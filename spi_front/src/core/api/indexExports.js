@@ -18,3 +18,4 @@ export * from "./signatureApi";
 export * from "./externalCasesApi";
 export * from "./integrationsApi";
 export * from "./deliveryRequestsApi";
+export * from "./tiAssetsApi";

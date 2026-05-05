@@ -22,6 +22,7 @@ const mLogger = require("./middlewares/loggerMiddleware");
 const { auditMiddleware } = require("./middlewares/auditMiddleware");
 const { normalizeApiPayloads, logLegacyUsageStats } = require("./middlewares/apiNormalization");
 const { verifyToken } = require("./middlewares/auth");
+const { moduleAccessGuard } = require("./middlewares/moduleAccess");
 const { isPublicPath } = require("./routes/publicPaths");
 const { mountPublicRoutes, mountPrivateRoutes } = require("./routes/registerRoutes");
 
@@ -119,6 +120,7 @@ app.use((req, res, next) => {
 
 app.use(normalizeApiPayloads);
 app.use(logLegacyUsageStats);
+app.use(moduleAccessGuard);
 app.use(auditMiddleware);
 
 mountPrivateRoutes(app);

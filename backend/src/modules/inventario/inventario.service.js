@@ -56,6 +56,45 @@ async function listModelos({ search } = {}) {
   }
 }
 
+async function updateModelo({
+  modelo_id,
+  nombre,
+  fabricante,
+  modelo,
+  categoria,
+  caracteristicas = null,
+  user_id = null,
+}) {
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `UPDATE public.equipos_modelo
+          SET nombre = COALESCE($1, nombre),
+              fabricante = COALESCE($2, fabricante),
+              modelo = COALESCE($3, modelo),
+              categoria = COALESCE($4, categoria),
+              metadata = COALESCE(metadata, '{}'::jsonb) || COALESCE($5::jsonb, '{}'::jsonb),
+              updated_at = now()
+        WHERE id = $6
+        RETURNING id, nombre, fabricante, modelo, categoria, metadata`,
+      [nombre, fabricante, modelo, categoria, caracteristicas, modelo_id],
+    );
+    if (!rows.length) {
+      const error = new Error("Modelo no encontrado");
+      error.status = 404;
+      throw error;
+    }
+    await client.query("COMMIT");
+    return rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 /* ============================================================
    🧭 Obtener todo el inventario (vista completa)
    ============================================================ */
@@ -258,26 +297,24 @@ async function captureSerial({ unidad_id, serial, cliente_id = null, sucursal_id
 }
 
 async function assignUnidad({ unidad_id, cliente_id, sucursal_id = null, detalle = null, user_id = null }) {
-  if (!cliente_id) {
-    const error = new Error("cliente_id es requerido para asignar la unidad");
-    error.status = 400;
-    throw error;
-  }
-
   const client = await db.getClient();
 
   try {
     await client.query("BEGIN");
 
+    const assigning = cliente_id !== undefined && cliente_id !== null && String(cliente_id).trim() !== "";
+    const nextEstado = assigning ? "asignado" : "no_asignado";
+    const nextCliente = assigning ? cliente_id : null;
+    const nextSucursal = assigning ? sucursal_id : null;
     const { rows } = await client.query(
       `UPDATE public.equipos_unidad
           SET cliente_id = $1,
-              sucursal_id = COALESCE($2, sucursal_id),
-              estado = 'asignado',
+              sucursal_id = $2,
+              estado = $3,
               updated_at = now()
-        WHERE id = $3
+        WHERE id = $4
         RETURNING id, serial, estado`,
-      [cliente_id, sucursal_id, unidad_id],
+      [nextCliente, nextSucursal, nextEstado, unidad_id],
     );
 
     if (!rows.length) {
@@ -286,8 +323,20 @@ async function assignUnidad({ unidad_id, cliente_id, sucursal_id = null, detalle
 
     await client.query(
       `INSERT INTO public.equipos_historial (unidad_id, evento, detalle, cliente_id, sucursal_id, created_by, created_at)
-       VALUES ($1, 'asignacion', $2, $3, $4, $5, now())`,
-      [unidad_id, normalizeDetalleValue(detalle || "Unidad asignada"), cliente_id, sucursal_id, user_id],
+       VALUES ($1, $2, $3, $4, $5, $6, now())`,
+      [
+        unidad_id,
+        assigning ? "asignacion" : "desasignacion",
+        normalizeDetalleValue(
+          detalle ||
+            (assigning
+              ? "Unidad asignada o reasignada"
+              : "Unidad liberada para quedar sin asignacion"),
+        ),
+        nextCliente,
+        nextSucursal,
+        user_id,
+      ],
     );
 
     await client.query("COMMIT");
@@ -299,6 +348,19 @@ async function assignUnidad({ unidad_id, cliente_id, sucursal_id = null, detalle
   } finally {
     client.release();
   }
+}
+
+async function getUnidadHistorial(unidad_id) {
+  const { rows } = await db.query(
+    `SELECT h.id, h.unidad_id, h.evento, h.detalle, h.request_id, h.cliente_id, h.sucursal_id, h.created_by, h.created_at,
+            COALESCE(u.fullname, u.name, u.email) AS created_by_name
+       FROM public.equipos_historial h
+       LEFT JOIN public.users u ON u.id = h.created_by
+      WHERE h.unidad_id = $1
+      ORDER BY h.created_at DESC, h.id DESC`,
+    [unidad_id],
+  );
+  return rows;
 }
 
 async function cambiarEstadoUnidad({ unidad_id, estado, detalle = null, request_id = null, user_id = null }) {
@@ -348,9 +410,11 @@ module.exports = {
   getAllInventario,
   registrarMovimiento,
   listModelos,
+  updateModelo,
   createUnidad,
   captureSerial,
   assignUnidad,
   cambiarEstadoUnidad,
+  getUnidadHistorial,
   normalizeDetalleValue,
 };

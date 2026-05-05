@@ -60,6 +60,8 @@ const corsConfig = {
     "x-refresh-token",
     "X-Requested-With",
     "Accept",
+    "x-app-path",
+    "X-App-Path",
     "x-flow-id",
     "Idempotency-Key",
     "idempotency-key",

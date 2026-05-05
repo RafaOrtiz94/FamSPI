@@ -125,7 +125,7 @@ router.post(
 router.get(
   "/equipos",
   verifyToken,
-  requireRole(["tecnico", "gerencia", "jefe_tecnico", "jefe_servicio_tecnico"]),
+  requireRole(["tecnico", "gerencia", "jefe_tecnico", "jefe_servicio_tecnico", "ti", "jefe_ti", "admin_ti"]),
   controller.getEquipos
 );
 router.post(

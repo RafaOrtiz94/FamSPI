@@ -311,12 +311,14 @@ async function createMantenimiento({
  * Listar mantenimientos
  */
 async function listMantenimientos(userId, role) {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  const canSeeAll = ["gerencia", "ti", "jefe_ti", "admin_ti"].includes(normalizedRole);
   const query =
-    role === "gerencia"
+    canSeeAll
       ? `SELECT * FROM servicio.cronograma_mantenimientos ORDER BY created_at DESC`
       : `SELECT * FROM servicio.cronograma_mantenimientos WHERE created_by=$1 ORDER BY created_at DESC`;
 
-  const { rows } = await db.query(query, role === "gerencia" ? [] : [userId]);
+  const { rows } = await db.query(query, canSeeAll ? [] : [userId]);
   return rows;
 }
 
@@ -401,6 +403,96 @@ async function exportPdf(id) {
   return pdf;
 }
 
+async function generateAnnualScheduleForTi({
+  year,
+  responsable = "TI",
+  createdBy = null,
+  dryRun = false,
+}) {
+  const y = Number.parseInt(String(year || ""), 10);
+  if (!Number.isFinite(y) || y < 2020 || y > 2100) {
+    const err = new Error("year invalido");
+    err.status = 400;
+    throw err;
+  }
+
+  const deviceRows = await db.query(
+    `SELECT id, name, category, model, manufacturer
+       FROM public.equipment_models
+      WHERE LOWER(COALESCE(category,'')) LIKE '%comput%'
+         OR LOWER(COALESCE(category,'')) LIKE '%laptop%'
+         OR LOWER(COALESCE(category,'')) LIKE '%cel%'
+         OR LOWER(COALESCE(category,'')) LIKE '%movil%'
+         OR LOWER(COALESCE(name,'')) LIKE '%comput%'
+         OR LOWER(COALESCE(name,'')) LIKE '%laptop%'
+         OR LOWER(COALESCE(name,'')) LIKE '%cel%'
+      ORDER BY name ASC`,
+  );
+  const devices = deviceRows.rows || [];
+  const created = [];
+  const skipped = [];
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    for (const device of devices) {
+      for (let month = 1; month <= 12; month += 1) {
+        const fecha = `${y}-${String(month).padStart(2, "0")}-05`;
+        const exists = await client.query(
+          `SELECT id
+             FROM servicio.cronograma_mantenimientos_anuales
+            WHERE id_equipo = $1
+              AND mes = $2
+              AND EXTRACT(YEAR FROM fecha_programada::date) = $3
+            LIMIT 1`,
+          [device.id, month, y],
+        );
+        if (exists.rows.length) {
+          skipped.push({ id_equipo: device.id, mes: month, motivo: "ya_existia" });
+          continue;
+        }
+        if (dryRun) {
+          created.push({ id_equipo: device.id, mes: month, fecha_programada: fecha, dry_run: true });
+          continue;
+        }
+        const insert = await client.query(
+          `INSERT INTO servicio.cronograma_mantenimientos_anuales
+             (id_equipo, mes, responsable, fecha_programada, estado, comentarios, created_by, created_at)
+           VALUES ($1,$2,$3,$4::date,'Pendiente',$5,$6,now())
+           RETURNING id, id_equipo, mes, fecha_programada, estado`,
+          [
+            device.id,
+            month,
+            responsable,
+            fecha,
+            `Generado automaticamente para ${y} (${device.name || device.model || "equipo"})`,
+            createdBy,
+          ],
+        );
+        created.push(insert.rows[0]);
+      }
+    }
+    if (!dryRun) {
+      await client.query("COMMIT");
+    } else {
+      await client.query("ROLLBACK");
+    }
+    return {
+      year: y,
+      devices_considered: devices.length,
+      generated_count: created.length,
+      skipped_count: skipped.length,
+      generated: created,
+      skipped,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 
 module.exports = {
   createMantenimiento,
@@ -409,4 +501,5 @@ module.exports = {
   sign,
   approve,
   exportPdf,
+  generateAnnualScheduleForTi,
 };

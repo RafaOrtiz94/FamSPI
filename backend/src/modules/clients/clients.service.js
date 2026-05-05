@@ -216,8 +216,19 @@ function getClientRequestAttachments(request = {}) {
     .filter(Boolean);
 }
 
+let _tablesEnsured = false;
 async function ensureTables() {
-  await db.query(`
+  if (_tablesEnsured) return;
+  _tablesEnsured = true; // set early so concurrent requests don't pile up
+  const run = async (label, sql) => {
+    try {
+      await db.query(sql);
+    } catch (err) {
+      logger.warn({ err, label }, "[CLIENTS] ensureTables: non-fatal DDL/DML failure");
+    }
+  };
+
+  await run("client_requests columns", `
     ALTER TABLE client_requests
       ADD COLUMN IF NOT EXISTS external_source TEXT,
       ADD COLUMN IF NOT EXISTS external_id TEXT,
@@ -228,7 +239,7 @@ async function ensureTables() {
       ADD COLUMN IF NOT EXISTS consent_record_file_id VARCHAR(255);
   `);
 
-  await db.query(`
+  await run("client_requests indexes", `
     CREATE INDEX IF NOT EXISTS idx_client_requests_external_source
       ON client_requests (external_source);
     CREATE UNIQUE INDEX IF NOT EXISTS ux_client_requests_external_identity
@@ -236,7 +247,7 @@ async function ensureTables() {
       WHERE external_source IS NOT NULL AND external_id IS NOT NULL;
   `);
 
-  await db.query(`
+  await run("client_assignments table", `
     CREATE TABLE IF NOT EXISTS client_assignments (
       id SERIAL PRIMARY KEY,
       client_request_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
@@ -255,7 +266,7 @@ async function ensureTables() {
     );
   `);
 
-  await db.query(`
+  await run("client_assignments columns", `
     ALTER TABLE client_assignments
       ADD COLUMN IF NOT EXISTS assignment_type VARCHAR(20) NOT NULL DEFAULT 'manual',
       ADD COLUMN IF NOT EXISTS is_temporary BOOLEAN NOT NULL DEFAULT FALSE,
@@ -265,7 +276,7 @@ async function ensureTables() {
       ADD COLUMN IF NOT EXISTS reason TEXT;
   `);
 
-  await db.query(`
+  await run("client_assignments constraint", `
     DO $$
     BEGIN
       IF NOT EXISTS (
@@ -280,14 +291,14 @@ async function ensureTables() {
     END $$;
   `);
 
-  await db.query(`
+  await run("client_assignments indexes", `
     CREATE INDEX IF NOT EXISTS idx_client_assignments_client_active
       ON client_assignments (client_request_id, is_active, starts_at, ends_at);
     CREATE INDEX IF NOT EXISTS idx_client_assignments_assigned_email
       ON client_assignments (assigned_to_email);
   `);
 
-  await db.query(`
+  await run("client_assignments seed owners", `
     INSERT INTO client_assignments (
       client_request_id,
       assigned_to_email,
@@ -318,7 +329,7 @@ async function ensureTables() {
 
   // Los clientes migrados desde Odoo deben quedar disponibles para reasignacion real
   // por jefatura comercial, no asignados al usuario tecnico de sincronizacion.
-  await db.query(`
+  await run("client_assignments deactivate odoo technical", `
     UPDATE client_assignments ca
        SET is_active = FALSE,
            ends_at = COALESCE(ca.ends_at, NOW()),
@@ -336,7 +347,7 @@ async function ensureTables() {
        );
   `);
 
-  await db.query(`
+  await run("client_visit_logs table", `
     CREATE TABLE IF NOT EXISTS client_visit_logs (
       id SERIAL PRIMARY KEY,
       client_request_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
@@ -358,8 +369,7 @@ async function ensureTables() {
     );
   `);
 
-  // Asegurar columnas nuevas en instalaciones existentes
-  await db.query(`
+  await run("client_visit_logs columns", `
     ALTER TABLE client_visit_logs
       ADD COLUMN IF NOT EXISTS hora_entrada TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS hora_salida TIMESTAMPTZ,
@@ -370,9 +380,9 @@ async function ensureTables() {
       ADD COLUMN IF NOT EXISTS observaciones TEXT,
       ADD COLUMN IF NOT EXISTS duracion_minutos INTEGER,
       ADD COLUMN IF NOT EXISTS is_planned BOOLEAN DEFAULT FALSE;
-    `);
+  `);
 
-  await db.query(`
+  await run("prospect_visits table", `
     CREATE TABLE IF NOT EXISTS prospect_visits (
       id SERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
@@ -391,7 +401,7 @@ async function ensureTables() {
     );
   `);
 
-  await db.query(`
+  await run("client_interactions table", `
     CREATE TABLE IF NOT EXISTS client_interactions (
       id SERIAL PRIMARY KEY,
       client_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
@@ -402,14 +412,14 @@ async function ensureTables() {
     );
   `);
 
-  await db.query(`
+  await run("client_interactions indexes", `
     CREATE INDEX IF NOT EXISTS idx_client_interactions_client_created_at
       ON client_interactions (client_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_client_interactions_created_by
       ON client_interactions (created_by);
   `);
 
-  await db.query(`
+  await run("client_locations table", `
     CREATE TABLE IF NOT EXISTS client_locations (
       id SERIAL PRIMARY KEY,
       client_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
@@ -425,7 +435,7 @@ async function ensureTables() {
     );
   `);
 
-  await db.query(`
+  await run("client_locations indexes", `
     CREATE INDEX IF NOT EXISTS idx_client_locations_client_id
       ON client_locations (client_id);
     CREATE INDEX IF NOT EXISTS idx_client_locations_geo
@@ -435,7 +445,7 @@ async function ensureTables() {
       WHERE is_main = TRUE;
   `);
 
-  await db.query(`
+  await run("client_locations seed main", `
     INSERT INTO client_locations (client_id, name, address, city, province, is_main)
     SELECT
       cr.id,
@@ -1119,8 +1129,17 @@ async function fetchOdooCommercialPartners() {
   return allPartners;
 }
 
+// Throttle: prevent hammering Odoo on every GET /clients — max once per 5 min per role
+const _odooSyncLastRun = new Map();
+const ODOO_SYNC_THROTTLE_MS = 5 * 60 * 1000;
+
 async function syncOdooPartnersIntoClientRequests({ user }) {
   if (!canSyncOdooClients(user)) return;
+
+  const throttleKey = String(user?.role || "unknown");
+  const lastRun = _odooSyncLastRun.get(throttleKey) || 0;
+  if (Date.now() - lastRun < ODOO_SYNC_THROTTLE_MS) return;
+  _odooSyncLastRun.set(throttleKey, Date.now());
 
   let partners = [];
   try {
@@ -1321,7 +1340,11 @@ async function syncOdooClientsBackfill({ user }) {
 
 async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo = false, filterBySchedule = false }) {
   await ensureTables();
-  await syncOdooPartnersIntoClientRequests({ user });
+  // Fire-and-forget: sync Odoo in background without blocking the response.
+  // Throttled to once per 5 min per role to avoid hammering Odoo on every request.
+  syncOdooPartnersIntoClientRequests({ user }).catch((err) =>
+    logger.warn({ error: err?.message }, "[CLIENTS] Odoo sync background error (non-fatal)")
+  );
   const dateParam = visitDate || new Date().toISOString().slice(0, 10);
 
   const normalizedEmail = (user?.email || "").toLowerCase();

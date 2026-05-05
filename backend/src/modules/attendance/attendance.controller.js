@@ -215,6 +215,8 @@ const ATTENDANCE_WORKING_DAY_START = process.env.ATTENDANCE_WORKING_DAY_START ||
 const ATTENDANCE_WORKING_DAY_END = process.env.ATTENDANCE_WORKING_DAY_END || "18:00";
 const ATTENDANCE_LUNCH_START = process.env.ATTENDANCE_LUNCH_START || "13:00";
 const ATTENDANCE_LUNCH_END = process.env.ATTENDANCE_LUNCH_END || "14:00";
+const ATTENDANCE_OPERATIONAL_LUNCH_START = process.env.ATTENDANCE_OPERATIONAL_LUNCH_START || "14:00";
+const ATTENDANCE_OPERATIONAL_LUNCH_END = process.env.ATTENDANCE_OPERATIONAL_LUNCH_END || "15:00";
 const LATE_BASE_MINUTES = 9 * 60;
 const LATE_TOLERANCE_MINUTES = 5;
 const LATE_JUSTIFICATION_MONTHLY_LIMIT = Number(process.env.ATTENDANCE_LATE_JUSTIFICATION_MONTHLY_LIMIT || 5);
@@ -654,6 +656,36 @@ const autoSeedScheduledLunchWindow = async ({ userId, location, timestamp = new 
     logger.info(
       { userId, businessDate, lunchStart: ATTENDANCE_LUNCH_START, lunchEnd: ATTENDANCE_LUNCH_END },
       "[ATTENDANCE] Auto-seeded scheduled lunch window for field/unexpected flow"
+    );
+  }
+};
+
+// Seeds acta lunch window to 14:00-15:00 for collaborators with active operational exits.
+// Always seeds regardless of current time (no hour check), and never overwrites an existing value.
+const autoSeedOperationalLunchWindow = async ({ userId, location, timestamp = new Date() }) => {
+  const businessDate = getBusinessDate(timestamp);
+  const lunchStartTime = buildDateTimeFromBusinessDate(businessDate, ATTENDANCE_OPERATIONAL_LUNCH_START);
+  const lunchEndTime = buildDateTimeFromBusinessDate(businessDate, ATTENDANCE_OPERATIONAL_LUNCH_END);
+  const normalizedLocation = normalizeLocationInput(location) || null;
+
+  const result = await db.query(
+    `UPDATE user_attendance_records
+        SET lunch_start_time = COALESCE(lunch_start_time, $3),
+            lunch_start_location = COALESCE(lunch_start_location, $4),
+            lunch_end_time = COALESCE(lunch_end_time, $5),
+            lunch_end_location = COALESCE(lunch_end_location, $4),
+            updated_at = NOW()
+      WHERE user_id = $1
+        AND date = $2
+        AND entry_time IS NOT NULL
+      RETURNING id`,
+    [userId, businessDate, lunchStartTime, normalizedLocation, lunchEndTime]
+  );
+
+  if (result.rowCount > 0) {
+    logger.info(
+      { userId, businessDate, lunchStart: ATTENDANCE_OPERATIONAL_LUNCH_START, lunchEnd: ATTENDANCE_OPERATIONAL_LUNCH_END },
+      "[ATTENDANCE] Auto-seeded operational lunch window (14:00-15:00) in acta"
     );
   }
 };
@@ -1192,9 +1224,17 @@ const clockIn = async (req, res) => {
       return;
     }
 
-    // Keep regular attendance acta complete when unexpected flow starts before lunch.
-    await syncNormalEntryFromFieldOp({ userId, location: normalizedLocation, timestamp: now });
-    await autoSeedScheduledLunchWindow({ userId, location: normalizedLocation, timestamp: now });
+    // Sync the regular attendance record and pre-fill lunch ONLY when the collaborator
+    // has an active exception (operational or unexpected flow). Regular collaborators with
+    // no active exception must mark entry and lunch manually at the real times.
+    const activeAnyException = await getActiveExceptionByFlow({ userId, flow: "any" });
+    if (activeAnyException) {
+      await syncNormalEntryFromFieldOp({ userId, location: normalizedLocation, timestamp: now });
+      // Pre-fill operational lunch window (14:00-15:00) only for operational exits.
+      if (isOperationalFlowException(activeAnyException)) {
+        await autoSeedOperationalLunchWindow({ userId, location: normalizedLocation, timestamp: now });
+      }
+    }
     const ensured = await ensureDailyClockIn({ userId, location: normalizedLocation, timestamp: now });
 
     if (!ensured.created) {
@@ -1232,7 +1272,7 @@ const clockIn = async (req, res) => {
 
     const lateMinutes = computeLateMinutesFromEntry(now);
     if (Number.isFinite(lateMinutes) && lateMinutes > LATE_TOLERANCE_MINUTES) {
-      await notifyTalentoHumanoAttendanceIrregularity({
+      notifyTalentoHumanoAttendanceIrregularity({
         collaboratorId: userId,
         collaboratorName: resolveActorDisplayName({ id: userId, email }),
         collaboratorEmail: email || null,
@@ -1245,7 +1285,7 @@ const clockIn = async (req, res) => {
           tolerance_minutes: LATE_TOLERANCE_MINUTES,
           location: normalizedLocation,
         },
-      });
+      }).catch((err) => logger.error({ err }, "[ATTENDANCE] Error notificando llegada tarde (non-fatal)"));
     }
 
     logger.info(`[ATTENDANCE] Clock in: ${email} at ${now.toISOString()} loc: ${normalizedLocation || "n/a"}`);
@@ -1479,7 +1519,7 @@ const clockInLunch = async (req, res) => {
     if (lunchStartAt instanceof Date && !Number.isNaN(lunchStartAt.getTime()) && lunchEndAt instanceof Date && !Number.isNaN(lunchEndAt.getTime())) {
       const lunchDurationMinutes = Math.round((lunchEndAt.getTime() - lunchStartAt.getTime()) / 60000);
       if (lunchDurationMinutes > 60) {
-        await notifyTalentoHumanoAttendanceIrregularity({
+        notifyTalentoHumanoAttendanceIrregularity({
           collaboratorId: userId,
           collaboratorName: resolveActorDisplayName({ id: userId, email }),
           collaboratorEmail: email || null,
@@ -1492,7 +1532,7 @@ const clockInLunch = async (req, res) => {
             lunch_threshold_minutes: 60,
             location: normalizedLocation,
           },
-        });
+        }).catch((err) => logger.error({ err }, "[ATTENDANCE] Error notificando almuerzo largo (non-fatal)"));
       }
     }
 
@@ -1626,7 +1666,7 @@ const clockOut = async (req, res) => {
     }
 
     if (irregularities.length) {
-      await Promise.all(
+      Promise.all(
         irregularities.map((irregularity) =>
           notifyTalentoHumanoAttendanceIrregularity({
             collaboratorId: userId,
@@ -1644,7 +1684,7 @@ const clockOut = async (req, res) => {
             },
           })
         )
-      );
+      ).catch((err) => logger.error({ err }, "[ATTENDANCE] Error notificando irregularidades en clock-out (non-fatal)"));
     }
 
     const message = overtimeHours > 0
@@ -1730,7 +1770,7 @@ const registerException = async (req, res) => {
     );
 
     if (!exceptionIsJustified) {
-      await notifyTalentoHumanoAttendanceIrregularity({
+      notifyTalentoHumanoAttendanceIrregularity({
         collaboratorId: userId,
         collaboratorName: resolveActorDisplayName({ id: userId, email, fullname, name }),
         collaboratorEmail: email || null,
@@ -1744,7 +1784,7 @@ const registerException = async (req, res) => {
           exception_justified: false,
           location: normalizedLocation,
         },
-      });
+      }).catch((err) => logger.error({ err }, "[ATTENDANCE] Error notificando excepcion no justificada (non-fatal)"));
     }
 
     logger.info(`[ATTENDANCE] Exception Start: ${email} - ${type}`);
@@ -3781,10 +3821,11 @@ const clockOutOperational = async (req, res) => {
       return;
     }
 
-    // Aseguramos que la entrada normal del día quede marcada al iniciar la salida operacional, 
+    // Aseguramos que la entrada normal del día quede marcada al iniciar la salida operacional,
     // sin importar si es o no fuera de horario, para evitar "falta de registros".
     await syncNormalEntryFromFieldOp({ userId, location: normalizedLocation, timestamp: now });
-    await autoSeedScheduledLunchWindow({ userId, location: normalizedLocation, timestamp: now });
+    // Regularizar almuerzo en el acta a 14:00-15:00 para salidas operacionales (sin chequeo de hora).
+    await autoSeedOperationalLunchWindow({ userId, location: normalizedLocation, timestamp: now });
     // Si el colaborador dejó almuerzo abierto y sigue laborando en salida operacional,
     // cerramos el almuerzo al iniciar la operación para mantener consistencia del acta normal.
     await closePendingLunchForOperationalStart({ userId, location: normalizedLocation, timestamp: now });
@@ -4513,6 +4554,142 @@ const clockCloseTrip = async (req, res) => {
   }
 };
 
+/**
+ * POST /marcar/almuerzo-salida-operacional
+ * Marks the start of lunch break during an active operational exit.
+ * Optional — the acta is already regularized to 14:00-15:00 automatically.
+ */
+const clockOutOperationalLunch = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
+
+    const now = new Date();
+    const today = getBusinessDate(now);
+
+    const normalizedLocation = await resolveRequiredLocation({
+      req,
+      res,
+      userId,
+      actionKey: "clock-out-operational-lunch",
+      targetKey: "start",
+      businessDate: today,
+    });
+    if (!normalizedLocation) return;
+
+    const activeOperational = await getActiveExceptionByFlow({ userId, flow: "operational" });
+    if (!activeOperational) {
+      return res.status(404).json({
+        ok: false,
+        code: "NO_ACTIVE_OPERATIONAL",
+        message: "No tienes una salida operacional activa para registrar almuerzo.",
+      });
+    }
+
+    if (activeOperational.op_lunch_start_time) {
+      return res.status(400).json({
+        ok: false,
+        code: "OPERATIONAL_LUNCH_ALREADY_STARTED",
+        message: "Ya marcaste salida a almuerzo en la operacion activa.",
+        data: activeOperational,
+      });
+    }
+
+    const { rows } = await db.query(
+      `UPDATE attendance_exceptions
+          SET op_lunch_start_time = $1,
+              op_lunch_start_location = $2,
+              updated_at = NOW()
+        WHERE id = $3
+        RETURNING *`,
+      [now, normalizedLocation, activeOperational.id]
+    );
+
+    logger.info({ userId, email, exceptionId: activeOperational.id }, "[ATTENDANCE] Operational lunch-out marked");
+
+    return res.status(200).json({
+      ok: true,
+      message: "Salida a almuerzo operacional registrada. El acta reflejará 14:00-15:00.",
+      data: rows[0],
+    });
+  } catch (err) {
+    logger.error({ err }, "Error en clock-out-operational-lunch");
+    return res.status(500).json({ ok: false, message: "Error registrando salida a almuerzo operacional" });
+  }
+};
+
+/**
+ * POST /marcar/almuerzo-entrada-operacional
+ * Marks the end of lunch break during an active operational exit.
+ * Optional — the acta is already regularized to 14:00-15:00 automatically.
+ */
+const clockInOperationalLunch = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
+
+    const now = new Date();
+    const today = getBusinessDate(now);
+
+    const normalizedLocation = await resolveRequiredLocation({
+      req,
+      res,
+      userId,
+      actionKey: "clock-in-operational-lunch",
+      targetKey: "return",
+      businessDate: today,
+    });
+    if (!normalizedLocation) return;
+
+    const activeOperational = await getActiveExceptionByFlow({ userId, flow: "operational" });
+    if (!activeOperational) {
+      return res.status(404).json({
+        ok: false,
+        code: "NO_ACTIVE_OPERATIONAL",
+        message: "No tienes una salida operacional activa para registrar regreso de almuerzo.",
+      });
+    }
+
+    if (!activeOperational.op_lunch_start_time) {
+      return res.status(400).json({
+        ok: false,
+        code: "OPERATIONAL_LUNCH_NOT_STARTED",
+        message: "Debes marcar salida a almuerzo operacional primero.",
+      });
+    }
+
+    if (activeOperational.op_lunch_end_time) {
+      return res.status(400).json({
+        ok: false,
+        code: "OPERATIONAL_LUNCH_ALREADY_ENDED",
+        message: "Ya marcaste regreso de almuerzo en la operacion activa.",
+        data: activeOperational,
+      });
+    }
+
+    const { rows } = await db.query(
+      `UPDATE attendance_exceptions
+          SET op_lunch_end_time = $1,
+              op_lunch_end_location = $2,
+              updated_at = NOW()
+        WHERE id = $3
+        RETURNING *`,
+      [now, normalizedLocation, activeOperational.id]
+    );
+
+    logger.info({ userId, email, exceptionId: activeOperational.id }, "[ATTENDANCE] Operational lunch-in marked");
+
+    return res.status(200).json({
+      ok: true,
+      message: "Regreso de almuerzo operacional registrado.",
+      data: rows[0],
+    });
+  } catch (err) {
+    logger.error({ err }, "Error en clock-in-operational-lunch");
+    return res.status(500).json({ ok: false, message: "Error registrando regreso de almuerzo operacional" });
+  }
+};
+
 module.exports = {
   clockIn,
   clockOutLunch,
@@ -4526,6 +4703,8 @@ module.exports = {
   clockUnexpectedReturn,
   clockOutOperational,
   clockInOperational,
+  clockOutOperationalLunch,
+  clockInOperationalLunch,
   clockInDestino,
   clockCloseTrip,
   justifyLateArrival,

@@ -1178,6 +1178,8 @@ async function settleExpiredPendingSolicitud(row = {}) {
             cancellation_reviewed_at = COALESCE(cancellation_reviewed_at, NOW()),
             cancellation_reviewed_by_email = COALESCE(cancellation_reviewed_by_email, 'system_auto_expiry'),
             cancellation_review_reason = COALESCE(cancellation_review_reason, 'auto_expired_without_approval'),
+            auto_cancelled_justification_deadline = COALESCE(auto_cancelled_justification_deadline, NOW() + INTERVAL '30 days'),
+            auto_cancelled_justification_warning_sent = COALESCE(auto_cancelled_justification_warning_sent, false),
             updated_at = NOW()
       WHERE id = $1
         AND LOWER(COALESCE(status, '')) IN ('pending', 'pendiente')
@@ -1201,6 +1203,7 @@ async function settleExpiredPendingSolicitud(row = {}) {
           solicitud_id: settled.id,
           status: settled.status,
           cancellation_reason: settled.cancellation_reason,
+          auto_cancelled_justification_deadline: settled.auto_cancelled_justification_deadline,
         },
         contexto: { auto: true },
       });
@@ -1211,12 +1214,13 @@ async function settleExpiredPendingSolicitud(row = {}) {
       );
     }
 
+    // Notify requester
     try {
       if (settled?.user_id) {
         await notificationManager.sendNotification({
           userId: settled.user_id,
           customTitle: "Solicitud cancelada automaticamente",
-          customMessage: `Tu solicitud #${settled.id} fue cancelada automaticamente porque no tuvo aprobacion del jefe inmediato antes del inicio del permiso.`,
+          customMessage: `Tu solicitud #${settled.id} fue cancelada automaticamente porque no tuvo aprobacion del jefe inmediato antes del inicio del permiso. Si asististe sin aprobacion previa, tienes 30 dias para subir los justificantes correspondientes.`,
           type: "warning",
           source: "permisos_vacaciones",
           priority: 1,
@@ -1227,6 +1231,7 @@ async function settleExpiredPendingSolicitud(row = {}) {
             tipo_permiso: settled.tipo_permiso || null,
             status: "cancelled",
             cancellation_reason: settled.cancellation_reason || "auto_expired_without_approval",
+            auto_cancelled_justification_deadline: settled.auto_cancelled_justification_deadline,
             target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${settled.id}`,
           },
         });
@@ -1234,7 +1239,52 @@ async function settleExpiredPendingSolicitud(row = {}) {
     } catch (notifyError) {
       logger.warn(
         { notifyError, solicitudId: settled.id },
-        "No se pudo notificar cancelacion automatica por vencimiento"
+        "No se pudo notificar cancelacion automatica por vencimiento al solicitante"
+      );
+    }
+
+    // Notify approver (jefe inmediato)
+    try {
+      if (settled?.approver_user_id) {
+        await notificationManager.sendNotification({
+          userId: settled.approver_user_id,
+          customTitle: "Solicitud cancelada automaticamente",
+          customMessage: `La solicitud #${settled.id} de ${settled.user_fullname || settled.user_email} fue cancelada automaticamente por vencimiento sin aprobacion. El colaborador tiene 30 dias para justificar si asistio sin autorizacion previa.`,
+          type: "warning",
+          source: "permisos_vacaciones",
+          priority: 1,
+          email: true,
+          meta: {
+            solicitud_id: settled.id,
+            tipo_solicitud: settled.tipo_solicitud || null,
+            tipo_permiso: settled.tipo_permiso || null,
+            status: "cancelled",
+            cancellation_reason: settled.cancellation_reason || "auto_expired_without_approval",
+            auto_cancelled_justification_deadline: settled.auto_cancelled_justification_deadline,
+            target_path: `/dashboard/talento-humano/permisos?tab=approve&solicitudId=${settled.id}`,
+          },
+        });
+      } else if (settled?.approver_email) {
+        // Fallback: send email directly if no user_id for approver
+        await notificationManager.sendNotification({
+          userId: settled.user_id,
+          customTitle: "Solicitud cancelada automaticamente",
+          customMessage: `La solicitud #${settled.id} de ${settled.user_fullname || settled.user_email} fue cancelada automaticamente por vencimiento sin aprobacion.`,
+          type: "warning",
+          source: "permisos_vacaciones",
+          priority: 1,
+          email: true,
+          meta: {
+            solicitud_id: settled.id,
+            email_to: settled.approver_email,
+            status: "cancelled",
+          },
+        });
+      }
+    } catch (notifyError) {
+      logger.warn(
+        { notifyError, solicitudId: settled.id },
+        "No se pudo notificar cancelacion automatica por vencimiento al aprobador"
       );
     }
   }
@@ -1669,6 +1719,9 @@ async function ensureTable() {
       "ALTER TABLE permisos_vacaciones ADD CONSTRAINT permisos_vacaciones_cancellation_status_check CHECK (cancellation_status IN ('none','pending','approved','rejected'))"
     );
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS study_enrollment_id BIGINT");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS auto_cancelled_justification_deadline TIMESTAMPTZ");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS auto_cancelled_justification_warning_sent BOOLEAN NOT NULL DEFAULT false");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS auto_cancelled_justification_submitted_at TIMESTAMPTZ");
     await db.query("ALTER TABLE permisos_vacaciones DROP CONSTRAINT IF EXISTS permisos_vacaciones_check1");
     await db.query("ALTER TABLE permisos_vacaciones DROP CONSTRAINT IF EXISTS permisos_vacaciones_subtipo_calamidad_check");
     await db.query("ALTER TABLE permisos_vacaciones DROP CONSTRAINT IF EXISTS permisos_vacaciones_subtipo_salud_check");
@@ -2720,15 +2773,60 @@ async function subirJustificantes({ id, urls, user }) {
   const canUploadByDefaultFlow = ["partially_approved", "pending_final"].includes(normalizedStatus);
   const canUploadHealthEmergency =
     ["pending", "pendiente"].includes(normalizedStatus) && normalizedTipoPermiso === "salud";
-  if (!canUploadByDefaultFlow && !canUploadHealthEmergency) {
+  const isAutoCancelledPendingJustification =
+    normalizedStatus === "cancelled" &&
+    solicitud.cancellation_reason === "auto_expired_without_approval" &&
+    solicitud.auto_cancelled_justification_deadline &&
+    new Date() <= new Date(solicitud.auto_cancelled_justification_deadline) &&
+    !solicitud.auto_cancelled_justification_submitted_at;
+  if (!canUploadByDefaultFlow && !canUploadHealthEmergency && !isAutoCancelledPendingJustification) {
     const err = new Error(
-      "Solo se pueden subir justificantes en solicitudes parcialmente aprobadas, pendientes finales o permisos de salud pendientes."
+      "Solo se pueden subir justificantes en solicitudes parcialmente aprobadas, pendientes finales, permisos de salud pendientes, o solicitudes canceladas automaticamente dentro del plazo de 30 dias."
     );
     err.status = 409;
     throw err;
   }
 
   const safeUrls = Array.isArray(urls) ? urls : [];
+
+  // Auto-cancelled justification: move back to pending_final for approver review
+  if (isAutoCancelledPendingJustification) {
+    const { rows } = await db.query(
+      `UPDATE permisos_vacaciones
+          SET justificantes_urls = $2,
+              status = 'pending_final',
+              auto_cancelled_justification_submitted_at = NOW(),
+              updated_at = now()
+        WHERE id = $1
+      RETURNING *`,
+      [id, safeUrls]
+    );
+    await logAction({ usuario_email: user?.email, modulo: "permisos", accion: "subir_justificantes_cancelacion_automatica" });
+    try {
+      const updated = rows[0];
+      if (updated?.approver_user_id && updated.approver_user_id != user?.id) {
+        await notificationManager.sendNotification({
+          userId: updated.approver_user_id,
+          customTitle: "Justificantes subidos — solicitud cancelada automaticamente",
+          customMessage: `${updated.user_fullname || updated.user_email} subio justificantes para la solicitud #${updated.id} que fue cancelada automaticamente. Requiere tu revision y aprobacion final.`,
+          type: "info",
+          source: "permisos_vacaciones",
+          priority: 2,
+          email: true,
+          meta: {
+            solicitud_id: updated.id,
+            tipo_solicitud: updated.tipo_solicitud,
+            target_path: `/dashboard/talento-humano/permisos?tab=approve&solicitudId=${updated.id}`,
+          },
+        });
+      }
+    } catch (notifyError) {
+      logger.warn({ notifyError, solicitudId: id }, "No se pudo notificar justificantes de cancelacion automatica");
+    }
+    const enriched = await attachWorkflowSignatures([rows[0]]);
+    return enriched[0] || rows[0];
+  }
+
   const { rows } = await db.query(
     `UPDATE permisos_vacaciones
         SET justificantes_urls = $2,
@@ -4133,6 +4231,158 @@ async function listarResumenColaboradores() {
   });
 }
 
+// ─── Auto-cancelled justification window: warning (1 day before deadline) ─────
+
+async function processAutoCancelledJustificationWarnings() {
+  await ensureTable();
+  const { rows } = await db.query(`
+    SELECT * FROM permisos_vacaciones
+     WHERE cancellation_reason = 'auto_expired_without_approval'
+       AND auto_cancelled_justification_deadline IS NOT NULL
+       AND auto_cancelled_justification_warning_sent = false
+       AND auto_cancelled_justification_submitted_at IS NULL
+       AND LOWER(COALESCE(status, '')) = 'cancelled'
+       AND auto_cancelled_justification_deadline - NOW() <= INTERVAL '1 day'
+       AND auto_cancelled_justification_deadline > NOW()
+  `);
+
+  if (!rows.length) return { scanned: 0, warned: 0 };
+
+  let warned = 0;
+  for (const row of rows) {
+    try {
+      await db.query(
+        `UPDATE permisos_vacaciones
+            SET auto_cancelled_justification_warning_sent = true,
+                updated_at = NOW()
+          WHERE id = $1
+            AND auto_cancelled_justification_warning_sent = false`,
+        [row.id]
+      );
+
+      if (row.user_id) {
+        await notificationManager.sendNotification({
+          userId: row.user_id,
+          customTitle: "Plazo de justificacion por vencer",
+          customMessage: `Tu solicitud #${row.id} cancelada automaticamente vence manana su plazo de justificacion. Si asististe sin aprobacion, sube los justificantes antes de que se descuenten de tus vacaciones.`,
+          type: "alert",
+          source: "permisos_vacaciones",
+          priority: 2,
+          email: true,
+          meta: {
+            solicitud_id: row.id,
+            tipo_solicitud: row.tipo_solicitud || null,
+            auto_cancelled_justification_deadline: row.auto_cancelled_justification_deadline,
+            target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${row.id}`,
+          },
+        });
+      }
+      warned += 1;
+    } catch (err) {
+      logger.warn({ err, solicitudId: row.id }, "Error enviando advertencia de vencimiento de justificacion");
+    }
+  }
+
+  return { scanned: rows.length, warned };
+}
+
+// ─── Auto-cancelled justification window: deduct from vacation after deadline ─
+
+async function processAutoCancelledJustificationDeductions() {
+  await ensureTable();
+  const { rows } = await db.query(`
+    SELECT * FROM permisos_vacaciones
+     WHERE cancellation_reason = 'auto_expired_without_approval'
+       AND auto_cancelled_justification_deadline IS NOT NULL
+       AND NOW() >= auto_cancelled_justification_deadline
+       AND auto_cancelled_justification_submitted_at IS NULL
+       AND LOWER(COALESCE(status, '')) = 'cancelled'
+       AND COALESCE(charged_to_vacation, false) = false
+  `);
+
+  if (!rows.length) return { scanned: 0, deducted: 0 };
+
+  let deducted = 0;
+  for (const row of rows) {
+    try {
+      const vacationCharge = buildVacationCharge(row);
+      const { rows: updated } = await db.query(
+        `UPDATE permisos_vacaciones
+            SET charged_to_vacation = true,
+                charged_vacation_hours = COALESCE(charged_vacation_hours, $2),
+                charged_vacation_days = COALESCE(charged_vacation_days, $3),
+                charged_to_vacation_at = COALESCE(charged_to_vacation_at, NOW()),
+                charged_to_vacation_reason = COALESCE(charged_to_vacation_reason, 'auto_cancelled_no_justification'),
+                updated_at = NOW()
+          WHERE id = $1
+            AND COALESCE(charged_to_vacation, false) = false
+          RETURNING *`,
+        [row.id, vacationCharge.hours, vacationCharge.days]
+      );
+
+      if (!updated[0]) continue;
+
+      try {
+        await logAction({
+          usuario_id: null,
+          usuario_email: "system_auto_expiry",
+          modulo: "permisos",
+          accion: "descuento_vacaciones_sin_justificacion",
+          descripcion: "Dias descontados de vacaciones por solicitud cancelada automaticamente sin justificacion dentro del plazo.",
+          datos_nuevos: {
+            solicitud_id: row.id,
+            charged_vacation_hours: vacationCharge.hours,
+            charged_vacation_days: vacationCharge.days,
+            charged_to_vacation_reason: "auto_cancelled_no_justification",
+          },
+          contexto: { auto: true },
+        });
+      } catch (auditErr) {
+        logger.warn({ auditErr, solicitudId: row.id }, "No se pudo registrar auditoria de descuento automatico");
+      }
+
+      if (row.user_id) {
+        await notificationManager.sendNotification({
+          userId: row.user_id,
+          customTitle: "Dias descontados de vacaciones",
+          customMessage: `La solicitud #${row.id} no fue justificada dentro del plazo de 30 dias. Se han descontado ${vacationCharge.days} dia(s) de tus vacaciones disponibles.`,
+          type: "alert",
+          source: "permisos_vacaciones",
+          priority: 2,
+          email: true,
+          meta: {
+            solicitud_id: row.id,
+            charged_vacation_days: vacationCharge.days,
+            target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${row.id}`,
+          },
+        });
+      }
+
+      if (row.approver_user_id) {
+        await notificationManager.sendNotification({
+          userId: row.approver_user_id,
+          customTitle: "Descuento automatico de vacaciones aplicado",
+          customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} no fue justificada. Se descontaron ${vacationCharge.days} dia(s) de sus vacaciones.`,
+          type: "info",
+          source: "permisos_vacaciones",
+          priority: 1,
+          email: false,
+          meta: {
+            solicitud_id: row.id,
+            charged_vacation_days: vacationCharge.days,
+          },
+        });
+      }
+
+      deducted += 1;
+    } catch (err) {
+      logger.warn({ err, solicitudId: row.id }, "Error aplicando descuento automatico de vacaciones");
+    }
+  }
+
+  return { scanned: rows.length, deducted };
+}
+
 module.exports = {
   ensureTable,
   createSolicitud,
@@ -4155,6 +4405,8 @@ module.exports = {
   recreateCalendarEventForSolicitud,
   processExpiredPendingSolicitudes,
   processExpiredRecoveryCoordinations,
+  processAutoCancelledJustificationWarnings,
+  processAutoCancelledJustificationDeductions,
   getLegalVerificationByToken,
   getLegalCoverage,
 };

@@ -29,7 +29,9 @@ const { start: startBcNotificationQueueJob } = require("./jobs/businessCaseNotif
 const { startDatabaseBackupJob } = require("./jobs/databaseBackupToDrive");
 const { startPermisosPendingExpiryJob } = require("./jobs/permisosPendingExpiryScheduler");
 const { startPermisosRecoveryCoordinationExpiryJob } = require("./jobs/permisosRecoveryCoordinationExpiryScheduler");
+const { startPermisosAutoCancelledJustificationJob } = require("./jobs/permisosAutoCancelledJustificationScheduler");
 const { startExternalCaseSyncJob } = require("./jobs/externalCaseSyncScheduler");
+const { startTiMaintenanceReportJob } = require("./jobs/tiMaintenanceReportScheduler");
 
 const PORT = Number(process.env.PORT) || 8080;
 const ENV = process.env.NODE_ENV || "development";
@@ -54,8 +56,10 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
       { name: "bc_notification_queue", fn: startBcNotificationQueueJob },
       { name: "permisos_pending_expiry", fn: startPermisosPendingExpiryJob },
       { name: "permisos_recovery_coordination_expiry", fn: startPermisosRecoveryCoordinationExpiryJob },
+      { name: "permisos_auto_cancelled_justification", fn: startPermisosAutoCancelledJustificationJob },
       { name: "db_backup", fn: startDatabaseBackupJob },
       { name: "external_case_sync", fn: startExternalCaseSyncJob },
+      { name: "ti_maintenance_report", fn: startTiMaintenanceReportJob },
     ];
 
     jobs.forEach((job, index) => {

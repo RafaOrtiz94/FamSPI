@@ -15,7 +15,9 @@ const HOURS_PER_VACATION_DAY = 8;
 const TEMPLATE_PATH = path.join(__dirname, "../../data/plantillas/Vacation_Format.docx");
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
+let _vacacionesTableReady = false;
 async function ensureTable() {
+  if (_vacacionesTableReady) return;
   await db.query(`
     CREATE TABLE IF NOT EXISTS vacaciones_solicitudes (
       id SERIAL PRIMARY KEY,
@@ -46,6 +48,7 @@ async function ensureTable() {
   await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS projected_remaining_days DECIMAL(8,2)");
   await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS recovery_date DATE");
   await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS monetary_debt NUMERIC(12,2)");
+  _vacacionesTableReady = true;
 }
 
 const ROLE_APPROVER = {

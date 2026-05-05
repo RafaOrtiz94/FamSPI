@@ -637,6 +637,11 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
 
   const handleStartOffboarding = async (collaborator, reason = "") => {
     if (!collaborator?.id) return;
+    const collaboratorName = collaborator?.fullname || collaborator?.email || "este colaborador";
+    const confirmed = window.confirm(
+      `¿Confirmas iniciar desvinculación para ${collaboratorName}?`
+    );
+    if (!confirmed) return;
     const collaboratorId = String(collaborator.id);
     try {
       setStartingOffboardingId(collaboratorId);

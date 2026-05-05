@@ -1003,6 +1003,117 @@ async function startOffboarding({
   };
 }
 
+async function cancelOffboarding({
+  userId,
+  actor,
+}) {
+  const targetUserId = Number(userId);
+  if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+    const err = new Error("Usuario invalido");
+    err.status = 400;
+    throw err;
+  }
+
+  const cancelledAtIso = new Date().toISOString();
+  const cancelledBy = getDisplayName(actor) || "Sistema";
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    await ensureOffboardingTables(client);
+    await ensureProcessAndTasks(client, targetUserId);
+
+    const user = await loadUser(client, targetUserId);
+    if (!user) {
+      const err = new Error("Colaborador no encontrado");
+      err.status = 404;
+      throw err;
+    }
+
+    const process = await loadProcess(client, targetUserId);
+    if (process?.is_closed) {
+      const err = new Error("No se puede cancelar: el proceso ya fue cerrado.");
+      err.status = 409;
+      throw err;
+    }
+
+    await client.query(
+      `INSERT INTO collaborator_profiles (user_id, profile, updated_by)
+       VALUES (
+         $1,
+         jsonb_build_object(
+           'onboarding',
+           jsonb_build_object(
+             'offboarding_requested', false,
+             'offboarding_cancelled_at', $2::text,
+             'offboarding_cancelled_by', $3::text
+           )
+         ),
+         $4
+       )
+       ON CONFLICT (user_id) DO UPDATE
+       SET profile = jsonb_set(
+             COALESCE(collaborator_profiles.profile, '{}'::jsonb),
+             ARRAY['onboarding'],
+             (
+               COALESCE(
+                 COALESCE(collaborator_profiles.profile, '{}'::jsonb)->'onboarding',
+                 '{}'::jsonb
+               )
+               - 'offboarding_request_code'
+               - 'offboarding_request_reason'
+               - 'offboarding_requested_at'
+               - 'offboarding_requested_by'
+             ) || jsonb_build_object(
+               'offboarding_requested', false,
+               'offboarding_cancelled_at', $2::text,
+               'offboarding_cancelled_by', $3::text
+             ),
+             true
+           ),
+           updated_by = COALESCE($4, collaborator_profiles.updated_by),
+           updated_at = now()`,
+      [targetUserId, cancelledAtIso, cancelledBy, actor?.id || null]
+    );
+
+    await client.query(
+      `UPDATE offboarding_processes
+          SET updated_at = now()
+        WHERE user_id = $1`,
+      [targetUserId]
+    );
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  try {
+    await logAction({
+      user_id: actor?.id || null,
+      user_email: actor?.email || "system",
+      role: actor?.role || null,
+      module: "offboarding",
+      action: "cancel_offboarding",
+      details: {
+        user_id: targetUserId,
+        cancelled_at: cancelledAtIso,
+        cancelled_by: cancelledBy,
+      },
+    });
+  } catch (auditError) {
+    logger.warn({ auditError, userId: targetUserId }, "No se pudo registrar auditoria de cancelacion offboarding");
+  }
+
+  const workspace = await buildWorkspace(db, targetUserId);
+  return {
+    workspace,
+    cancelled: true,
+  };
+}
+
 async function closeOffboarding({
   userId,
   actor,
@@ -1203,5 +1314,6 @@ module.exports = {
   updateTask,
   runLiquidation,
   startOffboarding,
+  cancelOffboarding,
   closeOffboarding,
 };

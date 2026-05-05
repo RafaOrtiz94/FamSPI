@@ -8,6 +8,9 @@ import {
  FiShield,
  FiArrowRight,
  FiLink,
+ FiCalendar,
+ FiCpu,
+ FiGrid,
 } from "react-icons/fi";
 import toast from "react-hot-toast";
 import api from "../../core/api";
@@ -158,6 +161,27 @@ const DashboardTI = () => {
  path: "/dashboard/auditoria",
  gradient: "from-purple-600 via-fuchsia-500 to-pink-500",
  icon: <FiShield size={24} />,
+ },
+ {
+ title: "Dispositivos TI",
+ desc: "Administra equipos corporativos, asignaciones, estados y trazabilidad de cambios.",
+ path: "/dashboard/ti/dispositivos",
+ gradient: "from-indigo-600 via-blue-500 to-cyan-500",
+ icon: <FiCpu size={24} />,
+ },
+ {
+ title: "Modulos por Usuario",
+ desc: "Activa o desactiva modulos por usuario desde workspace TI.",
+ path: "/dashboard/ti/modulos",
+ gradient: "from-slate-700 via-slate-600 to-slate-500",
+ icon: <FiGrid size={24} />,
+ },
+ {
+ title: "Cronograma de Mantenimientos TI",
+ desc: "Planifica y gestiona mantenimientos de celulares y computadoras asignadas.",
+ path: "/dashboard/ti/mantenimientos",
+ gradient: "from-emerald-600 via-teal-500 to-cyan-500",
+ icon: <FiCalendar size={24} />,
  },
  {
  title: "Casos Externos ST-01-04",

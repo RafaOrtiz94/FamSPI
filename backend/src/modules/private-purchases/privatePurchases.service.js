@@ -2420,23 +2420,16 @@ class PrivatePurchasesService {
       clientData.ruc_cedula
     ]);
 
-    if (!approvedClients.length) {
-      const error = new Error('El cliente debe estar aprobado por backoffice antes de poder registrarse en la compra privada');
-      error.status = 400;
-      error.code = 'CLIENT_NOT_APPROVED';
-      error.details = {
-        clientName: clientData.commercial_name || clientData.name,
-        rucCedula: clientData.ruc_cedula,
-        message: 'Cliente no encontrado en solicitudes aprobadas'
-      };
-      throw error;
+    const approvedClient = approvedClients[0] || null;
+
+    if (approvedClient) {
+      logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Cliente aprobado encontrado: ${approvedClient.commercial_name} (ID: ${approvedClient.id})`);
+    } else {
+      logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Cliente no encontrado en sistema, procede como posible cliente: ${clientData.commercial_name || clientData.name}`);
     }
 
-    const approvedClient = approvedClients[0];
-    logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Cliente aprobado encontrado: ${approvedClient.commercial_name} (ID: ${approvedClient.id})`);
-
-    // Usar el ID del cliente aprobado
-    const finalClientId = clientId || approvedClient.id;
+    // Si está registrado usa su ID; si no, procede sin registered_client_id (posible cliente)
+    const finalClientId = clientId || approvedClient?.id || null;
 
     const hasClientId = finalClientId !== undefined && finalClientId !== null && String(finalClientId).trim().length > 0;
     const query = hasClientId
@@ -2463,14 +2456,15 @@ class PrivatePurchasesService {
       throw new Error('Solicitud no encontrada');
     }
 
-    logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][SUCCESS] Cliente registrado exitosamente: ${approvedClient.commercial_name}`);
+    const clientLabel = approvedClient?.commercial_name || clientData.commercial_name || clientData.name || 'Posible cliente';
+    logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][SUCCESS] Cliente registrado: ${clientLabel}`);
 
     // Transicion automatica a CLIENT_REGISTERED (esperando contrato)
     await this.transitionState(
       purchaseId,
       PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED,
       user,
-      `Cliente aprobado registrado: ${approvedClient.commercial_name}`
+      `Cliente registrado: ${clientLabel}`
     );
 
     // Notificar a backoffice que puede continuar flujo documental
@@ -2482,7 +2476,7 @@ class PrivatePurchasesService {
           userId: recipient.id,
           template: 'private_purchase_client_approved_contract_pending',
           data: {
-            client_name: approvedClient.commercial_name || 'Cliente',
+            client_name: clientLabel,
             purchase_id: purchaseId
           },
           source: 'private_purchase.client_registration',

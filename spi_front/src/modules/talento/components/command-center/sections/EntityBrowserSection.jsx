@@ -24,7 +24,7 @@ const ACTIONABLE_REQUEST_STATUSES = new Set(["pendiente", "en_revision"]);
 const getBaseItemSize = (view, width) => {
   const isMobile = width < 640;
   if (view === "requests") return isMobile ? 154 : 124;
-  return isMobile ? 116 : 96;
+  return isMobile ? 128 : 108;
 };
 
 const resolveListState = (activeView, browserProps = {}) => {
@@ -117,7 +117,25 @@ const EntityBrowserSection = ({
         if (item?.workflow?.current_stage_label) extra += 24;
         if (item?.workflow?.elapsed_label) extra += 20;
       } else if (listState.key === "collaborators" || listState.key === "offboarding") {
+        const normalizedEmploymentStatus = String(
+          item?.estatus_empleado || item?.status || "",
+        )
+          .trim()
+          .toLowerCase();
+        const isPassive =
+          item?.active === false ||
+          normalizedEmploymentStatus === "pasivo" ||
+          normalizedEmploymentStatus === "desvinculado" ||
+          normalizedEmploymentStatus === "inactivo";
+        const isOffboardingInProgress =
+          !isPassive &&
+          (item?.offboarding_requested === true ||
+            item?.profile?.onboarding?.offboarding_requested === true);
+        const canStartOffboarding =
+          listState.key === "collaborators" && !isPassive && !isOffboardingInProgress;
+
         if (item?.department_name) extra += 12;
+        if (canStartOffboarding) extra += 42;
       }
 
       return baseItemSize + extra;

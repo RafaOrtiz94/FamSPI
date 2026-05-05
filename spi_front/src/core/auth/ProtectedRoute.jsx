@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { useUI } from "../ui/UIContext";
+import { isPathEnabledForUser } from "./moduleAccess";
 
 /**
  * ============================================================
@@ -50,6 +51,10 @@ export const ProtectedRoute = ({ allowedRoles = [], strictRoles = false }) => {
  (normalizedScopes.includes("gerencia") ||
  normalizedUserRoles.includes("gerencia")));
  const lopdpPending = (user?.lopdp_internal_status || "").toLowerCase() !== "granted";
+ const moduleEnabled = isPathEnabledForUser({
+ pathname: location.pathname,
+ moduleAccess: user?.module_access || [],
+ });
 
  useEffect(() => {
  if (loading || toastShownRef.current) return;
@@ -63,11 +68,14 @@ export const ProtectedRoute = ({ allowedRoles = [], strictRoles = false }) => {
  ) {
  showToast("No tienes permisos para acceder a esta sección.", "error");
  toastShownRef.current = true;
+ } else if (isAuthenticated && !moduleEnabled) {
+ showToast("Este módulo fue deshabilitado para tu usuario.", "error");
+ toastShownRef.current = true;
  } else if (lopdpPending && !lopdpToastShownRef.current) {
  showToast("Debes firmar el acuerdo interno de datos para continuar.", "warning");
  lopdpToastShownRef.current = true;
  }
- }, [loading, isAuthenticated, hasPermission, showToast, lopdpPending]);
+ }, [loading, isAuthenticated, hasPermission, moduleEnabled, showToast, lopdpPending]);
 
  // 🕐 Mientras se verifica sesión
  if (loading) {
@@ -96,6 +104,9 @@ export const ProtectedRoute = ({ allowedRoles = [], strictRoles = false }) => {
  // 🎫 Validar roles permitidos
  if (isAuthenticated && !hasPermission && normalizedAllowed.length > 0) {
  console.warn(`🚫 Acceso denegado. Rol actual: ${userRole}`);
+ return <Navigate to="/unauthorized" replace />;
+ }
+ if (isAuthenticated && !moduleEnabled) {
  return <Navigate to="/unauthorized" replace />;
  }
 

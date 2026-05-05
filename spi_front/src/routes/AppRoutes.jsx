@@ -81,6 +81,9 @@ const TecnicoPrivatePurchases = lazy(() => import("../modules/servicio/pages/Tec
 const DashboardTalento = lazy(() => import("../modules/talento/Dashboard"));
 const DashboardTI = lazy(() => import("../modules/talento/DashboardTI"));
 const TicketsWorkspace = lazy(() => import("../modules/ti/pages/TicketsWorkspace"));
+const TIMaintenanceSchedulePage = lazy(() => import("../modules/ti/pages/TIMaintenanceSchedulePage"));
+const TIDeviceManagementPage = lazy(() => import("../modules/ti/pages/TIDeviceManagementPage"));
+const TIModuleAccessPage = lazy(() => import("../modules/ti/pages/TIModuleAccessPage"));
 const DashboardOperaciones = lazy(() => import("../modules/operaciones/Dashboard"));
 const DashboardCalidad = lazy(() => import("../modules/calidad/Dashboard"));
 const CA0101Workspace = lazy(() => import("../modules/calidad/pages/CA0101Workspace"));
@@ -354,6 +357,12 @@ const AppRoutes = () => {
           <Route element={<ProtectedRoute allowedRoles={["ti", "jefe_ti", "admin_ti"]} />}>
             <Route path="/dashboard/ti" element={<DashboardTI />} />
             <Route path="/dashboard/ti/workspace" element={<TicketsWorkspace />} />
+            <Route path="/dashboard/ti/dispositivos" element={<TIDeviceManagementPage />} />
+            <Route path="/dashboard/ti/mantenimientos" element={<Navigate to="/dashboard/ti/dispositivos" replace />} />
+          </Route>
+          <Route element={<ProtectedRoute allowedRoles={["jefe_ti", "admin_ti"]} />}>
+            <Route path="/dashboard/ti/modulos" element={<TIModuleAccessPage />} />
+            <Route path="/dashboard/ti/modulos/*" element={<TIModuleAccessPage />} />
           </Route>
           <Route path="/dashboard/operaciones" element={<DashboardOperaciones />} />
           <Route path="/dashboard/logistica" element={<DashboardLogistica />} />
@@ -391,6 +400,7 @@ const AppRoutes = () => {
 
           {/* Subrutas Talento Humano */}
           <Route path="/dashboard/talento-humano/command-center" element={<CollaboratorCommandCenter />} />
+          <Route path="/dashboard/talento-humano/command-center/:kind" element={<CollaboratorCommandCenter />} />
           <Route path="/dashboard/talento-humano/command-center/:kind/:id" element={<CollaboratorCommandCenter />} />
           <Route path="/dashboard/talento-humano/colaboradores" element={<CollaboratorCommandCenter initialView="colaboradores" />} />
           <Route path="/dashboard/talento-humano/colaboradores/:id" element={<CollaboratorCommandCenter initialView="colaboradores" />} />

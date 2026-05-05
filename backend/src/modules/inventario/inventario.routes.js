@@ -56,6 +56,7 @@ router.get("/", controller.getInventario);
 router.get("/equipos-disponibles", controller.getEquiposDisponibles);
 router.get("/equipos-cliente/:cliente_id", controller.getEquiposPorCliente);
 router.get("/modelos", controller.listModelos);
+router.put("/modelos/:id", requireRole(INVENTORY_MUTATION_ROLES), controller.updateModelo);
 
 // ➕ Crear unidad desde modelo
 router.post("/equipos-unidad", requireRole(INVENTORY_CREATE_ROLES), controller.createUnidad);
@@ -68,6 +69,7 @@ router.post("/equipos-unidad/:id/asignar", requireRole(INVENTORY_MUTATION_ROLES)
 
 // 🔄 Cambiar estado de unidad
 router.post("/equipos-unidad/:id/cambiar-estado", requireRole(INVENTORY_MUTATION_ROLES), controller.cambiarEstadoUnidad);
+router.get("/equipos-unidad/:id/historial", requireRole(INVENTORY_MUTATION_ROLES), controller.getUnidadHistorial);
 
 // ➕ Registrar entrada o salida
 router.post("/movimiento", requireRole(INVENTORY_MUTATION_ROLES), controller.addMovimiento);

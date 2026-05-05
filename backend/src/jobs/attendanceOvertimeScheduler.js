@@ -7,6 +7,10 @@
 const db = require("../config/db");
 const logger = require("../config/logger");
 const { ATTENDANCE_TIMEZONE, getBusinessDate } = require("../modules/attendance/attendance.utils");
+const notificationManager = require("../modules/notifications/notificationManager");
+
+const OPERATIONAL_EXCEPTION_TYPES = ["operacion_campo", "operacion_de_campo", "salida_oficina", "viaje", "campo"];
+const OPERATIONAL_OVERTIME_THRESHOLD_HOURS = Number(process.env.ATTENDANCE_OPERATIONAL_OVERTIME_THRESHOLD_HOURS || 8);
 
 /**
  * Process automatic shift closures and overtime start
@@ -210,11 +214,83 @@ const triggerManualRun = async () => {
   return { success: true, message: "Manual overtime processing completed" };
 };
 
+/**
+ * Notify users with active operational exits that have exceeded 8 hours.
+ * Sends one email per exception (tracked by op_overtime_notified_at).
+ */
+const processOperationalOvertimeNotifications = async () => {
+  const thresholdMs = OPERATIONAL_OVERTIME_THRESHOLD_HOURS * 60 * 60 * 1000;
+  const cutoff = new Date(Date.now() - thresholdMs);
+
+  const { rows } = await db.query(
+    `SELECT ex.id, ex.user_id, ex.start_time, ex.type, ex.description,
+            u.email AS user_email, u.fullname AS user_fullname, u.name AS user_name
+       FROM attendance_exceptions ex
+       JOIN users u ON u.id = ex.user_id
+      WHERE LOWER(COALESCE(ex.type, '')) = ANY($1::text[])
+        AND UPPER(COALESCE(ex.status, '')) <> 'COMPLETED'
+        AND ex.start_time IS NOT NULL
+        AND ex.start_time <= $2
+        AND ex.op_overtime_notified_at IS NULL`,
+    [OPERATIONAL_EXCEPTION_TYPES, cutoff]
+  );
+
+  if (!rows.length) return { scanned: 0, notified: 0 };
+
+  let notified = 0;
+  for (const row of rows) {
+    try {
+      const elapsedHours = Math.floor((Date.now() - new Date(row.start_time).getTime()) / 3600000);
+      const displayName = row.user_fullname || row.user_name || row.user_email;
+
+      await notificationManager.sendNotification({
+        userId: row.user_id,
+        customTitle: `Salida operacional activa por más de ${OPERATIONAL_OVERTIME_THRESHOLD_HOURS} horas`,
+        customMessage: `Hola ${displayName}, tienes una salida operacional activa desde hace ${elapsedHours} horas. Si ya regresaste a la oficina, registra tu entrada operacional para cerrar el ciclo correctamente.`,
+        type: "alert",
+        source: "attendance_operational",
+        priority: 2,
+        email: true,
+        meta: {
+          exception_id: row.id,
+          start_time: row.start_time,
+          elapsed_hours: elapsedHours,
+          email_to: row.user_email,
+          target_path: "/dashboard/asistencia",
+        },
+      });
+
+      await db.query(
+        `UPDATE attendance_exceptions SET op_overtime_notified_at = NOW(), updated_at = NOW() WHERE id = $1`,
+        [row.id]
+      );
+
+      notified += 1;
+      logger.info(
+        { exceptionId: row.id, userId: row.user_id, elapsedHours },
+        "[ATTENDANCE] Operational overtime notification sent"
+      );
+    } catch (err) {
+      logger.warn({ err, exceptionId: row.id }, "[ATTENDANCE] Failed to send operational overtime notification");
+    }
+  }
+
+  return { scanned: rows.length, notified };
+};
+
 // Alias for Cloud Scheduler compatibility
-const runOnce = processAutomaticOvertime;
+const runOnce = async () => {
+  const overtime = await processAutomaticOvertime();
+  const opNotifications = await processOperationalOvertimeNotifications();
+  logger.info(
+    `[ATTENDANCE SCHEDULER] op_overtime_notifications: scanned=${opNotifications.scanned} notified=${opNotifications.notified}`
+  );
+  return { overtime, opNotifications };
+};
 
 module.exports = {
   processAutomaticOvertime,
+  processOperationalOvertimeNotifications,
   getSchedulerStatus,
   triggerManualRun,
   runOnce,

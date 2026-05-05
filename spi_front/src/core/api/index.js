@@ -147,6 +147,9 @@ api.interceptors.request.use(
  if (activeAccessToken) {
  config.headers.Authorization = `Bearer ${activeAccessToken}`;
  }
+ if (typeof window !== "undefined") {
+ config.headers["x-app-path"] = window.location.pathname || "";
+ }
  return config;
  },
  (error) => Promise.reject(error)
@@ -199,6 +202,9 @@ api.interceptors.request.use(
  const activeAccessToken = getAccessToken();
  if (activeAccessToken) {
  config.headers.Authorization = `Bearer ${activeAccessToken}`;
+ }
+ if (typeof window !== "undefined") {
+ config.headers["x-app-path"] = window.location.pathname || "";
  }
  return config;
  },

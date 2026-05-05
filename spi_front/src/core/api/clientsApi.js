@@ -1,5 +1,11 @@
 import api from "./index";
 
+export const searchApprovedClients = async (q = "") => {
+  if (!q || q.trim().length < 2) return [];
+  const { data } = await api.get("/clients", { params: { q: q.trim() } });
+  return data?.data || [];
+};
+
 export const fetchClients = async (params = {}) => {
  const { data } = await api.get("/clients", { params });
  return {

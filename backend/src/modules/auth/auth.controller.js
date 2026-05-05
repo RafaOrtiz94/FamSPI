@@ -30,6 +30,7 @@ const { getGeoLocation } = require("../../utils/geoip");
 const { notifyTIAboutOffHoursLogin } = require("../../modules/notifications/notifications.service");
 const { logAction } = require("../../utils/audit");
 const { ensureDailyClockIn } = require("../attendance/attendance.utils");
+const { listUserModuleAccess } = require("../module-access/moduleAccess.service");
 // Use crypto.randomUUID() (Node.js 18+ native)
 const { randomUUID } = require('crypto');
 const LOGIN_ATTENDANCE_SYNC_ENABLED = process.env.AUTH_ENABLE_LOGIN_CLOCK_IN !== "false";
@@ -494,6 +495,7 @@ const me = async (req, res) => {
         ...payload,
         scope: meta.scope,
         dashboard: meta.dashboard,
+        module_access: await listUserModuleAccess(payload.id),
         lopdp_internal_status: payload.lopdp_internal_status || "pending",
         avatar_url: avatarUrl,
         avatar_drive_id: payload.avatar_drive_id || null,

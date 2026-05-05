@@ -18,21 +18,20 @@ import { useUI } from "../../../core/ui/UIContext";
 import { useAuth } from "../../../core/auth/AuthContext";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../core/api";
 
-// ─── helpers ───────────────────────────────────────────────────────────────
 const toMoney = (v, cur = "USD") =>
   new Intl.NumberFormat("es-EC", { style: "currency", currency: cur, minimumFractionDigits: 2 }).format(
     Number.isFinite(Number(v)) ? Number(v) : 0
   );
 
 const fmtDate = (v) => {
-  if (!v) return "—";
+  if (!v) return "â€”";
   return String(v).slice(0, 10);
 };
 
 const fmtDateTime = (v) => {
-  if (!v) return "—";
+  if (!v) return "â€”";
   const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return "—";
+  if (Number.isNaN(d.getTime())) return "â€”";
   return d.toLocaleString("es-EC", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 };
 
@@ -50,7 +49,7 @@ const normalizeRoles = (user) =>
     .map((r) => r.trim().toLowerCase())
     .filter(Boolean);
 
-const FINANCE_ROLES = ["finanzas", "jefe_finanzas", "jefe_financiero", "gerencia", "gerencia_general", "admin"];
+const FINANCE_ROLES = ["finanzas", "jefe_finanzas", "jefe_financiero", "gerencia", "gerencia_general", "admin", "administrador"];
 
 const STATUS_BADGE = {
   pending: "bg-amber-100 text-amber-800",
@@ -66,7 +65,6 @@ const INV_STATUS_BADGE = {
   rechazada: "bg-rose-100 text-rose-700",
 };
 
-// ─── Collapsible section ───────────────────────────────────────────────────
 function Section({ title, badge, children, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -89,7 +87,6 @@ function Section({ title, badge, children, defaultOpen = false }) {
   );
 }
 
-// ─── Main component ────────────────────────────────────────────────────────
 const ViaticosWorkspace = () => {
   const { showToast, showLoader, hideLoader } = useUI();
   const { user } = useAuth();
@@ -103,27 +100,20 @@ const ViaticosWorkspace = () => {
   const [allowances, setAllowances] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // invoices per allowance: { [allowanceId]: invoice[] }
   const [invoicesMap, setInvoicesMap] = useState({});
   const [invoicesLoading, setInvoicesLoading] = useState({});
 
-  // TXT upload state per allowance
   const [txtMap, setTxtMap] = useState({});        // { [id]: { file, content } }
   const [txtUploading, setTxtUploading] = useState({});
 
-  // expanded allowance detail panel
   const [expanded, setExpanded] = useState(null);
 
-  // outside_labor_area draft per candidate key
   const [candidateDrafts, setCandidateDrafts] = useState({});
 
-  // report cache per allowance
   const [reports, setReports] = useState({});
 
-  // saving/status mutation state
   const [saving, setSaving] = useState({});
 
-  // ── load data ─────────────────────────────────────────────────────────
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
     try {
@@ -135,7 +125,7 @@ const ViaticosWorkspace = () => {
       setAllowances(Array.isArray(avData) ? avData : []);
       setCandidates(Array.isArray(candData) ? candData : []);
     } catch (err) {
-      showToast(err?.response?.data?.message || "Error cargando vi�ticos", "error");
+      showToast(err?.response?.data?.message || "Error cargando viáticos", "error");
     } finally {
       if (!silent) setLoading(false);
     }
@@ -144,7 +134,6 @@ const ViaticosWorkspace = () => {
   useEffect(() => { loadData(); }, [loadData]);
   useScopedAutoUpdate(DATA_UPDATE_SCOPES.VIATICOS, () => loadData({ silent: true }), [loadData]);
 
-  // ── load invoices for an allowance ────────────────────────────────────
   const loadInvoices = useCallback(async (allowanceId) => {
     setInvoicesLoading((p) => ({ ...p, [allowanceId]: true }));
     try {
@@ -165,7 +154,6 @@ const ViaticosWorkspace = () => {
     });
   }, [invoicesMap, loadInvoices]);
 
-  // ── TXT file handling ─────────────────────────────────────────────────
   const handleTxtFileChange = (allowanceId, file) => {
     if (!file) return;
     const reader = new FileReader();
@@ -194,7 +182,6 @@ const ViaticosWorkspace = () => {
     }
   };
 
-  // ── delete invoice ────────────────────────────────────────────────────
   const handleDeleteInvoice = async (allowanceId, invoiceId) => {
     const key = `del-inv-${invoiceId}`;
     setSaving((p) => ({ ...p, [key]: true }));
@@ -213,7 +200,6 @@ const ViaticosWorkspace = () => {
     }
   };
 
-  // ── patch invoice (finance) ───────────────────────────────────────────
   const handlePatchInvoice = async (allowanceId, invoiceId, patch) => {
     const key = `patch-inv-${invoiceId}`;
     setSaving((p) => ({ ...p, [key]: true }));
@@ -227,7 +213,6 @@ const ViaticosWorkspace = () => {
     }
   };
 
-  // ── create viatico from candidate ─────────────────────────────────────
   const handleCreateFromCandidate = async (item, outsideLaborArea) => {
     const key = `cand-${item.source_type}-${item.source_id}`;
     setSaving((p) => ({ ...p, [key]: true }));
@@ -253,7 +238,6 @@ const ViaticosWorkspace = () => {
     }
   };
 
-  // ── finance: update status ────────────────────────────────────────────
   const handlePatchStatus = async (allowanceId, status, extraPayload = {}) => {
     if (!isFinance) return;
     const key = `status-${allowanceId}`;
@@ -271,7 +255,6 @@ const ViaticosWorkspace = () => {
     }
   };
 
-  // ── finance: build report ─────────────────────────────────────────────
   const handleBuildReport = async (allowanceId) => {
     const key = `report-${allowanceId}`;
     setSaving((p) => ({ ...p, [key]: true }));
@@ -288,7 +271,6 @@ const ViaticosWorkspace = () => {
     }
   };
 
-  // ── summary stats ─────────────────────────────────────────────────────
   const summary = useMemo(() =>
     allowances.reduce(
       (acc, a) => {
@@ -299,7 +281,6 @@ const ViaticosWorkspace = () => {
       { total: 0, pending: 0, approved: 0, paid: 0, rejected: 0 }
     ), [allowances]);
 
-  // ── operational candidates not yet converted ──────────────────────────
   const operationalCandidates = useMemo(
     () => candidates.filter((c) => c.source_type === "operational_exit"),
     [candidates]
@@ -309,15 +290,14 @@ const ViaticosWorkspace = () => {
     [allowances, isFinance, user]
   );
 
-  // ─── RENDER ────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-5 p-3 sm:p-5">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Vi�ticos</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Viáticos</h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            {isFinance ? "Revisi�n y procesamiento de solicitudes de vi�ticos" : "Solicitudes y comprobantes de tus salidas operacionales"}
+            {isFinance ? "Revisión y procesamiento de solicitudes de viáticos" : "Solicitudes y comprobantes de tus salidas operacionales"}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -349,8 +329,7 @@ const ViaticosWorkspace = () => {
         ))}
       </div>
 
-      {/* ── STEP 1: Operational trip candidates (non-finance) ─────────────── */}
-      {operationalCandidates.length > 0 && (
+      {!isFinance && operationalCandidates.length > 0 && (
         <Section title="Salidas operacionales" badge={operationalCandidates.length} defaultOpen>
           <p className="mb-4 text-sm text-slate-500">
             Clasifica cada salida como dentro o fuera del area de labores. Las salidas fuera del area aplican a viatico.
@@ -402,15 +381,14 @@ const ViaticosWorkspace = () => {
         </Section>
       )}
 
-      {/* ── STEP 2 / FINANCE VIEW: Allowances list ────────────────────────── */}
       <div className="space-y-4">
         {loading ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">Cargando vi�ticos...</div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">Cargando viáticos...</div>
         ) : myAllowances.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center">
-            <p className="text-slate-500 text-sm">No hay vi�ticos en el per�odo seleccionado.</p>
+            <p className="text-slate-500 text-sm">No hay viáticos en el período seleccionado.</p>
             {!isFinance && (
-              <p className="mt-2 text-xs text-slate-400">Los vi�ticos se crean desde las salidas operacionales completadas y clasificadas como "fuera del �rea".</p>
+              <p className="mt-2 text-xs text-slate-400">Los viáticos se crean desde las salidas operacionales completadas y clasificadas como "fuera del área".</p>
             )}
           </div>
         ) : (
@@ -430,7 +408,6 @@ const ViaticosWorkspace = () => {
 
             return (
               <div key={item.id} className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-                {/* ── Card header ── */}
                 <button
                   type="button"
                   onClick={() => toggleExpand(item.id)}
@@ -445,14 +422,14 @@ const ViaticosWorkspace = () => {
                         {STATUS_LABEL[item.status] || item.status}
                       </span>
                       {item.outside_labor_area && (
-                        <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700">Fuera de área</span>
+                        <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700">Fuera de Ã¡rea</span>
                       )}
                     </div>
                     <div className="flex flex-wrap gap-4 text-xs text-slate-500">
                       <span className="inline-flex items-center gap-1"><FiCalendar size={11} /> {fmtDate(item.visit_date)}</span>
                       {item.city && <span className="inline-flex items-center gap-1"><FiMapPin size={11} /> {item.city}</span>}
-                      <span className="inline-flex items-center gap-1"><FiFileText size={11} /> {item.docs_count || invoices.length || 0} docs · {toMoney(item.invoices_total || invoiceTotal)}</span>
-                      <span className="text-slate-400">#{item.id} · {item.source_type}</span>
+                      <span className="inline-flex items-center gap-1"><FiFileText size={11} /> {item.docs_count || invoices.length || 0} docs {toMoney(item.invoices_total || invoiceTotal)}</span>
+                      <span className="text-slate-400">#{item.id} Â· {item.source_type}</span>
                     </div>
                   </div>
                   <div className="flex-shrink-0 mt-1">
@@ -460,11 +437,9 @@ const ViaticosWorkspace = () => {
                   </div>
                 </button>
 
-                {/* ── Expanded detail ── */}
                 {isExpanded && (
                   <div className="border-t border-slate-100 px-5 pb-6 pt-4 space-y-5">
 
-                    {/* Trip details */}
                     <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">Detalle del viaje</p>
                       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-sm">
@@ -481,7 +456,7 @@ const ViaticosWorkspace = () => {
                       <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 space-y-3">
                         <p className="text-sm font-semibold text-blue-800">Cargar comprobantes desde TXT del SRI</p>
                         <p className="text-xs text-blue-600 leading-5">
-                          Descarga el archivo de comprobantes recibidos desde el portal del SRI (formato: <code>RUC_Recibidos.txt</code>). El sistema filtrará automáticamente las facturas que correspondan al período del viaje.
+                          Descarga el archivo de comprobantes recibidos desde el portal del SRI (formato: <code>RUC_Recibidos.txt</code>). El sistema filtrarÃ¡ automÃ¡ticamente las facturas que correspondan al perÃ­odo del viaje.
                         </p>
                         <div className="flex flex-wrap items-end gap-3">
                           <label className="flex-1">
@@ -516,7 +491,7 @@ const ViaticosWorkspace = () => {
                           Facturas cargadas
                           {invoices.length > 0 && (
                             <span className="ml-2 text-xs text-slate-400">
-                              {inRangeCount} en rango del viaje · {outRangeCount} fuera del rango · Total: {toMoney(invoiceTotal)}
+                              {inRangeCount} en rango del viaje {outRangeCount} fuera del rango Total: {toMoney(invoiceTotal)}
                             </span>
                           )}
                         </p>
@@ -529,7 +504,7 @@ const ViaticosWorkspace = () => {
                         <p className="text-xs text-slate-400 py-3">Cargando facturas...</p>
                       ) : invoices.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
-                          No hay facturas cargadas aún.
+                          No hay facturas cargadas aÃºn.
                           {canEdit && " Usa el cargador TXT para agregar comprobantes del SRI."}
                         </div>
                       ) : (
@@ -552,20 +527,20 @@ const ViaticosWorkspace = () => {
                                 return (
                                   <tr key={inv.id} className={`hover:bg-slate-50 transition-colors ${!inv.in_trip_date_range ? "opacity-60" : ""}`}>
                                     <td className="px-3 py-2">
-                                      <p className="font-medium text-slate-800 truncate max-w-[180px]">{inv.supplier_name || inv.supplier_ruc || "—"}</p>
+                                      <p className="font-medium text-slate-800 truncate max-w-[180px]">{inv.supplier_name || inv.supplier_ruc || "â€”"}</p>
                                       <p className="text-slate-400">{inv.supplier_ruc}</p>
                                     </td>
                                     <td className="px-3 py-2 text-slate-600">{fmtDate(inv.issue_date)}</td>
                                     <td className="px-3 py-2 text-right font-semibold text-slate-800">{toMoney(inv.total)}</td>
                                     <td className="px-3 py-2 text-center">
                                       {inv.in_trip_date_range
-                                        ? <span className="inline-flex items-center gap-1 text-emerald-600"><FiCheckCircle size={12} /> Sí</span>
+                                        ? <span className="inline-flex items-center gap-1 text-emerald-600"><FiCheckCircle size={12} /> SÃ­</span>
                                         : <span className="inline-flex items-center gap-1 text-amber-500"><FiAlertTriangle size={12} /> Fuera</span>}
                                     </td>
                                     {isFinance && (
                                       <td className="px-3 py-2 text-center">
                                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${INV_STATUS_BADGE[inv.status] || "bg-slate-100 text-slate-600"}`}>
-                                          {inv.status || "—"}
+                                          {inv.status || "â€”"}
                                         </span>
                                       </td>
                                     )}
@@ -619,14 +594,13 @@ const ViaticosWorkspace = () => {
                       )}
                     </div>
 
-                    {/* Finance: cotejo report */}
                     {isFinance && report && (
                       <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-2 text-sm">
                         <p className="font-semibold text-emerald-800">Cotejo de asistencia</p>
                         <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
                           <div><p className="text-emerald-600">Estado asistencia</p><p className="font-semibold capitalize">{report.attendance?.status}</p></div>
-                          <div><p className="text-emerald-600">Distancia mín.</p><p className="font-semibold">{report.attendance?.min_distance_km != null ? `${Number(report.attendance.min_distance_km).toFixed(1)} km` : "—"}</p></div>
-                          <div><p className="text-emerald-600">Fuera de área</p><p className="font-semibold">{report.rules?.outside_labor_area ? "Sí" : "No"}</p></div>
+                          <div><p className="text-emerald-600">Distancia mín.</p><p className="font-semibold">{report.attendance?.min_distance_km != null ? `${Number(report.attendance.min_distance_km).toFixed(1)} km` : "â€”"}</p></div>
+                          <div><p className="text-emerald-600">Fuera de Área</p><p className="font-semibold">{report.rules?.outside_labor_area ? "SÃ­" : "No"}</p></div>
                           <div><p className="text-emerald-600">Monto sugerido</p><p className="font-semibold">{toMoney(report.recommendation?.suggested_amount || 0)}</p></div>
                         </div>
                       </div>
@@ -689,4 +663,3 @@ const ViaticosWorkspace = () => {
 };
 
 export default ViaticosWorkspace;
-

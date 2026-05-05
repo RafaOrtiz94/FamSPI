@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 
 import Button from "../../../../core/ui/components/Button";
 import {
+  cancelOffboardingProcess,
   closeOffboardingProcess,
   getOffboardingWorkspace,
   runOffboardingLiquidation,
@@ -55,6 +56,9 @@ const OffboardingWorkspace = ({
   const operationalReady = Boolean(stages?.OPERATIONAL?.complete);
   const financialReady = Boolean(stages?.FINANCIAL?.complete);
   const closed = Boolean(process?.is_closed);
+  const offboardingRequested = Boolean(
+    profileData?.onboarding?.offboarding_requested === true
+  );
 
   useEffect(() => {
     if (!workspace) return;
@@ -86,6 +90,19 @@ const OffboardingWorkspace = ({
     },
     onError: (error) => {
       toast.error(error?.response?.data?.message || "No se pudo cerrar la desvinculacion.");
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: () => cancelOffboardingProcess(collaboratorId),
+    onSuccess: async () => {
+      toast.success("Solicitud de desvinculación cancelada.");
+      await queryClient.invalidateQueries({ queryKey: ["talento", "offboarding", String(collaboratorId || "")] });
+      await queryClient.invalidateQueries({ queryKey: ["talento", "collaborator-profile", String(collaboratorId || "")] });
+      await queryClient.invalidateQueries({ queryKey: ["talento", "collaborators"] });
+    },
+    onError: (error) => {
+      toast.error(error?.response?.data?.message || "No se pudo cancelar la desvinculación.");
     },
   });
 
@@ -168,6 +185,23 @@ const OffboardingWorkspace = ({
           >
             Sincronizar
           </Button>
+          {offboardingRequested && !closed ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={async () => {
+                const confirmed = window.confirm(
+                  "¿Cancelar la solicitud de desvinculación de este colaborador?"
+                );
+                if (!confirmed) return;
+                await cancelMutation.mutateAsync();
+              }}
+              disabled={cancelMutation.isPending}
+            >
+              {cancelMutation.isPending ? "Cancelando..." : "Cancelar desvinculación"}
+            </Button>
+          ) : null}
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           {STAGE_ORDER.map((stageKey) => {

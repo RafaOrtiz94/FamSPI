@@ -24,6 +24,7 @@ import clsx from "clsx";
 
 import { useAuth } from "../../auth/AuthContext";
 import useAuditStatus from "../../hooks/useAuditStatus";
+import { isPathEnabledForUser } from "../../auth/moduleAccess";
 
 const homePathsByScope = {
  gerencia: "/dashboard/gerencia",
@@ -45,6 +46,7 @@ const homePathsByScope = {
  talento_humano: "/dashboard/talento-humano",
  "talento-humano": "/dashboard/talento-humano",
  jefe_talento_humano: "/dashboard/talento-humano",
+ it: "/dashboard/ti",
  ti: "/dashboard/ti",
  jefe_ti: "/dashboard/ti",
  admin_ti: "/dashboard/ti",
@@ -204,6 +206,17 @@ const tiWorkspaceLink = {
  name: "Workspace TI",
  icon: FiLifeBuoy,
  path: "/dashboard/ti/workspace",
+};
+
+const tiDevicesLink = {
+ name: "Dispositivos TI",
+ icon: FiCpu,
+ path: "/dashboard/ti/dispositivos",
+};
+const tiModulesLink = {
+ name: "Modulos por Usuario",
+ icon: FiSettings,
+ path: "/dashboard/ti/modulos",
 };
 
 const servicioLinks = [
@@ -367,9 +380,12 @@ const getPriorityGroups = (scope, role, auditActive) => {
  }
 
  // TI - Tecnología y auditoría
- else if (["ti", "jefe_ti", "admin_ti"].includes(scope)) {
+else if (["it", "ti", "jefe_ti", "admin_ti"].includes(scope)) {
  groups.critical.push(tiWorkspaceLink);
- groups.primary.push(permisosLink, peopleAdminLink, ...talentoLinks, ...auditLinks);
+ if (["jefe_ti", "admin_ti"].includes(scope) || role.includes("jefe_ti") || role.includes("admin_ti")) {
+ groups.critical.push(tiModulesLink);
+ }
+ groups.primary.push(tiDevicesLink, permisosLink, peopleAdminLink, ...talentoLinks, ...auditLinks);
  if (auditActive) groups.primary.push(auditPrepLink);
  }
 
@@ -505,10 +521,22 @@ const NavigationBar = () => {
  const { status: auditStatus } = useAuditStatus();
  const auditActive = Boolean(auditStatus?.active);
  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+ const filterEnabledLinks = React.useCallback(
+ (links) => links.filter((link) => isPathEnabledForUser({ pathname: link.path, moduleAccess: user?.module_access || [] })),
+ [user?.module_access]
+ );
 
  const priorityGroups = React.useMemo(
- () => getPriorityGroups(scope, role, auditActive),
- [scope, role, auditActive]
+ () => {
+ const base = getPriorityGroups(scope, role, auditActive);
+ return {
+ critical: filterEnabledLinks(base.critical),
+ primary: filterEnabledLinks(base.primary),
+ secondary: filterEnabledLinks(base.secondary),
+ admin: filterEnabledLinks(base.admin),
+ };
+ },
+ [scope, role, auditActive, filterEnabledLinks]
  );
 
  const toggleMobileMenu = () => {

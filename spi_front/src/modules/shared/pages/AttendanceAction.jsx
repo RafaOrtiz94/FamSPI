@@ -25,7 +25,7 @@ import {
   getTodayAttendance,
   getActiveException,
 } from "../../../core/api/attendanceApi";
-import { getLocationForAction } from "../../../shared/utils/attendanceLocationCache";
+import { getLocationForAction, startLocationPrewarm, stopLocationPrewarm } from "../../../shared/utils/attendanceLocationCache";
 import { fetchClients } from "../../../core/api/clientsApi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
@@ -532,6 +532,12 @@ const AttendanceAction = () => {
     }, 22000);
     return () => clearTimeout(timer);
   }, [status]);
+
+  // Prewarm GPS as soon as the page loads so cache is warm when needed
+  useEffect(() => {
+    startLocationPrewarm();
+    return () => stopLocationPrewarm();
+  }, []);
 
   useEffect(() => {
     if (authLoading || !user || processedRef.current || !config) return;

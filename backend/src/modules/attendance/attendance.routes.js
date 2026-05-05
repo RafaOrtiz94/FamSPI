@@ -112,6 +112,8 @@ router.post("/marcar/salida-oficina", verifyToken, attendanceMarkLimiter, contro
 router.post("/marcar/entrada-oficina", verifyToken, attendanceMarkLimiter, controller.clockInOperational);
 router.post("/marcar/salida-campo", verifyToken, attendanceMarkLimiter, controller.clockOutOperational);
 router.post("/marcar/entrada-campo", verifyToken, attendanceMarkLimiter, controller.clockInOperational);
+router.post("/marcar/almuerzo-salida-operacional", verifyToken, attendanceMarkLimiter, controller.clockOutOperationalLunch);
+router.post("/marcar/almuerzo-entrada-operacional", verifyToken, attendanceMarkLimiter, controller.clockInOperationalLunch);
 router.post("/marcar/llegada-destino", verifyToken, attendanceMarkLimiter, controller.clockInDestino);
 router.post("/marcar/cierre-viaje", verifyToken, attendanceMarkLimiter, controller.clockCloseTrip);
 
