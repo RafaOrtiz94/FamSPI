@@ -422,7 +422,7 @@ const ViaticosWorkspace = () => {
                         {STATUS_LABEL[item.status] || item.status}
                       </span>
                       {item.outside_labor_area && (
-                        <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700">Fuera de Ã¡rea</span>
+                        <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700">Fuera de área</span>
                       )}
                     </div>
                     <div className="flex flex-wrap gap-4 text-xs text-slate-500">
@@ -456,7 +456,7 @@ const ViaticosWorkspace = () => {
                       <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 space-y-3">
                         <p className="text-sm font-semibold text-blue-800">Cargar comprobantes desde TXT del SRI</p>
                         <p className="text-xs text-blue-600 leading-5">
-                          Descarga el archivo de comprobantes recibidos desde el portal del SRI (formato: <code>RUC_Recibidos.txt</code>). El sistema filtrarÃ¡ automÃ¡ticamente las facturas que correspondan al perÃ­odo del viaje.
+                          Descarga el archivo de comprobantes recibidos desde el portal del SRI (formato: <code>RUC_Recibidos.txt</code>). El sistema filtrará automáticamente las facturas que correspondan al período del viaje.
                         </p>
                         <div className="flex flex-wrap items-end gap-3">
                           <label className="flex-1">
@@ -504,7 +504,7 @@ const ViaticosWorkspace = () => {
                         <p className="text-xs text-slate-400 py-3">Cargando facturas...</p>
                       ) : invoices.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
-                          No hay facturas cargadas aÃºn.
+                          No hay facturas cargadas aún.
                           {canEdit && " Usa el cargador TXT para agregar comprobantes del SRI."}
                         </div>
                       ) : (

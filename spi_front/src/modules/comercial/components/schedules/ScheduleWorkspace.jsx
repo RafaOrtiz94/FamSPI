@@ -9,6 +9,13 @@ import {
   FiTrash2,
 } from "react-icons/fi";
 import Button from "../../../../core/ui/components/Button";
+import {
+  WORKSPACE_3COL_CLASS,
+  WORKSPACE_SIDEBAR_CLASS,
+  WORKSPACE_MAIN_CLASS,
+  WORKSPACE_CONTEXT_CLASS,
+  WORKSPACE_PANEL_PADDING,
+} from "../../../../core/ui/workspaceLayout";
 import { useAuth } from "../../../../core/auth/useAuth";
 import { useUI } from "../../../../core/ui/useUI";
 import { fetchClients } from "../../../../core/api/clientsApi";
@@ -475,8 +482,8 @@ const ScheduleWorkspace = ({
   };
 
   return (
-    <div className="grid grid-cols-12 h-screen overflow-hidden">
-      <aside className="col-span-12 lg:col-span-3 bg-white border-r border-slate-200 p-6 overflow-y-auto space-y-4">
+    <div className={WORKSPACE_3COL_CLASS}>
+      <aside className={`${WORKSPACE_SIDEBAR_CLASS} ${WORKSPACE_PANEL_PADDING} space-y-3`}>
         <div>
           <p className="text-xs uppercase tracking-wide text-slate-500">Planificacion mensual</p>
           <h1 className="text-xl font-bold text-slate-900">Workspace de cronogramas</h1>
@@ -543,7 +550,6 @@ const ScheduleWorkspace = ({
                 <span className="text-sm font-semibold text-slate-800">
                   {MONTHS[Number(displayedSchedule.month || 1) - 1]} {displayedSchedule.year}
                 </span>
-                <ScheduleStatusBadge status={displayedSchedule.status} />
               </div>
 
               {editingLocked ? (
@@ -677,20 +683,19 @@ const ScheduleWorkspace = ({
         </div>
       </aside>
 
-      <main className="col-span-12 lg:col-span-6 bg-slate-50 p-6 overflow-y-auto">
+      <main className={`${WORKSPACE_MAIN_CLASS} ${WORKSPACE_PANEL_PADDING}`}>
         {error ? (
           <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
         ) : null}
 
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-slate-500">Calendario central</p>
-            <p className="text-sm text-slate-700">
-              {clientsLoading ? "Cargando clientes..." : `${clients.length} clientes disponibles para quick-add`}
+        {(clientsLoading || clients.length > 0 || loading) && (
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs text-slate-400">
+              {clientsLoading ? "Cargando clientes..." : `${clients.length} clientes disponibles`}
             </p>
+            {loading ? <span className="text-xs text-slate-400">Sincronizando...</span> : null}
           </div>
-          {loading ? <span className="text-xs text-slate-500">Sincronizando...</span> : null}
-        </div>
+        )}
 
         <ScheduleCalendarView
           schedule={displayedSchedule}
@@ -705,7 +710,7 @@ const ScheduleWorkspace = ({
         />
       </main>
 
-      <aside className="col-span-12 lg:col-span-3 bg-white border-l border-slate-200 p-4 overflow-y-auto">
+      <aside className={`${WORKSPACE_CONTEXT_CLASS} ${WORKSPACE_PANEL_PADDING}`}>
         <div className="mb-4 flex items-center gap-2">
           <FiMap className="text-slate-600" size={16} />
           <p className="text-sm font-semibold text-slate-900">Context Panel</p>

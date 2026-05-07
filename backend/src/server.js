@@ -31,11 +31,12 @@ const { startPermisosPendingExpiryJob } = require("./jobs/permisosPendingExpiryS
 const { startPermisosRecoveryCoordinationExpiryJob } = require("./jobs/permisosRecoveryCoordinationExpiryScheduler");
 const { startPermisosAutoCancelledJustificationJob } = require("./jobs/permisosAutoCancelledJustificationScheduler");
 const { startExternalCaseSyncJob } = require("./jobs/externalCaseSyncScheduler");
-const { startTiMaintenanceReportJob } = require("./jobs/tiMaintenanceReportScheduler");
 
 const PORT = Number(process.env.PORT) || 8080;
 const ENV = process.env.NODE_ENV || "development";
 const ENABLE_JOBS = process.env.ENABLE_JOBS === "true" || ENV !== "production";
+const IS_JOBS_RUNNER_INSTANCE =
+  ENV !== "production" || String(process.env.JOBS_RUNNER_INSTANCE || "false").toLowerCase() === "true";
 const JOB_EXECUTION_MODE = ENABLE_JOBS ? "in_process" : "external_scheduler";
 const JOB_BOOTSTRAP_STAGGER_MS = Math.max(1000, Number(process.env.JOBS_BOOTSTRAP_STAGGER_MS || 15000));
 
@@ -45,7 +46,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
   logger.info(`SPI FAM API running on port ${PORT} [${ENV}]`);
   logger.info({ job_execution_mode: JOB_EXECUTION_MODE }, "Modo de ejecucion de jobs");
 
-  if (ENABLE_JOBS) {
+  if (ENABLE_JOBS && IS_JOBS_RUNNER_INSTANCE) {
     logger.info("Jobs internos habilitados");
     const jobs = [
       { name: "mantenimiento_reminder", fn: startReminderScheduler },
@@ -59,7 +60,6 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
       { name: "permisos_auto_cancelled_justification", fn: startPermisosAutoCancelledJustificationJob },
       { name: "db_backup", fn: startDatabaseBackupJob },
       { name: "external_case_sync", fn: startExternalCaseSyncJob },
-      { name: "ti_maintenance_report", fn: startTiMaintenanceReportJob },
     ];
 
     jobs.forEach((job, index) => {
@@ -73,6 +73,8 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
         }
       }, delayMs);
     });
+  } else if (ENABLE_JOBS && !IS_JOBS_RUNNER_INSTANCE) {
+    logger.info("Jobs internos deshabilitados en esta instancia; no es jobs-runner");
   } else {
     logger.info("Jobs internos deshabilitados; usar scheduler externo");
   }

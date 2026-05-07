@@ -228,7 +228,7 @@ const PurchasesWorkspace = () => {
  </div>
 
  {/* Content Area */}
- <div className="min-h-screen bg-slate-50">
+ <div className="bg-slate-50">
  <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 py-8">
  <AnimatePresence mode="wait">
  <motion.div

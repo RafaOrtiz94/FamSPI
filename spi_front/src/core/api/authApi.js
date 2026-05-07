@@ -156,3 +156,13 @@ export const submitInternalLopdpConsent = async ({
 
 // Alias for consistency
 export const acceptInternalLopdp = submitInternalLopdpConsent;
+
+/* ==========================================================
+ 🧪 Login sandbox (solo cuando REACT_APP_SANDBOX_AUTH=true)
+ ========================================================== */
+export const sandboxLogin = async (email, password) => {
+  const { data } = await api.post("/auth/local", { email, password });
+  if (!data?.ok) throw new Error(data?.message || "Credenciales incorrectas");
+  setTokens(data.accessToken, data.refreshToken);
+  return data;
+};

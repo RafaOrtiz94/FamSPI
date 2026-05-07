@@ -31,6 +31,12 @@ router.get("/google", controller.googleAuthRedirect);
  */
 router.get("/google/callback", controller.googleCallback);
 
+/**
+ * @route POST /api/v1/auth/local
+ * @desc Login usuario/contraseña — solo activo cuando SANDBOX_AUTH=true y NODE_ENV != production
+ */
+router.post("/local", controller.localLogin);
+
 
 // ======================================================
 // 🔒 2️⃣ RUTAS PROTEGIDAS (requieren Authorization: Bearer)

@@ -43,9 +43,11 @@ const REQUEST_TYPES = {
  icon: FiUserPlus,
  path: "/dashboard/comercial/new-client-request",
  color: "blue",
- gradient: "from-blue-500 to-blue-600",
- bgGradient: "from-blue-50 to-blue-100",
- textColor: "text-blue-700"
+ gradient: "bg-blue-700",
+ bgGradient: "bg-blue-50",
+ textColor: "text-blue-800",
+ borderColor: "border-blue-200",
+ shadowColor: "hover:shadow-blue-200/40"
  },
 
  // Compras Públicas (ACP)
@@ -55,9 +57,11 @@ const REQUEST_TYPES = {
  icon: FiShoppingCart,
  path: "/dashboard/comercial/acp-compras",
  color: "emerald",
- gradient: "from-emerald-500 to-emerald-600",
- bgGradient: "from-emerald-50 to-emerald-100",
- textColor: "text-emerald-700"
+ gradient: "bg-emerald-700",
+ bgGradient: "bg-emerald-50",
+ textColor: "text-emerald-800",
+ borderColor: "border-emerald-200",
+ shadowColor: "hover:shadow-emerald-200/40"
  },
 
  // Compras Privadas
@@ -67,9 +71,11 @@ const REQUEST_TYPES = {
  icon: FiBriefcase,
  path: "/dashboard/backoffice/private-purchases",
  color: "purple",
- gradient: "from-purple-500 to-purple-600",
- bgGradient: "from-purple-50 to-purple-100",
- textColor: "text-purple-700"
+ gradient: "bg-violet-700",
+ bgGradient: "bg-violet-50",
+ textColor: "text-violet-800",
+ borderColor: "border-violet-200",
+ shadowColor: "hover:shadow-violet-200/40"
  },
 
  // Business Case
@@ -79,9 +85,11 @@ const REQUEST_TYPES = {
  icon: FiFileText,
  path: "/dashboard/business-case/wizard",
  color: "indigo",
- gradient: "from-indigo-500 to-indigo-600",
- bgGradient: "from-indigo-50 to-indigo-100",
- textColor: "text-indigo-700"
+ gradient: "bg-indigo-700",
+ bgGradient: "bg-indigo-50",
+ textColor: "text-indigo-800",
+ borderColor: "border-indigo-200",
+ shadowColor: "hover:shadow-indigo-200/40"
  },
 
  // Mantenimiento
@@ -91,9 +99,11 @@ const REQUEST_TYPES = {
  icon: FiTool,
  path: "/dashboard/servicio-tecnico/mantenimientos",
  color: "orange",
- gradient: "from-orange-500 to-orange-600",
- bgGradient: "from-orange-50 to-orange-100",
- textColor: "text-orange-700"
+ gradient: "bg-orange-700",
+ bgGradient: "bg-orange-50",
+ textColor: "text-orange-800",
+ borderColor: "border-orange-200",
+ shadowColor: "hover:shadow-orange-200/40"
  },
 
  // Permisos (redirige a página de permisos con modal)
@@ -103,9 +113,11 @@ const REQUEST_TYPES = {
  icon: FiCalendar,
  path: "/dashboard/talento-humano/permisos",
  color: "teal",
- gradient: "from-teal-500 to-teal-600",
- bgGradient: "from-teal-50 to-teal-100",
- textColor: "text-teal-700"
+ gradient: "bg-teal-700",
+ bgGradient: "bg-teal-50",
+ textColor: "text-teal-800",
+ borderColor: "border-teal-200",
+ shadowColor: "hover:shadow-teal-200/40"
  },
 
  // Equipos
@@ -115,9 +127,11 @@ const REQUEST_TYPES = {
  icon: FiCpu,
  path: "/dashboard/servicio-tecnico/equipos",
  color: "cyan",
- gradient: "from-cyan-500 to-cyan-600",
- bgGradient: "from-cyan-50 to-cyan-100",
- textColor: "text-cyan-700"
+ gradient: "bg-cyan-700",
+ bgGradient: "bg-cyan-50",
+ textColor: "text-cyan-800",
+ borderColor: "border-cyan-200",
+ shadowColor: "hover:shadow-cyan-200/40"
  }
 };
 
@@ -164,9 +178,9 @@ const RequestActionCard = ({
  className={`cursor-pointer ${className}`}
  onClick={handleClick}
  >
- <Card className={`p-4 bg-gradient-to-br ${config.bgGradient} border border-${config.color}-200 hover:shadow-lg transition-all duration-300`}>
+ <Card className={`p-4 ${config.bgGradient} border ${config.borderColor} hover:shadow-lg transition-all duration-300`}>
  <div className="flex items-center gap-3">
- <div className={`p-2 rounded-lg bg-gradient-to-br ${config.gradient} text-white shadow-sm`}>
+ <div className={`p-2 rounded-lg ${config.gradient} text-white shadow-sm`}>
  <Icon size={18} />
  </div>
  <div className="flex-1">
@@ -191,15 +205,15 @@ const RequestActionCard = ({
  className={`cursor-pointer ${className}`}
  onClick={handleClick}
  >
- <Card className={`p-6 bg-gradient-to-br ${config.bgGradient} border border-${config.color}-200 hover:shadow-xl transition-all duration-300 relative overflow-hidden`}>
+ <Card className={`p-6 ${config.bgGradient} border ${config.borderColor} hover:shadow-xl transition-all duration-300 relative overflow-hidden`}>
  {/* Decorative background pattern */}
  <div className="absolute top-0 right-0 w-20 h-20 opacity-10">
- <div className={`w-full h-full bg-gradient-to-br ${config.gradient} rounded-full transform translate-x-6 -translate-y-6`} />
+ <div className={`w-full h-full ${config.gradient} rounded-full transform translate-x-6 -translate-y-6`} />
  </div>
 
  <div className="relative z-10">
  <div className="flex items-center gap-4 mb-3">
- <div className={`p-3 rounded-xl bg-gradient-to-br ${config.gradient} text-white shadow-lg`}>
+ <div className={`p-3 rounded-xl ${config.gradient} text-white shadow-lg`}>
  <Icon size={24} />
  </div>
  <div className="flex-1">
@@ -277,7 +291,7 @@ const RequestActionButton = ({
  >
  <Button
  onClick={handleClick}
- className={`${buttonSize} bg-gradient-to-r ${config.gradient} hover:shadow-lg hover:shadow-${config.color}-500/25 font-semibold text-white border-0 ${className}`}
+ className={`${buttonSize} ${config.gradient} hover:shadow-lg font-semibold text-white border-0 ${className}`}
  icon={Icon}
  >
  {config.title}
@@ -298,9 +312,9 @@ const RequestActionGrid = ({
 }) => {
  const gridCols = {
  1: "grid-cols-1",
- 2: "grid-cols-1 md:grid-cols-2",
- 3: "grid-cols-1 md:grid-cols-2 lg:grid-cols-3",
- 4: "grid-cols-1 md:grid-cols-2 lg:grid-cols-4"
+ 2: "grid-cols-1 sm:grid-cols-2",
+ 3: "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3",
+ 4: "grid-cols-1 sm:grid-cols-2 xl:grid-cols-4"
  };
 
  return (

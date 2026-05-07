@@ -577,16 +577,14 @@ const SolicitudesPage = () => {
  showLoader();
  console.log('[SOLICITUDES_PAGE][CLIENTE] Enviando:', data);
 
- const { files = [], ...payload } = data;
- const payloadToSend = {
- ...payload,
- observaciones: payload.observacion,
- };
- delete payloadToSend.observacion;
+ const { request_type_id, payload: rawPayload, files = [] } = data || {};
+ const payload = rawPayload && typeof rawPayload === "object" ? { ...rawPayload } : {};
+ if (payload.observacion && !payload.observaciones) payload.observaciones = payload.observacion;
+ delete payload.observacion;
 
  const result = await createRequest({
- request_type_id: "F.ST-22",
- ...payloadToSend,
+ request_type_id: request_type_id || "F.ST-22",
+ payload,
  files
  });
 
@@ -626,16 +624,14 @@ const SolicitudesPage = () => {
  showLoader();
  console.log('[SOLICITUDES_PAGE][COMPRA] Enviando:', data);
 
- const { files = [], ...payload } = data;
- const payloadToSend = {
- ...payload,
- observaciones: payload.observacion,
- };
- delete payloadToSend.observacion;
+ const { request_type_id, payload: rawPayload, files = [] } = data || {};
+ const payload = rawPayload && typeof rawPayload === "object" ? { ...rawPayload } : {};
+ if (payload.observacion && !payload.observaciones) payload.observaciones = payload.observacion;
+ delete payload.observacion;
 
  const result = await createRequest({
- request_type_id: "F.ST-19",
- ...payloadToSend,
+ request_type_id: request_type_id || "F.ST-19",
+ payload,
  files
  });
 
@@ -660,17 +656,14 @@ const SolicitudesPage = () => {
  showLoader();
  console.log('[SOLICITUDES_PAGE][INSPECCION] Enviando:', data);
 
- const { files = [], ...payload } = data;
- const payloadToSend = {
- ...payload,
- observaciones: payload.observacion,
- };
- delete payloadToSend.observacion;
+ const { request_type_id, payload: rawPayload, files = [] } = data || {};
+ const payload = rawPayload && typeof rawPayload === "object" ? { ...rawPayload } : {};
+ if (payload.observacion && !payload.observaciones) payload.observaciones = payload.observacion;
+ delete payload.observacion;
 
- // El backend espera que los campos estén directamente en el payload, no anidados
  const result = await createRequest({
- request_type_id: "F.ST-20",
- ...payloadToSend, // Desestructurar para que los campos estén en el nivel superior
+ request_type_id: request_type_id || "F.ST-20",
+ payload,
  files
  });
 
@@ -695,16 +688,14 @@ const SolicitudesPage = () => {
  showLoader();
  console.log('[SOLICITUDES_PAGE][RETIRO] Enviando:', data);
 
- const { files = [], ...payload } = data;
- const payloadToSend = {
- ...payload,
- observaciones: payload.observacion,
- };
- delete payloadToSend.observacion;
+ const { request_type_id, payload: rawPayload, files = [] } = data || {};
+ const payload = rawPayload && typeof rawPayload === "object" ? { ...rawPayload } : {};
+ if (payload.observacion && !payload.observaciones) payload.observaciones = payload.observacion;
+ delete payload.observacion;
 
  const result = await createRequest({
- request_type_id: "F.ST-21",
- ...payloadToSend,
+ request_type_id: request_type_id || "F.ST-21",
+ payload,
  files
  });
 
@@ -783,4 +774,3 @@ const SolicitudesPage = () => {
 };
 
 export default SolicitudesPage;
-

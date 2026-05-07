@@ -40,10 +40,11 @@ exports.upload = upload;
 
 exports.getMeta = async (req, res, next) => {
   try {
-    const [clients, equipment, acpUsers, providerContacts] = await Promise.all([
+    const [clients, equipment, acpUsers, technicalUsers, providerContacts] = await Promise.all([
       service.getApprovedClients(),
       service.getEquipmentCatalog(),
       service.getAcpCommercialUsers(),
+      service.getTechnicalInspectionUsers(),
       service.listProviderContacts({ user: req.user, limit: 50 }),
     ]);
 
@@ -61,6 +62,7 @@ exports.getMeta = async (req, res, next) => {
         clients,
         equipment,
         acp_users: acpUsers,
+        technical_users: technicalUsers,
         provider_contacts: providerContacts,
       },
     });
@@ -622,12 +624,13 @@ exports.requestInspectionEnvironment = async (req, res, next) => {
 
 exports.coordinateInspectionDate = async (req, res, next) => {
   try {
-    const { inspection_date, notes, expected_updated_at } = req.body || {};
+    const { inspection_date, notes, assigned_technician_id, expected_updated_at } = req.body || {};
     const updated = await service.coordinateInspectionDate({
       id: req.params.id,
       user: req.user,
       inspection_date,
       notes,
+      assigned_technician_id,
       expected_updated_at,
     });
     const normalizedUpdated = normalizeDatesDeep(updated, {

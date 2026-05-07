@@ -18,6 +18,15 @@ const FULL_ACCESS_ROLES = new Set([
   "ti",
 ]);
 
+const FIELD_CLIENT_READ_ROLES = new Set([
+  "tecnico",
+  "jefe_tecnico",
+  "servicio_tecnico",
+  "jefe_servicio_tecnico",
+  "logistica",
+  "jefe_logistica",
+]);
+
 const ASSIGNER_ROLES = new Set([
   "jefe_comercial",
   "gerencia",
@@ -75,6 +84,10 @@ function hasRole(user, allowedRoles) {
 
 function isManager(user) {
   return hasRole(user, FULL_ACCESS_ROLES);
+}
+
+function hasFieldClientReadAccess(user) {
+  return hasRole(user, FIELD_CLIENT_READ_ROLES);
 }
 
 function canAssignClients(user) {
@@ -1417,7 +1430,7 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
     ? Math.min(Math.max(requestedLimit, 200), 20000)
     : 5000;
 
-  if (!isManager(user)) {
+  if (!isManager(user) && !hasFieldClientReadAccess(user)) {
     params.push(user.email, user.email);
     clauses.push(`(
       LOWER(COALESCE(cr.created_by, '')) = LOWER($${params.length - 1})

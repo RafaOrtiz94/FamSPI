@@ -1,9 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FiClock, FiCoffee, FiSun, FiMoon, FiAlertTriangle, FiTrendingUp, FiChevronDown, FiChevronUp, FiCheckCircle } from "react-icons/fi";
 import confetti from "canvas-confetti";
 
-import Button from "../components/Button";
+import Button, { actionBtnClass, actionBtnNeutralClass } from "../components/Button";
 import Modal from "../components/Modal";
 import { useUI } from "../useUI";
 import { getAttendanceErrorInfo } from "../attendanceErrorUtils";
@@ -85,14 +85,8 @@ const CONTROL_INPUT_CLASS =
 const CONTROL_INPUT_SUBTLE_CLASS =
   "h-11 w-full rounded-lg border border-blue-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 transition placeholder:text-slate-400 focus-visible:border-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200";
 const CONTROL_TEXTAREA_CLASS = `${CONTROL_INPUT_CLASS} resize-none`;
-const ACTION_BTN_PRIMARY_CLASS =
-  "w-full min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 disabled:cursor-not-allowed disabled:opacity-70";
-const ACTION_BTN_SUCCESS_CLASS =
-  "w-full min-h-[44px] bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 disabled:cursor-not-allowed disabled:opacity-70";
-const ACTION_BTN_WARN_CLASS =
-  "w-full min-h-[44px] bg-amber-500 hover:bg-amber-600 text-white font-semibold py-2.5 disabled:cursor-not-allowed disabled:opacity-70";
-const ACTION_BTN_NEUTRAL_CLASS =
-  "w-full min-h-[44px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-70";
+const ACTION_BTN_BASE_CLASS = actionBtnClass;
+const ACTION_BTN_NEUTRAL_CLASS = actionBtnNeutralClass;
 const ACTION_BTN_MODAL_PRIMARY_CLASS =
   "w-full sm:w-auto min-h-[44px] rounded-xl px-6 py-2 font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-70";
 const ACTION_BTN_MODAL_SECONDARY_CLASS =
@@ -1889,40 +1883,24 @@ const AttendanceWidget = () => {
     ];
 
     return (
-      <div className="mb-6 p-5 rounded-2xl border-2 border-amber-200/60 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-amber-100 rounded-xl">
-              <FiAlertTriangle className="text-amber-600" size={20} />
-            </div>
+      <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FiAlertTriangle className="flex-shrink-0 text-amber-600" size={14} />
             <div>
-              <h4 className="text-sm font-bold text-amber-900 uppercase tracking-wider">
-                Salida Inesperada Activa
-              </h4>
-              <p className="text-sm font-semibold text-amber-800">{exceptionStepLabel}</p>
+              <span className="text-xs font-bold uppercase tracking-wider text-amber-900">Salida Inesperada Activa</span>
+              <span className="ml-2 text-xs text-amber-700">{exceptionStepLabel}</span>
             </div>
           </div>
-          <div className="text-right">
-            <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold border border-amber-200">
-              {activeException.type}
-            </span>
-          </div>
+          <span className="rounded-full border border-amber-200 bg-white px-2.5 py-0.5 text-[10px] font-bold uppercase text-amber-800">
+            {activeException.type}
+          </span>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
           {items.map((item) => (
-            <div
-              key={item.label}
-              className="flex items-center gap-3 rounded-xl bg-white/70 px-3 py-3 border border-amber-100/50 shadow-sm"
-            >
-              <span className="text-lg">{item.icon}</span>
-              <div className="flex-1">
-                <div className="text-xs font-semibold text-amber-900 uppercase tracking-wider">
-                  {item.label}
-                </div>
-                <div className="text-sm font-mono font-bold text-amber-800">
-                  {formatDateTime(item.value)}
-                </div>
-              </div>
+            <div key={item.label} className="rounded-lg border border-amber-100 bg-white px-3 py-2">
+              <div className="text-[9px] font-semibold uppercase tracking-wider text-amber-700">{item.label}</div>
+              <div className="mt-0.5 font-mono text-sm font-bold text-amber-900">{formatDateTime(item.value)}</div>
             </div>
           ))}
         </div>
@@ -1937,17 +1915,20 @@ const AttendanceWidget = () => {
     }
     if (!hasActiveException) {
       return (
-        <div className="mt-2 rounded-xl border border-amber-100 bg-amber-50 p-4">
-          <div className="flex items-center gap-2 text-amber-800 mb-2">
-            <FiAlertTriangle size={14} />
-            <span className={SECTION_TITLE_CLASS}>Salida inesperada</span>
+        <div className="mt-2 rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex items-center gap-2.5 mb-2.5">
+            <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-600">
+              <FiAlertTriangle size={13} />
+            </span>
+            <span className="text-sm font-semibold text-slate-800">Salida inesperada</span>
           </div>
-          <p className="mb-3 text-sm leading-5 text-amber-800">
+          <p className="mb-3 text-xs leading-5 text-slate-500">
             Registra una salida inesperada solo cuando aplique una excepcion fuera del flujo normal.
           </p>
           <Button
+            variant="warning"
             onClick={() => setExceptionModalOpen(true)}
-            className={ACTION_BTN_WARN_CLASS}
+            className={ACTION_BTN_BASE_CLASS}
             disabled={loading}
           >
             Registrar salida inesperada
@@ -1957,52 +1938,59 @@ const AttendanceWidget = () => {
     }
 
     return (
-      <div className="mt-4 rounded-xl border border-amber-100 bg-amber-50 p-4">
-        <div className="flex items-center gap-2 mb-2 text-amber-800">
-          <FiAlertTriangle size={14} />
-          <span className={SECTION_TITLE_CLASS}>
-            Salida en curso: {activeException.type}
+      <div className="mt-4 overflow-hidden rounded-xl border border-amber-200 bg-white">
+        <div className="flex items-center gap-2.5 border-b border-amber-100 bg-amber-50 px-4 py-2.5">
+          <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-amber-200 text-amber-700">
+            <FiAlertTriangle size={12} />
+          </span>
+          <span className="text-xs font-semibold text-amber-900">
+            Salida en curso: {String(activeException.type).replace(/_/g, " ")}
           </span>
         </div>
 
-        {activeException.status === "ACTIVE" && (
-          <>
-            <p className="mb-3 text-sm text-amber-800">Estas en camino a tu destino.</p>
-            <Button
-              onClick={() => handleExceptionUpdate("ON_SITE", "Has llegado a tu destino")}
-              className={ACTION_BTN_WARN_CLASS}
-              disabled={loading}
-            >
-              Llegue a destino
-            </Button>
-          </>
-        )}
+        <div className="p-4 space-y-3">
+          {activeException.status === "ACTIVE" && (
+            <>
+              <p className="text-xs leading-5 text-slate-500">Estás en camino a tu destino.</p>
+              <Button
+                variant="warning"
+                onClick={() => handleExceptionUpdate("ON_SITE", "Has llegado a tu destino")}
+                className={ACTION_BTN_BASE_CLASS}
+                disabled={loading}
+              >
+                Llegué a destino
+              </Button>
+            </>
+          )}
 
-        {activeException.status === "ON_SITE" && (
-          <>
-            <p className="mb-3 text-sm text-amber-800">Estas en el sitio. Registra cuando salgas.</p>
-            <Button
-              onClick={() => handleExceptionUpdate("RETURNING", "Has salido del destino")}
-              className={ACTION_BTN_WARN_CLASS}
-              disabled={loading}
-            >
-              Salir de destino
-            </Button>
-          </>
-        )}
+          {activeException.status === "ON_SITE" && (
+            <>
+              <p className="text-xs leading-5 text-slate-500">Estás en el sitio. Registra cuando salgas.</p>
+              <Button
+                variant="warning"
+                onClick={() => handleExceptionUpdate("RETURNING", "Has salido del destino")}
+                className={ACTION_BTN_BASE_CLASS}
+                disabled={loading}
+              >
+                Salir de destino
+              </Button>
+            </>
+          )}
 
-        {activeException.status === "RETURNING" && (
-          <>
-            <p className="mb-3 text-sm text-amber-800">Estas regresando a la oficina.</p>
-            <Button
-              onClick={() => handleExceptionUpdate("COMPLETED", "Ciclo de salida completado")}
-              className={ACTION_BTN_SUCCESS_CLASS}
-              disabled={loading}
-            >
-              Llegue a oficina
-            </Button>
-          </>
-        )}
+          {activeException.status === "RETURNING" && (
+            <>
+              <p className="text-xs leading-5 text-slate-500">Estás regresando a la oficina.</p>
+              <Button
+                variant="success"
+                onClick={() => handleExceptionUpdate("COMPLETED", "Ciclo de salida completado")}
+                className={ACTION_BTN_BASE_CLASS}
+                disabled={loading}
+              >
+                Llegué a oficina
+              </Button>
+            </>
+          )}
+        </div>
       </div>
     );
   };
@@ -2027,12 +2015,12 @@ const AttendanceWidget = () => {
     );
 
     const renderClientPickerSection = () => (
-      <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-700">Tipo de gestion</p>
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-600">Paso 1</span>
+          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-semibold text-slate-500">Paso 1</span>
         </div>
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           {FIELD_VISIT_TYPE_OPTIONS.map((option) => {
             const active = fieldVisitType === option.value;
             return (
@@ -2150,35 +2138,35 @@ const AttendanceWidget = () => {
 
     if (!isFieldOperationFlow) {
       return (
-        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="space-y-4">
+          <div>
             <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100">
-                <FiTrendingUp size={14} className="text-sky-700" />
+              <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-sky-100">
+                <FiTrendingUp size={13} className="text-sky-700" />
               </div>
-              <div>
-                <span className={SECTION_TITLE_CLASS}>Operacion de campo</span>
-                <p className="text-xs text-slate-600">Flujo guiado para salida, visita y retorno</p>
-              </div>
+              <span className={SECTION_TITLE_CLASS}>Operacion de campo</span>
+              <span className="ml-auto flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">Sin viaje activo</span>
             </div>
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-600">Sin viaje activo</span>
+            <p className="mt-1.5 text-sm leading-5 text-slate-600">
+              Registra tu salida, visita a cliente y retorno. El acta se regulariza automaticamente.
+            </p>
           </div>
-          <p className="mb-4 text-sm leading-5 text-slate-700">
-            Inicia un viaje operacional para registrar salida de oficina, visitas a clientes y retorno. El acta formal se regulariza automaticamente.
-          </p>
-          <div className="mb-3">{renderClientPickerSection()}</div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+            {renderClientPickerSection()}
+          </div>
           <input
             type="text"
             value={fieldEmergencyReason}
             onChange={(e) => setFieldEmergencyReason(e.target.value)}
             placeholder="Motivo del viaje (opcional)"
-            className={`${CONTROL_INPUT_CLASS} mb-4`}
+            className={CONTROL_INPUT_CLASS}
             aria-label="Motivo del viaje operacional"
           />
           <Button
+            variant="primary"
             onClick={handleOfficeDepartureQuick}
             disabled={fieldVisitSubmitting}
-            className={`${ACTION_BTN_PRIMARY_CLASS} w-full sm:w-auto`}
+            className={ACTION_BTN_BASE_CLASS}
           >
             {fieldVisitSubmitting ? "Registrando..." : "Salida de oficina / Inicio de viaje"}
           </Button>
@@ -2198,12 +2186,9 @@ const AttendanceWidget = () => {
     const tripTypeLabel = String(activeException?.type || "viaje").replace(/_/g, " ");
     const elapsedHours = Number(activeException?.operational_elapsed_hours || 0);
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // STATE: ACTIVE — heading to destination
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (exceptionStatus === "ACTIVE") {
       return (
-        <div className="mt-4 overflow-hidden rounded-2xl border border-sky-200 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-2xl border border-sky-200 bg-white shadow-sm">
           <div className="flex items-center justify-between bg-sky-700 px-4 py-3">
             <div className="flex items-center gap-2">
               <FiTrendingUp size={14} className="text-white" />
@@ -2212,7 +2197,7 @@ const AttendanceWidget = () => {
             <span className="rounded-full bg-sky-500 px-2 py-0.5 text-[10px] font-semibold text-white capitalize">{tripTypeLabel}</span>
           </div>
           <div className="p-4 space-y-4">
-            <div className="rounded-xl border border-sky-100 bg-sky-50/40 p-3">
+            <div className="rounded-xl bg-sky-50/60 p-3">
               {tripSteps.slice(0, 2).map((s) => (
                 <TripStep key={s.label} {...s} />
               ))}
@@ -2221,9 +2206,10 @@ const AttendanceWidget = () => {
               <p className="text-sm text-amber-800">Estás en camino al destino. Registra tu llegada cuando estés ahí.</p>
             </div>
             <Button
+              variant="success"
               onClick={handleLlegadaDestino}
               disabled={fieldVisitSubmitting}
-              className={`${ACTION_BTN_SUCCESS_CLASS} w-full sm:w-auto`}
+              className={ACTION_BTN_BASE_CLASS}
             >
               {fieldVisitSubmitting ? "Registrando..." : "Llegué al destino"}
             </Button>
@@ -2232,9 +2218,6 @@ const AttendanceWidget = () => {
       );
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // STATE: ON_SITE — at destination, managing clients
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (exceptionStatus === "ON_SITE") {
       const clientEntryDisabled =
         fieldVisitSubmitting ||
@@ -2242,7 +2225,7 @@ const AttendanceWidget = () => {
         (fieldVisitType === "prospecto" && !fieldProspectName.trim());
 
       return (
-        <div className="mt-4 overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-sm">
           <div className="flex items-center justify-between bg-emerald-700 px-4 py-3">
             <div className="flex items-center gap-2">
               <FiCheckCircle size={14} className="text-white" />
@@ -2253,7 +2236,7 @@ const AttendanceWidget = () => {
             ) : null}
           </div>
           <div className="p-4 space-y-4">
-            <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
+            <div className="rounded-xl bg-emerald-50/60 p-3">
               {tripSteps.slice(0, 3).map((s) => (
                 <TripStep key={s.label} {...s} />
               ))}
@@ -2265,9 +2248,10 @@ const AttendanceWidget = () => {
                   <p className="text-sm font-medium text-amber-800">Tienes una visita de cliente abierta. Ciérrala antes de continuar.</p>
                 </div>
                 <Button
+                  variant="warning"
                   onClick={() => handleFieldVisitMark("exit")}
                   disabled={fieldVisitSubmitting}
-                  className={`${ACTION_BTN_WARN_CLASS} w-full sm:w-auto`}
+                  className={ACTION_BTN_BASE_CLASS}
                 >
                   {fieldVisitSubmitting ? "Registrando..." : "Salida de cliente"}
                 </Button>
@@ -2287,19 +2271,23 @@ const AttendanceWidget = () => {
             ) : (
               <>
                 <p className="text-sm text-slate-700">Registra la visita al cliente o prospecto en este destino.</p>
-                {renderClientPickerSection()}
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                  {renderClientPickerSection()}
+                </div>
                 <Button
+                  variant="primary"
                   onClick={() => handleFieldVisitMark("entry")}
                   disabled={clientEntryDisabled}
-                  className={`${ACTION_BTN_PRIMARY_CLASS} w-full sm:w-auto`}
+                  className={ACTION_BTN_BASE_CLASS}
                 >
                   {fieldVisitSubmitting ? "Registrando..." : "Entrada a cliente"}
                 </Button>
                 <div className="h-px bg-slate-100" />
                 <Button
+                  variant="ghost"
                   onClick={() => handleExceptionUpdate("RETURNING", "Retorno iniciado desde destino")}
                   disabled={fieldVisitSubmitting}
-                  className={`${ACTION_BTN_NEUTRAL_CLASS} w-full sm:w-auto`}
+                  className={ACTION_BTN_NEUTRAL_CLASS}
                 >
                   Iniciar retorno a oficina (sin cliente)
                 </Button>
@@ -2310,12 +2298,9 @@ const AttendanceWidget = () => {
       );
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // STATE: RETURNING — heading back
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (exceptionStatus === "RETURNING") {
       return (
-        <div className="mt-4 overflow-hidden rounded-2xl border border-indigo-200 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-2xl border border-indigo-200 bg-white shadow-sm">
           <div className="flex items-center justify-between bg-indigo-700 px-4 py-3">
             <div className="flex items-center gap-2">
               <FiClock size={14} className="text-white" />
@@ -2326,23 +2311,23 @@ const AttendanceWidget = () => {
             ) : null}
           </div>
           <div className="p-4 space-y-4">
-            <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
+            <div className="rounded-xl bg-indigo-50/50 p-3">
               {tripSteps.map((s) => (
                 <TripStep key={s.label} {...s} />
               ))}
             </div>
 
             <Button
+              variant="success"
               onClick={handleOfficeArrivalQuick}
               disabled={fieldVisitSubmitting}
-              className={`${ACTION_BTN_SUCCESS_CLASS} w-full sm:w-auto`}
+              className={ACTION_BTN_BASE_CLASS}
             >
               {fieldVisitSubmitting ? "Registrando..." : "Llegué a la oficina"}
             </Button>
 
-            <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <div className="space-y-2 border-t border-slate-100 pt-3">
               <p className="text-xs font-semibold text-slate-700">¿Cierras el viaje fuera de la oficina?</p>
-              <p className="text-sm leading-5 text-slate-600">Usa esta opcion si terminaste el viaje en otro lugar y no regresaras a la oficina hoy.</p>
               <input
                 type="text"
                 value={tripClosureReason}
@@ -2352,9 +2337,10 @@ const AttendanceWidget = () => {
                 aria-label="Motivo del cierre fuera de oficina"
               />
               <Button
+                variant="warning"
                 onClick={handleCierreViaje}
                 disabled={fieldVisitSubmitting}
-                className={`${ACTION_BTN_WARN_CLASS} w-full sm:w-auto`}
+                className={ACTION_BTN_BASE_CLASS}
               >
                 {fieldVisitSubmitting ? "Cerrando..." : "Cerrar viaje fuera de oficina"}
               </Button>
@@ -2364,21 +2350,18 @@ const AttendanceWidget = () => {
       );
     }
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // STATE: COMPLETED or fallback — summary
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     return (
-      <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+      <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
         <div className="mb-2 flex items-center gap-2">
           <FiCheckCircle size={14} className="text-emerald-600" />
           <span className="text-xs font-bold uppercase tracking-wide text-emerald-800">Viaje completado</span>
         </div>
-        <div className="rounded-lg bg-white border border-emerald-100 p-3">
+        <div className="space-y-0.5">
           {tripSteps.map((s) => (
             <TripStep key={s.label} {...s} />
           ))}
         </div>
-        <p className="mt-3 text-xs text-emerald-700">El viaje operacional fue cerrado correctamente. El acta formal fue regularizada.</p>
+        <p className="mt-3 text-xs text-emerald-700">El viaje fue cerrado correctamente. El acta formal fue regularizada.</p>
       </div>
     );
   };
@@ -2482,58 +2465,64 @@ const AttendanceWidget = () => {
 
     return (
       <div className={SECTION_PANEL_CLASS}>
-        {/* STATUS ZONE */}
-        <div className={`px-4 py-4 sm:px-6 sm:py-5 ${statusZoneBg}`}>
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl ${statusIconBg}`}>
-                {status.icon}
-              </div>
-              <div>
-                <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                  Asistencia diaria
-                </div>
-                <p className="text-sm font-semibold text-slate-800">
-                  {formatDateSafe(attendance?.date || new Date(), "dd/MM/yyyy")} &mdash; {status.text}
-                </p>
-              </div>
+        {/* HEADER: fecha + estado + reloj */}
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-5">
+          <div className="flex items-center gap-2.5">
+            <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${statusIconBg}`}>
+              {status.icon}
             </div>
-            <div className="flex flex-col items-end gap-1.5">
-              <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${dayStatusBadge}`}>
-                {hasActiveException ? "Excepcion activa" : status.text}
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs font-semibold text-slate-600">
+                {formatDateSafe(attendance?.date || new Date(), "dd/MM/yyyy")}
               </span>
-              <span className="font-mono text-xs font-bold text-slate-400">
-                {formatTimeSafe(currentTime, "HH:mm:ss")}
+              <span className="text-slate-200">|</span>
+              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${dayStatusBadge}`}>
+                {hasActiveException ? "Excepción activa" : status.text}
               </span>
             </div>
           </div>
+          <span className="font-mono text-sm font-bold text-slate-700 tabular-nums">
+            {formatTimeSafe(currentTime, "HH:mm:ss")}
+          </span>
+        </div>
 
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-            {summaryCards.map((card) => (
-              <div key={card.label} className="rounded-xl border border-white/60 bg-white/80 px-3 py-2.5 shadow-sm">
-                <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                  {card.label}
+        {/* ESTADO OPERACIONAL */}
+        <div className={`px-4 py-4 sm:px-5 ${hasActiveException ? "bg-amber-50" : isDayComplete ? "bg-slate-50" : isOnLunch ? "bg-amber-50" : hasEntry ? "bg-emerald-50/50" : "bg-white"}`}>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Estado actual</div>
+              <div className="mt-0.5 text-xl font-semibold text-slate-900">{status.text}</div>
+              {hasEntry && !isDayComplete && (
+                <div className="mt-0.5 font-mono text-sm text-slate-500">{elapsedDisplay} en jornada</div>
+              )}
+              {attendance?.entry_time && (
+                <div className="mt-1 font-mono text-xs text-slate-400">
+                  Entrada: {formatTime(attendance.entry_time)}
+                  {attendance?.exit_time && ` · Salida: ${formatTime(attendance.exit_time)}`}
                 </div>
-                <div className="mt-1 text-sm font-bold text-slate-900">{card.value}</div>
-                <div className="mt-0.5 text-xs leading-4 text-slate-600">{card.hint}</div>
-              </div>
-            ))}
+              )}
+            </div>
+            <div className="min-w-0 sm:text-right">
+              <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Siguiente acción</div>
+              <div className="mt-0.5 text-sm font-bold text-slate-800">{nextActionMeta.label}</div>
+              {nextActionMeta.detail && (
+                <p className="mt-0.5 text-xs leading-4 text-slate-500 sm:ml-auto sm:max-w-[200px]">{nextActionMeta.detail}</p>
+              )}
+            </div>
           </div>
 
           {hasEntry && !isDayComplete && (
             <div className="mt-3">
-              <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                  Progreso &middot; {elapsedDisplay} transcurridos
-                </span>
-                <span className="text-xs font-bold text-slate-600">{progress}%</span>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Progreso de jornada</span>
+                <span className="font-mono text-xs font-bold text-slate-500">{progress}%</span>
               </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-black/10">
+              <div className="h-1 overflow-hidden rounded-full bg-black/8">
                 <motion.div
                   initial={{ width: 0 }}
                   animate={{ width: `${progress}%` }}
                   transition={{ type: "spring", stiffness: 120, damping: 20 }}
-                  className={`h-full rounded-full ${isOnLunch ? "bg-amber-500" : "bg-green-500"}`}
+                  className={`h-full rounded-full ${isOnLunch ? "bg-amber-400" : "bg-emerald-500"}`}
                 />
               </div>
             </div>
@@ -2541,38 +2530,35 @@ const AttendanceWidget = () => {
         </div>
 
         {/* ACTION ZONE */}
-        <div className="px-4 py-4 sm:px-6">
+        <div className="px-4 py-4 sm:px-5">
           {reminderMessage && (
-            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
-              <div className="text-[10px] font-semibold uppercase tracking-widest text-amber-700">
-                Recordatorio
-              </div>
-              <div className="mt-1 text-sm text-amber-900">{reminderMessage}</div>
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <div className="text-[10px] font-semibold uppercase tracking-widest text-amber-700">Aviso operativo</div>
+              <div className="mt-0.5 text-sm text-amber-900">{reminderMessage}</div>
             </div>
           )}
 
           {latePolicy?.isLate && (
-            <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3">
-              <div className="text-[10px] font-semibold uppercase tracking-widest text-rose-700">
-                Atraso detectado
-              </div>
-              <div className="mt-1 text-sm text-rose-900">
+            <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
+              <div className="text-[10px] font-semibold uppercase tracking-widest text-rose-700">Atraso registrado</div>
+              <div className="mt-0.5 text-sm text-rose-900">
                 {latePolicy.lateMinutes} min (tolerancia {latePolicy.toleranceMinutes} min tras 09:00).
               </div>
-              <div className="mt-1 text-xs text-rose-700">
+              <div className="mt-0.5 text-xs text-rose-700">
                 {latePolicy?.justification?.exists
-                  ? "Justificacion registrada."
+                  ? "Justificación registrada."
                   : attendance?.entry_time
-                    ? `Disponibles este mes: ${latePolicy?.justification?.remainingMonthly ?? 0} / ${latePolicy?.monthlyLimit ?? 5}.`
+                    ? `Cupo mensual disponible: ${latePolicy?.justification?.remainingMonthly ?? 0} / ${latePolicy?.monthlyLimit ?? 5}.`
                     : "Marca la entrada y luego justifica el atraso."}
               </div>
               {!latePolicy?.justification?.exists && shouldPromptLateJustification && (
                 <div className="mt-2">
                   <Button
                     type="button"
+                    variant="danger"
                     onClick={openLateJustificationFlow}
                     disabled={!attendance?.entry_time}
-                    className="min-h-[44px] rounded-lg bg-rose-600 px-3 py-1.5 text-sm text-white hover:bg-rose-700"
+                    className="min-h-[44px] text-sm active:scale-[0.98] [touch-action:manipulation]"
                   >
                     {attendance?.entry_time ? "Justificar atraso" : "Entrada pendiente"}
                   </Button>
@@ -2584,35 +2570,26 @@ const AttendanceWidget = () => {
           {renderExceptionBanner()}
 
           {isDayComplete ? (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-slate-200 text-slate-600">
-                  <FiCheckCircle size={18} />
-                </div>
-                <div>
-                  <div className="text-sm font-semibold text-slate-800">Jornada completada</div>
-                  <div className="text-xs text-slate-500">
-                    Salida: {formatTime(attendance.exit_time)}
-                  </div>
-                </div>
+            <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-slate-200 text-slate-600">
+                <FiCheckCircle size={18} />
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-slate-800">Jornada completada</div>
+                <div className="font-mono text-xs text-slate-500">Salida registrada: {formatTime(attendance.exit_time)}</div>
               </div>
             </div>
           ) : !hasActiveException && (
             <div>
-              <div className="mb-2">
-                <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                  Siguiente accion
-                </div>
-                <div className="mt-0.5 text-base font-bold text-slate-900">{nextActionMeta.label}</div>
-                {nextActionMeta.detail && (
-                  <p className="mt-1 text-sm text-slate-600">{nextActionMeta.detail}</p>
-                )}
+              <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+                Acción requerida
               </div>
               <button
                 type="button"
                 onClick={handlePrimaryAction}
                 disabled={loading || locationLoading}
-                className={`min-h-[52px] w-full rounded-2xl px-5 py-3 text-base font-semibold shadow-sm transition-colors disabled:opacity-60 ${primaryBtnClass}`}
+                className={`min-h-[52px] w-full rounded-xl px-5 py-3 text-base font-semibold shadow-sm transition-colors active:scale-[0.98] disabled:opacity-60 ${primaryBtnClass}`}
+                style={{ touchAction: "manipulation" }}
               >
                 {primaryBtnLabel}
               </button>
@@ -2621,194 +2598,184 @@ const AttendanceWidget = () => {
         </div>
 
         {/* ACCORDIONS */}
-        <div className="border-t border-gray-100 px-4 pb-4 pt-2 sm:px-6">
-          <div className="space-y-2">
-            <div className="rounded-2xl border border-gray-200 bg-white">
+        <div className="border-t border-slate-100 px-4 pb-4 pt-2 sm:px-5">
+          <div className="space-y-1.5">
+
+            {/* Jornada del día */}
+            <div className="overflow-hidden rounded-xl border border-slate-200">
               <button
                 type="button"
                 onClick={() => setShowTimelineDetails((prev) => !prev)}
-                className="flex min-h-[44px] w-full items-center justify-between px-4 py-3 text-left"
+                className="flex min-h-[44px] w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-slate-50"
               >
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                    Jornada del dia
+                <div className="flex items-center gap-2.5">
+                  <FiClock size={14} className="flex-shrink-0 text-slate-400" />
+                  <div>
+                    <span className="text-xs font-semibold text-slate-700">Jornada del día</span>
+                    <span className="ml-2 text-[10px] text-slate-400">
+                      {timeEntries.filter((e) => e.value).length}/{timeEntries.length} marcas
+                    </span>
                   </div>
-                  <div className="text-sm text-slate-500">Marcas registradas hoy.</div>
                 </div>
-                <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-slate-400">
-                  {showTimelineDetails ? <FiChevronUp size={14} /> : <FiChevronDown size={14} />}
+                <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-slate-400">
+                  {showTimelineDetails ? <FiChevronUp size={13} /> : <FiChevronDown size={13} />}
                 </span>
               </button>
               {showTimelineDetails && (
-                <div className="border-t border-gray-100 px-4 pb-4 pt-3">
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="border-t border-slate-100 px-4 pb-4 pt-3">
+                  <div className="space-y-1">
                     {timelineSteps.map((entry, index) => (
-                      <motion.div
+                      <div
                         key={`${entry.label}-${entry.value ?? "pending"}`}
-                        whileHover={{ y: -1 }}
-                        className={`rounded-xl border p-3 transition-colors ${entry.state === "done"
-                          ? "border-green-200 bg-green-50 text-green-900"
-                          : entry.state === "current"
-                            ? "border-blue-200 bg-blue-50 text-blue-900"
-                            : "border-gray-200 bg-gray-50 text-slate-700"
-                          }`}
-                      >
-                        <div className="mb-1.5 flex items-center gap-2">
-                          <span className={`inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-xs font-bold ${entry.state === "done"
-                            ? "bg-green-600 text-white"
+                        className={`flex items-center gap-3 rounded-lg px-3 py-2.5 ${
+                          entry.state === "done"
+                            ? "bg-emerald-50"
                             : entry.state === "current"
-                              ? "bg-blue-600 text-white"
-                              : "bg-gray-300 text-slate-600"
-                            }`}>
-                            {entry.state === "done" ? <FiCheckCircle size={12} /> : index + 1}
-                          </span>
-                          <div className="text-[10px] font-semibold uppercase tracking-widest opacity-70">
-                            {entry.label}
-                          </div>
+                              ? "bg-blue-50"
+                              : "bg-slate-50"
+                        }`}
+                      >
+                        <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md text-[10px] font-bold ${
+                          entry.state === "done"
+                            ? "bg-emerald-500 text-white"
+                            : entry.state === "current"
+                              ? "bg-blue-500 text-white"
+                              : "bg-slate-200 text-slate-500"
+                        }`}>
+                          {entry.state === "done" ? <FiCheckCircle size={10} /> : index + 1}
                         </div>
-                        <div className="font-mono text-sm font-bold">{formatTime(entry.value)}</div>
-                        {entry.note && (
-                          <div className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
-                            {entry.note}
-                          </div>
-                        )}
-                      </motion.div>
+                        <div className="min-w-0 flex-1">
+                          <span className={`text-xs font-semibold ${
+                            entry.state === "done" ? "text-emerald-800" : entry.state === "current" ? "text-blue-800" : "text-slate-400"
+                          }`}>{entry.label}</span>
+                          {entry.note && (
+                            <span className="ml-2 text-[10px] uppercase tracking-wide text-slate-400">{entry.note}</span>
+                          )}
+                        </div>
+                        <span className={`flex-shrink-0 font-mono text-sm font-bold ${
+                          entry.state === "done" ? "text-emerald-700" : entry.state === "current" ? "text-blue-600" : "text-slate-300"
+                        }`}>
+                          {formatTime(entry.value)}
+                        </span>
+                      </div>
                     ))}
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="rounded-2xl border border-gray-200 bg-white">
+            {/* Operaciones de campo */}
+            <div className="overflow-hidden rounded-xl border border-slate-200">
               <button
                 type="button"
                 onClick={() => setShowFieldTools((prev) => !prev)}
-                className="flex min-h-[44px] w-full items-center justify-between px-4 py-3 text-left"
+                className="flex min-h-[44px] w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-slate-50"
               >
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                    Operaciones de campo
+                <div className="flex items-center gap-2.5">
+                  <FiTrendingUp size={14} className="flex-shrink-0 text-slate-400" />
+                  <div>
+                    <span className="text-xs font-semibold text-slate-700">Operaciones de campo</span>
+                    {isFieldOperationFlow && (
+                      <span className="ml-2 inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+                        Activo
+                      </span>
+                    )}
                   </div>
-                  <div className="text-sm text-slate-500">Entrada/salida oficina, viaje o cliente.</div>
                 </div>
-                <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-slate-400">
-                  {showFieldTools ? <FiChevronUp size={14} /> : <FiChevronDown size={14} />}
+                <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-slate-400">
+                  {showFieldTools ? <FiChevronUp size={13} /> : <FiChevronDown size={13} />}
                 </span>
               </button>
               {showFieldTools && (
-                <div className="border-t border-gray-100 px-4 pb-4 pt-3">
+                <div className="border-t border-slate-100 px-4 pb-4 pt-3">
                   {renderFieldOperationsControls()}
                 </div>
               )}
             </div>
 
-            <div className="rounded-2xl border border-gray-200 bg-white">
+            {/* Salidas inesperadas */}
+            <div className="overflow-hidden rounded-xl border border-slate-200">
               <button
                 type="button"
                 onClick={() => setShowExceptionTools((prev) => !prev)}
-                className="flex min-h-[44px] w-full items-center justify-between px-4 py-3 text-left"
+                className="flex min-h-[44px] w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-slate-50"
               >
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                    Salidas inesperadas
+                <div className="flex items-center gap-2.5">
+                  <FiAlertTriangle size={14} className={`flex-shrink-0 ${hasActiveException && !isFieldOperationFlow ? "text-amber-500" : "text-slate-400"}`} />
+                  <div>
+                    <span className="text-xs font-semibold text-slate-700">Salidas inesperadas</span>
+                    {hasActiveException && !isFieldOperationFlow && (
+                      <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                        Activa
+                      </span>
+                    )}
                   </div>
-                  <div className="text-sm text-slate-500">Solo para excepciones operativas.</div>
                 </div>
-                <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-slate-400">
-                  {showExceptionTools ? <FiChevronUp size={14} /> : <FiChevronDown size={14} />}
+                <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-slate-400">
+                  {showExceptionTools ? <FiChevronUp size={13} /> : <FiChevronDown size={13} />}
                 </span>
               </button>
               {showExceptionTools && (
-                <div className="border-t border-gray-100 px-4 pb-4 pt-3">
+                <div className="border-t border-slate-100 px-4 pb-4 pt-3">
                   {renderExceptionControls()}
                 </div>
               )}
             </div>
+
           </div>
         </div>
 
-        {/* RANKING + HISTORY */}
-        <div className="border-t border-gray-100 px-4 pb-6 pt-4 sm:px-6">
-          <div className="mb-3 overflow-hidden rounded-2xl bg-[#1E293B]">
-            <div className="px-4 py-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-[9px] font-semibold uppercase tracking-widest text-slate-400">
-                    Ranking de puntualidad
-                  </div>
-                  <div className="mt-1 text-sm font-bold text-white">
-                    {punctualityInsights.league}
-                  </div>
-                </div>
-                <span className="rounded-xl border border-slate-600 bg-slate-700 px-3 py-1 text-xs font-bold text-slate-200">
-                  Puesto {punctualityInsights.position || "--"} / {punctualityInsights.total}
-                </span>
+        {/* PUNTUALIDAD + HISTORIAL */}
+        <div className="border-t border-slate-100 px-4 pb-6 pt-4 sm:px-5">
+          <div className="mb-4 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Puntualidad</div>
+              <div className="mt-0.5 text-sm font-bold text-slate-800">{punctualityInsights.league}</div>
+              <div className="text-xs text-slate-500">{punctualityInsights.vibe}</div>
+            </div>
+            <div className="text-right">
+              <div className="font-mono text-2xl font-black text-slate-800 tabular-nums">{punctualityInsights.streak}</div>
+              <div className="text-[10px] text-slate-400">
+                día{punctualityInsights.streak !== 1 ? "s" : ""} de racha
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-3">
-                  <div className="text-[9px] font-semibold uppercase tracking-widest text-slate-400">
-                    Racha actual
-                  </div>
-                  <div className="mt-1 text-lg font-black text-white">
-                    {punctualityInsights.streak}{" "}
-                    <span className="text-sm font-normal text-slate-300">
-                      dia{punctualityInsights.streak === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                </div>
-                <div className="rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-3">
-                  <div className="text-[9px] font-semibold uppercase tracking-widest text-slate-400">
-                    Estado
-                  </div>
-                  <div className="mt-1 text-sm font-bold text-white">{punctualityInsights.vibe}</div>
-                  <div className="text-[10px] text-slate-400">Ultimos {RECENT_HISTORY_DAYS} dias</div>
-                </div>
+              <div className="mt-0.5 text-[10px] font-semibold text-slate-500">
+                Puesto {punctualityInsights.position || "--"}/{punctualityInsights.total}
               </div>
             </div>
           </div>
 
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">
-                Historial reciente
-              </div>
-              <span className="rounded-lg bg-gray-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
-                {recentHistory.length}/{RECENT_HISTORY_DAYS}
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Historial reciente</span>
+              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                {recentHistory.length}/{RECENT_HISTORY_DAYS} días
               </span>
             </div>
-            <div className="space-y-1.5">
-              {recentHistory.length ? recentHistory.map((row) => (
+            <div className="overflow-hidden rounded-xl border border-slate-200">
+              {recentHistory.length ? recentHistory.map((row, idx) => (
                 <div
                   key={`${row.date}-${row.id}`}
-                  className="grid grid-cols-[60px_minmax(0,1fr)_52px] items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5"
+                  className={`grid grid-cols-[60px_minmax(0,1fr)_52px] items-center gap-3 px-3 py-2.5 ${idx < recentHistory.length - 1 ? "border-b border-slate-100" : ""}`}
                 >
-                  <div className="text-center">
+                  <div>
                     <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Fecha</div>
-                    <div className="mt-0.5 font-mono text-sm font-bold text-slate-800">
-                      {formatDateSafe(row.date, "dd/MM")}
-                    </div>
+                    <div className="mt-0.5 font-mono text-sm font-bold text-slate-800">{formatDateSafe(row.date, "dd/MM")}</div>
                   </div>
                   <div className="min-w-0">
-                    <div className="text-[9px] font-semibold uppercase tracking-widest text-slate-400">
-                      Jornada
-                    </div>
+                    <div className="text-[9px] font-semibold uppercase tracking-widest text-slate-400">Jornada</div>
                     <div className="mt-0.5 truncate font-mono text-xs font-semibold text-slate-700">
-                      {row.entry_time
-                        ? `${formatTime(row.entry_time)} — ${formatTime(row.exit_time)}`
-                        : "Sin entrada"}
+                      {row.entry_time ? `${formatTime(row.entry_time)} — ${formatTime(row.exit_time)}` : "Sin entrada"}
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Horas</div>
+                    <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Total</div>
                     <div className="mt-0.5 font-mono text-sm font-bold text-slate-800">
                       {row.total_hours ? `${Number(row.total_hours).toFixed(1)}h` : "--"}
                     </div>
                   </div>
                 </div>
               )) : (
-                <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-4 text-sm text-slate-400">
-                  Aun no hay historial reciente disponible.
-                </div>
+                <div className="px-4 py-4 text-sm text-slate-400">Sin historial reciente disponible.</div>
               )}
             </div>
           </div>
@@ -2834,26 +2801,28 @@ const AttendanceWidget = () => {
 
   return (
     <>
-      <div className="fixed bottom-20 right-4 z-[60] sm:bottom-24 sm:right-6">
-        <motion.button
-          onClick={() => setWidgetModalOpen(true)}
-          className={`relative flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg shadow-slate-900/20 transition focus-visible:ring-2 focus-visible:ring-accent ${launcherColorClass}`}
-          aria-label={`Abrir asistencia - ${nextActionMeta.label}`}
-          title={`Asistencia - ${nextActionMeta.label}`}
-          whileHover={{ y: -1 }}
-          whileTap={{ scale: 0.97 }}
-          animate={showCelebration ? { scale: [1, 1.04, 1] } : { scale: 1 }}
-          transition={showCelebration ? { duration: 0.6 } : { duration: 0.7 }}
-          style={{ touchAction: "manipulation" }}
-        >
-          <LauncherIcon className="text-white" size={20} />
-        </motion.button>
-      </div>
+      {!widgetModalOpen && (
+        <div className="fixed bottom-20 right-4 z-[49] sm:bottom-24 sm:right-6">
+          <motion.button
+            onClick={() => setWidgetModalOpen(true)}
+            className={`relative flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg shadow-slate-900/20 transition focus-visible:ring-2 focus-visible:ring-accent ${launcherColorClass}`}
+            aria-label={`Abrir asistencia - ${nextActionMeta.label}`}
+            title={`Asistencia - ${nextActionMeta.label}`}
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.97 }}
+            animate={showCelebration ? { scale: [1, 1.04, 1] } : { scale: 1 }}
+            transition={showCelebration ? { duration: 0.6 } : { duration: 0.7 }}
+            style={{ touchAction: "manipulation" }}
+          >
+            <LauncherIcon className="text-white" size={20} />
+          </motion.button>
+        </div>
+      )}
       <Modal
         isOpen={widgetModalOpen}
         onClose={() => setWidgetModalOpen(false)}
         title="Asistencia"
-        maxWidth="max-w-5xl"
+        maxWidth="max-w-lg"
       >
         {renderWidgetContent()}
       </Modal>
@@ -2913,9 +2882,10 @@ const AttendanceWidget = () => {
               Cancelar
             </button>
             <Button
+              variant="warning"
               onClick={handleRegisterException}
               disabled={exceptionLoading}
-              className={`${ACTION_BTN_MODAL_PRIMARY_CLASS} bg-amber-500 hover:bg-amber-600`}
+              className={ACTION_BTN_MODAL_PRIMARY_CLASS}
             >
               {exceptionLoading ? "Registrando..." : "Registrar salida"}
             </Button>
@@ -2966,9 +2936,10 @@ const AttendanceWidget = () => {
               Omitir
             </button>
             <Button
+              variant="primary"
               onClick={handleOvertimeSubmit}
               disabled={overtimeSubmitting}
-              className={`${ACTION_BTN_MODAL_PRIMARY_CLASS} bg-blue-600 hover:bg-blue-700`}
+              className={ACTION_BTN_MODAL_PRIMARY_CLASS}
             >
               {overtimeSubmitting ? "Guardando..." : "Guardar horas extra"}
             </Button>
@@ -3013,9 +2984,10 @@ const AttendanceWidget = () => {
               Cerrar
             </button>
             <Button
+              variant="danger"
               onClick={handleLateJustificationSubmit}
               disabled={lateJustificationSubmitting || !latePolicy?.justification?.canJustify}
-              className={`${ACTION_BTN_MODAL_PRIMARY_CLASS} bg-rose-600 hover:bg-rose-700`}
+              className={ACTION_BTN_MODAL_PRIMARY_CLASS}
             >
               {lateJustificationSubmitting ? "Guardando..." : "Guardar justificación"}
             </Button>
@@ -3042,9 +3014,10 @@ const AttendanceWidget = () => {
               Cancelar
             </button>
             <Button
+              variant="danger"
               onClick={() => { setExitConfirmOpen(false); doClockOutRef.current?.(); }}
               disabled={loading}
-              className={`${ACTION_BTN_MODAL_PRIMARY_CLASS} bg-red-600 hover:bg-red-700`}
+              className={ACTION_BTN_MODAL_PRIMARY_CLASS}
             >
               {loading ? "Registrando..." : "Sí, registrar salida"}
             </Button>

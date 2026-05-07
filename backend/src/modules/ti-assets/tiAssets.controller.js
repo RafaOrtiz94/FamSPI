@@ -97,14 +97,24 @@ exports.downloadReport = asyncHandler(async (req, res) => {
     : null;
   const user = req.user || {};
   const generatedByName = user.fullname || user.name || user.email || "Sistema";
-  const result = await reportSvc.generateAndStoreMaintenanceReport({
+  let result = null;
+  const existing = await reportSvc.downloadReportPdfFromDrive({
     periodType,
     year,
     month,
-    userId: user.id || null,
-    generatedByName,
-    rootFolderId: process.env.DRIVE_ROOT_FOLDER_ID || null,
   });
+  if (existing?.pdfBuffer) {
+    result = { ...existing.report, pdfBuffer: existing.pdfBuffer };
+  } else {
+    result = await reportSvc.generateAndStoreMaintenanceReport({
+      periodType,
+      year,
+      month,
+      userId: user.id || null,
+      generatedByName,
+      rootFolderId: process.env.DRIVE_ROOT_FOLDER_ID || null,
+    });
+  }
   const ts = new Date().toISOString().slice(0, 10);
   const periodLabel = periodType === "monthly"
     ? `${year}-${String(month).padStart(2, "0")}`

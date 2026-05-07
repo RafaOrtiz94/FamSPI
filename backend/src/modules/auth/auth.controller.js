@@ -783,6 +783,84 @@ const acceptInternalLopdp = async (req, res) => {
 };
 
 /* ============================================================
+   7️⃣ Login local (solo sandbox — SANDBOX_AUTH=true)
+============================================================ */
+const localLogin = async (req, res) => {
+  if (process.env.NODE_ENV === "production") {
+    return res.status(403).json({ ok: false, message: "No disponible en produccion" });
+  }
+  if (process.env.SANDBOX_AUTH !== "true") {
+    return res.status(403).json({ ok: false, message: "Sandbox auth no habilitado" });
+  }
+
+  const sandboxPassword = process.env.SANDBOX_PASSWORD;
+  if (!sandboxPassword) {
+    return res.status(500).json({ ok: false, message: "SANDBOX_PASSWORD no configurado en .env" });
+  }
+
+  const { email, password } = req.body || {};
+  if (!email || !password) {
+    return res.status(400).json({ ok: false, message: "Email y contrasena requeridos" });
+  }
+  if (password !== sandboxPassword) {
+    return res.status(401).json({ ok: false, message: "Credenciales incorrectas" });
+  }
+
+  try {
+    const { rows } = await db.query(
+      "SELECT id, email, fullname, role, department_id, lopdp_internal_status FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1",
+      [email.trim()]
+    );
+
+    if (!rows.length) {
+      return res.status(401).json({
+        ok: false,
+        message: "Usuario no encontrado. Debe existir en la base de datos.",
+      });
+    }
+
+    const user = rows[0];
+    const roleValue = user.role || "pendiente";
+    const roleMeta = resolveRoleMeta(roleValue);
+    let department = roleMeta.scope || "pendiente";
+    if (user.department_id) {
+      const depQ = await db.query("SELECT code FROM departments WHERE id = $1 LIMIT 1", [
+        user.department_id,
+      ]);
+      department = depQ.rows[0]?.code || department;
+    }
+
+    const userProfile = {
+      id: user.id,
+      email: user.email,
+      fullname: user.fullname,
+      role: roleValue,
+      department,
+      scope: roleMeta.scope,
+      dashboard: roleMeta.dashboard,
+      lopdp_internal_status: user.lopdp_internal_status || "pending",
+    };
+
+    const accessToken = signAccess(userProfile);
+    const refreshToken = signRefresh({ id: user.id, email: user.email });
+
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || req.ip;
+    try {
+      await createSession({ email: user.email, ip, userAgent: req.headers["user-agent"], refreshToken });
+    } catch (sessionErr) {
+      logger.warn("[SANDBOX] No se pudo registrar sesion: %s", sessionErr.message);
+    }
+
+    logger.info("[SANDBOX] Login local: %s", user.email);
+    return res.json({ ok: true, accessToken, refreshToken, email: user.email });
+  } catch (err) {
+    logger.error({ err }, "[SANDBOX] Error en login local");
+    return res.status(500).json({ ok: false, message: "Error interno" });
+  }
+};
+
+/* ============================================================
    Exportación
 ============================================================ */
 module.exports = {
@@ -794,4 +872,5 @@ module.exports = {
   listSessions,
   activeUsers,
   acceptInternalLopdp,
+  localLogin,
 };

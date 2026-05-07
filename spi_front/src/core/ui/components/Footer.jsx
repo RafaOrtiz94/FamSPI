@@ -5,7 +5,7 @@ export default function Footer() {
 
   return (
     <footer className="border-t border-white/10 bg-white/5 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-7xl flex-col gap-2 px-6 py-4 text-sm text-white/70 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-4 sm:px-6 text-sm text-white/70 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-center sm:text-left">
           © {year} <span className="font-semibold text-white">SPI Fam</span> · Departamento de TI
         </p>

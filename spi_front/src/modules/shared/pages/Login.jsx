@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { useLocation, Navigate } from "react-router-dom";
+import { useLocation, Navigate, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { FiLoader } from "react-icons/fi";
 import { useAuth } from "../../../core/auth/AuthContext";
-import { googleLogin } from "../../../core/api/authApi";
+import { googleLogin, sandboxLogin } from "../../../core/api/authApi";
 import famLogo from "../../../assets/famproject_logo.png";
+
+const SANDBOX_AUTH = process.env.REACT_APP_SANDBOX_AUTH === "true";
 
 /* ============================================================
  🔐 Login — Versión Corporativa Ampliada
@@ -17,7 +19,10 @@ import famLogo from "../../../assets/famproject_logo.png";
 export default function Login() {
  const [error, setError] = useState("");
  const [loading, setLoading] = useState(false);
+ const [sandboxEmail, setSandboxEmail] = useState("");
+ const [sandboxPassword, setSandboxPassword] = useState("");
  const location = useLocation();
+ const navigate = useNavigate();
  const { isAuthenticated } = useAuth();
 
  useEffect(() => {
@@ -49,6 +54,20 @@ export default function Login() {
  } catch (err) {
  console.error("❌ Error iniciando login:", err);
  setError("No se pudo conectar con el servidor de autenticación.");
+ setLoading(false);
+ }
+ };
+
+ const handleSandboxLogin = async (e) => {
+ e.preventDefault();
+ setError("");
+ setLoading(true);
+ try {
+ await sandboxLogin(sandboxEmail, sandboxPassword);
+ navigate("/dashboard", { replace: true });
+ } catch (err) {
+ setError(err?.response?.data?.message || err.message || "Credenciales incorrectas");
+ } finally {
  setLoading(false);
  }
  };
@@ -119,6 +138,45 @@ export default function Login() {
  </>
  )}
  </motion.button>
+
+ {/* Formulario sandbox (solo visible cuando REACT_APP_SANDBOX_AUTH=true) */}
+ {SANDBOX_AUTH && (
+ <>
+ <div className="flex items-center gap-3 my-6">
+ <div className="flex-1 h-px bg-neutral-200 dark:bg-gray-700" />
+ <span className="text-xs text-amber-500 font-medium uppercase tracking-wider">
+ Sandbox
+ </span>
+ <div className="flex-1 h-px bg-neutral-200 dark:bg-gray-700" />
+ </div>
+
+ <form onSubmit={handleSandboxLogin} className="text-left space-y-3">
+ <input
+ type="email"
+ required
+ placeholder="correo@fam-project.com"
+ value={sandboxEmail}
+ onChange={(e) => setSandboxEmail(e.target.value)}
+ className="w-full px-4 py-2.5 rounded-xl border border-neutral-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-neutral-800 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+ />
+ <input
+ type="password"
+ required
+ placeholder="Contraseña sandbox"
+ value={sandboxPassword}
+ onChange={(e) => setSandboxPassword(e.target.value)}
+ className="w-full px-4 py-2.5 rounded-xl border border-neutral-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-neutral-800 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+ />
+ <button
+ type="submit"
+ disabled={loading}
+ className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium text-sm transition-colors disabled:opacity-60"
+ >
+ {loading ? "Ingresando..." : "Ingresar"}
+ </button>
+ </form>
+ </>
+ )}
 
  {/* Texto inferior */}
  <p className="text-neutral-400 dark:text-neutral-500 text-xs mt-8">

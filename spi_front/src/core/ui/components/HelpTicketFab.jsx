@@ -182,7 +182,7 @@ export default function HelpTicketFab() {
  if (event.target === event.currentTarget) setOpen(false);
  }}
  >
- <div className="max-h-[calc(100vh-1.5rem)] w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:max-h-[calc(100vh-3rem)]">
+ <div className="max-h-[calc(100vh-1.5rem)] w-full max-w-2xl min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:max-h-[calc(100vh-3rem)]">
  <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
  <div>
  <h3 className="text-sm font-semibold text-slate-900">Centro de Ayuda</h3>
@@ -203,7 +203,7 @@ export default function HelpTicketFab() {
  <select
  value={form.ticket_type}
  onChange={(e) => handleChange("ticket_type", e.target.value)}
- className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+ className="mt-1 w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm"
  >
  {TYPE_OPTIONS.map((opt) => (
  <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -216,7 +216,7 @@ export default function HelpTicketFab() {
  <select
  value={form.priority}
  onChange={(e) => handleChange("priority", e.target.value)}
- className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+ className="mt-1 w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm"
  >
  {PRIORITY_OPTIONS.map((opt) => (
  <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -229,7 +229,7 @@ export default function HelpTicketFab() {
  <select
  value={form.impact}
  onChange={(e) => handleChange("impact", e.target.value)}
- className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+ className="mt-1 w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm"
  >
  {LVL_OPTIONS.map((opt) => (
  <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -244,7 +244,7 @@ export default function HelpTicketFab() {
  <select
  value={form.urgency}
  onChange={(e) => handleChange("urgency", e.target.value)}
- className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+ className="mt-1 w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm"
  >
  {LVL_OPTIONS.map((opt) => (
  <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -258,7 +258,7 @@ export default function HelpTicketFab() {
  value={form.category}
  onChange={(e) => handleChange("category", e.target.value)}
  placeholder="Ej: Acceso, ERP, VPN"
- className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+ className="mt-1 w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm"
  />
  </label>
  </div>
@@ -269,7 +269,7 @@ export default function HelpTicketFab() {
  value={form.title}
  onChange={(e) => handleChange("title", e.target.value)}
  placeholder="Describe brevemente el ticket"
- className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+ className="mt-1 w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm"
  maxLength={180}
  required
  />
@@ -281,7 +281,7 @@ export default function HelpTicketFab() {
  value={form.description}
  onChange={(e) => handleChange("description", e.target.value)}
  placeholder="Incluye contexto, pasos y resultado esperado."
- className="mt-1 h-24 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+ className="mt-1 h-24 w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm"
  required
  />
  </label>

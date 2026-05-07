@@ -793,6 +793,11 @@ function mapRequestRow(row = {}) {
     contract_file_link: driveLink(row.contract_file_id),
     process_doc_link: row.process_doc_url || driveLink(row.process_doc_id),
     inspection_request_id: row.inspection_request_id || null,
+    inspection_assigned_technician_id: extra?.inspection_assigned_technician_id || null,
+    inspection_assigned_technician_email: extra?.inspection_assigned_technician_email || null,
+    inspection_assigned_technician_name: extra?.inspection_assigned_technician_name || null,
+    inspection_calendar_event_id: extra?.inspection_calendar_event_id || null,
+    inspection_calendar_event_link: extra?.inspection_calendar_event_link || null,
     inspection_site_status: inspectionSite.status,
     inspection_site_result: inspectionSite.result,
     inspection_site_follow_up_date: inspectionSite.follow_up_date || null,
@@ -1992,6 +1997,29 @@ async function getAcpCommercialUsers() {
   }));
 }
 
+async function getTechnicalInspectionUsers() {
+  const { rows } = await db.query(
+    `SELECT id, email, fullname, name, role
+       FROM users
+      WHERE active = true
+        AND lower(role) IN ('tecnico', 'jefe_tecnico', 'jefe_servicio_tecnico')
+      ORDER BY
+        CASE
+          WHEN lower(role) IN ('jefe_tecnico', 'jefe_servicio_tecnico') THEN 0
+          ELSE 1
+        END,
+        fullname NULLS LAST,
+        email ASC`,
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    email: row.email,
+    role: row.role,
+    name: row.fullname || row.name || row.email,
+  }));
+}
+
 async function listProviderContacts({ user, query = "", limit = 50 }) {
   await ensureTables();
   if (!canManageAll(user)) {
@@ -2721,6 +2749,7 @@ async function uploadProforma({ id, user, file, expected_updated_at }) {
     [fileId, STATUS.PROFORMA_RECEIVED, id],
   );
   const updated = mapRequestRow(rows[0]);
+  const commercialUser = updated?.created_by ? await getUserById(updated.created_by) : null;
 
   try {
     await notifyUsers({
@@ -3250,7 +3279,14 @@ async function requestInspectionEnvironment({
   };
 }
 
-async function coordinateInspectionDate({ id, user, inspection_date, notes, expected_updated_at }) {
+async function coordinateInspectionDate({
+  id,
+  user,
+  inspection_date,
+  notes,
+  assigned_technician_id,
+  expected_updated_at,
+}) {
   await ensureTables();
 
   if (!canCoordinateInspection(user)) {
@@ -3341,10 +3377,35 @@ async function coordinateInspectionDate({ id, user, inspection_date, notes, expe
     });
   }
 
+  const parsedAssignedId = Number.parseInt(assigned_technician_id, 10);
+  const resolvedAssignedId =
+    Number.isFinite(parsedAssignedId) && parsedAssignedId > 0
+      ? parsedAssignedId
+      : (Number.isFinite(Number(user?.id)) ? Number(user.id) : null);
+  if (!resolvedAssignedId) {
+    throw createAppError("Debes asignar un técnico para la visita de inspección", {
+      status: 400,
+      code: "TECHNICAL_ASSIGNEE_REQUIRED",
+    });
+  }
+  const assignedTechnician = await getUserById(resolvedAssignedId);
+  if (!assignedTechnician || !canRegisterSiteInspection(assignedTechnician)) {
+    throw createAppError("El usuario asignado no pertenece al equipo técnico", {
+      status: 409,
+      code: "TECHNICAL_ASSIGNEE_INVALID",
+    });
+  }
+
   const extraBase = request?.extra || {};
   const mergedExtra = mergeExtra(extraBase, {
     inspection_request_id: request.inspection_request_id,
     inspection_coordination_confirmed_at: new Date().toISOString(),
+    inspection_assigned_technician_id: assignedTechnician.id || null,
+    inspection_assigned_technician_email: assignedTechnician.email || null,
+    inspection_assigned_technician_name:
+      assignedTechnician.fullname || assignedTechnician.name || assignedTechnician.email || null,
+    inspection_assignment_by_id: user?.id || null,
+    inspection_assignment_by_email: user?.email || null,
   });
 
   const { rows } = await db.query(
@@ -3429,6 +3490,63 @@ async function coordinateInspectionDate({ id, user, inspection_date, notes, expe
   }
 
   try {
+    await upsertInspectionTechnicalActivity({
+      request: updated,
+      inspectionDate: normalizedInspectionDate,
+      assignedTechnician,
+      chiefUser: user,
+      commercialUser,
+    });
+  } catch (scheduleError) {
+    logger.warn(
+      { scheduleError, requestId: updated?.id },
+      "No se pudo registrar la inspección en cronograma técnico",
+    );
+  }
+
+  try {
+    const attendees = [
+      assignedTechnician?.email || null,
+      user?.email || null,
+      updated?.created_by_email || commercialUser?.email || null,
+    ].filter(Boolean);
+    const calendarEvent = await createAllDayEvent({
+      summary: `Inspección ambiente - ${updated.client_name || "cliente"}`,
+      description: [
+        `Compra pública #${updated.id}`,
+        `Cliente: ${updated.client_name || "N/D"}`,
+        `Jefe técnico: ${user?.fullname || user?.name || user?.email || "N/D"}`,
+        `Técnico asignado: ${assignedTechnician?.fullname || assignedTechnician?.name || assignedTechnician?.email || "N/D"}`,
+        `Comercial: ${updated?.created_by_email || commercialUser?.email || "N/D"}`,
+      ].join("\n"),
+      date: normalizedInspectionDate,
+      attendees,
+    });
+    if (calendarEvent?.id || calendarEvent?.htmlLink) {
+      const withCalendarExtra = mergeExtra(updated?.extra, {
+        inspection_calendar_event_id: calendarEvent.id || null,
+        inspection_calendar_event_link: calendarEvent.htmlLink || null,
+      });
+      const calendarRes = await db.query(
+        `UPDATE equipment_purchase_requests
+            SET extra = $1::jsonb,
+                updated_at = now()
+          WHERE id = $2
+          RETURNING *`,
+        [JSON.stringify(withCalendarExtra), id],
+      );
+      if (calendarRes.rows?.[0]) {
+        Object.assign(updated, mapRequestRow(calendarRes.rows[0]));
+      }
+    }
+  } catch (calendarError) {
+    logger.warn(
+      { calendarError, requestId: updated?.id },
+      "No se pudo crear evento de calendario para inspección",
+    );
+  }
+
+  try {
     await notifyUsers({
       userIds: [updated.created_by, updated.assigned_to],
       title: "Fecha de inspección coordinada",
@@ -3436,13 +3554,81 @@ async function coordinateInspectionDate({ id, user, inspection_date, notes, expe
       type: "task",
       source: "equipment_purchases",
       priority: 1,
-      meta: { request_id: updated.id, inspection_date: normalizedInspectionDate },
+      meta: {
+        request_id: updated.id,
+        inspection_date: normalizedInspectionDate,
+        assigned_technician_id: assignedTechnician?.id || null,
+      },
     });
   } catch (notifyError) {
     logger.warn({ notifyError, requestId: updated.id }, "No se pudieron enviar notificaciones de coordinación");
   }
 
   return updated;
+}
+
+async function upsertInspectionTechnicalActivity({
+  request,
+  inspectionDate,
+  assignedTechnician,
+  chiefUser,
+  commercialUser,
+}) {
+  if (!request?.id || !inspectionDate) return;
+  const sourceType = "public_purchase_inspection";
+  const sourceId = String(request.id);
+  const techLabel = assignedTechnician?.name || assignedTechnician?.email || "Por definir";
+  const chiefLabel = chiefUser?.fullname || chiefUser?.name || chiefUser?.email || "Jefatura técnica";
+  const commercialLabel = commercialUser?.fullname || commercialUser?.name || commercialUser?.email || "Comercial";
+  const title = `Inspección de ambiente - ${request.client_name || "cliente"}`;
+  const notes = `Compra pública #${request.id} · Técnico: ${techLabel} · Jefe técnico: ${chiefLabel} · Comercial: ${commercialLabel}`;
+
+  const { rows } = await db.query(
+    `SELECT id
+       FROM servicio.cronograma_actividades_tecnicas
+      WHERE source_type = $1
+        AND source_id = $2
+      ORDER BY id DESC
+      LIMIT 1`,
+    [sourceType, sourceId],
+  );
+
+  if (rows[0]?.id) {
+    await db.query(
+      `UPDATE servicio.cronograma_actividades_tecnicas
+          SET user_id = $1,
+              activity_date = $2,
+              title = $3,
+              notes = $4,
+              status = 'programado',
+              updated_at = now()
+        WHERE id = $5`,
+      [
+        Number.isFinite(Number(assignedTechnician?.id)) ? Number(assignedTechnician.id) : null,
+        inspectionDate,
+        title,
+        notes,
+        rows[0].id,
+      ],
+    );
+    return;
+  }
+
+  await db.query(
+    `INSERT INTO servicio.cronograma_actividades_tecnicas (
+        user_id, activity_date, title, notes, status, source_type, source_id, created_by, created_by_email, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, 'programado', $5, $6, $7, $8, now(), now())`,
+    [
+      Number.isFinite(Number(assignedTechnician?.id)) ? Number(assignedTechnician.id) : null,
+      inspectionDate,
+      title,
+      notes,
+      sourceType,
+      sourceId,
+      Number.isFinite(Number(chiefUser?.id)) ? Number(chiefUser.id) : null,
+      chiefUser?.email || null,
+    ],
+  );
 }
 
 async function registerSiteInspection({
@@ -4043,6 +4229,12 @@ async function reviewInspectionDateProposal({ id, user, decision, review_notes, 
       extraBase?.inspection_acta_link ||
       null,
     inspection_acta_generated_at: new Date().toISOString(),
+    inspection_assigned_technician_id: user?.id || null,
+    inspection_assigned_technician_email: user?.email || null,
+    inspection_assigned_technician_name:
+      user?.fullname || user?.name || user?.email || null,
+    inspection_assignment_by_id: user?.id || null,
+    inspection_assignment_by_email: user?.email || null,
   });
 
   const { rows } = await db.query(
@@ -4072,10 +4264,68 @@ async function reviewInspectionDateProposal({ id, user, decision, review_notes, 
     ],
   );
   const updated = mapRequestRow(rows[0]);
+  const commercialUser = updated?.created_by ? await getUserById(updated.created_by) : null;
+
+  try {
+    await upsertInspectionTechnicalActivity({
+      request: updated,
+      inspectionDate: proposalDate,
+      assignedTechnician: user,
+      chiefUser: user,
+      commercialUser,
+    });
+  } catch (scheduleError) {
+    logger.warn(
+      { scheduleError, requestId: updated?.id },
+      "No se pudo registrar la inspección aprobada en cronograma técnico",
+    );
+  }
+
+  try {
+    const attendees = [
+      user?.email || null,
+      user?.email || null,
+      updated?.created_by_email || commercialUser?.email || null,
+    ].filter(Boolean);
+    const calendarEvent = await createAllDayEvent({
+      summary: `Inspección ambiente - ${updated.client_name || "cliente"}`,
+      description: [
+        `Compra pública #${updated.id}`,
+        `Cliente: ${updated.client_name || "N/D"}`,
+        `Jefe técnico: ${user?.fullname || user?.name || user?.email || "N/D"}`,
+        `Técnico asignado: ${user?.fullname || user?.name || user?.email || "N/D"}`,
+        `Comercial: ${updated?.created_by_email || commercialUser?.email || "N/D"}`,
+      ].join("\n"),
+      date: proposalDate,
+      attendees,
+    });
+    if (calendarEvent?.id || calendarEvent?.htmlLink) {
+      const withCalendarExtra = mergeExtra(updated?.extra, {
+        inspection_calendar_event_id: calendarEvent.id || null,
+        inspection_calendar_event_link: calendarEvent.htmlLink || null,
+      });
+      const calendarRes = await db.query(
+        `UPDATE equipment_purchase_requests
+            SET extra = $1::jsonb,
+                updated_at = now()
+          WHERE id = $2
+          RETURNING *`,
+        [JSON.stringify(withCalendarExtra), id],
+      );
+      if (calendarRes.rows?.[0]) {
+        Object.assign(updated, mapRequestRow(calendarRes.rows[0]));
+      }
+    }
+  } catch (calendarError) {
+    logger.warn(
+      { calendarError, requestId: updated?.id },
+      "No se pudo crear evento calendario al aprobar la coordinación",
+    );
+  }
 
   try {
     await notifyUsers({
-      userIds: [updated.created_by, updated.assigned_to],
+      userIds: [updated.created_by, user?.id],
       title: "Fecha de inspección aprobada",
       message: `Jefe Técnico confirmó inspección para ${updated.client_name || "cliente"} el ${proposalDate}.`,
       type: "task",
@@ -4765,6 +5015,7 @@ async function getStats({ requestType = "purchase" } = {}) {
 module.exports = {
   getApprovedClients,
   getAcpCommercialUsers,
+  getTechnicalInspectionUsers,
   getEquipmentCatalog,
   listProviderContacts,
   saveProviderContact,

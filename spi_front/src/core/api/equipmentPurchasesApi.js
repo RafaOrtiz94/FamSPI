@@ -247,10 +247,14 @@ export const requestPublicPurchaseInspection = async (
  return data.data;
 };
 
-export const coordinateInspectionDate = async (id, { inspection_date, notes, expected_updated_at }) => {
+export const coordinateInspectionDate = async (
+ id,
+ { inspection_date, notes, assigned_technician_id, expected_updated_at },
+) => {
  const { data } = await api.patch(`/equipment-purchases/${id}/coordinate-inspection-date`, {
  inspection_date,
  notes,
+ assigned_technician_id,
  expected_updated_at,
  });
  return data.data;

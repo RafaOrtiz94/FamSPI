@@ -12,6 +12,7 @@ import SiteInspectionStepper from "../components/SiteInspectionStepper";
 import SiteInspectionSummaryCard from "../components/SiteInspectionSummaryCard";
 import {
  coordinateInspectionDate,
+ getEquipmentPurchaseMeta,
  getPublicPurchaseTechnicalSchedule,
  listEquipmentPurchases,
  reviewInspectionDate,
@@ -208,6 +209,7 @@ const TechnicalProcedureWorkspace = () => {
  const [siteInspectionAttemptedSubmit, setSiteInspectionAttemptedSubmit] = useState(false);
  const [siteInspectionSaving, setSiteInspectionSaving] = useState(false);
  const [publicScheduleDays, setPublicScheduleDays] = useState([]);
+ const [technicalUsers, setTechnicalUsers] = useState([]);
  const isChiefTechnical = useMemo(() => isChiefTechnicalUser(user), [user]);
  const technicalRoleParam = useMemo(() => getPrivateRoleParam(user), [user]);
  const isTechnicalProcedureUser = useMemo(
@@ -253,10 +255,14 @@ const TechnicalProcedureWorkspace = () => {
  setError("");
  try {
  const privateRole = technicalRoleParam;
- const [publicResult, privateResult] = await Promise.allSettled([
+ const [publicResult, privateResult, metaResult] = await Promise.allSettled([
  listEquipmentPurchases(),
  privateRole ? getPrivatePurchasesByRole(privateRole) : Promise.resolve([]),
+ getEquipmentPurchaseMeta(),
  ]);
+ if (metaResult.status === "fulfilled") {
+ setTechnicalUsers(Array.isArray(metaResult.value?.technical_users) ? metaResult.value.technical_users : []);
+ }
 
  if (publicResult.status !== "fulfilled") {
  throw publicResult.reason || new Error("No se pudieron cargar compras públicas");
@@ -283,6 +289,10 @@ const TechnicalProcedureWorkspace = () => {
  inspectionProposedNotes: row.inspection_proposed_notes || "",
  inspectionCoordinationStatus: row.inspection_coordination_status || null,
  inspectionCoordinationNotes: row.inspection_coordination_notes || null,
+ assignedTechnicianId: row.inspection_assigned_technician_id || null,
+ assignedTechnicianName: row.inspection_assigned_technician_name || null,
+ assignedTechnicianEmail: row.inspection_assigned_technician_email || null,
+ inspectionCalendarEventLink: row.inspection_calendar_event_link || null,
  inspectionActaLink: row?.extra?.inspection_acta_link || null,
  inspectionSiteStatus: row.inspection_site_status || null,
  inspectionSiteResult: row.inspection_site_result || null,
@@ -404,10 +414,11 @@ const TechnicalProcedureWorkspace = () => {
  setCoordinationOverlay({ open: true, clientName: item.clientName || "cliente" });
  setError("");
  try {
- await coordinateInspectionDate(item.sourceId, {
- inspection_date: inspectionDate,
- notes: draft.notes || null,
- });
+     await coordinateInspectionDate(item.sourceId, {
+     inspection_date: inspectionDate,
+     notes: draft.notes || null,
+     assigned_technician_id: draft.assigned_technician_id || item.assignedTechnicianId || null,
+     });
  setPublicItems((prev) =>
  prev.map((row) =>
  row.sourceId === item.sourceId
@@ -863,6 +874,26 @@ setSiteInspectionModal({ open: false, item: null });
  }
  className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
  />
+ <select
+ value={draft.assigned_technician_id || item.assignedTechnicianId || ""}
+ onChange={(event) =>
+ setCoordDrafts((prev) => ({
+ ...prev,
+ [item.sourceId]: {
+ ...prev[item.sourceId],
+ assigned_technician_id: event.target.value,
+ },
+ }))
+ }
+ className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+ >
+ <option value="">Asignarme como técnico responsable</option>
+ {technicalUsers.map((tech) => (
+ <option key={tech.id} value={tech.id}>
+ {tech.name} · {tech.role}
+ </option>
+ ))}
+ </select>
  <textarea
  rows={2}
  value={draft.notes || ""}

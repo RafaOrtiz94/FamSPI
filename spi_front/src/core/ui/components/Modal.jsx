@@ -36,7 +36,7 @@ const Modal = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/60 backdrop-blur-sm sm:items-center sm:p-4"
       role="presentation"
       onClick={handleBackdropClick}
     >
@@ -44,11 +44,17 @@ const Modal = ({
         role="dialog"
         aria-modal="true"
         aria-label={title || "Modal"}
-        className={`relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_30px_80px_rgba(15,23,42,0.20)] ${maxWidth}`}
+        className={`relative flex w-full flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-[0_30px_80px_rgba(15,23,42,0.20)] sm:rounded-3xl ${maxWidth}`}
+        style={{ maxHeight: "calc(92dvh - env(safe-area-inset-bottom, 0px))" }}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
-          {title ? <h2 className="text-lg font-bold text-slate-900 sm:text-xl">{title}</h2> : <span />}
+        {/* drag handle — visible only on mobile */}
+        <div className="flex justify-center pt-2.5 sm:hidden" aria-hidden="true">
+          <div className="h-1 w-9 rounded-full bg-slate-200" />
+        </div>
+
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-6 sm:py-4">
+          {title ? <h2 className="text-base font-bold text-slate-900 sm:text-xl">{title}</h2> : <span />}
           <button
             type="button"
             onClick={() => !disableClose && onClose?.()}
@@ -59,7 +65,7 @@ const Modal = ({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">{children}</div>
+        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5">{children}</div>
       </div>
     </div>
   );

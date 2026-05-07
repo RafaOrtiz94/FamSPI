@@ -5,7 +5,7 @@
  */
 
 const router = require("express").Router();
-const rateLimit = require("express-rate-limit");
+const { rateLimit, ipKeyGenerator } = require("express-rate-limit");
 const { verifyToken } = require("../../middlewares/auth");
 const controller = require("./attendance.controller");
 const { requireAttendanceReportAccess, hasReportingAccess } = require("./attendance.auth");
@@ -75,7 +75,10 @@ const attendanceMarkLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => String(req.user?.id || req.ip || "unknown"),
+  keyGenerator: (req) => {
+    if (req.user?.id) return `uid:${String(req.user.id)}`;
+    return ipKeyGenerator(req);
+  },
   message: {
     ok: false,
     code: "ATTENDANCE_MARK_RATE_LIMIT",

@@ -345,7 +345,7 @@ const CreateRequestModal = ({
  const { showToast } = useUI();
 
  const todayDateString = useMemo(() => TODAY, []);
- const clientSelectionRequired = type === "inspection" || type === "retiro" || type === "mantenimiento";
+ const clientSelectionRequired = type === "retiro" || type === "mantenimiento";
  const requiresEquipment = type === "inspection" || type === "retiro";
  const allowUnassignedEquipment = type === "inspection";
  const hasSelectedClient = !!(formData?.nombre_cliente || "").trim();
@@ -620,7 +620,6 @@ const CreateRequestModal = ({
  });
 
  if (!clientId) {
- setFormData((prev) => ({ ...prev, nombre_cliente: "" }));
  setSelectedClientId("");
  return;
  }
@@ -886,10 +885,10 @@ const CreateRequestModal = ({
  </label>
 
  {/* 📞 Input de Teléfono Personalizado */}
- {clientSelectionRequired && f === "nombre_cliente" ? (
+ {(clientSelectionRequired || type === "inspection") && f === "nombre_cliente" ? (
  <div className="space-y-2">
  <select
- name={f}
+ name={`${f}_selector`}
  value={selectedClientId}
  onChange={(e) => handleClientSelect(e.target.value)}
  disabled={loadingClients}
@@ -898,8 +897,8 @@ const CreateRequestModal = ({
  : "border-gray-300 dark:border-gray-600"
  } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
  >
- <option value="" disabled>
- {loadingClients ? "Cargando clientes..." : "Selecciona un cliente"}
+ <option value="">
+ {loadingClients ? "Cargando clientes..." : type === "inspection" ? "Cliente registrado (opcional)" : "Selecciona un cliente"}
  </option>
  {availableClients.map((client) => (
  <option key={client.id} value={client.id}>
@@ -907,6 +906,16 @@ const CreateRequestModal = ({
  </option>
  ))}
  </select>
+ {type === "inspection" && (
+ <input
+ type="text"
+ name={f}
+ value={formData[f] || ""}
+ onChange={handleChange}
+ placeholder="Nombre del cliente o prospecto"
+ className={`w-full p-2 rounded-lg border ${errors[f] ? "border-red-500" : "border-gray-300 dark:border-gray-600"} bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
+ />
+ )}
  {!loadingClients && availableClients.length === 0 && (
  <p className="text-xs text-gray-500">
  No encontramos clientes disponibles. Registra uno nuevo.

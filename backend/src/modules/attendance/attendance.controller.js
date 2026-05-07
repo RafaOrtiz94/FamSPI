@@ -1134,40 +1134,50 @@ const getTimeOffLabel = (record = {}) => {
 const findActiveTimeOffForMarking = async ({ userEmail, now, businessDate }) => {
   const normalizedEmail = String(userEmail || "").trim().toLowerCase();
   if (!normalizedEmail) return null;
-
-  const { rows } = await db.query(
-    `
-    SELECT
-      id,
-      tipo_solicitud,
-      tipo_permiso,
-      fecha_inicio,
-      fecha_fin,
-      fecha_inicio_hora,
-      fecha_fin_hora,
-      status
-    FROM permisos_vacaciones
-    WHERE LOWER(COALESCE(user_email, '')) = $1
-      AND LOWER(COALESCE(status, '')) IN ('approved', 'aprobado')
-      AND (
-        (
-          fecha_inicio_hora IS NOT NULL
-          AND fecha_fin_hora IS NOT NULL
-          AND $2::timestamptz BETWEEN fecha_inicio_hora AND fecha_fin_hora
+  try {
+    const { rows } = await db.query(
+      `
+      SELECT
+        id,
+        tipo_solicitud,
+        tipo_permiso,
+        fecha_inicio,
+        fecha_fin,
+        fecha_inicio_hora,
+        fecha_fin_hora,
+        status
+      FROM permisos_vacaciones
+      WHERE LOWER(COALESCE(user_email, '')) = $1
+        AND LOWER(COALESCE(status, '')) IN ('approved', 'aprobado')
+        AND (
+          (
+            fecha_inicio_hora IS NOT NULL
+            AND fecha_fin_hora IS NOT NULL
+            AND $2::timestamptz BETWEEN fecha_inicio_hora AND fecha_fin_hora
+          )
+          OR
+          (
+            (fecha_inicio_hora IS NULL OR fecha_fin_hora IS NULL)
+            AND $3::date BETWEEN COALESCE(fecha_inicio, $3::date) AND COALESCE(fecha_fin, $3::date)
+          )
         )
-        OR
-        (
-          (fecha_inicio_hora IS NULL OR fecha_fin_hora IS NULL)
-          AND $3::date BETWEEN COALESCE(fecha_inicio, $3::date) AND COALESCE(fecha_fin, $3::date)
-        )
-      )
-    ORDER BY COALESCE(fecha_inicio_hora, fecha_inicio::timestamptz) DESC, id DESC
-    LIMIT 1
-    `,
-    [normalizedEmail, now, businessDate]
-  );
+      ORDER BY COALESCE(fecha_inicio_hora, fecha_inicio::timestamptz) DESC, id DESC
+      LIMIT 1
+      `,
+      [normalizedEmail, now, businessDate]
+    );
 
-  return rows?.[0] || null;
+    return rows?.[0] || null;
+  } catch (error) {
+    if (["42P01", "42703", "42501"].includes(String(error?.code || ""))) {
+      logger.warn(
+        { code: error?.code, message: error?.message },
+        "[ATTENDANCE] Time-off validation skipped due DB schema/permissions mismatch"
+      );
+      return null;
+    }
+    throw error;
+  }
 };
 
 const enforceNoActiveTimeOffForMarking = async ({ res, userEmail, now }) => {
@@ -1863,7 +1873,7 @@ const updateExceptionStatus = async (req, res) => {
       updateResult = await db.query(updateQuery, params);
     } catch (queryErr) {
       if (queryErr?.code === "42703") {
-        // Fallback for DBs missing end_time/end_location/updated_at (pre-migration 158)
+        // Fallback for DBs with legacy attendance_exceptions schema.
         const fallbackQueryMap = {
           ON_SITE: "UPDATE attendance_exceptions SET status = 'ON_SITE', arrival_time = $1, arrival_location = $2 WHERE id = $3 RETURNING *",
           RETURNING: "UPDATE attendance_exceptions SET status = 'RETURNING', departure_time = COALESCE(departure_time, $1), departure_location = COALESCE(departure_location, $2) WHERE id = $3 RETURNING *",
@@ -1871,7 +1881,17 @@ const updateExceptionStatus = async (req, res) => {
         };
         const fallback = fallbackQueryMap[status];
         if (!fallback) throw queryErr;
-        updateResult = await db.query(fallback, params);
+        try {
+          updateResult = await db.query(fallback, params);
+        } catch (legacyErr) {
+          if (legacyErr?.code === "42703") {
+            // Last-resort fallback: close/update only status to avoid blocking the user.
+            const statusOnly = "UPDATE attendance_exceptions SET status = $1 WHERE id = $2 RETURNING *";
+            updateResult = await db.query(statusOnly, [status, exceptionId]);
+          } else {
+            throw legacyErr;
+          }
+        }
       } else {
         throw queryErr;
       }

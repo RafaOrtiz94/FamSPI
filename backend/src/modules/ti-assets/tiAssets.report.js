@@ -5,8 +5,10 @@
  */
 
 const PDFDocument = require("pdfkit");
+const { Readable } = require("stream");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
+const { drive } = require("../../config/google");
 const { computeSha256HexFromBuffer } = require("../../utils/documentHash");
 const { uploadBase64File, ensureFolder } = require("../../utils/drive");
 
@@ -54,6 +56,23 @@ async function ensureReportsTable() {
     `CREATE INDEX IF NOT EXISTS idx_ti_maintenance_reports_period
        ON public.ti_maintenance_reports(period)`
   );
+}
+
+function bufferToStream(buffer) {
+  const readable = new Readable();
+  readable._read = () => {};
+  readable.push(buffer);
+  readable.push(null);
+  return readable;
+}
+
+function normalizeReportPeriod({ year, month, periodType = "annual" } = {}) {
+  const safePeriodType = String(periodType || "annual").toLowerCase() === "monthly" ? "monthly" : "annual";
+  const safeYear = Number(year || new Date().getFullYear());
+  const safeMonth = safePeriodType === "monthly" ? Number(month || (new Date().getMonth() + 1)) : null;
+  const period = safePeriodType === "monthly" ? `${safeYear}-${String(safeMonth).padStart(2, "0")}` : String(safeYear);
+  const periodLabel = safePeriodType === "monthly" ? `Mes ${period}` : `Año ${safeYear}`;
+  return { safePeriodType, safeYear, safeMonth, period, periodLabel };
 }
 
 // ─── Data fetching ─────────────────────────────────────────────────────────────
@@ -316,11 +335,11 @@ function buildPdf({ assets, schedulesByAsset, stats, periodLabel, generatedAt, g
 async function generateAndStoreMaintenanceReport({ year, month, periodType = "annual", userId, generatedByName, rootFolderId } = {}) {
   await ensureReportsTable();
 
-  const safePeriodType = String(periodType || "annual").toLowerCase() === "monthly" ? "monthly" : "annual";
-  const safeYear = Number(year || new Date().getFullYear());
-  const safeMonth = safePeriodType === "monthly" ? Number(month || (new Date().getMonth() + 1)) : null;
-  const period = safePeriodType === "monthly" ? `${safeYear}-${String(safeMonth).padStart(2, "0")}` : String(safeYear);
-  const periodLabel = safePeriodType === "monthly" ? `Mes ${period}` : `Año ${safeYear}`;
+  const { safePeriodType, safeYear, safeMonth, period, periodLabel } = normalizeReportPeriod({
+    year,
+    month,
+    periodType,
+  });
   const generatedAt = new Date();
 
   const { assets, schedulesByAsset, stats } = await fetchReportData({ year: safeYear, month: safeMonth, periodType: safePeriodType });
@@ -339,7 +358,17 @@ async function generateAndStoreMaintenanceReport({ year, month, periodType = "an
   const sha256 = computeSha256HexFromBuffer(pdfBuffer);
   const fileSizeBytes = pdfBuffer.length;
 
-  // Upload to Drive
+  // Persist report record (one current row per period; update latest, delete duplicates)
+  const { rows: existingRows } = await db.query(
+    `SELECT id, drive_file_id
+       FROM public.ti_maintenance_reports
+      WHERE period = $1
+      ORDER BY generated_at DESC, id DESC`,
+    [period],
+  );
+  const previousDriveFileId = existingRows[0]?.drive_file_id || null;
+
+  // Upload/update in Drive
   let driveFileId = null;
   let driveUrl = null;
   try {
@@ -350,24 +379,32 @@ async function generateAndStoreMaintenanceReport({ year, month, periodType = "an
       folderId = folder?.id || null;
     }
 
-    const ts = generatedAt.toISOString().slice(0, 19).replace(/[:T]/g, "-");
-    const filename = `Cronograma_TI_${safePeriodType}_${period}_${ts}.pdf`;
-    const base64 = pdfBuffer.toString("base64");
-    const uploaded = await uploadBase64File(filename, base64, "application/pdf", folderId);
-    driveFileId = uploaded?.id || null;
-    driveUrl = uploaded?.webViewLink || uploaded?.webContentLink || null;
+    const filename = `Cronograma_TI_${safePeriodType}_${period}.pdf`;
+    if (previousDriveFileId) {
+      const { data: updated } = await drive.files.update({
+        fileId: previousDriveFileId,
+        supportsAllDrives: true,
+        requestBody: {
+          name: filename,
+          parents: folderId ? [folderId] : undefined,
+        },
+        media: {
+          mimeType: "application/pdf",
+          body: bufferToStream(pdfBuffer),
+        },
+        fields: "id, name, webViewLink, webContentLink",
+      });
+      driveFileId = updated?.id || null;
+      driveUrl = updated?.webViewLink || updated?.webContentLink || null;
+    } else {
+      const base64 = pdfBuffer.toString("base64");
+      const uploaded = await uploadBase64File(filename, base64, "application/pdf", folderId);
+      driveFileId = uploaded?.id || null;
+      driveUrl = uploaded?.webViewLink || uploaded?.webContentLink || null;
+    }
   } catch (driveErr) {
     logger.warn({ driveErr }, "[TI REPORT] Drive upload failed, storing metadata only");
   }
-
-  // Persist report record (one current row per period; update latest, delete duplicates)
-  const { rows: existingRows } = await db.query(
-    `SELECT id
-       FROM public.ti_maintenance_reports
-      WHERE period = $1
-      ORDER BY generated_at DESC, id DESC`,
-    [period],
-  );
 
   let record = null;
   if (existingRows.length) {
@@ -445,5 +482,39 @@ async function listReports({ limit = 50 } = {}) {
   return rows;
 }
 
-module.exports = { generateAndStoreMaintenanceReport, listReports, ensureReportsTable };
+async function getReportByPeriod({ year, month, periodType = "annual" } = {}) {
+  await ensureReportsTable();
+  const { period } = normalizeReportPeriod({ year, month, periodType });
+  const { rows } = await db.query(
+    `SELECT *
+       FROM public.ti_maintenance_reports
+      WHERE period = $1
+      ORDER BY generated_at DESC, id DESC
+      LIMIT 1`,
+    [period],
+  );
+  return rows[0] || null;
+}
+
+async function downloadReportPdfFromDrive({ year, month, periodType = "annual" } = {}) {
+  const report = await getReportByPeriod({ year, month, periodType });
+  if (!report?.drive_file_id) return null;
+  const response = await drive.files.get(
+    { fileId: report.drive_file_id, alt: "media", supportsAllDrives: true },
+    { responseType: "arraybuffer" },
+  );
+  return {
+    report,
+    pdfBuffer: Buffer.from(response.data),
+  };
+}
+
+module.exports = {
+  generateAndStoreMaintenanceReport,
+  listReports,
+  ensureReportsTable,
+  getReportByPeriod,
+  downloadReportPdfFromDrive,
+};
+
 

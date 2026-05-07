@@ -14,6 +14,7 @@ const { runOnce: runPermisosPendingExpiry } = require('../jobs/permisosPendingEx
 const { runOnce: runPermisosRecoveryCoordinationExpiry } = require('../jobs/permisosRecoveryCoordinationExpiryScheduler');
 const { runOnce: runExternalCaseSyncQueue } = require('../jobs/externalCaseSyncScheduler');
 const permisosService = require('../modules/permisos/permisos.service');
+const { generateAndStoreMaintenanceReport } = require('../modules/ti-assets/tiAssets.report');
 
 const jobsAuth = require('../middlewares/jobsAuth');
 
@@ -406,6 +407,59 @@ router.post('/external-cases/sync', async (req, res) => {
         res.status(500).json({
             error: 'Falló el procesamiento de cola de casos externos',
             details: error.message
+        });
+    }
+});
+
+// Endpoint manual para generar reporte de mantenimiento TI (sin scheduler automático)
+router.post('/ti-assets/maintenance-report/generate', async (req, res) => {
+    try {
+        const now = new Date();
+        const parsedYear = Number(req.body?.year ?? req.query?.year ?? now.getFullYear());
+        const parsedMonthRaw = req.body?.month ?? req.query?.month;
+        const parsedMonth = parsedMonthRaw === undefined || parsedMonthRaw === null || parsedMonthRaw === ''
+            ? null
+            : Number(parsedMonthRaw);
+        const periodType = String(req.body?.periodType ?? req.query?.periodType ?? (parsedMonth ? 'monthly' : 'annual')).trim().toLowerCase();
+
+        if (!Number.isInteger(parsedYear) || parsedYear < 2020 || parsedYear > 2100) {
+            return res.status(400).json({
+                success: false,
+                error: 'Parámetro year inválido',
+            });
+        }
+        if (parsedMonth !== null && (!Number.isInteger(parsedMonth) || parsedMonth < 1 || parsedMonth > 12)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Parámetro month inválido (1-12)',
+            });
+        }
+        if (!['annual', 'monthly'].includes(periodType)) {
+            return res.status(400).json({
+                success: false,
+                error: 'periodType inválido. Usa annual|monthly',
+            });
+        }
+
+        const result = await generateAndStoreMaintenanceReport({
+            year: parsedYear,
+            month: parsedMonth,
+            periodType,
+            userId: null,
+            generatedByName: 'Sistema (manual interno)',
+        });
+
+        return res.json({
+            success: true,
+            message: 'Reporte TI generado manualmente',
+            data: result,
+        });
+    } catch (error) {
+        console.error('Error generando reporte TI manual:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Falló generación manual de reporte TI',
+            details: error.message,
         });
     }
 });

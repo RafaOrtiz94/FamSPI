@@ -28,7 +28,7 @@ export default function Header() {
 
  return (
  <header className="sticky top-0 z-40 bg-primary/95 text-white shadow-md backdrop-blur-md border-b border-primary-light transition-all duration-300">
- <div className="flex items-center justify-between h-16 px-4 sm:px-6">
+ <div className="flex h-16 items-center justify-between gap-2 px-3 sm:px-6">
  {/* =======================================================
  🔹 IZQUIERDA: Logo + Nombre
  ======================================================= */}
@@ -86,7 +86,7 @@ export default function Header() {
  )}
  </div>
  <div className="flex flex-col items-start leading-tight">
- <span className="text-sm font-semibold text-white truncate max-w-[160px]">
+ <span className="text-sm font-semibold text-white truncate max-w-[120px] sm:max-w-[160px]">
  {displayName}
  </span>
  <span className="text-[11px] text-accent-light uppercase tracking-wide">

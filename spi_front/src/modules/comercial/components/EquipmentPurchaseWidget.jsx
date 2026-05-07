@@ -721,6 +721,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  await coordinateInspectionDate(request.id, {
  inspection_date: selectedDate,
  notes: draft.notes || "",
+ assigned_technician_id: draft.assigned_technician_id || request?.inspection_assigned_technician_id || null,
  expected_updated_at: request.updated_at,
  });
  showToast("Fecha propuesta enviada. Pendiente aprobación de Jefe Técnico", "success");
@@ -1443,6 +1444,26 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  placeholder="Notas de coordinación (opcional)"
  className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
  />
+ <select
+ className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+ value={inspectionCoordinationDraft.assigned_technician_id ?? req.inspection_assigned_technician_id ?? ""}
+ onChange={(event) =>
+ setInspectionCoordDrafts((prev) => ({
+ ...prev,
+ [req.id]: {
+ ...prev[req.id],
+ assigned_technician_id: event.target.value,
+ },
+ }))
+ }
+ >
+ <option value="">Asignarme como técnico responsable</option>
+ {(meta.technical_users || []).map((user) => (
+ <option key={user.id} value={user.id}>
+ {user.name} · {user.role}
+ </option>
+ ))}
+ </select>
  <Button
  size="sm"
  onClick={() => handleCoordinateInspection(req)}
