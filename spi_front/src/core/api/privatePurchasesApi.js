@@ -1293,6 +1293,34 @@ export const requestClientRegistration = async (id) => {
  }
 };
 
+export const setPrivatePurchaseSupplyControlType = async (id, { controlType, hasCommercialDeliverables = false, expected_updated_at } = {}) => {
+ try {
+ const response = await api.post(`${PRIVATE_PURCHASE_ENDPOINTS.BASE}/${id}/set-supply-control-type`, {
+ control_type: controlType,
+ has_commercial_deliverables: hasCommercialDeliverables,
+ expected_updated_at,
+ });
+ if (!response.data?.ok) throw new Error(response.data?.message || 'Error');
+ return response.data.data;
+ } catch (error) {
+ throw error.response?.data?.message || error.message || 'Error desconocido';
+ }
+};
+
+export const registerPrivatePurchaseSerial = async (id, { serialNumber, unitId = null, expected_updated_at } = {}) => {
+ try {
+ const response = await api.post(`${PRIVATE_PURCHASE_ENDPOINTS.BASE}/${id}/register-serial`, {
+ serial_number: serialNumber,
+ unit_id: unitId,
+ expected_updated_at,
+ });
+ if (!response.data?.ok) throw new Error(response.data?.message || 'Error');
+ return response.data.data;
+ } catch (error) {
+ throw error.response?.data?.message || error.message || 'Error desconocido';
+ }
+};
+
 export default {
  createPrivatePurchaseRequest,
  createPrivatePurchase,
@@ -1337,6 +1365,8 @@ uploadPrivatePurchaseDeliveryGuides,
  listPrivatePurchasesByRole,
  formatPrivatePurchaseState,
  getStateColor,
+ setPrivatePurchaseSupplyControlType,
+ registerPrivatePurchaseSerial,
  PRIVATE_PURCHASE_STATES,
  FLOW_TYPES
 };

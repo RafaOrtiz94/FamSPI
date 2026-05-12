@@ -2,16 +2,7 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const NotificationManager = require('./notificationManager');
 
-const TI_OFFHOURS_ROLES = [
-  "ti",
-  "jefe_ti",
-  "tecnico",
-  "jefe_tecnico",
-  "servicio_tecnico",
-  "jefe_servicio_tecnico",
-  "admin_ti",
-  "jefe_de_ti",
-];
+const TI_OFFHOURS_ROLES = ["jefe_ti"];
 
 const mapNotificationRow = (row) => ({
   id: row.id,

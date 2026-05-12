@@ -5628,6 +5628,177 @@ class PrivatePurchasesService {
     }
   }
 
+  // ----------------------------------------------------------
+  // WORKFLOW ALIGNMENT — supply_control_type
+  // ----------------------------------------------------------
+
+  _deriveSupplyControlType(offerKind, hasCommercialDeliverables = false) {
+    const kind = String(offerKind || '').trim().toLowerCase();
+    if (kind === 'comodato') return 'bc_maximums';
+    if (['venta', 'alquiler', 'alquiler_transferencia_dominio'].includes(kind)) {
+      return hasCommercialDeliverables ? 'commercial_deliverables' : 'none';
+    }
+    return 'pending';
+  }
+
+  async setSupplyControlType(purchaseId, user, { controlType, hasCommercialDeliverables = false } = {}) {
+    const { rows } = await db.query(
+      `SELECT id, offer_kind, supply_control_type, status, created_by FROM private_purchase_requests WHERE id = $1 LIMIT 1`,
+      [purchaseId]
+    );
+    if (!rows.length) {
+      const err = new Error('Solicitud de compra privada no encontrada');
+      err.status = 404;
+      err.code = 'PRIVATE_PURCHASE_NOT_FOUND';
+      throw err;
+    }
+    const row = rows[0];
+
+    const derived = controlType
+      ? String(controlType).trim()
+      : this._deriveSupplyControlType(row.offer_kind, hasCommercialDeliverables);
+
+    const allowed = ['bc_maximums', 'commercial_deliverables', 'none'];
+    if (!allowed.includes(derived)) {
+      const err = new Error(`supply_control_type inválido: ${derived}. Valores: ${allowed.join(', ')}`);
+      err.status = 400;
+      err.code = 'INVALID_SUPPLY_CONTROL_TYPE';
+      throw err;
+    }
+
+    const { rows: updated } = await db.query(
+      `UPDATE private_purchase_requests
+          SET supply_control_type = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING id, offer_kind, supply_control_type, status`,
+      [derived, purchaseId]
+    );
+
+    try {
+      await notificationManager.sendNotification({
+        userId: row.created_by,
+        customTitle: 'Control de insumos activado',
+        customMessage: `La solicitud quedó en modo "${derived === 'bc_maximums' ? 'Máximos del BC' : derived === 'commercial_deliverables' ? 'Entregables comerciales' : 'Sin control de insumos'}".`,
+        type: 'info',
+        source: 'private_purchase_supply_control',
+        priority: 1,
+        data: { purchase_id: purchaseId, supply_control_type: derived },
+        email: true,
+        chat: false,
+      });
+    } catch (notifyErr) {
+      logger.warn({ notifyErr, purchaseId }, '[PRIVATE_PURCHASE] No se pudo notificar activación de control de insumos');
+    }
+
+    return updated[0];
+  }
+
+  // ----------------------------------------------------------
+  // WORKFLOW ALIGNMENT — serial_status
+  // ----------------------------------------------------------
+
+  async registerSerial(purchaseId, user, { serialNumber, unitId = null } = {}) {
+    const { rows } = await db.query(
+      `SELECT id, serial_status, status, created_by, client_snapshot, equipment FROM private_purchase_requests WHERE id = $1 LIMIT 1`,
+      [purchaseId]
+    );
+    if (!rows.length) {
+      const err = new Error('Solicitud de compra privada no encontrada');
+      err.status = 404;
+      err.code = 'PRIVATE_PURCHASE_NOT_FOUND';
+      throw err;
+    }
+    const row = rows[0];
+
+    if (row.serial_status !== 'received_pending_serial') {
+      const err = new Error(
+        `El serial solo se registra cuando el equipo ha sido recibido físicamente. Estado actual: ${row.serial_status || 'not_applicable_yet'}`
+      );
+      err.status = 409;
+      err.code = 'SERIAL_NOT_ALLOWED_YET';
+      err.details = {
+        current_serial_status: row.serial_status || 'not_applicable_yet',
+        required_serial_status: 'received_pending_serial',
+        hint: 'Primero registra la llegada física del equipo (mark-equipment-arrived).',
+      };
+      throw err;
+    }
+
+    if (!serialNumber || !String(serialNumber).trim()) {
+      const err = new Error('El número de serie es obligatorio');
+      err.status = 400;
+      err.code = 'SERIAL_NUMBER_REQUIRED';
+      throw err;
+    }
+
+    const { rows: updated } = await db.query(
+      `UPDATE private_purchase_requests
+          SET serial_status = 'serial_registered',
+              extra = COALESCE(extra, '{}'::jsonb) || jsonb_build_object(
+                'serial_number', $1::text,
+                'serial_registered_at', NOW()::text,
+                'serial_registered_by', $2::integer,
+                'unit_id', $3::text
+              ),
+              updated_at = NOW()
+        WHERE id = $4
+        RETURNING id, serial_status, extra, status`,
+      [
+        String(serialNumber).trim(),
+        user?.id || null,
+        unitId ? String(unitId) : null,
+        purchaseId,
+      ]
+    );
+
+    try {
+      await notificationManager.sendNotification({
+        userId: row.created_by,
+        customTitle: 'Número de serie registrado',
+        customMessage: `Serie ${serialNumber} registrada para la solicitud de compra privada.`,
+        type: 'success',
+        source: 'private_purchase_serial',
+        priority: 1,
+        data: { purchase_id: purchaseId, serial_number: serialNumber },
+        email: true,
+        chat: false,
+      });
+    } catch (notifyErr) {
+      logger.warn({ notifyErr, purchaseId }, '[PRIVATE_PURCHASE] No se pudo notificar registro de serial');
+    }
+
+    return updated[0];
+  }
+
+  // ----------------------------------------------------------
+  // WORKFLOW ALIGNMENT — notificación supply bloqueado
+  // ----------------------------------------------------------
+
+  async notifySupplyBlocked(purchaseId, { itemName, maxQuantity, sentQty, requestedBy } = {}) {
+    try {
+      const { rows } = await db.query(
+        `SELECT created_by FROM private_purchase_requests WHERE id = $1 LIMIT 1`,
+        [purchaseId]
+      );
+      const userIds = [rows[0]?.created_by, requestedBy].filter(Boolean);
+      await Promise.all(userIds.map((userId) =>
+        notificationManager.sendNotification({
+          userId,
+          customTitle: 'Solicitud de insumo bloqueada',
+          customMessage: `No se puede solicitar "${itemName}": saldo agotado. Máximo: ${maxQuantity}, Enviado: ${sentQty}.`,
+          type: 'warning',
+          source: 'private_purchase_supply_blocked',
+          priority: 2,
+          data: { purchase_id: purchaseId, item_name: itemName, max_quantity: maxQuantity, sent_qty: sentQty },
+          email: true,
+          chat: true,
+        })
+      ));
+    } catch (err) {
+      logger.warn({ err, purchaseId }, '[PRIVATE_PURCHASE] No se pudo notificar bloqueo de insumo');
+    }
+  }
+
 }
 
 module.exports = new PrivatePurchasesService();

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Departamento de TI\\\\Desktop\\\\PROYECTOS\\\\FamSPI\\\\spi_front\\\\src\\\\modules\\\\servicio\" -Recurse -Force)",
+      "Bash(grep -E \"\\\\.\\(jsx?\\)$\")",
+      "Bash(python -c ' *)",
+      "Bash(1[0-2][0-9]\" | head -40)",
+      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\Departamento de TI\\\\Desktop\\\\PROYECTOS\\\\FamSPI\\\\backend\\\\src\\\\db\\\\migrations\\\\\" | Where-Object { $_.Name -match \"^0\\(9[5-9]|[0-9]{2}[0-9]\\)_|^1\\(0[0-9]|1[0-9]|2[0-9]\\)_\" } | Select-Object Name | Sort-Object Name)"
+    ]
+  }
+}

@@ -2,10 +2,11 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { enqueueIntegrationEvent } = require("../integrations/integrationOutbox.service");
 
-const DELIVERY_REQUEST_STATUSES = Object.freeze(["pending", "confirmed", "cancelled"]);
+const DELIVERY_REQUEST_STATUSES = Object.freeze(["pending", "ops_approved", "confirmed", "cancelled"]);
 
 // "Open" requests reserve saldo but are not yet confirmed into delivered_qty.
-const OPEN_REQUEST_STATUSES = Object.freeze(["pending"]);
+// Both pending and ops_approved hold the reservation until logistics dispatches.
+const OPEN_REQUEST_STATUSES = Object.freeze(["pending", "ops_approved"]);
 const EPSILON = 1e-9;
 
 const buildError = (
@@ -381,12 +382,14 @@ async function createDeliveryRequest({
   asOfDate = null,
   notes = null,
   actorUser = null,
+  privatePurchaseId = null,
 } = {}) {
   const normalizedCeilingId = asPositiveInteger(ceilingId, "ceilingId");
   const normalizedLines = normalizeLinesPayload(lines);
   const normalizedAsOfDate = asOfDate ? asDateOnly(asOfDate, "asOfDate") : new Date().toISOString().slice(0, 10);
   const normalizedNotes = asTrimmedText(notes, null);
   const actorUserId = getActorId(actorUser);
+  const normalizedPrivatePurchaseId = asTrimmedText(privatePurchaseId, null);
 
   const client = await db.getClient();
   try {
@@ -474,6 +477,20 @@ async function createDeliveryRequest({
       dbClient: client,
     });
 
+    // Vincular el ceiling a la compra privada si se provee y aún no está vinculado.
+    // Esto permite que delivery_ceiling.private_purchase_id se establezca la primera vez
+    // que Comercial genera una solicitud de insumo para una compra privada.
+    if (normalizedPrivatePurchaseId) {
+      await client.query(
+        `UPDATE public.delivery_ceiling
+            SET private_purchase_id = $1,
+                updated_at = NOW()
+          WHERE id = $2
+            AND private_purchase_id IS NULL`,
+        [normalizedPrivatePurchaseId, normalizedCeilingId],
+      );
+    }
+
     await client.query("COMMIT");
     return {
       request: mapRequest(createdRequest),
@@ -486,6 +503,7 @@ async function createDeliveryRequest({
             public_delivery_plan_id: publicPlanContext.public_delivery_plan_id,
           }
         : null,
+      private_purchase_id: normalizedPrivatePurchaseId,
     };
   } catch (error) {
     try {
@@ -531,10 +549,10 @@ async function confirmDeliveryRequest({
     }
 
     const requestRow = requestRows[0];
-    if (requestRow.status !== "pending") {
-      throw buildError("Solo se pueden confirmar solicitudes en estado pending", {
+    if (requestRow.status !== "ops_approved") {
+      throw buildError("Solo se pueden confirmar solicitudes aprobadas por operaciones", {
         status: 409,
-        code: "DELIVERY_REQUEST_NOT_PENDING",
+        code: "DELIVERY_REQUEST_NOT_OPS_APPROVED",
         details: { current_status: requestRow.status },
       });
     }
@@ -631,6 +649,26 @@ async function confirmDeliveryRequest({
       [normalizedRequestId, actorUserId],
     );
 
+    // For public-purchase ceilings: advance the equipment_purchase_request
+    // from contract_available → waiting_dispatch. The delivery_request being
+    // confirmed is the canonical signal that delivery was committed via the
+    // public_delivery_plan; the legacy planning routes are removed (CHG-08).
+    const { rows: ceilingRows } = await client.query(
+      `SELECT business_case_id, purchase_type FROM public.delivery_ceiling WHERE id = $1`,
+      [ceilingId],
+    );
+    if (ceilingRows.length && ceilingRows[0].purchase_type === "public") {
+      const purchaseRequestId = ceilingRows[0].business_case_id;
+      await client.query(
+        `UPDATE public.equipment_purchase_requests
+            SET status     = 'waiting_dispatch',
+                updated_at = NOW()
+          WHERE id = $1
+            AND status = 'contract_available'`,
+        [purchaseRequestId],
+      );
+    }
+
     await enqueueIntegrationEvent({
       eventType: "delivery_request.confirmed",
       payload: {
@@ -670,9 +708,174 @@ async function confirmDeliveryRequest({
   }
 }
 
+async function opsApproveRequest({ requestId, actorUser = null } = {}) {
+  const normalizedRequestId = asPositiveInteger(requestId, "requestId");
+  const actorUserId = getActorId(actorUser);
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    const { rows } = await client.query(
+      `SELECT * FROM public.delivery_request WHERE id = $1 FOR UPDATE`,
+      [normalizedRequestId],
+    );
+
+    if (!rows.length) {
+      throw buildError("delivery_request no encontrado", {
+        status: 404,
+        code: "DELIVERY_REQUEST_NOT_FOUND",
+      });
+    }
+
+    const requestRow = rows[0];
+    if (requestRow.status !== "pending") {
+      throw buildError("Solo se pueden aprobar solicitudes en estado pendiente", {
+        status: 409,
+        code: "DELIVERY_REQUEST_NOT_PENDING",
+        details: { current_status: requestRow.status },
+      });
+    }
+
+    await getCeilingForUpdate(client, Number(requestRow.delivery_ceiling_id));
+
+    const { rows: updatedRows } = await client.query(
+      `UPDATE public.delivery_request
+          SET status           = 'ops_approved',
+              ops_approved_by  = $2,
+              ops_approved_at  = NOW(),
+              updated_at       = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [normalizedRequestId, actorUserId],
+    );
+
+    await client.query("COMMIT");
+    return { request: mapRequest(updatedRows[0]) };
+  } catch (error) {
+    try { await client.query("ROLLBACK"); } catch (_) { /* ignore */ }
+    throw parsePgError(error);
+  } finally {
+    client.release();
+  }
+}
+
+async function cancelDeliveryRequest({ requestId, actorUser = null } = {}) {
+  const normalizedRequestId = asPositiveInteger(requestId, "requestId");
+  const actorUserId = getActorId(actorUser);
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    const { rows } = await client.query(
+      `SELECT * FROM public.delivery_request WHERE id = $1 FOR UPDATE`,
+      [normalizedRequestId],
+    );
+
+    if (!rows.length) {
+      throw buildError("delivery_request no encontrado", { status: 404, code: "DELIVERY_REQUEST_NOT_FOUND" });
+    }
+
+    const requestRow = rows[0];
+    if (requestRow.status === "confirmed" || requestRow.status === "cancelled") {
+      throw buildError("No se puede cancelar una solicitud ya confirmada o cancelada", {
+        status: 409,
+        code: "DELIVERY_REQUEST_ALREADY_TERMINAL",
+        details: { current_status: requestRow.status },
+      });
+    }
+
+    const { rows: updatedRows } = await client.query(
+      `UPDATE public.delivery_request
+          SET status     = 'cancelled',
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [normalizedRequestId, actorUserId],
+    );
+    void actorUserId;
+
+    await client.query("COMMIT");
+    return { request: mapRequest(updatedRows[0]) };
+  } catch (error) {
+    try { await client.query("ROLLBACK"); } catch (_) { /* ignore */ }
+    throw parsePgError(error);
+  } finally {
+    client.release();
+  }
+}
+
+async function listDeliveryRequests({ ceilingId = null, status = null, limit = 100 } = {}) {
+  const safeCeilingId = ceilingId ? asPositiveInteger(ceilingId, "ceilingId") : null;
+  const safeLimit = Math.min(200, Math.max(1, Number.parseInt(String(limit || 100), 10) || 100));
+
+  const params = [];
+  const where = [];
+
+  if (safeCeilingId) {
+    params.push(safeCeilingId);
+    where.push(`dr.delivery_ceiling_id = $${params.length}`);
+  }
+  if (status) {
+    params.push(String(status).trim());
+    where.push(`dr.status = $${params.length}`);
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+  const { rows: requestRows } = await db.query(
+    `SELECT dr.*
+       FROM public.delivery_request dr
+       ${whereSql}
+       ORDER BY dr.created_at DESC
+       LIMIT $${params.length + 1}`,
+    [...params, safeLimit],
+  );
+
+  if (!requestRows.length) return [];
+
+  const requestIds = requestRows.map((r) => Number(r.id));
+  const { rows: lineRows } = await db.query(
+    `SELECT
+       rl.*,
+       cl.item_type,
+       cl.unit,
+       cl.max_quantity,
+       cl.delivered_qty
+     FROM public.delivery_request_line rl
+     INNER JOIN public.delivery_ceiling_line cl ON cl.id = rl.delivery_ceiling_line_id
+     WHERE rl.delivery_request_id = ANY($1::int[])`,
+    [requestIds],
+  );
+
+  const linesByRequest = new Map();
+  lineRows.forEach((row) => {
+    const reqId = Number(row.delivery_request_id);
+    if (!linesByRequest.has(reqId)) linesByRequest.set(reqId, []);
+    linesByRequest.get(reqId).push({
+      id: Number(row.id),
+      delivery_ceiling_line_id: Number(row.delivery_ceiling_line_id),
+      requested_qty: Number(row.requested_qty),
+      item_type: row.item_type,
+      unit: row.unit,
+    });
+  });
+
+  return requestRows.map((row) => ({
+    ...mapRequest(row),
+    ops_approved_by: row.ops_approved_by ? Number(row.ops_approved_by) : null,
+    ops_approved_at: row.ops_approved_at || null,
+    lines: linesByRequest.get(Number(row.id)) || [],
+  }));
+}
+
 module.exports = {
   DELIVERY_REQUEST_STATUSES,
   OPEN_REQUEST_STATUSES,
   createDeliveryRequest,
+  opsApproveRequest,
+  cancelDeliveryRequest,
   confirmDeliveryRequest,
+  listDeliveryRequests,
 };

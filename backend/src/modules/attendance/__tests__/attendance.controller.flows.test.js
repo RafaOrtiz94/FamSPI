@@ -273,6 +273,60 @@ describe("attendance flow separation", () => {
     );
   });
 
+  test("accepts explicit post visit action when closing field visit", async () => {
+    const req = {
+      user: { id: 17, email: "field.exit@fam.com" },
+      body: {
+        location: "-2.170998,-79.922359",
+        location_accuracy: 14,
+        prospect_name: "Prospecto B",
+        post_visit_action: "return_to_office",
+      },
+    };
+    const res = createRes();
+    const visit = { id: 603, status: "visited", prospect_name: "Prospecto B" };
+
+    db.query
+      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
+      .mockResolvedValueOnce({ rows: [] }) // no active operational flow before visit exit
+      .mockResolvedValueOnce({ rows: [visit] }) // update prospect visit
+      .mockResolvedValueOnce({ rows: [] }); // no active operational flow after visit exit
+
+    await controller.clockOutField(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: true,
+        message: expect.stringContaining("retorno"),
+        nextStep: "retorno_oficina_viaje",
+        postVisitAction: "return_to_office",
+      }),
+    );
+  });
+
+  test("rejects invalid post visit action when closing field visit", async () => {
+    const req = {
+      user: { id: 17, email: "field.exit@fam.com" },
+      body: {
+        location: "-2.170998,-79.922359",
+        prospect_name: "Prospecto B",
+        post_visit_action: "cerrar_jornada",
+      },
+    };
+    const res = createRes();
+
+    await controller.clockOutField(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        code: "INVALID_POST_VISIT_ACTION",
+      }),
+    );
+  });
+
   test("returns LOCATION_REQUIRED_RETRY when location is missing in clock-in", async () => {
     const req = {
       user: { id: 18, email: "noloc@fam.com" },

@@ -124,6 +124,10 @@ const formatDuration = (seconds = 0) => {
   return rest ? `${hours} h ${rest} min` : `${hours} h`;
 };
 
+const surfaceClass = "rounded-2xl border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)]";
+const controlClass =
+  "min-h-11 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition-colors focus:border-blue-600 focus:ring-2 focus:ring-sky-500 focus:ring-offset-2";
+
 const toDateKey = (value) => {
   if (!value) return "";
   if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
@@ -607,8 +611,10 @@ const ScheduleCalendarView = ({
 
   if (!schedule) {
     return (
-      <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">
-        Selecciona o crea un cronograma para comenzar.
+      <div className="flex min-h-[240px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center">
+        <FiCalendar className="mb-3 h-10 w-10 text-slate-300" />
+        <p className="text-sm font-semibold text-slate-900">No hay cronograma activo</p>
+        <p className="mt-1 max-w-md text-sm text-slate-500">Selecciona o crea un cronograma para comenzar.</p>
       </div>
     );
   }
@@ -644,30 +650,38 @@ const ScheduleCalendarView = ({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="flex items-center gap-2 text-xl font-bold text-slate-900">
-            <FiCalendar className="text-slate-600" size={20} />
-            Calendario {schedule.month}/{schedule.year}
-          </h3>
-          <p className="text-sm text-slate-600">Selecciona el dia y gestiona visitas en tiempo real</p>
+      <section className={`${surfaceClass} overflow-hidden`}>
+        <div className="bg-slate-900 px-4 py-4 text-white sm:px-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h3 className="flex items-center gap-2 text-xl font-bold text-white">
+                <FiCalendar className="text-slate-200" size={20} />
+                Calendario {schedule.month}/{schedule.year}
+              </h3>
+              <p className="mt-1 text-sm text-slate-300">Selecciona el dia y gestiona visitas en tiempo real</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <ScheduleStatusBadge status={schedule.status} />
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <Button
             size="sm"
             variant="secondary"
             icon={FiNavigation}
             onClick={() => requestOptimizedRoute(selectedDate)}
             disabled={!selectedDate || routeLoading}
+            className="w-full sm:w-auto"
           >
             {routeLoading ? "Optimizando..." : "Optimizar ruta"}
           </Button>
-          <ScheduleStatusBadge status={schedule.status} />
+          <p className="text-xs text-slate-500">La optimizacion calcula orden, distancia y tiempo estimado.</p>
         </div>
-      </div>
+      </section>
 
       {routeError ? (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{routeError}</div>
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{routeError}</div>
       ) : null}
 
       {calendarEntries.length === 0 ? (
@@ -677,8 +691,8 @@ const ScheduleCalendarView = ({
         </div>
       ) : null}
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
+      <section className={`${surfaceClass} p-4 sm:p-5`}>
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Seleccion de dia</p>
           <input
             type="date"
@@ -686,7 +700,7 @@ const ScheduleCalendarView = ({
             min={periodStart}
             max={periodEnd}
             onChange={(event) => setSelectedDate(event.target.value)}
-            className="rounded-lg border border-slate-200 px-2 py-1 text-sm"
+            className={`${controlClass} w-full sm:w-auto`}
           />
         </div>
         <div className="mb-2 grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-slate-500">
@@ -700,7 +714,7 @@ const ScheduleCalendarView = ({
         </div>
         <div className="grid grid-cols-7 gap-1">
           {Array.from({ length: firstDayOffset }, (_, index) => (
-            <span key={`offset-${index}`} className="h-8 rounded-md bg-transparent" />
+            <span key={`offset-${index}`} className="h-10 rounded-md bg-transparent" />
           ))}
           {calendarDays.map((dateKey) => {
             const dayNumber = Number(dateKey.slice(-2));
@@ -712,7 +726,7 @@ const ScheduleCalendarView = ({
                 key={dateKey}
                 type="button"
                 onClick={() => setSelectedDate(dateKey)}
-                className={`h-8 rounded-md border text-xs transition ${
+                className={`min-h-10 rounded-lg border text-xs transition ${
                   isSelected
                     ? "border-cyan-300 bg-cyan-50 font-semibold text-cyan-700"
                     : "border-slate-200 text-slate-700 hover:border-cyan-200 hover:bg-cyan-50/40"
@@ -727,7 +741,7 @@ const ScheduleCalendarView = ({
             );
           })}
         </div>
-      </div>
+      </section>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {calendarEntries.map(([date, visits]) => {
@@ -763,14 +777,14 @@ const ScheduleCalendarView = ({
               layout
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition ${
+              className={`overflow-hidden rounded-2xl border bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition ${
                 isSelected ? "border-cyan-300 ring-2 ring-cyan-100" : "border-slate-200"
               }`}
             >
               <button
                 type="button"
                 onClick={() => setSelectedDate(date)}
-                className="w-full border-b border-slate-200 bg-slate-50 px-4 py-3 text-left"
+                className="w-full cursor-pointer border-b border-slate-200 bg-slate-50 px-4 py-3 text-left"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -797,13 +811,13 @@ const ScheduleCalendarView = ({
               </button>
 
               <div className="space-y-3 p-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <Popover className="relative">
                     {({ close }) => (
                       <>
                         <Popover.Button
                           onClick={() => setQuickAddDate(date)}
-                          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          className="min-h-11 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                         >
                           Quick add
                         </Popover.Button>
@@ -905,9 +919,9 @@ const ScheduleCalendarView = ({
 
                         {/* Solo mostrar edicion si NO esta bloqueado y es borrador/rechazado */}
                         {!isLocked && (
-                          <div className="grid grid-cols-1 gap-2 mb-2">
+                          <div className="mb-2 grid grid-cols-1 gap-2">
                             <select
-                              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm disabled:opacity-60"
+                              className="min-h-11 w-full rounded-xl border border-slate-200 px-2 py-1.5 text-sm disabled:opacity-60"
                               value={visit.client_request_id || ""}
                               onChange={(event) => handleChangeClient(visit, event.target.value)}
                               disabled={isLocked}
@@ -930,9 +944,9 @@ const ScheduleCalendarView = ({
                               })}
                             </select>
 
-                            <div className="flex items-center gap-2">
+                            <div className="grid grid-cols-1 gap-2">
                               <select
-                                className="flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-sm disabled:opacity-60"
+                                className="min-h-11 flex-1 rounded-xl border border-slate-200 px-2 py-1.5 text-sm disabled:opacity-60"
                                 value={visit.priority || 1}
                                 onChange={(event) => handleChangePriority(visit, event.target.value)}
                                 disabled={isLocked}
@@ -942,14 +956,14 @@ const ScheduleCalendarView = ({
                                 <option value={3}>Alta</option>
                               </select>
                               {onRemoveVisit && (
-                                <Button
-                                  size="sm"
-                                  variant="danger"
-                                  icon={FiTrash2}
+                                <button
+                                  type="button"
                                   onClick={() => onRemoveVisit(schedule.id, visit.id)}
+                                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
                                 >
-                                  Quitar
-                                </Button>
+                                  <FiTrash2 size={14} />
+                                  Quitar visita
+                                </button>
                               )}
                             </div>
                           </div>
@@ -1005,7 +1019,7 @@ const ScheduleCalendarView = ({
         })}
       </div>
 
-      <Card className="border border-slate-200">
+      <Card className="border border-slate-200 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
         <div className="p-4 text-xs text-slate-600">
           <p className="font-semibold text-slate-800">Dia seleccionado: {selectedDate ? getCurrentDateLabel(selectedDate) : "-"}</p>
           <p className="mt-1">Las alertas logisticas se activan cuando la distancia entre visitas supera 250 km en un mismo dia.</p>
@@ -1025,7 +1039,7 @@ const ScheduleCalendarView = ({
               setSearchByDate((prev) => ({ ...prev, [quickAddDate]: event.target.value }))
             }
             placeholder="Buscar cliente por nombre, correo, ciudad o ID"
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            className={`${controlClass} w-full`}
           />
           <div className="max-h-[56vh] space-y-2 overflow-y-auto">
             {quickAddClients.length ? (
@@ -1041,7 +1055,7 @@ const ScheduleCalendarView = ({
                     key={client.id}
                     type="button"
                     onClick={() => handleQuickAdd(quickAddDate, client)}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-left text-sm transition hover:bg-slate-50"
                   >
                     <p className="font-medium text-slate-900">{label}</p>
                     <p className="text-xs text-slate-500">
@@ -1051,7 +1065,7 @@ const ScheduleCalendarView = ({
                 );
               })
             ) : (
-              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">
+              <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">
                 No se encontraron clientes.
               </p>
             )}
@@ -1066,7 +1080,7 @@ const ScheduleCalendarView = ({
         maxWidth="max-w-md"
       >
         <div className="space-y-4">
-          <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+          <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
             <p className="font-semibold text-slate-800">Visita:</p>
             <p>{justifyingVisit ? resolveVisitLabel(justifyingVisit, findClient(justifyingVisit.client_request_id)) : ""}</p>
             <p className="mt-1 font-semibold text-slate-800">Fecha planificada:</p>
@@ -1074,11 +1088,11 @@ const ScheduleCalendarView = ({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="mb-1 block text-sm font-medium text-slate-700">
               Motivo del incumplimiento
             </label>
             <textarea
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+              className={`${controlClass} w-full`}
               rows={4}
               value={justificationText}
               onChange={(e) => setJustificationText(e.target.value)}
@@ -1106,4 +1120,3 @@ const ScheduleCalendarView = ({
 };
 
 export default ScheduleCalendarView;
-

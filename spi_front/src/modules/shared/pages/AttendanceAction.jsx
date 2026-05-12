@@ -24,6 +24,7 @@ import {
   marcarVisitaSalida,
   getTodayAttendance,
   getActiveException,
+  updateExceptionStatus,
 } from "../../../core/api/attendanceApi";
 import { getLocationForAction, startLocationPrewarm, stopLocationPrewarm } from "../../../shared/utils/attendanceLocationCache";
 import { fetchClients } from "../../../core/api/clientsApi";
@@ -41,16 +42,23 @@ const resolveShortcutParam = (params, keys = []) => {
   return "";
 };
 
+const parseOptionalBooleanParam = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (["1", "true", "si", "sí", "yes"].includes(normalized)) return true;
+  if (["0", "false", "no"].includes(normalized)) return false;
+  return null;
+};
+
 const parseActionParams = (search) => {
   const params = new URLSearchParams(search || "");
+  const returnToOfficeParam = resolveShortcutParam(params, ["return_to_office", "retorno_oficina", "returnToOffice"]);
   return {
     clientId: resolveShortcutParam(params, ["client_id", "cliente_id", "clientId"]),
     prospectName: resolveShortcutParam(params, ["prospect_name", "prospecto", "prospectName"]),
     description: resolveShortcutParam(params, ["motivo", "descripcion", "description"]),
     observations: resolveShortcutParam(params, ["observaciones", "observacion", "observations", "obs"]),
-    returnToOffice: ["1", "true", "si", "yes"].includes(
-      resolveShortcutParam(params, ["return_to_office", "retorno_oficina", "returnToOffice"]).toLowerCase()
-    ),
+    returnToOffice: parseOptionalBooleanParam(returnToOfficeParam),
     returnUrl: resolveShortcutParam(params, ["return_url", "returnUrl", "redirect"]),
   };
 };
@@ -99,10 +107,9 @@ const AttendanceAction = () => {
   const { user, loading: authLoading } = useAuth();
   const { showToast } = useUI();
 
-  const [status, setStatus] = useState("initializing"); // initializing, geolocating, ready, processing, success, error
+  const [status, setStatus] = useState("initializing"); // initializing, geolocating, processing, success, error
   const [message, setMessage] = useState("");
   const [errorDetails, setErrorDetails] = useState("");
-  const [resolvedLocation, setResolvedLocation] = useState(null);
   const [availableClients, setAvailableClients] = useState([]);
   const [loadingClients, setLoadingClients] = useState(false);
   const [manualClientId, setManualClientId] = useState("");
@@ -110,13 +117,14 @@ const AttendanceAction = () => {
   const [manualProspectName, setManualProspectName] = useState("");
   const [manualReason, setManualReason] = useState("");
   const [manualObservations, setManualObservations] = useState("");
+  const [manualPostVisitAction, setManualPostVisitAction] = useState("");
   const [manualStepError, setManualStepError] = useState("");
   const [manualSubmitNonce, setManualSubmitNonce] = useState(0);
   const processedRef = useRef(false);
   const executionKeyRef = useRef("");
   const actionParams = parseActionParams(location.search);
   const executionKey = `${action || ""}|${location.search || ""}|${location.key || ""}|${user?.id || ""}`;
-  const ensureExceptionFlow = async (expectedFlow) => {
+  const ensureExceptionFlow = useCallback(async (expectedFlow) => {
     const activeResponse = await getActiveException();
     const activeException = activeResponse?.data;
     const operationalFlow = isOperationalFlow(activeException);
@@ -137,9 +145,9 @@ const AttendanceAction = () => {
     if (operationalFlow) {
       throw new Error("La salida activa actual es operacional. Usa el flujo operacional para continuar.");
     }
-  };
+  }, []);
 
-  const resolveVisitExitPayload = async (params = {}) => {
+  const resolveVisitExitPayload = useCallback(async (params = {}) => {
     const directClientId = params.clientId ? Number(params.clientId) : null;
     const directProspectName = String(params.prospectName || "").trim();
     if (directClientId || directProspectName) {
@@ -163,77 +171,77 @@ const AttendanceAction = () => {
       // Allow backend auto-resolution of latest active visit.
       return {};
     }
-  };
+  }, []);
 
-  const ACTION_MAP = {
+  const ACTION_MAP = useMemo(() => ({
     entrada: {
-      fn: async (currentLoc) => marcarEntrada(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarEntrada(currentLoc, markMeta),
       label: "Entrada",
       syncTarget: "entry",
       requiresParams: false,
       icon: <FiClock className="text-blue-500" />,
     },
     "almuerzo-salida": {
-      fn: async (currentLoc) => marcarAlmuerzoSalida(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarAlmuerzoSalida(currentLoc, markMeta),
       label: "Salida a almuerzo",
       syncTarget: "lunch_start",
       requiresParams: false,
       icon: <FiClock className="text-orange-500" />,
     },
     "salida-almuerzo": {
-      fn: async (currentLoc) => marcarAlmuerzoSalida(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarAlmuerzoSalida(currentLoc, markMeta),
       label: "Salida a almuerzo",
       syncTarget: "lunch_start",
       requiresParams: false,
       icon: <FiClock className="text-orange-500" />,
     },
     almuerzo: {
-      fn: async (currentLoc) => marcarAlmuerzoSalida(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarAlmuerzoSalida(currentLoc, markMeta),
       label: "Salida a almuerzo",
       syncTarget: "lunch_start",
       requiresParams: false,
       icon: <FiClock className="text-orange-500" />,
     },
     "almuerzo-entrada": {
-      fn: async (currentLoc) => marcarAlmuerzoEntrada(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarAlmuerzoEntrada(currentLoc, markMeta),
       label: "Entrada de almuerzo",
       syncTarget: "lunch_end",
       requiresParams: false,
       icon: <FiClock className="text-green-500" />,
     },
     "entrada-almuerzo": {
-      fn: async (currentLoc) => marcarAlmuerzoEntrada(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarAlmuerzoEntrada(currentLoc, markMeta),
       label: "Entrada de almuerzo",
       syncTarget: "lunch_end",
       requiresParams: false,
       icon: <FiClock className="text-green-500" />,
     },
     salida: {
-      fn: async (currentLoc) => marcarSalida(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarSalida(currentLoc, markMeta),
       label: "Salida final",
       syncTarget: "exit",
       requiresParams: false,
       icon: <FiClock className="text-red-500" />,
     },
     "salida-final": {
-      fn: async (currentLoc) => marcarSalida(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarSalida(currentLoc, markMeta),
       label: "Salida final",
       syncTarget: "exit",
       requiresParams: false,
       icon: <FiClock className="text-red-500" />,
     },
     "salida-imprevista": {
-      fn: async (currentLoc, params) =>
-        marcarSalidaImprevista(currentLoc, params.description || "Salida imprevista via atajo"),
+      fn: async (currentLoc, params, markMeta) =>
+        marcarSalidaImprevista(currentLoc, params.description || "Salida imprevista via atajo", markMeta),
       label: "Salida inesperada",
       syncTarget: "start",
       requiresParams: false,
       icon: <FiClock className="text-rose-500" />,
     },
     "regreso-imprevisto": {
-      fn: async (currentLoc) => {
+      fn: async (currentLoc, _params, markMeta) => {
         await ensureExceptionFlow("unexpected");
-        return marcarRegresoImprevisto(currentLoc);
+        return marcarRegresoImprevisto(currentLoc, markMeta);
       },
       label: "Entrada inesperada",
       syncTarget: "return",
@@ -241,9 +249,9 @@ const AttendanceAction = () => {
       icon: <FiClock className="text-rose-500" />,
     },
     "llegada-imprevista": {
-      fn: async (currentLoc) => {
+      fn: async (currentLoc, _params, markMeta) => {
         await ensureExceptionFlow("unexpected");
-        return marcarLlegadaImprevista(currentLoc);
+        return marcarLlegadaImprevista(currentLoc, markMeta);
       },
       label: "Llegada al lugar inesperado",
       syncTarget: "onsite",
@@ -251,9 +259,9 @@ const AttendanceAction = () => {
       icon: <FiClock className="text-rose-500" />,
     },
     "retorno-imprevisto": {
-      fn: async (currentLoc) => {
+      fn: async (currentLoc, _params, markMeta) => {
         await ensureExceptionFlow("unexpected");
-        return marcarRetornoImprevisto(currentLoc);
+        return marcarRetornoImprevisto(currentLoc, markMeta);
       },
       label: "Salida del lugar (retorno oficina)",
       syncTarget: "returning",
@@ -261,17 +269,17 @@ const AttendanceAction = () => {
       icon: <FiClock className="text-rose-500" />,
     },
     "salida-oficina": {
-      fn: async (currentLoc, params) =>
-        marcarSalidaOficina(currentLoc, params.description || "Salida de oficina o viaje via atajo"),
+      fn: async (currentLoc, params, markMeta) =>
+        marcarSalidaOficina(currentLoc, params.description || "Salida de oficina o viaje via atajo", markMeta),
       label: "Salida oficina o viaje",
       syncTarget: "start",
       requiresParams: false,
       icon: <FiClock className="text-amber-500" />,
     },
     "entrada-oficina": {
-      fn: async (currentLoc) => {
+      fn: async (currentLoc, _params, markMeta) => {
         await ensureExceptionFlow("operational");
-        return marcarEntradaOficina(currentLoc);
+        return marcarEntradaOficina(currentLoc, markMeta);
       },
       label: "Entrada oficina o viaje",
       syncTarget: "return",
@@ -279,17 +287,17 @@ const AttendanceAction = () => {
       icon: <FiClock className="text-amber-500" />,
     },
     "salida-campo": {
-      fn: async (currentLoc, params) =>
-        marcarSalidaCampo(currentLoc, params.description || "Salida de campo via atajo"),
+      fn: async (currentLoc, params, markMeta) =>
+        marcarSalidaCampo(currentLoc, params.description || "Salida de campo via atajo", markMeta),
       label: "Salida de campo",
       syncTarget: "start",
       requiresParams: false,
       icon: <FiClock className="text-amber-500" />,
     },
     "entrada-campo": {
-      fn: async (currentLoc) => {
+      fn: async (currentLoc, _params, markMeta) => {
         await ensureExceptionFlow("operational");
-        return marcarEntradaCampo(currentLoc);
+        return marcarEntradaCampo(currentLoc, markMeta);
       },
       label: "Entrada de campo",
       syncTarget: "return",
@@ -297,9 +305,9 @@ const AttendanceAction = () => {
       icon: <FiClock className="text-amber-500" />,
     },
     "llegada-destino": {
-      fn: async (currentLoc) => {
+      fn: async (currentLoc, _params, markMeta) => {
         await ensureExceptionFlow("operational");
-        return marcarLlegadaDestino(currentLoc);
+        return marcarLlegadaDestino(currentLoc, markMeta);
       },
       label: "Llegada a destino",
       syncTarget: "arrival",
@@ -307,22 +315,43 @@ const AttendanceAction = () => {
       icon: <FiMapPin className="text-amber-500" />,
     },
     "cierre-viaje": {
-      fn: async (currentLoc, params) => {
+      fn: async (currentLoc, params, markMeta) => {
         await ensureExceptionFlow("operational");
-        return marcarCierreViaje(currentLoc, params.description || "Cierre de viaje via atajo");
+        return marcarCierreViaje(currentLoc, params.description || "Cierre de viaje via atajo", markMeta);
       },
       label: "Cierre de viaje",
       syncTarget: "return",
       requiresParams: false,
       icon: <FiCheckCircle className="text-amber-500" />,
     },
+    "retorno-operacional": {
+      fn: async (currentLoc) => {
+        await ensureExceptionFlow("operational");
+        return updateExceptionStatus("RETURNING", currentLoc);
+      },
+      label: "Retorno operacional",
+      syncTarget: "returning",
+      requiresParams: false,
+      icon: <FiMapPin className="text-amber-500" />,
+    },
+    "regreso-operacional": {
+      fn: async (currentLoc) => {
+        await ensureExceptionFlow("operational");
+        return updateExceptionStatus("RETURNING", currentLoc);
+      },
+      label: "Retorno operacional",
+      syncTarget: "returning",
+      requiresParams: false,
+      icon: <FiMapPin className="text-amber-500" />,
+    },
     "cliente-entrada": {
-      fn: async (currentLoc, params) => {
+      fn: async (currentLoc, params, markMeta) => {
         if (!params.clientId && !params.prospectName) {
           throw new Error("Para entrada cliente debes enviar client_id o prospect_name en la URL.");
         }
         return marcarVisitaEntrada({
           location: currentLoc,
+          occurred_at: markMeta?.occurred_at,
           client_id: params.clientId ? Number(params.clientId) : undefined,
           prospect_name: params.prospectName || undefined,
           observations: params.observations || params.description || undefined,
@@ -334,12 +363,13 @@ const AttendanceAction = () => {
       icon: <FiClock className="text-violet-500" />,
     },
     "entrada-cliente": {
-      fn: async (currentLoc, params) => {
+      fn: async (currentLoc, params, markMeta) => {
         if (!params.clientId && !params.prospectName) {
           throw new Error("Para entrada cliente debes enviar client_id o prospect_name en la URL.");
         }
         return marcarVisitaEntrada({
           location: currentLoc,
+          occurred_at: markMeta?.occurred_at,
           client_id: params.clientId ? Number(params.clientId) : undefined,
           prospect_name: params.prospectName || undefined,
           observations: params.observations || params.description || undefined,
@@ -351,13 +381,15 @@ const AttendanceAction = () => {
       icon: <FiClock className="text-violet-500" />,
     },
     "cliente-salida": {
-      fn: async (currentLoc, params) => {
+      fn: async (currentLoc, params, markMeta) => {
         const visitScopePayload = await resolveVisitExitPayload(params);
         return marcarVisitaSalida({
           location: currentLoc,
+          occurred_at: markMeta?.occurred_at,
           ...visitScopePayload,
           observations: params.observations || params.description || undefined,
           return_to_office: params.returnToOffice,
+          post_visit_action: params.postVisitAction,
         });
       },
       label: "Salida cliente",
@@ -366,13 +398,15 @@ const AttendanceAction = () => {
       icon: <FiClock className="text-violet-500" />,
     },
     "salida-cliente": {
-      fn: async (currentLoc, params) => {
+      fn: async (currentLoc, params, markMeta) => {
         const visitScopePayload = await resolveVisitExitPayload(params);
         return marcarVisitaSalida({
           location: currentLoc,
+          occurred_at: markMeta?.occurred_at,
           ...visitScopePayload,
           observations: params.observations || params.description || undefined,
           return_to_office: params.returnToOffice,
+          post_visit_action: params.postVisitAction,
         });
       },
       label: "Salida cliente",
@@ -380,7 +414,7 @@ const AttendanceAction = () => {
       requiresParams: false,
       icon: <FiClock className="text-violet-500" />,
     },
-  };
+  }), [ensureExceptionFlow, resolveVisitExitPayload]);
 
   const config = ACTION_MAP[action];
 
@@ -404,6 +438,8 @@ const AttendanceAction = () => {
       "entrada-oficina": "Ciclo operacional cerrado correctamente.",
       "entrada-campo": "Ciclo operacional cerrado correctamente.",
       "cierre-viaje": "Viaje cerrado correctamente.",
+      "retorno-operacional": "Continúa con entrada oficina para cerrar el ciclo operacional.",
+      "regreso-operacional": "Continúa con entrada oficina para cerrar el ciclo operacional.",
       "cliente-entrada": "Continúa con salida de cliente al terminar la visita.",
       "entrada-cliente": "Continúa con salida de cliente al terminar la visita.",
       "cliente-salida": "Visita cerrada correctamente.",
@@ -432,13 +468,20 @@ const AttendanceAction = () => {
   const needsManualClientStep = Boolean(
     config?.requiresParams && !actionParams.clientId && !actionParams.prospectName
   );
+  const isClientExitAction = action === "cliente-salida" || action === "salida-cliente";
+  const needsPostVisitDecisionStep = Boolean(
+    isClientExitAction && actionParams.returnToOffice === null && !manualPostVisitAction
+  );
   const effectiveActionParams = useMemo(
     () => ({
       clientId: actionParams.clientId || manualClientId,
       prospectName: actionParams.prospectName || manualProspectName,
       description: actionParams.description || manualReason,
       observations: actionParams.observations || manualObservations,
-      returnToOffice: actionParams.returnToOffice,
+      returnToOffice: actionParams.returnToOffice ?? (manualPostVisitAction === "return_to_office"),
+      postVisitAction: actionParams.returnToOffice === null
+        ? manualPostVisitAction || undefined
+        : (actionParams.returnToOffice ? "return_to_office" : "continue_operation"),
     }),
     [
       actionParams.clientId,
@@ -450,6 +493,7 @@ const AttendanceAction = () => {
       manualProspectName,
       manualReason,
       manualObservations,
+      manualPostVisitAction,
     ]
   );
 
@@ -516,7 +560,7 @@ const AttendanceAction = () => {
       setStatus("initializing");
       setMessage("");
       setErrorDetails("");
-      setResolvedLocation(null);
+      setManualPostVisitAction("");
     }
   }, [executionKey]);
 
@@ -539,59 +583,11 @@ const AttendanceAction = () => {
     return () => stopLocationPrewarm();
   }, []);
 
-  useEffect(() => {
-    if (authLoading || !user || processedRef.current || !config) return;
-    if (needsManualClientStep && manualSubmitNonce === 0) return;
-
-    let cancelled = false;
-    const resolveLocationOnly = async () => {
-      processedRef.current = true;
-      setStatus("geolocating");
-      try {
-        const currentLoc = await withTimeout(
-          getLocationForAction(),
-          20000,
-          "GPS tardó demasiado en responder. Verifica permisos de ubicación y vuelve a intentar."
-        );
-        if (cancelled) return;
-        setResolvedLocation(currentLoc);
-        setStatus("ready");
-        setMessage("Ubicación lista. Confirma para marcar.");
-        setErrorDetails("");
-      } catch (err) {
-        if (!cancelled) {
-          const info = getAttendanceErrorInfo(err, "No se pudo obtener la ubicacion.", "error");
-          setStatus("error");
-          setMessage("No se pudo obtener tu ubicación.");
-          setErrorDetails(info.message || "Error desconocido");
-          showToast(info.message || "Error de red", info.type || "error");
-          processedRef.current = false;
-        }
-      }
-    };
-
-    resolveLocationOnly();
-    return () => { cancelled = true; };
-  }, [
-    action,
-    authLoading,
-    user,
-    config,
-    navigate,
-    showToast,
-    needsManualClientStep,
-    manualSubmitNonce,
-    effectiveActionParams,
-    actionParams.returnUrl,
-    resolveFriendlyDuplicateMessage,
-  ]);
-
-
-  const handleConfirmMark = async () => {
-    if (!resolvedLocation || !config) return;
+  const handleConfirmMark = useCallback(async (currentLoc, occurredAt) => {
+    if (!currentLoc || !config) return;
     setStatus("processing");
     try {
-      const response = await config.fn(resolvedLocation, effectiveActionParams);
+      const response = await config.fn(currentLoc, effectiveActionParams, { occurred_at: occurredAt || new Date().toISOString() });
       if (response?.ok) {
         setStatus("success");
         setMessage(response.message || `${config.label} registrada correctamente.`);
@@ -646,7 +642,68 @@ const AttendanceAction = () => {
       setErrorDetails(info.message || "Error desconocido");
       showToast(info.message || "Error de red", info.type || "error");
     }
-  };
+  }, [
+    action,
+    actionParams.returnUrl,
+    config,
+    effectiveActionParams,
+    navigate,
+    resolveFriendlyDuplicateMessage,
+    showToast,
+  ]);
+
+  useEffect(() => {
+    if (authLoading || !user || processedRef.current || !config) return;
+    if (needsManualClientStep && manualSubmitNonce === 0) return;
+    if (needsPostVisitDecisionStep) return;
+
+    let cancelled = false;
+    const resolveLocationOnly = async () => {
+      processedRef.current = true;
+      const intentAt = new Date().toISOString();
+      setStatus("geolocating");
+      try {
+        const currentLoc = await withTimeout(
+          getLocationForAction(),
+          20000,
+          "GPS tardó demasiado en responder. Verifica permisos de ubicación y vuelve a intentar."
+        );
+        if (cancelled) return;
+        setStatus("processing");
+        setMessage("Ubicación lista. Registrando marcación.");
+        setErrorDetails("");
+        await handleConfirmMark(currentLoc, intentAt);
+      } catch (err) {
+        if (!cancelled) {
+          const info = getAttendanceErrorInfo(err, "No se pudo obtener la ubicacion.", "error");
+          setStatus("error");
+          setMessage("No se pudo obtener tu ubicación.");
+          setErrorDetails(info.message || "Error desconocido");
+          showToast(info.message || "Error de red", info.type || "error");
+          processedRef.current = false;
+        }
+      }
+    };
+
+    resolveLocationOnly();
+    return () => { cancelled = true; };
+  }, [
+    action,
+    authLoading,
+    user,
+    config,
+    navigate,
+    showToast,
+    needsManualClientStep,
+    needsPostVisitDecisionStep,
+    manualSubmitNonce,
+    effectiveActionParams,
+    actionParams.returnUrl,
+    handleConfirmMark,
+    resolveFriendlyDuplicateMessage,
+  ]);
+
+
   const handleManualClientSubmit = () => {
     setManualStepError("");
     if (!manualClientId && !manualProspectName.trim()) {
@@ -660,6 +717,11 @@ const AttendanceAction = () => {
     setManualSubmitNonce(Date.now());
   };
 
+  const handlePostVisitDecision = (nextAction) => {
+    setManualStepError("");
+    setManualPostVisitAction(nextAction);
+  };
+
   if (!config) {
     return (
       <div className="flex items-center justify-center min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
@@ -668,6 +730,44 @@ const AttendanceAction = () => {
           <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2">Acción no válida</h2>
           <p className="text-gray-600 dark:text-gray-400 mb-6">La ruta de asistencia solicitada no existe.</p>
           <Button onClick={() => navigate("/dashboard")} variant="primary">Volver al Dashboard</Button>
+        </Card>
+      </div>
+    );
+  }
+
+  if (needsPostVisitDecisionStep) {
+    return (
+      <div className="flex items-center justify-center min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
+        <Card className="max-w-xl w-full py-8 px-6">
+          <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2">
+            Salida cliente: siguiente paso
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+            Selecciona que ocurrira despues de cerrar la visita.
+          </p>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button
+              onClick={() => handlePostVisitDecision("continue_operation")}
+              variant="primary"
+              className="min-h-[96px] flex-col items-start justify-center text-left"
+            >
+              <span className="font-semibold">Continuar operacion</span>
+              <span className="text-xs opacity-90">Mantiene el viaje abierto para otro cliente.</span>
+            </Button>
+            <Button
+              onClick={() => handlePostVisitDecision("return_to_office")}
+              variant="secondary"
+              className="min-h-[96px] flex-col items-start justify-center text-left"
+            >
+              <span className="font-semibold">Iniciar retorno</span>
+              <span className="text-xs opacity-90">Cambia el viaje a estado de regreso.</span>
+            </Button>
+          </div>
+
+          <Button onClick={() => navigate("/dashboard")} variant="ghost" className="mt-6">
+            Cancelar
+          </Button>
         </Card>
       </div>
     );
@@ -823,29 +923,6 @@ const AttendanceAction = () => {
               </motion.div>
             )}
 
-            {status === "ready" && (
-              <motion.div
-                key="ready"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="flex flex-col items-center"
-              >
-                <div className="bg-blue-100 dark:bg-blue-900/30 p-4 rounded-full mb-6">
-                  <FiMapPin className="text-6xl text-blue-500" />
-                </div>
-                <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Ubicación lista</h2>
-                <p className="text-gray-600 dark:text-gray-300 mb-6">
-                  Se obtuvo tu ubicación correctamente. Presiona para confirmar la marcación.
-                </p>
-                <div className="flex gap-3">
-                  <Button onClick={handleConfirmMark} variant="primary">Marcar ahora</Button>
-                  <Button onClick={() => navigate(actionParams.returnUrl || "/dashboard", { replace: true })} variant="ghost">
-                    Cancelar
-                  </Button>
-                </div>
-              </motion.div>
-            )}
             {status === "success" && (
               <motion.div
                 key="success"

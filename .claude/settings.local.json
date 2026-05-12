@@ -8,7 +8,10 @@
       "Bash(PGPASSWORD=\"npg_IvXRb0pLAku5\" psql \"host=ep-muddy-sun-ah5um48r-pooler.c-3.us-east-1.aws.neon.tech port=5432 dbname=FamSPI user=neondb_owner sslmode=require\" -c \"UPDATE user_attendance_records SET lunch_start_time = NULL, lunch_start_location = NULL, lunch_end_time = NULL, lunch_end_location = NULL, updated_at = NOW\\(\\) WHERE date = CURRENT_DATE AND \\(lunch_start_time IS NOT NULL OR lunch_end_time IS NOT NULL\\) RETURNING id, user_id, date, lunch_start_time, lunch_end_time;\")",
       "Bash(node -e ' *)",
       "Bash(node \"c:\\\\Users\\\\Departamento de TI\\\\Desktop\\\\PROYECTOS\\\\FamSPI\\\\.claude\\\\skills\\\\impeccable\\\\scripts\\\\load-context.mjs\")",
-      "Bash(grep -E \"\\\\.\\(jsx?|tsx?\\)$\")"
+      "Bash(grep -E \"\\\\.\\(jsx?|tsx?\\)$\")",
+      "Bash(python skills/ui-ux-pro-max/scripts/search.py \"internal ops procurement dashboard b2b role-based\" --design-system -p \"FamSPI Purchases\")",
+      "Bash(python .agents/skills/ui-ux-pro-max/scripts/search.py \"internal ops procurement dashboard b2b role-based\" --design-system -p \"FamSPI Purchases\")",
+      "Bash(npx tsc *)"
     ]
   }
 }

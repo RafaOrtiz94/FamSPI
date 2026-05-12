@@ -1123,3 +1123,29 @@ exports.getTimeline = async (req, res, next) => {
     next(error);
   }
 };
+
+// WORKFLOW ALIGNMENT — Parte 2
+
+exports.setSupplyControlType = async (req, res, next) => {
+  try {
+    const updated = await service.setSupplyControlType(req.params.id, req.user, {
+      controlType: req.body?.control_type,
+      hasCommercialDeliverables: Boolean(req.body?.has_commercial_deliverables),
+    });
+    res.json({ ok: true, data: normalizeDates(updated) });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.registerSerial = async (req, res, next) => {
+  try {
+    const updated = await service.registerSerial(req.params.id, req.user, {
+      serialNumber: req.body?.serial_number,
+      unitId: req.body?.unit_id,
+    });
+    res.json({ ok: true, data: normalizeDates(updated) });
+  } catch (error) {
+    next(error);
+  }
+};

@@ -14,7 +14,19 @@ const { streamPrivatePurchaseUpdates } = require('./privatePurchaseEvents');
 
 const managerRoles = ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial'];
 const creatorRoles = ['comercial', ...managerRoles];
-const viewerRoles = Array.from(new Set([...creatorRoles, 'jefe_tecnico', 'jefe_operaciones']));
+// Todos los roles con visibilidad según sección 12 del workflow: todos ven, acciones se gatean.
+const viewerRoles = Array.from(new Set([
+  ...creatorRoles,
+  'jefe_tecnico',
+  'jefe_servicio_tecnico',
+  'tecnico',
+  'jefe_operaciones',
+  'jefe_logistica',
+  'logistica',
+  'backoffice_comercial',
+]));
+const supplyControlRoles = [...managerRoles, 'backoffice_comercial'];
+const serialRoles = [...managerRoles, 'jefe_logistica', 'logistica'];
 
 const attachTokenFromQuery = (req, _res, next) => {
   const token = req.query?.token;
@@ -107,5 +119,19 @@ router.get('/stats/:role', controller.getStats);
 
 // FASE 3: Timeline/auditoría para widgets
 router.get('/:id/timeline', controller.getTimeline);
+
+// WORKFLOW ALIGNMENT — Parte 2
+// supply_control_type: bc_maximums | commercial_deliverables | none
+router.post(
+  '/:id/set-supply-control-type',
+  requireRole(supplyControlRoles),
+  controller.setSupplyControlType,
+);
+// Serial: solo registrable cuando serial_status = received_pending_serial (equipo recibido)
+router.post(
+  '/:id/register-serial',
+  requireRole(serialRoles),
+  controller.registerSerial,
+);
 
 module.exports = router;

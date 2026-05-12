@@ -60,6 +60,7 @@ async function updateStatus(req, res) {
       approvedAmount: req.body?.approved_amount,
       paymentDate: req.body?.payment_date,
       notes: req.body?.notes,
+      destinationCity: req.body?.destination_city,
       actorUser: req.user,
     });
     return res.status(200).json({ ok: true, data });

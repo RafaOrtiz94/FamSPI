@@ -14,6 +14,7 @@ const technicalApplicationsRoutes = require("../modules/technical-applications/t
 const departmentsRoutes = require("../modules/departments/departments.routes");
 const usersRoutes = require("../modules/users/users.routes");
 const inventarioRoutes = require("../modules/inventario/inventario.routes");
+const equipmentManagementRoutes = require("../modules/equipment-management/equipmentManagement.routes");
 const attendanceRoutes = require("../modules/attendance/attendance.routes");
 const gmailRoutes = require("../modules/gmail/gmail.routes");
 const equipmentPurchaseRoutes = require("../modules/equipment-purchases/equipmentPurchases.routes");
@@ -113,6 +114,7 @@ app.use("/api/v1/calidad/capa", calidadCapaRoutes);
   app.use("/api/v1/collaborators", collaboratorsRoutes);
   app.use("/api/v1/offboarding", offboardingRoutes);
   app.use("/api/v1/inventario", inventarioRoutes);
+  app.use("/api/v1/equipment-management", equipmentManagementRoutes);
   app.use("/api/v1/attendance", attendanceRoutes);
   // Alias for iPhone shortcuts and Spanish-speaking users
   app.use("/asistencia", attendanceRoutes);

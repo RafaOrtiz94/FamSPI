@@ -283,11 +283,6 @@ const CHECKLIST_ITEMS = {
           request?.extra?.inspection_site?.report_link,
       ),
   },
-  delivery_dates_defined: {
-    label: "Fechas de entrega definidas",
-    auto: true,
-    validator: (request) => Boolean(request?.delivery_start_at && request?.delivery_end_at),
-  },
   equipment_arrived: {
     label: "Equipo arribado",
     auto: true,
@@ -318,8 +313,8 @@ const ACTION_CHECKLIST_REQUIREMENTS = {
   ],
   request_delivery_dates: [],
   submit_delivery_dates: [],
-  mark_equipment_arrived: ["delivery_dates_defined"],
-  mark_dispatch_ready: ["delivery_dates_defined", "equipment_arrived"],
+  mark_equipment_arrived: [],
+  mark_dispatch_ready: ["equipment_arrived"],
   complete_delivery: ["dispatch_ready_confirmed", "inspection_site_report_uploaded"],
 };
 const ACTION_ALLOWED_STATUSES = {
@@ -334,7 +329,7 @@ const ACTION_ALLOWED_STATUSES = {
   upload_contract: [STATUS.PENDING_CONTRACT],
   request_delivery_dates: [STATUS.CONTRACT_AVAILABLE],
   submit_delivery_dates: [STATUS.DELIVERY_DATES_REQUESTED],
-  mark_equipment_arrived: [STATUS.DELIVERY_DATES_SUBMITTED],
+  mark_equipment_arrived: [STATUS.DELIVERY_DATES_SUBMITTED, STATUS.WAITING_DISPATCH],
   mark_dispatch_ready: [STATUS.WAITING_DISPATCH],
   complete_delivery: [STATUS.DISPATCH_READY],
 };
@@ -2582,6 +2577,7 @@ async function startAvailabilityRequest({ id, user, providerEmail, notes, expect
             status = $3,
             availability_email_sent_at = now(),
             availability_email_file_id = $4,
+            availability_status = 'supplier_requested',
             updated_at = now()
       WHERE id = $5
       RETURNING *`,
@@ -2610,11 +2606,13 @@ async function saveProviderResponse({ id, user, outcome, items = [], notes, expe
   assertActionStatus(request, "save_provider_response");
 
   const normalizedOutcome = outcome === "none" ? STATUS.NO_STOCK : STATUS.WAITING_PROFORMA;
+  const availabilityStatus = outcome === "none" ? "supplier_rejected" : "availability_confirmed";
   const { rows } = await db.query(
     `UPDATE equipment_purchase_requests
         SET provider_response = $1,
             provider_response_at = now(),
             status = $2,
+            availability_status = $4,
             updated_at = now()
       WHERE id = $3
       RETURNING *`,
@@ -2622,6 +2620,7 @@ async function saveProviderResponse({ id, user, outcome, items = [], notes, expe
       { outcome, items, notes },
       normalizedOutcome,
       id,
+      availabilityStatus,
     ],
   );
   const updated = rows[0];
@@ -4364,8 +4363,9 @@ async function registerPublicPortalOutcome({ id, user, outcome, notes, expected_
   }
 
   const normalizedOutcome = String(outcome || "").trim().toLowerCase();
-  if (!["won", "lost"].includes(normalizedOutcome)) {
-    throw createAppError("Resultado inválido. Usa 'won' o 'lost'.", {
+  // Outcomes del workflow: ganado=won, perdido=lost, desierto=deserted, cancelado=cancelled
+  if (!["won", "lost", "deserted", "cancelled"].includes(normalizedOutcome)) {
+    throw createAppError("Resultado inválido. Usa: won, lost, deserted o cancelled.", {
       status: 400,
       code: "INVALID_PORTAL_OUTCOME",
     });
@@ -4440,6 +4440,7 @@ async function registerPublicPortalOutcome({ id, user, outcome, notes, expected_
   }
 
   const nowIso = new Date().toISOString();
+  const isTerminal = ["lost", "deserted", "cancelled"].includes(normalizedOutcome);
   const mergedExtra = mergeExtra(request?.extra, {
     public_portal_outcome: {
       outcome: normalizedOutcome,
@@ -4448,12 +4449,18 @@ async function registerPublicPortalOutcome({ id, user, outcome, notes, expected_
       recorded_by: user?.id || null,
       recorded_by_email: user?.email || null,
     },
-    ...(normalizedOutcome === "lost"
+    ...(isTerminal
       ? {
           cancellation: {
             by_user_id: user?.id || null,
             by_user_email: user?.email || null,
-            reason: String(notes || "").trim() || "Proceso no adjudicado en portal de compras públicas",
+            reason:
+              String(notes || "").trim() ||
+              (normalizedOutcome === "deserted"
+                ? "Proceso desierto en portal de compras públicas"
+                : normalizedOutcome === "cancelled"
+                  ? "Proceso cancelado en portal de compras públicas"
+                  : "Proceso no adjudicado en portal de compras públicas"),
             cancelled_at: nowIso,
           },
         }
@@ -4461,6 +4468,7 @@ async function registerPublicPortalOutcome({ id, user, outcome, notes, expected_
   });
 
   const nextStatus = normalizedOutcome === "won" ? STATUS.PENDING_CONTRACT : STATUS.NO_STOCK;
+
   const { rows } = await db.query(
     `UPDATE equipment_purchase_requests
         SET status = $1,
@@ -4472,22 +4480,43 @@ async function registerPublicPortalOutcome({ id, user, outcome, notes, expected_
   );
 
   const updated = mapRequestRow(rows[0]);
+
+  const OUTCOME_LABELS = {
+    won: "Proceso ganado en portal público",
+    lost: "Proceso perdido en portal público",
+    deserted: "Proceso declarado desierto",
+    cancelled: "Proceso cancelado en portal público",
+  };
+  const OUTCOME_MESSAGES = {
+    won: `Continúa con contrato e inspección para ${updated.client_name || "cliente"}.`,
+    lost: `Solicitud cerrada para ${updated.client_name || "cliente"}: proceso perdido.`,
+    deserted: `Solicitud cerrada para ${updated.client_name || "cliente"}: proceso desierto.`,
+    cancelled: `Solicitud cerrada para ${updated.client_name || "cliente"}: proceso cancelado.`,
+  };
+
   try {
+    // Notificar con chat=true para resultados de portal (eventos clave del negocio).
     await notifyUsers({
       userIds: [updated.created_by, updated.assigned_to],
-      title: normalizedOutcome === "won" ? "Proceso ganado en portal público" : "Proceso no adjudicado",
-      message:
-        normalizedOutcome === "won"
-          ? `Continúa con registro de cliente e inspección para ${updated.client_name || "cliente"}.`
-          : `Solicitud cerrada para ${updated.client_name || "cliente"} por no adjudicación.`,
-      type: "task",
-      source: "equipment_purchases",
-      priority: 1,
+      title: OUTCOME_LABELS[normalizedOutcome] || "Resultado del portal público registrado",
+      message: OUTCOME_MESSAGES[normalizedOutcome] || `Resultado: ${normalizedOutcome}`,
+      type: normalizedOutcome === "won" ? "success" : "warning",
+      source: "equipment_purchases_portal",
+      priority: 2,
       meta: { request_id: updated.id, public_portal_outcome: normalizedOutcome },
+      email: true,
+      chat: true,
     });
   } catch (notifyError) {
     logger.warn({ notifyError, requestId: updated.id }, "No se pudieron enviar notificaciones de resultado portal");
   }
+
+  enqueuePurchaseStatusChangedEvent({
+    purchaseType: "equipment_purchase",
+    id: updated.id,
+    status: updated.status,
+    businessCaseId: updated?.extra?.auto_business_case_id || null,
+  });
 
   return updated;
 }
@@ -4626,6 +4655,47 @@ async function uploadContract({ id, user, file, expected_updated_at }) {
   return completed;
 }
 
+async function markEquipmentArrived({ id, user, notes, expected_updated_at }) {
+  await ensureTables();
+  if (!canManageDelivery(user)) {
+    throw createAppError("Tu rol no puede marcar arribo de equipo", {
+      status: 403,
+      code: "FORBIDDEN_ROLE_ACTION",
+    });
+  }
+  const request = await getById(id, user);
+  assertRequestExists(request);
+  assertNoStaleWrite(request, expected_updated_at);
+  assertActionStatus(request, "mark_equipment_arrived");
+  assertChecklistReady(request, "mark_equipment_arrived");
+
+  const { rows } = await db.query(
+    `UPDATE equipment_purchase_requests
+        SET equipment_arrived_at = now(),
+            status = $1,
+            equipment_arrived_by = $2,
+            equipment_arrived_by_email = $3,
+            delivery_notes = COALESCE($4, delivery_notes),
+            serial_status = CASE
+              WHEN COALESCE(serial_status, 'not_applicable_yet') IN ('not_applicable_yet', 'pending_reception')
+              THEN 'received_pending_serial'
+              ELSE serial_status
+            END,
+            updated_at = now()
+      WHERE id = $5
+      RETURNING *`,
+    [STATUS.WAITING_DISPATCH, user?.id || null, user?.email || null, notes || null, id],
+  );
+  const updated = mapRequestRow(rows[0]);
+  await notifyDeliveryStage({
+    request: updated,
+    title: "Equipo arribado — registrar serial",
+    message: `Equipo de ${updated.client_name || "cliente"} recibido físicamente. Procede a registrar el número de serie (F.ST-14).`,
+    meta: { status: updated.status, equipment_arrived_at: updated.equipment_arrived_at || null, form_reference: "F.ST-14" },
+  });
+  return updated;
+}
+
 async function requestDeliveryDates({ id, user, notes, expected_updated_at }) {
   await ensureTables();
   if (!canManageDelivery(user)) {
@@ -4639,9 +4709,6 @@ async function requestDeliveryDates({ id, user, notes, expected_updated_at }) {
   assertNoStaleWrite(request, expected_updated_at);
   assertActionStatus(request, "request_delivery_dates");
   assertChecklistReady(request, "request_delivery_dates");
-  if (request?.inspection_request_id || request?.inspection_scheduled_date) {
-    assertSiteReadyForInstallation(request);
-  }
 
   const { rows } = await db.query(
     `UPDATE equipment_purchase_requests
@@ -4659,20 +4726,13 @@ async function requestDeliveryDates({ id, user, notes, expected_updated_at }) {
   await notifyDeliveryStage({
     request: updated,
     title: "Fechas de entrega solicitadas",
-    message: `Se solicitó registrar fechas de entrega para ${updated.client_name || "el cliente"}.`,
-    meta: { status: updated.status },
+    message: `Se solicitaron fechas de entrega para ${updated.client_name || "el cliente"}.`,
+    meta: { status: updated.status, delivery_dates_requested_at: updated.delivery_dates_requested_at || null },
   });
   return updated;
 }
 
-async function submitDeliveryDates({
-  id,
-  user,
-  delivery_start_at,
-  delivery_end_at,
-  notes,
-  expected_updated_at,
-}) {
+async function submitDeliveryDates({ id, user, delivery_start_at, delivery_end_at, notes, expected_updated_at }) {
   await ensureTables();
   if (!canManageDelivery(user)) {
     throw createAppError("Tu rol no puede registrar fechas de entrega", {
@@ -4680,89 +4740,48 @@ async function submitDeliveryDates({
       code: "FORBIDDEN_ROLE_ACTION",
     });
   }
-  if (!delivery_start_at || !delivery_end_at) {
-    throw createAppError("Debes definir fecha inicio y fin de entrega", {
-      status: 400,
-      code: "DELIVERY_DATES_REQUIRED",
-    });
-  }
-  const start = new Date(`${delivery_start_at}T00:00:00`);
-  const end = new Date(`${delivery_end_at}T00:00:00`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    throw createAppError("Formato de fecha inválido para entrega", {
-      status: 400,
-      code: "INVALID_DATE_FORMAT",
-    });
-  }
-  if (end.getTime() < start.getTime()) {
-    throw createAppError("La fecha fin no puede ser menor que la fecha inicio", {
-      status: 409,
-      code: "DELIVERY_DATES_INVALID_RANGE",
-    });
-  }
-
   const request = await getById(id, user);
   assertRequestExists(request);
   assertNoStaleWrite(request, expected_updated_at);
   assertActionStatus(request, "submit_delivery_dates");
+  assertChecklistReady(request, "submit_delivery_dates");
+
+  const start = String(delivery_start_at || "").slice(0, 10);
+  const end = String(delivery_end_at || "").slice(0, 10);
+  if (!start || !end) {
+    throw createAppError("Debes registrar fecha inicio y fin de entrega", {
+      status: 400,
+      code: "DELIVERY_DATES_REQUIRED",
+    });
+  }
+  if (new Date(end).getTime() < new Date(start).getTime()) {
+    throw createAppError("La fecha fin no puede ser menor a la fecha inicio", {
+      status: 400,
+      code: "DELIVERY_DATES_INVALID_RANGE",
+    });
+  }
 
   const { rows } = await db.query(
     `UPDATE equipment_purchase_requests
         SET status = $1,
-            delivery_start_at = $2,
-            delivery_end_at = $3,
+            delivery_start_at = $2::date,
+            delivery_end_at = $3::date,
             delivery_notes = COALESCE($4, delivery_notes),
             updated_at = now()
       WHERE id = $5
       RETURNING *`,
-    [STATUS.DELIVERY_DATES_SUBMITTED, delivery_start_at, delivery_end_at, notes || null, id],
+    [STATUS.DELIVERY_DATES_SUBMITTED, start, end, notes || null, id],
   );
   const updated = mapRequestRow(rows[0]);
   await notifyDeliveryStage({
     request: updated,
     title: "Fechas de entrega registradas",
-    message: `Entrega planificada del ${updated.delivery_start_at || "-"} al ${updated.delivery_end_at || "-"}.`,
+    message: `Se registraron fechas de entrega para ${updated.client_name || "el cliente"}.`,
     meta: {
       status: updated.status,
       delivery_start_at: updated.delivery_start_at || null,
       delivery_end_at: updated.delivery_end_at || null,
     },
-  });
-  return updated;
-}
-
-async function markEquipmentArrived({ id, user, notes, expected_updated_at }) {
-  await ensureTables();
-  if (!canManageDelivery(user)) {
-    throw createAppError("Tu rol no puede marcar arribo de equipo", {
-      status: 403,
-      code: "FORBIDDEN_ROLE_ACTION",
-    });
-  }
-  const request = await getById(id, user);
-  assertRequestExists(request);
-  assertNoStaleWrite(request, expected_updated_at);
-  assertActionStatus(request, "mark_equipment_arrived");
-  assertChecklistReady(request, "mark_equipment_arrived");
-
-  const { rows } = await db.query(
-    `UPDATE equipment_purchase_requests
-        SET status = $1,
-            equipment_arrived_at = now(),
-            equipment_arrived_by = $2,
-            equipment_arrived_by_email = $3,
-            delivery_notes = COALESCE($4, delivery_notes),
-            updated_at = now()
-      WHERE id = $5
-      RETURNING *`,
-    [STATUS.WAITING_DISPATCH, user?.id || null, user?.email || null, notes || null, id],
-  );
-  const updated = mapRequestRow(rows[0]);
-  await notifyDeliveryStage({
-    request: updated,
-    title: "Equipo arribado",
-    message: `Se confirmó arribo de equipo para ${updated.client_name || "el cliente"}.`,
-    meta: { status: updated.status, equipment_arrived_at: updated.equipment_arrived_at || null },
   });
   return updated;
 }
@@ -5012,6 +5031,311 @@ async function getStats({ requestType = "purchase" } = {}) {
   return summary;
 }
 
+const SERCOP_PROCEDURE_TYPES = new Set([
+  "catalogo_electronico",
+  "infima_cuantia",
+  "subasta_inversa_electronica",
+  "menor_cuantia",
+  "cotizacion",
+  "licitacion",
+  "regimen_especial",
+]);
+
+async function updateSercop({ id, user, fields = {} }) {
+  await ensureTables();
+  const request = await getById(id, user);
+  assertRequestExists(request);
+
+  const isAssignee = String(request?.assigned_to || "") === String(user?.id || "");
+  if (!canManageAll(user) && !isAssignee) {
+    throw createAppError("Solo el ACP Comercial asignado puede actualizar datos SERCOP", {
+      status: 403,
+      code: "FORBIDDEN_ROLE_ACTION",
+    });
+  }
+
+  const updates = {};
+
+  if (fields.procedure_type !== undefined) {
+    const pt = String(fields.procedure_type || "").trim().toLowerCase();
+    if (pt && !SERCOP_PROCEDURE_TYPES.has(pt)) {
+      throw createAppError(`Tipo de procedimiento inválido: ${pt}`, { status: 400, code: "INVALID_PROCEDURE_TYPE" });
+    }
+    updates.procedure_type = pt || null;
+  }
+
+  const textFields = [
+    "soce_process_code",
+    "entidad_contratante_name",
+    "entidad_contratante_ruc",
+    "adjudicacion_resolution_number",
+    "adjudicacion_resolution_file_id",
+    "orden_compra_number",
+    "pac_code",
+  ];
+  for (const key of textFields) {
+    if (fields[key] !== undefined) {
+      updates[key] = String(fields[key] || "").trim() || null;
+    }
+  }
+
+  const numericFields = ["presupuesto_referencial", "puja_final_price"];
+  for (const key of numericFields) {
+    if (fields[key] !== undefined) {
+      const v = Number(fields[key]);
+      updates[key] = Number.isFinite(v) && v >= 0 ? v : null;
+    }
+  }
+
+  const dateFields = [
+    "puja_date",
+    "adjudicacion_resolution_date",
+    "acta_recepcion_provisional_date",
+    "acta_recepcion_definitiva_date",
+  ];
+  for (const key of dateFields) {
+    if (fields[key] !== undefined) {
+      updates[key] = normalizeDateOnlyInput(fields[key]);
+    }
+  }
+
+  const tsFields = ["oferta_tecnica_submitted_at"];
+  for (const key of tsFields) {
+    if (fields[key] !== undefined) {
+      const v = fields[key];
+      updates[key] = v ? new Date(v).toISOString() : null;
+    }
+  }
+
+  if (fields.garantia_fiel_cumplimiento_submitted !== undefined) {
+    updates.garantia_fiel_cumplimiento_submitted = Boolean(fields.garantia_fiel_cumplimiento_submitted);
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return getById(id, user);
+  }
+
+  const setClauses = Object.keys(updates)
+    .map((key, i) => `${key} = $${i + 2}`)
+    .join(", ");
+  const values = [id, ...Object.values(updates)];
+
+  const { rows } = await db.query(
+    `UPDATE public.equipment_purchase_requests
+        SET ${setClauses}, updated_at = now()
+      WHERE id = $1
+      RETURNING *`,
+    values,
+  );
+
+  return mapRequestRow(rows[0]);
+}
+
+async function getTimeline({ id, user }) {
+  await ensureTables();
+  const request = await getById(id, user);
+  assertRequestExists(request);
+
+  const events = [];
+  const wf = request?.installation_workflow || {};
+
+  const push = (type, label, timestamp, meta = {}) => {
+    if (!timestamp) return;
+    const ts = new Date(timestamp);
+    if (Number.isNaN(ts.getTime())) return;
+    events.push({ type, label, timestamp: ts.toISOString(), ...meta });
+  };
+
+  push("REQUEST_CREATED", "Solicitud creada", request.created_at, { actor_email: request.created_by_email || null });
+  push("AVAILABILITY_REQUESTED", "Disponibilidad solicitada al proveedor", request.availability_requested_at);
+  push("PROVIDER_RESPONSE", "Respuesta del proveedor registrada", request.provider_response_at);
+  push("PROFORMA_REQUESTED", "Proforma solicitada al proveedor", request.proforma_requested_at);
+  push("PROFORMA_RECEIVED", "Proforma recibida/subida", request.proforma_uploaded_at);
+  push("RESERVATION_MADE", "Equipos reservados", request.reserved_at);
+  push("SIGNED_PROFORMA_UPLOADED", "Proforma firmada cargada", request.signed_proforma_uploaded_at);
+  push("PORTAL_OUTCOME_REGISTERED", "Resultado portal público registrado", request.public_portal_outcome_at, {
+    outcome: request.public_portal_outcome,
+  });
+  push("INSPECTION_REQUESTED", "Inspección de ambiente solicitada (F.ST-20)", request.inspection_requested_at);
+  push("INSPECTION_SCHEDULED", "Fecha de inspección coordinada", request.inspection_scheduled_date);
+  push("CONTRACT_UPLOADED", "Contrato subido", request.contract_uploaded_at);
+  push("SERCOP_OFERTA_SUBMITTED", "Oferta técnica enviada al SOCE", request.oferta_tecnica_submitted_at);
+  push("SERCOP_PUJA", "Sesión de puja SOCE", request.puja_date);
+  push("SERCOP_ADJUDICACION", "Resolución de adjudicación", request.adjudicacion_resolution_date, {
+    resolution_number: request.adjudicacion_resolution_number,
+  });
+  push("EQUIPMENT_ARRIVED", "Equipo llegó a bodega", request.equipment_arrived_at);
+  push("DISPATCH_READY", "Despacho listo", request.dispatch_ready_at);
+  push("DELIVERY_COMPLETED", "Entrega completada", request.delivered_at);
+  push("INSTALLATION_DISPATCH_REQUEST", "Solicitud formal de despacho registrada", wf.dispatch_request?.requested_at, {
+    actor_email: wf.dispatch_request?.requested_by_email || null,
+  });
+  push("LOGISTICS_VALIDATED", "Validación logística completada (guía/proforma)", wf.logistics_validation?.validated_at, {
+    actor_email: wf.logistics_validation?.validated_by_email || null,
+  });
+  push("FST14_COMPLETED", "Recepción visual F.ST-14 registrada", wf.visual_reception?.inspected_at, {
+    result: wf.visual_reception?.result || null,
+    actor_email: wf.visual_reception?.inspected_by_email || null,
+    report_link: wf.visual_reception?.report_link || null,
+  });
+  push("VERIFICATION_DECIDED", "Decisión de verificación F.ST-09 registrada", wf.verification_decision?.decided_at, {
+    applies: wf.verification_decision?.applies,
+    actor_email: wf.verification_decision?.decided_by_email || null,
+  });
+  push("SERCOP_ACTA_PROVISIONAL", "Acta de recepción provisional (SERCOP)", request.acta_recepcion_provisional_date);
+  push("SERCOP_ACTA_DEFINITIVA", "Acta de recepción definitiva (SERCOP)", request.acta_recepcion_definitiva_date);
+
+  events.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  return { events, request_id: id, status: request.status };
+}
+
+// ----------------------------------------------------------
+// WORKFLOW ALIGNMENT — Parte 1+2
+// ----------------------------------------------------------
+
+async function registerParticipationDecision({ id, user, decision, notes, expected_updated_at }) {
+  await ensureTables();
+  const request = await getById(id, user);
+  assertRequestExists(request);
+  assertNoStaleWrite(request, expected_updated_at);
+
+  if (!canManageAll(user)) {
+    throw createAppError("Solo jefe_comercial, gerencia o acp_comercial pueden registrar la decisión de participar", {
+      status: 403,
+      code: "FORBIDDEN_ROLE_ACTION",
+    });
+  }
+
+  const normalized = String(decision || "").trim().toLowerCase();
+  if (!["participate", "not_participate"].includes(normalized)) {
+    throw createAppError("Decisión inválida. Usa: participate o not_participate.", {
+      status: 400,
+      code: "INVALID_PARTICIPATION_DECISION",
+    });
+  }
+
+  const { rows } = await db.query(
+    `UPDATE equipment_purchase_requests
+        SET participation_decision = $1,
+            participation_decision_at = now(),
+            participation_decision_by = $2,
+            participation_decision_notes = $3,
+            updated_at = now()
+      WHERE id = $4
+      RETURNING *`,
+    [normalized, user?.id || null, String(notes || "").trim() || null, id],
+  );
+
+  const updated = mapRequestRow(rows[0]);
+  const decisionLabel = normalized === "participate" ? "Se decidió participar" : "Se decidió NO participar";
+
+  try {
+    await notifyUsers({
+      userIds: [updated.created_by, updated.assigned_to],
+      title: `Decisión de participar: ${decisionLabel}`,
+      message: `${decisionLabel} en el proceso de compra pública para ${updated.client_name || "cliente"}.${notes ? ` Notas: ${notes}` : ""}`,
+      type: normalized === "participate" ? "success" : "warning",
+      source: "equipment_purchases_participation",
+      priority: 2,
+      meta: { request_id: updated.id, participation_decision: normalized },
+      email: true,
+      chat: true,
+    });
+  } catch (notifyError) {
+    logger.warn({ notifyError, requestId: updated.id }, "No se pudo notificar decisión de participar");
+  }
+
+  enqueuePurchaseStatusChangedEvent({
+    purchaseType: "equipment_purchase",
+    id: updated.id,
+    status: updated.status,
+    businessCaseId: updated?.extra?.auto_business_case_id || null,
+  });
+
+  return updated;
+}
+
+async function registerSerialPublic({ id, user, serialNumber, unitId = null }) {
+  await ensureTables();
+  const request = await getById(id, user);
+  assertRequestExists(request);
+
+  if (request.serial_status !== "received_pending_serial") {
+    throw createAppError(
+      `El serial solo se registra cuando el equipo ha sido recibido físicamente. Estado actual: ${request.serial_status || "not_applicable_yet"}`,
+      {
+        status: 409,
+        code: "SERIAL_NOT_ALLOWED_YET",
+        details: {
+          current_serial_status: request.serial_status || "not_applicable_yet",
+          required_serial_status: "received_pending_serial",
+          hint: "Primero registra la llegada física del equipo (mark-equipment-arrived).",
+        },
+      },
+    );
+  }
+
+  if (!serialNumber || !String(serialNumber).trim()) {
+    throw createAppError("El número de serie es obligatorio", {
+      status: 400,
+      code: "SERIAL_NUMBER_REQUIRED",
+    });
+  }
+
+  const mergedExtra = mergeExtra(request?.extra, {
+    serial_number: String(serialNumber).trim(),
+    serial_registered_at: new Date().toISOString(),
+    serial_registered_by: user?.id || null,
+    ...(unitId ? { unit_id: String(unitId) } : {}),
+  });
+
+  const { rows } = await db.query(
+    `UPDATE equipment_purchase_requests
+        SET serial_status = 'serial_registered',
+            extra = $1::jsonb,
+            updated_at = now()
+      WHERE id = $2
+      RETURNING *`,
+    [JSON.stringify(mergedExtra), id],
+  );
+
+  const updated = mapRequestRow(rows[0]);
+  try {
+    await notifyUsers({
+      userIds: [updated.created_by, updated.assigned_to],
+      title: "Número de serie registrado",
+      message: `Serie ${serialNumber} registrada para ${updated.client_name || "cliente"}.`,
+      type: "success",
+      source: "equipment_purchases_serial",
+      priority: 1,
+      meta: { request_id: updated.id, serial_number: serialNumber },
+      email: true,
+      chat: false,
+    });
+  } catch (notifyError) {
+    logger.warn({ notifyError, requestId: updated.id }, "No se pudo notificar registro de serial");
+  }
+
+  return updated;
+}
+
+// También actualiza serial_status → received_pending_serial al marcar equipo llegado.
+// Se inyecta en markEquipmentArrived como post-step sin romper la función existente.
+async function _advanceSerialStatusOnArrival(id) {
+  try {
+    await db.query(
+      `UPDATE equipment_purchase_requests
+          SET serial_status = 'received_pending_serial',
+              updated_at = now()
+        WHERE id = $1
+          AND serial_status = 'pending_reception'`,
+      [id],
+    );
+  } catch (err) {
+    logger.warn({ err, id }, "No se pudo avanzar serial_status a received_pending_serial");
+  }
+}
+
 module.exports = {
   getApprovedClients,
   getAcpCommercialUsers,
@@ -5044,7 +5368,12 @@ module.exports = {
   renewReservation,
   cancelOrder,
   updateChecklistItem,
+  updateSercop,
+  getTimeline,
   getStats,
   getTechnicalScheduleCalendar,
+  registerParticipationDecision,
+  registerSerialPublic,
+  _advanceSerialStatusOnArrival,
   STATUS,
 };

@@ -107,8 +107,18 @@ const getClientDisplayLabel = (client) => {
   return [name, city].filter(Boolean).join(" · ");
 };
 
+const normalizeClientSearchValue = (value) =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
 const resolveClientIdFromInput = (inputValue, clients = []) => {
   const raw = String(inputValue || "").trim();
+  const normalizedRaw = normalizeClientSearchValue(raw);
   if (!raw) return null;
 
   const exact = clients.find((client) => getClientDisplayLabel(client).toLowerCase() === raw.toLowerCase());
@@ -121,8 +131,9 @@ const resolveClientIdFromInput = (inputValue, clients = []) => {
     const haystack = [
       String(client?.name || ""),
       String(client?.city || ""),
-    ].join(" ").toLowerCase();
-    return haystack.includes(raw.toLowerCase());
+      getClientDisplayLabel(client),
+    ].join(" ");
+    return normalizeClientSearchValue(haystack).includes(normalizedRaw);
   });
   if (contains.length === 1 && contains[0]?.id != null) return Number(contains[0].id);
 
@@ -1036,16 +1047,15 @@ const AttendanceWidget = () => {
   }, [emergencyClients, fieldEmergencyClientId, fieldEmergencyClientSearch, fieldVisitType]);
 
   const filteredEmergencyClients = useMemo(() => {
-    const term = String(fieldEmergencyClientSearch || "").trim().toLowerCase();
+    const term = normalizeClientSearchValue(fieldEmergencyClientSearch);
     if (!term) return emergencyClients;
     return emergencyClients.filter((client) => {
       const haystack = [
         String(client?.name || ""),
         String(client?.city || ""),
-      ]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(term);
+        getClientDisplayLabel(client),
+      ].join(" ");
+      return normalizeClientSearchValue(haystack).includes(term);
     });
   }, [emergencyClients, fieldEmergencyClientSearch]);
 
@@ -1116,6 +1126,7 @@ const AttendanceWidget = () => {
       const payload = await buildFieldVisitPayload({ includeObservations: kind === "exit", mode: kind });
       if (kind === "exit") {
         payload.return_to_office = fieldExitMode === "return_to_office";
+        payload.post_visit_action = fieldExitMode;
       }
       const res =
         kind === "entry"
@@ -2247,14 +2258,6 @@ const AttendanceWidget = () => {
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
                   <p className="text-sm font-medium text-amber-800">Tienes una visita de cliente abierta. Ciérrala antes de continuar.</p>
                 </div>
-                <Button
-                  variant="warning"
-                  onClick={() => handleFieldVisitMark("exit")}
-                  disabled={fieldVisitSubmitting}
-                  className={ACTION_BTN_BASE_CLASS}
-                >
-                  {fieldVisitSubmitting ? "Registrando..." : "Salida de cliente"}
-                </Button>
                 <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3">
                   <label className="text-[11px] font-semibold text-slate-600">Después de salir del cliente</label>
                   <select
@@ -2267,6 +2270,14 @@ const AttendanceWidget = () => {
                     <option value="return_to_office">Iniciar retorno a oficina</option>
                   </select>
                 </div>
+                <Button
+                  variant="warning"
+                  onClick={() => handleFieldVisitMark("exit")}
+                  disabled={fieldVisitSubmitting}
+                  className={ACTION_BTN_BASE_CLASS}
+                >
+                  {fieldVisitSubmitting ? "Registrando..." : "Salida de cliente"}
+                </Button>
               </>
             ) : (
               <>

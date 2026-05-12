@@ -20,6 +20,16 @@ const confirmDeliverySchema = Joi.object({
   id: Joi.number().integer().positive().required(),
 });
 
+const requestIdSchema = Joi.object({
+  id: Joi.number().integer().positive().required(),
+});
+
+const listRequestsQuerySchema = Joi.object({
+  ceiling_id: Joi.number().integer().positive().optional(),
+  status: Joi.string().valid("pending", "ops_approved", "confirmed", "cancelled").optional(),
+  limit: Joi.number().integer().min(1).max(200).optional(),
+});
+
 const getValidationMessage = (error) => {
   if (!error?.details?.length) return "Solicitud invalida";
   return error.details.map((detail) => detail.message).join(", ");
@@ -90,7 +100,53 @@ async function confirmDeliveryRequest(req, res) {
   }
 }
 
+async function opsApproveDeliveryRequest(req, res) {
+  const { error, value } = requestIdSchema.validate(req.params || {}, { convert: true, abortEarly: false });
+  if (error) {
+    return res.status(400).json({ ok: false, code: "DELIVERY_REQUEST_ID_INVALID", message: getValidationMessage(error), details: error.details });
+  }
+  try {
+    const data = await service.opsApproveRequest({ requestId: value.id, actorUser: req.user || null });
+    return res.status(200).json({ ok: true, data });
+  } catch (serviceError) {
+    return handleError(res, serviceError, "No se pudo aprobar la solicitud");
+  }
+}
+
+async function cancelDeliveryRequest(req, res) {
+  const { error, value } = requestIdSchema.validate(req.params || {}, { convert: true, abortEarly: false });
+  if (error) {
+    return res.status(400).json({ ok: false, code: "DELIVERY_REQUEST_ID_INVALID", message: getValidationMessage(error), details: error.details });
+  }
+  try {
+    const data = await service.cancelDeliveryRequest({ requestId: value.id, actorUser: req.user || null });
+    return res.status(200).json({ ok: true, data });
+  } catch (serviceError) {
+    return handleError(res, serviceError, "No se pudo cancelar la solicitud");
+  }
+}
+
+async function listDeliveryRequests(req, res) {
+  const { error, value } = listRequestsQuerySchema.validate(req.query || {}, { convert: true, abortEarly: false });
+  if (error) {
+    return res.status(400).json({ ok: false, code: "DELIVERY_REQUEST_QUERY_INVALID", message: getValidationMessage(error), details: error.details });
+  }
+  try {
+    const data = await service.listDeliveryRequests({
+      ceilingId: value.ceiling_id || null,
+      status: value.status || null,
+      limit: value.limit || 100,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (serviceError) {
+    return handleError(res, serviceError, "No se pudieron listar las solicitudes");
+  }
+}
+
 module.exports = {
   createDeliveryRequest,
+  opsApproveDeliveryRequest,
+  cancelDeliveryRequest,
   confirmDeliveryRequest,
+  listDeliveryRequests,
 };

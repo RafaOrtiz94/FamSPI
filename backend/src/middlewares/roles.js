@@ -52,7 +52,7 @@ const ROLE_GROUPS = {
     "rh",
     "rrhh",
   ],
-  finanzas: ["finanzas", "jefe_finanzas", "jefe_de_finanzas", "contador", "jefe_financiero"],
+  finanzas: ["finanzas", "financiero", "jefe_finanzas", "jefe_de_finanzas", "contador", "jefe_financiero"],
   jefe_comercial: ["jefe_comercial", "jefe_de_comercial"],
   jefe_servicio_tecnico: ["jefe_servicio_tecnico", "jefe_de_servicio_tecnico"],
   jefe_tecnico: ["jefe_tecnico", "jefe_de_tecnico"],

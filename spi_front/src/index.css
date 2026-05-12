@@ -2,14 +2,29 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 🌍 Configuración global */
+/* Configuración global */
 html {
   scroll-behavior: smooth;
-  color-scheme: light dark; /* Respeta las preferencias del sistema */
+  color-scheme: light dark;
 }
 
 body {
-  @apply bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 antialiased transition-colors duration-300 ease-in-out;
+  font-family: 'Geist', system-ui, -apple-system, sans-serif;
+  @apply bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 antialiased;
+}
+
+/* prefers-reduced-motion — DESIGN.md §6 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Geist Mono para IDs, montos, fechas exactas */
+.font-mono-data {
+  font-family: 'Geist Mono', ui-monospace, monospace;
 }
 
 /* ✨ Scrollbar personalizado */

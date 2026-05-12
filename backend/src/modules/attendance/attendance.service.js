@@ -119,6 +119,8 @@ const startOfDay = (date) =>
 const endOfDay = (date) =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
 
+const isWeekendDate = (date) => date.getDay() === 0 || date.getDay() === 6;
+
 const parseDateTime = (value) => {
   if (!value) return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
@@ -129,9 +131,19 @@ const parseDateTime = (value) => {
   return parsed;
 };
 
-const buildVacationLabel = (ids = []) => `VAC-ID ${ids.join("/")}`;
 const buildPermissionLabel = (id, timeLabel = "") =>
   `PER-ID ${id}${timeLabel ? ` ${timeLabel}` : ""}`;
+const WEEKEND_LABEL = "FIN DE SEMANA";
+const VACATION_LABEL = "VACACIONES";
+const DAY_TEXT_FIELD_PREFIXES = Object.freeze([
+  "hora_entrada",
+  "hora_salida_a",
+  "hora_entrada_a",
+  "hora_salida",
+  "ra_observaciones",
+]);
+const DAY_TEXT_FIELD_PATTERN =
+  /^(hora_entrada_a|hora_salida_a|hora_entrada|hora_salida|ra_observaciones)_(\d+)$/;
 
 const uniqueNumericIds = (values = []) =>
   [...new Set(values.map((item) => Number.parseInt(item, 10)).filter((item) => Number.isInteger(item)))];
@@ -180,6 +192,54 @@ const setFieldText = (form, fieldName, value) => {
     logger.warn({ fieldName, err }, "No se pudo asignar texto al campo");
   }
   return false;
+};
+
+const getFieldFirstWidgetRect = (field) => {
+  const widgets = field?.acroField?.getWidgets?.() || [];
+  return widgets[0]?.getRectangle?.() || null;
+};
+
+const buildDayTextFieldLookup = (form) => {
+  const columns = new Map(DAY_TEXT_FIELD_PREFIXES.map((prefix) => [prefix, []]));
+
+  for (const field of form.getFields()) {
+    const name = field.getName();
+    const match = name.match(DAY_TEXT_FIELD_PATTERN);
+    if (!match) continue;
+
+    const [, prefix, suffixDayRaw] = match;
+    const suffixDay = Number.parseInt(suffixDayRaw, 10);
+    if (!Number.isInteger(suffixDay) || suffixDay < 1 || suffixDay > 31) continue;
+
+    const rect = getFieldFirstWidgetRect(field);
+    columns.get(prefix).push({
+      name,
+      suffixDay,
+      y: Number.isFinite(rect?.y) ? rect.y : Number.NEGATIVE_INFINITY,
+      x: Number.isFinite(rect?.x) ? rect.x : Number.POSITIVE_INFINITY,
+    });
+  }
+
+  const lookup = new Map();
+  for (const [prefix, fields] of columns.entries()) {
+    fields
+      .sort((a, b) => b.y - a.y || a.x - b.x || a.suffixDay - b.suffixDay)
+      .slice(0, 31)
+      .forEach((field, index) => {
+        lookup.set(`${prefix}_${index + 1}`, field.name);
+      });
+  }
+
+  return lookup;
+};
+
+const setDayFieldText = (form, dayFieldLookup, prefix, day, value) =>
+  setFieldText(form, dayFieldLookup.get(`${prefix}_${day}`) || `${prefix}_${day}`, value);
+
+const resolveDayOverrideLabel = ({ currentDate, dayTimeOff }) => {
+  if (isWeekendDate(currentDate)) return WEEKEND_LABEL;
+  if (dayTimeOff?.vacations?.size) return VACATION_LABEL;
+  return null;
 };
 
 /**
@@ -498,7 +558,7 @@ const resolveHourlySlotValue = ({ rawValue, slotName, dayTimeOff, regularizedEnt
 
   const vacationIds = uniqueNumericIds([...dayTimeOff.vacations]);
   if (vacationIds.length) {
-    return buildVacationLabel(vacationIds);
+    return VACATION_LABEL;
   }
 
   const permissions = Array.isArray(dayTimeOff.permissions) ? dayTimeOff.permissions : [];
@@ -603,6 +663,7 @@ const buildMonthlyPdfBuffer = async ({
   const templateBytes = getTemplateBytes();
   const pdfDoc = await PDFDocument.load(templateBytes);
   const form = pdfDoc.getForm();
+  const dayFieldLookup = buildDayTextFieldLookup(form);
 
   const periodYear = periodDate.getFullYear();
   const periodMonth = periodDate.getMonth();
@@ -622,61 +683,86 @@ const buildMonthlyPdfBuffer = async ({
 
   for (let day = 1; day <= 31; day += 1) {
     if (day > daysInMonth) {
-      setFieldText(form, `hora_entrada_${day}`, "");
-      setFieldText(form, `hora_salida_${day}`, "");
-      setFieldText(form, `hora_entrada_a_${day}`, "");
-      setFieldText(form, `hora_salida_a_${day}`, "");
-      setFieldText(form, `ra_observaciones_${day}`, "");
+      setDayFieldText(form, dayFieldLookup, "hora_entrada", day, "");
+      setDayFieldText(form, dayFieldLookup, "hora_salida", day, "");
+      setDayFieldText(form, dayFieldLookup, "hora_entrada_a", day, "");
+      setDayFieldText(form, dayFieldLookup, "hora_salida_a", day, "");
+      setDayFieldText(form, dayFieldLookup, "ra_observaciones", day, "");
       await setFieldSignature(pdfDoc, form, `Firma_${day}`, null, "", true);
       await setFieldSignature(pdfDoc, form, `Firma_S_${day}`, null, "", true);
       continue;
     }
 
     const currentDate = new Date(periodYear, periodMonth, day, 12, 0, 0, 0);
-    const isWeekend = currentDate.getDay() === 0 || currentDate.getDay() === 6;
+    const isWeekend = isWeekendDate(currentDate);
     const isBeforeHireDate = Boolean(hireDate && isDateBefore(currentDate, hireDate));
-    const record = isBeforeHireDate ? null : recordsByDay.get(day);
+    const record = isBeforeHireDate || isWeekend ? null : recordsByDay.get(day);
     const dayTimeOff = isBeforeHireDate ? null : timeOffByDay.get(day);
+    const dayOverrideLabel = resolveDayOverrideLabel({ currentDate, dayTimeOff });
 
-    setFieldText(
+    setDayFieldText(
       form,
-      `hora_entrada_${day}`,
-      resolveHourlySlotValue({
-        rawValue: record?.acta_entry_time || record?.entry_time,
-        slotName: "entry",
-        dayTimeOff,
-        regularizedEntryTime: record?.late_regularized_entry_time || null,
-        lateJustificationStatus: record?.late_justification_status || null,
-      })
+      dayFieldLookup,
+      "hora_entrada",
+      day,
+      dayOverrideLabel ||
+        resolveHourlySlotValue({
+          rawValue: record?.acta_entry_time || record?.entry_time,
+          slotName: "entry",
+          dayTimeOff,
+          regularizedEntryTime: record?.late_regularized_entry_time || null,
+          lateJustificationStatus: record?.late_justification_status || null,
+        })
     );
-    setFieldText(
+    setDayFieldText(
       form,
-      `hora_salida_a_${day}`,
-      resolveHourlySlotValue({ rawValue: record?.acta_lunch_start_time || record?.lunch_start_time, slotName: "lunch_start", dayTimeOff })
+      dayFieldLookup,
+      "hora_salida_a",
+      day,
+      dayOverrideLabel ||
+        resolveHourlySlotValue({
+          rawValue: record?.acta_lunch_start_time || record?.lunch_start_time,
+          slotName: "lunch_start",
+          dayTimeOff,
+        })
     );
-    setFieldText(
+    setDayFieldText(
       form,
-      `hora_entrada_a_${day}`,
-      resolveHourlySlotValue({ rawValue: record?.acta_lunch_end_time || record?.lunch_end_time, slotName: "lunch_end", dayTimeOff })
+      dayFieldLookup,
+      "hora_entrada_a",
+      day,
+      dayOverrideLabel ||
+        resolveHourlySlotValue({
+          rawValue: record?.acta_lunch_end_time || record?.lunch_end_time,
+          slotName: "lunch_end",
+          dayTimeOff,
+        })
     );
-    setFieldText(
+    setDayFieldText(
       form,
-      `hora_salida_${day}`,
-      resolveHourlySlotValue({ rawValue: record?.acta_exit_time || record?.exit_time, slotName: "exit", dayTimeOff })
+      dayFieldLookup,
+      "hora_salida",
+      day,
+      dayOverrideLabel ||
+        resolveHourlySlotValue({
+          rawValue: record?.acta_exit_time || record?.exit_time,
+          slotName: "exit",
+          dayTimeOff,
+        })
     );
 
     const observation = isBeforeHireDate
       ? "NO LABORABA EN LA EMPRESA"
       : isWeekend
-      ? "FIN DE SEMANA"
+      ? WEEKEND_LABEL
       : dayTimeOff?.vacations?.size
-      ? buildVacationLabel(uniqueNumericIds([...dayTimeOff.vacations]))
+      ? VACATION_LABEL
       : dayTimeOff?.permissions?.length
       ? uniqueNumericIds(dayTimeOff.permissions.map((item) => item.id))
           .map((id) => buildPermissionLabel(id))
           .join(" / ")
       : "";
-    setFieldText(form, `ra_observaciones_${day}`, observation);
+    setDayFieldText(form, dayFieldLookup, "ra_observaciones", day, observation);
 
     const hasFirstCycle = record && record.entry_time && record.lunch_start_time;
     if (hasFirstCycle && signatureBuffer) {
@@ -854,4 +940,11 @@ const generateAttendancePDF = async (userId, startDate, endDate, options = {}) =
 
 module.exports = {
   generateAttendancePDF,
+  __private: {
+    VACATION_LABEL,
+    WEEKEND_LABEL,
+    buildDayTextFieldLookup,
+    resolveDayOverrideLabel,
+    resolveHourlySlotValue,
+  },
 };

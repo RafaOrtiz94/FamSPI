@@ -1,24 +1,10 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import {
- FiClipboard,
- FiCheckCircle,
- FiClock,
- FiAlertTriangle,
- FiList,
- FiBarChart2,
- FiCreditCard,
- FiUsers,
- FiActivity,
- FiShoppingCart,
- FiBriefcase,
- FiTarget,
- FiTrendingUp
+  FiClipboard, FiCheckCircle, FiClock, FiAlertTriangle,
+  FiList, FiBarChart2, FiActivity, FiTrendingUp,
 } from "react-icons/fi";
-import Card from "../../../core/ui/components/Card";
-import Button from "../../../core/ui/components/Button";
-import Modal from "../../../core/ui/components/Modal";
 import { useAuth } from "../../../core/auth/useAuth";
 import { useUI } from "../../../core/ui/UIContext";
 import { useRequestModals } from "../../../core/hooks/useRequestModals";
@@ -26,9 +12,9 @@ import ACPComercialSolicitudesView from "../components/solicitudes/ACPComercialS
 import ComercialSolicitudesView from "../components/solicitudes/ComercialSolicitudesView";
 import UserRequestsView from "../components/solicitudes/UserRequestsView";
 import {
- MaintenanceRequestModal,
- PrivatePurchaseRequestModal,
- EquipmentRequestModal,
+  MaintenanceRequestModal,
+  PrivatePurchaseRequestModal,
+  EquipmentRequestModal,
 } from "../../../core/ui/components/RequestModals";
 import CreateRequestModal from "../components/CreateRequestModal";
 import PermisoVacacionModal from "../../shared/solicitudes/modals/PermisoVacacionModal";
@@ -38,739 +24,481 @@ import PurchaseTypeSelector from "../../../shared/purchases/PurchaseTypeSelector
 import NewPurchaseRequestModal from "../../../shared/purchases/NewPurchaseRequestModal";
 import { usePreflowPurchaseStart } from "../../../shared/purchases/usePreflowPurchaseStart";
 import { PURCHASE_FAMILY, PURCHASE_START_MODE, PURCHASE_KIND } from "../../../shared/purchases/purchaseTypes";
-
-// Importar configuraciones centralizadas
 import { REQUEST_TYPES_CONFIG } from '../config/requestConfig';
-import StatsCard from '../components/shared/StatsCard';
+import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
+
+/* Easing system — DESIGN.md §6 */
+const EASE_OUT = [0.23, 1, 0.32, 1];
+
+/* Icon bg classes per semantic color — only the icon gets the color, never the card */
+const ACTION_ICON_CLASS = {
+  blue:    "bg-blue-50 text-blue-600",
+  emerald: "bg-emerald-50 text-emerald-700",
+  indigo:  "bg-indigo-50 text-indigo-600",
+  orange:  "bg-orange-50 text-orange-700",
+  teal:    "bg-teal-50 text-teal-700",
+  amber:   "bg-amber-50 text-amber-700",
+};
 
 const SolicitudesPage = () => {
- const { user } = useAuth();
- const navigate = useNavigate();
- const { showToast, showLoader, hideLoader } = useUI();
- const [activeTab, setActiveTab] = useState("overview");
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { showToast, showLoader, hideLoader } = useUI();
+  const [activeTab, setActiveTab] = useState("overview");
 
- // Hook para manejar modales
- const {
- privatePurchaseModalOpen,
- maintenanceModalOpen,
- equipmentModalOpen,
- openModal,
- closeModal
- } = useRequestModals();
+  const {
+    privatePurchaseModalOpen,
+    maintenanceModalOpen,
+    equipmentModalOpen,
+    openModal,
+    closeModal,
+  } = useRequestModals();
 
- // Estados para modales de creación de solicitudes comerciales
- const [createInspectionModalOpen, setCreateInspectionModalOpen] = useState(false);
- const [createRetiroModalOpen, setCreateRetiroModalOpen] = useState(false);
- const [purchaseTypeSelectionModalOpen, setPurchaseTypeSelectionModalOpen] = useState(false);
- const [newPurchaseModalOpen, setNewPurchaseModalOpen] = useState(false);
- const [newPurchaseMode, setNewPurchaseMode] = useState('acp_required');
- const [newPurchaseSource, setNewPurchaseSource] = useState('dashboard');
- const [newPurchaseIntent, setNewPurchaseIntent] = useState('provider_handoff');
- const [createCompraModalOpen, setCreateCompraModalOpen] = useState(false);
- const [createClienteModalOpen, setCreateClienteModalOpen] = useState(false);
- const [permisosModalOpen, setPermisosModalOpen] = useState(false);
- const [personnelModalOpen, setPersonnelModalOpen] = useState(false);
- const [privatePurchasePreset, setPrivatePurchasePreset] = useState({
- initialOfferKind: "venta",
- hideOfferKindSelector: false,
- });
- const { startPreflow } = usePreflowPurchaseStart({ navigate, showToast, showLoader, hideLoader });
+  const [createInspectionModalOpen, setCreateInspectionModalOpen] = useState(false);
+  const [createRetiroModalOpen, setCreateRetiroModalOpen] = useState(false);
+  const [purchaseTypeSelectionModalOpen, setPurchaseTypeSelectionModalOpen] = useState(false);
+  const [newPurchaseModalOpen, setNewPurchaseModalOpen] = useState(false);
+  const [newPurchaseMode, setNewPurchaseMode] = useState('acp_required');
+  const [newPurchaseSource, setNewPurchaseSource] = useState('dashboard');
+  const [newPurchaseIntent, setNewPurchaseIntent] = useState('provider_handoff');
+  const [createCompraModalOpen, setCreateCompraModalOpen] = useState(false);
+  const [createClienteModalOpen, setCreateClienteModalOpen] = useState(false);
+  const [permisosModalOpen, setPermisosModalOpen] = useState(false);
+  const [personnelModalOpen, setPersonnelModalOpen] = useState(false);
+  const [privatePurchasePreset, setPrivatePurchasePreset] = useState({
+    initialOfferKind: "venta",
+    hideOfferKindSelector: false,
+  });
+  const { startPreflow } = usePreflowPurchaseStart({ navigate, showToast, showLoader, hideLoader });
 
- // Determinar configuración basada en el rol
- const roleConfig = useMemo(() => {
- const roleName = (user?.role_name || user?.role || "").toLowerCase();
- const isACP = roleName.includes('acp');
- const isBackofficeCommercial = roleName === "backoffice_comercial";
- const isJefeComercial = roleName.includes("jefe_comercial") || roleName.includes("jefe comercial");
+  const roleConfig = useMemo(() => {
+    const roleName = (user?.role_name || user?.role || "").toLowerCase();
+    const isACP = roleName.includes('acp');
+    const isBackofficeCommercial = roleName === "backoffice_comercial";
+    const isJefeComercial = roleName.includes("jefe_comercial") || roleName.includes("jefe comercial");
 
- const baseActions = ["cliente", "compra", "permisos"];
- const acpActions = ["cliente", "compra", "permisos"];
- const backofficeCommercialActions = ["cliente", "compra", "permisos"];
- const fullActions = ["inspection", "retiro", ...baseActions];
+    const baseActions = ["cliente", "compra", "permisos"];
+    const fullActions = ["inspection", "retiro", ...baseActions];
 
- let availableActionIds;
- if (isBackofficeCommercial) {
- availableActionIds = backofficeCommercialActions;
- } else if (isACP) {
- availableActionIds = acpActions;
- } else if (isJefeComercial) {
- availableActionIds = [...fullActions, "personal"];
- } else {
- availableActionIds = fullActions;
- }
+    let availableActionIds;
+    if (isBackofficeCommercial) {
+      availableActionIds = baseActions;
+    } else if (isACP) {
+      availableActionIds = baseActions;
+    } else if (isJefeComercial) {
+      availableActionIds = [...fullActions, "personal"];
+    } else {
+      availableActionIds = fullActions;
+    }
 
- return {
- isACP,
- isBackofficeCommercial,
- isJefeComercial,
- viewComponent: isBackofficeCommercial ? null : (isACP ? ACPComercialSolicitudesView : ComercialSolicitudesView),
- availableActions: availableActionIds.map(id => REQUEST_TYPES_CONFIG[id]).filter(Boolean)
- };
- }, [user]);
+    return {
+      isACP,
+      isBackofficeCommercial,
+      isJefeComercial,
+      viewComponent: isBackofficeCommercial ? null : (isACP ? ACPComercialSolicitudesView : ComercialSolicitudesView),
+      availableActions: availableActionIds.map(id => REQUEST_TYPES_CONFIG[id]).filter(Boolean),
+    };
+  }, [user]);
 
- // Estadísticas calculadas (placeholder - en producción vendrían de API)
- const stats = useMemo(() => ({
- total: 45,
- pending: 12,
- approved: 28,
- rejected: 5
- }), []);
+  const stats = useMemo(() => ({
+    total: 45,
+    pending: 12,
+    approved: 28,
+    rejected: 5,
+  }), []);
 
- // Función para manejar acciones rápidas
- const handleQuickAction = useCallback((actionId) => {
- switch (actionId) {
- case 'cliente':
- setCreateClienteModalOpen(true);
- break;
- case 'compra':
- setPurchaseTypeSelectionModalOpen(true);
- break;
- case 'permisos':
- setPermisosModalOpen(true);
- break;
- case 'personal':
- setPersonnelModalOpen(true);
- break;
- case 'inspection':
- setCreateInspectionModalOpen(true);
- break;
- case 'retiro':
- setCreateRetiroModalOpen(true);
- break;
- default:
- console.warn(`Acción rápida no reconocida: ${actionId}`);
- }
- }, []);
+  const handleQuickAction = useCallback((actionId) => {
+    switch (actionId) {
+      case 'cliente':    setCreateClienteModalOpen(true); break;
+      case 'compra':     setPurchaseTypeSelectionModalOpen(true); break;
+      case 'permisos':   setPermisosModalOpen(true); break;
+      case 'personal':   setPersonnelModalOpen(true); break;
+      case 'inspection': setCreateInspectionModalOpen(true); break;
+      case 'retiro':     setCreateRetiroModalOpen(true); break;
+      default: break;
+    }
+  }, []);
 
- // Función para manejar selección de tipo de compra
- // Funcion para manejar seleccion de tipo de compra
- const handlePurchaseTypeSelection = useCallback(async (selection) => {
- console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][PURCHASE_TYPE_SELECTED]', {
- selection,
- timestamp: new Date().toISOString()
- });
+  const handlePurchaseTypeSelection = useCallback(async (selection) => {
+    const family = selection?.purchaseFamily || selection;
+    const kind = selection?.purchaseKind || null;
+    const startFrom = selection?.startFrom || null;
 
- const family = selection?.purchaseFamily || selection;
- const kind = selection?.purchaseKind || null;
- const startFrom = selection?.startFrom || null;
+    if (startFrom === PURCHASE_START_MODE.EXISTING_MODAL && family === PURCHASE_FAMILY.PRIVATE && kind) {
+      setPrivatePurchasePreset({ initialOfferKind: kind, hideOfferKindSelector: true });
+      openModal('PRIVATE_PURCHASE');
+      return;
+    }
+    if (startFrom === PURCHASE_START_MODE.BUSINESS_CASE_PREFLOW) {
+      await startPreflow({ family, kind, origin: "solicitudes" });
+      return;
+    }
+    if (family === PURCHASE_FAMILY.PRIVATE) {
+      setPrivatePurchasePreset({ initialOfferKind: PURCHASE_KIND.PRIVATE_SALE, hideOfferKindSelector: false });
+      openModal('PRIVATE_PURCHASE');
+      return;
+    }
+    if (family === PURCHASE_FAMILY.PUBLIC) {
+      setNewPurchaseMode('acp_required');
+      setNewPurchaseSource('solicitudes_publicas');
+      setNewPurchaseIntent('public_purchase');
+      setNewPurchaseModalOpen(true);
+    }
+  }, [openModal, startPreflow]);
 
- if (startFrom === PURCHASE_START_MODE.EXISTING_MODAL && family === PURCHASE_FAMILY.PRIVATE && kind) {
- setPrivatePurchasePreset({
- initialOfferKind: kind,
- hideOfferKindSelector: true,
- });
- openModal('PRIVATE_PURCHASE');
- return;
- }
+  const tabs = [
+    { id: 'overview',    label: 'Vista General',  icon: FiBarChart2 },
+    { id: 'my-requests', label: 'Mis Solicitudes', icon: FiList },
+    ...(roleConfig.isBackofficeCommercial ? [] : [{ id: 'analytics', label: 'Análisis', icon: FiActivity }]),
+  ];
 
- if (startFrom === PURCHASE_START_MODE.BUSINESS_CASE_PREFLOW) {
- await startPreflow({ family, kind, origin: "solicitudes" });
- return;
- }
+  /* Stats strip data — numbers use font-mono per Geist Mono Rule */
+  const statsData = [
+    { label: "Total",      value: stats.total,    sub: "Gestiones activas",      color: "text-slate-900" },
+    { label: "Aprobadas",  value: stats.approved, sub: `${stats.total > 0 ? Math.round((stats.approved / stats.total) * 100) : 0}% de éxito`, color: "text-emerald-700" },
+    { label: "En proceso", value: stats.pending,  sub: "Pendientes de revisión", color: "text-amber-700" },
+    { label: "Rechazadas", value: stats.rejected, sub: "Requieren corrección",   color: "text-red-600"   },
+  ];
 
- if (family === PURCHASE_FAMILY.PRIVATE) {
- setPrivatePurchasePreset({
- initialOfferKind: PURCHASE_KIND.PRIVATE_SALE,
- hideOfferKindSelector: false,
- });
- openModal('PRIVATE_PURCHASE');
- return;
- }
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'overview':
+        return (
+          <div className="space-y-6">
+            {/* Franja de métricas — una sola superficie, no tarjetas individuales */}
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-slate-100 divide-y sm:divide-y-0">
+                {statsData.map((s, i) => (
+                  <div key={i} className="px-5 py-4">
+                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">{s.label}</p>
+                    <p className={`text-3xl font-bold mt-1 font-mono tabular-nums tracking-tight ${s.color}`}>
+                      {s.value}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5 leading-snug">{s.sub}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
 
- if (family === PURCHASE_FAMILY.PUBLIC) {
- setNewPurchaseMode('acp_required');
- setNewPurchaseSource('solicitudes_publicas');
- setNewPurchaseIntent('public_purchase');
- setNewPurchaseModalOpen(true);
- }
- }, [openModal, startPreflow]);
+            {/* Acciones rápidas */}
+            <div>
+              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                {roleConfig.isACP ? 'Operaciones ACP' : 'Acciones rápidas'}
+              </p>
+              <div className={`grid gap-2 ${
+                roleConfig.availableActions.length <= 3
+                  ? 'grid-cols-1 sm:grid-cols-3'
+                  : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
+              }`}>
+                {roleConfig.availableActions.map((action) => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    onClick={() => handleQuickAction(action.id)}
+                    /* Press feedback — DESIGN.md §6: scale(0.97) con ease-out */
+                    style={{ transitionTimingFunction: 'cubic-bezier(0.23, 1, 0.32, 1)' }}
+                    className="flex items-center gap-3 px-4 py-3.5 bg-white border border-slate-200 rounded-xl text-left hover:border-slate-300 hover:shadow-[0_4px_16px_rgba(0,0,0,0.10)] active:scale-[0.97] transition-[transform,box-shadow,border-color] duration-[120ms] cursor-pointer [touch-action:manipulation] focus-visible:outline-2 focus-visible:outline-sky-400 focus-visible:outline-offset-2"
+                  >
+                    <div className={`p-2 rounded-lg shrink-0 ${ACTION_ICON_CLASS[action.color] || 'bg-slate-50 text-slate-600'}`}>
+                      <action.icon size={15} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-900 truncate leading-tight">{action.label}</p>
+                      <p className="text-xs text-slate-500 truncate mt-0.5">{action.subtitle}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
 
- // Componentes de Tabs - Filtrar según rol
- const tabs = [
- { id: 'overview', label: 'Vista General', icon: FiBarChart2 },
- { id: 'my-requests', label: 'Mis Solicitudes', icon: FiList },
- // Ocultar análisis/planning para usuarios backoffice_comercial
- ...(roleConfig.isBackofficeCommercial ? [] : [{ id: 'analytics', label: 'Análisis', icon: FiActivity }])
- ];
+            {/* Vista específica del rol */}
+            {roleConfig.viewComponent && (
+              <roleConfig.viewComponent />
+            )}
+          </div>
+        );
 
- // Contenido de cada tab
- const renderTabContent = () => {
- switch (activeTab) {
- case 'overview':
- return (
- <motion.div
- initial={{ opacity: 0, y: 20 }}
- animate={{ opacity: 1, y: 0 }}
- className="space-y-4 sm:space-y-6"
- >
- {/* KPIs Principales - iOS Style - Responsive */}
- <div className="grid grid-cols-2 gap-2 sm:grid-cols-2 lg:grid-cols-4 sm:gap-3">
- <StatsCard
- title="Total Solicitudes"
- value={stats.total}
- subtitle="Gestiones activas"
- icon={FiClipboard}
- colors="from-blue-50 via-blue-100 to-blue-200"
- borderColor="border-blue-500/30"
- shadowColor="shadow-blue-100/30"
- iconBg="bg-gradient-to-br from-blue-500 to-blue-600"
- textColor="text-blue-800"
- valueColor="text-blue-900"
- className="rounded-2xl border-0 shadow-lg text-xs sm:text-sm"
- />
- <StatsCard
- title="Aprobadas"
- value={stats.approved}
- subtitle={`${stats.total > 0 ? Math.round((stats.approved / stats.total) * 100) : 0}% de éxito`}
- icon={FiCheckCircle}
- colors="from-green-50 via-green-100 to-green-200"
- borderColor="border-green-500/30"
- shadowColor="shadow-green-100/30"
- iconBg="bg-gradient-to-br from-green-500 to-green-600"
- textColor="text-green-800"
- valueColor="text-green-900"
- className="rounded-2xl border-0 shadow-lg text-xs sm:text-sm"
- />
- <StatsCard
- title="En Proceso"
- value={stats.pending}
- subtitle="Pendientes de revisión"
- icon={FiClock}
- colors="from-yellow-50 via-yellow-100 to-yellow-200"
- borderColor="border-yellow-500/30"
- shadowColor="shadow-yellow-100/30"
- iconBg="bg-gradient-to-br from-yellow-500 to-yellow-600"
- textColor="text-yellow-800"
- valueColor="text-yellow-900"
- className="rounded-2xl border-0 shadow-lg text-xs sm:text-sm"
- />
- <StatsCard
- title="Rechazadas"
- value={stats.rejected}
- subtitle="Requieren corrección"
- icon={FiAlertTriangle}
- colors="from-red-50 via-red-100 to-red-200"
- borderColor="border-red-500/30"
- shadowColor="shadow-red-100/30"
- iconBg="bg-gradient-to-br from-red-500 to-red-600"
- textColor="text-red-800"
- valueColor="text-red-900"
- className="rounded-2xl border-0 shadow-lg text-xs sm:text-sm"
- />
- </div>
+      case 'my-requests':
+        return <UserRequestsView onCreateNew={handleQuickAction} />;
 
- {/* Accesos rápidos - iOS Style */}
- <Card className="p-4 sm:p-6 border-0 shadow-lg shadow-gray-100/50 rounded-2xl bg-white">
- <div className="flex items-center justify-between mb-3 sm:mb-5">
- <div>
- <h3 className="text-base sm:text-lg font-bold text-gray-900 tracking-tight">Accesos rápidos</h3>
- <p className="text-gray-600 mt-1 text-[11px] sm:text-sm">
- {roleConfig.isACP ? 'Operaciones disponibles para ACP Comercial' : 'Operaciones disponibles para tu rol'}
- </p>
- </div>
- </div>
+      case 'analytics':
+        return (
+          <div className="space-y-5">
+            <div className="flex items-center gap-2.5 pb-4 border-b border-slate-100">
+              <FiBarChart2 className="text-slate-400" size={16} />
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">Análisis y estadísticas</h2>
+                <p className="text-xs text-slate-500">Distribución de solicitudes por categoría</p>
+              </div>
+            </div>
 
- <div className={`grid gap-2 sm:gap-3 ${roleConfig.isACP ? 'grid-cols-2 sm:grid-cols-2' : 'grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4'}`}>
- {roleConfig.availableActions.map((action) => (
- <Button
- key={action.id}
- onClick={() => handleQuickAction(action.id)}
- className={`p-3 h-12 sm:h-16 transition-all duration-200 rounded-xl border-0 shadow-sm hover:shadow-md active:scale-95 ${
- action.color === 'blue' ? 'bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700' :
- action.color === 'amber' ? 'bg-gradient-to-br from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700' :
- action.color === 'emerald' ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700' :
- action.color === 'indigo' ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700' :
- action.color === 'teal' ? 'bg-gradient-to-br from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700' :
- 'bg-gradient-to-br from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700'
- }`}
- >
- <div className="flex items-center gap-2 w-full">
- <div className="p-1.5 sm:p-2 bg-white/20 rounded-lg backdrop-blur-sm">
- <action.icon size={14} className="text-white" />
- </div>
- <div className="text-left flex-1 min-w-0">
- <div className="font-semibold text-white text-xs sm:text-sm leading-tight truncate">{action.label}</div>
- <div className="text-white/80 text-[10px] sm:text-xs leading-tight truncate">{action.subtitle}</div>
- </div>
- </div>
- </Button>
- ))}
- </div>
- </Card>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Distribución */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5">
+                <h3 className="text-sm font-semibold text-slate-900 mb-4">Por tipo</h3>
+                <div className="space-y-px">
+                  {[
+                    { label: "Clientes",     value: 15, cls: "bg-emerald-50 text-emerald-700" },
+                    { label: "Compras",      value: 12, cls: "bg-indigo-50 text-indigo-700" },
+                    { label: "Permisos",     value: 8,  cls: "bg-orange-50 text-orange-700" },
+                    ...(!roleConfig.isACP && !roleConfig.isBackofficeCommercial ? [
+                      { label: "Inspecciones", value: 6, cls: "bg-blue-50 text-blue-700" },
+                      { label: "Retiros",      value: 4, cls: "bg-amber-50 text-amber-700" },
+                    ] : []),
+                  ].map((item) => (
+                    <div key={item.label} className="flex items-center justify-between py-2.5 border-b border-slate-50 last:border-0">
+                      <span className="text-sm text-slate-700">{item.label}</span>
+                      <span className={`text-xs font-semibold font-mono tabular-nums px-2.5 py-0.5 rounded-full ${item.cls}`}>
+                        {item.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
 
- {/* Vista Específica del Rol */}
- {roleConfig.viewComponent && (
- <div className="mt-8">
- <roleConfig.viewComponent />
- </div>
- )}
+              {/* Tiempo de respuesta — empty state */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col items-center justify-center gap-3 min-h-[200px]">
+                <FiTrendingUp className="text-slate-200" size={36} />
+                <div className="text-center">
+                  <p className="text-sm font-medium text-slate-600">Tiempo de respuesta</p>
+                  <p className="text-xs text-slate-400 mt-1">Disponible próximamente</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
 
- {/* Actividad Reciente - iOS Style Unificado */}
- <Card className="p-4 sm:p-6 border-0 shadow-lg shadow-gray-100/50 rounded-2xl bg-white">
- <div className="flex items-center justify-between mb-3 sm:mb-5">
- <div className="flex items-center gap-3">
- <div className="p-1.5 sm:p-2 bg-gradient-to-br from-gray-600 to-gray-700 rounded-lg shadow-sm">
- <FiActivity className="text-white" size={18} />
- </div>
- <div>
- <h3 className="text-base sm:text-lg font-bold text-gray-900 tracking-tight">Actividad Reciente</h3>
- <p className="text-gray-600 mt-1 text-[11px] sm:text-sm">Últimas actualizaciones en tus solicitudes</p>
- </div>
- </div>
- </div>
+      default:
+        return null;
+    }
+  };
 
- <div className="space-y-2 sm:space-y-3">
- <motion.div
- initial={{ opacity: 0, x: -20 }}
- animate={{ opacity: 1, x: 0 }}
- transition={{ delay: 0.1 }}
- className="flex items-center justify-between p-3 sm:p-4 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-xl border border-indigo-200/60 hover:bg-gradient-to-br hover:from-indigo-100 hover:to-indigo-200 transition-all duration-200 cursor-pointer hover:shadow-sm"
- >
- <div className="flex items-center gap-3">
- <div className="p-1.5 sm:p-2 bg-white rounded-lg shadow-sm">
- <FiCreditCard className="text-indigo-600" size={14} />
- </div>
- <div>
- <p className="font-semibold text-gray-900 text-xs sm:text-sm">
- Requerimiento de Equipos
- </p>
- <p className="text-[11px] sm:text-xs text-gray-600">
- Aprobado hace 2 días
- </p>
- </div>
- </div>
- <FiCheckCircle className="text-green-600" size={16} />
- </motion.div>
+  return (
+    <div className={WORKSPACE_PAGE_CLASS}>
 
- <motion.div
- initial={{ opacity: 0, x: -20 }}
- animate={{ opacity: 1, x: 0 }}
- transition={{ delay: 0.2 }}
- className="flex items-center justify-between p-3 sm:p-4 bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl border border-orange-200/60 hover:bg-gradient-to-br hover:from-orange-100 hover:to-orange-200 transition-all duration-200 cursor-pointer hover:shadow-sm"
- >
- <div className="flex items-center gap-3">
- <div className="p-1.5 sm:p-2 bg-white rounded-lg shadow-sm">
- <FiUsers className="text-orange-600" size={14} />
- </div>
- <div>
- <p className="font-semibold text-gray-900 text-xs sm:text-sm">
- Permiso de Vacaciones
- </p>
- <p className="text-[11px] sm:text-xs text-gray-600">
- En proceso de aprobación
- </p>
- </div>
- </div>
- <FiClock className="text-yellow-600" size={16} />
- </motion.div>
+      {/* ── Header ── */}
+      <div className="bg-white border-b border-slate-200 px-6 py-5">
 
- {!roleConfig.isACP && !roleConfig.isBackofficeCommercial && (
- <motion.div
- initial={{ opacity: 0, x: -20 }}
- animate={{ opacity: 1, x: 0 }}
- transition={{ delay: 0.3 }}
- className="flex items-center justify-between p-3 sm:p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border border-blue-200/60 hover:bg-gradient-to-br hover:from-blue-100 hover:to-blue-200 transition-all duration-200 cursor-pointer hover:shadow-sm"
- >
- <div className="flex items-center gap-3">
- <div className="p-1.5 sm:p-2 bg-white rounded-lg shadow-sm">
- <FiClipboard className="text-blue-600" size={14} />
- </div>
- <div>
- <p className="font-semibold text-gray-900 text-xs sm:text-sm">
- Inspección Técnica
- </p>
- <p className="text-[11px] sm:text-xs text-gray-600">
- Programada para mañana
- </p>
- </div>
- </div>
- <FiTarget className="text-blue-600" size={16} />
- </motion.div>
- )}
- </div>
- </Card>
- </motion.div>
- );
+        {/* Título + resumen inline */}
+        <div className="flex items-start justify-between gap-6">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Naval Slate como ancla estructural — DESIGN.md §2 Naval Structure Rule */}
+            <div className="p-2 bg-slate-800 rounded-xl shrink-0">
+              <FiClipboard className="text-white" size={18} />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight leading-tight">
+                Solicitudes
+              </h1>
+              <p className="text-sm text-slate-500 mt-0.5">
+                {roleConfig.isACP
+                  ? 'Gestión ACP, solicitudes y requerimientos'
+                  : 'Gestión comercial, solicitudes y seguimiento'}
+              </p>
+            </div>
+          </div>
 
- case 'my-requests':
- return (
- <motion.div
- initial={{ opacity: 0, y: 20 }}
- animate={{ opacity: 1, y: 0 }}
- className="space-y-6"
- >
- <UserRequestsView onCreateNew={handleQuickAction} />
- </motion.div>
- );
+          {/* Resumen numérico en mono — The Geist Mono Rule */}
+          <div className="hidden sm:flex items-center gap-2 shrink-0 pt-0.5">
+            <span className="text-sm font-bold text-slate-900 font-mono tabular-nums">{stats.total}</span>
+            <span className="text-xs text-slate-400">solicitudes</span>
+            <span className="w-px h-3.5 bg-slate-200 mx-1" />
+            <span className="text-sm font-semibold text-emerald-700 font-mono tabular-nums">{stats.approved}</span>
+            <span className="text-xs text-slate-400">aprobadas</span>
+            <span className="w-px h-3.5 bg-slate-200 mx-1" />
+            <span className="text-sm font-semibold text-amber-700 font-mono tabular-nums">{stats.pending}</span>
+            <span className="text-xs text-slate-400">en proceso</span>
+          </div>
+        </div>
 
- case 'analytics':
- return (
- <motion.div
- initial={{ opacity: 0, y: 20 }}
- animate={{ opacity: 1, y: 0 }}
- className="space-y-6"
- >
- <Card className="p-6 border-0 shadow-lg shadow-gray-100/50 rounded-2xl bg-white">
- <div className="flex items-center gap-3 mb-6">
- <div className="p-2 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg shadow-sm">
- <FiBarChart2 className="text-white" size={24} />
- </div>
- <div>
- <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Análisis y Estadísticas</h2>
- <p className="text-gray-600 mt-1 text-sm">Métricas detalladas de tu rendimiento en solicitudes</p>
- </div>
- </div>
+        {/* Tab nav — underline style, Action Blue solo en activo */}
+        <div className="flex mt-5 border-b border-slate-100 -mb-px gap-0 overflow-x-auto scrollbar-hide">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors duration-150 cursor-pointer ${
+                  isActive
+                    ? 'border-blue-600 text-slate-900'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-200'
+                }`}
+              >
+                <Icon size={13} />
+                {tab.label}
+                {tab.id === 'overview' && stats.total > 0 && (
+                  <span className={`text-[10px] font-semibold font-mono tabular-nums px-1.5 py-px rounded-full ml-0.5 ${
+                    isActive ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'
+                  }`}>
+                    {stats.total}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
- <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
- <Card className="p-6 border-0 shadow-md shadow-gray-100/40 rounded-2xl bg-white">
- <h3 className="text-lg font-bold text-gray-900 mb-4">Distribución por Tipo</h3>
- <div className="space-y-3">
- <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
- <span className="text-sm font-medium text-gray-700">Clientes</span>
- <span className="text-sm font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">15</span>
- </div>
- <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
- <span className="text-sm font-medium text-gray-700">Compras</span>
- <span className="text-sm font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full">12</span>
- </div>
- <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
- <span className="text-sm font-medium text-gray-700">Permisos</span>
- <span className="text-sm font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-full">8</span>
- </div>
- {!roleConfig.isACP && !roleConfig.isBackofficeCommercial && (
- <>
- <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
- <span className="text-sm font-medium text-gray-700">Inspecciones</span>
- <span className="text-sm font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-full">6</span>
- </div>
- <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
- <span className="text-sm font-medium text-gray-700">Retiros</span>
- <span className="text-sm font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-full">4</span>
- </div>
- </>
- )}
- </div>
- </Card>
+      {/* ── Contenido ── */}
+      <div className="flex-1 p-6">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            /* DESIGN.md §6: ease-out fuerte, 150ms — tab switch en "decenas/día" */
+            transition={{ duration: 0.15, ease: EASE_OUT }}
+          >
+            {renderTabContent()}
+          </motion.div>
+        </AnimatePresence>
+      </div>
 
- <Card className="p-6 border-0 shadow-md shadow-gray-100/40 rounded-2xl bg-white">
- <h3 className="text-lg font-bold text-gray-900 mb-4">Tiempo de Respuesta</h3>
- <div className="text-center py-8">
- <FiTrendingUp className="mx-auto text-gray-300 mb-3" size={48} />
- <p className="text-gray-500 text-sm">Funcionalidad próximamente</p>
- <p className="text-gray-400 text-xs mt-1">Análisis de tiempos de proceso</p>
- </div>
- </Card>
- </div>
- </Card>
- </motion.div>
- );
+      {/* ── Modales ── */}
+      <PermisoVacacionModal
+        open={permisosModalOpen}
+        onClose={() => setPermisosModalOpen(false)}
+        onSuccess={() => setPermisosModalOpen(false)}
+      />
 
- default:
- return null;
- }
- };
+      {personnelModalOpen && (
+        <PersonnelRequestForm
+          onClose={() => setPersonnelModalOpen(false)}
+          onSuccess={() => setPersonnelModalOpen(false)}
+        />
+      )}
 
- return (
- <div className="bg-slate-50">
- {/* Header Principal - iOS Style */}
- <motion.div
- initial={{ opacity: 0, y: -20 }}
- animate={{ opacity: 1, y: 0 }}
- className="bg-white border-b border-gray-200/60 rounded-t-3xl shadow-sm"
- >
- <div className="px-4 py-4 sm:px-6 sm:py-6">
- <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 sm:mb-6">
- <div className="flex items-center gap-3 sm:gap-4">
- <div className="p-2 sm:p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-md">
- <FiClipboard className="text-white" size={22} />
- </div>
- <div>
- <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">Solicitudes</h1>
- <p className="text-gray-600 mt-1 text-xs sm:text-sm">
- {roleConfig.isACP ? 'Gestión ACP - Solicitudes y requerimientos' : 'Gestión comercial - Solicitudes y seguimiento'}
- </p>
- </div>
- </div>
+      <CreateRequestModal
+        open={createClienteModalOpen}
+        onClose={() => setCreateClienteModalOpen(false)}
+        onSubmit={async (data) => {
+          try {
+            showLoader();
+            const { request_type_id, payload: rawPayload, files = [] } = data || {};
+            const payload = rawPayload && typeof rawPayload === "object" ? { ...rawPayload } : {};
+            if (payload.observacion && !payload.observaciones) payload.observaciones = payload.observacion;
+            delete payload.observacion;
+            await createRequest({ request_type_id: request_type_id || "F.ST-22", payload, files });
+            showToast("Solicitud de cliente enviada correctamente", "success");
+            setCreateClienteModalOpen(false);
+          } catch {
+            showToast("No se pudo enviar la solicitud de cliente. Verifica tu conexión.", "error");
+          } finally {
+            hideLoader();
+          }
+        }}
+        presetType="cliente"
+      />
 
- <div className="flex items-center gap-3 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200/60">
- <div className="text-right">
- <p className="text-xs sm:text-sm font-semibold text-gray-900">{stats.total} Solicitudes</p>
- <p className="text-[11px] sm:text-xs text-gray-600">
- {stats.approved} aprobadas • {stats.pending} pendientes
- </p>
- </div>
- </div>
- </div>
+      <CreateRequestModal
+        open={createCompraModalOpen}
+        onClose={() => setCreateCompraModalOpen(false)}
+        onSubmit={async (data) => {
+          try {
+            showLoader();
+            const { request_type_id, payload: rawPayload, files = [] } = data || {};
+            const payload = rawPayload && typeof rawPayload === "object" ? { ...rawPayload } : {};
+            if (payload.observacion && !payload.observaciones) payload.observaciones = payload.observacion;
+            delete payload.observacion;
+            await createRequest({ request_type_id: request_type_id || "F.ST-19", payload, files });
+            showToast("Solicitud de compra enviada correctamente", "success");
+            setCreateCompraModalOpen(false);
+          } catch {
+            showToast("No se pudo enviar la solicitud de compra. Verifica tu conexión.", "error");
+          } finally {
+            hideLoader();
+          }
+        }}
+        presetType="compra"
+      />
 
- {/* Navigation Tabs - iOS Style */}
- <div className="border-b border-gray-200/60 pb-2">
- <div className="flex space-x-1 overflow-x-auto scrollbar-hide -mx-2 px-2">
- {tabs.map((tab) => {
- const Icon = tab.icon;
- const isActive = activeTab === tab.id;
+      <CreateRequestModal
+        open={createInspectionModalOpen}
+        onClose={() => setCreateInspectionModalOpen(false)}
+        onSubmit={async (data) => {
+          try {
+            showLoader();
+            const { request_type_id, payload: rawPayload, files = [] } = data || {};
+            const payload = rawPayload && typeof rawPayload === "object" ? { ...rawPayload } : {};
+            if (payload.observacion && !payload.observaciones) payload.observaciones = payload.observacion;
+            delete payload.observacion;
+            await createRequest({ request_type_id: request_type_id || "F.ST-20", payload, files });
+            showToast("Solicitud de inspección enviada correctamente", "success");
+            setCreateInspectionModalOpen(false);
+          } catch {
+            showToast("No se pudo enviar la solicitud de inspección. Verifica tu conexión.", "error");
+          } finally {
+            hideLoader();
+          }
+        }}
+        presetType="inspection"
+      />
 
- return (
- <button
- key={tab.id}
- onClick={() => setActiveTab(tab.id)}
- className={`
- flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 min-w-max
- ${isActive
- ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
- : 'text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 hover:text-gray-900 hover:shadow-sm'
- }
- `}
- >
- <Icon size={14} className={isActive ? 'text-white' : 'text-gray-500'} />
- <span className="hidden sm:inline">{tab.label}</span>
- {tab.id === 'overview' && stats.total > 0 && (
- <span className={`text-[10px] px-1.5 py-0.5 rounded-full ml-1 ${
- isActive ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-600'
- }`}>
- {stats.total}
- </span>
- )}
- </button>
- );
- })}
- </div>
- </div>
- </div>
- </motion.div>
+      <CreateRequestModal
+        open={createRetiroModalOpen}
+        onClose={() => setCreateRetiroModalOpen(false)}
+        onSubmit={async (data) => {
+          try {
+            showLoader();
+            const { request_type_id, payload: rawPayload, files = [] } = data || {};
+            const payload = rawPayload && typeof rawPayload === "object" ? { ...rawPayload } : {};
+            if (payload.observacion && !payload.observaciones) payload.observaciones = payload.observacion;
+            delete payload.observacion;
+            await createRequest({ request_type_id: request_type_id || "F.ST-21", payload, files });
+            showToast("Solicitud de retiro enviada correctamente", "success");
+            setCreateRetiroModalOpen(false);
+          } catch {
+            showToast("No se pudo enviar la solicitud de retiro. Verifica tu conexión.", "error");
+          } finally {
+            hideLoader();
+          }
+        }}
+        presetType="retiro"
+      />
 
- {/* Contenido Principal - Responsive */}
- <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
- <AnimatePresence mode="wait">
- <motion.div
- key={activeTab}
- initial={{ opacity: 0, y: 20 }}
- animate={{ opacity: 1, y: 0 }}
- exit={{ opacity: 0, y: -20 }}
- transition={{ duration: 0.3 }}
- >
- {renderTabContent()}
- </motion.div>
- </AnimatePresence>
- </div>
+      <PrivatePurchaseRequestModal
+        isOpen={privatePurchaseModalOpen}
+        initialOfferKind={privatePurchasePreset.initialOfferKind}
+        hideOfferKindSelector={privatePurchasePreset.hideOfferKindSelector}
+        onClose={() => {
+          setPrivatePurchasePreset({ initialOfferKind: 'venta', hideOfferKindSelector: false });
+          closeModal('PRIVATE_PURCHASE');
+        }}
+        onSuccess={() => {}}
+      />
 
- {/* Modales */}
- <PermisoVacacionModal
- open={permisosModalOpen}
- onClose={() => setPermisosModalOpen(false)}
- onSuccess={() => {
- setPermisosModalOpen(false);
- // Aquí podríamos recargar datos si fuera necesario
- }}
- />
- {personnelModalOpen && (
- <PersonnelRequestForm
- onClose={() => setPersonnelModalOpen(false)}
- onSuccess={() => setPersonnelModalOpen(false)}
- />
- )}
+      <EquipmentRequestModal
+        isOpen={equipmentModalOpen}
+        onClose={() => closeModal('EQUIPMENT')}
+      />
 
- <CreateRequestModal
- open={createClienteModalOpen}
- onClose={() => setCreateClienteModalOpen(false)}
- onSubmit={async (data) => {
- try {
- showLoader();
- console.log('[SOLICITUDES_PAGE][CLIENTE] Enviando:', data);
+      <MaintenanceRequestModal
+        isOpen={maintenanceModalOpen}
+        onClose={() => closeModal('MAINTENANCE')}
+      />
 
- const { request_type_id, payload: rawPayload, files = [] } = data || {};
- const payload = rawPayload && typeof rawPayload === "object" ? { ...rawPayload } : {};
- if (payload.observacion && !payload.observaciones) payload.observaciones = payload.observacion;
- delete payload.observacion;
+      <PurchaseTypeSelector
+        isOpen={purchaseTypeSelectionModalOpen}
+        onClose={() => setPurchaseTypeSelectionModalOpen(false)}
+        origin="solicitudes"
+        onSelect={handlePurchaseTypeSelection}
+      />
 
- const result = await createRequest({
- request_type_id: request_type_id || "F.ST-22",
- payload,
- files
- });
-
- console.log('[SOLICITUDES_PAGE][CLIENTE] Respuesta:', result);
- showToast("Solicitud de cliente enviada correctamente ✅", "success");
- setCreateClienteModalOpen(false);
- } catch (err) {
- console.error('[SOLICITUDES_PAGE][CLIENTE] Error:', err);
- showToast("Error al enviar solicitud de cliente", "error");
- } finally {
- hideLoader();
- }
- }}
- presetType="cliente"
- />
-
- <CreateRequestModal
- open={createCompraModalOpen}
- onClose={() => {
- console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][MODAL_CLOSE]', {
- modalType: 'CreateRequestModal',
- presetType: 'compra',
- timestamp: new Date().toISOString()
- });
- setCreateCompraModalOpen(false);
- }}
- onSubmit={async (data) => {
- console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][FORM_SUBMIT]', {
- modalType: 'CreateRequestModal',
- presetType: 'compra',
- formType: 'compra_general',
- hasData: !!data,
- timestamp: new Date().toISOString()
- });
-
- try {
- showLoader();
- console.log('[SOLICITUDES_PAGE][COMPRA] Enviando:', data);
-
- const { request_type_id, payload: rawPayload, files = [] } = data || {};
- const payload = rawPayload && typeof rawPayload === "object" ? { ...rawPayload } : {};
- if (payload.observacion && !payload.observaciones) payload.observaciones = payload.observacion;
- delete payload.observacion;
-
- const result = await createRequest({
- request_type_id: request_type_id || "F.ST-19",
- payload,
- files
- });
-
- console.log('[SOLICITUDES_PAGE][COMPRA] Respuesta:', result);
- showToast("Solicitud de compra enviada correctamente ✅", "success");
- setCreateCompraModalOpen(false);
- } catch (err) {
- console.error('[SOLICITUDES_PAGE][COMPRA] Error:', err);
- showToast("Error al enviar solicitud de compra", "error");
- } finally {
- hideLoader();
- }
- }}
- presetType="compra"
- />
-
- <CreateRequestModal
- open={createInspectionModalOpen}
- onClose={() => setCreateInspectionModalOpen(false)}
- onSubmit={async (data) => {
- try {
- showLoader();
- console.log('[SOLICITUDES_PAGE][INSPECCION] Enviando:', data);
-
- const { request_type_id, payload: rawPayload, files = [] } = data || {};
- const payload = rawPayload && typeof rawPayload === "object" ? { ...rawPayload } : {};
- if (payload.observacion && !payload.observaciones) payload.observaciones = payload.observacion;
- delete payload.observacion;
-
- const result = await createRequest({
- request_type_id: request_type_id || "F.ST-20",
- payload,
- files
- });
-
- console.log('[SOLICITUDES_PAGE][INSPECCION] Respuesta:', result);
- showToast("Solicitud de inspección enviada correctamente ✅", "success");
- setCreateInspectionModalOpen(false);
- } catch (err) {
- console.error('[SOLICITUDES_PAGE][INSPECCION] Error:', err);
- showToast("Error al enviar solicitud de inspección", "error");
- } finally {
- hideLoader();
- }
- }}
- presetType="inspection"
- />
-
- <CreateRequestModal
- open={createRetiroModalOpen}
- onClose={() => setCreateRetiroModalOpen(false)}
- onSubmit={async (data) => {
- try {
- showLoader();
- console.log('[SOLICITUDES_PAGE][RETIRO] Enviando:', data);
-
- const { request_type_id, payload: rawPayload, files = [] } = data || {};
- const payload = rawPayload && typeof rawPayload === "object" ? { ...rawPayload } : {};
- if (payload.observacion && !payload.observaciones) payload.observaciones = payload.observacion;
- delete payload.observacion;
-
- const result = await createRequest({
- request_type_id: request_type_id || "F.ST-21",
- payload,
- files
- });
-
- console.log('[SOLICITUDES_PAGE][RETIRO] Respuesta:', result);
- showToast("Solicitud de retiro enviada correctamente ✅", "success");
- setCreateRetiroModalOpen(false);
- } catch (err) {
- console.error('[SOLICITUDES_PAGE][RETIRO] Error:', err);
- showToast("Error al enviar solicitud de retiro", "error");
- } finally {
- hideLoader();
- }
- }}
- presetType="retiro"
- />
-
- {/* ✅ MODALES GLOBALES DETALLADOS */}
- <PrivatePurchaseRequestModal
- isOpen={privatePurchaseModalOpen}
- initialOfferKind={privatePurchasePreset.initialOfferKind}
- hideOfferKindSelector={privatePurchasePreset.hideOfferKindSelector}
- onClose={() => {
- console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][MODAL_CLOSE]', {
- modalType: 'PrivatePurchaseRequestModal',
- timestamp: new Date().toISOString()
- });
- setPrivatePurchasePreset({
- initialOfferKind: 'venta',
- hideOfferKindSelector: false,
- });
- closeModal('PRIVATE_PURCHASE');
- }}
- onSuccess={(data) => {
- console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][FORM_SUBMIT]', {
- modalType: 'PrivatePurchaseRequestModal',
- formType: 'compra_privada_proceso',
- hasData: !!data,
- timestamp: new Date().toISOString()
- });
- }}
- />
-<EquipmentRequestModal
- isOpen={equipmentModalOpen}
- onClose={() => closeModal('EQUIPMENT')}
- />
-
- <MaintenanceRequestModal
- isOpen={maintenanceModalOpen}
- onClose={() => closeModal('MAINTENANCE')}
- />
-
- {/* COMPONENTE UNIFICADO PARA SELECCIÓN DE TIPO DE COMPRA */}
- <PurchaseTypeSelector
- isOpen={purchaseTypeSelectionModalOpen}
- onClose={() => setPurchaseTypeSelectionModalOpen(false)}
- origin="solicitudes"
- onSelect={handlePurchaseTypeSelection}
- />
-
- {/* Modal unificado de compra pública/privada */}
- <NewPurchaseRequestModal
- isOpen={newPurchaseModalOpen}
- onOpenChange={setNewPurchaseModalOpen}
- mode={newPurchaseMode}
- source={newPurchaseSource}
- intent={newPurchaseIntent}
- hideButton={true}
- onSuccess={(result) => {
- console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][PURCHASE_SUCCESS]', result);
- setNewPurchaseModalOpen(false);
- // Aquí podríamos recargar datos si fuera necesario
- }}
- />
- </div>
- );
+      <NewPurchaseRequestModal
+        isOpen={newPurchaseModalOpen}
+        onOpenChange={setNewPurchaseModalOpen}
+        mode={newPurchaseMode}
+        source={newPurchaseSource}
+        intent={newPurchaseIntent}
+        hideButton={true}
+        onSuccess={() => setNewPurchaseModalOpen(false)}
+      />
+    </div>
+  );
 };
 
 export default SolicitudesPage;

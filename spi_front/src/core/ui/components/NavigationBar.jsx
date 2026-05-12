@@ -15,7 +15,6 @@ import {
  FiCalendar,
  FiLayers,
  FiShield,
- FiTruck,
  FiLifeBuoy,
  FiActivity,
  FiSettings,
@@ -90,18 +89,6 @@ const aprobacionesPlanLink = {
  path: "/dashboard/comercial/aprobaciones-planificacion",
 };
 
-const privatePurchasesLink = {
- name: "Compras Privadas",
- icon: FiLayers,
- path: "/dashboard/backoffice/private-purchases",
-};
-
-const publicPurchasesLink = {
- name: "Compras Públicas",
- icon: FiShoppingCart,
- path: "/dashboard/comercial/equipment-purchases",
-};
-
 const businessCaseLink = {
  name: "Business Case",
  icon: FiFileText,
@@ -132,16 +119,16 @@ const purchasesWorkspaceLink = {
  path: "/dashboard/purchases/workspace",
 };
 
+const equipmentWorkspaceLink = {
+ name: "Workspace de Equipos",
+ icon: FiCpu,
+ path: "/dashboard/equipos",
+};
+
 const gerenciaContractApprovalsLink = {
  name: "Album de Compras",
  icon: FiCheckCircle,
  path: "/dashboard/gerencia/compras-album",
-};
-
-const logisticaPurchasesLink = {
- name: "Compras Privadas",
- icon: FiTruck,
- path: "/dashboard/logistica/private-purchases",
 };
 
 const talentoLinks = [
@@ -219,76 +206,6 @@ const tiModulesLink = {
  path: "/dashboard/ti/modulos",
 };
 
-const servicioLinks = [
- {
- name: "Workspace Procedimiento",
- icon: FiShoppingCart,
- path: "/dashboard/servicio-tecnico/workspace-procedimiento",
- },
- {
- name: "Mantenimientos",
- icon: FiTool,
- path: "/dashboard/servicio-tecnico/mantenimientos",
- },
- {
- name: "Solicitudes",
- icon: FiList,
- path: "/dashboard/servicio-tecnico/solicitudes",
- },
- {
- name: "Disponibilidad",
- icon: FiUsers,
- path: "/dashboard/servicio-tecnico/disponibilidad",
- },
- {
- name: "Capacitaciones",
- icon: FiBookOpen,
- path: "/dashboard/servicio-tecnico/capacitaciones",
- },
- {
- name: "Equipos",
- icon: FiCpu,
- path: "/dashboard/servicio-tecnico/equipos",
- },
- {
- name: "Aprobaciones",
- icon: FiCheckCircle,
- path: "/dashboard/servicio-tecnico/aprobaciones",
- },
- {
- name: "Aplicaciones",
- icon: FiFileText,
- path: "/dashboard/servicio-tecnico/aplicaciones",
- },
- {
- name: "Desinfección",
- icon: FiShield,
- path: "/dashboard/servicio-tecnico/desinfeccion",
- },
- {
- name: "Asistencia",
- icon: FiCheckCircle,
- path: "/dashboard/servicio-tecnico/asistencia",
- },
- {
- name: "Verificación",
- icon: FiClipboard,
- path: "/dashboard/servicio-tecnico/verificacion",
- },
-];
-
-const deliveryActsLink = {
- name: "Compras privadas",
- icon: FiFileText,
- path: "/dashboard/servicio-tecnico/compras-privadas",
-};
-
-const privateDeliveriesLink = {
- name: "Entregas privadas",
- icon: FiTruck,
- path: "/dashboard/servicio-tecnico/entregas-privadas",
-};
-
 // Sistema de prioridades por rol
 const getPriorityGroups = (scope, role, auditActive) => {
  const roleSet = new Set(
@@ -350,6 +267,15 @@ const getPriorityGroups = (scope, role, auditActive) => {
  if (workspaceAllowedRoles.includes(scope) || role.includes("backoffice")) {
  groups.primary.unshift(purchasesWorkspaceLink); // Workspace primero en primary
  }
+ const equipmentWorkspaceAllowedRoles = [
+ "comercial", "jefe_comercial", "backoffice_comercial", "acp_comercial",
+ "servicio_tecnico", "tecnico", "jefe_tecnico", "jefe_servicio_tecnico",
+ "operaciones", "jefe_operaciones", "logistica", "jefe_logistica",
+ "gerencia", "gerencia_general", "admin", "administrador", "ti", "admin_ti",
+ ];
+ if (equipmentWorkspaceAllowedRoles.includes(scope) || role.includes("backoffice")) {
+ groups.primary.push(equipmentWorkspaceLink);
+ }
  groups.primary.push(deliveryCeilingsLink);
 
  if (["jefe_comercial"].includes(scope)) {
@@ -362,15 +288,9 @@ const getPriorityGroups = (scope, role, auditActive) => {
 
  // SERVICIO TECNICO - Operaciones tecnicas
  else if (["servicio_tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "tecnico"].includes(scope)) {
- groups.critical.push(
- servicioLinks.find(l => l.name === "Workspace Procedimiento"),
- purchasesWorkspaceLink,
- );
- groups.primary.push(
- privateDeliveriesLink,
- deliveryActsLink,
- permisosLink,
- );
+ groups.critical.push(purchasesWorkspaceLink);
+ groups.primary.push(equipmentWorkspaceLink);
+ groups.primary.push(permisosLink);
  groups.secondary.push(viaticosLink);
  }
 
@@ -392,13 +312,15 @@ else if (["it", "ti", "jefe_ti", "admin_ti"].includes(scope)) {
  // âš™ï¸ OPERACIONES - Procesos operativos
  else if (["operaciones", "jefe_operaciones"].includes(scope)) {
  groups.primary.push(purchasesWorkspaceLink, permisosLink);
+ groups.primary.push(equipmentWorkspaceLink);
  groups.secondary.push(businessCaseLink);
  if (auditActive) groups.secondary.push(auditPrepLink);
  }
 
- // 📦 LOGISTICA - Despachos y actas
+ // LOGISTICA - Despachos y actas
  else if (["logistica", "jefe_logistica"].includes(scope)) {
- groups.primary.push(logisticaPurchasesLink);
+ groups.primary.push(purchasesWorkspaceLink);
+ groups.primary.push(equipmentWorkspaceLink);
  groups.primary.push(permisosLink);
  }
 
@@ -410,7 +332,7 @@ else if (["it", "ti", "jefe_ti", "admin_ti"].includes(scope)) {
 
  // ðŸ¢ BACKOFFICE - Soporte administrativo
  else if (role.includes("backoffice")) {
- groups.primary.push(privatePurchasesLink, publicPurchasesLink);
+ groups.primary.push(purchasesWorkspaceLink);
  groups.secondary.push(...comercialLinks);
  }
 

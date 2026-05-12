@@ -18,12 +18,10 @@ import NotFound from "../modules/shared/pages/NotFound";
 import Unauthorized from "../modules/shared/pages/Unauthorized";
 import RolePending from "../modules/shared/pages/RolePending";
 import AttendanceAction from "../modules/shared/pages/AttendanceAction";
+import MobileShortcuts from "../modules/shared/pages/MobileShortcuts";
 
 // 🧭 Dashboards por rol
 import LinksInteres from "../modules/shared/pages/LinksInteres";
-
-// 🛒 Workspace de Compras Unificado
-import PurchasesWorkspace from "../modules/shared/purchases-workspace/PurchasesWorkspace";
 
 // 📋 Páginas de Talento Humano
 import PermisosPage from "../modules/shared/solicitudes/pages/PermisosPage";
@@ -47,6 +45,7 @@ import SignatureDashboard from "../modules/signature/pages/SignatureDashboard";
 
 
 // Lazy loaded components
+const PurchasesWorkspace = lazy(() => import("../modules/shared/purchases-workspace/PurchasesWorkspace"));
 const DashboardGerencia = lazy(() => import("../modules/gerencia/Dashboard"));
 const PurchasesAlbumPage = lazy(() => import("../modules/gerencia/PurchasesAlbumPage"));
 const DashboardFinanzas = lazy(() => import("../modules/finanzas/Dashboard"));
@@ -60,6 +59,7 @@ const DeliveryCeilingsPage = lazy(() => import("../modules/comercial/pages/Deliv
 const ACPEquipmentPurchasesPage = lazy(() => import("../modules/comercial/pages/ACPEquipmentPurchases"));
 const BusinessCaseWorkspace = lazy(() => import("../modules/comercial/pages/BusinessCaseWorkspace"));
 const BusinessCaseObservabilityDashboard = lazy(() => import("../modules/comercial/pages/BusinessCaseObservabilityDashboard"));
+const EquipmentWorkspace = lazy(() => import("../modules/equipment/pages/EquipmentWorkspace"));
 const PlanificacionMensual = lazy(() => import("../modules/comercial/pages/PlanificacionMensual"));
 const AprobacionCronogramas = lazy(() => import("../modules/comercial/pages/AprobacionCronogramas"));
 const DashboardServicio = lazy(() => import("../modules/servicio/pages/Dashboard"));
@@ -77,7 +77,6 @@ const ServicioTechnicalProcedureWorkspace = lazy(() => import("../modules/servic
 const ServicioExternalCasesWorkspace = lazy(() => import("../modules/servicio/pages/ExternalCasesWorkspace"));
 const ServicioPrivatePurchaseDeliveries = lazy(() => import("../modules/servicio/pages/PrivatePurchaseDeliveries"));
 const ServicioRetiroEquipos = lazy(() => import("../modules/servicio/pages/RetiroEquipos"));
-const TecnicoPrivatePurchases = lazy(() => import("../modules/servicio/pages/TecnicoPrivatePurchases"));
 const DashboardTalento = lazy(() => import("../modules/talento/Dashboard"));
 const DashboardTI = lazy(() => import("../modules/talento/DashboardTI"));
 const TicketsWorkspace = lazy(() => import("../modules/ti/pages/TicketsWorkspace"));
@@ -220,6 +219,8 @@ const AppRoutes = () => {
         <Route path="/dashboard" element={<RoleRedirect />} />
 
         {/* 📱 Atajos de asistencia (requiere login previo) */}
+        <Route path="/mobile-shortcuts" element={<MobileShortcuts />} />
+        <Route path="/asistencia/mobile-shortcuts" element={<MobileShortcuts />} />
         <Route path="/asistencia/marcar/:action" element={<AttendanceAction />} />
 
         {/* Layout principal */}
@@ -307,6 +308,35 @@ const AppRoutes = () => {
           <Route path="/dashboard/servicio-tecnico/disponibilidad" element={<ServicioDisponibilidad />} />
           <Route path="/dashboard/servicio-tecnico/capacitaciones" element={<ServicioCapacitaciones />} />
           <Route path="/dashboard/servicio-tecnico/equipos" element={<ServicioEquipos />} />
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "comercial",
+                  "jefe_comercial",
+                  "backoffice_comercial",
+                  "acp_comercial",
+                  "servicio_tecnico",
+                  "tecnico",
+                  "jefe_tecnico",
+                  "jefe_servicio_tecnico",
+                  "operaciones",
+                  "jefe_operaciones",
+                  "logistica",
+                  "jefe_logistica",
+                  "gerencia",
+                  "gerencia_general",
+                  "ti",
+                  "admin_ti",
+                  "admin",
+                  "administrador",
+                ]}
+              />
+            }
+          >
+            <Route path="/dashboard/equipos" element={<EquipmentWorkspace />} />
+            <Route path="/dashboard/equipos/activos" element={<EquipmentWorkspace />} />
+          </Route>
           <Route path="/dashboard/servicio-tecnico/aprobaciones" element={<ServicioAprobaciones />} />
           <Route path="/dashboard/servicio-tecnico/aplicaciones" element={<ServicioAplicaciones />} />
           <Route path="/dashboard/servicio-tecnico/desinfeccion" element={<ServicioDesinfeccion />} />
@@ -315,7 +345,7 @@ const AppRoutes = () => {
           <Route
             element={<ProtectedRoute allowedRoles={["servicio_tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "tecnico"]} />}
           >
-            <Route path="/dashboard/servicio-tecnico/workspace-procedimiento" element={<ServicioTechnicalProcedureWorkspace />} />
+            <Route path="/dashboard/servicio-tecnico/workspace-procedimiento" element={<Navigate to="/dashboard/purchases/workspace?tab=public&subtab=tecnica" replace />} />
             <Route path="/dashboard/servicio-tecnico/retiros" element={<ServicioRetiroEquipos />} />
           </Route>
           <Route
@@ -341,8 +371,7 @@ const AppRoutes = () => {
           <Route
             element={<ProtectedRoute allowedRoles={["jefe_tecnico", "jefe_servicio_tecnico", "tecnico"]} />}
           >
-            <Route path="/dashboard/servicio-tecnico/entregas-privadas" element={<ServicioPrivatePurchaseDeliveries />} />
-            <Route path="/dashboard/servicio-tecnico/compras-privadas" element={<TecnicoPrivatePurchases />} />
+            <Route path="/dashboard/servicio-tecnico/entregas-privadas" element={<Navigate to="/dashboard/purchases/workspace?tab=private" replace />} />
           </Route>
           <Route
             element={
@@ -390,12 +419,12 @@ const AppRoutes = () => {
 
           {/* Subrutas Operaciones - Compras Privadas */}
           <Route element={<ProtectedRoute allowedRoles={["jefe_operaciones"]} />}>
-            <Route path="/dashboard/operaciones/private-purchases" element={<OperacionesPrivatePurchases />} />
+            <Route path="/dashboard/operaciones/private-purchases" element={<Navigate to="/dashboard/purchases/workspace?tab=private" replace />} />
           </Route>
 
           {/* Subrutas Logística - Compras Privadas */}
           <Route element={<ProtectedRoute allowedRoles={["jefe_logistica"]} />}>
-            <Route path="/dashboard/logistica/private-purchases" element={<LogisticaPrivatePurchases />} />
+            <Route path="/dashboard/logistica/private-purchases" element={<Navigate to="/dashboard/purchases/workspace?tab=private" replace />} />
           </Route>
 
           {/* Subrutas Talento Humano */}
@@ -566,7 +595,7 @@ const AppRoutes = () => {
                 />
               )}
             >
-              <Route path="/dashboard/backoffice/private-purchases" element={<PrivatePurchasesPage />} />
+              <Route path="/dashboard/backoffice/private-purchases" element={<Navigate to="/dashboard/purchases/workspace?tab=private" replace />} />
             </Route>
           </Route>
 

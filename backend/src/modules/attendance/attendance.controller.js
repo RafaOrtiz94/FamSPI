@@ -223,6 +223,8 @@ const LATE_JUSTIFICATION_MONTHLY_LIMIT = Number(process.env.ATTENDANCE_LATE_JUST
 const LATE_JUSTIFICATION_CUTOFF_HOUR = Number(process.env.ATTENDANCE_LATE_JUSTIFICATION_CUTOFF_HOUR || 21);
 const LATE_TIMEZONE = process.env.APP_TIMEZONE || process.env.TZ || "America/Guayaquil";
 const LOCATION_MAX_ACCURACY_METERS = Number(process.env.ATTENDANCE_LOCATION_MAX_ACCURACY_METERS || 250);
+const ATTENDANCE_OCCURRED_AT_MAX_PAST_MS = Number(process.env.ATTENDANCE_OCCURRED_AT_MAX_PAST_MS || (15 * 60 * 1000));
+const ATTENDANCE_OCCURRED_AT_MAX_FUTURE_MS = Number(process.env.ATTENDANCE_OCCURRED_AT_MAX_FUTURE_MS || (2 * 60 * 1000));
 
 const ATTENDANCE_STATUS_ALIASES = Object.freeze({
   no_entry: "no_entry",
@@ -245,6 +247,20 @@ const ATTENDANCE_STATUS_ALIASES = Object.freeze({
 const normalizeAttendanceStateFilter = (value) => {
   const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   return ATTENDANCE_STATUS_ALIASES[normalized] || null;
+};
+
+const resolveMarkTimestamp = (reqBody = {}, fallbackNow = new Date()) => {
+  const rawOccurredAt = reqBody?.occurred_at ?? reqBody?.occurredAt ?? null;
+  if (!rawOccurredAt) return fallbackNow;
+
+  const parsed = new Date(rawOccurredAt);
+  if (Number.isNaN(parsed.getTime())) return fallbackNow;
+
+  const deltaMs = fallbackNow.getTime() - parsed.getTime();
+  if (deltaMs < -ATTENDANCE_OCCURRED_AT_MAX_FUTURE_MS) return fallbackNow;
+  if (deltaMs > ATTENDANCE_OCCURRED_AT_MAX_PAST_MS) return fallbackNow;
+
+  return parsed;
 };
 
 const deriveAttendanceState = (record = {}) => {
@@ -1218,7 +1234,7 @@ const clockIn = async (req, res) => {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const today = getBusinessDate(now);
     const normalizedLocation = await resolveRequiredLocation({
       req,
@@ -1327,7 +1343,7 @@ const clockOutLunch = async (req, res) => {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const today = getBusinessDate(now);
     const normalizedLocation = await resolveRequiredLocation({
       req,
@@ -1442,7 +1458,7 @@ const clockInLunch = async (req, res) => {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const today = getBusinessDate(now);
     const normalizedLocation = await resolveRequiredLocation({
       req,
@@ -1580,7 +1596,7 @@ const clockOut = async (req, res) => {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const today = getBusinessDate(now);
     const normalizedLocation = await resolveRequiredLocation({
       req,
@@ -1740,7 +1756,7 @@ const registerException = async (req, res) => {
       return res.status(400).json({ ok: false, message: "Tipo y descripciÃ³n requeridos" });
     }
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const today = getBusinessDate(now);
     const normalizedLocation = await resolveRequiredLocation({
       req,
@@ -1826,7 +1842,7 @@ const updateExceptionStatus = async (req, res) => {
 
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const normalizedLocation = await resolveRequiredLocation({
       req,
       res,
@@ -2920,7 +2936,7 @@ const clockInField = async (req, res) => {
       return res.status(403).json({ ok: false, message: "Solo personal de campo puede marcar visitas" });
     }
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const today = getBusinessDate(now);
     const normalizedLocation = await resolveRequiredLocation({
       req,
@@ -3254,13 +3270,24 @@ const clockOutField = async (req, res) => {
     const { id: userId, email } = req.user || {};
     const { client_id, prospect_name, observations } = req.body;
     const normalizedProspectName = String(prospect_name || "").trim();
-    const returnToOffice = ["1", "true", "si", "yes"].includes(
-      String(req.body?.return_to_office ?? "").trim().toLowerCase()
-    );
 
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
-    const now = new Date();
+    const postVisitAction = String(req.body?.post_visit_action || req.body?.next_step || "").trim().toLowerCase();
+    const validPostVisitActions = new Set(["", "continue_operation", "continuar_operacion", "continue", "return_to_office", "retorno_oficina", "return"]);
+    if (!validPostVisitActions.has(postVisitAction)) {
+      return res.status(400).json({
+        ok: false,
+        code: "INVALID_POST_VISIT_ACTION",
+        message: "La accion posterior a la salida de cliente debe ser continuar operacion o retorno a oficina",
+      });
+    }
+    const returnToOffice = ["1", "true", "si", "yes"].includes(
+      String(req.body?.return_to_office ?? "").trim().toLowerCase()
+    ) || ["return_to_office", "retorno_oficina", "return"].includes(postVisitAction);
+    const resolvedPostVisitAction = returnToOffice ? "return_to_office" : "continue_operation";
+
+    const now = resolveMarkTimestamp(req.body, new Date());
     const today = getBusinessDate(now);
     const normalizedLocation = await resolveRequiredLocation({
       req,
@@ -3535,6 +3562,7 @@ const clockOutField = async (req, res) => {
         ? "Salida de visita registrada. Ya puedes marcar el retorno a oficina o viaje."
         : "Salida de visita registrada. La salida operacional queda abierta para continuar.",
       nextStep: returnToOffice ? "retorno_oficina_viaje" : "entrada_cliente",
+      postVisitAction: resolvedPostVisitAction,
       data: {
         ...result.rows[0],
         operational_status: activeOperational
@@ -3560,7 +3588,7 @@ const clockOutUnexpected = async (req, res) => {
 
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const today = getBusinessDate(now);
     const normalizedLocation = await resolveRequiredLocation({
       req,
@@ -3615,7 +3643,7 @@ const clockInUnexpected = async (req, res) => {
     const { id: userId, email } = req.user || {};
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const normalizedLocation = await resolveRequiredLocation({
       req,
       res,
@@ -3695,7 +3723,7 @@ const clockUnexpectedArrival = async (req, res) => {
     const { id: userId, email } = req.user || {};
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const normalizedLocation = await resolveRequiredLocation({
       req,
       res,
@@ -3759,7 +3787,7 @@ const clockUnexpectedReturn = async (req, res) => {
     const { id: userId, email } = req.user || {};
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const normalizedLocation = await resolveRequiredLocation({
       req,
       res,
@@ -3825,7 +3853,7 @@ const clockOutOperational = async (req, res) => {
 
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const today = getBusinessDate(now);
     const normalizedLocation = await resolveRequiredLocation({
       req,
@@ -3912,7 +3940,7 @@ const clockInOperational = async (req, res) => {
     const { id: userId, email } = req.user || {};
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const normalizedLocation = await resolveRequiredLocation({
       req,
       res,
@@ -4002,7 +4030,7 @@ const clockInDestino = async (req, res) => {
     const { id: userId, email } = req.user || {};
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const today = getBusinessDate(now);
     const normalizedLocation = await resolveRequiredLocation({
       req,
@@ -4504,7 +4532,7 @@ const clockCloseTrip = async (req, res) => {
 
     const closureReason = String(req.body?.reason || req.body?.closure_reason || "").trim() || null;
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const today = getBusinessDate(now);
     const normalizedLocation = await resolveRequiredLocation({
       req,
@@ -4584,7 +4612,7 @@ const clockOutOperationalLunch = async (req, res) => {
     const { id: userId, email } = req.user || {};
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const today = getBusinessDate(now);
 
     const normalizedLocation = await resolveRequiredLocation({
@@ -4648,7 +4676,7 @@ const clockInOperationalLunch = async (req, res) => {
     const { id: userId, email } = req.user || {};
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
-    const now = new Date();
+    const now = resolveMarkTimestamp(req.body, new Date());
     const today = getBusinessDate(now);
 
     const normalizedLocation = await resolveRequiredLocation({

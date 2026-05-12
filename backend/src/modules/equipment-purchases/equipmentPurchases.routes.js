@@ -43,6 +43,7 @@ router.get("/stats", verifyToken, requireRole(managerRoles), ctrl.getStats);
 router.get("/technical-schedule", verifyToken, requireRole(viewerRoles), ctrl.getTechnicalScheduleCalendar);
 router.get("/", verifyToken, requireRole(viewerRoles), ctrl.listMine);
 router.get("/:id", verifyToken, requireRole(viewerRoles), ctrl.getOne);
+router.get("/:id/timeline", verifyToken, requireRole(viewerRoles), ctrl.getTimeline);
 
 router.post("/", verifyToken, requireRole(creatorRoles), ctrl.create);
 router.post("/provider-contacts", verifyToken, requireRole(managerRoles), ctrl.saveProviderContact);
@@ -164,6 +165,30 @@ router.patch(
   verifyToken,
   requireRole(deliveryRoles),
   ctrl.updateInstallationWorkflow,
+);
+
+router.patch(
+  "/:id/sercop",
+  verifyToken,
+  requireRole(managerRoles),
+  ctrl.updateSercop,
+);
+
+// WORKFLOW ALIGNMENT — Parte 2
+// Decisión formal de participar (solo compra pública, antes de asignar ACP).
+router.post(
+  "/:id/register-participation-decision",
+  verifyToken,
+  requireRole(managerRoles),
+  ctrl.registerParticipationDecision,
+);
+
+// Registro de serial — gate: solo si serial_status = received_pending_serial.
+router.post(
+  "/:id/register-serial",
+  verifyToken,
+  requireRole(deliveryRoles),
+  ctrl.registerSerial,
 );
 
 module.exports = router;

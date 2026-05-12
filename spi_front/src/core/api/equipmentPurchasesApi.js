@@ -167,7 +167,7 @@ export const requestDeliveryDates = async (id, { notes, expected_updated_at } = 
 
 export const submitDeliveryDates = async (
  id,
- { delivery_start_at, delivery_end_at, notes, expected_updated_at },
+ { delivery_start_at, delivery_end_at, notes, expected_updated_at } = {},
 ) => {
  const { data } = await api.post(`/equipment-purchases/${id}/submit-delivery-dates`, {
  delivery_start_at,
@@ -306,6 +306,17 @@ export const updatePublicPurchaseInstallationWorkflow = async (
  });
  return data.data;
 };
+
+export const updateSercop = async (id, fields) => {
+ const { data } = await api.patch(`/equipment-purchases/${id}/sercop`, fields);
+ return data.data;
+};
+
+export const getEquipmentPurchaseTimeline = async (id) => {
+ const { data } = await api.get(`/equipment-purchases/${id}/timeline`);
+ return data.data;
+};
+
 export const getEquipmentPurchaseById = async (id) => {
  const { data } = await api.get(`/equipment-purchases/${id}`);
  return data.data;
@@ -316,4 +327,22 @@ export const getPublicPurchaseTechnicalSchedule = async ({ from, to }) => {
  params: { from, to },
  });
  return data.data || { days: [] };
+};
+
+export const registerParticipationDecision = async (id, { decision, notes, expected_updated_at } = {}) => {
+ const { data } = await api.post(`/equipment-purchases/${id}/register-participation-decision`, {
+ decision,
+ notes,
+ expected_updated_at,
+ });
+ return data.data;
+};
+
+export const registerEquipmentPurchaseSerial = async (id, { serialNumber, unitId = null, expected_updated_at } = {}) => {
+ const { data } = await api.post(`/equipment-purchases/${id}/register-serial`, {
+ serial_number: serialNumber,
+ unit_id: unitId,
+ expected_updated_at,
+ });
+ return data.data;
 };

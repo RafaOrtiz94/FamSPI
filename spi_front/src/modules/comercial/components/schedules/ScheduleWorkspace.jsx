@@ -81,6 +81,9 @@ const statusTone = (status) => {
   if (status === "rejected") return "border-rose-200 bg-rose-50";
   return "border-slate-200 bg-white";
 };
+const panelClass = "rounded-2xl border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)]";
+const inputClass =
+  "mt-1 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition-colors focus:border-blue-600 focus:ring-2 focus:ring-sky-500 focus:ring-offset-2";
 
 const RouteContextPanel = ({ routeContext }) => {
   const { isLoaded: mapsLoaded, loadError } = useGoogleMaps();
@@ -483,17 +486,17 @@ const ScheduleWorkspace = ({
 
   return (
     <div className={WORKSPACE_3COL_CLASS}>
-      <aside className={`${WORKSPACE_SIDEBAR_CLASS} ${WORKSPACE_PANEL_PADDING} space-y-3`}>
-        <div>
-          <p className="text-xs uppercase tracking-wide text-slate-500">Planificacion mensual</p>
-          <h1 className="text-xl font-bold text-slate-900">Workspace de cronogramas</h1>
+      <aside className={`${WORKSPACE_SIDEBAR_CLASS} ${WORKSPACE_PANEL_PADDING} space-y-4`}>
+        <div className={panelClass + " p-4"}>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Planificacion mensual</p>
+          <h1 className="mt-1 text-2xl font-bold leading-tight text-slate-900">Workspace de cronogramas</h1>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className={panelClass + " grid grid-cols-2 gap-3 p-4"}>
           <label className="text-xs text-slate-600">
             Mes
             <select
-              className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              className={inputClass}
               value={selectedMonth}
               onChange={(event) => setSelectedMonth(Number(event.target.value))}
             >
@@ -508,7 +511,7 @@ const ScheduleWorkspace = ({
           <label className="text-xs text-slate-600">
             Ano
             <select
-              className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              className={inputClass}
               value={selectedYear}
               onChange={(event) => setSelectedYear(Number(event.target.value))}
             >
@@ -521,7 +524,7 @@ const ScheduleWorkspace = ({
           </label>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+        <div className={panelClass + " space-y-3 p-4"}>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Acciones</p>
           {!scheduleForPeriod && canEditSchedules ? (
             <>
@@ -530,7 +533,7 @@ const ScheduleWorkspace = ({
                 onChange={(event) => setCreateNotes(event.target.value)}
                 rows={2}
                 placeholder="Notas del cronograma"
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                className="min-h-20 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-sky-500 focus:ring-offset-2"
               />
               <Button
                 variant="primary"
@@ -593,7 +596,7 @@ const ScheduleWorkspace = ({
           ) : null}
         </div>
 
-        <div className="space-y-2">
+        <div className={panelClass + " space-y-2 p-4"}>
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Cronogramas</p>
             <span className="text-xs text-slate-400">{schedulesByYear.length}</span>
@@ -627,7 +630,7 @@ const ScheduleWorkspace = ({
           )}
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-3">
+        <div className={panelClass + " p-4"}>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">KPI Section</p>
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div className="rounded-lg bg-slate-50 p-2">
@@ -781,4 +784,3 @@ const ScheduleWorkspace = ({
 };
 
 export default ScheduleWorkspace;
-

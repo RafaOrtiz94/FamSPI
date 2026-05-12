@@ -22,7 +22,7 @@ export const MODULE_PATH_PREFIXES = [
   { key: "servicio_solicitudes", prefixes: ["/dashboard/servicio-tecnico/solicitudes"] },
   { key: "servicio_disponibilidad", prefixes: ["/dashboard/servicio-tecnico/disponibilidad"] },
   { key: "servicio_capacitaciones", prefixes: ["/dashboard/servicio-tecnico/capacitaciones"] },
-  { key: "servicio_equipos", prefixes: ["/dashboard/servicio-tecnico/equipos"] },
+  { key: "servicio_equipos", prefixes: ["/dashboard/servicio-tecnico/equipos", "/dashboard/equipos"] },
   { key: "servicio_aprobaciones", prefixes: ["/dashboard/servicio-tecnico/aprobaciones"] },
   { key: "servicio_aplicaciones", prefixes: ["/dashboard/servicio-tecnico/aplicaciones"] },
   { key: "servicio_desinfeccion", prefixes: ["/dashboard/servicio-tecnico/desinfeccion"] },

@@ -4,12 +4,13 @@ const { requireRole } = require("../../middlewares/roles");
 const controller = require("./viaticos.controller");
 
 const router = express.Router();
-const FINANCE_REVIEWER_ROLES = ["finanzas", "jefe_financiero", "jefe_finanzas"];
+const FINANCE_REVIEWER_ROLES = ["finanzas", "financiero", "jefe_financiero", "jefe_finanzas"];
 
 router.use(verifyToken);
 router.use(
   requireRole([
     "finanzas",
+    "financiero",
     "comercial",
     "backoffice_comercial",
     "servicio_tecnico",
@@ -31,10 +32,10 @@ router.get("/", controller.list);
 router.post("/", controller.upsert);
 router.patch("/:id/status", requireRole(FINANCE_REVIEWER_ROLES), controller.updateStatus);
 router.patch("/:id/workflow", controller.updateWorkflowOperational);
-router.post("/config/zones", requireRole(["finanzas", "admin", "administrador", "gerencia_general"]), controller.upsertZone);
-router.post("/config/fixed-profiles", requireRole(["finanzas", "admin", "administrador", "gerencia_general"]), controller.upsertFixedProfile);
-router.get("/config/fixed-profiles", requireRole(["finanzas", "admin", "administrador", "gerencia_general"]), controller.listFixedProfiles);
-router.patch("/config/policy", requireRole(["finanzas", "admin", "administrador", "gerencia_general"]), controller.updatePolicy);
+router.post("/config/zones", requireRole(["finanzas", "financiero", "admin", "administrador", "gerencia_general"]), controller.upsertZone);
+router.post("/config/fixed-profiles", requireRole(["finanzas", "financiero", "admin", "administrador", "gerencia_general"]), controller.upsertFixedProfile);
+router.get("/config/fixed-profiles", requireRole(["finanzas", "financiero", "admin", "administrador", "gerencia_general"]), controller.listFixedProfiles);
+router.patch("/config/policy", requireRole(["finanzas", "financiero", "admin", "administrador", "gerencia_general"]), controller.updatePolicy);
 router.get("/:id/documents", controller.listDocuments);
 router.post("/:id/documents", controller.addDocument);
 router.post("/sync-sri", controller.syncSri);

@@ -825,3 +825,75 @@ exports.registerPublicPortalOutcome = async (req, res, next) => {
     next(error);
   }
 };
+
+exports.updateSercop = async (req, res, next) => {
+  try {
+    const updated = await service.updateSercop({
+      id: req.params.id,
+      user: req.user,
+      fields: req.body || {},
+    });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: "equipment_purchases",
+      keysToNormalize: ["created_at", "updated_at"],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: "sercop_updated",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getTimeline = async (req, res, next) => {
+  try {
+    const result = await service.getTimeline({ id: req.params.id, user: req.user });
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// WORKFLOW ALIGNMENT — Parte 2
+
+exports.registerParticipationDecision = async (req, res, next) => {
+  try {
+    const updated = await service.registerParticipationDecision({
+      id: req.params.id,
+      user: req.user,
+      decision: req.body?.decision,
+      notes: req.body?.notes,
+      expected_updated_at: req.body?.expected_updated_at,
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizeDatesDeep(updated),
+      action: "participation_decision_registered",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.registerSerial = async (req, res, next) => {
+  try {
+    const updated = await service.registerSerialPublic({
+      id: req.params.id,
+      user: req.user,
+      serialNumber: req.body?.serial_number,
+      unitId: req.body?.unit_id,
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizeDatesDeep(updated),
+      action: "serial_registered",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
