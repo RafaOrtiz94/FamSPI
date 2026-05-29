@@ -1,5 +1,10 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
+const {
+  buildSheetPayloads,
+  loadTemplateDefinition,
+  pullMaximumQuantitiesFromGoogleSheet,
+} = require("./businessCaseSheetSyncLocal.service");
 
 const ALLOWED_ITEM_TYPES = new Set([
   "reactivo",
@@ -114,6 +119,74 @@ async function queryWithClient(client, sql, params = []) {
   return db.query(sql, params);
 }
 
+function toObject(value) {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+async function resolveBusinessCaseSheetId(businessCaseId, client = null) {
+  const { rows } = await queryWithClient(
+    client,
+    `SELECT bc_spreadsheet_id, modern_bc_metadata
+       FROM equipment_purchase_requests
+      WHERE id = $1
+      LIMIT 1`,
+    [businessCaseId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+
+  const metadata = toObject(row.modern_bc_metadata);
+  const fromMetadata = metadata?.bc_sheet_generation?.last?.sheet_id || null;
+  return fromMetadata || row.bc_spreadsheet_id || null;
+}
+
+function buildSheetContextFromConsumptionRows(consumptionRows = []) {
+  const equipmentMap = new Map();
+  consumptionRows.forEach((row) => {
+    const equipmentId = Number(row.equipment_id);
+    if (!Number.isInteger(equipmentId) || equipmentId <= 0) return;
+    if (!equipmentMap.has(equipmentId)) {
+      equipmentMap.set(equipmentId, {
+        id: equipmentId,
+        name: row.equipment_name || null,
+        code: null,
+        model: null,
+      });
+    }
+  });
+
+  const maxQuantities = consumptionRows.map((row) => ({
+    item_key: row.item_key,
+    item_id: row.item_id || null,
+    item_name: row.name || null,
+    item_type: row.item_type || null,
+    source: row.source || null,
+    equipment_id: row.equipment_id || null,
+    equipment_name: row.equipment_name || null,
+    annual_qty: row.annual_qty === null || row.annual_qty === undefined ? null : Number(row.annual_qty),
+  }));
+
+  const equipmentRecords = Array.from(equipmentMap.values());
+  const equipmentTabs = buildSheetPayloads({
+    template: loadTemplateDefinition(),
+    equipmentRecords,
+    payload: {
+      fields: {},
+      max_quantities: maxQuantities,
+      sheet_context: {},
+    },
+  });
+
+  return { equipmentTabs };
+}
+
 async function syncDispatchWorkspaceFromConsumption(businessCaseId, options = {}) {
   const client = options.client || null;
   const allowMissingTable = Boolean(options.allowMissingTable);
@@ -192,8 +265,8 @@ async function syncDispatchWorkspaceFromConsumption(businessCaseId, options = {}
          p.equipment_id,
          p.equipment_name,
          GREATEST(COALESCE(p.annual_qty, 0), 0),
-         GREATEST(COALESCE(p.annual_qty, 0), 0),
-         GREATEST(COALESCE(p.annual_qty, 0), 0),
+         0,
+         0,
          0,
          'pendiente',
          NOW(),
@@ -208,14 +281,6 @@ async function syncDispatchWorkspaceFromConsumption(businessCaseId, options = {}
          equipment_id = EXCLUDED.equipment_id,
          equipment_name = EXCLUDED.equipment_name,
          annual_qty = EXCLUDED.annual_qty,
-         planned_qty = CASE
-           WHEN bc_dispatch_items.commercial_updated_at IS NULL THEN EXCLUDED.annual_qty
-           ELSE bc_dispatch_items.planned_qty
-         END,
-         ops_dispatch_qty = CASE
-           WHEN bc_dispatch_items.operations_updated_at IS NULL THEN EXCLUDED.annual_qty
-           ELSE bc_dispatch_items.ops_dispatch_qty
-         END,
          updated_at = NOW()`,
       [businessCaseId, JSON.stringify(payload)],
     );
@@ -232,6 +297,45 @@ async function syncDispatchWorkspaceFromConsumption(businessCaseId, options = {}
           )`,
       [businessCaseId],
     );
+
+    try {
+      const sheetId = await resolveBusinessCaseSheetId(businessCaseId, client);
+      if (sheetId) {
+        const { equipmentTabs } = buildSheetContextFromConsumptionRows(consumptionRows);
+        const sheetUpdates = await pullMaximumQuantitiesFromGoogleSheet({
+          sheetId,
+          equipmentTabs,
+        });
+
+        if (sheetUpdates.length) {
+          await queryWithClient(
+            client,
+            `WITH payload AS (
+               SELECT *
+               FROM jsonb_to_recordset($2::jsonb) AS p(
+                 item_key text,
+                 planned_qty numeric
+               )
+             )
+             UPDATE bc_dispatch_items d
+                SET planned_qty = CASE
+                    WHEN d.commercial_updated_at IS NULL THEN GREATEST(COALESCE(p.planned_qty, 0), 0)
+                    ELSE d.planned_qty
+                  END,
+                    updated_at = NOW()
+               FROM payload p
+              WHERE d.business_case_id = $1
+                AND d.item_key = p.item_key`,
+            [businessCaseId, JSON.stringify(sheetUpdates)],
+          );
+        }
+      }
+    } catch (sheetSyncError) {
+      logger.warn(
+        { businessCaseId, error: sheetSyncError.message },
+        "No se pudo sincronizar PRODUCTO A ENTREGAR/ENVIAR desde Google Sheet. Continua con datos locales.",
+      );
+    }
 
     return getDispatchWorkspace(businessCaseId, { client, skipSync: true });
   } catch (error) {

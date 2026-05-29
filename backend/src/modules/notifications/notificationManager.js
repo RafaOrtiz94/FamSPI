@@ -131,6 +131,8 @@ class NotificationManager {
   };
     this.asyncDispatchEnabled =
       String(process.env.NOTIFICATION_ASYNC_DISPATCH_ENABLED ?? "false").trim().toLowerCase() !== "false";
+    this.emailChannelEnabled =
+      String(process.env.NOTIFICATIONS_EMAIL_ENABLED ?? "true").trim().toLowerCase() === "true";
     this.defaultMaxAttempts = Number(process.env.NOTIFICATION_DISPATCH_MAX_ATTEMPTS || 5);
     this.defaultBatchLimit = Number(process.env.NOTIFICATION_DISPATCH_BATCH_LIMIT || 50);
     this._warnedMissingThreadTable = false;
@@ -345,7 +347,23 @@ class NotificationManager {
   }
 
   /**
-   * Envía notificación completa (BD + Email + Chat)
+   * Política de reintentos según prioridad.
+   * priority 3 (urgente): 8 intentos, backoff rápido.
+   * priority 2 (importante): 6 intentos.
+   * priority 1 (normal): 4 intentos.
+   * priority 0 (informativo): 2 intentos.
+   */
+  resolveRetryPolicy(priority) {
+    const p = Number.isFinite(Number(priority)) ? Number(priority) : 0;
+    if (p >= 3) return { maxAttempts: 8, firstRetryMinutes: 1 };
+    if (p >= 2) return { maxAttempts: 6, firstRetryMinutes: 2 };
+    if (p >= 1) return { maxAttempts: 4, firstRetryMinutes: 5 };
+    return { maxAttempts: 2, firstRetryMinutes: 30 };
+  }
+
+  /**
+   * Envía notificación completa (BD + Email + Chat).
+   * NUNCA lanza excepción — errores se logean y devuelve null.
    */
   async sendNotification({
     userId,
@@ -361,11 +379,14 @@ class NotificationManager {
     meta = {}
   }) {
     try {
-      // 1. Preparar datos de notificación
+      const emailEnabledForDispatch = email && this.emailChannelEnabled;
       const templateData = this.templates[template];
       if (!templateData && !customTitle) {
         throw new Error(`Template '${template}' no encontrado`);
       }
+      const resolvedPriority = Number.isFinite(Number(priority))
+        ? Number(priority)
+        : templateData?.priority ?? 0;
       const processKey = this.resolveProcessKey({
         source: source || template,
         template,
@@ -385,7 +406,7 @@ class NotificationManager {
         message: normalizeHumanText(customMessage || this.interpolate(templateData.message, data)),
         type: type || templateData?.type || 'info',
         source: source || template,
-        priority: priority || templateData?.priority || 0,
+        priority: resolvedPriority,
         meta: {
           ...meta,
           template,
@@ -395,24 +416,27 @@ class NotificationManager {
         }
       };
 
-      // 2. Crear notificación en BD
       const notification = await loadNotificationService().createNotification(notificationData);
 
-      // 3. Despachar por canales (asincrónico en producción por defecto)
       if (this.asyncDispatchEnabled) {
         try {
           const queueOps = [];
-          if (email) {
+          if (emailEnabledForDispatch) {
             queueOps.push(
               this.enqueueDispatch(notification.id, "email", {
                 data,
                 processKey,
                 emailThreadKey: threadProcessKey,
+                priority: resolvedPriority,
               }),
             );
           }
           if (chat) {
-            queueOps.push(this.enqueueDispatch(notification.id, "chat", { data, processKey }));
+            queueOps.push(this.enqueueDispatch(notification.id, "chat", {
+              data,
+              processKey,
+              priority: resolvedPriority,
+            }));
           }
           await Promise.all(queueOps);
         } catch (queueError) {
@@ -420,7 +444,7 @@ class NotificationManager {
             { error: queueError.message, notificationId: notification.id },
             "[NOTIFICATIONS] Fallo en cola asincrona, aplicando fallback sincrono",
           );
-          if (email) {
+          if (emailEnabledForDispatch) {
             await this.sendEmailNotification(notification, data, { processKey: threadProcessKey });
           }
           if (chat) {
@@ -428,7 +452,7 @@ class NotificationManager {
           }
         }
       } else {
-        if (email) {
+        if (emailEnabledForDispatch) {
           await this.sendEmailNotification(notification, data, { processKey: threadProcessKey });
         }
         if (chat) {
@@ -438,14 +462,26 @@ class NotificationManager {
 
       return notification;
     } catch (error) {
-      logger.error({ error: error.message }, 'Error enviando notificación');
-      throw error;
+      logger.error(
+        { error: error.message, userId, source, template },
+        '[NOTIFICATIONS] Error en sendNotification — el flujo principal no se interrumpe'
+      );
+      return null;
     }
+  }
+
+  /**
+   * Alias explícito que garantiza que nunca lanza.
+   * Útil como documentación de intención en callers críticos.
+   */
+  async sendNotificationSafe(params) {
+    return this.sendNotification(params);
   }
 
   async enqueueDispatch(notificationId, channel, payload = {}) {
     if (!notificationId || !channel) return null;
-    const maxAttempts = Number.isFinite(this.defaultMaxAttempts) ? this.defaultMaxAttempts : 5;
+    const policy = this.resolveRetryPolicy(payload?.priority);
+    const maxAttempts = policy.maxAttempts;
     const processKey = this.normalizeProcessRef(payload?.processKey);
     const { rows } = await db.query(
       `
@@ -565,6 +601,19 @@ class NotificationManager {
 
       try {
         if (job.channel === "email") {
+          if (!this.emailChannelEnabled) {
+            await db.query(
+              `UPDATE notification_dispatch_queue
+                  SET status = 'sent',
+                      locked_at = NULL,
+                      last_error = 'Email deshabilitado por configuracion',
+                      updated_at = NOW()
+                WHERE id = $1`,
+              [job.id],
+            );
+            summary.sent += 1;
+            continue;
+          }
           await this.sendEmailNotification(notification, payload.data || {}, {
             strict: true,
             threadProcessKey: payload.emailThreadKey || null,
@@ -577,49 +626,66 @@ class NotificationManager {
         }
 
         await db.query(
-          `
-          UPDATE notification_dispatch_queue
-          SET status = 'sent',
-              locked_at = NULL,
-              last_error = NULL,
-              updated_at = NOW()
-          WHERE id = $1
-          `,
+          `UPDATE notification_dispatch_queue
+              SET status = 'sent',
+                  locked_at = NULL,
+                  last_error = NULL,
+                  updated_at = NOW()
+            WHERE id = $1`,
           [job.id],
         );
         summary.sent += 1;
       } catch (error) {
         const attemptsAfterIncrement = Number(job.attempts) + 1;
-        const hasRetry = attemptsAfterIncrement < Number(job.max_attempts);
-        const retryMinutes = Math.min(60, Math.max(1, 2 ** Math.min(attemptsAfterIncrement, 6)));
+        const maxAttempts = Number(job.max_attempts);
+        const exhausted = attemptsAfterIncrement >= maxAttempts;
+        // Backoff: 1 → 2 → 4 → 8 → 16 → 32 → 60 min (capped)
+        const retryMinutes = exhausted
+          ? 0
+          : Math.min(60, Math.max(1, 2 ** Math.min(attemptsAfterIncrement - 1, 6)));
 
         await db.query(
-          `
-          UPDATE notification_dispatch_queue
-          SET status = 'failed',
-              locked_at = NULL,
-              last_error = $2,
-              next_retry_at = CASE
-                WHEN attempts < max_attempts THEN NOW() + make_interval(mins => $3)
-                ELSE NOW()
-              END,
-              updated_at = NOW()
-          WHERE id = $1
-          `,
-          [job.id, String(error.message || "dispatch_error"), retryMinutes],
+          `UPDATE notification_dispatch_queue
+              SET status = CASE WHEN $3 THEN 'permanently_failed' ELSE 'failed' END,
+                  locked_at = NULL,
+                  last_error = $2,
+                  next_retry_at = CASE
+                    WHEN NOT $3 THEN NOW() + make_interval(mins => $4)
+                    ELSE next_retry_at
+                  END,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [job.id, String(error.message || "dispatch_error").slice(0, 500), exhausted, retryMinutes],
         );
 
-        summary.failed += 1;
-        if (hasRetry) summary.retriable += 1;
-        logger.error(
-          {
-            queueId: job.id,
-            notificationId: job.notification_id,
-            channel: job.channel,
-            error: error.message,
-          },
-          "[NOTIFICATIONS] Error despachando cola",
-        );
+        if (exhausted) {
+          summary.failed += 1;
+          logger.error(
+            {
+              queueId: job.id,
+              notificationId: job.notification_id,
+              channel: job.channel,
+              attempts: attemptsAfterIncrement,
+              error: error.message,
+            },
+            "[NOTIFICATIONS] Despacho agotado — permanently_failed",
+          );
+        } else {
+          summary.failed += 1;
+          summary.retriable += 1;
+          logger.warn(
+            {
+              queueId: job.id,
+              notificationId: job.notification_id,
+              channel: job.channel,
+              attemptsAfterIncrement,
+              maxAttempts,
+              nextRetryMinutes: retryMinutes,
+              error: error.message,
+            },
+            "[NOTIFICATIONS] Error despachando; reintento programado",
+          );
+        }
       }
     }
 
@@ -738,44 +804,84 @@ class NotificationManager {
   }
 
   /**
-   * Genera HTML para emails
+   * Genera HTML para emails.
+   * Incluye botón CTA cuando notification.meta.target_path o data.target_path están presentes.
    */
   generateEmailHTML(notification, data) {
     const typeColors = {
       info: '#3B82F6',
       task: '#10B981',
       alert: '#F59E0B',
-      error: '#EF4444'
+      warning: '#F59E0B',
+      error: '#EF4444',
     };
 
     const color = typeColors[notification.type] || '#6B7280';
     const title = normalizeHumanText(notification.title);
     const message = normalizeHumanText(notification.message);
 
-    return `
-      <!DOCTYPE html>
-      <html lang="es">
-      <head>
-        <meta charset="utf-8" />
-        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-        <title>${title}</title>
-      </head>
-      <body>
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background-color: ${color}; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-          <h2 style="margin: 0; font-size: 24px;">${title}</h2>
-        </div>
-        <div style="background-color: #f8f9fa; padding: 20px; border-radius: 0 0 8px 8px;">
-          <p style="margin: 0; font-size: 16px; line-height: 1.5;">${message}</p>
-          <hr style="border: none; border-top: 1px solid #e9ecef; margin: 20px 0;">
-          <p style="margin: 0; color: #6c757d; font-size: 14px;">
-            Recibido: ${formatNotificationDateTime(notification.created_at)}
-          </p>
-        </div>
-      </div>
-      </body>
-      </html>
-    `;
+    const appBaseUrl = String(
+      process.env.APP_FRONTEND_URL ||
+      process.env.FRONTEND_URL ||
+      process.env.APP_BASE_URL ||
+      ""
+    ).replace(/\/$/, "");
+
+    const rawPath = String(
+      notification?.meta?.target_path ||
+      data?.target_path ||
+      ""
+    ).trim();
+
+    const ctaHref = rawPath
+      ? (rawPath.startsWith("http") ? rawPath : `${appBaseUrl}${rawPath}`)
+      : null;
+
+    const ctaLabel =
+      notification?.meta?.cta_label ||
+      data?.cta_label ||
+      "Ver en FamSPI";
+
+    const ctaBlock = ctaHref
+      ? `<div style="text-align: center; margin: 24px 0;">
+           <a href="${ctaHref}"
+              style="display: inline-block; background-color: ${color}; color: #ffffff;
+                     padding: 12px 28px; border-radius: 6px; font-size: 15px;
+                     font-weight: bold; text-decoration: none; letter-spacing: 0.3px;">
+             ${ctaLabel}
+           </a>
+         </div>`
+      : "";
+
+    return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${title}</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f0f2f5;">
+  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 32px auto; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+    <div style="background-color: ${color}; color: white; padding: 24px 28px;">
+      <h2 style="margin: 0; font-size: 22px; line-height: 1.3;">${title}</h2>
+    </div>
+    <div style="background-color: #ffffff; padding: 28px;">
+      <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #374151;">${message}</p>
+      ${ctaBlock}
+      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+      <p style="margin: 0; color: #9ca3af; font-size: 13px;">
+        Recibido: ${formatNotificationDateTime(notification.created_at)}
+      </p>
+    </div>
+    <div style="background-color: #f9fafb; padding: 14px 28px; border-top: 1px solid #e5e7eb;">
+      <p style="margin: 0; font-size: 12px; color: #9ca3af; text-align: center;">
+        Este es un mensaje automático del sistema FamSPI. Por favor no responda directamente a este correo.
+      </p>
+    </div>
+  </div>
+</body>
+</html>`;
   }
 
   /**

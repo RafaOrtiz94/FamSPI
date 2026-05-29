@@ -3,6 +3,7 @@ const service = require("./deliveryRequests.service");
 
 const createDeliveryRequestSchema = Joi.object({
   ceilingId: Joi.number().integer().positive().required(),
+  privatePurchaseId: Joi.string().trim().allow("", null).optional(),
   asOfDate: Joi.date().iso().optional(),
   lines: Joi.array()
     .items(
@@ -16,8 +17,24 @@ const createDeliveryRequestSchema = Joi.object({
   notes: Joi.string().trim().allow("", null).max(2000).optional(),
 });
 
+const opsApproveSchema = Joi.object({
+  // Optional per-line approved quantities. If omitted, approves all as-is.
+  lines: Joi.array()
+    .items(
+      Joi.object({
+        lineId: Joi.number().integer().positive().required(),
+        approvedQty: Joi.number().positive().required(),
+      }),
+    )
+    .optional(),
+});
+
 const confirmDeliverySchema = Joi.object({
   id: Joi.number().integer().positive().required(),
+});
+
+const confirmDeliveryBodySchema = Joi.object({
+  dispatchNotes: Joi.string().trim().allow("", null).max(2000).optional(),
 });
 
 const requestIdSchema = Joi.object({
@@ -27,6 +44,12 @@ const requestIdSchema = Joi.object({
 const listRequestsQuerySchema = Joi.object({
   ceiling_id: Joi.number().integer().positive().optional(),
   status: Joi.string().valid("pending", "ops_approved", "confirmed", "cancelled").optional(),
+  limit: Joi.number().integer().min(1).max(200).optional(),
+});
+
+const listDispatchesQuerySchema = Joi.object({
+  ceiling_id: Joi.number().integer().positive().optional(),
+  request_id: Joi.number().integer().positive().optional(),
   limit: Joi.number().integer().min(1).max(200).optional(),
 });
 
@@ -63,6 +86,7 @@ async function createDeliveryRequest(req, res) {
   try {
     const data = await service.createDeliveryRequest({
       ceilingId: value.ceilingId,
+      privatePurchaseId: value.privatePurchaseId || null,
       asOfDate: value.asOfDate,
       lines: value.lines,
       notes: value.notes,
@@ -75,23 +99,38 @@ async function createDeliveryRequest(req, res) {
 }
 
 async function confirmDeliveryRequest(req, res) {
-  const { error, value } = confirmDeliverySchema.validate(req.params || {}, {
+  const { error: paramError, value: paramValue } = confirmDeliverySchema.validate(req.params || {}, {
     convert: true,
     abortEarly: false,
   });
 
-  if (error) {
+  if (paramError) {
     return res.status(400).json({
       ok: false,
       code: "DELIVERY_REQUEST_ID_INVALID",
-      message: getValidationMessage(error),
-      details: error.details,
+      message: getValidationMessage(paramError),
+      details: paramError.details,
+    });
+  }
+
+  const { error: bodyError, value: bodyValue } = confirmDeliveryBodySchema.validate(req.body || {}, {
+    convert: true,
+    abortEarly: false,
+  });
+
+  if (bodyError) {
+    return res.status(400).json({
+      ok: false,
+      code: "DELIVERY_REQUEST_BODY_INVALID",
+      message: getValidationMessage(bodyError),
+      details: bodyError.details,
     });
   }
 
   try {
     const data = await service.confirmDeliveryRequest({
-      requestId: value.id,
+      requestId: paramValue.id,
+      dispatchNotes: bodyValue.dispatchNotes || null,
       actorUser: req.user || null,
     });
     return res.status(200).json({ ok: true, data });
@@ -101,12 +140,38 @@ async function confirmDeliveryRequest(req, res) {
 }
 
 async function opsApproveDeliveryRequest(req, res) {
-  const { error, value } = requestIdSchema.validate(req.params || {}, { convert: true, abortEarly: false });
-  if (error) {
-    return res.status(400).json({ ok: false, code: "DELIVERY_REQUEST_ID_INVALID", message: getValidationMessage(error), details: error.details });
+  const { error: paramError, value: paramValue } = requestIdSchema.validate(req.params || {}, {
+    convert: true,
+    abortEarly: false,
+  });
+  if (paramError) {
+    return res.status(400).json({
+      ok: false,
+      code: "DELIVERY_REQUEST_ID_INVALID",
+      message: getValidationMessage(paramError),
+      details: paramError.details,
+    });
   }
+
+  const { error: bodyError, value: bodyValue } = opsApproveSchema.validate(req.body || {}, {
+    convert: true,
+    abortEarly: false,
+  });
+  if (bodyError) {
+    return res.status(400).json({
+      ok: false,
+      code: "DELIVERY_REQUEST_OPS_APPROVE_INVALID",
+      message: getValidationMessage(bodyError),
+      details: bodyError.details,
+    });
+  }
+
   try {
-    const data = await service.opsApproveRequest({ requestId: value.id, actorUser: req.user || null });
+    const data = await service.opsApproveRequest({
+      requestId: paramValue.id,
+      lines: bodyValue.lines || [],
+      actorUser: req.user || null,
+    });
     return res.status(200).json({ ok: true, data });
   } catch (serviceError) {
     return handleError(res, serviceError, "No se pudo aprobar la solicitud");
@@ -143,10 +208,28 @@ async function listDeliveryRequests(req, res) {
   }
 }
 
+async function listDeliveryDispatches(req, res) {
+  const { error, value } = listDispatchesQuerySchema.validate(req.query || {}, { convert: true, abortEarly: false });
+  if (error) {
+    return res.status(400).json({ ok: false, code: "DELIVERY_DISPATCHES_QUERY_INVALID", message: getValidationMessage(error), details: error.details });
+  }
+  try {
+    const data = await service.listDeliveryDispatches({
+      ceilingId: value.ceiling_id || null,
+      requestId: value.request_id || null,
+      limit: value.limit || 100,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (serviceError) {
+    return handleError(res, serviceError, "No se pudieron listar los despachos");
+  }
+}
+
 module.exports = {
   createDeliveryRequest,
   opsApproveDeliveryRequest,
   cancelDeliveryRequest,
   confirmDeliveryRequest,
   listDeliveryRequests,
+  listDeliveryDispatches,
 };

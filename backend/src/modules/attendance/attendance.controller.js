@@ -17,7 +17,18 @@ const { hasReportingAccess } = require("./attendance.auth");
 const { normalizeAttendanceRangeFilters } = require("./attendanceRangeFilters");
 const { buildAttendanceRangeQuery } = require("./attendanceReports.service");
 const { logAttendanceReportAccess } = require("./attendanceAudit.service");
+const { getRequestContext, computeIdempotencyHash } = require("./attendanceRequestContext.service");
+const {
+  getExistingIdempotentResponse,
+  reserveIdempotencyKey,
+  persistIdempotentResponse,
+} = require("./attendanceIdempotency.service");
+const { logAttendanceAuditEvent } = require("./attendanceAuditTrail.service");
 const { getBusinessHours, isOffHours } = require("../../utils/offHoursPolicy");
+const {
+  upsertLearningPoint,
+  validateLocationAgainstOfficialGeofence,
+} = require("./attendanceGeofence.service");
 const notificationManager = require("../notifications/notificationManager");
 const { sendMail } = require("../../utils/mailer");
 const { createTimeOffEvent } = require("../../utils/calendar");
@@ -225,6 +236,13 @@ const LATE_TIMEZONE = process.env.APP_TIMEZONE || process.env.TZ || "America/Gua
 const LOCATION_MAX_ACCURACY_METERS = Number(process.env.ATTENDANCE_LOCATION_MAX_ACCURACY_METERS || 250);
 const ATTENDANCE_OCCURRED_AT_MAX_PAST_MS = Number(process.env.ATTENDANCE_OCCURRED_AT_MAX_PAST_MS || (15 * 60 * 1000));
 const ATTENDANCE_OCCURRED_AT_MAX_FUTURE_MS = Number(process.env.ATTENDANCE_OCCURRED_AT_MAX_FUTURE_MS || (2 * 60 * 1000));
+const ATTENDANCE_V2_IDEMPOTENCY_ENABLED = String(process.env.ATTENDANCE_V2_IDEMPOTENCY_ENABLED || "").toLowerCase() === "true";
+const ATTENDANCE_V2_AUDIT_TRAIL_ENABLED = String(process.env.ATTENDANCE_V2_AUDIT_TRAIL_ENABLED || "").toLowerCase() === "true";
+const ATTENDANCE_V2_MARK_META_ENABLED = String(process.env.ATTENDANCE_V2_MARK_META_ENABLED || "").toLowerCase() === "true";
+const ATTENDANCE_GEOFENCE_ENFORCE = String(process.env.ATTENDANCE_GEOFENCE_ENFORCE || "").toLowerCase() === "true";
+const ATTENDANCE_GEOFENCE_LEARNING_ENABLED = String(process.env.ATTENDANCE_GEOFENCE_LEARNING_ENABLED || "").toLowerCase() === "true";
+const ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED =
+  String(process.env.ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED || "").toLowerCase() === "true";
 
 const ATTENDANCE_STATUS_ALIASES = Object.freeze({
   no_entry: "no_entry",
@@ -261,6 +279,25 @@ const resolveMarkTimestamp = (reqBody = {}, fallbackNow = new Date()) => {
   if (deltaMs > ATTENDANCE_OCCURRED_AT_MAX_PAST_MS) return fallbackNow;
 
   return parsed;
+};
+
+const buildMarkTimingMetadata = ({ requestContext, now, resolvedTimestamp }) => {
+  const serverNow = now instanceof Date ? now : new Date();
+  const resolved = resolvedTimestamp instanceof Date ? resolvedTimestamp : serverNow;
+  const clientIso = requestContext?.clientTimestamp || null;
+  const clientMs = clientIso ? new Date(clientIso).getTime() : null;
+  const serverMs = serverNow.getTime();
+  const skewMs = Number.isFinite(clientMs) ? clientMs - serverMs : null;
+
+  return {
+    server_timestamp: serverNow.toISOString(),
+    client_timestamp: clientIso,
+    device_timestamp: requestContext?.deviceTimestamp || null,
+    resolved_mark_timestamp: resolved.toISOString(),
+    source_channel: requestContext?.sourceChannel || "web",
+    clock_skew_ms: skewMs,
+    is_suspicious_time: Number.isFinite(skewMs) ? Math.abs(skewMs) > (20 * 60 * 1000) : false,
+  };
 };
 
 const deriveAttendanceState = (record = {}) => {
@@ -420,6 +457,14 @@ const ensurePendingLocationTable = async () => {
     );
     CREATE INDEX IF NOT EXISTS idx_attendance_pending_locations_user_status
       ON attendance_pending_locations(user_id, status, created_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_att_pending_active_attempt
+      ON attendance_pending_locations(
+        user_id,
+        action_key,
+        COALESCE(target_key, ''),
+        COALESCE(business_date, '1970-01-01'::date)
+      )
+      WHERE status = 'pending';
   `);
   pendingLocationTableReady = true;
 };
@@ -497,7 +542,7 @@ const resolveRequiredLocation = async ({
       errorMessage: "Marcacion rechazada por falta de ubicacion valida",
     });
     logger.warn({ userId, actionKey, targetKey }, "Attendance mark rejected: missing location");
-    res.status(422).json({
+    res.status(409).json({
       ok: false,
       code: "LOCATION_REQUIRED_RETRY",
       message: "Ubicacion obligatoria. Reintenta cuando el GPS responda.",
@@ -1229,12 +1274,14 @@ const enforceNoActiveTimeOffForMarking = async ({ res, userEmail, now }) => {
 const clockIn = async (req, res) => {
   try {
     const { id: userId, email } = req.user || {};
+    const requestContext = getRequestContext(req, "clock-in");
 
     if (!userId) {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
 
-    const now = resolveMarkTimestamp(req.body, new Date());
+    const serverNow = new Date();
+    const now = resolveMarkTimestamp(req.body, serverNow);
     const today = getBusinessDate(now);
     const normalizedLocation = await resolveRequiredLocation({
       req,
@@ -1245,18 +1292,63 @@ const clockIn = async (req, res) => {
       businessDate: today,
     });
     if (!normalizedLocation) return;
+    if (ATTENDANCE_GEOFENCE_ENFORCE || ATTENDANCE_GEOFENCE_LEARNING_ENABLED) {
+      const geofenceCheck = await validateLocationAgainstOfficialGeofence({
+        scopeType: "office",
+        scopeId: "main_office",
+        location: normalizedLocation,
+      }).catch(() => ({ ok: true, enforced: false }));
+      if (ATTENDANCE_GEOFENCE_ENFORCE && !geofenceCheck.ok && geofenceCheck.enforced) {
+        return res.status(422).json({
+          ok: false,
+          code: geofenceCheck.code || "LOCATION_OUTSIDE_GEOFENCE",
+          message: `La ubicacion esta fuera de geocerca permitida (${Math.round(geofenceCheck.allowedRadiusMeters || 200)}m).`,
+          data: geofenceCheck,
+        });
+      }
+    }
+
+    let idempotencyReservation = null;
+    if (ATTENDANCE_V2_IDEMPOTENCY_ENABLED) {
+      const requestHash = computeIdempotencyHash({
+        userId,
+        actionType: "clock-in",
+        location: normalizedLocation,
+        requestContext,
+        businessDate: today,
+      });
+      const existingIdempotent = await getExistingIdempotentResponse({
+        userId,
+        actionType: "clock-in",
+        requestHash,
+      });
+      if (existingIdempotent?.response_payload) {
+        return res.status(existingIdempotent.response_status || 200).json(existingIdempotent.response_payload);
+      }
+      idempotencyReservation = await reserveIdempotencyKey({
+        userId,
+        actionType: "clock-in",
+        requestHash,
+        requestContext,
+      });
+    }
 
     if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now }))) {
       return;
     }
 
-    // Sync the regular attendance record and pre-fill lunch ONLY when the collaborator
-    // has an active exception (operational or unexpected flow). Regular collaborators with
-    // no active exception must mark entry and lunch manually at the real times.
+    if (ATTENDANCE_GEOFENCE_LEARNING_ENABLED) {
+      await upsertLearningPoint({
+        scopeType: "office",
+        scopeId: "main_office",
+        location: normalizedLocation,
+        sourceContext: { userId, attendanceDate: today, source: "clock-in" },
+      }).catch((err) => logger.warn({ err: err?.message }, "attendance geofence learning skipped"));
+    }
+
     const activeAnyException = await getActiveExceptionByFlow({ userId, flow: "any" });
     if (activeAnyException) {
       await syncNormalEntryFromFieldOp({ userId, location: normalizedLocation, timestamp: now });
-      // Pre-fill operational lunch window (14:00-15:00) only for operational exits.
       if (isOperationalFlowException(activeAnyException)) {
         await autoSeedOperationalLunchWindow({ userId, location: normalizedLocation, timestamp: now });
       }
@@ -1265,7 +1357,6 @@ const clockIn = async (req, res) => {
 
     if (!ensured.created) {
       if (normalizedLocation && !ensured.data?.entry_location) {
-        const today = getBusinessDate(now);
         const syncResult = await db.query(
           `
           UPDATE user_attendance_records
@@ -1280,20 +1371,37 @@ const clockIn = async (req, res) => {
         );
 
         if (syncResult.rows[0]) {
-          logger.info(`[ATTENDANCE] Clock in location synced: ${email} at ${now.toISOString()} loc: ${normalizedLocation}`);
-          return res.status(200).json({
+          const payload = {
             ok: true,
-            message: "Entrada ya registrada; ubicaciÃ³n sincronizada correctamente",
+            message: "Entrada ya registrada; ubicacion sincronizada correctamente",
             data: syncResult.rows[0],
-          });
+          };
+          if (ATTENDANCE_V2_IDEMPOTENCY_ENABLED) {
+            await persistIdempotentResponse({
+              idempotencyId: idempotencyReservation?.id,
+              statusCode: 200,
+              payload,
+              createdRecordTable: "user_attendance_records",
+              createdRecordId: syncResult.rows[0]?.id,
+            });
+          }
+          return res.status(200).json(payload);
         }
       }
 
-      return res.status(400).json({
+      const payload = {
         ok: false,
         message: "Ya has marcado entrada hoy",
         data: ensured.data,
-      });
+      };
+      if (ATTENDANCE_V2_IDEMPOTENCY_ENABLED) {
+        await persistIdempotentResponse({
+          idempotencyId: idempotencyReservation?.id,
+          statusCode: 400,
+          payload,
+        });
+      }
+      return res.status(400).json(payload);
     }
 
     const lateMinutes = computeLateMinutesFromEntry(now);
@@ -1314,15 +1422,50 @@ const clockIn = async (req, res) => {
       }).catch((err) => logger.error({ err }, "[ATTENDANCE] Error notificando llegada tarde (non-fatal)"));
     }
 
-    logger.info(`[ATTENDANCE] Clock in: ${email} at ${now.toISOString()} loc: ${normalizedLocation || "n/a"}`);
+    const timingMetadata = ATTENDANCE_V2_MARK_META_ENABLED
+      ? buildMarkTimingMetadata({
+          requestContext,
+          now: serverNow,
+          resolvedTimestamp: now,
+        })
+      : null;
 
-    return res.status(200).json({
+    const payload = {
       ok: true,
       message: "Entrada registrada correctamente",
-      data: ensured.data,
-    });
+      data: {
+        ...ensured.data,
+        ...(timingMetadata ? { mark_meta: timingMetadata } : {}),
+      },
+    };
+
+    if (ATTENDANCE_V2_IDEMPOTENCY_ENABLED) {
+      await persistIdempotentResponse({
+        idempotencyId: idempotencyReservation?.id,
+        statusCode: 200,
+        payload,
+        createdRecordTable: "user_attendance_records",
+        createdRecordId: ensured.data?.id,
+      });
+    }
+
+    if (ATTENDANCE_V2_AUDIT_TRAIL_ENABLED) {
+      await logAttendanceAuditEvent({
+        actorUserId: userId,
+        affectedUserId: userId,
+        action: "attendance.clock_in",
+        endpoint: req.originalUrl,
+        method: req.method,
+        newValue: { attendanceDate: today, location: normalizedLocation, timingMetadata },
+        result: "ok",
+        requestContext,
+      });
+    }
+
+    logger.info(`[ATTENDANCE] Clock in: ${email} at ${now.toISOString()} loc: ${normalizedLocation || "n/a"}`);
+    return res.status(200).json(payload);
   } catch (err) {
-    logger.error({ err }, "âŒ Error en clock-in");
+    logger.error({ err }, "Error en clock-in");
     return res.status(500).json({
       ok: false,
       message: "Error registrando entrada",
@@ -1338,6 +1481,7 @@ const clockIn = async (req, res) => {
 const clockOutLunch = async (req, res) => {
   try {
     const { id: userId, email } = req.user || {};
+    const requestContext = getRequestContext(req, "clock-out-lunch");
 
     if (!userId) {
       return res.status(401).json({ ok: false, message: "No autorizado" });
@@ -1426,6 +1570,18 @@ const clockOutLunch = async (req, res) => {
     }
 
     logger.info(`[ATTENDANCE] Lunch start: ${email} at ${now.toISOString()} loc: ${normalizedLocation || "n/a"}`);
+    if (ATTENDANCE_V2_AUDIT_TRAIL_ENABLED) {
+      await logAttendanceAuditEvent({
+        actorUserId: userId,
+        affectedUserId: userId,
+        action: "attendance.clock_out_lunch",
+        endpoint: req.originalUrl,
+        method: req.method,
+        newValue: { attendanceDate: today, location: normalizedLocation },
+        result: "ok",
+        requestContext,
+      });
+    }
 
     return res.status(200).json({
       ok: true,
@@ -1453,6 +1609,7 @@ const clockOutLunch = async (req, res) => {
 const clockInLunch = async (req, res) => {
   try {
     const { id: userId, email } = req.user || {};
+    const requestContext = getRequestContext(req, "clock-in-lunch");
 
     if (!userId) {
       return res.status(401).json({ ok: false, message: "No autorizado" });
@@ -1563,6 +1720,18 @@ const clockInLunch = async (req, res) => {
     }
 
     logger.info(`[ATTENDANCE] Lunch end: ${email} at ${now.toISOString()} loc: ${normalizedLocation || "n/a"}`);
+    if (ATTENDANCE_V2_AUDIT_TRAIL_ENABLED) {
+      await logAttendanceAuditEvent({
+        actorUserId: userId,
+        affectedUserId: userId,
+        action: "attendance.clock_in_lunch",
+        endpoint: req.originalUrl,
+        method: req.method,
+        newValue: { attendanceDate: today, location: normalizedLocation },
+        result: "ok",
+        requestContext,
+      });
+    }
 
     return res.status(200).json({
       ok: true,
@@ -1591,6 +1760,7 @@ const clockOut = async (req, res) => {
   try {
     const { id: userId, email, fullname, name } = req.user || {};
     const { isOvertime } = req.body;
+    const requestContext = getRequestContext(req, "clock-out");
 
     if (!userId) {
       return res.status(401).json({ ok: false, message: "No autorizado" });
@@ -1718,6 +1888,23 @@ const clockOut = async (req, res) => {
       : "Salida registrada correctamente";
 
     logger.info(`[ATTENDANCE] Clock out: ${email} at ${now.toISOString()} loc: ${normalizedLocation || "n/a"} overtime: ${overtimeHours.toFixed(2)}h`);
+    if (ATTENDANCE_V2_AUDIT_TRAIL_ENABLED) {
+      await logAttendanceAuditEvent({
+        actorUserId: userId,
+        affectedUserId: userId,
+        action: "attendance.clock_out",
+        endpoint: req.originalUrl,
+        method: req.method,
+        newValue: {
+          attendanceDate: today,
+          location: normalizedLocation,
+          overtimeHours: Number(overtimeHours.toFixed(2)),
+          workedHours: Number(workedHours.toFixed(2)),
+        },
+        result: "ok",
+        requestContext,
+      });
+    }
 
     return res.status(200).json({
       ok: true,
@@ -2952,16 +3139,26 @@ const clockInField = async (req, res) => {
     if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now }))) {
       return;
     }
-    const activeOperationalBeforeVisit = await getActiveExceptionByFlow({ userId, flow: "operational" });
-    if (activeOperationalBeforeVisit) {
-      await autoCompleteOperationalAttendanceSpan({
-        userId,
-        operationalException: activeOperationalBeforeVisit,
-        location: activeOperationalBeforeVisit.start_location || normalizedLocation,
-        now,
-      });
+    await ensureDailyClockIn({
+      userId,
+      location: normalizedLocation,
+      timestamp: now,
+      entrySource: "field_op",
+    });
+    if (ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED) {
+      const activeOperationalBeforeVisit = await getActiveExceptionByFlow({ userId, flow: "operational" });
+      if (activeOperationalBeforeVisit) {
+        await autoCompleteOperationalAttendanceSpan({
+          userId,
+          operationalException: activeOperationalBeforeVisit,
+          location: activeOperationalBeforeVisit.start_location || normalizedLocation,
+          now,
+        });
+      }
+      await syncNormalEntryFromFieldOp({ userId, location: normalizedLocation, timestamp: now }).catch((err) =>
+        logger.warn({ err: err?.message, userId }, "[ATTENDANCE] Non-fatal syncNormalEntryFromFieldOp failure")
+      );
     }
-    await syncNormalEntryFromFieldOp({ userId, location: normalizedLocation, timestamp: now });
     let result;
 
     if (client_id) {
@@ -3303,14 +3500,19 @@ const clockOutField = async (req, res) => {
     if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now }))) {
       return;
     }
-    const activeOperationalBeforeVisitExit = await getActiveExceptionByFlow({ userId, flow: "operational" });
-    if (activeOperationalBeforeVisitExit) {
-      await autoCompleteOperationalAttendanceSpan({
-        userId,
-        operationalException: activeOperationalBeforeVisitExit,
-        location: activeOperationalBeforeVisitExit.start_location || normalizedLocation,
-        now,
-      });
+    if (postVisitAction) {
+      await getActiveExceptionByFlow({ userId, flow: "operational" });
+    }
+    if (ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED) {
+      const activeOperationalBeforeVisitExit = await getActiveExceptionByFlow({ userId, flow: "operational" });
+      if (activeOperationalBeforeVisitExit) {
+        await autoCompleteOperationalAttendanceSpan({
+          userId,
+          operationalException: activeOperationalBeforeVisitExit,
+          location: activeOperationalBeforeVisitExit.start_location || normalizedLocation,
+          now,
+        });
+      }
     }
     let result;
 
@@ -3387,35 +3589,6 @@ const clockOutField = async (req, res) => {
         [now, parsedLocation?.latitude ?? null, parsedLocation?.longitude ?? null, observations, email, normalizedProspectName, today]
       );
 
-      // Fallback: close latest active prospect visit if business date drifted or casing differs.
-      if (!result?.rows?.length) {
-        const normalizedEmail = String(email || "").trim().toLowerCase();
-        const openProspect = await db.query(
-          `SELECT id
-             FROM prospect_visits
-            WHERE LOWER(COALESCE(user_email, '')) = $1
-              AND LOWER(COALESCE(prospect_name, '')) = LOWER($2)
-              AND status = 'in_visit'
-              AND visit_date >= ($3::date - INTERVAL '7 day')::date
-            ORDER BY visit_date DESC, check_in_time DESC NULLS LAST, id DESC
-            LIMIT 1`,
-          [normalizedEmail, normalizedProspectName, today]
-        );
-
-        if (openProspect.rows.length) {
-          result = await db.query(
-            `UPDATE prospect_visits
-                SET status = 'visited',
-                    check_out_time = $1,
-                    check_out_lat = $2,
-                    check_out_lng = $3,
-                    observations = $4
-              WHERE id = $5
-              RETURNING *`,
-            [now, parsedLocation?.latitude ?? null, parsedLocation?.longitude ?? null, observations, openProspect.rows[0].id]
-          );
-        }
-      }
     } else {
       // Auto resolution: close latest active visit for this user when client/prospect is not provided.
       const normalizedEmail = String(email || "").trim().toLowerCase();
@@ -3552,7 +3725,7 @@ const clockOutField = async (req, res) => {
       }
     }
 
-    if (shouldMirrorAttendanceForFieldOp(now)) {
+    if (ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED && shouldMirrorAttendanceForFieldOp(now)) {
       await syncNormalExitFromFieldOp({ userId, location: normalizedLocation, timestamp: now });
     }
 
@@ -3869,23 +4042,18 @@ const clockOutOperational = async (req, res) => {
       return;
     }
 
-    // Aseguramos que la entrada normal del día quede marcada al iniciar la salida operacional,
-    // sin importar si es o no fuera de horario, para evitar "falta de registros".
-    await syncNormalEntryFromFieldOp({ userId, location: normalizedLocation, timestamp: now });
-    // Regularizar almuerzo en el acta a 14:00-15:00 para salidas operacionales (sin chequeo de hora).
-    await autoSeedOperationalLunchWindow({ userId, location: normalizedLocation, timestamp: now });
-    // Si el colaborador dejó almuerzo abierto y sigue laborando en salida operacional,
-    // cerramos el almuerzo al iniciar la operación para mantener consistencia del acta normal.
-    await closePendingLunchForOperationalStart({ userId, location: normalizedLocation, timestamp: now });
-
     const activeOperational = await getActiveExceptionByFlow({ userId, flow: "operational" });
     if (activeOperational) {
-      await autoCompleteOperationalAttendanceSpan({
-        userId,
-        operationalException: activeOperational,
-        location: activeOperational.start_location || normalizedLocation,
-        now,
-      });
+      if (ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED) {
+        await autoCompleteOperationalAttendanceSpan({
+          userId,
+          operationalException: activeOperational,
+          location: activeOperational.start_location || normalizedLocation,
+          now,
+        }).catch((err) =>
+          logger.warn({ err: err?.message, userId }, "[ATTENDANCE] Non-fatal autoCompleteOperationalAttendanceSpan failure (active op)")
+        );
+      }
       const tracking = computeOperationalTracking({ startTime: activeOperational.start_time, now });
       return res.status(200).json({
         ok: true,
@@ -3906,6 +4074,18 @@ const clockOutOperational = async (req, res) => {
       });
     }
 
+    if (ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED) {
+      await syncNormalEntryFromFieldOp({ userId, location: normalizedLocation, timestamp: now }).catch((err) =>
+        logger.warn({ err: err?.message, userId }, "[ATTENDANCE] Non-fatal syncNormalEntryFromFieldOp failure")
+      );
+      await autoSeedOperationalLunchWindow({ userId, location: normalizedLocation, timestamp: now }).catch((err) =>
+        logger.warn({ err: err?.message, userId }, "[ATTENDANCE] Non-fatal autoSeedOperationalLunchWindow failure")
+      );
+      await closePendingLunchForOperationalStart({ userId, location: normalizedLocation, timestamp: now }).catch((err) =>
+        logger.warn({ err: err?.message, userId }, "[ATTENDANCE] Non-fatal closePendingLunchForOperationalStart failure")
+      );
+    }
+
     const result = await db.query(
       `INSERT INTO attendance_exceptions (user_id, date, type, description, start_time, start_location, status)
        VALUES ($1, $2, 'operacion_campo', $3, $4, $5, 'ACTIVE')
@@ -3914,12 +4094,16 @@ const clockOutOperational = async (req, res) => {
     );
 
     const tracking = computeOperationalTracking({ startTime: result.rows[0]?.start_time, now });
-    await autoCompleteOperationalAttendanceSpan({
-      userId,
-      operationalException: result.rows[0],
-      location: normalizedLocation,
-      now,
-    });
+    if (ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED) {
+      await autoCompleteOperationalAttendanceSpan({
+        userId,
+        operationalException: result.rows[0],
+        location: normalizedLocation,
+        now,
+      }).catch((err) =>
+        logger.warn({ err: err?.message, userId }, "[ATTENDANCE] Non-fatal autoCompleteOperationalAttendanceSpan failure (new op)")
+      );
+    }
 
     return res.status(200).json({
       ok: true,
@@ -3959,12 +4143,16 @@ const clockInOperational = async (req, res) => {
     if (!activeOperational) {
       return res.status(404).json({ ok: false, code: "NO_ACTIVE_OPERATIONAL", message: "No se encontro una salida operacional activa" });
     }
-    await autoCompleteOperationalAttendanceSpan({
-      userId,
-      operationalException: activeOperational,
-      location: activeOperational.start_location || normalizedLocation,
-      now,
-    });
+    if (ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED) {
+      await autoCompleteOperationalAttendanceSpan({
+        userId,
+        operationalException: activeOperational,
+        location: activeOperational.start_location || normalizedLocation,
+        now,
+      }).catch((err) =>
+        logger.warn({ err: err?.message, userId }, "[ATTENDANCE] Non-fatal autoCompleteOperationalAttendanceSpan failure (return op)")
+      );
+    }
 
     const tracking = computeOperationalTracking({ startTime: activeOperational.start_time, endTime: now, now });
     const descriptionWithSummary = appendOperationalSummary({
@@ -4007,7 +4195,7 @@ const clockInOperational = async (req, res) => {
       return res.status(404).json({ ok: false, code: "NO_ACTIVE_OPERATIONAL", message: "No se encontro una salida operacional activa" });
     }
 
-    if (shouldMirrorAttendanceForFieldOp(now) || shouldMirrorRegularExitBySchedule(now)) {
+    if (ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED && (shouldMirrorAttendanceForFieldOp(now) || shouldMirrorRegularExitBySchedule(now))) {
       await syncNormalExitFromFieldOp({ userId, location: normalizedLocation, timestamp: now });
     }
 
@@ -4771,3 +4959,5 @@ module.exports = {
   markOvertime,
   getOvertimeRecords,
 };
+
+

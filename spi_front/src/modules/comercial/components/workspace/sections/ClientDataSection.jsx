@@ -16,6 +16,7 @@ const SECTION_FIELDS = {
  "provinceCity",
  "processCode",
  "contractObject",
+ "smartObjective",
  "notes",
  ],
 };
@@ -225,6 +226,14 @@ const ClientDataSection = ({
  businessCase?.contract_object ||
  fallbackBusinessCase?.contractObject ||
  fallbackBusinessCase?.contract_object ||
+ "",
+ smartObjective:
+ businessCase?.smart_objective ||
+ fallbackBusinessCase?.smart_objective ||
+ metadata.smart_objective ||
+ metadata.smartObjective ||
+ metadataGeneral.smart_objective ||
+ metadataGeneral.smartObjective ||
  "",
  notes:
  businessCase?.notes ||
@@ -504,6 +513,8 @@ const ClientDataSection = ({
  installation_lng: selectedLocationValue?.lng ?? null,
  general_data: {
  notes: formData.notes,
+ smart_objective: formData.smartObjective || "",
+ smartObjective: formData.smartObjective || "",
  clientType: finalClientType,
  contractingEntity: formData.contractingEntity,
  provinceCity: formData.provinceCity || locationProvinceCity || "",
@@ -549,7 +560,7 @@ const ClientDataSection = ({
  // Check permissions based on role
  const canEdit = () => {
  const role = permissions?.userRole || "comercial";
- return [
+ const hasRoleAccess = [
  "comercial",
  "acp_comercial",
  "backoffice_comercial",
@@ -557,6 +568,7 @@ const ClientDataSection = ({
  "jefe_tecnico",
  "jefe_operaciones",
  ].includes(role);
+ return hasRoleAccess && permissions?.canEdit !== false && ownership?.canUserEdit !== false;
  };
 
  if (loading) {
@@ -779,6 +791,19 @@ const ClientDataSection = ({
  className={naInputClass("contractObject")}
  disabled={isNA("contractObject") || !canEdit()}
  {...register("contractObject")}
+ />
+ </label>
+ <label className="flex flex-col gap-1.5 md:col-span-2">
+ <div className="flex items-center justify-between">
+ <span className="text-sm font-bold text-gray-700">Objetivo SMART</span>
+ {renderNAButton("smartObjective")}
+ </div>
+ <textarea
+ rows={3}
+ className={naInputClass("smartObjective")}
+ disabled={isNA("smartObjective") || !canEdit()}
+ placeholder="Ejemplo: Incrementar cobertura diagnostica en 20% en 12 meses con trazabilidad mensual."
+ {...register("smartObjective")}
  />
  </label>
  <label className="flex flex-col gap-1.5 md:col-span-2">

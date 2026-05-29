@@ -26,14 +26,14 @@ const toMoney = (v, cur = "USD") =>
   );
 
 const fmtDate = (v) => {
-  if (!v) return "â€”";
+  if (!v) return "—";
   return String(v).slice(0, 10);
 };
 
 const fmtDateTime = (v) => {
-  if (!v) return "â€”";
+  if (!v) return "—";
   const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return "â€”";
+  if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleString("es-EC", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 };
 
@@ -880,13 +880,13 @@ const ViaticosWorkspace = () => {
                                 return (
                                   <tr key={inv.id} className={`hover:bg-slate-50 transition-colors ${!inv.in_trip_date_range ? "opacity-60" : ""}`}>
                                     <td className="px-3 py-2">
-                                      <p className="font-medium text-slate-800 truncate max-w-[180px]">{inv.supplier_name || inv.supplier_ruc || "â€”"}</p>
+                                      <p className="font-medium text-slate-800 truncate max-w-[180px]">{inv.supplier_name || inv.supplier_ruc || "—"}</p>
                                       <p className="text-slate-400">{inv.supplier_ruc}</p>
                                     </td>
-                                    {isFinance && <td className="px-3 py-2 text-slate-600">{inv.receipt_type || "â€”"}</td>}
+                                    {isFinance && <td className="px-3 py-2 text-slate-600">{inv.receipt_type || "—"}</td>}
                                     {isFinance && <td className="px-3 py-2 text-slate-600">{fmtDateTime(inv.authorization_date)}</td>}
                                     <td className="px-3 py-2 text-slate-600">{fmtDate(inv.issue_date)}</td>
-                                    {isFinance && <td className="px-3 py-2 text-slate-600">{inv.buyer_id || "â€”"}</td>}
+                                    {isFinance && <td className="px-3 py-2 text-slate-600">{inv.buyer_id || "—"}</td>}
                                     {isFinance && (
                                       <td className="px-3 py-2">
                                         <select
@@ -915,7 +915,7 @@ const ViaticosWorkspace = () => {
                                     {isFinance && (
                                       <td className="px-3 py-2 text-center">
                                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${INV_STATUS_BADGE[inv.status] || "bg-slate-100 text-slate-600"}`}>
-                                          {inv.status || "â€”"}
+                                          {inv.status || "—"}
                                         </span>
                                       </td>
                                     )}
@@ -975,7 +975,7 @@ const ViaticosWorkspace = () => {
                         <p className="font-semibold text-emerald-800">Cotejo de asistencia</p>
                         <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
                           <div><p className="text-emerald-600">Estado asistencia</p><p className="font-semibold capitalize">{report.attendance?.status}</p></div>
-                          <div><p className="text-emerald-600">Distancia mín.</p><p className="font-semibold">{report.attendance?.min_distance_km != null ? `${Number(report.attendance.min_distance_km).toFixed(1)} km` : "â€”"}</p></div>
+                          <div><p className="text-emerald-600">Distancia mín.</p><p className="font-semibold">{report.attendance?.min_distance_km != null ? `${Number(report.attendance.min_distance_km).toFixed(1)} km` : "—"}</p></div>
                           <div><p className="text-emerald-600">Fuera de Área</p><p className="font-semibold">{report.rules?.outside_labor_area ? "Sí" : "No"}</p></div>
                           <div><p className="text-emerald-600">Monto sugerido</p><p className="font-semibold">{toMoney(report.recommendation?.suggested_amount || 0)}</p></div>
                         </div>

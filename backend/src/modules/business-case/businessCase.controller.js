@@ -27,6 +27,8 @@ const preflowService = require("./businessCasePreflow.service");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 const determinationsGateService = require("./businessCaseDeterminationsGate.service");
 const { ensureBusinessCaseDriveFolder } = require("./businessCaseDriveFolder.service");
+const sheetGenerationService = require("./businessCaseSheetGeneration.service");
+const { createRequest: createServiceRequest, addDriveAttachment } = require("../requests/requests.service");
 
 const createSchema = Joi.object({
   client_name: Joi.string().required(),
@@ -146,7 +148,20 @@ const SECTION_ALIASES = {
 };
 
 const REVIEW_ROLES = ["acp_comercial", "backoffice_comercial"];
-const LOCK_ROLES = ["acp_comercial", "backoffice_comercial", "jefe_comercial"];
+// BUG-03: backoffice incluido — pero la validación de tipo de compra se hace en lockSection/unlockSection
+// En BC público: solo acp_comercial / jefe_comercial pueden bloquear/desbloquear
+// En BC privado: también backoffice / backoffice_comercial pueden bloquear/desbloquear
+// NUEVO-07: jefe_de_comercial tiene mismos permisos que jefe_comercial para bloquear/desbloquear
+const LOCK_ROLES = ["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_de_comercial"];
+const BACKOFFICE_LOCK_ROLES = new Set(["backoffice", "backoffice_comercial"]);
+// NUEVO-01: private_comodato y private_sale también son tipos privados válidos en BD
+// comodato_privado y private_comodato son la misma cosa con nombres distintos según el origen
+const PRIVATE_PURCHASE_TYPES = new Set([
+  "privada", "private", "privado",       // legacy strings
+  "comodato_privado",                    // BC creado desde compra pública con comodato
+  "private_comodato",                    // BC creado desde compra privada comodato
+  "private_sale",                        // BC de compra privada venta directa
+]);
 const PHASE1_SECTIONS = ["general", "lab", "equipment", "lis", "determinations", "requirement"];
 const PRE_BC_DURATION_HOURS = 48;
 const DETERMINATIONS_UPLOAD_MAIL_ROLES = [
@@ -168,15 +183,30 @@ const BUSINESS_CASE_PROCESS_MAIL_ROLES = [
 ];
 const DETERMINATIONS_REACTIVO_TYPES = new Set(["reactivo", "determinacion"]);
 const DETERMINATIONS_TECH_TYPES = new Set(["control", "calibrador", "consumible", "material"]);
-// Public BCs: only acp_comercial fills reactivos. Private BCs: only backoffice fills reactivos.
-const DETERMINATIONS_REACTIVO_PUBLIC_ROLES = new Set(["acp_comercial"]);
-const DETERMINATIONS_REACTIVO_PRIVATE_ROLES = new Set(["backoffice"]);
+// Public BCs: comercial uploads the statistical document and completes the public commercial phase.
+// Private BCs: backoffice_comercial/backoffice fill reactivos.
+const DETERMINATIONS_REACTIVO_PUBLIC_ROLES = new Set(["comercial"]);
+const DETERMINATIONS_REACTIVO_PRIVATE_ROLES = new Set(["backoffice_comercial", "backoffice"]);
 // tecnico + jefe_tecnico fill controles/calibradores/materiales regardless of BC type
 const DETERMINATIONS_TECH_EDIT_ROLES = new Set(["tecnico", "jefe_tecnico"]);
 const DETERMINATIONS_TECH_WINDOW_NOTIFY_ROLES = ["tecnico", "jefe_tecnico"];
+const DETERMINATIONS_SUBSECTIONS = new Set(["reactivos", "controles", "calibradores", "materiales"]);
+const DETERMINATIONS_UNLOCK_DECIDER_ROLES = new Set(["jefe_comercial"]);
 const INVESTMENT_VALUES_DEADLINE_HOURS = 48;
-const INVESTMENT_VALUES_OP_ROLES = new Set(["jefe_operaciones", "jefe_de_operaciones"]);
+const INVESTMENT_VALUES_OP_ROLES = new Set([
+  "jefe_operaciones",
+  "jefe_de_operaciones",
+]);
 const INVESTMENT_VALUES_FIN_ROLES = new Set(["jefe_financiero"]);
+const INVESTMENT_CART_CONFIRM_ROLES = new Set([
+  "comercial",
+  "acp_comercial",
+  "backoffice_comercial",
+  "backoffice",
+  "jefe_comercial",
+  "gerencia",
+  "gerencia_general",
+]);
 
 const AUTOSAVE_FLAG_ADMIN_ROLES = new Set([
   "admin",
@@ -197,9 +227,45 @@ function logConsumptionDebug(payload, message) {
   logger.info(payload, message);
 }
 
+function summarizeConsumptionItems(items = [], limit = 20) {
+  const safeItems = Array.isArray(items) ? items : [];
+  const withQty = safeItems.map((item) => {
+    const qty = Number(item?.annualQty ?? item?.annualQuantity ?? item?.annual_qty ?? 0);
+    return {
+      key: item?.key || null,
+      itemId: item?.itemId || null,
+      name: item?.name || null,
+      type: item?.type || item?.item_type || null,
+      equipmentId: item?.equipmentId ?? item?.equipment_id ?? null,
+      annualQty: Number.isFinite(qty) ? qty : 0,
+    };
+  });
+  return {
+    count: withQty.length,
+    nonZeroCount: withQty.filter((item) => item.annualQty > 0).length,
+    sample: withQty.slice(0, limit),
+    nonZeroSample: withQty.filter((item) => item.annualQty > 0).slice(0, limit),
+  };
+}
+
 function hasTextValue(value) {
   if (value === null || value === undefined) return false;
   return String(value).trim().length > 0;
+}
+
+function hasValue(value) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "boolean") return true;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return false;
+}
+
+function hasAnyFields(obj, fields = []) {
+  if (!obj || typeof obj !== "object") return false;
+  return fields.some((field) => hasValue(obj[field]));
 }
 
 function hasGeneralPayloadChanges(payload = {}) {
@@ -315,6 +381,19 @@ function resolveRequestRole(req) {
   return String(req.user?.role || req.user?.scope || req.user?.role_name || "").toLowerCase();
 }
 
+function getInvestmentCartStatus(businessCase = {}) {
+  const metadata = preflowService.toObject(businessCase?.modern_bc_metadata);
+  const cart = metadata?.investments_cart && typeof metadata.investments_cart === "object"
+    ? metadata.investments_cart
+    : {};
+  return {
+    confirmed: Boolean(cart.confirmed),
+    confirmedAt: cart.confirmed_at || null,
+    confirmedByEmail: cart.confirmed_by_email || null,
+    confirmedByRole: cart.confirmed_by_role || null,
+  };
+}
+
 function normalizePurchaseTypeForGate(value = "") {
   const raw = String(value || "").trim().toLowerCase();
   if (["private_comodato", "comodato_privado"].includes(raw)) return "private_comodato";
@@ -417,6 +496,387 @@ function resolveBusinessCaseClientDisplayName(businessCase = {}) {
   return "Cliente sin nombre";
 }
 
+function normalizeDateOnlyInput(value) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString().slice(0, 10);
+  }
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function addMonthsIso(months = 0, baseDate = new Date()) {
+  const parsedMonths = Number.parseInt(months, 10);
+  if (!Number.isFinite(parsedMonths) || parsedMonths < 0) return null;
+  const date = new Date(baseDate);
+  date.setHours(0, 0, 0, 0);
+  date.setMonth(date.getMonth() + parsedMonths);
+  return normalizeDateOnlyInput(date);
+}
+
+async function getBusinessCaseClientDetails(clientId) {
+  if (!clientId) return null;
+  const { rows } = await db.query(
+    `SELECT id, commercial_name, client_email, shipping_contact_name, shipping_phone, shipping_cellphone, shipping_address
+       FROM client_requests
+      WHERE id = $1
+      LIMIT 1`,
+    [clientId],
+  );
+  return rows[0] || null;
+}
+
+function buildBusinessCaseInstallationAddress(metadata = {}, generalData = {}, clientInfo = null) {
+  const directCandidates = [
+    generalData?.installation_address,
+    metadata?.installation_address,
+    clientInfo?.shipping_address,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (hasTextValue(candidate)) return String(candidate).trim();
+  }
+
+  const composedParts = [
+    generalData?.client_location_name,
+    metadata?.client_location_name,
+    generalData?.installation_city,
+    metadata?.installation_city,
+    generalData?.installation_province,
+    metadata?.installation_province,
+    generalData?.provinceCity,
+    metadata?.provinceCity,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  if (!composedParts.length) return null;
+  return [...new Set(composedParts)].join(", ");
+}
+
+async function resolveBusinessCaseInspectionEquipment(businessCaseId, businessCase = {}, metadata = {}) {
+  const selectedEquipment = await equipmentSelectionService.getSelectedEquipment(businessCaseId).catch(() => null);
+  const metadataEquipmentDetails = metadata?.equipment_details && typeof metadata.equipment_details === "object"
+    ? metadata.equipment_details
+    : {};
+  const metadataEquipmentPairs = Array.isArray(metadataEquipmentDetails?.equipment_pairs)
+    ? metadataEquipmentDetails.equipment_pairs
+    : [];
+  const extraEquipmentPairs = Array.isArray(businessCase?.extra?.equipment_details)
+    ? businessCase.extra.equipment_details
+    : [];
+  const rootEquipmentPairs = Array.isArray(businessCase?.equipment_details)
+    ? businessCase.equipment_details
+    : [];
+  const equipmentPairs = [...metadataEquipmentPairs, ...extraEquipmentPairs, ...rootEquipmentPairs];
+
+  const equipmentIds = Array.from(
+    new Set(
+      equipmentPairs
+        .flatMap((pair) => [pair?.primary_id, pair?.backup_id])
+        .map((value) => Number.parseInt(value, 10))
+        .filter((value) => Number.isFinite(value)),
+    ),
+  );
+
+  const namesById = {};
+  if (equipmentIds.length) {
+    const { rows } = await db.query(
+      `SELECT id, name, model
+         FROM public.equipment_models
+        WHERE id = ANY($1::int[])`,
+      [equipmentIds],
+    );
+    for (const row of rows) {
+      namesById[String(row.id)] = row?.name || row?.model || "Equipo";
+    }
+  }
+
+  const items = [];
+  const pushEquipment = (equipmentId, displayName, state) => {
+    const numericId = Number.parseInt(equipmentId, 10);
+    const key = Number.isFinite(numericId) ? String(numericId) : `${displayName}:${state}`;
+    if (!displayName) return;
+    if (items.some((item) => item.__key === key)) return;
+    items.push({
+      __key: key,
+      nombre_equipo: displayName,
+      estado: state || "nuevo",
+      unidad_id: Number.isFinite(numericId) ? numericId : "",
+      serial: "",
+    });
+  };
+
+  if (selectedEquipment?.equipment_id || selectedEquipment?.equipment_name || selectedEquipment?.model) {
+    pushEquipment(
+      selectedEquipment?.equipment_id,
+      selectedEquipment?.equipment_name || selectedEquipment?.model || "Equipo principal",
+      "principal",
+    );
+  }
+
+  for (const pair of equipmentPairs) {
+    const primaryId = Number.parseInt(pair?.primary_id, 10);
+    const backupId = Number.parseInt(pair?.backup_id, 10);
+    if (Number.isFinite(primaryId)) {
+      pushEquipment(primaryId, namesById[String(primaryId)] || "Equipo principal", pair?.primary_type || "nuevo");
+    }
+    if (Number.isFinite(backupId)) {
+      pushEquipment(backupId, namesById[String(backupId)] || "Equipo backup", pair?.backup_type || "backup");
+    }
+  }
+
+  return items.map(({ __key, ...rest }) => rest);
+}
+
+async function buildBusinessCaseInspectionDraft({
+  businessCaseId,
+  businessCase,
+  metadata,
+  inspectionWindow = {},
+  overrides = {},
+}) {
+  const currentMetadata = metadata && typeof metadata === "object" ? metadata : {};
+  const clientInfo = await getBusinessCaseClientDetails(businessCase?.client_id).catch(() => null);
+  const generalData = currentMetadata?.general_data && typeof currentMetadata.general_data === "object"
+    ? currentMetadata.general_data
+    : {};
+  const lisIntegration = await bcLisIntegrationService.getLisIntegration(businessCaseId);
+  const requirements = await bcRequirementsService.getRequirements(businessCaseId);
+  const equipment = await resolveBusinessCaseInspectionEquipment(businessCaseId, businessCase, currentMetadata);
+
+  const normalizeOverride = (value) => {
+    if (!hasTextValue(value)) return null;
+    return String(value).trim();
+  };
+
+  const inferredObservations = [
+    hasTextValue(businessCase?.process_code) ? `Proceso: ${businessCase.process_code}` : null,
+    hasTextValue(requirements?.observations) ? `Requerimientos: ${requirements.observations}` : null,
+    hasTextValue(generalData?.notes) ? `Notas comerciales: ${generalData.notes}` : null,
+  ].filter(Boolean).join(" | ");
+
+  const draft = {
+    nombre_cliente:
+      normalizeOverride(overrides?.nombre_cliente) ||
+      businessCase?.client_name ||
+      generalData?.commercial_name ||
+      generalData?.client_commercial_name ||
+      clientInfo?.commercial_name ||
+      "",
+    direccion_cliente:
+      normalizeOverride(overrides?.direccion_cliente) ||
+      buildBusinessCaseInstallationAddress(currentMetadata, generalData, clientInfo) ||
+      "",
+    persona_contacto:
+      normalizeOverride(overrides?.persona_contacto) ||
+      clientInfo?.shipping_contact_name ||
+      generalData?.contact_name ||
+      generalData?.shipping_contact_name ||
+      "",
+    celular_contacto:
+      normalizeOverride(overrides?.celular_contacto) ||
+      clientInfo?.shipping_phone ||
+      clientInfo?.shipping_cellphone ||
+      generalData?.shipping_phone ||
+      generalData?.shipping_cellphone ||
+      "",
+    email_cliente:
+      normalizeOverride(overrides?.email_cliente) ||
+      clientInfo?.client_email ||
+      "",
+    fecha_instalacion: normalizeDateOnlyInput(inspectionWindow?.inspection_min_date) || "",
+    fecha_tope_instalacion: normalizeDateOnlyInput(inspectionWindow?.inspection_max_date) || "",
+    requiere_lis: Boolean(lisIntegration?.includes_lis),
+    equipos: equipment,
+    anotaciones:
+      normalizeOverride(overrides?.anotaciones) ||
+      "Solicitud de inspeccion de ambiente generada desde Business Case",
+    accesorios:
+      normalizeOverride(overrides?.accesorios) ||
+      "",
+    observaciones:
+      normalizeOverride(overrides?.observaciones) ||
+      inferredObservations,
+  };
+
+  const missingFields = [];
+  if (!hasTextValue(draft.nombre_cliente)) missingFields.push("nombre_cliente");
+  if (!hasTextValue(draft.direccion_cliente)) missingFields.push("direccion_cliente");
+  if (!hasTextValue(draft.fecha_instalacion)) missingFields.push("fecha_instalacion");
+  if (!hasTextValue(draft.fecha_tope_instalacion)) missingFields.push("fecha_tope_instalacion");
+  if (!Array.isArray(draft.equipos) || !draft.equipos.length) missingFields.push("equipos");
+
+  return { draft, missingFields };
+}
+
+function resolveBusinessCaseInspectionWindow(requirements = {}) {
+  const monthValues = [
+    requirements?.deadline_months,
+    requirements?.projected_deadline_months,
+  ]
+    .map((value) => Number.parseInt(value, 10))
+    .filter((value) => Number.isFinite(value) && value >= 0);
+
+  if (!monthValues.length) {
+    const error = new Error("No se puede generar la solicitud de inspeccion sin plazo o proyeccion de plazo en el Business Case.");
+    error.status = 409;
+    error.code = "BC_INSPECTION_WINDOW_REQUIRED";
+    throw error;
+  }
+
+  const sorted = [...monthValues].sort((a, b) => a - b);
+  const inspection_min_date = addMonthsIso(sorted[0]);
+  const inspection_max_date = addMonthsIso(sorted[sorted.length - 1]);
+
+  if (!inspection_min_date || !inspection_max_date) {
+    const error = new Error("No se pudo calcular la ventana de inspeccion del Business Case.");
+    error.status = 409;
+    error.code = "BC_INSPECTION_WINDOW_INVALID";
+    throw error;
+  }
+
+  return { inspection_min_date, inspection_max_date };
+}
+
+async function ensureBusinessCaseInspectionRequest({
+  businessCaseId,
+  businessCase,
+  metadata,
+  actorUser,
+  inspectionWindow,
+  inspectionPayload = {},
+  statDocument = null,
+}) {
+  const currentMetadata = metadata && typeof metadata === "object" ? { ...metadata } : {};
+  const existingInspection = currentMetadata?.environment_inspection_request
+    && typeof currentMetadata.environment_inspection_request === "object"
+    ? { ...currentMetadata.environment_inspection_request }
+    : {};
+
+  if (existingInspection?.request_id) {
+    return {
+      metadata: currentMetadata,
+      inspection: existingInspection,
+      created: false,
+    };
+  }
+
+  const inspection_min_date = normalizeDateOnlyInput(inspectionWindow?.inspection_min_date);
+  const inspection_max_date = normalizeDateOnlyInput(inspectionWindow?.inspection_max_date);
+
+  if (!inspection_min_date || !inspection_max_date) {
+    const error = new Error("Debes registrar el rango minimo y maximo para solicitar la inspeccion de ambiente.");
+    error.status = 409;
+    error.code = "BC_INSPECTION_WINDOW_REQUIRED";
+    throw error;
+  }
+  if (inspection_min_date > inspection_max_date) {
+    const error = new Error("La fecha minima de inspeccion no puede ser mayor que la fecha maxima.");
+    error.status = 409;
+    error.code = "BC_INSPECTION_WINDOW_INVALID";
+    throw error;
+  }
+
+  const { draft: payload, missingFields } = await buildBusinessCaseInspectionDraft({
+    businessCaseId,
+    businessCase,
+    metadata: currentMetadata,
+    inspectionWindow: {
+      inspection_min_date,
+      inspection_max_date,
+    },
+    overrides: inspectionPayload,
+  });
+
+  if (missingFields.length) {
+    const labels = {
+      nombre_cliente: "nombre de cliente",
+      direccion_cliente: "direccion de instalacion",
+      fecha_instalacion: "fecha minima de instalacion",
+      fecha_tope_instalacion: "fecha maxima de instalacion",
+      equipos: "equipo seleccionado",
+    };
+    const error = new Error(`No se puede generar F.ST-20. Faltan datos requeridos: ${missingFields.map((field) => labels[field] || field).join(", ")}.`);
+    error.status = 409;
+    error.code = `BC_INSPECTION_${String(missingFields[0] || "REQUIRED").toUpperCase()}_REQUIRED`;
+    error.details = { missing_fields: missingFields, draft: payload };
+    throw error;
+  }
+
+  const inspectionRequest = await createServiceRequest({
+    requester_id: actorUser?.id,
+    requester_email: actorUser?.email || businessCase?.created_by_email || null,
+    requester_name: actorUser?.fullname || actorUser?.name || null,
+    request_type_id: "F.ST-20",
+    payload,
+  });
+
+  const requestId =
+    inspectionRequest?.request?.id ||
+    inspectionRequest?.request_id ||
+    inspectionRequest?.id ||
+    null;
+  const documentId =
+    inspectionRequest?.document?.id ||
+    inspectionRequest?.document?.pdfId ||
+    inspectionRequest?.document?.docId ||
+    null;
+  const documentLink =
+    inspectionRequest?.document?.link ||
+    inspectionRequest?.document?.pdfLink ||
+    inspectionRequest?.document?.docLink ||
+    null;
+
+  if (!requestId) {
+    const error = new Error("No se pudo generar la solicitud automatica F.ST-20 del Business Case.");
+    error.status = 500;
+    error.code = "BC_INSPECTION_REQUEST_CREATE_FAILED";
+    throw error;
+  }
+
+  if (statDocument?.drive_file_id) {
+    await addDriveAttachment({
+      request_id: requestId,
+      drive_file_id: statDocument.drive_file_id,
+      title: statDocument.name || "Documento estadistico BC",
+      mime_type: statDocument.mime_type || "application/octet-stream",
+    }).catch((attachmentError) => {
+      logger.warn(
+        { error: attachmentError.message, businessCaseId, requestId },
+        "No se pudo adjuntar el documento estadistico a la solicitud F.ST-20",
+      );
+    });
+  }
+
+  const requestedAt = new Date().toISOString();
+  currentMetadata.environment_inspection_request = {
+    request_id: requestId,
+    acta_document_id: documentId,
+    acta_document_link: documentLink,
+    inspection_min_date,
+    inspection_max_date,
+    payload,
+    requested_at: requestedAt,
+    requested_by_id: actorUser?.id || null,
+    requested_by_email: actorUser?.email || null,
+    source_stat_document_drive_file_id: statDocument?.drive_file_id || null,
+    source_stat_document_drive_link: statDocument?.drive_link || null,
+  };
+
+  return {
+    metadata: currentMetadata,
+    inspection: currentMetadata.environment_inspection_request,
+    created: true,
+  };
+}
+
 function buildBusinessCaseProcessSubject(businessCase = {}) {
   const flowLabel = normalizeBusinessCaseFlowLabel(businessCase?.bc_purchase_type);
   const clientName = resolveBusinessCaseClientDisplayName(businessCase);
@@ -424,6 +884,15 @@ function buildBusinessCaseProcessSubject(businessCase = {}) {
   return processCode
     ? `${flowLabel} - ${clientName} - ${processCode}`
     : `${flowLabel} - ${clientName}`;
+}
+
+function canRequestBusinessCaseInspection(role = "", bcPurchaseType = "") {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  const normalizedType = normalizePurchaseTypeForGate(bcPurchaseType);
+  const allowedRoles = normalizedType === "public"
+    ? DETERMINATIONS_REACTIVO_PUBLIC_ROLES
+    : DETERMINATIONS_REACTIVO_PRIVATE_ROLES;
+  return allowedRoles.has(normalizedRole);
 }
 
 async function resolveBusinessCaseMailingList({ businessCase, actorUser }) {
@@ -477,11 +946,225 @@ async function notifyDeterminationsTechWindowStarted({ businessCaseId, actor }) 
           section: "determinations",
           actor,
           process_key: buildBusinessCaseProcessKey(businessCaseId),
-          technical_window_hours: DETERMINATIONS_DEADLINE_HOURS,
+          technical_window_hours: determinationsGateService.DETERMINATIONS_DEADLINE_HOURS,
         }
       }).catch(() => null)
     )
   );
+}
+
+function subsectionFromConsumptionType(value) {
+  const type = normalizeConsumptionType(value);
+  if (DETERMINATIONS_REACTIVO_TYPES.has(type)) return "reactivos";
+  if (type === "control") return "controles";
+  if (type === "calibrador") return "calibradores";
+  return "materiales";
+}
+
+function normalizeSubsectionKey(value = "") {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "reactivo" || raw === "reactivos") return "reactivos";
+  if (raw === "control" || raw === "controles") return "controles";
+  if (raw === "calibrador" || raw === "calibradores") return "calibradores";
+  if (raw === "material" || raw === "materiales" || raw === "consumible" || raw === "consumibles") return "materiales";
+  return raw;
+}
+
+function resolveDeterminationsSectionLocks(gate = {}) {
+  const phase = String(gate?.phase || "commercial_input").toLowerCase();
+  const raw = gate?.section_locks && typeof gate.section_locks === "object" ? gate.section_locks : {};
+  const locks = {
+    reactivos: Boolean(raw.reactivos),
+    controles: Boolean(raw.controles),
+    calibradores: Boolean(raw.calibradores),
+    materiales: Boolean(raw.materiales),
+  };
+  if (phase === "technical_review") locks.reactivos = true;
+  if (phase === "locked" || gate?.quantities_locked === true) {
+    locks.reactivos = true;
+    locks.controles = true;
+    locks.calibradores = true;
+    locks.materiales = true;
+  }
+  return locks;
+}
+
+function resolveUnlockRequestList(gate = {}) {
+  const raw = Array.isArray(gate?.unlock_requests) ? gate.unlock_requests : [];
+  return raw
+    .filter((entry) => entry && typeof entry === "object")
+    .map((entry) => ({
+      id: String(entry.id || "").trim() || null,
+      subsection: normalizeSubsectionKey(entry.subsection),
+      status: String(entry.status || "pending").trim().toLowerCase(),
+      requested_at: entry.requested_at || null,
+      requested_by_email: entry.requested_by_email || null,
+      requested_by_role: entry.requested_by_role || null,
+      reason: entry.reason || "",
+      resolved_at: entry.resolved_at || null,
+      resolved_by_email: entry.resolved_by_email || null,
+      resolution_notes: entry.resolution_notes || "",
+    }))
+    .filter((entry) => entry.id && DETERMINATIONS_SUBSECTIONS.has(entry.subsection));
+}
+
+function buildUnlockRequestId(subsection) {
+  const seed = `${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}:${subsection}`;
+  return `unlock_${seed}`;
+}
+
+function assertConsumptionPhasePolicyOrThrow({
+  phase = "commercial_input",
+  role = "",
+  hasReactivoFamily = false,
+  hasTechFamily = false,
+  bcPurchaseType = "",
+}) {
+  const normalizedPhase = String(phase || "commercial_input").trim().toLowerCase();
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  const isPublic = normalizePurchaseTypeForGate(bcPurchaseType) === "public";
+  const reactivoRoles = isPublic ? DETERMINATIONS_REACTIVO_PUBLIC_ROLES : DETERMINATIONS_REACTIVO_PRIVATE_ROLES;
+
+  if (normalizedPhase === "locked") {
+    const error = new Error("Las cantidades de determinaciones estan bloqueadas. Solicita reapertura a Jefe Comercial.");
+    error.status = 409;
+    error.code = "DETERMINATIONS_QUANTITIES_LOCKED";
+    throw error;
+  }
+
+  if (normalizedPhase === "technical_review") {
+    if (hasReactivoFamily) {
+      const error = new Error("En revision tecnica los reactivos quedan en solo lectura (solo > 0 definidos por ACP/Backoffice).");
+      error.status = 403;
+      error.code = "DETERMINATIONS_REACTIVOS_READ_ONLY";
+      throw error;
+    }
+    if (hasTechFamily && !DETERMINATIONS_TECH_EDIT_ROLES.has(normalizedRole)) {
+      const error = new Error("Solo tecnico y jefe_tecnico pueden completar calibradores, controles y materiales en revision tecnica.");
+      error.status = 403;
+      error.code = "DETERMINATIONS_TECH_REVIEW_ROLE_REQUIRED";
+      throw error;
+    }
+    return;
+  }
+
+  if (normalizedPhase === "commercial_input") {
+    if (hasTechFamily) {
+      const error = new Error("Aun no inicia la revision tecnica. Primero ACP/Backoffice debe terminar reactivos.");
+      error.status = 403;
+      error.code = "DETERMINATIONS_TECH_REVIEW_NOT_STARTED";
+      throw error;
+    }
+    if (hasReactivoFamily && !reactivoRoles.has(normalizedRole)) {
+      const error = new Error(
+        isPublic
+          ? "Solo comercial puede completar reactivos en la fase comercial."
+          : "Solo backoffice_comercial puede completar reactivos en la fase comercial.",
+      );
+      error.status = 403;
+      error.code = "DETERMINATIONS_REACTIVO_PHASE_ROLE_REQUIRED";
+      throw error;
+    }
+  }
+}
+
+function buildDeterminationsCompletionProfile({ role = "", bcPurchaseType = "" }) {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  const isPublic = normalizePurchaseTypeForGate(bcPurchaseType) === "public";
+  const reactivoRoles = isPublic ? DETERMINATIONS_REACTIVO_PUBLIC_ROLES : DETERMINATIONS_REACTIVO_PRIVATE_ROLES;
+  if (reactivoRoles.has(normalizedRole)) return { phase: "commercial_input", actor: "commercial" };
+  if (DETERMINATIONS_TECH_EDIT_ROLES.has(normalizedRole)) return { phase: "technical_review", actor: "technical" };
+  return { phase: "unknown", actor: "unknown" };
+}
+
+async function applyDeterminationsCompletionTransition({ businessCase, role, user }) {
+  const businessCaseId = businessCase?.id;
+  if (!businessCaseId) return;
+  const profile = buildDeterminationsCompletionProfile({
+    role,
+    bcPurchaseType: businessCase?.bc_purchase_type,
+  });
+  const now = new Date();
+  const metadata = preflowService.toObject(businessCase?.modern_bc_metadata);
+  const currentGate = metadata?.determinations_gate && typeof metadata.determinations_gate === "object"
+    ? { ...metadata.determinations_gate }
+    : {};
+
+  if (profile.actor === "commercial") {
+    const currentConsumption = await businessCaseService.getConsumptionItems(businessCaseId);
+    const filteredItems = (currentConsumption?.items || []).filter((item) => {
+      const type = normalizeConsumptionType(item?.type);
+      if (!DETERMINATIONS_REACTIVO_TYPES.has(type)) return true;
+      const qty = Number(item?.annualQty ?? item?.annualQuantity ?? 0);
+      return Number.isFinite(qty) && qty > 0;
+    });
+    await businessCaseService.saveConsumptionItems(
+      businessCaseId,
+      filteredItems,
+      currentConsumption?.excluded || [],
+      { expectedVersion: currentConsumption?.version || null },
+    );
+
+    const deadlineAt = new Date(now.getTime() + determinationsGateService.DETERMINATIONS_DEADLINE_HOURS * 60 * 60 * 1000);
+    metadata.determinations_gate = {
+      ...currentGate,
+      phase: "technical_review",
+      enabled: true,
+      is_expired: false,
+      review_role: "jefe_tecnico",
+      review_started_at: now.toISOString(),
+      review_deadline_at: deadlineAt.toISOString(),
+      deadline_at: deadlineAt.toISOString(),
+      completed_commercial_at: now.toISOString(),
+      completed_commercial_by_role: role,
+      completed_commercial_by_email: user?.email || null,
+      quantities_locked: false,
+      section_locks: {
+        ...resolveDeterminationsSectionLocks(currentGate),
+        reactivos: true,
+      },
+      updated_at: now.toISOString(),
+    };
+    await businessCaseService.updateBusinessCase(businessCaseId, { modern_bc_metadata: metadata });
+    return;
+  }
+
+  if (profile.actor === "technical") {
+    const sectionLocks = resolveDeterminationsSectionLocks(currentGate);
+    const allLocked = ["reactivos", "controles", "calibradores", "materiales"].every((key) => sectionLocks[key] === true);
+    if (!allLocked) {
+      const error = new Error("Para terminar determinaciones primero debes bloquear reactivos, controles, calibradores y materiales.");
+      error.status = 409;
+      error.code = "DETERMINATIONS_SUBSECTIONS_PENDING_LOCK";
+      throw error;
+    }
+    metadata.determinations_gate = {
+      ...currentGate,
+      phase: "locked",
+      quantities_locked: true,
+      section_locks: {
+        reactivos: true,
+        controles: true,
+        calibradores: true,
+        materiales: true,
+      },
+      locked_at: now.toISOString(),
+      locked_by_role: role,
+      locked_by_email: user?.email || null,
+      completed_technical_at: now.toISOString(),
+      completed_technical_by_role: role,
+      completed_technical_by_email: user?.email || null,
+      updated_at: now.toISOString(),
+    };
+    await businessCaseService.updateBusinessCase(businessCaseId, { modern_bc_metadata: metadata });
+    await BusinessCaseDataOwnership.lockSection(
+      businessCaseId,
+      "determinations",
+      user,
+      String(businessCase?.canonical_state || businessCase?.bc_stage || "draft").toUpperCase(),
+      { source: "determinations_completed_technical" },
+    );
+  }
 }
 
 async function notifyInvestmentValuesReady({ businessCaseId, actor, deadlineAt }) {
@@ -521,9 +1204,10 @@ async function startDeterminationsTechWindowIfNeeded({ businessCase, role, actor
   const normalizedRole = String(role || "").toLowerCase();
   const purchaseCategory = normalizePurchaseTypeForGate(businessCase?.bc_purchase_type);
   const isPublic = purchaseCategory === "public";
-  // Public: acp_comercial triggers the window. Private: backoffice triggers it.
-  const triggerRole = isPublic ? "acp_comercial" : "backoffice";
-  if (normalizedRole !== triggerRole) {
+  // Public: comercial triggers the window by uploading the statistical document.
+  // Private: backoffice_comercial/backoffice trigger it.
+  const privateTriggerRoles = new Set(["backoffice_comercial", "backoffice"]);
+  if ((isPublic && normalizedRole !== "comercial") || (!isPublic && !privateTriggerRoles.has(normalizedRole))) {
     return null;
   }
 
@@ -651,6 +1335,78 @@ function buildOwnershipCompletionRules(ownershipInfo = {}) {
     requirement: { isCompleted: Boolean(getSection("requirement")?.completedAt) },
     equipment: { isCompleted: Boolean(getSection("equipment")?.completedAt) },
     lis: { isCompleted: Boolean(getSection("lis")?.completedAt) },
+  };
+}
+
+async function buildSectionReadinessForDeterminationsUpload(businessCaseId, businessCase) {
+  const labEnvironment = await bcLabEnvironmentService.getLabEnvironment(businessCaseId);
+  const equipmentDetails = await bcEquipmentDetailsService.getEquipmentDetails(businessCaseId);
+  const lisIntegration = await bcLisIntegrationService.getLisIntegration(businessCaseId);
+  const requirementData = await bcRequirementsService.getRequirements(businessCaseId);
+  const deliveryData = await bcDeliveriesService.getDeliveries(businessCaseId);
+
+  const extraEquipment = Array.isArray(businessCase?.extra?.equipment_details)
+    ? businessCase.extra.equipment_details
+    : [];
+  const equipmentPairs = extraEquipment.length ? extraEquipment : (equipmentDetails || []);
+
+  const hasLabData =
+    labEnvironment &&
+    Object.entries(labEnvironment).some(([key, value]) => {
+      if (["id", "business_case_id", "created_at", "updated_at"].includes(key)) return false;
+      return hasValue(value);
+    });
+
+  const hasEquipmentData = Array.isArray(equipmentPairs) && equipmentPairs.length > 0;
+  const equipmentComplete = hasEquipmentData && equipmentPairs.every((pair) => {
+    if (!pair?.primary_id) return false;
+    if (pair?.requires_backup) return Boolean(pair?.backup_id);
+    return true;
+  });
+
+  const hasLisData =
+    lisIntegration &&
+    Object.entries(lisIntegration).some(([key, value]) => {
+      if (["id", "business_case_id", "created_at", "updated_at"].includes(key)) return false;
+      return hasValue(value);
+    });
+
+  const lisComplete =
+    lisIntegration &&
+    lisIntegration.includes_lis !== null &&
+    lisIntegration.includes_lis !== undefined &&
+    (lisIntegration.includes_lis === false || hasValue(lisIntegration.lis_provider));
+
+  const hasRequirementData =
+    requirementData &&
+    (hasValue(requirementData.deadline_months) ||
+      hasValue(requirementData.projected_deadline_months) ||
+      hasValue(requirementData.observations));
+
+  const hasDeliveryData =
+    deliveryData &&
+    (hasValue(deliveryData.delivery_type) || typeof deliveryData.effective_determination === "boolean");
+
+  const requirementReady = hasRequirementData || hasDeliveryData;
+
+  const metadata = businessCase?.modern_bc_metadata && typeof businessCase.modern_bc_metadata === "object"
+    ? businessCase.modern_bc_metadata
+    : {};
+  const metadataGeneral = metadata?.general_data && typeof metadata.general_data === "object"
+    ? metadata.general_data
+    : {};
+  const generalReady =
+    (hasValue(businessCase?.client_name) &&
+      hasValue(businessCase?.process_code) &&
+      hasValue(businessCase?.contract_object)) ||
+    hasAnyFields(metadataGeneral, ["contractingEntity", "provinceCity", "clientType"]);
+
+  return {
+    general: Boolean(generalReady),
+    lab: Boolean(hasLabData),
+    equipment: Boolean(equipmentComplete),
+    lis: Boolean(lisComplete || hasLisData),
+    requirement: Boolean(requirementReady),
   };
 }
 
@@ -1323,8 +2079,9 @@ async function getInvestmentCatalog(req, res) {
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
+    const bc = await businessCaseService.getBusinessCaseById(id);
     const rows = await investmentsService.getCatalogWithSelections(id);
-    res.json({ ok: true, data: rows });
+    res.json({ ok: true, data: { items: rows, cart: getInvestmentCartStatus(bc) } });
   } catch (error) {
     logger.error({ error: error.message }, 'Error getting investment catalog');
     res.status(error.status || 500).json({ ok: false, message: error.message });
@@ -1336,6 +2093,13 @@ async function saveInvestmentSelection(req, res) {
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
+    const bc = await businessCaseService.getBusinessCaseById(id);
+    if (getInvestmentCartStatus(bc).confirmed) {
+      const lockError = new Error("El carrito de inversiones ya fue confirmado y esta bloqueado.");
+      lockError.status = 409;
+      lockError.code = "INVESTMENT_CART_CONFIRMED_LOCKED";
+      throw lockError;
+    }
     const role = resolveRequestRole(req);
     const canEditPrice = ["jefe_operaciones", "jefe_de_operaciones"].includes(role);
     const isBatch = Array.isArray(req.body?.selections);
@@ -1369,18 +2133,6 @@ async function saveInvestmentSelection(req, res) {
       throw error;
     }
 
-    // Snapshot current state before save for change detection
-    let prevSelectionsMap = new Map();
-    if (isBatch && payload.selections.length) {
-      const catalogIds = payload.selections.map((s) => s.catalog_id).filter(Boolean);
-      const { rows: prevRows } = await db.query(
-        `SELECT catalog_id, selected, quantity FROM bc_investment_selections
-         WHERE business_case_id = $1 AND catalog_id = ANY($2)`,
-        [id, catalogIds]
-      );
-      prevRows.forEach((r) => prevSelectionsMap.set(Number(r.catalog_id), r));
-    }
-
     const selection = isBatch
       ? await investmentsService.upsertInvestmentSelectionsBatch(id, payload.selections, req.user)
       : await investmentsService.upsertInvestmentSelection(id, payload, req.user);
@@ -1391,21 +2143,7 @@ async function saveInvestmentSelection(req, res) {
     res.json(responseBody);
 
     // Fire-and-forget: detect changes → stamp deadline → notify value managers
-    const hasChanges = isBatch
-      ? investmentsService.detectInvestmentSelectionChanges(prevSelectionsMap, payload.selections)
-      : payload.selected;
-    if (hasChanges) {
-      investmentsService.stampInvestmentDeadlines(id, INVESTMENT_VALUES_DEADLINE_HOURS)
-        .then((deadline) => {
-          const deadlineAt = new Date(Date.now() + INVESTMENT_VALUES_DEADLINE_HOURS * 3600 * 1000);
-          return notifyInvestmentValuesReady({
-            businessCaseId: id,
-            actor: req.user?.email || req.user?.role || 'sistema',
-            deadlineAt,
-          });
-        })
-        .catch((err) => logger.warn({ err: err.message }, 'Investment values notification failed'));
-    }
+    // El SLA de valores inicia solo cuando se confirma el carrito.
   } catch (error) {
     await failIdempotentWrite(idempotencySession, error);
     logger.error({ error: error.message }, 'Error saving investment selection');
@@ -1417,6 +2155,10 @@ async function createInvestmentCatalogItem(req, res) {
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
+    const bc = await businessCaseService.getBusinessCaseById(id);
+    if (getInvestmentCartStatus(bc).confirmed) {
+      return res.status(409).json({ ok: false, message: "El carrito de inversiones ya fue confirmado y esta bloqueado.", code: "INVESTMENT_CART_CONFIRMED_LOCKED" });
+    }
     const catalog = await investmentsService.createInvestmentCatalogItem(req.body);
     let selection = null;
     if (req.body?.selected !== false) {
@@ -1464,6 +2206,7 @@ async function getConsumptionItems(req, res) {
         businessCaseId: id,
         itemsCount: Array.isArray(data?.items) ? data.items.length : 0,
         excludedCount: Array.isArray(data?.excluded) ? data.excluded.length : 0,
+        summary: summarizeConsumptionItems(data?.items || []),
         debugItem: debugItem
           ? {
             key: debugItem.key,
@@ -1500,9 +2243,64 @@ async function saveConsumptionItems(req, res) {
     determinationsGateService.assertCanEditDeterminationsOrThrow(gate);
     const silent = isTruthyFlag(req.query?.silent) || isTruthyFlag(req.body?.silent);
     const expectedVersion = getExpectedVersion(req);
-    const items = Array.isArray(req.body?.items) ? req.body.items : [];
-    const excluded = Array.isArray(req.body?.excluded) ? req.body.excluded : [];
-    const { hasReactivoFamily, hasTechFamily } = classifyConsumptionItemsByType(items);
+    let items = Array.isArray(req.body?.items) ? req.body.items : [];
+    let excluded = Array.isArray(req.body?.excluded) ? req.body.excluded : [];
+    const sectionLocks = resolveDeterminationsSectionLocks(gate);
+    const hasAnySectionLocked = Object.values(sectionLocks).some(Boolean);
+    if (hasAnySectionLocked) {
+      const currentConsumption = await businessCaseService.getConsumptionItems(id);
+      const currentItems = Array.isArray(currentConsumption?.items) ? currentConsumption.items : [];
+      const currentByKey = new Map(currentItems.map((item) => [String(item?.key || ""), item]));
+      const incomingUnlocked = [];
+      const lockedIncomingKeys = new Set();
+      items.forEach((item) => {
+        const subsection = subsectionFromConsumptionType(item?.type);
+        const key = String(item?.key || "");
+        if (sectionLocks[subsection]) {
+          if (key) lockedIncomingKeys.add(key);
+          return;
+        }
+        incomingUnlocked.push(item);
+      });
+      const preservedLocked = currentItems.filter((item) => {
+        const subsection = subsectionFromConsumptionType(item?.type);
+        return sectionLocks[subsection];
+      });
+      items = [...incomingUnlocked, ...preservedLocked];
+      excluded = excluded.filter((key) => {
+        const current = currentByKey.get(String(key || ""));
+        if (!current) return true;
+        const subsection = subsectionFromConsumptionType(current?.type);
+        return !sectionLocks[subsection];
+      });
+      logConsumptionDebug(
+        {
+          businessCaseId: id,
+          sectionLocks,
+          lockedIncomingCount: lockedIncomingKeys.size,
+          preservedLockedCount: preservedLocked.length,
+        },
+        "[BC_CONSUMPTION][SAVE][SECTION_LOCKS_SANITIZE]",
+      );
+    }
+    logger.info(
+      {
+        businessCaseId: id,
+        itemsCount: items.length,
+        excludedCount: excluded.length,
+        requestSummary: summarizeConsumptionItems(items, 10),
+      },
+      "[BC_CONSUMPTION][SAVE][TRACE]",
+    );
+    const policyItems = items.filter((item) => !sectionLocks[subsectionFromConsumptionType(item?.type)]);
+    const { hasReactivoFamily, hasTechFamily } = classifyConsumptionItemsByType(policyItems);
+    assertConsumptionPhasePolicyOrThrow({
+      phase: gate?.phase || "commercial_input",
+      role,
+      hasReactivoFamily,
+      hasTechFamily,
+      bcPurchaseType: currentBusinessCase?.bc_purchase_type,
+    });
     assertConsumptionRolePolicyOrThrow({ role, hasReactivoFamily, hasTechFamily, bcPurchaseType: currentBusinessCase?.bc_purchase_type });
     const requestDebugItem = items.find((item) => String(item?.itemId || "").trim() === "3321193001");
     logConsumptionDebug(
@@ -1510,6 +2308,7 @@ async function saveConsumptionItems(req, res) {
         businessCaseId: id,
         itemsCount: items.length,
         excludedCount: excluded.length,
+        requestSummary: summarizeConsumptionItems(items),
         requestDebugItem: requestDebugItem
           ? {
             key: requestDebugItem.key,
@@ -1538,6 +2337,15 @@ async function saveConsumptionItems(req, res) {
     }
 
     const data = await businessCaseService.saveConsumptionItems(id, items, excluded, { expectedVersion });
+    logger.info(
+      {
+        businessCaseId: id,
+        responseItemsCount: Array.isArray(data?.items) ? data.items.length : 0,
+        responseExcludedCount: Array.isArray(data?.excluded) ? data.excluded.length : 0,
+        responseSummary: summarizeConsumptionItems(data?.items || [], 10),
+      },
+      "[BC_CONSUMPTION][SAVE][TRACE_RESULT]",
+    );
     if (hasReactivoFamily) {
       await startDeterminationsTechWindowIfNeeded({
         businessCase: currentBusinessCase,
@@ -1551,6 +2359,7 @@ async function saveConsumptionItems(req, res) {
         businessCaseId: id,
         itemsCount: Array.isArray(data?.items) ? data.items.length : 0,
         excludedCount: Array.isArray(data?.excluded) ? data.excluded.length : 0,
+        responseSummary: summarizeConsumptionItems(data?.items || []),
         responseDebugItem: responseDebugItem
           ? {
             key: responseDebugItem.key,
@@ -1605,8 +2414,23 @@ async function patchConsumptionItem(req, res) {
     const expectedVersion = getExpectedVersion(req);
     const annualQty = req.body?.annualQty;
     const row = req.body?.row && typeof req.body.row === "object" ? req.body.row : {};
+    const sectionLocks = resolveDeterminationsSectionLocks(gate);
+    const rowSubsection = subsectionFromConsumptionType(row?.type);
+    if (sectionLocks[rowSubsection]) {
+      const lockError = new Error(`La subseccion ${rowSubsection} esta bloqueada.`);
+      lockError.status = 409;
+      lockError.code = "DETERMINATIONS_SUBSECTION_LOCKED";
+      throw lockError;
+    }
     const { hasReactivoFamily, hasTechFamily } = classifyConsumptionItemsByType([row]);
-    assertConsumptionRolePolicyOrThrow({ role, hasReactivoFamily, hasTechFamily });
+    assertConsumptionPhasePolicyOrThrow({
+      phase: gate?.phase || "commercial_input",
+      role,
+      hasReactivoFamily,
+      hasTechFamily,
+      bcPurchaseType: currentBusinessCase?.bc_purchase_type,
+    });
+    assertConsumptionRolePolicyOrThrow({ role, hasReactivoFamily, hasTechFamily, bcPurchaseType: currentBusinessCase?.bc_purchase_type });
     const exclude = isTruthyFlag(req.body?.exclude);
     const normalizedItemKey = decodeURIComponent(itemKey);
     logConsumptionDebug(
@@ -2530,7 +3354,7 @@ async function getUIGuidance(req, res) {
       ? consumptionData.items
       : [];
     const hasDeterminationsData = consumptionItems.length > 0;
-    const determinationsComplete = consumptionItems.some((item) => Number(item?.annualQty) > 0);
+    const hasPositiveDeterminations = consumptionItems.some((item) => Number(item?.annualQty) > 0);
     let dispatchWorkspaceData = { items: [] };
     try {
       dispatchWorkspaceData = await dispatchWorkspaceService.getDispatchWorkspace(id);
@@ -2590,7 +3414,7 @@ async function getUIGuidance(req, res) {
       lab: completionRule(hasLabData, hasLabData, "lab"),
       equipment: completionRule(equipmentComplete, hasEquipmentData, "equipment"),
       lis: completionRule(lisComplete, hasLisData, "lis"),
-      determinations: completionRule(determinationsComplete, hasDeterminationsData, "determinations"),
+      determinations: completionRule(false, hasDeterminationsData, "determinations"),
       requirement: completionRule(requirementComplete, hasRequirementData || hasDeliveryData, "requirement"),
       investments: completionRule(hasInvestmentsData, hasInvestmentsData, "investments"),
       prices: completionRule(false, false, "prices"),
@@ -2622,6 +3446,25 @@ async function getUIGuidance(req, res) {
     ownershipRules.determinations.canUserEdit = Boolean(
       ownershipRules.determinations.canUserEdit && determinationsGate.permissions.canEditDeterminations,
     );
+    const determinationsOwnershipCompleted = Boolean(getOwnershipEntry("determinations")?.completedAt);
+    const determinationsCompleted = determinationsGate?.phase === "locked" || determinationsOwnershipCompleted;
+    const determinationsInProgress = Boolean(
+      hasDeterminationsData || hasPositiveDeterminations || determinationsGate?.phase === "technical_review" || determinationsGate?.phase === "commercial_input",
+    );
+    ownershipRules.determinations.isCompleted = determinationsCompleted;
+    ownershipRules.determinations.currentOwner = !determinationsCompleted && determinationsInProgress
+      ? ownershipRules.determinations.currentOwner
+      : null;
+    if (!ownershipRules.determinations.isCompleted) {
+      if (determinationsGate?.phase === "technical_review") {
+        ownershipRules.determinations.currentOwner = "jefe_tecnico";
+      } else if (determinationsGate?.phase === "commercial_input") {
+        ownershipRules.determinations.currentOwner =
+          normalizePurchaseTypeForGate(bc?.bc_purchase_type) === "public"
+            ? "comercial"
+            : "backoffice_comercial";
+      }
+    }
     ownershipRules.determinations.metadata = {
       ...(ownershipRules.determinations.metadata || {}),
       requires_stat_document: true,
@@ -2686,6 +3529,26 @@ async function getUIGuidance(req, res) {
     );
     const canDecideFeasibility = ["acp_comercial", "jefe_comercial", "gerencia", "gerencia_general"].includes(userRole);
 
+    // BC-16: Apelación de factibilidad rechazada
+    const feasibilityMeta = preflowService.toObject(bc?.modern_bc_metadata)?.feasibility;
+    const feasibilityDecisionMeta = (feasibilityMeta?.decision && typeof feasibilityMeta.decision === "object")
+      ? feasibilityMeta.decision
+      : null;
+    const existingAppeal = preflowService.toObject(bc?.modern_bc_metadata)?.feasibility_appeal || null;
+    // BC-17: también bloquear si el rechazo ya es definitivo (no hay más apelaciones posibles)
+    const isDefinitivelyRejected = Boolean(preflowService.toObject(bc?.modern_bc_metadata)?.feasibility_is_definitively_rejected);
+    const canAppealFeasibilityRejection = Boolean(
+      FEASIBILITY_APPEAL_REQUESTER_ROLES.has(userRole) &&
+      feasibilityDecisionMeta?.decided_at &&
+      !Boolean(feasibilityDecisionMeta?.is_feasible) &&
+      !isDefinitivelyRejected &&           // BC-17: rechazo definitivo → no más apelaciones
+      existingAppeal?.status !== "pending",
+    );
+    const canResolveFeasibilityAppeal = Boolean(
+      FEASIBILITY_APPEAL_RESOLVER_ROLES.has(userRole) &&
+      existingAppeal?.status === "pending",
+    );
+
     // Get permissions based on user role
     const permissions = {
       userRole: userRole,
@@ -2698,6 +3561,10 @@ async function getUIGuidance(req, res) {
       canRequestPreflowReopen: !workspaceClosedByFeasibility && canRequestPreflowReopen,
       canResolvePreflowReopen,
       canDecideFeasibility: canDecideFeasibility && !workspaceClosedByFeasibility,
+      canAppealFeasibilityRejection,              // BC-16: comercial* puede apelar cuando is_feasible=false
+      canResolveFeasibilityAppeal,               // BC-16: jefe_comercial/gerencia puede resolver apelación
+      feasibilityAppeal: existingAppeal,         // BC-16: datos de la apelación vigente para el frontend
+      feasibilityIsDefinitivelyRejected: isDefinitivelyRejected, // BC-17: rechazo sin más apelaciones posibles
       workspaceClosed: workspaceClosedByFeasibility,
     };
     const autosaveFlags = await featureFlagsService.getAutosaveFlagsForRole(userRole);
@@ -2750,13 +3617,472 @@ async function getDeterminationsGateInfo(req, res) {
       role,
       currentDocument: await determinationsGateService.getCurrentDocument(id),
     });
-    res.json({ ok: true, data: gate });
+    const metadata = bc?.modern_bc_metadata && typeof bc.modern_bc_metadata === "object"
+      ? bc.modern_bc_metadata
+      : {};
+    const inspectionRequest =
+      metadata?.environment_inspection_request && typeof metadata.environment_inspection_request === "object"
+        ? metadata.environment_inspection_request
+        : null;
+    const inspectionDraft = await buildBusinessCaseInspectionDraft({
+      businessCaseId: id,
+      businessCase: bc,
+      metadata,
+      inspectionWindow: {
+        inspection_min_date: inspectionRequest?.inspection_min_date || null,
+        inspection_max_date: inspectionRequest?.inspection_max_date || null,
+      },
+      overrides: inspectionRequest?.payload || {},
+    }).catch(() => ({ draft: null, missingFields: [] }));
+    res.json({
+      ok: true,
+      data: {
+        ...gate,
+        inspectionRequest,
+        inspectionDraft,
+      },
+    });
   } catch (error) {
     logger.error({ error: error.message }, "Error getting determinations gate info");
     res.status(error.status || 500).json({
       ok: false,
       message: error.message || "No se pudo obtener informacion del documento estadistico",
     });
+  }
+}
+
+async function requestEnvironmentInspection(req, res) {
+  try {
+    const { id } = req.params;
+    const role = resolveRequestRole(req);
+    const bc = await businessCaseService.getBusinessCaseById(id);
+    if (!canRequestBusinessCaseInspection(role, bc?.bc_purchase_type)) {
+      return res.status(403).json({
+        ok: false,
+        message: "No tienes permisos para solicitar la inspeccion de ambiente en este Business Case.",
+      });
+    }
+
+    const currentDocument = await determinationsGateService.getCurrentDocument(id);
+    if (!currentDocument?.drive_file_id && !currentDocument?.drive_link) {
+      return res.status(409).json({
+        ok: false,
+        message: "Primero debes subir el documento estadistico antes de solicitar la inspeccion de ambiente.",
+      });
+    }
+
+    const metadata = bc?.modern_bc_metadata && typeof bc.modern_bc_metadata === "object"
+      ? { ...bc.modern_bc_metadata }
+      : {};
+    if (metadata?.environment_inspection_request?.request_id) {
+      return res.status(409).json({
+        ok: false,
+        message: "La inspeccion de ambiente ya fue solicitada para este Business Case.",
+        code: "BC_INSPECTION_ALREADY_REQUESTED",
+      });
+    }
+
+    const inspectionResult = await ensureBusinessCaseInspectionRequest({
+      businessCaseId: id,
+      businessCase: bc,
+      metadata,
+      actorUser: req.user,
+      inspectionWindow: {
+        inspection_min_date: req.body?.inspection_min_date,
+        inspection_max_date: req.body?.inspection_max_date,
+      },
+      inspectionPayload: {
+        persona_contacto: req.body?.persona_contacto,
+        celular_contacto: req.body?.celular_contacto,
+        accesorios: req.body?.accesorios,
+        anotaciones: req.body?.anotaciones,
+        observaciones: req.body?.observaciones,
+      },
+      statDocument: {
+        drive_file_id: currentDocument.drive_file_id || null,
+        drive_link: currentDocument.drive_link || null,
+        name: currentDocument.file_name || "Documento estadistico BC",
+        mime_type: currentDocument.mime_type || "application/octet-stream",
+      },
+    });
+
+    await businessCaseService.updateBusinessCase(id, {
+      modern_bc_metadata: inspectionResult.metadata,
+    });
+
+    const refreshed = await businessCaseService.getBusinessCaseById(id);
+    const gate = determinationsGateService.buildGateInfo({
+      businessCase: refreshed,
+      role,
+      currentDocument,
+    });
+
+    return res.json({
+      ok: true,
+      data: {
+        gate,
+        inspectionRequest: inspectionResult.inspection,
+      },
+    });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error requesting BC environment inspection");
+    res.status(error.status || 500).json({
+      ok: false,
+      message: error.message || "No se pudo solicitar la inspeccion de ambiente",
+      code: error.code || null,
+    });
+  }
+}
+
+async function requestInvestmentQuantityIncrease(req, res) {
+  try {
+    const { id } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const requestRow = await investmentsService.createIncreaseQuantityRequest(id, req.body || {}, req.user);
+
+    try {
+      const { rows: ownerRows } = await db.query(
+        `SELECT owner_email
+         FROM bc_investment_selections
+         WHERE business_case_id = $1
+           AND catalog_id = $2
+         LIMIT 1`,
+        [id, requestRow.catalog_id],
+      );
+      const ownerEmail = String(ownerRows?.[0]?.owner_email || "").trim().toLowerCase();
+      if (ownerEmail) {
+        const { rows: users } = await db.query(
+          `SELECT id FROM users WHERE lower(email) = $1 AND active = true LIMIT 1`,
+          [ownerEmail],
+        );
+        const ownerUserId = users?.[0]?.id || null;
+        if (ownerUserId) {
+          await notificationManager.sendNotification({
+            userId: ownerUserId,
+            template: "custom_html",
+            customTitle: "Solicitud de aumento de cantidad",
+            customMessage: `${req.user?.email || "Usuario"} solicito aumentar cantidad para catalogo ${requestRow.catalog_id} a ${requestRow.requested_quantity}.`,
+            email: true,
+            chat: true,
+            source: "business_case.investment.quantity_increase_request",
+            meta: {
+              businessCaseId: id,
+              catalogId: requestRow.catalog_id,
+              requestId: requestRow.id,
+            },
+          }).catch(() => null);
+        }
+      }
+    } catch (_notifyErr) {}
+
+    res.json({ ok: true, data: requestRow });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error requesting investment quantity increase");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+async function confirmInvestmentCart(req, res) {
+  try {
+    const { id } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const role = resolveRequestRole(req);
+    if (!INVESTMENT_CART_CONFIRM_ROLES.has(role)) {
+      return res.status(403).json({ ok: false, message: "No tienes permisos para confirmar el carrito de inversiones." });
+    }
+
+    const bc = await businessCaseService.getBusinessCaseById(id);
+    const cartStatus = getInvestmentCartStatus(bc);
+    if (cartStatus.confirmed) {
+      return res.status(409).json({ ok: false, message: "El carrito ya fue confirmado.", code: "INVESTMENT_CART_ALREADY_CONFIRMED" });
+    }
+
+    const selected = await investmentsService.getInvestmentValuesByClass(id, "operativa");
+    if (!Array.isArray(selected) || !selected.length) {
+      return res.status(409).json({ ok: false, message: "No hay inversiones seleccionadas para confirmar." });
+    }
+    const invalidQty = selected.some((row) => !Number.isFinite(Number(row?.quantity)) || Number(row.quantity) <= 0);
+    if (invalidQty) {
+      return res.status(409).json({ ok: false, message: "Todas las inversiones seleccionadas deben tener cantidad mayor a 0 antes de confirmar." });
+    }
+
+    const metadata = preflowService.toObject(bc?.modern_bc_metadata);
+    const now = new Date();
+    const deadline = new Date(now.getTime() + INVESTMENT_VALUES_DEADLINE_HOURS * 60 * 60 * 1000);
+    metadata.investments_cart = {
+      confirmed: true,
+      confirmed_at: now.toISOString(),
+      confirmed_by_email: req.user?.email || null,
+      confirmed_by_role: role,
+      deadline_at: deadline.toISOString(),
+    };
+    await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
+    await investmentsService.stampInvestmentDeadlines(id, INVESTMENT_VALUES_DEADLINE_HOURS);
+    await notifyInvestmentValuesReady({
+      businessCaseId: id,
+      actor: req.user?.email || req.user?.role || "sistema",
+      deadlineAt: deadline,
+    });
+
+    res.json({
+      ok: true,
+      data: {
+        confirmed: true,
+        confirmed_at: now.toISOString(),
+        deadline_at: deadline.toISOString(),
+      },
+    });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error confirming investment cart");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+async function lockDeterminationsSubsection(req, res) {
+  try {
+    const { id } = req.params;
+    const subsection = normalizeSubsectionKey(req.body?.subsection);
+    if (!DETERMINATIONS_SUBSECTIONS.has(subsection)) {
+      return res.status(400).json({ ok: false, message: "Subseccion invalida. Usa: reactivos, controles, calibradores o materiales." });
+    }
+
+    const role = resolveRequestRole(req);
+    const businessCase = await businessCaseService.getBusinessCaseById(id);
+    const currentDocument = await determinationsGateService.getCurrentDocument(id);
+    const gate = determinationsGateService.buildGateInfo({ businessCase, role, currentDocument });
+    determinationsGateService.assertCanEditDeterminationsOrThrow(gate);
+
+    const currentConsumption = await businessCaseService.getConsumptionItems(id);
+    const items = Array.isArray(currentConsumption?.items) ? currentConsumption.items : [];
+    const scoped = items.filter((item) => subsectionFromConsumptionType(item?.type) === subsection);
+    if (!scoped.length) {
+      return res.status(409).json({
+        ok: false,
+        message: `No existen items en la subseccion ${subsection} para bloquear.`,
+      });
+    }
+    const hasPending = scoped.some((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) <= 0);
+    if (hasPending) {
+      return res.status(409).json({
+        ok: false,
+        message: `La subseccion ${subsection} tiene cantidades en 0. Completa todas antes de bloquear.`,
+      });
+    }
+
+    const metadata = preflowService.toObject(businessCase?.modern_bc_metadata);
+    const currentGate = metadata?.determinations_gate && typeof metadata.determinations_gate === "object"
+      ? { ...metadata.determinations_gate }
+      : {};
+    const locks = resolveDeterminationsSectionLocks(currentGate);
+    locks[subsection] = true;
+
+    if (subsection === "reactivos") {
+      await applyDeterminationsCompletionTransition({
+        businessCase,
+        role,
+        user: req.user,
+      });
+      const refreshedAfterTransition = await businessCaseService.getBusinessCaseById(id);
+      const updatedGate = determinationsGateService.buildGateInfo({
+        businessCase: refreshedAfterTransition,
+        role,
+        currentDocument: await determinationsGateService.getCurrentDocument(id),
+      });
+      return res.json({ ok: true, data: { subsection, locked: true, gate: updatedGate } });
+    }
+
+    const now = new Date().toISOString();
+    metadata.determinations_gate = {
+      ...currentGate,
+      section_locks: locks,
+      updated_at: now,
+    };
+    await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
+    const refreshed = await businessCaseService.getBusinessCaseById(id);
+    const updatedGate = determinationsGateService.buildGateInfo({
+      businessCase: refreshed,
+      role,
+      currentDocument: await determinationsGateService.getCurrentDocument(id),
+    });
+    res.json({ ok: true, data: { subsection, locked: true, gate: updatedGate } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error locking determinations subsection");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function requestDeterminationsSubsectionUnlock(req, res) {
+  try {
+    const { id } = req.params;
+    const subsection = normalizeSubsectionKey(req.body?.subsection);
+    const reason = String(req.body?.reason || "").trim();
+    if (!DETERMINATIONS_SUBSECTIONS.has(subsection)) {
+      return res.status(400).json({ ok: false, message: "Subseccion invalida. Usa: reactivos, controles, calibradores o materiales." });
+    }
+    if (!reason) {
+      return res.status(400).json({ ok: false, message: "Debes incluir el motivo de la solicitud de desbloqueo." });
+    }
+
+    const role = resolveRequestRole(req);
+    const businessCase = await businessCaseService.getBusinessCaseById(id);
+    const metadata = preflowService.toObject(businessCase?.modern_bc_metadata);
+    const currentGate = metadata?.determinations_gate && typeof metadata.determinations_gate === "object"
+      ? { ...metadata.determinations_gate }
+      : {};
+    const locks = resolveDeterminationsSectionLocks(currentGate);
+    if (!locks[subsection]) {
+      return res.status(409).json({ ok: false, message: `La subseccion ${subsection} ya esta desbloqueada.` });
+    }
+
+    const requests = resolveUnlockRequestList(currentGate);
+    const hasPending = requests.some((entry) => entry.subsection === subsection && entry.status === "pending");
+    if (hasPending) {
+      return res.status(409).json({ ok: false, message: `Ya existe una solicitud pendiente para desbloquear ${subsection}.` });
+    }
+
+    const created = {
+      id: buildUnlockRequestId(subsection),
+      subsection,
+      status: "pending",
+      requested_at: new Date().toISOString(),
+      requested_by_email: req.user?.email || null,
+      requested_by_role: role || null,
+      reason,
+      resolved_at: null,
+      resolved_by_email: null,
+      resolution_notes: "",
+    };
+
+    metadata.determinations_gate = {
+      ...currentGate,
+      unlock_requests: [...requests, created],
+      updated_at: new Date().toISOString(),
+    };
+    await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
+
+    try {
+      const targets = await getUsersByRoles(["jefe_comercial"]);
+      await Promise.all(
+        targets.map((target) =>
+          notificationManager.sendNotification({
+            userId: target.id,
+            template: "custom_html",
+            customTitle: `Solicitud de desbloqueo: ${subsection}`,
+            customMessage:
+              `${req.user?.email || "Usuario"} solicito desbloquear la subseccion ${subsection} del BC ${id}. Motivo: ${reason}`,
+            email: true,
+            chat: true,
+            source: "business_case.determinations_unlock_request",
+            meta: {
+              businessCaseId: id,
+              subsection,
+              requestedBy: req.user?.email || null,
+              requestId: created.id,
+            },
+          }).catch(() => null),
+        ),
+      );
+    } catch (_notifyErr) {}
+
+    const refreshed = await businessCaseService.getBusinessCaseById(id);
+    const gate = determinationsGateService.buildGateInfo({
+      businessCase: refreshed,
+      role,
+      currentDocument: await determinationsGateService.getCurrentDocument(id),
+    });
+    return res.json({ ok: true, data: { request: created, gate } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error requesting determinations subsection unlock");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function resolveDeterminationsSubsectionUnlock(req, res) {
+  try {
+    const { id } = req.params;
+    const role = resolveRequestRole(req);
+    if (!DETERMINATIONS_UNLOCK_DECIDER_ROLES.has(role)) {
+      return res.status(403).json({ ok: false, message: "Solo jefe_comercial puede decidir solicitudes de desbloqueo." });
+    }
+    const requestId = String(req.body?.request_id || req.body?.requestId || "").trim();
+    const approve = Boolean(req.body?.approve === true || String(req.body?.decision || "").toLowerCase() === "approve");
+    const resolutionNotes = String(req.body?.resolution_notes || req.body?.resolutionNotes || "").trim();
+    if (!requestId) {
+      return res.status(400).json({ ok: false, message: "request_id es obligatorio." });
+    }
+
+    const businessCase = await businessCaseService.getBusinessCaseById(id);
+    const metadata = preflowService.toObject(businessCase?.modern_bc_metadata);
+    const currentGate = metadata?.determinations_gate && typeof metadata.determinations_gate === "object"
+      ? { ...metadata.determinations_gate }
+      : {};
+    const requests = resolveUnlockRequestList(currentGate);
+    const index = requests.findIndex((entry) => entry.id === requestId);
+    if (index < 0) {
+      return res.status(404).json({ ok: false, message: "Solicitud no encontrada." });
+    }
+    if (requests[index].status !== "pending") {
+      return res.status(409).json({ ok: false, message: "La solicitud ya fue resuelta." });
+    }
+
+    const now = new Date().toISOString();
+    requests[index] = {
+      ...requests[index],
+      status: approve ? "approved" : "rejected",
+      resolved_at: now,
+      resolved_by_email: req.user?.email || null,
+      resolution_notes: resolutionNotes,
+    };
+
+    const locks = resolveDeterminationsSectionLocks(currentGate);
+    if (approve) {
+      locks[requests[index].subsection] = false;
+    }
+    const allLockedAfterDecision = ["reactivos", "controles", "calibradores", "materiales"].every((key) => locks[key] === true);
+    const nextPhase = allLockedAfterDecision ? "locked" : (locks.reactivos ? "technical_review" : "commercial_input");
+
+    metadata.determinations_gate = {
+      ...currentGate,
+      unlock_requests: requests,
+      section_locks: locks,
+      quantities_locked: allLockedAfterDecision,
+      phase: nextPhase,
+      updated_at: now,
+    };
+    await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
+
+    try {
+      const targetEmail = requests[index].requested_by_email;
+      if (targetEmail) {
+        const users = await getUsersByRoles([
+          "comercial", "acp_comercial", "backoffice_comercial", "backoffice", "jefe_tecnico", "tecnico",
+        ]);
+        const target = users.find((u) => String(u.email || "").toLowerCase() === targetEmail.toLowerCase());
+        if (target?.id) {
+          await notificationManager.sendNotification({
+            userId: target.id,
+            template: "custom_html",
+            customTitle: `Solicitud de desbloqueo ${approve ? "aprobada" : "rechazada"}`,
+            customMessage: `La solicitud para ${requests[index].subsection} fue ${approve ? "aprobada" : "rechazada"}.`,
+            email: true,
+            chat: true,
+            source: "business_case.determinations_unlock_resolved",
+            meta: { businessCaseId: id, requestId, approved: approve },
+          }).catch(() => null);
+        }
+      }
+    } catch (_notifyErr) {}
+
+    const refreshed = await businessCaseService.getBusinessCaseById(id);
+    const gate = determinationsGateService.buildGateInfo({
+      businessCase: refreshed,
+      role,
+      currentDocument: await determinationsGateService.getCurrentDocument(id),
+    });
+    return res.json({ ok: true, data: { request: requests[index], gate } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error resolving determinations subsection unlock");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
   }
 }
 
@@ -2813,7 +4139,8 @@ async function uploadDeterminationsStatDocument(req, res) {
       });
     }
     const requiredBeforeUpload = ["general", "lab", "requirement", "equipment", "lis"];
-    const missingRequired = requiredBeforeUpload.filter((sectionKey) => !ownershipRules?.[sectionKey]?.isCompleted);
+    const readiness = await buildSectionReadinessForDeterminationsUpload(id, bc);
+    const missingRequired = requiredBeforeUpload.filter((sectionKey) => !readiness?.[sectionKey]);
     if (missingRequired.length) {
       return res.status(409).json({
         ok: false,
@@ -3069,6 +4396,20 @@ async function lockSection(req, res) {
   try {
     const { id, section } = req.params;
     const canonicalSection = SECTION_ALIASES[section] || section;
+    const userRole = String(req.user?.role || "").toLowerCase();
+
+    // BUG-03: backoffice solo puede bloquear secciones en BC de compra PRIVADA
+    if (BACKOFFICE_LOCK_ROLES.has(userRole)) {
+      const bc = await businessCaseService.getBusinessCaseById(id);
+      const purchaseType = String(bc?.bc_purchase_type || bc?.purchase_type || bc?.type || "").toLowerCase();
+      if (!PRIVATE_PURCHASE_TYPES.has(purchaseType)) {
+        return res.status(403).json({
+          ok: false,
+          message: "El rol backoffice solo puede bloquear secciones en Business Cases de compra privada.",
+        });
+      }
+    }
+
     await BusinessCaseDataOwnership.lockSection(id, canonicalSection, req.user, null, {
       source: "workspace",
     });
@@ -3113,6 +4454,20 @@ async function unlockSection(req, res) {
   try {
     const { id, section } = req.params;
     const canonicalSection = SECTION_ALIASES[section] || section;
+    const userRole = String(req.user?.role || "").toLowerCase();
+
+    // BUG-03: backoffice solo puede desbloquear secciones en BC de compra PRIVADA
+    if (BACKOFFICE_LOCK_ROLES.has(userRole)) {
+      const bc = await businessCaseService.getBusinessCaseById(id);
+      const purchaseType = String(bc?.bc_purchase_type || bc?.purchase_type || bc?.type || "").toLowerCase();
+      if (!PRIVATE_PURCHASE_TYPES.has(purchaseType)) {
+        return res.status(403).json({
+          ok: false,
+          message: "El rol backoffice solo puede desbloquear secciones en Business Cases de compra privada.",
+        });
+      }
+    }
+
     await BusinessCaseDataOwnership.unlockSection(id, canonicalSection, req.user, null, {
       source: "workspace",
     });
@@ -3182,6 +4537,285 @@ async function resolvePreflowReopen(req, res) {
   }
 }
 
+// BC-16: Roles que pueden solicitar apelación de factibilidad rechazada
+const FEASIBILITY_APPEAL_REQUESTER_ROLES = new Set(["comercial", "asesor_comercial", "analista_comercial"]);
+// BC-16: Roles que pueden resolver (aprobar/rechazar) una apelación
+const FEASIBILITY_APPEAL_RESOLVER_ROLES = new Set(["jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]);
+
+// ──────────────────────────────────────────────────────────────────────────────
+// BC-17: Helpers para pausar/desbloquear/cancelar expedientes vinculados al BC
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** Asegura que la columna paused_reason existe en ambas tablas (idempotente) */
+async function ensureExpedientPausedReasonColumns() {
+  await db.query(`
+    ALTER TABLE private_purchase_requests
+      ADD COLUMN IF NOT EXISTS paused_reason TEXT DEFAULT NULL
+  `);
+  await db.query(`
+    ALTER TABLE equipment_purchases
+      ADD COLUMN IF NOT EXISTS paused_reason TEXT DEFAULT NULL
+  `);
+}
+
+/**
+ * Pausa todos los expedientes vinculados al BC (private_purchase_requests + equipment_purchases).
+ * Llamado cuando se registra una apelación de factibilidad pendiente.
+ */
+async function pauseLinkedExpedients(bcId) {
+  try {
+    await ensureExpedientPausedReasonColumns();
+    await db.query(
+      `UPDATE private_purchase_requests
+          SET paused_reason = 'feasibility_appeal_pending', updated_at = NOW()
+        WHERE business_case_id = $1
+          AND status NOT IN ('rejected', 'delivered_signed')
+          AND paused_reason IS NULL`,
+      [bcId],
+    );
+    await db.query(
+      `UPDATE equipment_purchases
+          SET paused_reason = 'feasibility_appeal_pending', updated_at = NOW()
+        WHERE extra->>'auto_business_case_id' = $1
+          AND paused_reason IS NULL`,
+      [bcId],
+    );
+    logger.info({ bcId }, "[BC-17] Expedientes pausados por apelación de factibilidad");
+  } catch (err) {
+    logger.warn({ bcId, err }, "[BC-17] Error al pausar expedientes vinculados");
+  }
+}
+
+/**
+ * Despausa los expedientes vinculados al BC.
+ * Llamado cuando la apelación es APROBADA (BC vuelve a evaluación) o en la resolución.
+ */
+async function unpauseLinkedExpedients(bcId) {
+  try {
+    await db.query(
+      `UPDATE private_purchase_requests
+          SET paused_reason = NULL, updated_at = NOW()
+        WHERE business_case_id = $1
+          AND paused_reason = 'feasibility_appeal_pending'`,
+      [bcId],
+    );
+    await db.query(
+      `UPDATE equipment_purchases
+          SET paused_reason = NULL, updated_at = NOW()
+        WHERE extra->>'auto_business_case_id' = $1
+          AND paused_reason = 'feasibility_appeal_pending'`,
+      [bcId],
+    );
+    logger.info({ bcId }, "[BC-17] Expedientes despausados");
+  } catch (err) {
+    logger.warn({ bcId, err }, "[BC-17] Error al desbloquear expedientes vinculados");
+  }
+}
+
+/**
+ * Cancela los expedientes vinculados al BC.
+ * Llamado cuando la apelación es RECHAZADA DEFINITIVAMENTE.
+ */
+async function cancelLinkedExpedients(bcId) {
+  try {
+    await db.query(
+      `UPDATE private_purchase_requests
+          SET status = 'rejected',
+              paused_reason = NULL,
+              updated_at = NOW()
+        WHERE business_case_id = $1
+          AND status NOT IN ('rejected', 'delivered_signed')`,
+      [bcId],
+    );
+    await db.query(
+      `UPDATE equipment_purchases
+          SET status = 'rejected',
+              paused_reason = NULL,
+              updated_at = NOW()
+        WHERE extra->>'auto_business_case_id' = $1
+          AND status NOT IN ('rejected', 'delivered', 'completed')`,
+      [bcId],
+    );
+    logger.info({ bcId }, "[BC-17] Expedientes cancelados por rechazo definitivo de factibilidad");
+  } catch (err) {
+    logger.warn({ bcId, err }, "[BC-17] Error al cancelar expedientes vinculados");
+  }
+}
+
+/**
+ * BC-16: comercial* solicita revisión de un BC no factible
+ */
+async function requestFeasibilityAppeal(req, res) {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body || {};
+    const userRole = String(req.user?.role || "").toLowerCase();
+
+    if (!FEASIBILITY_APPEAL_REQUESTER_ROLES.has(userRole)) {
+      return res.status(403).json({ ok: false, message: "Solo el rol comercial puede solicitar revisión de factibilidad." });
+    }
+
+    const bc = await businessCaseService.getBusinessCaseById(id);
+    if (!bc) return res.status(404).json({ ok: false, message: "Business Case no encontrado." });
+
+    const metadata = preflowService.toObject(bc?.modern_bc_metadata);
+    const feasibility = (metadata?.feasibility && typeof metadata.feasibility === "object") ? metadata.feasibility : {};
+    const decision = (feasibility?.decision && typeof feasibility.decision === "object") ? feasibility.decision : null;
+
+    if (!decision?.decided_at) {
+      return res.status(409).json({ ok: false, message: "El BC aún no tiene una decisión de factibilidad registrada." });
+    }
+    if (Boolean(decision?.is_feasible)) {
+      return res.status(409).json({ ok: false, message: "El BC fue marcado como factible. Solo se puede apelar decisiones negativas." });
+    }
+    // BC-17: No se puede apelar si el rechazo ya es definitivo
+    if (metadata?.feasibility_is_definitively_rejected) {
+      return res.status(409).json({ ok: false, message: "La decisión de no factibilidad es definitiva y no puede ser apelada nuevamente." });
+    }
+    if (metadata?.feasibility_appeal?.status === "pending") {
+      return res.status(409).json({ ok: false, message: "Ya existe una solicitud de revisión pendiente para este Business Case." });
+    }
+
+    const normalizedReason = String(reason || "").trim();
+    if (!normalizedReason) {
+      return res.status(400).json({ ok: false, message: "Debes ingresar el motivo de la solicitud de revisión." });
+    }
+
+    const appeal = {
+      status: "pending",
+      requested_at: new Date().toISOString(),
+      requested_by_email: req.user?.email || null,
+      requested_by_role: userRole,
+      reason: normalizedReason,
+    };
+    await preflowService.updateBusinessCaseMetadata(id, { feasibility_appeal: appeal });
+
+    // BC-17: Pausar los expedientes vinculados mientras la apelación está pendiente
+    await pauseLinkedExpedients(id);
+
+    // Notificar a jefe_comercial y gerencia
+    try {
+      const managers = await db.query(
+        `SELECT id FROM users WHERE active = true AND lower(role) = ANY($1::text[])`,
+        [["jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]],
+      );
+      for (const mgr of managers.rows) {
+        notificationManager.sendNotification({
+          userId: mgr.id,
+          customTitle: "Solicitud de revisión de factibilidad",
+          customMessage: `${req.user?.email || "Un usuario"} solicita revisión del BC ${id} marcado como no factible. Motivo: ${normalizedReason}`,
+          type: "task",
+          source: "business_case.feasibility.appeal_requested",
+          priority: 2,
+          email: true,
+          chat: false,
+          meta: { businessCaseId: id, appeal },
+        });
+      }
+    } catch (_notifErr) {
+      logger.warn({ businessCaseId: id }, "No se pudo enviar notificación de apelación de factibilidad");
+    }
+
+    return res.json({ ok: true, data: { appeal } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error requesting feasibility appeal");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+/**
+ * BC-16: jefe_comercial/gerencia resuelve la apelación de factibilidad
+ *   approved=true  → borra la decisión de factibilidad y reabre el workspace
+ *   approved=false → marca la apelación como rechazada y notifica al comercial
+ */
+async function resolveFeasibilityAppeal(req, res) {
+  try {
+    const { id } = req.params;
+    const { approved, notes } = req.body || {};
+    const userRole = String(req.user?.role || "").toLowerCase();
+
+    if (!FEASIBILITY_APPEAL_RESOLVER_ROLES.has(userRole)) {
+      return res.status(403).json({ ok: false, message: "No tienes permisos para resolver apelaciones de factibilidad." });
+    }
+
+    const bc = await businessCaseService.getBusinessCaseById(id);
+    if (!bc) return res.status(404).json({ ok: false, message: "Business Case no encontrado." });
+
+    const metadata = preflowService.toObject(bc?.modern_bc_metadata);
+    const appeal = metadata?.feasibility_appeal;
+    if (!appeal || appeal.status !== "pending") {
+      return res.status(409).json({ ok: false, message: "No existe una solicitud de revisión pendiente para este Business Case." });
+    }
+
+    const now = new Date().toISOString();
+    const resolvedAppeal = {
+      ...appeal,
+      status: Boolean(approved) ? "approved" : "rejected",
+      resolved_at: now,
+      resolved_by_email: req.user?.email || null,
+      resolved_by_role: userRole,
+      resolution_notes: String(notes || "").trim(),
+    };
+
+    const metadataPatch = { feasibility_appeal: resolvedAppeal };
+
+    if (Boolean(approved)) {
+      // Reabrir workspace: borrar la decisión de factibilidad para permitir nueva evaluación
+      const feasibility = (metadata?.feasibility && typeof metadata.feasibility === "object") ? { ...metadata.feasibility } : {};
+      delete feasibility.decision;
+      feasibility.closed = false;
+      metadataPatch.feasibility = feasibility;
+    } else {
+      // BC-17: Rechazo definitivo — el jefe confirma que el BC no es factible
+      metadataPatch.feasibility_is_definitively_rejected = true;
+    }
+
+    await preflowService.updateBusinessCaseMetadata(id, metadataPatch);
+
+    // BC-17: Gestionar pausa de expedientes según la resolución
+    if (Boolean(approved)) {
+      // Aprobado → desbloquear expedientes para que continúen su flujo
+      await unpauseLinkedExpedients(id);
+    } else {
+      // Rechazado definitivamente → desbloquear pausa Y cancelar expedientes
+      await unpauseLinkedExpedients(id);
+      await cancelLinkedExpedients(id);
+    }
+
+    // Notificar al solicitante
+    try {
+      const requesters = await db.query(
+        `SELECT id FROM users WHERE active = true AND email = $1`,
+        [appeal.requested_by_email],
+      );
+      for (const requester of requesters.rows) {
+        notificationManager.sendNotification({
+          userId: requester.id,
+          customTitle: Boolean(approved) ? "Revisión de factibilidad aprobada" : "Revisión de factibilidad rechazada",
+          customMessage: Boolean(approved)
+            ? `${req.user?.email || "Jefe comercial"} abrió la revisión del BC ${id}. La factibilidad puede ser evaluada nuevamente.`
+            : `${req.user?.email || "Jefe comercial"} rechazó tu solicitud de revisión del BC ${id}.${resolvedAppeal.resolution_notes ? ` Motivo: ${resolvedAppeal.resolution_notes}` : ""}`,
+          type: Boolean(approved) ? "success" : "alert",
+          source: Boolean(approved)
+            ? "business_case.feasibility.appeal_approved"
+            : "business_case.feasibility.appeal_rejected",
+          priority: 2,
+          email: true,
+          chat: false,
+          meta: { businessCaseId: id, appeal: resolvedAppeal },
+        });
+      }
+    } catch (_notifErr) {
+      logger.warn({ businessCaseId: id }, "No se pudo notificar resolución de apelación de factibilidad");
+    }
+
+    return res.json({ ok: true, data: { appeal: resolvedAppeal, approved: Boolean(approved) } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error resolving feasibility appeal");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
 /**
  * Record section completion
  */
@@ -3203,6 +4837,69 @@ async function recordSectionCompletion(req, res) {
     const userRole = resolveRequestRole(req) || user?.role || user?.role_name || "comercial";
     const actorId = user?.id ?? user?.sub ?? user?.user_id ?? user?.uuid ?? null;
 
+    if (canonicalSection === "determinations") {
+      const profile = buildDeterminationsCompletionProfile({
+        role: userRole,
+        bcPurchaseType: businessCase?.bc_purchase_type,
+      });
+      // Cierre comercial: NO marca la seccion como completada.
+      // Solo transiciona a revision tecnica y mantiene determinaciones "en curso".
+      if (profile.actor === "commercial") {
+        await applyDeterminationsCompletionTransition({
+          businessCase,
+          role: userRole,
+          user,
+        });
+        const refreshed = await businessCaseService.getBusinessCaseById(id);
+        const gate = determinationsGateService.buildGateInfo({
+          businessCase: refreshed,
+          role: "jefe_tecnico",
+          currentDocument: await determinationsGateService.getCurrentDocument(id),
+        });
+        return res.json({
+          ok: true,
+          data: {
+            section: canonicalSection,
+            completed: false,
+            transitionedTo: "technical_review",
+            reviewRole: gate?.phase === "technical_review" ? "jefe_tecnico" : null,
+            deadlineAt: gate?.deadlineAt || null,
+            reason,
+          },
+        });
+      }
+    }
+
+    if (canonicalSection === "investments") {
+      if (!INVESTMENT_VALUES_OP_ROLES.has(userRole)) {
+        return res.status(403).json({
+          ok: false,
+          message: "Solo jefe_operaciones puede cerrar la seccion de inversiones.",
+          code: "INVESTMENTS_COMPLETE_ROLE_REQUIRED",
+        });
+      }
+      const cartStatus = getInvestmentCartStatus(businessCase);
+      if (!cartStatus.confirmed) {
+        return res.status(409).json({
+          ok: false,
+          message: "Primero debes confirmar el carrito de inversiones.",
+          code: "INVESTMENT_CART_NOT_CONFIRMED",
+        });
+      }
+      const selectedInvestments = await investmentsService.getInvestmentValuesByClass(id, "operativa");
+      const missingPrices = (selectedInvestments || []).filter((row) => {
+        const price = Number(row?.unit_price ?? 0);
+        return !Number.isFinite(price) || price <= 0;
+      });
+      if (missingPrices.length > 0) {
+        return res.status(409).json({
+          ok: false,
+          message: `No se puede cerrar inversiones: faltan ${missingPrices.length} precio(s) en el carrito seleccionado.`,
+          code: "INVESTMENTS_PRICES_REQUIRED",
+        });
+      }
+    }
+
     await BusinessCaseDataOwnership.recordSectionCompletion(
       id,
       canonicalSection,
@@ -3216,6 +4913,14 @@ async function recordSectionCompletion(req, res) {
         actor_id_raw: actorId,
       },
     );
+
+    if (canonicalSection === "determinations") {
+      await applyDeterminationsCompletionTransition({
+        businessCase,
+        role: userRole,
+        user,
+      });
+    }
 
     let metadataAfter = preflowService.toObject(businessCase?.modern_bc_metadata);
     if (preflowService.isPreflowCase(businessCase) && canonicalSection === "general" && !metadataAfter.preflow_started_at) {
@@ -3394,11 +5099,36 @@ async function getInvestmentValues(req, res) {
       [id]
     );
     const bc = bcRows[0] || {};
+    const fullBc = await businessCaseService.getBusinessCaseById(id);
+    const cartStatus = getInvestmentCartStatus(fullBc);
     const deadlineAt = investmentClass === 'operativa'
       ? bc.invest_values_op_deadline_at
       : bc.invest_values_fin_deadline_at;
 
-    res.json({ ok: true, data: { items: rows, deadline_at: deadlineAt || null } });
+    const selectedCount = Array.isArray(rows) ? rows.length : 0;
+    const missingPriceCount = (rows || []).filter((row) => {
+      const price = Number(row?.unit_price ?? 0);
+      return !Number.isFinite(price) || price <= 0;
+    }).length;
+    const syncPending = !cartStatus.confirmed || missingPriceCount > 0;
+    res.json({
+      ok: true,
+      data: {
+        items: rows,
+        deadline_at: deadlineAt || null,
+        cart: cartStatus,
+        sync_status: {
+          pending: syncPending,
+          selected_count: selectedCount,
+          missing_price_count: missingPriceCount,
+          message: !cartStatus.confirmed
+            ? "Pendiente de sincronizacion: el carrito aun no ha sido confirmado."
+            : syncPending
+            ? `Pendiente de sincronizacion: faltan ${missingPriceCount} precio(s) en inversiones seleccionadas.`
+            : "Sincronizacion lista: todas las inversiones seleccionadas tienen precio.",
+        },
+      },
+    });
   } catch (error) {
     logger.error({ error: error.message }, 'Error getting investment values');
     res.status(error.status || 500).json({ ok: false, message: error.message });
@@ -3409,6 +5139,11 @@ async function saveInvestmentValues(req, res) {
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
+    const bc = await businessCaseService.getBusinessCaseById(id);
+    const cartStatus = getInvestmentCartStatus(bc);
+    if (!cartStatus.confirmed) {
+      return res.status(409).json({ ok: false, message: "Primero se debe confirmar el carrito de inversiones.", code: "INVESTMENT_CART_NOT_CONFIRMED" });
+    }
     const role = resolveRequestRole(req);
 
     const investmentClass = req.body?.class;
@@ -3430,7 +5165,65 @@ async function saveInvestmentValues(req, res) {
     }
 
     const saved = await investmentsService.saveInvestmentValuesBatch(id, investmentClass, values, req.user);
-    res.json({ ok: true, data: { items: saved, saved_count: saved.length } });
+
+    // Auto-sync with Sheets after operational prices update.
+    // This keeps BC sheet totals/prices aligned without requiring manual sync click.
+    let sheetSync = null;
+    if (investmentClass === "operativa") {
+      try {
+        const syncResult = await sheetGenerationService.enqueueGenerationJob({
+          businessCaseId: id,
+          input: {},
+          user: req.user || null,
+          idempotencyKey: `auto:inv-values-op:${id}:${Date.now()}`,
+          correlationId: null,
+        });
+
+        if (syncResult?.replay) {
+          sheetSync = {
+            queued: true,
+            replay: true,
+            status: syncResult.replayStatus || 202,
+          };
+        } else {
+          const job = syncResult?.responseBody?.data || {};
+          sheetSync = {
+            queued: true,
+            replay: false,
+            status: 202,
+            job_id: job.job_id || null,
+            request_id: job.request_id || null,
+          };
+        }
+
+        try {
+          await sheetGenerationService.processPendingJobsBatch({ limit: 1 });
+        } catch (inlineSyncError) {
+          logger.warn(
+            { error: inlineSyncError?.message || String(inlineSyncError), businessCaseId: id },
+            "[BC_SHEET] Inline processing after saving operational investment values failed",
+          );
+        }
+      } catch (syncError) {
+        logger.warn(
+          { error: syncError?.message || String(syncError), businessCaseId: id },
+          "No se pudo encolar sincronizacion a Sheets tras guardar valores operativos",
+        );
+        sheetSync = {
+          queued: false,
+          error: syncError?.message || "No se pudo iniciar la sincronizacion de hoja",
+        };
+      }
+    }
+
+    res.json({
+      ok: true,
+      data: {
+        items: saved,
+        saved_count: saved.length,
+        sheet_sync: sheetSync,
+      },
+    });
   } catch (error) {
     logger.error({ error: error.message }, 'Error saving investment values');
     res.status(error.status || 500).json({ ok: false, message: error.message });
@@ -3460,6 +5253,8 @@ module.exports = {
   deleteInvestment,
   getInvestmentCatalog,
   createInvestmentCatalogItem,
+  confirmInvestmentCart,
+  requestInvestmentQuantityIncrease,
   saveInvestmentSelection,
   getInvestmentValues,
   saveInvestmentValues,
@@ -3477,6 +5272,10 @@ module.exports = {
   // UI Guidance endpoints (Workspace)
   getUIGuidance,
   getDeterminationsGateInfo,
+  requestEnvironmentInspection,
+  lockDeterminationsSubsection,
+  requestDeterminationsSubsectionUnlock,
+  resolveDeterminationsSubsectionUnlock,
   uploadDeterminationsStatDocument,
   getDataOwnership,
   recordSectionCompletion,
@@ -3484,6 +5283,8 @@ module.exports = {
   unlockSection,
   requestPreflowReopen,
   resolvePreflowReopen,
+  requestFeasibilityAppeal,    // BC-16
+  resolveFeasibilityAppeal,    // BC-16
   // Manual BC Form endpoints
   saveLabEnvironment,
   getLabEnvironment,

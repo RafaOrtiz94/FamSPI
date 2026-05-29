@@ -111,6 +111,12 @@ const OperacionesPrivatePurchases = lazy(() => import("../modules/operaciones/pa
 const LogisticaPrivatePurchases = lazy(() => import("../modules/logistica/pages/LogisticaPrivatePurchases"));
 const AsistenciaReportes = lazy(() => import("../modules/talento/pages/AsistenciaReportes"));
 
+// ── Kick Off 2026 ──────────────────────────────────────────────────────────
+const KickoffPage             = lazy(() => import("../modules/kickoff/pages/KickoffPage"));
+const KickoffPresentationPage = lazy(() => import("../modules/kickoff/pages/KickoffPresentationPage"));
+const KickoffQuestionRoomPage = lazy(() => import("../modules/kickoff/pages/KickoffQuestionRoomPage"));
+const KickoffQREntryPage      = lazy(() => import("../modules/kickoff/pages/KickoffQREntryPage"));
+
 const routeFallback = (
   <div className="flex justify-center items-center min-h-[50vh]">
     <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" />
@@ -179,6 +185,8 @@ const AppRoutes = () => {
 
         {/* 📝 Verificación pública de documentos firmados */}
         <Route path="/verificar/:token" element={<DocumentVerification />} />
+        {/* 🚀 Kick Off 2026 — entrada por QR (validación por token, sin rol previo) */}
+        <Route path="/kickoff/sala/:token" element={<KickoffQREntryPage />} />
       </Route>
 
       {/* =======================================
@@ -542,6 +550,13 @@ const AppRoutes = () => {
           <Route path="/dashboard/mi-perfil" element={backgroundLocation ? null : profileModalElement} />
           <Route path="/first-login-signature" element={<FirstLoginSignature />} />
 
+          {/* 🚀 Kick Off 2026 — acceso controlado por backend (whitelist + is_open) */}
+          <Route element={<ProtectedRoute />}>
+            <Route path="/dashboard/kickoff" element={<KickoffPage />} />
+            <Route path="/dashboard/kickoff/presentacion/:presentationId" element={<KickoffPresentationPage />} />
+            <Route path="/dashboard/kickoff/sala/:presentationId" element={<KickoffQuestionRoomPage />} />
+          </Route>
+
           {/* 📝 Sistema de Firma Digital */}
           <Route
             element={
@@ -613,7 +628,9 @@ const AppRoutes = () => {
                   "jefe_servicio_tecnico",
                   "tecnico",
                   "jefe_operaciones",
+                  "operaciones",
                   "jefe_logistica",
+                  "logistica",
                   "backoffice_comercial",
                 ]}
               />

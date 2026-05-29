@@ -97,9 +97,22 @@ export const NotificationProvider = ({ children }) => {
  [isAuthenticated, playNotificationSound, showToast]
  );
 
+ // Carga inicial: se ejecuta solo cuando cambia el estado de autenticación.
  useEffect(() => {
+ if (isAuthenticated) {
  refresh();
+ }
+ // eslint-disable-next-line react-hooks/exhaustive-deps
+ }, [isAuthenticated]);
 
+ // Polling periódico: intervalo largo (5 min) para minimizar tráfico a Neon.
+ // `refresh` se lee via ref para evitar que cambios de referencia reinicien el timer.
+ const refreshRef = useRef(refresh);
+ useEffect(() => {
+ refreshRef.current = refresh;
+ }, [refresh]);
+
+ useEffect(() => {
  if (!isAuthenticated) {
  if (refreshTimerRef.current) {
  clearInterval(refreshTimerRef.current);
@@ -108,11 +121,15 @@ export const NotificationProvider = ({ children }) => {
  return;
  }
 
- if (!refreshTimerRef.current) {
- refreshTimerRef.current = setInterval(() => {
- refresh();
- }, 30000);
+ // Limpiar timer previo antes de crear uno nuevo
+ if (refreshTimerRef.current) {
+ clearInterval(refreshTimerRef.current);
  }
+
+ // 5 minutos entre polls — suficiente para notificaciones no críticas
+ refreshTimerRef.current = setInterval(() => {
+ refreshRef.current();
+ }, 5 * 60 * 1000);
 
  return () => {
  if (refreshTimerRef.current) {
@@ -120,7 +137,7 @@ export const NotificationProvider = ({ children }) => {
  refreshTimerRef.current = null;
  }
  };
- }, [refresh, isAuthenticated]);
+ }, [isAuthenticated]);
 
  const markAsRead = useCallback(
  async (id) => {

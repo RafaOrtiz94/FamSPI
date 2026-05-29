@@ -77,6 +77,7 @@ import {
 } from "./PrivatePurchasesWidget.utils";
 import PrivatePurchaseActions from "./PrivatePurchaseActions";
 import { usePurchaseSSE } from "../../../core/hooks/usePurchaseSSE";
+import { promptDialog } from "../../../core/ui/utils/promptDialog";
 
 const STATUS_DEFINITIONS = PRIVATE_PURCHASE_STATUS_DEFINITIONS;
 
@@ -784,7 +785,12 @@ const PrivatePurchasesPage = () => {
  if (!selectedRequest) return;
  setProcessingAction({ id: selectedRequest.id, type: "reject" });
  try {
- const reason = window.prompt("Motivo de rechazo (obligatorio):", "") || "";
+ const reason = (await promptDialog({
+  title: "Rechazar contrato",
+  message: "Motivo de rechazo (obligatorio):",
+  required: true,
+  confirmText: "Rechazar",
+ })) || "";
  if (!reason.trim()) {
  showToast("Motivo de rechazo es obligatorio", "warning");
  setProcessingAction(null);
@@ -808,7 +814,11 @@ const PrivatePurchasesPage = () => {
  if (!request) return;
  setProcessingAction({ id: request.id, type: "offer_reject_by_commercial" });
  try {
- const reason = window.prompt("Motivo de rechazo (opcional):", "") || "";
+ const reason = (await promptDialog({
+  title: "Rechazar oferta",
+  message: "Motivo de rechazo (opcional):",
+  confirmText: "Rechazar",
+ })) || "";
  await transitionPrivatePurchaseState(
  request.id,
  "offer_rejected_by_commercial",
@@ -852,7 +862,11 @@ const PrivatePurchasesPage = () => {
  if (!request) return;
  setProcessingAction({ id: request.id, type: "price_improvement_request" });
  try {
- const reason = window.prompt("Detalle de mejora de precio (opcional):", "") || "";
+ const reason = (await promptDialog({
+  title: "Solicitar mejora de precio",
+  message: "Detalle de mejora de precio (opcional):",
+  confirmText: "Solicitar",
+ })) || "";
  await transitionPrivatePurchaseState(
  request.id,
  "price_improvement_requested",
@@ -1420,7 +1434,12 @@ const PrivatePurchasesPage = () => {
  const request = requestId ? getRequestById(requestId) : selectedRequest;
  if (!request) return;
 
- const reason = window.prompt("Motivo de rechazo de disponibilidad:", "") || "";
+ const reason = (await promptDialog({
+  title: "Rechazar disponibilidad",
+  message: "Motivo de rechazo de disponibilidad:",
+  required: true,
+  confirmText: "Rechazar",
+ })) || "";
  if (!reason.trim()) {
  showToast("Motivo de rechazo es obligatorio", "warning");
  return;

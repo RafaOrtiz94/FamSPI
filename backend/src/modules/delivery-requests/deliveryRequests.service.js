@@ -1,13 +1,70 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { enqueueIntegrationEvent } = require("../integrations/integrationOutbox.service");
+const notificationManager = require("../notifications/notificationManager");
 
 const DELIVERY_REQUEST_STATUSES = Object.freeze(["pending", "ops_approved", "confirmed", "cancelled"]);
+
+/* ─── Schema migration (runs once per server start) ──────────────────────── */
+let _tablesReady = false;
+async function ensureDeliveryTables() {
+  if (_tablesReady) return;
+  try {
+    // approved_qty: ops can approve less than what was requested (partial dispatch)
+    await db.query(`
+      ALTER TABLE public.delivery_request_line
+        ADD COLUMN IF NOT EXISTS approved_qty NUMERIC
+    `);
+    // dispatch_notes on request: logistics can add notes when confirming shipment
+    await db.query(`
+      ALTER TABLE public.delivery_request
+        ADD COLUMN IF NOT EXISTS dispatch_notes TEXT
+    `);
+    // Allow NULL max_quantity for open-order ceilings (no maximum enforced)
+    await db.query(`
+      ALTER TABLE public.delivery_ceiling_line
+        ALTER COLUMN max_quantity DROP NOT NULL
+    `);
+    // delivery_dispatch: one record per physical shipment
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS public.delivery_dispatch (
+        id              BIGSERIAL PRIMARY KEY,
+        delivery_request_id BIGINT NOT NULL REFERENCES public.delivery_request(id),
+        dispatched_by   BIGINT,
+        dispatched_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        notes           TEXT,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    // delivery_dispatch_line: per-item quantities within a dispatch
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS public.delivery_dispatch_line (
+        id                      BIGSERIAL PRIMARY KEY,
+        delivery_dispatch_id    BIGINT NOT NULL REFERENCES public.delivery_dispatch(id),
+        delivery_ceiling_line_id BIGINT NOT NULL REFERENCES public.delivery_ceiling_line(id),
+        dispatched_qty          NUMERIC NOT NULL CHECK (dispatched_qty > 0),
+        created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    _tablesReady = true;
+    logger.info("delivery_dispatch tables ready");
+  } catch (err) {
+    logger.error({ err: err.message }, "ensureDeliveryTables failed");
+  }
+}
+// Fire-and-forget on module load
+ensureDeliveryTables().catch(() => {});
 
 // "Open" requests reserve saldo but are not yet confirmed into delivered_qty.
 // Both pending and ops_approved hold the reservation until logistics dispatches.
 const OPEN_REQUEST_STATUSES = Object.freeze(["pending", "ops_approved"]);
 const EPSILON = 1e-9;
+const OPEN_ORDER_FALLBACK_ITEMS = Object.freeze([
+  { name: "Reactivo", type: "reactivo", unit: "unidad" },
+  { name: "Calibrador", type: "calibrador", unit: "unidad" },
+  { name: "Control", type: "control", unit: "unidad" },
+  { name: "Material", type: "material", unit: "unidad" },
+]);
 
 const buildError = (
   message,
@@ -80,7 +137,10 @@ const mapRequest = (row) => ({
   status: row.status,
   requested_by: row.requested_by ? Number(row.requested_by) : null,
   confirmed_by: row.confirmed_by ? Number(row.confirmed_by) : null,
+  ops_approved_by: row.ops_approved_by ? Number(row.ops_approved_by) : null,
+  ops_approved_at: row.ops_approved_at || null,
   notes: row.notes || null,
+  dispatch_notes: row.dispatch_notes || null,
   requested_at: row.requested_at,
   confirmed_at: row.confirmed_at || null,
   created_at: row.created_at,
@@ -92,9 +152,38 @@ const mapRequestLine = (row) => ({
   delivery_request_id: Number(row.delivery_request_id),
   delivery_ceiling_line_id: Number(row.delivery_ceiling_line_id),
   requested_qty: Number(row.requested_qty),
+  approved_qty: row.approved_qty != null ? Number(row.approved_qty) : null,
   created_at: row.created_at,
   updated_at: row.updated_at,
 });
+
+const pickModelIdsFromEquipment = (equipment = []) => {
+  const ids = new Set();
+  for (const item of Array.isArray(equipment) ? equipment : []) {
+    const candidates = [
+      item?.equipment_model_id,
+      item?.equipmentModelId,
+      item?.model_id,
+      item?.modelId,
+    ];
+    for (const value of candidates) {
+      const parsed = Number.parseInt(String(value ?? ""), 10);
+      if (Number.isFinite(parsed) && parsed > 0) ids.add(parsed);
+    }
+  }
+  return Array.from(ids);
+};
+
+const normalizeOpenOrderType = (rawType) => {
+  const value = String(rawType || "").trim().toLowerCase();
+  if (!value) return "material";
+  if (value.includes("react")) return "reactivo";
+  if (value.includes("calibr")) return "calibrador";
+  if (value.includes("control")) return "control";
+  if (value.includes("consum")) return "material";
+  if (value.includes("material")) return "material";
+  return value;
+};
 
 const parsePgError = (error) => {
   if (!error?.code) return error;
@@ -335,6 +424,23 @@ const validateRequestedAgainstRemaining = ({
       });
     }
 
+    // open_orders lines have max_quantity = NULL → no maximum enforcement
+    const isUnlimited = ceilingLine.max_quantity == null;
+    if (isUnlimited) {
+      const deliveredQty = Number(ceilingLine.delivered_qty || 0);
+      return {
+        ceiling_line_id: line.ceilingLineId,
+        requested_qty: Number(line.requestedQty.toFixed(3)),
+        remaining_before: null,
+        remaining_after: null,
+        max_quantity: null,
+        delivered_qty: Number(deliveredQty.toFixed(3)),
+        reserved_qty: Number((reservedByLine.get(line.ceilingLineId) || 0).toFixed(3)),
+        tranche_max_qty: null,
+        effective_limit: null,
+      };
+    }
+
     const maxQuantity = Number(ceilingLine.max_quantity || 0);
     const deliveredQty = Number(ceilingLine.delivered_qty || 0);
     const reservedQty = Number(reservedByLine.get(line.ceilingLineId) || 0);
@@ -492,7 +598,7 @@ async function createDeliveryRequest({
     }
 
     await client.query("COMMIT");
-    return {
+    const response = {
       request: mapRequest(createdRequest),
       lines: insertedLines,
       balance_snapshot: balanceSnapshot,
@@ -505,6 +611,11 @@ async function createDeliveryRequest({
         : null,
       private_purchase_id: normalizedPrivatePurchaseId,
     };
+    await notifyOpsNewSupplyRequest({
+      requestId: response.request.id,
+      ceilingId: Number(createdRequest.delivery_ceiling_id),
+    });
+    return response;
   } catch (error) {
     try {
       await client.query("ROLLBACK");
@@ -520,24 +631,34 @@ async function createDeliveryRequest({
   }
 }
 
+/**
+ * confirmDeliveryRequest
+ * Logistics confirms the physical shipment.
+ * Uses approved_qty (set by ops) or falls back to requested_qty.
+ * Creates a delivery_dispatch record for full traceability.
+ * If approved_qty < requested_qty for any line, auto-creates a new
+ * pending request for the remainder so nothing is lost.
+ *
+ * @param {object} options
+ * @param {number} options.requestId
+ * @param {string|null} [options.dispatchNotes]
+ * @param {object|null} [options.actorUser]
+ */
 async function confirmDeliveryRequest({
   requestId,
+  dispatchNotes = null,
   actorUser = null,
 } = {}) {
   const normalizedRequestId = asPositiveInteger(requestId, "requestId");
   const actorUserId = getActorId(actorUser);
+  const normalizedDispatchNotes = asTrimmedText(dispatchNotes, null);
 
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
 
     const { rows: requestRows } = await client.query(
-      `
-      SELECT *
-      FROM public.delivery_request
-      WHERE id = $1
-      FOR UPDATE
-      `,
+      `SELECT * FROM public.delivery_request WHERE id = $1 FOR UPDATE`,
       [normalizedRequestId],
     );
 
@@ -561,22 +682,18 @@ async function confirmDeliveryRequest({
     await getCeilingForUpdate(client, ceilingId);
 
     const { rows: requestLineRows } = await client.query(
-      `
-      SELECT
-        rl.id,
-        rl.delivery_request_id,
-        rl.delivery_ceiling_line_id,
-        rl.requested_qty,
-        rl.created_at,
-        rl.updated_at,
-        cl.max_quantity,
-        cl.delivered_qty
-      FROM public.delivery_request_line rl
-      INNER JOIN public.delivery_ceiling_line cl
-        ON cl.id = rl.delivery_ceiling_line_id
-      WHERE rl.delivery_request_id = $1
-      FOR UPDATE OF rl, cl
-      `,
+      `SELECT
+         rl.id,
+         rl.delivery_request_id,
+         rl.delivery_ceiling_line_id,
+         rl.requested_qty,
+         rl.approved_qty,
+         cl.max_quantity,
+         cl.delivered_qty
+       FROM public.delivery_request_line rl
+       INNER JOIN public.delivery_ceiling_line cl ON cl.id = rl.delivery_ceiling_line_id
+       WHERE rl.delivery_request_id = $1
+       FOR UPDATE OF rl, cl`,
       [normalizedRequestId],
     );
 
@@ -594,13 +711,19 @@ async function confirmDeliveryRequest({
       excludedRequestId: normalizedRequestId,
     });
 
-    const normalizedLines = requestLineRows.map((row) => ({
+    // Determine dispatch qty per line: approved_qty if set, else requested_qty
+    const dispatchLines = requestLineRows.map((row) => ({
+      lineId: Number(row.id),
       ceilingLineId: Number(row.delivery_ceiling_line_id),
       requestedQty: Number(row.requested_qty),
+      dispatchQty: row.approved_qty != null ? Number(row.approved_qty) : Number(row.requested_qty),
+      maxQuantity: Number(row.max_quantity),
+      deliveredQty: Number(row.delivered_qty),
     }));
 
+    // Validate dispatch quantities against remaining saldo
     validateRequestedAgainstRemaining({
-      normalizedLines,
+      normalizedLines: dispatchLines.map((l) => ({ ceilingLineId: l.ceilingLineId, requestedQty: l.dispatchQty })),
       ceilingLines: requestLineRows.map((row) => ({
         id: row.delivery_ceiling_line_id,
         max_quantity: row.max_quantity,
@@ -609,50 +732,94 @@ async function confirmDeliveryRequest({
       reservedByLine,
     });
 
+    // ── Apply dispatch quantities to ceiling lines ────────────────────────
     const appliedLines = [];
-    for (const row of requestLineRows) {
-      const requestedQty = Number(row.requested_qty);
+    for (const line of dispatchLines) {
       const { rows } = await client.query(
-        `
-        UPDATE public.delivery_ceiling_line
-        SET
-          delivered_qty = delivered_qty + $2,
-          updated_at = NOW()
-        WHERE id = $1
-        RETURNING id, delivered_qty, max_quantity
-        `,
-        [row.delivery_ceiling_line_id, requestedQty],
+        `UPDATE public.delivery_ceiling_line
+            SET delivered_qty = delivered_qty + $2, updated_at = NOW()
+          WHERE id = $1
+          RETURNING id, delivered_qty, max_quantity`,
+        [line.ceilingLineId, line.dispatchQty],
       );
 
-      const updatedLine = rows[0];
+      const updated = rows[0];
       appliedLines.push({
-        delivery_ceiling_line_id: Number(updatedLine.id),
-        requested_qty: Number(requestedQty.toFixed(3)),
-        delivered_qty_after: Number(Number(updatedLine.delivered_qty).toFixed(3)),
+        delivery_ceiling_line_id: line.ceilingLineId,
+        requested_qty: Number(line.requestedQty.toFixed(3)),
+        dispatched_qty: Number(line.dispatchQty.toFixed(3)),
+        remainder_qty: Number(Math.max(0, line.requestedQty - line.dispatchQty).toFixed(3)),
+        delivered_qty_after: Number(Number(updated.delivered_qty).toFixed(3)),
         remaining_after: Number(
-          Math.max(0, Number(updatedLine.max_quantity) - Number(updatedLine.delivered_qty)).toFixed(3),
+          Math.max(0, Number(updated.max_quantity) - Number(updated.delivered_qty)).toFixed(3),
         ),
       });
     }
 
+    // ── Mark request as confirmed ─────────────────────────────────────────
     const { rows: updatedRequestRows } = await client.query(
-      `
-      UPDATE public.delivery_request
-      SET
-        status = 'confirmed',
-        confirmed_by = $2,
-        confirmed_at = NOW(),
-        updated_at = NOW()
-      WHERE id = $1
-      RETURNING *
-      `,
-      [normalizedRequestId, actorUserId],
+      `UPDATE public.delivery_request
+          SET status        = 'confirmed',
+              confirmed_by  = $2,
+              confirmed_at  = NOW(),
+              dispatch_notes = $3,
+              updated_at    = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [normalizedRequestId, actorUserId, normalizedDispatchNotes],
     );
 
-    // For public-purchase ceilings: advance the equipment_purchase_request
-    // from contract_available → waiting_dispatch. The delivery_request being
-    // confirmed is the canonical signal that delivery was committed via the
-    // public_delivery_plan; the legacy planning routes are removed (CHG-08).
+    // ── Create dispatch record for traceability ───────────────────────────
+    const { rows: dispatchRows } = await client.query(
+      `INSERT INTO public.delivery_dispatch
+         (delivery_request_id, dispatched_by, dispatched_at, notes, created_at)
+       VALUES ($1, $2, NOW(), $3, NOW())
+       RETURNING *`,
+      [normalizedRequestId, actorUserId, normalizedDispatchNotes],
+    );
+    const dispatchId = Number(dispatchRows[0].id);
+
+    for (const line of dispatchLines) {
+      await client.query(
+        `INSERT INTO public.delivery_dispatch_line
+           (delivery_dispatch_id, delivery_ceiling_line_id, dispatched_qty, created_at)
+         VALUES ($1, $2, $3, NOW())`,
+        [dispatchId, line.ceilingLineId, line.dispatchQty],
+      );
+    }
+
+    // ── Auto-create remainder request if any line was partially dispatched ─
+    const remainderLines = appliedLines.filter((l) => l.remainder_qty > EPSILON);
+    let remainderRequest = null;
+    if (remainderLines.length > 0) {
+      const { rows: remReqRows } = await client.query(
+        `INSERT INTO public.delivery_request
+           (delivery_ceiling_id, status, requested_by, notes, requested_at, created_at, updated_at)
+         VALUES ($1, 'pending', $2, $3, NOW(), NOW(), NOW())
+         RETURNING *`,
+        [
+          ceilingId,
+          requestRow.requested_by,
+          `Sobrante automático de solicitud #${normalizedRequestId}`,
+        ],
+      );
+      const remReqId = Number(remReqRows[0].id);
+
+      for (const rem of remainderLines) {
+        // Find original line's ceiling_line_id
+        const origLine = dispatchLines.find((l) => l.ceilingLineId === rem.delivery_ceiling_line_id);
+        if (!origLine) continue;
+        await client.query(
+          `INSERT INTO public.delivery_request_line
+             (delivery_request_id, delivery_ceiling_line_id, requested_qty, created_at, updated_at)
+           VALUES ($1, $2, $3, NOW(), NOW())`,
+          [remReqId, rem.delivery_ceiling_line_id, rem.remainder_qty],
+        );
+      }
+      remainderRequest = mapRequest(remReqRows[0]);
+    }
+
+    // ── Advance public purchase state if applicable ───────────────────────
     const { rows: ceilingRows } = await client.query(
       `SELECT business_case_id, purchase_type FROM public.delivery_ceiling WHERE id = $1`,
       [ceilingId],
@@ -661,10 +828,8 @@ async function confirmDeliveryRequest({
       const purchaseRequestId = ceilingRows[0].business_case_id;
       await client.query(
         `UPDATE public.equipment_purchase_requests
-            SET status     = 'waiting_dispatch',
-                updated_at = NOW()
-          WHERE id = $1
-            AND status = 'contract_available'`,
+            SET status = 'waiting_dispatch', updated_at = NOW()
+          WHERE id = $1 AND status = 'contract_available'`,
         [purchaseRequestId],
       );
     }
@@ -672,15 +837,12 @@ async function confirmDeliveryRequest({
     await enqueueIntegrationEvent({
       eventType: "delivery_request.confirmed",
       payload: {
-        delivery_request_id: Number(updatedRequestRows[0].id),
-        delivery_ceiling_id: Number(updatedRequestRows[0].delivery_ceiling_id),
+        delivery_request_id: normalizedRequestId,
+        delivery_ceiling_id: ceilingId,
+        dispatch_id: dispatchId,
         confirmed_at: updatedRequestRows[0].confirmed_at || null,
-        lines: appliedLines.map((line) => ({
-          delivery_ceiling_line_id: line.delivery_ceiling_line_id,
-          requested_qty: line.requested_qty,
-          delivered_qty_after: line.delivered_qty_after,
-          remaining_after: line.remaining_after,
-        })),
+        lines: appliedLines,
+        remainder_request_id: remainderRequest ? remainderRequest.id : null,
       },
       idempotencyKey: `delivery_request:${normalizedRequestId}:confirmed`,
       correlationId: null,
@@ -690,17 +852,16 @@ async function confirmDeliveryRequest({
     await client.query("COMMIT");
     return {
       request: mapRequest(updatedRequestRows[0]),
+      dispatch_id: dispatchId,
       applied_lines: appliedLines,
+      remainder_request: remainderRequest,
       open_statuses_used_for_reservation: [...OPEN_REQUEST_STATUSES],
     };
   } catch (error) {
     try {
       await client.query("ROLLBACK");
     } catch (rollbackError) {
-      logger.error(
-        { rollbackError: rollbackError.message },
-        "Error en rollback confirmDeliveryRequest",
-      );
+      logger.error({ rollbackError: rollbackError.message }, "Error en rollback confirmDeliveryRequest");
     }
     throw parsePgError(error);
   } finally {
@@ -708,9 +869,30 @@ async function confirmDeliveryRequest({
   }
 }
 
-async function opsApproveRequest({ requestId, actorUser = null } = {}) {
+/**
+ * opsApproveRequest
+ * Ops reviews a pending delivery request and sets how much to actually send
+ * per line (approved_qty). If lines are omitted, approved_qty = requested_qty
+ * (approve all as-is). approved_qty can be less than requested_qty (partial).
+ *
+ * @param {object} options
+ * @param {number} options.requestId
+ * @param {Array<{lineId: number, approvedQty: number}>} [options.lines]
+ * @param {object|null} [options.actorUser]
+ */
+async function opsApproveRequest({ requestId, lines = [], actorUser = null } = {}) {
   const normalizedRequestId = asPositiveInteger(requestId, "requestId");
   const actorUserId = getActorId(actorUser);
+
+  // Validate per-line approved quantities if provided
+  const approvedByLine = new Map();
+  if (Array.isArray(lines) && lines.length > 0) {
+    lines.forEach((line, idx) => {
+      const lineId = asPositiveInteger(line?.lineId, `lines[${idx}].lineId`);
+      const approvedQty = asPositiveNumeric(line?.approvedQty, `lines[${idx}].approvedQty`);
+      approvedByLine.set(lineId, approvedQty);
+    });
+  }
 
   const client = await db.getClient();
   try {
@@ -739,6 +921,35 @@ async function opsApproveRequest({ requestId, actorUser = null } = {}) {
 
     await getCeilingForUpdate(client, Number(requestRow.delivery_ceiling_id));
 
+    // Load lines to validate approved_qty <= requested_qty
+    const { rows: lineRows } = await client.query(
+      `SELECT id, delivery_ceiling_line_id, requested_qty
+         FROM public.delivery_request_line
+        WHERE delivery_request_id = $1`,
+      [normalizedRequestId],
+    );
+
+    for (const lineRow of lineRows) {
+      const lineId = Number(lineRow.id);
+      const requestedQty = Number(lineRow.requested_qty);
+      const approvedQty = approvedByLine.get(lineId) ?? requestedQty;
+
+      if (approvedQty > requestedQty + EPSILON) {
+        throw buildError(`La cantidad aprobada no puede superar la solicitada (línea ${lineId})`, {
+          status: 400,
+          code: "APPROVED_EXCEEDS_REQUESTED",
+          details: { line_id: lineId, approved_qty: approvedQty, requested_qty: requestedQty },
+        });
+      }
+
+      await client.query(
+        `UPDATE public.delivery_request_line
+            SET approved_qty = $2, updated_at = NOW()
+          WHERE id = $1`,
+        [lineId, Number(approvedQty.toFixed(3))],
+      );
+    }
+
     const { rows: updatedRows } = await client.query(
       `UPDATE public.delivery_request
           SET status           = 'ops_approved',
@@ -751,7 +962,16 @@ async function opsApproveRequest({ requestId, actorUser = null } = {}) {
     );
 
     await client.query("COMMIT");
-    return { request: mapRequest(updatedRows[0]) };
+
+    const { rows: updatedLineRows } = await db.query(
+      `SELECT * FROM public.delivery_request_line WHERE delivery_request_id = $1`,
+      [normalizedRequestId],
+    );
+
+    return {
+      request: mapRequest(updatedRows[0]),
+      lines: updatedLineRows.map(mapRequestLine),
+    };
   } catch (error) {
     try { await client.query("ROLLBACK"); } catch (_) { /* ignore */ }
     throw parsePgError(error);
@@ -864,18 +1084,263 @@ async function listDeliveryRequests({ ceilingId = null, status = null, limit = 1
 
   return requestRows.map((row) => ({
     ...mapRequest(row),
-    ops_approved_by: row.ops_approved_by ? Number(row.ops_approved_by) : null,
-    ops_approved_at: row.ops_approved_at || null,
     lines: linesByRequest.get(Number(row.id)) || [],
   }));
+}
+
+/**
+ * listDeliveryDispatches
+ * Returns all dispatch records for a given ceiling or request, with per-line quantities.
+ */
+async function listDeliveryDispatches({ ceilingId = null, requestId = null, limit = 100 } = {}) {
+  const safeLimit = Math.min(200, Math.max(1, Number.parseInt(String(limit || 100), 10) || 100));
+
+  const params = [];
+  const where = [];
+
+  if (ceilingId) {
+    params.push(asPositiveInteger(ceilingId, "ceilingId"));
+    where.push(`dr.delivery_ceiling_id = $${params.length}`);
+  }
+  if (requestId) {
+    params.push(asPositiveInteger(requestId, "requestId"));
+    where.push(`dd.delivery_request_id = $${params.length}`);
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+  const { rows: dispatchRows } = await db.query(
+    `SELECT
+       dd.id,
+       dd.delivery_request_id,
+       dd.dispatched_by,
+       dd.dispatched_at,
+       dd.notes,
+       dd.created_at,
+       dr.delivery_ceiling_id
+     FROM public.delivery_dispatch dd
+     INNER JOIN public.delivery_request dr ON dr.id = dd.delivery_request_id
+     ${whereSql}
+     ORDER BY dd.dispatched_at DESC
+     LIMIT $${params.length + 1}`,
+    [...params, safeLimit],
+  );
+
+  if (!dispatchRows.length) return [];
+
+  const dispatchIds = dispatchRows.map((r) => Number(r.id));
+  const { rows: dispatchLineRows } = await db.query(
+    `SELECT
+       ddl.id,
+       ddl.delivery_dispatch_id,
+       ddl.delivery_ceiling_line_id,
+       ddl.dispatched_qty,
+       cl.item_type,
+       cl.unit,
+       cl.max_quantity,
+       cl.delivered_qty
+     FROM public.delivery_dispatch_line ddl
+     INNER JOIN public.delivery_ceiling_line cl ON cl.id = ddl.delivery_ceiling_line_id
+     WHERE ddl.delivery_dispatch_id = ANY($1::int[])`,
+    [dispatchIds],
+  );
+
+  const linesByDispatch = new Map();
+  dispatchLineRows.forEach((row) => {
+    const dId = Number(row.delivery_dispatch_id);
+    if (!linesByDispatch.has(dId)) linesByDispatch.set(dId, []);
+    linesByDispatch.get(dId).push({
+      id: Number(row.id),
+      delivery_ceiling_line_id: Number(row.delivery_ceiling_line_id),
+      dispatched_qty: Number(row.dispatched_qty),
+      item_type: row.item_type,
+      unit: row.unit,
+    });
+  });
+
+  return dispatchRows.map((row) => ({
+    id: Number(row.id),
+    delivery_request_id: Number(row.delivery_request_id),
+    delivery_ceiling_id: Number(row.delivery_ceiling_id),
+    dispatched_by: row.dispatched_by ? Number(row.dispatched_by) : null,
+    dispatched_at: row.dispatched_at,
+    notes: row.notes || null,
+    created_at: row.created_at,
+    lines: linesByDispatch.get(Number(row.id)) || [],
+  }));
+}
+
+async function notifyOpsNewSupplyRequest({ requestId, ceilingId }) {
+  try {
+    const { rows: metaRows } = await db.query(
+      `SELECT p.client_snapshot, p.equipment
+         FROM public.delivery_ceiling c
+         LEFT JOIN public.private_purchase_requests p ON p.id::text = c.private_purchase_id::text
+        WHERE c.id = $1
+        LIMIT 1`,
+      [ceilingId],
+    );
+    const meta = metaRows[0] || {};
+    const clientName =
+      meta?.client_snapshot?.commercial_name ||
+      meta?.client_snapshot?.name ||
+      "Cliente";
+    const equipmentName = Array.isArray(meta?.equipment)
+      ? meta.equipment.map((item) => item?.name || item?.label || item?.sku).filter(Boolean).join(", ")
+      : "";
+
+    const { rows: recipients } = await db.query(
+      `SELECT id FROM users WHERE role = 'jefe_operaciones' AND active = true`,
+    );
+    if (!recipients.length) return;
+
+    await Promise.all(recipients.map((recipient) => notificationManager.sendNotification({
+      userId: recipient.id,
+      customTitle: "Nuevo pedido de insumos recibido",
+      customMessage: `Cliente: ${clientName}. Equipo: ${equipmentName || "N/D"}. Pedido #${requestId}.`,
+      type: "info",
+      source: "supply_control_request",
+      priority: 1,
+      data: { delivery_request_id: requestId, delivery_ceiling_id: ceilingId },
+      email: true,
+      chat: false,
+    })));
+  } catch (notifyError) {
+    logger.warn({ notifyError: notifyError.message, requestId, ceilingId }, "No se pudo notificar pedido de insumos a jefe_operaciones");
+  }
+}
+
+/**
+ * OPEN_ORDER_ITEM_TYPES
+ * Predefined item categories for private purchases without a BC.
+ * No max_quantity — the system tracks totals without enforcing a ceiling.
+ */
+const OPEN_ORDER_ITEM_TYPES = [...OPEN_ORDER_FALLBACK_ITEMS];
+
+async function resolveOpenOrderItemsForPrivatePurchase(client, privatePurchaseId) {
+  const { rows: purchaseRows } = await client.query(
+    `SELECT business_case_id, equipment
+       FROM public.private_purchase_requests
+      WHERE id::text = $1
+      LIMIT 1`,
+    [String(privatePurchaseId)],
+  );
+  if (!purchaseRows.length) return [...OPEN_ORDER_ITEM_TYPES];
+
+  const purchase = purchaseRows[0];
+  const items = [];
+
+  if (purchase.business_case_id) {
+    const { rows: bcRows } = await client.query(
+      `SELECT name, item_type
+         FROM public.bc_consumption_items
+        WHERE business_case_id = $1
+          AND COALESCE(annual_qty, 0) > 0
+        ORDER BY name ASC`,
+      [purchase.business_case_id],
+    );
+    bcRows.forEach((row) => {
+      const name = String(row.name || "").trim();
+      if (!name) return;
+      items.push({ name, type: normalizeOpenOrderType(row.item_type), unit: "unidad" });
+    });
+  }
+
+  if (!items.length) {
+    const modelIds = pickModelIdsFromEquipment(purchase.equipment);
+    if (modelIds.length) {
+      const { rows: modelRows } = await client.query(
+        `SELECT cc.name, cc.type, COALESCE(NULLIF(cc.unit, ''), 'unidad') AS unit
+           FROM public.catalog_equipment_consumables cec
+           JOIN public.catalog_consumables cc ON cc.id = cec.consumable_id
+          WHERE cec.equipment_id = ANY($1::int[])
+          ORDER BY cc.name ASC`,
+        [modelIds],
+      );
+      modelRows.forEach((row) => {
+        const name = String(row.name || "").trim();
+        if (!name) return;
+        items.push({ name, type: normalizeOpenOrderType(row.type), unit: String(row.unit || "unidad").trim() || "unidad" });
+      });
+    }
+  }
+
+  const dedup = new Map();
+  items.forEach((item) => {
+    const key = `${item.type}|${item.name.toLowerCase()}`;
+    if (!dedup.has(key)) dedup.set(key, item);
+  });
+
+  return dedup.size ? Array.from(dedup.values()) : [...OPEN_ORDER_ITEM_TYPES];
+}
+
+/**
+ * createOpenOrderCeiling
+ * Auto-creates a delivery_ceiling + 4 open lines (no max) for a private
+ * purchase that uses open_orders supply control (no BC linked).
+ * Safe to call multiple times — won't create duplicates.
+ *
+ * @param {string|number} privatePurchaseId
+ * @returns {object} ceiling row
+ */
+async function createOpenOrderCeiling(privatePurchaseId) {
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    // Check if an open-order ceiling already exists for this purchase
+    const { rows: existing } = await client.query(
+      `SELECT id FROM public.delivery_ceiling
+        WHERE private_purchase_id = $1 AND purchase_type = 'private'
+        LIMIT 1`,
+      [String(privatePurchaseId)],
+    );
+    if (existing.length) {
+      await client.query("COMMIT");
+      return existing[0];
+    }
+
+    // Create the ceiling (no business_case_id for open orders)
+    const { rows: ceilingRows } = await client.query(
+      `INSERT INTO public.delivery_ceiling
+         (purchase_type, private_purchase_id, status, created_at, updated_at)
+       VALUES ('private', $1, 'active', NOW(), NOW())
+       RETURNING *`,
+      [String(privatePurchaseId)],
+    );
+    const ceilingId = Number(ceilingRows[0].id);
+
+    // Create lines with max_quantity = NULL (unlimited) from BC or model-linked catalog.
+    const openItems = await resolveOpenOrderItemsForPrivatePurchase(client, privatePurchaseId);
+    for (const item of openItems) {
+      await client.query(
+        `INSERT INTO public.delivery_ceiling_line
+           (delivery_ceiling_id, item_type, unit, max_quantity, delivered_qty, created_at, updated_at)
+         VALUES ($1, $2, $3, NULL, 0, NOW(), NOW())`,
+        [ceilingId, item.name, item.unit],
+      );
+    }
+
+    await client.query("COMMIT");
+    logger.info({ ceilingId, privatePurchaseId }, "open_order ceiling created");
+    return ceilingRows[0];
+  } catch (error) {
+    try { await client.query("ROLLBACK"); } catch (_) { /* ignore */ }
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 module.exports = {
   DELIVERY_REQUEST_STATUSES,
   OPEN_REQUEST_STATUSES,
+  OPEN_ORDER_ITEM_TYPES,
   createDeliveryRequest,
   opsApproveRequest,
   cancelDeliveryRequest,
   confirmDeliveryRequest,
   listDeliveryRequests,
+  listDeliveryDispatches,
+  createOpenOrderCeiling,
 };

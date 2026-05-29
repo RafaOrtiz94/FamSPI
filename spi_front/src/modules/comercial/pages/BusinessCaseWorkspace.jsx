@@ -21,8 +21,9 @@ import ErrorBoundary from "../../../core/ui/components/ErrorBoundary";
 import { BusinessCaseWorkspaceProviders } from "../components/workspace/BusinessCaseWorkspaceContext";
 import Modal from "../../../core/ui/components/Modal";
 import Button from "../../../core/ui/components/Button";
-import { resolveRoleSectionConfig } from "../components/workspace/roleSectionConfig";
+import { resolveRoleSectionConfig, getVisibleSections } from "../components/workspace/roleSectionConfig";
 
+// BC-21: Orden canónico de secciones — incluye investment_values para roles que las ven
 const WORKSPACE_SECTION_ORDER = [
  "general",
  "lab",
@@ -31,6 +32,8 @@ const WORKSPACE_SECTION_ORDER = [
  "lis",
  "determinations",
  "investments",
+ "investment_values_op",
+ "investment_values_fin",
  "consumption_export",
  "dispatch_workspace",
  "feasibility",
@@ -41,21 +44,19 @@ const SECTION_LABELS = {
  lab: "Entorno Laboratorio",
  requirement: "Condiciones del BC",
  equipment: "Equipamiento",
- lis: "Integracion LIS",
+ lis: "Integración LIS",
  determinations: "Determinaciones",
  investments: "Inversiones",
- consumption_export: "Sincronizacion",
- dispatch_workspace: "Cantidades Maximas",
+ investment_values_op: "Valores Operativos",
+ investment_values_fin: "Valores Financieros",
+ consumption_export: "Sincronización",
+ dispatch_workspace: "Cantidades Máximas",
  feasibility: "Factibilidad",
 };
 
+// BC-21: Usa la función exportada del config para obtener secciones visibles por rol
 const getVisibleSectionsByRole = (role = "") => {
- const config = resolveRoleSectionConfig(String(role || "").toLowerCase());
- if (config?.visible === "all") return WORKSPACE_SECTION_ORDER;
- if (Array.isArray(config?.visible) && config.visible.length) {
- return config.visible.filter((section) => WORKSPACE_SECTION_ORDER.includes(section));
- }
- return WORKSPACE_SECTION_ORDER;
+ return getVisibleSections(role, WORKSPACE_SECTION_ORDER);
 };
 
 const getNextSectionId = (currentSection, role = "") => {
@@ -65,6 +66,18 @@ const getNextSectionId = (currentSection, role = "") => {
  if (currentIndex >= visible.length - 1) return null;
  return visible[currentIndex + 1] || null;
 };
+
+// BC-21: Roles que ven inversiones después de determinaciones
+// (ampliado con analista_comercial, asesor_comercial, jefe_ti)
+const ROLE_FORCE_INVESTMENTS_AFTER_DETERMINATIONS = new Set([
+ "comercial",
+ "asesor_comercial",
+ "analista_comercial",
+ "acp_comercial",
+ "backoffice",
+ "backoffice_comercial",
+ "jefe_ti",
+]);
 
 const BusinessCaseWorkspace = () => {
  const { id: bcId } = useParams();
@@ -140,6 +153,11 @@ const BusinessCaseWorkspace = () => {
 
  const startedAt = Date.now();
  try {
+ console.log("[BC_AUDIT][FE][WORKSPACE_SAVE_START]", {
+ bcId,
+ options,
+ selectedSection,
+ });
  let sectionCompleted = false;
  const shouldMarkComplete = options?.markComplete !== false;
  if (bcId && options?.section && shouldMarkComplete) {
@@ -154,7 +172,22 @@ const BusinessCaseWorkspace = () => {
  const normalizedUIGuidance = await refreshWorkspaceState();
  if (sectionCompleted && options?.section) {
  const userRole = normalizedUIGuidance?.permissions?.userRole || "comercial";
- const nextSection = getNextSectionId(options.section, userRole);
+ const visible = getVisibleSectionsByRole(userRole);
+ let nextSection = getNextSectionId(options.section, userRole);
+ if (
+ options.section === "determinations" &&
+ ROLE_FORCE_INVESTMENTS_AFTER_DETERMINATIONS.has(String(userRole || "").toLowerCase()) &&
+ visible.includes("investments")
+ ) {
+ nextSection = "investments";
+ }
+ console.log("[BC_AUDIT][FE][WORKSPACE_SECTION_COMPLETE]", {
+ bcId,
+ section: options.section,
+ userRole,
+ visible,
+ nextSection,
+ });
  if (nextSection) {
  setSelectedSection(nextSection);
  }

@@ -23,7 +23,7 @@ import clsx from "clsx";
 
 import { useAuth } from "../../auth/AuthContext";
 import useAuditStatus from "../../hooks/useAuditStatus";
-import { isPathEnabledForUser } from "../../auth/moduleAccess";
+import { isPathEnabledForUser, buildGlobalStatusMap, MODULE_PATH_PREFIXES } from "../../auth/moduleAccess";
 
 const homePathsByScope = {
  gerencia: "/dashboard/gerencia",
@@ -195,6 +195,12 @@ const tiWorkspaceLink = {
  path: "/dashboard/ti/workspace",
 };
 
+const kickoffLink = {
+ name: "Kick Off 2026",
+ icon: FiCalendar,
+ path: "/dashboard/kickoff",
+};
+
 const tiDevicesLink = {
  name: "Dispositivos TI",
  icon: FiCpu,
@@ -238,7 +244,7 @@ const getPriorityGroups = (scope, role, auditActive) => {
  groups.admin.push(...talentoLinks); // Gestión administrativa
  }
 
- // ðŸ’° FINANZAS - Control presupuestario
+ // 💰 FINANZAS - Control presupuestario
  else if (["finanzas", "jefe_finanzas", "jefe_financiero", "financiero"].includes(scope)) {
  groups.primary.push(viaticosLink, asistenciaReportesLink, permisosLink); // Control financiero principal
  if (!hideBusinessCaseForFinance) {
@@ -247,7 +253,7 @@ const getPriorityGroups = (scope, role, auditActive) => {
  if (auditActive) groups.secondary.push(auditPrepLink);
  }
 
- // ðŸ’¼ COMERCIAL - Flujo de ventas completo
+ // 💼 COMERCIAL - Flujo de ventas completo
  else if (comercialScopes.includes(scope)) {
  groups.critical.push(...comercialLinks); // Solicitudes y clientes cr?ticos
  // Ocultar planificación para backoffice y acp_comercial (sea por scope o por rol)
@@ -303,13 +309,13 @@ const getPriorityGroups = (scope, role, auditActive) => {
 else if (["it", "ti", "jefe_ti", "admin_ti"].includes(scope)) {
  groups.critical.push(tiWorkspaceLink);
  if (["jefe_ti", "admin_ti"].includes(scope) || role.includes("jefe_ti") || role.includes("admin_ti")) {
- groups.critical.push(tiModulesLink);
+ groups.critical.push(tiModulesLink, kickoffLink);
  }
  groups.primary.push(tiDevicesLink, permisosLink, peopleAdminLink, ...talentoLinks, ...auditLinks);
  if (auditActive) groups.primary.push(auditPrepLink);
  }
 
- // âš™ï¸ OPERACIONES - Procesos operativos
+ // ⚙️ OPERACIONES - Procesos operativos
  else if (["operaciones", "jefe_operaciones"].includes(scope)) {
  groups.primary.push(purchasesWorkspaceLink, permisosLink);
  groups.primary.push(equipmentWorkspaceLink);
@@ -324,13 +330,13 @@ else if (["it", "ti", "jefe_ti", "admin_ti"].includes(scope)) {
  groups.primary.push(permisosLink);
  }
 
- // ðŸŽ¨ CALIDAD - Control de calidad
+ // 🎨 CALIDAD - Control de calidad
  else if (["calidad", "jefe_calidad"].includes(scope)) {
  groups.primary.push(clientRequestsReviewLink, solicitudesTalentoLink, permisosLink);
  if (auditActive) groups.primary.push(auditPrepLink);
  }
 
- // ðŸ¢ BACKOFFICE - Soporte administrativo
+ // 🏢 BACKOFFICE - Soporte administrativo
  else if (role.includes("backoffice")) {
  groups.primary.push(purchasesWorkspaceLink);
  groups.secondary.push(...comercialLinks);
@@ -348,6 +354,12 @@ else if (["it", "ti", "jefe_ti", "admin_ti"].includes(scope)) {
  groups.secondary.push(businessCaseObservabilityLink);
  }
 
+ // Kick Off 2026 — visible para todos los usuarios autenticados
+ const allLinks = [...groups.critical, ...groups.primary, ...groups.secondary, ...groups.admin];
+ if (!allLinks.some(l => l?.path === '/dashboard/kickoff')) {
+   groups.secondary.push(kickoffLink);
+ }
+
  groups.secondary.push(linksInteresLink);
 
  // Filtrar elementos vacíos y aplanar arrays
@@ -359,7 +371,10 @@ else if (["it", "ti", "jefe_ti", "admin_ti"].includes(scope)) {
 };
 
 // Componente para botones de navegación
-const NavButton = ({ link, variant = "primary", mobile = false, onClick }) => {
+const NavButton = ({ link, variant = "primary", mobile = false, onClick, globalStatusMap }) => {
+ const moduleStatus = globalStatusMap?.get(link.path) || null;
+ const showConstructionBadge = moduleStatus?.stage === 'construction' || (moduleStatus?.stage === 'testing' && !moduleStatus?.in_whitelist);
+ const showBetaBadge = moduleStatus?.stage === 'testing' && moduleStatus?.in_whitelist;
  const baseClasses = mobile
  ? "flex items-center px-3 py-2 text-base font-medium rounded-md transition-colors duration-200"
  : "inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-800";
@@ -402,6 +417,12 @@ const NavButton = ({ link, variant = "primary", mobile = false, onClick }) => {
  )
  })}
  <span className="truncate">{link.name}</span>
+ {showConstructionBadge && (
+   <span className="ml-1.5 flex-shrink-0 text-xs bg-amber-100 text-amber-700 rounded-full px-1.5 py-0.5 font-semibold leading-none">🚧</span>
+ )}
+ {showBetaBadge && (
+   <span className="ml-1.5 flex-shrink-0 text-xs bg-violet-100 text-violet-700 rounded-full px-1.5 py-0.5 font-semibold leading-none">Beta</span>
+ )}
  </>
  )}
  </NavLink>
@@ -413,7 +434,7 @@ const GroupSeparator = () => (
  <div className="mx-1 h-6 w-px bg-gradient-to-b from-transparent via-slate-300 to-transparent dark:via-slate-600 sm:mx-2 sm:h-8" />
 );
 
-const renderGroup = (links, variant, onClick, isMobile) =>
+const renderGroup = (links, variant, onClick, isMobile, globalStatusMap) =>
  links.map((link) => (
  <NavButton
  key={link.path}
@@ -421,6 +442,7 @@ const renderGroup = (links, variant, onClick, isMobile) =>
  variant={variant}
  mobile={isMobile}
  onClick={onClick}
+ globalStatusMap={globalStatusMap}
  />
  ));
 
@@ -447,6 +469,19 @@ const NavigationBar = () => {
  (links) => links.filter((link) => isPathEnabledForUser({ pathname: link.path, moduleAccess: user?.module_access || [] })),
  [user?.module_access]
  );
+
+ // Map: link.path → { stage, in_whitelist } — for construction/beta badges
+ const globalStatusMap = React.useMemo(() => {
+   const byKey = buildGlobalStatusMap(user?.module_global_status || []);
+   const byPath = new Map();
+   for (const entry of MODULE_PATH_PREFIXES || []) {
+     const status = byKey.get(entry.key);
+     if (status) {
+       for (const p of entry.prefixes || []) byPath.set(p, status);
+     }
+   }
+   return byPath;
+ }, [user?.module_global_status]);
 
  const priorityGroups = React.useMemo(
  () => {
@@ -483,13 +518,13 @@ const NavigationBar = () => {
  aria-label="Navegación principal"
  >
  <div className="flex items-center gap-1">
- {renderGroup(priorityGroups.critical, "critical")}
+ {renderGroup(priorityGroups.critical, "critical", undefined, false, globalStatusMap)}
  </div>
  {priorityGroups.primary.length > 0 && (
  <>
  <GroupSeparator />
  <div className="flex items-center gap-1">
- {renderGroup(priorityGroups.primary, "primary")}
+ {renderGroup(priorityGroups.primary, "primary", undefined, false, globalStatusMap)}
  </div>
  </>
  )}
@@ -497,7 +532,7 @@ const NavigationBar = () => {
  <>
  <GroupSeparator />
  <div className="flex items-center gap-1">
- {renderGroup(priorityGroups.secondary, "secondary")}
+ {renderGroup(priorityGroups.secondary, "secondary", undefined, false, globalStatusMap)}
  </div>
  </>
  )}
@@ -505,7 +540,7 @@ const NavigationBar = () => {
  <>
  <GroupSeparator />
  <div className="flex items-center gap-1">
- {renderGroup(priorityGroups.admin, "admin")}
+ {renderGroup(priorityGroups.admin, "admin", undefined, false, globalStatusMap)}
  </div>
  </>
  )}
@@ -533,26 +568,26 @@ const NavigationBar = () => {
  {mobileMenuOpen && (
  <div className="md:hidden" id="mobile-menu">
  <div className="px-2 pt-2 pb-3 space-y-1 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
- {renderGroup(priorityGroups.critical, "critical", closeMobileMenu, true)}
+ {renderGroup(priorityGroups.critical, "critical", closeMobileMenu, true, globalStatusMap)}
 
  {priorityGroups.primary.length > 0 && (
  <>
  <div className="border-t border-gray-200 dark:border-gray-600 my-2" />
- {renderGroup(priorityGroups.primary, "primary", closeMobileMenu, true)}
+ {renderGroup(priorityGroups.primary, "primary", closeMobileMenu, true, globalStatusMap)}
  </>
  )}
 
  {priorityGroups.secondary.length > 0 && (
  <>
  <div className="border-t border-gray-200 dark:border-gray-600 my-2" />
- {renderGroup(priorityGroups.secondary, "secondary", closeMobileMenu, true)}
+ {renderGroup(priorityGroups.secondary, "secondary", closeMobileMenu, true, globalStatusMap)}
  </>
  )}
 
  {priorityGroups.admin.length > 0 && (
  <>
  <div className="border-t border-gray-200 dark:border-gray-600 my-2" />
- {renderGroup(priorityGroups.admin, "admin", closeMobileMenu, true)}
+ {renderGroup(priorityGroups.admin, "admin", closeMobileMenu, true, globalStatusMap)}
  </>
  )}
  </div>

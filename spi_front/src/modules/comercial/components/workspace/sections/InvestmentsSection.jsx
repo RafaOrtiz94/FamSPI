@@ -1,8 +1,10 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { FiCheckCircle, FiClock, FiSave } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useParams } from "react-router-dom";
 import { useUI } from "../../../../../core/ui/UIContext";
+import { useAuth } from "../../../../../core/auth/AuthContext";
+import Modal from "../../../../../core/ui/components/Modal";
 const makeTempId = () => `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const isTempId = (id) => String(id).startsWith("tmp-");
 
@@ -17,9 +19,20 @@ const dedupeItemsById = (rows = []) => {
  return Array.from(map.values());
 };
 
+const getNaturalErrorMessage = (err, fallback) => {
+ const status = Number(err?.response?.status || 0);
+ const raw = String(err?.response?.data?.message || "").trim();
+ if (status === 403) return "No tienes permiso para realizar esta acción en este momento.";
+ if (status === 409) return "La información cambió mientras trabajabas. Recarga la sección e inténtalo de nuevo.";
+ if (!raw) return fallback;
+ if (/\b(4\d\d|5\d\d)\b/.test(raw) || /forbidden|conflict|unauthorized|status/i.test(raw)) return fallback;
+ return raw;
+};
+
 const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  const { id: bcId } = useParams();
  const { showToast } = useUI();
+ const { user } = useAuth();
  const [items, setItems] = useState([]);
  const [loading, setLoading] = useState(true);
  const [savingCart, setSavingCart] = useState(false);
@@ -31,16 +44,30 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  const [newCharacteristics, setNewCharacteristics] = useState("");
  const [newNotes, setNewNotes] = useState("");
  const [dirtyMap, setDirtyMap] = useState({});
+ const [cartStatus, setCartStatus] = useState({ confirmed: false, deadline_at: null, confirmed_at: null });
+ const [increaseModal, setIncreaseModal] = useState({
+  open: false,
+  item: null,
+  requestedQuantity: "",
+  reason: "",
+  submitting: false,
+ });
+ const [confirmCartModalOpen, setConfirmCartModalOpen] = useState(false);
 
- const canEdit = permissions.canEdit !== false && ownership?.canUserEdit !== false;
+ const canEditBase = permissions.canEdit !== false && ownership?.canUserEdit !== false;
+ const canEdit = canEditBase && !cartStatus?.confirmed;
+ const currentUserEmail = String(user?.email || "").trim().toLowerCase();
 
  const loadCatalog = useCallback(async () => {
  if (!bcId) return;
  try {
  setLoading(true);
  const res = await api.get(`/business-case/${bcId}/investments/catalog`);
- const data = res?.data?.data || res?.data || [];
- setItems(Array.isArray(data) ? data : []);
+ const payload = res?.data?.data || res?.data || [];
+ const list = Array.isArray(payload) ? payload : (Array.isArray(payload?.items) ? payload.items : []);
+ const cart = payload?.cart || { confirmed: false };
+ setItems(Array.isArray(list) ? list : []);
+ setCartStatus(cart);
  setDirtyMap({});
  } catch (err) {
  console.error("Error loading investment catalog", err);
@@ -76,6 +103,50 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  const updateItem = (id, patch) => {
  setItems((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
  markDirty(id);
+ };
+
+ const openIncreaseModal = (item) => {
+ const currentQty = Number(item?.quantity ?? 0);
+ setIncreaseModal({
+  open: true,
+  item,
+  requestedQuantity: String(Math.max(currentQty + 1, 1)),
+  reason: "",
+  submitting: false,
+ });
+ };
+
+ const closeIncreaseModal = () => {
+ if (increaseModal.submitting) return;
+ setIncreaseModal((prev) => ({ ...prev, open: false }));
+ };
+
+ const submitIncreaseRequest = async () => {
+ if (!bcId || !increaseModal.item) return;
+ const currentQty = Number(increaseModal.item?.quantity ?? 0);
+ const requestedQuantity = Number(increaseModal.requestedQuantity);
+ if (!Number.isFinite(requestedQuantity) || requestedQuantity <= currentQty) {
+ showToast("La cantidad solicitada debe ser mayor a la actual.", "warning");
+ return;
+ }
+ if (!String(increaseModal.reason || "").trim()) {
+ showToast("Debes indicar el motivo de la solicitud.", "warning");
+ return;
+ }
+ try {
+ setIncreaseModal((prev) => ({ ...prev, submitting: true }));
+ await api.post(`/business-case/${bcId}/investments/selections/request-increase`, {
+  catalog_id: increaseModal.item.id,
+  requested_quantity: requestedQuantity,
+  reason: increaseModal.reason.trim(),
+ });
+ showToast("Solicitud enviada al propietario del carrito.", "success");
+ setIncreaseModal({ open: false, item: null, requestedQuantity: "", reason: "", submitting: false });
+ await loadCatalog();
+ } catch (err) {
+ setIncreaseModal((prev) => ({ ...prev, submitting: false }));
+ showToast(getNaturalErrorMessage(err, "No se pudo registrar la solicitud."), "error");
+ }
  };
 
  const handleSaveCart = async () => {
@@ -167,9 +238,25 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  showToast(`Se guardaron ${dirtyItemsToSave.length} inversiones del carrito`, "success");
  } catch (err) {
  console.error("Error saving investment cart", err);
- showToast(err.response?.data?.message || "No se pudo guardar el carrito de inversiones", "error");
+ showToast(getNaturalErrorMessage(err, "No se pudo guardar el carrito de inversiones"), "error");
  } finally {
  setSavingCart(false);
+ }
+ };
+
+const handleConfirmCart = async () => {
+if (!bcId || !canEdit) return;
+if (dirtyCount > 0) {
+showToast("Guarda los cambios pendientes antes de confirmar el carrito.", "warning");
+return;
+}
+ try {
+ await api.post(`/business-case/${bcId}/investments/confirm-cart`);
+ showToast("Carrito confirmado. Edición bloqueada y plazo de 48 horas iniciado para Jefe de Operaciones.", "success");
+ setConfirmCartModalOpen(false);
+ await loadCatalog();
+ } catch (err) {
+ showToast(getNaturalErrorMessage(err, "No se pudo confirmar el carrito."), "error");
  }
  };
 
@@ -234,6 +321,9 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  const renderInvestmentCard = (item) => {
  const isDirty = Boolean(dirtyMap[String(item.id)]);
  const pendingCreate = isTempId(item.id);
+ const ownerEmail = String(item?.owner_email || "").trim().toLowerCase();
+ const isOwner = !ownerEmail || ownerEmail === currentUserEmail;
+ const canModifySelectionAndQty = canEdit && isOwner;
  return (
  <div key={item.id} className="p-4 flex flex-col gap-3 border-b last:border-b-0">
  <div className="flex items-start justify-between gap-3">
@@ -243,7 +333,7 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  className="mt-1 accent-emerald-600"
  checked={!!item.selected}
  onChange={() => handleToggle(item)}
- disabled={!canEdit || savingCart}
+ disabled={!canModifySelectionAndQty || savingCart}
  />
  <div>
  <div className="text-sm font-semibold text-gray-900">{item.name}</div>
@@ -257,6 +347,9 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  {item.updated_by_email ? ` (${item.updated_by_email})` : ""}
  </div>
  )
+ )}
+ {item.owner_email && (
+ <div className="text-xs text-gray-500">Propietario del carrito: {item.owner_email}</div>
  )}
  </div>
  </label>
@@ -294,11 +387,31 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  min={0}
  value={item.quantity ?? ""}
  onChange={(e) => updateItem(item.id, { quantity: e.target.value === "" ? null : Number(e.target.value) })}
- disabled={!canEdit || !item.selected || savingCart}
+ disabled={!canModifySelectionAndQty || !item.selected || savingCart}
  placeholder="0"
  className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50"
  />
  </div>
+ {!isOwner && item.selected && (
+ <div className="flex flex-col gap-2 md:col-span-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+ <div className="text-xs text-amber-800">
+ Solo el propietario puede cambiar cantidad o quitar del carrito.
+ </div>
+ <button
+ type="button"
+ onClick={() => openIncreaseModal(item)}
+ disabled={savingCart}
+ className="inline-flex items-center justify-center px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-semibold disabled:opacity-60 w-fit"
+ >
+ Solicitar aumento
+ </button>
+ </div>
+ )}
+ {Number(item?.pending_requests_count || 0) > 0 && (
+ <div className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 md:col-span-3">
+ Solicitudes pendientes para este item: {Number(item.pending_requests_count)}
+ </div>
+ )}
 
  <div className="flex flex-col gap-2 md:col-span-2">
  <label className="text-xs font-semibold text-gray-500">Caracteristicas</label>
@@ -356,28 +469,45 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  <div className="text-xs sm:text-sm font-semibold text-amber-700 bg-amber-50 px-3 py-1 rounded-full w-fit">
  {dirtyCount} pendientes
  </div>
+ {cartStatus?.confirmed && (
+ <div className="text-xs sm:text-sm font-semibold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-full w-fit">
+ Carrito confirmado
+ </div>
+ )}
  {pendingCreateCount > 0 && (
  <div className="text-xs sm:text-sm font-semibold text-blue-700 bg-blue-50 px-3 py-1 rounded-full w-fit">
  {pendingCreateCount} nuevos por crear
  </div>
  )}
  {canEdit && (
+ <>
  <button
  type="button"
- onClick={handleSaveCart}
- disabled={savingCart || dirtyCount === 0}
- className="inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-full bg-blue-600 text-white text-xs sm:text-sm font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500 transition-colors"
+ onClick={() => setConfirmCartModalOpen(true)}
+ disabled={savingCart || dirtyCount > 0}
+ className="inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-full bg-indigo-600 text-white text-xs sm:text-sm font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500 transition-colors"
  >
- <FiSave size={13} />
- {savingCart ? "Guardando..." : "Guardar cambios"}
+ Confirmar carrito
  </button>
+ <button
+type="button"
+onClick={handleSaveCart}
+disabled={savingCart || dirtyCount === 0}
+className="inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-full bg-blue-600 text-white text-xs sm:text-sm font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500 transition-colors"
+>
+<FiSave size={13} />
+{savingCart ? "Guardando..." : "Guardar cambios"}
+</button>
+ </>
  )}
  </div>
  </div>
 
  {!canEdit && (
  <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 text-amber-800 text-sm">
- No tienes permisos para editar inversiones en este estado.
+ {cartStatus?.confirmed
+ ? "Carrito confirmado: contenido bloqueado para edición. Jefe de Operaciones debe cargar valores en 48h."
+ : "No tienes permisos para editar inversiones en este estado."}
  </div>
  )}
 
@@ -508,6 +638,87 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  </>
  )}
  </div>
+
+ <Modal
+ open={increaseModal.open}
+ onClose={closeIncreaseModal}
+ title="Solicitar aumento de cantidad"
+ maxWidth="max-w-xl"
+ >
+ <div className="space-y-4">
+ <p className="text-sm text-slate-600">
+ {increaseModal.item?.name || "Ítem"} tiene cantidad actual de{" "}
+ <span className="font-semibold text-slate-900">{Number(increaseModal.item?.quantity ?? 0)}</span>.
+ </p>
+ <div className="space-y-2">
+ <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Nueva cantidad solicitada</label>
+ <input
+ type="number"
+ min={0}
+ value={increaseModal.requestedQuantity}
+ onChange={(event) => setIncreaseModal((prev) => ({ ...prev, requestedQuantity: event.target.value }))}
+ className="min-h-[44px] w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:ring-2 focus:ring-sky-200"
+ />
+ </div>
+ <div className="space-y-2">
+ <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Motivo</label>
+ <textarea
+ rows={3}
+ value={increaseModal.reason}
+ onChange={(event) => setIncreaseModal((prev) => ({ ...prev, reason: event.target.value }))}
+ className="min-h-[96px] w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:ring-2 focus:ring-sky-200"
+ placeholder="Explica por qué se necesita aumentar la cantidad"
+ />
+ </div>
+ <div className="flex justify-end gap-2 pt-1">
+ <button
+ type="button"
+ onClick={closeIncreaseModal}
+ disabled={increaseModal.submitting}
+ className="min-h-[44px] rounded-2xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-transform active:scale-[0.97] disabled:opacity-50"
+ >
+ Cancelar
+ </button>
+ <button
+ type="button"
+ onClick={submitIncreaseRequest}
+ disabled={increaseModal.submitting}
+ className="min-h-[44px] rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-transform active:scale-[0.97] disabled:opacity-50"
+ >
+ {increaseModal.submitting ? "Enviando..." : "Enviar solicitud"}
+ </button>
+ </div>
+ </div>
+ </Modal>
+
+ <Modal
+ open={confirmCartModalOpen}
+ onClose={() => setConfirmCartModalOpen(false)}
+ title="Confirmar carrito"
+ maxWidth="max-w-lg"
+ >
+ <div className="space-y-4">
+ <p className="text-sm text-slate-700">
+ Al confirmar, el carrito quedará bloqueado para edición y empezará el plazo de 48 horas para cargar valores.
+ </p>
+ <div className="flex justify-end gap-2">
+ <button
+ type="button"
+ onClick={() => setConfirmCartModalOpen(false)}
+ className="min-h-[44px] rounded-2xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-transform active:scale-[0.97]"
+ >
+ Cancelar
+ </button>
+ <button
+ type="button"
+ onClick={handleConfirmCart}
+ className="min-h-[44px] rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-transform active:scale-[0.97]"
+ >
+ Confirmar
+ </button>
+ </div>
+ </div>
+ </Modal>
  </div>
  );
 };

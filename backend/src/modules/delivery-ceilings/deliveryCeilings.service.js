@@ -104,6 +104,7 @@ const mapLine = (row) => {
 const listDeliveryCeilings = async ({
   ceilingId = null,
   businessCaseId = null,
+  privatePurchaseId = null,
   status = null,
   purchaseType = null,
   page = 1,
@@ -113,6 +114,7 @@ const listDeliveryCeilings = async ({
   const safeLimit = Math.min(200, asPositiveInteger(limit, "limit", 20) || 20);
   const safeCeilingId = asPositiveInteger(ceilingId, "ceilingId", null);
   const safeBusinessCaseId = asTrimmedText(businessCaseId, "businessCaseId", null);
+  const safePrivatePurchaseId = asTrimmedText(privatePurchaseId, "privatePurchaseId", null);
   const safeStatus = asTrimmedText(status, "status", null);
   const safePurchaseType = asTrimmedText(purchaseType, "purchaseType", null);
   const offset = (safePage - 1) * safeLimit;
@@ -127,6 +129,10 @@ const listDeliveryCeilings = async ({
   if (safeBusinessCaseId) {
     params.push(safeBusinessCaseId);
     whereClauses.push(`c.business_case_id = $${params.length}::uuid`);
+  }
+  if (safePrivatePurchaseId) {
+    params.push(safePrivatePurchaseId);
+    whereClauses.push(`c.private_purchase_id::text = $${params.length}`);
   }
   if (safeStatus) {
     params.push(safeStatus);
@@ -217,4 +223,3 @@ module.exports = {
   OPEN_REQUEST_STATUSES,
   listDeliveryCeilings,
 };
-

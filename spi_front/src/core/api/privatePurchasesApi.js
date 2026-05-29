@@ -29,6 +29,8 @@ export const PRIVATE_PURCHASE_ENDPOINTS = {
  SEND_TO_ACP: '/private-purchases/:id/send-to-acp',
  START_AVAILABILITY: '/private-purchases/:id/start-availability',
  PROVIDER_RESPONSE: '/private-purchases/:id/provider-response',
+ CONFIRM_CU_AVAILABILITY: '/private-purchases/:id/confirm-cu-availability',
+ CONFIRM_IMPORT_APPROVAL: '/private-purchases/:id/confirm-import-approval',
  SUBMIT_CONTRACT: '/private-purchases/:id/submit-contract',
  CONTRACT_CLIENT_SIGNED: '/private-purchases/:id/contract/client-signed',
  INSPECTION_REQUEST: '/private-purchases/:id/inspection-request',
@@ -44,7 +46,17 @@ export const PRIVATE_PURCHASE_ENDPOINTS = {
  DELIVERY_ACT: '/private-purchases/:id/delivery-act',
  DELIVERY_ACT_ASSIGN: '/private-purchases/:id/delivery-act/assign',
  DELIVERY_ACT_FINALIZE: '/private-purchases/:id/delivery-act/finalize',
- DISPATCH_DETAILS: '/private-purchases/:id/dispatch-details'
+ DISPATCH_DETAILS: '/private-purchases/:id/dispatch-details',
+ TECHNICIAN_SCHEDULE: '/private-purchases/technician-schedule',
+ UPLOAD_PROFORMA: '/private-purchases/:id/upload-proforma',
+ REQUEST_PROFORMA: '/private-purchases/:id/request-proforma',
+ UPLOAD_SIGNED_PROFORMA: '/private-purchases/:id/upload-signed-proforma',
+ ACTIVE_RESERVATIONS: '/private-purchases/active-reservations',
+ PROVIDER_CONTRACT_RECEIVED: '/private-purchases/:id/provider-contract/received',
+ PROVIDER_CONTRACT_UPLOAD: '/private-purchases/:id/provider-contract/upload',
+ CONTRACT_GERENCIA_DECISION: '/private-purchases/:id/contract/gerencia-decision',
+ CONTRACT_ACP_SIGNED: '/private-purchases/:id/contract/acp-signed',
+ CONTRACT_RESTART_REJECTION: '/private-purchases/:id/contract/restart-rejection',
 };
 
 export const PRIVATE_PURCHASE_STATES = {
@@ -63,6 +75,8 @@ export const PRIVATE_PURCHASE_STATES = {
  ACP_AVAILABILITY_REQUESTED: 'acp_availability_requested',
  ACP_AVAILABILITY_CONFIRMED: 'acp_availability_confirmed',
  ACP_AVAILABILITY_REJECTED: 'acp_availability_rejected',
+ ACP_AVAILABILITY_CU_PENDING: 'acp_availability_cu_pending',
+ ACP_AVAILABILITY_IMPORT_PENDING: 'acp_availability_import_pending',
  PENDING_CONTRACT_APPROVAL: 'pending_contract_approval',
  PENDING_CONTRACT_CLIENT_SIGNATURE: 'pending_contract_client_signature',
  CONTRACT_AVAILABLE: 'contract_available',
@@ -853,6 +867,29 @@ export const savePrivatePurchaseProviderResponse = async (id, payload) => {
 };
 
 /**
+ * Comercial registra la decisión del cliente sobre disponibilidad en CU.
+ */
+export const confirmPrivateCuAvailability = async (id, { decision } = {}) => {
+ const response = await api.post(
+   PRIVATE_PURCHASE_ENDPOINTS.CONFIRM_CU_AVAILABILITY.replace(':id', id),
+   { decision }
+ );
+ return response.data.data;
+};
+
+/**
+ * Comercial registra la aprobación VINCULANTE del cliente para importación nueva.
+ * Una vez aprobado el cliente, la importación no se puede cancelar.
+ */
+export const confirmPrivateImportApproval = async (id, { decision } = {}) => {
+ const response = await api.post(
+   PRIVATE_PURCHASE_ENDPOINTS.CONFIRM_IMPORT_APPROVAL.replace(':id', id),
+   { decision }
+ );
+ return response.data.data;
+};
+
+/**
  * Subir contrato (gerencia)
  * @param {string} id - ID de la solicitud
  * @param {Object} contractData - Datos del contrato
@@ -933,14 +970,33 @@ export const savePrivatePurchaseInspectionRequest = async (id, payload = {}) => 
  }
 };
 
+/**
+ * Obtiene la carga de inspecciones por técnico para una fecha específica.
+ * @param {string} date  YYYY-MM-DD
+ */
+export const getPrivatePurchaseTechnicianSchedule = async (date) => {
+  try {
+    const response = await api.get(PRIVATE_PURCHASE_ENDPOINTS.TECHNICIAN_SCHEDULE, {
+      params: { date },
+    });
+    if (!response.data?.ok) throw new Error(response.data?.message || 'Error obteniendo carga de técnicos');
+    return response.data.data;
+  } catch (error) {
+    const apiMessage = error.response?.data?.error || error.response?.data?.message;
+    if (apiMessage) error.message = apiMessage;
+    console.error('[PrivatePurchasesAPI] Error obteniendo carga de técnicos:', error);
+    throw error;
+  }
+};
+
 export const coordinatePrivatePurchaseInspectionDate = async (
  id,
- { inspection_date, notes = '' } = {},
+ { inspection_date, notes = '', assigned_technician_id } = {},
 ) => {
  try {
  const response = await api.patch(
  PRIVATE_PURCHASE_ENDPOINTS.COORDINATE_INSPECTION_DATE.replace(':id', id),
- { inspection_date, notes },
+ { inspection_date, notes, assigned_technician_id },
  );
  if (!response.data?.ok) {
  throw new Error(response.data?.message || 'Error coordinando inspección');
@@ -1321,6 +1377,213 @@ export const registerPrivatePurchaseSerial = async (id, { serialNumber, unitId =
  }
 };
 
+export const renewPrivatePurchaseReservation = async (id) => {
+  const response = await api.post(`${PRIVATE_PURCHASE_ENDPOINTS.BASE}/${id}/renew-reservation`);
+  if (!response.data?.ok) {
+    throw new Error(response.data?.message || 'Error renovando reserva');
+  }
+  return response.data.data;
+};
+
+/**
+ * Subir proforma sin firmar y activar reserva del equipo.
+ * @param {string} id - ID de la solicitud
+ * @param {Object} data
+ * @param {string} data.proformaBase64 - Archivo en base64 (sin prefijo data:)
+ * @param {string} data.fileName - Nombre del archivo
+ * @param {string} [data.mimeType] - MIME type (default: application/pdf)
+ * @param {boolean} [data.reserveImport] - Solo para importación: confirma compromiso 100%
+ */
+export const uploadPrivatePurchaseProforma = async (id, { proformaBase64, fileName, mimeType, reserveImport = false }) => {
+  try {
+    const response = await api.post(`${PRIVATE_PURCHASE_ENDPOINTS.BASE}/${id}/upload-proforma`, {
+      proforma_base64: proformaBase64,
+      file_name: fileName,
+      mime_type: mimeType || 'application/pdf',
+      reserve_import: reserveImport,
+    });
+    if (!response.data?.ok) throw new Error(response.data?.message || 'Error subiendo proforma');
+    return response.data.data;
+  } catch (error) {
+    const apiMessage = error.response?.data?.error || error.response?.data?.message;
+    if (apiMessage) error.message = apiMessage;
+    console.error('[PrivatePurchasesAPI] Error subiendo proforma:', error);
+    throw error;
+  }
+};
+
+/**
+ * Solicitar proforma al proveedor por email.
+ * @param {string} id
+ * @param {Object} data
+ * @param {string} data.providerEmail
+ * @param {string} [data.notes]
+ */
+export const requestPrivatePurchaseProforma = async (id, { providerEmail, notes = '' } = {}) => {
+  try {
+    const response = await api.post(`${PRIVATE_PURCHASE_ENDPOINTS.BASE}/${id}/request-proforma`, {
+      provider_email: providerEmail,
+      notes,
+    });
+    if (!response.data?.ok) throw new Error(response.data?.message || 'Error solicitando proforma');
+    return response.data.data;
+  } catch (error) {
+    const apiMessage = error.response?.data?.error || error.response?.data?.message;
+    if (apiMessage) error.message = apiMessage;
+    console.error('[PrivatePurchasesAPI] Error solicitando proforma:', error);
+    throw error;
+  }
+};
+
+/**
+ * Subir proforma firmada por el proveedor (habilita gestión del contrato).
+ */
+export const uploadPrivatePurchaseSignedProforma = async (id, { proformaBase64, fileName, mimeType } = {}) => {
+  try {
+    const response = await api.post(`${PRIVATE_PURCHASE_ENDPOINTS.BASE}/${id}/upload-signed-proforma`, {
+      proforma_base64: proformaBase64,
+      file_name: fileName,
+      mime_type: mimeType || 'application/pdf',
+    });
+    if (!response.data?.ok) throw new Error(response.data?.message || 'Error subiendo proforma firmada');
+    return response.data.data;
+  } catch (error) {
+    const apiMessage = error.response?.data?.error || error.response?.data?.message;
+    if (apiMessage) error.message = apiMessage;
+    console.error('[PrivatePurchasesAPI] Error subiendo proforma firmada:', error);
+    throw error;
+  }
+};
+
+/**
+ * Gerencia General aprueba o rechaza el contrato del cliente.
+ * @param {string|number} id
+ * @param {Object} data
+ * @param {'approved'|'rejected'} data.decision
+ * @param {string} [data.reason]
+ */
+export const registerPrivatePurchaseManagerContractDecision = async (id, { decision, reason = '' } = {}) => {
+  try {
+    const response = await api.post(
+      PRIVATE_PURCHASE_ENDPOINTS.CONTRACT_GERENCIA_DECISION.replace(':id', id),
+      { decision, reason }
+    );
+    if (!response.data?.ok) throw new Error(response.data?.message || 'Error registrando decisión de gerencia');
+    return response.data.data;
+  } catch (error) {
+    const apiMessage = error.response?.data?.error || error.response?.data?.message;
+    if (apiMessage) error.message = apiMessage;
+    console.error(`[PrivatePurchasesAPI] Error decisión gerencia contrato ${id}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * ACP Comercial sube el contrato firmado (tras aprobación de gerencia).
+ * @param {string|number} id
+ * @param {Object} data
+ * @param {string} data.contractBase64
+ * @param {string} data.fileName
+ * @param {string} [data.mimeType]
+ */
+export const uploadPrivatePurchaseAcpSignedContract = async (id, { contractBase64, fileName, mimeType } = {}) => {
+  try {
+    const response = await api.post(
+      PRIVATE_PURCHASE_ENDPOINTS.CONTRACT_ACP_SIGNED.replace(':id', id),
+      { contract_base64: contractBase64, file_name: fileName, mime_type: mimeType || 'application/pdf' }
+    );
+    if (!response.data?.ok) throw new Error(response.data?.message || 'Error subiendo contrato firmado por ACP');
+    return response.data.data;
+  } catch (error) {
+    const apiMessage = error.response?.data?.error || error.response?.data?.message;
+    if (apiMessage) error.message = apiMessage;
+    console.error(`[PrivatePurchasesAPI] Error subiendo contrato ACP ${id}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * Reinicia el flujo de contrato tras un rechazo de gerencia.
+ * Limpia todos los campos del contrato y retorna al estado donde
+ * backoffice puede subir un nuevo borrador.
+ * @param {string|number} id
+ */
+export const restartPrivatePurchaseContractAfterRejection = async (id) => {
+  try {
+    const response = await api.post(
+      PRIVATE_PURCHASE_ENDPOINTS.CONTRACT_RESTART_REJECTION.replace(':id', id)
+    );
+    if (!response.data?.ok) throw new Error(response.data?.message || 'Error reiniciando contrato');
+    return response.data.data;
+  } catch (error) {
+    const apiMessage = error.response?.data?.error || error.response?.data?.message;
+    if (apiMessage) error.message = apiMessage;
+    console.error(`[PrivatePurchasesAPI] Error reiniciando contrato ${id}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * ACP marca que el contrato físico del proveedor ha llegado.
+ * Operación idempotente.
+ * @param {string|number} id - ID de la solicitud de compra privada
+ */
+export const markPrivatePurchaseProviderContractReceived = async (id) => {
+  try {
+    const response = await api.post(
+      PRIVATE_PURCHASE_ENDPOINTS.PROVIDER_CONTRACT_RECEIVED.replace(':id', id)
+    );
+    if (!response.data?.ok) throw new Error(response.data?.message || 'Error marcando contrato del proveedor');
+    return response.data.data;
+  } catch (error) {
+    const apiMessage = error.response?.data?.error || error.response?.data?.message;
+    if (apiMessage) error.message = apiMessage;
+    console.error(`[PrivatePurchasesAPI] Error marcando contrato del proveedor ${id}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * ACP sube el contrato del proveedor ya firmado.
+ * @param {string|number} id - ID de la solicitud
+ * @param {Object} data
+ * @param {string} data.contractBase64 - Archivo en base64
+ * @param {string} data.fileName - Nombre del archivo
+ * @param {string} [data.mimeType] - MIME type (default: application/pdf)
+ */
+export const uploadPrivatePurchaseProviderSignedContract = async (id, { contractBase64, fileName, mimeType } = {}) => {
+  try {
+    const response = await api.post(
+      PRIVATE_PURCHASE_ENDPOINTS.PROVIDER_CONTRACT_UPLOAD.replace(':id', id),
+      { contract_base64: contractBase64, file_name: fileName, mime_type: mimeType || 'application/pdf' }
+    );
+    if (!response.data?.ok) throw new Error(response.data?.message || 'Error subiendo contrato del proveedor');
+    return response.data.data;
+  } catch (error) {
+    const apiMessage = error.response?.data?.error || error.response?.data?.message;
+    if (apiMessage) error.message = apiMessage;
+    console.error(`[PrivatePurchasesAPI] Error subiendo contrato del proveedor ${id}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * Obtener todas las reservas activas de compras privadas.
+ * Panel de gestión de reservas para acp_comercial.
+ */
+export const getPrivatePurchaseActiveReservations = async () => {
+  try {
+    const response = await api.get(PRIVATE_PURCHASE_ENDPOINTS.ACTIVE_RESERVATIONS);
+    if (!response.data?.ok) throw new Error(response.data?.message || 'Error obteniendo reservas');
+    return response.data.data;
+  } catch (error) {
+    const apiMessage = error.response?.data?.error || error.response?.data?.message;
+    if (apiMessage) error.message = apiMessage;
+    console.error('[PrivatePurchasesAPI] Error obteniendo reservas activas:', error);
+    throw error;
+  }
+};
+
 export default {
  createPrivatePurchaseRequest,
  createPrivatePurchase,
@@ -1351,6 +1614,7 @@ export default {
  uploadPrivatePurchaseClientSignedContract,
  savePrivatePurchaseInspectionRequest,
  coordinatePrivatePurchaseInspectionDate,
+ getPrivatePurchaseTechnicianSchedule,
 reviewPrivatePurchaseInspectionDate,
 registerPrivatePurchaseSiteInspection,
  updatePrivatePurchaseInstallationWorkflow,
@@ -1360,6 +1624,8 @@ uploadPrivatePurchaseDeliveryGuides,
  forwardPrivatePurchaseToAcp,
  startPrivatePurchaseAvailability,
  savePrivatePurchaseProviderResponse,
+ confirmPrivateCuAvailability,
+ confirmPrivateImportApproval,
  getPrivatePurchaseDocuments,
  listPrivatePurchases,
  listPrivatePurchasesByRole,
@@ -1367,6 +1633,16 @@ uploadPrivatePurchaseDeliveryGuides,
  getStateColor,
  setPrivatePurchaseSupplyControlType,
  registerPrivatePurchaseSerial,
+ uploadPrivatePurchaseProforma,
+ requestPrivatePurchaseProforma,
+ uploadPrivatePurchaseSignedProforma,
+ getPrivatePurchaseActiveReservations,
+ renewPrivatePurchaseReservation,
+ markPrivatePurchaseProviderContractReceived,
+ uploadPrivatePurchaseProviderSignedContract,
+ registerPrivatePurchaseManagerContractDecision,
+ uploadPrivatePurchaseAcpSignedContract,
+ restartPrivatePurchaseContractAfterRejection,
  PRIVATE_PURCHASE_STATES,
  FLOW_TYPES
 };

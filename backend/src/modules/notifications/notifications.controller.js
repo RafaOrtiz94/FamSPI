@@ -44,10 +44,11 @@ const canTargetOtherUsers = (user = {}) => {
 
 const list = async (req, res) => {
   try {
+    // Una sola query — unread se deriva del array devuelto, sin segunda consulta a Neon.
     const notifications = await service.listNotifications(req.user.id, {
       status: req.query.status,
     });
-    const unread = await service.getUnreadCount(req.user.id);
+    const unread = notifications.filter((n) => n.status !== "read").length;
 
     return res.status(200).json({ ok: true, data: notifications, unread });
   } catch (err) {

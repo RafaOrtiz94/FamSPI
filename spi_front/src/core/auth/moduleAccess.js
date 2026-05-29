@@ -1,5 +1,6 @@
 export const MODULE_PATH_PREFIXES = [
-  { key: "ti_workspace", prefixes: ["/dashboard/ti/workspace"] },
+  { key: "kickoff_2026",  prefixes: ["/dashboard/kickoff"] },
+  { key: "ti_workspace",  prefixes: ["/dashboard/ti/workspace"] },
   { key: "ti_dispositivos", prefixes: ["/dashboard/ti/dispositivos"] },
   { key: "ti_modulos", prefixes: ["/dashboard/ti/modulos"] },
   { key: "ti_casos_externos", prefixes: ["/dashboard/ti/casos-externos"] },
@@ -63,4 +64,34 @@ export const isPathEnabledForUser = ({ pathname, moduleAccess }) => {
   const map = buildModuleAccessMap(moduleAccess);
   if (!map.has(key)) return true;
   return map.get(key);
+};
+
+// ── Global status helpers ─────────────────────────────────────────────────────
+
+export const buildGlobalStatusMap = (moduleGlobalStatus = []) => {
+  const map = new Map();
+  for (const row of moduleGlobalStatus || []) {
+    map.set(String(row.module_key || '').toLowerCase(), {
+      stage:        row.stage || 'production',
+      in_whitelist: Boolean(row.in_whitelist),
+    });
+  }
+  return map;
+};
+
+// Returns { stage, in_whitelist } for a path. stage defaults to 'production' if unknown.
+export const getModuleStatusForPath = ({ pathname, moduleGlobalStatus }) => {
+  const key = resolveModuleKeyForPath(pathname);
+  if (!key) return { stage: 'production', in_whitelist: false };
+  const map = buildGlobalStatusMap(moduleGlobalStatus);
+  return map.get(key) || { stage: 'production', in_whitelist: false };
+};
+
+// Returns true if the user should see the "under construction" page
+export const isModuleUnderConstruction = ({ pathname, moduleGlobalStatus, isTiAdmin = false }) => {
+  if (isTiAdmin) return false; // TI always passes through
+  const { stage, in_whitelist } = getModuleStatusForPath({ pathname, moduleGlobalStatus });
+  if (stage === 'construction') return true;
+  if (stage === 'testing' && !in_whitelist) return true;
+  return false;
 };

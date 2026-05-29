@@ -1360,7 +1360,7 @@ const TIDeviceManagementPage = () => {
                   <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-                        {String(r.period || "").match(/^\d{4}-\d{2}$/) ? `Mes ${r.period}` : `Año ${r.period}`}
+                        {String(r.period || "").match(/^\d{4}-\d{2}$/) ? `Mes ${r.period}` : `Aï¿½o ${r.period}`}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-600">

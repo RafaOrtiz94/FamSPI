@@ -1,7 +1,11 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { FiArrowRightCircle, FiCheckCircle, FiLock, FiTrendingUp, FiXCircle } from "react-icons/fi";
-import { submitBusinessCaseFeasibilityDecision } from "../../../../../core/api/businessCaseApi";
+import { FiArrowRightCircle, FiCheckCircle, FiLock, FiTrendingUp, FiXCircle, FiMessageSquare } from "react-icons/fi";
+import {
+  submitBusinessCaseFeasibilityDecision,
+  requestBusinessCaseFeasibilityAppeal,
+  resolveBusinessCaseFeasibilityAppeal,
+} from "../../../../../core/api/businessCaseApi";
 import { useUI } from "../../../../../core/ui/UIContext";
 
 const FALLBACK_OPTIONS = [
@@ -82,6 +86,60 @@ const FeasibilitySection = ({
  );
  const [notes, setNotes] = useState(decision?.notes || "");
 
+ // BC-16: Estado de apelación
+ const [appealReason, setAppealReason] = useState("");
+ const [appealSaving, setAppealSaving] = useState(false);
+ const [showAppealForm, setShowAppealForm] = useState(false);
+ const [resolveAppealNotes, setResolveAppealNotes] = useState("");
+ const [resolveAppealSaving, setResolveAppealSaving] = useState(false);
+
+ const canAppealFeasibilityRejection = Boolean(permissions?.canAppealFeasibilityRejection);
+ const canResolveFeasibilityAppeal = Boolean(permissions?.canResolveFeasibilityAppeal);
+ const existingAppeal = permissions?.feasibilityAppeal || null;
+ // BC-17: rechazo definitivo — no se permiten más apelaciones
+ const feasibilityIsDefinitivelyRejected = Boolean(permissions?.feasibilityIsDefinitivelyRejected);
+
+ const handleRequestAppeal = async () => {
+ if (!appealReason.trim()) {
+ showToast("Debes ingresar el motivo de la solicitud de revisión.", "warning");
+ return;
+ }
+ try {
+ setAppealSaving(true);
+ await requestBusinessCaseFeasibilityAppeal(businessCaseId, { reason: appealReason.trim() });
+ setShowAppealForm(false);
+ setAppealReason("");
+ await onSave({ refresh: true, markComplete: false, section: "feasibility" });
+ showToast("Solicitud de revisión enviada a Jefe Comercial.", "success");
+ } catch (error) {
+ showToast(error?.response?.data?.message || "No se pudo enviar la solicitud de revisión.", "error");
+ } finally {
+ setAppealSaving(false);
+ }
+ };
+
+ const handleResolveAppeal = async (approved) => {
+ try {
+ setResolveAppealSaving(true);
+ await resolveBusinessCaseFeasibilityAppeal(businessCaseId, {
+ approved,
+ notes: resolveAppealNotes.trim(),
+ });
+ setResolveAppealNotes("");
+ await onSave({ refresh: true, markComplete: false, section: "feasibility" });
+ showToast(
+ approved
+ ? "Apelación aprobada. El workspace de factibilidad fue reabierto."
+ : "Apelación rechazada.",
+ approved ? "success" : "info",
+ );
+ } catch (error) {
+ showToast(error?.response?.data?.message || "No se pudo resolver la apelación.", "error");
+ } finally {
+ setResolveAppealSaving(false);
+ }
+ };
+
  const purchasesWorkspacePath = useMemo(
  () => resolvePurchasesWorkspacePath(businessCase),
  [businessCase],
@@ -140,29 +198,150 @@ const FeasibilitySection = ({
  )}
 
  {isClosed && decision && (
- <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+ <div className={`rounded-2xl border p-4 ${decision.is_feasible ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
  <div className="flex items-start gap-3">
- <div className="rounded-xl bg-emerald-100 p-2 text-emerald-700">
+ <div className={`rounded-xl p-2 ${decision.is_feasible ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
  {decision.is_feasible ? <FiCheckCircle size={18} /> : <FiXCircle size={18} />}
  </div>
- <div className="space-y-1">
- <p className="text-sm font-semibold text-emerald-900">
+ <div className="space-y-1 flex-1">
+ <p className={`text-sm font-semibold ${decision.is_feasible ? "text-emerald-900" : "text-rose-900"}`}>
  Business Case cerrado como {decision.is_feasible ? "factible" : "no factible"}
  </p>
- <p className="text-xs text-emerald-800">
+ <p className={`text-xs ${decision.is_feasible ? "text-emerald-800" : "text-rose-800"}`}>
  Resuelto por {decision.decided_by_email || "N/D"}
  {decision.decided_at ? ` el ${new Date(decision.decided_at).toLocaleString("es-EC")}` : ""}
  </p>
  {!decision.is_feasible && (
- <p className="text-xs text-emerald-800">
+ <p className={`text-xs ${decision.is_feasible ? "text-emerald-800" : "text-rose-800"}`}>
  Alternativa definida: {normalizeFallbackLabel(decision.fallback_offer_kind)}
  </p>
  )}
  {decision.notes ? (
- <p className="pt-1 text-sm text-emerald-900">{decision.notes}</p>
+ <p className={`pt-1 text-sm ${decision.is_feasible ? "text-emerald-900" : "text-rose-900"}`}>{decision.notes}</p>
  ) : null}
  </div>
  </div>
+ </div>
+ )}
+
+ {/* BC-16: Panel de apelación cuando el BC fue rechazado */}
+ {isClosed && decision && !decision.is_feasible && (
+ <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+ <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Revisión de factibilidad</p>
+
+ {/* Apelación pendiente */}
+ {existingAppeal?.status === "pending" && (
+ <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+ <p className="font-semibold">Solicitud de revisión enviada</p>
+ <p className="text-xs mt-1">
+ Por {existingAppeal.requested_by_email || "N/D"} el{" "}
+ {existingAppeal.requested_at ? new Date(existingAppeal.requested_at).toLocaleString("es-EC") : ""}
+ </p>
+ {existingAppeal.reason && <p className="text-xs mt-1 text-amber-800">Motivo: {existingAppeal.reason}</p>}
+ </div>
+ )}
+
+ {/* Apelación resuelta */}
+ {existingAppeal?.status === "approved" && (
+ <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+ <p className="font-semibold">Revisión aprobada — workspace reabierto</p>
+ <p className="text-xs mt-1">Por {existingAppeal.resolved_by_email || "N/D"}</p>
+ </div>
+ )}
+ {existingAppeal?.status === "rejected" && (
+ <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+ <p className="font-semibold">Revisión rechazada</p>
+ {existingAppeal.resolution_notes && <p className="text-xs mt-1">Motivo: {existingAppeal.resolution_notes}</p>}
+ </div>
+ )}
+
+ {/* BC-17: Badge de rechazo definitivo — no se permiten más apelaciones */}
+ {feasibilityIsDefinitivelyRejected && (
+ <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+ <p className="font-bold">❌ No factible — decisión definitiva</p>
+ <p className="text-xs mt-1 text-red-700">
+ La solicitud de revisión fue rechazada. El Business Case no puede ser apelado nuevamente.
+ Los expedientes vinculados han sido cancelados.
+ </p>
+ </div>
+ )}
+
+ {/* Botón para comercial: solicitar revisión */}
+ {canAppealFeasibilityRejection && !showAppealForm && (
+ <button
+ type="button"
+ onClick={() => setShowAppealForm(true)}
+ className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+ >
+ <FiMessageSquare size={14} />
+ Solicitar revisión de factibilidad
+ </button>
+ )}
+ {canAppealFeasibilityRejection && showAppealForm && (
+ <div className="space-y-2">
+ <textarea
+ className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
+ rows={3}
+ placeholder="Motivo de la solicitud de revisión..."
+ value={appealReason}
+ onChange={(e) => setAppealReason(e.target.value)}
+ disabled={appealSaving}
+ />
+ <div className="flex gap-2">
+ <button
+ type="button"
+ onClick={handleRequestAppeal}
+ disabled={appealSaving}
+ className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+ >
+ {appealSaving ? "Enviando..." : "Enviar solicitud"}
+ </button>
+ <button
+ type="button"
+ onClick={() => { setShowAppealForm(false); setAppealReason(""); }}
+ className="rounded-full border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100"
+ >
+ Cancelar
+ </button>
+ </div>
+ </div>
+ )}
+
+ {/* Botón para jefe_comercial/gerencia: resolver apelación */}
+ {canResolveFeasibilityAppeal && existingAppeal?.status === "pending" && (
+ <div className="space-y-2">
+ <p className="text-xs text-slate-600">
+ <span className="font-semibold">{existingAppeal.requested_by_email}</span> solicita revisión.{" "}
+ Motivo: {existingAppeal.reason}
+ </p>
+ <textarea
+ className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
+ rows={2}
+ placeholder="Notas de resolución (opcional)..."
+ value={resolveAppealNotes}
+ onChange={(e) => setResolveAppealNotes(e.target.value)}
+ disabled={resolveAppealSaving}
+ />
+ <div className="flex gap-2">
+ <button
+ type="button"
+ onClick={() => handleResolveAppeal(true)}
+ disabled={resolveAppealSaving}
+ className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+ >
+ {resolveAppealSaving ? "Procesando..." : "Aprobar revisión"}
+ </button>
+ <button
+ type="button"
+ onClick={() => handleResolveAppeal(false)}
+ disabled={resolveAppealSaving}
+ className="inline-flex items-center gap-2 rounded-full bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+ >
+ Rechazar apelación
+ </button>
+ </div>
+ </div>
+ )}
  </div>
  )}
 

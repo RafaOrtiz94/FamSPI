@@ -196,13 +196,10 @@ const PermisosPage = () => {
  }, [vacationRequests]);
 
  const remainingDays = useMemo(() => {
- if (!vacationSummary) return 0;
- const allowance = Number(vacationSummary.allowance || 0);
- if (vacationSummary.eligible === false && !vacationSummary.missing_hire_date) {
- return allowance - vacationStats.requested;
- }
- return Math.max(0, allowance - vacationStats.approved);
- }, [vacationSummary, vacationStats.approved, vacationStats.requested]);
+    if (!vacationSummary) return 0;
+    // Use server-computed remaining — includes carry-over, charged permisos, and pending
+    return Number(vacationSummary.remaining ?? 0);
+  }, [vacationSummary]);
  const remainingVacationDisplay = useMemo(() => formatVacationDaysHours(remainingDays), [remainingDays]);
  const requestedVacationDisplay = useMemo(() => formatVacationDaysHours(vacationStats.requested), [vacationStats.requested]);
  const approvedVacationDisplay = useMemo(() => formatVacationDaysHours(vacationStats.approved), [vacationStats.approved]);
@@ -219,9 +216,9 @@ const PermisosPage = () => {
  const candidates = [user?.role, user?.scope, user?.role_name].map(normalizeRole);
 
  return candidates.some((role) =>
- ["talento_humano", "jefe_talento_humano", "jefe_financiero", "jefe_finanzas", "jefe_ti"].includes(role)
- );
- }, [user]);
+      ["talento_humano", "jefe_talento_humano", "jefe_financiero", "jefe_finanzas", "jefe_ti", "admin", "administrador"].includes(role)
+    );
+  }, [user]);
 
  const canViewGlobalRequestsWidget = useMemo(() => {
  const normalizeRole = (value) =>
@@ -250,9 +247,12 @@ const PermisosPage = () => {
     if (isTalentRole) {
       sections.push("collaborators");
       sections.push("reports");
+      if (!sections.includes("gerencia_approvals")) {
+        sections.push("gerencia_approvals");
+      }
     }
     if (canViewGlobalRequestsWidget) sections.push("global");
-    
+
     // Si es jefe o gerencia, permitir ver el widget de aprobaciones
     if (isJefeRole) {
       if (!sections.includes("gerencia_approvals")) {
@@ -367,13 +367,19 @@ const PermisosPage = () => {
 
  {!isGerenciaGeneral && (
  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
- <Card className="p-4 border border-emerald-200 bg-emerald-50">
- <p className="text-xs font-semibold uppercase text-emerald-700">Disponibles</p>
- <p className="text-2xl font-bold text-emerald-800">
- {loadingSummary ? "..." : remainingVacationDisplay.shortText}
- </p>
- <p className="text-xs text-emerald-700/80">{remainingVacationDisplay.decimalText}</p>
- </Card>
+ <Card className={`p-4 border ${remainingDays < 0 ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"}`}>
+            <p className={`text-xs font-semibold uppercase ${remainingDays < 0 ? "text-red-700" : "text-emerald-700"}`}>
+              {remainingDays < 0 ? "Déficit" : "Disponibles"}
+            </p>
+            <p className={`text-2xl font-bold ${remainingDays < 0 ? "text-red-800" : "text-emerald-800"}`}>
+              {loadingSummary ? "..." : formatVacationDaysHours(Math.abs(remainingDays)).shortText}
+            </p>
+            <p className={`text-xs ${remainingDays < 0 ? "text-red-700/80" : "text-emerald-700/80"}`}>
+              {remainingDays < 0
+                ? `−${formatVacationDaysHours(Math.abs(remainingDays)).decimalText}`
+                : remainingVacationDisplay.decimalText}
+            </p>
+          </Card>
  <Card className="p-4 border border-blue-200 bg-blue-50">
  <p className="text-xs font-semibold uppercase text-blue-700">Solicitados</p>
  <p className="text-2xl font-bold text-blue-800">
@@ -423,6 +429,7 @@ const PermisosPage = () => {
  vacationSummary &&
  !loadingSummary &&
  vacationSummary.eligible !== false &&
+ remainingDays >= 0 &&
  remainingDays <= 3 && (
  <Card className="border border-amber-200 bg-amber-50">
  <div className="p-4 text-sm text-amber-700">
@@ -431,6 +438,16 @@ const PermisosPage = () => {
  </div>
  </Card>
  )}
+
+ {!isGerenciaGeneral && vacationSummary && !loadingSummary && remainingDays < 0 && (
+        <Card className="border border-red-300 bg-red-50">
+          <div className="p-4 text-sm text-red-800">
+            Tu saldo de vacaciones es negativo. Déficit actual:{" "}
+            <strong>{formatVacationDaysHours(Math.abs(remainingDays)).text}</strong>. Consulta con Talento Humano
+            para regularizar.
+          </div>
+        </Card>
+      )}
 
  {!isGerenciaGeneral && vacationSummary?.missing_hire_date && (
  <Card className="border border-amber-200 bg-amber-50">

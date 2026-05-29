@@ -190,7 +190,42 @@ async function createTimeOffEvent({
   };
 }
 
+async function cancelTimeOffEvent({ eventId, calendarId, userEmail }) {
+  if (!eventId) return;
+
+  if (userEmail) {
+    try {
+      const delegatedUser = resolveDelegatedUser(userEmail);
+      if (delegatedUser) {
+        const delegatedAuth = createDelegatedJwtClient(delegatedUser);
+        await delegatedAuth.authorize();
+        const delegatedCalendar = google.calendar({ version: "v3", auth: delegatedAuth });
+        await delegatedCalendar.events.delete({
+          calendarId: "primary",
+          eventId,
+          sendUpdates: "all",
+        });
+        logger.info({ eventId, userEmail }, "[CALENDAR] Evento de tiempo fuera eliminado del calendario del usuario");
+        return;
+      }
+    } catch (primaryError) {
+      logger.warn(
+        { err: primaryError, eventId, userEmail },
+        "[CALENDAR] No se pudo eliminar del calendario primario; intentando calendario compartido"
+      );
+    }
+  }
+
+  await calendar.events.delete({
+    calendarId: calendarId || DEFAULT_CALENDAR_ID,
+    eventId,
+    sendUpdates: "all",
+  });
+  logger.info({ eventId, calendarId }, "[CALENDAR] Evento de tiempo fuera eliminado del calendario compartido");
+}
+
 module.exports = {
   createAllDayEvent,
   createTimeOffEvent,
+  cancelTimeOffEvent,
 };

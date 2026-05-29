@@ -111,12 +111,12 @@ const DesinfeccionStepper = () => {
  };
 
  const handleSignatureCapture = (signatureData) => {
- console.log("ðŸ“ DesinfeccionStepper: Signature captured", {
+ console.log("📝 DesinfeccionStepper: Signature captured", {
  dataLength: signatureData?.length,
  dataPreview: signatureData?.substring(0, 50) + "..."
  });
  setValue("firma_ing_SC", signatureData);
- console.log("ðŸ“ DesinfeccionStepper: Signature stored in form");
+ console.log("📝 DesinfeccionStepper: Signature stored in form");
  };
 
  const handleFileUpload = async (event) => {
@@ -234,7 +234,7 @@ const DesinfeccionStepper = () => {
  // 9. DECLARACIÓN Y FIRMA (temporal, será reemplazada por firma avanzada)
  firma_ing_SC: "FIRMA_ELECTRONICA_AVANZADA_PENDIENTE",
 
- // ðŸ”Ÿ ADJUNTOS
+ // 🔟 ADJUNTOS
  adjunto_evidencia: data.adjunto_evidencia,
  };
 

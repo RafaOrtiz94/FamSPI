@@ -8,6 +8,9 @@ const router = require("express").Router();
 const { rateLimit, ipKeyGenerator } = require("express-rate-limit");
 const { verifyToken } = require("../../middlewares/auth");
 const controller = require("./attendance.controller");
+const regularizationsController = require("./attendanceRegularizations.controller");
+const periodsController = require("./attendancePeriods.controller");
+const geofenceController = require("./attendanceGeofence.controller");
 const { requireAttendanceReportAccess, hasReportingAccess } = require("./attendance.auth");
 
 const requireAttendanceOpsAccess = (req, res, next) => {
@@ -145,6 +148,16 @@ router.post("/non-compliance/:userId/schedule-meeting", verifyToken, controller.
 // Operational health endpoint response:
 // { ok, data: { timezone, todayEc, cutoffEc, since48h, activeFlows, geoQuality, policyWatch, pendingLocationQueue } }
 router.get("/operational-health", verifyToken, requireAttendanceOpsAccess, controller.getOperationalHealth);
+router.get("/geofence/reference", verifyToken, requireAttendanceOpsAccess, geofenceController.getReference);
+
+// Regularizations lifecycle (incremental v2)
+router.post("/regularizations", verifyToken, regularizationsController.create);
+router.get("/regularizations", verifyToken, regularizationsController.list);
+router.post("/regularizations/:id/status", verifyToken, regularizationsController.transition);
+
+// Attendance periods lifecycle
+router.get("/period/current", verifyToken, periodsController.getCurrent);
+router.post("/period/:periodKey/status", verifyToken, periodsController.transition);
 
 // PDF generation
 router.get("/pdf/:userId", verifyToken, requireAttendanceReportAccess("param", { allowAll: true }), controller.generatePDF);

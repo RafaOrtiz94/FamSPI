@@ -66,6 +66,7 @@ const calidadTecnoRoutes = require("../modules/calidad/ca0117.routes");
 const internalJobsRouter = require("./internalJobs.routes");
 const tiAssetsRoutes = require("../modules/ti-assets/tiAssets.routes");
 const moduleAccessRoutes = require("../modules/module-access/moduleAccess.routes");
+const kickoffRoutes = require("../modules/kickoff/kickoff.routes");
 
 function mountPublicRoutes(app) {
   app.use("/api/v1/auth", authRoutes);
@@ -134,6 +135,7 @@ app.use("/api/v1/calidad/capa", calidadCapaRoutes);
   app.use("/api/v1/support-tickets", supportTicketsRoutes);
   app.use("/api/v1/ti-assets", tiAssetsRoutes);
   app.use("/api/v1/module-access", moduleAccessRoutes);
+  app.use("/api/v1/kickoff", kickoffRoutes);
   app.use("/api/v1/viaticos", viaticosRoutes);
   app.use("/internal/jobs", internalJobsRouter);
   app.use("/api/v1/users/me/profile", userProfileRoutes);

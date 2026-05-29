@@ -26,8 +26,15 @@ export const createDeliveryRequest = async (payload) => {
   return extractApiData(response);
 };
 
-export const opsApproveDeliveryRequest = async (id) => {
-  const response = await api.post(`/delivery-requests/${id}/ops-approve`);
+/**
+ * opsApproveDeliveryRequest
+ * @param {number} id - delivery request ID
+ * @param {{ lines?: Array<{ lineId: number, approvedQty: number }> }} [payload]
+ *   If lines are omitted, ops approves all lines at requested quantities.
+ *   Pass lines to set partial approved quantities per line.
+ */
+export const opsApproveDeliveryRequest = async (id, payload = {}) => {
+  const response = await api.post(`/delivery-requests/${id}/ops-approve`, payload);
   return extractApiData(response);
 };
 
@@ -36,8 +43,24 @@ export const cancelDeliveryRequest = async (id) => {
   return extractApiData(response);
 };
 
-export const confirmDeliveryRequest = async (id) => {
-  const response = await api.post(`/delivery-requests/${id}/confirm-delivery`);
+/**
+ * confirmDeliveryRequest
+ * Logistics confirms physical shipment.
+ * @param {number} id - delivery request ID
+ * @param {{ dispatchNotes?: string }} [payload]
+ */
+export const confirmDeliveryRequest = async (id, payload = {}) => {
+  const response = await api.post(`/delivery-requests/${id}/confirm-delivery`, payload);
+  return extractApiData(response);
+};
+
+/**
+ * listDeliveryDispatches
+ * Returns shipment history with timestamps and per-item quantities.
+ * @param {{ ceiling_id?: number, request_id?: number, limit?: number }} params
+ */
+export const listDeliveryDispatches = async (params = {}) => {
+  const response = await api.get("/delivery-requests/dispatches", { params: sanitizeParams(params) });
   return extractApiData(response);
 };
 

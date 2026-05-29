@@ -791,7 +791,7 @@ class PrivatePurchaseStateMachine {
     static async _checkRequiredDocumentsForGerencia(purchaseId) {
         const requiredDocs = [
             'CLIENT_REGISTRATION',
-            'INSPECTION_ACT',
+            // INSPECTION_ACT ya NO es requisito para gerencia — inspección y contrato son flujos paralelos
             'LOPDP_APPROVAL',
             'CLIENT_ID',
             'ACP_RESPONSE',
@@ -862,10 +862,8 @@ class PrivatePurchaseStateMachine {
             presentDocs.push('CLIENT_REGISTRATION');
         }
 
-        // Check inspection act
-        if (!purchase.inspection_acta_document_id) {
-            missingDocs.push('INSPECTION_ACT');
-        } else {
+        // Inspection act — informativo, ya NO bloquea gerencia (flujo paralelo al contrato)
+        if (purchase.inspection_acta_document_id) {
             presentDocs.push('INSPECTION_ACT');
         }
 

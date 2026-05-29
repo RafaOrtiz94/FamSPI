@@ -26,15 +26,17 @@ function getRoleConfig(businessCase = {}) {
   if (normalizedType === "private_comodato") {
     return {
       type: "private_comodato",
-      editors: ["tecnico", "jefe_comercial"],
-      notify: ["tecnico", "jefe_comercial"],
+      commercialEditors: ["backoffice_comercial", "backoffice"],
+      technicalEditors: ["tecnico", "jefe_tecnico"],
+      notify: ["tecnico", "jefe_tecnico"],
       label: "Compra privada comodato",
     };
   }
   return {
     type: "public",
-    editors: ["acp_comercial"],
-    notify: ["acp_comercial"],
+    commercialEditors: ["comercial"],
+    technicalEditors: ["tecnico", "jefe_tecnico"],
+    notify: ["tecnico", "jefe_tecnico"],
     label: "Compra publica",
   };
 }
@@ -233,28 +235,64 @@ function buildGateInfo({
     || (uploadedAt ? new Date(uploadedAt.getTime() + DETERMINATIONS_DEADLINE_HOURS * 60 * 60 * 1000) : null);
   const hasDocument = Boolean(document?.drive_file_id || document?.drive_link);
   const enabled = Boolean(rawGate?.enabled && hasDocument && uploadedAt);
+  const phase = String(rawGate?.phase || "commercial_input").trim().toLowerCase();
+  const quantitiesLocked = Boolean(rawGate?.quantities_locked || phase === "locked");
+  const rawSectionLocks = rawGate?.section_locks && typeof rawGate.section_locks === "object"
+    ? rawGate.section_locks
+    : {};
+  const sectionLocks = {
+    reactivos: Boolean(rawSectionLocks.reactivos || phase === "technical_review" || phase === "locked"),
+    controles: Boolean(rawSectionLocks.controles || phase === "locked"),
+    calibradores: Boolean(rawSectionLocks.calibradores || phase === "locked"),
+    materiales: Boolean(rawSectionLocks.materiales || phase === "locked"),
+  };
+  const unlockRequests = Array.isArray(rawGate?.unlock_requests)
+    ? rawGate.unlock_requests
+      .filter((entry) => entry && typeof entry === "object")
+      .map((entry) => ({
+        id: entry.id || null,
+        subsection: entry.subsection || null,
+        status: entry.status || "pending",
+        requestedAt: entry.requested_at || null,
+        requestedByEmail: entry.requested_by_email || null,
+        requestedByRole: entry.requested_by_role || null,
+        reason: entry.reason || "",
+        resolvedAt: entry.resolved_at || null,
+        resolvedByEmail: entry.resolved_by_email || null,
+        resolutionNotes: entry.resolution_notes || "",
+      }))
+    : [];
   const expiredByTime = Boolean(deadlineAt && deadlineAt.getTime() < now.getTime());
   const expiredByFlag = Boolean(rawGate?.is_expired);
   const expired = expiredByTime || expiredByFlag;
   const normalizedRole = String(role || "").toLowerCase();
+  const editorsByPhase = phase === "technical_review"
+    ? config.technicalEditors
+    : phase === "locked"
+      ? []
+      : config.commercialEditors;
   const canUpload = isUploadRole(normalizedRole);
   const canViewDocument = hasDocument && (
     canUpload ||
     DETERMINATIONS_DOCUMENT_VIEW_ROLES.has(normalizedRole)
   );
-  const canEditDeterminations = enabled && !expired && config.editors.includes(normalizedRole);
+  const canEditDeterminations = enabled && !expired && !quantitiesLocked && editorsByPhase.includes(normalizedRole);
 
   return {
     enabledForBusinessCase: true,
     workflowType: config.type,
     workflowLabel: config.label,
     requiresDocument: true,
+    phase,
+    quantitiesLocked,
+    sectionLocks,
+    unlockRequests,
     documentUploaded: hasDocument,
     enabledAt: toIsoOrNull(uploadedAt),
     deadlineAt: toIsoOrNull(deadlineAt),
     remainingMs: deadlineAt ? Math.max(0, deadlineAt.getTime() - now.getTime()) : null,
     isExpired: expired,
-    editors: config.editors,
+    editors: editorsByPhase,
     notificationsTargetRoles: config.notify,
     permissions: {
       canUploadDocument: canUpload,
@@ -278,6 +316,12 @@ function buildGateInfo({
 }
 
 function assertCanEditDeterminationsOrThrow(gate) {
+  if (gate?.quantitiesLocked) {
+    const error = new Error("Las cantidades de determinaciones estan bloqueadas. Solicita reapertura a Jefe Comercial.");
+    error.status = 409;
+    error.code = "DETERMINATIONS_QUANTITIES_LOCKED";
+    throw error;
+  }
   if (!gate?.documentUploaded) {
     const error = new Error("Debe cargarse el documento estadistico antes de editar determinaciones.");
     error.status = 409;

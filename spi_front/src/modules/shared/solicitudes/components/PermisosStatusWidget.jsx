@@ -15,12 +15,14 @@ import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useAuth } from "../../../../core/auth/AuthContext";
-import { STATUS_META, getTipoLabel, formatDateShort, hasJustificantes } from "../utils/solicitudesHelpers";
+import { STATUS_META, getTipoLabel, formatDateShort, hasJustificantes, JUSTIFICANTE_STATUS_META, ESCALATION_STATUS_META, PROVISIONAL_STATUS_META } from "../utils/solicitudesHelpers";
 import { formatVacationDaysHours } from "../utils/vacationDisplay";
 import {
   getMisSolicitudes,
   cancelarSolicitud,
   updateRecoveryPlan,
+  resolverRegularizacion,
+  convertirAVacaciones,
 } from "../../../../core/api/permisosApi";
 import UploadJustificantesModal from "../modals/UploadJustificantesModal";
 import { getActiveException } from "../../../../core/api/attendanceApi";
@@ -72,31 +74,14 @@ const normalizeDateOnly = (value) => {
   return parsed.toISOString().slice(0, 10);
 };
 
-const getTodayLocalDate = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
 
-const canCancelByDateRule = (solicitud = {}) => {
-  const startDate = normalizeDateOnly(solicitud?.fecha_inicio || solicitud?.fecha_inicio_hora);
-  if (!startDate) return false;
-  return getTodayLocalDate() <= startDate;
-};
+
 
 const isSameEmail = (a, b) =>
   String(a || "").trim().toLowerCase() !== "" &&
   String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 
-const APPROVED_CANCEL_FLOW_STATUSES = new Set(["approved", "aprobado"]);
-const DIRECT_CANCELABLE_STATUSES = new Set([
-  "pending",
-  "pendiente",
-  "partially_approved",
-  "pending_final",
-]);
+const NON_CANCELABLE_STATUSES = new Set(["rejected", "rechazado", "cancelled", "cancelado"]);
 
 const RECOVERY_COORDINATION_LABELS = {
   not_required: "No requiere coordinación",
@@ -173,10 +158,13 @@ const PermisosStatusWidget = () => {
   const [cancelReason, setCancelReason] = useState("");
   const [visibleItemsBySection, setVisibleItemsBySection] = useState(INITIAL_VISIBLE_COUNTS);
   const [recoveryRows, setRecoveryRows] = useState([]);
+  const [recoveryModalAction, setRecoveryModalAction] = useState("propose");
   const [activeException, setActiveException] = useState(null);
+  const [regularizacionModal, setRegularizacionModal] = useState({ open: false, solicitudId: null, action: null });
+  const [regularizacionReason, setRegularizacionReason] = useState("");
   const refreshPromiseRef = useRef(null);
 
-  const isTalentRole = ["talento_humano", "jefe_talento_humano", "talento-humano", "jefe_financiero", "jefe_finanzas"].includes(scope);
+  const isTalentRole = ["talento_humano", "jefe_talento_humano", "talento-humano", "gerencia_general", "gerente_general", "gerencia", "gerente", "director", "admin", "administrador"].includes(scope);
 
   const normalizeDateValue = (value) => {
     if (!value) return null;
@@ -324,20 +312,78 @@ const PermisosStatusWidget = () => {
     });
   };
 
-  const openRecoveryEditor = (solicitud) => {
+  const openRecoveryEditor = (solicitud, action = "propose") => {
     const currentPlan = Array.isArray(solicitud?.recovery_plan) ? solicitud.recovery_plan : [];
     setSelectedSolicitud(solicitud);
+    setRecoveryModalAction(action);
+    // log_progress always starts with a blank row to enter new execution entries
     setRecoveryRows(
-      currentPlan.length > 0
-        ? currentPlan.map((row) => ({
-          date: String(row?.date || ""),
-          start_time: normalizeTimeText(row?.start_time),
-          end_time: normalizeTimeText(row?.end_time),
-          notes: String(row?.notes || ""),
-        }))
-        : [{ date: "", start_time: "", end_time: "", notes: "" }]
+      action === "log_progress"
+        ? [{ date: "", start_time: "", end_time: "", notes: "" }]
+        : currentPlan.length > 0
+          ? currentPlan.map((row) => ({
+            date: String(row?.date || ""),
+            start_time: normalizeTimeText(row?.start_time),
+            end_time: normalizeTimeText(row?.end_time),
+            notes: String(row?.notes || ""),
+          }))
+          : [{ date: "", start_time: "", end_time: "", notes: "" }]
     );
     setShowRecoveryModal(true);
+  };
+
+  const handleCloseRecovery = async (solicitudId) => {
+    await runActionWithLoader(`close-recovery-${solicitudId}`, "Confirmando recuperación completada...", async () => {
+      try {
+        const response = await updateRecoveryPlan(solicitudId, [], "close");
+        if (response?.ok) {
+          showToast("Recuperación marcada como completada", "success");
+          await loadData();
+        }
+      } catch (error) {
+        showToast(error.response?.data?.message || "Error al cerrar la recuperación", "error");
+      }
+    });
+  };
+
+  const openRegularizacionModal = (solicitudId, action) => {
+    setRegularizacionReason("");
+    setRegularizacionModal({ open: true, solicitudId, action });
+  };
+
+  const handleConfirmRegularizacion = async () => {
+    const { solicitudId, action } = regularizacionModal;
+    if (!solicitudId || !action) return;
+    if (!regularizacionReason.trim()) {
+      showToast("Debes ingresar un motivo para continuar.", "error");
+      return;
+    }
+    await runActionWithLoader(`regularizacion-${solicitudId}`, "Procesando regularización...", async () => {
+      try {
+        const response = await resolverRegularizacion(solicitudId, action, regularizacionReason.trim());
+        if (response?.ok) {
+          showToast("Regularización procesada correctamente.", "success");
+          setRegularizacionModal({ open: false, solicitudId: null, action: null });
+          await loadData();
+        }
+      } catch (error) {
+        showToast(error.response?.data?.message || "Error al procesar la regularización", "error");
+      }
+    });
+  };
+
+  const handleConvertirAVacaciones = async (solicitudId) => {
+    await runActionWithLoader(`convertir-vac-${solicitudId}`, "Convirtiendo a vacaciones...", async () => {
+      try {
+        const response = await convertirAVacaciones(solicitudId);
+        if (response?.ok) {
+          showToast("Ausencia convertida a vacaciones correctamente.", "success");
+          await loadData();
+        }
+      } catch (error) {
+        showToast(error.response?.data?.message || "Error al convertir a vacaciones", "error");
+      }
+    });
   };
 
   const handleSaveRecoveryPlan = async (action = "propose") => {
@@ -422,10 +468,7 @@ const PermisosStatusWidget = () => {
       selectedSolicitud?.approver_user_id &&
       Number(userId) === Number(selectedSolicitud.approver_user_id)) ||
       isSameEmail(userEmail, selectedSolicitud?.approver_email));
-  const selectedRequiresCancellationRequestFlow =
-    APPROVED_CANCEL_FLOW_STATUSES.has(selectedStatus) &&
-    isSelectedRequester &&
-    !selectedIsApprover;
+  const selectedRequiresCancellationRequestFlow = false;
 
   const pendientesDeJustificante = useMemo(
     () =>
@@ -619,15 +662,11 @@ const PermisosStatusWidget = () => {
 
     const cancellationStatus = String(solicitud?.cancellation_status || "none").toLowerCase();
     const hasPendingCancellation = cancellationStatus === "pending";
-    const isApprovedCancellationFlowStatus = APPROVED_CANCEL_FLOW_STATUSES.has(normalizedStatus);
-    const isDirectCancelableStatus = DIRECT_CANCELABLE_STATUSES.has(normalizedStatus);
     const canCancelThis =
       cancellationStatus !== "pending" &&
       isRequesterOfSolicitud &&
-      (isDirectCancelableStatus ||
-        (isApprovedCancellationFlowStatus && canCancelByDateRule(solicitud)));
-    const requiresCancellationRequestFlow =
-      isApprovedCancellationFlowStatus && isRequesterOfSolicitud && !isApproverOfSolicitud;
+      !NON_CANCELABLE_STATUSES.has(normalizedStatus);
+    const requiresCancellationRequestFlow = false;
 
     const signatureSummary = solicitud.firma_avanzada_resumen || null;
     const isVacation = solicitud.tipo_solicitud === "vacaciones";
@@ -652,15 +691,19 @@ const PermisosStatusWidget = () => {
       >
         <div
           className={`absolute left-0 top-0 h-full w-1 rounded-l-xl ${
-            solicitud.status === "approved" || solicitud.status === "aprobado"
-              ? "bg-green-500"
-              : solicitud.status === "partially_approved"
-                ? "bg-blue-500"
-                : solicitud.status === "pending_final"
-                  ? "bg-purple-500"
-                  : solicitud.status === "rejected"
-                    ? "bg-red-500"
-                    : "bg-amber-400"
+            solicitud.provisional_status === "pendiente_regularizacion"
+              ? "bg-rose-500"
+              : solicitud.provisional_status === "salida_provisional_autorizada"
+                ? "bg-orange-400"
+                : solicitud.status === "approved" || solicitud.status === "aprobado"
+                  ? "bg-green-500"
+                  : solicitud.status === "partially_approved"
+                    ? "bg-blue-500"
+                    : solicitud.status === "pending_final"
+                      ? "bg-purple-500"
+                      : solicitud.status === "rejected"
+                        ? "bg-red-500"
+                        : "bg-amber-400"
           }`}
         />
 
@@ -681,6 +724,31 @@ const PermisosStatusWidget = () => {
                 );
               })()}
             </div>
+            {solicitud.is_urgent && (
+              <span className="mt-1 inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded border bg-red-100 text-red-800 border-red-200">
+                URGENTE
+              </span>
+            )}
+            {(() => {
+              const prov = String(solicitud.provisional_status || "").toLowerCase();
+              const provMeta = PROVISIONAL_STATUS_META[prov];
+              if (!provMeta) return null;
+              return (
+                <span className={`mt-1 inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded border ${provMeta.badge}`}>
+                  {provMeta.label}
+                </span>
+              );
+            })()}
+            {(() => {
+              const esc = String(solicitud.escalation_status || "").toLowerCase();
+              const escMeta = ESCALATION_STATUS_META[esc];
+              if (!escMeta) return null;
+              return (
+                <span className={`mt-1 inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded border ${escMeta.badge}`}>
+                  {escMeta.label}
+                </span>
+              );
+            })()}
             <div className="flex items-center gap-3 text-xs text-gray-500">
               <span>
                 {formatDateShort(solicitud.fecha_inicio)} - {formatDateShort(solicitud.fecha_fin)}
@@ -807,6 +875,27 @@ const PermisosStatusWidget = () => {
           </div>
         )}
 
+        {(() => {
+          const jStatus = String(solicitud.justificante_status || "").toLowerCase();
+          const jMeta = JUSTIFICANTE_STATUS_META[jStatus];
+          if (!jMeta || jStatus === "aceptado") return null;
+          return (
+            <div className={`mt-2 rounded-lg border p-2 ${jMeta.bg} ${jMeta.border}`}>
+              <p className={`text-[11px] font-semibold ${jMeta.text}`}>{jMeta.label}</p>
+              {solicitud.justificante_observations && (
+                <p className={`text-[11px] italic mt-1 ${jMeta.text}`}>
+                  {solicitud.justificante_observations}
+                </p>
+              )}
+              {solicitud.justificante_deadline && (
+                <p className={`text-[11px] mt-1 ${jMeta.text}`}>
+                  Plazo: {formatDateShort(solicitud.justificante_deadline)}
+                </p>
+              )}
+            </div>
+          );
+        })()}
+
         {hasJustificantes(solicitud) && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {solicitud.justificantes_urls.map((url, idx) => (
@@ -865,26 +954,120 @@ const PermisosStatusWidget = () => {
           </div>
         )}
 
-        <div className="mt-3 flex gap-2">
-          {canCancelThis && (
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setSelectedSolicitud(solicitud);
-                setCancelReason("");
-                setShowCancelModal(true);
-              }}
-              className="flex-1 text-[10px] py-1.5 text-rose-600 border-rose-100 hover:bg-rose-50"
-            >
-              {requiresCancellationRequestFlow ? "Solicitar cancelacion" : "Cancelar solicitud"}
-            </Button>
-          )}
-        </div>
+        {(() => {
+          const provStatus = String(solicitud.provisional_status || "").toLowerCase();
+          const showRegularizacionActions =
+            isTalentRole && provStatus === "pendiente_regularizacion";
+          if (!showRegularizacionActions) return null;
+          const provMeta = PROVISIONAL_STATUS_META.pendiente_regularizacion;
+          return (
+            <div className={`mt-2 rounded-lg border p-2.5 ${provMeta.bg} ${provMeta.border}`}>
+              <p className={`text-[11px] font-semibold mb-2 ${provMeta.text}`}>
+                Ausencia urgente no procedente — requiere acción de regularización
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="flex-1 text-[10px] py-1.5 border-rose-300 text-rose-800 hover:bg-rose-100"
+                  onClick={() => openRegularizacionModal(solicitud.id, "rechazar_formalmente")}
+                  disabled={!!actionLoading}
+                >
+                  Rechazar formalmente
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="flex-1 text-[10px] py-1.5 border-emerald-300 text-emerald-800 hover:bg-emerald-100"
+                  onClick={() => openRegularizacionModal(solicitud.id, "aceptar_excepcion")}
+                  disabled={!!actionLoading}
+                >
+                  Aceptar por excepción
+                </Button>
+                {solicitud.vacation_conversion_consent && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1 text-[10px] py-1.5 border-purple-300 text-purple-800 hover:bg-purple-100"
+                    onClick={() => handleConvertirAVacaciones(solicitud.id)}
+                    disabled={!!actionLoading}
+                  >
+                    Convertir a vacaciones
+                  </Button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {(() => {
+          const jStatus = String(solicitud.justificante_status || "").toLowerCase();
+          const showResubmit = jStatus === "observado" && isRequesterOfSolicitud;
+          const showLogProgress =
+            Boolean(solicitud.es_recuperable) &&
+            coordinationStatus === "execution_in_progress" &&
+            isRequesterOfSolicitud;
+          const showCloseRecovery =
+            Boolean(solicitud.es_recuperable) &&
+            coordinationStatus === "pending_verification" &&
+            isRequesterOfSolicitud;
+          const hasAnyAction = canCancelThis || showResubmit || showLogProgress || showCloseRecovery;
+          if (!hasAnyAction) return null;
+          return (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {showResubmit && (
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setSelectedSolicitud(solicitud);
+                    setShowUploadModal(true);
+                  }}
+                  className="flex-1 text-[10px] py-1.5 bg-amber-600 hover:bg-amber-700"
+                >
+                  Resubmitir justificante
+                </Button>
+              )}
+              {showLogProgress && (
+                <Button
+                  variant="secondary"
+                  onClick={() => openRecoveryEditor(solicitud, "log_progress")}
+                  className="flex-1 text-[10px] py-1.5"
+                >
+                  Registrar progreso
+                </Button>
+              )}
+              {showCloseRecovery && (
+                <Button
+                  variant="primary"
+                  onClick={() => handleCloseRecovery(solicitud.id)}
+                  disabled={!!actionLoading}
+                  className="flex-1 text-[10px] py-1.5 bg-emerald-600 hover:bg-emerald-700"
+                >
+                  Confirmar recuperación
+                </Button>
+              )}
+              {canCancelThis && (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setSelectedSolicitud(solicitud);
+                    setCancelReason("");
+                    setShowCancelModal(true);
+                  }}
+                  className="flex-1 text-[10px] py-1.5 text-rose-600 border-rose-100 hover:bg-rose-50"
+                >
+                  {requiresCancellationRequestFlow ? "Solicitar cancelacion" : "Cancelar solicitud"}
+                </Button>
+              )}
+            </div>
+          );
+        })()}
       </motion.div>
     );
   };
 
   return (
+    <>
     <div className="space-y-4">
       {/* Widget de Salida Inesperada */}
       {!isTalentRole && (
@@ -1062,10 +1245,15 @@ const PermisosStatusWidget = () => {
               <div className="p-2 bg-emerald-50 rounded-lg">
                 <FiClock className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-bold">Plan de recuperación</h3>
+              <h3 className="text-lg font-bold">
+                {recoveryModalAction === "log_progress" ? "Registrar progreso de recuperación" : "Plan de recuperación"}
+              </h3>
             </div>
             <p className="text-sm text-gray-600 mb-4">
-              Coordinación de tramos para cubrir <span className="font-bold text-emerald-700">{requestedRecoveryHours}h</span> pendientes.
+              {recoveryModalAction === "log_progress"
+                ? <>Ingresa las horas ya ejecutadas. Total a recuperar: <span className="font-bold text-emerald-700">{requestedRecoveryHours}h</span>.</>
+                : <>Coordinación de tramos para cubrir <span className="font-bold text-emerald-700">{requestedRecoveryHours}h</span> pendientes.</>
+              }
             </p>
 
             <div className="mt-4 space-y-3 max-h-[40vh] overflow-auto pr-1">
@@ -1156,7 +1344,17 @@ const PermisosStatusWidget = () => {
               >
                 Cancelar
               </Button>
-              {canSelectedRequesterCounterPropose && (
+              {recoveryModalAction === "log_progress" && (
+                <Button
+                  variant="primary"
+                  onClick={() => handleSaveRecoveryPlan("log_progress")}
+                  disabled={actionLoading === `recovery-${selectedSolicitud?.id}`}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 rounded-xl"
+                >
+                  Guardar progreso
+                </Button>
+              )}
+              {canSelectedRequesterCounterPropose && recoveryModalAction !== "log_progress" && (
                 <Button
                   variant="primary"
                   onClick={() => handleSaveRecoveryPlan("propose")}
@@ -1171,6 +1369,52 @@ const PermisosStatusWidget = () => {
         </div>
       )}
     </div>
+
+    {/* Modal de razón para regularización urgente */}
+    {regularizacionModal.open && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="w-full max-w-md rounded-xl bg-white shadow-xl p-5">
+          <h3 className="text-sm font-semibold text-gray-900 mb-1">
+            {regularizacionModal.action === "rechazar_formalmente"
+              ? "Rechazar formalmente la ausencia urgente"
+              : "Aceptar ausencia urgente por excepción"}
+          </h3>
+          <p className="text-xs text-gray-500 mb-3">
+            {regularizacionModal.action === "rechazar_formalmente"
+              ? "Esta acción cierra la solicitud como rechazada. Indica el motivo formal del rechazo."
+              : "Esta acción acepta la ausencia por excepción y la envía a aprobación final. Indica el motivo de la excepción."}
+          </p>
+          <textarea
+            className="w-full rounded-lg border border-gray-200 text-xs p-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            rows={3}
+            placeholder="Motivo obligatorio..."
+            value={regularizacionReason}
+            onChange={(e) => setRegularizacionReason(e.target.value)}
+          />
+          <div className="mt-3 flex gap-2 justify-end">
+            <Button
+              size="sm"
+              variant="secondary"
+              className="text-xs"
+              onClick={() => setRegularizacionModal({ open: false, solicitudId: null, action: null })}
+              disabled={!!actionLoading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              className={`text-xs ${regularizacionModal.action === "rechazar_formalmente" ? "bg-rose-600 hover:bg-rose-700" : "bg-emerald-600 hover:bg-emerald-700"}`}
+              onClick={handleConfirmRegularizacion}
+              disabled={!!actionLoading || !regularizacionReason.trim()}
+            >
+              {actionLoading ? "Procesando..." : "Confirmar"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 };
 

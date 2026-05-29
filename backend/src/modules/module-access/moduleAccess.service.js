@@ -1,7 +1,8 @@
 const db = require("../../config/db");
 
 const MODULE_CATALOG = [
-  { key: "inicio", label: "Inicio", path_prefixes: ["/dashboard"] },
+  { key: "inicio",        label: "Inicio",          path_prefixes: ["/dashboard"] },
+  { key: "kickoff_2026",  label: "Kick Off 2026",   path_prefixes: ["/dashboard/kickoff"] },
   { key: "ti_workspace", label: "TI Workspace", path_prefixes: ["/dashboard/ti/workspace"] },
   { key: "ti_dispositivos", label: "TI Dispositivos", path_prefixes: ["/dashboard/ti/dispositivos"] },
   { key: "ti_modulos", label: "TI Modulos por Usuario", path_prefixes: ["/dashboard/ti/modulos"] },
@@ -154,10 +155,76 @@ async function isModuleEnabledForUser({ userId, moduleKey }) {
   }
 }
 
+// ─── Global module status ─────────────────────────────────────────────────────
+
+async function ensureGlobalStatusSchema() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS module_global_status (
+      module_key        TEXT PRIMARY KEY,
+      stage             TEXT NOT NULL DEFAULT 'production'
+                        CHECK (stage IN ('production', 'testing', 'construction')),
+      whitelist_emails  TEXT[] NOT NULL DEFAULT '{}',
+      updated_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+}
+
+async function listGlobalModuleStatuses() {
+  try {
+    await ensureGlobalStatusSchema();
+    const { rows } = await db.query(
+      `SELECT module_key, stage, whitelist_emails, updated_at, updated_by
+       FROM module_global_status ORDER BY module_key`
+    );
+    return rows;
+  } catch (_) {
+    return [];
+  }
+}
+
+async function getGlobalModuleStatusForUser(userEmail) {
+  const statuses = await listGlobalModuleStatuses();
+  return statuses.map(s => ({
+    module_key:   s.module_key,
+    stage:        s.stage,
+    in_whitelist: Array.isArray(s.whitelist_emails)
+      ? s.whitelist_emails.map(e => e.toLowerCase()).includes((userEmail || '').toLowerCase())
+      : false,
+  }));
+}
+
+async function upsertGlobalModuleStatus({ moduleKey, stage, whitelist_emails, actorUserId }) {
+  await ensureGlobalStatusSchema();
+  const key = sanitizeModuleKey(moduleKey);
+  if (!key) throw Object.assign(new Error('moduleKey inválido'), { status: 400 });
+
+  const validStages = ['production', 'testing', 'construction'];
+  if (!validStages.includes(stage)) throw Object.assign(new Error('stage inválido'), { status: 400 });
+
+  const emails = (whitelist_emails || []).map(e => String(e).trim().toLowerCase()).filter(Boolean);
+
+  const { rows } = await db.query(
+    `INSERT INTO module_global_status (module_key, stage, whitelist_emails, updated_by, updated_at)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (module_key) DO UPDATE SET
+       stage = EXCLUDED.stage,
+       whitelist_emails = EXCLUDED.whitelist_emails,
+       updated_by = EXCLUDED.updated_by,
+       updated_at = NOW()
+     RETURNING *`,
+    [key, stage, emails, actorUserId || null]
+  );
+  return rows[0];
+}
+
 module.exports = {
   getCatalog,
   listUserModuleAccess,
   upsertUserModuleAccess,
   resolveModuleKeyByPath,
   isModuleEnabledForUser,
+  listGlobalModuleStatuses,
+  getGlobalModuleStatusForUser,
+  upsertGlobalModuleStatus,
 };

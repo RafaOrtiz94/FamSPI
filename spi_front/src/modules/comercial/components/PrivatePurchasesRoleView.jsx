@@ -5,7 +5,7 @@
  * Proporciona vista unificada para todos los roles del workflow.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useUI } from '../../../core/ui/useUI';
 import Button from '../../../core/ui/components/Button';
 import { formatDateEC } from '../../../core/utils/dateUtils';
@@ -25,6 +25,7 @@ import {
  PRIVATE_PURCHASE_STATES
 } from '../../../core/api/privatePurchasesApi';
 import { usePurchaseSSE } from '../../../core/hooks/usePurchaseSSE';
+import { promptDialog } from '../../../core/ui/utils/promptDialog';
 
 const PrivatePurchasesRoleView = ({ role, title }) => {
  const { showToast } = useUI();
@@ -64,55 +65,44 @@ const PrivatePurchasesRoleView = ({ role, title }) => {
  onEvent: loadData
  });
 
- // Consultar estado de aprobación de clientes para backoffice_comercial
+ // Consultar estado de aprobación de clientes para backoffice_comercial.
+ // FIX: clientApprovalStatuses eliminado de deps para evitar re-ejecución en cada actualización.
+ // Se usa una ref para leer el estado cacheado dentro del intervalo sin re-crear el timer.
+ const clientApprovalStatusesRef = useRef(clientApprovalStatuses);
  useEffect(() => {
- if (role === 'backoffice_comercial') {
- console.log('[FRONTEND_CLIENT_APPROVAL] Iniciando consulta automática para backoffice_comercial');
+   clientApprovalStatusesRef.current = clientApprovalStatuses;
+ }, [clientApprovalStatuses]);
 
- const checkClientApprovals = async () => {
- console.log('[FRONTEND_CLIENT_APPROVAL] Ejecutando consulta automática, purchases:', purchases.length);
+ useEffect(() => {
+ if (role !== 'backoffice_comercial' || purchases.length === 0) return undefined;
 
- for (const purchase of purchases) {
- console.log(`[FRONTEND_CLIENT_APPROVAL] Verificando purchase ${purchase.id}, cliente:`, purchase.client_snapshot?.name || 'sin nombre');
-
- if (!clientApprovalStatuses[purchase.id]) {
- try {
- console.log(`[FRONTEND_CLIENT_APPROVAL] Consultando aprobación para purchase ${purchase.id}`);
- const approvalStatus = await checkClientApproval(purchase.id);
- console.log(`[FRONTEND_CLIENT_APPROVAL] Respuesta para purchase ${purchase.id}:`, approvalStatus);
-
- setClientApprovalStatuses(prev => ({
- ...prev,
- [purchase.id]: approvalStatus
- }));
-
- console.log(`[FRONTEND_CLIENT_APPROVAL] Estado actualizado para purchase ${purchase.id}:`, approvalStatus.isApproved ? 'APROBADO' : 'PENDIENTE');
- } catch (error) {
- console.error(`[FRONTEND_CLIENT_APPROVAL] Error consultando aprobación para ${purchase.id}:`, error);
- }
- } else {
- console.log(`[FRONTEND_CLIENT_APPROVAL] Purchase ${purchase.id} ya tiene estado cacheado:`, clientApprovalStatuses[purchase.id].isApproved ? 'APROBADO' : 'PENDIENTE');
- }
- }
+ const checkClientApprovals = async (purchaseList) => {
+   for (const purchase of purchaseList) {
+     // Solo consultar si no hay estado cacheado
+     if (!clientApprovalStatusesRef.current[purchase.id]) {
+       try {
+         const approvalStatus = await checkClientApproval(purchase.id);
+         setClientApprovalStatuses(prev => ({ ...prev, [purchase.id]: approvalStatus }));
+       } catch (error) {
+         // Error silencioso — no bloquear el flujo
+       }
+     }
+   }
  };
 
- if (purchases.length > 0) {
- console.log('[FRONTEND_CLIENT_APPROVAL] Iniciando primera consulta');
- checkClientApprovals();
+ // Carga inicial: solo consulta las compras sin estado cacheado
+ checkClientApprovals(purchases);
 
- // Consultar cada 30 segundos para actualizaciones en tiempo real
- console.log('[FRONTEND_CLIENT_APPROVAL] Configurando intervalo de 30 segundos');
+ // Refresco periódico: 3 min para no saturar el backend.
+ // Limpia estados cacheados para forzar re-consulta en cada ciclo.
  const interval = setInterval(() => {
- console.log('[FRONTEND_CLIENT_APPROVAL] Ejecutando consulta por intervalo');
- checkClientApprovals();
- }, 30000);
- return () => {
- console.log('[FRONTEND_CLIENT_APPROVAL] Limpiando intervalo');
- clearInterval(interval);
- };
- }
- }
- }, [role, purchases, clientApprovalStatuses]);
+   setClientApprovalStatuses({});
+   checkClientApprovals(purchases);
+ }, 3 * 60 * 1000);
+
+ return () => clearInterval(interval);
+ // eslint-disable-next-line react-hooks/exhaustive-deps
+ }, [role, purchases]);
 
  const loadOfferDocument = async (purchaseId) => {
  if (offerDocs[purchaseId]) return;
@@ -236,7 +226,12 @@ const PrivatePurchasesRoleView = ({ role, title }) => {
  };
 
  const handleRejectContract = async (purchaseId) => {
- const reason = window.prompt('Motivo de rechazo (obligatorio):');
+ const reason = await promptDialog({
+ title: 'Rechazar contrato',
+ message: 'Motivo de rechazo (obligatorio):',
+ required: true,
+ confirmText: 'Rechazar',
+ });
  if (!reason) {
  showToast('Debes ingresar un motivo de rechazo', 'error');
  return;

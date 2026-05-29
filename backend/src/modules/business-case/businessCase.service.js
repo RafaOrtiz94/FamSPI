@@ -796,13 +796,14 @@ async function updateBusinessCase(id, data) {
 
   await db.query(query, values);
 
-  if (
-    data?.modern_bc_metadata &&
-    (Array.isArray(data.modern_bc_metadata.consumption_items) ||
-      Array.isArray(data.modern_bc_metadata.consumption_excluded))
-  ) {
-    await syncConsumptionData(id, data.modern_bc_metadata);
-  }
+  // CRITICAL:
+  // No sincronizar consumos desde PUT general de BC.
+  // Este endpoint se usa para multiples secciones y puede traer
+  // modern_bc_metadata parcial/desactualizado (incluyendo arreglos vacios),
+  // lo que termina borrando bc_consumption_items.
+  // La fuente de verdad de consumos debe modificarse solo por:
+  // - PUT /business-case/:id/consumption-items
+  // - PATCH /business-case/:id/consumption-items/:itemKey
 
   logger.info({
     business_case_id: id
@@ -841,6 +842,16 @@ async function loadConsumptionData(businessCaseId) {
       excluded.map((row) => row.item_key),
     );
     const version = buildConsumptionVersion(mappedItems, mappedExcluded);
+    logger.info(
+      {
+        businessCaseId,
+        version,
+        itemsCount: mappedItems.length,
+        excludedCount: mappedExcluded.length,
+        nonZeroItems: mappedItems.filter((item) => Number(item?.annualQty ?? 0) > 0).length,
+      },
+      "[BC_AUDIT][BE][LOAD_CONSUMPTION]",
+    );
 
     return {
       items: mappedItems,
@@ -992,6 +1003,13 @@ function assertConsumptionVersion(expectedVersion, currentVersion) {
   const normalizedExpected = normalizeExpectedVersion(expectedVersion);
   if (!normalizedExpected) return;
   if (normalizedExpected === currentVersion) return;
+  logger.warn(
+    {
+      expectedVersion: normalizedExpected,
+      currentVersion,
+    },
+    "[BC_AUDIT][BE][VERSION_CONFLICT]",
+  );
 
   const error = new Error("Los consumos fueron actualizados por otro usuario. Refresca antes de guardar.");
   error.status = 409;
@@ -1020,6 +1038,15 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
     Array.isArray(metadata.consumption_excluded) ? metadata.consumption_excluded : [],
   );
   const client = await db.getClient();
+  logger.info(
+    {
+      businessCaseId,
+      itemsCount: items.length,
+      excludedCount: excluded.length,
+      nonZeroItems: items.filter((item) => Number(item?.annual_qty ?? 0) > 0).length,
+    },
+    "[BC_AUDIT][BE][SYNC_INPUT]",
+  );
 
   await client.query("BEGIN");
   try {
@@ -1131,6 +1158,24 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
     }
 
     await client.query("COMMIT");
+    const { rows: counters } = await db.query(
+      `
+      SELECT
+        COUNT(*)::int AS items_count,
+        COALESCE(SUM(CASE WHEN annual_qty > 0 THEN 1 ELSE 0 END), 0)::int AS non_zero_items,
+        COALESCE(SUM(annual_qty), 0)::int AS total_qty
+      FROM bc_consumption_items
+      WHERE business_case_id = $1
+      `,
+      [businessCaseId],
+    );
+    logger.info(
+      {
+        businessCaseId,
+        persisted: counters?.[0] || null,
+      },
+      "[BC_AUDIT][BE][SYNC_RESULT]",
+    );
   } catch (error) {
     await client.query("ROLLBACK");
     logger.error({ error: error.message, businessCaseId }, "Error sincronizando consumos de BC");
@@ -1163,6 +1208,17 @@ async function saveConsumptionItems(businessCaseId, items = [], excluded = [], o
   }
   nextExcluded = normalizeExcludedForItems(nextItems, nextExcluded);
   const current = await loadConsumptionData(businessCaseId);
+  logger.info(
+    {
+      businessCaseId,
+      expectedVersion,
+      currentVersion: current?.version || null,
+      incomingItems: nextItems.length,
+      incomingExcluded: nextExcluded.length,
+      incomingNonZero: nextItems.filter((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) > 0).length,
+    },
+    "[BC_AUDIT][BE][SAVE_CONSUMPTION_PRECHECK]",
+  );
   assertConsumptionVersion(expectedVersion, current?.version || null);
 
   if (current && isSameConsumptionPayload(current, nextItems, nextExcluded)) {
@@ -1173,7 +1229,19 @@ async function saveConsumptionItems(businessCaseId, items = [], excluded = [], o
     consumption_items: nextItems,
     consumption_excluded: nextExcluded
   });
-  return loadConsumptionData(businessCaseId);
+  const reloaded = await loadConsumptionData(businessCaseId);
+  logger.info(
+    {
+      businessCaseId,
+      version: reloaded?.version || null,
+      itemsCount: Array.isArray(reloaded?.items) ? reloaded.items.length : 0,
+      nonZeroItems: Array.isArray(reloaded?.items)
+        ? reloaded.items.filter((item) => Number(item?.annualQty ?? 0) > 0).length
+        : 0,
+    },
+    "[BC_AUDIT][BE][SAVE_CONSUMPTION_POST]",
+  );
+  return reloaded;
 }
 
 async function patchConsumptionItem(businessCaseId, itemKey, patch = {}, options = {}) {

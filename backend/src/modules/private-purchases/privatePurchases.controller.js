@@ -313,6 +313,125 @@ exports.saveProviderResponse = async (req, res, next) => {
   }
 };
 
+exports.renewReservation = async (req, res, next) => {
+  try {
+    const result = await service.renewReservation(req.params.id, req.user);
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Solicitar proforma al proveedor por correo.
+ * POST /private-purchases/:id/request-proforma
+ * Body: { provider_email, notes? }
+ */
+exports.requestProformaFromProvider = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { provider_email, notes } = req.body || {};
+    const result = await service.requestProformaFromProvider(id, req.user, {
+      providerEmail: provider_email,
+      notes,
+    });
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Subir proforma firmada por el proveedor (habilita gestión de contrato).
+ * POST /private-purchases/:id/upload-signed-proforma
+ * Body: { proforma_base64, file_name, mime_type? }
+ */
+exports.uploadSignedProforma = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { proforma_base64, file_name, mime_type } = req.body || {};
+    const result = await service.uploadSignedProforma(
+      id,
+      {
+        proformaBase64: proforma_base64,
+        fileName: file_name,
+        mimeType: mime_type,
+      },
+      req.user,
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Subir proforma sin firmar y activar reserva del equipo.
+ * POST /private-purchases/:id/upload-proforma
+ * Body: { proforma_base64, file_name, mime_type?, reserve_import? }
+ */
+exports.uploadProformaAndReserve = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { proforma_base64, file_name, mime_type, reserve_import } = req.body;
+    const result = await service.uploadProformaAndReserve(
+      id,
+      {
+        proformaBase64: proforma_base64,
+        fileName: file_name,
+        mimeType: mime_type,
+        reserveImport: reserve_import === true,
+      },
+      req.user,
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Obtener todas las reservas activas de compras privadas.
+ * GET /private-purchases/active-reservations
+ */
+exports.getActiveReservations = async (req, res, next) => {
+  try {
+    const data = await service.getActiveReservations();
+    res.json({ ok: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Comercial registra decisión del cliente sobre disponibilidad en CU.
+ * decision: 'approve' | 'reject'
+ */
+exports.confirmClientCuApproval = async (req, res, next) => {
+  try {
+    const { decision } = req.body || {};
+    const result = await service.confirmClientCuApproval(req.params.id, req.user, decision);
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Comercial registra aprobación vinculante del cliente para importación nueva.
+ * Una vez aprobada no se puede revertir — se advierte en el frontend.
+ * decision: 'approve' | 'reject'
+ */
+exports.confirmClientImportApproval = async (req, res, next) => {
+  try {
+    const { decision } = req.body || {};
+    const result = await service.confirmClientImportApproval(req.params.id, req.user, decision);
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /**
  * Gerencia sube contrato y deja disponible
  */
@@ -350,6 +469,81 @@ exports.uploadClientSignedContract = async (req, res, next) => {
 };
 
 /**
+ * Gerencia General aprueba o rechaza el contrato
+ */
+exports.registerManagerContractDecision = async (req, res, next) => {
+  try {
+    const { decision, reason = '' } = req.body || {};
+    const result = await service.registerManagerContractDecision(
+      req.params.id,
+      { decision, reason },
+      req.user
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * ACP Comercial sube el contrato firmado (tras aprobación de gerencia)
+ */
+exports.uploadAcpSignedContract = async (req, res, next) => {
+  try {
+    const { contract_base64, file_name, mime_type } = req.body || {};
+    const result = await service.uploadAcpSignedContract(
+      req.params.id,
+      { contractBase64: contract_base64, fileName: file_name, mimeType: mime_type },
+      req.user
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Reinicia el contrato tras un rechazo de gerencia
+ */
+exports.restartContractAfterRejection = async (req, res, next) => {
+  try {
+    const result = await service.restartContractAfterRejection(req.params.id, req.user);
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * ACP marca que el contrato físico del proveedor ha llegado
+ */
+exports.markProviderContractReceived = async (req, res, next) => {
+  try {
+    const result = await service.markProviderContractReceived(req.params.id, req.user);
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * ACP sube el contrato firmado del proveedor a Drive
+ */
+exports.uploadProviderContract = async (req, res, next) => {
+  try {
+    const { contract_base64, file_name, mime_type } = req.body || {};
+    const result = await service.uploadProviderContract(
+      req.params.id,
+      { contractBase64: contract_base64, fileName: file_name, mimeType: mime_type },
+      req.user
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Operaciones sube guias de despacho
  */
 exports.uploadDeliveryGuides = async (req, res, next) => {
@@ -371,7 +565,14 @@ exports.uploadDeliveryGuides = async (req, res, next) => {
  */
 exports.saveInspectionRequest = async (req, res, next) => {
   try {
-    const { request_id, acta_document_id, inspection_min_date, inspection_max_date } = req.body || {};
+    const {
+      request_id,
+      acta_document_id,
+      inspection_min_date,
+      inspection_max_date,
+      accesorios,
+      observaciones,
+    } = req.body || {};
     const result = await service.saveInspectionRequest(
       req.params.id,
       {
@@ -379,6 +580,8 @@ exports.saveInspectionRequest = async (req, res, next) => {
         actaDocumentId: acta_document_id,
         inspection_min_date,
         inspection_max_date,
+        accesorios,
+        observaciones,
       },
       req.user
     );
@@ -390,10 +593,10 @@ exports.saveInspectionRequest = async (req, res, next) => {
 
 exports.coordinateInspectionDate = async (req, res, next) => {
   try {
-    const { inspection_date, notes } = req.body || {};
+    const { inspection_date, notes, assigned_technician_id } = req.body || {};
     const result = await service.coordinateInspectionDate(
       req.params.id,
-      { inspection_date, notes },
+      { inspection_date, notes, assigned_technician_id },
       req.user
     );
     res.json({ ok: true, data: result });
@@ -701,6 +904,21 @@ exports.getStats = async (req, res, next) => {
     const { role } = req.params;
     const stats = await service.getStatsByRole(req.user, role);
     res.json({ ok: true, data: stats });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Carga de inspecciones por técnico en una fecha específica
+ * GET /private-purchases/technician-schedule?date=YYYY-MM-DD
+ */
+exports.getTechnicianSchedule = async (req, res, next) => {
+  try {
+    const { date } = req.query;
+    if (!date) return res.status(400).json({ ok: false, message: 'Parámetro date requerido (YYYY-MM-DD)' });
+    const data = await service.getTechnicianInspectionLoad(date);
+    res.json({ ok: true, data });
   } catch (error) {
     next(error);
   }

@@ -498,6 +498,17 @@ export const submitBusinessCaseFeasibilityDecision = async (businessCaseId, payl
  return data.data || data;
 };
 
+// BC-16: Apelación de factibilidad rechazada
+export const requestBusinessCaseFeasibilityAppeal = async (businessCaseId, payload = {}) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/feasibility/appeal`, payload);
+ return data.data || data;
+};
+
+export const resolveBusinessCaseFeasibilityAppeal = async (businessCaseId, payload = {}) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/feasibility/appeal/resolve`, payload);
+ return data.data || data;
+};
+
 export const getBusinessCaseDispatchWorkspace = async (businessCaseId) => {
  const { data } = await api.get(`/business-case/${businessCaseId}/dispatch-workspace`);
  return data.data || data;
@@ -527,6 +538,17 @@ export const uploadDeterminationsStatDocument = async (businessCaseId, file) => 
  formData.append("file", file);
  const { data } = await api.post(`/business-case/${businessCaseId}/determinations/stat-document`, formData, {
  headers: { "Content-Type": "multipart/form-data" },
+ });
+ return data.data || data;
+};
+
+export const requestBusinessCaseEnvironmentInspection = async (
+ businessCaseId,
+ { inspection_min_date, inspection_max_date } = {},
+) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/determinations/inspection-request`, {
+  inspection_min_date,
+  inspection_max_date,
  });
  return data.data || data;
 };

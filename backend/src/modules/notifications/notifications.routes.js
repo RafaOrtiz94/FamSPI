@@ -1,11 +1,29 @@
 const express = require("express");
+const rateLimit = require("express-rate-limit");
 const router = express.Router();
 const ctrl = require("./notifications.controller");
 const { verifyToken } = require("../../middlewares/auth");
 
 router.use(verifyToken);
 
-router.get("/", ctrl.list);
+// Limitar el endpoint de listado: máx. 20 peticiones/min por usuario.
+// Con el polling a 5 min del frontend esto da margen amplio y bloquea loops accidentales.
+const notificationsListLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => String(req.user?.id || req.ip),
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).json({
+      ok: false,
+      code: "RATE_LIMIT_NOTIFICATIONS",
+      message: "Demasiadas peticiones al endpoint de notificaciones. Intenta en un momento.",
+    });
+  },
+});
+
+router.get("/", notificationsListLimiter, ctrl.list);
 router.post("/", ctrl.create);
 router.patch("/read-all", ctrl.markAll);
 router.patch("/:id/read", ctrl.markRead);

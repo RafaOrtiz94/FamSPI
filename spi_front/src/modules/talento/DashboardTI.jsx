@@ -190,6 +190,13 @@ const DashboardTI = () => {
  gradient: "from-cyan-600 via-sky-500 to-blue-500",
  icon: <FiLink size={24} />,
  },
+ {
+ title: "Kick Off 2026",
+ desc: "Gestiona el evento interno: cronograma, presentaciones, sala de preguntas y moderación en vivo.",
+ path: "/dashboard/kickoff",
+ gradient: "from-violet-600 via-purple-500 to-fuchsia-500",
+ icon: <FiCalendar size={24} />,
+ },
  canSeeAudit
  ? {
  title: "Preparación de Auditoría",

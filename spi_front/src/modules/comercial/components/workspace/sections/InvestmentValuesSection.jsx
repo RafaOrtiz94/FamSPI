@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { FiAlertCircle, FiClock, FiSave } from "react-icons/fi";
+import { FiAlertCircle, FiCheckCircle, FiClock, FiSave } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useParams } from "react-router-dom";
 import { useUI } from "../../../../../core/ui/UIContext";
@@ -13,6 +13,16 @@ const EDITOR_ROLES = {
 const CLASS_LABELS = {
   operativa: "Operativas",
   financiera: "Financieras",
+};
+
+const getNaturalErrorMessage = (err, fallback) => {
+  const status = Number(err?.response?.status || 0);
+  const raw = String(err?.response?.data?.message || "").trim();
+  if (status === 403) return "No tienes permiso para editar esta sección.";
+  if (status === 409) return "La información cambió mientras trabajabas. Recarga la sección e inténtalo nuevamente.";
+  if (!raw) return fallback;
+  if (/\b(4\d\d|5\d\d)\b/.test(raw) || /forbidden|conflict|unauthorized|status/i.test(raw)) return fallback;
+  return raw;
 };
 
 function DeadlineBanner({ deadlineAt }) {
@@ -58,6 +68,8 @@ const InvestmentValuesSection = ({ investmentClass, permissions = {}, ownership 
   const [saving, setSaving] = useState(false);
   const [deadlineAt, setDeadlineAt] = useState(null);
   const [dirtyMap, setDirtyMap] = useState({});
+  const [syncStatus, setSyncStatus] = useState(null);
+  const [cartStatus, setCartStatus] = useState(null);
 
   const role = (user?.role || user?.scope || user?.role_name || "").toLowerCase();
   const isEditor = EDITOR_ROLES[investmentClass]?.has(role) ?? false;
@@ -73,6 +85,8 @@ const InvestmentValuesSection = ({ investmentClass, permissions = {}, ownership 
       const payload = res?.data?.data || {};
       setItems(Array.isArray(payload.items) ? payload.items : []);
       setDeadlineAt(payload.deadline_at || null);
+      setSyncStatus(payload.sync_status || null);
+      setCartStatus(payload.cart || null);
       setDirtyMap({});
     } catch (err) {
       console.error("Error loading investment values", err);
@@ -105,18 +119,26 @@ const InvestmentValuesSection = ({ investmentClass, permissions = {}, ownership 
 
     try {
       setSaving(true);
-      await api.post(`/business-case/${bcId}/investments/values`, {
+      const response = await api.post(`/business-case/${bcId}/investments/values`, {
         class: investmentClass,
         values: dirtyItems.map((row) => ({
           catalog_id: row.catalog_id,
           unit_price: row.unit_price ?? null,
         })),
       });
+      const syncInfo = response?.data?.data?.sheet_sync;
+      await load();
       setDirtyMap({});
-      showToast(`Valores ${CLASS_LABELS[investmentClass].toLowerCase()} guardados`, "success");
+      if (investmentClass === "operativa" && syncInfo?.queued === false) {
+        showToast("Valores guardados. La sincronización del sheet no se pudo iniciar automáticamente.", "warning");
+      } else if (investmentClass === "operativa") {
+        showToast(`Valores ${CLASS_LABELS[investmentClass].toLowerCase()} guardados y sincronización iniciada`, "success");
+      } else {
+        showToast(`Valores ${CLASS_LABELS[investmentClass].toLowerCase()} guardados`, "success");
+      }
     } catch (err) {
       showToast(
-        err.response?.data?.message || "No se pudieron guardar los valores",
+        getNaturalErrorMessage(err, "No se pudieron guardar los valores"),
         "error"
       );
     } finally {
@@ -191,12 +213,30 @@ const InvestmentValuesSection = ({ investmentClass, permissions = {}, ownership 
 
       {/* Deadline */}
       <DeadlineBanner deadlineAt={deadlineAt} />
+      {syncStatus?.pending && (
+        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <FiAlertCircle size={16} className="flex-shrink-0" />
+          <span>{syncStatus?.message || "Pendiente de sincronizacion"}</span>
+        </div>
+      )}
+      {!syncStatus?.pending && syncStatus && (
+        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <FiCheckCircle size={16} className="flex-shrink-0" />
+          <span>{syncStatus?.message}</span>
+        </div>
+      )}
+      {cartStatus && !cartStatus.confirmed && (
+        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <FiAlertCircle size={16} className="flex-shrink-0" />
+          <span>Carrito no confirmado. Espera confirmación para iniciar carga formal de valores.</span>
+        </div>
+      )}
 
       {/* Read-only notice for non-editors */}
       {!isEditor && (
         <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-700">
           Solo{" "}
-          {investmentClass === "operativa" ? "Jefe de Operaciones" : "Jefe Financiero"} puede
+          {investmentClass === "operativa" ? "Jefe de Operaciones / Jefe de Logística" : "Jefe Financiero"} puede
           ingresar los precios de esta sección.
         </div>
       )}

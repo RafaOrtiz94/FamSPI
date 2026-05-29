@@ -205,123 +205,180 @@
                                                                  ]
                                                  },
                   "area_02_personas_talento_control_laboral":  {
-                                                                    "label":  "Area 02: Personas, Talento y Control Laboral",
-                                                                    "supportDocuments":  [
-                                                                                             {
-                                                                                                 "title":  "Ley Organica de Proteccion de Datos Personales",
-                                                                                                 "year":  "2021",
-                                                                                                 "reference":  "Asamblea Nacional del Ecuador. (2021). Ley Organica de Proteccion de Datos Personales. Registro Oficial, Quinto Suplemento No. 459. https://www.asambleanacional.gob.ec/sites/default/files/private/asambleanacional/filesasambleanacionalnameuid-29/Leyes%202013-2017/920-lmoreno/ro-459-5to-sup-26-05-2021.pdf"
-                                                                                             },
-                                                                                             {
-                                                                                                 "title":  "Reglamento General a la Ley Organica de Proteccion de Datos Personales",
-                                                                                                 "year":  "2023",
-                                                                                                 "reference":  "Presidencia de la Republica del Ecuador. (2023). Reglamento General a la Ley Organica de Proteccion de Datos Personales. Registro Oficial. https://www.gob.ec/sites/default/files/regulations/2025-01/02%20Reglamento%20General%20a%20la%20Ley%20Org%C3%A1nica%20de%20Protecci%C3%B3n%20de%20Datos%20Personales_0.pdf"
-                                                                                             }
-                                                                                         ],
-                                                                    "definitions":  [
-                                                                                        {
-                                                                                            "term":  "Colaborador (Empleado)",
-                                                                                            "definition":  "Es toda persona que trabaja en la empresa. El sistema administra su información personal, su contrato, sus documentos (como cédula o títulos) y todo lo que hace en su día a día laboral."
-                                                                                        },
-                                                                                        {
-                                                                                            "term":  "Solicitud de Personal (Reclutamiento)",
-                                                                                            "definition":  "Es el proceso para contratar a alguien nuevo. Incluye desde que se detecta la necesidad de un nuevo empleado hasta que se elige al candidato, se revisan sus documentos y se firma su contrato."
-                                                                                        },
-                                                                                        {
-                                                                                            "term":  "Perfil del Colaborador",
-                                                                                            "definition":  "Es como una 'hoja de vida' digital dentro del sistema que contiene los datos del empleado, su cargo, el departamento al que pertenece y todos los documentos que ha entregado a la empresa."
-                                                                                        },
-                                                                                        {
-                                                                                            "term":  "Certificación Laboral",
-                                                                                            "definition":  "Es un registro de los cursos, capacitaciones o habilidades que tiene un empleado. El sistema permite guardar el diploma o certificado para demostrar que el empleado está capacitado."
-                                                                                        },
-                                                                                        {
-                                                                                            "term":  "Registro de Asistencia",
-                                                                                            "definition":  "Es el control de las horas trabajadas. El empleado marca su entrada, su hora de almuerzo y su salida. El sistema usa esto para saber si cumplió su jornada o si trabajó horas extra."
-                                                                                        },
-                                                                                        {
-                                                                                            "term":  "Excepción de Asistencia (Salidas Temporales)",
-                                                                                            "definition":  "Ocurre cuando un empleado debe salir de la oficina por un momento (por ejemplo, una cita médica rápida o una diligencia) y luego regresa para continuar trabajando."
-                                                                                        },
-                                                                                        {
-                                                                                            "term":  "Horas Extra (Sobretiempo)",
-                                                                                            "definition":  "Es el tiempo adicional que un empleado trabaja después de haber terminado su horario normal. El sistema calcula automáticamente este tiempo para que pueda ser pagado o compensado."
-                                                                                        },
-                                                                                        {
-                                                                                            "term":  "Permiso Recuperable",
-                                                                                            "definition":  "Es un permiso para faltar unas horas o días que el empleado se compromete a 'devolver' trabajando en otro horario, según lo acuerde con su jefe."
-                                                                                        },
-                                                                                        {
-                                                                                            "term":  "Matrícula de Estudios",
-                                                                                            "definition":  "Documento que demuestra que un empleado está estudiando. Es obligatorio subir este documento al sistema para que se le puedan otorgar permisos especiales por estudios."
-                                                                                        },
-                                                                                        {
-                                                                                            "term":  "Saldo de Vacaciones",
-                                                                                            "definition":  "Es la cantidad de días de descanso que el empleado tiene acumulados y disponibles para usar. El sistema los calcula automáticamente según el tiempo que lleva trabajando."
-                                                                                        },
-                                                                                        {
-                                                                                            "term":  "Onboarding (Bienvenida y Registro)",
-                                                                                            "definition":  "Es el proceso inicial cuando alguien entra a trabajar. Incluye la creación de su usuario, la entrega de sus herramientas de trabajo y la carga de sus primeros documentos legales."
-                                                                                        },
-                                                                                        {
-                                                                                            "term":  "Dossier Digital (Expediente)",
-                                                                                            "definition":  "Es la carpeta digital donde se guardan todos los documentos legales y contratos del empleado de forma segura y organizada."
-                                                                                        },
-                                                                                        {
-                                                                                            "term":  "Validación de Instalación (IQ)",
-                                                                                            "definition":  "Prueba técnica para asegurar que el sistema está correctamente instalado en los servidores de la empresa y listo para ser usado."
-                                                                                        },
-                                                                                        {
-                                                                                            "term":  "Validación de Funcionamiento (OQ)",
-                                                                                            "definition":  "Prueba para confirmar que cada botón y cada formulario del sistema hace exactamente lo que se supone que debe hacer sin errores."
-                                                                                        },
-                                                                                        {
-                                                                                            "term":  "Validación de Desempeño (PQ)",
-                                                                                            "definition":  "Prueba final donde se usa el sistema como si fuera un día normal de trabajo para asegurar que es estable y confiable para los usuarios."
-                                                                                        }
-                                                                                    ],
-                                                                    "modules":  [
-                                                                                    {
-                                                                                        "module":  "talento_humano",
-                                                                                        "focus":  "Registro basico de empleados y carga documental del submodulo HR legacy"
-                                                                                    },
-                                                                                    {
-                                                                                        "module":  "personnel-requests",
-                                                                                        "focus":  "Solicitud de personal, perfil, historial, comentarios, documentos y contratacion"
-                                                                                    },
-                                                                                    {
-                                                                                        "module":  "users",
-                                                                                        "focus":  "Gestion de usuarios internos y su relacion con departamentos y solicitudes"
-                                                                                    },
-                                                                                    {
-                                                                                        "module":  "collaborators",
-                                                                                        "focus":  "Workspace de colaborador, perfil consolidado, documentos y metricas"
-                                                                                    },
-                                                                                    {
-                                                                                        "module":  "departments",
-                                                                                        "focus":  "CRUD de departamentos y estructura organizacional consumida por talento"
-                                                                                    },
-                                                                                    {
-                                                                                        "module":  "user-profile",
-                                                                                        "focus":  "Perfil propio, preferencias, avatar y sincronizacion con datos de colaborador"
-                                                                                    },
-                                                                                    {
-                                                                                        "module":  "user-certifications",
-                                                                                        "focus":  "Registro, consulta, baja logica y PDF de certificaciones"
-                                                                                    },
-                                                                                    {
-                                                                                        "module":  "attendance",
-                                                                                        "focus":  "Jornada diaria, excepciones, sincronizacion de ubicacion, overtime y PDF RH-09"
-                                                                                    },
-                                                                                    {
-                                                                                        "module":  "permisos",
-                                                                                        "focus":  "Permisos, matriculas de estudio, justificantes, coordinacion de recuperacion y cobertura legal"
-                                                                                    },
-                                                                                    {
-                                                                                        "module":  "vacaciones",
-                                                                                        "focus":  "Solicitud, resumen, aprobacion, cancelacion y saldo de vacaciones"
-                                                                                    }
-                                                                                ]
-                                                                }
-              }
+                                                                   "label":  "Area 02: Personas, Talento y Control Laboral",
+                                                                   "supportDocuments":  [
+                                                                                            {
+                                                                                                "title":  "Ley Organica de Proteccion de Datos Personales",
+                                                                                                "year":  "2021",
+                                                                                                "reference":  "Asamblea Nacional del Ecuador. (2021). Ley Organica de Proteccion de Datos Personales. Registro Oficial, Quinto Suplemento No. 459. https://www.asambleanacional.gob.ec/sites/default/files/private/asambleanacional/filesasambleanacionalnameuid-29/Leyes%202013-2017/920-lmoreno/ro-459-5to-sup-26-05-2021.pdf"
+                                                                                            },
+                                                                                            {
+                                                                                                "title":  "Reglamento General a la Ley Organica de Proteccion de Datos Personales",
+                                                                                                "year":  "2023",
+                                                                                                "reference":  "Presidencia de la Republica del Ecuador. (2023). Reglamento General a la Ley Organica de Proteccion de Datos Personales. Registro Oficial. https://www.gob.ec/sites/default/files/regulations/2025-01/02%20Reglamento%20General%20a%20la%20Ley%20Org%C3%A1nica%20de%20Protecci%C3%B3n%20de%20Datos%20Personales_0.pdf"
+                                                                                            }
+                                                                                        ],
+                                                                   "definitions":  [
+                                                                                       {
+                                                                                           "term":  "Colaborador (Empleado)",
+                                                                                           "definition":  "Es toda persona que trabaja en la empresa. El sistema administra su información personal, su contrato, sus documentos (como cédula o títulos) y todo lo que hace en su día a día laboral."
+                                                                                       },
+                                                                                       {
+                                                                                           "term":  "Solicitud de Personal (Reclutamiento)",
+                                                                                           "definition":  "Es el proceso para contratar a alguien nuevo. Incluye desde que se detecta la necesidad de un nuevo empleado hasta que se elige al candidato, se revisan sus documentos y se firma su contrato."
+                                                                                       },
+                                                                                       {
+                                                                                           "term":  "Perfil del Colaborador",
+                                                                                           "definition":  "Es como una \u0027hoja de vida\u0027 digital dentro del sistema que contiene los datos del empleado, su cargo, el departamento al que pertenece y todos los documentos que ha entregado a la empresa."
+                                                                                       },
+                                                                                       {
+                                                                                           "term":  "Certificación Laboral",
+                                                                                           "definition":  "Es un registro de los cursos, capacitaciones o habilidades que tiene un empleado. El sistema permite guardar el diploma o certificado para demostrar que el empleado está capacitado."
+                                                                                       },
+                                                                                       {
+                                                                                           "term":  "Registro de Asistencia",
+                                                                                           "definition":  "Es el control de las horas trabajadas. El empleado marca su entrada, su hora de almuerzo y su salida. El sistema usa esto para saber si cumplió su jornada o si trabajó horas extra."
+                                                                                       },
+                                                                                       {
+                                                                                           "term":  "Excepción de Asistencia (Salidas Temporales)",
+                                                                                           "definition":  "Ocurre cuando un empleado debe salir de la oficina por un momento (por ejemplo, una cita médica rápida o una diligencia) y luego regresa para continuar trabajando."
+                                                                                       },
+                                                                                       {
+                                                                                           "term":  "Horas Extra (Sobretiempo)",
+                                                                                           "definition":  "Es el tiempo adicional que un empleado trabaja después de haber terminado su horario normal. El sistema calcula automáticamente este tiempo para que pueda ser pagado o compensado."
+                                                                                       },
+                                                                                       {
+                                                                                           "term":  "Permiso Recuperable",
+                                                                                           "definition":  "Es un permiso para faltar unas horas o días que el empleado se compromete a \u0027devolver\u0027 trabajando en otro horario, según lo acuerde con su jefe."
+                                                                                       },
+                                                                                       {
+                                                                                           "term":  "Matrícula de Estudios",
+                                                                                           "definition":  "Documento que demuestra que un empleado está estudiando. Es obligatorio subir este documento al sistema para que se le puedan otorgar permisos especiales por estudios."
+                                                                                       },
+                                                                                       {
+                                                                                           "term":  "Saldo de Vacaciones",
+                                                                                           "definition":  "Es la cantidad de días de descanso que el empleado tiene acumulados y disponibles para usar. El sistema los calcula automáticamente según el tiempo que lleva trabajando."
+                                                                                       },
+                                                                                       {
+                                                                                           "term":  "Onboarding (Bienvenida y Registro)",
+                                                                                           "definition":  "Es el proceso inicial cuando alguien entra a trabajar. Incluye la creación de su usuario, la entrega de sus herramientas de trabajo y la carga de sus primeros documentos legales."
+                                                                                       },
+                                                                                       {
+                                                                                           "term":  "Dossier Digital (Expediente)",
+                                                                                           "definition":  "Es la carpeta digital donde se guardan todos los documentos legales y contratos del empleado de forma segura y organizada."
+                                                                                       },
+                                                                                       {
+                                                                                           "term":  "Validación de Instalación (IQ)",
+                                                                                           "definition":  "Prueba técnica para asegurar que el sistema está correctamente instalado en los servidores de la empresa y listo para ser usado."
+                                                                                       },
+                                                                                       {
+                                                                                           "term":  "Validación de Funcionamiento (OQ)",
+                                                                                           "definition":  "Prueba para confirmar que cada botón y cada formulario del sistema hace exactamente lo que se supone que debe hacer sin errores."
+                                                                                       },
+                                                                                       {
+                                                                                           "term":  "Validación de Desempeño (PQ)",
+                                                                                           "definition":  "Prueba final donde se usa el sistema como si fuera un día normal de trabajo para asegurar que es estable y confiable para los usuarios."
+                                                                                       }
+                                                                                   ],
+                                                                   "modules":  [
+                                                                                   {
+                                                                                       "module":  "talento_humano",
+                                                                                       "focus":  "Registro basico de empleados y carga documental del submodulo HR legacy"
+                                                                                   },
+                                                                                   {
+                                                                                       "module":  "personnel-requests",
+                                                                                       "focus":  "Solicitud de personal, perfil, historial, comentarios, documentos y contratacion"
+                                                                                   },
+                                                                                   {
+                                                                                       "module":  "users",
+                                                                                       "focus":  "Gestion de usuarios internos y su relacion con departamentos y solicitudes"
+                                                                                   },
+                                                                                   {
+                                                                                       "module":  "collaborators",
+                                                                                       "focus":  "Workspace de colaborador, perfil consolidado, documentos y metricas"
+                                                                                   },
+                                                                                   {
+                                                                                       "module":  "departments",
+                                                                                       "focus":  "CRUD de departamentos y estructura organizacional consumida por talento"
+                                                                                   },
+                                                                                   {
+                                                                                       "module":  "user-profile",
+                                                                                       "focus":  "Perfil propio, preferencias, avatar y sincronizacion con datos de colaborador"
+                                                                                   },
+                                                                                   {
+                                                                                       "module":  "user-certifications",
+                                                                                       "focus":  "Registro, consulta, baja logica y PDF de certificaciones"
+                                                                                   },
+                                                                                   {
+                                                                                       "module":  "attendance",
+                                                                                       "focus":  "Jornada diaria, excepciones, sincronizacion de ubicacion, overtime y PDF RH-09"
+                                                                                   },
+                                                                                   {
+                                                                                       "module":  "permisos",
+                                                                                       "focus":  "Permisos, matriculas de estudio, justificantes, coordinacion de recuperacion y cobertura legal"
+                                                                                   },
+                                                                                   {
+                                                                                       "module":  "vacaciones",
+                                                                                       "focus":  "Solicitud, resumen, aprobacion, cancelacion y saldo de vacaciones"
+                                                                                   }
+                                                                               ]
+                                                               }
+              },
+    "generalValidation":  {
+                              "title":  "Paquete de Validacion General Inicial de FamSPI v1.0.0",
+                              "area":  "FamSPI v1.0.0 - Sistema Computarizado Institucional",
+                              "code":  "VAL-FAMSPI-GENERAL-V1-0-0",
+                              "outputName":  "PAQUETE_VALIDACION_GENERAL_FAMSPI_V1_0_0.docx",
+                              "template":  "Plantilla_Validacion_SPI_AUTOMATIZABLE.dotx",
+                              "mode":  "Final",
+                              "omitPrefixes":  [
+                                                   "00_"
+                                               ],
+                              "documentOrder":  [
+                                                    "01_control_documental_autorizacion.md",
+                                                    "02_introduccion_alcance.md",
+                                                    "03_glosario_abreviaturas.md",
+                                                    "04_protocolo_maestro_validacion_reportes.md",
+                                                    "05_gestion_proveedor_desarrollo_interno.md",
+                                                    "06_especificacion_requerimientos_urs.md",
+                                                    "07_especificacion_diseno_configuracion.md",
+                                                    "07A_evaluacion_riesgos_fmea.md",
+                                                    "08_calificacion_diseno_dq.md",
+                                                    "09_desarrollo_implementacion_sistema.md",
+                                                    "09A_migracion_datos.md",
+                                                    "10_calificacion_instalacion_iq.md",
+                                                    "11_calificacion_operacional_oq.md",
+                                                    "12_procedimientos_administracion_entrenamiento.md",
+                                                    "13_calificacion_desempeno_pq_uat.md",
+                                                    "14_operacion_mantenimiento_estado_validado.md",
+                                                    "14A_control_cambios.md",
+                                                    "14B_revision_periodica.md",
+                                                    "15_retiro_archivo_retencion.md",
+                                                    "16_informe_final_validacion_liberacion.md"
+                                                ]
+                          },
+    "generalValidationGeon":  {
+                                  "title":  "Paquete de Validacion General Inicial de FamSPI v1.0.0 - GEON/OMCL Annex 2",
+                                  "area":  "FamSPI v1.0.0 - Validacion de Sistema Computarizado Complejo",
+                                  "code":  "VAL-FAMSPI-GEON-V1-0-0",
+                                  "outputName":  "PAQUETE_VALIDACION_GENERAL_FAMSPI_V1_0_0_GEON_ANNEX2.docx",
+                                  "template":  "Plantilla_Validacion_SPI_AUTOMATIZABLE.dotx",
+                                  "mode":  "Final",
+                                  "geonPath":  "docs/validation/general_GEON",
+                                  "omitPatterns":  [
+                                                       "00_*",
+                                                       "09_comparativo*"
+                                                   ],
+                                  "documentOrder":  [
+                                                        "01_control_documental_autorizacion.md",
+                                                        "02_introduccion_alcance.md",
+                                                        "02A_glosario_abreviaturas.md",
+                                                        "03_urs_requerimientos_usuario.md",
+                                                        "04_iq_calificacion_instalacion.md",
+                                                        "05_oq_calificacion_operacional.md",
+                                                        "06_pq_uat_calificacion_desempeno.md",
+                                                        "07_informe_final_liberacion_uso.md",
+                                                        "08_archivo_retencion_control_posterior.md"
+                                                    ]
+                              }
 }

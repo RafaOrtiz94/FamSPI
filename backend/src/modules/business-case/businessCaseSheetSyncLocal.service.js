@@ -5,6 +5,7 @@ const { drive, sheets, jwtClient } = require("../../config/google");
 const logger = require("../../config/logger");
 
 const TEMPLATE_FILENAME = "FORMATO_BC.xlsx";
+const MAPPING_FILENAME = "mapping_auto.json";
 
 function resolveTemplatePath() {
   const envPath = String(process.env.BC_SHEET_TEMPLATE_PATH || "").trim();
@@ -21,6 +22,25 @@ function resolveTemplatePath() {
   candidatePaths.push(path.resolve(__dirname, "../../../Mapeador_Sheets", TEMPLATE_FILENAME));
   candidatePaths.push(path.resolve(__dirname, "../../../../Mapeador_Sheets", TEMPLATE_FILENAME));
   candidatePaths.push(path.resolve(__dirname, "../../../../../Mapeador_Sheets", TEMPLATE_FILENAME));
+
+  const found = candidatePaths.find((candidate) => fs.existsSync(candidate));
+  return {
+    path: found || candidatePaths[0],
+    tried: candidatePaths,
+  };
+}
+
+function resolveMappingPath() {
+  const envPath = String(process.env.BC_SHEET_MAPPING_PATH || "").trim();
+  const candidatePaths = [];
+
+  if (envPath) {
+    candidatePaths.push(path.resolve(envPath));
+  }
+
+  candidatePaths.push(path.resolve(__dirname, "../../../Mapeador_Sheets", MAPPING_FILENAME));
+  candidatePaths.push(path.resolve(__dirname, "../../../../Mapeador_Sheets", MAPPING_FILENAME));
+  candidatePaths.push(path.resolve(__dirname, "../../../../../Mapeador_Sheets", MAPPING_FILENAME));
 
   const found = candidatePaths.find((candidate) => fs.existsSync(candidate));
   return {
@@ -97,6 +117,7 @@ const BC_LABEL_FIELD_MAP = new Map([
 ]);
 
 let templateCache = null;
+let mappingCache = null;
 
 function normalizeText(value) {
   return String(value || "")
@@ -131,6 +152,19 @@ function columnLetter(index) {
 function decodeRange(ws) {
   const ref = ws?.["!ref"] || "A1:A1";
   return XLSX.utils.decode_range(ref);
+}
+
+function cellAddressToRowColumn(cellAddress) {
+  const match = String(cellAddress || "").trim().match(/^([A-Za-z]+)(\d+)$/);
+  if (!match) return null;
+  const letters = match[1].toUpperCase();
+  const row = Number(match[2]);
+  if (!row) return null;
+  let column = 0;
+  for (let i = 0; i < letters.length; i += 1) {
+    column = (column * 26) + (letters.charCodeAt(i) - 64);
+  }
+  return { row, column };
 }
 
 function getCellValue(ws, cellAddress) {
@@ -257,6 +291,247 @@ function parseEquipmentSheetDefinition(name, ws) {
   };
 }
 
+function loadMappingDefinition() {
+  if (mappingCache) return mappingCache;
+  const resolution = resolveMappingPath();
+  if (!fs.existsSync(resolution.path)) {
+    mappingCache = { bySheetName: new Map() };
+    logger.warn({ triedPaths: resolution.tried }, "No se encontro mapping_auto.json. Se usara parser por heuristica.");
+    return mappingCache;
+  }
+
+  try {
+    const raw = fs.readFileSync(resolution.path, "utf8");
+    const parsed = JSON.parse(raw);
+    const sheetsDef = Array.isArray(parsed?.sheets) ? parsed.sheets : [];
+    const bySheetName = new Map();
+    sheetsDef.forEach((entry) => {
+      const key = String(entry?.name || "").trim();
+      if (key) bySheetName.set(key, entry);
+    });
+    mappingCache = { bySheetName };
+    return mappingCache;
+  } catch (error) {
+    mappingCache = { bySheetName: new Map() };
+    logger.warn({ error: error.message }, "No se pudo parsear mapping_auto.json. Se usara parser por heuristica.");
+    return mappingCache;
+  }
+}
+
+function findColumnByTargetHeader(mappingSheet, targetHeader) {
+  const headers = Array.isArray(mappingSheet?.fillable_headers) ? mappingSheet.fillable_headers : [];
+  const needle = normalizeText(targetHeader);
+  const targetIsDeliver = needle.includes("producto") && (needle.includes("entregar") || needle.includes("enviar"));
+  const match = headers.find((entry) => {
+    const normalizedTargetHeader = normalizeText(entry?.target_header);
+    const normalizedHeaderText = normalizeText(entry?.header_text);
+    if (targetIsDeliver) {
+      return (
+        (normalizedTargetHeader.includes("producto") && (normalizedTargetHeader.includes("entregar") || normalizedTargetHeader.includes("enviar"))) ||
+        (normalizedHeaderText.includes("producto") && (normalizedHeaderText.includes("entregar") || normalizedHeaderText.includes("enviar")))
+      );
+    }
+    return normalizedTargetHeader.includes(needle) || normalizedHeaderText.includes(needle);
+  });
+  return Number(match?.column || 0) || null;
+}
+
+function findHeaderRowByTargetHeader(mappingSheet, targetHeader) {
+  const headers = Array.isArray(mappingSheet?.fillable_headers) ? mappingSheet.fillable_headers : [];
+  const needle = normalizeText(targetHeader);
+  const targetIsDeliver = needle.includes("producto") && (needle.includes("entregar") || needle.includes("enviar"));
+  const match = headers.find((entry) => {
+    const normalizedTargetHeader = normalizeText(entry?.target_header);
+    const normalizedHeaderText = normalizeText(entry?.header_text);
+    if (targetIsDeliver) {
+      return (
+        (normalizedTargetHeader.includes("producto") && (normalizedTargetHeader.includes("entregar") || normalizedTargetHeader.includes("enviar"))) ||
+        (normalizedHeaderText.includes("producto") && (normalizedHeaderText.includes("entregar") || normalizedHeaderText.includes("enviar")))
+      );
+    }
+    return normalizedTargetHeader.includes(needle) || normalizedHeaderText.includes(needle);
+  });
+  return Number(match?.row || 0) || null;
+}
+
+function buildRowsFromMappingObjectiveTargets(mappingSheet, annualColumn, deliverColumn) {
+  const objectiveTargets = Array.isArray(mappingSheet?.empty_fill_targets_objective)
+    ? mappingSheet.empty_fill_targets_objective
+    : [];
+
+  if (!objectiveTargets.length) return [];
+
+  const byRow = new Map();
+  objectiveTargets.forEach((target) => {
+    const rowNumber = Number(target?.row || 0);
+    if (!rowNumber) return;
+
+    const targetHeader = normalizeText(target?.target_header);
+    const isAnnual = targetHeader.includes("det") && targetHeader.includes("proceso");
+    const isDeliver = targetHeader.includes("producto") && (targetHeader.includes("entregar") || targetHeader.includes("enviar"));
+    if (!isAnnual && !isDeliver) return;
+
+    const labelFromField = normalizeText(target?.label);
+    const labelCellAddress = String(target?.label_cell || "").trim();
+    const labelCell = cellAddressToRowColumn(labelCellAddress);
+    const labelColumn = Number(labelCell?.column || 0) || null;
+
+    const existing = byRow.get(rowNumber) || {
+      rowNumber,
+      itemId: "",
+      label: labelFromField || "",
+      labelColumn,
+    };
+
+    if (!existing.label && labelFromField) existing.label = labelFromField;
+    if (!existing.labelColumn && labelColumn) existing.labelColumn = labelColumn;
+    byRow.set(rowNumber, existing);
+  });
+
+  const rows = Array.from(byRow.values())
+    .sort((a, b) => a.rowNumber - b.rowNumber)
+    .map((entry) => ({
+      rowNumber: entry.rowNumber,
+      itemId: entry.itemId || "",
+      label: entry.label || "",
+      labelColumn: entry.labelColumn || null,
+      columns: {
+        annual: annualColumn,
+        deliver: deliverColumn,
+      },
+    }));
+
+  return rows;
+}
+
+function parseEquipmentSheetDefinitionWithMapping(name, ws, mappingSheet) {
+  const fallback = parseEquipmentSheetDefinition(name, ws);
+  if (!mappingSheet) return fallback;
+
+  const annualColumn = findColumnByTargetHeader(mappingSheet, "DET/AÑO PROCESO") || fallback.columns.annual;
+  const deliverColumn = findColumnByTargetHeader(mappingSheet, "PRODUCTO A ENTREGAR") || fallback.columns.deliver;
+  const headerRow = findHeaderRowByTargetHeader(mappingSheet, "DET/AÑO PROCESO") || fallback.headerRow;
+  const mappedRows = buildRowsFromMappingObjectiveTargets(mappingSheet, annualColumn, deliverColumn);
+  const fallbackByRow = new Map((fallback.rows || []).map((row) => [Number(row.rowNumber), row]));
+
+  if (!mappedRows.length) {
+    return {
+      ...fallback,
+      headerRow,
+      columns: {
+        annual: annualColumn,
+        deliver: deliverColumn,
+      },
+    };
+  }
+
+  return {
+    ...fallback,
+    headerRow,
+    columns: {
+      annual: annualColumn,
+      deliver: deliverColumn,
+    },
+    rows: mappedRows.map((row) => {
+      const fromFallback = fallbackByRow.get(Number(row.rowNumber));
+      return {
+        ...row,
+        itemId: row.itemId || fromFallback?.itemId || "",
+        label: row.label || fromFallback?.label || "",
+      };
+    }),
+  };
+}
+
+function parseNumberFromSheetValue(value) {
+  if (value === null || value === undefined) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const normalized = raw.replace(/\s+/g, "").replace(",", ".");
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  if (parsed < 0) return null;
+  return parsed;
+}
+
+function buildSheetItemLookup(items = []) {
+  const byId = new Map();
+  const byLabel = new Map();
+  items.forEach((item) => {
+    const itemId = normalizeProductId(item.itemId || item.item_id);
+    const label = normalizeText(item.itemName || item.item_name || item.name);
+    if (itemId) byId.set(itemId, item);
+    if (label) byLabel.set(label, item);
+  });
+  return { byId, byLabel };
+}
+
+async function pullMaximumQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = [] }) {
+  if (!jwtClient || !sheetId) return [];
+  const template = loadTemplateDefinition();
+  const normalizedTabs = Array.isArray(equipmentTabs) ? equipmentTabs : [];
+  if (!normalizedTabs.length) return [];
+
+  const targets = [];
+  for (const tab of normalizedTabs) {
+    const definition = template.equipmentSheets.find((entry) => entry.name === tab.sheet_name);
+    if (!definition?.columns?.deliver) continue;
+    const rows = Array.isArray(definition.rows) ? definition.rows : [];
+    if (!rows.length) continue;
+    const rowNumbers = rows.map((row) => Number(row.rowNumber)).filter((row) => Number.isInteger(row) && row > 0);
+    if (!rowNumbers.length) continue;
+    const minRow = Math.min(...rowNumbers);
+    const maxRow = Math.max(...rowNumbers);
+    const column = columnLetter(definition.columns.deliver);
+    targets.push({
+      sheetName: definition.name,
+      range: `${definition.name}!${column}${minRow}:${column}${maxRow}`,
+      minRow,
+      rows,
+      tabItems: Array.isArray(tab.items) ? tab.items : [],
+    });
+  }
+
+  if (!targets.length) return [];
+
+  const { data } = await sheets.spreadsheets.values.batchGet({
+    spreadsheetId: sheetId,
+    ranges: targets.map((target) => target.range),
+    majorDimension: "ROWS",
+  });
+
+  const valueRanges = Array.isArray(data?.valueRanges) ? data.valueRanges : [];
+  const updatesByItemKey = new Map();
+
+  for (let i = 0; i < targets.length; i += 1) {
+    const target = targets[i];
+    const valueRange = valueRanges[i] || {};
+    const values = Array.isArray(valueRange.values) ? valueRange.values : [];
+    const lookup = buildSheetItemLookup(target.tabItems);
+
+    for (const rowDef of target.rows) {
+      const absoluteRow = Number(rowDef.rowNumber);
+      const valueIndex = absoluteRow - target.minRow;
+      const rawValue = values[valueIndex]?.[0];
+      const parsedValue = parseNumberFromSheetValue(rawValue);
+      if (parsedValue === null) continue;
+
+      const matchedItem = rowDef.itemId
+        ? lookup.byId.get(normalizeProductId(rowDef.itemId))
+        : lookup.byLabel.get(normalizeText(rowDef.label));
+      const itemKey = String(matchedItem?.item_key || matchedItem?.itemKey || "").trim();
+      if (!itemKey) continue;
+
+      updatesByItemKey.set(itemKey, {
+        item_key: itemKey,
+        planned_qty: parsedValue,
+      });
+    }
+  }
+
+  return Array.from(updatesByItemKey.values());
+}
+
 function loadTemplateDefinition() {
   if (templateCache) return templateCache;
   const templateResolution = resolveTemplatePath();
@@ -272,7 +547,14 @@ function loadTemplateDefinition() {
 
   const workbook = XLSX.readFile(templatePath, { raw: false, cellFormula: true });
   const bcSheet = workbook.Sheets.BC;
-  const equipmentSheets = workbook.SheetNames.filter((name) => name !== "BC").map((name) => parseEquipmentSheetDefinition(name, workbook.Sheets[name]));
+  const mappingDefinition = loadMappingDefinition();
+  const equipmentSheets = workbook.SheetNames
+    .filter((name) => name !== "BC")
+    .map((name) => parseEquipmentSheetDefinitionWithMapping(
+      name,
+      workbook.Sheets[name],
+      mappingDefinition.bySheetName.get(name),
+    ));
 
   templateCache = {
     templatePath,
@@ -507,9 +789,8 @@ function buildEquipmentSheetRanges(template, sheetPayload = {}) {
   if (definition.columns.annual) {
     clears.push(`${definition.name}!${columnLetter(definition.columns.annual)}${definition.headerRow + 1}:${columnLetter(definition.columns.annual)}${Math.max(definition.headerRow + 1, lastRowNumber)}`);
   }
-  if (definition.columns.deliver) {
-    clears.push(`${definition.name}!${columnLetter(definition.columns.deliver)}${definition.headerRow + 1}:${columnLetter(definition.columns.deliver)}${Math.max(definition.headerRow + 1, lastRowNumber)}`);
-  }
+  // PRODUCTO A ENTREGAR is user-owned in the sheet.
+  // Do not clear it during sync to avoid overwriting manually curated maximum quantities.
 
   const lookup = buildSheetItemLookup(sheetPayload.items || []);
   definition.rows.forEach((row) => {
@@ -518,10 +799,8 @@ function buildEquipmentSheetRanges(template, sheetPayload = {}) {
     if (definition.columns.annual) {
       updates.push(buildValueRange(`${definition.name}!${columnLetter(definition.columns.annual)}${row.rowNumber}`, item.annual_qty ?? item.annualQty ?? ""));
     }
-    if (definition.columns.deliver) {
-      const deliverValue = item.planned_qty ?? item.plannedQty ?? "";
-      updates.push(buildValueRange(`${definition.name}!${columnLetter(definition.columns.deliver)}${row.rowNumber}`, deliverValue));
-    }
+    // PRODUCTO A ENTREGAR is intentionally not written from backend mapping.
+    // SPI must consume the maximum quantities entered directly by users in the sheet.
   });
 
   return { updates, clears };
@@ -624,5 +903,6 @@ module.exports = {
   buildRecordAliases,
   scoreAliases,
   buildSheetPayloads,
+  pullMaximumQuantitiesFromGoogleSheet,
   syncBusinessCaseToGoogleSheet,
 };

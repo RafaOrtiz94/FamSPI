@@ -1,11 +1,11 @@
 ﻿const db = require("../../config/db");
 const crypto = require("crypto");
 const { logAction } = require("../../utils/audit");
-const { validatePermisoRequest } = require("./permisos.validation");
+const { validatePermisoRequest, SUBTIPO_CALAMIDAD_CONFIG } = require("./permisos.validation");
 const { generateFRH10, generateFirmaLegalValidationPdf } = require("./permisos.pdf");
 const notificationManager = require("../notifications/notificationManager");
 const logger = require("../../config/logger");
-const { createTimeOffEvent } = require("../../utils/calendar");
+const { createTimeOffEvent, cancelTimeOffEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
 const { uploadStudyEnrollmentDocument } = require("./permisos.drive");
 
@@ -14,6 +14,11 @@ const MAX_ANNUAL_ALLOWANCE = 30;
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 const HOURS_PER_VACATION_DAY = 8;
 const RECOVERY_COORDINATION_TIMEOUT_DAYS = 3;
+const MAX_NEGATIVE_VACATION_DAYS = 15;
+const VACATION_CONVERSION_CONSENT_TEXT =
+  "Entiendo que esta solicitud se autoriza de forma provisional y quedará pendiente de validación. " +
+  "Si posteriormente se determina que no procede bajo el tipo solicitado, autorizo que el tiempo sea " +
+  "regularizado con cargo a mis vacaciones disponibles, siempre que exista saldo suficiente.";
 const WORKFLOW_SIGNATURE_STAGES = {
   SOLICITUD: "solicitud",
   APROBACION_PARCIAL: "aprobacion_parcial",
@@ -183,10 +188,11 @@ function expandApproverLookupRoles(role) {
   return Array.from(roles).filter(Boolean);
 }
 
-async function findApproverByRole(role) {
+async function findApproverByRole(role, excludeUserId = null) {
   if (!role) return null;
   const roleCandidates = expandApproverLookupRoles(role);
   if (!roleCandidates.length) return null;
+  const excludeId = excludeUserId ? Number(excludeUserId) : null;
   const { rows } = await db.query(
     `SELECT u.id, u.email, u.fullname
        FROM users u
@@ -196,6 +202,7 @@ async function findApproverByRole(role) {
         AND NOT (
           LOWER(COALESCE(cp.profile->'laboral'->>'estatus_empleado', '')) = ANY($3::text[])
         )
+        AND ($4::integer IS NULL OR u.id <> $4)
       ORDER BY
         CASE
           WHEN LOWER(COALESCE(u.email, '')) = ANY($2) THEN 0
@@ -204,7 +211,7 @@ async function findApproverByRole(role) {
         END,
         u.id ASC
       LIMIT 1`,
-    [roleCandidates, PREFERRED_APPROVER_EMAILS, PASSIVE_EMPLOYMENT_STATUS_VALUES]
+    [roleCandidates, PREFERRED_APPROVER_EMAILS, PASSIVE_EMPLOYMENT_STATUS_VALUES, excludeId]
   );
   return rows[0] || null;
 }
@@ -817,10 +824,12 @@ function buildGeneralUnavailabilityMailContent(solicitud = {}) {
 
 async function sendGeneralUnavailabilityNotification(solicitud = {}) {
   if (!GENERAL_UNAVAILABILITY_EMAILS.length) return;
-  if (isEmergencySolicitud(solicitud)) {
+  // Skip legacy emergency requests UNLESS they are part of the new urgent flow
+  // (urgent requests explicitly want general visibility)
+  if (isEmergencySolicitud(solicitud) && !normalizeBooleanFlag(solicitud?.is_urgent)) {
     logger.info(
       { solicitudId: solicitud?.id, userEmail: solicitud?.user_email },
-      "Se omite aviso general de no disponibilidad por tratarse de una solicitud de emergencia"
+      "Se omite aviso general de no disponibilidad por tratarse de una solicitud de emergencia no urgente"
     );
     return;
   }
@@ -832,6 +841,47 @@ async function sendGeneralUnavailabilityNotification(solicitud = {}) {
     html,
     source: "permisos_vacaciones",
   });
+}
+
+function buildUrgentProvisionalMailContent(solicitud = {}) {
+  const collaborator = solicitud?.user_fullname || solicitud?.user_email || "Colaborador";
+  const typeLabel = solicitud?.tipo_permiso || solicitud?.tipo_solicitud || "permiso";
+  const periodLabel = buildGeneralUnavailabilityPeriodLabel(solicitud);
+  const subject = `[SPI URGENTE] Autorización provisional emitida: ${collaborator}`;
+  const text = [
+    "NOTIFICACIÓN URGENTE — Autorización provisional emitida",
+    `El colaborador ${collaborator} recibió autorización provisional para ausentarse por ${typeLabel}.`,
+    `Periodo: ${periodLabel}.`,
+    `Solicitud #${solicitud?.id || "—"} — estado: salida provisional autorizada.`,
+    "La solicitud queda pendiente de validación final con justificantes. Monitorear regularización.",
+  ].join("\n");
+  const html = `
+    <p><strong>⚠ NOTIFICACIÓN URGENTE — Autorización provisional emitida.</strong></p>
+    <p>El colaborador <strong>${collaborator}</strong> recibió autorización provisional para ausentarse por <strong>${typeLabel}</strong>.</p>
+    <p>Periodo: <strong>${periodLabel}</strong>.</p>
+    <p>Solicitud <strong>#${solicitud?.id || "—"}</strong> — estado: <em>salida provisional autorizada</em>.</p>
+    <p>La solicitud queda pendiente de validación final con justificantes. Por favor monitorear la regularización.</p>
+  `;
+  return { subject, text, html };
+}
+
+async function sendUrgentProvisionalApprovalNotification(solicitud = {}) {
+  if (!GENERAL_UNAVAILABILITY_EMAILS.length) return;
+  try {
+    const { subject, text, html } = buildUrgentProvisionalMailContent(solicitud);
+    await sendMail({
+      to: GENERAL_UNAVAILABILITY_EMAILS,
+      subject,
+      text,
+      html,
+      source: "permisos_vacaciones",
+    });
+  } catch (mailError) {
+    logger.warn(
+      { mailError, solicitudId: solicitud?.id },
+      "No se pudo enviar notificación urgente de autorización provisional al grupo general"
+    );
+  }
 }
 
 function buildSolicitudCalendarEventInput(solicitud = {}) {
@@ -866,7 +916,17 @@ function buildSolicitudCalendarEventInput(solicitud = {}) {
 
 async function createSolicitudCalendarEvent(solicitud, warningMessage) {
   try {
-    await createTimeOffEvent(buildSolicitudCalendarEventInput(solicitud));
+    const calendarEvent = await createTimeOffEvent(buildSolicitudCalendarEventInput(solicitud));
+    if (solicitud?.id && calendarEvent?.id) {
+      await db.query(
+        `UPDATE permisos_vacaciones
+            SET calendar_event_id = $2,
+                calendar_event_calendar_id = $3,
+                updated_at = NOW()
+          WHERE id = $1`,
+        [solicitud.id, calendarEvent.id, calendarEvent.calendarId || null]
+      );
+    }
     try {
       await sendGeneralUnavailabilityNotification(solicitud);
     } catch (mailError) {
@@ -950,6 +1010,17 @@ async function recreateCalendarEventForSolicitud({ solicitudId, includeGeneralNo
 
   const calendarEvent = await createTimeOffEvent(buildSolicitudCalendarEventInput(solicitud));
 
+  if (calendarEvent?.id) {
+    await db.query(
+      `UPDATE permisos_vacaciones
+          SET calendar_event_id = $2,
+              calendar_event_calendar_id = $3,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [solicitud.id, calendarEvent.id, calendarEvent.calendarId || null]
+    );
+  }
+
   let generalNotice = { attempted: false, sent: false, skipped: false };
   if (includeGeneralNotice) {
     generalNotice.attempted = true;
@@ -1026,7 +1097,7 @@ function isEmergencySolicitud(row = {}) {
 }
 
 function isAutoCancellationExempt(row = {}) {
-  return isHealthPermiso(row) || isEmergencySolicitud(row);
+  return isHealthPermiso(row) || isEmergencySolicitud(row) || normalizeBooleanFlag(row?.is_urgent);
 }
 
 function buildTimeRangeLabel(startValue, endValue) {
@@ -1164,6 +1235,25 @@ function isExpiredWithoutApproval(row = {}) {
   return Boolean(today && today >= dateOnly);
 }
 
+function hasJustificationFiles(row = {}) {
+  if (!Array.isArray(row?.justificantes_urls)) return false;
+  return row.justificantes_urls.some((entry) => String(entry || "").trim().length > 0);
+}
+
+function isExpiredWithoutJustificationAfterPartialApproval(row = {}) {
+  const status = normalizeStatusText(row?.status);
+  if (!["partially_approved", "pending_final"].includes(status)) return false;
+  if (String(row?.tipo_solicitud || "").toLowerCase() === "vacaciones") return false;
+  if (Boolean(row?.charged_to_vacation)) return false;
+  if (hasJustificationFiles(row)) return false;
+
+  const baseDate = normalizeDateOnly(row?.fecha_fin || row?.fecha_fin_hora || row?.fecha_inicio || row?.fecha_inicio_hora);
+  const deadlineDate = baseDate ? addDaysToDateOnly(baseDate, 5) : null;
+  const today = getCurrentDateInAppTimezone();
+  if (!deadlineDate || !today) return false;
+  return today > deadlineDate;
+}
+
 async function settleExpiredPendingSolicitud(row = {}) {
   if (!row?.id) return row;
   if (!isExpiredWithoutApproval(row)) return row;
@@ -1184,6 +1274,7 @@ async function settleExpiredPendingSolicitud(row = {}) {
       WHERE id = $1
         AND LOWER(COALESCE(status, '')) IN ('pending', 'pendiente')
         AND COALESCE(es_emergencia, false) = false
+        AND COALESCE(is_urgent, false) = false
         AND LOWER(COALESCE(tipo_permiso, '')) <> 'salud'
         AND aprobacion_parcial_at IS NULL
         AND aprobacion_final_at IS NULL
@@ -1313,6 +1404,7 @@ async function processExpiredPendingSolicitudes({ solicitudIds = null } = {}) {
                  FROM permisos_vacaciones
                 WHERE LOWER(COALESCE(status, '')) IN ('pending', 'pendiente')
                   AND COALESCE(es_emergencia, false) = false
+                  AND COALESCE(is_urgent, false) = false
                   AND LOWER(COALESCE(tipo_permiso, '')) <> 'salud'
                   AND aprobacion_parcial_at IS NULL
                   AND aprobacion_final_at IS NULL`;
@@ -1333,9 +1425,73 @@ async function processExpiredPendingSolicitudes({ solicitudIds = null } = {}) {
     0
   );
 
+  // Regla adicional:
+  // Si la solicitud quedó parcialmente aprobada o pendiente final y no se cargaron justificantes
+  // hasta el fin del permiso, se rechaza automáticamente y se carga a vacaciones.
+  const staleJustificationQuery = `
+    SELECT *
+      FROM permisos_vacaciones
+     WHERE LOWER(COALESCE(status, '')) IN ('partially_approved', 'pending_final')
+       AND LOWER(COALESCE(tipo_solicitud, '')) <> 'vacaciones'
+       AND COALESCE(charged_to_vacation, false) = false
+  `;
+  const staleRowsResult = await db.query(staleJustificationQuery);
+  let autoChargedByMissingJustification = 0;
+  for (const row of staleRowsResult.rows || []) {
+    if (!isExpiredWithoutJustificationAfterPartialApproval(row)) continue;
+    const charge = buildVacationCharge(row);
+    const autoObs = [
+      ...(Array.isArray(row?.observaciones) ? row.observaciones : []),
+      "Rechazo automático: no se cargaron justificantes en el plazo del permiso. Se carga a vacaciones.",
+    ];
+
+    const { rows: updatedRows } = await db.query(
+      `UPDATE permisos_vacaciones
+          SET status = 'rejected',
+              observaciones = $2,
+              aprobacion_final_por = COALESCE(aprobacion_final_por, 'system_auto_no_justification'),
+              aprobacion_final_at = COALESCE(aprobacion_final_at, NOW()),
+              charged_to_vacation = true,
+              charged_vacation_hours = COALESCE(charged_vacation_hours, $3),
+              charged_vacation_days = COALESCE(charged_vacation_days, $4),
+              charged_to_vacation_at = COALESCE(charged_to_vacation_at, NOW()),
+              charged_to_vacation_reason = COALESCE(charged_to_vacation_reason, 'missing_justification'),
+              updated_at = NOW()
+        WHERE id = $1
+          AND LOWER(COALESCE(status, '')) IN ('partially_approved', 'pending_final')
+          AND COALESCE(charged_to_vacation, false) = false
+        RETURNING *`,
+      [row.id, autoObs, charge.hours, charge.days],
+    );
+    const updated = updatedRows[0];
+    if (!updated) continue;
+
+    autoChargedByMissingJustification += 1;
+    try {
+      await logAction({
+        usuario_id: null,
+        usuario_email: "system_auto_no_justification",
+        modulo: "permisos",
+        accion: "rechazo_automatico_sin_justificantes",
+        descripcion: "Solicitud rechazada automáticamente por falta de justificantes y cargada a vacaciones.",
+        datos_nuevos: {
+          solicitud_id: updated.id,
+          charged_to_vacation: true,
+          charged_vacation_hours: updated.charged_vacation_hours,
+          charged_vacation_days: updated.charged_vacation_days,
+          charged_to_vacation_reason: updated.charged_to_vacation_reason,
+        },
+        contexto: { auto: true },
+      });
+    } catch (auditError) {
+      logger.warn({ auditError, solicitudId: updated.id }, "No se pudo registrar auditoría de rechazo automático por no justificación");
+    }
+  }
+
   return {
     scanned: rows.length,
     cancelled,
+    auto_charged_missing_justification: autoChargedByMissingJustification,
   };
 }
 
@@ -1680,9 +1836,14 @@ async function ensureTable() {
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS recovery_plan_updated_by_user_id INTEGER");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS recovery_coordination_status TEXT NOT NULL DEFAULT 'not_required'");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS recovery_coordination_round INTEGER NOT NULL DEFAULT 0");
+    // Ejecución, verificación y cierre de recuperación — Bloque 7
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS recovery_executed_hours DECIMAL(8,2) NOT NULL DEFAULT 0");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS recovery_progress_notes TEXT");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS recovery_closed_at TIMESTAMPTZ");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS recovery_closed_by_user_id INTEGER");
     await db.query("ALTER TABLE permisos_vacaciones DROP CONSTRAINT IF EXISTS permisos_vacaciones_recovery_coordination_status_check");
     await db.query(
-      "ALTER TABLE permisos_vacaciones ADD CONSTRAINT permisos_vacaciones_recovery_coordination_status_check CHECK (recovery_coordination_status IN ('not_required','pending_approver_proposal','pending_requester_acceptance','agreed','finalized_by_approver'))"
+      "ALTER TABLE permisos_vacaciones ADD CONSTRAINT permisos_vacaciones_recovery_coordination_status_check CHECK (recovery_coordination_status IN ('not_required','pending_approver_proposal','pending_requester_acceptance','agreed','execution_in_progress','pending_verification','closed','finalized_by_approver'))"
     );
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS justificantes_urls TEXT[]");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS aprobacion_parcial_at TIMESTAMPTZ");
@@ -1851,6 +2012,66 @@ async function ensureTable() {
        WHERE legal_verification_token IS NOT NULL`
     );
 
+    // Reverso de calendario en cancelación — Bloque 6
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS calendar_event_id TEXT");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS calendar_event_calendar_id TEXT");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS cancellation_calendar_cancelled BOOLEAN NOT NULL DEFAULT false");
+
+    // Ciclo completo de justificantes — Bloque 5
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS justificante_deadline TIMESTAMPTZ");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS justificante_observation_count SMALLINT NOT NULL DEFAULT 0");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS justificante_resubmitted_at TIMESTAMPTZ");
+
+    // Escalamiento por falta de respuesta del aprobador — Bloque 4
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS escalation_status TEXT NOT NULL DEFAULT 'none'");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS escalation_reminder_sent_at TIMESTAMPTZ");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS escalation_escalated_at TIMESTAMPTZ");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS escalation_escalated_to_user_id INTEGER");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS escalation_escalated_to_email TEXT");
+    await db.query("ALTER TABLE permisos_vacaciones DROP CONSTRAINT IF EXISTS permisos_vacaciones_escalation_status_check");
+    await db.query(
+      "ALTER TABLE permisos_vacaciones ADD CONSTRAINT permisos_vacaciones_escalation_status_check CHECK (escalation_status IN ('none','reminder_sent','escalated'))"
+    );
+
+    // Estado formal de justificante — Bloque 2
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS justificante_status TEXT NOT NULL DEFAULT 'not_required'");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS justificante_review_observations TEXT");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS justificante_reviewed_at TIMESTAMPTZ");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS justificante_reviewed_by_user_id INTEGER");
+    await db.query("ALTER TABLE permisos_vacaciones DROP CONSTRAINT IF EXISTS permisos_vacaciones_justificante_status_check");
+    await db.query(
+      "ALTER TABLE permisos_vacaciones ADD CONSTRAINT permisos_vacaciones_justificante_status_check CHECK (justificante_status IN ('not_required','pendiente','entregado','en_revision','observado','aceptado','rechazado','vencido'))"
+    );
+    // Migración de datos existentes: registros con archivos ya subidos
+    await db.query(`
+      UPDATE permisos_vacaciones
+         SET justificante_status = 'entregado'
+       WHERE justificante_status = 'not_required'
+         AND (justificantes_urls IS NOT NULL AND array_length(justificantes_urls, 1) > 0)
+         AND (justificacion_requerida IS NOT NULL AND array_length(justificacion_requerida, 1) > 0)
+    `);
+    // Migración: registros que requieren justificante pero no lo han entregado
+    await db.query(`
+      UPDATE permisos_vacaciones
+         SET justificante_status = 'pendiente'
+       WHERE justificante_status = 'not_required'
+         AND (justificantes_urls IS NULL OR array_length(justificantes_urls, 1) IS NULL)
+         AND (justificacion_requerida IS NOT NULL AND array_length(justificacion_requerida, 1) > 0)
+         AND status IN ('partially_approved', 'pending_final')
+    `);
+
+    // Bloque urgencia: clasificación general de ausencia urgente
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS is_urgent BOOLEAN NOT NULL DEFAULT false");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS provisional_status TEXT");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS vacation_conversion_consent BOOLEAN NOT NULL DEFAULT false");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS vacation_conversion_consent_at TIMESTAMPTZ");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS vacation_conversion_consent_text TEXT");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS calamidad_parentesco TEXT");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS calamidad_grado_consanguinidad TEXT");
+    await db.query(
+      "CREATE INDEX IF NOT EXISTS idx_pv_is_urgent ON permisos_vacaciones(is_urgent, status) WHERE is_urgent = true"
+    );
+
     tableReady = true;
   })();
 
@@ -1908,6 +2129,20 @@ async function listMyStudyEnrollments({ userId }) {
 
 async function listPendingStudyEnrollments({ approver }) {
   await ensureTable();
+
+  if (isTalentoHumanoOrAdmin(approver)) {
+    const { rows } = await db.query(
+      `SELECT
+          m.*,
+          COALESCE(NULLIF(u.fullname, ''), NULLIF(u.name, ''), m.user_email) AS user_fullname
+         FROM permisos_estudios_matriculas m
+         LEFT JOIN users u ON u.id = m.user_id
+        WHERE m.status = 'pending_validation'
+        ORDER BY m.created_at DESC, m.id DESC`
+    );
+    return rows;
+  }
+
   const roleCandidates = getApproverRoleCandidates(approver);
   const { rows } = await db.query(
     `SELECT
@@ -2076,7 +2311,9 @@ async function reviewStudyEnrollment({ id, approver, decision, reason }) {
     err.status = 409;
     throw err;
   }
+  const isTH = isTalentoHumanoOrAdmin(approver);
   const canReview =
+    isTH ||
     Number(enrollment.approver_user_id) === Number(actorId) ||
     canApprove({
       approverRole: enrollment.approver_role,
@@ -2167,8 +2404,7 @@ async function createSolicitud({ body, user, meta }) {
   payload.user_fullname = requesterIdentity?.fullname || getDisplayName(user);
   payload.user_id = requesterUserId;
   payload.allow_negative = Boolean(payload.allow_negative);
-  payload.es_emergencia =
-    payload.tipo_solicitud === "permiso" ? normalizeBooleanFlag(payload.es_emergencia) : false;
+  payload.es_emergencia = normalizeBooleanFlag(payload.es_emergencia);
   payload.projected_remaining_days = null;
   payload.recovery_date = null;
   payload.monetary_debt = null;
@@ -2201,11 +2437,36 @@ async function createSolicitud({ body, user, meta }) {
     throw err;
   }
 
+  // Prevención de autoaprobación: el solicitante no puede ser su propio aprobador
+  if (requesterUserId && payload.approver_user_id && Number(payload.approver_user_id) === Number(requesterUserId)) {
+    logger.warn(
+      { requesterUserId, approverUserId: payload.approver_user_id, approverRole: payload.approver_role },
+      "Autoaprobacion detectada - buscando aprobador alternativo en gerencia_general"
+    );
+    const altApprover = await findApproverByRole("gerencia_general", requesterUserId);
+    if (altApprover?.id) {
+      payload.approver_role = "gerencia_general";
+      payload.approver_user_id = altApprover.id;
+      payload.approver_email = altApprover.email;
+      logger.info(
+        { newApproverUserId: altApprover.id, newApproverEmail: altApprover.email },
+        "Autoaprobacion resuelta - solicitud reasignada a gerencia_general"
+      );
+    } else {
+      const err = new Error(
+        "No se puede asignar al solicitante como su propio aprobador y no se encontró un aprobador alternativo disponible."
+      );
+      err.status = 400;
+      throw err;
+    }
+  }
+
   let driveMeta = {};
   let justificacionRequerida = [];
   let esRecuperable = false;
   let recoveryPlan = [];
   let recoveryPlanTotalHours = 0;
+  let vacLockAcquired = false;
   const startDateTimeRaw = payload.fecha_inicio_hora || payload.fecha_inicio_datetime || payload.start_time;
   const endDateTimeRaw = payload.fecha_fin_hora || payload.fecha_fin_datetime || payload.end_time;
   payload.fecha_inicio_hora = normalizeDateTime(startDateTimeRaw);
@@ -2393,6 +2654,9 @@ async function createSolicitud({ body, user, meta }) {
     const requestYear = payload.fecha_inicio
       ? new Date(payload.fecha_inicio).getFullYear()
       : new Date().getFullYear();
+    // Serializar solicitudes concurrentes del mismo usuario para evitar race condition en saldo
+    await db.query("SELECT pg_advisory_lock($1)", [Number(payload.user_id)]);
+    vacLockAcquired = true;
     const hireDate = await getHireDate(payload.user_id);
     const allowanceInfo = computeVacationAllowance(hireDate, payload.fecha_inicio || new Date());
     const consumption = await getVacationConsumption({
@@ -2425,6 +2689,13 @@ async function createSolicitud({ body, user, meta }) {
       err.status = 400;
       throw err;
     }
+    if (exceedsBalance && payload.allow_negative && projection.deficit_days > MAX_NEGATIVE_VACATION_DAYS) {
+      const err = new Error(
+        `El déficit solicitado (${projection.deficit_days} días) supera el máximo permitido en saldo negativo (${MAX_NEGATIVE_VACATION_DAYS} días). Ajusta el periodo o contacta a Talento Humano.`
+      );
+      err.status = 400;
+      throw err;
+    }
     payload.projected_remaining_days = projection.projected_remaining;
     payload.recovery_date = null;
     payload.monetary_debt = null;
@@ -2445,7 +2716,41 @@ async function createSolicitud({ body, user, meta }) {
     }
   }
 
-  const { rows } = await db.query(
+  // Urgency auto-detection: explicit flag, es_emergencia, or start date already reached
+  const todayStr = new Date().toISOString().split("T")[0];
+  const isUrgent =
+    normalizeBooleanFlag(payload.is_urgent) ||
+    normalizeBooleanFlag(payload.es_emergencia) ||
+    (payload.fecha_inicio && payload.fecha_inicio <= todayStr);
+  payload.is_urgent = isUrgent;
+
+  // Vacaciones normales (no emergencia) deben solicitarse con al menos 24h de anticipación
+  if (payload.tipo_solicitud === "vacaciones" && !isUrgent && payload.fecha_inicio) {
+    const startDate = new Date(`${payload.fecha_inicio}T00:00:00`);
+    const minAllowedStart = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    if (startDate < minAllowedStart) {
+      const err = new Error(
+        "Las vacaciones deben solicitarse con al menos 24 horas de anticipación. Si necesitas ausentarte hoy o mañana, márcalas como emergencia."
+      );
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  // Vacation conversion consent — only store when explicitly given
+  const hasConversionConsent = normalizeBooleanFlag(payload.vacation_conversion_consent);
+  const conversionConsentAt = hasConversionConsent ? new Date().toISOString() : null;
+  const conversionConsentText = hasConversionConsent ? VACATION_CONVERSION_CONSENT_TEXT : null;
+
+  // Calamidad kinship fields (only meaningful for tipo_permiso === 'calamidad')
+  const calamidadParentesco =
+    payload.tipo_permiso === "calamidad" ? String(payload.calamidad_parentesco || "").trim() || null : null;
+  const calamidadGradoConsanguinidad =
+    payload.tipo_permiso === "calamidad" ? String(payload.calamidad_grado_consanguinidad || "").trim() || null : null;
+
+  let rows;
+  try {
+  const result = await db.query(
     `INSERT INTO permisos_vacaciones (
       user_email, user_fullname, user_id, approver_role, approver_user_id, approver_email, department_id,
       tipo_solicitud, tipo_permiso, subtipo_calamidad, subtipo_salud,
@@ -2454,8 +2759,10 @@ async function createSolicitud({ body, user, meta }) {
       recovery_plan, recovery_plan_total_hours, recovery_plan_updated_at, recovery_plan_updated_by_user_id, recovery_coordination_status,
       drive_doc_id, drive_pdf_id, drive_doc_link, drive_pdf_link, drive_folder_id,
       allow_negative, projected_remaining_days, recovery_date, monetary_debt, es_emergencia,
-      status
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,'pending') RETURNING *`,
+      is_urgent, vacation_conversion_consent, vacation_conversion_consent_at, vacation_conversion_consent_text,
+      calamidad_parentesco, calamidad_grado_consanguinidad,
+      status, justificante_status
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,'pending',$44) RETURNING *`,
     [
       payload.user_email,
       payload.user_fullname,
@@ -2494,10 +2801,25 @@ async function createSolicitud({ body, user, meta }) {
       payload.recovery_date,
       payload.monetary_debt,
       payload.es_emergencia,
+      isUrgent,
+      hasConversionConsent,
+      conversionConsentAt,
+      conversionConsentText,
+      calamidadParentesco,
+      calamidadGradoConsanguinidad,
+      justificacionRequerida.length > 0 ? "pendiente" : "not_required",
     ]
   );
+  rows = result.rows;
+  } finally {
+    if (vacLockAcquired) {
+      await db.query("SELECT pg_advisory_unlock($1)", [Number(payload.user_id)]).catch(() => {});
+      vacLockAcquired = false;
+    }
+  }
 
   await logAction({ usuario_email: user?.email, modulo: "permisos", accion: "crear" });
+
   const approverLabel = GERENCIA_GENERAL_ROLES.has(String(payload.approver_role || "").toLowerCase())
     ? "gerencia general"
     : "jefe inmediato";
@@ -2523,24 +2845,83 @@ async function createSolicitud({ body, user, meta }) {
       });
     }
     if (payload.approver_user_id && payload.approver_user_id !== payload.user_id) {
+      const urgentPrefix = isUrgent ? "[URGENTE] " : "";
+      const urgentSuffix = isUrgent
+        ? " Esta solicitud es urgente y requiere autorización provisional inmediata."
+        : "";
       await notificationManager.sendNotification({
         userId: payload.approver_user_id,
-        customTitle: "Nueva solicitud pendiente",
-        customMessage: `${payload.user_fullname || payload.user_email} envio una solicitud de ${payload.tipo_solicitud}.`,
-        type: "task",
+        customTitle: `${urgentPrefix}Nueva solicitud pendiente`,
+        customMessage: `${payload.user_fullname || payload.user_email} envio una solicitud de ${payload.tipo_solicitud}.${urgentSuffix}`,
+        type: isUrgent ? "alert" : "task",
         source: "permisos_vacaciones",
-        priority: 1,
+        priority: isUrgent ? 2 : 1,
         email: true,
         meta: {
           solicitud_id: rows[0].id,
           tipo_solicitud: payload.tipo_solicitud,
           solicitante: payload.user_email,
+          is_urgent: isUrgent,
           target_path: `/dashboard/talento-humano/permisos?tab=approve&solicitudId=${rows[0].id}`,
         },
       });
     }
+
+    // For urgent requests, also notify the general list so someone can act immediately
+    if (isUrgent && GENERAL_UNAVAILABILITY_EMAILS.length > 0) {
+      try {
+        for (const email of GENERAL_UNAVAILABILITY_EMAILS) {
+          await notificationManager.sendNotification({
+            userEmail: email,
+            customTitle: "[URGENTE] Solicitud urgente recibida",
+            customMessage: `${payload.user_fullname || payload.user_email} registró una solicitud urgente de ${payload.tipo_solicitud}${payload.tipo_permiso ? ` (${payload.tipo_permiso})` : ""}. Requiere autorización provisional inmediata.`,
+            type: "alert",
+            source: "permisos_vacaciones",
+            priority: 2,
+            email: true,
+            meta: {
+              solicitud_id: rows[0].id,
+              tipo_solicitud: payload.tipo_solicitud,
+              tipo_permiso: payload.tipo_permiso || null,
+              solicitante: payload.user_email,
+              is_urgent: true,
+              target_path: `/dashboard/talento-humano/permisos?tab=approve&solicitudId=${rows[0].id}`,
+            },
+          });
+        }
+      } catch (urgentNotifyError) {
+        logger.warn({ urgentNotifyError, solicitudId: rows[0]?.id }, "No se pudo enviar notificación urgente a lista general");
+      }
+    }
   } catch (notifyError) {
     logger.warn({ notifyError, solicitudId: rows[0]?.id }, "No se pudo enviar notificaci?n de solicitud");
+  }
+
+  // Notificar a Talento Humano (visibilidad, sin email para no saturar)
+  try {
+    const thUsers = await findTalentoHumanoUsers();
+    for (const thUser of thUsers) {
+      if (Number(thUser.id) === Number(payload.user_id)) continue;
+      if (Number(thUser.id) === Number(payload.approver_user_id)) continue;
+      await notificationManager.sendNotification({
+        userId: thUser.id,
+        customTitle: "Nueva solicitud registrada",
+        customMessage: `${payload.user_fullname || payload.user_email} envió una solicitud de ${payload.tipo_solicitud}${payload.tipo_permiso ? ` (${payload.tipo_permiso})` : ""}.`,
+        type: "info",
+        source: "permisos_vacaciones",
+        priority: 0,
+        email: false,
+        meta: {
+          solicitud_id: rows[0].id,
+          tipo_solicitud: payload.tipo_solicitud,
+          tipo_permiso: payload.tipo_permiso || null,
+          solicitante: payload.user_email,
+          target_path: `/dashboard/talento-humano/permisos?tab=all&solicitudId=${rows[0].id}`,
+        },
+      });
+    }
+  } catch (thNotifyError) {
+    logger.warn({ thNotifyError, solicitudId: rows[0]?.id }, "No se pudo notificar a Talento Humano sobre nueva solicitud");
   }
 
   try {
@@ -2557,6 +2938,16 @@ async function createSolicitud({ body, user, meta }) {
 
   const enriched = await attachWorkflowSignatures([rows[0]]);
   return enriched[0] || rows[0];
+}
+
+async function findTalentoHumanoUsers() {
+  const { rows } = await db.query(
+    `SELECT id, email FROM users
+      WHERE LOWER(COALESCE(role, '')) IN ('talento_humano', 'jefe_talento_humano')
+        AND COALESCE(active, true) = true
+      LIMIT 20`
+  );
+  return rows;
 }
 
 function canApprove({ approverRole, approverUserId, approver }) {
@@ -2579,6 +2970,9 @@ function normalizeRecoveryCoordinationStatus(value) {
     "pending_approver_proposal",
     "pending_requester_acceptance",
     "agreed",
+    "execution_in_progress",
+    "pending_verification",
+    "closed",
     "finalized_by_approver",
   ]);
   if (allowed.has(status)) return status;
@@ -2588,7 +2982,7 @@ function normalizeRecoveryCoordinationStatus(value) {
 async function aprobarParcial({ id, approver, meta }) {
   await ensureTable();
   const existing = await db.query(
-    `SELECT approver_role, approver_user_id, status, tipo_solicitud, tipo_permiso FROM permisos_vacaciones WHERE id = $1 LIMIT 1`,
+    `SELECT approver_role, approver_user_id, status, tipo_solicitud, tipo_permiso, is_urgent FROM permisos_vacaciones WHERE id = $1 LIMIT 1`,
     [id]
   );
   const solicitud = existing.rows[0];
@@ -2605,6 +2999,14 @@ async function aprobarParcial({ id, approver, meta }) {
   }
   const approverName = getDisplayName(approver);
   const shouldAutoFinal = isAutoFinalPermisoType(solicitud.tipo_permiso);
+  const isUrgentRow = normalizeBooleanFlag(solicitud.is_urgent);
+
+  // Determine justificant deadline based on subtype config (calamidad) or fallback to 5 days
+  const subtipoConfig = SUBTIPO_CALAMIDAD_CONFIG[String(solicitud.subtipo_calamidad || "").toLowerCase()] || null;
+  const baseDeadlineDays = subtipoConfig ? subtipoConfig.justificante_deadline_days : 5;
+  const urgentExtension = isUrgentRow && subtipoConfig ? (subtipoConfig.urgent_deadline_extension_days || 0) : 0;
+  const deadlineDays = baseDeadlineDays + urgentExtension;
+
   const { rows } = await db.query(
     `UPDATE permisos_vacaciones
         SET status = $3,
@@ -2612,31 +3014,56 @@ async function aprobarParcial({ id, approver, meta }) {
             aprobacion_parcial_por = $2,
             aprobacion_final_at = CASE WHEN $4 THEN now() ELSE aprobacion_final_at END,
             aprobacion_final_por = CASE WHEN $4 THEN $2 ELSE aprobacion_final_por END,
+            provisional_status = CASE
+              WHEN NOT $4 AND $5 THEN 'salida_provisional_autorizada'
+              ELSE provisional_status
+            END,
             recovery_coordination_status = CASE
               WHEN $4 AND COALESCE(es_recuperable, false) THEN 'pending_approver_proposal'
               ELSE recovery_coordination_status
             END,
+            justificante_deadline = CASE
+              WHEN NOT $4
+                AND (justificacion_requerida IS NOT NULL AND array_length(justificacion_requerida, 1) > 0)
+                AND justificante_deadline IS NULL
+              THEN COALESCE(fecha_fin, fecha_inicio) + ($6 || ' days')::INTERVAL
+              ELSE justificante_deadline
+            END,
             updated_at = now()
       WHERE id = $1
     RETURNING *`,
-    [id, approverName, shouldAutoFinal ? "approved" : "partially_approved", shouldAutoFinal]
+    [id, approverName, shouldAutoFinal ? "approved" : "partially_approved", shouldAutoFinal, isUrgentRow, deadlineDays]
   );
   await logAction({ usuario_email: approver?.email, modulo: "permisos", accion: "aprobar_parcial" });
   try {
     if (rows[0]?.user_id) {
+      let notifTitle;
+      let notifMessage;
+      if (shouldAutoFinal) {
+        notifTitle = "Solicitud aprobada";
+        notifMessage = "Tu solicitud fue aprobada de forma definitiva.";
+      } else if (isUrgentRow) {
+        notifTitle = "Salida provisional autorizada";
+        notifMessage =
+          "Tu solicitud urgente fue autorizada de forma provisional. Puedes ausentarte. " +
+          "Debes subir los justificantes cuando regreses para completar la validación final.";
+      } else {
+        notifTitle = "Solicitud aprobada parcialmente";
+        notifMessage = "Tu solicitud fue aprobada parcialmente. Debes subir los justificantes para la aprobación final.";
+      }
       await notificationManager.sendNotification({
         userId: rows[0].user_id,
-        customTitle: shouldAutoFinal ? "Solicitud aprobada" : "Solicitud aprobada parcialmente",
-        customMessage: shouldAutoFinal
-          ? "Tu solicitud fue aprobada de forma definitiva."
-          : "Tu solicitud fue aprobada parcialmente. Debes subir los justificantes para la aprobación final.",
+        customTitle: notifTitle,
+        customMessage: notifMessage,
         type: "info",
         source: "permisos_vacaciones",
-        priority: 1,
+        priority: isUrgentRow && !shouldAutoFinal ? 2 : 1,
         email: true,
         meta: {
           solicitud_id: rows[0].id,
           tipo_solicitud: rows[0].tipo_solicitud,
+          is_urgent: isUrgentRow,
+          provisional_status: rows[0].provisional_status || null,
           target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${rows[0].id}`,
         },
       });
@@ -2671,6 +3098,44 @@ async function aprobarParcial({ id, approver, meta }) {
       rows[0],
       "No se pudo crear evento de calendario en aprobación definitiva automática del permiso"
     );
+    try {
+      await sendGeneralUnavailabilityNotification(rows[0]);
+    } catch (mailError) {
+      logger.warn({ mailError, solicitudId: rows[0]?.id }, "No se pudo enviar aviso general de no disponibilidad en auto-aprobación");
+    }
+  } else if (isUrgentRow) {
+    // Create a provisional calendar event so the absence is visible immediately
+    try {
+      const eventInput = buildSolicitudCalendarEventInput(rows[0]);
+      eventInput.summary = `[PROVISIONAL] ${eventInput.summary || "Ausencia urgente"}`;
+      eventInput.description = `Autorización provisional urgente — pendiente de validación con justificantes.\n\n${eventInput.description || ""}`.trim();
+      const calendarEvent = await createTimeOffEvent(eventInput);
+      if (rows[0]?.id && calendarEvent?.id) {
+        await db.query(
+          `UPDATE permisos_vacaciones
+              SET calendar_event_id = $2,
+                  calendar_event_calendar_id = $3,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [rows[0].id, calendarEvent.id, calendarEvent.calendarId || null]
+        );
+        rows[0].calendar_event_id = calendarEvent.id;
+        rows[0].calendar_event_calendar_id = calendarEvent.calendarId || null;
+      }
+      try {
+        await sendGeneralUnavailabilityNotification(rows[0]);
+      } catch (mailError) {
+        logger.warn(
+          { mailError, solicitudId: rows[0]?.id },
+          "No se pudo enviar aviso general de no disponibilidad para ausencia urgente provisional"
+        );
+      }
+    } catch (calendarError) {
+      logger.warn(
+        { calendarError, solicitudId: rows[0]?.id },
+        "No se pudo crear evento de calendario provisional para ausencia urgente"
+      );
+    }
   }
 
   if (shouldAutoFinal) {
@@ -2754,6 +3219,50 @@ async function aprobarParcial({ id, approver, meta }) {
     }
   }
 
+  // Urgent provisional approval: notify TH in-app + send general email
+  if (isUrgentRow && !shouldAutoFinal) {
+    try {
+      const thUsers = await findTalentoHumanoUsers();
+      for (const thUser of thUsers) {
+        if (Number(thUser.id) === Number(rows[0]?.user_id)) continue;
+        await notificationManager.sendNotification({
+          userId: thUser.id,
+          customTitle: "[URGENTE] Salida provisional autorizada",
+          customMessage: `${rows[0]?.user_fullname || rows[0]?.user_email} tiene una solicitud urgente con autorización provisional. Validación pendiente de justificantes.`,
+          type: "alert",
+          source: "permisos_vacaciones",
+          priority: 2,
+          email: false,
+          meta: {
+            solicitud_id: rows[0].id,
+            tipo_solicitud: rows[0].tipo_solicitud,
+            tipo_permiso: rows[0].tipo_permiso || null,
+            provisional_status: rows[0].provisional_status || null,
+            is_urgent: true,
+            target_path: `/dashboard/talento-humano/permisos?tab=all&solicitudId=${rows[0].id}`,
+          },
+        });
+      }
+    } catch (thNotifyError) {
+      logger.warn({ thNotifyError, solicitudId: rows[0]?.id }, "No se pudo notificar a TH sobre autorización provisional urgente");
+    }
+
+    await sendUrgentProvisionalApprovalNotification(rows[0]);
+  }
+
+  // Regular partial approval (salud, calamidad no urgente): create calendar event + notify todo el personal
+  if (!shouldAutoFinal && !isUrgentRow) {
+    await createSolicitudCalendarEvent(
+      rows[0],
+      "No se pudo crear evento de calendario en aprobación parcial regular"
+    );
+    try {
+      await sendGeneralUnavailabilityNotification(rows[0]);
+    } catch (mailError) {
+      logger.warn({ mailError, solicitudId: rows[0]?.id }, "No se pudo enviar aviso general de no disponibilidad en aprobación parcial");
+    }
+  }
+
   const enriched = await attachWorkflowSignatures([rows[0]]);
   return enriched[0] || rows[0];
 }
@@ -2795,6 +3304,7 @@ async function subirJustificantes({ id, urls, user }) {
       `UPDATE permisos_vacaciones
           SET justificantes_urls = $2,
               status = 'pending_final',
+              justificante_status = 'entregado',
               auto_cancelled_justification_submitted_at = NOW(),
               updated_at = now()
         WHERE id = $1
@@ -2827,16 +3337,23 @@ async function subirJustificantes({ id, urls, user }) {
     return enriched[0] || rows[0];
   }
 
+  const isResubmission = String(solicitud.justificante_status || "").toLowerCase() === "observado";
   const { rows } = await db.query(
     `UPDATE permisos_vacaciones
         SET justificantes_urls = $2,
             status = 'pending_final',
+            justificante_status = 'entregado',
+            justificante_resubmitted_at = CASE WHEN $3 THEN NOW() ELSE justificante_resubmitted_at END,
             updated_at = now()
       WHERE id = $1
     RETURNING *`,
-    [id, safeUrls]
+    [id, safeUrls, isResubmission]
   );
-  await logAction({ usuario_email: user?.email, modulo: "permisos", accion: "subir_justificantes" });
+  await logAction({
+    usuario_email: user?.email,
+    modulo: "permisos",
+    accion: isResubmission ? "subsanar_justificantes" : "subir_justificantes",
+  });
 
   try {
     const solicitud = rows[0];
@@ -2863,16 +3380,302 @@ async function subirJustificantes({ id, urls, user }) {
   return enriched[0] || rows[0];
 }
 
+async function revisarJustificante({ id, decision, observations, approver }) {
+  await ensureTable();
+  const { rows: existingRows } = await db.query(
+    `SELECT * FROM permisos_vacaciones WHERE id = $1 LIMIT 1`,
+    [id]
+  );
+  const solicitud = existingRows[0];
+  if (!solicitud) {
+    const err = new Error("Solicitud no encontrada");
+    err.status = 404;
+    throw err;
+  }
+  const isActorTH = isTalentoHumanoOrAdmin(approver);
+  if (!isActorTH && !canApprove({ approverRole: solicitud.approver_role, approverUserId: solicitud.approver_user_id, approver })) {
+    const err = new Error("No autorizado para revisar los justificantes de esta solicitud");
+    err.status = 403;
+    throw err;
+  }
+  const normalizedDecision = String(decision || "").trim().toLowerCase();
+  if (!["aceptado", "rechazado", "observado"].includes(normalizedDecision)) {
+    const err = new Error("Decisión inválida. Usa: aceptado, rechazado u observado");
+    err.status = 400;
+    throw err;
+  }
+  const trimmedObservations = String(observations || "").trim();
+  if ((normalizedDecision === "rechazado" || normalizedDecision === "observado") && !trimmedObservations) {
+    const err = new Error("Las observaciones son obligatorias al rechazar u observar un justificante.");
+    err.status = 400;
+    throw err;
+  }
+  const currentJustificanteStatus = String(solicitud.justificante_status || "not_required").toLowerCase();
+  if (!["entregado", "en_revision", "observado"].includes(currentJustificanteStatus)) {
+    const err = new Error(
+      `No se puede revisar el justificante en estado actual: ${currentJustificanteStatus}. Debe estar en estado entregado o en revisión.`
+    );
+    err.status = 409;
+    throw err;
+  }
+
+  // Protección: máximo 3 ciclos de observación antes de auto-rechazar
+  const MAX_OBSERVATION_CYCLES = 3;
+  const currentObsCount = Number(solicitud.justificante_observation_count || 0);
+  let effectiveDecision = normalizedDecision;
+  let effectiveObservations = trimmedObservations;
+  if (normalizedDecision === "observado" && currentObsCount >= MAX_OBSERVATION_CYCLES) {
+    effectiveDecision = "rechazado";
+    effectiveObservations = `Justificante rechazado automaticamente por superar el maximo de ${MAX_OBSERVATION_CYCLES} ciclos de observacion. Ultima observacion: ${trimmedObservations}`;
+  }
+
+  const approverActorId = resolveActorId(approver);
+  const isUrgentRow = normalizeBooleanFlag(solicitud.is_urgent);
+
+  // Derive provisional_status transition for urgent flow:
+  // aceptado → 'procedente' (justified, forward to final approval)
+  // rechazado → 'pendiente_regularizacion' (not justified, requires admin action)
+  const nextProvisionalStatus =
+    isUrgentRow && effectiveDecision === "aceptado"
+      ? "procedente"
+      : isUrgentRow && effectiveDecision === "rechazado"
+      ? "pendiente_regularizacion"
+      : null; // no change for observado or non-urgent
+
+  const { rows } = await db.query(
+    `UPDATE permisos_vacaciones
+        SET justificante_status = $2,
+            justificante_review_observations = $3,
+            justificante_reviewed_at = NOW(),
+            justificante_reviewed_by_user_id = $4,
+            justificante_observation_count = CASE WHEN $5 THEN justificante_observation_count + 1 ELSE justificante_observation_count END,
+            provisional_status = CASE WHEN $6 IS NOT NULL THEN $6 ELSE provisional_status END,
+            updated_at = NOW()
+      WHERE id = $1
+    RETURNING *`,
+    [id, effectiveDecision, effectiveObservations || null, approverActorId, effectiveDecision === "observado", nextProvisionalStatus]
+  );
+  await logAction({
+    usuario_email: approver?.email,
+    modulo: "permisos",
+    accion: `justificante_${effectiveDecision}`,
+    datos_nuevos: {
+      justificante_status: effectiveDecision,
+      observations: effectiveObservations,
+      observation_count: rows[0]?.justificante_observation_count,
+      auto_rejected_by_max_cycles: normalizedDecision === "observado" && effectiveDecision === "rechazado",
+      provisional_status: rows[0]?.provisional_status || null,
+      is_urgent: isUrgentRow,
+    },
+  });
+
+  // Build notification content — urgent cases get richer messages
+  let notifTitle;
+  let notifMessage;
+  let notifType;
+  let notifPriority;
+
+  if (effectiveDecision === "aceptado") {
+    if (isUrgentRow) {
+      notifTitle = "Ausencia urgente validada — procedente";
+      notifMessage =
+        "Tu justificante fue aceptado. Tu ausencia urgente fue determinada como procedente. " +
+        "El proceso continuará con la aprobación final por parte de Talento Humano.";
+    } else {
+      notifTitle = "Justificante aceptado";
+      notifMessage = "Tu justificante fue revisado y aceptado por el aprobador.";
+    }
+    notifType = "info";
+    notifPriority = 1;
+  } else if (effectiveDecision === "rechazado") {
+    if (isUrgentRow) {
+      notifTitle = "Ausencia urgente — no procedente, pendiente de regularización";
+      notifMessage =
+        `Tu justificante fue rechazado y tu ausencia urgente fue determinada como no procedente. ` +
+        `Motivo: ${effectiveObservations}. ` +
+        `Tu solicitud queda en estado de regularización pendiente. Talento Humano se comunicará contigo.`;
+    } else {
+      notifTitle = "Justificante rechazado";
+      notifMessage = `Tu justificante fue rechazado. Motivo: ${effectiveObservations}`;
+    }
+    notifType = "warning";
+    notifPriority = 2;
+  } else {
+    notifTitle = "Justificante con observaciones";
+    notifMessage = `Tu justificante tiene observaciones: ${effectiveObservations}. Puedes corregir y volver a subir antes del plazo.`;
+    notifType = "warning";
+    notifPriority = 1;
+  }
+
+  try {
+    if (rows[0]?.user_id) {
+      await notificationManager.sendNotification({
+        userId: rows[0].user_id,
+        customTitle: notifTitle,
+        customMessage: notifMessage,
+        type: notifType,
+        source: "permisos_vacaciones",
+        priority: notifPriority,
+        email: true,
+        meta: {
+          solicitud_id: rows[0].id,
+          tipo_solicitud: rows[0].tipo_solicitud,
+          justificante_status: effectiveDecision,
+          provisional_status: rows[0].provisional_status || null,
+          is_urgent: isUrgentRow,
+          justificante_deadline: rows[0].justificante_deadline || null,
+          target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${rows[0].id}`,
+        },
+      });
+    }
+  } catch (notifyError) {
+    logger.warn({ notifyError, solicitudId: rows[0]?.id }, "No se pudo notificar revision de justificante");
+  }
+
+  // When urgent request enters pendiente_regularizacion: alert TH immediately
+  if (isUrgentRow && nextProvisionalStatus === "pendiente_regularizacion") {
+    try {
+      const thUsers = await findTalentoHumanoUsers();
+      for (const thUser of thUsers) {
+        if (Number(thUser.id) === Number(rows[0]?.user_id)) continue;
+        await notificationManager.sendNotification({
+          userId: thUser.id,
+          customTitle: "[URGENTE] Regularización pendiente",
+          customMessage: `La ausencia urgente de ${rows[0]?.user_fullname || rows[0]?.user_email} fue determinada como no procedente. Requiere acción de regularización por parte de TH/admin.`,
+          type: "alert",
+          source: "permisos_vacaciones",
+          priority: 2,
+          email: true,
+          meta: {
+            solicitud_id: rows[0].id,
+            tipo_solicitud: rows[0].tipo_solicitud,
+            tipo_permiso: rows[0].tipo_permiso || null,
+            provisional_status: "pendiente_regularizacion",
+            is_urgent: true,
+            target_path: `/dashboard/talento-humano/permisos?tab=all&solicitudId=${rows[0].id}`,
+          },
+        });
+      }
+    } catch (thNotifyError) {
+      logger.warn({ thNotifyError, solicitudId: rows[0]?.id }, "No se pudo notificar a TH sobre regularización pendiente urgente");
+    }
+
+    // Also send general email so no one misses this
+    try {
+      if (GENERAL_UNAVAILABILITY_EMAILS.length) {
+        const collaborator = rows[0]?.user_fullname || rows[0]?.user_email || "Colaborador";
+        await sendMail({
+          to: GENERAL_UNAVAILABILITY_EMAILS,
+          subject: `[SPI URGENTE] Regularización pendiente: ${collaborator}`,
+          text: [
+            "NOTIFICACIÓN URGENTE — Regularización pendiente de acción",
+            `La ausencia urgente de ${collaborator} (solicitud #${rows[0]?.id}) fue determinada como NO PROCEDENTE.`,
+            `Motivo del rechazo: ${effectiveObservations}`,
+            "La solicitud requiere acción administrativa: conversión a vacaciones o regularización formal.",
+          ].join("\n"),
+          html: `
+            <p><strong>⚠ NOTIFICACIÓN URGENTE — Regularización pendiente de acción.</strong></p>
+            <p>La ausencia urgente de <strong>${collaborator}</strong> (solicitud <strong>#${rows[0]?.id}</strong>) fue determinada como <strong>NO PROCEDENTE</strong>.</p>
+            <p>Motivo del rechazo: ${effectiveObservations}</p>
+            <p>La solicitud requiere acción administrativa: conversión a vacaciones o regularización formal.</p>
+          `,
+          source: "permisos_vacaciones",
+        });
+      }
+    } catch (mailError) {
+      logger.warn({ mailError, solicitudId: rows[0]?.id }, "No se pudo enviar email de regularización pendiente al grupo general");
+    }
+  }
+
+  // When urgent request becomes procedente: alert TH to proceed with final approval
+  if (isUrgentRow && nextProvisionalStatus === "procedente") {
+    try {
+      const thUsers = await findTalentoHumanoUsers();
+      for (const thUser of thUsers) {
+        if (Number(thUser.id) === Number(rows[0]?.user_id)) continue;
+        await notificationManager.sendNotification({
+          userId: thUser.id,
+          customTitle: "Ausencia urgente validada — lista para aprobación final",
+          customMessage: `El justificante de ${rows[0]?.user_fullname || rows[0]?.user_email} fue aceptado. La ausencia urgente es procedente. Puedes emitir la aprobación final.`,
+          type: "task",
+          source: "permisos_vacaciones",
+          priority: 1,
+          email: false,
+          meta: {
+            solicitud_id: rows[0].id,
+            tipo_solicitud: rows[0].tipo_solicitud,
+            provisional_status: "procedente",
+            is_urgent: true,
+            target_path: `/dashboard/talento-humano/permisos?tab=approve&solicitudId=${rows[0].id}`,
+          },
+        });
+      }
+    } catch (thNotifyError) {
+      logger.warn({ thNotifyError, solicitudId: rows[0]?.id }, "No se pudo notificar a TH sobre procedencia de ausencia urgente");
+    }
+  }
+
+  // Bloque 5 — provisional calendar event lifecycle
+  // procedente: replace [PROVISIONAL] event with a regular confirmed event
+  // pendiente_regularizacion: cancel the provisional event (absence is not approved)
+  if (isUrgentRow && nextProvisionalStatus === "procedente") {
+    try {
+      await cancelSolicitudCalendarEvent(rows[0]);
+      await createSolicitudCalendarEvent(
+        rows[0],
+        "No se pudo recrear el evento de calendario al confirmar ausencia urgente como procedente"
+      );
+    } catch (calendarError) {
+      logger.warn(
+        { calendarError, solicitudId: rows[0]?.id },
+        "Error al reemplazar evento provisional por evento confirmado en ausencia urgente procedente"
+      );
+    }
+  } else if (isUrgentRow && nextProvisionalStatus === "pendiente_regularizacion") {
+    try {
+      await cancelSolicitudCalendarEvent(rows[0]);
+    } catch (calendarError) {
+      logger.warn(
+        { calendarError, solicitudId: rows[0]?.id },
+        "No se pudo cancelar el evento provisional al entrar en pendiente_regularizacion"
+      );
+    }
+  }
+
+  const enriched = await attachWorkflowSignatures([rows[0]]);
+  return enriched[0] || rows[0];
+}
+
 async function aprobarFinal({ id, approver, meta }) {
   await ensureTable();
   const { rows } = await db.query(`SELECT * FROM permisos_vacaciones WHERE id = $1 LIMIT 1`, [id]);
   const solicitud = rows[0];
   if (!solicitud) throw new Error("Solicitud no encontrada");
-  if (!canApprove({ approverRole: solicitud.approver_role, approverUserId: solicitud.approver_user_id, approver })) {
+
+  const currentProvisionalStatus = String(solicitud.provisional_status || "").toLowerCase();
+
+  // Block final approval when TH still needs to resolve regularization
+  if (currentProvisionalStatus === "pendiente_regularizacion") {
+    const err = new Error(
+      "Esta solicitud está pendiente de regularización por Talento Humano. No se puede emitir la aprobación final hasta que TH resuelva el estado."
+    );
+    err.status = 409;
+    throw err;
+  }
+
+  // TH/Admin may approve final only for urgent requests already validated (procedente or accepted by exception)
+  const isActorTH = isTalentoHumanoOrAdmin(approver);
+  const isUrgentTHApproval =
+    isActorTH &&
+    normalizeBooleanFlag(solicitud.is_urgent) &&
+    ["procedente", "aceptado_por_excepcion"].includes(currentProvisionalStatus);
+
+  if (!isUrgentTHApproval && !canApprove({ approverRole: solicitud.approver_role, approverUserId: solicitud.approver_user_id, approver })) {
     const err = new Error("No autorizado para aprobar esta solicitud");
     err.status = 403;
     throw err;
   }
+
   const requesterIdentity = await getUserIdentity(solicitud.user_id).catch(() => null);
   const approverIdentity = await getUserIdentity(resolveActorId(approver)).catch(() => null);
   const approverName = approverIdentity?.fullname || getDisplayName(approver);
@@ -2881,6 +3684,11 @@ async function aprobarFinal({ id, approver, meta }) {
         SET status = 'approved',
             aprobacion_final_at = now(),
             aprobacion_final_por = $2,
+            provisional_status = CASE
+              WHEN is_urgent AND LOWER(COALESCE(provisional_status, '')) IN ('procedente', 'aceptado_por_excepcion', 'salida_provisional_autorizada')
+              THEN NULL
+              ELSE provisional_status
+            END,
             recovery_coordination_status = CASE
               WHEN COALESCE(es_recuperable, false) THEN 'pending_approver_proposal'
               ELSE recovery_coordination_status
@@ -3042,6 +3850,18 @@ async function aprobarFinal({ id, approver, meta }) {
       : "No se pudo crear evento de calendario en aprobación final del permiso"
   );
 
+  // Vacaciones de emergencia aprobadas: notificar a todo el personal
+  if (
+    update.rows[0]?.tipo_solicitud === "vacaciones" &&
+    normalizeBooleanFlag(update.rows[0]?.is_urgent)
+  ) {
+    try {
+      await sendGeneralUnavailabilityNotification(update.rows[0]);
+    } catch (mailError) {
+      logger.warn({ mailError, solicitudId: update.rows[0]?.id }, "No se pudo enviar aviso general por vacaciones de emergencia aprobadas");
+    }
+  }
+
   const enriched = await attachWorkflowSignatures([update.rows[0]]);
   const responseRow = enriched[0] || update.rows[0];
   return {
@@ -3121,7 +3941,7 @@ async function getLegalCoverage() {
 
 async function rechazar({ id, approver, observaciones, meta }) {
   await ensureTable();
-  const current = await db.query(`SELECT approver_role, approver_user_id FROM permisos_vacaciones WHERE id = $1 LIMIT 1`, [id]);
+  const current = await db.query(`SELECT * FROM permisos_vacaciones WHERE id = $1 LIMIT 1`, [id]);
   const solicitud = current.rows[0];
   if (!solicitud) throw new Error("Solicitud no encontrada");
   if (!canApprove({ approverRole: solicitud.approver_role, approverUserId: solicitud.approver_user_id, approver })) {
@@ -3134,7 +3954,18 @@ async function rechazar({ id, approver, observaciones, meta }) {
     : observaciones
       ? [observaciones]
       : [];
+  const hasValidObservacion = obsArray.some((obs) => String(obs || "").trim().length > 0);
+  if (!hasValidObservacion) {
+    const err = new Error("Las observaciones son obligatorias al rechazar una solicitud.");
+    err.status = 400;
+    throw err;
+  }
   const approverName = getDisplayName(approver);
+  const status = normalizeStatusText(solicitud?.status);
+  const shouldChargeToVacationOnReject =
+    String(solicitud?.tipo_solicitud || "").toLowerCase() !== "vacaciones" &&
+    ["partially_approved", "pending_final"].includes(status);
+  const vacationCharge = shouldChargeToVacationOnReject ? buildVacationCharge(solicitud) : { hours: 0, days: 0 };
   const { rows } = await db.query(
     `UPDATE permisos_vacaciones
         SET status = 'rejected',
@@ -3142,12 +3973,17 @@ async function rechazar({ id, approver, observaciones, meta }) {
             updated_at = now(),
             aprobacion_final_por = $3,
             aprobacion_final_at = now(),
+            charged_to_vacation = CASE WHEN $4 THEN true ELSE COALESCE(charged_to_vacation, false) END,
+            charged_vacation_hours = CASE WHEN $4 THEN COALESCE(charged_vacation_hours, $5) ELSE charged_vacation_hours END,
+            charged_vacation_days = CASE WHEN $4 THEN COALESCE(charged_vacation_days, $6) ELSE charged_vacation_days END,
+            charged_to_vacation_at = CASE WHEN $4 THEN COALESCE(charged_to_vacation_at, NOW()) ELSE charged_to_vacation_at END,
+            charged_to_vacation_reason = CASE WHEN $4 THEN COALESCE(charged_to_vacation_reason, 'justification_rejected') ELSE charged_to_vacation_reason END,
             pdf_validacion_legal_url = NULL,
             legal_verification_token = NULL,
             legal_verification_created_at = NULL
       WHERE id = $1
     RETURNING *`,
-    [id, obsArray, approverName]
+    [id, obsArray, approverName, shouldChargeToVacationOnReject, vacationCharge.hours, vacationCharge.days]
   );
   await logAction({ usuario_email: approver?.email, modulo: "permisos", accion: "rechazar" });
   try {
@@ -3155,7 +3991,9 @@ async function rechazar({ id, approver, observaciones, meta }) {
       await notificationManager.sendNotification({
         userId: rows[0].user_id,
         customTitle: "Solicitud rechazada",
-        customMessage: "Tu solicitud fue rechazada. Revisa las observaciones.",
+        customMessage: shouldChargeToVacationOnReject
+          ? "Tu solicitud fue rechazada. Al no validar la justificación, el tiempo se cargó a vacaciones. Revisa las observaciones."
+          : "Tu solicitud fue rechazada. Revisa las observaciones.",
         type: "warning",
         source: "permisos_vacaciones",
         priority: 1,
@@ -3172,6 +4010,9 @@ async function rechazar({ id, approver, observaciones, meta }) {
     logger.warn({ notifyError, solicitudId: rows[0]?.id }, "No se pudo notificar rechazo");
   }
 
+  // Cancel calendar event if one was created during partial approval
+  await cancelSolicitudCalendarEvent(rows[0]);
+
   try {
     await recordWorkflowSignature({
       solicitud: rows[0],
@@ -3186,6 +4027,31 @@ async function rechazar({ id, approver, observaciones, meta }) {
 
   const enriched = await attachWorkflowSignatures([rows[0]]);
   return enriched[0] || rows[0];
+}
+
+async function cancelSolicitudCalendarEvent(solicitud) {
+  const eventId = solicitud?.calendar_event_id;
+  if (!eventId) return;
+  try {
+    await cancelTimeOffEvent({
+      eventId,
+      calendarId: solicitud.calendar_event_calendar_id || null,
+      userEmail: solicitud.user_email || null,
+    });
+    await db.query(
+      `UPDATE permisos_vacaciones
+          SET cancellation_calendar_cancelled = true,
+              updated_at = NOW()
+        WHERE id = $1
+          AND cancellation_calendar_cancelled = false`,
+      [solicitud.id]
+    );
+  } catch (calendarError) {
+    logger.warn(
+      { calendarError, solicitudId: solicitud.id, eventId },
+      "No se pudo cancelar el evento de calendario de la solicitud"
+    );
+  }
 }
 
 async function cancelarSolicitud({ id, actor, reason }) {
@@ -3212,7 +4078,7 @@ async function cancelarSolicitud({ id, actor, reason }) {
   }
 
   const status = normalizeStatusText(solicitud.status);
-  if (["rejected", "cancelled"].includes(status)) {
+  if (["rejected", "rechazado", "cancelled", "cancelado"].includes(status)) {
     const err = new Error("La solicitud ya no puede ser cancelada");
     err.status = 409;
     throw err;
@@ -3220,6 +4086,7 @@ async function cancelarSolicitud({ id, actor, reason }) {
 
   const isRequester = Number(solicitud.user_id) === Number(actorId);
   const isApprover =
+    isTalentoHumanoOrAdmin(actor) ||
     Number(solicitud.approver_user_id) === Number(actorId) ||
     canApprove({ approverRole: solicitud.approver_role, approverUserId: solicitud.approver_user_id, approver: actor });
   if (!isRequester && !isApprover) {
@@ -3229,27 +4096,21 @@ async function cancelarSolicitud({ id, actor, reason }) {
   }
 
   const isApprovedStatus = ["approved", "aprobado"].includes(status);
-  const isDirectCancelableStatus = [
-    "pending",
-    "pendiente",
-    "partially_approved",
-    "pending_final",
-  ].includes(status);
-  if (!isApprovedStatus && !isDirectCancelableStatus) {
-    const err = new Error(
-      "Solo solicitudes en estado pendiente, aprobacion parcial, aprobacion final o aprobada pueden cancelarse"
-    );
-    err.status = 409;
-    throw err;
-  }
 
-  if (isApprovedStatus && !canCancelByDateRule(solicitud)) {
-    const err = new Error("La solicitud solo puede cancelarse hasta el día del permiso o antes.");
-    err.status = 409;
-    throw err;
+  // Guard: once an approved absence has already ended, only TH/Admin can cancel
+  // (prevents retroactive self-cancellation to fraudulently recover vacation days)
+  if (isApprovedStatus && solicitud.fecha_fin) {
+    const endDate = new Date(solicitud.fecha_fin);
+    endDate.setHours(23, 59, 59, 999);
+    if (endDate < new Date() && !isTalentoHumanoOrAdmin(actor)) {
+      const err = new Error(
+        "No puedes cancelar una ausencia que ya finalizó. Contacta a Talento Humano si necesitas ajustar el registro."
+      );
+      err.status = 409;
+      throw err;
+    }
   }
-
-  const requiresCancellationRequest = isApprovedStatus && isRequester && !isApprover;
+  const requiresCancellationRequest = false;
   let updated = null;
   if (requiresCancellationRequest) {
     if (String(solicitud.cancellation_status || "none").toLowerCase() === "pending") {
@@ -3325,6 +4186,31 @@ async function cancelarSolicitud({ id, actor, reason }) {
         { legalRefreshError, solicitudId: updated?.id },
         "No se pudo regenerar evidencia legal al cancelar la solicitud"
       );
+    }
+    // Reverso de calendario si había evento creado
+    await cancelSolicitudCalendarEvent(updated);
+    // Notificación de acreditación de saldo cuando era solicitud aprobada de vacaciones
+    if (isApprovedStatus && updated?.user_id) {
+      const wasVacation = String(updated.tipo_solicitud || "").toLowerCase() === "vacaciones";
+      const wasChargedPermiso = Boolean(updated.charged_to_vacation);
+      if (wasVacation || wasChargedPermiso) {
+        try {
+          await notificationManager.sendNotification({
+            userId: updated.user_id,
+            customTitle: "Saldo de vacaciones acreditado",
+            customMessage: `Tu solicitud #${updated.id} fue cancelada. Los días correspondientes han sido acreditados de vuelta a tu saldo de vacaciones disponible.`,
+            type: "info",
+            source: "permisos_vacaciones",
+            priority: 1,
+            email: false,
+            meta: {
+              solicitud_id: updated.id,
+              tipo_solicitud: updated.tipo_solicitud,
+              target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${updated.id}`,
+            },
+          });
+        } catch (_) { /* notificación no bloquea */ }
+      }
     }
     try {
       if (isRequester && !isApprover && updated?.approver_user_id) {
@@ -3461,6 +4347,31 @@ async function revisarCancelacionSolicitud({ id, actor, decision, reason }) {
         "No se pudo regenerar evidencia legal al aprobar la cancelación"
       );
     }
+    // Reverso de calendario
+    await cancelSolicitudCalendarEvent(updated);
+    // Notificación de acreditación de saldo
+    if (updated?.user_id) {
+      const wasVacation = String(updated.tipo_solicitud || "").toLowerCase() === "vacaciones";
+      const wasChargedPermiso = Boolean(updated.charged_to_vacation);
+      if (wasVacation || wasChargedPermiso) {
+        try {
+          await notificationManager.sendNotification({
+            userId: updated.user_id,
+            customTitle: "Saldo de vacaciones acreditado",
+            customMessage: `Tu solicitud de cancelación #${updated.id} fue aprobada. Los días correspondientes han sido acreditados de vuelta a tu saldo de vacaciones disponible.`,
+            type: "info",
+            source: "permisos_vacaciones",
+            priority: 1,
+            email: false,
+            meta: {
+              solicitud_id: updated.id,
+              tipo_solicitud: updated.tipo_solicitud,
+              target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${updated.id}`,
+            },
+          });
+        } catch (_) { /* notificación no bloquea */ }
+      }
+    }
   } else {
     const { rows: rejectedRows } = await db.query(
       `UPDATE permisos_vacaciones
@@ -3556,6 +4467,16 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
     err.status = 409;
     throw err;
   }
+  const currentCoordStatus = normalizeRecoveryCoordinationStatus(solicitud.recovery_coordination_status);
+  if (["closed", "finalized_by_approver"].includes(currentCoordStatus)) {
+    const err = new Error(
+      currentCoordStatus === "closed"
+        ? "El plan de recuperación ya fue cerrado exitosamente."
+        : "El plan de recuperación ya fue finalizado de forma definitiva por el jefe inmediato."
+    );
+    err.status = 409;
+    throw err;
+  }
 
   const isRequester = Number(solicitud.user_id) === Number(actorId);
   const isApprover =
@@ -3568,36 +4489,183 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
   }
 
   const normalizedAction = String(action || "").trim().toLowerCase();
-  const recoveryAction = ["propose", "accept", "finalize"].includes(normalizedAction)
-    ? normalizedAction
-    : "propose";
+  const validActions = ["propose", "accept", "log_progress", "close", "finalize"];
+  const recoveryAction = validActions.includes(normalizedAction) ? normalizedAction : "propose";
+
+  const currentCoordinationStatus = normalizeRecoveryCoordinationStatus(solicitud.recovery_coordination_status);
+  // Bloquear propose/accept cuando la ejecución ya comenzó
+  const lockedForProposal = ["agreed", "execution_in_progress", "pending_verification", "finalized_by_approver"];
+  if (lockedForProposal.includes(currentCoordinationStatus) && recoveryAction === "propose") {
+    const err = new Error("No se puede re-proponer un plan en el estado actual. Usa log_progress, close o finalize.");
+    err.status = 409;
+    throw err;
+  }
+
+  let nextCoordinationStatus = currentCoordinationStatus;
+  let nextRound = Number(solicitud.recovery_coordination_round || 0);
+  let vacationCharge = null;
+  let executedHoursUpdate = null;
+  let progressNotesUpdate = null;
+  let closedAtUpdate = false;
+
+  // ── log_progress: colaborador registra horas ejecutadas ─────────────────────
+  if (recoveryAction === "log_progress") {
+    if (!isRequester && !isApprover) {
+      const err = new Error("No autorizado para registrar avance de recuperación");
+      err.status = 403;
+      throw err;
+    }
+    if (!["agreed", "execution_in_progress", "pending_verification"].includes(currentCoordinationStatus)) {
+      const err = new Error("Solo se puede registrar avance cuando la recuperación está en estado acordado o en ejecución");
+      err.status = 409;
+      throw err;
+    }
+    const newExecutedHours = Number(recoveryPlan?.executed_hours ?? solicitud.recovery_executed_hours ?? 0);
+    if (!Number.isFinite(newExecutedHours) || newExecutedHours < 0) {
+      const err = new Error("Las horas ejecutadas deben ser un número positivo");
+      err.status = 400;
+      throw err;
+    }
+    const totalPlannedHours = Number(solicitud.recovery_plan_total_hours || 0);
+    executedHoursUpdate = Math.min(newExecutedHours, totalPlannedHours);
+    progressNotesUpdate = String(recoveryPlan?.notes || "").trim() || null;
+    nextCoordinationStatus = executedHoursUpdate >= totalPlannedHours - 0.01
+      ? "pending_verification"
+      : "execution_in_progress";
+
+    const { rows: updatedRows } = await db.query(
+      `UPDATE permisos_vacaciones
+          SET recovery_executed_hours = $2,
+              recovery_progress_notes = COALESCE($3, recovery_progress_notes),
+              recovery_coordination_status = $4,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [id, executedHoursUpdate, progressNotesUpdate, nextCoordinationStatus]
+    );
+    const updated = updatedRows[0];
+    await logAction({
+      usuario_email: actor?.email,
+      modulo: "permisos",
+      accion: "registrar_avance_recuperacion",
+      datos_nuevos: {
+        solicitud_id: id,
+        recovery_executed_hours: executedHoursUpdate,
+        recovery_coordination_status: nextCoordinationStatus,
+      },
+    });
+    try {
+      const notifyTo = isRequester ? updated?.approver_user_id : updated?.user_id;
+      if (notifyTo && Number(notifyTo) !== Number(actorId)) {
+        const isPendingVerification = nextCoordinationStatus === "pending_verification";
+        await notificationManager.sendNotification({
+          userId: notifyTo,
+          customTitle: isPendingVerification ? "Recuperación lista para verificación" : "Avance de recuperación registrado",
+          customMessage: isPendingVerification
+            ? `El colaborador completó las ${executedHoursUpdate}h de recuperación en la solicitud #${updated.id}. Verifica y cierra el plan.`
+            : `Se registraron ${executedHoursUpdate}h de recuperación de un total de ${Number(updated.recovery_plan_total_hours || 0)}h acordadas. Solicitud #${updated.id}.`,
+          type: isPendingVerification ? "task" : "info",
+          source: "permisos_vacaciones",
+          priority: isPendingVerification ? 2 : 1,
+          email: true,
+          meta: {
+            solicitud_id: updated.id,
+            recovery_executed_hours: executedHoursUpdate,
+            recovery_plan_total_hours: updated.recovery_plan_total_hours,
+            recovery_coordination_status: nextCoordinationStatus,
+            target_path: `/dashboard/talento-humano/permisos?tab=approve&solicitudId=${updated.id}&openRecovery=true`,
+          },
+        });
+      }
+    } catch (notifyError) {
+      logger.warn({ notifyError, solicitudId: updated?.id }, "No se pudo notificar avance de recuperación");
+    }
+    const enriched = await attachWorkflowSignatures([updated]);
+    return enriched[0] || updated;
+  }
+
+  // ── close: jefe verifica y cierra exitosamente ───────────────────────────────
+  if (recoveryAction === "close") {
+    if (!isApprover) {
+      const err = new Error("Solo el jefe inmediato puede cerrar el plan de recuperación");
+      err.status = 403;
+      throw err;
+    }
+    if (!["execution_in_progress", "pending_verification", "agreed"].includes(currentCoordinationStatus)) {
+      const err = new Error("Solo se puede cerrar un plan en ejecución o pendiente de verificación");
+      err.status = 409;
+      throw err;
+    }
+    const totalPlanned = Number(solicitud.recovery_plan_total_hours || 0);
+    const executed = Number(solicitud.recovery_executed_hours || 0);
+    if (totalPlanned > 0 && executed < totalPlanned - 0.01) {
+      const err = new Error(
+        `No se puede cerrar: faltan ${roundToTwo(totalPlanned - executed)}h por recuperar (${executed}h de ${totalPlanned}h completadas). Usa 'finalize' para cerrar con cargo a vacaciones.`
+      );
+      err.status = 409;
+      throw err;
+    }
+    const { rows: updatedRows } = await db.query(
+      `UPDATE permisos_vacaciones
+          SET recovery_coordination_status = 'closed',
+              recovery_closed_at = NOW(),
+              recovery_closed_by_user_id = $2,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [id, actorId]
+    );
+    const updated = updatedRows[0];
+    await logAction({
+      usuario_email: actor?.email,
+      modulo: "permisos",
+      accion: "cerrar_recuperacion_exitosa",
+      datos_nuevos: {
+        solicitud_id: id,
+        recovery_executed_hours: executed,
+        recovery_plan_total_hours: totalPlanned,
+      },
+    });
+    try {
+      if (updated?.user_id && Number(updated.user_id) !== Number(actorId)) {
+        await notificationManager.sendNotification({
+          userId: updated.user_id,
+          customTitle: "Recuperación verificada y cerrada",
+          customMessage: `El jefe verificó y cerró exitosamente tu plan de recuperación de la solicitud #${updated.id}. No se aplicó cargo a vacaciones.`,
+          type: "info",
+          source: "permisos_vacaciones",
+          priority: 1,
+          email: true,
+          meta: {
+            solicitud_id: updated.id,
+            recovery_executed_hours: executed,
+            recovery_plan_total_hours: totalPlanned,
+            recovery_coordination_status: "closed",
+            target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${updated.id}`,
+          },
+        });
+      }
+    } catch (notifyError) {
+      logger.warn({ notifyError, solicitudId: updated?.id }, "No se pudo notificar cierre de recuperación");
+    }
+    const enriched = await attachWorkflowSignatures([updated]);
+    return enriched[0] || updated;
+  }
+
+  // ── propose / accept / finalize: flujo original ─────────────────────────────
   const normalized = normalizeRecoveryPlan(recoveryPlan);
-  if (!normalized.plan.length) {
+  if (recoveryAction !== "finalize" && !normalized.plan.length) {
     const err = new Error("Debes registrar al menos un tramo de recuperación");
     err.status = 400;
     throw err;
   }
 
   const requestedHours = estimateRequestedHours(solicitud);
-  if (requestedHours > 0 && normalized.totalHours > requestedHours + 0.01) {
+  if (recoveryAction !== "finalize" && requestedHours > 0 && normalized.totalHours > requestedHours + 0.01) {
     const err = new Error("El plan de recuperación excede las horas del permiso solicitado");
     err.status = 400;
     throw err;
   }
-
-  const currentCoordinationStatus = normalizeRecoveryCoordinationStatus(solicitud.recovery_coordination_status);
-  if (["agreed", "finalized_by_approver"].includes(currentCoordinationStatus)) {
-    const err = new Error(
-      currentCoordinationStatus === "agreed"
-        ? "La coordinación de recuperación ya fue aprobada y cerrada."
-        : "El plan de recuperación ya fue definido de forma definitiva por el jefe inmediato."
-    );
-    err.status = 409;
-    throw err;
-  }
-  let nextCoordinationStatus = currentCoordinationStatus;
-  let nextRound = Number(solicitud.recovery_coordination_round || 0);
-  let vacationCharge = null;
 
   if (recoveryAction === "accept") {
     if (!isRequester && !isApprover) {
@@ -3618,7 +4686,16 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
       throw err;
     }
     nextCoordinationStatus = "finalized_by_approver";
-    vacationCharge = buildVacationCharge(solicitud);
+    // Cargar solo las horas NO recuperadas
+    const totalHours = estimateRequestedHours(solicitud);
+    const executedHours = Number(solicitud.recovery_executed_hours || 0);
+    const remainingHours = Math.max(0, roundToTwo(totalHours - executedHours));
+    if (remainingHours > 0) {
+      vacationCharge = {
+        hours: remainingHours,
+        days: roundToTwo(remainingHours / HOURS_PER_VACATION_DAY),
+      };
+    }
   } else {
     if (isApprover) {
       nextCoordinationStatus = "pending_requester_acceptance";
@@ -3651,7 +4728,7 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
       actorId,
       nextCoordinationStatus,
       nextRound,
-      recoveryAction === "finalize",
+      Boolean(vacationCharge),
       vacationCharge?.hours || null,
       vacationCharge?.days || null,
     ]
@@ -3665,8 +4742,14 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
       recoveryAction === "accept"
         ? "aprobar_plan_recuperacion"
         : recoveryAction === "finalize"
-          ? "cerrar_plan_recuperacion"
+          ? "cerrar_plan_recuperacion_forzado"
           : "proponer_plan_recuperacion",
+    datos_nuevos: recoveryAction === "finalize" ? {
+      solicitud_id: id,
+      vacation_charge_hours: vacationCharge?.hours ?? 0,
+      vacation_charge_days: vacationCharge?.days ?? 0,
+      recovery_executed_hours: Number(solicitud.recovery_executed_hours || 0),
+    } : undefined,
   });
 
   try {
@@ -3674,9 +4757,11 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
     if (notifyTo && Number(notifyTo) !== Number(actorId)) {
       const actionMessage =
         recoveryAction === "accept"
-          ? "La propuesta de recuperación fue aprobada y la coordinación quedó cerrada."
+          ? "La propuesta de recuperación fue aprobada. El colaborador puede comenzar a registrar avances."
           : recoveryAction === "finalize"
-            ? `No hubo acuerdo en la recuperación y el permiso se cargó a vacaciones (${vacationCharge?.hours || 0}h).`
+            ? vacationCharge
+              ? `No hubo recuperación completa y se cargaron ${vacationCharge.hours}h a vacaciones (${vacationCharge.days} día(s)).`
+              : "El plan fue cerrado por el jefe inmediato. Las horas ya habían sido recuperadas."
             : isApprover
               ? "El jefe inmediato propuso tramos de recuperación para revisión del solicitante."
               : "El solicitante propuso ajustes al plan de recuperación.";
@@ -3684,9 +4769,9 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
         userId: notifyTo,
         customTitle: "Plan de recuperación actualizado",
         customMessage: `${actionMessage} Solicitud #${updated.id}.`,
-        type: "info",
+        type: recoveryAction === "finalize" && vacationCharge ? "warning" : "info",
         source: "permisos_vacaciones",
-        priority: 1,
+        priority: recoveryAction === "finalize" ? 2 : 1,
         email: true,
         meta: {
           solicitud_id: updated.id,
@@ -3711,6 +4796,19 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
 async function listarPendientes({ stage, approver }) {
   await ensureTable();
   await processExpiredPendingSolicitudes();
+
+  // Special stage for TH/Admin: all solicitudes pending regularization from any collaborator
+  if (stage === "regularizacion_pendiente") {
+    if (!isTalentoHumanoOrAdmin(approver)) return [];
+    const { rows: regRows } = await db.query(
+      `SELECT * FROM permisos_vacaciones
+        WHERE LOWER(COALESCE(provisional_status, '')) = 'pendiente_regularizacion'
+        ORDER BY created_at DESC`
+    );
+    const settled = await settleExpiredRecoveryCoordinationRows(regRows);
+    return attachWorkflowSignatures(settled);
+  }
+
   let statusFilter = "pending";
   if (stage === "final" || stage === "pending_final") statusFilter = "pending_final";
   if (stage === "parcial") statusFilter = "pending";
@@ -3730,6 +4828,29 @@ async function listarPendientes({ stage, approver }) {
             ? ["pending", "pendiente"]
             : [normalizedStatusFilter];
   const roleCandidates = getApproverRoleCandidates(approver);
+
+  // TH/Admin see all solicitudes for stages they supervise:
+  // - pending_final: review justificantes and approve urgent cases
+  // - approved/rejected/cancelled: oversight and reporting
+  // They do NOT see pending (parcial approval) — that belongs to jefe inmediato → gerencia_general escalation
+  const TH_VISIBLE_STAGES = new Set(["pending_final", "approved", "rejected", "cancelled"]);
+  if (isTalentoHumanoOrAdmin(approver) && TH_VISIBLE_STAGES.has(normalizedStatusFilter)) {
+    const { rows: thRows } = await db.query(
+      `SELECT * FROM permisos_vacaciones
+        WHERE LOWER(COALESCE(status, '')) = ANY($1::text[])
+          AND ($2::text IS NULL OR LOWER(COALESCE(cancellation_status, 'none')) = $2)
+          AND ($3::boolean = false OR LOWER(COALESCE(cancellation_status, 'none')) <> 'pending')
+        ORDER BY created_at DESC`,
+      [
+        statusCandidates,
+        stage === "cancellation_pending" ? "pending" : null,
+        stage === "approved",
+      ]
+    );
+    const thSettled = await settleExpiredRecoveryCoordinationRows(thRows);
+    return attachWorkflowSignatures(thSettled);
+  }
+
   if (!approver?.id && roleCandidates.length === 0) return [];
   const { rows } = await db.query(
     `SELECT * FROM permisos_vacaciones
@@ -3949,9 +5070,11 @@ const computeVacationAllowance = (hireDateValue, asOfValue = new Date()) => {
   };
 };
 
-async function listarResumenColaboradores() {
+async function listarResumenColaboradores({ departmentId = null, year = null } = {}) {
   await ensureTable();
   await processExpiredPendingSolicitudes();
+  const filterYear = year ? Number(year) : null;
+  const filterDeptId = departmentId ? Number(departmentId) : null;
   const usersResult = await db.query(
     `SELECT u.id, u.email, u.fullname, u.name, u.department_id,
             d.name AS department_name,
@@ -3960,7 +5083,9 @@ async function listarResumenColaboradores() {
        FROM users u
        LEFT JOIN departments d ON d.id = u.department_id
        LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
-      ORDER BY COALESCE(NULLIF(u.fullname, ''), NULLIF(u.name, ''), u.email, CONCAT('Usuario #', u.id)) ASC`
+      WHERE ($1::int IS NULL OR u.department_id = $1)
+      ORDER BY COALESCE(NULLIF(u.fullname, ''), NULLIF(u.name, ''), u.email, CONCAT('Usuario #', u.id)) ASC`,
+    [filterDeptId]
   );
   const { rows } = await db.query(
     `SELECT
@@ -3980,6 +5105,9 @@ async function listarResumenColaboradores() {
         p.charged_vacation_days,
         p.justificacion_requerida,
         p.justificantes_urls,
+        p.justificante_status,
+        p.escalation_status,
+        p.recovery_coordination_status,
         p.es_emergencia,
         p.fecha_inicio,
         p.fecha_fin,
@@ -3988,7 +5116,10 @@ async function listarResumenColaboradores() {
         p.created_at
       FROM permisos_vacaciones p
       LEFT JOIN departments d ON d.id = p.department_id
-      ORDER BY p.created_at DESC`
+      WHERE ($1::int IS NULL OR p.department_id = $1)
+        AND ($2::int IS NULL OR EXTRACT(YEAR FROM COALESCE(p.fecha_inicio, p.created_at)) = $2)
+      ORDER BY p.created_at DESC`,
+    [filterDeptId, filterYear]
   );
   const vacationRequestsResult = await db.query(
     `SELECT
@@ -4006,7 +5137,10 @@ async function listarResumenColaboradores() {
       FROM vacaciones_solicitudes v
       LEFT JOIN users u ON u.id = v.requester_id
       LEFT JOIN departments d ON d.id = u.department_id
-      ORDER BY v.created_at DESC`
+      WHERE ($1::int IS NULL OR u.department_id = $1)
+        AND ($2::int IS NULL OR EXTRACT(YEAR FROM COALESCE(v.start_date, v.created_at)) = $2)
+      ORDER BY v.created_at DESC`,
+    [filterDeptId, filterYear]
   );
 
   const collaborators = new Map();
@@ -4383,11 +5517,912 @@ async function processAutoCancelledJustificationDeductions() {
   return { scanned: rows.length, deducted };
 }
 
+// ─── Reportes para Talento Humano — Bloque 9 ─────────────────────────────────
+
+async function getReportePeriodo({ startDate, endDate, departmentId = null, tipoSolicitud = null, status = null } = {}) {
+  await ensureTable();
+  if (!startDate || !endDate) {
+    const err = new Error("startDate y endDate son requeridos");
+    err.status = 400;
+    throw err;
+  }
+
+  const filterDept = departmentId ? Number(departmentId) : null;
+  const filterTipo = tipoSolicitud ? String(tipoSolicitud).toLowerCase() : null;
+  const filterStatus = status ? String(status).toLowerCase() : null;
+
+  const { rows: permisosRows } = await db.query(
+    `SELECT
+        p.id,
+        p.user_id,
+        p.user_email,
+        p.user_fullname,
+        p.department_id,
+        d.name AS department_name,
+        p.tipo_solicitud,
+        p.tipo_permiso,
+        p.subtipo_calamidad,
+        p.subtipo_salud,
+        p.status,
+        p.duracion_dias,
+        p.duracion_horas,
+        p.es_emergencia,
+        p.es_recuperable,
+        p.fecha_inicio,
+        p.fecha_fin,
+        p.aprobacion_parcial_at,
+        p.aprobacion_final_at,
+        p.approver_email,
+        p.justificante_status,
+        p.justificante_deadline,
+        p.justificante_observation_count,
+        p.escalation_status,
+        p.escalation_escalated_at,
+        p.recovery_coordination_status,
+        p.recovery_executed_hours,
+        p.recovery_plan_total_hours,
+        p.charged_to_vacation,
+        p.charged_vacation_days,
+        p.cancellation_status,
+        p.is_urgent,
+        p.provisional_status,
+        p.calamidad_parentesco,
+        p.calamidad_grado_consanguinidad,
+        p.vacation_conversion_consent,
+        p.created_at,
+        'permisos_vacaciones' AS source
+      FROM permisos_vacaciones p
+      LEFT JOIN departments d ON d.id = p.department_id
+      WHERE COALESCE(p.fecha_inicio, p.created_at::date) BETWEEN $1::date AND $2::date
+        AND ($3::int IS NULL OR p.department_id = $3)
+        AND ($4::text IS NULL OR LOWER(COALESCE(p.tipo_solicitud, '')) = $4)
+        AND ($5::text IS NULL OR LOWER(COALESCE(p.status, '')) = $5)
+      ORDER BY p.fecha_inicio ASC, p.id ASC`,
+    [startDate, endDate, filterDept, filterTipo, filterStatus]
+  );
+
+  const { rows: vacRows } = await db.query(
+    `SELECT
+        v.id,
+        v.requester_id AS user_id,
+        u.email AS user_email,
+        COALESCE(u.fullname, u.name, u.email) AS user_fullname,
+        u.department_id,
+        d.name AS department_name,
+        'vacaciones' AS tipo_solicitud,
+        NULL AS tipo_permiso,
+        NULL AS subtipo_calamidad,
+        NULL AS subtipo_salud,
+        v.status,
+        v.days AS duracion_dias,
+        NULL AS duracion_horas,
+        false AS es_emergencia,
+        false AS es_recuperable,
+        v.start_date AS fecha_inicio,
+        v.end_date AS fecha_fin,
+        NULL AS aprobacion_parcial_at,
+        v.approved_at AS aprobacion_final_at,
+        NULL AS approver_email,
+        NULL AS justificante_status,
+        NULL AS justificante_deadline,
+        0 AS justificante_observation_count,
+        NULL AS escalation_status,
+        NULL AS escalation_escalated_at,
+        NULL AS recovery_coordination_status,
+        NULL AS recovery_executed_hours,
+        NULL AS recovery_plan_total_hours,
+        false AS charged_to_vacation,
+        NULL AS charged_vacation_days,
+        NULL AS cancellation_status,
+        v.created_at,
+        'vacaciones_solicitudes' AS source
+      FROM vacaciones_solicitudes v
+      LEFT JOIN users u ON u.id = v.requester_id
+      LEFT JOIN departments d ON d.id = u.department_id
+      WHERE v.start_date BETWEEN $1::date AND $2::date
+        AND ($3::int IS NULL OR u.department_id = $3)
+        AND ($4::text IS NULL OR $4 = 'vacaciones')
+        AND ($5::text IS NULL OR LOWER(COALESCE(v.status, '')) = $5)
+      ORDER BY v.start_date ASC, v.id ASC`,
+    [startDate, endDate, filterDept, filterTipo, filterStatus]
+  );
+
+  const all = [...permisosRows, ...vacRows].sort((a, b) => {
+    const da = new Date(a.fecha_inicio || a.created_at);
+    const db_ = new Date(b.fecha_inicio || b.created_at);
+    return da - db_;
+  });
+
+  return {
+    period: { startDate, endDate },
+    filters: { departmentId: filterDept, tipoSolicitud: filterTipo, status: filterStatus },
+    total: all.length,
+    items: all,
+  };
+}
+
+async function getKpiDashboard({ year = null, departmentId = null } = {}) {
+  await ensureTable();
+  const targetYear = year ? Number(year) : new Date().getFullYear();
+  const filterDept = departmentId ? Number(departmentId) : null;
+
+  const { rows } = await db.query(
+    `SELECT
+        EXTRACT(MONTH FROM COALESCE(fecha_inicio, created_at)) AS mes,
+        tipo_solicitud,
+        tipo_permiso,
+        status,
+        escalation_status,
+        justificante_status,
+        recovery_coordination_status,
+        aprobacion_final_at,
+        created_at,
+        duracion_dias,
+        duracion_horas,
+        es_emergencia
+      FROM permisos_vacaciones
+      WHERE EXTRACT(YEAR FROM COALESCE(fecha_inicio, created_at)) = $1
+        AND ($2::int IS NULL OR department_id = $2)`,
+    [targetYear, filterDept]
+  );
+
+  const { rows: vacRows } = await db.query(
+    `SELECT
+        EXTRACT(MONTH FROM COALESCE(v.start_date, v.created_at)) AS mes,
+        'vacaciones' AS tipo_solicitud,
+        v.status,
+        v.days AS duracion_dias,
+        v.created_at,
+        v.approved_at AS aprobacion_final_at
+      FROM vacaciones_solicitudes v
+      LEFT JOIN users u ON u.id = v.requester_id
+      WHERE EXTRACT(YEAR FROM COALESCE(v.start_date, v.created_at)) = $1
+        AND ($2::int IS NULL OR u.department_id = $2)`,
+    [targetYear, filterDept]
+  );
+
+  const totalSolicitudes = rows.length + vacRows.length;
+  const totalPermisos = rows.filter(r => r.tipo_solicitud !== 'vacaciones').length;
+  const totalVacaciones = rows.filter(r => r.tipo_solicitud === 'vacaciones').length + vacRows.length;
+
+  const approvedPermisos = rows.filter(r =>
+    r.tipo_solicitud !== 'vacaciones' &&
+    ['approved', 'aprobado'].includes(String(r.status || '').toLowerCase())
+  );
+  const rejectedPermisos = rows.filter(r =>
+    r.tipo_solicitud !== 'vacaciones' &&
+    ['rejected', 'rechazado'].includes(String(r.status || '').toLowerCase())
+  );
+  const approvalRate = totalPermisos > 0
+    ? roundToTwo(approvedPermisos.length / totalPermisos * 100)
+    : null;
+
+  // Tiempo promedio de aprobación (días desde created_at hasta aprobacion_final_at)
+  const approvalTimes = approvedPermisos
+    .filter(r => r.aprobacion_final_at && r.created_at)
+    .map(r => (new Date(r.aprobacion_final_at) - new Date(r.created_at)) / (1000 * 60 * 60 * 24));
+  const avgApprovalDays = approvalTimes.length > 0
+    ? roundToTwo(approvalTimes.reduce((a, b) => a + b, 0) / approvalTimes.length)
+    : null;
+
+  // Tasa de escalamiento
+  const escalatedCount = rows.filter(r =>
+    r.escalation_status === 'escalated'
+  ).length;
+  const escalationRate = totalPermisos > 0
+    ? roundToTwo(escalatedCount / totalPermisos * 100)
+    : null;
+
+  // Tasa de cumplimiento de justificantes
+  const needsJustificante = rows.filter(r =>
+    !['not_required', null, ''].includes(String(r.justificante_status || ''))
+  );
+  const justificanteAceptado = needsJustificante.filter(r => r.justificante_status === 'aceptado').length;
+  const justificanteRate = needsJustificante.length > 0
+    ? roundToTwo(justificanteAceptado / needsJustificante.length * 100)
+    : null;
+
+  // Tasa de recuperación exitosa
+  const recoveryRequired = rows.filter(r =>
+    r.recovery_coordination_status && r.recovery_coordination_status !== 'not_required'
+  );
+  const recoveryClosed = recoveryRequired.filter(r => r.recovery_coordination_status === 'closed').length;
+  const recoveryRate = recoveryRequired.length > 0
+    ? roundToTwo(recoveryClosed / recoveryRequired.length * 100)
+    : null;
+
+  // Solicitudes por mes
+  const byMonth = {};
+  for (let m = 1; m <= 12; m++) {
+    byMonth[m] = { permisos: 0, vacaciones: 0 };
+  }
+  rows.forEach(r => {
+    const m = Number(r.mes);
+    if (m >= 1 && m <= 12) {
+      if (r.tipo_solicitud === 'vacaciones') byMonth[m].vacaciones += 1;
+      else byMonth[m].permisos += 1;
+    }
+  });
+  vacRows.forEach(r => {
+    const m = Number(r.mes);
+    if (m >= 1 && m <= 12) byMonth[m].vacaciones += 1;
+  });
+
+  // Solicitudes por tipo de permiso
+  const byTipoPermiso = {};
+  rows.filter(r => r.tipo_solicitud !== 'vacaciones').forEach(r => {
+    const t = r.tipo_permiso || 'sin_tipo';
+    byTipoPermiso[t] = (byTipoPermiso[t] || 0) + 1;
+  });
+
+  return {
+    year: targetYear,
+    departmentId: filterDept,
+    totales: {
+      solicitudes: totalSolicitudes,
+      permisos: totalPermisos,
+      vacaciones: totalVacaciones,
+      aprobados: approvedPermisos.length,
+      rechazados: rejectedPermisos.length,
+      emergencias: rows.filter(r => Boolean(r.es_emergencia)).length,
+    },
+    tasas: {
+      aprobacion_porcentaje: approvalRate,
+      escalamiento_porcentaje: escalationRate,
+      justificante_cumplimiento_porcentaje: justificanteRate,
+      recuperacion_exitosa_porcentaje: recoveryRate,
+      tiempo_promedio_aprobacion_dias: avgApprovalDays,
+    },
+    por_mes: byMonth,
+    por_tipo_permiso: byTipoPermiso,
+  };
+}
+
+// ─── Vencimiento automático de justificantes — Bloque 5 ──────────────────────
+
+async function processJustificanteVencimientos() {
+  await ensureTable();
+
+  const { rows } = await db.query(`
+    SELECT *
+      FROM permisos_vacaciones
+     WHERE LOWER(COALESCE(justificante_status, '')) IN ('pendiente', 'observado')
+       AND justificante_deadline IS NOT NULL
+       AND justificante_deadline < NOW()
+       AND LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'rejected', 'approved')
+  `);
+
+  if (!rows.length) return { scanned: 0, expired: 0 };
+
+  let expired = 0;
+  for (const row of rows) {
+    try {
+      const { rows: updated } = await db.query(
+        `UPDATE permisos_vacaciones
+            SET justificante_status = 'vencido',
+                updated_at = NOW()
+          WHERE id = $1
+            AND LOWER(COALESCE(justificante_status, '')) IN ('pendiente', 'observado')
+            AND justificante_deadline IS NOT NULL
+            AND justificante_deadline < NOW()
+          RETURNING *`,
+        [row.id]
+      );
+
+      if (!updated[0]) continue;
+
+      try {
+        await logAction({
+          usuario_id: null,
+          usuario_email: "system_justificante_expiry",
+          modulo: "permisos",
+          accion: "justificante_vencido",
+          descripcion: "Plazo de entrega de justificante vencido automaticamente.",
+          datos_nuevos: { solicitud_id: row.id, justificante_deadline: row.justificante_deadline },
+          contexto: { auto: true },
+        });
+      } catch (_) { /* audit non-blocking */ }
+
+      if (row.user_id) {
+        await notificationManager.sendNotification({
+          userId: row.user_id,
+          customTitle: "Plazo de justificante vencido",
+          customMessage: `El plazo para entregar los justificantes de tu solicitud #${row.id} ha vencido. Contacta a tu aprobador si tienes alguna consulta.`,
+          type: "alert",
+          source: "permisos_vacaciones",
+          priority: 2,
+          email: true,
+          meta: {
+            solicitud_id: row.id,
+            justificante_deadline: row.justificante_deadline,
+            target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${row.id}`,
+          },
+        });
+      }
+
+      if (row.approver_user_id) {
+        await notificationManager.sendNotification({
+          userId: row.approver_user_id,
+          customTitle: "Justificante vencido — solicitud pendiente",
+          customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} tiene el plazo de justificante vencido. Puedes aprobar o rechazar la solicitud final.`,
+          type: "warning",
+          source: "permisos_vacaciones",
+          priority: 2,
+          email: true,
+          meta: {
+            solicitud_id: row.id,
+            target_path: `/dashboard/talento-humano/permisos?tab=pending&solicitudId=${row.id}`,
+          },
+        });
+      }
+
+      expired += 1;
+    } catch (err) {
+      logger.warn({ err, solicitudId: row.id }, "Error procesando vencimiento de justificante");
+    }
+  }
+
+  return { scanned: rows.length, expired };
+}
+
+// ─── Escalamiento por falta de respuesta del aprobador — Bloque 4 ────────────
+
+async function processApprovalEscalationReminders() {
+  await ensureTable();
+
+  // Fase 1: Recordatorio al jefe — 48 h antes y aún sin acción de escalamiento
+  const { rows: reminderRows } = await db.query(`
+    SELECT *
+      FROM permisos_vacaciones
+     WHERE LOWER(COALESCE(status, '')) IN ('pending', 'pendiente')
+       AND escalation_status = 'none'
+       AND fecha_inicio IS NOT NULL
+       AND fecha_inicio > NOW()
+       AND fecha_inicio - NOW() <= INTERVAL '48 hours'
+       AND aprobacion_parcial_at IS NULL
+       AND aprobacion_final_at IS NULL
+  `);
+
+  let reminded = 0;
+  for (const row of reminderRows) {
+    try {
+      await db.query(
+        `UPDATE permisos_vacaciones
+            SET escalation_status = 'reminder_sent',
+                escalation_reminder_sent_at = NOW(),
+                updated_at = NOW()
+          WHERE id = $1
+            AND escalation_status = 'none'`,
+        [row.id]
+      );
+
+      if (row.approver_user_id) {
+        await notificationManager.sendNotification({
+          userId: row.approver_user_id,
+          customTitle: "Solicitud pendiente de aprobacion",
+          customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} inicia en menos de 48 horas y aun no ha sido aprobada. Por favor, revisa y aprueba o rechaza a la brevedad.`,
+          type: "alert",
+          source: "permisos_vacaciones",
+          priority: 2,
+          email: true,
+          meta: {
+            solicitud_id: row.id,
+            tipo_solicitud: row.tipo_solicitud || null,
+            fecha_inicio: row.fecha_inicio,
+            target_path: `/dashboard/talento-humano/permisos?tab=pending&solicitudId=${row.id}`,
+          },
+        });
+      }
+
+      try {
+        await logAction({
+          usuario_id: null,
+          usuario_email: "system_escalation",
+          modulo: "permisos",
+          accion: "escalation_reminder_sent",
+          descripcion: "Recordatorio automatico enviado al aprobador por solicitud sin respuesta a 48 h del inicio.",
+          datos_nuevos: { solicitud_id: row.id, approver_user_id: row.approver_user_id },
+          contexto: { auto: true },
+        });
+      } catch (_) { /* audit non-blocking */ }
+
+      reminded += 1;
+    } catch (err) {
+      logger.warn({ err, solicitudId: row.id }, "Error enviando recordatorio de aprobacion");
+    }
+  }
+
+  // Fase 2: Escalamiento a gerencia_general — 24 h antes y recordatorio ya enviado
+  const { rows: escalationRows } = await db.query(`
+    SELECT *
+      FROM permisos_vacaciones
+     WHERE LOWER(COALESCE(status, '')) IN ('pending', 'pendiente')
+       AND escalation_status = 'reminder_sent'
+       AND fecha_inicio IS NOT NULL
+       AND fecha_inicio > NOW()
+       AND fecha_inicio - NOW() <= INTERVAL '24 hours'
+       AND aprobacion_parcial_at IS NULL
+       AND aprobacion_final_at IS NULL
+  `);
+
+  let escalated = 0;
+  for (const row of escalationRows) {
+    try {
+      const gerente = await findApproverByRole("gerencia_general", row.approver_user_id || null);
+      if (!gerente?.id) {
+        logger.warn({ solicitudId: row.id }, "No se encontro gerente_general para escalar solicitud");
+        continue;
+      }
+
+      await db.query(
+        `UPDATE permisos_vacaciones
+            SET escalation_status = 'escalated',
+                escalation_escalated_at = NOW(),
+                escalation_escalated_to_user_id = $2,
+                escalation_escalated_to_email = $3,
+                approver_user_id = $2,
+                approver_email = $3,
+                approver_role = 'gerencia_general',
+                updated_at = NOW()
+          WHERE id = $1
+            AND escalation_status = 'reminder_sent'`,
+        [row.id, gerente.id, gerente.email]
+      );
+
+      // Notificar al nuevo aprobador (gerencia_general)
+      await notificationManager.sendNotification({
+        userId: gerente.id,
+        customTitle: "Solicitud escalada para tu aprobacion urgente",
+        customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} inicia en menos de 24 horas. El aprobador original no respondio; ahora requiere tu aprobacion.`,
+        type: "alert",
+        source: "permisos_vacaciones",
+        priority: 3,
+        email: true,
+        meta: {
+          solicitud_id: row.id,
+          tipo_solicitud: row.tipo_solicitud || null,
+          fecha_inicio: row.fecha_inicio,
+          original_approver_user_id: row.approver_user_id,
+          target_path: `/dashboard/talento-humano/permisos?tab=pending&solicitudId=${row.id}`,
+        },
+      });
+
+      // Notificar al aprobador original que fue escalado
+      if (row.approver_user_id) {
+        await notificationManager.sendNotification({
+          userId: row.approver_user_id,
+          customTitle: "Solicitud escalada a gerencia",
+          customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} fue escalada a gerencia general por falta de respuesta. Ya no requiere tu accion.`,
+          type: "info",
+          source: "permisos_vacaciones",
+          priority: 1,
+          email: false,
+          meta: { solicitud_id: row.id },
+        });
+      }
+
+      // Notificar al solicitante del escalamiento
+      if (row.user_id) {
+        await notificationManager.sendNotification({
+          userId: row.user_id,
+          customTitle: "Tu solicitud fue escalada a gerencia",
+          customMessage: `Tu solicitud #${row.id} fue escalada a gerencia general para aprobacion urgente debido a falta de respuesta del aprobador asignado.`,
+          type: "info",
+          source: "permisos_vacaciones",
+          priority: 1,
+          email: false,
+          meta: {
+            solicitud_id: row.id,
+            target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${row.id}`,
+          },
+        });
+      }
+
+      try {
+        await logAction({
+          usuario_id: null,
+          usuario_email: "system_escalation",
+          modulo: "permisos",
+          accion: "escalation_to_gerencia_general",
+          descripcion: "Solicitud escalada automaticamente a gerencia_general por falta de respuesta a 24 h del inicio.",
+          datos_nuevos: {
+            solicitud_id: row.id,
+            original_approver_user_id: row.approver_user_id,
+            new_approver_user_id: gerente.id,
+            new_approver_email: gerente.email,
+          },
+          contexto: { auto: true },
+        });
+      } catch (_) { /* audit non-blocking */ }
+
+      escalated += 1;
+    } catch (err) {
+      logger.warn({ err, solicitudId: row.id }, "Error escalando solicitud a gerencia_general");
+    }
+  }
+
+  return {
+    scanned: reminderRows.length + escalationRows.length,
+    reminded,
+    escalated,
+  };
+}
+
+const TH_ADMIN_ROLES = new Set([
+  "talento_humano", "jefe_talento_humano",
+  "gerencia_general", "gerente_general", "gerencia", "gerente", "director",
+  "admin", "administrador",
+]);
+
+function isTalentoHumanoOrAdmin(actor = {}) {
+  return getActorRoleCandidates(actor).some((role) => TH_ADMIN_ROLES.has(role));
+}
+
+async function resolverRegularizacion({ id, action, reason, actor }) {
+  await ensureTable();
+
+  if (!isTalentoHumanoOrAdmin(actor)) {
+    const err = new Error("No autorizado. Solo Talento Humano o administración puede resolver regularizaciones.");
+    err.status = 403;
+    throw err;
+  }
+
+  const { rows: existingRows } = await db.query(
+    `SELECT * FROM permisos_vacaciones WHERE id = $1 LIMIT 1`,
+    [id]
+  );
+  const solicitud = existingRows[0];
+  if (!solicitud) {
+    const err = new Error("Solicitud no encontrada");
+    err.status = 404;
+    throw err;
+  }
+
+  const currentProvisional = String(solicitud.provisional_status || "").trim().toLowerCase();
+  if (currentProvisional !== "pendiente_regularizacion") {
+    const err = new Error(
+      `La solicitud no está en estado pendiente_regularizacion. Estado actual: ${currentProvisional || "(sin estado provisional)"}`
+    );
+    err.status = 409;
+    throw err;
+  }
+
+  const normalizedAction = String(action || "").trim().toLowerCase();
+  if (!["rechazar_formalmente", "aceptar_excepcion", "convertir_vacaciones"].includes(normalizedAction)) {
+    const err = new Error(
+      "Acción inválida. Usa: rechazar_formalmente, aceptar_excepcion o convertir_vacaciones."
+    );
+    err.status = 400;
+    throw err;
+  }
+
+  if (normalizedAction === "convertir_vacaciones") {
+    const err = new Error(
+      "Para convertir a vacaciones usa el endpoint POST /:id/regularizar/convertir-vacaciones."
+    );
+    err.status = 400;
+    throw err;
+  }
+
+  const trimmedReason = String(reason || "").trim();
+  if (!trimmedReason) {
+    const err = new Error("El motivo (reason) es obligatorio para resolver una regularización.");
+    err.status = 400;
+    throw err;
+  }
+
+  const actorName = getDisplayName(actor);
+
+  if (normalizedAction === "rechazar_formalmente") {
+    const { rows } = await db.query(
+      `UPDATE permisos_vacaciones
+          SET status = 'rejected',
+              provisional_status = 'rechazado_formalmente',
+              observaciones = ARRAY[$2::text],
+              aprobacion_final_por = $3,
+              aprobacion_final_at = NOW(),
+              updated_at = NOW()
+        WHERE id = $1
+      RETURNING *`,
+      [id, trimmedReason, actorName]
+    );
+
+    await logAction({
+      usuario_email: actor?.email,
+      modulo: "permisos",
+      accion: "regularizacion_rechazada_formalmente",
+      datos_nuevos: {
+        solicitud_id: id,
+        provisional_status: "rechazado_formalmente",
+        status: "rejected",
+        reason: trimmedReason,
+        actor_email: actor?.email,
+      },
+    });
+
+    // Cancel provisional calendar event if still active
+    try {
+      await cancelSolicitudCalendarEvent(rows[0]);
+    } catch (calendarError) {
+      logger.warn({ calendarError, solicitudId: id }, "No se pudo cancelar evento de calendario al rechazar formalmente");
+    }
+
+    // Notify employee
+    try {
+      if (rows[0]?.user_id) {
+        await notificationManager.sendNotification({
+          userId: rows[0].user_id,
+          customTitle: "Ausencia urgente rechazada formalmente",
+          customMessage:
+            `Tu ausencia urgente (solicitud #${id}) fue rechazada de forma definitiva por Talento Humano. ` +
+            `Motivo: ${trimmedReason}.`,
+          type: "warning",
+          source: "permisos_vacaciones",
+          priority: 2,
+          email: true,
+          meta: {
+            solicitud_id: id,
+            provisional_status: "rechazado_formalmente",
+            target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${id}`,
+          },
+        });
+      }
+    } catch (notifyError) {
+      logger.warn({ notifyError, solicitudId: id }, "No se pudo notificar rechazo formal de regularización");
+    }
+
+    const enriched = await attachWorkflowSignatures([rows[0]]);
+    return enriched[0] || rows[0];
+  }
+
+  // normalizedAction === "aceptar_excepcion"
+  const { rows } = await db.query(
+    `UPDATE permisos_vacaciones
+        SET provisional_status = 'aceptado_por_excepcion',
+            updated_at = NOW()
+      WHERE id = $1
+    RETURNING *`,
+    [id]
+  );
+
+  await logAction({
+    usuario_email: actor?.email,
+    modulo: "permisos",
+    accion: "regularizacion_aceptada_por_excepcion",
+    datos_nuevos: {
+      solicitud_id: id,
+      provisional_status: "aceptado_por_excepcion",
+      reason: trimmedReason,
+      actor_email: actor?.email,
+    },
+  });
+
+  // Notify employee
+  try {
+    if (rows[0]?.user_id) {
+      await notificationManager.sendNotification({
+        userId: rows[0].user_id,
+        customTitle: "Ausencia urgente aceptada por excepción",
+        customMessage:
+          `Tu ausencia urgente (solicitud #${id}) fue aceptada por excepción por Talento Humano. ` +
+          `Motivo: ${trimmedReason}. Procederá a la aprobación final.`,
+        type: "info",
+        source: "permisos_vacaciones",
+        priority: 1,
+        email: true,
+        meta: {
+          solicitud_id: id,
+          provisional_status: "aceptado_por_excepcion",
+          target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${id}`,
+        },
+      });
+    }
+  } catch (notifyError) {
+    logger.warn({ notifyError, solicitudId: id }, "No se pudo notificar aceptación por excepción de regularización");
+  }
+
+  // Alert TH to proceed with final approval
+  try {
+    const thUsers = await findTalentoHumanoUsers();
+    for (const thUser of thUsers) {
+      if (Number(thUser.id) === Number(rows[0]?.user_id)) continue;
+      if (Number(thUser.id) === Number(resolveActorId(actor))) continue;
+      await notificationManager.sendNotification({
+        userId: thUser.id,
+        customTitle: "Excepción aprobada — lista para aprobación final",
+        customMessage: `La ausencia urgente de ${rows[0]?.user_fullname || rows[0]?.user_email} fue aceptada por excepción. Procede a emitir la aprobación final.`,
+        type: "task",
+        source: "permisos_vacaciones",
+        priority: 1,
+        email: false,
+        meta: {
+          solicitud_id: id,
+          provisional_status: "aceptado_por_excepcion",
+          target_path: `/dashboard/talento-humano/permisos?tab=approve&solicitudId=${id}`,
+        },
+      });
+    }
+  } catch (thNotifyError) {
+    logger.warn({ thNotifyError, solicitudId: id }, "No se pudo notificar a TH sobre excepción aprobada");
+  }
+
+  const enriched = await attachWorkflowSignatures([rows[0]]);
+  return enriched[0] || rows[0];
+}
+
+async function convertirAVacaciones({ id, actor }) {
+  await ensureTable();
+
+  if (!isTalentoHumanoOrAdmin(actor)) {
+    const err = new Error("No autorizado. Solo Talento Humano o administración puede convertir ausencias a vacaciones.");
+    err.status = 403;
+    throw err;
+  }
+
+  const { rows: existingRows } = await db.query(
+    `SELECT * FROM permisos_vacaciones WHERE id = $1 LIMIT 1`,
+    [id]
+  );
+  const solicitud = existingRows[0];
+  if (!solicitud) {
+    const err = new Error("Solicitud no encontrada");
+    err.status = 404;
+    throw err;
+  }
+
+  const currentProvisional = String(solicitud.provisional_status || "").trim().toLowerCase();
+  if (currentProvisional !== "pendiente_regularizacion") {
+    const err = new Error(
+      `La solicitud no está en estado pendiente_regularizacion. Estado actual: ${currentProvisional || "(sin estado provisional)"}`
+    );
+    err.status = 409;
+    throw err;
+  }
+
+  // Consent is mandatory — employee must have agreed at request creation time
+  if (!normalizeBooleanFlag(solicitud.vacation_conversion_consent)) {
+    const err = new Error(
+      "No es posible convertir a vacaciones: el colaborador no otorgó consentimiento previo para conversión al crear la solicitud."
+    );
+    err.status = 409;
+    throw err;
+  }
+
+  // Compute current vacation balance
+  const requestYear = solicitud.fecha_inicio
+    ? new Date(solicitud.fecha_inicio).getFullYear()
+    : new Date().getFullYear();
+  const hireDate = await getHireDate(solicitud.user_id);
+  const allowanceInfo = computeVacationAllowance(hireDate, new Date());
+  const consumption = await getVacationConsumption({
+    userId: solicitud.user_id,
+    userEmail: solicitud.user_email,
+    year: requestYear,
+  });
+  const historicalBalance = await getHistoricVacationBalance({
+    userId: solicitud.user_id,
+    userEmail: solicitud.user_email,
+    year: requestYear,
+  });
+  const remaining = allowanceInfo.allowance + historicalBalance - consumption.approved - consumption.pending;
+
+  const charge = buildVacationCharge(solicitud);
+  const projectedRemaining = roundToTwo(remaining - charge.days);
+  const balanceDeficit = projectedRemaining < 0;
+
+  const actorName = getDisplayName(actor);
+
+  const { rows } = await db.query(
+    `UPDATE permisos_vacaciones
+        SET status = 'approved',
+            provisional_status = 'convertido_a_vacaciones',
+            charged_to_vacation = true,
+            charged_vacation_hours = $2,
+            charged_vacation_days = $3,
+            charged_to_vacation_at = NOW(),
+            charged_to_vacation_reason = 'urgent_provisional_conversion',
+            aprobacion_final_por = $4,
+            aprobacion_final_at = NOW(),
+            projected_remaining_days = $5,
+            updated_at = NOW()
+      WHERE id = $1
+    RETURNING *`,
+    [id, charge.hours, charge.days, actorName, projectedRemaining]
+  );
+
+  await logAction({
+    usuario_email: actor?.email,
+    modulo: "permisos",
+    accion: "regularizacion_convertida_a_vacaciones",
+    datos_nuevos: {
+      solicitud_id: id,
+      provisional_status: "convertido_a_vacaciones",
+      charged_vacation_days: charge.days,
+      charged_vacation_hours: charge.hours,
+      projected_remaining_days: projectedRemaining,
+      balance_deficit: balanceDeficit,
+      actor_email: actor?.email,
+      vacation_conversion_consent_text: solicitud.vacation_conversion_consent_text || null,
+    },
+  });
+
+  // Notify employee
+  try {
+    if (rows[0]?.user_id) {
+      const deficitNote = balanceDeficit
+        ? ` Tu saldo quedará en déficit de ${Math.abs(projectedRemaining)} día(s).`
+        : ` Tu saldo restante será de ${projectedRemaining} día(s).`;
+      await notificationManager.sendNotification({
+        userId: rows[0].user_id,
+        customTitle: "Ausencia urgente regularizada — cargada a vacaciones",
+        customMessage:
+          `Tu ausencia urgente (solicitud #${id}) fue regularizada con cargo a tu saldo de vacaciones ` +
+          `(${charge.days} día(s) / ${charge.hours} hora(s)).${deficitNote}`,
+        type: balanceDeficit ? "warning" : "info",
+        source: "permisos_vacaciones",
+        priority: balanceDeficit ? 2 : 1,
+        email: true,
+        meta: {
+          solicitud_id: id,
+          provisional_status: "convertido_a_vacaciones",
+          charged_vacation_days: charge.days,
+          projected_remaining_days: projectedRemaining,
+          balance_deficit: balanceDeficit,
+          target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${id}`,
+        },
+      });
+    }
+  } catch (notifyError) {
+    logger.warn({ notifyError, solicitudId: id }, "No se pudo notificar conversión a vacaciones");
+  }
+
+  // Warn TH if the conversion leaves the employee in deficit
+  if (balanceDeficit) {
+    try {
+      const thUsers = await findTalentoHumanoUsers();
+      for (const thUser of thUsers) {
+        if (Number(thUser.id) === Number(rows[0]?.user_id)) continue;
+        await notificationManager.sendNotification({
+          userId: thUser.id,
+          customTitle: "⚠ Conversión a vacaciones con déficit",
+          customMessage: `La conversión de la ausencia urgente de ${rows[0]?.user_fullname || rows[0]?.user_email} dejó su saldo en déficit de ${Math.abs(projectedRemaining)} día(s). Requiere seguimiento.`,
+          type: "warning",
+          source: "permisos_vacaciones",
+          priority: 2,
+          email: false,
+          meta: {
+            solicitud_id: id,
+            projected_remaining_days: projectedRemaining,
+            balance_deficit: true,
+            target_path: `/dashboard/talento-humano/permisos?tab=all&solicitudId=${id}`,
+          },
+        });
+      }
+    } catch (thNotifyError) {
+      logger.warn({ thNotifyError, solicitudId: id }, "No se pudo notificar a TH sobre déficit en conversión a vacaciones");
+    }
+  }
+
+  const enriched = await attachWorkflowSignatures([rows[0]]);
+  return {
+    ...(enriched[0] || rows[0]),
+    conversion_summary: {
+      charged_days: charge.days,
+      charged_hours: charge.hours,
+      remaining_before: remaining,
+      projected_remaining: projectedRemaining,
+      balance_deficit: balanceDeficit,
+      consent_text: solicitud.vacation_conversion_consent_text || null,
+    },
+  };
+}
+
 module.exports = {
   ensureTable,
   createSolicitud,
   aprobarParcial,
   subirJustificantes,
+  revisarJustificante,
   aprobarFinal,
   rechazar,
   cancelarSolicitud,
@@ -4407,6 +6442,12 @@ module.exports = {
   processExpiredRecoveryCoordinations,
   processAutoCancelledJustificationWarnings,
   processAutoCancelledJustificationDeductions,
+  processApprovalEscalationReminders,
+  processJustificanteVencimientos,
   getLegalVerificationByToken,
   getLegalCoverage,
+  getReportePeriodo,
+  getKpiDashboard,
+  resolverRegularizacion,
+  convertirAVacaciones,
 };

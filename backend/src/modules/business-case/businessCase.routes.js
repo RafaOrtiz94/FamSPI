@@ -13,20 +13,27 @@ const calculationTemplatesCtrl = require("./calculationTemplates.controller");
 const observabilityService = require("./businessCaseObservability.service");
 const sheetGenerationCtrl = require("./businessCaseSheetGeneration.controller");
 
+// BC-01: Roles que pueden VER y participar en el BC (todos los involucrados)
+// BC-02/BC-10: analista_comercial = asesor_comercial = comercial / jefe_ti agregado
+// BUG-06: operaciones (base) agregado — necesita acceder a dispatch_workspace en BC
 const businessCaseRoles = [
   "comercial",
   "asesor_comercial",
-  "analista_comercial",
+  "analista_comercial",   // BC-02: mismo nivel que comercial
   "acp_comercial",
   "backoffice",
   "backoffice_comercial",
   "jefe_comercial",
   "jefe_de_comercial",
   "jefe_operaciones",
+  "operaciones",          // BUG-06: necesita editar dispatch_workspace en BC
   "jefe_tecnico",
+  "jefe_financiero",      // BC-02: ve el BC desde BORRADOR
+  "jefe_ti",              // BC-10: puede ver y agregar ítems al carrito
   "gerencia",
   "gerencia_general",
 ];
+// BC-10: investmentRoles — quienes pueden agregar ítems al carrito de inversiones
 const investmentRoles = [
   "comercial",
   "asesor_comercial",
@@ -38,16 +45,20 @@ const investmentRoles = [
   "jefe_de_comercial",
   "jefe_operaciones",
   "jefe_tecnico",
+  "jefe_financiero",
+  "jefe_ti",              // BC-10: puede agregar ítems al carrito
   "gerencia",
   "gerencia_general",
 ];
+// BC-12: Solo jefe_operaciones y jefe_financiero GUARDAN valores
+// jefe_comercial y gerencia solo VER — la separación GET/POST se hace aquí
 const investmentValuesRoles = [
   "jefe_operaciones",
   "jefe_de_operaciones",
   "jefe_financiero",
   "gerencia",
   "gerencia_general",
-  "admin",
+  "jefe_comercial",       // BC-12: puede VER valores (no guardar — validar en servicio)
 ];
 const adminRoles = ["admin", "gerencia", "jefe_tecnico"];
 const determinationsCatalogWriteRoles = [
@@ -126,7 +137,18 @@ router.put(
 );
 
 router.get("/", verifyToken, requireRole(businessCaseRoles), ctrl.list);
-router.post("/", verifyToken, requireRole(["comercial"]), ctrl.create);
+// BC-01: BC puede ser creado por comercial, asesor_comercial, analista_comercial,
+//        acp_comercial, jefe_comercial, backoffice y backoffice_comercial
+router.post("/", verifyToken, requireRole([
+  "comercial",
+  "asesor_comercial",
+  "analista_comercial",
+  "acp_comercial",
+  "jefe_comercial",
+  "jefe_de_comercial",
+  "backoffice",
+  "backoffice_comercial",
+]), ctrl.create);
 router.get("/:id", verifyToken, requireRole(businessCaseRoles), ctrl.getById);
 router.put("/:id", verifyToken, requireRole(businessCaseRoles), ctrl.update);
 router.delete("/:id", verifyToken, requireRole(["gerencia", "admin"]), ctrl.remove);
@@ -134,12 +156,22 @@ router.delete("/:id", verifyToken, requireRole(["gerencia", "admin"]), ctrl.remo
 router.post("/:id/equipment", verifyToken, requireRole(businessCaseRoles), ctrl.selectEquipment);
 router.get("/:id/determinations", verifyToken, requireRole(businessCaseRoles), ctrl.getDeterminations);
 router.get("/:id/determinations/stat-document", verifyToken, requireRole(businessCaseRoles), ctrl.getDeterminationsGateInfo);
+router.post("/:id/determinations/lock-subsection", verifyToken, requireRole(businessCaseRoles), ctrl.lockDeterminationsSubsection);
+router.post("/:id/determinations/request-unlock-subsection", verifyToken, requireRole(businessCaseRoles), ctrl.requestDeterminationsSubsectionUnlock);
+// NUEVO-08: jefe_de_comercial = mismo nivel que jefe_comercial para aprobar desbloqueo de sub-secciones
+router.post("/:id/determinations/resolve-unlock-subsection", verifyToken, requireRole(["jefe_comercial", "jefe_de_comercial"]), ctrl.resolveDeterminationsSubsectionUnlock);
 router.post(
   "/:id/determinations/stat-document",
   verifyToken,
   requireRole(businessCaseRoles),
   upload.single("file"),
   ctrl.uploadDeterminationsStatDocument,
+);
+router.post(
+  "/:id/determinations/inspection-request",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  ctrl.requestEnvironmentInspection,
 );
 router.post(
   "/:id/determinations",
@@ -168,10 +200,11 @@ router.get("/:id/calculations", verifyToken, requireRole(businessCaseRoles), ctr
 router.post("/:id/recalculate", verifyToken, requireRole(businessCaseRoles), ctrl.recalculate);
 router.get("/:id/export/pdf", verifyToken, requireRole(businessCaseRoles), ctrl.exportPdf);
 router.get("/:id/export/excel", verifyToken, requireRole(businessCaseRoles), ctrl.exportExcel);
+// BC-07: Viabilidad — acp_comercial, jefe_comercial y gerencia (ambos niveles = mismo rol)
 router.post(
   "/:id/feasibility-decision",
   verifyToken,
-  requireRole(["acp_comercial", "jefe_comercial", "gerencia", "gerencia_general"]),
+  requireRole(["acp_comercial", "jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]),
   ctrl.submitFeasibilityDecision,
 );
 router.put("/:id/economic-data", verifyToken, requireRole(businessCaseRoles), ctrl.updateEconomicData);
@@ -187,14 +220,30 @@ router.get("/sheets/metrics", verifyToken, requireRole(adminRoles), sheetGenerat
 router.get("/:id/ui-guidance", verifyToken, requireRole(businessCaseRoles), ctrl.getUIGuidance);
 router.get("/:id/ownership", verifyToken, requireRole(businessCaseRoles), ctrl.getDataOwnership);
 router.post("/:id/ownership/complete", verifyToken, requireRole(businessCaseRoles), ctrl.recordSectionCompletion);
-router.post("/:id/sections/:section/lock", verifyToken, requireRole(["acp_comercial", "backoffice_comercial", "jefe_comercial"]), ctrl.lockSection);
-router.post("/:id/sections/:section/unlock", verifyToken, requireRole(["acp_comercial", "backoffice_comercial", "jefe_comercial"]), ctrl.unlockSection);
+// BC-20: Bloqueo/desbloqueo de secciones — solo acp_comercial, jefe_comercial (públicas) y backoffice (privadas)
+// NUEVO-07: jefe_de_comercial = mismo nivel que jefe_comercial → debe poder bloquear/desbloquear
+router.post("/:id/sections/:section/lock", verifyToken, requireRole(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_de_comercial"]), ctrl.lockSection);
+router.post("/:id/sections/:section/unlock", verifyToken, requireRole(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_de_comercial"]), ctrl.unlockSection);
 router.post("/:id/preflow/reopen-request", verifyToken, requireRole(businessCaseRoles), ctrl.requestPreflowReopen);
 router.post(
   "/:id/preflow/reopen-decision",
   verifyToken,
-  requireRole(["jefe_comercial", "gerencia", "gerencia_general"]),
+  // NUEVO-09: jefe_de_comercial = mismo nivel que jefe_comercial para aprobar reapertura de preflow
+  requireRole(["jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]),
   ctrl.resolvePreflowReopen,
+);
+// BC-16: Apelación de factibilidad rechazada — comercial* solicita revisión; jefe_comercial/gerencia resuelve
+router.post(
+  "/:id/feasibility/appeal",
+  verifyToken,
+  requireRole(["comercial", "asesor_comercial", "analista_comercial"]),
+  ctrl.requestFeasibilityAppeal,
+);
+router.post(
+  "/:id/feasibility/appeal/resolve",
+  verifyToken,
+  requireRole(["jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]),
+  ctrl.resolveFeasibilityAppeal,
 );
 
 // Investment routes (audited — REQ-BC-12)
@@ -205,6 +254,8 @@ router.delete("/:id/investments/:invId", verifyToken, requireRole(businessCaseRo
 router.get("/:id/investments/catalog", verifyToken, requireRole(investmentRoles), ctrl.getInvestmentCatalog);
 router.post("/:id/investments/catalog", verifyToken, requireRole(investmentRoles), ctrl.createInvestmentCatalogItem);
 router.post("/:id/investments/selections", verifyToken, requireRole(investmentRoles), ctrl.saveInvestmentSelection);
+router.post("/:id/investments/selections/request-increase", verifyToken, requireRole(investmentRoles), ctrl.requestInvestmentQuantityIncrease);
+router.post("/:id/investments/confirm-cart", verifyToken, requireRole(investmentRoles), ctrl.confirmInvestmentCart);
 router.get("/:id/investments/values", verifyToken, requireRole(investmentValuesRoles), ctrl.getInvestmentValues);
 router.post("/:id/investments/values", verifyToken, requireRole(investmentValuesRoles), ctrl.saveInvestmentValues);
 router.get("/:id/consumption-items", verifyToken, requireRole(businessCaseRoles), ctrl.getConsumptionItems);
@@ -214,13 +265,15 @@ router.get("/:id/dispatch-workspace", verifyToken, requireRole(businessCaseRoles
 router.put(
   "/:id/dispatch-workspace/commercial-plan",
   verifyToken,
-  requireRole(["jefe_comercial", "gerencia", "gerencia_general"]),
+  // BUG-07: acp_comercial y jefe_de_comercial también editan el plan comercial de dispatch
+  requireRole(["acp_comercial", "jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]),
   ctrl.saveCommercialDispatchPlan,
 );
 router.put(
   "/:id/dispatch-workspace/operations-control",
   verifyToken,
-  requireRole(["jefe_operaciones", "gerencia", "gerencia_general"]),
+  // BUG-07: acp_comercial, jefe_comercial y operaciones (base) también guardan control operativo
+  requireRole(["acp_comercial", "jefe_comercial", "jefe_de_comercial", "jefe_operaciones", "operaciones", "gerencia", "gerencia_general"]),
   ctrl.saveOperationsDispatchControl,
 );
 
@@ -250,7 +303,8 @@ router.get("/:id/deliveries", verifyToken, requireRole(businessCaseRoles), ctrl.
   router.post("/:id/orchestrator/validate", verifyToken, requireRole(businessCaseRoles), ctrl.validateBC);
   router.post("/:id/orchestrator/promote-stage", verifyToken, requireRole(businessCaseRoles), ctrl.promoteStage);
   router.get("/:id/orchestrator/complete", verifyToken, requireRole(businessCaseRoles), ctrl.getCompleteBCMaster);
-  router.post("/:id/orchestrator/emergency-transition", verifyToken, requireRole(["gerencia_general"]), ctrl.emergencyTransition);
+  // BC-15: gerencia y gerencia_general son el mismo nivel — ambos pueden hacer emergency-transition
+  router.post("/:id/orchestrator/emergency-transition", verifyToken, requireRole(["gerencia", "gerencia_general"]), ctrl.emergencyTransition);
   router.get("/:id/state-history", verifyToken, requireRole(businessCaseRoles), ctrl.getStateHistory);
   router.get("/:id/section-access-log", verifyToken, requireRole(["admin", "gerencia", "gerencia_general", "jefe_comercial"]), ctrl.getSectionAccessLog);
   router.get("/:id/section-completeness", verifyToken, requireRole(businessCaseRoles), ctrl.getSectionCompleteness);

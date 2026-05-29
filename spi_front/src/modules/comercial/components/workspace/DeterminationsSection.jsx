@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FiActivity, FiAlertTriangle, FiCheck, FiChevronDown, FiEdit2, FiTrash2, FiUpload, FiX } from "react-icons/fi";
+import { FiActivity, FiAlertTriangle, FiCalendar, FiCheck, FiChevronDown, FiEdit2, FiFileText, FiTrash2, FiUpload, FiX } from "react-icons/fi";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
 import { useAuth } from "../../../../core/auth/AuthContext";
 import { recordBusinessCaseTelemetry } from "../../../../core/utils/businessCaseTelemetry";
+import { promptDialog } from "../../../../core/ui/utils/promptDialog";
 import {
  getDeterminationsStatDocumentInfo,
+ requestBusinessCaseEnvironmentInspection,
  uploadDeterminationsStatDocument,
 } from "../../../../core/api/businessCaseApi";
 
@@ -23,12 +25,28 @@ const REACTIVO_TYPES = new Set(["reactivo", "determinacion"]);
 const TECNICO_TYPES = new Set(["control", "calibrador", "consumible", "material"]);
 // Public BC: only acp_comercial. Private BC: only backoffice.
 const PUBLIC_BC_TYPES = new Set(["public", "comodato_publico"]);
+// Roles que ejecutan la parte técnica (inspección, actas, calibradores propios)
 const TECNICO_ROLES = new Set(["tecnico", "jefe_tecnico"]);
+// BUG-01: jefe_comercial y jefe_de_comercial son editores directos de TECNICO_TYPES
+// (calibradores, controles, materiales — según PASO BC-4 del flujo documentado)
+const TECNICO_EDIT_ROLES = new Set(["tecnico", "jefe_tecnico", "jefe_comercial", "jefe_de_comercial"]);
 const ADMIN_ROLES = new Set(["administrador", "super_admin"]);
 const ROW_WINDOW_STEP = 24;
 const IDEMPOTENCY_TTL_MS = 60 * 1000;
-const DET_DEBUG_VERSION = "2026-02-24-det-save-v4";
-const DET_DEBUG_ENABLED = String(process.env.REACT_APP_BC_CONSUMPTION_DEBUG || "").trim().toLowerCase() === "true";
+const DET_DEBUG_VERSION = "2026-05-13-det-save-v5";
+const DET_DEBUG_ENABLED = (() => {
+ const envFlag = String(process.env.REACT_APP_BC_CONSUMPTION_DEBUG || "").trim().toLowerCase() === "true";
+ if (envFlag) return true;
+ if (typeof window === "undefined") return false;
+ const search = String(window.location.search || "").toLowerCase();
+ if (search.includes("bc_consumption_debug=1") || search.includes("bcdebug=1")) return true;
+ try {
+ const localFlag = String(window.localStorage?.getItem("bc_consumption_debug") || "").trim().toLowerCase();
+ return localFlag === "1" || localFlag === "true" || localFlag === "yes" || localFlag === "on";
+ } catch (_err) {
+ return false;
+ }
+})();
 
 const debugInfo = (...args) => {
  if (!DET_DEBUG_ENABLED) return;
@@ -43,6 +61,102 @@ const debugWarn = (...args) => {
 const debugError = (...args) => {
  if (!DET_DEBUG_ENABLED) return;
  console.error(...args);
+};
+
+const summarizeItemsForAudit = (items = [], limit = 30) => {
+ const safe = Array.isArray(items) ? items : [];
+ return {
+ total: safe.length,
+ nonZero: safe.filter((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) > 0).length,
+ zeros: safe.filter((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) <= 0).length,
+ sample: safe.slice(0, limit).map((item) => ({
+ key: item?.key || null,
+ type: item?.type || null,
+ itemId: item?.itemId || null,
+ name: item?.name || null,
+ source: item?.source || null,
+ catalogId: item?.catalogId ?? null,
+ equipmentId: item?.equipmentId ?? null,
+ annualQty: Number(item?.annualQty ?? item?.annualQuantity ?? 0),
+ })),
+ };
+};
+
+const logFrontAudit = (label, payload = {}) => {
+ try {
+ console.groupCollapsed(label);
+ Object.entries(payload).forEach(([key, value]) => console.log(key, value));
+ console.groupEnd();
+ } catch (_err) {
+ console.log(label, payload);
+ }
+};
+
+const getNaturalErrorMessage = (err, fallback) => {
+ const status = Number(err?.response?.status || 0);
+ const raw = String(err?.response?.data?.message || "").trim();
+ const code = String(err?.response?.data?.code || "").trim().toUpperCase();
+ if (status === 403) return "No tienes permiso para realizar esta acción en esta etapa.";
+ if (status === 409 && code.startsWith("BC_INSPECTION")) return raw || fallback;
+ if (status === 409) return "La información cambió mientras trabajabas. Recarga esta sección e intenta nuevamente.";
+ if (!raw) return fallback;
+ if (/\b(4\d\d|5\d\d)\b/.test(raw) || /forbidden|conflict|unauthorized|status/i.test(raw)) return fallback;
+ return raw;
+};
+
+const completeDeterminationsSection = async (bcId, reason = "determinaciones_finalizadas_workspace") => {
+ const payload = { section: "determinations", reason };
+ console.log("[BC_AUDIT][FE][COMPLETE_SECTION][REQUEST]", { bcId, payload });
+ const response = await api.post(`/business-case/${bcId}/ownership/complete`, payload);
+ console.log("[BC_AUDIT][FE][COMPLETE_SECTION][RESPONSE]", {
+  bcId,
+  status: response?.status || null,
+  data: response?.data || null,
+ });
+ return response?.data || null;
+};
+
+const lockDeterminationsSubsection = async (bcId, subsection) => {
+ const payload = { subsection };
+ console.log("[BC_AUDIT][FE][LOCK_SUBSECTION][REQUEST]", { bcId, payload });
+ const response = await api.post(`/business-case/${bcId}/determinations/lock-subsection`, payload);
+ console.log("[BC_AUDIT][FE][LOCK_SUBSECTION][RESPONSE]", {
+  bcId,
+  subsection,
+  status: response?.status || null,
+  data: response?.data || null,
+ });
+ return response?.data || null;
+};
+
+const requestUnlockSubsection = async (bcId, subsection, reason) => {
+ const payload = { subsection, reason };
+ console.log("[BC_AUDIT][FE][REQUEST_UNLOCK][REQUEST]", { bcId, payload });
+ const response = await api.post(`/business-case/${bcId}/determinations/request-unlock-subsection`, payload);
+ console.log("[BC_AUDIT][FE][REQUEST_UNLOCK][RESPONSE]", {
+  bcId,
+  subsection,
+  status: response?.status || null,
+  data: response?.data || null,
+ });
+ return response?.data || null;
+};
+
+const resolveUnlockSubsection = async (bcId, requestId, approve, resolutionNotes = "") => {
+ const payload = {
+  request_id: requestId,
+  approve: Boolean(approve),
+  resolution_notes: resolutionNotes,
+ };
+ console.log("[BC_AUDIT][FE][RESOLVE_UNLOCK][REQUEST]", { bcId, payload });
+ const response = await api.post(`/business-case/${bcId}/determinations/resolve-unlock-subsection`, payload);
+ console.log("[BC_AUDIT][FE][RESOLVE_UNLOCK][RESPONSE]", {
+  bcId,
+  requestId,
+  status: response?.status || null,
+  data: response?.data || null,
+ });
+ return response?.data || null;
 };
 
 const deriveLegacyConsumptionKey = (key) => {
@@ -185,29 +299,16 @@ const toUiType = (type) => {
 };
 
 const dedupeVisibleRowsForUI = (items = []) => {
- const picked = new Map();
- items.forEach((row) => {
- const key = [normalizeTextKey(row?.equipmentId), normalizeTextKey(row?.name), getTypeFamily(row?.type)].join("|");
- const current = picked.get(key);
- if (!current) {
- picked.set(key, row);
- return;
- }
-
- const score = (candidate) => {
- let total = 0;
- if (String(candidate?.manufacturerId || "").trim()) total += 2;
- if (String(candidate?.itemId || "").trim()) total += 2;
- if (String(candidate?.name || "").trim()) total += 1;
- if (String(candidate?.source || "").toLowerCase() === "custom") total += 1;
- return total;
- };
-
- if (score(row) > score(current)) {
- picked.set(key, row);
+ const byStableKey = new Map();
+ (Array.isArray(items) ? items : []).forEach((row) => {
+ if (!row) return;
+ const stableKey = String(row?.key || "").trim();
+ if (!stableKey) return;
+ if (!byStableKey.has(stableKey)) {
+ byStableKey.set(stableKey, row);
  }
  });
- return Array.from(picked.values());
+ return Array.from(byStableKey.values());
 };
 
 const normalizePersistedItemForUI = (item = {}) => {
@@ -225,6 +326,16 @@ const normalizePersistedItemForUI = (item = {}) => {
 
 const normalizePersistedItemsForUI = (items = []) =>
  (Array.isArray(items) ? items : []).map((item) => normalizePersistedItemForUI(item));
+
+const buildDebugQtySample = (rows = [], drafts = {}, getSavedRow = () => null, limit = 25) =>
+ (Array.isArray(rows) ? rows : []).slice(0, limit).map((row) => ({
+ key: row?.key || null,
+ legacyKey: row?.legacyKey || null,
+ itemId: row?.itemId || null,
+ name: row?.name || null,
+ draftQty: drafts?.[row?.key] ?? (row?.legacyKey ? drafts?.[row.legacyKey] : undefined) ?? null,
+ savedQty: getSavedRow(row)?.annualQty ?? getSavedRow(row)?.annualQuantity ?? null,
+ }));
 
 const DETERMINATION_CATEGORY_CONFIG = [
  {
@@ -246,12 +357,20 @@ const DETERMINATION_CATEGORY_CONFIG = [
  types: new Set(["calibrador"]),
  },
  {
- key: "consumibles",
- title: "Consumibles",
+ key: "materiales",
+ title: "Materiales",
  description: "Edita esta seccion con rol jefe tecnico / tecnico.",
  types: new Set(["consumible", "material"]),
  },
 ];
+
+const subsectionFromType = (type) => {
+ const normalized = String(type || "").trim().toLowerCase();
+ if (normalized === "reactivo" || normalized === "determinacion") return "reactivos";
+ if (normalized === "control") return "controles";
+ if (normalized === "calibrador") return "calibradores";
+ return "materiales";
+};
 
 const DeterminationsSection = ({
  businessCase,
@@ -269,6 +388,17 @@ const DeterminationsSection = ({
  const [gateLoading, setGateLoading] = useState(false);
  const [uploadingDocument, setUploadingDocument] = useState(false);
  const [selectedDocument, setSelectedDocument] = useState(null);
+ const [inspectionModal, setInspectionModal] = useState({
+  open: false,
+  minDate: "",
+  maxDate: "",
+  contactName: "",
+  contactPhone: "",
+  accessories: "",
+  annotations: "",
+  observations: "",
+ });
+ const [submittingInspectionRequest, setSubmittingInspectionRequest] = useState(false);
  const [savedItems, setSavedItems] = useState([]);
  const [excludedKeys, setExcludedKeys] = useState([]);
  const [loading, setLoading] = useState(false);
@@ -299,24 +429,65 @@ const DeterminationsSection = ({
  const idempotencyCacheRef = useRef(new Map());
  const lastSavedKeysRef = useRef([]);
  const lastEditedRowRef = useRef(null);
+ const persistInFlightRef = useRef(false);
 
- const canEditBase = permissions.canEdit !== false && ownership?.canUserEdit !== false;
- const currentRole = user?.role;
+const canEditBase = permissions.canEdit !== false && ownership?.canUserEdit !== false;
+const currentRole = user?.role;
+const isJefeComercial = String(currentRole || "").toLowerCase() === "jefe_comercial";
  const autosaveEnabled = false;
- const gateActive = gateInfo?.enabledForBusinessCase === true;
- const canUploadDocument = gateInfo?.permissions?.canUploadDocument === true;
- const canEditByGate = gateInfo?.permissions?.canEditDeterminations === true;
- const canEditFinal = gateActive ? (canEditBase && canEditByGate) : canEditBase;
+const gateActive = gateInfo?.enabledForBusinessCase === true;
+const gatePhase = String(gateInfo?.phase || "commercial_input").toLowerCase();
+const quantitiesLocked = gateInfo?.quantitiesLocked === true;
+const isTechnicalRole = TECNICO_ROLES.has(String(currentRole || "").toLowerCase());
+const canUploadDocument = gateInfo?.permissions?.canUploadDocument === true;
+const inspectionRequestInfo = gateInfo?.inspectionRequest || null;
+const inspectionDraft = gateInfo?.inspectionDraft?.draft || null;
+const inspectionMissingFields = gateInfo?.inspectionDraft?.missingFields || [];
+const canRequestInspection = canUploadDocument && gateInfo?.documentUploaded && !inspectionRequestInfo?.request_id;
+const canEditByGate = gateInfo?.permissions?.canEditDeterminations === true;
+const canEditFinal = (gateActive ? (canEditBase && canEditByGate) : canEditBase) && !quantitiesLocked;
+const sectionLocks = gateInfo?.sectionLocks || {};
+const isSubsectionLocked = (subsectionKey) => Boolean(sectionLocks?.[subsectionKey]) || quantitiesLocked;
+const allSubsectionsLocked = ["reactivos", "controles", "calibradores", "materiales"].every((key) => isSubsectionLocked(key));
+const pendingUnlockBySubsection = useMemo(() => {
+ const map = {};
+ (gateInfo?.unlockRequests || [])
+  .filter((entry) => String(entry?.status || "").toLowerCase() === "pending")
+  .forEach((entry) => {
+   const key = String(entry?.subsection || "").trim().toLowerCase();
+   if (key && !map[key]) map[key] = entry;
+  });
+ return map;
+}, [gateInfo?.unlockRequests]);
+
+const inspectionSummary = useMemo(() => {
+ return {
+  clientName: inspectionDraft?.nombre_cliente || businessCase?.client_name || "Cliente pendiente",
+  processCode: businessCase?.process_code || "Sin numero de proceso",
+  address: inspectionDraft?.direccion_cliente || "Pendiente en datos del cliente",
+  contactName: inspectionDraft?.persona_contacto || "",
+  contactPhone: inspectionDraft?.celular_contacto || "",
+  accessories: inspectionDraft?.accesorios || "",
+  annotations: inspectionDraft?.anotaciones || "",
+  observations: inspectionDraft?.observaciones || "",
+  equipment: Array.isArray(inspectionDraft?.equipos) ? inspectionDraft.equipos : [],
+ };
+}, [businessCase, inspectionDraft]);
 
  const isPublicBC = PUBLIC_BC_TYPES.has(businessCase?.bc_purchase_type);
 
- const canEditType = (type) => {
+const canEditType = (type) => {
  if (!canEditFinal) return false;
+ if (isSubsectionLocked(subsectionFromType(type))) return false;
  if (ADMIN_ROLES.has(currentRole)) return true;
+ // NUEVO-02: jefe_comercial y jefe_de_comercial pueden editar reactivos en BC público y privado
  if (REACTIVO_TYPES.has(type)) {
-   return isPublicBC ? currentRole === "acp_comercial" : currentRole === "backoffice";
+   const isJefeComercial = currentRole === "jefe_comercial" || currentRole === "jefe_de_comercial";
+   if (isJefeComercial) return true;
+   return isPublicBC ? currentRole === "acp_comercial" : (currentRole === "backoffice_comercial" || currentRole === "backoffice");
  }
- if (TECNICO_TYPES.has(type)) return TECNICO_ROLES.has(currentRole);
+ // BUG-01: usar TECNICO_EDIT_ROLES (incluye jefe_comercial/jefe_de_comercial) para sub-secciones técnicas
+ if (TECNICO_TYPES.has(type)) return TECNICO_EDIT_ROLES.has(currentRole);
  return false;
  };
 
@@ -466,6 +637,21 @@ const DeterminationsSection = ({
  const normalizedItems = normalizePersistedItemsForUI(items);
  const excluded = normalizeExcludedAgainstItems(normalizedItems, excludedRaw);
  const version = data?.version || null;
+ logFrontAudit("[BC_AUDIT][FE][GET_CONSUMPTION_ITEMS]", {
+ bcId,
+ version,
+ excludedRawCount: excludedRaw.length,
+ excludedFinalCount: excluded.length,
+ rawSummary: summarizeItemsForAudit(items),
+ normalizedSummary: summarizeItemsForAudit(normalizedItems),
+ });
+ console.log("[BC_AUDIT][FE][LOAD_EXISTING]", {
+ bcId,
+ version,
+ itemsCount: items.length,
+ excludedCount: excluded.length,
+ nonZeroItems: items.filter((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) > 0).length,
+ });
  pendingQtyChangesRef.current = {};
  editedRowsRef.current = {};
  setPendingChangesCount(0);
@@ -486,13 +672,21 @@ const DeterminationsSection = ({
  return next;
  });
  setHasStructureChanges(false);
- debugInfo("[DET_DEBUG] loadExisting:success", {
- bcId,
- items: items.length,
- excluded: excluded.length,
- loadedKeysSample: items.slice(0, 10).map((item) => item?.key),
- lastSavedKeysSample: lastSavedKeysRef.current.slice(0, 10),
- });
+  debugInfo("[DET_DEBUG] loadExisting:success", {
+  bcId,
+  items: items.length,
+  excluded: excluded.length,
+  loadedKeysSample: items.slice(0, 10).map((item) => item?.key),
+  loadedNonZeroSample: items
+  .filter((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) > 0)
+  .slice(0, 15)
+  .map((item) => ({
+  key: item?.key || null,
+  itemId: item?.itemId || null,
+  annualQty: item?.annualQty ?? item?.annualQuantity ?? 0,
+  })),
+  lastSavedKeysSample: lastSavedKeysRef.current.slice(0, 10),
+  });
  recordBusinessCaseTelemetry({
  section: "determinations",
  type: "load_existing_success",
@@ -505,47 +699,23 @@ const DeterminationsSection = ({
  // 304 no trae cuerpo útil para axios; mantenemos estado actual y evitamos fallback destructivo.
  return;
  }
- // Fallback to businessCase metadata if API fails
- const stored = businessCase?.modern_bc_metadata?.consumption_items;
- const excluded = businessCase?.modern_bc_metadata?.consumption_excluded;
- const safeStored = Array.isArray(stored) ? stored : [];
- const safeExcluded = normalizeExcludedAgainstItems(
- safeStored,
- Array.isArray(excluded) ? excluded : [],
- );
- pendingQtyChangesRef.current = {};
- editedRowsRef.current = {};
- setPendingChangesCount(0);
- consumptionVersionRef.current = null;
- setSavedItems(normalizePersistedItemsForUI(safeStored));
- setExcludedKeys(safeExcluded);
- setQuantityDrafts(() => {
- const next = {};
- normalizePersistedItemsForUI(safeStored).forEach((item) => {
- if (!item?.key) return;
- next[item.key] = String(item.annualQty ?? item.annualQuantity ?? 0);
- });
- quantityDraftsRef.current = next;
- return next;
- });
- setHasStructureChanges(false);
- debugInfo("[DET_DEBUG] loadExisting:fallback", {
+ // Fail-safe estricto: no hidratar desde metadata para evitar sobreescritura con ceros.
+ // Si falla el endpoint fuente-de-verdad (bc_consumption_items), mantenemos estado actual.
+ debugError("[DET_DEBUG] loadExisting:error_source_of_truth", {
  bcId,
- items: safeStored.length,
- excluded: safeExcluded.length,
- loadedKeysSample: safeStored.slice(0, 10).map((item) => item?.key),
- lastSavedKeysSample: lastSavedKeysRef.current.slice(0, 10),
+ message: err?.response?.data?.message || err?.message,
+ status: err?.response?.status || null,
  });
+ showToast("No se pudo cargar consumos desde base de datos. Reintenta en unos segundos.", "error");
  recordBusinessCaseTelemetry({
  section: "determinations",
- type: "load_existing_fallback",
+ type: "load_existing_error",
  success: false,
  });
  }
  }, [
  bcId,
- businessCase?.modern_bc_metadata?.consumption_excluded,
- businessCase?.modern_bc_metadata?.consumption_items,
+ showToast,
  ]);
 
  const loadGateInfo = useCallback(async () => {
@@ -579,6 +749,33 @@ const DeterminationsSection = ({
  useEffect(() => {
  loadExisting();
  }, [loadExisting]);
+
+ // Refuerzo de hidratacion:
+ // cuando cambia el snapshot del BC (refresh de workspace), forzar GET fuente-de-verdad.
+ useEffect(() => {
+ if (!bcId) return;
+ console.log("[BC_AUDIT][FE][RELOAD_ON_BC_SNAPSHOT]", {
+ bcId,
+ businessCaseUpdatedAt: businessCase?.updated_at || businessCase?.updatedAt || null,
+ });
+ loadExisting();
+ }, [bcId, businessCase?.updated_at, businessCase?.updatedAt, loadExisting]);
+
+ // Refuerzo adicional: al volver a la pestaña/ventana, rehidratar desde backend.
+ useEffect(() => {
+ if (!bcId) return undefined;
+ const onVisibilityOrFocus = () => {
+ if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+ console.log("[BC_AUDIT][FE][RELOAD_ON_FOCUS]", { bcId });
+ loadExisting();
+ };
+ window.addEventListener("focus", onVisibilityOrFocus);
+ document.addEventListener("visibilitychange", onVisibilityOrFocus);
+ return () => {
+ window.removeEventListener("focus", onVisibilityOrFocus);
+ document.removeEventListener("visibilitychange", onVisibilityOrFocus);
+ };
+ }, [bcId, loadExisting]);
 
  useEffect(() => {
  loadGateInfo();
@@ -631,18 +828,23 @@ const DeterminationsSection = ({
  return dedupedRows.sort((a, b) => a.name.localeCompare(b.name));
  }, [catalogDeterminations, catalogConsumables]);
 
- const savedMap = useMemo(() => {
- const map = {};
- (savedItems || []).forEach((item) => {
- if (!item) return;
- if (item.key) map[item.key] = item;
- if (item.catalogId && item.equipmentId) {
- const prefix = item.type === "determinacion" ? "det" : "cons";
- map[`${prefix}:${item.equipmentId}:${item.catalogId}`] = item;
- }
- });
- return map;
- }, [savedItems]);
+const savedMap = useMemo(() => {
+const map = {};
+const resolvePrefix = (rawType) => {
+const family = getTypeFamily(rawType);
+if (family === "reactivo_determinacion") return "det";
+return "cons";
+};
+(savedItems || []).forEach((item) => {
+if (!item) return;
+if (item.key) map[item.key] = item;
+if (item.catalogId && item.equipmentId) {
+const prefix = resolvePrefix(item.type);
+map[`${prefix}:${item.equipmentId}:${item.catalogId}`] = item;
+}
+});
+return map;
+}, [savedItems]);
 
  const mergedRows = useMemo(() => {
  const customItems = (savedItems || []).filter((item) => item.source === "custom");
@@ -716,6 +918,7 @@ const DeterminationsSection = ({
  const normalizedName = String(row.name || "").trim().toLowerCase();
  const rowCatalogId = row.catalogId ?? null;
  const rowEquipmentId = row.equipmentId ?? null;
+ const rowEquipmentNormalized = String(rowEquipmentId ?? "").trim();
 
  return (savedItemsRef.current || []).find((item) => {
  if (!item) return false;
@@ -724,12 +927,16 @@ const DeterminationsSection = ({
  const itemName = String(item.name || "").trim().toLowerCase();
  const itemCatalogId = item.catalogId ?? null;
  const itemEquipmentId = item.equipmentId ?? null;
+ const itemEquipmentNormalized = String(itemEquipmentId ?? "").trim();
+ const sameEquipment = rowEquipmentNormalized === itemEquipmentNormalized;
+ const rowEquipmentMissing = rowEquipmentId == null || rowEquipmentNormalized === "";
+ const itemEquipmentMissing = itemEquipmentId == null || itemEquipmentNormalized === "";
 
  if (
  rowCatalogId !== null &&
  itemCatalogId !== null &&
  String(rowCatalogId) === String(itemCatalogId) &&
- String(rowEquipmentId || "") === String(itemEquipmentId || "")
+ (sameEquipment || rowEquipmentMissing || itemEquipmentMissing)
  ) {
  return true;
  }
@@ -739,7 +946,7 @@ const DeterminationsSection = ({
  itemId &&
  normalizedItemId === itemId &&
  normalizedType === itemType &&
- String(rowEquipmentId || "") === String(itemEquipmentId || "")
+ (sameEquipment || rowEquipmentMissing || itemEquipmentMissing)
  ) {
  return true;
  }
@@ -748,10 +955,10 @@ const DeterminationsSection = ({
  normalizedName &&
  normalizedName === itemName &&
  normalizedType === itemType &&
- String(rowEquipmentId || "") === String(itemEquipmentId || "")
+ (sameEquipment || rowEquipmentMissing || itemEquipmentMissing)
  );
  }) || null;
- }, [savedMap]);
+}, [savedMap]);
 
  const getManufacturerId = (row) => {
  const saved = getSavedRow(row);
@@ -774,6 +981,22 @@ const DeterminationsSection = ({
  return String(savedValue ?? 0);
  };
 
+ useEffect(() => {
+ if (!DET_DEBUG_ENABLED) return;
+ if (!mergedRows.length) return;
+ const sample = buildDebugQtySample(mergedRows, quantityDraftsRef.current, getSavedRow, 40);
+ const nonZeroDrafts = sample.filter((item) => Number(item?.draftQty ?? 0) > 0).length;
+ const nonZeroSaved = sample.filter((item) => Number(item?.savedQty ?? 0) > 0).length;
+ debugInfo("[BC_CONSUMPTION][FE][RENDER_QTY_SNAPSHOT]", {
+ bcId,
+ mergedRows: mergedRows.length,
+ sampleSize: sample.length,
+ nonZeroDrafts,
+ nonZeroSaved,
+ sample,
+ });
+ }, [bcId, mergedRows, savedItems, getSavedRow]);
+
  const toPositiveNumber = (value) => {
  const normalized = String(value ?? "").trim().replace(",", ".");
  const parsed = Number(normalized);
@@ -784,8 +1007,10 @@ const DeterminationsSection = ({
 const syncQuantityDrafts = useCallback((items = []) => {
  const next = {};
  (Array.isArray(items) ? items : []).forEach((item) => {
- if (!item?.key) return;
- next[item.key] = String(item.annualQty ?? item.annualQuantity ?? 0);
+ if (!item) return;
+ const qty = String(item.annualQty ?? item.annualQuantity ?? 0);
+ const itemKey = String(item?.key || "").trim();
+ if (itemKey) next[itemKey] = qty;
  });
  quantityDraftsRef.current = next;
  setQuantityDrafts(next);
@@ -837,6 +1062,10 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  showToast("Primero crea el Business Case", "warning");
  return;
  }
+ if (persistInFlightRef.current) {
+ debugWarn("[DET_DEBUG] persistItems:skipped_inflight", { bcId });
+ return;
+ }
  const { refresh = false, silent = false, revalidate = false, markComplete = false } = options;
  const effectiveRefresh = markComplete ? Boolean(refresh) : false;
  const effectiveRevalidate = markComplete ? Boolean(revalidate) : false;
@@ -848,6 +1077,7 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  nextExcludedCount: Array.isArray(nextExcluded) ? nextExcluded.length : 0,
  version: consumptionVersionRef.current,
  });
+ persistInFlightRef.current = true;
  setSaving(true);
  const startedAt = Date.now();
  try {
@@ -881,8 +1111,53 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  version: consumptionVersionRef.current,
  }),
  };
+ console.log("[BC_AUDIT][FE][SAVE_REQUEST]", {
+ bcId,
+ version: payload.version || null,
+ itemsCount: payload.items.length,
+ excludedCount: payload.excluded.length,
+ nonZeroItems: payload.items.filter((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) > 0).length,
+ markComplete,
+ });
  const querySuffix = silent ? "?silent=true" : "";
- const response = await api.put(`/business-case/${bcId}/consumption-items${querySuffix}`, payload);
+ logFrontAudit("[BC_AUDIT][FE][PUT_CONSUMPTION_ITEMS][REQUEST]", {
+ bcId,
+ url: `/business-case/${bcId}/consumption-items${querySuffix}`,
+ version: payload.version || null,
+ excludedCount: payload.excluded.length,
+ itemsSummary: summarizeItemsForAudit(payload.items),
+ excludedSample: payload.excluded.slice(0, 40),
+ markComplete,
+ });
+ const runSaveRequest = async (body) =>
+ api.put(`/business-case/${bcId}/consumption-items${querySuffix}`, body);
+
+ let response;
+ try {
+ response = await runSaveRequest(payload);
+ } catch (firstErr) {
+ const firstCode = firstErr?.response?.data?.code;
+ const currentVersion = firstErr?.response?.data?.details?.currentVersion || null;
+ if (firstCode !== "CONSUMPTION_VERSION_CONFLICT" || !currentVersion) {
+ throw firstErr;
+ }
+ debugWarn("[DET_DEBUG] persistItems:retry_on_version_conflict", {
+ bcId,
+ previousVersion: payload.version || null,
+ currentVersion,
+ });
+ consumptionVersionRef.current = currentVersion;
+ const retryPayload = {
+ ...payload,
+ version: currentVersion,
+ idempotency_key: getIdempotencyKey("bc.consumption.save.retry", {
+ items: payload.items,
+ excluded: payload.excluded,
+ version: currentVersion,
+ }),
+ };
+ response = await runSaveRequest(retryPayload);
+ }
  debugInfo("[DET_DEBUG] persistItems:api_success", {
  bcId,
  status: response?.status,
@@ -890,6 +1165,25 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  ms: Date.now() - startedAt,
  });
  const persisted = response?.data?.data || {};
+ logFrontAudit("[BC_AUDIT][FE][PUT_CONSUMPTION_ITEMS][RESPONSE]", {
+ bcId,
+ httpStatus: response?.status || null,
+ version: persisted?.version || null,
+ excludedCount: Array.isArray(persisted?.excluded) ? persisted.excluded.length : 0,
+ itemsSummary: summarizeItemsForAudit(Array.isArray(persisted?.items) ? persisted.items : []),
+ excludedSample: Array.isArray(persisted?.excluded) ? persisted.excluded.slice(0, 40) : [],
+ markComplete,
+ });
+ console.log("[BC_AUDIT][FE][SAVE_RESPONSE]", {
+ bcId,
+ version: persisted?.version || null,
+ itemsCount: Array.isArray(persisted?.items) ? persisted.items.length : 0,
+ excludedCount: Array.isArray(persisted?.excluded) ? persisted.excluded.length : 0,
+ nonZeroItems: Array.isArray(persisted?.items)
+ ? persisted.items.filter((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) > 0).length
+ : 0,
+ markComplete,
+ });
  const { persistedItems, persistedExcluded } = applyPersistedSnapshot(
  persisted,
  nextItems,
@@ -917,6 +1211,28 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  if (!silent) {
  showToast("Determinaciones guardadas correctamente.", "success");
  }
+ if (markComplete) {
+ debugInfo("[DET_DEBUG] persistItems:mark_complete_request", { bcId, gatePhase, role: currentRole });
+ try {
+ await completeDeterminationsSection(bcId);
+ await loadGateInfo();
+ } catch (completeErr) {
+ console.error("[BC_AUDIT][FE][COMPLETE_SECTION][ERROR]", {
+  bcId,
+  message: completeErr?.response?.data?.message || completeErr?.message,
+  code: completeErr?.response?.data?.code || null,
+  status: completeErr?.response?.status || null,
+  data: completeErr?.response?.data || null,
+ });
+ showToast(
+  getNaturalErrorMessage(
+   completeErr,
+   "Las cantidades se guardaron, pero no se pudo terminar la sección.",
+  ),
+  "warning",
+ );
+ }
+ }
  if (effectiveRefresh) {
  debugInfo("[DET_DEBUG] persistItems:onSave", {
  bcId,
@@ -943,10 +1259,15 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  });
  const code = err?.response?.data?.code;
  if (code === "CONSUMPTION_VERSION_CONFLICT") {
+ console.warn("[BC_AUDIT][FE][VERSION_CONFLICT]", {
+ bcId,
+ expectedVersion: err?.response?.data?.details?.expectedVersion || null,
+ currentVersion: err?.response?.data?.details?.currentVersion || null,
+ });
  showToast("Otro usuario actualizo esta seccion. Recargando datos...", "warning");
  await loadExisting();
  } else {
- showToast(err?.response?.data?.message || "No se pudo guardar la informacion", "error");
+ showToast(getNaturalErrorMessage(err, "No se pudo guardar la información"), "error");
  }
  recordBusinessCaseTelemetry({
  section: "determinations",
@@ -955,15 +1276,16 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  success: false,
  });
  } finally {
+ persistInFlightRef.current = false;
  setSaving(false);
  }
  };
 
  const buildPersistPayloadFromDrafts = useCallback(() => {
- const visibleRowMap = new Map();
- mergedRows.forEach((row) => {
- if (row?.key) visibleRowMap.set(row.key, row);
- });
+  const visibleRowMap = new Map();
+  mergedRows.forEach((row) => {
+  if (row?.key) visibleRowMap.set(row.key, row);
+  });
  Object.values(editedRowsRef.current || {}).forEach((row) => {
  if (row?.key && !visibleRowMap.has(row.key)) {
  visibleRowMap.set(row.key, row);
@@ -971,24 +1293,52 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  });
 
  // Conserva filas guardadas que no estén visibles por cambios de catálogo/equipo.
- (savedItemsRef.current || []).forEach((item) => {
- if (item?.key && !visibleRowMap.has(item.key)) {
- visibleRowMap.set(item.key, item);
- }
- });
+  (savedItemsRef.current || []).forEach((item) => {
+  if (item?.key && !visibleRowMap.has(item.key)) {
+  visibleRowMap.set(item.key, item);
+  }
+  });
 
- const nextExcluded = Array.from(new Set(excludedKeysRef.current || []));
- const nextItems = [];
+  // Blindaje: cualquier draft con cantidad > 0 debe terminar en payload, incluso
+  // si no quedó en mergedRows por desalineación temporal de UI.
+  const rowIndexByKey = new Map();
+  const indexCandidate = (rowLike) => {
+  if (!rowLike) return;
+  const key = String(rowLike?.key || "").trim();
+  if (key) rowIndexByKey.set(key, rowLike);
+  const legacyKey = String(rowLike?.legacyKey || "").trim();
+  if (legacyKey) rowIndexByKey.set(legacyKey, rowLike);
+  };
+  (catalogItems || []).forEach(indexCandidate);
+  mergedRows.forEach(indexCandidate);
+  (savedItemsRef.current || []).forEach(indexCandidate);
+  Object.values(editedRowsRef.current || {}).forEach(indexCandidate);
+
+  Object.entries(quantityDraftsRef.current || {}).forEach(([draftKey, draftValue]) => {
+  const numeric = toPositiveNumber(draftValue);
+  if (numeric <= 0) return;
+  if (visibleRowMap.has(draftKey)) return;
+  const resolved = rowIndexByKey.get(draftKey);
+  if (resolved?.key) {
+  visibleRowMap.set(resolved.key, resolved);
+  return;
+  }
+  const fromLegacy = (catalogItems || []).find((row) => row?.legacyKey && row.legacyKey === draftKey);
+  if (fromLegacy?.key) {
+  visibleRowMap.set(fromLegacy.key, fromLegacy);
+  }
+  });
+
+  const nextExcluded = Array.from(new Set(excludedKeysRef.current || []));
+  const nextItems = [];
 
  visibleRowMap.forEach((row) => {
  const saved = getSavedRow(row);
  const rawQty = quantityDraftsRef.current[row.key]
- ?? quantityDrafts[row.key]
- ?? (row?.legacyKey ? quantityDraftsRef.current[row.legacyKey] : undefined)
- ?? (row?.legacyKey ? quantityDrafts[row.legacyKey] : undefined)
- ?? saved?.annualQty
- ?? saved?.annualQuantity
- ?? row?.annualQty
+  ?? quantityDrafts[row.key]
+  ?? saved?.annualQty
+  ?? saved?.annualQuantity
+  ?? row?.annualQty
  ?? row?.annualQuantity
  ?? 0;
  const annualQty = toPositiveNumber(rawQty);
@@ -1026,29 +1376,46 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  });
 
  const debugItemFromPayload = nextItems.find((item) => String(item?.itemId || "").trim() === "3321193001");
- debugInfo("[BC_CONSUMPTION][FE][BUILD_PAYLOAD]", {
- bcId,
- rowsVisible: visibleRowMap.size,
- itemsToSave: nextItems.length,
- excludedToSave: nextExcluded.length,
- debugItem: debugItemFromPayload
- ? {
- key: debugItemFromPayload.key,
+  debugInfo("[BC_CONSUMPTION][FE][BUILD_PAYLOAD]", {
+  bcId,
+  rowsVisible: visibleRowMap.size,
+  itemsToSave: nextItems.length,
+  excludedToSave: nextExcluded.length,
+  nonZeroItemsSample: nextItems
+  .filter((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) > 0)
+  .slice(0, 15)
+  .map((item) => ({
+  key: item?.key || null,
+  itemId: item?.itemId || null,
+  annualQty: item?.annualQty ?? item?.annualQuantity ?? 0,
+  })),
+  debugItem: debugItemFromPayload
+  ? {
+  key: debugItemFromPayload.key,
  itemId: debugItemFromPayload.itemId,
  annualQty: debugItemFromPayload.annualQty,
  source: debugItemFromPayload.source,
  }
  : null,
  });
- debugInfo("[DET_DEBUG] buildPersistPayloadFromDrafts", {
+  debugInfo("[DET_DEBUG] buildPersistPayloadFromDrafts", {
  bcId,
  visibleRows: visibleRowMap.size,
  nextItems: nextItems.length,
  nextExcluded: nextExcluded.length,
  pendingQtyKeys: Object.keys(pendingQtyChangesRef.current || {}),
  hasStructureChanges,
- sampleKeys: nextItems.slice(0, 8).map((item) => item?.key),
- });
+  sampleKeys: nextItems.slice(0, 8).map((item) => item?.key),
+  qtySample: buildDebugQtySample(Array.from(visibleRowMap.values()), quantityDraftsRef.current, getSavedRow),
+  });
+  logFrontAudit("[BC_AUDIT][FE][BUILD_PERSIST_PAYLOAD]", {
+  bcId,
+  visibleRows: visibleRowMap.size,
+  hasStructureChanges,
+  nextExcludedCount: nextExcluded.length,
+  nextExcludedSample: nextExcluded.slice(0, 40),
+  nextItemsSummary: summarizeItemsForAudit(nextItems),
+  });
  return { nextItems, nextExcluded };
  }, [bcId, getSavedRow, hasStructureChanges, mergedRows]);
 
@@ -1084,14 +1451,9 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  lastEditedRowRef.current = row;
  editedRowsRef.current[rowKey] = row;
  const nextDraftsRef = { ...quantityDraftsRef.current, [rowKey]: value };
- if (row.legacyKey) {
- nextDraftsRef[row.legacyKey] = value;
- }
  quantityDraftsRef.current = nextDraftsRef;
  setQuantityDrafts((prev) => {
- const next = { ...prev, [rowKey]: value };
- if (row.legacyKey) next[row.legacyKey] = value;
- return next;
+ return { ...prev, [rowKey]: value };
  });
  const numeric = toPositiveNumber(value);
  const savedNumeric = toPositiveNumber(getSavedRow(row)?.annualQty ?? 0);
@@ -1134,7 +1496,7 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  }
  };
 
- const handleSaveNow = () => {
+const handleSaveNow = () => {
  // Guardado manual explícito: siempre persistimos snapshot actual para dejar avance en base.
  if (autosaveTimeoutRef.current) {
  clearTimeout(autosaveTimeoutRef.current);
@@ -1146,7 +1508,113 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  hasStructureChanges,
  });
  flushPendingQtyChanges({ force: true, markComplete: false });
- };
+};
+
+const handleCompleteSection = async () => {
+ if (!canEditFinal || saving) return;
+ if (!allSubsectionsLocked) {
+ showToast("Primero debes bloquear reactivos, controles, calibradores y materiales.", "warning");
+ return;
+ }
+ if (autosaveTimeoutRef.current) {
+ clearTimeout(autosaveTimeoutRef.current);
+ autosaveTimeoutRef.current = null;
+ }
+ const { nextItems, nextExcluded } = buildPersistPayloadFromDrafts();
+ console.log("[BC_AUDIT][FE][COMPLETE_SECTION_CLICK]", {
+ bcId,
+ gatePhase,
+ role: currentRole,
+ nextItemsCount: nextItems.length,
+ nextExcludedCount: nextExcluded.length,
+ nonZeroItems: nextItems.filter((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) > 0).length,
+ });
+ await persistItems(nextItems, nextExcluded, {
+ refresh: true,
+ silent: false,
+ revalidate: true,
+ markComplete: true,
+ });
+};
+
+const handleLockSubsection = async (sectionKey, rows = []) => {
+ if (!canEditFinal || saving) return;
+ if (isSubsectionLocked(sectionKey)) {
+ showToast(`La subseccion ${sectionKey} ya esta bloqueada.`, "info");
+ return;
+ }
+ const hasRows = Array.isArray(rows) && rows.length > 0;
+ if (!hasRows) {
+ showToast(`No hay items en ${sectionKey} para bloquear.`, "warning");
+ return;
+ }
+ const hasPending = rows.some((row) => toPositiveNumber(getQtyInputValue(row)) <= 0);
+ if (hasPending) {
+ showToast(`Completa todas las cantidades de ${sectionKey} antes de bloquear.`, "warning");
+ return;
+ }
+ try {
+ const { nextItems, nextExcluded } = buildPersistPayloadFromDrafts();
+ await persistItems(nextItems, nextExcluded, {
+ refresh: false,
+ silent: false,
+ revalidate: true,
+ markComplete: false,
+ });
+ await lockDeterminationsSubsection(bcId, sectionKey);
+ await loadGateInfo();
+ onSave({ refresh: true, markComplete: false });
+ showToast(`Subseccion ${sectionKey} bloqueada correctamente.`, "success");
+ } catch (err) {
+ showToast(getNaturalErrorMessage(err, `No se pudo bloquear ${sectionKey}.`), "error");
+ }
+};
+
+const handleRequestUnlockSubsection = async (sectionKey) => {
+ if (!bcId) return;
+ const reason = await promptDialog({
+  title: "Solicitar desbloqueo",
+  message: `Motivo para solicitar desbloqueo de ${sectionKey}:`,
+  required: true,
+  confirmText: "Enviar solicitud",
+ });
+ if (!reason || !reason.trim()) return;
+ try {
+ await requestUnlockSubsection(bcId, sectionKey, reason.trim());
+ await loadGateInfo();
+ onSave({ refresh: true, markComplete: false });
+ showToast(`Solicitud enviada a jefe_comercial para ${sectionKey}.`, "success");
+ } catch (err) {
+ showToast(getNaturalErrorMessage(err, `No se pudo solicitar desbloqueo para ${sectionKey}.`), "error");
+ }
+};
+
+const handleResolveUnlockSubsection = async (requestEntry, approve) => {
+ if (!bcId || !requestEntry?.id) return;
+ const notes = (await promptDialog({
+  title: approve ? "Aprobar desbloqueo" : "Rechazar desbloqueo",
+  message: approve ? "Notas de aprobación (opcional):" : "Motivo de rechazo:",
+  required: !approve,
+  confirmText: approve ? "Aprobar" : "Rechazar",
+ })) || "";
+ if (!approve && !notes.trim()) {
+ showToast("Debes indicar el motivo de rechazo.", "warning");
+ return;
+ }
+ try {
+ await resolveUnlockSubsection(bcId, requestEntry.id, approve, notes.trim());
+ await loadGateInfo();
+ onSave({ refresh: true, markComplete: false });
+ showToast(
+  approve
+   ? `Desbloqueo aprobado para ${requestEntry.subsection}.`
+   : `Desbloqueo rechazado para ${requestEntry.subsection}.`,
+  "success",
+ );
+ } catch (err) {
+ showToast(getNaturalErrorMessage(err, "No se pudo resolver la solicitud."), "error");
+ }
+};
 
  const getSectionPendingCount = (rows = []) => {
  let count = 0;
@@ -1154,7 +1622,7 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  if (!row?.key) return;
  const draftValue =
  quantityDraftsRef.current[row.key]
- ?? (row?.legacyKey ? quantityDraftsRef.current[row.legacyKey] : undefined);
+ ?? undefined;
  const hasDraft = draftValue !== undefined;
  if (!hasDraft) return;
  const draftQty = toPositiveNumber(draftValue);
@@ -1229,9 +1697,52 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  await loadGateInfo();
  onSave({ refresh: true, markComplete: false });
  } catch (err) {
- showToast(err?.response?.data?.message || "No se pudo cargar el documento", "error");
+ showToast(getNaturalErrorMessage(err, "No se pudo cargar el documento"), "error");
  } finally {
  setUploadingDocument(false);
+ }
+ };
+
+ const handleSubmitInspectionRequest = async () => {
+ if (!bcId) return;
+ const minDate = String(inspectionModal.minDate || "").trim();
+ const maxDate = String(inspectionModal.maxDate || "").trim();
+ if (!minDate || !maxDate) {
+ showToast("Debes registrar el rango minimo y maximo de instalacion.", "warning");
+ return;
+ }
+ if (minDate > maxDate) {
+ showToast("La fecha minima no puede ser mayor que la fecha maxima.", "warning");
+ return;
+ }
+ try {
+ setSubmittingInspectionRequest(true);
+ await requestBusinessCaseEnvironmentInspection(bcId, {
+ inspection_min_date: minDate,
+ inspection_max_date: maxDate,
+ persona_contacto: inspectionModal.contactName,
+ celular_contacto: inspectionModal.contactPhone,
+ accesorios: inspectionModal.accessories,
+ anotaciones: inspectionModal.annotations,
+ observaciones: inspectionModal.observations,
+ });
+ showToast("Solicitud de inspeccion de ambiente enviada correctamente.", "success");
+ setInspectionModal({
+ open: false,
+ minDate: "",
+ maxDate: "",
+ contactName: "",
+ contactPhone: "",
+ accessories: "",
+ annotations: "",
+ observations: "",
+ });
+ await loadGateInfo();
+ onSave({ refresh: true, markComplete: false });
+ } catch (err) {
+ showToast(getNaturalErrorMessage(err, "No se pudo solicitar la inspeccion de ambiente."), "error");
+ } finally {
+ setSubmittingInspectionRequest(false);
  }
  };
 
@@ -1253,6 +1764,7 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  const hasDoc = Boolean(gateInfo?.documentUploaded);
  const canEdit = Boolean(gateInfo?.permissions?.canEditDeterminations);
  const expired = Boolean(gateInfo?.isExpired);
+ const inspectionRequested = Boolean(gateInfo?.inspectionRequest?.request_id);
  return [
  {
  id: "doc",
@@ -1268,6 +1780,11 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  id: "window",
  label: "Ventana 48h",
  status: expired ? "blocked" : hasDoc ? "active" : "pending",
+ },
+ {
+ id: "inspection",
+ label: "Inspeccion de ambiente",
+ status: inspectionRequested ? "done" : hasDoc ? "active" : "pending",
  },
  ];
  }, [gateInfo]);
@@ -1421,10 +1938,14 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  <div>
  <span className="font-semibold">Vence:</span> {formatGateDateTime(gateInfo?.deadlineAt)}
  </div>
- <div>
- <span className="font-semibold">Responsables:</span> {(gateInfo?.editors || []).join(", ") || "N/A"}
- </div>
- </div>
+<div>
+<span className="font-semibold">Responsables:</span> {(gateInfo?.editors || []).join(", ") || "N/A"}
+</div>
+<div>
+<span className="font-semibold">Fase actual:</span>{" "}
+{gatePhase === "technical_review" ? "Revision tecnica" : gatePhase === "locked" ? "Bloqueada" : "Carga comercial"}
+</div>
+</div>
  ) : (
  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
  Aun no se ha cargado el documento estadistico. La seccion de determinaciones permanece bloqueada.
@@ -1451,11 +1972,102 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  </div>
  )}
 
- {!canEditFinal && (
- <div className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
- No tienes habilitada la edicion de determinaciones para este flujo o la ventana de 48 horas ya expiro.
+ {gateInfo?.documentUploaded && (
+ <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
+ <div className="flex items-start justify-between gap-3">
+ <div className="space-y-1">
+ <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+ <FiFileText size={13} />
+ Solicitud tecnica
+ </div>
+ <h4 className="text-sm font-semibold text-slate-900">Solicitar inspeccion de ambiente</h4>
+ <p className="text-xs text-slate-600">
+ Registra el rango estimado de instalacion. El sistema llenara el F.ST-20 con la informacion ya guardada en las secciones previas del Business Case.
+ </p>
+ </div>
+ {inspectionRequestInfo?.request_id ? (
+ <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-semibold text-emerald-700">
+ Solicitada
+ </span>
+ ) : (
+ <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-[11px] font-semibold text-amber-700">
+ Pendiente
+ </span>
+ )}
+ </div>
+
+ <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-700">
+ <div className="rounded-lg bg-white border border-slate-200 px-3 py-2">
+ <div className="font-semibold text-slate-900">Cliente</div>
+ <div>{inspectionSummary.clientName}</div>
+ </div>
+ <div className="rounded-lg bg-white border border-slate-200 px-3 py-2">
+ <div className="font-semibold text-slate-900">Proceso</div>
+ <div>{inspectionSummary.processCode}</div>
+ </div>
+ <div className="rounded-lg bg-white border border-slate-200 px-3 py-2">
+ <div className="font-semibold text-slate-900">Direccion</div>
+ <div>{inspectionSummary.address}</div>
+ </div>
+ </div>
+
+ {inspectionRequestInfo?.request_id ? (
+ <div className="space-y-2 text-xs text-slate-700">
+ <div><span className="font-semibold">Solicitud:</span> #{inspectionRequestInfo.request_id}</div>
+ <div>
+ <span className="font-semibold">Rango registrado:</span>{" "}
+ {inspectionRequestInfo?.inspection_min_date || "Pendiente"} a {inspectionRequestInfo?.inspection_max_date || "Pendiente"}
+ </div>
+ {inspectionRequestInfo?.acta_document_link && (
+ <a
+ href={inspectionRequestInfo.acta_document_link}
+ target="_blank"
+ rel="noreferrer"
+ className="inline-flex items-center gap-2 text-blue-700 hover:underline"
+ >
+ <FiFileText size={13} />
+ Ver F.ST-20
+ </a>
+ )}
+ <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sky-700">
+ Jefatura Tecnica seleccionara la fecha exacta de inspeccion dentro del rango registrado.
+ </div>
+ </div>
+ ) : (
+ <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-3">
+ <div className="text-xs text-slate-600">
+ Despues de enviarla, Jefatura Tecnica podra escoger la fecha exacta dentro del rango indicado.
+ </div>
+ <button
+ type="button"
+ onClick={() => setInspectionModal({
+ open: true,
+ minDate: inspectionRequestInfo?.inspection_min_date || "",
+ maxDate: inspectionRequestInfo?.inspection_max_date || "",
+ contactName: inspectionSummary.contactName || "",
+ contactPhone: inspectionSummary.contactPhone || "",
+ accessories: inspectionSummary.accessories || "",
+ annotations: inspectionSummary.annotations || "",
+ observations: inspectionSummary.observations || "",
+ })}
+ disabled={!canRequestInspection}
+ className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+ >
+ <FiCalendar size={14} />
+ Solicitar inspeccion
+ </button>
  </div>
  )}
+ </div>
+ )}
+
+{!canEditFinal && (
+<div className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
+ {quantitiesLocked
+ ? "Las cantidades quedaron bloqueadas tras cierre tecnico. Solicita reapertura con Jefe Comercial."
+ : "No tienes habilitada la edicion de determinaciones para este flujo o la ventana de 48 horas ya expiro."}
+</div>
+)}
  </div>
  )}
  </div>
@@ -1476,9 +2088,15 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  </div>
  </div>
 
- {DETERMINATION_CATEGORY_CONFIG.map((section) => {
- const rows = group.categories?.[section.key] || [];
- const rowLimit = getWindowLimit(group.key, section.key);
+{DETERMINATION_CATEGORY_CONFIG.map((section) => {
+const rowsRaw = group.categories?.[section.key] || [];
+const rows =
+gatePhase === "technical_review" && isTechnicalRole && section.key === "reactivos"
+? rowsRaw.filter((row) => toPositiveNumber(getQtyInputValue(row)) > 0)
+: rowsRaw;
+const subsectionLocked = isSubsectionLocked(section.key);
+const pendingUnlock = pendingUnlockBySubsection[section.key] || null;
+const rowLimit = getWindowLimit(group.key, section.key);
  const visibleRows = rows.slice(0, rowLimit);
  const isCollapsed = isSectionCollapsed(group.key, section.key);
  const isDone =
@@ -1499,21 +2117,76 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  {sectionPendingCount} cambio(s)
  </span>
  )}
- <button
- type="button"
- onClick={(event) => {
- event.stopPropagation();
- handleSaveSection(rows);
- }}
- disabled={saving || !canEditFinal}
- className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
- >
- Guardar seccion
- </button>
- <span
- className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${
+<button
+type="button"
+onClick={(event) => {
+event.stopPropagation();
+handleSaveSection(rows);
+}}
+disabled={saving || !canEditFinal || subsectionLocked}
+className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+>
+Guardar seccion
+</button>
+<button
+type="button"
+onClick={(event) => {
+event.stopPropagation();
+handleLockSubsection(section.key, rows);
+}}
+disabled={saving || !canEditFinal || subsectionLocked}
+className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed"
+>
+{subsectionLocked ? "Subseccion bloqueada" : "Bloquear subseccion"}
+</button>
+{subsectionLocked && !pendingUnlock && !isJefeComercial && (
+<button
+type="button"
+onClick={(event) => {
+event.stopPropagation();
+handleRequestUnlockSubsection(section.key);
+}}
+disabled={saving}
+className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
+>
+Solicitar desbloqueo
+</button>
+)}
+{pendingUnlock && (
+<span className="inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold bg-amber-100 text-amber-800">
+Desbloqueo pendiente
+</span>
+)}
+{isJefeComercial && pendingUnlock && (
+<>
+<button
+type="button"
+onClick={(event) => {
+event.stopPropagation();
+handleResolveUnlockSubsection(pendingUnlock, true);
+}}
+disabled={saving}
+className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-100 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed"
+>
+Aprobar desbloqueo
+</button>
+<button
+type="button"
+onClick={(event) => {
+event.stopPropagation();
+handleResolveUnlockSubsection(pendingUnlock, false);
+}}
+disabled={saving}
+className="inline-flex items-center gap-1 rounded-lg border border-rose-300 bg-rose-100 px-2.5 py-1.5 text-[11px] font-semibold text-rose-800 hover:bg-rose-200 disabled:opacity-50 disabled:cursor-not-allowed"
+>
+Rechazar desbloqueo
+</button>
+</>
+)}
+<span
+className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${
  isDone ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
- }`}
+}`}
  >
  <FiCheck size={11} />
  {isDone ? "Realizado" : "Pendiente"}
@@ -1698,11 +2371,12 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  }
  disabled={!canEditType((newItemByEquipment[group.key]?.type || "reactivo"))}
  />
- <select
- className="border rounded-lg px-2 py-1"
- value={newItemByEquipment[group.key]?.type || "reactivo"}
- onChange={(e) =>
- setNewItemByEquipment((prev) => ({
+<select
+className="border rounded-lg px-2 py-1"
+value={newItemByEquipment[group.key]?.type || "reactivo"}
+disabled={!canEditFinal}
+onChange={(e) =>
+setNewItemByEquipment((prev) => ({
  ...prev,
  [group.key]: { ...(prev[group.key] || {}), type: e.target.value },
  }))
@@ -1747,15 +2421,23 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  )}
  </div>
  <div className="flex items-center gap-6 text-sm">
- <button
- type="button"
- onClick={handleSaveNow}
- disabled={saving || !canEditFinal}
- className="px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
- >
- Guardar ahora
- </button>
- {saving && (
+<button
+type="button"
+onClick={handleSaveNow}
+disabled={saving || !canEditFinal}
+className="px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+>
+Guardar ahora
+</button>
+<button
+type="button"
+onClick={handleCompleteSection}
+disabled={saving || !canEditFinal || !allSubsectionsLocked}
+className="px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+>
+Terminar seccion
+</button>
+{saving && (
  <div className="flex items-center gap-2 text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
  <span className="text-xs font-semibold">Guardando...</span>
@@ -1765,14 +2447,169 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  </div>
 
  <div className="flex flex-col sm:flex-row sm:justify-end pt-4 border-t border-gray-100">
+<button
+onClick={handleSaveNow}
+disabled={!canEditFinal || saving}
+className="inline-flex items-center justify-center bg-blue-600 text-white w-full sm:w-auto px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 active:scale-[0.99] transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+>
+Guardar informacion
+</button>
+<button
+onClick={handleCompleteSection}
+disabled={!canEditFinal || saving || !allSubsectionsLocked}
+className="inline-flex items-center justify-center bg-emerald-600 text-white w-full sm:w-auto px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-700 active:scale-[0.99] transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+>
+Terminar seccion
+</button>
+</div>
+
+ {inspectionModal.open && (
+ <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4">
+ <div className="w-full max-w-xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+ <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-6 py-5">
+ <div>
+ <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Inspeccion de ambiente</p>
+ <h3 className="text-lg font-semibold text-slate-900">Solicitar F.ST-20</h3>
+ <p className="mt-1 text-sm text-slate-600">
+ Registra el rango de instalacion estimado. Los datos del cliente, direccion y equipo se tomaran del Business Case.
+ </p>
+ </div>
  <button
- onClick={handleSaveNow}
- disabled={!canEditFinal || saving}
- className="inline-flex items-center justify-center bg-blue-600 text-white w-full sm:w-auto px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 active:scale-[0.99] transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+ type="button"
+ onClick={() => !submittingInspectionRequest && setInspectionModal({
+ open: false,
+ minDate: "",
+ maxDate: "",
+ contactName: "",
+ contactPhone: "",
+ accessories: "",
+ annotations: "",
+ observations: "",
+ })}
+ className="rounded-full p-2 text-slate-500 hover:bg-slate-100"
  >
- Guardar informacion
+ <FiX size={16} />
  </button>
  </div>
+
+ <div className="space-y-5 px-6 py-5">
+ {inspectionMissingFields.length > 0 && (
+ <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+ Faltan datos por confirmar para generar F.ST-20: {inspectionMissingFields.join(", ")}.
+ </div>
+ )}
+ <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+ <label className="space-y-2">
+ <span className="text-sm font-medium text-slate-800">Fecha minima de instalacion</span>
+ <input
+ type="date"
+ value={inspectionModal.minDate}
+ onChange={(e) => setInspectionModal((prev) => ({ ...prev, minDate: e.target.value }))}
+ className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
+ />
+ </label>
+ <label className="space-y-2">
+ <span className="text-sm font-medium text-slate-800">Fecha maxima de instalacion</span>
+ <input
+ type="date"
+ value={inspectionModal.maxDate}
+ min={inspectionModal.minDate || undefined}
+ onChange={(e) => setInspectionModal((prev) => ({ ...prev, maxDate: e.target.value }))}
+ className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
+ />
+ </label>
+ </div>
+
+ <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+ <label className="space-y-2">
+ <span className="text-sm font-medium text-slate-800">Persona de contacto</span>
+ <input
+ type="text"
+ value={inspectionModal.contactName}
+ onChange={(e) => setInspectionModal((prev) => ({ ...prev, contactName: e.target.value }))}
+ className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
+ />
+ </label>
+ <label className="space-y-2">
+ <span className="text-sm font-medium text-slate-800">Celular de contacto</span>
+ <input
+ type="text"
+ value={inspectionModal.contactPhone}
+ onChange={(e) => setInspectionModal((prev) => ({ ...prev, contactPhone: e.target.value }))}
+ className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
+ />
+ </label>
+ </div>
+
+ <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-2 text-sm text-slate-700">
+ <div><span className="font-semibold text-slate-900">Cliente:</span> {inspectionSummary.clientName}</div>
+ <div><span className="font-semibold text-slate-900">Proceso:</span> {inspectionSummary.processCode}</div>
+ <div><span className="font-semibold text-slate-900">Direccion:</span> {inspectionSummary.address}</div>
+ <div><span className="font-semibold text-slate-900">Equipos:</span> {inspectionSummary.equipment.length ? inspectionSummary.equipment.map((item) => item?.nombre_equipo || "Equipo").join(", ") : "Pendiente"}</div>
+ </div>
+
+ <label className="space-y-2">
+ <span className="text-sm font-medium text-slate-800">Accesorios</span>
+ <input
+ type="text"
+ value={inspectionModal.accessories}
+ onChange={(e) => setInspectionModal((prev) => ({ ...prev, accessories: e.target.value }))}
+ className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
+ />
+ </label>
+
+ <label className="space-y-2">
+ <span className="text-sm font-medium text-slate-800">Anotaciones</span>
+ <textarea
+ rows={3}
+ value={inspectionModal.annotations}
+ onChange={(e) => setInspectionModal((prev) => ({ ...prev, annotations: e.target.value }))}
+ className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
+ />
+ </label>
+
+ <label className="space-y-2">
+ <span className="text-sm font-medium text-slate-800">Observaciones</span>
+ <textarea
+ rows={4}
+ value={inspectionModal.observations}
+ onChange={(e) => setInspectionModal((prev) => ({ ...prev, observations: e.target.value }))}
+ className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
+ />
+ </label>
+ </div>
+
+ <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
+ <button
+ type="button"
+ onClick={() => setInspectionModal({
+ open: false,
+ minDate: "",
+ maxDate: "",
+ contactName: "",
+ contactPhone: "",
+ accessories: "",
+ annotations: "",
+ observations: "",
+ })}
+ disabled={submittingInspectionRequest}
+ className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+ >
+ Cancelar
+ </button>
+ <button
+ type="button"
+ onClick={handleSubmitInspectionRequest}
+ disabled={submittingInspectionRequest}
+ className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+ >
+ <FiCheck size={15} />
+ {submittingInspectionRequest ? "Enviando..." : "Enviar solicitud"}
+ </button>
+ </div>
+ </div>
+ </div>
+ )}
  </div>
  );
 };

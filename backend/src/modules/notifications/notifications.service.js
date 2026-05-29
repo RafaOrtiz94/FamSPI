@@ -18,7 +18,11 @@ const mapNotificationRow = (row) => ({
   read_at: row.read_at,
 });
 
-const listNotifications = async (userId, { status } = {}) => {
+// Límite de notificaciones por request: evita respuestas masivas y reduce transferencia hacia Neon.
+// El frontend solo muestra las 6 más recientes; 50 es más que suficiente como tope operativo.
+const NOTIFICATIONS_PAGE_LIMIT = 50;
+
+const listNotifications = async (userId, { status, limit } = {}) => {
   const params = [userId];
   let query = `
     SELECT id, user_id, title, message, type, source, status, priority, meta, created_at, read_at
@@ -31,7 +35,8 @@ const listNotifications = async (userId, { status } = {}) => {
     params.push(status);
   }
 
-  query += " ORDER BY created_at DESC";
+  const effectiveLimit = Math.min(Number(limit) || NOTIFICATIONS_PAGE_LIMIT, NOTIFICATIONS_PAGE_LIMIT);
+  query += ` ORDER BY priority DESC, created_at DESC LIMIT ${effectiveLimit}`;
 
   const { rows } = await db.query(query, params);
   return rows.map(mapNotificationRow);

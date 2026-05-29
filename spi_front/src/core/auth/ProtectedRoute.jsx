@@ -2,7 +2,8 @@ import React, { useEffect, useRef } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { useUI } from "../ui/UIContext";
-import { isPathEnabledForUser } from "./moduleAccess";
+import { isPathEnabledForUser, isModuleUnderConstruction, getModuleStatusForPath } from "./moduleAccess";
+import UnderConstructionPage from "../ui/components/UnderConstructionPage";
 
 /**
  * ============================================================
@@ -55,6 +56,15 @@ export const ProtectedRoute = ({ allowedRoles = [], strictRoles = false }) => {
  pathname: location.pathname,
  moduleAccess: user?.module_access || [],
  });
+ const isTiAdmin = ['jefe_ti', 'admin_ti', 'admin', 'administrador'].includes(userRole);
+ const underConstruction = !loading && isAuthenticated && isModuleUnderConstruction({
+   pathname: location.pathname,
+   moduleGlobalStatus: user?.module_global_status || [],
+   isTiAdmin,
+ });
+ const constructionStage = underConstruction
+   ? getModuleStatusForPath({ pathname: location.pathname, moduleGlobalStatus: user?.module_global_status || [] }).stage
+   : null;
 
  useEffect(() => {
  if (loading || toastShownRef.current) return;
@@ -106,6 +116,11 @@ export const ProtectedRoute = ({ allowedRoles = [], strictRoles = false }) => {
  console.warn(`🚫 Acceso denegado. Rol actual: ${userRole}`);
  return <Navigate to="/unauthorized" replace />;
  }
+ // 🚧 Módulo en construcción o testing sin acceso
+ if (underConstruction) {
+   return <UnderConstructionPage stage={constructionStage} />;
+ }
+
  if (isAuthenticated && !moduleEnabled) {
  return <Navigate to="/unauthorized" replace />;
  }

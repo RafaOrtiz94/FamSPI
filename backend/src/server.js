@@ -30,6 +30,8 @@ const { startDatabaseBackupJob } = require("./jobs/databaseBackupToDrive");
 const { startPermisosPendingExpiryJob } = require("./jobs/permisosPendingExpiryScheduler");
 const { startPermisosRecoveryCoordinationExpiryJob } = require("./jobs/permisosRecoveryCoordinationExpiryScheduler");
 const { startPermisosAutoCancelledJustificationJob } = require("./jobs/permisosAutoCancelledJustificationScheduler");
+const { startPermisosApprovalEscalationJob } = require("./jobs/permisosApprovalEscalationScheduler");
+const { startPermisosJustificanteVencimientoJob } = require("./jobs/permisosJustificanteVencimientoScheduler");
 const { startExternalCaseSyncJob } = require("./jobs/externalCaseSyncScheduler");
 
 const PORT = Number(process.env.PORT) || 8080;
@@ -58,6 +60,8 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
       { name: "permisos_pending_expiry", fn: startPermisosPendingExpiryJob },
       { name: "permisos_recovery_coordination_expiry", fn: startPermisosRecoveryCoordinationExpiryJob },
       { name: "permisos_auto_cancelled_justification", fn: startPermisosAutoCancelledJustificationJob },
+      { name: "permisos_approval_escalation", fn: startPermisosApprovalEscalationJob },
+      { name: "permisos_justificante_vencimiento", fn: startPermisosJustificanteVencimientoJob },
       { name: "db_backup", fn: startDatabaseBackupJob },
       { name: "external_case_sync", fn: startExternalCaseSyncJob },
     ];

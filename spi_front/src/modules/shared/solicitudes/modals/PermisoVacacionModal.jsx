@@ -43,6 +43,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  const [calamidadDuracionTipo, setCalamidadDuracionTipo] = useState("dias"); // 'horas' o 'dias'
  const [subtipoSalud, setSubtipoSalud] = useState(""); // 'enfermedad_certificada' | 'atencion_medica_familiar'
  const [esEmergencia, setEsEmergencia] = useState(false);
+ const [calamidadParentesco, setCalamidadParentesco] = useState("");
+ const [vacationConversionConsent, setVacationConversionConsent] = useState(false);
  const [vacacionMedioDia, setVacacionMedioDia] = useState(false);
  const [studyEnrollments, setStudyEnrollments] = useState([]);
  const [selectedStudyEnrollmentId, setSelectedStudyEnrollmentId] = useState("");
@@ -74,6 +76,13 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  (permiso === "calamidad" && calamidadTipo === "horas");
  const extractDatePart = (value) =>
  typeof value === "string" && value.includes("T") ? value.split("T")[0] : value || "";
+ const getTodayDateOnly = () => {
+ const now = new Date();
+ const year = now.getFullYear();
+ const month = String(now.getMonth() + 1).padStart(2, "0");
+ const day = String(now.getDate()).padStart(2, "0");
+ return `${year}-${month}-${day}`;
+ };
  const toIsoDateTime = (value) => {
  if (!value) return "";
  const date = new Date(value);
@@ -470,6 +479,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  setSubtipoSalud("");
  setEsEmergencia(false);
  setSaludDuracionTipo("dias");
+ setCalamidadParentesco("");
+ setVacationConversionConsent(false);
  setVacacionMedioDia(false);
  setVacationSummary(null);
  setVacationBalanceValidation(null);
@@ -601,9 +612,18 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  fam_sign_consent_text: famSignConsentText,
  };
 
+ if (esEmergencia) {
+   payload.es_emergencia = true;
+ }
+
  if (tipoSolicitud === "permiso") {
  payload.tipo_permiso = tipoPermiso;
- payload.es_emergencia = Boolean(esEmergencia);
+ if (esEmergencia) {
+   payload.vacation_conversion_consent = vacationConversionConsent;
+ }
+ if (tipoPermiso === "calamidad" && calamidadParentesco.trim()) {
+   payload.calamidad_parentesco = calamidadParentesco.trim();
+ }
  const rawRequestedHours = Number(formData.duracion_horas || 0);
  const uiHourLimit = getPermisoHourLimit(tipoPermiso);
  if (Number.isFinite(rawRequestedHours) && rawRequestedHours > 0 && uiHourLimit !== null && rawRequestedHours > uiHourLimit) {
@@ -976,7 +996,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  <input
  type="checkbox"
  checked={esEmergencia}
- onChange={(e) => setEsEmergencia(e.target.checked)}
+ onChange={(e) => { setEsEmergencia(e.target.checked); if (!e.target.checked) setVacationConversionConsent(false); }}
  className="mt-1 h-4 w-4 rounded border-orange-300 text-orange-600 focus:ring-orange-500"
  />
  <span>
@@ -993,15 +1013,48 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
  {tipoPermiso === "calamidad" && (
  <div className="space-y-3">
- <label className="block text-sm font-medium text-gray-700">Tipo de Calamidad</label>
- <input
- type="text"
- value={subtipoCalamidad}
- onChange={(e) => setSubtipoCalamidad(e.target.value)}
- placeholder="Ej: fallecimiento, accidente, desastre, etc."
- className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
- required
- />
+ <div>
+ <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Calamidad</label>
+ <select
+   value={subtipoCalamidad}
+   onChange={(e) => { setSubtipoCalamidad(e.target.value); setCalamidadParentesco(""); }}
+   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+   required
+ >
+   <option value="">Selecciona el tipo de calamidad</option>
+   <option value="fallecimiento">Fallecimiento de familiar</option>
+   <option value="enfermedad_grave_familiar">Enfermedad grave de familiar</option>
+   <option value="accidente_familiar">Accidente de familiar</option>
+   <option value="hospitalizacion_familiar">Hospitalización de familiar</option>
+   <option value="accidente_propio">Accidente propio</option>
+   <option value="emergencia_medica_propia">Emergencia médica propia</option>
+   <option value="desastre">Desastre (incendio, robo, desastre natural)</option>
+   <option value="otro">Otro asunto fortuito imprevisto</option>
+ </select>
+ </div>
+ {["fallecimiento", "enfermedad_grave_familiar", "accidente_familiar", "hospitalizacion_familiar"].includes(subtipoCalamidad) && (
+ <div>
+ <label className="block text-sm font-medium text-gray-700 mb-1">Parentesco con el familiar afectado</label>
+ <select
+   value={calamidadParentesco}
+   onChange={(e) => setCalamidadParentesco(e.target.value)}
+   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+   required
+ >
+   <option value="">Selecciona el parentesco</option>
+   <option value="conyuge">Cónyuge / Conviviente / Pareja</option>
+   <option value="padre">Padre / Madre</option>
+   <option value="hijo">Hijo / Hija</option>
+   <option value="hermano">Hermano / Hermana</option>
+   <option value="abuelo">Abuelo / Abuela</option>
+   <option value="nieto">Nieto / Nieta</option>
+   <option value="suegro">Suegro / Suegra</option>
+   <option value="yerno">Yerno / Nuera</option>
+   <option value="tio">Tío / Tía</option>
+   <option value="sobrino">Sobrino / Sobrina</option>
+ </select>
+ </div>
+ )}
  <div>
  <label className="block text-sm font-medium text-gray-700 mb-2">Duración</label>
  <select
@@ -1455,6 +1508,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  !tipoPermiso ||
  (isSalud && !subtipoSalud) ||
  (tipoPermiso === "calamidad" && (!String(subtipoCalamidad || "").trim() || !String(formData.observaciones || "").trim())) ||
+ (tipoPermiso === "calamidad" && ["fallecimiento", "enfermedad_grave_familiar", "accidente_familiar", "hospitalizacion_familiar"].includes(subtipoCalamidad) && !calamidadParentesco.trim()) ||
  !hasDates ||
  !hasDuration ||
  invalidDateRange ||
@@ -1508,9 +1562,16 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  const cancelledVacationDisplay = formatVacationDaysHours(cancelledDisplay);
  const hasDates = formData.fecha_inicio && (vacacionMedioDia || formData.fecha_fin);
  const hasVacationTimeRange = !vacacionMedioDia || (formData.vacation_start_time && formData.vacation_end_time);
+ const isSameDayVacationStart = Boolean(formData.fecha_inicio) && formData.fecha_inicio === getTodayDateOnly();
  const allowMissingHireDate = vacationSummary?.missing_hire_date;
  const exceedsBalance = !allowMissingHireDate && !isAdvanceRequest && days > remaining;
- const canSubmit = days > 0 && hasDates && hasVacationTimeRange;
+ const isWithin24h = (() => {
+   if (!formData.fecha_inicio) return false;
+   const start = new Date(`${formData.fecha_inicio}T00:00:00`);
+   return start < new Date(Date.now() + 24 * 60 * 60 * 1000);
+ })();
+ const blockedByAnticipation = isWithin24h && !esEmergencia;
+ const canSubmit = days > 0 && hasDates && hasVacationTimeRange && !blockedByAnticipation;
 
  return (
  <div className="space-y-4">
@@ -1565,6 +1626,15 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  Falta registrar la <strong>fecha de ingreso</strong> en tu perfil.
  Puedes enviar la solicitud, pero Talento Humano debe completar ese dato
  para calcular correctamente tus vacaciones.
+ </p>
+ </div>
+ )}
+
+ {isSameDayVacationStart && (
+ <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+ <p className="text-xs text-amber-800">
+ <strong>Aviso importante:</strong> si solicitas vacaciones para el mismo día de inicio,
+ la solicitud puede cancelarse automáticamente por regla operativa si no se aprueba a tiempo.
  </p>
  </div>
  )}
@@ -1696,6 +1766,32 @@ Saldo resultante:{" "}
 </div>
  )}
 
+ {blockedByAnticipation && (
+   <div className="p-3 bg-rose-50 border border-rose-300 rounded-lg">
+     <p className="text-sm font-semibold text-rose-900">Solicitud con menos de 24 horas de anticipación</p>
+     <p className="text-xs text-rose-700 mt-0.5">
+       Las vacaciones que inician hoy o mañana no pueden solicitarse de forma normal. Si se trata de una emergencia, márcala como tal para continuar.
+     </p>
+   </div>
+ )}
+
+ <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
+   <label className="flex items-start gap-3 cursor-pointer">
+     <input
+       type="checkbox"
+       checked={esEmergencia}
+       onChange={(e) => setEsEmergencia(e.target.checked)}
+       className="mt-1 h-4 w-4 rounded border-orange-300 text-orange-600 focus:ring-orange-500"
+     />
+     <span>
+       <span className="block text-sm font-semibold text-orange-900">Es una emergencia</span>
+       <span className="block text-xs text-orange-800 mt-0.5">
+         Las vacaciones inician hoy o en menos de 24 horas. El jefe aprueba y se notifica al equipo de inmediato.
+       </span>
+     </span>
+   </label>
+ </div>
+
  <div className="flex gap-3 pt-4">
  <Button type="button" variant="secondary" onClick={() => setStep(1)} className="flex-1">
  Atrás
@@ -1727,6 +1823,10 @@ Saldo resultante:{" "}
  tipoSolicitud === "vacaciones"
  ? getVacationShiftLabel(formData.vacation_start_time, formData.vacation_end_time)
  : "";
+ const isSameDayVacationStart =
+ tipoSolicitud === "vacaciones" &&
+ Boolean(formData.fecha_inicio) &&
+ formData.fecha_inicio === getTodayDateOnly();
  return (
  <div className="space-y-4">
  <h3 className="text-lg font-semibold text-gray-900">Confirmar Solicitud</h3>
@@ -1772,11 +1872,17 @@ Saldo resultante:{" "}
  : `${formData.duracion_dias} días`}
  </span>
  </div>
- {tipoSolicitud === "permiso" && (
+ {esEmergencia && (
  <div className="flex justify-between">
- <span className="text-sm text-gray-600">Emergencia:</span>
- <span className={`text-sm font-semibold ${esEmergencia ? "text-orange-700" : "text-gray-900"}`}>
- {esEmergencia ? "Sí" : "No"}
+ <span className="text-sm text-gray-600">Urgente:</span>
+ <span className="text-sm font-semibold text-orange-700">Sí — autorización provisional</span>
+ </div>
+ )}
+ {tipoSolicitud === "permiso" && esEmergencia && (
+ <div className="flex justify-between">
+ <span className="text-sm text-gray-600">Cons. vacaciones:</span>
+ <span className={`text-sm font-semibold ${vacationConversionConsent ? "text-amber-700" : "text-gray-500"}`}>
+ {vacationConversionConsent ? "Autorizado" : "No autorizado"}
  </span>
  </div>
  )}
@@ -1787,6 +1893,37 @@ Saldo resultante:{" "}
  </div>
  )}
  </div>
+
+ {isSameDayVacationStart && (
+ <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+ <p className="text-xs text-amber-800">
+ <strong>Aviso importante:</strong> esta solicitud inicia hoy. Si no alcanza aprobación en tiempo,
+ el sistema puede cancelarla automáticamente.
+ </p>
+ </div>
+ )}
+
+ {tipoSolicitud === "permiso" && esEmergencia && (
+ <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg space-y-3">
+ <p className="text-xs font-semibold text-amber-900">Consentimiento de regularización provisional</p>
+ <p className="text-xs text-amber-800 italic">
+ "Entiendo que esta solicitud se autoriza de forma provisional y quedará pendiente de validación.
+ Si posteriormente se determina que no procede bajo el tipo solicitado, autorizo que el tiempo sea
+ regularizado con cargo a mis vacaciones disponibles, siempre que exista saldo suficiente."
+ </p>
+ <label className="flex items-start gap-2 cursor-pointer">
+ <input
+   type="checkbox"
+   checked={vacationConversionConsent}
+   onChange={(e) => setVacationConversionConsent(e.target.checked)}
+   className="mt-0.5 h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+ />
+ <span className="text-xs text-amber-900 font-medium">
+   Acepto y autorizo la regularización con cargo a vacaciones si aplica
+ </span>
+ </label>
+ </div>
+ )}
 
  <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg space-y-2">
  <p className="text-xs text-indigo-800">
@@ -1846,7 +1983,7 @@ Saldo resultante:{" "}
  variant="primary"
  onClick={handleSubmit}
  className="flex-1"
- disabled={loading}
+ disabled={loading || (tipoSolicitud === "permiso" && esEmergencia && !vacationConversionConsent)}
  >
  {loading ? "Enviando..." : "Enviar Solicitud"}
  </Button>

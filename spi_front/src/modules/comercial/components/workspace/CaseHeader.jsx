@@ -3,14 +3,43 @@ import { FiRefreshCw, FiDownload, FiFileText, FiCheckCircle, FiClock, FiAlertTri
 import Card from "../../../../core/ui/components/Card";
 import { useBusinessCaseWorkspaceOptional } from "./BusinessCaseWorkspaceContext";
 
-const resolvePurchaseOrigin = (bcPurchaseType, metadata = {}) => {
- const normalizedType = String(bcPurchaseType || "").toLowerCase();
- const sourceModule = String(metadata?.source_module || "").toLowerCase();
+const resolvePurchaseOrigin = (guidance = {}) => {
+ const businessCase = guidance?.businessCase || {};
+ const metadata = guidance?.modern_bc_metadata || businessCase?.modern_bc_metadata || {};
+ const candidates = [
+  guidance?.bc_purchase_type,
+  businessCase?.bc_purchase_type,
+  guidance?.purchase_type,
+  businessCase?.purchase_type,
+  metadata?.purchase_type,
+  metadata?.source_module,
+  metadata?.sourceModule,
+  metadata?.origin,
+  metadata?.workflow_origin,
+  metadata?.flow_origin,
+ ]
+  .map((value) => String(value || "").trim().toLowerCase())
+  .filter(Boolean);
 
- if (normalizedType.includes("pub") || normalizedType.includes("publico")) return "publica";
- if (normalizedType.includes("priv")) return "privada";
- if (sourceModule.includes("equipment_purchases")) return "publica";
- if (sourceModule.includes("private_purchases")) return "privada";
+ const hasPublicSignal = candidates.some(
+  (value) =>
+   value.includes("public") ||
+   value.includes("publico") ||
+   value.includes("equipment_purchases") ||
+   value.includes("public_purchase"),
+ );
+ if (hasPublicSignal) return "publica";
+
+ const hasPrivateSignal = candidates.some(
+  (value) =>
+   value.includes("private") ||
+   value.includes("privado") ||
+   value.includes("privada") ||
+   value.includes("private_purchases") ||
+   value.includes("private_purchase"),
+ );
+ if (hasPrivateSignal) return "privada";
+
  return "no_definida";
 };
 
@@ -162,8 +191,8 @@ const CaseHeader = ({ uiGuidance, onRefresh, onOpenReopenRequest, onOpenReopenDe
  }, [preflow?.isActive, preflow?.isExpired, countdownUrgency]);
 
  const purchaseOrigin = useMemo(
- () => resolvePurchaseOrigin(resolvedGuidance?.bc_purchase_type, resolvedGuidance?.modern_bc_metadata),
- [resolvedGuidance?.bc_purchase_type, resolvedGuidance?.modern_bc_metadata],
+ () => resolvePurchaseOrigin(resolvedGuidance || {}),
+ [resolvedGuidance],
  );
  const purchaseOriginBadge = purchaseOrigin === "publica"
  ? "bg-emerald-100 text-emerald-800"

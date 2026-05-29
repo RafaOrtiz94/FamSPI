@@ -266,16 +266,31 @@ const SectionContent = ({
 
  const sectionContent = renderSection();
 
- // Determine read-only reason for banner (REQ-BC-17)
+ // BC-20: Determinar razón de solo-lectura y rol autorizador para desbloqueo
  const canonicalState = businessCase?.canonical_state || uiGuidance?.workflowState?.currentState;
+ const purchaseType = businessCase?.purchase_type || businessCase?.type || '';
+ const isPrivatePurchase = ['privada', 'private', 'PRIVADA'].includes(String(purchaseType).toLowerCase());
+
  const isTerminalState = ['CANCELADO', 'RECHAZADO_POR_GERENCIA', 'CERRADO_PARA_APROBACION'].includes(canonicalState);
  const isStateLocked = sectionRule.isLocked;
  const isPermissionLocked = !permissions.canEdit && !isInvestments;
 
+ // BC-20: El rol autorizador para desbloqueo varía según tipo de compra
+ // Compra pública → acp_comercial / jefe_comercial
+ // Compra privada → backoffice
+ const unlockAuthorizer = isPrivatePurchase
+   ? 'Backoffice'
+   : 'ACP Comercial o Jefe Comercial';
+
+ const terminalStateLabel =
+   canonicalState === 'CANCELADO' ? 'Cancelado'
+   : canonicalState === 'RECHAZADO_POR_GERENCIA' ? 'Rechazado por Gerencia'
+   : 'Cerrado para Aprobación';
+
  const readOnlyReason = isTerminalState
-   ? `BC en estado "${canonicalState === 'CANCELADO' ? 'Cancelado' : canonicalState === 'RECHAZADO_POR_GERENCIA' ? 'Rechazado por Gerencia' : 'Cerrado para Aprobación'}" — edición deshabilitada`
+   ? `BC en estado "${terminalStateLabel}" — edición deshabilitada`
    : isStateLocked
-   ? `Sección cerrada por ${sectionRule.lockedByRole || 'un supervisor'} — solo lectura`
+   ? `Sección bloqueada por ${sectionRule.lockedByRole || 'un supervisor'} — Para modificar, solicitar desbloqueo a ${unlockAuthorizer}`
    : isPermissionLocked
    ? `Tu rol no tiene permiso de edición en esta sección`
    : null;
@@ -289,7 +304,7 @@ const SectionContent = ({
  <span>{readOnlyReason}</span>
  </div>
  )}
- {!readOnlyReason && isTerminalState === false && (canonicalState === 'OBSERVADO_POR_VIABILIDAD') && (
+ {!readOnlyReason && !isTerminalState && canonicalState === 'OBSERVADO_POR_VIABILIDAD' && (
  <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
  <FiInfo className="flex-shrink-0" size={16} />
  <span>BC observado por viabilidad — revisa los comentarios antes de editar</span>
@@ -304,7 +319,7 @@ const SectionContent = ({
  disabled={lockBusy}
  className="px-3 py-1.5 text-xs font-semibold rounded-full bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-60"
  >
- Cerrar seccion
+ Cerrar sección
  </button>
  )}
  {canUnlock && (
@@ -314,7 +329,7 @@ const SectionContent = ({
  disabled={lockBusy}
  className="px-3 py-1.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-900 hover:bg-amber-200 disabled:opacity-60"
  >
- Reabrir seccion
+ Reabrir sección
  </button>
  )}
  </div>

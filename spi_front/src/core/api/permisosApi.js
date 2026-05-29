@@ -60,9 +60,35 @@ export const getMisSolicitudes = async () => {
 /**
  * Resumen por colaborador (talento humano)
  */
-export const getResumenColaboradores = async () => {
- const response = await api.get("/permisos/resumen-colaboradores");
- return response.data;
+export const getResumenColaboradores = async ({ departmentId = null, year = null } = {}) => {
+  const params = {};
+  if (departmentId) params.department_id = departmentId;
+  if (year) params.year = year;
+  const response = await api.get("/permisos/resumen-colaboradores", { params });
+  return response.data;
+};
+
+export const getReportePeriodo = async ({
+  startDate,
+  endDate,
+  departmentId = null,
+  tipoSolicitud = null,
+  status = null,
+} = {}) => {
+  const params = { start_date: startDate, end_date: endDate };
+  if (departmentId) params.department_id = departmentId;
+  if (tipoSolicitud) params.tipo_solicitud = tipoSolicitud;
+  if (status) params.status = status;
+  const response = await api.get("/permisos/reporte-periodo", { params });
+  return response.data;
+};
+
+export const getKpiDashboard = async ({ year = null, departmentId = null } = {}) => {
+  const params = {};
+  if (year) params.year = year;
+  if (departmentId) params.department_id = departmentId;
+  const response = await api.get("/permisos/kpis", { params });
+  return response.data;
 };
 
 /**
@@ -135,6 +161,28 @@ export const updateRecoveryPlan = async (id, recovery_plan, action = "propose") 
 export const getVacationSummary = async () => {
  const response = await api.get("/vacaciones/summary/data?all=false");
  return response.data;
+};
+
+/**
+ * Resolución de regularización urgente (TH/admin)
+ * action: 'rechazar_formalmente' | 'aceptar_excepcion'
+ */
+export const resolverRegularizacion = async (id, action, reason) => {
+  const response = await api.post(`/permisos/${id}/regularizar`, { action, reason });
+  return response.data;
+};
+
+/**
+ * Conversión a vacaciones de ausencia urgente no procedente
+ */
+export const convertirAVacaciones = async (id) => {
+  const response = await api.post(`/permisos/${id}/regularizar/convertir-vacaciones`);
+  return response.data;
+};
+
+export const revisarJustificante = async (id, decision, observations = null) => {
+  const response = await api.post(`/permisos/${id}/justificantes/revisar`, { decision, observations });
+  return response.data;
 };
 
 // Aliases para compatibilidad con código existente

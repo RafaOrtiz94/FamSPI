@@ -28,8 +28,31 @@ async function updateUserModules(req, res) {
   return res.status(200).json({ ok: true, data });
 }
 
+async function getGlobalStatuses(_req, res) {
+  const data = await service.listGlobalModuleStatuses();
+  return res.status(200).json({ ok: true, data });
+}
+
+async function updateGlobalStatus(req, res) {
+  const moduleKey = req.params.moduleKey;
+  const { stage, whitelist_emails } = req.body;
+  try {
+    const data = await service.upsertGlobalModuleStatus({
+      moduleKey,
+      stage,
+      whitelist_emails,
+      actorUserId: req.user?.id || null,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (err) {
+    return res.status(err.status || 500).json({ ok: false, message: err.message });
+  }
+}
+
 module.exports = {
   getCatalog,
   getUserModules,
   updateUserModules,
+  getGlobalStatuses,
+  updateGlobalStatus,
 };

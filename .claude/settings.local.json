@@ -11,7 +11,9 @@
       "Bash(grep -E \"\\\\.\\(jsx?|tsx?\\)$\")",
       "Bash(python skills/ui-ux-pro-max/scripts/search.py \"internal ops procurement dashboard b2b role-based\" --design-system -p \"FamSPI Purchases\")",
       "Bash(python .agents/skills/ui-ux-pro-max/scripts/search.py \"internal ops procurement dashboard b2b role-based\" --design-system -p \"FamSPI Purchases\")",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "PowerShell(cd \"c:\\\\Users\\\\Departamento de TI\\\\Desktop\\\\PROYECTOS\\\\FamSPI\"; powershell -ExecutionPolicy Bypass -File .\\\\scripts\\\\generate_validation_general_docx.ps1 -Mode Final 2>&1)",
+      "PowerShell(cd \"c:\\\\Users\\\\Departamento de TI\\\\Desktop\\\\PROYECTOS\\\\FamSPI\"; powershell -ExecutionPolicy Bypass -File .\\\\scripts\\\\generate_validation_general_geon_docx.ps1 -Mode Final 2>&1)"
     ]
   }
 }
