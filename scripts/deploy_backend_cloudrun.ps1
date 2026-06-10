@@ -74,12 +74,14 @@ try {
     "--allow-unauthenticated",
     "--memory", "512Mi",
     "--cpu", "1",
-    "--max-instances", "3",               # Contención: max 3 instancias para controlar conexiones Neon
+    "--max-instances", "3",               # 3 instancias x 8 conexiones = 24 max al pooler Neon
+    "--concurrency", "50",                # Máx 50 requests simultáneos por instancia — suficiente para ~40 usuarios de evento
     "--set-env-vars", "NODE_ENV=production",
     "--set-env-vars", "ENABLE_JOBS=true",
     "--set-env-vars", "JOBS_RUN_ON_START=false",
     "--set-env-vars", "JOBS_BOOTSTRAP_STAGGER_MS=20000",
-    "--set-env-vars", "DB_POOL_MAX=5",    # Reducido de 20 — 3 instancias x 5 = 15 conexiones max a Neon
+    "--set-env-vars", "DB_POOL_MAX=8",    # 3 instancias x 8 = 24 conexiones al pooler Neon (evento Kick Off ~40 usuarios)
+    "--set-env-vars", "DB_POOL_MIN=2",    # 2 conexiones calientes por instancia — reduce latencia del primer request
     "--set-env-vars", "DB_CONN_TIMEOUT_MS=15000",
     "--set-env-vars", "DB_SSL=true",
     "--set-env-vars", "FRONTEND_URL=https://fam-spi-front.web.app",
@@ -94,9 +96,9 @@ try {
     "--set-env-vars", "GMAIL_DELEGATED_USER=administrador@fam-project.com",
     "--set-env-vars", "GOOGLE_SUBJECT=administrador@fam-project.com",
     "--set-env-vars", "GSA_KEY_PATH=/secrets/gsa-key.json",
-    "--set-env-vars", "EMAIL_NOTIFICATIONS_ENABLED=false",
-    "--set-env-vars", "NOTIFICATIONS_EMAIL_ENABLED=false",
-    "--set-env-vars", "DISABLE_MAIL=true",
+    "--set-env-vars", "EMAIL_NOTIFICATIONS_ENABLED=true",
+    "--set-env-vars", "NOTIFICATIONS_EMAIL_ENABLED=true",
+    "--set-env-vars", "DISABLE_MAIL=false",
     "--set-env-vars", "NOTIFICATION_ASYNC_DISPATCH_ENABLED=false",
     "--set-env-vars", "EMAIL_SUPPRESS_SOURCES=",
     "--set-env-vars", "NOTIFICATION_TIMEZONE=America/Guayaquil",

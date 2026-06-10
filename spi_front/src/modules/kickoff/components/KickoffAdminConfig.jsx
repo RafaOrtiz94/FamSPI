@@ -45,9 +45,9 @@ function parseCanvaInput(raw) {
 }
 
 const EMPTY_EVENT = { name: 'Kick Off 2026', description: '', event_date: '', status: 'draft', moderation_active: true };
-const EMPTY_PRES  = { title: '', description: '', scheduled_start: '', scheduled_end: '', canva_url: '', canva_embed_url: '', fallback_url: '', sort_order: 0, presenter_user_id: '' };
+const EMPTY_PRES  = { title: '', description: '', scheduled_start: '', scheduled_end: '', canva_url: '', canva_embed_url: '', fallback_url: '', sort_order: 0, presenter_user_id: '', is_intro: false };
 
-export default function KickoffAdminConfig({ eventId }) {
+export default function KickoffAdminConfig({ eventId, onBack }) {
   const [event,        setEvent]       = useState(null);
   const [presArr,      setPresArr]     = useState([]);
   const [users,        setUsers]       = useState([]);
@@ -212,7 +212,19 @@ export default function KickoffAdminConfig({ eventId }) {
   return (
     <div className="max-w-4xl mx-auto flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-slate-900">Configuración del Kick Off 2026</h2>
+        <div className="flex items-center gap-3">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 transition-colors"
+            >
+              ← Todos los eventos
+            </button>
+          )}
+          <h2 className="text-xl font-bold text-slate-900">
+            {event?.name || 'Nuevo evento'}
+          </h2>
+        </div>
         <span className="text-xs text-slate-400">Solo visible para administradores</span>
       </div>
 
@@ -310,7 +322,14 @@ export default function KickoffAdminConfig({ eventId }) {
                   {presArr.map((p, i) => (
                     <tr key={p.id} className={`hover:bg-slate-50 ${editPres?.id === p.id ? 'bg-blue-50' : ''}`}>
                       <td className="px-4 py-3 text-slate-400 text-xs">{i + 1}</td>
-                      <td className="px-4 py-3 font-medium text-slate-800 max-w-[180px] truncate">{p.title}</td>
+                      <td className="px-4 py-3 font-medium text-slate-800 max-w-[180px]">
+                        <span className="truncate block">{p.title}</span>
+                        {p.is_intro && (
+                          <span className="mt-0.5 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                            Introducción
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-slate-500 text-xs">{p.presenter_name || '—'}</td>
                       <td className="px-4 py-3">
                         <span className="text-xs bg-slate-100 rounded-full px-2 py-0.5">{PRES_STATUS_LABELS[p.status] || p.status}</span>
@@ -346,6 +365,7 @@ export default function KickoffAdminConfig({ eventId }) {
                 className="self-start px-6 py-2.5 text-sm font-semibold bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50">
                 {saving ? 'Guardando…' : 'Guardar cambios'}
               </button>
+
             </div>
           )}
 
@@ -396,6 +416,19 @@ function PresForm({ pres, onChange, users, canvaRaw, onCanvaChange }) {
       <Field label="Descripción">
         <textarea value={pres.description || ''} onChange={e => onChange(v => ({ ...v, description: e.target.value }))} rows={2} className={inputCls} />
       </Field>
+
+      <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={Boolean(pres.is_intro)}
+          onChange={e => onChange(v => ({ ...v, is_intro: e.target.checked }))}
+          className="mt-0.5 h-4 w-4 rounded border-slate-300"
+        />
+        <span className="text-sm">
+          <span className="font-medium text-slate-800">Presentación de introducción</span>
+          <span className="block text-xs text-slate-500">No exige aportes ni preguntas, y sus aportes no cuentan en el ranking.</span>
+        </span>
+      </label>
 
       {/* Canva smart paste */}
       <Field label="Canva — pega el código HTML de inserción o el enlace inteligente">

@@ -10,6 +10,7 @@ import InternalLopdpConsentModal from "../ui/widgets/InternalLopdpConsentModal";
 import { RequestModalProvider } from "../ui/components/RequestActionCards";
 import { useAuth } from "../auth/AuthContext";
 import AttendanceWidget from "../ui/widgets/AttendanceWidget";
+import KickoffRankingFab from "../../modules/kickoff/components/KickoffRankingFab";
 import { GoogleMapsProvider } from "../contexts/GoogleMapsContext";
 
 export default function DashboardLayout() {
@@ -31,6 +32,7 @@ export default function DashboardLayout() {
         <HelpTicketFab />
         <NotificationBell />
         <AttendanceWidget />
+        <KickoffRankingFab />
 
         <GoogleMapsProvider>
           <main className="flex min-h-[calc(100vh-4rem)] flex-col">

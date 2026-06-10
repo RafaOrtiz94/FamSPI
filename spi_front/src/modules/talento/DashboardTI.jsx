@@ -5,6 +5,7 @@ import {
  FiSettings,
  FiDatabase,
  FiActivity,
+ FiFileText,
  FiShield,
  FiArrowRight,
  FiLink,

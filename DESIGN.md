@@ -455,7 +455,79 @@ Componente de mayor frecuencia de uso en mobile. Reglas inamovibles:
 
 ---
 
-## 8. Interaction Design
+## 8. Progressive Disclosure & Gestión del Scroll
+
+Cada sección visible compite por el mismo presupuesto de scroll del viewport. Cuando una pantalla tiene demasiadas zonas de interacción simultáneas, el usuario pierde contexto y necesita hacer scroll para recordar qué decidió antes. Las reglas de esta sección evitan ese problema.
+
+### El presupuesto de scroll
+
+Una página bien diseñada en FamSPI tiene **como máximo dos zonas de scroll independientes**: el área de contenido principal y, opcionalmente, un panel lateral. Todo lo demás debe revelarse bajo demanda.
+
+**Señales de que el scroll está fuera de control:**
+- El usuario hace scroll para llegar a un formulario de acción (crear, editar, configurar)
+- Una vista secundaria reemplaza la vista principal sin navegación real (un "modo" dentro de la misma página)
+- Hay más de 3 paneles apilados verticalmente en el mismo flujo
+- Un formulario inline empuja el contenido circundante hacia abajo
+
+### Cuándo usar modal
+
+| Situación | Patrón |
+|-----------|--------|
+| Formulario de creación (≤ 12 campos) | Modal `max-w-lg` o `max-w-2xl` |
+| Formulario de edición puntual (1–5 campos) | Modal compacto `max-w-md` |
+| Acción destructiva con confirmación | Modal `max-w-sm` |
+| Detalle de un ítem de lista sin navegación | Modal `max-w-2xl` |
+| Formulario de configuración compleja (> 12 campos) | Página dedicada o side panel |
+| Vista que reemplaza la pantalla actual | Página dedicada con back button |
+
+**Regla de la acción inline.** Si al hacer clic en "Nueva solicitud", "Revisar" o "Configurar" se sustituye el contenido principal de la pantalla por otro contenido, es una señal clara de que ese flujo debe ir en un modal o drawer — no como un "activeMainView" dentro de la misma página.
+
+### Cuándo usar accordion
+
+El accordion es para contenido de lectura-escritura donde el usuario necesita ver otros campos simultáneamente (ej.: secciones de un formulario largo con progreso visible por sección). **No** es para acciones independientes — un accordión con un formulario de crear/editar dentro es un modal mal disfrazado.
+
+| Patrón | Correcto | Incorrecto |
+|--------|----------|------------|
+| Secciones de un perfil con autosave | Accordion | Modal |
+| Formulario de "Iniciar requerimiento de salida" | Modal | Accordion anidado |
+| Checklist operativo con items | Lista inline | Modal |
+| Formulario de creación de solicitud | Modal | View takeover |
+
+### Cuándo usar drawer / bottom sheet
+
+El drawer lateral o bottom sheet es para contenido que:
+- El usuario necesita ver junto al contenido principal (no lo reemplaza)
+- En mobile se convierte en bottom sheet automáticamente (el `Modal` del sistema ya lo hace)
+- Tiene múltiples acciones pero no requiere navegación propia
+
+### La regla del selector mobile
+
+En mobile, un selector de ítems (lista de solicitudes, colaboradores, aspirantes) nunca debe renderizarse inline expandiendo el layout. Debe abrirse como un bottom sheet/modal. El layout mobile tiene un solo scroll y el selector no debe empujar el contenido de trabajo hacia abajo.
+
+### Jerarquía de patrones para evitar scroll
+
+```
+Acción puntual (1–3 campos)    → Popover o modal compacto
+Formulario medio (4–12 campos) → Modal
+Formulario largo (> 12 campos) → Página dedicada o side panel
+Vista secundaria               → Modal fullscreen o página
+Selector de ítem (mobile)      → Bottom sheet / Modal
+Secciones de expediente        → Accordions con autosave
+```
+
+### Checklist anti-scroll
+
+Antes de renderizar algo inline, responde:
+- [ ] ¿Este contenido empuja otros elementos hacia abajo cuando aparece?
+- [ ] ¿El usuario necesita hacer scroll para encontrar el botón de acción principal?
+- [ ] ¿Se sustituye el contenido de trabajo principal para mostrar esto?
+- [ ] ¿Hay más de 3 bloques de interacción simultáneos en la misma pantalla?
+
+Si alguna respuesta es "sí", el contenido va en modal, drawer o página dedicada.
+
+---
+
+## 10. Interaction Design
 
 *(Aportación de ui-ux-pro-max: touch, cursors, accessibility, feedback)*
 
@@ -482,7 +554,7 @@ Componente de mayor frecuencia de uso en mobile. Reglas inamovibles:
 
 ---
 
-## 9. Loading y Empty States
+## 11. Loading y Empty States
 
 *(Aportación de ui-ux-pro-max + frontend-design: perceived performance, atmosphere)*
 
@@ -508,7 +580,7 @@ Nunca: ilustraciones complejas, texto de marketing, múltiples párrafos.
 
 ---
 
-## 10. Copy y Contenido
+## 12. Copy y Contenido
 
 *(Aportación de impeccable: word economy, label hierarchy)*
 
@@ -524,7 +596,7 @@ Nunca: ilustraciones complejas, texto de marketing, múltiples párrafos.
 
 ---
 
-## 11. El Estándar de Craft
+## 13. El Estándar de Craft
 
 *(Aportación de impeccable: the AI slop test, category-reflex check)*
 
@@ -597,7 +669,7 @@ Antes de marcar un componente o página como listo:
 
 ---
 
-## 12. Accesibilidad
+## 14. Accesibilidad
 
 **Baseline obligatoria: WCAG AA**
 
@@ -611,7 +683,7 @@ Antes de marcar un componente o página como listo:
 
 ---
 
-## 13. Do's and Don'ts (expandido)
+## 15. Do's and Don'ts (expandido)
 
 ### Do
 

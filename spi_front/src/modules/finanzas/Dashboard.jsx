@@ -7,6 +7,7 @@ import {
     FiClipboard,
     FiShield,
     FiUser,
+    FiBarChart2,
 } from "react-icons/fi";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -42,6 +43,13 @@ const DashboardFinanzas = () => {
                     title="Workspace Viaticos"
                     color="blue"
                     onClick={() => navigate("/dashboard/finanzas/viaticos")}
+                />
+                <ActionCard
+                    icon={FiBarChart2}
+                    subtitle="Activos TI"
+                    title="Activos Tecnologicos"
+                    color="indigo"
+                    onClick={() => navigate("/dashboard/ti/activos")}
                 />
                 <ActionCard
                     icon={FiPieChart}

@@ -26,6 +26,7 @@
     "html2canvas": "^1.4.1",
     "js-cookie": "^3.0.5",
     "jspdf": "^3.0.3",
+    "jspdf-autotable": "^5.0.8",
     "jwt-decode": "^4.0.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^3.11.174",
@@ -42,6 +43,7 @@
     "react-router-dom": "^7.9.5",
     "react-scripts": "5.0.1",
     "react-signature-canvas": "^1.1.0-alpha.2",
+    "react-toastify": "^11.1.0",
     "react-window": "^1.8.11",
     "web-vitals": "^2.1.4",
     "zod": "^4.3.6"

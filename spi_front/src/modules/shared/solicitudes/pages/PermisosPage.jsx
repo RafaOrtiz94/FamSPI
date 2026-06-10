@@ -12,11 +12,10 @@ import { formatVacationDaysHours } from "../utils/vacationDisplay";
 import { calculateInclusiveCalendarDays } from "../utils/solicitudesHelpers";
 
 const PermisosStatusWidget = lazy(() => import("../components/PermisosStatusWidget"));
-const PermisosColaboradoresWidget = lazy(() => import("../components/PermisosColaboradoresWidget"));
+const PermisosConsolidadoView = lazy(() => import("../components/PermisosConsolidadoView"));
 const PermisosGlobalRequestsWidget = lazy(() => import("../components/PermisosGlobalRequestsWidget"));
 const PermisosColaboradoresAlbum = lazy(() => import("../components/PermisosColaboradoresAlbum"));
 const AprobacionPermisosView = lazy(() => import("../components/AprobacionPermisosView"));
-const PermisosReportsView = lazy(() => import("../components/PermisosReportsView"));
 
 const SECTION_META = {
   mine: {
@@ -24,88 +23,40 @@ const SECTION_META = {
     subtitle: "Personal",
     description: "Gestiona tus propios permisos, vacaciones y subida de justificantes.",
     icon: FiCalendar,
-    tone: "blue",
   },
-  collaborators: {
-    title: "Colaboradores",
-    subtitle: "Talento Humano",
-    description: "Resumen por colaborador con carga independiente para no saturar la página principal.",
-    icon: FiUsers,
-    tone: "emerald",
+  consolidado: {
+    title: "Consolidado",
+    subtitle: "Talento Humano · RR.HH. & Finanzas",
+    description: "Estado por colaborador con fechas, detalle expandible y exportación a CSV o PDF.",
+    icon: FiFileText,
   },
   global: {
     title: "Solicitudes globales",
     subtitle: "Seguimiento",
     description: "Consulta consolidada de solicitudes sin mezclarla con la gestión personal diaria.",
     icon: FiGlobe,
-    tone: "amber",
   },
   gerencia_album: {
     title: "Álbum de colaboradores",
     subtitle: "Gerencia",
     description: "Navegación por tarjetas para revisar disponibilidad y detalle por colaborador.",
     icon: FiUsers,
-    tone: "indigo",
   },
   gerencia_approvals: {
     title: "Aprobaciones",
     subtitle: "Gestión",
     description: "Revisa y gestiona las solicitudes de tu equipo y el historial de aprobados.",
     icon: FiCheckSquare,
-    tone: "blue",
   },
-  reports: {
-    title: "Informes",
-    subtitle: "Consolidado",
-    description: "Visualiza y exporta el estado actual de permisos y vacaciones de toda la empresa.",
-    icon: FiFileText,
-    tone: "rose",
-  },
-};
-
-const SECTION_TONES = {
- blue: {
- selected: "border-blue-500 bg-blue-50 shadow-blue-100",
- idle: "border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/50",
- icon: "bg-blue-600 text-white",
- subtitle: "text-blue-700",
- },
- emerald: {
- selected: "border-emerald-500 bg-emerald-50 shadow-emerald-100",
- idle: "border-gray-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/50",
- icon: "bg-emerald-600 text-white",
- subtitle: "text-emerald-700",
- },
- amber: {
- selected: "border-amber-500 bg-amber-50 shadow-amber-100",
- idle: "border-gray-200 bg-white hover:border-amber-300 hover:bg-amber-50/50",
- icon: "bg-amber-500 text-white",
- subtitle: "text-amber-700",
- },
- indigo: {
- selected: "border-indigo-500 bg-indigo-50 shadow-indigo-100",
- idle: "border-gray-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/50",
- icon: "bg-indigo-600 text-white",
- subtitle: "text-indigo-700",
- },
- rose: {
- selected: "border-rose-500 bg-rose-50 shadow-rose-100",
- idle: "border-gray-200 bg-white hover:border-rose-300 hover:bg-rose-50/50",
- icon: "bg-rose-600 text-white",
- subtitle: "text-rose-700",
- },
 };
 
 const SectionLoader = ({ label }) => (
- <Card className="border border-gray-200 shadow-sm">
- <div className="p-8 text-center space-y-2">
- <div className="inline-block h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600" />
- <p className="text-sm font-medium text-gray-700">Cargando {label}...</p>
- <p className="text-xs text-gray-500">
- Se monta solo la vista activa para reducir carga visual y tiempo de refresco.
- </p>
- </div>
- </Card>
+  <Card className="border border-slate-200 shadow-soft">
+    <div className="p-8 text-center space-y-2">
+      <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-t-transparent" style={{ borderColor: "#2563EB transparent transparent transparent" }} />
+      <p className="text-sm font-medium text-slate-700">Cargando {label}...</p>
+    </div>
+  </Card>
 );
 
 const PermisosPage = () => {
@@ -245,8 +196,7 @@ const PermisosPage = () => {
     if (isGerenciaGeneral) return ["gerencia_album", "gerencia_approvals"];
 
     if (isTalentRole) {
-      sections.push("collaborators");
-      sections.push("reports");
+      sections.push("consolidado");
       if (!sections.includes("gerencia_approvals")) {
         sections.push("gerencia_approvals");
       }
@@ -290,10 +240,10 @@ const PermisosPage = () => {
             <PermisosStatusWidget />
           </Suspense>
         );
-      case "collaborators":
+      case "consolidado":
         return (
-          <Suspense fallback={<SectionLoader label="colaboradores" />}>
-            <PermisosColaboradoresWidget />
+          <Suspense fallback={<SectionLoader label="consolidado" />}>
+            <PermisosConsolidadoView />
           </Suspense>
         );
       case "global":
@@ -314,12 +264,6 @@ const PermisosPage = () => {
             <AprobacionPermisosView compact={isGerenciaGeneral} />
           </Suspense>
         );
-      case "reports":
-        return (
-          <Suspense fallback={<SectionLoader label="informes" />}>
-            <PermisosReportsView />
-          </Suspense>
-        );
       default:
         return (
           <Suspense fallback={<SectionLoader label="mis solicitudes" />}>
@@ -331,10 +275,13 @@ const PermisosPage = () => {
 
  return (
  <div className={containerClass}>
- <div className="rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white shadow">
- <h1 className="text-2xl font-bold">Permisos y Vacaciones</h1>
- <p className="text-sm opacity-90 mt-1">
- Gestiona solicitudes, aprobaciones y justificantes sin cargar todas las vistas al mismo tiempo.
+ <div>
+ <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mb-0.5">
+ Talento Humano
+ </p>
+ <h1 className="text-xl font-semibold text-slate-900">Permisos y Vacaciones</h1>
+ <p className="mt-1 text-sm text-slate-500">
+ Gestiona solicitudes, aprobaciones y justificantes en un solo lugar.
  </p>
  </div>
 
@@ -459,10 +406,9 @@ const PermisosPage = () => {
  )}
 
  <section className="space-y-4">
- <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+ <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
  {availableSections.map((sectionId) => {
  const meta = SECTION_META[sectionId];
- const tone = SECTION_TONES[meta.tone] || SECTION_TONES.blue;
  const Icon = meta.icon;
  const isActive = activeSection === sectionId;
 
@@ -471,20 +417,25 @@ const PermisosPage = () => {
  key={sectionId}
  type="button"
  onClick={() => setActiveSection(sectionId)}
- className={`text-left rounded-2xl border p-4 shadow-sm transition-all ${isActive ? tone.selected : tone.idle}`}
+ className="text-left rounded-2xl border p-4 transition-colors cursor-pointer"
+ style={isActive
+ ? { borderColor: "#2563EB", background: "#EFF6FF", boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }
+ : { borderColor: "#E5E7EB", background: "#FFFFFF" }
+ }
  >
  <div className="flex items-start gap-3">
- <div className={`h-11 w-11 rounded-2xl flex items-center justify-center shrink-0 ${tone.icon}`}>
- <Icon size={20} />
+ <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+ style={isActive ? { background: "#2563EB", color: "#FFFFFF" } : { background: "#F3F4F6", color: "#6B7280" }}>
+ <Icon size={18} />
  </div>
  <div className="min-w-0">
- <p className={`text-[11px] font-bold uppercase tracking-wider ${tone.subtitle}`}>
+ <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">
  {meta.subtitle}
  </p>
- <h3 className="text-base font-semibold text-gray-900 mt-1">
+ <h3 className="text-sm font-semibold text-slate-900 mt-0.5">
  {meta.title}
  </h3>
- <p className="text-sm text-gray-500 mt-2 leading-relaxed">
+ <p className="text-xs text-slate-500 mt-1 leading-relaxed">
  {meta.description}
  </p>
  </div>

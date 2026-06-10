@@ -11,6 +11,7 @@ import {
  FiList,
  FiBookOpen,
  FiCpu,
+ FiBarChart2,
  FiCheckCircle,
  FiCalendar,
  FiLayers,
@@ -81,7 +82,7 @@ const planificacionLink = {
  path: "/dashboard/comercial/planificacion",
 };
 
-const comercialScopes = ["comercial", "acp_comercial", "backoffice", "backoffice_comercial"];
+const comercialScopes = ["comercial", "jefe_comercial", "acp_comercial", "backoffice", "backoffice_comercial"];
 
 const aprobacionesPlanLink = {
  name: "Aprobación de planes",
@@ -93,6 +94,12 @@ const businessCaseLink = {
  name: "Business Case",
  icon: FiFileText,
  path: "/dashboard/business-case",
+};
+
+const famSheetsLink = {
+ name: "FamSheets",
+ icon: FiBookOpen,
+ path: "/dashboard/comercial/famsheets",
 };
 
 const deliveryCeilingsLink = {
@@ -183,6 +190,12 @@ const viaticosLink = {
  path: "/dashboard/finanzas/viaticos",
 };
 
+const tiActivosFinancieroLink = {
+ name: "Activos TI",
+ icon: FiBarChart2,
+ path: "/dashboard/ti/activos",
+};
+
 const auditPrepLink = {
  name: "Preparación Auditoría",
  icon: FiShield,
@@ -238,6 +251,13 @@ const getPriorityGroups = (scope, role, auditActive) => {
  // 📊 GERENCIA - Enfoque en control y supervisión
  if (["gerencia", "gerencia_general", "gerente_general", "director"].includes(scope)) {
  groups.critical.push(businessCaseLink, aprobacionesPlanLink); // Estrategia y Control
+ if (["gerencia", "gerencia_general"].includes(scope)) {
+ groups.critical.push(famSheetsLink);
+ }
+ // Acceso post-evento para responder preguntas y exportar reportes
+ if (scope === "gerencia_general") {
+   groups.secondary.push(kickoffLink);
+ }
  groups.primary.push(gerenciaContractApprovalsLink, permisosLink, auditLinks[0]); // Gestion de personal y auditoria
  groups.primary.push(deliveryCeilingsLink);
  groups.secondary.push(auditPrepLink); // Preparación
@@ -245,8 +265,8 @@ const getPriorityGroups = (scope, role, auditActive) => {
  }
 
  // 💰 FINANZAS - Control presupuestario
- else if (["finanzas", "jefe_finanzas", "jefe_financiero", "financiero"].includes(scope)) {
- groups.primary.push(viaticosLink, asistenciaReportesLink, permisosLink); // Control financiero principal
+ else if (["finanzas", "jefe_finanzas", "jefe_financiero", "financiero", "contador"].includes(scope)) {
+ groups.primary.push(viaticosLink, tiActivosFinancieroLink, asistenciaReportesLink, permisosLink); // Control financiero principal
  if (!hideBusinessCaseForFinance) {
  groups.primary.push(businessCaseLink);
  }
@@ -259,9 +279,13 @@ const getPriorityGroups = (scope, role, auditActive) => {
  // Ocultar planificación para backoffice y acp_comercial (sea por scope o por rol)
  const isBackoffice = String(scope || "").includes("backoffice") || role.includes("backoffice");
  const isAcp = scope === "acp_comercial" || role.includes("acp_comercial");
+ const canSeeFamSheets = ["comercial", "jefe_comercial"].includes(scope);
 
  if (!isBackoffice && !isAcp) {
  groups.primary.push(planificacionLink); // Planificación mensual
+ }
+ if (canSeeFamSheets) {
+ groups.primary.push(famSheetsLink);
  }
 
  // UNIFICACION: Solo Workspace de Compras - Roles según AppRoutes.jsx
@@ -354,11 +378,7 @@ else if (["it", "ti", "jefe_ti", "admin_ti"].includes(scope)) {
  groups.secondary.push(businessCaseObservabilityLink);
  }
 
- // Kick Off 2026 — visible para todos los usuarios autenticados
- const allLinks = [...groups.critical, ...groups.primary, ...groups.secondary, ...groups.admin];
- if (!allLinks.some(l => l?.path === '/dashboard/kickoff')) {
-   groups.secondary.push(kickoffLink);
- }
+ // Kick Off 2026 — solo jefe_ti (acceso para reportes post-evento)
 
  groups.secondary.push(linksInteresLink);
 

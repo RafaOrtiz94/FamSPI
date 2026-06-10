@@ -12,6 +12,9 @@ function buildClient() {
 
 const kickoffApi = {
   // ── events ──────────────────────────────────────────────────────────────────
+  listEvents: () =>
+    buildClient().get('/events').then(r => r.data),
+
   getCurrentEvent: () =>
     buildClient().get('/events/current').then(r => r.data),
 
@@ -93,20 +96,30 @@ const kickoffApi = {
   rateAporte: (aporteId, rating) =>
     buildClient().post(`/questions/${aporteId}/rate-aporte`, { rating }).then(r => r.data),
 
-  ratePresentation: (presentationId, payload) =>
-    buildClient().post(`/presentations/${presentationId}/rate`, payload).then(r => r.data),
-
-  getPresentationRatings: (presentationId) =>
-    buildClient().get(`/presentations/${presentationId}/ratings`).then(r => r.data),
-
-  getEventRankings: (eventId) =>
-    buildClient().get(`/events/${eventId}/rankings`).then(r => r.data),
-
   getAporteRankings: (eventId) =>
     buildClient().get(`/events/${eventId}/aporte-rankings`).then(r => r.data),
 
   getEventWinners: (eventId) =>
     buildClient().get(`/events/${eventId}/winners`).then(r => r.data),
+
+  getEventSummary: (eventId) =>
+    buildClient().get(`/events/${eventId}/summary`).then(r => r.data),
+
+  getPostEventQA: (eventId) =>
+    buildClient().get(`/events/${eventId}/post-qa`).then(r => r.data),
+
+  // ── tiebreaker ───────────────────────────────────────────────────────────────
+  getTiebreaker: (eventId) =>
+    buildClient().get(`/events/${eventId}/tiebreaker`).then(r => r.data),
+
+  startTiebreaker: (eventId, aporteIds) =>
+    buildClient().post(`/events/${eventId}/tiebreaker/start`, { aporte_ids: aporteIds }).then(r => r.data),
+
+  voteTiebreaker: (roundId, aporteId) =>
+    buildClient().post(`/tiebreaker/rounds/${roundId}/vote`, { aporte_id: aporteId }).then(r => r.data),
+
+  finishTiebreaker: (roundId) =>
+    buildClient().post(`/tiebreaker/rounds/${roundId}/finish`).then(r => r.data),
 
   // ── QR ───────────────────────────────────────────────────────────────────────
   validateQr: (token) =>

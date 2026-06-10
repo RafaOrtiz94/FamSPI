@@ -1,40 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React from 'react';
 import KickoffPresentationCard from './KickoffPresentationCard';
 import KickoffRankingPanel from './KickoffRankingPanel';
+import KickoffAdminWinnersPanel from './KickoffAdminWinnersPanel';
 import KickoffStatusBadge from './KickoffStatusBadge';
-import kickoffApi from '../api/kickoffApi';
+import KickoffPostEventQA from './KickoffPostEventQA';
+import KickoffAwardsSection from './KickoffAwardsSection';
 import { formatEcDate } from '../api/kickoffDateUtils';
 
-const RANK_POLL = 6000;
-
-export default function KickoffScheduleIndex({ event, presentations, currentUserId }) {
-  const [rankings, setRankings] = useState([]);
-  const timerRef = useRef(null);
-
-  useEffect(() => {
-    if (!event?.id) return;
-    const load = async () => {
-      try {
-        const res = await kickoffApi.getEventRankings(event.id);
-        setRankings(res.data || []);
-      } catch {}
-    };
-    load();
-    timerRef.current = setInterval(load, RANK_POLL);
-    const onVis = () => {
-      if (document.hidden) clearInterval(timerRef.current);
-      else { load(); timerRef.current = setInterval(load, RANK_POLL); }
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => { clearInterval(timerRef.current); document.removeEventListener('visibilitychange', onVis); };
-  }, [event?.id]); // eslint-disable-line
-
+export default function KickoffScheduleIndex({ event, presentations, currentUserId, isAdmin, isTiAdmin }) {
   const activePresentation   = presentations.find(p => ['active', 'questions_open', 'questions_closed'].includes(p.status));
   const pendingPresentations = presentations.filter(p => ['pending', 'ready'].includes(p.status));
   const donePresentations    = presentations.filter(p => ['finished', 'skipped'].includes(p.status));
 
-  // Build a lookup map of ratings by presentation_id
-  const ratingsMap = Object.fromEntries(rankings.map(r => [r.presentation_id, r]));
+  const nonIntro   = presentations.filter(p => !p.is_intro);
+  const allDone    = nonIntro.length > 0 && nonIntro.every(p => ['finished', 'skipped'].includes(p.status));
+  const showPostQA = isTiAdmin && allDone && event?.id;
 
   if (!event) {
     return (
@@ -52,21 +32,24 @@ export default function KickoffScheduleIndex({ event, presentations, currentUser
   return (
     <div className="flex flex-col gap-8">
       {/* Event header */}
-      <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-900 to-blue-950 p-6 text-white">
+      <div
+        className="rounded-2xl p-6"
+        style={{ background: '#0a1628', border: '1px solid #1a2d45' }}
+      >
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-3 mb-1">
+            <div className="flex items-center gap-3 mb-2">
               <KickoffStatusBadge status={event.status} type="event" />
             </div>
-            <h2 className="text-2xl font-black tracking-tight">{event.name}</h2>
-            <p className="text-blue-200 text-sm mt-1 capitalize">{formatEcDate(event.event_date)}</p>
+            <h2 className="text-2xl font-black tracking-tight" style={{ color: '#ffffff' }}>{event.name}</h2>
+            <p className="text-sm mt-1 capitalize font-mono" style={{ color: '#4a6080' }}>{formatEcDate(event.event_date)}</p>
             {event.description && (
-              <p className="text-slate-300 text-sm mt-2 max-w-lg">{event.description}</p>
+              <p className="text-sm mt-2 max-w-lg" style={{ color: '#6b8aaa' }}>{event.description}</p>
             )}
           </div>
           <div className="flex flex-col items-end gap-1 text-right">
-            <span className="text-slate-300 text-xs">Presentaciones</span>
-            <span className="text-4xl font-black">{presentations.length}</span>
+            <span className="text-xs font-mono font-bold tracking-widest" style={{ color: '#2a4060' }}>MISIONES</span>
+            <span className="text-4xl font-black" style={{ color: '#00a8d4' }}>{presentations.length}</span>
           </div>
         </div>
       </div>
@@ -74,18 +57,19 @@ export default function KickoffScheduleIndex({ event, presentations, currentUser
       {/* Active now */}
       {activePresentation && (
         <section>
-          <h3 className="text-xs font-bold tracking-widest text-green-600 uppercase mb-3 flex items-center gap-2">
-            <span className="flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-2 w-2 rounded-full bg-green-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+          <div className="flex items-center gap-2 mb-3">
+            <span className="flex h-2 w-2 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ backgroundColor: '#00a8d4' }} />
+              <span className="relative inline-flex rounded-full h-2 w-2" style={{ backgroundColor: '#00a8d4' }} />
             </span>
-            Ahora en presentación
-          </h3>
+            <h3 className="text-xs font-black tracking-widest font-mono uppercase" style={{ color: '#00a8d4' }}>
+              Misión en curso
+            </h3>
+          </div>
           <KickoffPresentationCard
             presentation={activePresentation}
             index={presentations.indexOf(activePresentation)}
-            isPresenter={activePresentation.presenter_user_id === currentUserId}
-            ratings={ratingsMap[activePresentation.id]}
+            isPresenter={isAdmin || activePresentation.presenter_user_id === currentUserId}
           />
         </section>
       )}
@@ -93,8 +77,8 @@ export default function KickoffScheduleIndex({ event, presentations, currentUser
       {/* Upcoming */}
       {pendingPresentations.length > 0 && (
         <section>
-          <h3 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-3">
-            Próximas presentaciones
+          <h3 className="text-xs font-black tracking-widest font-mono uppercase mb-3" style={{ color: '#6b8aaa' }}>
+            Próximas misiones
           </h3>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {pendingPresentations.map((p) => (
@@ -102,8 +86,7 @@ export default function KickoffScheduleIndex({ event, presentations, currentUser
                 key={p.id}
                 presentation={p}
                 index={presentations.indexOf(p)}
-                isPresenter={p.presenter_user_id === currentUserId}
-                ratings={ratingsMap[p.id]}
+                isPresenter={isAdmin || p.presenter_user_id === currentUserId}
               />
             ))}
           </div>
@@ -113,8 +96,8 @@ export default function KickoffScheduleIndex({ event, presentations, currentUser
       {/* Completed */}
       {donePresentations.length > 0 && (
         <section>
-          <h3 className="text-xs font-bold tracking-widest text-slate-300 uppercase mb-3">
-            Presentaciones finalizadas
+          <h3 className="text-xs font-black tracking-widest font-mono uppercase mb-3" style={{ color: '#16a34a' }}>
+            Misiones completadas
           </h3>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {donePresentations.map((p) => (
@@ -122,8 +105,7 @@ export default function KickoffScheduleIndex({ event, presentations, currentUser
                 key={p.id}
                 presentation={p}
                 index={presentations.indexOf(p)}
-                isPresenter={false}
-                ratings={ratingsMap[p.id]}
+                isPresenter={isAdmin}
               />
             ))}
           </div>
@@ -136,9 +118,24 @@ export default function KickoffScheduleIndex({ event, presentations, currentUser
         </div>
       )}
 
-      {/* Real-time ranking */}
-      {event?.id && (
+      {/* Live ranking during event — replaced by awards section when all done */}
+      {event?.id && !allDone && (
         <KickoffRankingPanel eventId={event.id} />
+      )}
+
+      {/* Awards ceremony — visible to all once all presentations are done */}
+      {event?.id && allDone && (
+        <KickoffAwardsSection eventId={event.id} isAdmin={isAdmin} />
+      )}
+
+      {/* Panel de ganadores — solo admin/jefe_ti */}
+      {isAdmin && event?.id && (
+        <KickoffAdminWinnersPanel eventId={event.id} />
+      )}
+
+      {/* Mesa de preguntas finales — solo jefe_ti, cuando todo está completado */}
+      {showPostQA && (
+        <KickoffPostEventQA eventId={event.id} />
       )}
     </div>
   );

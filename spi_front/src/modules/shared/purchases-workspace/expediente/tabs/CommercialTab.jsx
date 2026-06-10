@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   FiBriefcase,
@@ -15,10 +15,13 @@ import {
   FiFileText,
   FiCalendar,
   FiTag,
+  FiActivity,
 } from 'react-icons/fi';
 import TabBadge from '../../components/TabBadge';
 import { setPurchaseType, setPrivateModality } from '../../../../../core/api/equipmentPurchasesApi';
 import { getEquipmentPurchaseApiError } from '../../../../../core/api/equipmentPurchasesApi';
+import { getBusinessCase } from '../../../../../core/api/businessCaseApi';
+import { getEquipmentModelDetail } from '../../../../../core/api/equipmentManagementApi';
 
 const EASE_OUT = [0.23, 1, 0.32, 1];
 
@@ -84,6 +87,70 @@ const CommercialTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
   const [loading,          setLoading]           = useState(false);
   const [error,            setError]             = useState(null);
 
+  /* ── BC data (solo para compras públicas vinculadas a BC) ─────────────── */
+  const [bcData,       setBcData]       = useState(null);
+  const [bcLoading,    setBcLoading]    = useState(false);
+  const [bcEquipList,  setBcEquipList]  = useState([]);
+
+  /* ── BC data fetch ───────────────────────────────────────────────────── */
+  const bcId  = purchase?.extra?.auto_business_case_id || purchase?.business_case_id || null;
+
+  useEffect(() => {
+    if (!bcId || type !== 'public') return;
+    let cancelled = false;
+    setBcLoading(true);
+
+    getBusinessCase(bcId).then(async (data) => {
+      if (cancelled) return;
+      setBcData(data || null);
+
+      // Construir lista de equipos con nombres resueltos.
+      // Los pares nuevos ya tienen primary_name/backup_name. Los legacy solo tienen IDs.
+      const pairs = Array.isArray(data?.extra?.equipment_details) ? data.extra.equipment_details : [];
+      if (!pairs.length) { setBcEquipList([]); return; }
+
+      // IDs sin nombre resuelto (registros guardados antes del fix)
+      const unresolvedIds = [
+        ...new Set(
+          pairs.flatMap((p) => [
+            !p.primary_name && p.primary_id ? p.primary_id : null,
+            !p.backup_name  && p.backup_id  ? p.backup_id  : null,
+          ].filter(Boolean)),
+        ),
+      ];
+
+      // Resolver nombres faltantes en paralelo (máx. 4 equipos en la práctica)
+      const resolvedNames = {};
+      await Promise.all(
+        unresolvedIds.map((id) =>
+          getEquipmentModelDetail(id)
+            .then((m) => { resolvedNames[String(id)] = m?.name || m?.model || `Equipo ${id}`; })
+            .catch(() => { resolvedNames[String(id)] = `Equipo ${id}`; }),
+        ),
+      );
+
+      const list = [];
+      pairs.forEach((pair, i) => {
+        if (pair.primary_id) {
+          const name = pair.primary_name || resolvedNames[String(pair.primary_id)] || `Equipo ${pair.primary_id}`;
+          list.push({ id: `bc-primary-${i}`, model: name, _type: pair.primary_type || 'nuevo', _role: 'Principal' });
+        }
+        if (pair.backup_id) {
+          const name = pair.backup_name || resolvedNames[String(pair.backup_id)] || `Equipo ${pair.backup_id}`;
+          list.push({ id: `bc-backup-${i}`, model: name, _type: pair.backup_type || 'nuevo', _role: 'Respaldo' });
+        }
+      });
+
+      if (!cancelled) setBcEquipList(list);
+    }).catch(() => {
+      if (!cancelled) { setBcData(null); setBcEquipList([]); }
+    }).finally(() => {
+      if (!cancelled) setBcLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [bcId, type]);
+
   /* ── derived flags ──────────────────────────────────────────────────── */
   const isPurePrivate      = type === 'private';
   const isPublicExpediente = type === 'public';
@@ -148,8 +215,28 @@ const CommercialTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
   const equipmentItems = Array.isArray(purchase?.equipment) ? purchase.equipment : [];
 
   /* ── BC info ─────────────────────────────────────────────────────────── */
-  const bcId  = purchase?.extra?.auto_business_case_id || purchase?.business_case_id || null;
   const bcUrl = bcId ? `/dashboard/business-case/workspace/${bcId}` : null;
+
+  /* Datos del BC resueltos para el tab (solo compra pública vinculada) */
+  const bcGeneralData = bcData?.modern_bc_metadata?.general_data || bcData?.metadata?.general_data || {};
+  const bcClientName  = bcData?.client_name || bcGeneralData?.commercial_name || bcGeneralData?.client_commercial_name || null;
+  const bcClientAddr  = bcGeneralData?.shipping_address || bcGeneralData?.installation_address || null;
+  const bcClientPhone = bcGeneralData?.shipping_phone || bcGeneralData?.shipping_cellphone || null;
+  const bcClientContact = bcGeneralData?.shipping_contact_name || bcGeneralData?.contact_name || null;
+  const bcProcessCode = bcData?.process_code || null;
+  const bcStageLabel  = bcData?.bc_status || bcData?.status || bcData?.current_stage || null;
+  const bcIsComplete  = ['aprobado', 'factible', 'completed', 'cerrado_factible'].includes(String(bcStageLabel || '').toLowerCase());
+  const bcIsRejected  = ['cerrado_no_factible', 'no_factible', 'rejected', 'cancelled'].includes(String(bcStageLabel || '').toLowerCase());
+
+  /* Cuando es compra pública con BC, sobrescribir datos de cliente/equipo con datos del BC */
+  const effectiveClientName    = (isPurchasePublic && bcId) ? (clientName !== '—' ? clientName : bcClientName) ?? '—' : clientName;
+  const effectiveClientAddr    = (isPurchasePublic && bcId) ? clientAddress    || bcClientAddr    : clientAddress;
+  const effectiveClientPhone   = (isPurchasePublic && bcId) ? clientPhone      || bcClientPhone   : clientPhone;
+  const effectiveClientContact = (isPurchasePublic && bcId) ? clientContact    || bcClientContact : clientContact;
+  // Equipos: siempre preferir bcEquipList (resuelto con nombres reales, soporta múltiples)
+  const effectiveEquipment = (isPurchasePublic && bcId)
+    ? (bcEquipList.length > 0 ? bcEquipList : equipmentItems)
+    : equipmentItems;
 
   /* ── handlers ──────────────────────────────────────────────────────── */
   const handleSetPurchaseType = async (newType) => {
@@ -190,7 +277,11 @@ const CommercialTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
           <h2 className="text-lg font-semibold text-ink-slate">Comercial</h2>
           <p className="text-xs text-warm-ash mt-0.5">Detalle de la solicitud, cliente y equipos</p>
         </div>
-        <TabBadge status={requiresBusinessCase ? 'pendiente' : 'completado'} />
+        <TabBadge status={
+          (isPurchasePublic && bcId)
+            ? (bcIsComplete ? 'completado' : bcIsRejected ? 'rechazado' : 'pendiente')
+            : (requiresBusinessCase ? 'pendiente' : 'completado')
+        } />
       </div>
 
       <div className="p-6 space-y-5">
@@ -268,18 +359,72 @@ const CommercialTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
         </div>
 
         {/* ═══════════════════════════════════════════════════════════════
+            BANNER — Estado del Business Case (solo compra pública con BC)
+        ═══════════════════════════════════════════════════════════════ */}
+        {isPurchasePublic && bcId && (
+          <div className={`rounded-xl border p-4 flex items-start gap-3 ${
+            bcLoading   ? 'bg-slate-50 border-slate-200' :
+            bcIsComplete ? 'bg-green-soft border-green-200' :
+            bcIsRejected ? 'bg-red-soft border-red-200' :
+            'bg-amber-soft border-amber-200'
+          }`}>
+            <div className={`p-1.5 rounded-lg shrink-0 ${
+              bcLoading    ? 'bg-slate-200 text-slate-500' :
+              bcIsComplete ? 'bg-operative-green/20 text-operative-green' :
+              bcIsRejected ? 'bg-alert-red/20 text-alert-red' :
+              'bg-caution-amber/20 text-caution-amber'
+            }`}>
+              {bcLoading ? <FiLoader size={14} className="animate-spin" /> :
+               bcIsComplete ? <FiCheckCircle size={14} /> :
+               bcIsRejected ? <FiXCircle size={14} /> :
+               <FiActivity size={14} />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className={`text-xs font-semibold ${
+                bcLoading    ? 'text-slate-600' :
+                bcIsComplete ? 'text-operative-green' :
+                bcIsRejected ? 'text-alert-red' :
+                'text-caution-amber'
+              }`}>
+                {bcLoading    ? 'Cargando Business Case...' :
+                 bcIsComplete ? 'Business Case aprobado' :
+                 bcIsRejected ? 'Business Case no factible' :
+                 'Business Case en progreso'}
+              </p>
+              <p className="text-xs text-warm-ash mt-0.5">
+                {bcLoading    ? '' :
+                 bcIsComplete ? 'El BC fue aprobado. Los datos del cliente y equipo están disponibles.' :
+                 bcIsRejected ? 'El Business Case fue rechazado. Revisar con jefatura.' :
+                 'La disponibilidad puede consultarse mientras el BC se resuelve. Los datos se completarán al aprobarlo.'}
+              </p>
+            </div>
+            {bcUrl && !bcLoading && (
+              <a href={bcUrl} target="_blank" rel="noreferrer"
+                className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-action-blue hover:underline">
+                <FiExternalLink size={12} /> Ver BC
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════════
             SECCIÓN B — Información del cliente
         ═══════════════════════════════════════════════════════════════ */}
-        {clientName !== '—' && (
+        {effectiveClientName !== '—' && (
           <div className="bg-white rounded-xl border border-soft-border p-5 shadow-ambient">
             <div className="flex items-center gap-2 mb-4">
               <FiUser className="text-action-blue" size={15} />
               <h3 className="text-sm font-semibold text-ink-slate">
-                {isPurchasePublic ? 'Proveedor / Cliente' : 'Información del cliente'}
+                {isPurchasePublic ? 'Cliente' : 'Información del cliente'}
               </h3>
               {clientTypeLabel && (
                 <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">
                   {clientTypeLabel}
+                </span>
+              )}
+              {isPurchasePublic && bcId && bcData && (
+                <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-action-blue/10 text-action-blue font-medium">
+                  Datos del BC
                 </span>
               )}
             </div>
@@ -292,15 +437,18 @@ const CommercialTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
               </div>
             )}
 
-            {hasFullClientData ? (
-              /* Datos completos */
+            {/* Proceso BC si aplica */}
+            {isPurchasePublic && bcProcessCode && (
+              <div className="mb-3 flex items-center gap-2 text-xs text-warm-ash">
+                <FiFileText size={12} />
+                <span>Proceso: <span className="font-semibold text-ink-slate">{bcProcessCode}</span></span>
+              </div>
+            )}
+
+            {(hasFullClientData || effectiveClientAddr || effectiveClientPhone || effectiveClientContact) ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
-                {clientName !== '—' && (
-                  <DetailField
-                    icon={FiBriefcase}
-                    label="Nombre / Razón social"
-                    value={clientName}
-                  />
+                {effectiveClientName !== '—' && (
+                  <DetailField icon={FiBriefcase} label="Nombre / Razón social" value={effectiveClientName} />
                 )}
                 {clientRuc && (
                   <DetailField icon={FiFileText} label="RUC / Cédula" value={clientRuc} />
@@ -308,25 +456,24 @@ const CommercialTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                 {clientEmail && (
                   <DetailField icon={FiMail} label="Correo" value={clientEmail} />
                 )}
-                {clientPhone && (
-                  <DetailField icon={FiPhone} label="Teléfono / Celular" value={clientPhone} />
+                {effectiveClientPhone && (
+                  <DetailField icon={FiPhone} label="Teléfono / Celular" value={effectiveClientPhone} />
                 )}
-                {clientContact && (
-                  <DetailField icon={FiUser} label="Persona de contacto" value={clientContact} />
+                {effectiveClientContact && (
+                  <DetailField icon={FiUser} label="Persona de contacto" value={effectiveClientContact} />
                 )}
-                {clientAddress && (
+                {effectiveClientAddr && (
                   <div className="sm:col-span-2">
-                    <DetailField icon={FiMapPin} label="Dirección" value={clientAddress} />
+                    <DetailField icon={FiMapPin} label="Dirección" value={effectiveClientAddr} />
                   </div>
                 )}
               </div>
             ) : (
-              /* Solo nombre */
               <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-slate-50 border border-slate-200">
                 <div className="w-8 h-8 rounded-full bg-action-blue/10 flex items-center justify-center shrink-0">
                   <FiUser size={14} className="text-action-blue" />
                 </div>
-                <p className="text-sm font-semibold text-ink-slate">{clientName}</p>
+                <p className="text-sm font-semibold text-ink-slate">{effectiveClientName}</p>
               </div>
             )}
           </div>
@@ -335,18 +482,23 @@ const CommercialTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
         {/* ═══════════════════════════════════════════════════════════════
             SECCIÓN C — Equipo solicitado
         ═══════════════════════════════════════════════════════════════ */}
-        {equipmentItems.length > 0 && (
+        {effectiveEquipment.length > 0 && (
           <div className="bg-white rounded-xl border border-soft-border p-5 shadow-ambient">
             <div className="flex items-center gap-2 mb-4">
               <FiPackage className="text-action-blue" size={15} />
               <h3 className="text-sm font-semibold text-ink-slate">Equipo solicitado</h3>
               <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
-                {equipmentItems.length} ítem{equipmentItems.length !== 1 ? 's' : ''}
+                {effectiveEquipment.length} ítem{effectiveEquipment.length !== 1 ? 's' : ''}
               </span>
+              {isPurchasePublic && bcId && bcData && bcEquipList.length > 0 && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-action-blue/10 text-action-blue font-medium">
+                  Datos del BC
+                </span>
+              )}
             </div>
 
             <div className="space-y-2">
-              {equipmentItems.map((item, i) => {
+              {effectiveEquipment.map((item, i) => {
                 /* Tipo del equipo: de creación (item.type) o de respuesta del proveedor (item.available_type) */
                 const rawType = item.available_type || item.type || null;
                 const typeCfg = rawType ? EQUIP_TYPE_CONFIG[rawType] : null;
@@ -371,6 +523,17 @@ const CommercialTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                       )}
                     </div>
 
+                    {/* Rol del equipo (Principal / Respaldo) cuando viene del BC */}
+                    {item._role && (
+                      <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                        item._role === 'Respaldo'
+                          ? 'bg-amber-soft text-caution-amber border-amber-200'
+                          : 'bg-action-blue/10 text-action-blue border-action-blue/20'
+                      }`}>
+                        {item._role}
+                      </span>
+                    )}
+
                     {/* Cantidad */}
                     {item.quantity && item.quantity > 1 && (
                       <span className="text-xs text-warm-ash font-mono shrink-0">×{item.quantity}</span>
@@ -381,7 +544,7 @@ const CommercialTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                       <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${typeCfg.cls}`}>
                         {typeCfg.label}
                       </span>
-                    ) : rawType && (
+                    ) : rawType && !item._role && (
                       <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-slate-100 text-slate-500 border-slate-200">
                         {rawType}
                       </span>
@@ -492,31 +655,7 @@ const CommercialTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
           </motion.div>
         )}
 
-        {/* ═══════════════════════════════════════════════════════════════
-            SECCIÓN 3 — Resumen ACP / Compra pública (BC link)
-        ═══════════════════════════════════════════════════════════════ */}
-        {isPurchasePublic && bcUrl && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, ease: EASE_OUT }}
-            className="bg-white rounded-xl border border-soft-border p-5 shadow-ambient"
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <FiBriefcase className="text-action-blue" size={15} />
-              <h3 className="text-sm font-semibold text-ink-slate">Business Case vinculado</h3>
-            </div>
-            <a
-              href={bcUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 text-sm text-action-blue hover:underline font-medium"
-            >
-              <FiExternalLink size={13} />
-              Abrir Business Case
-            </a>
-          </motion.div>
-        )}
+        {/* BC link: ya se muestra en el banner superior, no duplicar */}
 
         {/* ═══════════════════════════════════════════════════════════════
             SECCIÓN 4 — Business Case (comodato privado)

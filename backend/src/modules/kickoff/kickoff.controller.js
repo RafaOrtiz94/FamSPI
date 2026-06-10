@@ -11,6 +11,11 @@ const fail = (res, err) => {
   res.status(status).json({ ok: false, message: err.message });
 };
 
+const ADMIN_ROLES  = new Set(['jefe_ti', 'admin', 'administrador']);
+const REPORT_ROLES = new Set(['jefe_ti', 'gerencia_general']);
+const isAdminRole  = (req) => ADMIN_ROLES.has((req.user?.role || '').toLowerCase());
+const isReportRole = (req) => REPORT_ROLES.has((req.user?.role || '').toLowerCase());
+
 async function isPresenter(userId, presentationId) {
   const db = require('../../config/db');
   const { rows } = await db.query(
@@ -21,6 +26,13 @@ async function isPresenter(userId, presentationId) {
 }
 
 // ─── events ───────────────────────────────────────────────────────────────────
+
+const listEvents = async (req, res) => {
+  try {
+    const data = await svc.listAllEvents();
+    ok(res, data);
+  } catch (e) { fail(res, e); }
+};
 
 const getCurrentEvent = async (req, res) => {
   try {
@@ -69,15 +81,14 @@ const deleteEvent = async (req, res) => {
 
 const getPresentations = async (req, res) => {
   try {
-    const data = await svc.getPresentationsByEvent(req.params.eventId);
+    const userId = isAdminRole(req) ? null : req.user?.id;
+    const data   = await svc.getPresentationsByEvent(req.params.eventId, userId);
     ok(res, data);
   } catch (e) { fail(res, e); }
 };
 
 const getPresentation = async (req, res) => {
   try {
-    const gate = await svc.getProgressGateForPresentation(req.params.presentationId, req.user?.id);
-    if (gate?.blocked) return res.status(403).json({ ok: false, message: gate.reason, data: gate });
 
     const pres = await svc.getPresentationById(req.params.presentationId);
     if (!pres) return res.status(404).json({ ok: false, message: 'Presentación no encontrada' });
@@ -154,13 +165,11 @@ const deleteBlock = async (req, res) => {
 
 const getQuestions = async (req, res) => {
   try {
-    const gate = await svc.getProgressGateForPresentation(req.params.presentationId, req.user?.id);
-    if (gate?.blocked) return res.status(403).json({ ok: false, message: gate.reason, data: gate });
-
-    const presenter = await isPresenter(req.user.id, req.params.presentationId);
+    const forModerator = isAdminRole(req) || isReportRole(req) || await isPresenter(req.user.id, req.params.presentationId);
     const data = await svc.getQuestions(req.params.presentationId, {
       status:       req.query.status,
-      forModerator: presenter,
+      forModerator,
+      userId:       req.user?.id,
     });
     ok(res, data);
   } catch (e) { fail(res, e); }
@@ -168,9 +177,6 @@ const getQuestions = async (req, res) => {
 
 const createQuestion = async (req, res) => {
   try {
-    const gate = await svc.getProgressGateForPresentation(req.params.presentationId, req.user?.id);
-    if (gate?.blocked) return res.status(403).json({ ok: false, message: gate.reason, data: gate });
-
     const data = await svc.createQuestion(req.params.presentationId, req.body, req.user.id);
     ok(res, data, 201);
   } catch (e) { fail(res, e); }
@@ -179,6 +185,55 @@ const createQuestion = async (req, res) => {
 const moderateQuestion = async (req, res) => {
   try {
     const data = await svc.moderateQuestion(req.params.questionId, req.body, req.user.id);
+    ok(res, data);
+  } catch (e) { fail(res, e); }
+};
+
+// ─── tiebreaker ───────────────────────────────────────────────────────────────
+
+const getTiebreakerStatus = async (req, res) => {
+  try {
+    const data = await svc.getTiebreakerStatus(req.params.eventId, req.user?.id);
+    ok(res, data);
+  } catch (e) { fail(res, e); }
+};
+
+const startTiebreakerRound = async (req, res) => {
+  try {
+    const { aporte_ids } = req.body;
+    const data = await svc.startTiebreakerRound(req.params.eventId, aporte_ids, req.user.id);
+    ok(res, data, 201);
+  } catch (e) { fail(res, e); }
+};
+
+const castTiebreakerVote = async (req, res) => {
+  try {
+    const data = await svc.castTiebreakerVote(req.params.roundId, req.body.aporte_id, req.user.id);
+    ok(res, data);
+  } catch (e) { fail(res, e); }
+};
+
+const finishTiebreakerRound = async (req, res) => {
+  try {
+    const data = await svc.finishTiebreakerRound(req.params.roundId, req.user.id);
+    ok(res, data);
+  } catch (e) { fail(res, e); }
+};
+
+// ─── event summary ────────────────────────────────────────────────────────────
+
+const getEventSummary = async (req, res) => {
+  try {
+    const data = await svc.getEventSummary(req.params.eventId);
+    ok(res, data);
+  } catch (e) { fail(res, e); }
+};
+
+// ─── post-event Q&A ───────────────────────────────────────────────────────────
+
+const getPostEventQA = async (req, res) => {
+  try {
+    const data = await svc.getPostEventQA(req.params.eventId);
     ok(res, data);
   } catch (e) { fail(res, e); }
 };
@@ -223,32 +278,6 @@ const rateQuestion = async (req, res) => {
   } catch (e) { fail(res, e); }
 };
 
-const ratePresentation = async (req, res) => {
-  try {
-    const impacto   = parseInt(req.body.impacto);
-    const contenido = parseInt(req.body.contenido);
-    const destreza  = parseInt(req.body.destreza);
-    if (!impacto || !contenido || !destreza)
-      return res.status(400).json({ ok: false, message: 'impacto, contenido y destreza son requeridos (1-5)' });
-    const data = await svc.ratePresentation(req.params.presentationId, req.user.id, { impacto, contenido, destreza });
-    ok(res, data);
-  } catch (e) { fail(res, e); }
-};
-
-const getPresentationRatings = async (req, res) => {
-  try {
-    const data = await svc.getPresentationRatingSummary(req.params.presentationId, req.user.id);
-    ok(res, data);
-  } catch (e) { fail(res, e); }
-};
-
-const getEventRankings = async (req, res) => {
-  try {
-    const data = await svc.getEventRankings(req.params.eventId);
-    ok(res, data);
-  } catch (e) { fail(res, e); }
-};
-
 const rateAporte = async (req, res) => {
   try {
     const rating = parseInt(req.body.rating);
@@ -274,12 +303,16 @@ const getEventWinners = async (req, res) => {
 };
 
 module.exports = {
+  listEvents,
   getCurrentEvent, getAdminCurrentEvent, getEvent, createEvent, updateEvent, deleteEvent,
   getPresentations, getPresentation, createPresentation,
   updatePresentation, startPresentation, finishPresentation, deletePresentation,
   nextBlock, prevBlock, upsertBlock, deleteBlock,
   getQuestions, createQuestion, moderateQuestion,
   getQrByToken, regenerateQr, getActiveQr,
-  rateQuestion, ratePresentation, getPresentationRatings, getEventRankings,
+  rateQuestion,
   rateAporte, getAporteRankings, getEventWinners,
+  getEventSummary,
+  getPostEventQA,
+  getTiebreakerStatus, startTiebreakerRound, castTiebreakerVote, finishTiebreakerRound,
 };

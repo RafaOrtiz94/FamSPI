@@ -183,15 +183,34 @@ async function listGlobalModuleStatuses() {
   }
 }
 
+// talento_asistencia está temporalmente en construcción hasta esta fecha (UTC-5 Ecuador).
+const ASISTENCIA_REENABLE_DATE = new Date('2026-06-06T00:00:00-05:00');
+
 async function getGlobalModuleStatusForUser(userEmail) {
   const statuses = await listGlobalModuleStatuses();
-  return statuses.map(s => ({
-    module_key:   s.module_key,
-    stage:        s.stage,
-    in_whitelist: Array.isArray(s.whitelist_emails)
-      ? s.whitelist_emails.map(e => e.toLowerCase()).includes((userEmail || '').toLowerCase())
-      : false,
-  }));
+  const now = new Date();
+
+  const rows = statuses.map(s => {
+    let stage = s.stage;
+    if (s.module_key === 'talento_asistencia' && now < ASISTENCIA_REENABLE_DATE) {
+      stage = 'construction';
+    }
+    return {
+      module_key:   s.module_key,
+      stage,
+      in_whitelist: Array.isArray(s.whitelist_emails)
+        ? s.whitelist_emails.map(e => e.toLowerCase()).includes((userEmail || '').toLowerCase())
+        : false,
+    };
+  });
+
+  // Si talento_asistencia no tiene fila en DB aún pero sigue en el periodo de bloqueo,
+  // lo inyectamos para que el frontend lo trate como en construcción.
+  if (now < ASISTENCIA_REENABLE_DATE && !rows.some(r => r.module_key === 'talento_asistencia')) {
+    rows.push({ module_key: 'talento_asistencia', stage: 'construction', in_whitelist: false });
+  }
+
+  return rows;
 }
 
 async function upsertGlobalModuleStatus({ moduleKey, stage, whitelist_emails, actorUserId }) {

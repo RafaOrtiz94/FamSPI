@@ -544,12 +544,12 @@ export const uploadDeterminationsStatDocument = async (businessCaseId, file) => 
 
 export const requestBusinessCaseEnvironmentInspection = async (
  businessCaseId,
- { inspection_min_date, inspection_max_date } = {},
+ payload = {},
 ) => {
- const { data } = await api.post(`/business-case/${businessCaseId}/determinations/inspection-request`, {
-  inspection_min_date,
-  inspection_max_date,
- });
+ const { data } = await api.post(
+  `/business-case/${businessCaseId}/determinations/inspection-request`,
+  payload,
+ );
  return data.data || data;
 };
 

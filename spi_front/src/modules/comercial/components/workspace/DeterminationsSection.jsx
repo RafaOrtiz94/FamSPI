@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Dialog } from "@headlessui/react";
 import { FiActivity, FiAlertTriangle, FiCalendar, FiCheck, FiChevronDown, FiEdit2, FiFileText, FiTrash2, FiUpload, FiX } from "react-icons/fi";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
@@ -461,6 +462,14 @@ const pendingUnlockBySubsection = useMemo(() => {
 }, [gateInfo?.unlockRequests]);
 
 const inspectionSummary = useMemo(() => {
+ // equipmentMeta tiene los nombres reales del catálogo ya cargados en este componente.
+ // El draft del backend puede traer placeholders ("Equipo principal") cuando el
+ // selectedEquipment no tiene nombre resuelto, por eso equipmentMeta tiene prioridad.
+ const equipment = equipmentIds.length > 0
+  ? equipmentIds.map((id) => ({ nombre_equipo: equipmentMeta[id] || `Equipo ${id}` }))
+  : (Array.isArray(inspectionDraft?.equipos) && inspectionDraft.equipos.length > 0
+   ? inspectionDraft.equipos
+   : []);
  return {
   clientName: inspectionDraft?.nombre_cliente || businessCase?.client_name || "Cliente pendiente",
   processCode: businessCase?.process_code || "Sin numero de proceso",
@@ -470,9 +479,9 @@ const inspectionSummary = useMemo(() => {
   accessories: inspectionDraft?.accesorios || "",
   annotations: inspectionDraft?.anotaciones || "",
   observations: inspectionDraft?.observaciones || "",
-  equipment: Array.isArray(inspectionDraft?.equipos) ? inspectionDraft.equipos : [],
+  equipment,
  };
-}, [businessCase, inspectionDraft]);
+}, [businessCase, inspectionDraft, equipmentIds, equipmentMeta]);
 
  const isPublicBC = PUBLIC_BC_TYPES.has(businessCase?.bc_purchase_type);
 
@@ -1718,13 +1727,13 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  try {
  setSubmittingInspectionRequest(true);
  await requestBusinessCaseEnvironmentInspection(bcId, {
- inspection_min_date: minDate,
- inspection_max_date: maxDate,
- persona_contacto: inspectionModal.contactName,
- celular_contacto: inspectionModal.contactPhone,
- accesorios: inspectionModal.accessories,
- anotaciones: inspectionModal.annotations,
- observaciones: inspectionModal.observations,
+  inspection_min_date: minDate,
+  inspection_max_date: maxDate,
+  persona_contacto: inspectionModal.contactName || undefined,
+  celular_contacto: inspectionModal.contactPhone || undefined,
+  accesorios: inspectionModal.accessories || undefined,
+  anotaciones: inspectionModal.annotations || undefined,
+  observaciones: inspectionModal.observations || undefined,
  });
  showToast("Solicitud de inspeccion de ambiente enviada correctamente.", "success");
  setInspectionModal({
@@ -2463,153 +2472,175 @@ Terminar seccion
 </button>
 </div>
 
- {inspectionModal.open && (
- <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4">
- <div className="w-full max-w-xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
- <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-6 py-5">
- <div>
- <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Inspeccion de ambiente</p>
- <h3 className="text-lg font-semibold text-slate-900">Solicitar F.ST-20</h3>
- <p className="mt-1 text-sm text-slate-600">
- Registra el rango de instalacion estimado. Los datos del cliente, direccion y equipo se tomaran del Business Case.
- </p>
- </div>
- <button
- type="button"
- onClick={() => !submittingInspectionRequest && setInspectionModal({
- open: false,
- minDate: "",
- maxDate: "",
- contactName: "",
- contactPhone: "",
- accessories: "",
- annotations: "",
- observations: "",
- })}
- className="rounded-full p-2 text-slate-500 hover:bg-slate-100"
+ {/* Modal de solicitud de inspeccion de ambiente — usa Dialog de Headless UI
+     para portal correcto, focus-trap, cierre con Escape y z-index DESIGN.md */}
+ <Dialog
+  open={inspectionModal.open}
+  onClose={() => {
+   if (submittingInspectionRequest) return;
+   setInspectionModal({ open: false, minDate: "", maxDate: "", contactName: "", contactPhone: "", accessories: "", annotations: "", observations: "" });
+  }}
+  className="relative z-[40]"
  >
- <FiX size={16} />
- </button>
- </div>
+  {/* Backdrop — z-index modalBackdrop=30 gestionado por Dialog */}
+  <div className="fixed inset-0 z-[30] bg-slate-950/40 backdrop-blur-sm" aria-hidden="true" />
 
- <div className="space-y-5 px-6 py-5">
- {inspectionMissingFields.length > 0 && (
- <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
- Faltan datos por confirmar para generar F.ST-20: {inspectionMissingFields.join(", ")}.
- </div>
- )}
- <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
- <label className="space-y-2">
- <span className="text-sm font-medium text-slate-800">Fecha minima de instalacion</span>
- <input
- type="date"
- value={inspectionModal.minDate}
- onChange={(e) => setInspectionModal((prev) => ({ ...prev, minDate: e.target.value }))}
- className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
- />
- </label>
- <label className="space-y-2">
- <span className="text-sm font-medium text-slate-800">Fecha maxima de instalacion</span>
- <input
- type="date"
- value={inspectionModal.maxDate}
- min={inspectionModal.minDate || undefined}
- onChange={(e) => setInspectionModal((prev) => ({ ...prev, maxDate: e.target.value }))}
- className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
- />
- </label>
- </div>
+  <div className="fixed inset-0 z-[40] flex items-center justify-center px-4 py-6 overflow-y-auto">
+   <Dialog.Panel className="w-full max-w-xl overflow-hidden rounded-2xl border border-soft-border bg-white shadow-2xl">
+    {/* Header */}
+    <div className="flex items-start justify-between gap-3 border-b border-soft-border px-6 py-5">
+     <div>
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-warm-ash">Inspeccion de ambiente</p>
+      <Dialog.Title className="mt-0.5 text-lg font-semibold text-ink-slate">Solicitar F.ST-20</Dialog.Title>
+      <p className="mt-1 text-sm text-warm-ash">
+       Registra el rango de instalacion estimado. Los datos del cliente, direccion y equipo se tomaran del Business Case.
+      </p>
+     </div>
+     <button
+      type="button"
+      onClick={() => !submittingInspectionRequest && setInspectionModal({ open: false, minDate: "", maxDate: "", contactName: "", contactPhone: "", accessories: "", annotations: "", observations: "" })}
+      className="rounded-lg p-2 text-warm-ash hover:bg-paper-white transition-colors"
+      aria-label="Cerrar modal"
+     >
+      <FiX size={16} />
+     </button>
+    </div>
 
- <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
- <label className="space-y-2">
- <span className="text-sm font-medium text-slate-800">Persona de contacto</span>
- <input
- type="text"
- value={inspectionModal.contactName}
- onChange={(e) => setInspectionModal((prev) => ({ ...prev, contactName: e.target.value }))}
- className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
- />
- </label>
- <label className="space-y-2">
- <span className="text-sm font-medium text-slate-800">Celular de contacto</span>
- <input
- type="text"
- value={inspectionModal.contactPhone}
- onChange={(e) => setInspectionModal((prev) => ({ ...prev, contactPhone: e.target.value }))}
- className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
- />
- </label>
- </div>
+    {/* Body */}
+    <div className="space-y-5 px-6 py-5 max-h-[70vh] overflow-y-auto">
+     {inspectionMissingFields.length > 0 && (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-caution-amber">
+       <span className="font-semibold">Faltan datos para F.ST-20:</span>{" "}
+       {inspectionMissingFields.join(", ")}.
+      </div>
+     )}
 
- <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-2 text-sm text-slate-700">
- <div><span className="font-semibold text-slate-900">Cliente:</span> {inspectionSummary.clientName}</div>
- <div><span className="font-semibold text-slate-900">Proceso:</span> {inspectionSummary.processCode}</div>
- <div><span className="font-semibold text-slate-900">Direccion:</span> {inspectionSummary.address}</div>
- <div><span className="font-semibold text-slate-900">Equipos:</span> {inspectionSummary.equipment.length ? inspectionSummary.equipment.map((item) => item?.nombre_equipo || "Equipo").join(", ") : "Pendiente"}</div>
- </div>
+     {/* Rango de instalacion */}
+     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <label className="space-y-1.5">
+       <span className="text-xs font-semibold uppercase tracking-wide text-warm-ash">Fecha minima de instalacion <span className="text-alert-red">*</span></span>
+       <input
+        type="date"
+        value={inspectionModal.minDate}
+        onChange={(e) => setInspectionModal((prev) => ({ ...prev, minDate: e.target.value }))}
+        className="w-full rounded-[12px] border border-fog bg-white px-3 py-2 text-sm text-ink-slate focus:border-action-blue focus:outline-none focus:ring-2 focus:ring-sky-signal/20"
+       />
+      </label>
+      <label className="space-y-1.5">
+       <span className="text-xs font-semibold uppercase tracking-wide text-warm-ash">Fecha maxima de instalacion <span className="text-alert-red">*</span></span>
+       <input
+        type="date"
+        value={inspectionModal.maxDate}
+        min={inspectionModal.minDate || undefined}
+        onChange={(e) => setInspectionModal((prev) => ({ ...prev, maxDate: e.target.value }))}
+        className="w-full rounded-[12px] border border-fog bg-white px-3 py-2 text-sm text-ink-slate focus:border-action-blue focus:outline-none focus:ring-2 focus:ring-sky-signal/20"
+       />
+      </label>
+     </div>
 
- <label className="space-y-2">
- <span className="text-sm font-medium text-slate-800">Accesorios</span>
- <input
- type="text"
- value={inspectionModal.accessories}
- onChange={(e) => setInspectionModal((prev) => ({ ...prev, accessories: e.target.value }))}
- className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
- />
- </label>
+     {/* Datos de contacto */}
+     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <label className="space-y-1.5">
+       <span className="text-xs font-semibold uppercase tracking-wide text-warm-ash">Persona de contacto</span>
+       <input
+        type="text"
+        value={inspectionModal.contactName}
+        onChange={(e) => setInspectionModal((prev) => ({ ...prev, contactName: e.target.value }))}
+        className="w-full rounded-[12px] border border-fog bg-white px-3 py-2 text-sm text-ink-slate focus:border-action-blue focus:outline-none focus:ring-2 focus:ring-sky-signal/20"
+        placeholder="Nombre del contacto"
+       />
+      </label>
+      <label className="space-y-1.5">
+       <span className="text-xs font-semibold uppercase tracking-wide text-warm-ash">Celular de contacto</span>
+       <input
+        type="text"
+        value={inspectionModal.contactPhone}
+        onChange={(e) => setInspectionModal((prev) => ({ ...prev, contactPhone: e.target.value }))}
+        className="w-full rounded-[12px] border border-fog bg-white px-3 py-2 text-sm text-ink-slate focus:border-action-blue focus:outline-none focus:ring-2 focus:ring-sky-signal/20"
+        placeholder="+593 9xx xxx xxxx"
+       />
+      </label>
+     </div>
 
- <label className="space-y-2">
- <span className="text-sm font-medium text-slate-800">Anotaciones</span>
- <textarea
- rows={3}
- value={inspectionModal.annotations}
- onChange={(e) => setInspectionModal((prev) => ({ ...prev, annotations: e.target.value }))}
- className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
- />
- </label>
+     {/* Resumen datos BC — solo lectura */}
+     <div className="rounded-[16px] border border-soft-border bg-paper-white p-4 space-y-2 text-sm text-ink-slate">
+      <p className="text-xs font-semibold uppercase tracking-wide text-warm-ash mb-2">Datos tomados del Business Case</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
+       <div><span className="font-semibold text-ink-slate">Cliente:</span>{" "}<span className="text-warm-ash">{inspectionSummary.clientName}</span></div>
+       <div><span className="font-semibold text-ink-slate">Proceso:</span>{" "}<span className="text-warm-ash">{inspectionSummary.processCode}</span></div>
+       <div className="sm:col-span-2"><span className="font-semibold text-ink-slate">Direccion:</span>{" "}<span className="text-warm-ash">{inspectionSummary.address}</span></div>
+       <div className="sm:col-span-2">
+        <span className="font-semibold text-ink-slate">Equipos:</span>{" "}
+        <span className="text-warm-ash">
+         {inspectionSummary.equipment.length
+          ? inspectionSummary.equipment.map((item) => item?.nombre_equipo || "Equipo").join(", ")
+          : <span className="italic">Pendiente — configura equipos en la seccion de equipos del BC</span>
+         }
+        </span>
+       </div>
+      </div>
+     </div>
 
- <label className="space-y-2">
- <span className="text-sm font-medium text-slate-800">Observaciones</span>
- <textarea
- rows={4}
- value={inspectionModal.observations}
- onChange={(e) => setInspectionModal((prev) => ({ ...prev, observations: e.target.value }))}
- className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-slate-500 focus:outline-none"
- />
- </label>
- </div>
+     {/* Accesorios */}
+     <label className="space-y-1.5">
+      <span className="text-xs font-semibold uppercase tracking-wide text-warm-ash">Accesorios</span>
+      <input
+       type="text"
+       value={inspectionModal.accessories}
+       onChange={(e) => setInspectionModal((prev) => ({ ...prev, accessories: e.target.value }))}
+       className="w-full rounded-[12px] border border-fog bg-white px-3 py-2 text-sm text-ink-slate focus:border-action-blue focus:outline-none focus:ring-2 focus:ring-sky-signal/20"
+       placeholder="Ej: mangueras, adaptadores..."
+      />
+     </label>
 
- <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
- <button
- type="button"
- onClick={() => setInspectionModal({
- open: false,
- minDate: "",
- maxDate: "",
- contactName: "",
- contactPhone: "",
- accessories: "",
- annotations: "",
- observations: "",
- })}
- disabled={submittingInspectionRequest}
- className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
- >
- Cancelar
- </button>
- <button
- type="button"
- onClick={handleSubmitInspectionRequest}
- disabled={submittingInspectionRequest}
- className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
- >
- <FiCheck size={15} />
- {submittingInspectionRequest ? "Enviando..." : "Enviar solicitud"}
- </button>
- </div>
- </div>
- </div>
- )}
+     {/* Anotaciones */}
+     <label className="space-y-1.5">
+      <span className="text-xs font-semibold uppercase tracking-wide text-warm-ash">Anotaciones</span>
+      <textarea
+       rows={3}
+       value={inspectionModal.annotations}
+       onChange={(e) => setInspectionModal((prev) => ({ ...prev, annotations: e.target.value }))}
+       className="w-full rounded-[12px] border border-fog bg-white px-3 py-2 text-sm text-ink-slate focus:border-action-blue focus:outline-none focus:ring-2 focus:ring-sky-signal/20 resize-none"
+       placeholder="Notas adicionales para el tecnico..."
+      />
+     </label>
+
+     {/* Observaciones */}
+     <label className="space-y-1.5">
+      <span className="text-xs font-semibold uppercase tracking-wide text-warm-ash">Observaciones</span>
+      <textarea
+       rows={4}
+       value={inspectionModal.observations}
+       onChange={(e) => setInspectionModal((prev) => ({ ...prev, observations: e.target.value }))}
+       className="w-full rounded-[12px] border border-fog bg-white px-3 py-2 text-sm text-ink-slate focus:border-action-blue focus:outline-none focus:ring-2 focus:ring-sky-signal/20 resize-none"
+       placeholder="Observaciones del Business Case..."
+      />
+     </label>
+    </div>
+
+    {/* Footer */}
+    <div className="flex items-center justify-end gap-3 border-t border-soft-border bg-paper-white px-6 py-4">
+     <button
+      type="button"
+      onClick={() => setInspectionModal({ open: false, minDate: "", maxDate: "", contactName: "", contactPhone: "", accessories: "", annotations: "", observations: "" })}
+      disabled={submittingInspectionRequest}
+      className="rounded-[16px] border border-fog px-4 py-2 text-sm font-medium text-ink-slate hover:bg-white transition-colors disabled:opacity-50"
+     >
+      Cancelar
+     </button>
+     <button
+      type="button"
+      onClick={handleSubmitInspectionRequest}
+      disabled={submittingInspectionRequest}
+      className="inline-flex items-center gap-2 rounded-[16px] bg-action-blue px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 active:scale-[0.97] transition-all disabled:opacity-50"
+     >
+      <FiCheck size={15} />
+      {submittingInspectionRequest ? "Enviando..." : "Enviar solicitud"}
+     </button>
+    </div>
+   </Dialog.Panel>
+  </div>
+ </Dialog>
  </div>
  );
 };

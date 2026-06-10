@@ -6,14 +6,13 @@ import toast from 'react-hot-toast';
 const BASE_FRONTEND = window.location.origin;
 
 export default function KickoffQRCode({ presentationId, isAdmin = false }) {
-  const canvasRef  = useRef(null);
-  const [token,    setToken]    = useState(null);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState(null);
+  const canvasRef = useRef(null);
+  const [token,   setToken]   = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(null);
 
   const loadQr = async () => {
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
       const res = await kickoffApi.getActiveQr(presentationId);
       setToken(res.data?.token || null);
@@ -30,9 +29,9 @@ export default function KickoffQRCode({ presentationId, isAdmin = false }) {
     if (!token || !canvasRef.current) return;
     const url = `${BASE_FRONTEND}/kickoff/sala/${token}`;
     QRCode.toCanvas(canvasRef.current, url, {
-      width:  220,
+      width:  200,
       margin: 2,
-      color:  { dark: '#1e293b', light: '#ffffff' },
+      color:  { dark: '#0a1628', light: '#ffffff' },
     });
   }, [token]);
 
@@ -48,20 +47,27 @@ export default function KickoffQRCode({ presentationId, isAdmin = false }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center w-[220px] h-[220px] bg-slate-50 rounded-2xl border border-slate-200 animate-pulse" />
+      <div
+        className="flex items-center justify-center rounded-2xl animate-pulse"
+        style={{ width: 200, height: 200, background: '#f4f8fc', border: '1px solid #dce8f5' }}
+      />
     );
   }
 
   if (error || !token) {
     return (
-      <div className="flex flex-col items-center gap-3 p-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50">
-        <p className="text-sm text-slate-500">QR no disponible</p>
+      <div
+        className="flex flex-col items-center gap-3 p-5 rounded-2xl text-center"
+        style={{ background: '#f4f8fc', border: '1.5px dashed #b8d0e8' }}
+      >
+        <p className="text-xs font-mono font-bold" style={{ color: '#6b8aaa' }}>[ QR NO DISPONIBLE ]</p>
         {isAdmin && (
           <button
             onClick={regenerate}
-            className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+            className="px-4 py-1.5 text-xs font-black tracking-widest uppercase rounded-xl transition-colors"
+            style={{ background: '#e8f7fc', color: '#00a8d4', border: '1px solid #b8e6f5' }}
           >
-            Generar QR
+            [ GENERAR QR ]
           </button>
         )}
       </div>
@@ -70,18 +76,22 @@ export default function KickoffQRCode({ presentationId, isAdmin = false }) {
 
   return (
     <div className="flex flex-col items-center gap-3">
-      <div className="p-3 bg-white rounded-2xl shadow-md border border-slate-100">
+      <div
+        className="p-3 rounded-2xl"
+        style={{ background: '#ffffff', border: '1px solid #dce8f5', boxShadow: '0 2px 12px #0a162810' }}
+      >
         <canvas ref={canvasRef} />
       </div>
-      <p className="text-xs text-slate-400 text-center max-w-[200px]">
-        Escanea para ingresar a la sala de preguntas
+      <p className="text-xs text-center max-w-[200px] font-mono" style={{ color: '#6b8aaa' }}>
+        Escanea para unirte a la sala de preguntas y aportes
       </p>
       {isAdmin && (
         <button
           onClick={regenerate}
-          className="text-xs text-blue-600 hover:text-blue-800 underline transition-colors"
+          className="text-xs font-bold font-mono tracking-wide transition-colors"
+          style={{ color: '#00a8d4' }}
         >
-          Regenerar QR
+          [ REGENERAR QR ]
         </button>
       )}
     </div>

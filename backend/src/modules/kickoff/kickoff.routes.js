@@ -8,47 +8,41 @@ const router = Router();
 
 const adminRoles    = ['jefe_ti'];
 const allStaffRoles = ['jefe_ti', 'ti'];
-
-// ── Whitelist para acceso en fase de pruebas ──────────────────────────────────
-// Estos usuarios tienen acceso aunque el evento no esté abierto al público.
-// Cuando el evento tenga is_open=true, todos los usuarios autenticados tienen acceso.
-const KICKOFF_WHITELIST = new Set([
-  'alex.farino@fam-project.com',
-  'pamela.altamirano@fam-project.com',
-  'eric.gavilanes@fam-project.com',
-  'rafael.ortiz@fam-project.com',
-]);
-
-// ── requireKickoffAccess ──────────────────────────────────────────────────────
-// Para rutas de asistentes/presentadores (no exclusivas de admin).
-// Permite: adminRoles + SUPER_ROLES, whitelist, o todos cuando is_open=true.
-const requireKickoffAccess = async (req, res, next) => {
-  const role  = (req.user?.role || '').toLowerCase();
-  const email = (req.user?.email || '').toLowerCase();
-
-  if (adminRoles.includes(role) || SUPER_ROLES.includes(role)) return next();
-  if (allStaffRoles.includes(role)) return next();
-  if (KICKOFF_WHITELIST.has(email)) return next();
-
-  try {
-    const { rows } = await db.query(
-      `SELECT is_open FROM kickoff_events ORDER BY event_date DESC LIMIT 1`
-    );
-    if (rows[0]?.is_open) return next();
-  } catch (_) {}
-
-  return res.status(403).json({ ok: false, message: 'El módulo Kick Off no está disponible para tu usuario en este momento.' });
+// Roles con acceso a reportes y respuesta de preguntas post-evento
+const reportRoles   = ['jefe_ti', 'gerencia_general'];
+const requireReportAccess = (req, res, next) => {
+  const role = (req.user?.role || '').toLowerCase();
+  if (reportRoles.includes(role)) return next();
+  return res.status(403).json({ ok: false, message: 'No autorizado' });
 };
 
-// Rate limit para envío de preguntas: máximo 5 por minuto por usuario
+// ── requireKickoffAccess ──────────────────────────────────────────────────────
+// Módulo abierto a todos los usuarios autenticados.
+const requireKickoffAccess = (req, res, next) => next();
+
+// Rate limit para envío de preguntas: máximo 20 por minuto por usuario.
+// Aumentado para soportar pruebas con ~40 usuarios simultáneos en eventos Kick Off.
 const questionLimiter = rateLimit({
   windowMs:        60 * 1000,
-  max:             5,
+  max:             20,
   standardHeaders: true,
   legacyHeaders:   false,
   keyGenerator:    (req) => `kickoff_q_${req.user?.id || req.ip}`,
   handler: (_req, res) =>
     res.status(429).json({ ok: false, message: 'Demasiadas preguntas. Espera un momento antes de enviar otra.' }),
+});
+
+// Rate limit para rutas de lectura (polling): 500 req/min por usuario.
+// Los clientes hacen polling cada 4–5 s → ~15 req/min por usuario, por ende
+// 500 deja margen amplio sin abrir la puerta a abusos.
+const kickoffReadLimiter = rateLimit({
+  windowMs:        60 * 1000,
+  max:             500,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  keyGenerator:    (req) => `kickoff_r_${req.user?.id || req.ip}`,
+  handler: (_req, res) =>
+    res.status(429).json({ ok: false, message: 'Demasiadas solicitudes al módulo Kick Off. Intenta en un momento.' }),
 });
 
 // ── requirePresenterOrAdmin ───────────────────────────────────────────────────
@@ -99,18 +93,19 @@ const requireQuestionModerator = (req, res, next) => {
 
 // ─── events ───────────────────────────────────────────────────────────────────
 
-router.get('/events/current',          requireKickoffAccess,    c.getCurrentEvent);
-router.get('/events/admin/current',    requireRole(adminRoles), c.getAdminCurrentEvent);
-router.get('/events/:eventId',         requireKickoffAccess,    c.getEvent);
+router.get('/events',                  requireRole(adminRoles), kickoffReadLimiter, c.listEvents);
+router.get('/events/current',          requireKickoffAccess,    kickoffReadLimiter, c.getCurrentEvent);
+router.get('/events/admin/current',    requireRole(adminRoles), kickoffReadLimiter, c.getAdminCurrentEvent);
+router.get('/events/:eventId',         requireKickoffAccess,    kickoffReadLimiter, c.getEvent);
 router.post('/events',                 requireRole(adminRoles), c.createEvent);
 router.patch('/events/:eventId',       requireRole(adminRoles), c.updateEvent);
 router.delete('/events/:eventId',      requireRole(adminRoles), c.deleteEvent);
 
 // ─── presentations ────────────────────────────────────────────────────────────
 
-router.get('/events/:eventId/presentations',       requireKickoffAccess,    c.getPresentations);
+router.get('/events/:eventId/presentations',       requireKickoffAccess,    kickoffReadLimiter, c.getPresentations);
 router.post('/events/:eventId/presentations',      requireRole(adminRoles), c.createPresentation);
-router.get('/presentations/:presentationId',       requireKickoffAccess,    c.getPresentation);
+router.get('/presentations/:presentationId',       requireKickoffAccess,    kickoffReadLimiter, c.getPresentation);
 router.patch('/presentations/:presentationId',     requireRole(adminRoles), c.updatePresentation);
 router.delete('/presentations/:presentationId',    requireRole(adminRoles), c.deletePresentation);
 
@@ -128,6 +123,7 @@ router.post('/presentations/:presentationId/qr/regenerate',   requirePresenterOr
 
 router.get('/presentations/:presentationId/questions',
   requireKickoffAccess,
+  kickoffReadLimiter,
   c.getQuestions
 );
 router.post('/presentations/:presentationId/questions',
@@ -142,7 +138,7 @@ router.patch('/questions/:questionId/highlight', requireQuestionModerator, (req,
   req.body = { ...req.body, status: 'highlighted' };
   next();
 }, c.moderateQuestion);
-router.patch('/questions/:questionId/answer',    requireQuestionModerator, (req, _res, next) => {
+router.patch('/questions/:questionId/answer',    requireReportAccess, (req, _res, next) => {
   req.body = { ...req.body, status: 'answered' };
   next();
 }, c.moderateQuestion);
@@ -155,15 +151,27 @@ router.patch('/questions/:questionId/approve',   requireQuestionModerator, (req,
   next();
 }, c.moderateQuestion);
 
+// ─── tiebreaker ───────────────────────────────────────────────────────────────
+
+router.get('/events/:eventId/tiebreaker',         requireKickoffAccess, kickoffReadLimiter, c.getTiebreakerStatus);
+router.post('/events/:eventId/tiebreaker/start',  requireRole(adminRoles), c.startTiebreakerRound);
+router.post('/tiebreaker/rounds/:roundId/vote',   requireKickoffAccess, c.castTiebreakerVote);
+router.post('/tiebreaker/rounds/:roundId/finish', requireRole(adminRoles), c.finishTiebreakerRound);
+
+// ─── event summary ────────────────────────────────────────────────────────────
+
+router.get('/events/:eventId/summary', requireReportAccess, kickoffReadLimiter, c.getEventSummary);
+
+// ─── post-event Q&A ───────────────────────────────────────────────────────────
+
+router.get('/events/:eventId/post-qa', requireReportAccess, kickoffReadLimiter, c.getPostEventQA);
+
 // ─── ratings ──────────────────────────────────────────────────────────────────
 
 router.post('/questions/:questionId/rate',           requireKickoffAccess, c.rateQuestion);
 router.post('/questions/:questionId/rate-aporte',    requireKickoffAccess, c.rateAporte);
-router.post('/presentations/:presentationId/rate',   requireKickoffAccess, c.ratePresentation);
-router.get('/presentations/:presentationId/ratings', requireKickoffAccess, c.getPresentationRatings);
-router.get('/events/:eventId/rankings',              requireKickoffAccess, c.getEventRankings);
-router.get('/events/:eventId/aporte-rankings',       requireKickoffAccess, c.getAporteRankings);
-router.get('/events/:eventId/winners',               requireKickoffAccess, c.getEventWinners);
+router.get('/events/:eventId/aporte-rankings',       requireKickoffAccess, kickoffReadLimiter, c.getAporteRankings);
+router.get('/events/:eventId/winners',               requireKickoffAccess, kickoffReadLimiter, c.getEventWinners);
 
 // ─── QR ───────────────────────────────────────────────────────────────────────
 

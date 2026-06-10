@@ -54,6 +54,7 @@ const mapPresentation = (r) => ({
   status:              r.status,
   current_block_order: r.current_block_order,
   sort_order:          r.sort_order,
+  is_intro:            Boolean(r.is_intro),
   created_at:          r.created_at,
   updated_at:          r.updated_at,
 });
@@ -79,11 +80,14 @@ const mapQuestion = (r) => ({
   // Aportes are always shown as anonymous
   display_name:    (r.is_anonymous || r.type === 'aporte') ? 'Anónimo' : (r.display_name || r.user_fullname || 'Sin nombre'),
   question_text:   r.question_text,
+  answer_text:     r.answer_text || null,
+  answered_at:     r.answered_at || null,
   status:          r.status,
   is_anonymous:    r.is_anonymous,
   is_highlighted:  r.is_highlighted,
   avg_rating:      r.avg_rating  ? parseFloat(r.avg_rating)  : null,
   rating_count:    r.rating_count ? parseInt(r.rating_count) : 0,
+  user_rating:     r.user_rating != null ? parseInt(r.user_rating) : null,
   created_at:      r.created_at,
   updated_at:      r.updated_at,
 });
@@ -102,6 +106,18 @@ function buildUpdateSet(fields, values, idx = 1) {
 }
 
 // ─── events ───────────────────────────────────────────────────────────────────
+
+async function listAllEvents() {
+  const { rows } = await db.query(`
+    SELECT ke.*,
+           COUNT(kp.id)::int AS presentation_count
+    FROM kickoff_events ke
+    LEFT JOIN kickoff_presentations kp ON kp.event_id = ke.id
+    GROUP BY ke.id
+    ORDER BY ke.event_date DESC, ke.created_at DESC
+  `);
+  return rows.map(r => ({ ...mapEvent(r), presentation_count: r.presentation_count }));
+}
 
 async function getCurrentEvent() {
   const { rows } = await db.query(`
@@ -185,7 +201,39 @@ async function updateEvent(eventId, patch, userId) {
 
 // ─── presentations ────────────────────────────────────────────────────────────
 
-async function getPresentationsByEvent(eventId) {
+async function getPresentationsByEvent(eventId, userId = null) {
+  if (userId) {
+    // Un solo query: incluye cuántos aportes de otros le faltan calificar al usuario
+    const { rows } = await db.query(`
+      SELECT kp.*,
+             u.fullname AS presenter_name,
+             COUNT(DISTINCT CASE
+               WHEN kq.type = 'aporte'
+                AND kq.status != 'hidden'
+                AND kq.user_id != $2
+                AND kar.aporte_id IS NULL
+               THEN kq.id
+             END)::int AS pending_ratings,
+             COUNT(DISTINCT CASE
+               WHEN kq.type = 'aporte' AND kq.status != 'hidden' AND kq.user_id != $2
+               THEN kq.id
+             END)::int AS total_other_aportes
+      FROM kickoff_presentations kp
+      LEFT JOIN users u            ON u.id = kp.presenter_user_id
+      LEFT JOIN kickoff_questions kq ON kq.presentation_id = kp.id
+      LEFT JOIN kickoff_aporte_ratings kar
+             ON kar.aporte_id = kq.id AND kar.user_id = $2
+      WHERE kp.event_id = $1
+      GROUP BY kp.id, u.fullname
+      ORDER BY kp.sort_order ASC, kp.scheduled_start ASC NULLS LAST
+    `, [eventId, userId]);
+    return rows.map(r => ({
+      ...mapPresentation(r),
+      pending_ratings:     r.pending_ratings     || 0,
+      total_other_aportes: r.total_other_aportes || 0,
+    }));
+  }
+
   const { rows } = await db.query(`
     SELECT kp.*, u.fullname AS presenter_name
     FROM kickoff_presentations kp
@@ -213,32 +261,40 @@ async function getProgressGateForPresentation(presentationId, userId) {
   if (!target) throw Object.assign(new Error('Presentación no encontrada'), { status: 404 });
 
   const { rows: previous } = await db.query(
-    `SELECT id, title, sort_order
+    `SELECT id, title, sort_order, presenter_user_id
      FROM kickoff_presentations
      WHERE event_id = $1
        AND status = 'finished'
        AND sort_order < $2
+       AND is_intro = FALSE
      ORDER BY sort_order ASC`,
     [target.event_id, target.sort_order]
   );
 
   for (const pres of previous) {
-    const { rows: ownAporteRows } = await db.query(
-      `SELECT 1
-       FROM kickoff_questions
-       WHERE presentation_id = $1
-         AND user_id = $2
-         AND type = 'aporte'
-         AND status != 'hidden'
-       LIMIT 1`,
-      [pres.id, userId]
-    );
-    if (ownAporteRows.length === 0) {
-      return {
-        blocked: true,
-        reason: `Debes registrar al menos un aporte en "${pres.title}" antes de pasar a la siguiente presentación.`,
-        missing: { presentation_id: pres.id, presentation_title: pres.title, requirement: 'aporte' },
-      };
+    // El presentador de esta presentación no está obligado a aportar en la suya
+    // (no tendría lógica aportar a la propia). Sí debe calificar los aportes recibidos.
+    const isPresenterOfThis = pres.presenter_user_id != null
+      && String(pres.presenter_user_id) === String(userId);
+
+    if (!isPresenterOfThis) {
+      const { rows: ownAporteRows } = await db.query(
+        `SELECT 1
+         FROM kickoff_questions
+         WHERE presentation_id = $1
+           AND user_id = $2
+           AND type = 'aporte'
+           AND status != 'hidden'
+         LIMIT 1`,
+        [pres.id, userId]
+      );
+      if (ownAporteRows.length === 0) {
+        return {
+          blocked: true,
+          reason: `Debes registrar al menos un aporte en "${pres.title}" antes de pasar a la siguiente presentación.`,
+          missing: { presentation_id: pres.id, presentation_title: pres.title, requirement: 'aporte' },
+        };
+      }
     }
 
     const { rows: totals } = await db.query(
@@ -284,6 +340,7 @@ async function createPresentation(eventId, payload, userId) {
     presenter_user_id, title, description,
     scheduled_start, scheduled_end,
     canva_url, canva_embed_url, fallback_url, sort_order = 0,
+    is_intro = false,
   } = payload;
 
   if (!title) throw Object.assign(new Error('title es requerido'), { status: 400 });
@@ -291,13 +348,13 @@ async function createPresentation(eventId, payload, userId) {
   const { rows } = await db.query(`
     INSERT INTO kickoff_presentations
       (event_id, presenter_user_id, title, description, scheduled_start, scheduled_end,
-       canva_url, canva_embed_url, fallback_url, sort_order, created_by, updated_by)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11) RETURNING *`,
+       canva_url, canva_embed_url, fallback_url, sort_order, is_intro, created_by, updated_by)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12) RETURNING *`,
     [
       eventId, presenter_user_id || null, title, description || null,
       scheduled_start || null, scheduled_end || null,
       canva_url || null, canva_embed_url || null, fallback_url || null,
-      sort_order, userId,
+      sort_order, Boolean(is_intro), userId,
     ]
   );
   return mapPresentation(rows[0]);
@@ -330,6 +387,7 @@ async function updatePresentation(presentationId, patch, userId) {
       fallback_url:      patch.fallback_url,
       status:            patch.status,
       sort_order:        patch.sort_order,
+      is_intro:          patch.is_intro,
     },
     values
   );
@@ -492,12 +550,13 @@ async function deleteBlock(blockId, presentationId) {
 
 // ─── questions ────────────────────────────────────────────────────────────────
 
-async function getQuestions(presentationId, { status, forModerator } = {}) {
-  const params = [presentationId];
+async function getQuestions(presentationId, { status, forModerator, userId = null } = {}) {
+  const params = [presentationId, userId];
   let q = `
     SELECT kq.*, u.fullname AS user_fullname,
            COUNT(kar.id)::int              AS rating_count,
-           ROUND(AVG(kar.rating)::numeric, 2) AS avg_rating
+           ROUND(AVG(kar.rating)::numeric, 2) AS avg_rating,
+           MAX(CASE WHEN kar.user_id = $2 THEN kar.rating END) AS user_rating
     FROM kickoff_questions kq
     LEFT JOIN users u        ON u.id = kq.user_id
     LEFT JOIN kickoff_aporte_ratings kar ON kar.aporte_id = kq.id
@@ -523,14 +582,18 @@ async function createQuestion(presentationId, payload, userId) {
   const pres = await getPresentationById(presentationId);
   if (!pres) throw Object.assign(new Error('Presentación no encontrada'), { status: 404 });
 
-  if (!['active', 'questions_open'].includes(pres.status)) {
-    throw Object.assign(
-      new Error('Las preguntas no están habilitadas para esta presentación en este momento'),
-      { status: 409 }
-    );
+  const { question_text, display_name, is_anonymous = false, type = 'question' } = payload;
+  const normalizedType = type === 'aporte' ? 'aporte' : 'question';
+  const allowsRegularParticipation = ['active', 'questions_open'].includes(pres.status);
+  const allowsLateAporte = pres.status === 'finished' && normalizedType === 'aporte';
+
+  if (!allowsRegularParticipation && !allowsLateAporte) {
+    const disabledMessage = pres.status === 'finished'
+      ? 'La presentación ya finalizó; solo se permiten aportes pendientes en este momento'
+      : 'Las preguntas no están habilitadas para esta presentación en este momento';
+    throw Object.assign(new Error(disabledMessage), { status: 409 });
   }
 
-  const { question_text, display_name, is_anonymous = false, type = 'question' } = payload;
   const text = (question_text || '').trim();
 
   if (text.length < 5)    throw Object.assign(new Error('El texto debe tener al menos 5 caracteres'), { status: 400 });
@@ -541,7 +604,7 @@ async function createQuestion(presentationId, payload, userId) {
     [pres.event_id]
   );
   // Aportes bypass moderation — they go directly to 'approved' and are visible to all
-  const initialStatus = type === 'aporte'
+  const initialStatus = normalizedType === 'aporte'
     ? 'approved'
     : (eventRows[0]?.moderation_active ? 'under_review' : 'approved');
 
@@ -552,11 +615,11 @@ async function createQuestion(presentationId, payload, userId) {
     [
       presentationId,
       userId || null,
-      (is_anonymous || type === 'aporte') ? null : (display_name || null),
+      (is_anonymous || normalizedType === 'aporte') ? null : (display_name || null),
       text,
       initialStatus,
-      is_anonymous || type === 'aporte',
-      type,
+      is_anonymous || normalizedType === 'aporte',
+      normalizedType,
     ]
   );
   return mapQuestion(rows[0]);
@@ -640,36 +703,12 @@ async function validateQrToken(token, userId) {
   if (!qr.is_active)           return { valid: false, reason: 'Este QR ha sido desactivado' };
   if (qr.expires_at && new Date() > new Date(qr.expires_at))
                                return { valid: false, reason: 'Este QR ha expirado' };
-  const ALLOWED_STATUSES = ['pending', 'ready', 'active', 'questions_open', 'questions_closed'];
+  // 'finished' permanece válido: tras finalizar aún se admiten aportes tardíos.
+  const ALLOWED_STATUSES = ['pending', 'ready', 'active', 'questions_open', 'questions_closed', 'finished'];
   if (!ALLOWED_STATUSES.includes(qr.presentation_status))
-                               return { valid: false, reason: 'La presentación ha finalizado o fue cancelada' };
+                               return { valid: false, reason: 'La presentación fue cancelada' };
   if (['finished', 'cancelled'].includes(qr.event_status))
                                return { valid: false, reason: 'El evento ha finalizado' };
-
-  let progress_gate = null;
-  let requires_rating = null;
-  if (userId) {
-    progress_gate = await getProgressGateForPresentation(qr.presentation_id, userId);
-    if (progress_gate?.blocked) {
-      return { valid: false, reason: progress_gate.reason, progress_gate };
-    }
-
-    const { rows: unrated } = await db.query(
-      `SELECT kp.id, kp.title
-       FROM kickoff_presentations kp
-       WHERE kp.event_id = $1
-         AND kp.status = 'finished'
-         AND kp.id NOT IN (
-           SELECT presentation_id FROM kickoff_presentation_ratings WHERE user_id = $2
-         )
-       ORDER BY kp.sort_order ASC
-       LIMIT 1`,
-      [qr.event_id, userId]
-    );
-    if (unrated[0]) {
-      requires_rating = { presentation_id: unrated[0].id, presentation_title: unrated[0].title };
-    }
-  }
 
   return {
     valid:               true,
@@ -678,7 +717,6 @@ async function validateQrToken(token, userId) {
     presentation_status: qr.presentation_status,
     event_id:            qr.event_id,
     event_name:          qr.event_name,
-    requires_rating,
   };
 }
 
@@ -732,69 +770,6 @@ async function rateQuestion(questionId, userId, rating) {
   return { rated: true };
 }
 
-async function ratePresentation(presentationId, userId, { impacto, contenido, destreza }) {
-  const pres = await getPresentationById(presentationId);
-  if (!pres) throw Object.assign(new Error('Presentación no encontrada'), { status: 404 });
-  if (pres.status !== 'finished')
-    throw Object.assign(new Error('Solo se puede calificar una presentación finalizada'), { status: 400 });
-
-  await db.query(
-    `INSERT INTO kickoff_presentation_ratings (presentation_id, user_id, impacto, contenido, destreza)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (presentation_id, user_id) DO UPDATE
-       SET impacto = EXCLUDED.impacto,
-           contenido = EXCLUDED.contenido,
-           destreza = EXCLUDED.destreza`,
-    [presentationId, userId, impacto, contenido, destreza]
-  );
-  return { rated: true };
-}
-
-async function getPresentationRatingSummary(presentationId, userId) {
-  const { rows } = await db.query(
-    `SELECT COUNT(*)::int AS count,
-            ROUND(AVG(impacto)::numeric,  2) AS avg_impacto,
-            ROUND(AVG(contenido)::numeric, 2) AS avg_contenido,
-            ROUND(AVG(destreza)::numeric,  2) AS avg_destreza,
-            ROUND(AVG((impacto + contenido + destreza) / 3.0)::numeric, 2) AS avg_overall
-     FROM kickoff_presentation_ratings
-     WHERE presentation_id = $1`,
-    [presentationId]
-  );
-  let userRated = false;
-  if (userId) {
-    const { rows: ur } = await db.query(
-      'SELECT 1 FROM kickoff_presentation_ratings WHERE presentation_id=$1 AND user_id=$2',
-      [presentationId, userId]
-    );
-    userRated = ur.length > 0;
-  }
-  return { ...rows[0], user_rated: userRated };
-}
-
-async function getEventRankings(eventId) {
-  const { rows } = await db.query(
-    `SELECT kp.id AS presentation_id,
-            kp.title,
-            kp.status AS presentation_status,
-            kp.sort_order,
-            u.fullname AS presenter_name,
-            COUNT(kpr.id)::int AS rating_count,
-            ROUND(AVG(kpr.impacto)::numeric,  2) AS avg_impacto,
-            ROUND(AVG(kpr.contenido)::numeric, 2) AS avg_contenido,
-            ROUND(AVG(kpr.destreza)::numeric,  2) AS avg_destreza,
-            ROUND(AVG((kpr.impacto + kpr.contenido + kpr.destreza) / 3.0)::numeric, 2) AS avg_overall
-     FROM kickoff_presentations kp
-     LEFT JOIN kickoff_presentation_ratings kpr ON kpr.presentation_id = kp.id
-     LEFT JOIN users u ON u.id = kp.presenter_user_id
-     WHERE kp.event_id = $1
-     GROUP BY kp.id, kp.title, kp.status, kp.sort_order, u.fullname
-     ORDER BY avg_overall DESC NULLS LAST, kp.sort_order ASC`,
-    [eventId]
-  );
-  return rows;
-}
-
 async function rateAporte(aporteId, userId, rating) {
   const { rows } = await db.query(
     'SELECT id, user_id, type, status FROM kickoff_questions WHERE id = $1',
@@ -808,21 +783,29 @@ async function rateAporte(aporteId, userId, rating) {
   if (rows[0].user_id === userId)
     throw Object.assign(new Error('No puedes calificar tu propio aporte'), { status: 403 });
 
-  await db.query(
+  // Una sola calificación por usuario y aporte: si ya existe, no se permite recalificar.
+  const inserted = await db.query(
     `INSERT INTO kickoff_aporte_ratings (aporte_id, user_id, rating)
      VALUES ($1, $2, $3)
-     ON CONFLICT (aporte_id, user_id) DO UPDATE SET rating = EXCLUDED.rating`,
+     ON CONFLICT (aporte_id, user_id) DO NOTHING`,
     [aporteId, userId, rating]
   );
+  if (inserted.rowCount === 0)
+    throw Object.assign(new Error('Ya calificaste este aporte; la calificación es única'), { status: 409 });
   return { rated: true };
 }
 
 async function getAporteRankings(eventId) {
+  // Ranking por aporte individual: cada aporte es una fila independiente, por lo que
+  // un mismo colaborador puede ocupar varias posiciones con distintos aportes.
   const { rows } = await db.query(
     `SELECT
-       kq.user_id                                AS id,
+       kq.id                                     AS id,
+       kq.user_id                                AS collaborator_user_id,
        COALESCE(u.fullname, 'Colaborador')       AS collaborator_name,
        up.avatar_url                             AS collaborator_avatar_url,
+       kp.title                                  AS presentation_title,
+       kq.question_text                          AS aporte_text,
        COUNT(kar.id)::int                        AS rating_count,
        ROUND(AVG(kar.rating)::numeric, 2)        AS avg_rating
      FROM kickoff_questions kq
@@ -833,7 +816,8 @@ async function getAporteRankings(eventId) {
      WHERE kp.event_id = $1
        AND kq.type    = 'aporte'
        AND kq.status != 'hidden'
-     GROUP BY kq.user_id, u.fullname, up.avatar_url
+       AND kp.is_intro = FALSE
+     GROUP BY kq.id, kq.user_id, kq.question_text, u.fullname, up.avatar_url, kp.title
      ORDER BY avg_rating DESC NULLS LAST, rating_count DESC, collaborator_name ASC`,
     [eventId]
   );
@@ -858,6 +842,7 @@ async function getEventWinners(eventId) {
      WHERE kp.event_id = $1
        AND kq.type = 'aporte'
        AND kq.status != 'hidden'
+       AND kp.is_intro = FALSE
      GROUP BY kq.user_id, u.fullname
      HAVING COUNT(kar.id) > 0
      ORDER BY avg_rating DESC NULLS LAST, ratings_count DESC, collaborator_name ASC
@@ -865,37 +850,396 @@ async function getEventWinners(eventId) {
     [eventId]
   );
 
-  const { rows: presentationRows } = await db.query(
-    `SELECT
-        kp.id AS presentation_id,
-        kp.title AS presentation_title,
-        COALESCE(u.fullname, 'Sin presentador') AS presenter_name,
-        COUNT(kpr.id)::int AS ratings_count,
-        ROUND(AVG((kpr.impacto + kpr.contenido + kpr.destreza) / 3.0)::numeric, 2) AS avg_overall
+  return {
+    collaborator_winner: collaboratorRows[0] || null,
+  };
+}
+
+// ─── event summary ────────────────────────────────────────────────────────────
+
+async function getEventSummary(eventId) {
+  const [aporteRows, questionRows] = await Promise.all([
+    db.query(`
+      SELECT
+        kq.id,
+        kq.question_text        AS aporte_text,
+        kq.status,
+        kq.created_at,
+        kp.title                AS presentation_title,
+        kp.sort_order,
+        COALESCE(u.fullname, 'Colaborador') AS collaborator_name,
+        COUNT(kar.id)::int                  AS rating_count,
+        ROUND(AVG(kar.rating)::numeric, 2)  AS avg_rating
+      FROM kickoff_questions kq
+      JOIN kickoff_presentations kp ON kp.id = kq.presentation_id
+      LEFT JOIN users u              ON u.id  = kq.user_id
+      LEFT JOIN kickoff_aporte_ratings kar ON kar.aporte_id = kq.id
+      WHERE kp.event_id = $1
+        AND kq.type     = 'aporte'
+        AND kq.status  != 'hidden'
+        AND kp.is_intro = FALSE
+      GROUP BY kq.id, kq.question_text, kq.status, kq.created_at,
+               kp.title, kp.sort_order, u.fullname
+      ORDER BY kp.sort_order ASC, avg_rating DESC NULLS LAST, kq.created_at ASC
+    `, [eventId]),
+
+    db.query(`
+      SELECT
+        kq.id,
+        kq.question_text,
+        kq.answer_text,
+        kq.status,
+        kq.is_highlighted,
+        kq.answered_at,
+        kq.created_at,
+        kq.is_anonymous,
+        CASE WHEN kq.is_anonymous THEN 'Anónimo' ELSE COALESCE(kq.display_name, u.fullname, 'Sin nombre') END AS display_name,
+        kp.title   AS presentation_title,
+        kp.sort_order
+      FROM kickoff_questions kq
+      JOIN kickoff_presentations kp ON kp.id = kq.presentation_id
+      LEFT JOIN users u              ON u.id  = kq.user_id
+      WHERE kp.event_id = $1
+        AND kq.type     = 'question'
+        AND kq.status  NOT IN ('hidden', 'rejected')
+        AND kp.is_intro = FALSE
+      ORDER BY kp.sort_order ASC, kq.is_highlighted DESC, kq.created_at ASC
+    `, [eventId]),
+  ]);
+
+  const aportes   = aporteRows.rows;
+  const questions = questionRows.rows;
+
+  return {
+    aportes,
+    questions,
+    stats: {
+      total_aportes:      aportes.length,
+      total_questions:    questions.length,
+      answered_questions: questions.filter(q => q.status === 'answered').length,
+      avg_rating_overall: aportes.length
+        ? parseFloat((aportes.reduce((s, a) => s + (parseFloat(a.avg_rating) || 0), 0) / aportes.filter(a => a.avg_rating).length).toFixed(2)) || null
+        : null,
+    },
+  };
+}
+
+// ─── auto-start scheduler ────────────────────────────────────────────────────
+
+async function autoStartOverduePresentations() {
+  try {
+    // Busca presentaciones cuyo inicio programado ya pasó hace más de 5 min y
+    // nadie las inició, pero solo si el evento está activo y no hay otra presentación en curso.
+    const { rows } = await db.query(`
+      SELECT kp.id, kp.title
+      FROM kickoff_presentations kp
+      JOIN kickoff_events ke ON ke.id = kp.event_id
+      WHERE kp.status IN ('pending', 'ready')
+        AND kp.scheduled_start IS NOT NULL
+        AND kp.scheduled_start + INTERVAL '5 minutes' <= NOW()
+        AND ke.status = 'active'
+        AND NOT EXISTS (
+          SELECT 1 FROM kickoff_presentations kp2
+          WHERE kp2.event_id = kp.event_id
+            AND kp2.status IN ('active', 'questions_open', 'questions_closed')
+        )
+      ORDER BY kp.sort_order ASC
+      LIMIT 1
+    `);
+
+    for (const pres of rows) {
+      logger.info(`[kickoff-scheduler] Auto-iniciando presentación id=${pres.id} "${pres.title}"`);
+      await startPresentation(pres.id, null);
+    }
+  } catch (err) {
+    logger.error(`[kickoff-scheduler] Error en auto-start: ${err.message}`);
+  }
+}
+
+// ─── post-event Q&A ───────────────────────────────────────────────────────────
+
+async function getPostEventQA(eventId) {
+  const { rows: presentations } = await db.query(
+    `SELECT kp.id, kp.title, kp.sort_order, u.fullname AS presenter_name
      FROM kickoff_presentations kp
      LEFT JOIN users u ON u.id = kp.presenter_user_id
-     LEFT JOIN kickoff_presentation_ratings kpr ON kpr.presentation_id = kp.id
      WHERE kp.event_id = $1
-     GROUP BY kp.id, kp.title, u.fullname
-     HAVING COUNT(kpr.id) > 0
-     ORDER BY avg_overall DESC NULLS LAST, ratings_count DESC, kp.sort_order ASC
-     LIMIT 1`,
+       AND kp.status = 'finished'
+       AND kp.is_intro = FALSE
+     ORDER BY kp.sort_order ASC`,
     [eventId]
   );
 
+  const result = [];
+  for (const pres of presentations) {
+    const { rows: questions } = await db.query(
+      `SELECT kq.*, u.fullname AS user_fullname
+       FROM kickoff_questions kq
+       LEFT JOIN users u ON u.id = kq.user_id
+       WHERE kq.presentation_id = $1
+         AND kq.type = 'question'
+         AND kq.status NOT IN ('hidden', 'rejected')
+       ORDER BY kq.is_highlighted DESC, kq.created_at ASC`,
+      [pres.id]
+    );
+    result.push({ ...pres, questions: questions.map(mapQuestion) });
+  }
+  return result;
+}
+
+// ─── tiebreaker ───────────────────────────────────────────────────────────────
+
+// Llamada ÚNICA al arrancar el servidor (vía kickoff.scheduler).
+// No debe invocarse en el hot path de requests.
+async function initTiebreakerSchema() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS kickoff_tiebreaker_rounds (
+      id               SERIAL PRIMARY KEY,
+      event_id         INTEGER     NOT NULL REFERENCES kickoff_events(id) ON DELETE CASCADE,
+      round_number     INTEGER     NOT NULL DEFAULT 1,
+      status           TEXT        NOT NULL DEFAULT 'active'
+                         CHECK (status IN ('active','finished')),
+      winner_aporte_id INTEGER     REFERENCES kickoff_questions(id),
+      created_by       INTEGER     REFERENCES users(id) ON DELETE SET NULL,
+      finished_by      INTEGER     REFERENCES users(id) ON DELETE SET NULL,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      finished_at      TIMESTAMPTZ
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS kickoff_tiebreaker_candidates (
+      id        SERIAL PRIMARY KEY,
+      round_id  INTEGER NOT NULL REFERENCES kickoff_tiebreaker_rounds(id) ON DELETE CASCADE,
+      aporte_id INTEGER NOT NULL REFERENCES kickoff_questions(id)          ON DELETE CASCADE,
+      UNIQUE (round_id, aporte_id)
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS kickoff_tiebreaker_votes (
+      id         SERIAL PRIMARY KEY,
+      round_id   INTEGER     NOT NULL REFERENCES kickoff_tiebreaker_rounds(id) ON DELETE CASCADE,
+      aporte_id  INTEGER     NOT NULL REFERENCES kickoff_questions(id)          ON DELETE CASCADE,
+      user_id    INTEGER     NOT NULL REFERENCES users(id)                      ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (round_id, user_id)
+    )
+  `);
+}
+
+// Devuelve los aportes empatados en el primer lugar (misma avg_rating máxima, con votos).
+async function getTiedAportes(eventId) {
+  const { rows } = await db.query(`
+    WITH ranked AS (
+      SELECT kq.id,
+             kq.question_text                            AS aporte_text,
+             COALESCE(u.fullname, 'Colaborador')         AS collaborator_name,
+             up.avatar_url                               AS collaborator_avatar_url,
+             kp.title                                    AS presentation_title,
+             COUNT(kar.id)::int                          AS rating_count,
+             ROUND(AVG(kar.rating)::numeric, 2)          AS avg_rating
+      FROM kickoff_questions kq
+      JOIN kickoff_presentations kp ON kp.id = kq.presentation_id
+      LEFT JOIN users u             ON u.id  = kq.user_id
+      LEFT JOIN user_profile up     ON up.user_id = kq.user_id
+      LEFT JOIN kickoff_aporte_ratings kar ON kar.aporte_id = kq.id
+      WHERE kp.event_id = $1
+        AND kq.type     = 'aporte'
+        AND kq.status  != 'hidden'
+        AND kp.is_intro = FALSE
+      GROUP BY kq.id, kq.question_text, kq.user_id, u.fullname, up.avatar_url, kp.title
+      HAVING COUNT(kar.id) > 0
+    )
+    SELECT r.*
+    FROM ranked r
+    WHERE r.avg_rating = (SELECT MAX(avg_rating) FROM ranked)
+    ORDER BY r.collaborator_name ASC
+  `, [eventId]);
+  return rows;
+}
+
+async function getTiebreakerStatus(eventId, userId) {
+
+
+  const tiedAportes = await getTiedAportes(eventId);
+  const hasTie = tiedAportes.length >= 2;
+
+  // Ronda activa con candidatos y conteo de votos
+  const { rows: activeRows } = await db.query(`
+    SELECT r.*,
+      (SELECT v.aporte_id FROM kickoff_tiebreaker_votes v
+       WHERE v.round_id = r.id AND v.user_id = $2) AS user_voted_for,
+      (SELECT COUNT(*)::int FROM kickoff_tiebreaker_votes v WHERE v.round_id = r.id) AS total_votes
+    FROM kickoff_tiebreaker_rounds r
+    WHERE r.event_id = $1 AND r.status = 'active'
+    LIMIT 1
+  `, [eventId, userId || null]);
+
+  let activeRound = null;
+  if (activeRows[0]) {
+    const { rows: cands } = await db.query(`
+      SELECT c.aporte_id,
+             kq.question_text                          AS aporte_text,
+             COALESCE(u.fullname, 'Colaborador')       AS collaborator_name,
+             up.avatar_url                             AS collaborator_avatar_url,
+             kp.title                                  AS presentation_title,
+             COUNT(v.id)::int                          AS vote_count
+      FROM kickoff_tiebreaker_candidates c
+      JOIN kickoff_questions kq    ON kq.id = c.aporte_id
+      JOIN kickoff_presentations kp ON kp.id = kq.presentation_id
+      LEFT JOIN users u            ON u.id  = kq.user_id
+      LEFT JOIN user_profile up    ON up.user_id = kq.user_id
+      LEFT JOIN kickoff_tiebreaker_votes v ON v.round_id = c.round_id AND v.aporte_id = c.aporte_id
+      WHERE c.round_id = $1
+      GROUP BY c.aporte_id, kq.question_text, kq.user_id, u.fullname, up.avatar_url, kp.title
+      ORDER BY vote_count DESC
+    `, [activeRows[0].id]);
+    activeRound = { ...activeRows[0], candidates: cands };
+  }
+
+  // Última ronda finalizada (para mostrar resultado)
+  const { rows: lastRows } = await db.query(`
+    SELECT r.*,
+      (SELECT COUNT(*)::int FROM kickoff_tiebreaker_votes v WHERE v.round_id = r.id) AS total_votes
+    FROM kickoff_tiebreaker_rounds r
+    WHERE r.event_id = $1 AND r.status = 'finished'
+    ORDER BY r.round_number DESC LIMIT 1
+  `, [eventId]);
+
+  let lastRound = null;
+  if (lastRows[0]) {
+    const { rows: cands } = await db.query(`
+      SELECT c.aporte_id,
+             kq.question_text                          AS aporte_text,
+             COALESCE(u.fullname, 'Colaborador')       AS collaborator_name,
+             COUNT(v.id)::int                          AS vote_count
+      FROM kickoff_tiebreaker_candidates c
+      JOIN kickoff_questions kq ON kq.id = c.aporte_id
+      LEFT JOIN users u         ON u.id  = kq.user_id
+      LEFT JOIN kickoff_tiebreaker_votes v ON v.round_id = c.round_id AND v.aporte_id = c.aporte_id
+      WHERE c.round_id = $1
+      GROUP BY c.aporte_id, kq.question_text, kq.user_id, u.fullname
+      ORDER BY vote_count DESC
+    `, [lastRows[0].id]);
+    lastRound = { ...lastRows[0], candidates: cands };
+  }
+
+  return { has_tie: hasTie, tied_aportes: tiedAportes, active_round: activeRound, last_round: lastRound };
+}
+
+async function startTiebreakerRound(eventId, candidateAporteIds, userId) {
+
+
+  const { rows: active } = await db.query(
+    `SELECT id FROM kickoff_tiebreaker_rounds WHERE event_id = $1 AND status = 'active'`,
+    [eventId]
+  );
+  if (active.length > 0)
+    throw Object.assign(new Error('Ya existe una ronda de desempate activa'), { status: 409 });
+
+  if (!candidateAporteIds?.length || candidateAporteIds.length < 2)
+    throw Object.assign(new Error('Se necesitan al menos 2 aportes para el desempate'), { status: 400 });
+
+  const { rows: countRows } = await db.query(
+    `SELECT COALESCE(MAX(round_number), 0) + 1 AS next FROM kickoff_tiebreaker_rounds WHERE event_id = $1`,
+    [eventId]
+  );
+  const roundNum = countRows[0].next;
+
+  const { rows } = await db.query(
+    `INSERT INTO kickoff_tiebreaker_rounds (event_id, round_number, created_by)
+     VALUES ($1, $2, $3) RETURNING *`,
+    [eventId, roundNum, userId]
+  );
+  const round = rows[0];
+
+  for (const aporteId of candidateAporteIds) {
+    await db.query(
+      `INSERT INTO kickoff_tiebreaker_candidates (round_id, aporte_id) VALUES ($1, $2)`,
+      [round.id, aporteId]
+    );
+  }
+
+  logger.info(`[kickoff-tiebreaker] Ronda #${roundNum} iniciada event=${eventId} por user=${userId}`);
+  return round;
+}
+
+async function castTiebreakerVote(roundId, aporteId, userId) {
+
+
+  const { rows: rnd } = await db.query(
+    `SELECT id FROM kickoff_tiebreaker_rounds WHERE id = $1 AND status = 'active'`,
+    [roundId]
+  );
+  if (!rnd[0]) throw Object.assign(new Error('La ronda de desempate no está activa'), { status: 409 });
+
+  const { rows: cand } = await db.query(
+    `SELECT id FROM kickoff_tiebreaker_candidates WHERE round_id = $1 AND aporte_id = $2`,
+    [roundId, aporteId]
+  );
+  if (!cand[0]) throw Object.assign(new Error('El aporte no es candidato en esta ronda'), { status: 400 });
+
+  const result = await db.query(
+    `INSERT INTO kickoff_tiebreaker_votes (round_id, aporte_id, user_id)
+     VALUES ($1, $2, $3) ON CONFLICT (round_id, user_id) DO NOTHING`,
+    [roundId, aporteId, userId]
+  );
+  if (result.rowCount === 0)
+    throw Object.assign(new Error('Ya emitiste tu voto en esta ronda'), { status: 409 });
+
+  return { voted: true };
+}
+
+async function finishTiebreakerRound(roundId, userId) {
+
+
+  const { rows: rnd } = await db.query(
+    `SELECT id, event_id FROM kickoff_tiebreaker_rounds WHERE id = $1 AND status = 'active'`,
+    [roundId]
+  );
+  if (!rnd[0]) throw Object.assign(new Error('La ronda no está activa'), { status: 409 });
+
+  const { rows: results } = await db.query(`
+    SELECT c.aporte_id, COUNT(v.id)::int AS vote_count
+    FROM kickoff_tiebreaker_candidates c
+    LEFT JOIN kickoff_tiebreaker_votes v ON v.round_id = c.round_id AND v.aporte_id = c.aporte_id
+    WHERE c.round_id = $1
+    GROUP BY c.aporte_id
+    ORDER BY vote_count DESC
+  `, [roundId]);
+
+  const maxVotes = results[0]?.vote_count ?? 0;
+  const topGroup = results.filter(r => r.vote_count === maxVotes);
+  const winnerId = topGroup.length === 1 ? topGroup[0].aporte_id : null;
+
+  await db.query(
+    `UPDATE kickoff_tiebreaker_rounds
+     SET status = 'finished', winner_aporte_id = $1, finished_by = $2, finished_at = NOW()
+     WHERE id = $3`,
+    [winnerId, userId, roundId]
+  );
+
+  logger.info(`[kickoff-tiebreaker] Ronda id=${roundId} finalizada. winner=${winnerId ?? 'empate'}`);
   return {
-    collaborator_winner: collaboratorRows[0] || null,
-    presentation_winner: presentationRows[0] || null,
+    still_tied:       topGroup.length > 1,
+    tied_aporte_ids:  topGroup.length > 1 ? topGroup.map(r => r.aporte_id) : [],
+    winner_aporte_id: winnerId,
+    results,
   };
 }
 
 module.exports = {
+  listAllEvents,
   getCurrentEvent, getAdminCurrentEvent, getEventById, createEvent, updateEvent, deleteEvent,
   getPresentationsByEvent, getPresentationById, createPresentation,
   updatePresentation, startPresentation, finishPresentation, deletePresentation,
   getBlocksByPresentation, getActiveBlock, advanceBlock, upsertBlock, deleteBlock,
   getQuestions, createQuestion, moderateQuestion,
   generateQrToken, validateQrToken, getActiveQrForPresentation,
-  rateQuestion, ratePresentation, getPresentationRatingSummary, getEventRankings,
+  rateQuestion,
   rateAporte, getAporteRankings, getProgressGateForPresentation, getEventWinners,
+  getEventSummary,
+  getPostEventQA,
+  autoStartOverduePresentations,
+  initTiebreakerSchema,
+  getTiebreakerStatus, startTiebreakerRound, castTiebreakerVote, finishTiebreakerRound,
 };

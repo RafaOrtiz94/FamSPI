@@ -3449,7 +3449,7 @@ async function revisarJustificante({ id, decision, observations, approver }) {
             justificante_reviewed_at = NOW(),
             justificante_reviewed_by_user_id = $4,
             justificante_observation_count = CASE WHEN $5 THEN justificante_observation_count + 1 ELSE justificante_observation_count END,
-            provisional_status = CASE WHEN $6 IS NOT NULL THEN $6 ELSE provisional_status END,
+            provisional_status = CASE WHEN $6::text IS NOT NULL THEN $6::text ELSE provisional_status END,
             updated_at = NOW()
       WHERE id = $1
     RETURNING *`,
@@ -5112,7 +5112,13 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
         p.fecha_inicio,
         p.fecha_fin,
         p.aprobacion_parcial_at,
+        p.aprobacion_parcial_por,
         p.aprobacion_final_at,
+        p.aprobacion_final_por,
+        p.approver_email,
+        p.cancelled_by_email,
+        p.cancellation_requested_by_email,
+        p.cancellation_reviewed_by_email,
         p.created_at
       FROM permisos_vacaciones p
       LEFT JOIN departments d ON d.id = p.department_id
@@ -5133,10 +5139,14 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
         v.start_date,
         v.end_date,
         v.days,
-        v.created_at
+        v.created_at,
+        v.approver_id,
+        v.approver_role,
+        COALESCE(au.fullname, au.name, au.email) AS approver_name
       FROM vacaciones_solicitudes v
       LEFT JOIN users u ON u.id = v.requester_id
       LEFT JOIN departments d ON d.id = u.department_id
+      LEFT JOIN users au ON au.id = v.approver_id
       WHERE ($1::int IS NULL OR u.department_id = $1)
         AND ($2::int IS NULL OR EXTRACT(YEAR FROM COALESCE(v.start_date, v.created_at)) = $2)
       ORDER BY v.created_at DESC`,
@@ -5281,6 +5291,14 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
         duracion_dias: days,
         created_at: row.created_at,
         source: "permisos_vacaciones",
+        solicitante: row.user_fullname || row.user_email || null,
+        aprobacion_parcial_por: row.aprobacion_parcial_por || null,
+        aprobacion_final_por: row.aprobacion_final_por || row.approver_email || null,
+        cancelado_por:
+          row.cancelled_by_email ||
+          row.cancellation_reviewed_by_email ||
+          row.cancellation_requested_by_email ||
+          null,
       });
       return;
     }
@@ -5313,8 +5331,17 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
       justificantes_urls: row.justificantes_urls,
       es_emergencia: Boolean(row.es_emergencia),
       created_at: row.created_at,
+      // Trazabilidad: solicitante (dueño), aprobación parcial, final/rechazo y cancelación
+      solicitante: row.user_fullname || row.user_email || null,
+      aprobacion_parcial_por: row.aprobacion_parcial_por || null,
       aprobacion_parcial_at: row.aprobacion_parcial_at,
+      aprobacion_final_por: row.aprobacion_final_por || row.approver_email || null,
       aprobacion_final_at: row.aprobacion_final_at,
+      cancelado_por:
+        row.cancelled_by_email ||
+        row.cancellation_reviewed_by_email ||
+        row.cancellation_requested_by_email ||
+        null,
     });
   });
 
@@ -5349,6 +5376,8 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
       duracion_dias: days,
       created_at: row.created_at,
       source: "vacaciones_solicitudes",
+      solicitante: row.requester_name || row.requester_email || null,
+      aprobacion_final_por: row.approver_name || row.approver_role || null,
     });
   });
 

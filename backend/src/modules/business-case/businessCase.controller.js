@@ -2692,15 +2692,35 @@ async function saveEquipmentDetailsV2(req, res) {
       return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
     }
 
+    // Resolver nombres de equipos desde equipment_models para incluirlos en los pares almacenados.
+    // Esto evita que mapBusinessCaseEquipmentToRequestList use "Equipo ${id}" como fallback.
+    const allEquipmentIds = [
+      ...new Set(
+        value.equipment_pairs.flatMap((pair) => [pair.primary_id, pair.backup_id].filter(Number.isFinite)),
+      ),
+    ];
+    const namesById = {};
+    if (allEquipmentIds.length) {
+      const { rows: modelRows } = await db.query(
+        `SELECT id, name, model FROM public.equipment_models WHERE id = ANY($1::int[])`,
+        [allEquipmentIds],
+      );
+      modelRows.forEach((row) => {
+        namesById[String(row.id)] = row.name || row.model || null;
+      });
+    }
+
     // Persist in extra.equipment_details to allow UI rehydration
     const payload = {
       equipment_details: value.equipment_pairs.map((pair, index) => ({
         id: index + 1,
         requires_backup: pair.requires_backup,
         primary_id: pair.primary_id,
+        primary_name: namesById[String(pair.primary_id)] || null,
         primary_type: pair.primary_type || "new_available",
         backup_type: pair.requires_backup ? (pair.backup_type || "new_available") : null,
-        backup_id: pair.requires_backup ? pair.backup_id : null,
+        backup_id: pair.requires_backup ? (pair.backup_id ?? null) : null,
+        backup_name: (pair.requires_backup && pair.backup_id) ? (namesById[String(pair.backup_id)] || null) : null,
         backup_install_simultaneous: pair.backup_install_simultaneous || false,
       })),
     };

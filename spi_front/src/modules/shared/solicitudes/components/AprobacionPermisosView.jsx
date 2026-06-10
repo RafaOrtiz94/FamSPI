@@ -1052,12 +1052,12 @@ const AprobacionPermisosView = ({ compact = false }) => {
               <div className="mt-2 pt-2 border-t border-blue-200">
                 <Button
                   size="sm"
-                  variant="secondary"
+                  variant="primary"
                   onClick={() => openJustificanteModal(solicitud)}
                   disabled={!!actionLoading}
-                  className="text-xs py-1 px-2 bg-blue-600 text-white hover:bg-blue-700 border-blue-600"
+                  className="text-xs"
+                  leftIcon={FiShield}
                 >
-                  <FiShield className="w-3 h-3 mr-1.5 inline" />
                   Revisar justificante
                 </Button>
               </div>

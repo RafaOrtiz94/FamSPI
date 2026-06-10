@@ -59,6 +59,9 @@ const DeliveryCeilingsPage = lazy(() => import("../modules/comercial/pages/Deliv
 const ACPEquipmentPurchasesPage = lazy(() => import("../modules/comercial/pages/ACPEquipmentPurchases"));
 const BusinessCaseWorkspace = lazy(() => import("../modules/comercial/pages/BusinessCaseWorkspace"));
 const BusinessCaseObservabilityDashboard = lazy(() => import("../modules/comercial/pages/BusinessCaseObservabilityDashboard"));
+const OpportunitiesPage = lazy(() => import("../modules/comercial/pages/OpportunitiesPage"));
+const OpportunityWorkspace = lazy(() => import("../modules/comercial/pages/OpportunityWorkspace"));
+const FamSheetsDashboardPage = lazy(() => import("../modules/comercial/pages/FamSheetsDashboardPage"));
 const EquipmentWorkspace = lazy(() => import("../modules/equipment/pages/EquipmentWorkspace"));
 const PlanificacionMensual = lazy(() => import("../modules/comercial/pages/PlanificacionMensual"));
 const AprobacionCronogramas = lazy(() => import("../modules/comercial/pages/AprobacionCronogramas"));
@@ -83,6 +86,8 @@ const TicketsWorkspace = lazy(() => import("../modules/ti/pages/TicketsWorkspace
 const TIMaintenanceSchedulePage = lazy(() => import("../modules/ti/pages/TIMaintenanceSchedulePage"));
 const TIDeviceManagementPage = lazy(() => import("../modules/ti/pages/TIDeviceManagementPage"));
 const TIModuleAccessPage = lazy(() => import("../modules/ti/pages/TIModuleAccessPage"));
+const TIAssetsFinancieroPage = lazy(() => import("../modules/ti/pages/TIAssetsFinancieroPage"));
+const TIActasPage = lazy(() => import("../modules/ti/pages/TIActasPage"));
 const DashboardOperaciones = lazy(() => import("../modules/operaciones/Dashboard"));
 const DashboardCalidad = lazy(() => import("../modules/calidad/Dashboard"));
 const CA0101Workspace = lazy(() => import("../modules/calidad/pages/CA0101Workspace"));
@@ -256,6 +261,11 @@ const AppRoutes = () => {
             <Route path="/dashboard/comercial/equipment-purchases" element={<EquipmentPurchasesPage />} />
             <Route path="/dashboard/comercial/delivery-ceilings" element={<DeliveryCeilingsPage />} />
             <Route path="/dashboard/comercial/planificacion" element={<PlanificacionMensual />} />
+            <Route path="/dashboard/comercial/famsheets" element={<OpportunitiesPage />} />
+            <Route path="/dashboard/comercial/famsheets/dashboard" element={<FamSheetsDashboardPage />} />
+            <Route path="/dashboard/comercial/famsheets/:id" element={<OpportunityWorkspace />} />
+            <Route path="/dashboard/comercial/opportunities" element={<Navigate to="/dashboard/comercial/famsheets" replace />} />
+            <Route path="/dashboard/comercial/opportunities/:id" element={<OpportunityWorkspace />} />
           </Route>
 
           <Route element={<ProtectedRoute allowedRoles={["acp_comercial"]} />}>
@@ -395,11 +405,18 @@ const AppRoutes = () => {
             <Route path="/dashboard/ti" element={<DashboardTI />} />
             <Route path="/dashboard/ti/workspace" element={<TicketsWorkspace />} />
             <Route path="/dashboard/ti/dispositivos" element={<TIDeviceManagementPage />} />
+            <Route path="/dashboard/ti/actas" element={<TIActasPage />} />
             <Route path="/dashboard/ti/mantenimientos" element={<Navigate to="/dashboard/ti/dispositivos" replace />} />
           </Route>
           <Route element={<ProtectedRoute allowedRoles={["jefe_ti", "admin_ti"]} />}>
             <Route path="/dashboard/ti/modulos" element={<TIModuleAccessPage />} />
             <Route path="/dashboard/ti/modulos/*" element={<TIModuleAccessPage />} />
+          </Route>
+          <Route element={<ProtectedRoute allowedRoles={[
+            "financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador",
+            "ti", "jefe_ti", "admin_ti", "gerencia", "gerencia_general",
+          ]} />}>
+            <Route path="/dashboard/ti/activos" element={<TIAssetsFinancieroPage />} />
           </Route>
           <Route path="/dashboard/operaciones" element={<DashboardOperaciones />} />
           <Route path="/dashboard/logistica" element={<DashboardLogistica />} />

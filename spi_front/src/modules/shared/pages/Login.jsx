@@ -45,12 +45,19 @@ export default function Login() {
  }
  }, [location]);
 
- if (isAuthenticated) return <Navigate to="/dashboard" replace />;
+ // Preserve returnUrl for post-login redirect (used by QR and deep links)
+ const returnUrl = new URLSearchParams(location.search).get("returnUrl");
+ if (isAuthenticated) {
+   const dest = returnUrl ? decodeURIComponent(returnUrl) : "/dashboard";
+   return <Navigate to={dest} replace />;
+ }
 
  const handleGoogleLogin = () => {
  setLoading(true);
  try {
- window.location.replace(googleLogin());
+   // Store returnUrl so LoginCallback can redirect there after OAuth
+   if (returnUrl) sessionStorage.setItem("redirectTo", decodeURIComponent(returnUrl));
+   window.location.replace(googleLogin());
  } catch (err) {
  console.error("❌ Error iniciando login:", err);
  setError("No se pudo conectar con el servidor de autenticación.");
@@ -64,7 +71,8 @@ export default function Login() {
  setLoading(true);
  try {
  await sandboxLogin(sandboxEmail, sandboxPassword);
- navigate("/dashboard", { replace: true });
+ const dest = returnUrl ? decodeURIComponent(returnUrl) : "/dashboard";
+ navigate(dest, { replace: true });
  } catch (err) {
  setError(err?.response?.data?.message || err.message || "Credenciales incorrectas");
  } finally {

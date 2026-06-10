@@ -1,6 +1,9 @@
 const db = require("../../config/db");
 const notificationManager = require("../notifications/notificationManager");
 const { getHolidaysForYear } = require("../security/security.holidays.ec");
+const { ensureFolder, uploadBase64File } = require("../../utils/drive");
+const { computeSha256HexFromBuffer } = require("../../utils/documentHash");
+const { upsertCollaboratorProfile } = require("../collaborators/collaborators.service");
 
 const ALLOWED_STATUSES = new Set([
   "available",
@@ -12,6 +15,10 @@ const ALLOWED_STATUSES = new Set([
 ]);
 
 const TI_ROLES = ["ti", "jefe_ti", "admin_ti", "gerencia"];
+const TI_READ_ROLES = [
+  "ti", "jefe_ti", "admin_ti", "gerencia", "gerencia_general",
+  "financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador",
+];
 const MS_PER_DAY = 86400000;
 
 async function ensureTiAssetsSchema() {
@@ -84,6 +91,123 @@ async function ensureTiAssetsSchema() {
   await db.query(`ALTER TABLE public.ti_assets ADD COLUMN IF NOT EXISTS serial_number TEXT`);
   await db.query(`ALTER TABLE public.ti_assets ADD COLUMN IF NOT EXISTS imei TEXT`);
   await db.query(`ALTER TABLE public.ti_assets ADD COLUMN IF NOT EXISTS purchase_date DATE`);
+
+  // Accesorios vinculados a un activo
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS public.ti_asset_accessories (
+      id                 BIGSERIAL PRIMARY KEY,
+      asset_id           BIGINT NOT NULL REFERENCES public.ti_assets(id) ON DELETE CASCADE,
+      name               TEXT NOT NULL,
+      brand              TEXT,
+      model              TEXT,
+      serial_number      TEXT,
+      imei               TEXT,
+      is_new             BOOLEAN NOT NULL DEFAULT false,
+      physical_condition INTEGER,
+      observations       TEXT,
+      active             BOOLEAN NOT NULL DEFAULT true,
+      created_by         INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      updated_by         INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_accessories_asset ON public.ti_asset_accessories(asset_id, active)`);
+
+  // Cabecera de actas (entrega / retiro) — asset_id is now optional (NULL allowed)
+  // Multiple items stored in ti_asset_actas_items
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS public.ti_asset_actas (
+      id                  BIGSERIAL PRIMARY KEY,
+      acta_code           TEXT UNIQUE NOT NULL,
+      tipo                TEXT NOT NULL,
+      asset_id            BIGINT REFERENCES public.ti_assets(id) ON DELETE SET NULL,
+      recipient_user_id   INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      previous_user_id    INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      recipient_nombre    TEXT,
+      recipient_cedula    TEXT,
+      recipient_cargo     TEXT,
+      acta_day            INTEGER,
+      acta_month          INTEGER,
+      acta_year           INTEGER,
+      generated_by        INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      generated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+      notes               TEXT,
+      pdf_filename        TEXT,
+      pdf_sha256          TEXT,
+      pdf_drive_url       TEXT,
+      pdf_drive_file_id   TEXT,
+      active              BOOLEAN NOT NULL DEFAULT true,
+      created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  // Add missing columns if they don't exist (idempotent)
+  await db.query(`ALTER TABLE IF EXISTS public.ti_asset_actas ADD COLUMN IF NOT EXISTS acta_code TEXT UNIQUE`);
+  await db.query(`ALTER TABLE IF EXISTS public.ti_asset_actas ADD COLUMN IF NOT EXISTS acta_day INTEGER`);
+  await db.query(`ALTER TABLE IF EXISTS public.ti_asset_actas ADD COLUMN IF NOT EXISTS acta_month INTEGER`);
+  await db.query(`ALTER TABLE IF EXISTS public.ti_asset_actas ADD COLUMN IF NOT EXISTS acta_year INTEGER`);
+
+  // Make asset_id nullable if it exists and is currently NOT NULL
+  await db.query(`ALTER TABLE IF EXISTS public.ti_asset_actas ALTER COLUMN asset_id DROP NOT NULL`);
+
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_actas_asset ON public.ti_asset_actas(asset_id)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_actas_generated ON public.ti_asset_actas(generated_at DESC)`);
+
+  // Filas del acta (equipos + accesorios)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS public.ti_asset_actas_items (
+      id                  BIGSERIAL PRIMARY KEY,
+      acta_id             BIGINT NOT NULL REFERENCES public.ti_asset_actas(id) ON DELETE CASCADE,
+      order_num           INTEGER NOT NULL,
+      item_type           TEXT NOT NULL,
+      asset_id            BIGINT REFERENCES public.ti_assets(id) ON DELETE SET NULL,
+      accessory_id        BIGINT REFERENCES public.ti_asset_accessories(id) ON DELETE SET NULL,
+      name                TEXT NOT NULL,
+      brand_model         TEXT,
+      serial_imei         TEXT,
+      is_new              BOOLEAN,
+      physical_condition  INTEGER,
+      observations        TEXT
+    );
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_actas_items_acta ON public.ti_asset_actas_items(acta_id)`);
+
+  // Número corporativo en accesorios (idempotente)
+  await db.query(`ALTER TABLE public.ti_asset_accessories ADD COLUMN IF NOT EXISTS numero_corporativo TEXT`);
+
+  // Documentos financieros por activo (factura única, letra de cambio múltiple)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS public.ti_asset_financial_docs (
+      id              BIGSERIAL PRIMARY KEY,
+      asset_id        BIGINT NOT NULL REFERENCES public.ti_assets(id) ON DELETE CASCADE,
+      doc_type        TEXT NOT NULL,
+      assigned_user_id INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      filename        TEXT,
+      drive_file_id   TEXT,
+      drive_url       TEXT,
+      sha256          TEXT,
+      notes           TEXT,
+      uploaded_by     INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      uploaded_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+      active          BOOLEAN NOT NULL DEFAULT true
+    );
+  `);
+  // UNIQUE only for factura (one per asset), allow multiple letra_de_cambio per asset
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ti_financial_docs_asset_type_factura
+      ON public.ti_asset_financial_docs(asset_id, doc_type)
+      WHERE active = true AND doc_type = 'factura'
+  `);
+
+  // Columnas para acta firmada (idempotentes)
+  await db.query(`ALTER TABLE public.ti_asset_actas ADD COLUMN IF NOT EXISTS signed_pdf_drive_file_id TEXT`);
+  await db.query(`ALTER TABLE public.ti_asset_actas ADD COLUMN IF NOT EXISTS signed_pdf_drive_url     TEXT`);
+  await db.query(`ALTER TABLE public.ti_asset_actas ADD COLUMN IF NOT EXISTS signed_pdf_sha256        TEXT`);
+  await db.query(`ALTER TABLE public.ti_asset_actas ADD COLUMN IF NOT EXISTS signed_pdf_filename      TEXT`);
+  await db.query(`ALTER TABLE public.ti_asset_actas ADD COLUMN IF NOT EXISTS signed_at               TIMESTAMPTZ`);
+  await db.query(`ALTER TABLE public.ti_asset_actas ADD COLUMN IF NOT EXISTS signed_by               INTEGER REFERENCES public.users(id) ON DELETE SET NULL`);
+  await db.query(`ALTER TABLE public.ti_asset_actas ADD COLUMN IF NOT EXISTS is_complete             BOOLEAN NOT NULL DEFAULT false`);
 }
 
 function parseISODateUTC(value) {
@@ -326,12 +450,22 @@ async function updateAsset({ assetId, data, userId }) {
   return { ...rows[0], ...computeDepreciation(rows[0].purchase_date) };
 }
 
-async function assignAsset({ assetId, assignedToUserId = null, reason = null, userId }) {
+async function assignAsset({
+  assetId,
+  assignedToUserId = null,
+  reason = null,
+  userId,
+  // Acta fields
+  recipientNombre = null,
+  recipientCedula = null,
+  recipientCargo = null,
+  actaItems = null,   // [{item_type, asset_id, accessory_id, name, brand_model, serial_imei, is_new, physical_condition, observations}]
+}) {
   await ensureTiAssetsSchema();
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
-    const currentQ = await client.query(`SELECT id, assigned_to_user_id FROM public.ti_assets WHERE id = $1 LIMIT 1`, [assetId]);
+    const currentQ = await client.query(`SELECT id, name, assigned_to_user_id FROM public.ti_assets WHERE id = $1 LIMIT 1`, [assetId]);
     if (!currentQ.rows.length) {
       const err = new Error("Activo TI no encontrado");
       err.status = 404;
@@ -360,8 +494,210 @@ async function assignAsset({ assetId, assignedToUserId = null, reason = null, us
        VALUES ($1,$2,$3::jsonb,$4,now())`,
       [assetId, assignedToUserId ? "asset_assigned" : "asset_unassigned", JSON.stringify({ previous_user_id: current.assigned_to_user_id, assigned_to_user_id: assignedToUserId, reason }), userId],
     );
+
+    // Build acta items if not provided: asset principal + accesorios activos
+    let resolvedItems = actaItems;
+    if (!resolvedItems) {
+      const asset = upd.rows[0];
+      const accQ = await client.query(
+        `SELECT * FROM public.ti_asset_accessories WHERE asset_id = $1 AND active = true ORDER BY created_at ASC`,
+        [assetId],
+      );
+      resolvedItems = [
+        {
+          item_type: "equipo",
+          asset_id: asset.id,
+          name: asset.name,
+          brand_model: [asset.brand, asset.model].filter(Boolean).join(" "),
+          serial_imei: [asset.serial_number, asset.imei].filter(Boolean).join(" / ") || null,
+          is_new: null,
+          physical_condition: null,
+          observations: null,
+        },
+        ...accQ.rows.map((acc) => ({
+          item_type: "accesorio",
+          accessory_id: acc.id,
+          name: acc.name,
+          brand_model: [acc.brand, acc.model].filter(Boolean).join(" "),
+          serial_imei: [acc.serial_number, acc.imei].filter(Boolean).join(" / ") || null,
+          is_new: acc.is_new,
+          physical_condition: acc.physical_condition,
+          observations: acc.observations,
+        })),
+      ];
+    }
+
+    const tipo = assignedToUserId ? "entrega" : "retiro";
+    const acta = await createActa({
+      tipo,
+      assetId,
+      recipientUserId: assignedToUserId,
+      previousUserId: current.assigned_to_user_id,
+      recipientNombre,
+      recipientCedula,
+      recipientCargo,
+      generatedBy: userId,
+      notes: reason,
+      items: resolvedItems,
+      client,
+    });
+
     await client.query("COMMIT");
-    return { ...upd.rows[0], ...computeDepreciation(upd.rows[0].purchase_date) };
+    return {
+      ...upd.rows[0],
+      ...computeDepreciation(upd.rows[0].purchase_date),
+      acta_id: acta.id,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Assign multiple assets in a single acta (new flow)
+async function assignMultipleAssets({
+  assetIds = [],  // [1, 2, 3] — array of asset IDs to assign together
+  assignedToUserId = null,
+  reason = null,
+  userId,
+  // Acta fields
+  recipientNombre = null,
+  recipientCedula = null,
+  recipientCargo = null,
+  acta_items = null, // Optional: pre-built items with state data
+}) {
+  await ensureTiAssetsSchema();
+  if (!assetIds.length) {
+    const err = new Error("Debe seleccionar al menos un equipo");
+    err.status = 400;
+    throw err;
+  }
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    // Fetch all assets
+    const assetsQ = await client.query(
+      `SELECT id, name, brand, model, serial_number, imei, assigned_to_user_id FROM public.ti_assets WHERE id = ANY($1::bigint[]) ORDER BY id`,
+      [assetIds],
+    );
+    if (!assetsQ.rows.length) {
+      const err = new Error("Ninguno de los equipos encontrados");
+      err.status = 404;
+      throw err;
+    }
+
+    // Update all assets: assign to new user
+    const nextStatus = assignedToUserId ? "assigned" : "unassigned";
+    await client.query(
+      `UPDATE public.ti_assets
+        SET assigned_to_user_id = $1::integer,
+            assigned_at = CASE WHEN $1::integer IS NULL THEN NULL ELSE now() END,
+            status = $2,
+            updated_by = $3,
+            updated_at = now()
+       WHERE id = ANY($4::bigint[])`,
+      [assignedToUserId, nextStatus, userId, assetIds],
+    );
+
+    // Create assignments + events for each asset
+    for (const asset of assetsQ.rows) {
+      await client.query(
+        `INSERT INTO public.ti_asset_assignments (asset_id, assigned_to_user_id, previous_user_id, action, reason, created_by, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,now())`,
+        [asset.id, assignedToUserId, asset.assigned_to_user_id, assignedToUserId ? "assign_or_reassign" : "unassign", reason, userId],
+      );
+      await client.query(
+        `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
+         VALUES ($1,$2,$3::jsonb,$4,now())`,
+        [asset.id, assignedToUserId ? "asset_assigned" : "asset_unassigned", JSON.stringify({ previous_user_id: asset.assigned_to_user_id, assigned_to_user_id: assignedToUserId, reason }), userId],
+      );
+    }
+
+    // Build acta items: use provided acta_items if available, otherwise auto-build from assets + accessories
+    let resolvedItems = acta_items;
+    if (!resolvedItems || !Array.isArray(resolvedItems) || !resolvedItems.length) {
+      resolvedItems = [];
+      for (const asset of assetsQ.rows) {
+        resolvedItems.push({
+          item_type: "equipo",
+          asset_id: asset.id,
+          name: asset.name,
+          brand_model: [asset.brand, asset.model].filter(Boolean).join(" "),
+          serial_imei: [asset.serial_number, asset.imei].filter(Boolean).join(" / ") || null,
+          is_new: null,
+          physical_condition: null,
+          observations: null,
+        });
+
+        // Add accessories for this asset
+        const accQ = await client.query(
+          `SELECT * FROM public.ti_asset_accessories WHERE asset_id = $1 AND active = true ORDER BY created_at ASC`,
+          [asset.id],
+        );
+        resolvedItems.push(
+          ...accQ.rows.map((acc) => ({
+            item_type: "accesorio",
+            asset_id: asset.id,
+            accessory_id: acc.id,
+            name: acc.name,
+            brand_model: [acc.brand, acc.model].filter(Boolean).join(" "),
+            serial_imei: [acc.serial_number, acc.imei].filter(Boolean).join(" / ") || null,
+            is_new: acc.is_new,
+            physical_condition: acc.physical_condition,
+            observations: acc.observations,
+          })),
+        );
+      }
+    } else {
+      // If acta_items provided from frontend, also add accessories for each asset
+      for (const asset of assetsQ.rows) {
+        const accQ = await client.query(
+          `SELECT * FROM public.ti_asset_accessories WHERE asset_id = $1 AND active = true ORDER BY created_at ASC`,
+          [asset.id],
+        );
+        resolvedItems.push(
+          ...accQ.rows.map((acc) => ({
+            item_type: "accesorio",
+            asset_id: asset.id,
+            accessory_id: acc.id,
+            name: acc.name,
+            brand_model: [acc.brand, acc.model].filter(Boolean).join(" "),
+            serial_imei: [acc.serial_number, acc.imei].filter(Boolean).join(" / ") || null,
+            is_new: acc.is_new,
+            physical_condition: acc.physical_condition,
+            observations: acc.observations,
+          })),
+        );
+      }
+    }
+
+    // Create acta with all items
+    const tipo = assignedToUserId ? "entrega" : "retiro";
+    const acta = await createActa({
+      tipo,
+      assetId: null,  // No single asset, multiple items instead
+      recipientUserId: assignedToUserId,
+      previousUserId: assetsQ.rows[0]?.assigned_to_user_id || null,
+      recipientNombre,
+      recipientCedula,
+      recipientCargo,
+      generatedBy: userId,
+      notes: reason,
+      items: resolvedItems,
+      client,
+    });
+
+    await client.query("COMMIT");
+    return {
+      acta_id: acta.id,
+      acta_code: acta.acta_code,
+      assets_assigned: assetIds.length,
+      items_count: resolvedItems.length,
+    };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -913,13 +1249,716 @@ async function requestAssignedDeliveryForMaintenance({ maintenanceId, userId }) 
   };
 }
 
+// ─── Accessories ──────────────────────────────────────────────────────────────
+
+async function listAccessories(assetId) {
+  await ensureTiAssetsSchema();
+  const { rows } = await db.query(
+    `SELECT * FROM public.ti_asset_accessories
+      WHERE asset_id = $1 AND active = true
+      ORDER BY created_at ASC`,
+    [assetId],
+  );
+  return rows;
+}
+
+async function createAccessory({ assetId, data, userId }) {
+  await ensureTiAssetsSchema();
+  const { name, brand, model, serial_number, imei, is_new, physical_condition, observations, numero_corporativo } = data || {};
+  if (!name || !String(name).trim()) {
+    const err = new Error("name es obligatorio");
+    err.status = 400;
+    throw err;
+  }
+  const { rows } = await db.query(
+    `INSERT INTO public.ti_asset_accessories
+       (asset_id, name, brand, model, serial_number, imei, is_new, physical_condition, observations, numero_corporativo, created_by, updated_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)
+     RETURNING *`,
+    [
+      assetId,
+      String(name).trim(),
+      brand || null,
+      model || null,
+      serial_number || null,
+      imei || null,
+      Boolean(is_new),
+      physical_condition != null ? Number(physical_condition) : null,
+      observations || null,
+      numero_corporativo || null,
+      userId,
+    ],
+  );
+  return rows[0];
+}
+
+async function updateAccessory({ accessoryId, data, userId }) {
+  await ensureTiAssetsSchema();
+  const { rows } = await db.query(
+    `UPDATE public.ti_asset_accessories
+        SET name                = COALESCE($1, name),
+            brand               = COALESCE($2, brand),
+            model               = COALESCE($3, model),
+            serial_number       = COALESCE($4, serial_number),
+            imei                = COALESCE($5, imei),
+            is_new              = COALESCE($6, is_new),
+            physical_condition  = COALESCE($7, physical_condition),
+            observations        = COALESCE($8, observations),
+            numero_corporativo  = COALESCE($9, numero_corporativo),
+            updated_by          = $10,
+            updated_at          = now()
+      WHERE id = $11 AND active = true
+      RETURNING *`,
+    [
+      data?.name ?? null,
+      data?.brand ?? null,
+      data?.model ?? null,
+      data?.serial_number ?? null,
+      data?.imei ?? null,
+      data?.is_new != null ? Boolean(data.is_new) : null,
+      data?.physical_condition != null ? Number(data.physical_condition) : null,
+      data?.observations ?? null,
+      data?.numero_corporativo ?? null,
+      userId,
+      accessoryId,
+    ],
+  );
+  if (!rows.length) {
+    const err = new Error("Accesorio no encontrado");
+    err.status = 404;
+    throw err;
+  }
+  return rows[0];
+}
+
+async function removeAccessory({ accessoryId, userId }) {
+  await ensureTiAssetsSchema();
+  const { rows } = await db.query(
+    `UPDATE public.ti_asset_accessories
+        SET active = false, updated_by = $1, updated_at = now()
+      WHERE id = $2 AND active = true
+      RETURNING id`,
+    [userId, accessoryId],
+  );
+  if (!rows.length) {
+    const err = new Error("Accesorio no encontrado");
+    err.status = 404;
+    throw err;
+  }
+  return { deleted: true, id: rows[0].id };
+}
+
+// ─── Actas ────────────────────────────────────────────────────────────────────
+
+async function generateActaCode() {
+  const year = new Date().getFullYear();
+  const { rows } = await db.query(
+    `SELECT MAX(id) as max_id FROM public.ti_asset_actas`,
+  );
+  const nextId = (rows[0]?.max_id || 0) + 1;
+  return `ACTA-ET-${year}-${String(nextId).padStart(6, '0')}`;
+}
+
+async function createActa({ tipo, assetId, recipientUserId, previousUserId, recipientNombre, recipientCedula, recipientCargo, generatedBy, notes, items, client: txClient }) {
+  const qc = txClient || db;
+  const actaCode = await generateActaCode();
+
+  // Capture current date (immutable once created)
+  const now = new Date();
+  const actaDay = now.getDate();
+  const actaMonth = now.getMonth() + 1;
+  const actaYear = now.getFullYear();
+
+  // If items array provided, use first item's asset_id; otherwise use assetId param (supports legacy single-asset flow)
+  const mainAssetId = items && items.length && items[0].asset_id ? items[0].asset_id : (assetId || null);
+
+  const { rows } = await qc.query(
+    `INSERT INTO public.ti_asset_actas
+       (acta_code, tipo, asset_id, recipient_user_id, previous_user_id,
+        recipient_nombre, recipient_cedula, recipient_cargo,
+        acta_day, acta_month, acta_year,
+        generated_by, notes, generated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now())
+     RETURNING *`,
+    [actaCode, tipo, mainAssetId, recipientUserId || null, previousUserId || null,
+     recipientNombre || null, recipientCedula || null, recipientCargo || null,
+     actaDay, actaMonth, actaYear,
+     generatedBy || null, notes || null],
+  );
+  const acta = rows[0];
+
+  if (items && items.length) {
+    for (const [i, item] of items.entries()) {
+      await qc.query(
+        `INSERT INTO public.ti_asset_actas_items
+           (acta_id, order_num, item_type, asset_id, accessory_id,
+            name, brand_model, serial_imei, is_new, physical_condition, observations)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [
+          acta.id, i + 1, item.item_type || "equipo",
+          item.asset_id || null, item.accessory_id || null,
+          item.name || "", item.brand_model || null, item.serial_imei || null,
+          item.is_new != null ? Boolean(item.is_new) : null,
+          item.physical_condition != null ? Number(item.physical_condition) : null,
+          item.observations || null,
+        ],
+      );
+    }
+  }
+
+  return acta;
+}
+
+async function updateActaPdf({ actaId, filename, sha256, driveUrl, driveFileId }) {
+  await db.query(
+    `UPDATE public.ti_asset_actas
+        SET pdf_filename = $1, pdf_sha256 = $2, pdf_drive_url = $3, pdf_drive_file_id = $4
+      WHERE id = $5`,
+    [filename, sha256, driveUrl || null, driveFileId || null, actaId],
+  );
+}
+
+async function listAllActas({ limit = 100, offset = 0, tipo = null, is_complete = null }) {
+  await ensureTiAssetsSchema();
+  const params = [];
+  const where  = ["a.active = true"];
+  if (tipo) {
+    params.push(String(tipo).toLowerCase());
+    where.push(`a.tipo = $${params.length}`);
+  }
+  if (is_complete !== null) {
+    params.push(Boolean(is_complete));
+    where.push(`a.is_complete = $${params.length}`);
+  }
+  params.push(Number(limit));
+  params.push(Number(offset));
+  const { rows } = await db.query(
+    `SELECT a.*,
+            COALESCE(ub.fullname, ub.name, ub.email) AS generated_by_name,
+            ta.name       AS asset_name,
+            ta.asset_code AS asset_code
+       FROM public.ti_asset_actas a
+       LEFT JOIN public.users  ub ON ub.id = a.generated_by
+       LEFT JOIN public.ti_assets ta ON ta.id = a.asset_id
+      WHERE ${where.join(" AND ")}
+      ORDER BY a.generated_at DESC
+      LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params,
+  );
+  return rows;
+}
+
+async function listActas({ assetId, limit = 50 }) {
+  await ensureTiAssetsSchema();
+  // Find actas where this asset is EITHER the main asset_id OR appears in any acta_items row
+  const { rows } = await db.query(
+    `SELECT DISTINCT a.*,
+            COALESCE(u.fullname, u.name, u.email) AS generated_by_name
+       FROM public.ti_asset_actas a
+       LEFT JOIN public.ti_asset_actas_items ai ON ai.acta_id = a.id
+       LEFT JOIN public.users u ON u.id = a.generated_by
+      WHERE (a.asset_id = $1 OR ai.asset_id = $1) AND a.active = true
+      ORDER BY a.generated_at DESC
+      LIMIT $2`,
+    [assetId, limit],
+  );
+  return rows;
+}
+
+async function getActaWithItems(actaId) {
+  await ensureTiAssetsSchema();
+  const { rows: actaRows } = await db.query(
+    `SELECT a.*, COALESCE(u.fullname, u.name, u.email) AS generated_by_name
+       FROM public.ti_asset_actas a
+       LEFT JOIN public.users u ON u.id = a.generated_by
+      WHERE a.id = $1 LIMIT 1`,
+    [actaId],
+  );
+  if (!actaRows.length) {
+    const err = new Error("Acta no encontrada");
+    err.status = 404;
+    throw err;
+  }
+  const { rows: items } = await db.query(
+    `SELECT * FROM public.ti_asset_actas_items WHERE acta_id = $1 ORDER BY order_num ASC`,
+    [actaId],
+  );
+  return { ...actaRows[0], items };
+}
+
+// ─── Upload signed acta ───────────────────────────────────────────────────────
+
+async function resolveSignedActaFolder(userIdentity) {
+  const base =
+    process.env.DRIVE_PROFILE_FOLDER_ID ||
+    process.env.DRIVE_DOCS_FOLDER_ID ||
+    process.env.DRIVE_ROOT_FOLDER_ID ||
+    process.env.DRIVE_FOLDER_ID;
+  if (!base) return null;
+  const usersRoot  = await ensureFolder("Usuarios", base);
+  const userFolder = await ensureFolder(
+    userIdentity?.email || userIdentity?.fullname || `user-${userIdentity?.id || "na"}`,
+    usersRoot.id,
+  );
+  const docsFolder  = await ensureFolder("Documentos", userFolder.id);
+  const actasFolder = await ensureFolder("Actas TI", docsFolder.id);
+  return actasFolder.id;
+}
+
+async function uploadSignedActa({ actaId, fileBuffer, originalFilename, userId }) {
+  await ensureTiAssetsSchema();
+  const id = Number(actaId);
+  if (!Number.isFinite(id) || id <= 0) {
+    const err = new Error("actaId invalido"); err.status = 400; throw err;
+  }
+  const acta = await getActaWithItems(id);
+
+  const sha256    = computeSha256HexFromBuffer(fileBuffer);
+  const tipo      = acta.tipo === "entrega" ? "ET" : "RT";
+  const filename  = `ACTA-${tipo}-${String(id).padStart(6, "0")}-FIRMADA.pdf`;
+
+  let driveUrl = null;
+  let driveFileId = null;
+
+  try {
+    // Resolve recipient user identity for Drive folder
+    const recipientId = acta.tipo === "entrega"
+      ? acta.recipient_user_id
+      : acta.previous_user_id;
+
+    let userIdentity = { id: recipientId };
+    if (recipientId) {
+      const { rows } = await db.query(
+        `SELECT id, email, COALESCE(fullname, name, email) AS fullname
+           FROM public.users WHERE id = $1 LIMIT 1`,
+        [recipientId],
+      );
+      if (rows.length) userIdentity = rows[0];
+    }
+
+    const folderId = await resolveSignedActaFolder(userIdentity);
+    if (folderId) {
+      const uploaded = await uploadBase64File(
+        filename,
+        fileBuffer.toString("base64"),
+        "application/pdf",
+        folderId,
+      );
+      driveUrl    = uploaded?.webViewLink || uploaded?.webContentLink || null;
+      driveFileId = uploaded?.id || null;
+    }
+  } catch (_driveErr) { /* Drive opcional */ }
+
+  await db.query(
+    `UPDATE public.ti_asset_actas
+        SET signed_pdf_drive_file_id = $1,
+            signed_pdf_drive_url     = $2,
+            signed_pdf_sha256        = $3,
+            signed_pdf_filename      = $4,
+            signed_at                = now(),
+            signed_by                = $5,
+            is_complete              = true
+      WHERE id = $6`,
+    [driveFileId, driveUrl, sha256, filename, userId || null, id],
+  );
+
+  // ── Checklist integration (internal, no HTTP) ─────────────────────────────
+  try {
+    const targetUserId = acta.tipo === "entrega"
+      ? acta.recipient_user_id
+      : acta.previous_user_id;
+
+    if (targetUserId) {
+      const flags = acta.tipo === "entrega"
+        ? { computadora_entregada: true }
+        : { acta_descargo_herramientas: true, acta_entrega_equipos_comunicacion: true };
+
+      await upsertCollaboratorProfile(
+        targetUserId,
+        { onboarding: flags },
+        userId || null,
+      );
+    }
+  } catch (_checklistErr) { /* No bloquea si falla la actualizacion del checklist */ }
+
+  return { ok: true, sha256, filename, drive_url: driveUrl };
+}
+
+// ─── PDF Reports (on-demand, not stored) ──────────────────────────────────────
+
+async function generateAssetPdfReport(assetId) {
+  const PDFDocument = require("pdfkit");
+
+  const { rows: assetRows } = await db.query(
+    `SELECT a.*,
+            COALESCE(u.fullname, u.name, u.email) AS assigned_to_name
+       FROM public.ti_assets a
+       LEFT JOIN public.users u ON u.id = a.assigned_to_user_id
+      WHERE a.id = $1 LIMIT 1`,
+    [assetId],
+  );
+  if (!assetRows.length) { const e = new Error("Activo no encontrado"); e.status = 404; throw e; }
+  const asset = assetRows[0];
+
+  const { rows: assignments } = await db.query(
+    `SELECT aa.*,
+            COALESCE(u1.fullname, u1.name, u1.email) AS assigned_to_name,
+            COALESCE(u2.fullname, u2.name, u2.email) AS previous_user_name,
+            COALESCE(u3.fullname, u3.name, u3.email) AS created_by_name
+       FROM public.ti_asset_assignments aa
+       LEFT JOIN public.users u1 ON u1.id = aa.assigned_to_user_id
+       LEFT JOIN public.users u2 ON u2.id = aa.previous_user_id
+       LEFT JOIN public.users u3 ON u3.id = aa.created_by
+      WHERE aa.asset_id = $1 ORDER BY aa.created_at DESC`,
+    [assetId],
+  );
+
+  const { rows: actas } = await db.query(
+    `SELECT * FROM public.ti_asset_actas WHERE asset_id = $1 AND active = true ORDER BY generated_at DESC`,
+    [assetId],
+  );
+
+  const depData = computeDepreciation(asset.purchase_date);
+
+  return new Promise((resolve, reject) => {
+    const doc    = new PDFDocument({ margin: 40, size: "A4", bufferPages: true });
+    const chunks = [];
+    doc.on("data", (c) => chunks.push(c));
+    doc.on("end",  () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+    const W = 515;
+
+    // Header
+    doc.rect(40, 40, W, 60).fill("#1E293B");
+    doc.fillColor("#fff").fontSize(14).font("Helvetica-Bold").text("Reporte de Activo TI", 50, 52, { width: W - 10 });
+    doc.fontSize(9).font("Helvetica").fillColor("#94a3b8")
+       .text(`${asset.name}  ·  Código: ${asset.asset_code || "-"}`, 50, 72);
+    doc.fillColor("#0f172a").moveDown(2.5);
+
+    // Info block
+    const infoRows = [
+      ["Marca / Modelo",     `${asset.brand || "-"} ${asset.model || "-"}`],
+      ["N° de serie",        asset.serial_number || "-"],
+      ["IMEI",               asset.imei || "-"],
+      ["Fecha de compra",    asset.purchase_date ? String(asset.purchase_date).slice(0, 10) : "-"],
+      ["Estado",             asset.status || "-"],
+      ["Asignado a",         asset.assigned_to_name || "Sin asignación"],
+      ["Depreciación",       depData.depreciation_pct != null ? `${depData.depreciation_pct}% (residual ${depData.residual_pct}%)` : "-"],
+      ["Frec. mant.",        `${asset.maintenance_frequency_months || 12} meses`],
+    ];
+    infoRows.forEach(([lbl, val], i) => {
+      const y = doc.y;
+      if (i % 2 === 1) doc.rect(40, y, W, 16).fill("#f8fafc");
+      doc.fontSize(8).font("Helvetica-Bold").fillColor("#334155").text(lbl, 46, y + 3, { width: 130 });
+      doc.fontSize(8).font("Helvetica").fillColor("#1f2937").text(val, 180, y + 3, { width: W - 140 });
+      doc.y = y + 16;
+    });
+
+    doc.moveDown(1);
+
+    // Assignment history
+    doc.fontSize(11).font("Helvetica-Bold").fillColor("#0f172a").text("Historial de asignaciones");
+    doc.rect(40, doc.y + 2, W, 16).fill("#e2e8f0");
+    const hdrY = doc.y + 4;
+    ["Fecha", "Acción", "Asignado a", "Anterior", "Motivo"].forEach((h, i) => {
+      const xs = [42, 110, 200, 310, 400];
+      doc.fontSize(7).font("Helvetica-Bold").fillColor("#334155").text(h, xs[i], hdrY, { width: 85 });
+    });
+    doc.y = hdrY + 12;
+
+    assignments.forEach((a, idx) => {
+      if (doc.y > 720) doc.addPage();
+      const ry = doc.y;
+      if (idx % 2 === 1) doc.rect(40, ry, W, 14).fill("#f8fafc");
+      const vals = [
+        String(a.created_at || "").slice(0, 10),
+        a.action === "unassign" ? "Retiro" : "Entrega",
+        a.assigned_to_name || "-",
+        a.previous_user_name || "-",
+        String(a.reason || "-").slice(0, 25),
+      ];
+      vals.forEach((v, i) => {
+        const xs = [42, 110, 200, 310, 400];
+        doc.fontSize(7).font("Helvetica").fillColor("#334155").text(v, xs[i], ry + 2, { width: 85, lineBreak: false, ellipsis: true });
+      });
+      doc.y = ry + 14;
+    });
+
+    doc.moveDown(1);
+
+    // Actas
+    doc.fontSize(11).font("Helvetica-Bold").fillColor("#0f172a").text("Actas generadas");
+    actas.forEach((acta) => {
+      if (doc.y > 720) doc.addPage();
+      const ay = doc.y;
+      doc.rect(40, ay, W, 20).fill(acta.tipo === "entrega" ? "#dbeafe" : "#fef3c7");
+      doc.fontSize(8).font("Helvetica-Bold").fillColor("#1e293b")
+         .text(`${acta.tipo.toUpperCase()} #${String(acta.id).padStart(6, "0")}`, 46, ay + 4, { width: 120 });
+      doc.fontSize(8).font("Helvetica").fillColor("#334155")
+         .text(`${acta.recipient_nombre || "-"} · ${acta.recipient_cargo || "-"}`, 170, ay + 4, { width: 200 });
+      doc.fillColor(acta.is_complete ? "#16a34a" : "#d97706")
+         .text(acta.is_complete ? "FIRMADA" : "PENDIENTE FIRMA", 380, ay + 4, { width: 100 });
+      doc.y = ay + 24;
+    });
+
+    const pCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pCount; i++) {
+      doc.switchToPage(i);
+      doc.fontSize(7).fillColor("#94a3b8").font("Helvetica")
+         .text(`Página ${i + 1} de ${pCount}  ·  FAM SPI Activos TI`, 40, 820, { width: W, align: "center" });
+    }
+    doc.end();
+  });
+}
+
+async function generateCollaboratorPdfReport(collaboratorUserId) {
+  const PDFDocument = require("pdfkit");
+
+  const { rows: userRows } = await db.query(
+    `SELECT id, email, COALESCE(fullname, name, email) AS fullname, role
+       FROM public.users WHERE id = $1 LIMIT 1`,
+    [collaboratorUserId],
+  );
+  if (!userRows.length) { const e = new Error("Usuario no encontrado"); e.status = 404; throw e; }
+  const collab = userRows[0];
+
+  // All assets currently assigned
+  const { rows: currentAssets } = await db.query(
+    `SELECT a.*, COALESCE(u.fullname, u.name, u.email) AS assigned_to_name
+       FROM public.ti_assets a
+       LEFT JOIN public.users u ON u.id = a.assigned_to_user_id
+      WHERE a.assigned_to_user_id = $1 AND a.active = true ORDER BY a.name`,
+    [collaboratorUserId],
+  );
+
+  // Historical assignments (all assets ever assigned)
+  const { rows: history } = await db.query(
+    `SELECT aa.*,
+            b.name AS asset_name, b.brand, b.model, b.serial_number,
+            COALESCE(u1.fullname, u1.name, u1.email) AS assigned_to_name,
+            COALESCE(u2.fullname, u2.name, u2.email) AS created_by_name
+       FROM public.ti_asset_assignments aa
+       JOIN public.ti_assets b ON b.id = aa.asset_id
+       LEFT JOIN public.users u1 ON u1.id = aa.assigned_to_user_id
+       LEFT JOIN public.users u2 ON u2.id = aa.created_by
+      WHERE aa.assigned_to_user_id = $1 OR aa.previous_user_id = $1
+      ORDER BY aa.created_at DESC`,
+    [collaboratorUserId],
+  );
+
+  // Actas
+  const { rows: actas } = await db.query(
+    `SELECT * FROM public.ti_asset_actas
+      WHERE (recipient_user_id = $1 OR previous_user_id = $1) AND active = true
+      ORDER BY generated_at DESC`,
+    [collaboratorUserId],
+  );
+
+  return new Promise((resolve, reject) => {
+    const doc    = new PDFDocument({ margin: 40, size: "A4", bufferPages: true });
+    const chunks = [];
+    doc.on("data", (c) => chunks.push(c));
+    doc.on("end",  () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+    const W = 515;
+
+    // Header
+    doc.rect(40, 40, W, 60).fill("#1E293B");
+    doc.fillColor("#fff").fontSize(14).font("Helvetica-Bold").text("Reporte de Colaborador - Activos TI", 50, 52, { width: W - 10 });
+    doc.fontSize(9).font("Helvetica").fillColor("#94a3b8").text(`${collab.fullname}  ·  ${collab.email}`, 50, 72);
+    doc.fillColor("#0f172a").moveDown(2.5);
+
+    // Current assets
+    doc.fontSize(11).font("Helvetica-Bold").fillColor("#0f172a").text("Activos actualmente asignados");
+    if (!currentAssets.length) {
+      doc.fontSize(9).font("Helvetica").fillColor("#94a3b8").text("Sin activos asignados actualmente").moveDown(0.5);
+    } else {
+      currentAssets.forEach((a, idx) => {
+        if (doc.y > 720) doc.addPage();
+        const dep = computeDepreciation(a.purchase_date);
+        const ay = doc.y;
+        if (idx % 2 === 1) doc.rect(40, ay, W, 18).fill("#f8fafc");
+        doc.fontSize(8).font("Helvetica-Bold").fillColor("#1e293b").text(a.name, 46, ay + 3, { width: 160 });
+        doc.fontSize(8).font("Helvetica").fillColor("#334155")
+           .text(`${a.brand || "-"} ${a.model || ""}`, 210, ay + 3, { width: 120 });
+        doc.text(a.serial_number || "-", 335, ay + 3, { width: 90 });
+        doc.text(dep.depreciation_pct != null ? `${dep.depreciation_pct}% dep.` : "-", 430, ay + 3, { width: 80 });
+        doc.y = ay + 18;
+      });
+    }
+
+    doc.moveDown(1);
+
+    // History
+    doc.fontSize(11).font("Helvetica-Bold").fillColor("#0f172a").text("Historial de movimientos");
+    const cols = [42, 110, 200, 310, 400];
+    const hdrs = ["Fecha", "Acción", "Equipo", "Asignado a", "Realizado por"];
+    doc.rect(40, doc.y + 2, W, 16).fill("#e2e8f0");
+    const hY = doc.y + 4;
+    hdrs.forEach((h, i) => doc.fontSize(7).font("Helvetica-Bold").fillColor("#334155").text(h, cols[i], hY, { width: 85 }));
+    doc.y = hY + 12;
+
+    history.forEach((h, idx) => {
+      if (doc.y > 720) doc.addPage();
+      const ry = doc.y;
+      if (idx % 2 === 1) doc.rect(40, ry, W, 14).fill("#f8fafc");
+      [
+        String(h.created_at || "").slice(0, 10),
+        h.action === "unassign" ? "Retiro" : "Entrega",
+        String(h.asset_name || "-").slice(0, 18),
+        String(h.assigned_to_name || "-").slice(0, 18),
+        String(h.created_by_name || "-").slice(0, 18),
+      ].forEach((v, i) => {
+        doc.fontSize(7).font("Helvetica").fillColor("#334155").text(v, cols[i], ry + 2, { width: 85, lineBreak: false, ellipsis: true });
+      });
+      doc.y = ry + 14;
+    });
+
+    doc.moveDown(1);
+
+    // Actas
+    doc.fontSize(11).font("Helvetica-Bold").fillColor("#0f172a").text("Actas generadas");
+    actas.forEach((acta) => {
+      if (doc.y > 720) doc.addPage();
+      const ay = doc.y;
+      doc.rect(40, ay, W, 20).fill(acta.tipo === "entrega" ? "#dbeafe" : "#fef3c7");
+      doc.fontSize(8).font("Helvetica-Bold").fillColor("#1e293b")
+         .text(`${acta.tipo.toUpperCase()} #${String(acta.id).padStart(6, "0")}`, 46, ay + 4, { width: 120 });
+      doc.fontSize(8).font("Helvetica").fillColor("#334155")
+         .text(String(acta.generated_at || "").slice(0, 10), 170, ay + 4, { width: 100 });
+      doc.fillColor(acta.is_complete ? "#16a34a" : "#d97706")
+         .text(acta.is_complete ? "FIRMADA" : "PENDIENTE FIRMA", 380, ay + 4, { width: 100 });
+      doc.y = ay + 24;
+    });
+
+    const pCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pCount; i++) {
+      doc.switchToPage(i);
+      doc.fontSize(7).fillColor("#94a3b8").font("Helvetica")
+         .text(`Página ${i + 1} de ${pCount}  ·  FAM SPI Activos TI`, 40, 820, { width: W, align: "center" });
+    }
+    doc.end();
+  });
+}
+
+// ─── Financial docs (factura / letra de cambio) ───────────────────────────────
+
+const VALID_FIN_DOC_TYPES = new Set(["factura", "letra_de_cambio"]);
+
+async function resolveFinancialDocFolder(assetCode) {
+  const base =
+    process.env.DRIVE_ROOT_FOLDER_ID ||
+    process.env.DRIVE_FOLDER_ID;
+  if (!base) return null;
+  const activosRoot = await ensureFolder("Activos TI", base);
+  const docsRoot    = await ensureFolder("Documentos Financieros", activosRoot.id);
+  const assetFolder = await ensureFolder(String(assetCode || "sin-codigo"), docsRoot.id);
+  return assetFolder.id;
+}
+
+async function listFinancialDocs(assetId) {
+  await ensureTiAssetsSchema();
+  const { rows } = await db.query(
+    `SELECT d.*,
+            COALESCE(u.fullname, u.name, u.email) AS uploaded_by_name
+       FROM public.ti_asset_financial_docs d
+       LEFT JOIN public.users u ON u.id = d.uploaded_by
+      WHERE d.asset_id = $1 AND d.active = true
+      ORDER BY d.doc_type ASC, d.uploaded_at DESC`,
+    [assetId],
+  );
+  return rows;
+}
+
+async function uploadFinancialDoc({ assetId, docType, fileBuffer, originalFilename, notes, userId }) {
+  await ensureTiAssetsSchema();
+
+  const type = String(docType || "").toLowerCase().trim();
+  if (!VALID_FIN_DOC_TYPES.has(type)) {
+    const err = new Error("Tipo de documento no válido. Use: factura | letra_de_cambio");
+    err.status = 400;
+    throw err;
+  }
+
+  const { rows: assetRows } = await db.query(
+    `SELECT id, asset_code, name FROM public.ti_assets WHERE id = $1 AND active = true LIMIT 1`,
+    [assetId],
+  );
+  if (!assetRows.length) {
+    const err = new Error("Activo TI no encontrado"); err.status = 404; throw err;
+  }
+  const asset = assetRows[0];
+
+  const sha256   = computeSha256HexFromBuffer(fileBuffer);
+  const typeLabel = type === "factura" ? "Factura" : "Letra-de-Cambio";
+  const ext      = (originalFilename || "").split(".").pop() || "pdf";
+  const filename = `${typeLabel}-${asset.asset_code || asset.id}.${ext}`;
+
+  let driveUrl = null;
+  let driveFileId = null;
+
+  try {
+    const folderId = await resolveFinancialDocFolder(asset.asset_code || asset.id);
+    if (folderId) {
+      const uploaded = await uploadBase64File(
+        filename,
+        fileBuffer.toString("base64"),
+        "application/pdf",
+        folderId,
+      );
+      driveUrl    = uploaded?.webViewLink || uploaded?.webContentLink || null;
+      driveFileId = uploaded?.id || null;
+    }
+  } catch (_driveErr) { /* Drive opcional */ }
+
+  // Upsert: desactiva el anterior del mismo tipo y crea el nuevo
+  // Factura: upsert (desactiva anterior, crea nueva)
+  // Letra de cambio: append (crea nueva sin desactivar)
+  if (type === "factura") {
+    await db.query(
+      `UPDATE public.ti_asset_financial_docs
+          SET active = false
+        WHERE asset_id = $1 AND doc_type = $2 AND active = true`,
+      [assetId, type],
+    );
+  }
+
+  const { rows } = await db.query(
+    `INSERT INTO public.ti_asset_financial_docs
+       (asset_id, doc_type, assigned_user_id, filename, drive_file_id, drive_url, sha256, notes, uploaded_by, uploaded_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+     RETURNING *`,
+    [assetId, type, null, filename, driveFileId, driveUrl, sha256, notes || null, userId || null],
+  );
+
+  return rows[0];
+}
+
+async function getLetrasDeChangioHistory(assetId) {
+  await ensureTiAssetsSchema();
+  const { rows } = await db.query(
+    `SELECT d.*,
+            COALESCE(u.fullname, u.name, u.email) AS uploaded_by_name,
+            COALESCE(assigned.fullname, assigned.name, assigned.email) AS assigned_user_name
+       FROM public.ti_asset_financial_docs d
+       LEFT JOIN public.users u ON u.id = d.uploaded_by
+       LEFT JOIN public.users assigned ON assigned.id = d.assigned_user_id
+      WHERE d.asset_id = $1 AND d.doc_type = 'letra_de_cambio'
+      ORDER BY d.uploaded_at DESC`,
+    [assetId],
+  );
+  return rows;
+}
+
 module.exports = {
   TI_ROLES,
+  TI_READ_ROLES,
   ensureTiAssetsSchema,
   listAssets,
   createAsset,
   updateAsset,
   assignAsset,
+  assignMultipleAssets,
   updateAssetStatus,
   listAssetHistory,
   listAssetAssignmentsHistory,
@@ -931,4 +1970,23 @@ module.exports = {
   createMaintenance,
   completeMaintenance,
   requestAssignedDeliveryForMaintenance,
+  // Accessories
+  listAccessories,
+  createAccessory,
+  updateAccessory,
+  removeAccessory,
+  // Actas
+  createActa,
+  updateActaPdf,
+  listAllActas,
+  listActas,
+  getActaWithItems,
+  uploadSignedActa,
+  // Reports
+  generateAssetPdfReport,
+  generateCollaboratorPdfReport,
+  // Financial docs
+  listFinancialDocs,
+  uploadFinancialDoc,
+  getLetrasDeChangioHistory,
 };

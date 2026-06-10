@@ -34,7 +34,10 @@ app.set("trust proxy", 1);
 
 const RATE_LIMIT_WINDOW_MS =
   parseInt(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000, 10) || 15 * 60 * 1000;
-const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || (isProd ? 1200 : 0), 10);
+// Límite por ventana por usuario autenticado (o por IP si no autenticado).
+// Default en prod: 3000 req/15min = 200 req/min por usuario — suficiente para
+// polling intensivo en eventos como Kick Off sin sacrificar protección.
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || (isProd ? 3000 : 0), 10);
 const DISABLE_RATE_LIMIT =
   process.env.DISABLE_RATE_LIMIT === "true" || (!isProd && RATE_LIMIT_MAX === 0);
 
@@ -68,18 +71,27 @@ const shouldBypassRateLimit = (req) => {
   return false;
 };
 
+// Clave por usuario autenticado para evitar que redes corporativas (NAT compartido)
+// hagan que todos los usuarios compartan el mismo contador de IP.
+const rateLimitKeyGenerator = (req) => {
+  if (req.user?.id) return `uid_${req.user.id}`;
+  return req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip;
+};
+
 app.use(helmet(helmetConfig));
 
 if (!DISABLE_RATE_LIMIT) {
   app.use(
     rateLimit({
-      windowMs: RATE_LIMIT_WINDOW_MS,
-      max: RATE_LIMIT_MAX,
+      windowMs:        RATE_LIMIT_WINDOW_MS,
+      max:             RATE_LIMIT_MAX,
       standardHeaders: true,
-      legacyHeaders: false,
-      skip: shouldBypassRateLimit,
+      legacyHeaders:   false,
+      skip:            shouldBypassRateLimit,
+      keyGenerator:    rateLimitKeyGenerator,
       handler: (req, res) => {
-        logger.warn(`Rate limit alcanzado: ${req.ip} ${req.originalUrl}`);
+        const key = req.user?.id ? `usuario ${req.user.id}` : req.ip;
+        logger.warn(`Rate limit alcanzado: ${key} ${req.originalUrl}`);
         res.status(429).json({
           ok: false,
           code: "RATE_LIMIT",
@@ -143,5 +155,8 @@ app.use((err, req, res, next) => {
     request_id: res.getHeader("x-correlation-id") || null,
   });
 });
+
+const { startKickoffScheduler } = require('./modules/kickoff/kickoff.scheduler');
+startKickoffScheduler();
 
 module.exports = app;

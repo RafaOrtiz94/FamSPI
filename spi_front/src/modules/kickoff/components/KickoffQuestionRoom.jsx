@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import kickoffApi from '../api/kickoffApi';
 import KickoffQuestionCard from './KickoffQuestionCard';
-import KickoffPresentationRatingModal from './KickoffPresentationRatingModal';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../../core/auth/AuthContext';
 
@@ -18,8 +17,6 @@ export default function KickoffQuestionRoom({ presentationId, presentationTitle,
   const [sending, setSending]       = useState(false);
   const [sent, setSent]             = useState(false);
   const [presStatus, setPresStatus] = useState(null);
-  const [showRating, setShowRating] = useState(false);
-  const ratingShownRef              = useRef(false);
   const qTimerRef                   = useRef(null);
   const pTimerRef                   = useRef(null);
 
@@ -33,12 +30,7 @@ export default function KickoffQuestionRoom({ presentationId, presentationTitle,
   const loadPresStatus = async () => {
     try {
       const res = await kickoffApi.getPresentation(presentationId);
-      const status = res.data?.status;
-      setPresStatus(status);
-      if (status === 'finished' && !ratingShownRef.current && !isModerator) {
-        ratingShownRef.current = true;
-        setShowRating(true);
-      }
+      setPresStatus(res.data?.status);
     } catch {}
   };
 
@@ -98,18 +90,17 @@ export default function KickoffQuestionRoom({ presentationId, presentationTitle,
     : [];
 
   const isFinished = presStatus === 'finished';
+  const canSubmitParticipation = !isModerator && (!isFinished || type === 'aporte');
+
+  useEffect(() => {
+    if (isFinished && !isModerator) {
+      setType('aporte');
+      setAnon(false);
+    }
+  }, [isFinished, isModerator]);
 
   return (
     <>
-      {showRating && !isModerator && (
-        <KickoffPresentationRatingModal
-          presentationId={presentationId}
-          presentationTitle={presentationTitle}
-          mandatory
-          onDone={() => setShowRating(false)}
-        />
-      )}
-
       <div className="flex flex-col gap-6 max-w-2xl mx-auto">
         {/* Header */}
         <div className="rounded-2xl bg-gradient-to-br from-purple-900 to-indigo-900 p-6 text-white">
@@ -124,30 +115,25 @@ export default function KickoffQuestionRoom({ presentationId, presentationTitle,
 
         {/* Finished banner */}
         {isFinished && !isModerator && (
-          <div className="rounded-2xl border border-purple-200 bg-purple-50 p-4 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-purple-800">La presentación ha finalizado</p>
-              <p className="text-xs text-purple-500 mt-0.5">¿Ya calificaste la presentación?</p>
-            </div>
-            <button onClick={() => setShowRating(true)}
-              className="flex-shrink-0 px-4 py-2 text-xs font-semibold bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors">
-              Calificar ⭐
-            </button>
+          <div className="rounded-2xl border border-purple-200 bg-purple-50 p-4">
+            <p className="text-sm font-semibold text-purple-800">La presentación ha finalizado</p>
+            <p className="text-xs text-purple-500 mt-0.5">Si aún no registraste tu aporte, todavía puedes enviarlo.</p>
           </div>
         )}
 
-        {/* Submit form — only while active */}
-        {!isModerator && !isFinished && (
+        {/* Submit form: after finish only aporte remains enabled */}
+        {canSubmitParticipation && (
           <div className="rounded-2xl border border-slate-200 bg-white p-5 flex flex-col gap-4">
             {/* Type toggle */}
             <div className="flex gap-2">
               <button
+                disabled={isFinished}
                 onClick={() => { setType('question'); setSent(false); }}
                 className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-colors border ${
                   type === 'question'
                     ? 'bg-purple-600 text-white border-purple-600'
                     : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
-                }`}
+                } ${isFinished ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 ❓ Pregunta
               </button>
@@ -205,7 +191,7 @@ export default function KickoffQuestionRoom({ presentationId, presentationTitle,
                     type === 'aporte' ? 'bg-teal-600 hover:bg-teal-700' : 'bg-purple-600 hover:bg-purple-700'
                   }`}
                 >
-                  {sending ? 'Enviando…' : 'Enviar'}
+                  {sending ? 'Enviando...' : isFinished ? 'Enviar aporte' : 'Enviar'}
                 </button>
               </div>
             </div>

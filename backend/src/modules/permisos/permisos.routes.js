@@ -55,7 +55,15 @@ router.post("/:id/aprobar-parcial", approvalLimiter, controller.aprobarParcial);
 // Subir justificantes (colaborador) - con multer para archivos
 router.post("/:id/justificantes", uploadLimiter, (req, res, next) => {
   controller.upload.any()(req, res, (err) => {
-    if (err) return res.status(400).json({ ok: false, message: err.message });
+    if (err) {
+      let message = err.message;
+      if (err.code === "LIMIT_FILE_SIZE") {
+        message = "El archivo supera el tamaño máximo permitido de 10 MB. Comprímelo o sube uno más liviano.";
+      } else if (err.code === "LIMIT_FILE_COUNT") {
+        message = "Superaste el número máximo de archivos permitidos (10).";
+      }
+      return res.status(400).json({ ok: false, message });
+    }
     next();
   });
 }, controller.uploadJustificantes);

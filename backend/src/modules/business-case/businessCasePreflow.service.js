@@ -257,17 +257,18 @@ function mapBusinessCaseEquipmentToRequestList(businessCase) {
     const backupType = normalizeBcEquipmentType(pair?.backup_type || backup?.type);
 
     if (primary?.id) {
-      items.push({ ...primary, _bc_type: primaryType });
+      // primary_name viene de saveEquipmentDetailsV2 cuando está disponible
+      items.push({ ...primary, _bc_type: primaryType, _resolved_name: pair?.primary_name || null });
     }
     if (backup?.id) {
-      items.push({ ...backup, _bc_type: backupType });
+      items.push({ ...backup, _bc_type: backupType, _resolved_name: pair?.backup_name || null });
     }
   });
 
   const byKey = new Map();
   items.forEach((item, index) => {
     const id = item?.id || null;
-    const name = item?.name || item?.modelo || item?.description || (id ? `Equipo ${id}` : `Equipo ${index + 1}`);
+    const name = item?._resolved_name || item?.name || item?.modelo || item?.description || (id ? `Equipo ${id}` : `Equipo ${index + 1}`);
     const type = normalizeBcEquipmentType(item?._bc_type || item?.type);
     const key = `${id || "x"}-${name}-${type}`;
     if (!byKey.has(key)) {

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../core/auth/AuthContext';
 import KickoffQuestionRoom from '../components/KickoffQuestionRoom';
+import { KickoffAutoStartCountdown } from '../components/KickoffTimer';
 import kickoffApi from '../api/kickoffApi';
 
 const ADMIN_ROLES = new Set(['jefe_ti', 'admin', 'administrador']);
@@ -50,20 +51,19 @@ export default function KickoffQuestionRoomPage() {
     );
   }
 
-  const canJoin = ['active', 'questions_open'].includes(presentation?.status);
+  const canJoin = ['active', 'questions_open', 'questions_closed', 'finished'].includes(presentation?.status);
 
   if (!canJoin && !isModerator) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center text-center px-4">
+      <div className="min-h-screen flex items-center justify-center text-center px-4" style={{ background: '#f4f8fc' }}>
         <div>
-          <div className="text-4xl mb-4">🔒</div>
-          <h2 className="font-bold text-slate-800 text-lg">Sala cerrada</h2>
-          <p className="text-slate-500 text-sm mt-2">
-            La sala de preguntas no está activa en este momento.<br />
-            Estado actual: <strong>{presentation?.status}</strong>
+          <div className="text-4xl mb-4">⏳</div>
+          <h2 className="font-bold text-lg" style={{ color: '#0a1628' }}>Presentación no iniciada</h2>
+          <p className="text-sm mt-2" style={{ color: '#6b8aaa' }}>
+            La sala estará disponible cuando el presentador inicie la presentación.
           </p>
-          <button onClick={() => navigate('/dashboard/kickoff')} className="mt-4 text-sm text-blue-600 hover:underline">
-            Volver al cronograma
+          <button onClick={() => navigate('/dashboard/kickoff')} className="mt-4 text-xs font-mono font-bold" style={{ color: '#00a8d4' }}>
+            ← VOLVER AL CRONOGRAMA
           </button>
         </div>
       </div>
@@ -71,18 +71,21 @@ export default function KickoffQuestionRoomPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen" style={{ background: '#f4f8fc' }}>
+      <KickoffAutoStartCountdown presentation={presentation} />
       <div className="max-w-2xl mx-auto px-4 py-8">
         <button
           onClick={() => navigate(-1)}
-          className="mb-6 flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors"
+          className="mb-6 flex items-center gap-1.5 text-xs font-bold font-mono tracking-widest uppercase transition-colors"
+          style={{ color: '#6b8aaa' }}
         >
-          ← Volver a la presentación
+          ← VOLVER
         </button>
         <KickoffQuestionRoom
           presentationId={presentationId}
           presentationTitle={presentation?.title}
           isModerator={isModerator}
+          isPresenter={isPresenter}
         />
       </div>
     </div>

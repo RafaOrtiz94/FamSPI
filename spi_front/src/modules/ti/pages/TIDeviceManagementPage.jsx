@@ -7,32 +7,48 @@ import {
   FiClock,
   FiCpu,
   FiDownload,
+  FiEdit2,
   FiFileText,
+  FiLock,
+  FiPackage,
   FiPlus,
   FiRefreshCw,
   FiSearch,
+  FiTrash2,
   FiUser,
+  FiX,
 } from "react-icons/fi";
 import Button from "../../../core/ui/components/Button";
+import Modal from "../../../core/ui/components/Modal";
 import { useUI } from "../../../core/ui/UIContext";
 import { getUsers } from "../../../core/api/usersApi";
 import {
   assignTiAsset,
+  assignMultipleTiAssets,
   clearTiMaintenance,
   completeTiMaintenance,
   createTiAsset,
+  createTiAccessory,
   createTiMaintenance,
+  deleteTiAccessory,
+  downloadTiActa,
+  getTiActaRecipientInfo,
+  listTiAllActas,
   downloadTiMaintenanceReport,
+  uploadTiActaSigned,
   generateTiMaintenanceFuture,
   generateTiMaintenanceReport,
   getTiAssetAssignmentsHistory,
   getTiAssetHistory,
+  listTiAccessories,
+  listTiActas,
   listTiAssets,
   listTiMaintenance,
   listTiMaintenanceReports,
   refreshTiMaintenanceSchedule,
   requestTiMaintenanceDelivery,
   setTiMaintenanceCoordinationDate,
+  updateTiAccessory,
   updateTiAsset,
   updateTiAssetStatus,
 } from "../../../core/api/tiAssetsApi";
@@ -45,6 +61,77 @@ const STATUS_LABELS = {
   retired: "Dado de baja",
   available: "Disponible",
 };
+
+// Subcomponent: Todas las actas
+function TIActasView() {
+  const { showToast } = useUI();
+  const [allActas, setAllActas] = useState([]);
+  const [actasLoading, setActasLoading] = useState(false);
+
+  useEffect(() => {
+    setActasLoading(true);
+    listTiAllActas()
+      .then((rows) => setAllActas(rows || []))
+      .catch(() => showToast("Error al cargar actas", "error"))
+      .finally(() => setActasLoading(false));
+  }, [showToast]);
+
+  if (actasLoading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <FiRefreshCw size={20} className="animate-spin text-slate-300" />
+      </div>
+    );
+  }
+
+  if (allActas.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-14 text-center">
+        <FiFileText size={32} className="text-slate-200 mb-3" />
+        <p className="text-sm font-medium text-slate-500">Sin actas generadas</p>
+        <p className="text-xs text-slate-400 mt-1">Las actas se crean automáticamente al asignar o retirar equipos.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {allActas.map((acta) => (
+        <div key={acta.id} className="rounded-xl border border-slate-200 bg-white p-4 flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                acta.tipo === "entrega" ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"
+              }`}>
+                {acta.tipo}
+              </span>
+              <span className="text-xs font-mono font-semibold text-slate-600">#{String(acta.id).padStart(6, "0")}</span>
+              {acta.is_complete ? (
+                <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700">
+                  <FiCheck size={9} /> Firmada
+                </span>
+              ) : (
+                <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                  Pendiente
+                </span>
+              )}
+            </div>
+            <p className="text-xs font-medium text-slate-800">{acta.recipient_nombre || "Sin nombre"}</p>
+            <p className="text-[10px] text-slate-500 mt-0.5">{acta.recipient_cargo || "-"} · {acta.asset_name || "-"}</p>
+            <p className="text-[10px] text-slate-400">{new Date(acta.generated_at).toLocaleString("es-EC", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => downloadTiActa(acta.id, acta.tipo)}
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors whitespace-nowrap"
+          >
+            <FiDownload size={12} className="inline mr-1" /> PDF
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const STATUS_COLORS = {
   unassigned: "bg-slate-100 text-slate-600",
@@ -70,6 +157,17 @@ const EMPTY_FORM = {
   purchase_date: "",
   characteristics: "",
   maintenance_frequency_months: 12,
+};
+
+// JSONB characteristics can arrive as object {} from DB — always stringify to string for display/input
+const safeChars = (val) => {
+  if (!val) return "";
+  if (typeof val === "string") return val;
+  if (typeof val === "object") {
+    const keys = Object.keys(val);
+    return keys.length ? JSON.stringify(val) : "";
+  }
+  return String(val);
 };
 
 const Label = ({ children, required }) => (
@@ -162,10 +260,37 @@ const TIDeviceManagementPage = () => {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editFields, setEditFields] = useState({});
-  const [assignUserId, setAssignUserId] = useState("");
   const [newStatus, setNewStatus] = useState("unassigned");
   const [coordinationDates, setCoordinationDates] = useState({});
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  // Lock/unlock edición de info del equipo
+  const [isEditing, setIsEditing] = useState(false);
+  // Accesorios
+  const [accessories, setAccessories] = useState([]);
+  const [accessoriesLoading, setAccessoriesLoading] = useState(false);
+  const [showAccForm, setShowAccForm] = useState(false);
+  const [accForm, setAccForm] = useState({ name: "", brand: "", model: "", serial_number: "", imei: "", is_new: false, physical_condition: "", observations: "", numero_corporativo: "" });
+  const [editingAccId, setEditingAccId] = useState(null);
+  // Modal de asignación con acta (single asset)
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [assignModal, setAssignModal] = useState({ assigned_to_user_id: "", recipient_nombre: "", recipient_cedula: "", recipient_cargo: "", reason: "", acta_items: [] });
+  const [recipientLoading, setRecipientLoading] = useState(false);
+  const [recipientSource, setRecipientSource] = useState(null); // 'profile' | 'partial' | 'empty' | null
+
+  // Modal de asignación múltiple (batch)
+  const [showBatchAssignModal, setShowBatchAssignModal] = useState(false);
+  const [selectedAssets, setSelectedAssets] = useState(new Set());
+  const [batchAssignForm, setBatchAssignForm] = useState({ assigned_to_user_id: "", recipient_nombre: "", recipient_cedula: "", recipient_cargo: "", reason: "" });
+  const [batchRecipientLoading, setBatchRecipientLoading] = useState(false);
+  const [batchRecipientSource, setBatchRecipientSource] = useState(null);
+
+  // Actas
+  const [actas, setActas] = useState([]);
+  const [actasLoading, setActasLoading] = useState(false);
+
+  // Tabs: 'dispositivos' | 'todas-actas'
+  const [activeTab, setActiveTab] = useState('dispositivos');
+  const [uploadingActaId, setUploadingActaId] = useState(null);
   const [deviceFilter, setDeviceFilter] = useState("all");
   const [showManualForm, setShowManualForm] = useState(false);
   const [reports, setReports] = useState([]);
@@ -248,10 +373,34 @@ const TIDeviceManagementPage = () => {
     }
   };
 
+  const loadAccessories = useCallback(async (assetId) => {
+    setAccessoriesLoading(true);
+    try {
+      const rows = await listTiAccessories(assetId);
+      setAccessories(Array.isArray(rows) ? rows : []);
+    } catch (_e) {
+      setAccessories([]);
+    } finally {
+      setAccessoriesLoading(false);
+    }
+  }, []);
+
+  const loadActas = useCallback(async (assetId) => {
+    setActasLoading(true);
+    try {
+      const rows = await listTiActas(assetId);
+      setActas(Array.isArray(rows) ? rows : []);
+    } catch (_e) {
+      setActas([]);
+    } finally {
+      setActasLoading(false);
+    }
+  }, []);
+
   const handleSelectAsset = (a) => {
     setSelectedId(a.id);
+    setIsEditing(false);
     setNewStatus(a.status || "unassigned");
-    setAssignUserId(a.assigned_to_user_id ? String(a.assigned_to_user_id) : "");
     setEditFields({
       name: a.name || "",
       brand: a.brand || "",
@@ -259,10 +408,14 @@ const TIDeviceManagementPage = () => {
       serial_number: a.serial_number || "",
       imei: a.imei || "",
       purchase_date: a.purchase_date ? String(a.purchase_date).slice(0, 10) : "",
-      characteristics: a.characteristics || "",
+      characteristics: safeChars(a.characteristics),
       maintenance_frequency_months: a.maintenance_frequency_months || 12,
     });
+    setShowAccForm(false);
+    setEditingAccId(null);
     loadHistory(a.id);
+    loadAccessories(a.id);
+    loadActas(a.id);
   };
 
   const setField = (key) => (e) =>
@@ -306,20 +459,283 @@ const TIDeviceManagementPage = () => {
     }
   };
 
+  const openAssignModal = () => {
+    if (!selected) return;
+    const acItems = [
+      {
+        item_type: "equipo",
+        asset_id: selected.id,
+        name: selected.name,
+        brand_model: [selected.brand, selected.model].filter(Boolean).join(" "),
+        serial_imei: [selected.serial_number, selected.imei].filter(Boolean).join(" / ") || "-",
+        is_new: false,
+        physical_condition: "",
+        observations: "",
+      },
+      ...accessories.map((acc) => ({
+        item_type: "accesorio",
+        accessory_id: acc.id,
+        name: acc.name,
+        brand_model: [acc.brand, acc.model].filter(Boolean).join(" "),
+        serial_imei: [acc.serial_number, acc.imei].filter(Boolean).join(" / ") || "-",
+        is_new: acc.is_new,
+        physical_condition: acc.physical_condition ?? "",
+        observations: acc.observations || "",
+      })),
+    ];
+    const preUser = selected.assigned_to_user_id ? String(selected.assigned_to_user_id) : "";
+    const preUserObj = users.find((u) => String(u.id) === preUser);
+    const preNombre  = preUserObj ? (preUserObj.fullname || preUserObj.name || preUserObj.email) : "";
+
+    setAssignModal({
+      assigned_to_user_id: preUser,
+      recipient_nombre: preNombre,
+      recipient_cedula: "",
+      recipient_cargo: "",
+      reason: "",
+      acta_items: acItems,
+    });
+    setRecipientSource(null);
+    setShowAssignModal(true);
+
+    // Auto-fetch profile if there's a current assignee
+    if (preUser) {
+      fetchAndFillRecipient(preUser, preNombre);
+    }
+  };
+
   const doAssign = async () => {
     if (!selected) return;
     setSaving(true);
     try {
-      await assignTiAsset(selected.id, {
-        assigned_to_user_id: assignUserId ? Number(assignUserId) : null,
-      });
-      showToast(assignUserId ? "Equipo asignado" : "Asignación liberada", "success");
+      const payload = {
+        assigned_to_user_id: assignModal.assigned_to_user_id ? Number(assignModal.assigned_to_user_id) : null,
+        reason: assignModal.reason || null,
+        recipient_nombre: assignModal.recipient_nombre || null,
+        recipient_cedula: assignModal.recipient_cedula || null,
+        recipient_cargo: assignModal.recipient_cargo || null,
+        acta_items: assignModal.acta_items.map((it) => ({
+          ...it,
+          physical_condition: it.physical_condition !== "" && it.physical_condition != null ? Number(it.physical_condition) : null,
+        })),
+      };
+      const result = await assignTiAsset(selected.id, payload);
+      const tipoMsg = payload.assigned_to_user_id ? "Equipo asignado" : "Asignación liberada";
+      showToast(`${tipoMsg}${result?.acta_id ? ` · Acta #${result.acta_id} generada` : ""}`, "success");
+      setShowAssignModal(false);
       await loadAll();
       loadHistory(selected.id);
+      loadActas(selected.id);
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo actualizar asignación", "error");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Batch assign multiple assets
+  const doBatchAssign = async () => {
+    if (!selectedAssets.size) {
+      showToast("Selecciona al menos un equipo", "error");
+      return;
+    }
+    setSaving(true);
+    try {
+      // Build acta items from selected assets with their state data
+      const acta_items = Array.from(selectedAssets).map((assetId) => {
+        const asset = assets.find((a) => a.id === assetId);
+        const itemKey = `asset-${assetId}`;
+        const itemData = batchAssignForm[itemKey] || {};
+
+        return {
+          item_type: "equipo",
+          asset_id: assetId,
+          name: asset?.name || "",
+          brand_model: [asset?.brand, asset?.model].filter(Boolean).join(" ") || "",
+          serial_imei: [asset?.serial_number, asset?.imei].filter(Boolean).join(" / ") || null,
+          is_new: itemData.is_new !== null ? itemData.is_new : null,
+          physical_condition: itemData.physical_condition !== "" && itemData.physical_condition != null ? Number(itemData.physical_condition) : null,
+          observations: itemData.observations || null,
+        };
+      });
+
+      const payload = {
+        asset_ids: Array.from(selectedAssets),
+        assigned_to_user_id: batchAssignForm.assigned_to_user_id ? Number(batchAssignForm.assigned_to_user_id) : null,
+        reason: batchAssignForm.reason || null,
+        recipient_nombre: batchAssignForm.recipient_nombre || null,
+        recipient_cedula: batchAssignForm.recipient_cedula || null,
+        recipient_cargo: batchAssignForm.recipient_cargo || null,
+        acta_items, // Include the items with their state data
+      };
+      const result = await assignMultipleTiAssets(payload);
+      showToast(`${result.assets_assigned} equipos asignados · Acta #${result.acta_code} generada`, "success");
+      setShowBatchAssignModal(false);
+      setSelectedAssets(new Set());
+      setBatchAssignForm({ assigned_to_user_id: "", recipient_nombre: "", recipient_cedula: "", recipient_cargo: "", reason: "" });
+      await loadAll();
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo asignar múltiples equipos", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Batch helper: fetch profile
+  const fetchAndFillBatchRecipient = async (userId, baseNombre = "") => {
+    if (!userId) {
+      setBatchRecipientSource(null);
+      return;
+    }
+    setBatchRecipientLoading(true);
+    try {
+      const info = await getTiActaRecipientInfo(userId);
+      const nombre  = info?.nombre  || baseNombre;
+      const cedula  = info?.cedula  || "";
+      const cargo   = info?.cargo   || "";
+
+      setBatchAssignForm((p) => ({
+        ...p,
+        recipient_nombre: nombre,
+        recipient_cedula: cedula,
+        recipient_cargo:  cargo,
+      }));
+
+      if (cedula && cargo) {
+        setBatchRecipientSource("profile");
+      } else if (nombre) {
+        setBatchRecipientSource("partial");
+      } else {
+        setBatchRecipientSource("empty");
+      }
+    } catch (error) {
+      console.error("Error fetching batch recipient info:", error);
+    } finally {
+      setBatchRecipientLoading(false);
+    }
+  };
+
+  // Shared helper: fetch profile and update modal recipient fields
+  const fetchAndFillRecipient = async (userId, baseNombre = "") => {
+    if (!userId) {
+      setRecipientSource(null);
+      return;
+    }
+    setRecipientLoading(true);
+    try {
+      const info = await getTiActaRecipientInfo(userId);
+      const nombre  = info?.nombre  || baseNombre;
+      const cedula  = info?.cedula  || "";
+      const cargo   = info?.cargo   || "";
+
+      setAssignModal((p) => ({
+        ...p,
+        recipient_nombre: nombre,
+        recipient_cedula: cedula,
+        recipient_cargo:  cargo,
+      }));
+
+      // Determine data source quality for UX indicator
+      if (cedula && cargo) {
+        setRecipientSource("profile");     // full data from profile
+      } else if (nombre) {
+        setRecipientSource("partial");     // only name, no cedula/cargo
+      } else {
+        setRecipientSource("empty");       // new hire — nothing in system
+      }
+    } catch (_e) {
+      setRecipientSource("empty");
+    } finally {
+      setRecipientLoading(false);
+    }
+  };
+
+  const handleModalUserChange = async (userId) => {
+    // Immediate optimistic update from in-memory users list
+    const u = users.find((x) => String(x.id) === String(userId));
+    const fallbackNombre = u ? (u.fullname || u.name || u.email) : "";
+    setAssignModal((p) => ({
+      ...p,
+      assigned_to_user_id: userId,
+      recipient_nombre: fallbackNombre,
+      recipient_cedula: "",
+      recipient_cargo:  "",
+    }));
+    setRecipientSource(null);
+
+    // Then fetch full profile (cedula + cargo + corrected name)
+    await fetchAndFillRecipient(userId, fallbackNombre);
+  };
+
+  const saveAccessory = async () => {
+    if (!selected || !accForm.name.trim()) return showToast("El nombre es requerido", "warning");
+    setSaving(true);
+    try {
+      if (editingAccId) {
+        await updateTiAccessory(selected.id, editingAccId, {
+          ...accForm,
+          physical_condition: accForm.physical_condition !== "" ? Number(accForm.physical_condition) : null,
+        });
+        showToast("Accesorio actualizado", "success");
+      } else {
+        await createTiAccessory(selected.id, {
+          ...accForm,
+          physical_condition: accForm.physical_condition !== "" ? Number(accForm.physical_condition) : null,
+        });
+        showToast("Accesorio agregado", "success");
+      }
+      setAccForm({ name: "", brand: "", model: "", serial_number: "", imei: "", is_new: false, physical_condition: "", observations: "", numero_corporativo: "" });
+      setShowAccForm(false);
+      setEditingAccId(null);
+      await loadAccessories(selected.id);
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo guardar el accesorio", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const startEditAccessory = (acc) => {
+    setEditingAccId(acc.id);
+    setAccForm({
+      name: acc.name || "",
+      brand: acc.brand || "",
+      model: acc.model || "",
+      serial_number: acc.serial_number || "",
+      imei: acc.imei || "",
+      is_new: Boolean(acc.is_new),
+      physical_condition: acc.physical_condition ?? "",
+      observations: acc.observations || "",
+      numero_corporativo: acc.numero_corporativo || "",
+    });
+    setShowAccForm(true);
+  };
+
+  const deleteAccessory = async (accId) => {
+    if (!selected) return;
+    setSaving(true);
+    try {
+      await deleteTiAccessory(selected.id, accId);
+      showToast("Accesorio eliminado", "success");
+      await loadAccessories(selected.id);
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo eliminar el accesorio", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSignedActaUpload = async (actaId, file) => {
+    if (!file) return;
+    setUploadingActaId(actaId);
+    try {
+      await uploadTiActaSigned(actaId, file);
+      showToast("Acta firmada subida. Checklist del colaborador actualizado.", "success");
+      if (selected) loadActas(selected.id);
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo subir el acta firmada", "error");
+    } finally {
+      setUploadingActaId(null);
     }
   };
 
@@ -583,6 +999,35 @@ const TIDeviceManagementPage = () => {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-slate-200">
+        <button
+          type="button"
+          onClick={() => { setActiveTab('dispositivos'); setShowCreate(false); }}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'dispositivos'
+              ? 'border-blue-500 text-blue-600'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          Dispositivos
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('todas-actas')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'todas-actas'
+              ? 'border-blue-500 text-blue-600'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          Actas generadas
+        </button>
+      </div>
+
+      {activeTab === 'dispositivos' && (
+      <>
+
       {/* Create Form */}
       {showCreate && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -686,6 +1131,19 @@ const TIDeviceManagementPage = () => {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
+            {selectedAssets.size > 0 && (
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                icon={FiUser}
+                disabled={saving}
+                onClick={() => setShowBatchAssignModal(true)}
+                className="w-full mt-2"
+              >
+                Asignar {selectedAssets.size} equipo{selectedAssets.size !== 1 ? 's' : ''}
+              </Button>
+            )}
           </div>
           <div className="flex-1 overflow-auto p-3 space-y-1.5 max-h-[500px]">
             {loading ? (
@@ -699,16 +1157,36 @@ const TIDeviceManagementPage = () => {
               </div>
             ) : (
               filteredAssets.map((a) => (
-                <button
+                <div
                   key={a.id}
-                  type="button"
-                  onClick={() => handleSelectAsset(a)}
-                  className={`w-full rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                  className={`w-full rounded-xl border px-3 py-2.5 transition-colors flex items-center gap-2 ${
                     String(selectedId) === String(a.id)
                       ? "border-slate-300 bg-slate-50 shadow-sm"
                       : "border-transparent hover:border-slate-200 hover:bg-slate-50"
                   }`}
                 >
+                  {/* Checkbox for batch selection */}
+                  <input
+                    type="checkbox"
+                    checked={selectedAssets.has(a.id)}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      const newSelected = new Set(selectedAssets);
+                      if (newSelected.has(a.id)) {
+                        newSelected.delete(a.id);
+                      } else {
+                        newSelected.add(a.id);
+                      }
+                      setSelectedAssets(newSelected);
+                    }}
+                    className="w-4 h-4 rounded cursor-pointer flex-shrink-0"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAsset(a)}
+                    className="flex-1 text-left"
+                  >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-slate-900 truncate">
@@ -742,7 +1220,8 @@ const TIDeviceManagementPage = () => {
                       />
                     </div>
                   )}
-                </button>
+                  </button>
+                </div>
               ))
             )}
           </div>
@@ -780,105 +1259,186 @@ const TIDeviceManagementPage = () => {
 
               {/* Info section */}
               <div>
-                <SectionTitle icon={FiCpu}>Información del equipo</SectionTitle>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <FieldInput
-                    label="Nombre"
-                    required
-                    value={editFields.name || ""}
-                    onChange={setEditField("name")}
-                  />
-                  <FieldInput
-                    label="Marca"
-                    value={editFields.brand || ""}
-                    onChange={setEditField("brand")}
-                  />
-                  <FieldInput
-                    label="Modelo"
-                    value={editFields.model || ""}
-                    onChange={setEditField("model")}
-                  />
-                  <FieldInput
-                    label="Número de serie"
-                    required
-                    value={editFields.serial_number || ""}
-                    onChange={setEditField("serial_number")}
-                  />
-                  <FieldInput
-                    label="IMEI (opcional)"
-                    value={editFields.imei || ""}
-                    onChange={setEditField("imei")}
-                  />
-                  <div>
-                    <Label>Fecha de compra</Label>
-                    <input
-                      type="date"
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
-                      value={editFields.purchase_date || ""}
-                      onChange={setEditField("purchase_date")}
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <FieldInput
-                      label="Características"
-                      placeholder="RAM, disco, procesador, etc."
-                      value={editFields.characteristics || ""}
-                      onChange={setEditField("characteristics")}
-                    />
-                  </div>
-                  <div>
-                    <Label>Frec. mantenimiento (meses)</Label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={24}
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
-                      value={editFields.maintenance_frequency_months || 12}
-                      onChange={(e) =>
-                        setEditFields((p) => ({
-                          ...p,
-                          maintenance_frequency_months: Number(e.target.value || 12),
-                        }))
-                      }
-                    />
-                  </div>
+                <div className="flex items-center justify-between mb-3">
+                  <SectionTitle icon={FiCpu}>Información del equipo</SectionTitle>
+                  {!isEditing ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(true)}
+                      className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+                    >
+                      <FiEdit2 size={12} /> Habilitar edición
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => { setIsEditing(false); handleSelectAsset(selected); }}
+                      className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 transition-colors"
+                    >
+                      <FiX size={12} /> Cancelar
+                    </button>
+                  )}
                 </div>
-                <div className="mt-3 flex justify-end">
-                  <Button
+                {isEditing ? (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <FieldInput label="Nombre" required value={editFields.name || ""} onChange={setEditField("name")} />
+                    <FieldInput label="Marca" value={editFields.brand || ""} onChange={setEditField("brand")} />
+                    <FieldInput label="Modelo" value={editFields.model || ""} onChange={setEditField("model")} />
+                    <FieldInput label="Número de serie" required value={editFields.serial_number || ""} onChange={setEditField("serial_number")} />
+                    <FieldInput label="IMEI (opcional)" value={editFields.imei || ""} onChange={setEditField("imei")} />
+                    <div>
+                      <Label>Fecha de compra</Label>
+                      <input type="date" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors" value={editFields.purchase_date || ""} onChange={setEditField("purchase_date")} />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <FieldInput label="Características" placeholder="RAM, disco, procesador, etc." value={safeChars(editFields.characteristics)} onChange={setEditField("characteristics")} />
+                    </div>
+                    <div>
+                      <Label>Frec. mantenimiento (meses)</Label>
+                      <input type="number" min={1} max={24} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors" value={editFields.maintenance_frequency_months || 12} onChange={(e) => setEditFields((p) => ({ ...p, maintenance_frequency_months: Number(e.target.value || 12) }))} />
+                    </div>
+                    <div className="sm:col-span-2 flex justify-end">
+                      <Button type="button" variant="primary" icon={FiCheck} disabled={saving} onClick={async () => { await saveAsset(); setIsEditing(false); }}>
+                        Guardar cambios
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                    {[
+                      ["Nombre", selected.name],
+                      ["Marca", selected.brand || "-"],
+                      ["Modelo", selected.model || "-"],
+                      ["N° de serie", selected.serial_number || "-"],
+                      ["IMEI", selected.imei || "-"],
+                      ["Fecha de compra", selected.purchase_date ? String(selected.purchase_date).slice(0, 10) : "-"],
+                      ["Características", safeChars(selected.characteristics) || "-"],
+                      ["Frec. mantenimiento", `${selected.maintenance_frequency_months || 12} meses`],
+                    ].map(([lbl, val]) => (
+                      <div key={lbl} className="flex flex-col">
+                        <span className="text-xs text-slate-400">{lbl}</span>
+                        <span className="text-slate-800 font-medium truncate">{val}</span>
+                      </div>
+                    ))}
+                    <div className="col-span-2 flex items-center gap-1.5 mt-1 text-xs text-slate-400">
+                      <FiLock size={10} /> Bloqueado — usa "Habilitar edición" para modificar
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Accessories */}
+              <div className="border-t border-slate-100 pt-5">
+                <div className="flex items-center justify-between mb-3">
+                  <SectionTitle icon={FiPackage}>Accesorios</SectionTitle>
+                  <button
                     type="button"
-                    variant="secondary"
-                    icon={FiCheck}
-                    disabled={saving}
-                    onClick={saveAsset}
+                    onClick={() => { setShowAccForm((v) => !v); setEditingAccId(null); setAccForm({ name: "", brand: "", model: "", serial_number: "", imei: "", is_new: false, physical_condition: "", observations: "", numero_corporativo: "" }); }}
+                    className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors"
                   >
-                    Guardar cambios
-                  </Button>
+                    {showAccForm ? <><FiX size={12} /> Cancelar</> : <><FiPlus size={12} /> Agregar accesorio</>}
+                  </button>
                 </div>
+                {showAccForm && (
+                  <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="col-span-2">
+                        <Label required>Nombre</Label>
+                        <input className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:border-slate-400" placeholder="Ej: Cargador, Mouse, Funda..." value={accForm.name} onChange={(e) => setAccForm((p) => ({ ...p, name: e.target.value }))} />
+                      </div>
+                      <div>
+                        <Label>Marca</Label>
+                        <input className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:border-slate-400" value={accForm.brand} onChange={(e) => setAccForm((p) => ({ ...p, brand: e.target.value }))} />
+                      </div>
+                      <div>
+                        <Label>Modelo</Label>
+                        <input className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:border-slate-400" value={accForm.model} onChange={(e) => setAccForm((p) => ({ ...p, model: e.target.value }))} />
+                      </div>
+                      <div>
+                        <Label>Serie</Label>
+                        <input className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:border-slate-400" value={accForm.serial_number} onChange={(e) => setAccForm((p) => ({ ...p, serial_number: e.target.value }))} />
+                      </div>
+                      <div>
+                        <Label>Estado (1-10)</Label>
+                        <input type="number" min={1} max={10} className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:border-slate-400" value={accForm.physical_condition} onChange={(e) => setAccForm((p) => ({ ...p, physical_condition: e.target.value }))} />
+                      </div>
+                      <div>
+                        <Label>¿Es nuevo?</Label>
+                        <select className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:border-slate-400" value={accForm.is_new ? "1" : "0"} onChange={(e) => setAccForm((p) => ({ ...p, is_new: e.target.value === "1" }))}>
+                          <option value="0">Usado</option>
+                          <option value="1">Nuevo</option>
+                        </select>
+                      </div>
+                      <div>
+                        <Label>N° corporativo</Label>
+                        <input
+                          className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:border-slate-400"
+                          placeholder="Ej: 0999123456"
+                          value={accForm.numero_corporativo}
+                          onChange={(e) => setAccForm((p) => ({ ...p, numero_corporativo: e.target.value }))}
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <Label>Observaciones</Label>
+                        <input className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:border-slate-400" value={accForm.observations} onChange={(e) => setAccForm((p) => ({ ...p, observations: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div className="flex justify-end">
+                      <Button type="button" variant="primary" icon={FiCheck} disabled={saving} onClick={saveAccessory}>
+                        {editingAccId ? "Actualizar" : "Agregar"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {accessoriesLoading ? (
+                  <p className="text-xs text-slate-400 text-center py-3">Cargando...</p>
+                ) : accessories.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-3">Sin accesorios registrados</p>
+                ) : (
+                  <div className="rounded-xl border border-slate-100 overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-400 uppercase text-[10px]">
+                          <th className="px-3 py-2 text-left font-medium">Nombre</th>
+                          <th className="px-3 py-2 text-left font-medium">Marca/Modelo</th>
+                          <th className="px-3 py-2 text-left font-medium">N° corp.</th>
+                          <th className="px-3 py-2 text-left font-medium">Nuevo/Usado</th>
+                          <th className="px-3 py-2 text-left font-medium">Estado</th>
+                          <th className="px-3 py-2 text-left font-medium"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {accessories.map((acc, i) => (
+                          <tr key={acc.id} className={`border-t border-slate-100 ${i % 2 === 1 ? "bg-slate-50" : ""}`}>
+                            <td className="px-3 py-2 font-medium text-slate-800">{acc.name}</td>
+                            <td className="px-3 py-2 text-slate-500">{[acc.brand, acc.model].filter(Boolean).join(" ") || "-"}</td>
+                            <td className="px-3 py-2 font-mono text-slate-600">{acc.numero_corporativo || "-"}</td>
+                            <td className="px-3 py-2"><span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${acc.is_new ? "bg-green-50 text-green-700" : "bg-slate-100 text-slate-600"}`}>{acc.is_new ? "Nuevo" : "Usado"}</span></td>
+                            <td className="px-3 py-2 text-slate-600">{acc.physical_condition != null ? `${acc.physical_condition}/10` : "-"}</td>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center gap-1">
+                                <button type="button" onClick={() => startEditAccessory(acc)} className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700"><FiEdit2 size={11} /></button>
+                                <button type="button" onClick={() => deleteAccessory(acc.id)} className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500"><FiTrash2 size={11} /></button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
               {/* Assignment */}
               <div className="border-t border-slate-100 pt-5">
                 <SectionTitle icon={FiUser}>Asignación</SectionTitle>
-                <div className="flex gap-2">
-                  <select
-                    value={assignUserId}
-                    onChange={(e) => setAssignUserId(e.target.value)}
-                    className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
-                  >
-                    <option value="">Sin asignación</option>
-                    {users.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.fullname || u.name || u.email}
-                      </option>
-                    ))}
-                  </select>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={saving}
-                    onClick={doAssign}
-                  >
-                    {assignUserId ? "Asignar" : "Liberar"}
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">{selected.assigned_to_name || "Sin asignación"}</p>
+                    {selected.assigned_at && <p className="text-xs text-slate-400">Desde {new Date(selected.assigned_at).toLocaleDateString("es-EC")}</p>}
+                  </div>
+                  <Button type="button" variant="primary" icon={FiUser} disabled={saving} onClick={openAssignModal}>
+                    {selected.assigned_to_user_id ? "Reasignar / Liberar" : "Asignar equipo"}
                   </Button>
                 </div>
               </div>
@@ -954,37 +1514,90 @@ const TIDeviceManagementPage = () => {
                   {historyLoading ? (
                     <p className="text-xs text-slate-400 text-center py-4">Cargando...</p>
                   ) : assignmentsHistory.length === 0 ? (
-                    <p className="text-xs text-slate-400 text-center py-4">
-                      Sin movimientos de asignación
-                    </p>
+                    <p className="text-xs text-slate-400 text-center py-4">Sin movimientos de asignación</p>
                   ) : (
                     assignmentsHistory.map((a, i) => (
-                      <div
-                        key={a.id}
-                        className={`px-3 py-2.5 text-xs ${i < assignmentsHistory.length - 1 ? "border-b border-slate-100" : ""}`}
-                      >
+                      <div key={a.id} className={`px-3 py-2.5 text-xs ${i < assignmentsHistory.length - 1 ? "border-b border-slate-100" : ""}`}>
                         <p className="font-medium text-slate-700">
                           {a.action === "unassign"
                             ? `Liberado por ${a.created_by_name || "usuario"}`
                             : `Asignado a ${a.assigned_to_name || "usuario"} por ${a.created_by_name || "usuario"}`}
                         </p>
-                        <p className="text-slate-500 mt-0.5">
-                          Antes: {a.previous_user_name || "Sin asignación"} · Ahora: {a.assigned_to_name || "Sin asignación"}
-                        </p>
+                        <p className="text-slate-500 mt-0.5">Antes: {a.previous_user_name || "Sin asignación"} · Ahora: {a.assigned_to_name || "Sin asignación"}</p>
                         {a.reason ? <p className="text-slate-500 mt-0.5">Motivo: {a.reason}</p> : null}
-                        <p className="text-slate-400 mt-0.5">
-                          {new Date(a.created_at).toLocaleString("es-EC", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </p>
+                        <p className="text-slate-400 mt-0.5">{new Date(a.created_at).toLocaleString("es-EC", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
                       </div>
                     ))
                   )}
                 </div>
+              </div>
+
+              {/* Actas generadas */}
+              <div className="border-t border-slate-100 pt-5">
+                <SectionTitle icon={FiFileText}>Actas generadas</SectionTitle>
+                {actasLoading ? (
+                  <p className="text-xs text-slate-400 text-center py-3">Cargando actas...</p>
+                ) : actas.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-3">Sin actas generadas para este equipo</p>
+                ) : (
+                  <div className="space-y-2">
+                    {actas.map((acta) => (
+                      <div key={acta.id} className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${acta.tipo === "entrega" ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"}`}>
+                                {acta.tipo}
+                              </span>
+                              <span className="text-xs font-medium text-slate-700">#{String(acta.id).padStart(6, "0")}</span>
+                              {acta.is_complete ? (
+                                <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700">
+                                  <FiCheck size={9} /> Firmada
+                                </span>
+                              ) : (
+                                <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                                  Pendiente firma
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-500 mt-0.5 truncate">{acta.recipient_nombre || "Sin nombre"} · {acta.recipient_cargo || "-"}</p>
+                            <p className="text-[10px] text-slate-400">{new Date(acta.generated_at).toLocaleString("es-EC", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => downloadTiActa(acta.id, acta.tipo)}
+                            className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 hover:text-slate-900 hover:border-slate-300 transition-colors whitespace-nowrap cursor-pointer"
+                          >
+                            <FiDownload size={10} /> PDF
+                          </button>
+                        </div>
+                        {/* Upload firmada */}
+                        {!acta.is_complete ? (
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <span className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors">
+                              {uploadingActaId === acta.id ? (
+                                <><FiRefreshCw size={11} className="animate-spin" /> Subiendo...</>
+                              ) : (
+                                <><FiDownload size={11} className="rotate-180" /> Subir acta firmada (PDF)</>
+                              )}
+                            </span>
+                            <input type="file" accept=".pdf,application/pdf" className="hidden"
+                              disabled={uploadingActaId === acta.id}
+                              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleSignedActaUpload(acta.id, f); e.target.value = ""; }}
+                            />
+                          </label>
+                        ) : (
+                          acta.signed_pdf_drive_url && (
+                            <a href={acta.signed_pdf_drive_url} target="_blank" rel="noreferrer"
+                              className="flex items-center gap-1 text-xs text-green-700 hover:underline">
+                              <FiDownload size={10} /> Ver acta firmada en Drive
+                            </a>
+                          )
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1398,15 +2011,16 @@ const TIDeviceManagementPage = () => {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <a
-                        href={String(r.period || "").match(/^\d{4}-\d{2}$/) ? downloadTiMaintenanceReport({ period_type: "monthly", year: Number(String(r.period).slice(0, 4)), month: Number(String(r.period).slice(5, 7)) }) : downloadTiMaintenanceReport({ period_type: "annual", year: Number(r.period) })}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900"
+                      <button
+                        type="button"
+                        onClick={() => String(r.period || "").match(/^\d{4}-\d{2}$/)
+                          ? downloadTiMaintenanceReport({ period_type: "monthly", year: Number(String(r.period).slice(0, 4)), month: Number(String(r.period).slice(5, 7)) })
+                          : downloadTiMaintenanceReport({ period_type: "annual", year: Number(r.period) })}
+                        className="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 cursor-pointer"
                       >
                         <FiDownload size={12} />
                         PDF
-                      </a>
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -1415,6 +2029,439 @@ const TIDeviceManagementPage = () => {
           </div>
         )}
       </div>
+
+      {/* ── Modal de asignación / retiro con acta ─────────────────────────── */}
+      <Modal
+        open={showAssignModal}
+        onClose={() => setShowAssignModal(false)}
+        title={assignModal.assigned_to_user_id ? "Acta de entrega de equipos" : "Acta de retiro de equipos"}
+        maxWidth="max-w-3xl"
+      >
+        <div className="overflow-auto px-6 py-4 space-y-5" style={{ maxHeight: "65vh" }}>
+              {/* Datos del colaborador */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Datos del colaborador</p>
+                  {/* Profile source indicator */}
+                  {recipientLoading && (
+                    <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                      <FiRefreshCw size={10} className="animate-spin" /> Cargando perfil...
+                    </span>
+                  )}
+                  {!recipientLoading && recipientSource === "profile" && (
+                    <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-700">
+                      <FiCheck size={9} /> Datos del perfil — editables
+                    </span>
+                  )}
+                  {!recipientLoading && recipientSource === "partial" && (
+                    <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                      Perfil incompleto — completa cédula y cargo
+                    </span>
+                  )}
+                  {!recipientLoading && recipientSource === "empty" && (
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                      Sin perfil registrado — ingresa los datos manualmente
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label>Colaborador</Label>
+                    <select
+                      value={assignModal.assigned_to_user_id}
+                      onChange={(e) => handleModalUserChange(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
+                    >
+                      <option value="">Sin asignación (retiro)</option>
+                      {users.map((u) => (
+                        <option key={u.id} value={u.id}>{u.fullname || u.name || u.email}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label required>Nombre completo</Label>
+                    <input
+                      className={`w-full rounded-xl border px-3 py-2 text-sm text-slate-900 focus:outline-none transition-colors ${
+                        recipientLoading
+                          ? "border-slate-200 bg-slate-100 text-slate-400"
+                          : "border-slate-200 bg-white focus:border-blue-400"
+                      }`}
+                      placeholder="Ej: María Fernanda González Ortega"
+                      value={assignModal.recipient_nombre}
+                      disabled={recipientLoading}
+                      onChange={(e) => setAssignModal((p) => ({ ...p, recipient_nombre: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <Label required>Cédula</Label>
+                    <input
+                      className={`w-full rounded-xl border px-3 py-2 text-sm font-mono text-slate-900 focus:outline-none transition-colors ${
+                        recipientLoading
+                          ? "border-slate-200 bg-slate-100 text-slate-400"
+                          : !assignModal.recipient_cedula
+                          ? "border-amber-200 bg-amber-50 focus:border-blue-400 focus:bg-white"
+                          : "border-slate-200 bg-white focus:border-blue-400"
+                      }`}
+                      placeholder="10 dígitos"
+                      value={assignModal.recipient_cedula}
+                      disabled={recipientLoading}
+                      onChange={(e) => setAssignModal((p) => ({ ...p, recipient_cedula: e.target.value }))}
+                    />
+                    {!recipientLoading && !assignModal.recipient_cedula && assignModal.assigned_to_user_id && (
+                      <p className="mt-1 text-[10px] text-amber-600">Cédula no encontrada en el perfil — ingresa manualmente</p>
+                    )}
+                  </div>
+                  <div>
+                    <Label required>Cargo</Label>
+                    <input
+                      className={`w-full rounded-xl border px-3 py-2 text-sm text-slate-900 focus:outline-none transition-colors ${
+                        recipientLoading
+                          ? "border-slate-200 bg-slate-100 text-slate-400"
+                          : !assignModal.recipient_cargo
+                          ? "border-amber-200 bg-amber-50 focus:border-blue-400 focus:bg-white"
+                          : "border-slate-200 bg-white focus:border-blue-400"
+                      }`}
+                      placeholder="Ej: Analista Comercial"
+                      value={assignModal.recipient_cargo}
+                      disabled={recipientLoading}
+                      onChange={(e) => setAssignModal((p) => ({ ...p, recipient_cargo: e.target.value }))}
+                    />
+                    {!recipientLoading && !assignModal.recipient_cargo && assignModal.assigned_to_user_id && (
+                      <p className="mt-1 text-[10px] text-amber-600">Cargo no encontrado en el perfil — ingresa manualmente</p>
+                    )}
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label>Motivo</Label>
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors"
+                      placeholder="Motivo de la asignación / retiro"
+                      value={assignModal.reason}
+                      onChange={(e) => setAssignModal((p) => ({ ...p, reason: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                {/* Hint about editability */}
+                <p className="mt-2 text-[10px] text-slate-400">
+                  Los datos se cargan automáticamente del perfil del colaborador registrado en el sistema. Puedes editarlos antes de generar el acta.
+                </p>
+              </div>
+
+              {/* Tabla de inventario del acta */}
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Inventario y estado de activos</p>
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-slate-800 text-white text-[10px] uppercase">
+                        <th className="px-2 py-2 text-left font-medium w-7">No.</th>
+                        <th className="px-2 py-2 text-left font-medium">Equipo/Accesorio</th>
+                        <th className="px-2 py-2 text-left font-medium">Marca/Modelo</th>
+                        <th className="px-2 py-2 text-left font-medium">Serie/IMEI</th>
+                        <th className="px-2 py-2 text-left font-medium w-24">¿Nuevo o Usado?</th>
+                        <th className="px-2 py-2 text-left font-medium w-20">Estado (1-10)</th>
+                        <th className="px-2 py-2 text-left font-medium">Observaciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {assignModal.acta_items.map((item, idx) => (
+                        <tr key={idx} className={`border-t border-slate-100 ${idx % 2 === 1 ? "bg-slate-50" : ""}`}>
+                          <td className="px-2 py-2 text-slate-500 text-center">{idx + 1}</td>
+                          <td className="px-2 py-2">
+                            <p className="font-medium text-slate-800">{item.name}</p>
+                            <span className={`inline-block rounded-full px-1.5 py-0.5 text-[9px] font-medium ${item.item_type === "equipo" ? "bg-blue-50 text-blue-600" : "bg-slate-100 text-slate-500"}`}>
+                              {item.item_type === "equipo" ? "Equipo" : "Accesorio"}
+                            </span>
+                          </td>
+                          <td className="px-2 py-2 text-slate-500">{item.brand_model || "-"}</td>
+                          <td className="px-2 py-2 text-slate-500 font-mono text-[10px]">{item.serial_imei || "-"}</td>
+                          <td className="px-2 py-2">
+                            <select
+                              value={item.is_new ? "1" : "0"}
+                              onChange={(e) => {
+                                const updated = [...assignModal.acta_items];
+                                updated[idx] = { ...updated[idx], is_new: e.target.value === "1" };
+                                setAssignModal((p) => ({ ...p, acta_items: updated }));
+                              }}
+                              className="w-full rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-xs focus:outline-none focus:border-slate-400"
+                            >
+                              <option value="0">Usado</option>
+                              <option value="1">Nuevo</option>
+                            </select>
+                          </td>
+                          <td className="px-2 py-2">
+                            <input
+                              type="number"
+                              min={1}
+                              max={10}
+                              placeholder="-"
+                              value={item.physical_condition ?? ""}
+                              onChange={(e) => {
+                                const updated = [...assignModal.acta_items];
+                                updated[idx] = { ...updated[idx], physical_condition: e.target.value };
+                                setAssignModal((p) => ({ ...p, acta_items: updated }));
+                              }}
+                              className="w-full rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-xs focus:outline-none focus:border-slate-400"
+                            />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input
+                              type="text"
+                              placeholder="Observación..."
+                              value={item.observations || ""}
+                              onChange={(e) => {
+                                const updated = [...assignModal.acta_items];
+                                updated[idx] = { ...updated[idx], observations: e.target.value };
+                                setAssignModal((p) => ({ ...p, acta_items: updated }));
+                              }}
+                              className="w-full rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-xs focus:outline-none focus:border-slate-400"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-2 text-[10px] text-slate-400">Los campos Equipo/Accesorio, Marca/Modelo y Serie/IMEI se generan automáticamente del registro del activo.</p>
+              </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-100 bg-slate-50">
+          <Button type="button" variant="secondary" onClick={() => setShowAssignModal(false)}>
+            Cancelar
+          </Button>
+          <Button type="button" variant="primary" icon={FiFileText} disabled={saving} onClick={doAssign}>
+            {saving ? "Guardando..." : "Confirmar y generar acta"}
+          </Button>
+        </div>
+      </Modal>
+
+      {/* ── Modal de asignación múltiple ─────────────────────────────────── */}
+      <Modal
+        open={showBatchAssignModal}
+        onClose={() => setShowBatchAssignModal(false)}
+        title={batchAssignForm.assigned_to_user_id ? "Asignar múltiples equipos" : "Liberar múltiples equipos"}
+        maxWidth="max-w-2xl"
+      >
+        <div className="overflow-auto px-6 py-4 space-y-5" style={{ maxHeight: "65vh" }}>
+          {/* Datos del colaborador */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Datos del colaborador</p>
+              {batchRecipientLoading && (
+                <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                  <FiRefreshCw size={10} className="animate-spin" /> Cargando perfil...
+                </span>
+              )}
+              {!batchRecipientLoading && batchRecipientSource === "profile" && (
+                <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-700">
+                  <FiCheck size={9} /> Datos del perfil — editables
+                </span>
+              )}
+              {!batchRecipientLoading && batchRecipientSource === "partial" && (
+                <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                  Perfil incompleto — completa cédula y cargo
+                </span>
+              )}
+              {!batchRecipientLoading && batchRecipientSource === "empty" && (
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                  Sin perfil registrado — ingresa los datos manualmente
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <Label>Colaborador</Label>
+                <select
+                  value={batchAssignForm.assigned_to_user_id}
+                  onChange={(e) => {
+                    const userId = e.target.value;
+                    setBatchAssignForm((p) => ({ ...p, assigned_to_user_id: userId }));
+                    if (userId) {
+                      const user = users.find((u) => String(u.id) === String(userId));
+                      fetchAndFillBatchRecipient(userId, user?.fullname || user?.name || "");
+                    } else {
+                      setBatchRecipientSource(null);
+                    }
+                  }}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
+                >
+                  <option value="">Sin asignación (liberar)</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>{u.fullname || u.name || u.email}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label required>Nombre completo</Label>
+                <input
+                  className={`w-full rounded-xl border px-3 py-2 text-sm text-slate-900 focus:outline-none transition-colors ${
+                    batchRecipientLoading
+                      ? "border-slate-200 bg-slate-100 text-slate-400"
+                      : "border-slate-200 bg-white focus:border-blue-400"
+                  }`}
+                  placeholder="Ej: María Fernanda González Ortega"
+                  value={batchAssignForm.recipient_nombre}
+                  disabled={batchRecipientLoading}
+                  onChange={(e) => setBatchAssignForm((p) => ({ ...p, recipient_nombre: e.target.value }))}
+                />
+              </div>
+              <div>
+                <Label required>Cédula</Label>
+                <input
+                  className={`w-full rounded-xl border px-3 py-2 text-sm font-mono text-slate-900 focus:outline-none transition-colors ${
+                    batchRecipientLoading
+                      ? "border-slate-200 bg-slate-100 text-slate-400"
+                      : !batchAssignForm.recipient_cedula
+                      ? "border-amber-200 bg-amber-50 focus:border-blue-400 focus:bg-white"
+                      : "border-slate-200 bg-white focus:border-blue-400"
+                  }`}
+                  placeholder="10 dígitos"
+                  value={batchAssignForm.recipient_cedula}
+                  disabled={batchRecipientLoading}
+                  onChange={(e) => setBatchAssignForm((p) => ({ ...p, recipient_cedula: e.target.value }))}
+                />
+              </div>
+              <div>
+                <Label required>Cargo</Label>
+                <input
+                  className={`w-full rounded-xl border px-3 py-2 text-sm text-slate-900 focus:outline-none transition-colors ${
+                    batchRecipientLoading
+                      ? "border-slate-200 bg-slate-100 text-slate-400"
+                      : !batchAssignForm.recipient_cargo
+                      ? "border-amber-200 bg-amber-50 focus:border-blue-400 focus:bg-white"
+                      : "border-slate-200 bg-white focus:border-blue-400"
+                  }`}
+                  placeholder="Ej: Analista Comercial"
+                  value={batchAssignForm.recipient_cargo}
+                  disabled={batchRecipientLoading}
+                  onChange={(e) => setBatchAssignForm((p) => ({ ...p, recipient_cargo: e.target.value }))}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <Label>Motivo</Label>
+                <input
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors"
+                  placeholder="Motivo de la asignación / retiro"
+                  value={batchAssignForm.reason}
+                  onChange={(e) => setBatchAssignForm((p) => ({ ...p, reason: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <p className="mt-2 text-[10px] text-slate-400">
+              Se generará una acta con todos los {selectedAssets.size} equipo{selectedAssets.size !== 1 ? 's' : ''} seleccionado{selectedAssets.size !== 1 ? 's' : ''} y sus accesorios.
+            </p>
+          </div>
+
+          {/* Inventario de equipos con estado */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Inventario y estado de activos</p>
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-slate-800 text-white text-[10px] uppercase">
+                    <th className="px-2 py-2 text-left font-medium w-7">No.</th>
+                    <th className="px-2 py-2 text-left font-medium">Equipo</th>
+                    <th className="px-2 py-2 text-left font-medium">Marca/Modelo</th>
+                    <th className="px-2 py-2 text-left font-medium w-24">¿Nuevo o Usado?</th>
+                    <th className="px-2 py-2 text-left font-medium w-20">Estado (1-10)</th>
+                    <th className="px-2 py-2 text-left font-medium">Observaciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from(selectedAssets).map((assetId, idx) => {
+                    const asset = assets.find((a) => a.id === assetId);
+                    if (!asset) return null;
+
+                    // Get or initialize item data
+                    const itemKey = `asset-${assetId}`;
+                    const itemData = batchAssignForm[itemKey] || { is_new: null, physical_condition: null, observations: "" };
+
+                    return (
+                      <tr key={assetId} className={`border-t border-slate-100 ${idx % 2 === 1 ? "bg-slate-50" : ""}`}>
+                        <td className="px-2 py-2 text-slate-500 text-center">{idx + 1}</td>
+                        <td className="px-2 py-2">
+                          <p className="font-medium text-slate-800">{asset.name}</p>
+                          <span className="inline-block rounded-full px-1.5 py-0.5 text-[9px] font-medium bg-blue-50 text-blue-600">
+                            Equipo
+                          </span>
+                        </td>
+                        <td className="px-2 py-2 text-slate-500">{[asset.brand, asset.model].filter(Boolean).join(" ") || "-"}</td>
+                        <td className="px-2 py-2">
+                          <select
+                            value={itemData.is_new ? "1" : "0"}
+                            onChange={(e) => {
+                              setBatchAssignForm((p) => ({
+                                ...p,
+                                [itemKey]: { ...itemData, is_new: e.target.value === "1" }
+                              }));
+                            }}
+                            className="w-full rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-xs focus:outline-none focus:border-slate-400"
+                          >
+                            <option value="0">Usado</option>
+                            <option value="1">Nuevo</option>
+                          </select>
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="number"
+                            min={1}
+                            max={10}
+                            placeholder="-"
+                            value={itemData.physical_condition ?? ""}
+                            onChange={(e) => {
+                              setBatchAssignForm((p) => ({
+                                ...p,
+                                [itemKey]: { ...itemData, physical_condition: e.target.value }
+                              }));
+                            }}
+                            className="w-full rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-xs focus:outline-none focus:border-slate-400"
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="text"
+                            placeholder="Observación..."
+                            value={itemData.observations || ""}
+                            onChange={(e) => {
+                              setBatchAssignForm((p) => ({
+                                ...p,
+                                [itemKey]: { ...itemData, observations: e.target.value }
+                              }));
+                            }}
+                            className="w-full rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-xs focus:outline-none focus:border-slate-400"
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-2 text-[10px] text-slate-400">Completa el estado de cada equipo. Los datos se incluirán en el acta.</p>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-100 bg-slate-50">
+          <Button type="button" variant="secondary" onClick={() => setShowBatchAssignModal(false)}>
+            Cancelar
+          </Button>
+          <Button type="button" variant="primary" icon={FiFileText} disabled={saving} onClick={doBatchAssign}>
+            {saving ? "Guardando..." : "Confirmar y generar acta"}
+          </Button>
+        </div>
+      </Modal>
+
+      </>
+      )}
+
+      {/* Tab: Todas las actas */}
+      {activeTab === 'todas-actas' && (
+        <TIActasView />
+      )}
     </div>
   );
 };
