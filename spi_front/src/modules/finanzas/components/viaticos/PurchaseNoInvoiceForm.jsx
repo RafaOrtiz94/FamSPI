@@ -12,9 +12,13 @@ export default function PurchaseNoInvoiceForm({ onSubmit, loading = false, allow
 
   const [errors, setErrors] = useState({});
 
-  const visitDate = allowance?.visit_date ? String(allowance.visit_date).slice(0, 10) : '';
-  const dateMin = visitDate;
-  const dateMax = visitDate ? new Date(new Date(visitDate).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) : '';
+  const parseRange = (notes, visitDate) => {
+    const inicio = notes?.match(/Inicio:\s*(\d{4}-\d{2}-\d{2})/)?.[1];
+    const cierre = notes?.match(/Cierre:\s*(\d{4}-\d{2}-\d{2})/)?.[1];
+    const base = visitDate ? String(visitDate).slice(0, 10) : '';
+    return { min: inicio || base, max: cierre || base };
+  };
+  const { min: dateMin, max: dateMax } = parseRange(allowance?.notes, allowance?.visit_date);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -102,7 +106,7 @@ export default function PurchaseNoInvoiceForm({ onSubmit, loading = false, allow
         </div>
 
         <div>
-          <label className="mb-1 block text-xs font-medium text-[#374151]">Fecha de compra {dateMin ? `(desde ${dateMin})` : ''}</label>
+          <label className="mb-1 block text-xs font-medium text-[#374151]">Fecha de compra {dateMin && dateMax ? `(${dateMin} — ${dateMax})` : ''}</label>
           <input
             type="date"
             name="purchase_date"

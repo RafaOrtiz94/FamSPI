@@ -16,6 +16,8 @@ import {
   getViaticoReport,
   createManualNote,
   listManualNotes,
+  updateManualNote,
+  deleteManualNote,
   createPurchaseNoInvoice,
   listPurchasesNoInvoice,
   approvePurchaseNoInvoice,
@@ -382,6 +384,28 @@ const ViaticosWorkspace = () => {
       showToast(err?.response?.data?.message || "Error agregando nota", "error");
     } finally {
       setSaving((p) => ({ ...p, [key]: false }));
+    }
+  };
+
+  const handleUpdateManualNote = async (allowanceId, noteId, payload) => {
+    try {
+      await updateManualNote(noteId, payload);
+      showToast("Nota actualizada", "success");
+      await loadManualNotes(allowanceId);
+      await loadData({ silent: true });
+    } catch (err) {
+      showToast(err?.response?.data?.message || "Error actualizando nota", "error");
+    }
+  };
+
+  const handleDeleteManualNote = async (allowanceId, noteId) => {
+    try {
+      await deleteManualNote(noteId);
+      showToast("Nota eliminada", "success");
+      await loadManualNotes(allowanceId);
+      await loadData({ silent: true });
+    } catch (err) {
+      showToast(err?.response?.data?.message || "Error eliminando nota", "error");
     }
   };
 
@@ -842,6 +866,10 @@ const ViaticosWorkspace = () => {
                             notes={manualNotes}
                             isFinance={isFinance}
                             isRequester={user?.email === item.requester_email}
+                            onUpdate={(noteId, payload) => handleUpdateManualNote(item.id, noteId, payload)}
+                            onDelete={(noteId) => handleDeleteManualNote(item.id, noteId)}
+                            dateMin={item.notes?.match(/Inicio:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || String(item.visit_date || '').slice(0, 10)}
+                            dateMax={item.notes?.match(/Cierre:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || String(item.visit_date || '').slice(0, 10)}
                           />
                         </div>
                       </Section>

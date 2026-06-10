@@ -101,23 +101,29 @@ export default function ManualNoteForm({ allowance, onSubmit, loading = false, d
     }
   };
 
-  const visitDate = allowance?.visit_date ? String(allowance.visit_date).slice(0, 10) : '';
-  // Calcular max agregando 30 días al visit_date (rango de tolerancia)
-  const dateMin = visitDate;
-  const dateMax = visitDate ? new Date(new Date(visitDate).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) : '';
+  // Parsear rango exacto desde notes: "[RESUMEN_OPERACIONAL] Inicio: YYYY-MM-DD | Cierre: YYYY-MM-DD"
+  const parseRange = (notes, visitDate) => {
+    const inicio = notes?.match(/Inicio:\s*(\d{4}-\d{2}-\d{2})/)?.[1];
+    const cierre = notes?.match(/Cierre:\s*(\d{4}-\d{2}-\d{2})/)?.[1];
+    const base = visitDate ? String(visitDate).slice(0, 10) : '';
+    return { min: inicio || base, max: cierre || base };
+  };
+  const { min: dateMin, max: dateMax } = parseRange(allowance?.notes, allowance?.visit_date);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border border-[#E5E7EB] bg-white p-6">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div>
-          <label className="mb-1 block text-xs font-medium text-[#374151]">Fecha {dateMin ? `(desde ${dateMin})` : ''}</label>
+          <label className="mb-1 block text-xs font-medium text-[#374151]">
+            Fecha {dateMin && dateMax ? `(${dateMin} — ${dateMax})` : ''}
+          </label>
           <input
             type="date"
             name="issue_date"
             value={form.issue_date}
             onChange={handleChange}
             min={dateMin}
-            max={dateMax || ''}
+            max={dateMax}
             className={`w-full rounded-md border px-3 py-2 text-sm transition focus:outline-none focus:ring-2 focus:ring-[#0EA5E9] focus:ring-offset-2 ${
               errors.issue_date
                 ? 'border-[#DC2626] bg-[#FEE2E2]'

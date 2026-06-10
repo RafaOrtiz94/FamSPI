@@ -111,6 +111,16 @@ export const listManualNotes = async (viaticoId) => {
  return data?.data || [];
 };
 
+export const updateManualNote = async (noteId, payload) => {
+ const { data } = await api.patch(`/viaticos/invoices/manual/${noteId}`, payload);
+ return data?.data || data;
+};
+
+export const deleteManualNote = async (noteId) => {
+ const { data } = await api.delete(`/viaticos/invoices/manual/${noteId}`);
+ return data?.data || data;
+};
+
 // Compras sin factura
 export const createPurchaseNoInvoice = async (viaticoId, payload) => {
  const { data } = await api.post(`/viaticos/${viaticoId}/purchases-no-invoice`, payload);
