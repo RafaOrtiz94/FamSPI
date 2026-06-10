@@ -3370,7 +3370,10 @@ async function updateManualNote({
   assertViaticosAccess(actorUser);
 
   const { rows: noteRows } = await db.query(
-    'SELECT allowance_id FROM travel_allowance_invoices WHERE id = $1 AND document_type = $2',
+    `SELECT tai.allowance_id, ta.requester_email
+     FROM travel_allowance_invoices tai
+     JOIN travel_allowances ta ON ta.id = tai.allowance_id
+     WHERE tai.id = $1 AND tai.document_type = $2`,
     [noteId, 'nota_venta_manual']
   );
 
@@ -3380,7 +3383,13 @@ async function updateManualNote({
     throw err;
   }
 
-  const allowanceId = noteRows[0].allowance_id;
+  const { allowance_id: allowanceId, requester_email } = noteRows[0];
+
+  if (!isFinanceUser(actorUser) && String(actorUser?.email || '').toLowerCase() !== String(requester_email || '').toLowerCase()) {
+    const err = new Error('No tienes permiso para editar esta nota');
+    err.status = 403;
+    throw err;
+  }
 
   const { rows } = await db.query(
     `UPDATE travel_allowance_invoices SET
@@ -3401,7 +3410,10 @@ async function deleteManualNote({ noteId, actorUser }) {
   assertViaticosAccess(actorUser);
 
   const { rows } = await db.query(
-    'SELECT allowance_id FROM travel_allowance_invoices WHERE id = $1 AND document_type = $2',
+    `SELECT tai.allowance_id, ta.requester_email
+     FROM travel_allowance_invoices tai
+     JOIN travel_allowances ta ON ta.id = tai.allowance_id
+     WHERE tai.id = $1 AND tai.document_type = $2`,
     [noteId, 'nota_venta_manual']
   );
 
@@ -3411,7 +3423,13 @@ async function deleteManualNote({ noteId, actorUser }) {
     throw err;
   }
 
-  const allowanceId = rows[0].allowance_id;
+  const { allowance_id: allowanceId, requester_email } = rows[0];
+
+  if (!isFinanceUser(actorUser) && String(actorUser?.email || '').toLowerCase() !== String(requester_email || '').toLowerCase()) {
+    const err = new Error('No tienes permiso para eliminar esta nota');
+    err.status = 403;
+    throw err;
+  }
 
   await db.query(
     'DELETE FROM travel_allowance_invoices WHERE id = $1 AND document_type = $2',

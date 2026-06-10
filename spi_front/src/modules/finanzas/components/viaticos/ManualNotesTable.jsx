@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { FiFile, FiTrash2, FiEdit2, FiCheckCircle, FiClock, FiXCircle, FiCheck, FiX } from 'react-icons/fi';
+import { FiFileText, FiTrash2, FiEdit2, FiCheck, FiX, FiCheckCircle, FiClock, FiXCircle } from 'react-icons/fi';
 
-const formatMoney = (v) =>
+const toMoney = (v) =>
   new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 })
     .format(Number.isFinite(Number(v)) ? Number(v) : 0);
 
-const formatDate = (d) => {
+const fmtDate = (d) => {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('es-EC');
 };
@@ -20,42 +20,38 @@ const EXPENSE_CATEGORIES = [
 ];
 
 const getCategoryLabel = (val) =>
-  EXPENSE_CATEGORIES.find((c) => c.value === val)?.label || val || '—';
+  EXPENSE_CATEGORIES.find((c) => c.value === (val || '').toLowerCase())?.label || val || '—';
 
-const STATUS_BADGE = {
-  pendiente_clasificacion: { bg: 'bg-amber-100', text: 'text-amber-800', icon: FiClock, label: 'Pendiente' },
-  clasificada: { bg: 'bg-emerald-100', text: 'text-emerald-800', icon: FiCheckCircle, label: 'Clasificada' },
-  rechazada: { bg: 'bg-rose-100', text: 'text-rose-800', icon: FiXCircle, label: 'Rechazada' },
+const STATUS = {
+  pendiente_clasificacion: { bg: 'bg-amber-100', text: 'text-amber-800', Icon: FiClock, label: 'Pendiente' },
+  clasificada: { bg: 'bg-emerald-100', text: 'text-emerald-800', Icon: FiCheckCircle, label: 'Clasificada' },
+  rechazada: { bg: 'bg-red-100', text: 'text-red-800', Icon: FiXCircle, label: 'Rechazada' },
 };
 
-function InlineEdit({ note, dateMin, dateMax, onSave, onCancel }) {
+const cellInput = 'w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-blue-600';
+
+function EditRow({ note, dateMin, dateMax, onSave, onCancel }) {
   const [form, setForm] = useState({
     issue_date: note.issue_date ? String(note.issue_date).slice(0, 10) : '',
     supplier_ruc: note.supplier_ruc || '',
-    supplier_name: note.supplier_name || '',
-    establishment: note.establishment || '',
-    emission_point: note.emission_point || '',
-    sequential: note.sequential || '',
     expense_description: note.details_text || note.expense_description || note.category || '',
     total: note.total || '',
   });
-
-  const handleChange = (e) => setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
-
-  const inputCls = 'w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500';
+  const s = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
   return (
     <tr className="bg-blue-50">
       <td className="px-3 py-2">
-        <input type="date" name="issue_date" value={form.issue_date} onChange={handleChange}
-          min={dateMin} max={dateMax} className={inputCls} />
+        <input type="date" value={form.issue_date} min={dateMin} max={dateMax}
+          onChange={(e) => s('issue_date', e.target.value)} className={cellInput} />
       </td>
       <td className="px-3 py-2">
-        <input type="text" name="supplier_ruc" value={form.supplier_ruc} onChange={handleChange}
-          className={inputCls} placeholder="RUC" />
+        <input type="text" value={form.supplier_ruc}
+          onChange={(e) => s('supplier_ruc', e.target.value)} className={`${cellInput} font-mono`} />
       </td>
       <td className="px-3 py-2">
-        <select name="expense_description" value={form.expense_description} onChange={handleChange} className={inputCls}>
+        <select value={form.expense_description} onChange={(e) => s('expense_description', e.target.value)}
+          className={cellInput}>
           <option value="">Selecciona</option>
           {EXPENSE_CATEGORIES.map((c) => (
             <option key={c.value} value={c.value}>{c.label}</option>
@@ -63,18 +59,24 @@ function InlineEdit({ note, dateMin, dateMax, onSave, onCancel }) {
         </select>
       </td>
       <td className="px-3 py-2">
-        <input type="number" step="0.01" name="total" value={form.total} onChange={handleChange}
-          className={`${inputCls} text-right`} />
+        <input type="number" step="0.01" value={form.total}
+          onChange={(e) => s('total', e.target.value)} className={`${cellInput} font-mono text-right`} />
       </td>
-      <td className="px-3 py-2 text-center" colSpan={2}>
-        <div className="flex justify-center gap-1">
-          <button onClick={() => onSave(note.id, form)}
-            className="cursor-pointer rounded bg-emerald-600 p-1 text-white hover:bg-emerald-700">
-            <FiCheck size={14} />
+      <td className="px-3 py-2" />
+      <td className="px-3 py-2 text-center">
+        <div className="flex items-center justify-center gap-1">
+          <button onClick={() => onSave(note.id, {
+            issue_date: form.issue_date, supplier_ruc: form.supplier_ruc,
+            expense_description: form.expense_description,
+            subtotal_12: 0, subtotal_0: 0, iva: 0,
+            total: parseFloat(form.total) || 0,
+          })}
+            className="cursor-pointer rounded-lg bg-emerald-100 p-1.5 text-emerald-700 transition hover:bg-emerald-200 active:scale-[0.97] focus:outline-none focus:ring-1 focus:ring-sky-500">
+            <FiCheck size={13} />
           </button>
           <button onClick={onCancel}
-            className="cursor-pointer rounded bg-slate-400 p-1 text-white hover:bg-slate-500">
-            <FiX size={14} />
+            className="cursor-pointer rounded-lg bg-slate-100 p-1.5 text-slate-600 transition hover:bg-slate-200 active:scale-[0.97] focus:outline-none focus:ring-1 focus:ring-sky-500">
+            <FiX size={13} />
           </button>
         </div>
       </td>
@@ -86,8 +88,8 @@ export default function ManualNotesTable({
   notes = [],
   isFinance = false,
   isRequester = false,
-  onDelete = null,
   onUpdate = null,
+  onDelete = null,
   dateMin = '',
   dateMax = '',
 }) {
@@ -95,94 +97,76 @@ export default function ManualNotesTable({
 
   if (!notes.length) {
     return (
-      <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
-        No hay notas de venta manuales agregadas aún.
+      <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-slate-200 py-8 text-center">
+        <FiFileText className="h-8 w-8 text-slate-300" />
+        <p className="text-xs text-slate-400">No hay notas de venta manuales</p>
       </div>
     );
   }
 
-  const handleSave = (noteId, form) => {
-    if (onUpdate) {
-      onUpdate(noteId, {
-        issue_date: form.issue_date,
-        supplier_ruc: form.supplier_ruc,
-        supplier_name: form.supplier_name,
-        subtotal_12: 0,
-        subtotal_0: 0,
-        iva: 0,
-        total: parseFloat(form.total) || 0,
-        expense_description: form.expense_description,
-        emission_point: form.emission_point,
-        sequential: form.sequential,
-      });
-    }
+  const handleSave = (noteId, payload) => {
+    if (onUpdate) onUpdate(noteId, payload);
     setEditingId(null);
   };
 
+  const canEdit = isRequester || isFinance;
+
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200">
-      <table className="w-full text-xs">
-        <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
+    <div className="overflow-x-auto rounded-2xl border border-slate-200">
+      <table className="w-full">
+        <thead className="bg-slate-50">
           <tr>
-            <th className="px-3 py-2 text-left">Fecha</th>
-            <th className="px-3 py-2 text-left">RUC</th>
-            <th className="px-3 py-2 text-left">Concepto</th>
-            <th className="px-3 py-2 text-right">Total</th>
-            <th className="px-3 py-2 text-center">Estado</th>
-            <th className="px-3 py-2 text-center">Acciones</th>
+            <th className="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">Fecha</th>
+            <th className="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">RUC</th>
+            <th className="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">Concepto</th>
+            <th className="px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-400">Total</th>
+            <th className="px-3 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">Estado</th>
+            <th className="px-3 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">Acciones</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {notes.map((note) => {
             if (editingId === note.id) {
               return (
-                <InlineEdit
-                  key={note.id}
-                  note={note}
-                  dateMin={dateMin}
-                  dateMax={dateMax}
-                  onSave={handleSave}
-                  onCancel={() => setEditingId(null)}
-                />
+                <EditRow key={note.id} note={note} dateMin={dateMin} dateMax={dateMax}
+                  onSave={handleSave} onCancel={() => setEditingId(null)} />
               );
             }
-
-            const badge = STATUS_BADGE[note.status] || STATUS_BADGE.pendiente_clasificacion;
-            const BadgeIcon = badge.icon;
-
+            const badge = STATUS[note.status] || STATUS.pendiente_clasificacion;
+            const BadgeIcon = badge.Icon;
             return (
-              <tr key={note.id} className="bg-white transition hover:bg-slate-50">
-                <td className="px-3 py-2 text-slate-700">{formatDate(note.issue_date)}</td>
-                <td className="px-3 py-2 font-mono text-slate-500">{note.supplier_ruc || '—'}</td>
-                <td className="px-3 py-2 text-slate-700">
+              <tr key={note.id} className="bg-white transition-colors hover:bg-slate-50">
+                <td className="px-3 py-2.5 font-mono text-xs text-slate-700">{fmtDate(note.issue_date)}</td>
+                <td className="px-3 py-2.5 font-mono text-xs text-slate-500">{note.supplier_ruc || '—'}</td>
+                <td className="px-3 py-2.5 text-xs text-slate-700">
                   {getCategoryLabel(note.details_text || note.expense_description)}
                 </td>
-                <td className="px-3 py-2 text-right font-mono font-semibold text-slate-800">
-                  {formatMoney(note.total)}
+                <td className="px-3 py-2.5 text-right font-mono text-sm font-semibold text-slate-900">
+                  {toMoney(note.total)}
                 </td>
-                <td className="px-3 py-2 text-center">
+                <td className="px-3 py-2.5 text-center">
                   <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.bg} ${badge.text}`}>
                     <BadgeIcon size={11} />
                     {badge.label}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-center">
+                <td className="px-3 py-2.5 text-center">
                   <div className="flex items-center justify-center gap-2">
                     {note.drive_link && (
                       <a href={note.drive_link} target="_blank" rel="noopener noreferrer"
-                        className="cursor-pointer text-blue-600 hover:text-blue-800 transition" title="Ver documento">
-                        <FiFile size={14} />
+                        className="cursor-pointer text-slate-400 transition hover:text-blue-600 focus:outline-none">
+                        <FiFileText size={14} />
                       </a>
                     )}
-                    {(isRequester || isFinance) && onUpdate && (
+                    {canEdit && onUpdate && (
                       <button onClick={() => setEditingId(note.id)}
-                        className="cursor-pointer text-slate-500 hover:text-blue-600 transition" title="Editar">
+                        className="cursor-pointer text-slate-400 transition hover:text-blue-600 active:scale-[0.97] focus:outline-none">
                         <FiEdit2 size={14} />
                       </button>
                     )}
                     {isRequester && onDelete && (
                       <button onClick={() => onDelete(note.id)}
-                        className="cursor-pointer text-slate-400 hover:text-rose-600 transition" title="Eliminar">
+                        className="cursor-pointer text-slate-400 transition hover:text-red-600 active:scale-[0.97] focus:outline-none">
                         <FiTrash2 size={14} />
                       </button>
                     )}

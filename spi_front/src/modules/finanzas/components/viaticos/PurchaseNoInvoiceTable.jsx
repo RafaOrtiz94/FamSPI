@@ -1,17 +1,40 @@
 import React from 'react';
-import { FiFile, FiCheck, FiX } from 'react-icons/fi';
+import { FiFileText, FiCheck, FiX } from 'react-icons/fi';
 
-const formatMoney = (v) =>
-  new Intl.NumberFormat('es-EC', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-  }).format(Number.isFinite(Number(v)) ? Number(v) : 0);
+const toMoney = (v) =>
+  new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 })
+    .format(Number.isFinite(Number(v)) ? Number(v) : 0);
 
-const formatDate = (d) => {
+const fmtDate = (d) => {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('es-EC');
 };
+
+function ApprovalBadges({ financeApproved, talentoApproved }) {
+  if (financeApproved && talentoApproved) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-800">
+        <FiCheck size={10} /> Aprobado
+      </span>
+    );
+  }
+  return (
+    <div className="flex items-center justify-center gap-1">
+      <span className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+        financeApproved ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'
+      }`} title="Finanzas">
+        {financeApproved ? <FiCheck size={9} /> : <FiX size={9} />}
+        Fin
+      </span>
+      <span className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+        talentoApproved ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'
+      }`} title="Talento humano">
+        {talentoApproved ? <FiCheck size={9} /> : <FiX size={9} />}
+        Tal
+      </span>
+    </div>
+  );
+}
 
 export default function PurchaseNoInvoiceTable({
   purchases = [],
@@ -22,110 +45,70 @@ export default function PurchaseNoInvoiceTable({
 }) {
   if (!purchases.length) {
     return (
-      <div className="rounded-lg border border-[#E5E7EB] bg-white p-8 text-center">
-        <p className="text-sm text-[#6B7280]">No hay compras sin factura</p>
+      <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-slate-200 py-8 text-center">
+        <FiFileText className="h-8 w-8 text-slate-300" />
+        <p className="text-xs text-slate-400">No hay compras sin factura registradas</p>
       </div>
     );
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-[#E5E7EB]">
+    <div className="overflow-x-auto rounded-2xl border border-slate-200">
       <table className="w-full">
-        <thead className="border-b border-[#E5E7EB] bg-[#F9FAFB]">
+        <thead className="bg-slate-50">
           <tr>
-            <th className="px-4 py-3 text-left text-xs font-semibold text-[#374151]">Fecha</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold text-[#374151]">Descripción</th>
-            <th className="px-4 py-3 text-right text-xs font-semibold text-[#374151]">Total</th>
-            <th className="px-4 py-3 text-center text-xs font-semibold text-[#374151]">Aprobaciones</th>
-            <th className="px-4 py-3 text-center text-xs font-semibold text-[#374151]">Acciones</th>
+            <th className="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">Fecha</th>
+            <th className="px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">Descripción</th>
+            <th className="px-3 py-2.5 text-right text-[11px] font-semibold uppercase tracking-wide text-slate-400">Total</th>
+            <th className="px-3 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">Aprobaciones</th>
+            <th className="px-3 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">Acciones</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-[#E5E7EB]">
+        <tbody className="divide-y divide-slate-100">
           {purchases.map((purchase) => {
             const financeApproved = !!purchase.approved_by_finance;
             const talentoApproved = !!purchase.approved_by_talento;
-            const fullyApproved = financeApproved && talentoApproved;
+            const isLoadingThis = loadingPurchaseId === String(purchase.id);
 
             return (
-              <tr
-                key={purchase.id}
-                className="bg-white transition hover:bg-[#F9FAFB]"
-              >
-                <td className="px-4 py-3 text-sm text-[#374151]">{formatDate(purchase.purchase_date)}</td>
-                <td className="px-4 py-3 text-sm text-[#374151]">{purchase.description}</td>
-                <td className="px-4 py-3 text-right font-mono font-semibold text-[#1F2937]">
-                  {formatMoney(purchase.total)}
+              <tr key={purchase.id} className="bg-white transition-colors hover:bg-slate-50">
+                <td className="px-3 py-2.5 font-mono text-xs text-slate-700">{fmtDate(purchase.purchase_date)}</td>
+                <td className="px-3 py-2.5 max-w-[200px]">
+                  <p className="truncate text-xs text-slate-700">{purchase.description}</p>
+                  {purchase.justification && (
+                    <p className="mt-0.5 truncate text-[10px] text-slate-400">{purchase.justification}</p>
+                  )}
                 </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center justify-center gap-2">
-                    {fullyApproved ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[#DCFCE7] px-2.5 py-1 text-xs font-medium text-[#15803D]">
-                        <FiCheck size={14} />
-                        Aprobado
-                      </span>
-                    ) : (
-                      <div className="flex gap-1">
-                        <span
-                          className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-medium ${
-                            financeApproved
-                              ? 'bg-[#DCFCE7] text-[#15803D]'
-                              : 'bg-[#FEE2E2] text-[#7F1D1D]'
-                          }`}
-                          title="Aprobación de Finanzas"
-                        >
-                          {financeApproved ? <FiCheck size={12} /> : <FiX size={12} />}
-                          Fin
-                        </span>
-                        <span
-                          className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-medium ${
-                            talentoApproved
-                              ? 'bg-[#DCFCE7] text-[#15803D]'
-                              : 'bg-[#FEE2E2] text-[#7F1D1D]'
-                          }`}
-                          title="Aprobación de Talento"
-                        >
-                          {talentoApproved ? <FiCheck size={12} /> : <FiX size={12} />}
-                          Tal
-                        </span>
-                      </div>
-                    )}
-                  </div>
+                <td className="px-3 py-2.5 text-right font-mono text-sm font-semibold text-slate-900">
+                  {toMoney(purchase.total)}
                 </td>
-                <td className="px-4 py-3 text-center">
-                  <div className="flex items-center justify-center gap-2">
+                <td className="px-3 py-2.5 text-center">
+                  <ApprovalBadges financeApproved={financeApproved} talentoApproved={talentoApproved} />
+                </td>
+                <td className="px-3 py-2.5 text-center">
+                  <div className="flex items-center justify-center gap-1.5">
                     {purchase.file_id && (
-                      <a
-                        href="#"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          // Aquí iría la lógica para descargar el archivo
-                        }}
-                        className="cursor-pointer text-[#2563EB] hover:text-[#1D4ED8] transition"
-                        title="Ver justificante"
-                      >
-                        <FiFile size={16} />
-                      </a>
+                      <button className="cursor-pointer text-slate-400 transition hover:text-blue-600 focus:outline-none"
+                        title="Ver justificante">
+                        <FiFileText size={14} />
+                      </button>
                     )}
-
                     {isFinance && !financeApproved && onApprove && (
                       <button
                         onClick={() => onApprove(purchase.id, 'finance')}
-                        disabled={loadingPurchaseId === purchase.id}
-                        className="cursor-pointer rounded-md bg-[#DCFCE7] p-1 text-[#15803D] transition hover:bg-[#BBF7D0] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#0EA5E9] focus:ring-offset-2"
-                        title="Aprobar (Finanzas)"
-                      >
-                        <FiCheck size={16} />
+                        disabled={isLoadingThis}
+                        title="Aprobar como Finanzas"
+                        className="cursor-pointer rounded-lg bg-emerald-100 px-2 py-1 text-[10px] font-semibold text-emerald-700 transition hover:bg-emerald-200 active:scale-[0.97] disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-sky-500">
+                        Aprobar
                       </button>
                     )}
-
                     {isTalento && !talentoApproved && onApprove && (
                       <button
                         onClick={() => onApprove(purchase.id, 'talento')}
-                        disabled={loadingPurchaseId === purchase.id}
-                        className="cursor-pointer rounded-md bg-[#DCFCE7] p-1 text-[#15803D] transition hover:bg-[#BBF7D0] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#0EA5E9] focus:ring-offset-2"
-                        title="Aprobar (Talento)"
-                      >
-                        <FiCheck size={16} />
+                        disabled={isLoadingThis}
+                        title="Aprobar como Talento"
+                        className="cursor-pointer rounded-lg bg-emerald-100 px-2 py-1 text-[10px] font-semibold text-emerald-700 transition hover:bg-emerald-200 active:scale-[0.97] disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-sky-500">
+                        Aprobar
                       </button>
                     )}
                   </div>

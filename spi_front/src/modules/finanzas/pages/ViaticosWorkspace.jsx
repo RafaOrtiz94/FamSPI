@@ -761,6 +761,7 @@ const ViaticosWorkspace = () => {
             const report = reports[item.id];
             const isOwnRecord = String(item.requester_email || "").toLowerCase() === String(user?.email || "").toLowerCase();
             const canEdit = isOwnRecord && !isFinance && item.status === "pending";
+            const canViewDocs = canEdit || isFinance || isTalento;
             const destinationDraft = destinationDrafts[item.id] ?? (item.city || "");
 
             const invoiceTotal = invoices.reduce((s, i) => s + Number(i.total || 0), 0);
@@ -853,19 +854,21 @@ const ViaticosWorkspace = () => {
                     <ConsolidatedSummary allowance={item} />
 
                     {/* Notas de venta manual */}
-                    {canEdit && (
+                    {canViewDocs && (
                       <Section title="Notas de Venta Manual" badge={manualNotes.length} defaultOpen={false}>
-                        <ManualNoteForm
-                          allowance={item}
-                          onSubmit={(payload) => handleCreateManualNote(item.id, payload)}
-                          loading={saving[`create-note-${item.id}`]}
-                          destination={item.city}
-                        />
-                        <div className="mt-4">
+                        {canEdit && (
+                          <ManualNoteForm
+                            allowance={item}
+                            onSubmit={(payload) => handleCreateManualNote(item.id, payload)}
+                            loading={saving[`create-note-${item.id}`]}
+                            destination={item.city}
+                          />
+                        )}
+                        <div className={canEdit ? "mt-4" : ""}>
                           <ManualNotesTable
                             notes={manualNotes}
                             isFinance={isFinance}
-                            isRequester={user?.email === item.requester_email}
+                            isRequester={isOwnRecord}
                             onUpdate={(noteId, payload) => handleUpdateManualNote(item.id, noteId, payload)}
                             onDelete={(noteId) => handleDeleteManualNote(item.id, noteId)}
                             dateMin={item.notes?.match(/Inicio:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || String(item.visit_date || '').slice(0, 10)}
@@ -876,14 +879,16 @@ const ViaticosWorkspace = () => {
                     )}
 
                     {/* Compras sin factura */}
-                    {canEdit && (
+                    {canViewDocs && (
                       <Section title="Compras sin Factura" badge={purchasesNoInvoice.length} defaultOpen={false}>
-                        <PurchaseNoInvoiceForm
-                          allowance={item}
-                          onSubmit={(payload) => handleCreatePurchaseNoInvoice(item.id, payload)}
-                          loading={saving[`create-purchase-${item.id}`]}
-                        />
-                        <div className="mt-4">
+                        {canEdit && (
+                          <PurchaseNoInvoiceForm
+                            allowance={item}
+                            onSubmit={(payload) => handleCreatePurchaseNoInvoice(item.id, payload)}
+                            loading={saving[`create-purchase-${item.id}`]}
+                          />
+                        )}
+                        <div className={canEdit ? "mt-4" : ""}>
                           <PurchaseNoInvoiceTable
                             purchases={purchasesNoInvoice}
                             isFinance={isFinance}
