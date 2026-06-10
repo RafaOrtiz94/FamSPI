@@ -4,6 +4,7 @@ const reportSvc = require("./tiAssets.report");
 const { generateActaEntregaPdf } = require("./tiAssets.acta");
 const { computeSha256HexFromBuffer } = require("../../utils/documentHash");
 const { uploadBase64File, ensureFolder } = require("../../utils/drive");
+const { TI_ROLES } = require("./tiAssets.service");
 
 exports.listAssets = asyncHandler(async (req, res) => {
   const data = await svc.listAssets({ status: req.query?.status, q: req.query?.q });
@@ -134,6 +135,17 @@ exports.assignMultipleAssets = asyncHandler(async (req, res) => {
 
 exports.updateStatus = asyncHandler(async (req, res) => {
   const payload = req.body || {};
+  const userRole = req.user?.role || '';
+
+  // FASE 4: Validar que solo TI puede cambiar a ciertos estados
+  const restrictedStatuses = ['damaged', 'in_maintenance', 'retired', 'unassigned', 'available'];
+  if (restrictedStatuses.includes(payload.status) && !TI_ROLES.includes(userRole)) {
+    return res.status(403).json({
+      ok: false,
+      message: `Solo TI puede cambiar estado a "${payload.status}"`
+    });
+  }
+
   const data = await svc.updateAssetStatus({
     assetId: req.params.id,
     status: payload.status,
@@ -496,4 +508,78 @@ exports.uploadFinancialDoc = asyncHandler(async (req, res) => {
     userId:           req.user?.id || null,
   });
   res.status(201).json({ ok: true, data });
+});
+
+// ─── FASE 6: Liberation ────────────────────────────────────────────────────
+
+exports.liberateAsset = asyncHandler(async (req, res) => {
+  if (!req.file?.buffer) {
+    return res.status(400).json({ ok: false, message: "Se requiere una foto para liberar el equipo" });
+  }
+  const payload = req.body || {};
+  const data = await svc.liberateAsset({
+    assetId: req.params.id,
+    photoBuffer: req.file.buffer,
+    photoFilename: req.file.originalname || `liberation_${req.params.id}.jpg`,
+    notes: payload.notes || null,
+    userId: req.user?.id || null,
+  });
+  res.status(200).json({ ok: true, data });
+});
+
+exports.getLiberationPhotos = asyncHandler(async (req, res) => {
+  const data = await svc.getLiberationPhotos(req.params.id);
+  res.json({ ok: true, total: data.length, data });
+});
+
+// ─── FASE 2: Corporate Numbers ─────────────────────────────────────────────
+
+exports.listCorporateNumbers = asyncHandler(async (req, res) => {
+  const data = await svc.listCorporateNumbers({
+    status: req.query?.status,
+    q: req.query?.q,
+  });
+  res.json({ ok: true, total: data.length, data });
+});
+
+exports.getCorporateNumber = asyncHandler(async (req, res) => {
+  const data = await svc.getCorporateNumber(req.params.id);
+  res.json({ ok: true, data });
+});
+
+exports.createCorporateNumber = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const data = await svc.createCorporateNumber({
+    number: payload.number,
+    notes: payload.notes || null,
+    userId: req.user?.id || null,
+  });
+  res.status(201).json({ ok: true, data });
+});
+
+exports.assignCorporateNumber = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const data = await svc.assignCorporateNumber({
+    numberId: req.params.id,
+    assetId: payload.asset_id,
+    assignedToUserId: payload.assigned_to_user_id || null,
+    userId: req.user?.id || null,
+  });
+  res.json({ ok: true, data });
+});
+
+exports.changeCorporateNumber = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const data = await svc.changeCorporateNumber({
+    currentNumberId: req.params.currentId,
+    newNumberId: payload.new_number_id,
+    reason: payload.reason || null,
+    userId: req.user?.id || null,
+  });
+  res.json({ ok: true, data });
+});
+
+exports.getCorporateNumberHistory = asyncHandler(async (req, res) => {
+  const data = await svc.getCorporateNumberHistory(req.params.id);
+  res.json({ ok: true, total: data.length, data });
 });

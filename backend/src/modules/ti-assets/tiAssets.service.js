@@ -208,6 +208,105 @@ async function ensureTiAssetsSchema() {
   await db.query(`ALTER TABLE public.ti_asset_actas ADD COLUMN IF NOT EXISTS signed_at               TIMESTAMPTZ`);
   await db.query(`ALTER TABLE public.ti_asset_actas ADD COLUMN IF NOT EXISTS signed_by               INTEGER REFERENCES public.users(id) ON DELETE SET NULL`);
   await db.query(`ALTER TABLE public.ti_asset_actas ADD COLUMN IF NOT EXISTS is_complete             BOOLEAN NOT NULL DEFAULT false`);
+
+  // ========== FASE 1: ACTIVOS TI V2 ==========
+
+  // Tabla: ti_corporate_numbers (números corporativos para móviles)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS public.ti_corporate_numbers (
+      id BIGSERIAL PRIMARY KEY,
+      number TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'assigned', 'inactive')),
+      asset_id BIGINT REFERENCES public.ti_assets(id) ON DELETE SET NULL,
+      assigned_to_user_id INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      assigned_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_corporate_numbers_status ON public.ti_corporate_numbers(status)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_corporate_numbers_asset ON public.ti_corporate_numbers(asset_id)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_corporate_numbers_user ON public.ti_corporate_numbers(assigned_to_user_id)`);
+
+  // Tabla: ti_corporate_number_history (historial de cambios)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS public.ti_corporate_number_history (
+      id BIGSERIAL PRIMARY KEY,
+      number_id BIGINT NOT NULL REFERENCES public.ti_corporate_numbers(id) ON DELETE CASCADE,
+      old_number TEXT,
+      new_number TEXT NOT NULL,
+      changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      changed_by INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      reason TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_corporate_number_history_number ON public.ti_corporate_number_history(number_id)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_corporate_number_history_changed_at ON public.ti_corporate_number_history(changed_at DESC)`);
+
+  // Tabla: ti_asset_liberation_photos (fotos de liberación)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS public.ti_asset_liberation_photos (
+      id BIGSERIAL PRIMARY KEY,
+      asset_id BIGINT NOT NULL REFERENCES public.ti_assets(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      drive_url TEXT,
+      drive_file_id TEXT,
+      sha256 TEXT,
+      liberated_by INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      liberated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      notes TEXT,
+      active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_asset_liberation_photos_asset ON public.ti_asset_liberation_photos(asset_id)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_asset_liberation_photos_liberated_at ON public.ti_asset_liberation_photos(liberated_at DESC)`);
+
+  // Alteraciones a ti_assets: purchase_value y value_category (para depreciación)
+  await db.query(`ALTER TABLE public.ti_assets ADD COLUMN IF NOT EXISTS purchase_value DECIMAL(12, 2)`);
+  await db.query(`ALTER TABLE public.ti_assets ADD COLUMN IF NOT EXISTS value_category TEXT CHECK (value_category IN ('asset', 'control_item'))`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_assets_purchase_value ON public.ti_assets(purchase_value)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_assets_value_category ON public.ti_assets(value_category)`);
+
+  // Alteraciones a ti_asset_actas_items: características
+  await db.query(`ALTER TABLE public.ti_asset_actas_items ADD COLUMN IF NOT EXISTS characteristics TEXT`);
+
+  // Alteraciones a ti_asset_assignments: características
+  await db.query(`ALTER TABLE public.ti_asset_assignments ADD COLUMN IF NOT EXISTS characteristics TEXT`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_asset_assignments_asset_user ON public.ti_asset_assignments(asset_id, assigned_to_user_id)`);
+
+  // Alteraciones a ti_asset_financial_docs: assignment_id
+  await db.query(`ALTER TABLE public.ti_asset_financial_docs ADD COLUMN IF NOT EXISTS assignment_id BIGINT REFERENCES public.ti_asset_assignments(id) ON DELETE SET NULL`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_asset_financial_docs_user ON public.ti_asset_financial_docs(assigned_user_id)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_asset_financial_docs_assignment ON public.ti_asset_financial_docs(assignment_id)`);
+
+  // Función para auditar cambios de status
+  await db.query(`
+    CREATE OR REPLACE FUNCTION public.audit_ti_asset_status_change()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      IF OLD.status IS DISTINCT FROM NEW.status THEN
+        INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
+        VALUES (NEW.id, 'status_change', jsonb_build_object(
+          'old_status', OLD.status,
+          'new_status', NEW.status,
+          'changed_at', now()
+        ), NEW.updated_by, now());
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+
+  // Trigger para auditar cambios de status
+  await db.query(`DROP TRIGGER IF EXISTS trg_ti_asset_status_change ON public.ti_assets`);
+  await db.query(`
+    CREATE TRIGGER trg_ti_asset_status_change
+    AFTER UPDATE ON public.ti_assets
+    FOR EACH ROW
+    EXECUTE FUNCTION public.audit_ti_asset_status_change();
+  `);
 }
 
 function parseISODateUTC(value) {
@@ -372,6 +471,7 @@ async function createAsset({ data, userId }) {
     serial_number = null,
     imei = null,
     purchase_date = null,
+    purchase_value = null, // FASE 3: Depreciación
   } = data || {};
   if (!name || !String(name).trim()) {
     const err = new Error("name es obligatorio");
@@ -379,11 +479,16 @@ async function createAsset({ data, userId }) {
     throw err;
   }
   const safePurchaseDate = purchase_date ? String(purchase_date).trim() : null;
+
+  // FASE 3: Calcular categoría automáticamente
+  const parsedValue = purchase_value ? parseFloat(purchase_value) : null;
+  const valueCategory = parsedValue && parsedValue >= 400 ? 'asset' : (parsedValue ? 'control_item' : null);
+
   const { rows } = await db.query(
     `INSERT INTO public.ti_assets
        (asset_code, name, brand, model, characteristics, status, maintenance_frequency_months,
-        serial_number, imei, purchase_date, created_by, updated_by, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5::jsonb,'unassigned',$6,$7,$8,$9::date,$10,$10,now(),now())
+        serial_number, imei, purchase_date, purchase_value, value_category, created_by, updated_by, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5::jsonb,'unassigned',$6,$7,$8,$9::date,$10::decimal,$11,'unassigned',$12,$12,now(),now())
      RETURNING *`,
     [
       `TI-${Date.now()}`,
@@ -395,6 +500,8 @@ async function createAsset({ data, userId }) {
       serial_number || null,
       imei || null,
       safePurchaseDate,
+      parsedValue || null,
+      valueCategory,
       userId,
     ],
   );
@@ -402,7 +509,7 @@ async function createAsset({ data, userId }) {
   await db.query(
     `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
      VALUES ($1,'asset_created',$2::jsonb,$3,now())`,
-    [asset.id, JSON.stringify({ name, brand, model, serial_number, imei, purchase_date: safePurchaseDate }), userId],
+    [asset.id, JSON.stringify({ name, brand, model, serial_number, imei, purchase_date: safePurchaseDate, purchase_value: parsedValue }), userId],
   );
   return { ...asset, ...computeDepreciation(asset.purchase_date) };
 }
@@ -465,13 +572,23 @@ async function assignAsset({
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
-    const currentQ = await client.query(`SELECT id, name, assigned_to_user_id FROM public.ti_assets WHERE id = $1 LIMIT 1`, [assetId]);
+    const currentQ = await client.query(
+      `SELECT id, name, assigned_to_user_id, status FROM public.ti_assets WHERE id = $1 LIMIT 1`,
+      [assetId]
+    );
     if (!currentQ.rows.length) {
       const err = new Error("Activo TI no encontrado");
       err.status = 404;
       throw err;
     }
     const current = currentQ.rows[0];
+
+    // FASE 4: Validar estado - solo pueden asignarse equipos en estado available o unassigned
+    if (assignedToUserId && current.status && !['available', 'unassigned'].includes(current.status)) {
+      const err = new Error(`No se puede asignar un equipo en estado "${current.status}". Solo se pueden asignar equipos disponibles o sin asignar.`);
+      err.status = 400;
+      throw err;
+    }
     const nextStatus = assignedToUserId ? "assigned" : "unassigned";
     const upd = await client.query(
       `UPDATE public.ti_assets
@@ -484,11 +601,14 @@ async function assignAsset({
         RETURNING *`,
       [assignedToUserId, nextStatus, userId, assetId],
     );
-    await client.query(
-      `INSERT INTO public.ti_asset_assignments (asset_id, assigned_to_user_id, previous_user_id, action, reason, created_by, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,now())`,
-      [assetId, assignedToUserId, current.assigned_to_user_id, assignedToUserId ? "assign_or_reassign" : "unassign", reason, userId],
+    // FASE 5: Insertar asignación con características
+    const assignmentRes = await client.query(
+      `INSERT INTO public.ti_asset_assignments (asset_id, assigned_to_user_id, previous_user_id, action, reason, characteristics, created_by, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+       RETURNING id`,
+      [assetId, assignedToUserId, current.assigned_to_user_id, assignedToUserId ? "assign_or_reassign" : "unassign", reason, actaItems ? JSON.stringify(actaItems) : null, userId],
     );
+    const assignmentId = assignmentRes.rows[0]?.id || null;
     await client.query(
       `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
        VALUES ($1,$2,$3::jsonb,$4,now())`,
@@ -541,6 +661,26 @@ async function assignAsset({
       items: resolvedItems,
       client,
     });
+
+    // FASE 5: Crear letra de cambio automáticamente si se está asignando
+    if (assignedToUserId && assignmentId) {
+      // Buscar si existe factura del equipo
+      const facturaQ = await client.query(
+        `SELECT id FROM public.ti_asset_financial_docs
+         WHERE asset_id = $1 AND doc_type = 'factura' AND active = true LIMIT 1`,
+        [assetId]
+      );
+
+      if (facturaQ.rows.length) {
+        // Crear letra de cambio (INSERT sin upsert, para que sea nueva cada asignación)
+        await client.query(
+          `INSERT INTO public.ti_asset_financial_docs
+           (asset_id, doc_type, assignment_id, assigned_user_id, uploaded_at, uploaded_by, active)
+           VALUES ($1, 'letra_de_cambio', $2, $3, now(), $4, true)`,
+          [assetId, assignmentId, assignedToUserId, userId],
+        );
+      }
+    }
 
     await client.query("COMMIT");
     return {
@@ -1950,6 +2090,367 @@ async function getLetrasDeChangioHistory(assetId) {
   return rows;
 }
 
+// ========== FASE 6: LIBERACIÓN DE EQUIPOS ==========
+
+async function liberateAsset({ assetId, photoBuffer, photoFilename, notes, userId }) {
+  await ensureTiAssetsSchema();
+
+  if (!photoBuffer) {
+    const err = new Error("Se requiere una foto para liberar el equipo");
+    err.status = 400;
+    throw err;
+  }
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    // Obtener activo actual
+    const assetQ = await client.query(
+      `SELECT id, name, assigned_to_user_id, status FROM public.ti_assets WHERE id = $1`,
+      [assetId]
+    );
+
+    if (!assetQ.rows.length) {
+      const err = new Error("Activo TI no encontrado");
+      err.status = 404;
+      throw err;
+    }
+
+    const asset = assetQ.rows[0];
+
+    // Validar que esté asignado (status = assigned)
+    if (asset.status !== 'assigned') {
+      const err = new Error(`No se puede liberar un equipo en estado "${asset.status}". Solo se pueden liberar equipos asignados.`);
+      err.status = 400;
+      throw err;
+    }
+
+    // Computar SHA256 de la foto
+    const sha256 = computeSha256HexFromBuffer(photoBuffer);
+
+    // Guardar foto en Drive (opcional)
+    let driveUrl = null;
+    let driveFileId = null;
+    try {
+      const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || null;
+      let folderId = null;
+      if (rootFolderId) {
+        const folder = await ensureFolder("Liberación de Activos TI", rootFolderId);
+        folderId = folder?.id || null;
+      }
+      const uploaded = await uploadBase64File(
+        photoFilename || `liberation_${assetId}_${Date.now()}.jpg`,
+        photoBuffer.toString("base64"),
+        "image/jpeg",
+        folderId
+      );
+      driveUrl = uploaded?.webViewLink || uploaded?.webContentLink || null;
+      driveFileId = uploaded?.id || null;
+    } catch (_driveErr) { /* Drive opcional */ }
+
+    // Insertar foto de liberación
+    const photoRes = await client.query(
+      `INSERT INTO public.ti_asset_liberation_photos
+       (asset_id, filename, drive_url, drive_file_id, sha256, liberated_by, liberated_at, notes, active)
+       VALUES ($1, $2, $3, $4, $5, $6, now(), $7, true)
+       RETURNING *`,
+      [assetId, photoFilename || `liberation_${assetId}.jpg`, driveUrl, driveFileId, sha256, userId, notes || null]
+    );
+
+    // Crear acta de retiro (tipo='retiro')
+    const acta = await createActa({
+      tipo: 'retiro',
+      assetId,
+      recipientUserId: null, // Retiro
+      previousUserId: asset.assigned_to_user_id,
+      recipientNombre: null,
+      recipientCedula: null,
+      recipientCargo: null,
+      generatedBy: userId,
+      notes: `Liberación de equipo. Foto: ${photoFilename || 'adjunta'}`,
+      items: [
+        {
+          item_type: 'equipo',
+          asset_id: asset.id,
+          name: asset.name,
+          brand_model: '',
+          serial_imei: '',
+          is_new: false,
+          physical_condition: null,
+          observations: notes || null,
+        }
+      ],
+      client,
+    });
+
+    // Cambiar estado a 'available'
+    const updRes = await client.query(
+      `UPDATE public.ti_assets
+        SET status = 'available',
+            assigned_to_user_id = NULL,
+            assigned_at = NULL,
+            updated_by = $1,
+            updated_at = now()
+       WHERE id = $2
+       RETURNING *`,
+      [userId, assetId]
+    );
+
+    // Registrar evento
+    await client.query(
+      `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
+       VALUES ($1, 'asset_liberated', $2::jsonb, $3, now())`,
+      [assetId, JSON.stringify({ photo_filename: photoFilename, acta_id: acta.id }), userId]
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      ...updRes.rows[0],
+      ...computeDepreciation(updRes.rows[0].purchase_date),
+      photo: photoRes.rows[0],
+      acta_id: acta.id,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function getLiberationPhotos(assetId) {
+  await ensureTiAssetsSchema();
+  const { rows } = await db.query(
+    `SELECT lp.*,
+            COALESCE(u.fullname, u.name, u.email) AS liberated_by_name
+       FROM public.ti_asset_liberation_photos lp
+       LEFT JOIN public.users u ON u.id = lp.liberated_by
+      WHERE lp.asset_id = $1 AND lp.active = true
+      ORDER BY lp.liberated_at DESC`,
+    [assetId]
+  );
+  return rows;
+}
+
+// ========== FASE 2: NÚMEROS CORPORATIVOS ==========
+
+async function listCorporateNumbers({ status, q }) {
+  await ensureTiAssetsSchema();
+  const params = [];
+  let where = "WHERE 1=1";
+
+  if (status) {
+    if (!['available', 'assigned', 'inactive'].includes(String(status).toLowerCase())) {
+      const err = new Error("Estado de número corporativo inválido");
+      err.status = 400;
+      throw err;
+    }
+    params.push(String(status).toLowerCase());
+    where += ` AND cn.status = $${params.length}`;
+  }
+
+  if (q) {
+    params.push(`%${String(q).toLowerCase()}%`);
+    where += ` AND (LOWER(cn.number) LIKE $${params.length} OR LOWER(COALESCE(u.email, '')) LIKE $${params.length} OR LOWER(COALESCE(a.name, '')) LIKE $${params.length})`;
+  }
+
+  const { rows } = await db.query(
+    `SELECT cn.*,
+            COALESCE(u.fullname, u.name, u.email) AS assigned_user_name,
+            COALESCE(u.cedula, '') AS assigned_user_cedula,
+            COALESCE(u.departamento, '') AS assigned_user_department,
+            COALESCE(a.name, '') AS asset_name,
+            COALESCE(a.asset_code, '') AS asset_code
+       FROM public.ti_corporate_numbers cn
+       LEFT JOIN public.users u ON u.id = cn.assigned_to_user_id
+       LEFT JOIN public.ti_assets a ON a.id = cn.asset_id
+       ${where}
+       ORDER BY cn.number ASC`,
+    params,
+  );
+  return rows;
+}
+
+async function getCorporateNumber(numberId) {
+  await ensureTiAssetsSchema();
+  const { rows } = await db.query(
+    `SELECT cn.*,
+            COALESCE(u.fullname, u.name, u.email) AS assigned_user_name,
+            COALESCE(a.name, '') AS asset_name
+       FROM public.ti_corporate_numbers cn
+       LEFT JOIN public.users u ON u.id = cn.assigned_to_user_id
+       LEFT JOIN public.ti_assets a ON a.id = cn.asset_id
+      WHERE cn.id = $1`,
+    [numberId],
+  );
+  if (!rows.length) {
+    const err = new Error("Número corporativo no encontrado");
+    err.status = 404;
+    throw err;
+  }
+  return rows[0];
+}
+
+async function createCorporateNumber({ number, notes, userId }) {
+  await ensureTiAssetsSchema();
+
+  if (!number || !String(number).trim()) {
+    const err = new Error("Número corporativo es obligatorio");
+    err.status = 400;
+    throw err;
+  }
+
+  // Verificar que el número sea único
+  const existing = await db.query(
+    `SELECT id FROM public.ti_corporate_numbers WHERE number = $1`,
+    [String(number).trim()],
+  );
+  if (existing.rows.length) {
+    const err = new Error("Número corporativo ya existe");
+    err.status = 409;
+    throw err;
+  }
+
+  const { rows } = await db.query(
+    `INSERT INTO public.ti_corporate_numbers (number, status, created_at, updated_at)
+     VALUES ($1, 'available', now(), now())
+     RETURNING *`,
+    [String(number).trim()],
+  );
+
+  return rows[0];
+}
+
+async function assignCorporateNumber({ numberId, assetId, assignedToUserId, userId }) {
+  await ensureTiAssetsSchema();
+
+  const corpNum = await getCorporateNumber(numberId);
+  const asset = await getAsset(assetId);
+
+  // Validar que el activo sea un móvil
+  // (Asumimos que el tipo está en characteristics o en otro campo)
+  // Por ahora verificamos que el activo exista
+
+  if (!asset) {
+    const err = new Error("Activo no encontrado");
+    err.status = 404;
+    throw err;
+  }
+
+  // Verificar que el número esté disponible
+  if (corpNum.status !== 'available') {
+    const err = new Error("Número corporativo no está disponible");
+    err.status = 400;
+    throw err;
+  }
+
+  // Liberar número anterior si existe
+  const prevAssignment = await db.query(
+    `SELECT id FROM public.ti_corporate_numbers WHERE asset_id = $1 AND status != 'inactive'`,
+    [assetId],
+  );
+  if (prevAssignment.rows.length) {
+    await db.query(
+      `UPDATE public.ti_corporate_numbers
+        SET status = 'available', asset_id = NULL, assigned_to_user_id = NULL, assigned_at = NULL
+      WHERE id = $1`,
+      [prevAssignment.rows[0].id],
+    );
+  }
+
+  // Asignar nuevo número
+  const { rows } = await db.query(
+    `UPDATE public.ti_corporate_numbers
+      SET status = 'assigned', asset_id = $1, assigned_to_user_id = $2, assigned_at = now(), updated_at = now()
+    WHERE id = $3
+    RETURNING *`,
+    [assetId, assignedToUserId || null, numberId],
+  );
+
+  // Registrar en historial (cambio de número)
+  if (prevAssignment.rows.length) {
+    await db.query(
+      `INSERT INTO public.ti_corporate_number_history
+       (number_id, old_number, new_number, changed_at, changed_by, reason)
+       VALUES ($1, $2, $3, now(), $4, $5)`,
+      [numberId, corpNum.number, corpNum.number, userId || null, 'assigned_to_asset'],
+    );
+  }
+
+  return rows[0];
+}
+
+async function changeCorporateNumber({ currentNumberId, newNumberId, reason, userId }) {
+  await ensureTiAssetsSchema();
+
+  const currentNum = await getCorporateNumber(currentNumberId);
+  const newNum = await getCorporateNumber(newNumberId);
+
+  if (!currentNum.asset_id) {
+    const err = new Error("Número actual no está asignado a un activo");
+    err.status = 400;
+    throw err;
+  }
+
+  if (newNum.status !== 'available') {
+    const err = new Error("Número nuevo no está disponible");
+    err.status = 400;
+    throw err;
+  }
+
+  const assetId = currentNum.asset_id;
+
+  // Actualizar números
+  await db.query(
+    `UPDATE public.ti_corporate_numbers
+      SET status = 'available', asset_id = NULL, assigned_to_user_id = NULL, assigned_at = NULL
+    WHERE id = $1`,
+    [currentNumberId],
+  );
+
+  const { rows: newRows } = await db.query(
+    `UPDATE public.ti_corporate_numbers
+      SET status = 'assigned', asset_id = $1, assigned_to_user_id = $2, assigned_at = now()
+    WHERE id = $3
+    RETURNING *`,
+    [assetId, currentNum.assigned_to_user_id, newNumberId],
+  );
+
+  // Registrar cambio en historial
+  await db.query(
+    `INSERT INTO public.ti_corporate_number_history
+     (number_id, old_number, new_number, changed_at, changed_by, reason)
+     VALUES ($1, $2, $3, now(), $4, $5)`,
+    [newNumberId, currentNum.number, newNum.number, userId || null, reason || null],
+  );
+
+  return newRows[0];
+}
+
+async function getCorporateNumberHistory(numberId) {
+  await ensureTiAssetsSchema();
+  const { rows } = await db.query(
+    `SELECT ch.*,
+            COALESCE(u.fullname, u.name, u.email) AS changed_by_name
+       FROM public.ti_corporate_number_history ch
+       LEFT JOIN public.users u ON u.id = ch.changed_by
+      WHERE ch.number_id = $1
+      ORDER BY ch.changed_at DESC`,
+    [numberId],
+  );
+  return rows;
+}
+
+async function getAsset(assetId) {
+  const { rows } = await db.query(
+    `SELECT * FROM public.ti_assets WHERE id = $1 AND active = true`,
+    [assetId],
+  );
+  return rows[0] || null;
+}
+
 module.exports = {
   TI_ROLES,
   TI_READ_ROLES,
@@ -1961,6 +2462,13 @@ module.exports = {
   assignMultipleAssets,
   updateAssetStatus,
   listAssetHistory,
+  // FASE 2: Corporate Numbers
+  listCorporateNumbers,
+  getCorporateNumber,
+  createCorporateNumber,
+  assignCorporateNumber,
+  changeCorporateNumber,
+  getCorporateNumberHistory,
   listAssetAssignmentsHistory,
   generateAnnualMaintenance,
   generateFutureMaintenance,
@@ -1989,4 +2497,7 @@ module.exports = {
   listFinancialDocs,
   uploadFinancialDoc,
   getLetrasDeChangioHistory,
+  // FASE 6: Liberation
+  liberateAsset,
+  getLiberationPhotos,
 };

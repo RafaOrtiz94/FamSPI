@@ -66,4 +66,16 @@ router.post("/actas/:actaId/upload-signed",
   ctrl.uploadSignedActa,
 );
 
+// ── FASE 6: Liberation (TI only) ──────────────────────────────────────────
+router.post("/:id/liberate",                        requireRole(TI_ROLES), upload.single("photo"), ctrl.liberateAsset);
+router.get("/:id/liberation-photos",               requireRole(TI_READ_ROLES), ctrl.getLiberationPhotos);
+
+// ── FASE 2: Corporate Numbers (TI + Financiero can read, TI only can write) ──
+router.get("/corporate-numbers",                    requireRole(TI_READ_ROLES), ctrl.listCorporateNumbers);
+router.get("/corporate-numbers/:id",                requireRole(TI_READ_ROLES), ctrl.getCorporateNumber);
+router.get("/corporate-numbers/:id/history",       requireRole(TI_READ_ROLES), ctrl.getCorporateNumberHistory);
+router.post("/corporate-numbers",                   requireRole(TI_ROLES), ctrl.createCorporateNumber);
+router.post("/corporate-numbers/:id/assign",       requireRole(TI_ROLES), ctrl.assignCorporateNumber);
+router.post("/corporate-numbers/:currentId/change", requireRole(TI_ROLES), ctrl.changeCorporateNumber);
+
 module.exports = router;

@@ -157,6 +157,28 @@ const EMPTY_FORM = {
   purchase_date: "",
   characteristics: "",
   maintenance_frequency_months: 12,
+  purchase_value: "", // FASE 3: Depreciación
+};
+
+// Funciones de depreciación (FASE 3)
+const calculateDepreciation = (purchaseValue) => {
+  const val = parseFloat(purchaseValue) || 0;
+  if (val < 400) {
+    return {
+      category: 'control_item',
+      annual_depreciation: 0,
+      residual_value: val,
+      note: 'Bien de control (no deprecia)'
+    };
+  }
+  const annualDepreciation = val * 0.1111; // 33.33% / 3 años
+  const residualValue = val - (annualDepreciation * 3);
+  return {
+    category: 'asset',
+    annual_depreciation: parseFloat(annualDepreciation.toFixed(2)),
+    residual_value: parseFloat(residualValue.toFixed(2)),
+    note: 'Activo fijo (deprecia 33.33% en 3 años)'
+  };
 };
 
 // JSONB characteristics can arrive as object {} from DB — always stringify to string for display/input
@@ -1074,6 +1096,14 @@ const TIDeviceManagementPage = () => {
                 onChange={setField("purchase_date")}
               />
             </div>
+            <FieldInput
+              label="Valor de compra (USD)"
+              type="number"
+              step="0.01"
+              placeholder="Ej: 500.00"
+              value={form.purchase_value}
+              onChange={setField("purchase_value")}
+            />
             <div className="sm:col-span-2 lg:col-span-2">
               <Label>Características</Label>
               <input
@@ -1100,6 +1130,36 @@ const TIDeviceManagementPage = () => {
               />
             </div>
           </div>
+
+          {/* FASE 3: Depreciation Info */}
+          {form.purchase_value && parseFloat(form.purchase_value) > 0 && (
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 p-4 rounded-xl bg-amber-50 border border-amber-200">
+              {(() => {
+                const depr = calculateDepreciation(form.purchase_value);
+                return (
+                  <>
+                    <div>
+                      <p className="text-xs font-medium text-amber-700">Categoría</p>
+                      <p className="text-sm text-amber-900 font-semibold">{depr.category === 'asset' ? 'Activo fijo' : 'Bien de control'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-amber-700">Depreciación anual</p>
+                      <p className="text-sm text-amber-900 font-semibold">${depr.annual_depreciation.toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-amber-700">Valor residual (3 años)</p>
+                      <p className="text-sm text-amber-900 font-semibold">${depr.residual_value.toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-amber-700">Régimen</p>
+                      <p className="text-xs text-amber-800">{depr.note}</p>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
           <div className="mt-4 flex justify-end">
             <Button
               type="button"
@@ -1437,7 +1497,15 @@ const TIDeviceManagementPage = () => {
                     <p className="text-sm font-medium text-slate-800">{selected.assigned_to_name || "Sin asignación"}</p>
                     {selected.assigned_at && <p className="text-xs text-slate-400">Desde {new Date(selected.assigned_at).toLocaleDateString("es-EC")}</p>}
                   </div>
-                  <Button type="button" variant="primary" icon={FiUser} disabled={saving} onClick={openAssignModal}>
+                  {/* FASE 4: Deshabilitar asignación si estado no lo permite */}
+                  <Button
+                    type="button"
+                    variant="primary"
+                    icon={FiUser}
+                    disabled={saving || (selected.status && !['available', 'unassigned'].includes(selected.status))}
+                    title={selected.status && !['available', 'unassigned'].includes(selected.status) ? `No se puede asignar: equipo en estado "${selected.status}"` : undefined}
+                    onClick={openAssignModal}
+                  >
                     {selected.assigned_to_user_id ? "Reasignar / Liberar" : "Asignar equipo"}
                   </Button>
                 </div>

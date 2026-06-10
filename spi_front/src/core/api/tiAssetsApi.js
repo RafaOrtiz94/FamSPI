@@ -224,3 +224,52 @@ export const uploadTiFinancialDoc = async (assetId, docType, file, notes = "") =
  });
  return data?.data || null;
 };
+
+// ─── FASE 2: Corporate Numbers ────────────────────────────────────────────
+
+export const listTiCorporateNumbers = async (params = {}) => {
+ const { data } = await api.get("/ti-assets/corporate-numbers", { params });
+ return data?.data || [];
+};
+
+export const getTiCorporateNumber = async (id) => {
+ const { data } = await api.get(`/ti-assets/corporate-numbers/${id}`);
+ return data?.data || null;
+};
+
+export const createTiCorporateNumber = async (payload = {}) => {
+ const { data } = await api.post("/ti-assets/corporate-numbers", payload);
+ return data?.data || null;
+};
+
+export const assignTiCorporateNumber = async (id, payload = {}) => {
+ const { data } = await api.post(`/ti-assets/corporate-numbers/${id}/assign`, payload);
+ return data?.data || null;
+};
+
+export const changeTiCorporateNumber = async (currentId, payload = {}) => {
+ const { data } = await api.post(`/ti-assets/corporate-numbers/${currentId}/change`, payload);
+ return data?.data || null;
+};
+
+export const getTiCorporateNumberHistory = async (id) => {
+ const { data } = await api.get(`/ti-assets/corporate-numbers/${id}/history`);
+ return data?.data || [];
+};
+
+// ─── FASE 6: Liberation ───────────────────────────────────────────────────
+
+export const liberateTiAsset = async (assetId, photoFile, notes = "") => {
+ const formData = new FormData();
+ formData.append("photo", photoFile);
+ if (notes) formData.append("notes", notes);
+ const { data } = await api.post(`/ti-assets/${assetId}/liberate`, formData, {
+   headers: { "Content-Type": "multipart/form-data" },
+ });
+ return data?.data || null;
+};
+
+export const getTiLiberationPhotos = async (assetId) => {
+ const { data } = await api.get(`/ti-assets/${assetId}/liberation-photos`);
+ return data?.data || [];
+};
