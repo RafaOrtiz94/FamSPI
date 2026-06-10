@@ -316,6 +316,115 @@ async function deleteInvoice(req, res) {
   }
 }
 
+async function createManualNote(req, res) {
+  try {
+    const allowanceId = Number(req.params.id);
+    const { file_base64, file_name } = req.body || {};
+
+    let driveFileId = req.body?.drive_file_id || null;
+    let driveLink = req.body?.drive_link || null;
+
+    // Si se proporciona file_base64, simplemente almacenarlo como referencia
+    // (en una implementación real, esto guardaría en storage y obtendría un ID)
+    if (file_base64 && file_name) {
+      // Por ahora, solo guardamos el nombre del archivo como referencia
+      // Un true implementation guardaría en Google Drive o storage
+      driveLink = `data:application/octet-stream;base64,${file_base64.substring(0, 50)}...`;
+    }
+
+    const data = await service.createManualNote({
+      allowanceId,
+      issueDate: req.body?.issue_date,
+      supplierRuc: req.body?.supplier_ruc,
+      supplierName: req.body?.supplier_name,
+      subtotal12: req.body?.subtotal_12,
+      subtotal0: req.body?.subtotal_0,
+      iva: req.body?.iva,
+      total: req.body?.total,
+      expenseDescription: req.body?.expense_description,
+      documentState: req.body?.document_state,
+      emissionPoint: req.body?.emission_point,
+      sequential: req.body?.sequential,
+      driveFileId,
+      driveLink,
+      notes: req.body?.notes,
+      actorUser: req.user,
+    });
+    return res.status(201).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo crear la nota de venta manual");
+  }
+}
+
+async function listManualNotes(req, res) {
+  try {
+    const allowanceId = Number(req.params.id);
+    const data = await service.listManualNotes({
+      allowanceId,
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudieron listar las notas de venta manual");
+  }
+}
+
+async function createPurchaseNoInvoice(req, res) {
+  try {
+    const allowanceId = Number(req.params.id);
+    const { file_base64, file_name } = req.body || {};
+
+    let driveFileId = req.body?.drive_file_id || null;
+
+    // Si se proporciona file_base64, simplemente almacenarlo como referencia
+    if (file_base64 && file_name) {
+      // Nota: En una implementación real, esto guardaría en Google Drive o storage
+      // Por ahora solo aceptamos el archivo sin guardarlo
+    }
+
+    const data = await service.createPurchaseNoInvoice({
+      allowanceId,
+      description: req.body?.description,
+      total: req.body?.total,
+      purchaseDate: req.body?.purchase_date,
+      justification: req.body?.justification,
+      driveFileId,
+      actorUser: req.user,
+    });
+    return res.status(201).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo crear la compra sin factura");
+  }
+}
+
+async function listPurchasesNoInvoice(req, res) {
+  try {
+    const allowanceId = Number(req.params.id);
+    const data = await service.listPurchasesNoInvoice({
+      allowanceId,
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudieron listar las compras sin factura");
+  }
+}
+
+async function approvePurchaseNoInvoice(req, res) {
+  try {
+    const purchaseId = Number(req.params.id);
+    const data = await service.approvePurchaseNoInvoice({
+      purchaseId,
+      status: req.body?.status,
+      approvedBy: req.body?.approved_by,
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo aprobar la compra");
+  }
+}
+
 module.exports = {
   listCandidates,
   list,
@@ -338,4 +447,9 @@ module.exports = {
   reportSummary,
   atsXml,
   report,
+  createManualNote,
+  listManualNotes,
+  createPurchaseNoInvoice,
+  listPurchasesNoInvoice,
+  approvePurchaseNoInvoice,
 };

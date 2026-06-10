@@ -336,6 +336,7 @@ else if (["it", "ti", "jefe_ti", "admin_ti"].includes(scope)) {
  groups.critical.push(tiModulesLink, kickoffLink);
  }
  groups.primary.push(tiDevicesLink, permisosLink, peopleAdminLink, ...talentoLinks, ...auditLinks);
+ groups.secondary.push(viaticosLink);
  if (auditActive) groups.primary.push(auditPrepLink);
  }
 

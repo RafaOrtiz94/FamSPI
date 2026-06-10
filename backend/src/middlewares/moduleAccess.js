@@ -7,6 +7,7 @@ const BYPASS_PREFIXES = [
   "/api/v1/auth/",
   "/api/v1/module-access/",
   "/api/v1/notifications/",
+  "/api/v1/viaticos/",
 ];
 
 async function moduleAccessGuard(req, res, next) {

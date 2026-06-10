@@ -19,6 +19,8 @@ router.use(
     "jefe_tecnico",
     "jefe_servicio_tecnico",
     "jefe_operaciones",
+    "ti",
+    "jefe_ti",
     "admin",
     "administrador",
     "gerencia_general",
