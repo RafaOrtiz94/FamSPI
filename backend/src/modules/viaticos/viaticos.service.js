@@ -26,6 +26,10 @@ const REQUESTER_ROLES = [
   "tecnico",
   "jefe_tecnico",
   "jefe_servicio_tecnico",
+  "ti",
+  "jefe_ti",
+  "talento_humano",
+  "jefe_talento_humano",
   "admin",
 ];
 
@@ -3287,6 +3291,174 @@ async function deleteAllowanceInvoice({ invoiceId, actorUser }) {
   return { deleted: true, id: invoiceId };
 }
 
+async function createManualNote({
+  allowanceId,
+  issueDate,
+  supplierRuc,
+  supplierName,
+  subtotal12,
+  subtotal0,
+  iva,
+  total,
+  expenseDescription,
+  documentState,
+  emissionPoint,
+  sequential,
+  driveFileId,
+  driveLink,
+  notes,
+  actorUser,
+}) {
+  assertViaticosAccess(actorUser);
+
+  const { rows } = await db.query(
+    `INSERT INTO travel_allowance_invoices (
+      allowance_id, document_type, issue_date, supplier_ruc, supplier_name,
+      subtotal_12, subtotal_0, iva, total, details_text,
+      document_state, emission_point, sequential,
+      drive_file_id, drive_link, validation_notes,
+      status, created_by_user_id, created_at, updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())
+    RETURNING *`,
+    [
+      allowanceId, 'nota_venta_manual', issueDate, supplierRuc, supplierName,
+      subtotal12, subtotal0, iva, total, expenseDescription,
+      documentState, emissionPoint, sequential,
+      driveFileId, driveLink, notes,
+      'pendiente_clasificacion', actorUser.id
+    ]
+  );
+
+  await recalculateAllowanceTotals(allowanceId);
+  return rows[0];
+}
+
+async function listManualNotes({ allowanceId, actorUser }) {
+  assertViaticosAccess(actorUser);
+
+  const { rows } = await db.query(
+    `SELECT * FROM travel_allowance_invoices
+     WHERE allowance_id = $1 AND document_type = 'nota_venta_manual'
+     ORDER BY issue_date DESC`,
+    [allowanceId]
+  );
+  return rows;
+}
+
+async function createPurchaseNoInvoice({
+  allowanceId,
+  description,
+  total,
+  purchaseDate,
+  justification,
+  driveFileId,
+  actorUser,
+}) {
+  assertViaticosAccess(actorUser);
+
+  const { rows } = await db.query(
+    `INSERT INTO travel_allowance_purchases_no_invoice (
+      allowance_id, description, total, purchase_date, justification, file_id, status, created_at, updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW(), NOW())
+    RETURNING *`,
+    [allowanceId, description, total, purchaseDate, justification, driveFileId]
+  );
+
+  await recalculateAllowanceTotals(allowanceId);
+  return rows[0];
+}
+
+async function listPurchasesNoInvoice({ allowanceId, actorUser }) {
+  assertViaticosAccess(actorUser);
+
+  const { rows } = await db.query(
+    `SELECT p.*, u1.email as approved_by_finance_email, u2.email as approved_by_talento_email
+     FROM travel_allowance_purchases_no_invoice p
+     LEFT JOIN public.users u1 ON p.approved_by_finance = u1.id
+     LEFT JOIN public.users u2 ON p.approved_by_talento = u2.id
+     WHERE p.allowance_id = $1
+     ORDER BY p.purchase_date DESC`,
+    [allowanceId]
+  );
+  return rows;
+}
+
+async function approvePurchaseNoInvoice({
+  purchaseId,
+  status,
+  approvedBy,
+  actorUser,
+}) {
+  const roles = collectUserRoles(actorUser);
+  const isFinance = Array.from(roles).some(r => FINANCE_ROLES.includes(r));
+  const isTalento = Array.from(roles).some(r => ['talento_humano', 'jefe_talento_humano'].includes(r));
+
+  if (!isFinance && !isTalento) {
+    const error = new Error("Solo finanzas o talento humano pueden aprobar compras sin factura");
+    error.status = 403;
+    throw error;
+  }
+
+  const updateField = approvedBy === 'finance' ? 'approved_by_finance' : 'approved_by_talento';
+
+  const { rows } = await db.query(
+    `UPDATE travel_allowance_purchases_no_invoice
+     SET ${updateField} = $1, updated_at = NOW()
+     WHERE id = $2
+     RETURNING *`,
+    [actorUser.id, purchaseId]
+  );
+
+  if (rows.length === 0) {
+    const error = new Error("Compra no encontrada");
+    error.status = 404;
+    throw error;
+  }
+
+  const purchase = rows[0];
+  if (purchase.approved_by_finance && purchase.approved_by_talento) {
+    await db.query(
+      `UPDATE travel_allowance_purchases_no_invoice SET status = 'approved' WHERE id = $1`,
+      [purchaseId]
+    );
+  }
+
+  await recalculateAllowanceTotals(purchase.allowance_id);
+  return purchase;
+}
+
+async function recalculateAllowanceTotals(allowanceId) {
+  const { rows: sriTotal } = await db.query(
+    `SELECT COALESCE(SUM(total), 0) as total FROM travel_allowance_invoices
+     WHERE allowance_id = $1 AND document_type = 'factura_sri' AND status != 'rechazada'`,
+    [allowanceId]
+  );
+
+  const { rows: manualTotal } = await db.query(
+    `SELECT COALESCE(SUM(total), 0) as total FROM travel_allowance_invoices
+     WHERE allowance_id = $1 AND document_type = 'nota_venta_manual' AND status != 'rechazada'`,
+    [allowanceId]
+  );
+
+  const { rows: purchasesTotal } = await db.query(
+    `SELECT COALESCE(SUM(total), 0) as total FROM travel_allowance_purchases_no_invoice
+     WHERE allowance_id = $1 AND status = 'approved'`,
+    [allowanceId]
+  );
+
+  // Note: total_consolidated y deducible_10_percent son GENERATED ALWAYS AS,
+  // así que se calculan automáticamente. Solo actualizar los totales parciales.
+  await db.query(
+    `UPDATE travel_allowances SET
+      total_sri_invoices = $1,
+      total_manual_notes = $2,
+      total_purchases_no_invoice = $3,
+      updated_at = NOW()
+     WHERE id = $4`,
+    [sriTotal[0].total, manualTotal[0].total, purchasesTotal[0].total, allowanceId]
+  );
+}
+
 module.exports = {
   FINANCE_ROLES,
   isFinanceUser,
@@ -3312,5 +3484,11 @@ module.exports = {
   buildFinanceSummaryReport,
   generateAtsXml,
   buildAllowanceReport,
+  createManualNote,
+  listManualNotes,
+  createPurchaseNoInvoice,
+  listPurchasesNoInvoice,
+  approvePurchaseNoInvoice,
+  recalculateAllowanceTotals,
 };
 
