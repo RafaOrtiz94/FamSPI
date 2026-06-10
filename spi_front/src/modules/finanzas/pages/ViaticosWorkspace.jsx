@@ -14,11 +14,21 @@ import {
   deleteViaticoInvoice,
   patchViaticoInvoice,
   getViaticoReport,
+  createManualNote,
+  listManualNotes,
+  createPurchaseNoInvoice,
+  listPurchasesNoInvoice,
+  approvePurchaseNoInvoice,
 } from "../../../core/api/viaticosApi";
 import { useUI } from "../../../core/ui/UIContext";
 import { useAuth } from "../../../core/auth/AuthContext";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../core/api";
 import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
+import ConsolidatedSummary from "../components/viaticos/ConsolidatedSummary";
+import ManualNoteForm from "../components/viaticos/ManualNoteForm";
+import ManualNotesTable from "../components/viaticos/ManualNotesTable";
+import PurchaseNoInvoiceForm from "../components/viaticos/PurchaseNoInvoiceForm";
+import PurchaseNoInvoiceTable from "../components/viaticos/PurchaseNoInvoiceTable";
 
 const toMoney = (v, cur = "USD") =>
   new Intl.NumberFormat("es-EC", { style: "currency", currency: cur, minimumFractionDigits: 2 }).format(
@@ -196,6 +206,7 @@ const ViaticosWorkspace = () => {
   const { user } = useAuth();
   const roleList = useMemo(() => normalizeRoles(user), [user]);
   const isFinance = roleList.some((r) => FINANCE_ROLES.includes(r));
+  const isTalento = roleList.some((r) => ["talento_humano", "jefe_talento_humano"].includes(r));
 
   const range = useMemo(() => monthRange(), []);
   const [filters, setFilters] = useState({ start: range.start, end: range.end });
@@ -209,6 +220,12 @@ const ViaticosWorkspace = () => {
 
   const [invoicesMap, setInvoicesMap] = useState({});
   const [invoicesLoading, setInvoicesLoading] = useState({});
+
+  const [manualNotesMap, setManualNotesMap] = useState({});
+  const [manualNotesLoading, setManualNotesLoading] = useState({});
+
+  const [purchasesNoInvoiceMap, setPurchasesNoInvoiceMap] = useState({});
+  const [purchasesNoInvoiceLoading, setPurchasesNoInvoiceLoading] = useState({});
 
   const [txtMap, setTxtMap] = useState({});        // { [id]: { file, content } }
   const [txtUploading, setTxtUploading] = useState({});
@@ -257,13 +274,41 @@ const ViaticosWorkspace = () => {
     }
   }, []);
 
+  const loadManualNotes = useCallback(async (allowanceId) => {
+    setManualNotesLoading((p) => ({ ...p, [allowanceId]: true }));
+    try {
+      const data = await listManualNotes(allowanceId);
+      setManualNotesMap((p) => ({ ...p, [allowanceId]: Array.isArray(data) ? data : [] }));
+    } catch {
+      setManualNotesMap((p) => ({ ...p, [allowanceId]: [] }));
+    } finally {
+      setManualNotesLoading((p) => ({ ...p, [allowanceId]: false }));
+    }
+  }, []);
+
+  const loadPurchasesNoInvoice = useCallback(async (allowanceId) => {
+    setPurchasesNoInvoiceLoading((p) => ({ ...p, [allowanceId]: true }));
+    try {
+      const data = await listPurchasesNoInvoice(allowanceId);
+      setPurchasesNoInvoiceMap((p) => ({ ...p, [allowanceId]: Array.isArray(data) ? data : [] }));
+    } catch {
+      setPurchasesNoInvoiceMap((p) => ({ ...p, [allowanceId]: [] }));
+    } finally {
+      setPurchasesNoInvoiceLoading((p) => ({ ...p, [allowanceId]: false }));
+    }
+  }, []);
+
   const toggleExpand = useCallback((id) => {
     setExpanded((prev) => {
       const next = prev === id ? null : id;
-      if (next && !invoicesMap[next]) loadInvoices(next);
+      if (next) {
+        if (!invoicesMap[next]) loadInvoices(next);
+        if (!manualNotesMap[next]) loadManualNotes(next);
+        if (!purchasesNoInvoiceMap[next]) loadPurchasesNoInvoice(next);
+      }
       return next;
     });
-  }, [invoicesMap, loadInvoices]);
+  }, [invoicesMap, manualNotesMap, purchasesNoInvoiceMap, loadInvoices, loadManualNotes, loadPurchasesNoInvoice]);
 
   const handleTxtFileChange = (allowanceId, file) => {
     if (!file) return;
@@ -320,6 +365,51 @@ const ViaticosWorkspace = () => {
       await loadInvoices(allowanceId);
     } catch (err) {
       showToast(err?.response?.data?.message || "Error actualizando factura", "error");
+    } finally {
+      setSaving((p) => ({ ...p, [key]: false }));
+    }
+  };
+
+  const handleCreateManualNote = async (allowanceId, payload) => {
+    const key = `create-note-${allowanceId}`;
+    setSaving((p) => ({ ...p, [key]: true }));
+    try {
+      await createManualNote(allowanceId, payload);
+      showToast("Nota de venta agregada", "success");
+      await loadManualNotes(allowanceId);
+      await loadData({ silent: true });
+    } catch (err) {
+      showToast(err?.response?.data?.message || "Error agregando nota", "error");
+    } finally {
+      setSaving((p) => ({ ...p, [key]: false }));
+    }
+  };
+
+  const handleCreatePurchaseNoInvoice = async (allowanceId, payload) => {
+    const key = `create-purchase-${allowanceId}`;
+    setSaving((p) => ({ ...p, [key]: true }));
+    try {
+      await createPurchaseNoInvoice(allowanceId, payload);
+      showToast("Compra sin factura agregada", "success");
+      await loadPurchasesNoInvoice(allowanceId);
+      await loadData({ silent: true });
+    } catch (err) {
+      showToast(err?.response?.data?.message || "Error agregando compra", "error");
+    } finally {
+      setSaving((p) => ({ ...p, [key]: false }));
+    }
+  };
+
+  const handleApprovePurchaseNoInvoice = async (allowanceId, purchaseId, approvedBy) => {
+    const key = `approve-purchase-${purchaseId}`;
+    setSaving((p) => ({ ...p, [key]: true }));
+    try {
+      await approvePurchaseNoInvoice(purchaseId, { approved_by: approvedBy });
+      showToast("Aprobación registrada", "success");
+      await loadPurchasesNoInvoice(allowanceId);
+      await loadData({ silent: true });
+    } catch (err) {
+      showToast(err?.response?.data?.message || "Error aprobando compra", "error");
     } finally {
       setSaving((p) => ({ ...p, [key]: false }));
     }
@@ -640,6 +730,8 @@ const ViaticosWorkspace = () => {
             const isExpanded = expanded === item.id;
             const invoices = invoicesMap[item.id] || [];
             const invLoading = Boolean(invoicesLoading[item.id]);
+            const manualNotes = manualNotesMap[item.id] || [];
+            const purchasesNoInvoice = purchasesNoInvoiceMap[item.id] || [];
             const txtEntry = txtMap[item.id];
             const isTxtUploading = Boolean(txtUploading[item.id]);
             const report = reports[item.id];
@@ -731,6 +823,48 @@ const ViaticosWorkspace = () => {
                           </button>
                         </div>
                       </div>
+                    )}
+
+                    {/* Resumen consolidado */}
+                    <ConsolidatedSummary allowance={item} />
+
+                    {/* Notas de venta manual */}
+                    {canEdit && (
+                      <Section title="Notas de Venta Manual" badge={manualNotes.length} defaultOpen={false}>
+                        <ManualNoteForm
+                          allowance={item}
+                          onSubmit={(payload) => handleCreateManualNote(item.id, payload)}
+                          loading={saving[`create-note-${item.id}`]}
+                          destination={item.city}
+                        />
+                        <div className="mt-4">
+                          <ManualNotesTable
+                            notes={manualNotes}
+                            isFinance={isFinance}
+                            isRequester={user?.email === item.requester_email}
+                          />
+                        </div>
+                      </Section>
+                    )}
+
+                    {/* Compras sin factura */}
+                    {canEdit && (
+                      <Section title="Compras sin Factura" badge={purchasesNoInvoice.length} defaultOpen={false}>
+                        <PurchaseNoInvoiceForm
+                          allowance={item}
+                          onSubmit={(payload) => handleCreatePurchaseNoInvoice(item.id, payload)}
+                          loading={saving[`create-purchase-${item.id}`]}
+                        />
+                        <div className="mt-4">
+                          <PurchaseNoInvoiceTable
+                            purchases={purchasesNoInvoice}
+                            isFinance={isFinance}
+                            isTalento={isTalento}
+                            onApprove={(purchaseId, approvedBy) => handleApprovePurchaseNoInvoice(item.id, purchaseId, approvedBy)}
+                            loadingPurchaseId={Object.keys(saving).find(k => k.startsWith('approve-purchase'))}
+                          />
+                        </div>
+                      </Section>
                     )}
 
                     {/* TXT upload (requester, pending) */}

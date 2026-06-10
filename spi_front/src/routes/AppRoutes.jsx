@@ -524,6 +524,8 @@ const AppRoutes = () => {
                   "jefe_servicio_tecnico",
                   "ti",
                   "jefe_ti",
+                  "talento_humano",
+                  "jefe_talento_humano",
                 ]}
               />
             }

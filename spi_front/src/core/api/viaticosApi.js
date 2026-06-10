@@ -99,3 +99,30 @@ export const listViaticoInvoices = async (viaticoId) => {
  const { data } = await api.get(`/viaticos/${viaticoId}/invoices`);
  return data?.data || [];
 };
+
+// Notas de venta manual
+export const createManualNote = async (viaticoId, payload) => {
+ const { data } = await api.post(`/viaticos/${viaticoId}/invoices/manual`, payload);
+ return data?.data || data;
+};
+
+export const listManualNotes = async (viaticoId) => {
+ const { data } = await api.get(`/viaticos/${viaticoId}/invoices/manual`);
+ return data?.data || [];
+};
+
+// Compras sin factura
+export const createPurchaseNoInvoice = async (viaticoId, payload) => {
+ const { data } = await api.post(`/viaticos/${viaticoId}/purchases-no-invoice`, payload);
+ return data?.data || data;
+};
+
+export const listPurchasesNoInvoice = async (viaticoId) => {
+ const { data } = await api.get(`/viaticos/${viaticoId}/purchases-no-invoice`);
+ return data?.data || [];
+};
+
+export const approvePurchaseNoInvoice = async (purchaseId, payload) => {
+ const { data } = await api.patch(`/viaticos/purchases/${purchaseId}/approve`, payload);
+ return data?.data || data;
+};

@@ -3287,7 +3287,13 @@ async function deleteAllowanceInvoice({ invoiceId, actorUser }) {
     }
   }
 
+  const allowanceId = invoice.allowance_id;
+
   await db.query(`DELETE FROM travel_allowance_invoices WHERE id = $1`, [invoiceId]);
+
+  // Recalcular totales después de eliminar
+  await recalculateAllowanceTotals(allowanceId);
+
   return { deleted: true, id: invoiceId };
 }
 
@@ -3343,6 +3349,77 @@ async function listManualNotes({ allowanceId, actorUser }) {
     [allowanceId]
   );
   return rows;
+}
+
+async function updateManualNote({
+  noteId,
+  issueDate,
+  supplierRuc,
+  supplierName,
+  subtotal12,
+  subtotal0,
+  iva,
+  total,
+  expenseDescription,
+  documentState,
+  emissionPoint,
+  sequential,
+  notes,
+  actorUser,
+}) {
+  assertViaticosAccess(actorUser);
+
+  const { rows: noteRows } = await db.query(
+    'SELECT allowance_id FROM travel_allowance_invoices WHERE id = $1 AND document_type = $2',
+    [noteId, 'nota_venta_manual']
+  );
+
+  if (!noteRows.length) {
+    const err = new Error('Nota no encontrada');
+    err.status = 404;
+    throw err;
+  }
+
+  const allowanceId = noteRows[0].allowance_id;
+
+  const { rows } = await db.query(
+    `UPDATE travel_allowance_invoices SET
+      issue_date = $1, supplier_ruc = $2, supplier_name = $3,
+      subtotal_12 = $4, subtotal_0 = $5, iva = $6, total = $7,
+      details_text = $8, document_state = $9, emission_point = $10,
+      sequential = $11, validation_notes = $12, updated_at = NOW()
+     WHERE id = $13 AND document_type = 'nota_venta_manual'
+     RETURNING *`,
+    [issueDate, supplierRuc, supplierName, subtotal12, subtotal0, iva, total, expenseDescription, documentState, emissionPoint, sequential, notes, noteId]
+  );
+
+  await recalculateAllowanceTotals(allowanceId);
+  return rows[0];
+}
+
+async function deleteManualNote({ noteId, actorUser }) {
+  assertViaticosAccess(actorUser);
+
+  const { rows } = await db.query(
+    'SELECT allowance_id FROM travel_allowance_invoices WHERE id = $1 AND document_type = $2',
+    [noteId, 'nota_venta_manual']
+  );
+
+  if (!rows.length) {
+    const err = new Error('Nota no encontrada');
+    err.status = 404;
+    throw err;
+  }
+
+  const allowanceId = rows[0].allowance_id;
+
+  await db.query(
+    'DELETE FROM travel_allowance_invoices WHERE id = $1 AND document_type = $2',
+    [noteId, 'nota_venta_manual']
+  );
+
+  await recalculateAllowanceTotals(allowanceId);
+  return { deleted: true, id: noteId };
 }
 
 async function createPurchaseNoInvoice({
@@ -3486,6 +3563,8 @@ module.exports = {
   buildAllowanceReport,
   createManualNote,
   listManualNotes,
+  updateManualNote,
+  deleteManualNote,
   createPurchaseNoInvoice,
   listPurchasesNoInvoice,
   approvePurchaseNoInvoice,

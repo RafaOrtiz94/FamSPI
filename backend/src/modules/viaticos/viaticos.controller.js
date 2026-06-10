@@ -369,6 +369,44 @@ async function listManualNotes(req, res) {
   }
 }
 
+async function updateManualNote(req, res) {
+  try {
+    const noteId = Number(req.params.noteId);
+    const data = await service.updateManualNote({
+      noteId,
+      issueDate: req.body?.issue_date,
+      supplierRuc: req.body?.supplier_ruc,
+      supplierName: req.body?.supplier_name,
+      subtotal12: req.body?.subtotal_12,
+      subtotal0: req.body?.subtotal_0,
+      iva: req.body?.iva,
+      total: req.body?.total,
+      expenseDescription: req.body?.expense_description,
+      documentState: req.body?.document_state,
+      emissionPoint: req.body?.emission_point,
+      sequential: req.body?.sequential,
+      notes: req.body?.notes,
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo actualizar la nota de venta manual");
+  }
+}
+
+async function deleteManualNote(req, res) {
+  try {
+    const noteId = Number(req.params.noteId);
+    const data = await service.deleteManualNote({
+      noteId,
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo eliminar la nota de venta manual");
+  }
+}
+
 async function createPurchaseNoInvoice(req, res) {
   try {
     const allowanceId = Number(req.params.id);
@@ -449,6 +487,8 @@ module.exports = {
   report,
   createManualNote,
   listManualNotes,
+  updateManualNote,
+  deleteManualNote,
   createPurchaseNoInvoice,
   listPurchasesNoInvoice,
   approvePurchaseNoInvoice,

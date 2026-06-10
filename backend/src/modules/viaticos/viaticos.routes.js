@@ -21,6 +21,8 @@ router.use(
     "jefe_operaciones",
     "ti",
     "jefe_ti",
+    "talento_humano",
+    "jefe_talento_humano",
     "admin",
     "administrador",
     "gerencia_general",
@@ -48,5 +50,16 @@ router.get("/:id/invoices", controller.listInvoices);
 router.patch("/invoices/:invoiceId", requireRole(FINANCE_REVIEWER_ROLES), controller.patchInvoice);
 router.delete("/invoices/:invoiceId", controller.deleteInvoice);
 router.get("/:id/report", requireRole(FINANCE_REVIEWER_ROLES), controller.report);
+
+// Notas de venta manual
+router.post("/:id/invoices/manual", controller.createManualNote);
+router.get("/:id/invoices/manual", controller.listManualNotes);
+router.patch("/invoices/manual/:noteId", controller.updateManualNote);
+router.delete("/invoices/manual/:noteId", controller.deleteManualNote);
+
+// Compras sin factura
+router.post("/:id/purchases-no-invoice", controller.createPurchaseNoInvoice);
+router.get("/:id/purchases-no-invoice", controller.listPurchasesNoInvoice);
+router.patch("/purchases/:id/approve", requireRole([...FINANCE_REVIEWER_ROLES, "talento_humano", "jefe_talento_humano"]), controller.approvePurchaseNoInvoice);
 
 module.exports = router;

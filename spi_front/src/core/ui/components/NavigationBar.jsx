@@ -327,6 +327,7 @@ const getPriorityGroups = (scope, role, auditActive) => {
  // TALENTO HUMANO - Gestión de personal
  else if (["talento-humano", "talento_humano", "jefe_talento_humano"].includes(scope)) {
  groups.primary.push(permisosLink, peopleAdminLink, asistenciaReportesLink, ...talentoLinks);
+ groups.secondary.push(viaticosLink);
  }
 
  // TI - Tecnología y auditoría
