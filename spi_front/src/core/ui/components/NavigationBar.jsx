@@ -225,6 +225,18 @@ const tiModulesLink = {
  path: "/dashboard/ti/modulos",
 };
 
+const collabEntregasLink = {
+ name: "Entregas Colaboradores",
+ icon: FiList,
+ path: "/dashboard/collab/entregas",
+};
+
+const collabResumenLink = {
+ name: "Entregas Colaboradores",
+ icon: FiList,
+ path: "/dashboard/collab/resumen",
+};
+
 // Sistema de prioridades por rol
 const getPriorityGroups = (scope, role, auditActive) => {
  const roleSet = new Set(
@@ -258,7 +270,7 @@ const getPriorityGroups = (scope, role, auditActive) => {
  if (scope === "gerencia_general") {
    groups.secondary.push(kickoffLink);
  }
- groups.primary.push(gerenciaContractApprovalsLink, permisosLink, auditLinks[0]); // Gestion de personal y auditoria
+ groups.primary.push(gerenciaContractApprovalsLink, collabResumenLink, permisosLink, auditLinks[0]); // Gestion de personal y auditoria
  groups.primary.push(deliveryCeilingsLink);
  groups.secondary.push(auditPrepLink); // Preparación
  groups.admin.push(...talentoLinks); // Gestión administrativa
@@ -266,7 +278,7 @@ const getPriorityGroups = (scope, role, auditActive) => {
 
  // 💰 FINANZAS - Control presupuestario
  else if (["finanzas", "jefe_finanzas", "jefe_financiero", "financiero", "contador"].includes(scope)) {
- groups.primary.push(viaticosLink, tiActivosFinancieroLink, asistenciaReportesLink, permisosLink); // Control financiero principal
+ groups.primary.push(viaticosLink, collabEntregasLink, asistenciaReportesLink, permisosLink); // TI gestionado desde Entregas Colaboradores
  if (!hideBusinessCaseForFinance) {
  groups.primary.push(businessCaseLink);
  }
