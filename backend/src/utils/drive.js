@@ -162,7 +162,7 @@ async function deleteFile(fileId) {
   }
 }
 
-/** 📄 Copiar plantilla y crear documento editable */
+/** 📄 Copiar plantilla y crear documento editable (siempre como Google Doc nativo) */
 async function copyTemplate(templateId, name, parentId) {
   if (!templateId) {
     const err = new Error("No se recibió un fileId de plantilla para copiar en Drive.");
@@ -176,6 +176,9 @@ async function copyTemplate(templateId, name, parentId) {
       requestBody: {
         name,
         parents: parentId ? [parentId] : undefined,
+        // Fuerza conversión a Google Doc nativo si la plantilla es un archivo Office (.docx)
+        // Necesario para poder usar Docs API (batchUpdate) y exportar a PDF con files.export
+        mimeType: "application/vnd.google-apps.document",
       },
       fields: "id, name, webViewLink",
     });
