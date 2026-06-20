@@ -287,8 +287,7 @@ async function insertDocsTableRows(documentId, tableIndex = 0, items, getCellVal
     for (let colIdx = 0; colIdx < cellValues.length; colIdx++) {
       const cell = row.tableCells?.[colIdx];
       if (!cell) continue;
-      const val = String(cellValues[colIdx] ?? "").trim();
-      if (!val) continue;
+      const val = String(cellValues[colIdx] ?? "").trim() || "N/A";
       const cellStart = cell.content?.[0]?.startIndex;
       if (cellStart == null) continue;
       fillRequests.push({ insertText: { location: { index: cellStart }, text: val } });
