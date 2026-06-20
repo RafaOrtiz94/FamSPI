@@ -1,9 +1,23 @@
 const db = require("../../config/db");
+const logger = require("../../config/logger");
 const notificationManager = require("../notifications/notificationManager");
 const { getHolidaysForYear } = require("../security/security.holidays.ec");
-const { ensureFolder, uploadBase64File } = require("../../utils/drive");
+const {
+  ensureFolder,
+  uploadBase64File,
+  copyTemplate,
+  replaceTags,
+  insertDocsTableRows,
+  exportPdfBuffer,
+  downloadFileBuffer,
+  deleteFile,
+} = require("../../utils/drive");
 const { computeSha256HexFromBuffer } = require("../../utils/documentHash");
 const { upsertCollaboratorProfile } = require("../collaborators/collaborators.service");
+const { generateActaEntregaPdf, generateActaRetiroPdf } = require("./tiAssets.acta");
+const signatureWorkflowsService = require("../signature-workflows/signatureWorkflows.service");
+const { resolveRecipientOrThrow } = signatureWorkflowsService;
+const { validateCreateWorkflowPayload } = require("../signature-workflows/signatureWorkflows.validation");
 
 const ALLOWED_STATUSES = new Set([
   "available",
@@ -19,9 +33,56 @@ const TI_READ_ROLES = [
   "ti", "jefe_ti", "admin_ti", "gerencia", "gerencia_general",
   "financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador",
 ];
+// Roles que pueden crear activos (TI + financiero)
+const TI_ASSET_CREATE_ROLES = [...TI_ROLES, "financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador"];
 const MS_PER_DAY = 86400000;
+const TI_ACTA_ENTREGA_TEMPLATE_ID = process.env.TI_ACTA_ENTREGA_TEMPLATE_ID || null;
+const TI_ACTA_RETIRO_TEMPLATE_ID = process.env.TI_ACTA_RETIRO_TEMPLATE_ID || null;
 
-async function ensureTiAssetsSchema() {
+// Schema managed via migration 202_ti_assets_v2.sql — run it once against the DB.
+async function ensureTiAssetsSchema() { /* no-op */ }
+
+const getMonthNameEs = (monthNum) => {
+  const months = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+  ];
+  const idx = Number(monthNum) - 1;
+  return idx >= 0 && idx < 12 ? months[idx] : String(monthNum || "");
+};
+
+// ─── Google Docs table cell builder ──────────────────────────────────────────
+// Columns: No. | Equipo/Accesorio | Marca/Modelo | Serie/IMEI | Nuevo o Usado | Estado (1-10) | Observaciones
+const _tiActaCellValues = (item, i) => [
+  String(i + 1),
+  item.name || "",
+  item.brand_model || "",
+  item.serial_imei || "",
+  item.is_new === true ? "Nuevo" : item.is_new === false ? "Usado" : "",
+  item.physical_condition != null ? `${item.physical_condition}/10` : "",
+  item.observations || "",
+];
+
+const buildTiActaItemsBlock = (items = []) => items.map((item, index) => {
+  const lines = [`${index + 1}. ${item.name || "Item sin nombre"}`];
+  if (item.brand_model) lines.push(`   Marca/Modelo: ${item.brand_model}`);
+  if (item.serial_imei) lines.push(`   Serie/IMEI: ${item.serial_imei}`);
+  if (item.is_new === true) lines.push("   Estado: Nuevo");
+  if (item.is_new === false) lines.push("   Estado: Usado");
+  if (item.physical_condition != null) lines.push(`   Condición: ${item.physical_condition}/10`);
+  if (item.observations) lines.push(`   Observaciones: ${item.observations}`);
+  return lines.join("\n");
+}).join("\n\n");
+
+async function resolveDraftActaFolder() {
+  const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || null;
+  if (!rootFolderId) return null;
+  const folder = await ensureFolder("Actas TI", rootFolderId);
+  return folder?.id || rootFolderId;
+}
+
+// ── legacy inline schema (kept for reference, replaced by 202_ti_assets_v2.sql) ──
+async function _legacyEnsureTiAssetsSchema_UNUSED() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS public.ti_assets (
       id BIGSERIAL PRIMARY KEY,
@@ -276,7 +337,8 @@ async function ensureTiAssetsSchema() {
   await db.query(`ALTER TABLE public.ti_asset_assignments ADD COLUMN IF NOT EXISTS characteristics TEXT`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_asset_assignments_asset_user ON public.ti_asset_assignments(asset_id, assigned_to_user_id)`);
 
-  // Alteraciones a ti_asset_financial_docs: assignment_id
+  // Alteraciones a ti_asset_financial_docs: columnas añadidas posteriormente
+  await db.query(`ALTER TABLE public.ti_asset_financial_docs ADD COLUMN IF NOT EXISTS assigned_user_id INTEGER REFERENCES public.users(id) ON DELETE SET NULL`);
   await db.query(`ALTER TABLE public.ti_asset_financial_docs ADD COLUMN IF NOT EXISTS assignment_id BIGINT REFERENCES public.ti_asset_assignments(id) ON DELETE SET NULL`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_asset_financial_docs_user ON public.ti_asset_financial_docs(assigned_user_id)`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_asset_financial_docs_assignment ON public.ti_asset_financial_docs(assignment_id)`);
@@ -299,14 +361,24 @@ async function ensureTiAssetsSchema() {
     $$ LANGUAGE plpgsql;
   `);
 
-  // Trigger para auditar cambios de status
-  await db.query(`DROP TRIGGER IF EXISTS trg_ti_asset_status_change ON public.ti_assets`);
+  // Crear trigger solo si no existe (idempotente, sin DROP que requiere exclusive lock)
   await db.query(`
-    CREATE TRIGGER trg_ti_asset_status_change
-    AFTER UPDATE ON public.ti_assets
-    FOR EACH ROW
-    EXECUTE FUNCTION public.audit_ti_asset_status_change();
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'trg_ti_asset_status_change'
+          AND tgrelid = 'public.ti_assets'::regclass
+      ) THEN
+        CREATE TRIGGER trg_ti_asset_status_change
+        AFTER UPDATE ON public.ti_assets
+        FOR EACH ROW
+        EXECUTE FUNCTION public.audit_ti_asset_status_change();
+      END IF;
+    END;
+    $$;
   `);
+
 }
 
 function parseISODateUTC(value) {
@@ -457,7 +529,11 @@ async function listAssets({ status, q }) {
        ORDER BY a.updated_at DESC`,
     params,
   );
-  return rows.map((row) => ({ ...row, ...computeDepreciation(row.purchase_date) }));
+  return rows.map((row) => ({
+    ...row,
+    ...computeDepreciation(row.purchase_date),
+    depreciation_annual: row.purchase_value && row.purchase_value >= 400 ? (row.purchase_value * 0.1111) : 0,
+  }));
 }
 
 async function createAsset({ data, userId }) {
@@ -488,7 +564,7 @@ async function createAsset({ data, userId }) {
     `INSERT INTO public.ti_assets
        (asset_code, name, brand, model, characteristics, status, maintenance_frequency_months,
         serial_number, imei, purchase_date, purchase_value, value_category, created_by, updated_by, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5::jsonb,'unassigned',$6,$7,$8,$9::date,$10::decimal,$11,'unassigned',$12,$12,now(),now())
+     VALUES ($1,$2,$3,$4,$5::jsonb,'unassigned',$6,$7,$8,$9::date,$10::decimal,$11,$12,$12,now(),now())
      RETURNING *`,
     [
       `TI-${Date.now()}`,
@@ -648,14 +724,22 @@ async function assignAsset({
     }
 
     const tipo = assignedToUserId ? "entrega" : "retiro";
+    // Frontend puede enviar datos manuales cuando la ficha está incompleta; si los 3 vienen, úsalos directamente
+    let rNombre, rCedula, rCargo;
+    if (recipientNombre && recipientCedula && recipientCargo) {
+      rNombre = recipientNombre; rCedula = recipientCedula; rCargo = recipientCargo;
+    } else {
+      const actaRecipientId = assignedToUserId || current.assigned_to_user_id;
+      ({ nombre: rNombre, cedula: rCedula, cargo: rCargo } = await resolveRecipientOrThrow(actaRecipientId, client));
+    }
     const acta = await createActa({
       tipo,
       assetId,
       recipientUserId: assignedToUserId,
       previousUserId: current.assigned_to_user_id,
-      recipientNombre,
-      recipientCedula,
-      recipientCargo,
+      recipientNombre: rNombre,
+      recipientCedula: rCedula,
+      recipientCargo:  rCargo,
       generatedBy: userId,
       notes: reason,
       items: resolvedItems,
@@ -817,14 +901,21 @@ async function assignMultipleAssets({
 
     // Create acta with all items
     const tipo = assignedToUserId ? "entrega" : "retiro";
+    let rNombre, rCedula, rCargo;
+    if (recipientNombre && recipientCedula && recipientCargo) {
+      rNombre = recipientNombre; rCedula = recipientCedula; rCargo = recipientCargo;
+    } else {
+      const batchRecipientId = assignedToUserId || assetsQ.rows[0]?.assigned_to_user_id || null;
+      ({ nombre: rNombre, cedula: rCedula, cargo: rCargo } = await resolveRecipientOrThrow(batchRecipientId, client));
+    }
     const acta = await createActa({
       tipo,
-      assetId: null,  // No single asset, multiple items instead
+      assetId: null,
       recipientUserId: assignedToUserId,
       previousUserId: assetsQ.rows[0]?.assigned_to_user_id || null,
-      recipientNombre,
-      recipientCedula,
-      recipientCargo,
+      recipientNombre: rNombre,
+      recipientCedula: rCedula,
+      recipientCargo:  rCargo,
       generatedBy: userId,
       notes: reason,
       items: resolvedItems,
@@ -1490,18 +1581,17 @@ async function removeAccessory({ accessoryId, userId }) {
 
 // ─── Actas ────────────────────────────────────────────────────────────────────
 
-async function generateActaCode() {
+async function generateActaCode(tipo = 'entrega', qc = db) {
   const year = new Date().getFullYear();
-  const { rows } = await db.query(
-    `SELECT MAX(id) as max_id FROM public.ti_asset_actas`,
-  );
-  const nextId = (rows[0]?.max_id || 0) + 1;
-  return `ACTA-ET-${year}-${String(nextId).padStart(6, '0')}`;
+  const { rows } = await qc.query(`SELECT nextval('public.ti_acta_seq') AS seq`);
+  const seq = String(rows[0].seq).padStart(6, '0');
+  const prefix = tipo === 'retiro' ? `ACTA-D-ET-${year}` : `ACTA-ET-${year}`;
+  return `${prefix}-${seq}`;
 }
 
 async function createActa({ tipo, assetId, recipientUserId, previousUserId, recipientNombre, recipientCedula, recipientCargo, generatedBy, notes, items, client: txClient }) {
   const qc = txClient || db;
-  const actaCode = await generateActaCode();
+  const actaCode = await generateActaCode(tipo, qc);
 
   // Capture current date (immutable once created)
   const now = new Date();
@@ -1576,10 +1666,17 @@ async function listAllActas({ limit = 100, offset = 0, tipo = null, is_complete 
     `SELECT a.*,
             COALESCE(ub.fullname, ub.name, ub.email) AS generated_by_name,
             ta.name       AS asset_name,
-            ta.asset_code AS asset_code
+            ta.asset_code AS asset_code,
+            COALESCE(
+              a.recipient_nombre,
+              ur.fullname,  ur.name,  ur.email,
+              up.fullname,  up.name,  up.email
+            ) AS collaborator_name
        FROM public.ti_asset_actas a
-       LEFT JOIN public.users  ub ON ub.id = a.generated_by
+       LEFT JOIN public.users    ub ON ub.id = a.generated_by
        LEFT JOIN public.ti_assets ta ON ta.id = a.asset_id
+       LEFT JOIN public.users    ur ON ur.id = a.recipient_user_id
+       LEFT JOIN public.users    up ON up.id = a.previous_user_id
       WHERE ${where.join(" AND ")}
       ORDER BY a.generated_at DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -1624,6 +1721,144 @@ async function getActaWithItems(actaId) {
     [actaId],
   );
   return { ...actaRows[0], items };
+}
+
+async function updateActa({ actaId, data = {}, userId }) {
+  await ensureTiAssetsSchema();
+  const normalizedActaId = Number(actaId);
+  if (!Number.isFinite(normalizedActaId) || normalizedActaId <= 0) {
+    const err = new Error("actaId invalido");
+    err.status = 400;
+    throw err;
+  }
+
+  const items = Array.isArray(data.items) ? data.items : [];
+  if (!items.length) {
+    const err = new Error("El acta debe incluir al menos un item");
+    err.status = 400;
+    throw err;
+  }
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: actaRows } = await client.query(
+      `SELECT *
+         FROM public.ti_asset_actas
+        WHERE id = $1
+        LIMIT 1`,
+      [normalizedActaId],
+    );
+    if (!actaRows.length) {
+      const err = new Error("Acta no encontrada");
+      err.status = 404;
+      throw err;
+    }
+
+    const acta = actaRows[0];
+    if (
+      acta.signature_workflow_id ||
+      acta.is_complete ||
+      acta.signed_at ||
+      acta.signed_pdf_drive_file_id ||
+      acta.signed_pdf_sha256
+    ) {
+      const err = new Error("El acta ya tiene firma o workflow iniciado y no puede editarse");
+      err.status = 409;
+      throw err;
+    }
+
+    const targetRecipientNombre = data.recipient_nombre !== undefined ? String(data.recipient_nombre || "").trim() : (acta.recipient_nombre || "");
+    const targetRecipientCedula = data.recipient_cedula !== undefined ? String(data.recipient_cedula || "").trim() : (acta.recipient_cedula || "");
+    const targetRecipientCargo = data.recipient_cargo !== undefined ? String(data.recipient_cargo || "").trim() : (acta.recipient_cargo || "");
+    if (!targetRecipientNombre || !targetRecipientCedula || !targetRecipientCargo) {
+      const err = new Error("Nombre, cédula y cargo son obligatorios para editar el acta");
+      err.status = 400;
+      throw err;
+    }
+
+    const sanitizedItems = items.map((item, index) => ({
+      order_num: index + 1,
+      item_type: item.item_type || "equipo",
+      asset_id: item.asset_id != null && String(item.asset_id).trim() !== "" ? Number(item.asset_id) : null,
+      accessory_id: item.accessory_id != null && String(item.accessory_id).trim() !== "" ? Number(item.accessory_id) : null,
+      name: String(item.name || "").trim(),
+      brand_model: item.brand_model != null ? String(item.brand_model || "").trim() || null : null,
+      serial_imei: item.serial_imei != null ? String(item.serial_imei || "").trim() || null : null,
+      is_new: item.is_new === null || item.is_new === undefined || item.is_new === "" ? null : Boolean(item.is_new),
+      physical_condition: item.physical_condition === null || item.physical_condition === undefined || item.physical_condition === ""
+        ? null
+        : Number(item.physical_condition),
+      observations: item.observations != null ? String(item.observations || "").trim() || null : null,
+    }));
+
+    if (sanitizedItems.some((item) => !item.name)) {
+      const err = new Error("Todos los items del acta deben tener nombre");
+      err.status = 400;
+      throw err;
+    }
+
+    const mainAssetId = sanitizedItems.find((item) => item.asset_id)?.asset_id || acta.asset_id || null;
+    const nextNotes = data.notes !== undefined ? (String(data.notes || "").trim() || null) : acta.notes;
+
+    await client.query(
+      `UPDATE public.ti_asset_actas
+          SET asset_id = $2,
+              recipient_nombre = $3,
+              recipient_cedula = $4,
+              recipient_cargo = $5,
+              notes = $6
+        WHERE id = $1`,
+      [normalizedActaId, mainAssetId, targetRecipientNombre, targetRecipientCedula, targetRecipientCargo, nextNotes],
+    );
+
+    await client.query(
+      `DELETE FROM public.ti_asset_actas_items WHERE acta_id = $1`,
+      [normalizedActaId],
+    );
+
+    for (const item of sanitizedItems) {
+      await client.query(
+        `INSERT INTO public.ti_asset_actas_items
+           (acta_id, order_num, item_type, asset_id, accessory_id,
+            name, brand_model, serial_imei, is_new, physical_condition, observations)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [
+          normalizedActaId,
+          item.order_num,
+          item.item_type,
+          item.asset_id,
+          item.accessory_id,
+          item.name,
+          item.brand_model,
+          item.serial_imei,
+          item.is_new,
+          item.physical_condition,
+          item.observations,
+        ],
+      );
+    }
+
+    await client.query(
+      `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
+       VALUES ($1, $2, $3::jsonb, $4, now())`,
+      [
+        mainAssetId,
+        "acta_updated",
+        JSON.stringify({ acta_id: normalizedActaId }),
+        userId || null,
+      ],
+    );
+
+    await client.query("COMMIT");
+    return getActaWithItems(normalizedActaId);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── Upload signed acta ───────────────────────────────────────────────────────
@@ -1722,6 +1957,210 @@ async function uploadSignedActa({ actaId, fileBuffer, originalFilename, userId }
   } catch (_checklistErr) { /* No bloquea si falla la actualizacion del checklist */ }
 
   return { ok: true, sha256, filename, drive_url: driveUrl };
+}
+
+function buildTiActaTemplateReplacements(acta) {
+  const actaDay = acta.acta_day || new Date().getDate();
+  const actaMonth = acta.acta_month || (new Date().getMonth() + 1);
+  const actaYear = acta.acta_year || new Date().getFullYear();
+  return {
+    ACTA_CODE: acta.acta_code || "",
+    NOMBRE: acta.recipient_nombre || "",
+    CEDULA: acta.recipient_cedula || "",
+    CARGO: acta.recipient_cargo || "",
+    ACTA_DIA: String(actaDay).padStart(2, "0"),
+    ACTA_MES: getMonthNameEs(actaMonth),
+    ACTA_ANIO: String(actaYear),
+    ACTA_FECHA_LARGA: `${String(actaDay).padStart(2, "0")} de ${getMonthNameEs(actaMonth)} de ${actaYear}`,
+    ITEMS_COUNT: String(Array.isArray(acta.items) ? acta.items.length : 0),
+    ITEMS_BLOCK: buildTiActaItemsBlock(acta.items || []),
+    NOTES: acta.notes || "",
+  };
+}
+
+async function buildLegacyActaPdfBuffer(acta) {
+  if (!acta) return null;
+
+  const pdfParams = {
+    actaCode: acta.acta_code || "ACTA-ET-2026-000001",
+    nombre: acta.recipient_nombre || "",
+    cedula: acta.recipient_cedula || "",
+    cargo: acta.recipient_cargo || "",
+    actaDay: acta.acta_day || new Date().getDate(),
+    actaMonth: acta.acta_month || (new Date().getMonth() + 1),
+    actaYear: acta.acta_year || new Date().getFullYear(),
+    items: acta.items || [],
+  };
+
+  return acta.tipo === "retiro"
+    ? generateActaRetiroPdf(pdfParams)
+    : generateActaEntregaPdf(pdfParams);
+}
+
+async function buildDriveTemplateActaPdfBuffer(acta) {
+  if (!acta) return null;
+  const templateId = acta.tipo === "retiro"
+    ? TI_ACTA_RETIRO_TEMPLATE_ID
+    : TI_ACTA_ENTREGA_TEMPLATE_ID;
+  if (!templateId) return null;
+
+  const filename = acta.acta_code ? `${acta.acta_code}.pdf` : `ACTA-${String(acta.id).padStart(6, "0")}.pdf`;
+  const sourceName = filename.replace(/\.pdf$/i, "");
+  const folderId = await resolveDraftActaFolder();
+  let doc = null;
+
+  try {
+    doc = await copyTemplate(templateId, sourceName, folderId || undefined);
+    const usedTable = await insertDocsTableRows(doc.id, 0, acta.items || [], _tiActaCellValues);
+    const replacements = buildTiActaTemplateReplacements(acta);
+    if (usedTable) delete replacements.ITEMS_BLOCK;
+    await replaceTags(doc.id, replacements);
+    return {
+      pdfBuffer: await exportPdfBuffer(doc.id),
+      mode: "drive_template",
+    };
+  } finally {
+    if (doc?.id) {
+      try {
+        await deleteFile(doc.id);
+      } catch (err) {
+        logger.warn({ err, documentId: doc.id, actaId: acta.id }, "ti: no se pudo eliminar el documento temporal del acta");
+      }
+    }
+  }
+}
+
+async function buildActaPdfBuffer(acta, { preferStored = false } = {}) {
+  if (!acta) return null;
+
+  if (preferStored && acta.pdf_drive_file_id) {
+    try {
+      return {
+        pdfBuffer: await downloadFileBuffer(acta.pdf_drive_file_id),
+        mode: "stored_drive_pdf",
+      };
+    } catch (err) {
+      logger.warn({ err, actaId: acta.id, driveFileId: acta.pdf_drive_file_id }, "ti: no se pudo descargar el PDF persistido del acta");
+    }
+  }
+
+  try {
+    const templateResult = await buildDriveTemplateActaPdfBuffer(acta);
+    if (templateResult?.pdfBuffer) return templateResult;
+  } catch (err) {
+    logger.warn({ err, actaId: acta.id }, "ti: fallo la generacion de acta por plantilla Drive, se usara fallback");
+  }
+
+  return {
+    pdfBuffer: await buildLegacyActaPdfBuffer(acta),
+    mode: "legacy_pdf_lib",
+  };
+}
+
+async function getActaPdfDownload(actaId, { preferStored = true } = {}) {
+  const acta = await getActaWithItems(actaId);
+  const result = await buildActaPdfBuffer(acta, { preferStored });
+  const pdfBuffer = result?.pdfBuffer || null;
+  if (!pdfBuffer) {
+    const error = new Error("No se pudo construir el PDF del acta TI");
+    error.status = 503;
+    throw error;
+  }
+
+  return {
+    acta,
+    mode: result?.mode || null,
+    filename: acta.pdf_filename || (acta.acta_code ? `${acta.acta_code}.pdf` : `ACTA-${String(acta.id).padStart(6, "0")}.pdf`),
+    pdfBuffer,
+  };
+}
+
+async function generateAndStoreActaPdf(actaId) {
+  const { acta, pdfBuffer, mode, filename } = await getActaPdfDownload(actaId, { preferStored: false });
+  const sha256 = computeSha256HexFromBuffer(pdfBuffer);
+
+  let driveUrl = null;
+  let driveFileId = null;
+  try {
+    const folderId = await resolveDraftActaFolder();
+    if (folderId) {
+      const uploaded = await uploadBase64File(
+        filename,
+        pdfBuffer.toString("base64"),
+        "application/pdf",
+        folderId,
+      );
+      driveUrl = uploaded?.webViewLink || uploaded?.webContentLink || null;
+      driveFileId = uploaded?.id || null;
+    }
+  } catch (err) {
+    logger.warn({ err, actaId }, "ti: no se pudo subir PDF borrador del acta a Drive");
+  }
+
+  await updateActaPdf({ actaId: acta.id, filename, sha256, driveUrl, driveFileId });
+  return { actaId: acta.id, generated: true, filename, sha256, driveUrl, driveFileId, mode };
+}
+
+function queueTiActaPdfGeneration(actaId) {
+  if (!actaId) return;
+  setImmediate(async () => {
+    try {
+      await generateAndStoreActaPdf(actaId);
+    } catch (err) {
+      logger.error({ err, actaId }, "ti: fallo la generacion asincrona del PDF de acta");
+    }
+  });
+}
+
+async function startSignatureWorkflowForActa({ actaId, signers = [], actorUser }) {
+  const acta = await getActaWithItems(actaId);
+  if (acta.signature_workflow_id) {
+    return signatureWorkflowsService.getWorkflow(Number(acta.signature_workflow_id), actorUser);
+  }
+
+  const { pdfBuffer } = await getActaPdfDownload(actaId, { preferStored: true });
+  const payload = validateCreateWorkflowPayload({
+    source_module: "ti-assets",
+    source_entity: "acta",
+    source_entity_id: Number(acta.id),
+    document_type: `ti_asset_acta_${String(acta.tipo || "entrega").toLowerCase()}`,
+    title: `Acta ${acta.acta_code || `#${acta.id}`} - ${acta.tipo === "retiro" ? "Retiro" : "Entrega"} de activos TI`,
+    description: acta.notes || null,
+    document: {
+      filename: `${acta.acta_code || `ACTA-${String(acta.id).padStart(6, "0")}`}.pdf`,
+      pdf_base64: Buffer.from(pdfBuffer).toString("base64"),
+      source_sha256: computeSha256HexFromBuffer(pdfBuffer),
+    },
+    signers,
+    meta: {
+      source_table: "ti_asset_actas",
+      acta_tipo: acta.tipo || null,
+      acta_code: acta.acta_code || null,
+    },
+  });
+
+  const prepared = await signatureWorkflowsService.createWorkflow({ payload, user: actorUser });
+  await db.query(
+    `UPDATE public.ti_asset_actas
+        SET signature_workflow_id = $1,
+            signature_workflow_status = $2,
+            final_verification_token = $3
+      WHERE id = $4`,
+    [
+      prepared.workflow.id,
+      prepared.workflow.status,
+      prepared.workflow.verification_token || null,
+      acta.id,
+    ],
+  );
+
+  return signatureWorkflowsService.sendWorkflow(Number(prepared.workflow.id), actorUser);
+}
+
+async function getActaSignatureWorkflow(actaId, actorUser) {
+  const acta = await getActaWithItems(actaId);
+  if (!acta.signature_workflow_id) return null;
+  return signatureWorkflowsService.getWorkflow(Number(acta.signature_workflow_id), actorUser);
 }
 
 // ─── PDF Reports (on-demand, not stored) ──────────────────────────────────────
@@ -2092,11 +2531,11 @@ async function getLetrasDeChangioHistory(assetId) {
 
 // ========== FASE 6: LIBERACIÓN DE EQUIPOS ==========
 
-async function liberateAsset({ assetId, photoBuffer, photoFilename, notes, userId }) {
+async function liberateAsset({ assetId, photos, notes, userId }) {
   await ensureTiAssetsSchema();
 
-  if (!photoBuffer) {
-    const err = new Error("Se requiere una foto para liberar el equipo");
+  if (!Array.isArray(photos) || photos.length < 2) {
+    const err = new Error("Se requieren al menos 2 fotos para liberar el equipo");
     err.status = 400;
     throw err;
   }
@@ -2105,9 +2544,10 @@ async function liberateAsset({ assetId, photoBuffer, photoFilename, notes, userI
   try {
     await client.query("BEGIN");
 
-    // Obtener activo actual
+    // Obtener activo con datos completos para el acta
     const assetQ = await client.query(
-      `SELECT id, name, assigned_to_user_id, status FROM public.ti_assets WHERE id = $1`,
+      `SELECT id, name, brand, model, serial_number, imei, assigned_to_user_id, status
+         FROM public.ti_assets WHERE id = $1`,
       [assetId]
     );
 
@@ -2119,89 +2559,93 @@ async function liberateAsset({ assetId, photoBuffer, photoFilename, notes, userI
 
     const asset = assetQ.rows[0];
 
-    // Validar que esté asignado (status = assigned)
     if (asset.status !== 'assigned') {
       const err = new Error(`No se puede liberar un equipo en estado "${asset.status}". Solo se pueden liberar equipos asignados.`);
       err.status = 400;
       throw err;
     }
 
-    // Computar SHA256 de la foto
-    const sha256 = computeSha256HexFromBuffer(photoBuffer);
+    // Ficha TH es fuente de verdad — lanza 422 si incompleta
+    const { nombre: recipientNombre, cedula: recipientCedula, cargo: recipientCargo } =
+      await resolveRecipientOrThrow(asset.assigned_to_user_id, client);
 
-    // Guardar foto en Drive (opcional)
-    let driveUrl = null;
-    let driveFileId = null;
-    try {
-      const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || null;
-      let folderId = null;
-      if (rootFolderId) {
+    // Subir todas las fotos a Drive y guardar registros
+    const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || null;
+    let driveFolderId = null;
+    if (rootFolderId) {
+      try {
         const folder = await ensureFolder("Liberación de Activos TI", rootFolderId);
-        folderId = folder?.id || null;
-      }
-      const uploaded = await uploadBase64File(
-        photoFilename || `liberation_${assetId}_${Date.now()}.jpg`,
-        photoBuffer.toString("base64"),
-        "image/jpeg",
-        folderId
+        driveFolderId = folder?.id || null;
+      } catch (_) { /* Drive opcional */ }
+    }
+
+    const savedPhotos = [];
+    for (const { buffer, filename } of photos) {
+      const sha256 = computeSha256HexFromBuffer(buffer);
+      let driveUrl = null;
+      let driveFileId = null;
+      try {
+        if (driveFolderId) {
+          const uploaded = await uploadBase64File(filename, buffer.toString("base64"), "image/jpeg", driveFolderId);
+          driveUrl    = uploaded?.webViewLink || uploaded?.webContentLink || null;
+          driveFileId = uploaded?.id || null;
+        }
+      } catch (_) { /* Drive opcional */ }
+
+      const photoRes = await client.query(
+        `INSERT INTO public.ti_asset_liberation_photos
+         (asset_id, filename, drive_url, drive_file_id, sha256, liberated_by, liberated_at, notes, active)
+         VALUES ($1,$2,$3,$4,$5,$6,now(),$7,true)
+         RETURNING *`,
+        [assetId, filename, driveUrl, driveFileId, sha256, userId, notes || null]
       );
-      driveUrl = uploaded?.webViewLink || uploaded?.webContentLink || null;
-      driveFileId = uploaded?.id || null;
-    } catch (_driveErr) { /* Drive opcional */ }
+      savedPhotos.push(photoRes.rows[0]);
+    }
 
-    // Insertar foto de liberación
-    const photoRes = await client.query(
-      `INSERT INTO public.ti_asset_liberation_photos
-       (asset_id, filename, drive_url, drive_file_id, sha256, liberated_by, liberated_at, notes, active)
-       VALUES ($1, $2, $3, $4, $5, $6, now(), $7, true)
-       RETURNING *`,
-      [assetId, photoFilename || `liberation_${assetId}.jpg`, driveUrl, driveFileId, sha256, userId, notes || null]
-    );
+    // Crear acta de retiro con datos reales del colaborador y del equipo
+    const brandModel = [asset.brand, asset.model].filter(Boolean).join(" / ") || null;
+    const serialImei = [asset.serial_number, asset.imei].filter(Boolean).join(" / ") || null;
 
-    // Crear acta de retiro (tipo='retiro')
     const acta = await createActa({
       tipo: 'retiro',
       assetId,
-      recipientUserId: null, // Retiro
-      previousUserId: asset.assigned_to_user_id,
-      recipientNombre: null,
-      recipientCedula: null,
-      recipientCargo: null,
+      recipientUserId: asset.assigned_to_user_id,
+      previousUserId:  asset.assigned_to_user_id,
+      recipientNombre,
+      recipientCedula,
+      recipientCargo,
       generatedBy: userId,
-      notes: `Liberación de equipo. Foto: ${photoFilename || 'adjunta'}`,
-      items: [
-        {
-          item_type: 'equipo',
-          asset_id: asset.id,
-          name: asset.name,
-          brand_model: '',
-          serial_imei: '',
-          is_new: false,
-          physical_condition: null,
-          observations: notes || null,
-        }
-      ],
+      notes: notes || null,
+      items: [{
+        item_type:          'equipo',
+        asset_id:           asset.id,
+        name:               asset.name,
+        brand_model:        brandModel,
+        serial_imei:        serialImei,
+        is_new:             false,
+        physical_condition: null,
+        observations:       notes || null,
+      }],
       client,
     });
 
     // Cambiar estado a 'available'
     const updRes = await client.query(
       `UPDATE public.ti_assets
-        SET status = 'available',
-            assigned_to_user_id = NULL,
-            assigned_at = NULL,
-            updated_by = $1,
-            updated_at = now()
-       WHERE id = $2
-       RETURNING *`,
+          SET status = 'available',
+              assigned_to_user_id = NULL,
+              assigned_at = NULL,
+              updated_by = $1,
+              updated_at = now()
+        WHERE id = $2
+        RETURNING *`,
       [userId, assetId]
     );
 
-    // Registrar evento
     await client.query(
       `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
-       VALUES ($1, 'asset_liberated', $2::jsonb, $3, now())`,
-      [assetId, JSON.stringify({ photo_filename: photoFilename, acta_id: acta.id }), userId]
+       VALUES ($1,'asset_liberated',$2::jsonb,$3,now())`,
+      [assetId, JSON.stringify({ photos_count: photos.length, acta_id: acta.id }), userId]
     );
 
     await client.query("COMMIT");
@@ -2209,7 +2653,7 @@ async function liberateAsset({ assetId, photoBuffer, photoFilename, notes, userI
     return {
       ...updRes.rows[0],
       ...computeDepreciation(updRes.rows[0].purchase_date),
-      photo: photoRes.rows[0],
+      photos: savedPhotos,
       acta_id: acta.id,
     };
   } catch (error) {
@@ -2454,6 +2898,7 @@ async function getAsset(assetId) {
 module.exports = {
   TI_ROLES,
   TI_READ_ROLES,
+  TI_ASSET_CREATE_ROLES,
   ensureTiAssetsSchema,
   listAssets,
   createAsset,
@@ -2486,10 +2931,17 @@ module.exports = {
   // Actas
   createActa,
   updateActaPdf,
+  generateAndStoreActaPdf,
+  queueTiActaPdfGeneration,
   listAllActas,
   listActas,
   getActaWithItems,
+  getActaPdfDownload,
+  updateActa,
   uploadSignedActa,
+  buildActaPdfBuffer,
+  startSignatureWorkflowForActa,
+  getActaSignatureWorkflow,
   // Reports
   generateAssetPdfReport,
   generateCollaboratorPdfReport,
