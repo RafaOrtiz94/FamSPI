@@ -558,6 +558,47 @@ Si alguna respuesta es "sí", el contenido va en modal, drawer o página dedicad
 
 *(Aportación de ui-ux-pro-max + frontend-design: perceived performance, atmosphere)*
 
+### Pantallas de carga: por duración de espera
+
+Cada operación async tiene una duración esperada. La respuesta visual debe ser proporcional: demasiado poco = el usuario duda si ocurrió algo; demasiado = ruido innecesario.
+
+| Duración esperada | Patrón de carga | Notas |
+|-------------------|-----------------|-------|
+| <300ms | Ninguno | El cambio de estado ya es feedback suficiente |
+| 300ms–2s | Spinner dentro del botón + botón deshabilitado | `FiRefreshCw` con `animate-spin`, `disabled:opacity-60 disabled:cursor-wait` |
+| 2s–15s | Spinner en botón **+** overlay bloqueante con mensaje contextual | El overlay impide interacción accidental; el mensaje explica qué está pasando |
+| >15s o indeterminado | Overlay con mensaje + barra de progreso o etapas si están disponibles | Considerar estimación ("suele tardar ~20 segundos") |
+
+**El overlay bloqueante** (para esperas 2s–15s, ej.: generación de PDF en Google Docs):
+- Fondo: `fixed inset-0 z-[30] bg-[#0F172A]/60` — Midnight Slate al 60%
+- Card: `z-[40]` Surface White, `rounded-2xl`, borde Soft Border, sombra Overlay
+- Ícono: `FiRefreshCw` 28px `animate-spin` en Action Blue `#2563EB`
+- Título: 17px/600/Ink Slate — describe la acción ("Generando PDF")
+- Subtítulo: 13px/Warm Ash — contexto de por qué tarda ("Preparando el documento en Google Docs. Esto puede tomar unos segundos.")
+- No incluir botón de cancelar a menos que la operación sea genuinamente cancelable en backend
+
+```jsx
+{loadingState !== null && (
+  <div className="fixed inset-0 z-[30] flex items-center justify-center bg-[#0F172A]/60">
+    <div className="z-[40] flex flex-col items-center gap-5 rounded-2xl border border-[#E5E7EB] bg-white px-10 py-8 shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
+      <FiRefreshCw size={28} className="animate-spin text-[#2563EB]" />
+      <div className="flex flex-col items-center gap-1 text-center">
+        <span className="text-[17px] font-semibold leading-snug tracking-tight text-[#1F2937]">
+          Título de la operación
+        </span>
+        <span className="max-w-[260px] text-[13px] leading-relaxed text-[#6B7280]">
+          Explicación breve del proceso y por qué tarda.
+        </span>
+      </div>
+    </div>
+  </div>
+)}
+```
+
+**Regla del botón durante async.** En toda operación async, el botón que la inició debe deshabilitarse y mostrar spinner mientras dura, independientemente de si hay overlay adicional. Esto previene doble envío y da feedback inmediato antes de que el overlay aparezca.
+
+**El mensaje contextual importa.** "Cargando..." no calma al usuario. "Preparando el documento en Google Docs" sí — porque explica la causa de la espera. Si el sistema sabe qué está haciendo, dígalo.
+
 ### Skeletons
 
 Para cualquier contenido que tarda >300ms en cargar: mostrar skeleton, no spinner de página completa. El skeleton tiene la misma forma que el contenido real — mismo número de líneas, misma proporción. Fondo `#F3F4F6` animado con pulso suave (opacity 0.5 → 1, 1.5s linear infinite). No usar gradients shimmer — penaliza en mobile de gama baja.
@@ -646,7 +687,8 @@ Antes de marcar un componente o página como listo:
 - [ ] `cursor-pointer` en todos los elementos clickeables
 - [ ] `scale(0.97)` en `:active` de botones y cards interactivas
 - [ ] Touch targets ≥44px en mobile
-- [ ] Botón deshabilitado durante operaciones async
+- [ ] Botón deshabilitado + spinner durante operaciones async (toda duración)
+- [ ] Overlay bloqueante para operaciones async >2s con mensaje contextual
 - [ ] Focus ring visible en todos los elementos
 
 **Contenido**

@@ -1122,6 +1122,7 @@ function SessionDetail({ sessionId, onClose, availableUsers = [], catalog = [], 
   const [workflowStartActa, setWorkflowStartActa] = useState(null);
   const [startingWorkflow, setStartingWorkflow] = useState(false);
   const [downloadingFinalPdf, setDownloadingFinalPdf] = useState(null);
+  const [downloadingActaPdf, setDownloadingActaPdf] = useState(null);
   const [editingSession, setEditingSession] = useState(false);
 
   useEffect(() => {
@@ -1133,6 +1134,7 @@ function SessionDetail({ sessionId, onClose, availableUsers = [], catalog = [], 
   }, [sessionId, showToast]);
 
   const handleDownload = async (actaId) => {
+    setDownloadingActaPdf(actaId);
     try {
       const res = await import("../../../core/api/collabDeliveriesApi").then((m) => m.getCollabActaPdf(actaId));
       const blobUrl = window.URL.createObjectURL(res.blob);
@@ -1145,6 +1147,8 @@ function SessionDetail({ sessionId, onClose, availableUsers = [], catalog = [], 
       window.URL.revokeObjectURL(blobUrl);
     } catch (e) {
       showToast(e?.response?.data?.message || "No disponible", "info");
+    } finally {
+      setDownloadingActaPdf(null);
     }
   };
 
@@ -1343,9 +1347,16 @@ function SessionDetail({ sessionId, onClose, availableUsers = [], catalog = [], 
                       PDF Firmado
                     </button>
                   ) : null}
-                  <button type="button" onClick={() => handleDownload(acta.id)}
-                    className="cursor-pointer flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50 transition-colors active:scale-[0.97]">
-                    <FiDownload size={10} /> PDF
+                  <button
+                    type="button"
+                    onClick={() => handleDownload(acta.id)}
+                    disabled={downloadingActaPdf === acta.id}
+                    className="cursor-pointer flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50 transition-colors active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {downloadingActaPdf === acta.id
+                      ? <FiRefreshCw size={10} className="animate-spin" />
+                      : <FiDownload size={10} />}
+                    PDF
                   </button>
                   {!acta.is_complete && (
                     <label className="cursor-pointer">
@@ -1378,6 +1389,21 @@ function SessionDetail({ sessionId, onClose, availableUsers = [], catalog = [], 
         onClose={() => setEditingSession(false)}
         onSaved={handleSessionUpdated}
       />
+      {downloadingActaPdf !== null && (
+        <div className="fixed inset-0 z-[30] flex items-center justify-center bg-[#0F172A]/60">
+          <div className="z-[40] flex flex-col items-center gap-5 rounded-2xl border border-[#E5E7EB] bg-white px-10 py-8 shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
+            <FiRefreshCw size={28} className="animate-spin text-[#2563EB]" />
+            <div className="flex flex-col items-center gap-1 text-center">
+              <span className="text-[17px] font-semibold leading-snug tracking-tight text-[#1F2937]">
+                Generando PDF
+              </span>
+              <span className="max-w-[260px] text-[13px] leading-relaxed text-[#6B7280]">
+                Preparando el documento en Google Docs. Esto puede tomar unos segundos.
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
