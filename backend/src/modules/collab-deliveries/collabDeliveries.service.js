@@ -40,6 +40,12 @@ const ALLOWED_CATEGORIES = new Set(["ropa", "epp", "herramienta", "logistica", "
 const COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID = process.env.COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID || null;
 const COLLAB_ACTA_ROPA_TEMPLATE_ID        = process.env.COLLAB_ACTA_ROPA_TEMPLATE_ID        || null;
 
+// Verificación de arranque: muestra en log si los template IDs están configurados
+logger.info({
+  COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID: COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID ? "✓ configurado" : "✗ NO configurado — usará pdf-lib",
+  COLLAB_ACTA_ROPA_TEMPLATE_ID:        COLLAB_ACTA_ROPA_TEMPLATE_ID        ? "✓ configurado" : "✗ NO configurado — usará pdf-lib",
+}, "collab-deliveries: estado de plantillas Google Docs");
+
 const normalizeActaCategory = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return null;
@@ -564,7 +570,10 @@ async function _buildDriveTemplateActaPdfBuffer(acta) {
   const templateId = category === "herramienta" ? COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID
     : category === "ropa"        ? COLLAB_ACTA_ROPA_TEMPLATE_ID
     : null;
-  if (!templateId) return null;
+  if (!templateId) {
+    logger.warn({ category, actaId: acta.id }, "collab: no hay TEMPLATE_ID configurado para esta categoria, se usara fallback pdf-lib");
+    return null;
+  }
 
   const getCellValues = category === "ropa" ? _collabRopaCellValues : _collabHerramientaCellValues;
 
@@ -616,9 +625,10 @@ async function _buildActaPdfBuffer(acta, { preferStored = false } = {}) {
     const templateResult = await _buildDriveTemplateActaPdfBuffer(acta);
     if (templateResult?.pdfBuffer) return templateResult;
   } catch (err) {
-    logger.warn({ err, actaId: acta.id }, "collab: fallo la generacion de acta por plantilla Drive, se usara fallback");
+    logger.error({ err, actaId: acta.id }, "collab: ERROR en generacion por plantilla Drive — usando fallback pdf-lib");
   }
 
+  logger.warn({ actaId: acta.id, category }, "collab: generando PDF con fallback pdf-lib (Drive no disponible o sin template)");
   return _buildLegacyActaPdfBuffer(acta);
 }
 
@@ -675,6 +685,7 @@ async function generateAndStoreActaPdf(actaId) {
   }
 
   await _updateActaPdfMetadata(actaId, { filename, sha256, driveUrl, driveFileId });
+  logger.info({ actaId, mode, category, filename, driveFileId: driveFileId || null }, "collab: PDF de acta generado y guardado");
   return { actaId, generated: true, filename, sha256, driveUrl, driveFileId, category, mode };
 }
 
@@ -794,6 +805,12 @@ async function startSignatureWorkflowForActa({ actaId, signers = [], actorUser }
     throw error;
   }
 
+  if (!acta.pdf_drive_file_id) {
+    const error = new Error("El PDF del acta aún no ha sido generado. Descarga el acta primero.");
+    error.status = 400;
+    throw error;
+  }
+
   const actor = actorUser?.id ? actorUser : await _getUserIdentity(actorUser?.id);
   if (!actor?.id) {
     const error = new Error("No se pudo resolver el usuario creador del workflow");
@@ -801,16 +818,9 @@ async function startSignatureWorkflowForActa({ actaId, signers = [], actorUser }
     throw error;
   }
 
-  const generated = await generateAndStoreActaPdf(actaId);
-  if (!generated?.generated) {
-    const error = new Error("No se pudo generar el PDF base del acta para iniciar el workflow");
-    error.status = 400;
-    throw error;
-  }
-
   const { acta: refreshedActa, pdfBuffer } = await getActaPdfDownload(actaId, { preferStored: true });
   if (!pdfBuffer) {
-    const error = new Error("No se pudo construir el PDF del acta");
+    const error = new Error("No se pudo obtener el PDF del acta desde Drive");
     error.status = 400;
     throw error;
   }
@@ -828,7 +838,7 @@ async function startSignatureWorkflowForActa({ actaId, signers = [], actorUser }
     document: {
       filename: refreshedActa.pdf_filename || `${refreshedActa.acta_code || `ACTA-${refreshedActa.id}`}.pdf`,
       pdf_base64: pdfBuffer.toString("base64"),
-      source_sha256: generated.sha256,
+      source_sha256: refreshedActa.pdf_sha256,
     },
     signers: resolvedSigners,
     meta: {
@@ -1344,7 +1354,11 @@ async function updateCollabSession(sessionId, {
                   recipient_cargo = $4,
                   acta_day = $5,
                   acta_month = $6,
-                  acta_year = $7
+                  acta_year = $7,
+                  pdf_drive_file_id = NULL,
+                  pdf_sha256 = NULL,
+                  pdf_filename = NULL,
+                  pdf_drive_url = NULL
             WHERE id = $1
             RETURNING *`,
           [

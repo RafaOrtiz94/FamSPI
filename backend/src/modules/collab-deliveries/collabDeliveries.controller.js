@@ -1,7 +1,17 @@
 const svc = require("./collabDeliveries.service");
+const reportSvc = require("./collabDeliveriesReport.service");
+const { generateActaHerramientaPdf, generateActaRopaPdf } = require("./collabDeliveries.acta");
 
 const ok  = (res, data, status = 200) => res.status(status).json(data);
 const err = (res, e) => res.status(e.status || 500).json({ message: e.message || "Error interno" });
+
+const normalizeActaCategory = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (["herramienta", "herramientas", "herramienta_trabajo", "herramientas_trabajo"].includes(normalized)) return "herramienta";
+  if (["ropa", "uniforme", "uniformes", "ropa_trabajo", "uniformes_trabajo"].includes(normalized)) return "ropa";
+  return normalized;
+};
 
 // ── Catálogo ─────────────────────────────────────────────────────────────────
 
@@ -106,18 +116,24 @@ async function generateActa(req, res) {
 }
 
 async function downloadActaPdf(req, res) {
-  // Los templates PDF se integran cuando estén disponibles.
-  // Mientras tanto retornamos el drive_url del borrador para que el frontend redirija.
   try {
-    const acta = await svc.getActa(req.params.actaId);
-    if (!acta.pdf_drive_url) {
+    const acta = await svc.getActaWithItems(req.params.actaId);
+    if (!acta.pdf_drive_file_id) {
+      await svc.generateAndStoreActaPdf(req.params.actaId);
+    }
+    const { filename, pdfBuffer } = await svc.getActaPdfDownload(req.params.actaId, { preferStored: true });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(pdfBuffer);
+  } catch (e) {
+    if (e?.status === 503 && e?.meta) {
       return res.status(503).json({
-        message: "El template de acta para esta categoría aún no está disponible. Se habilitará cuando se reciba el archivo PDF.",
-        acta_code: acta.acta_code,
+        message: e.message,
+        ...e.meta,
       });
     }
-    return res.json({ drive_url: acta.pdf_drive_url, sha256: acta.pdf_sha256 });
-  } catch (e) { err(res, e); }
+    err(res, e);
+  }
 }
 
 async function uploadSignedActa(req, res) {
@@ -130,6 +146,22 @@ async function uploadSignedActa(req, res) {
       req.user.id,
     );
     ok(res, result);
+  } catch (e) { err(res, e); }
+}
+
+async function startActaSignatureWorkflow(req, res) {
+  try {
+    ok(res, await svc.startSignatureWorkflowForActa({
+      actaId: req.params.actaId,
+      signers: Array.isArray(req.body?.signers) ? req.body.signers : [],
+      actorUser: req.user,
+    }), 201);
+  } catch (e) { err(res, e); }
+}
+
+async function getActaSignatureWorkflow(req, res) {
+  try {
+    ok(res, await svc.getActaSignatureWorkflow(req.params.actaId, req.user));
   } catch (e) { err(res, e); }
 }
 
@@ -175,7 +207,13 @@ async function listSessions(req, res) {
 
 async function createCollabSession(req, res) {
   try {
-    ok(res, await svc.createCollabSession(req.body, req.user.id), 201);
+    ok(res, await svc.createCollabSession(req.body, req.user.id, req.user.role), 201);
+  } catch (e) { err(res, e); }
+}
+
+async function updateCollabSession(req, res) {
+  try {
+    ok(res, await svc.updateCollabSession(req.params.sessionId, req.body, req.user.id, req.user.role));
   } catch (e) { err(res, e); }
 }
 
@@ -191,13 +229,117 @@ async function createTiSession(req, res) {
   } catch (e) { err(res, e); }
 }
 
+// ── Documentos por entrega ────────────────────────────────────────────────────
+
+async function listDeliveryDocsByUser(req, res) {
+  try {
+    ok(res, await svc.listDeliveryDocsByUser(req.params.userId));
+  } catch (e) { err(res, e); }
+}
+
+async function listDeliveryDocs(req, res) {
+  try {
+    ok(res, await svc.listDeliveryDocs(req.params.id));
+  } catch (e) { err(res, e); }
+}
+
+async function getFullReport(req, res) {
+  try {
+    ok(res, await svc.getFullReport());
+  } catch (e) { err(res, e); }
+}
+
+async function getCollaboratorReport(req, res) {
+  try {
+    const userId = Number(req.params.userId);
+    if (!Number.isInteger(userId) || userId <= 0)
+      return res.status(400).json({ message: "userId inválido" });
+    ok(res, await svc.getCollaboratorReport(userId));
+  } catch (e) { err(res, e); }
+}
+
+async function getFullReportPdf(req, res) {
+  try {
+    const generatedByName = req.user?.fullname || req.user?.name || req.user?.email || null;
+    const { buffer, sha256, filename } = await reportSvc.generateFullReportPdf({ generatedByName });
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Length": buffer.length,
+      "X-SHA256": sha256,
+    });
+    res.send(buffer);
+  } catch (e) { err(res, e); }
+}
+
+async function getCollaboratorReportPdf(req, res) {
+  try {
+    const userId = Number(req.params.userId);
+    if (!Number.isInteger(userId) || userId <= 0)
+      return res.status(400).json({ message: "userId inválido" });
+    const generatedByName = req.user?.fullname || req.user?.name || req.user?.email || null;
+    const { buffer, sha256, filename } = await reportSvc.generateCollaboratorReportPdf(userId, { generatedByName });
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Length": buffer.length,
+      "X-SHA256": sha256,
+    });
+    res.send(buffer);
+  } catch (e) { err(res, e); }
+}
+
+async function uploadDeliveryDoc(req, res) {
+  try {
+    if (!req.file) return res.status(400).json({ message: "Se requiere el archivo" });
+    const result = await svc.uploadDeliveryDoc({
+      deliveryId:       req.params.id,
+      docType:          req.body.doc_type || "factura",
+      fileBuffer:       req.file.buffer,
+      originalFilename: req.file.originalname,
+      notes:            req.body.notes || null,
+      userId:           req.user.id,
+    });
+    ok(res, result, 201);
+  } catch (e) { err(res, e); }
+}
+
+async function getActaRecipientInfo(req, res) {
+  const db = require("../../config/db");
+  const userId = Number(req.params.userId);
+  if (!Number.isFinite(userId) || userId <= 0)
+    return res.status(400).json({ ok: false, message: "userId invalido" });
+  try {
+    const { rows } = await db.query(
+      `SELECT u.id, COALESCE(u.fullname, u.name, u.email) AS fullname, u.email,
+              cp.profile->'personal'->>'cedula'     AS cedula,
+              cp.profile->'personal'->>'nombres'    AS nombres,
+              cp.profile->'personal'->>'apellidos'  AS apellidos,
+              cp.profile->'laboral'->>'cargo'        AS cargo
+         FROM public.users u
+         LEFT JOIN public.collaborator_profiles cp ON cp.user_id = u.id
+        WHERE u.id = $1 LIMIT 1`,
+      [userId],
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, message: "Usuario no encontrado" });
+    const row = rows[0];
+    const nombre = [row.nombres, row.apellidos].filter(Boolean).join(" ").trim() || row.fullname || "";
+    res.json({ ok: true, data: { id: row.id, nombre, cedula: row.cedula || "", cargo: row.cargo || "", email: row.email || "" } });
+  } catch (e) { err(res, e); }
+}
+
 module.exports = {
   listCatalog, createCatalogItem, updateCatalogItem, deleteCatalogItem,
   listDeliveries, listDeliveriesByUser, getDelivery,
   createDelivery, updateDelivery, withdrawDelivery, listDeliveryEvents,
   listActasByDelivery, getActa, generateActa, downloadActaPdf, uploadSignedActa,
+  startActaSignatureWorkflow, getActaSignatureWorkflow,
   listRenewals, completeRenewal,
   getSummary,
   createOffboardingTasks,
-  listSessions, createCollabSession, getSession, createTiSession,
+  getActaRecipientInfo,
+  listSessions, createCollabSession, updateCollabSession, getSession, createTiSession,
+  listDeliveryDocsByUser, listDeliveryDocs, uploadDeliveryDoc,
+  getFullReport, getCollaboratorReport,
+  getFullReportPdf, getCollaboratorReportPdf,
 };
