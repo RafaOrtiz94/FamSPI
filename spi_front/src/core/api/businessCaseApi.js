@@ -542,6 +542,18 @@ export const uploadDeterminationsStatDocument = async (businessCaseId, file) => 
  return data.data || data;
 };
 
+export const parseDeterminationsQuantitiesFile = async (businessCaseId, file, section = null) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (section) formData.append("section", section);
+  const { data } = await api.post(
+    `/business-case/${businessCaseId}/determinations/parse-quantities-file`,
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return data.data || data;
+};
+
 export const requestBusinessCaseEnvironmentInspection = async (
  businessCaseId,
  payload = {},

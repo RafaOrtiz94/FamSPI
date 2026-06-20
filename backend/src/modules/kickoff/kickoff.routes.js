@@ -1,5 +1,5 @@
 const { Router }    = require('express');
-const { rateLimit } = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { requireRole } = require('../../middlewares/roles');
 const db = require('../../config/db');
 const c  = require('./kickoff.controller');
@@ -20,6 +20,9 @@ const requireReportAccess = (req, res, next) => {
 // Módulo abierto a todos los usuarios autenticados.
 const requireKickoffAccess = (req, res, next) => next();
 
+const kickoffKeyWithPrefix = (prefix) => (req) =>
+  req.user?.id ? `${prefix}_uid:${req.user.id}` : `${prefix}_${ipKeyGenerator(req)}`;
+
 // Rate limit para envío de preguntas: máximo 20 por minuto por usuario.
 // Aumentado para soportar pruebas con ~40 usuarios simultáneos en eventos Kick Off.
 const questionLimiter = rateLimit({
@@ -27,7 +30,7 @@ const questionLimiter = rateLimit({
   max:             20,
   standardHeaders: true,
   legacyHeaders:   false,
-  keyGenerator:    (req) => `kickoff_q_${req.user?.id || req.ip}`,
+  keyGenerator:    kickoffKeyWithPrefix("kickoff_q"),
   handler: (_req, res) =>
     res.status(429).json({ ok: false, message: 'Demasiadas preguntas. Espera un momento antes de enviar otra.' }),
 });
@@ -40,7 +43,7 @@ const kickoffReadLimiter = rateLimit({
   max:             500,
   standardHeaders: true,
   legacyHeaders:   false,
-  keyGenerator:    (req) => `kickoff_r_${req.user?.id || req.ip}`,
+  keyGenerator:    kickoffKeyWithPrefix("kickoff_r"),
   handler: (_req, res) =>
     res.status(429).json({ ok: false, message: 'Demasiadas solicitudes al módulo Kick Off. Intenta en un momento.' }),
 });

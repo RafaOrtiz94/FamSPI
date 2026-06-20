@@ -160,6 +160,14 @@ router.post("/:id/determinations/lock-subsection", verifyToken, requireRole(busi
 router.post("/:id/determinations/request-unlock-subsection", verifyToken, requireRole(businessCaseRoles), ctrl.requestDeterminationsSubsectionUnlock);
 // NUEVO-08: jefe_de_comercial = mismo nivel que jefe_comercial para aprobar desbloqueo de sub-secciones
 router.post("/:id/determinations/resolve-unlock-subsection", verifyToken, requireRole(["jefe_comercial", "jefe_de_comercial"]), ctrl.resolveDeterminationsSubsectionUnlock);
+router.post("/:id/determinations/reopen-commercial", verifyToken, requireRole(["jefe_comercial", "jefe_de_comercial"]), ctrl.reopenDeterminationsCommercial);
+router.post(
+  "/:id/determinations/parse-quantities-file",
+  verifyToken,
+  requireRole(["backoffice_comercial", "jefe_comercial", "jefe_de_comercial"]),
+  upload.single("file"),
+  ctrl.parseDeterminationsQuantitiesFile,
+);
 router.post(
   "/:id/determinations/stat-document",
   verifyToken,
@@ -215,6 +223,7 @@ router.get("/:id/sheets/document-versions", verifyToken, requireRole(businessCas
 router.get("/:id/sheets/jobs/latest", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.getLatestSheetGenerationJobStatus);
 router.get("/:id/sheets/jobs/:jobId", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.getSheetGenerationJobStatus);
 router.get("/sheets/metrics", verifyToken, requireRole(adminRoles), sheetGenerationCtrl.getSheetGenerationMetrics);
+router.post("/sheets/clear-template-cache", verifyToken, requireRole(adminRoles), ctrl.clearSheetTemplateCache);
 
 // UI Guidance routes (Workspace)
 router.get("/:id/ui-guidance", verifyToken, requireRole(businessCaseRoles), ctrl.getUIGuidance);

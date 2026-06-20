@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FiRefreshCw, FiUpload, FiTrash2, FiCheckCircle, FiXCircle,
   FiMapPin, FiCalendar, FiFileText, FiChevronDown, FiChevronUp, FiAlertTriangle,
-  FiSearch,
+  FiSearch, FiLayers, FiPlay,
 } from "react-icons/fi";
 import {
   listViaticos,
@@ -10,27 +10,24 @@ import {
   upsertViatico,
   updateViaticoStatus,
   listViaticoInvoices,
-  uploadViaticoInvoicesTxt,
   deleteViaticoInvoice,
   patchViaticoInvoice,
   getViaticoReport,
-  createManualNote,
   listManualNotes,
   updateManualNote,
   deleteManualNote,
-  createPurchaseNoInvoice,
   listPurchasesNoInvoice,
-  approvePurchaseNoInvoice,
+  approveViaticoSegment,
 } from "../../../core/api/viaticosApi";
 import { useUI } from "../../../core/ui/UIContext";
 import { useAuth } from "../../../core/auth/AuthContext";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../core/api";
+import Modal from "../../../core/ui/components/Modal";
 import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
 import ConsolidatedSummary from "../components/viaticos/ConsolidatedSummary";
-import ManualNoteForm from "../components/viaticos/ManualNoteForm";
 import ManualNotesTable from "../components/viaticos/ManualNotesTable";
-import PurchaseNoInvoiceForm from "../components/viaticos/PurchaseNoInvoiceForm";
 import PurchaseNoInvoiceTable from "../components/viaticos/PurchaseNoInvoiceTable";
+import ViaticosWizard from "../components/viaticos/ViaticosWizard";
 
 const toMoney = (v, cur = "USD") =>
   new Intl.NumberFormat("es-EC", { style: "currency", currency: cur, minimumFractionDigits: 2 }).format(
@@ -67,7 +64,7 @@ const normalizeSearchText = (value) =>
   String(value || "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[̀-ͯ]/g, "")
     .trim();
 
 const matchesSearch = (item, query, extraValues = []) => {
@@ -103,10 +100,22 @@ const STATUS_BADGE = {
 };
 const STATUS_LABEL = { pending: "Pendiente", approved: "Aprobado", paid: "Pagado", rejected: "Rechazado" };
 const WORKFLOW_LABEL = {
-  observado: "Correccion solicitada",
+  borrador: "Borrador",
+  pendiente_revision: "Pendiente revisión",
+  observado: "Corrección solicitada",
+  aprobado_jefe: "Aprobado por jefe",
+  rechazado_jefe: "Rechazado por jefe",
   pendiente_financiero: "Pendiente financiero",
   aprobado_financiero: "Aprobado financiero",
   rechazado_financiero: "Rechazado financiero",
+  pendiente_aprobacion_talento: "Pendiente talento humano",
+  pendiente_aprobacion_financiera: "Pendiente financiero",
+  pendiente_aprobacion_mixta: "Pendiente aprobacion mixta",
+  aprobado_talento_humano: "Aprobado talento humano",
+  aprobado_mixto: "Aprobado mixto",
+  devolucion_registrada: "Devolucion registrada",
+  pago_banco_registrado: "Pago al banco registrado",
+  cierre_mixto_registrado: "Cierre mixto registrado",
   listo_pago: "Listo para pago",
   pagado: "Pagado",
   cerrado: "Cerrado",
@@ -114,6 +123,7 @@ const WORKFLOW_LABEL = {
 
 const INV_STATUS_BADGE = {
   pendiente_clasificacion: "bg-amber-100 text-amber-700",
+  clasificada: "bg-sky-100 text-sky-700",
   aprobada: "bg-emerald-100 text-emerald-700",
   rechazada: "bg-rose-100 text-rose-700",
 };
@@ -125,6 +135,10 @@ const EXPENSE_CATEGORY_OPTIONS = [
   { value: "movilidad", label: "MOVILIDAD" },
   { value: "materiales", label: "MATERIALES" },
 ];
+const EXPENSE_MODE_LABEL = {
+  with_card: "Con tarjeta",
+  without_card: "Sin tarjeta",
+};
 
 const surfaceClass = "rounded-2xl border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)]";
 const focusClass = "focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2";
@@ -132,6 +146,92 @@ const controlClass = `${focusClass} min-h-11 rounded-xl border border-slate-300 
 const primaryButtonClass = `${focusClass} inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60`;
 const secondaryButtonClass = `${focusClass} inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60`;
 const ghostButtonClass = `${focusClass} inline-flex min-h-11 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60`;
+
+const WizardOnlyNotice = ({ onOpen, title = "Este viatico se procesa solo desde el wizard", detail }) => (
+  <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p className="text-sm font-semibold text-slate-900">{title}</p>
+        <p className="mt-1 text-xs leading-5 text-slate-600">
+          {detail || "Usa el flujo guiado para cargar facturas del SRI, notas manuales, compras sin factura y enviar la solicitud a revision."}
+        </p>
+      </div>
+      <button type="button" onClick={onOpen} className={`${primaryButtonClass} shrink-0`}>
+        <FiPlay size={14} />
+        Abrir wizard
+      </button>
+    </div>
+  </div>
+);
+
+// ── Helpers de agrupación ────────────────────────────────────────────────────
+
+function getISOWeek(dateStr) {
+  const d = new Date(dateStr);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  const week1 = new Date(d.getFullYear(), 0, 4);
+  const week = 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
+  return { year: d.getFullYear(), week };
+}
+
+function groupAllowancesByPeriod(items, mode) {
+  const map = new Map();
+  for (const item of items) {
+    const date = String(item.visit_date || "").slice(0, 10);
+    let key, label;
+    if (mode === "week") {
+      const { year, week } = getISOWeek(date);
+      key = `${year}-W${String(week).padStart(2, "0")}`;
+      label = `Semana ${week} · ${year}`;
+    } else {
+      key = date.slice(0, 7);
+      const [yr, mo] = key.split("-");
+      const monthName = new Date(Number(yr), Number(mo) - 1, 1)
+        .toLocaleString("es-EC", { month: "long" });
+      label = `${monthName.charAt(0).toUpperCase() + monthName.slice(1)} ${yr}`;
+    }
+    if (!map.has(key)) map.set(key, { key, label, items: [] });
+    map.get(key).items.push(item);
+  }
+  return Array.from(map.values());
+}
+
+function getExpenseModeLabel(value) {
+  return EXPENSE_MODE_LABEL[value] || "Sin definir";
+}
+
+function getAllowanceModeBreakdown(item) {
+  const withCardTotal = Number(item?.total_with_card || 0);
+  const withoutCardTotal = Number(item?.total_without_card || 0);
+  return {
+    withCardTotal,
+    withoutCardTotal,
+    requiresFinanceApproval: Boolean(item?.requires_finance_approval),
+    requiresTalentoApproval: Boolean(item?.requires_talento_approval),
+  };
+}
+
+function getSettlementActionLabel(item) {
+  const { withCardTotal, withoutCardTotal } = getAllowanceModeBreakdown(item);
+  if (withCardTotal > 0 && withoutCardTotal > 0) return "Registrar cierre mixto";
+  if (withCardTotal > 0) return "Registrar pago al banco";
+  return "Registrar devolucion";
+}
+
+function getAllowanceProgressBadge(item) {
+  const wf = String(item.workflow_status || "").toLowerCase();
+  if (["pendiente_revision", "aprobado_jefe", "rechazado_jefe",
+    "pendiente_financiero", "aprobado_financiero", "rechazado_financiero",
+    "listo_pago", "pagado", "cerrado"].includes(wf)) {
+    return null; // usa el badge de workflow normal
+  }
+  const hasDocs = Number(item.docs_count || 0) > 0 || Number(item.invoices_total || 0) > 0;
+  if (!hasDocs) return { label: "Sin documentos", cls: "bg-amber-100 text-amber-700" };
+  return { label: "En progreso", cls: "bg-sky-100 text-sky-700" };
+}
+
+// ── Sub-componentes UI ────────────────────────────────────────────────────────
 
 function Section({ title, badge, children, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -183,7 +283,7 @@ const LoadingState = () => (
   <div className={`${surfaceClass} flex min-h-[220px] items-center justify-center px-6 py-8`}>
     <div className="flex items-center gap-3 text-sm font-medium text-slate-600">
       <FiRefreshCw className="h-5 w-5 animate-spin text-blue-600" />
-      Cargando viaticos
+      Cargando viáticos
     </div>
   </div>
 );
@@ -193,7 +293,7 @@ const ErrorState = ({ message, onRetry }) => (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
       <FiAlertTriangle className="h-5 w-5 shrink-0 text-rose-700" />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-rose-900">No se pudieron cargar los viaticos</p>
+        <p className="text-sm font-semibold text-rose-900">No se pudieron cargar los viáticos</p>
         <p className="mt-1 text-sm text-rose-700">{message}</p>
       </div>
       <button type="button" onClick={onRetry} className={`${secondaryButtonClass} border-rose-300 text-rose-800 hover:bg-rose-100`}>
@@ -202,6 +302,8 @@ const ErrorState = ({ message, onRetry }) => (
     </div>
   </div>
 );
+
+// ── Componente principal ──────────────────────────────────────────────────────
 
 const ViaticosWorkspace = () => {
   const { showToast, showLoader, hideLoader } = useUI();
@@ -214,6 +316,7 @@ const ViaticosWorkspace = () => {
   const [filters, setFilters] = useState({ start: range.start, end: range.end });
   const [candidateSearch, setCandidateSearch] = useState("");
   const [allowanceSearch, setAllowanceSearch] = useState("");
+  const [groupBy, setGroupBy] = useState("month");
 
   const [candidates, setCandidates] = useState([]);
   const [allowances, setAllowances] = useState([]);
@@ -224,22 +327,20 @@ const ViaticosWorkspace = () => {
   const [invoicesLoading, setInvoicesLoading] = useState({});
 
   const [manualNotesMap, setManualNotesMap] = useState({});
-  const [manualNotesLoading, setManualNotesLoading] = useState({});
+  const [, setManualNotesLoading] = useState({});
 
   const [purchasesNoInvoiceMap, setPurchasesNoInvoiceMap] = useState({});
-  const [purchasesNoInvoiceLoading, setPurchasesNoInvoiceLoading] = useState({});
-
-  const [txtMap, setTxtMap] = useState({});        // { [id]: { file, content } }
-  const [txtUploading, setTxtUploading] = useState({});
+  const [, setPurchasesNoInvoiceLoading] = useState({});
 
   const [expanded, setExpanded] = useState(null);
-
   const [candidateDrafts, setCandidateDrafts] = useState({});
   const [destinationDrafts, setDestinationDrafts] = useState({});
-
   const [reports, setReports] = useState({});
-
   const [saving, setSaving] = useState({});
+
+  // Selección y wizard
+  const [selected, setSelected] = useState(new Set());
+  const [wizardAllowances, setWizardAllowances] = useState(null);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -253,7 +354,7 @@ const ViaticosWorkspace = () => {
       setAllowances(Array.isArray(avData) ? avData : []);
       setCandidates(Array.isArray(candData) ? candData : []);
     } catch (err) {
-      const message = err?.response?.data?.message || "No se pudieron cargar los datos. Verifica tu conexion.";
+      const message = err?.response?.data?.message || "No se pudieron cargar los datos. Verifica tu conexión.";
       setLoadError(message);
       showToast(message, "error");
     } finally {
@@ -263,6 +364,9 @@ const ViaticosWorkspace = () => {
 
   useEffect(() => { loadData(); }, [loadData]);
   useScopedAutoUpdate(DATA_UPDATE_SCOPES.VIATICOS, () => loadData({ silent: true }), [loadData]);
+
+  // Limpiar selección al cambiar filtros
+  useEffect(() => { setSelected(new Set()); }, [filters.start, filters.end]);
 
   const loadInvoices = useCallback(async (allowanceId) => {
     setInvoicesLoading((p) => ({ ...p, [allowanceId]: true }));
@@ -312,35 +416,6 @@ const ViaticosWorkspace = () => {
     });
   }, [invoicesMap, manualNotesMap, purchasesNoInvoiceMap, loadInvoices, loadManualNotes, loadPurchasesNoInvoice]);
 
-  const handleTxtFileChange = (allowanceId, file) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setTxtMap((p) => ({ ...p, [allowanceId]: { file, content: e.target.result } }));
-    };
-    reader.readAsText(file, "utf-8");
-  };
-
-  const handleUploadTxt = async (allowanceId) => {
-    const entry = txtMap[allowanceId];
-    if (!entry?.content) { showToast("Selecciona un archivo TXT", "warning"); return; }
-    setTxtUploading((p) => ({ ...p, [allowanceId]: true }));
-    showLoader("Cargando facturas desde TXT...");
-    try {
-      const result = await uploadViaticoInvoicesTxt(allowanceId, entry.content);
-      const outMsg = result.skipped > 0 ? `, ${result.skipped} fuera del rango de la salida descartadas` : "";
-      showToast(`${result.loaded} facturas cargadas${outMsg}`, result.loaded > 0 ? "success" : "warning");
-      setTxtMap((p) => ({ ...p, [allowanceId]: null }));
-      await loadInvoices(allowanceId);
-      await loadData({ silent: true });
-    } catch (err) {
-      showToast(err?.response?.data?.message || "Error procesando TXT", "error");
-    } finally {
-      hideLoader();
-      setTxtUploading((p) => ({ ...p, [allowanceId]: false }));
-    }
-  };
-
   const handleDeleteInvoice = async (allowanceId, invoiceId) => {
     const key = `del-inv-${invoiceId}`;
     setSaving((p) => ({ ...p, [key]: true }));
@@ -372,21 +447,6 @@ const ViaticosWorkspace = () => {
     }
   };
 
-  const handleCreateManualNote = async (allowanceId, payload) => {
-    const key = `create-note-${allowanceId}`;
-    setSaving((p) => ({ ...p, [key]: true }));
-    try {
-      await createManualNote(allowanceId, payload);
-      showToast("Nota de venta agregada", "success");
-      await loadManualNotes(allowanceId);
-      await loadData({ silent: true });
-    } catch (err) {
-      showToast(err?.response?.data?.message || "Error agregando nota", "error");
-    } finally {
-      setSaving((p) => ({ ...p, [key]: false }));
-    }
-  };
-
   const handleUpdateManualNote = async (allowanceId, noteId, payload) => {
     try {
       await updateManualNote(noteId, payload);
@@ -409,32 +469,18 @@ const ViaticosWorkspace = () => {
     }
   };
 
-  const handleCreatePurchaseNoInvoice = async (allowanceId, payload) => {
-    const key = `create-purchase-${allowanceId}`;
+  const handleApproveSegment = async (allowanceId) => {
+    const key = `approve-segment-${allowanceId}`;
     setSaving((p) => ({ ...p, [key]: true }));
+    showLoader("Registrando aprobacion...");
     try {
-      await createPurchaseNoInvoice(allowanceId, payload);
-      showToast("Compra sin factura agregada", "success");
-      await loadPurchasesNoInvoice(allowanceId);
+      await approveViaticoSegment(allowanceId);
+      showToast("Aprobacion registrada", "success");
       await loadData({ silent: true });
     } catch (err) {
-      showToast(err?.response?.data?.message || "Error agregando compra", "error");
+      showToast(err?.response?.data?.message || "Error registrando aprobacion", "error");
     } finally {
-      setSaving((p) => ({ ...p, [key]: false }));
-    }
-  };
-
-  const handleApprovePurchaseNoInvoice = async (allowanceId, purchaseId, approvedBy) => {
-    const key = `approve-purchase-${purchaseId}`;
-    setSaving((p) => ({ ...p, [key]: true }));
-    try {
-      await approvePurchaseNoInvoice(purchaseId, { approved_by: approvedBy });
-      showToast("Aprobación registrada", "success");
-      await loadPurchasesNoInvoice(allowanceId);
-      await loadData({ silent: true });
-    } catch (err) {
-      showToast(err?.response?.data?.message || "Error aprobando compra", "error");
-    } finally {
+      hideLoader();
       setSaving((p) => ({ ...p, [key]: false }));
     }
   };
@@ -448,7 +494,7 @@ const ViaticosWorkspace = () => {
       return;
     }
     setSaving((p) => ({ ...p, [key]: true }));
-    showLoader("Guardando clasificacion...");
+    showLoader("Guardando clasificación...");
     try {
       await upsertViatico({
         source_type: item.source_type,
@@ -459,11 +505,11 @@ const ViaticosWorkspace = () => {
         outside_labor_area: Boolean(outsideLaborArea),
         notes: item.reference_name || "",
       });
-      showToast("Clasificacion guardada", "success");
+      showToast("Clasificación guardada", "success");
       setCandidateDrafts((p) => ({ ...p, [key]: { outside_labor_area: Boolean(outsideLaborArea) } }));
       await loadData();
     } catch (err) {
-      showToast(err?.response?.data?.message || "Error guardando clasificacion", "error");
+      showToast(err?.response?.data?.message || "Error guardando clasificación", "error");
     } finally {
       hideLoader();
       setSaving((p) => ({ ...p, [key]: false }));
@@ -498,15 +544,15 @@ const ViaticosWorkspace = () => {
     if (!isFinance) return;
     const key = `status-${allowanceId}`;
     setSaving((p) => ({ ...p, [key]: true }));
-      showLoader(
-        extraPayload.workflow_status === "observado"
-          ? "Solicitando correccion..."
-          : status === "approved"
-          ? "Aprobando..."
-          : status === "rejected"
-          ? "Rechazando..."
-          : "Actualizando..."
-      );
+    showLoader(
+      extraPayload.workflow_status === "observado"
+        ? "Solicitando corrección..."
+        : status === "approved"
+        ? "Aprobando..."
+        : status === "rejected"
+        ? "Rechazando..."
+        : "Actualizando..."
+    );
     try {
       await updateViaticoStatus(allowanceId, { status, ...extraPayload });
       showToast("Estado actualizado", "success");
@@ -535,6 +581,45 @@ const ViaticosWorkspace = () => {
     }
   };
 
+  // ── Selección ──────────────────────────────────────────────────────────────
+
+  const toggleSelectOne = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectGroup = (groupItems) => {
+    const ids = groupItems.map((i) => i.id);
+    const allSelected = ids.every((id) => selected.has(id));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  const openWizardForSelected = () => {
+    const items = myAllowances.filter((a) => selected.has(a.id));
+    if (!items.length) return;
+    setWizardAllowances(items);
+  };
+
+  const openWizardForOne = (item) => {
+    setWizardAllowances([item]);
+  };
+
+  const handleWizardComplete = useCallback(() => {
+    setWizardAllowances(null);
+    setSelected(new Set());
+    loadData();
+  }, [loadData]);
+
+  // ── Derivados ──────────────────────────────────────────────────────────────
+
   const summary = useMemo(() =>
     allowances.reduce(
       (acc, a) => {
@@ -558,43 +643,46 @@ const ViaticosWorkspace = () => {
     [allowances, isFinance, user]
   );
   const filteredAllowances = useMemo(
-    () =>
-      myAllowances.filter((item) => {
-        const invoices = invoicesMap[item.id] || [];
-        const invoiceValues = invoices.flatMap((invoice) => [
-          invoice?.supplier_name,
-          invoice?.supplier_ruc,
-          invoice?.buyer_id,
-          invoice?.receipt_type,
-          invoice?.authorization_number,
-          invoice?.access_key,
-          invoice?.issue_date,
-          invoice?.authorization_date,
-          invoice?.status,
-          invoice?.total,
-        ]);
-        return matchesSearch(item, allowanceSearch, invoiceValues);
-      }),
-    [allowanceSearch, invoicesMap, myAllowances]
+    () => myAllowances.filter((item) => matchesSearch(item, allowanceSearch)),
+    [allowanceSearch, myAllowances]
   );
+
+  const grouped = useMemo(
+    () => groupAllowancesByPeriod(filteredAllowances, groupBy),
+    [filteredAllowances, groupBy]
+  );
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className={`${WORKSPACE_PAGE_CLASS} gap-5`}>
+
+      {/* Modal del wizard */}
+      {wizardAllowances && (
+        <Modal open onClose={() => setWizardAllowances(null)} maxWidth="max-w-5xl" hideHeader>
+          <ViaticosWizard
+            allowances={wizardAllowances}
+            onClose={() => setWizardAllowances(null)}
+            onComplete={handleWizardComplete}
+          />
+        </Modal>
+      )}
+
       {/* Header */}
       <section className={`${surfaceClass} overflow-hidden`}>
         <div className="bg-slate-900 p-4 text-white sm:p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <p className="text-xs font-semibold text-slate-100">Finanzas</p>
-              <h1 className="mt-1 text-2xl font-bold leading-tight text-white sm:text-3xl">Viaticos</h1>
+              <h1 className="mt-1 text-2xl font-bold leading-tight text-white sm:text-3xl">Viáticos</h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-100">
-                {isFinance ? "Revision financiera, facturas y cierre de solicitudes." : "Salidas operacionales, comprobantes y estado de tus solicitudes."}
+                {isFinance ? "Revisión financiera, facturas y cierre de solicitudes." : "Salidas operacionales, comprobantes y estado de tus solicitudes."}
               </p>
             </div>
           </div>
         </div>
         <div className="bg-white p-4 sm:p-5">
-          <div className="grid w-full gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+          <div className="grid w-full gap-3 sm:grid-cols-[1fr_1fr_auto_auto] sm:items-end">
             <label className="block">
               <span className="mb-1 block text-xs font-medium text-slate-700">Desde</span>
               <input type="date" value={filters.start} onChange={(e) => setFilters((p) => ({ ...p, start: e.target.value }))}
@@ -605,6 +693,13 @@ const ViaticosWorkspace = () => {
               <input type="date" value={filters.end} onChange={(e) => setFilters((p) => ({ ...p, end: e.target.value }))}
                 className={`${controlClass} w-full font-mono text-slate-900`} />
             </label>
+            <div>
+              <span className="mb-1 block text-xs font-medium text-slate-700">Agrupar por</span>
+              <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className={`${controlClass} w-full`}>
+                <option value="month">Mes</option>
+                <option value="week">Semana</option>
+              </select>
+            </div>
             <button type="button" onClick={() => loadData()} disabled={loading}
               className={`${primaryButtonClass} self-end`}>
               <FiRefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} /> Recargar
@@ -629,11 +724,12 @@ const ViaticosWorkspace = () => {
         ))}
       </section>
 
+      {/* Candidatos — solo colaboradores */}
       {!isFinance && operationalCandidates.length > 0 && (
         <Section title="Salidas operacionales" badge={`${filteredOperationalCandidates.length}/${operationalCandidates.length}`} defaultOpen>
           <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_360px] lg:items-end">
             <p className="text-sm leading-6 text-slate-600">
-              Clasifica cada salida. Solo las salidas fuera del area generan viatico.
+              Clasifica cada salida. Solo las salidas fuera del área generan viático.
             </p>
             <SearchField
               label="Buscar salida"
@@ -644,7 +740,7 @@ const ViaticosWorkspace = () => {
           </div>
           <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white">
             {filteredOperationalCandidates.length === 0 ? (
-              <EmptyState title="No hay salidas con esa busqueda" detail="Ajusta el texto para revisar las salidas operacionales del periodo." icon={FiSearch} />
+              <EmptyState title="No hay salidas con esa búsqueda" detail="Ajusta el texto para revisar las salidas operacionales del periodo." icon={FiSearch} />
             ) : filteredOperationalCandidates.map((item) => {
               const key = `cand-${item.source_type}-${item.source_id}`;
               const draft = candidateDrafts[key] || {
@@ -682,30 +778,30 @@ const ViaticosWorkspace = () => {
                         />
                       </label>
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setCandidateDrafts((p) => ({
-                            ...p,
-                            [key]: { ...draft, outside_labor_area: !draft.outside_labor_area },
-                          }))
-                        }
-                        className={`${secondaryButtonClass} justify-between sm:min-w-[240px]`}
-                        aria-pressed={draft.outside_labor_area}
-                      >
-                        <span>{draft.outside_labor_area ? "Fuera del area" : "Dentro del area"}</span>
-                        <span className={`relative h-6 w-11 rounded-full transition-colors ${draft.outside_labor_area ? "bg-blue-600" : "bg-slate-300"}`}>
-                          <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${draft.outside_labor_area ? "translate-x-5" : ""}`} />
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isSaving}
-                        onClick={() => handleCreateFromCandidate(item, draft.outside_labor_area)}
-                        className={`${primaryButtonClass} w-full sm:w-auto`}
-                      >
-                        {isSaving ? "Guardando" : (item.allowance_id ? "Actualizar" : "Guardar")}
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCandidateDrafts((p) => ({
+                              ...p,
+                              [key]: { ...draft, outside_labor_area: !draft.outside_labor_area },
+                            }))
+                          }
+                          className={`${secondaryButtonClass} justify-between sm:min-w-[240px]`}
+                          aria-pressed={draft.outside_labor_area}
+                        >
+                          <span>{draft.outside_labor_area ? "Fuera del área" : "Dentro del área"}</span>
+                          <span className={`relative h-6 w-11 rounded-full transition-colors ${draft.outside_labor_area ? "bg-blue-600" : "bg-slate-300"}`}>
+                            <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${draft.outside_labor_area ? "translate-x-5" : ""}`} />
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isSaving}
+                          onClick={() => handleCreateFromCandidate(item, draft.outside_labor_area)}
+                          className={`${primaryButtonClass} w-full sm:w-auto`}
+                        >
+                          {isSaving ? "Guardando" : (item.allowance_id ? "Actualizar" : "Guardar")}
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -716,24 +812,41 @@ const ViaticosWorkspace = () => {
         </Section>
       )}
 
+      {/* Barra de viáticos del periodo + controles */}
       <section className={`${surfaceClass} p-4 sm:p-5`}>
         <div className="grid gap-3 lg:grid-cols-[1fr_420px] lg:items-end">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Viaticos del periodo</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Viáticos del periodo</h2>
             <p className="mt-1 text-sm text-slate-500">
               Mostrando {filteredAllowances.length} de {myAllowances.length} registros.
+              {selected.size > 0 && (
+                <span className="ml-2 font-semibold text-blue-700">{selected.size} seleccionados.</span>
+              )}
             </p>
           </div>
-          <SearchField
-            label="Buscar viatico"
-            value={allowanceSearch}
-            onChange={(event) => setAllowanceSearch(event.target.value)}
-            placeholder={isFinance ? "Colaborador, estado, ciudad o factura" : "Estado, ciudad, factura o fecha"}
-          />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <SearchField
+              label="Buscar viático"
+              value={allowanceSearch}
+              onChange={(event) => setAllowanceSearch(event.target.value)}
+              placeholder={isFinance ? "Colaborador, estado, ciudad o factura" : "Estado, ciudad, factura o fecha"}
+            />
+            {!isFinance && selected.size > 0 && (
+              <button
+                type="button"
+                onClick={openWizardForSelected}
+                className={`${primaryButtonClass} shrink-0`}
+              >
+                <FiPlay size={14} />
+                Procesar {selected.size} viático{selected.size > 1 ? "s" : ""}
+              </button>
+            )}
+          </div>
         </div>
       </section>
 
-      <div className="space-y-4">
+      {/* Lista agrupada */}
+      <div className="space-y-6">
         {loading ? (
           <LoadingState />
         ) : loadError ? (
@@ -747,469 +860,476 @@ const ViaticosWorkspace = () => {
           </div>
         ) : filteredAllowances.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center">
-            <p className="text-slate-500 text-sm">No hay viaticos que coincidan con la busqueda.</p>
+            <p className="text-slate-500 text-sm">No hay viáticos que coincidan con la búsqueda.</p>
           </div>
         ) : (
-          filteredAllowances.map((item) => {
-            const isExpanded = expanded === item.id;
-            const invoices = invoicesMap[item.id] || [];
-            const invLoading = Boolean(invoicesLoading[item.id]);
-            const manualNotes = manualNotesMap[item.id] || [];
-            const purchasesNoInvoice = purchasesNoInvoiceMap[item.id] || [];
-            const txtEntry = txtMap[item.id];
-            const isTxtUploading = Boolean(txtUploading[item.id]);
-            const report = reports[item.id];
-            const isOwnRecord = String(item.requester_email || "").toLowerCase() === String(user?.email || "").toLowerCase();
-            const canEdit = isOwnRecord && !isFinance && item.status === "pending";
-            const canViewDocs = canEdit || isFinance || isTalento;
-            const destinationDraft = destinationDrafts[item.id] ?? (item.city || "");
-
-            const invoiceTotal = invoices.reduce((s, i) => s + Number(i.total || 0), 0);
-            const inRangeCount = invoices.filter((i) => i.in_trip_date_range).length;
-            const outRangeCount = invoices.length - inRangeCount;
-            const destinationReady = String(destinationDraft || "").trim().length > 0;
-            const hasInvoices = invoices.length > 0;
-            const categoriesComplete = hasInvoices && invoices.every((inv) => String(inv.category || "").trim().length > 0);
-            const canApproveAllowance = destinationReady && hasInvoices && categoriesComplete;
+          grouped.map((group) => {
+            const groupIds = group.items.map((i) => i.id);
+            const allGroupSelected = groupIds.length > 0 && groupIds.every((id) => selected.has(id));
+            const someGroupSelected = groupIds.some((id) => selected.has(id));
 
             return (
-              <article key={item.id} className={`${surfaceClass} overflow-hidden`}>
-                <button
-                  type="button"
-                  onClick={() => toggleExpand(item.id)}
-                  className={`flex min-h-[76px] w-full cursor-pointer touch-manipulation items-start justify-between gap-4 px-4 py-4 text-left transition hover:bg-slate-50 active:scale-[0.99] sm:px-5 ${focusClass}`}
-                >
-                  <div className="flex-1 min-w-0 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-base font-semibold text-slate-900">
-                        {item.requester_name || item.requester_email}
-                      </span>
-                      <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${STATUS_BADGE[item.status] || "bg-slate-100 text-slate-600"}`}>
-                        {STATUS_LABEL[item.status] || item.status}
-                      </span>
-                      {item.outside_labor_area && (
-                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">Fuera de area</span>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-500">
-                      <span className="inline-flex items-center gap-1 font-mono"><FiCalendar size={11} /> {fmtDate(item.visit_date)}</span>
-                      {item.city && <span className="inline-flex items-center gap-1"><FiMapPin size={11} /> {item.city}</span>}
-                      <span className="inline-flex items-center gap-1"><FiFileText size={11} /> {item.docs_count || invoices.length || 0} docs {toMoney(item.invoices_total || invoiceTotal)}</span>
-                      <span className="font-mono text-slate-400">#{item.id} - {item.source_type}</span>
-                    </div>
+              <div key={group.key} className="space-y-2">
+                {/* Cabecera del grupo */}
+                <div className="flex items-center gap-3 px-1">
+                  {!isFinance && (
+                    <input
+                      type="checkbox"
+                      checked={allGroupSelected}
+                      ref={(el) => { if (el) el.indeterminate = someGroupSelected && !allGroupSelected; }}
+                      onChange={() => toggleSelectGroup(group.items)}
+                      className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-blue-600"
+                      aria-label={`Seleccionar todos de ${group.label}`}
+                    />
+                  )}
+                  <div className="flex items-center gap-2">
+                    <FiLayers size={14} className="text-slate-400" />
+                    <span className="text-sm font-semibold text-slate-700">{group.label}</span>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">
+                      {group.items.length} viático{group.items.length !== 1 ? "s" : ""}
+                    </span>
                   </div>
-                  <div className="flex-shrink-0 mt-1">
-                    {isExpanded ? <FiChevronUp className="text-slate-400" /> : <FiChevronDown className="text-slate-400" />}
-                  </div>
-                </button>
+                  {!isFinance && someGroupSelected && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const groupSelected = group.items.filter((i) => selected.has(i.id));
+                        setWizardAllowances(groupSelected);
+                      }}
+                      className={`${ghostButtonClass} ml-auto text-xs text-blue-700 hover:bg-blue-50`}
+                    >
+                      <FiPlay size={12} /> Procesar seleccionados del grupo
+                    </button>
+                  )}
+                </div>
 
-                {isExpanded && (
-                  <div className="border-t border-slate-100 px-5 pb-6 pt-4 space-y-5">
+                {/* Items del grupo */}
+                <div className="space-y-3">
+                  {group.items.map((item) => {
+                    const isExpanded = expanded === item.id;
+                    const invoices = invoicesMap[item.id] || [];
+                    const invLoading = Boolean(invoicesLoading[item.id]);
+                    const manualNotes = manualNotesMap[item.id] || [];
+                    const purchasesNoInvoice = purchasesNoInvoiceMap[item.id] || [];
+                    const report = reports[item.id];
+                    const isOwnRecord = String(item.requester_email || "").toLowerCase() === String(user?.email || "").toLowerCase();
+                    const canEdit = isOwnRecord && !isFinance && item.status === "pending";
+                    const canViewDocs = canEdit || isFinance || isTalento;
+                    const destinationDraft = destinationDrafts[item.id] ?? (item.city || "");
+                    const invoiceTotal = invoices.reduce((s, i) => s + Number(i.total || 0), 0);
+                    const inRangeCount = invoices.filter((i) => i.in_trip_date_range).length;
+                    const outRangeCount = invoices.length - inRangeCount;
+                    const destinationReady = String(destinationDraft || "").trim().length > 0;
+                    const hasInvoices = invoices.length > 0;
+                    const categoriesComplete = hasInvoices && invoices.every((inv) => String(inv.category || "").trim().length > 0);
+                    const expenseModesComplete = hasInvoices && invoices.every((inv) => String(inv.expense_mode || "").trim().length > 0);
+                    const canApproveAllowance = destinationReady && hasInvoices && categoriesComplete && expenseModesComplete;
+                    const {
+                      withCardTotal,
+                      withoutCardTotal,
+                      requiresFinanceApproval,
+                      requiresTalentoApproval,
+                    } = getAllowanceModeBreakdown(item);
+                    const canApproveFinanceSegment = isFinance && item.status === "pending" && requiresFinanceApproval && item.finance_approval_status !== "approved";
+                    const canApproveTalentoSegment = isTalento && item.status === "pending" && requiresTalentoApproval && item.talento_approval_status !== "approved";
+                    const progressBadge = getAllowanceProgressBadge(item);
+                    const isSelected = selected.has(item.id);
 
-                    <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">Detalle del viaje</p>
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-sm">
-                        <div><p className="text-[11px] text-slate-400">Monto solicitado</p><p className="font-semibold">{toMoney(item.amount)}</p></div>
-                        <div><p className="text-[11px] text-slate-400">Aprobado</p><p className="font-semibold">{toMoney(item.approved_amount || 0)}</p></div>
-                        <div><p className="text-[11px] text-slate-400">Total facturas</p><p className="font-semibold">{toMoney(invoiceTotal)}</p></div>
-                        <div><p className="text-[11px] text-slate-400">Asistencia</p><p className="font-semibold capitalize">{item.attendance_check_status || "sin verificar"}</p></div>
-                      </div>
-                      {item.workflow_status && (
-                        <p className="mt-2 text-xs text-slate-500">
-                          Flujo: {WORKFLOW_LABEL[item.workflow_status] || item.workflow_status}
-                        </p>
-                      )}
-                      {item.notes && <p className="mt-2 text-xs text-slate-500">Nota: {item.notes}</p>}
-                    </div>
-
-                    {isFinance && (
-                      <div className="rounded-xl border border-slate-200 bg-white p-4">
-                        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Destino</p>
-                        <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-                          <label className="block">
-                            <span className="mb-1 block text-xs font-medium text-slate-700">Ciudad de destino</span>
-                            <input
-                              type="text"
-                              value={destinationDraft}
-                              onChange={(event) =>
-                                setDestinationDrafts((prev) => ({ ...prev, [item.id]: event.target.value }))
-                              }
-                              placeholder="Ej. Ambato"
-                              className={`${controlClass} w-full`}
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            disabled={saving[`dest-${item.id}`]}
-                            onClick={() => handleSaveDestination(item)}
-                            className={secondaryButtonClass}
-                          >
-                            Guardar destino
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Resumen consolidado */}
-                    <ConsolidatedSummary allowance={item} />
-
-                    {/* Notas de venta manual */}
-                    {canViewDocs && (
-                      <Section title="Notas de Venta Manual" badge={manualNotes.length} defaultOpen={false}>
-                        {canEdit && (
-                          <ManualNoteForm
-                            allowance={item}
-                            onSubmit={(payload) => handleCreateManualNote(item.id, payload)}
-                            loading={saving[`create-note-${item.id}`]}
-                            destination={item.city}
-                          />
-                        )}
-                        <div className={canEdit ? "mt-4" : ""}>
-                          <ManualNotesTable
-                            notes={manualNotes}
-                            isFinance={isFinance}
-                            isRequester={isOwnRecord}
-                            onUpdate={(noteId, payload) => handleUpdateManualNote(item.id, noteId, payload)}
-                            onDelete={(noteId) => handleDeleteManualNote(item.id, noteId)}
-                            dateMin={item.notes?.match(/Inicio:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || String(item.visit_date || '').slice(0, 10)}
-                            dateMax={item.notes?.match(/Cierre:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || String(item.visit_date || '').slice(0, 10)}
-                          />
-                        </div>
-                      </Section>
-                    )}
-
-                    {/* Compras sin factura */}
-                    {canViewDocs && (
-                      <Section title="Compras sin Factura" badge={purchasesNoInvoice.length} defaultOpen={false}>
-                        {canEdit && (
-                          <PurchaseNoInvoiceForm
-                            allowance={item}
-                            onSubmit={(payload) => handleCreatePurchaseNoInvoice(item.id, payload)}
-                            loading={saving[`create-purchase-${item.id}`]}
-                          />
-                        )}
-                        <div className={canEdit ? "mt-4" : ""}>
-                          <PurchaseNoInvoiceTable
-                            purchases={purchasesNoInvoice}
-                            isFinance={isFinance}
-                            isTalento={isTalento}
-                            onApprove={(purchaseId, approvedBy) => handleApprovePurchaseNoInvoice(item.id, purchaseId, approvedBy)}
-                            loadingPurchaseId={Object.keys(saving).find(k => k.startsWith('approve-purchase'))}
-                          />
-                        </div>
-                      </Section>
-                    )}
-
-                    {/* TXT upload (requester, pending) */}
-                    {canEdit && (
-                      <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50 p-4">
-                        <p className="text-sm font-semibold text-blue-900">Cargar comprobantes SRI</p>
-                        <p className="text-xs leading-5 text-blue-700">
-                          Descarga el archivo de comprobantes recibidos desde el portal del SRI (formato: <code>RUC_Recibidos.txt</code>). Solo se cargarán las facturas cuya fecha de emisión esté dentro del rango de la salida operacional; las demás se descartan automáticamente.
-                        </p>
-                        <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-                          <label className="min-w-0">
-                            <span className="text-xs font-medium text-blue-800">Archivo TXT del SRI</span>
-                            <input
-                              type="file"
-                              accept=".txt,text/plain"
-                              onChange={(e) => handleTxtFileChange(item.id, e.target.files?.[0] || null)}
-                              className="mt-1 block w-full text-xs text-slate-700 file:mr-3 file:min-h-10 file:cursor-pointer file:rounded-2xl file:border-0 file:bg-white file:px-3 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            disabled={!txtEntry?.content || isTxtUploading}
-                            onClick={() => handleUploadTxt(item.id)}
-                            className={`${primaryButtonClass} w-full sm:w-auto`}
-                          >
-                            <FiUpload size={14} />
-                            {isTxtUploading ? "Procesando..." : "Cargar facturas"}
-                          </button>
-                        </div>
-                        {txtEntry?.file && (
-                          <p className="text-xs text-blue-700">Archivo seleccionado: <strong>{txtEntry.file.name}</strong></p>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Invoice list */}
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-sm font-semibold text-slate-700">
-                          Facturas cargadas
-                          {invoices.length > 0 && (
-                            <span className="ml-2 text-xs text-slate-400">
-                              {inRangeCount} en rango del viaje {outRangeCount} fuera del rango Total: {toMoney(invoiceTotal)}
-                            </span>
+                    return (
+                      <article
+                        key={item.id}
+                        className={`${surfaceClass} overflow-hidden transition-all ${isSelected ? "ring-2 ring-blue-500 ring-offset-1" : ""}`}
+                      >
+                        <div className="flex min-h-[76px] items-start gap-3 px-4 py-4 sm:px-5">
+                          {/* Checkbox selección */}
+                          {!isFinance && (
+                            <div className="mt-1 shrink-0">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleSelectOne(item.id)}
+                                className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-blue-600"
+                                aria-label={`Seleccionar viático #${item.id}`}
+                              />
+                            </div>
                           )}
-                        </p>
-                        <button type="button" onClick={() => loadInvoices(item.id)} className={`${ghostButtonClass} text-xs`}>
-                          <FiRefreshCw size={11} /> Recargar
-                        </button>
-                      </div>
 
-                      {invLoading ? (
-                        <p className="text-xs text-slate-400 py-3">Cargando facturas...</p>
-                      ) : invoices.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
-                          No hay facturas cargadas aún.
-                          {canEdit && " Usa el cargador TXT para agregar comprobantes del SRI."}
-                        </div>
-                      ) : (
-                        <>
-                        <div className="space-y-3 md:hidden">
-                          {invoices.map((inv) => {
-                            const delKey = `del-inv-${inv.id}`;
-                            const patchKey = `patch-inv-${inv.id}`;
-                            return (
-                              <article key={inv.id} className={`rounded-2xl border border-slate-200 bg-white p-3 ${!inv.in_trip_date_range ? "opacity-70" : ""}`}>
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <p className="truncate text-sm font-semibold text-slate-900">{inv.supplier_name || inv.supplier_ruc || "Sin emisor"}</p>
-                                    <p className="mt-0.5 font-mono text-xs text-slate-500">{inv.supplier_ruc || "Sin RUC"}</p>
-                                  </div>
-                                  <p className="shrink-0 font-mono text-sm font-semibold text-slate-900">{toMoney(inv.total)}</p>
-                                </div>
-                                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                                  <div className="rounded-xl bg-slate-50 px-3 py-2">
-                                    <p className="text-slate-500">Emision</p>
-                                    <p className="font-mono font-semibold text-slate-800">{fmtDate(inv.issue_date)}</p>
-                                  </div>
-                                  <div className="rounded-xl bg-slate-50 px-3 py-2">
-                                    <p className="text-slate-500">Rango</p>
-                                    <p className={`font-semibold ${inv.in_trip_date_range ? "text-emerald-700" : "text-amber-700"}`}>
-                                      {inv.in_trip_date_range ? "En viaje" : "Fuera"}
-                                    </p>
-                                  </div>
-                                </div>
-                                {isFinance && (
-                                  <label className="mt-3 block text-xs">
-                                    <span className="mb-1 block font-medium text-slate-600">Concepto de gasto</span>
-                                    <select
-                                      value={inv.category || ""}
-                                      disabled={saving[patchKey]}
-                                      onChange={(event) =>
-                                        handlePatchInvoice(item.id, inv.id, { category: event.target.value || null })
-                                      }
-                                      className="min-h-10 w-full rounded-xl border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800"
-                                    >
-                                      <option value="">Sin clasificar</option>
-                                      {EXPENSE_CATEGORY_OPTIONS.map((option) => (
-                                        <option key={option.value} value={option.value}>
-                                          {option.label}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                )}
-                                {(canEdit || isFinance) && (
-                                  <div className="mt-3 flex flex-wrap gap-2">
-                                    {isFinance && inv.status !== "aprobada" && (
-                                      <button type="button" disabled={saving[patchKey]} onClick={() => handlePatchInvoice(item.id, inv.id, { status: "aprobada" })} className={`${secondaryButtonClass} flex-1 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100`}>
-                                        <FiCheckCircle size={14} /> Aprobar
-                                      </button>
-                                    )}
-                                    {isFinance && inv.status !== "rechazada" && (
-                                      <button type="button" disabled={saving[patchKey]} onClick={() => handlePatchInvoice(item.id, inv.id, { status: "rechazada" })} className={`${secondaryButtonClass} flex-1 border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100`}>
-                                        <FiXCircle size={14} /> Rechazar
-                                      </button>
-                                    )}
-                                    <button type="button" disabled={saving[delKey]} onClick={() => handleDeleteInvoice(item.id, inv.id)} className={`${secondaryButtonClass} flex-1 text-rose-700 hover:bg-rose-50`}>
-                                      <FiTrash2 size={14} /> Eliminar
-                                    </button>
-                                  </div>
-                                )}
-                              </article>
-                            );
-                          })}
-                        </div>
-                        <div className="hidden overflow-x-auto rounded-xl border border-slate-200 md:block">
-                          <table className="w-full text-xs">
-                            <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
-                              <tr>
-                                <th className="px-3 py-2 text-left">Emisor</th>
-                                {isFinance && <th className="px-3 py-2 text-left">Tipo</th>}
-                                {isFinance && <th className="px-3 py-2 text-left">Fecha autorizacion</th>}
-                                <th className="px-3 py-2 text-left">Fecha emision</th>
-                                {isFinance && <th className="px-3 py-2 text-left">Receptor</th>}
-                                {isFinance && <th className="px-3 py-2 text-left">Concepto</th>}
-                                <th className="px-3 py-2 text-right">Total</th>
-                                <th className="px-3 py-2 text-center">Rango</th>
-                                {isFinance && <th className="px-3 py-2 text-center">Estado</th>}
-                                <th className="px-3 py-2 text-center">Acciones</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                              {invoices.map((inv) => {
-                                const delKey = `del-inv-${inv.id}`;
-                                const patchKey = `patch-inv-${inv.id}`;
-                                return (
-                                  <tr key={inv.id} className={`hover:bg-slate-50 transition-colors ${!inv.in_trip_date_range ? "opacity-60" : ""}`}>
-                                    <td className="px-3 py-2">
-                                      <p className="font-medium text-slate-800 truncate max-w-[180px]">{inv.supplier_name || inv.supplier_ruc || "—"}</p>
-                                      <p className="text-slate-400">{inv.supplier_ruc}</p>
-                                    </td>
-                                    {isFinance && <td className="px-3 py-2 text-slate-600">{inv.receipt_type || "—"}</td>}
-                                    {isFinance && <td className="px-3 py-2 text-slate-600">{fmtDateTime(inv.authorization_date)}</td>}
-                                    <td className="px-3 py-2 text-slate-600">{fmtDate(inv.issue_date)}</td>
-                                    {isFinance && <td className="px-3 py-2 text-slate-600">{inv.buyer_id || "—"}</td>}
-                                    {isFinance && (
-                                      <td className="px-3 py-2">
-                                        <select
-                                          value={inv.category || ""}
-                                          disabled={saving[patchKey]}
-                                          onChange={(event) =>
-                                            handlePatchInvoice(item.id, inv.id, { category: event.target.value || null })
-                                          }
-                                          className="min-h-8 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-800"
-                                        >
-                                          <option value="">Sin clasificar</option>
-                                          {EXPENSE_CATEGORY_OPTIONS.map((option) => (
-                                            <option key={option.value} value={option.value}>
-                                              {option.label}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </td>
-                                    )}
-                                    <td className="px-3 py-2 text-right font-semibold text-slate-800">{toMoney(inv.total)}</td>
-                                    <td className="px-3 py-2 text-center">
-                                      {inv.in_trip_date_range
-                                        ? <span className="inline-flex items-center gap-1 text-emerald-600"><FiCheckCircle size={12} /> Sí</span>
-                                        : <span className="inline-flex items-center gap-1 text-amber-500"><FiAlertTriangle size={12} /> Fuera</span>}
-                                    </td>
-                                    {isFinance && (
-                                      <td className="px-3 py-2 text-center">
-                                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${INV_STATUS_BADGE[inv.status] || "bg-slate-100 text-slate-600"}`}>
-                                          {inv.status || "—"}
-                                        </span>
-                                      </td>
-                                    )}
-                                    <td className="px-3 py-2 text-center">
-                                      <div className="flex items-center justify-center gap-1">
-                                        {isFinance && inv.status !== "aprobada" && (
-                                          <button
-                                            type="button"
-                                            disabled={saving[patchKey]}
-                                            onClick={() => handlePatchInvoice(item.id, inv.id, { status: "aprobada" })}
-                                            className={`${secondaryButtonClass} min-h-9 px-2 py-1 text-emerald-700 hover:bg-emerald-50`}
-                                          >
-                                            <FiCheckCircle size={12} />
-                                          </button>
-                                        )}
-                                        {isFinance && inv.status !== "rechazada" && (
-                                          <button
-                                            type="button"
-                                            disabled={saving[patchKey]}
-                                            onClick={() => handlePatchInvoice(item.id, inv.id, { status: "rechazada" })}
-                                            className={`${secondaryButtonClass} min-h-9 px-2 py-1 text-rose-700 hover:bg-rose-50`}
-                                          >
-                                            <FiXCircle size={12} />
-                                          </button>
-                                        )}
-                                        {(canEdit || isFinance) && (
-                                          <button
-                                            type="button"
-                                            disabled={saving[delKey]}
-                                            onClick={() => handleDeleteInvoice(item.id, inv.id)}
-                                            className={`${secondaryButtonClass} min-h-9 px-2 py-1 text-slate-600 hover:bg-rose-50 hover:text-rose-700`}
-                                          >
-                                            <FiTrash2 size={12} />
-                                          </button>
-                                        )}
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                            <tfoot>
-                              <tr className="bg-slate-50">
-                                <td colSpan={isFinance ? 6 : 2} className="px-3 py-2 text-right text-xs font-semibold text-slate-600">Total</td>
-                                <td className="px-3 py-2 text-right text-xs font-bold text-slate-900">{toMoney(invoiceTotal)}</td>
-                                <td colSpan={isFinance ? 3 : 2} />
-                              </tr>
-                            </tfoot>
-                          </table>
-                        </div>
-                        </>
-                      )}
-                    </div>
-
-                    {isFinance && report && (
-                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-2 text-sm">
-                        <p className="font-semibold text-emerald-800">Cotejo de asistencia</p>
-                        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-                          <div><p className="text-emerald-600">Estado asistencia</p><p className="font-semibold capitalize">{report.attendance?.status}</p></div>
-                          <div><p className="text-emerald-600">Distancia mín.</p><p className="font-semibold">{report.attendance?.min_distance_km != null ? `${Number(report.attendance.min_distance_km).toFixed(1)} km` : "—"}</p></div>
-                          <div><p className="text-emerald-600">Fuera de Área</p><p className="font-semibold">{report.rules?.outside_labor_area ? "Sí" : "No"}</p></div>
-                          <div><p className="text-emerald-600">Monto sugerido</p><p className="font-semibold">{toMoney(report.recommendation?.suggested_amount || 0)}</p></div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Actions */}
-                    <div className="grid gap-2 pt-1 sm:flex sm:flex-wrap sm:items-center">
-                      {isFinance && (
-                        <>
+                          {/* Botón expandir */}
                           <button
                             type="button"
-                            disabled={saving[`report-${item.id}`]}
-                            onClick={() => handleBuildReport(item.id)}
-                            className={`${secondaryButtonClass} border-slate-300 text-slate-700`}
+                            onClick={() => toggleExpand(item.id)}
+                            className={`flex flex-1 min-w-0 cursor-pointer touch-manipulation items-start justify-between gap-4 text-left transition hover:opacity-80 active:scale-[0.99] ${focusClass}`}
                           >
-                            <FiFileText size={14} /> Cotejar asistencia
+                            <div className="flex-1 min-w-0 space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="truncate text-base font-semibold text-slate-900">
+                                  {item.requester_name || item.requester_email}
+                                </span>
+                                <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${STATUS_BADGE[item.status] || "bg-slate-100 text-slate-600"}`}>
+                                  {STATUS_LABEL[item.status] || item.status}
+                                </span>
+                                {item.workflow_status && WORKFLOW_LABEL[item.workflow_status] && (
+                                  <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600">
+                                    {WORKFLOW_LABEL[item.workflow_status]}
+                                  </span>
+                                )}
+                                {progressBadge && (
+                                  <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${progressBadge.cls}`}>
+                                    {progressBadge.label}
+                                  </span>
+                                )}
+                                {item.outside_labor_area && (
+                                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">Fuera de área</span>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-500">
+                                <span className="inline-flex items-center gap-1 font-mono"><FiCalendar size={11} /> {fmtDate(item.visit_date)}</span>
+                                {item.city && <span className="inline-flex items-center gap-1"><FiMapPin size={11} /> {item.city}</span>}
+                                <span className="inline-flex items-center gap-1"><FiFileText size={11} /> {item.docs_count || invoices.length || 0} docs {toMoney(item.invoices_total || invoiceTotal)}</span>
+                                <span className="font-mono text-slate-400">#{item.id}</span>
+                              </div>
+                            </div>
+                            <div className="flex-shrink-0 mt-1">
+                              {isExpanded ? <FiChevronUp className="text-slate-400" /> : <FiChevronDown className="text-slate-400" />}
+                            </div>
                           </button>
-                          {item.status === "pending" && (
-                            <>
-                              <button
-                                type="button"
-                                disabled={saving[`status-${item.id}`] || !canApproveAllowance}
-                                onClick={() => handlePatchStatus(item.id, "approved")}
-                                className={`${secondaryButtonClass} border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100`}
-                              >
-                                <FiCheckCircle size={14} /> Aprobar
-                              </button>
-                              <button
-                                type="button"
-                                disabled={saving[`status-${item.id}`]}
-                                onClick={() => handlePatchStatus(item.id, "rejected")}
-                                className={`${secondaryButtonClass} border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100`}
-                              >
-                                <FiXCircle size={14} /> Rechazar
-                              </button>
-                              <button
-                                type="button"
-                                disabled={saving[`status-${item.id}`]}
-                                onClick={() => handlePatchStatus(item.id, "pending", { workflow_status: "observado" })}
-                                className={`${secondaryButtonClass} border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100`}
-                              >
-                                <FiAlertTriangle size={14} /> Solicitar correccion
-                              </button>
-                              {!canApproveAllowance && (
-                                <p className="text-xs text-amber-700">
-                                  Para aprobar: registra destino y clasifica el concepto en todas las facturas.
-                                </p>
-                              )}
-                            </>
-                          )}
-                          {item.status === "approved" && (
+
+                          {/* Botón procesar rápido */}
+                          {!isFinance && canEdit && (
                             <button
                               type="button"
-                              disabled={saving[`status-${item.id}`]}
-                              onClick={() => handlePatchStatus(item.id, "paid")}
-                              className={`${primaryButtonClass}`}
+                              onClick={() => openWizardForOne(item)}
+                              className={`${secondaryButtonClass} shrink-0 mt-0.5 text-xs px-3`}
+                              title="Completar viático con wizard"
                             >
-                              <FiCheckCircle size={14} /> Marcar pagado
+                              <FiUpload size={13} /> Completar
                             </button>
                           )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </article>
+                        </div>
+
+                        {isExpanded && (
+                          <div className="border-t border-slate-100 px-5 pb-6 pt-4 space-y-5">
+
+                            <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">Detalle del viaje</p>
+                              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-sm">
+                                <div><p className="text-[11px] text-slate-400">Monto solicitado</p><p className="font-semibold">{toMoney(item.amount)}</p></div>
+                                <div><p className="text-[11px] text-slate-400">Aprobado</p><p className="font-semibold">{toMoney(item.approved_amount || 0)}</p></div>
+                                <div><p className="text-[11px] text-slate-400">Total facturas</p><p className="font-semibold">{toMoney(invoiceTotal)}</p></div>
+                                <div><p className="text-[11px] text-slate-400">Asistencia</p><p className="font-semibold capitalize">{item.attendance_check_status || "sin verificar"}</p></div>
+                              </div>
+                              {item.workflow_status && (
+                                <p className="mt-2 text-xs text-slate-500">
+                                  Flujo: {WORKFLOW_LABEL[item.workflow_status] || item.workflow_status}
+                                </p>
+                              )}
+                              {item.notes && <p className="mt-2 text-xs text-slate-500">Nota: {item.notes}</p>}
+                            </div>
+
+                            {isFinance && (
+                              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Destino</p>
+                                <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                                  <label className="block">
+                                    <span className="mb-1 block text-xs font-medium text-slate-700">Ciudad de destino</span>
+                                    <input
+                                      type="text"
+                                      value={destinationDraft}
+                                      onChange={(event) =>
+                                        setDestinationDrafts((prev) => ({ ...prev, [item.id]: event.target.value }))
+                                      }
+                                      placeholder="Ej. Ambato"
+                                      className={`${controlClass} w-full`}
+                                    />
+                                  </label>
+                                  <button
+                                    type="button"
+                                    disabled={saving[`dest-${item.id}`]}
+                                    onClick={() => handleSaveDestination(item)}
+                                    className={secondaryButtonClass}
+                                  >
+                                    Guardar destino
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            <ConsolidatedSummary allowance={item} />
+
+                            {(withCardTotal > 0 || withoutCardTotal > 0) && (
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <p className="text-sm font-semibold text-slate-900">Con tarjeta</p>
+                                    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                                      {requiresFinanceApproval ? "Aprueba financiero" : "Sin consumo"}
+                                    </span>
+                                  </div>
+                                  <p className="mt-2 text-xl font-bold text-slate-900">{toMoney(withCardTotal)}</p>
+                                  <p className="mt-1 text-xs text-slate-500">Liquidacion: pago al banco</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <p className="text-sm font-semibold text-slate-900">Sin tarjeta</p>
+                                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                                      {requiresTalentoApproval ? "Aprueba talento humano" : "Sin devolucion"}
+                                    </span>
+                                  </div>
+                                  <p className="mt-2 text-xl font-bold text-slate-900">{toMoney(withoutCardTotal)}</p>
+                                  <p className="mt-1 text-xs text-slate-500">Liquidacion: devolucion</p>
+                                </div>
+                              </div>
+                            )}
+
+                            {canViewDocs && (
+                              <Section title="Notas de Venta Manual" badge={manualNotes.length} defaultOpen={false}>
+                                {canEdit && (
+                                  <WizardOnlyNotice
+                                    onOpen={() => openWizardForOne(item)}
+                                    detail="Las notas manuales deben registrarse desde el wizard para conservar un solo flujo de procesamiento."
+                                  />
+                                )}
+                                <div className={canEdit ? "mt-4" : ""}>
+                                  <ManualNotesTable
+                                    notes={manualNotes}
+                                    isFinance={isFinance}
+                                    isRequester={false}
+                                    onUpdate={(noteId, payload) => handleUpdateManualNote(item.id, noteId, payload)}
+                                    onDelete={(noteId) => handleDeleteManualNote(item.id, noteId)}
+                                    dateMin={item.notes?.match(/Inicio:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || String(item.visit_date || '').slice(0, 10)}
+                                    dateMax={item.notes?.match(/Cierre:\s*(\d{4}-\d{2}-\d{2})/)?.[1] || String(item.visit_date || '').slice(0, 10)}
+                                  />
+                                </div>
+                              </Section>
+                            )}
+
+                            {canViewDocs && (
+                              <Section title="Compras sin Factura" badge={purchasesNoInvoice.length} defaultOpen={false}>
+                                {canEdit && (
+                                  <WizardOnlyNotice
+                                    onOpen={() => openWizardForOne(item)}
+                                    detail="Las compras sin factura tambien se registran desde el wizard para evitar rutas paralelas."
+                                  />
+                                )}
+                                <div className={canEdit ? "mt-4" : ""}>
+                                  <PurchaseNoInvoiceTable
+                                    purchases={purchasesNoInvoice}
+                                  />
+                                </div>
+                              </Section>
+                            )}
+
+                            {canEdit && (
+                              <WizardOnlyNotice
+                                onOpen={() => openWizardForOne(item)}
+                                title="La carga de comprobantes SRI se hace desde el wizard"
+                                detail="El flujo guiado concentra la carga del TXT, la clasificacion y el envio a revision en un solo recorrido."
+                              />
+                            )}
+
+                            {/* Listado de facturas */}
+                            <div>
+                              <div className="flex items-center justify-between mb-3">
+                                <p className="text-sm font-semibold text-slate-700">
+                                  Facturas cargadas
+                                  {invoices.length > 0 && (
+                                    <span className="ml-2 text-xs text-slate-400">
+                                      {inRangeCount} en rango · {outRangeCount} fuera · Total: {toMoney(invoiceTotal)}
+                                    </span>
+                                  )}
+                                </p>
+                                <button type="button" onClick={() => loadInvoices(item.id)} className={`${ghostButtonClass} text-xs`}>
+                                  <FiRefreshCw size={11} /> Recargar
+                                </button>
+                              </div>
+
+                              {invLoading ? (
+                                <p className="text-xs text-slate-400 py-3">Cargando facturas...</p>
+                              ) : invoices.length === 0 ? (
+                                <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+                                  No hay facturas cargadas aún.
+                                  {canEdit && " Usa el wizard (botón Completar) para agregar comprobantes del SRI."}
+                                </div>
+                              ) : (
+                                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                                  <table className="w-full text-xs">
+                                    <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
+                                      <tr>
+                                        <th className="px-3 py-2 text-left">Emisor</th>
+                                        {isFinance && <th className="px-3 py-2 text-left">Tipo</th>}
+                                        <th className="px-3 py-2 text-left">Fecha emisión</th>
+                                        {isFinance && <th className="px-3 py-2 text-left">Concepto</th>}
+                                        <th className="px-3 py-2 text-left">Modo</th>
+                                        <th className="px-3 py-2 text-right">Total</th>
+                                        <th className="px-3 py-2 text-center">Rango</th>
+                                        {isFinance && <th className="px-3 py-2 text-center">Estado</th>}
+                                        <th className="px-3 py-2 text-center">Acciones</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                      {invoices.map((inv) => {
+                                        const delKey = `del-inv-${inv.id}`;
+                                        const patchKey = `patch-inv-${inv.id}`;
+                                        return (
+                                          <tr key={inv.id} className={`hover:bg-slate-50 transition-colors ${!inv.in_trip_date_range ? "opacity-60" : ""}`}>
+                                            <td className="px-3 py-2">
+                                              <p className="font-medium text-slate-800 truncate max-w-[180px]">{inv.supplier_name || inv.supplier_ruc || "—"}</p>
+                                              <p className="text-slate-400">{inv.supplier_ruc}</p>
+                                            </td>
+                                            {isFinance && <td className="px-3 py-2 text-slate-600">{inv.receipt_type || "—"}</td>}
+                                            <td className="px-3 py-2 text-slate-600">{fmtDate(inv.issue_date)}</td>
+                                            {isFinance && (
+                                              <td className="px-3 py-2">
+                                                <select
+                                                  value={inv.category || ""}
+                                                  disabled={saving[patchKey]}
+                                                  onChange={(event) =>
+                                                    handlePatchInvoice(item.id, inv.id, { category: event.target.value || null })
+                                                  }
+                                                  className="min-h-8 w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-800"
+                                                >
+                                                  <option value="">Sin clasificar</option>
+                                                  {EXPENSE_CATEGORY_OPTIONS.map((option) => (
+                                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                                  ))}
+                                                </select>
+                                              </td>
+                                            )}
+                                            {!isFinance && (
+                                              <td className="px-3 py-2 text-slate-600">
+                                                {inv.category ? (
+                                                  <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700 uppercase">{inv.category}</span>
+                                                ) : (
+                                                  <span className="text-slate-400 italic">Sin categoría</span>
+                                                )}
+                                              </td>
+                                            )}
+                                            <td className="px-3 py-2 text-slate-600">
+                                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${inv.expense_mode === "with_card" ? "bg-indigo-100 text-indigo-700" : "bg-amber-100 text-amber-700"}`}>
+                                                {getExpenseModeLabel(inv.expense_mode)}
+                                              </span>
+                                            </td>
+                                            <td className="px-3 py-2 text-right font-semibold text-slate-800">{toMoney(inv.total)}</td>
+                                            <td className="px-3 py-2 text-center">
+                                              {inv.in_trip_date_range
+                                                ? <span className="inline-flex items-center gap-1 text-emerald-600"><FiCheckCircle size={12} /> Sí</span>
+                                                : <span className="inline-flex items-center gap-1 text-amber-500"><FiAlertTriangle size={12} /> Fuera</span>}
+                                            </td>
+                                            {isFinance && (
+                                              <td className="px-3 py-2 text-center">
+                                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${INV_STATUS_BADGE[inv.status] || "bg-slate-100 text-slate-600"}`}>
+                                                  {inv.status || "—"}
+                                                </span>
+                                              </td>
+                                            )}
+                                            <td className="px-3 py-2 text-center">
+                                              <div className="flex items-center justify-center gap-1">
+                                                {isFinance && inv.status !== "aprobada" && (
+                                                  <button type="button" disabled={saving[patchKey]}
+                                                    onClick={() => handlePatchInvoice(item.id, inv.id, { status: "aprobada" })}
+                                                    className={`${secondaryButtonClass} min-h-9 px-2 py-1 text-emerald-700 hover:bg-emerald-50`}>
+                                                    <FiCheckCircle size={12} />
+                                                  </button>
+                                                )}
+                                                {isFinance && inv.status !== "rechazada" && (
+                                                  <button type="button" disabled={saving[patchKey]}
+                                                    onClick={() => handlePatchInvoice(item.id, inv.id, { status: "rechazada" })}
+                                                    className={`${secondaryButtonClass} min-h-9 px-2 py-1 text-rose-700 hover:bg-rose-50`}>
+                                                    <FiXCircle size={12} />
+                                                  </button>
+                                                )}
+                                                {isFinance && (
+                                                  <button type="button" disabled={saving[delKey]}
+                                                    onClick={() => handleDeleteInvoice(item.id, inv.id)}
+                                                    className={`${secondaryButtonClass} min-h-9 px-2 py-1 text-slate-600 hover:bg-rose-50 hover:text-rose-700`}>
+                                                    <FiTrash2 size={12} />
+                                                  </button>
+                                                )}
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                    <tfoot>
+                                      <tr className="bg-slate-50">
+                                        <td colSpan={isFinance ? 5 : 4} className="px-3 py-2 text-right text-xs font-semibold text-slate-600">Total</td>
+                                        <td className="px-3 py-2 text-right text-xs font-bold text-slate-900">{toMoney(invoiceTotal)}</td>
+                                        <td colSpan={isFinance ? 3 : 1} />
+                                      </tr>
+                                    </tfoot>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+
+                            {isFinance && report && (
+                              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-2 text-sm">
+                                <p className="font-semibold text-emerald-800">Cotejo de asistencia</p>
+                                <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                                  <div><p className="text-emerald-600">Estado asistencia</p><p className="font-semibold capitalize">{report.attendance?.status}</p></div>
+                                  <div><p className="text-emerald-600">Distancia mín.</p><p className="font-semibold">{report.attendance?.min_distance_km != null ? `${Number(report.attendance.min_distance_km).toFixed(1)} km` : "—"}</p></div>
+                                  <div><p className="text-emerald-600">Fuera de Área</p><p className="font-semibold">{report.rules?.outside_labor_area ? "Sí" : "No"}</p></div>
+                                  <div><p className="text-emerald-600">Monto sugerido</p><p className="font-semibold">{toMoney(report.recommendation?.suggested_amount || 0)}</p></div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Acciones de finanzas */}
+                            <div className="grid gap-2 pt-1 sm:flex sm:flex-wrap sm:items-center">
+                              {isFinance && (
+                                <>
+                                  <button type="button" disabled={saving[`report-${item.id}`]}
+                                    onClick={() => handleBuildReport(item.id)}
+                                    className={`${secondaryButtonClass} border-slate-300 text-slate-700`}>
+                                    <FiFileText size={14} /> Cotejar asistencia
+                                  </button>
+                                  {canApproveFinanceSegment && (
+                                    <>
+                                      <button type="button" disabled={saving[`approve-segment-${item.id}`] || !canApproveAllowance}
+                                        onClick={() => handleApproveSegment(item.id)}
+                                        className={`${secondaryButtonClass} border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100`}>
+                                        <FiCheckCircle size={14} /> Aprobar bloque con tarjeta
+                                      </button>
+                                      <button type="button" disabled={saving[`status-${item.id}`]}
+                                        onClick={() => handlePatchStatus(item.id, "rejected")}
+                                        className={`${secondaryButtonClass} border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100`}>
+                                        <FiXCircle size={14} /> Rechazar
+                                      </button>
+                                      <button type="button" disabled={saving[`status-${item.id}`]}
+                                        onClick={() => handlePatchStatus(item.id, "pending", { workflow_status: "observado" })}
+                                        className={`${secondaryButtonClass} border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100`}>
+                                        <FiAlertTriangle size={14} /> Solicitar corrección
+                                      </button>
+                                      {!canApproveAllowance && (
+                                        <p className="text-xs text-amber-700">Para aprobar: registra destino y clasifica concepto y modo en todas las facturas.</p>
+                                      )}
+                                    </>
+                                  )}
+                                  {item.status === "approved" && (
+                                    <button type="button" disabled={saving[`status-${item.id}`]}
+                                      onClick={() => handlePatchStatus(item.id, "paid")}
+                                      className={primaryButtonClass}>
+                                      <FiCheckCircle size={14} /> {getSettlementActionLabel(item)}
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                              {!isFinance && isTalento && canApproveTalentoSegment && (
+                                <button type="button" disabled={saving[`approve-segment-${item.id}`] || !canApproveAllowance}
+                                  onClick={() => handleApproveSegment(item.id)}
+                                  className={`${secondaryButtonClass} border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100`}>
+                                  <FiCheckCircle size={14} /> Aprobar bloque sin tarjeta
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
             );
           })
         )}

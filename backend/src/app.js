@@ -14,7 +14,7 @@ if (process.env.NODE_ENV !== "production") {
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const rateLimit = require("express-rate-limit");
+const { rateLimit, ipKeyGenerator } = require("express-rate-limit");
 
 const logger = require("./config/logger");
 const { helmetConfig, corsConfig, isProd } = require("./config/security");
@@ -75,7 +75,7 @@ const shouldBypassRateLimit = (req) => {
 // hagan que todos los usuarios compartan el mismo contador de IP.
 const rateLimitKeyGenerator = (req) => {
   if (req.user?.id) return `uid_${req.user.id}`;
-  return req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip;
+  return ipKeyGenerator(req);
 };
 
 app.use(helmet(helmetConfig));

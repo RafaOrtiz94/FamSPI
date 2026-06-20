@@ -1,5 +1,8 @@
 const db = require("../../config/db");
 const notificationManager = require("../notifications/notificationManager");
+const logger = require("../../config/logger");
+const { enqueueIntegrationEvent } = require("../integrations/integrationOutbox.service");
+const { isCrmSyncEnabled } = require("../../config/crmDb");
 
 const MANAGER_ROLES = new Set([
   "jefe_comercial",
@@ -307,6 +310,29 @@ const getOpportunityDetail = async (opportunityId) => {
   };
 };
 
+const buildCrmOpportunityPayload = (detail) => {
+  const opportunity = detail?.opportunity || {};
+  const rating = detail?.rating || {};
+
+  return {
+    famspi_opportunity_id: opportunity.id,
+    title: opportunity.title,
+    estimated_amount: opportunity.estimated_amount,
+    currency: opportunity.currency,
+    funnel_stage: opportunity.funnel_stage,
+    competitive_position: opportunity.competitive_position,
+    singular_objective: opportunity.singular_objective || null,
+    total_score: Number(rating.total_score || 0),
+    target_close_date: opportunity.target_close_date,
+    account_id: opportunity.account_id,
+    account_name: opportunity.account_name || null,
+    owner_id: opportunity.owner_id,
+    owner_name: opportunity.owner_name || null,
+    summary: opportunity.summary,
+    updated_at: opportunity.updated_at,
+  };
+};
+
 const createOpportunity = async (payload, actorUser) => {
   const actorId = getActorId(actorUser);
   const title = normalizeText(payload?.title, 220);
@@ -340,7 +366,26 @@ const createOpportunity = async (payload, actorUser) => {
   );
   await refreshRating(rows[0].id, actorId);
   await createSnapshot(rows[0].id, "create", rows[0], actorId);
-  return getOpportunityDetail(rows[0].id);
+  const detail = await getOpportunityDetail(rows[0].id);
+
+  if (isCrmSyncEnabled()) {
+    const crmPayload = buildCrmOpportunityPayload(detail);
+    try {
+      await enqueueIntegrationEvent({
+        eventType: "crm.opportunity.sync",
+        payload: crmPayload,
+        idempotencyKey: `crm.opportunity.sync.create.${crmPayload.famspi_opportunity_id}`,
+        correlationId: String(crmPayload.famspi_opportunity_id),
+      });
+    } catch (crmErr) {
+      logger.warn(
+        { opportunity_id: crmPayload.famspi_opportunity_id, error: crmErr?.message },
+        "[CRM_SYNC] Error encolando oportunidad nueva"
+      );
+    }
+  }
+
+  return detail;
 };
 
 const updateOpportunity = async (opportunityId, payload, actorUser) => {
@@ -389,7 +434,26 @@ const updateOpportunity = async (opportunityId, payload, actorUser) => {
 
   await refreshRating(opportunityId, actorId);
   await createSnapshot(opportunityId, "update", { before: previous, payload }, actorId);
-  return getOpportunityDetail(opportunityId);
+  const updated = await getOpportunityDetail(opportunityId);
+
+  if (isCrmSyncEnabled()) {
+    const crmPayload = buildCrmOpportunityPayload(updated);
+    try {
+      await enqueueIntegrationEvent({
+        eventType: "crm.opportunity.sync",
+        payload: crmPayload,
+        idempotencyKey: `crm.opportunity.sync.update.${crmPayload.famspi_opportunity_id}.${Date.now()}`,
+        correlationId: String(crmPayload.famspi_opportunity_id),
+      });
+    } catch (crmErr) {
+      logger.warn(
+        { opportunity_id: crmPayload.famspi_opportunity_id, error: crmErr?.message },
+        "[CRM_SYNC] Error encolando actualizacion de oportunidad"
+      );
+    }
+  }
+
+  return updated;
 };
 
 const upsertInfluence = async (opportunityId, payload, actorUser) => {

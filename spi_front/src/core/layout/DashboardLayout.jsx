@@ -6,6 +6,7 @@ import Header from "../ui/components/Header";
 import NavigationBar from "../ui/components/NavigationBar";
 import NotificationBell from "../ui/components/NotificationBell";
 import HelpTicketFab from "../ui/components/HelpTicketFab";
+import FamSignFab from "../ui/components/FamSignFab";
 import InternalLopdpConsentModal from "../ui/widgets/InternalLopdpConsentModal";
 import { RequestModalProvider } from "../ui/components/RequestActionCards";
 import { useAuth } from "../auth/AuthContext";
@@ -29,6 +30,7 @@ export default function DashboardLayout() {
       <div className={lopdpPending ? "pointer-events-none select-none blur-[2px]" : ""}>
         <Header />
         <NavigationBar />
+        <FamSignFab />
         <HelpTicketFab />
         <NotificationBell />
         <AttendanceWidget />

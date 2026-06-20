@@ -15,6 +15,10 @@ const { runOnce: runPermisosRecoveryCoordinationExpiry } = require('../jobs/perm
 const { runOnce: runExternalCaseSyncQueue } = require('../jobs/externalCaseSyncScheduler');
 const permisosService = require('../modules/permisos/permisos.service');
 const { generateAndStoreMaintenanceReport } = require('../modules/ti-assets/tiAssets.report');
+const { notifyUpcomingRenewals, createOffboardingTasksForUser } = require('../modules/collab-deliveries/collabDeliveries.service');
+const { runOnce: runCollabActaPendingSignatureReminder } = require('../jobs/collabActaPendingSignatureReminder');
+const { runOnce: runSignatureWorkflowReminder } = require('../jobs/signatureWorkflowReminderScheduler');
+const { runOnce: runSignatureWorkflowExpiry } = require('../jobs/signatureWorkflowExpiryScheduler');
 
 const jobsAuth = require('../middlewares/jobsAuth');
 
@@ -461,6 +465,63 @@ router.post('/ti-assets/maintenance-report/generate', async (req, res) => {
             error: 'Falló generación manual de reporte TI',
             details: error.message,
         });
+    }
+});
+
+// ── Job: notificar renovaciones próximas de entregas a colaboradores ──────────
+router.post('/collab-deliveries/renewals/notify', async (_req, res) => {
+    try {
+        const result = await notifyUpcomingRenewals();
+        res.json({ success: true, message: 'Renovaciones notificadas', data: result });
+    } catch (error) {
+        console.error('Error en job de renovaciones collab:', error);
+        res.status(500).json({ error: 'Falló el job de renovaciones', details: error.message });
+    }
+});
+
+// ── Job: recordatorio diario de actas collab pendientes de firma ──────────────
+router.post('/collab-deliveries/actas/pending-signature-reminder', async (_req, res) => {
+    try {
+        const result = await runCollabActaPendingSignatureReminder();
+        res.json({ success: true, message: 'Recordatorios de actas pendientes procesados', data: result });
+    } catch (error) {
+        console.error('Error en job de recordatorios de actas:', error);
+        res.status(500).json({ error: 'Falló el job de recordatorios de actas', details: error.message });
+    }
+});
+
+// ── Job: recordatorio diario de documentos pendientes de firma (signature workflows) ──
+router.post('/signature-workflows/reminder', async (_req, res) => {
+    try {
+        const result = await runSignatureWorkflowReminder();
+        res.json({ success: true, message: 'Recordatorios de firma procesados', data: result });
+    } catch (error) {
+        console.error('Error en job de recordatorios de firma:', error);
+        res.status(500).json({ error: 'Falló el job de recordatorios de firma', details: error.message });
+    }
+});
+
+// ── Job: expiración automática de flujos de firma vencidos ────────────────────
+router.post('/signature-workflows/expiry', async (_req, res) => {
+    try {
+        const result = await runSignatureWorkflowExpiry();
+        res.json({ success: true, message: 'Expiraciones de flujos de firma procesadas', data: result });
+    } catch (error) {
+        console.error('Error en job de expiración de flujos de firma:', error);
+        res.status(500).json({ error: 'Falló el job de expiración de flujos de firma', details: error.message });
+    }
+});
+
+// ── Endpoint manual: crear tareas de offboarding para un colaborador ──────────
+router.post('/collab-deliveries/offboarding/:userId', async (req, res) => {
+    try {
+        const userId = Number(req.params.userId);
+        if (!Number.isInteger(userId) || userId <= 0) return res.status(400).json({ error: 'userId inválido' });
+        const result = await createOffboardingTasksForUser(userId, null);
+        res.json({ success: true, message: 'Tareas de offboarding creadas', data: result });
+    } catch (error) {
+        console.error('Error creando tareas offboarding collab:', error);
+        res.status(500).json({ error: 'Falló la creación de tareas', details: error.message });
     }
 });
 

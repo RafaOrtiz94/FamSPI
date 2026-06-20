@@ -41,8 +41,8 @@ const COLLAB_ACTA_ROPA_TEMPLATE_ID        = process.env.COLLAB_ACTA_ROPA_TEMPLAT
 
 // Verificación de arranque: muestra en log si los template IDs están configurados
 logger.info({
-  COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID: COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID ? "✓ configurado" : "✗ NO configurado — usará pdf-lib",
-  COLLAB_ACTA_ROPA_TEMPLATE_ID:        COLLAB_ACTA_ROPA_TEMPLATE_ID        ? "✓ configurado" : "✗ NO configurado — usará pdf-lib",
+  COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID: COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID ? "✓ configurado" : "✗ NO configurado",
+  COLLAB_ACTA_ROPA_TEMPLATE_ID:        COLLAB_ACTA_ROPA_TEMPLATE_ID        ? "✓ configurado" : "✗ NO configurado",
 }, "collab-deliveries: estado de plantillas Google Docs");
 
 const normalizeActaCategory = (value) => {

@@ -4,6 +4,7 @@ import { FiCheckCircle, FiChevronDown, FiUsers } from "react-icons/fi";
 import { useParams } from "react-router-dom";
 import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
+import { useAuth } from "../../../../../core/auth/AuthContext";
 import SectionObservationAlert from "../SectionObservationAlert";
 import LocationManager from "../../LocationManager";
 
@@ -35,6 +36,33 @@ const getClientLabel = (client) =>
  client?.id ||
  "Cliente";
 
+const getClientAssignmentSummary = (client, currentUserEmail) => {
+ const details = Array.isArray(client?.assignment_details) ? client.assignment_details : [];
+ const activeDetails = details.filter((item) => item && item.is_active !== false);
+ if (!activeDetails.length) {
+ return { label: "Sin asignar", tone: "slate" };
+ }
+
+ const myEmail = String(currentUserEmail || "").trim().toLowerCase();
+ const isAssignedToMe = myEmail && activeDetails.some(
+ (item) => String(item?.assigned_to_email || "").toLowerCase() === myEmail,
+ );
+
+ if (isAssignedToMe) {
+ return { label: "Tu cliente", tone: "emerald" };
+ }
+
+ const names = activeDetails
+ .map((item) => item?.assigned_to_name || item?.assigned_to_email || "")
+ .map((value) => String(value || "").trim())
+ .filter(Boolean);
+
+ return {
+ label: names.length ? `Asignado a ${names[0]}` : "Asignado",
+ tone: "amber",
+ };
+};
+
 const toCleanText = (value) => {
  const normalized = String(value || "").trim();
  return normalized || "";
@@ -63,6 +91,14 @@ const resolveProvinceCityFromLocation = (location) => {
  const province = toCleanText(location?.province);
  const city = toCleanText(location?.city);
  return [province, city].filter(Boolean).join(", ");
+};
+
+const getLocationLabel = (location) => {
+ if (!location || typeof location !== "object") return "";
+ const provinceCity = resolveProvinceCityFromLocation(location);
+ const name = toCleanText(location?.name);
+ if (name && provinceCity) return `${name} - ${provinceCity}`;
+ return name || provinceCity || toCleanText(location?.address) || "Sede";
 };
 
 const normalizeClientType = (value) => {
@@ -130,13 +166,18 @@ const ClientDataSection = ({
 }) => {
  const { id: bcId } = useParams();
  const { showToast, showLoader, hideLoader } = useUI();
+ const { user: currentUser } = useAuth();
  const [clients, setClients] = useState([]);
  const [loadingClients, setLoadingClients] = useState(false);
  const [saving, setSaving] = useState(false);
  const [loading, setLoading] = useState(true);
+ const [isEditing, setIsEditing] = useState(false);
 
  const [showClientDropdown, setShowClientDropdown] = useState(false);
  const [filteredClients, setFilteredClients] = useState([]);
+ const [isClientInputFocused, setIsClientInputFocused] = useState(false);
+ const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+ const [filteredLocations, setFilteredLocations] = useState([]);
  const [isNewClient, setIsNewClient] = useState(false);
  const [clientLocations, setClientLocations] = useState([]);
  const [selectedLocation, setSelectedLocation] = useState(null);
@@ -160,12 +201,14 @@ const ClientDataSection = ({
  } = useForm({ defaultValues });
 
  const [naFields, setNaFields] = useState({});
- const watchClient = watch("client");
- const watchLocationId = watch("locationId");
- const watchClientType = watch("clientType");
+const watchClient = watch("client");
+const watchLocationId = watch("locationId");
+const watchClientType = watch("clientType");
+const watchProvinceCity = watch("provinceCity");
+ const selectedClientLabel = selectedClient ? normalizeText(getClientLabel(selectedClient)) : "";
  const [openSections, setOpenSections] = useState(() =>
  SECTION_ORDER.reduce((acc, id) => {
- acc[id] = id === "general";
+ acc[id] = true;
  return acc;
  }, {}),
  );
@@ -342,7 +385,9 @@ const ClientDataSection = ({
  const fetchClients = async () => {
  setLoadingClients(true);
  try {
- const res = await api.get("/clients");
+ const res = await api.get("/clients", {
+ params: { include_all_for_business_case: true },
+ });
  const payload = res.data?.data ?? res.data;
  const parsedClients = Array.isArray(payload?.items)
  ? payload.items
@@ -402,11 +447,37 @@ const ClientDataSection = ({
  setSelectedClient(exact);
  setIsNewClient(Boolean(term) && !exact);
 
+ const exactLabel = exact ? normalizeText(getClientLabel(exact)) : "";
+ if (exact && term === exactLabel && (!selectedClientLabel || selectedClientLabel === exactLabel)) {
+ setFilteredClients([]);
+ setShowClientDropdown(false);
+ return;
+ }
+
+ if (term.length < 2) {
+ setFilteredClients([]);
+ setShowClientDropdown(false);
+ return;
+ }
+
  const matches = clients
- .filter((client) => normalizeText(getClientLabel(client)).includes(term))
+ .filter((client) => {
+ const haystack = [
+ getClientLabel(client),
+ client?.identificador,
+ client?.client_email,
+ client?.shipping_city,
+ client?.shipping_province,
+ ]
+ .map((value) => normalizeText(value))
+ .filter(Boolean)
+ .join(" ");
+ return haystack.includes(term);
+ })
  .slice(0, 8);
  setFilteredClients(matches);
- }, [watchClient, clients, setValue, findClientByInput]);
+ setShowClientDropdown(isClientInputFocused && !exact && matches.length > 0);
+ }, [watchClient, clients, setValue, findClientByInput, selectedClientLabel, isClientInputFocused]);
 
  useEffect(() => {
  if (!selectedClient) return;
@@ -427,47 +498,76 @@ const ClientDataSection = ({
  }, [selectedClient, clientLocations, watchLocationId, setValue]);
 
  useEffect(() => {
- const naClientType = Boolean(naFields.clientType);
- const naProvinceCity = Boolean(naFields.provinceCity);
-
  if (startedAsPublic) {
  setValue("clientType", "persona_juridica", { shouldDirty: true });
- }
-
- if (!selectedClient) {
- if (!naClientType && !startedAsPublic) setValue("clientType", "", { shouldDirty: true });
- // Preserve stored province/city when no client match is resolved.
  return;
  }
 
- const provinceCity = selectedLocation
- ? resolveProvinceCityFromLocation(selectedLocation)
- : resolveProvinceCityFromClient(selectedClient);
+ if (!selectedClient) return;
 
- if (!naClientType && !startedAsPublic) {
- setValue(
- "clientType",
- normalizeClientType(
+ const currentType = normalizeClientType(watchClientType);
+ if (currentType) return;
+
+ const suggestedType = normalizeClientType(
  selectedClient?.client_type ||
  selectedClient?.person_type ||
- selectedClient?.tipo_persona ||
- watchClientType,
- ),
- { shouldDirty: true },
+ selectedClient?.tipo_persona,
  );
- }
- if (!naProvinceCity) {
- setValue("provinceCity", provinceCity || "", { shouldDirty: false });
+ if (suggestedType) {
+ setValue("clientType", suggestedType, { shouldDirty: false });
  }
  }, [
  selectedClient,
- selectedLocation,
  setValue,
- naFields.clientType,
- naFields.provinceCity,
  startedAsPublic,
  watchClientType
  ]);
+
+ useEffect(() => {
+ const term = normalizeText(watchProvinceCity);
+ if (!selectedClient || !clientLocations.length) {
+ setFilteredLocations([]);
+ setShowLocationDropdown(false);
+ return;
+ }
+
+ if (!term) {
+ setFilteredLocations(clientLocations.slice(0, 8));
+ return;
+ }
+
+ const matches = clientLocations
+ .filter((location) => {
+ const haystack = [
+ getLocationLabel(location),
+ location?.address,
+ location?.city,
+ location?.province,
+ ]
+ .map((value) => normalizeText(value))
+ .filter(Boolean)
+ .join(" ");
+ return haystack.includes(term);
+ })
+ .slice(0, 8);
+ setFilteredLocations(matches);
+ }, [clientLocations, selectedClient, watchProvinceCity]);
+
+ useEffect(() => {
+ if (Boolean(naFields.provinceCity)) return;
+
+ if (selectedLocation) {
+ setValue("provinceCity", getLocationLabel(selectedLocation), { shouldDirty: false, shouldValidate: true });
+ return;
+ }
+
+ if (selectedClient && !clientLocations.length) {
+ const fallbackProvinceCity = resolveProvinceCityFromClient(selectedClient);
+ if (fallbackProvinceCity) {
+ setValue("provinceCity", fallbackProvinceCity, { shouldDirty: false, shouldValidate: false });
+ }
+ }
+ }, [clientLocations.length, selectedClient, selectedLocation, setValue, naFields.provinceCity]);
 
  const handleSave = async (formData) => {
  if (!bcId) {
@@ -498,11 +598,14 @@ const ClientDataSection = ({
  const finalClientType = startedAsPublic
  ? "persona_juridica"
  : normalizeClientType(formData.clientType);
+ const normalizedSmartObjective = String(formData.smartObjective || "").trim();
+ const finalContractingEntity = startedAsPublic ? String(formData.contractingEntity || "").trim() : null;
+ const finalProcessCode = startedAsPublic ? String(formData.processCode || "").trim() || null : null;
 
  const metadata = {
  notes: formData.notes,
  clientType: finalClientType,
- contractingEntity: formData.contractingEntity,
+ contractingEntity: finalContractingEntity,
  provinceCity: formData.provinceCity || locationProvinceCity || "",
  client_location_id,
  client_location_name,
@@ -513,10 +616,10 @@ const ClientDataSection = ({
  installation_lng: selectedLocationValue?.lng ?? null,
  general_data: {
  notes: formData.notes,
- smart_objective: formData.smartObjective || "",
- smartObjective: formData.smartObjective || "",
+ smart_objective: normalizedSmartObjective,
+ smartObjective: normalizedSmartObjective,
  clientType: finalClientType,
- contractingEntity: formData.contractingEntity,
+ contractingEntity: finalContractingEntity,
  provinceCity: formData.provinceCity || locationProvinceCity || "",
  client_location_id,
  client_location_name,
@@ -536,14 +639,13 @@ const ClientDataSection = ({
  await api.put(`/business-case/${bcId}`, {
  client_id,
  client_name,
- process_code: formData.processCode || null,
+ process_code: finalProcessCode,
  contract_object: formData.contractObject || null,
  modern_bc_metadata: metadata,
  });
 
  showToast("Datos del cliente guardados correctamente", "success");
-
- // Trigger UI guidance refresh
+ setIsEditing(false);
  onSave();
 
  } catch (error) {
@@ -646,15 +748,19 @@ const ClientDataSection = ({
  selectedClient ? "bg-emerald-50" : isNewClient ? "bg-blue-50" : ""
  }`}
  placeholder={loadingClients ? "Cargando clientes..." : "Escribe o selecciona un cliente"}
- disabled={!canEdit()}
+ disabled={!isEditing}
  {...register("client", { required: "El cliente es obligatorio" })}
  onChange={(event) => {
  setValue("client", event.target.value, { shouldDirty: true, shouldValidate: true });
  }}
  onFocus={() => {
- if (filteredClients.length > 0) setShowClientDropdown(true);
+ setIsClientInputFocused(true);
+ if (!selectedClient && filteredClients.length > 0) setShowClientDropdown(true);
  }}
- onBlur={() => setTimeout(() => setShowClientDropdown(false), 120)}
+ onBlur={() => setTimeout(() => {
+ setIsClientInputFocused(false);
+ setShowClientDropdown(false);
+ }, 120)}
  />
  {selectedClient && (
  <span className="absolute right-2 top-2 rounded bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-800">
@@ -668,7 +774,9 @@ const ClientDataSection = ({
  )}
  {showClientDropdown && filteredClients.length > 0 && (
  <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
- {filteredClients.map((client) => (
+ {filteredClients.map((client) => {
+ const assignment = getClientAssignmentSummary(client, currentUser?.email);
+ return (
  <button
  key={client.id}
  type="button"
@@ -680,14 +788,34 @@ const ClientDataSection = ({
  setSelectedClient(client);
  setClientLocations([]);
  setSelectedLocation(null);
+ setValue("provinceCity", "", { shouldDirty: true, shouldValidate: true });
  setValue("locationId", "", { shouldDirty: true, shouldValidate: true });
  setIsNewClient(false);
  setShowClientDropdown(false);
  }}
  >
+ <div className="flex items-start justify-between gap-3">
+ <div>
  <p className="text-sm font-medium text-slate-900">{getClientLabel(client)}</p>
+ <p className="text-xs text-slate-500">
+ {[client?.identificador, client?.shipping_city, client?.shipping_province].filter(Boolean).join(" • ") || "Cliente registrado"}
+ </p>
+ </div>
+ <span
+ className={`rounded-full px-2 py-1 text-[10px] font-semibold flex-shrink-0 ${
+ assignment.tone === "emerald"
+ ? "bg-emerald-100 text-emerald-800"
+ : assignment.tone === "amber"
+ ? "bg-amber-100 text-amber-800"
+ : "bg-slate-100 text-slate-600"
+ }`}
+ >
+ {assignment.label}
+ </span>
+ </div>
  </button>
- ))}
+ );
+ })}
  </div>
  )}
  </div>
@@ -700,12 +828,12 @@ const ClientDataSection = ({
  {selectedClient ? (
  <LocationManager
  clientId={selectedClient.id}
- canEdit={canEdit()}
+ canEdit={isEditing}
  selectedLocationId={watchLocationId}
  onSelectLocation={(location) => {
  setSelectedLocation(location || null);
  setValue("locationId", location?.id ? String(location.id) : "", { shouldDirty: true, shouldValidate: true });
- const autoProvinceCity = resolveProvinceCityFromLocation(location);
+ const autoProvinceCity = getLocationLabel(location);
  if (!naFields.provinceCity && autoProvinceCity) {
  setValue("provinceCity", autoProvinceCity, { shouldDirty: true, shouldValidate: false });
  }
@@ -714,6 +842,14 @@ const ClientDataSection = ({
  setClientLocations(Array.isArray(locations) ? locations : []);
  }}
  />
+ ) : isNewClient ? (
+ <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-4 text-sm">
+ <p className="font-semibold text-blue-900 mb-1">Cliente nuevo</p>
+ <p className="text-blue-700">
+ Las sedes de instalación se registran desde el módulo de Clientes una vez creado el cliente.
+ Completa Provincia / Ciudad manualmente para continuar.
+ </p>
+ </div>
  ) : (
  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">
  Selecciona primero un cliente para gestionar sus sedes de instalación.
@@ -728,7 +864,7 @@ const ClientDataSection = ({
  <select
  className="w-full border rounded-xl px-4 py-2.5 transition-all outline-none bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900 disabled:bg-gray-100 disabled:text-gray-500"
  {...register("clientType", { required: "El tipo de cliente es obligatorio" })}
- disabled={!canEdit() || startedAsPublic}
+ disabled={!isEditing ||startedAsPublic}
  >
  <option value="">Selecciona tipo</option>
  <option value="persona_natural">Persona natural</option>
@@ -742,6 +878,7 @@ const ClientDataSection = ({
  {errors.clientType && <p className="text-xs text-rose-500 font-medium ml-1">{errors.clientType.message}</p>}
  </label>
 
+ {startedAsPublic && (
  <label className="flex flex-col gap-1.5">
  <div className="flex items-center justify-between">
  <span className="text-sm font-bold text-gray-700">Entidad contratante</span>
@@ -750,24 +887,78 @@ const ClientDataSection = ({
  <input
  type="text"
  className={naInputClass("contractingEntity")}
- disabled={isNA("contractingEntity") || !canEdit()}
+ disabled={isNA("contractingEntity") || !isEditing}
  {...register("contractingEntity")}
  />
  </label>
+ )}
 
  <label className="flex flex-col gap-1.5">
  <div className="flex items-center justify-between">
  <span className="text-sm font-bold text-gray-700">Provincia / Ciudad</span>
- {renderNAButton("provinceCity")}
  </div>
+ <div className="relative">
  <input
  type="text"
- className={naInputClass("provinceCity")}
- readOnly={Boolean(selectedClient) || isNA("provinceCity")}
+ className="w-full border rounded-xl px-4 py-2.5 transition-all outline-none bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900 disabled:bg-gray-100 disabled:text-gray-500"
+ placeholder={selectedClient ? "Busca una sede por provincia o ciudad" : isNewClient ? "Ej: Quito, Pichincha" : "Selecciona primero un cliente"}
  {...register("provinceCity")}
- disabled={!canEdit()}
+ disabled={!isEditing || (!selectedClient && !isNewClient)}
+ onChange={(event) => {
+ const nextValue = event.target.value;
+ setValue("provinceCity", nextValue, { shouldDirty: true, shouldValidate: true });
+ if (selectedLocation && normalizeText(getLocationLabel(selectedLocation)) !== normalizeText(nextValue)) {
+ setSelectedLocation(null);
+ setValue("locationId", "", { shouldDirty: true, shouldValidate: true });
+ }
+ if (selectedClient) setShowLocationDropdown(true);
+ }}
+ onFocus={() => {
+ if (selectedClient && filteredLocations.length > 0) setShowLocationDropdown(true);
+ }}
+ onBlur={() => setTimeout(() => setShowLocationDropdown(false), 120)}
  />
+ {showLocationDropdown && selectedClient && filteredLocations.length > 0 && (
+ <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+ {filteredLocations.map((location) => (
+ <button
+ key={location.id}
+ type="button"
+ className="w-full border-b border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
+ onMouseDown={(event) => event.preventDefault()}
+ onClick={() => {
+ setSelectedLocation(location);
+ setValue("locationId", String(location.id), { shouldDirty: true, shouldValidate: true });
+ setValue("provinceCity", getLocationLabel(location), { shouldDirty: true, shouldValidate: true });
+ setShowLocationDropdown(false);
+ }}
+ >
+ <p className="text-sm font-medium text-slate-900">{getLocationLabel(location)}</p>
+ <p className="text-xs text-slate-500">
+ {[location?.address, location?.city, location?.province].filter(Boolean).join(" • ") || "Sede registrada"}
+ </p>
+ </button>
+ ))}
+ </div>
+ )}
+ </div>
  </label>
+ {isNewClient && !selectedClient && (
+ <p className="text-xs text-blue-600 -mt-2 md:col-span-2">
+ Cliente no registrado. Ingresa Provincia / Ciudad manualmente.
+ </p>
+ )}
+ {selectedClient && !clientLocations.length && (
+ <p className="text-xs text-amber-600 -mt-2 md:col-span-2">
+ Este cliente no tiene sedes registradas. Puedes crear una desde el módulo de Clientes o escribir provincia/ciudad manualmente.
+ </p>
+ )}
+ {selectedClient && clientLocations.length > 0 && !watchLocationId && (
+ <p className="text-xs text-amber-600 -mt-2 md:col-span-2">
+ Selecciona una sede usando la búsqueda de provincia/ciudad para continuar.
+ </p>
+ )}
+ {startedAsPublic && (
  <label className="flex flex-col gap-1.5">
  <div className="flex items-center justify-between">
  <span className="text-sm font-bold text-gray-700">Código del proceso</span>
@@ -776,10 +967,11 @@ const ClientDataSection = ({
  <input
  type="text"
  className={naInputClass("processCode")}
- disabled={isNA("processCode") || !canEdit()}
+ disabled={isNA("processCode") || !isEditing}
  {...register("processCode")}
  />
  </label>
+ )}
 
  <label className="flex flex-col gap-1.5">
  <div className="flex items-center justify-between">
@@ -789,22 +981,22 @@ const ClientDataSection = ({
  <input
  type="text"
  className={naInputClass("contractObject")}
- disabled={isNA("contractObject") || !canEdit()}
+ disabled={isNA("contractObject") || !isEditing}
  {...register("contractObject")}
  />
  </label>
  <label className="flex flex-col gap-1.5 md:col-span-2">
  <div className="flex items-center justify-between">
  <span className="text-sm font-bold text-gray-700">Objetivo SMART</span>
- {renderNAButton("smartObjective")}
  </div>
  <textarea
  rows={3}
- className={naInputClass("smartObjective")}
- disabled={isNA("smartObjective") || !canEdit()}
+ className="w-full border rounded-xl px-4 py-2.5 transition-all outline-none bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900 placeholder-gray-400 disabled:bg-gray-100 disabled:text-gray-500"
+ disabled={!isEditing}
  placeholder="Ejemplo: Incrementar cobertura diagnostica en 20% en 12 meses con trazabilidad mensual."
- {...register("smartObjective")}
+ {...register("smartObjective", { required: "El objetivo SMART es obligatorio" })}
  />
+ {errors.smartObjective && <p className="text-xs text-rose-500 font-medium ml-1">{errors.smartObjective.message}</p>}
  </label>
  <label className="flex flex-col gap-1.5 md:col-span-2">
  <div className="flex items-center justify-between">
@@ -814,7 +1006,7 @@ const ClientDataSection = ({
  <textarea
  rows={3}
  className={naInputClass("notes")}
- disabled={isNA("notes") || !canEdit()}
+ disabled={isNA("notes") || !isEditing}
  {...register("notes")}
  />
  </label>
@@ -824,14 +1016,35 @@ const ClientDataSection = ({
  {/* Section Actions */}
  {canEdit() && (
  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-100">
- <p className="text-xs text-gray-400 font-medium">Los cambios se guardan automáticamente al enviar el formulario.</p>
- <button
- type="submit"
- disabled={saving}
- className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-60 disabled:scale-100 w-full sm:w-auto"
- >
- {saving ? "Guardando..." : "Guardar Datos del Cliente"}
- </button>
+ <p className="text-xs text-gray-400 font-medium">
+  {isEditing ? "Los cambios se guardan al presionar Guardar." : "Sección en modo solo lectura."}
+ </p>
+ {isEditing ? (
+  <div className="flex gap-2 sm:justify-end">
+  <button
+  type="button"
+  onClick={() => { initializeForm(); setIsEditing(false); }}
+  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all w-full sm:w-auto"
+  >
+  Cancelar
+  </button>
+  <button
+  type="submit"
+  disabled={saving}
+  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-60 disabled:scale-100 w-full sm:w-auto"
+  >
+  {saving ? "Guardando..." : "Guardar"}
+  </button>
+  </div>
+ ) : (
+  <button
+  type="button"
+  onClick={() => setIsEditing(true)}
+  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 bg-white text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all w-full sm:w-auto"
+  >
+  Editar
+  </button>
+ )}
  </div>
  )}
  </form>

@@ -8,6 +8,8 @@ const handleError = (res, error, fallbackMessage) => {
   });
 };
 
+const isWizardFlow = (req) => String(req.headers?.["x-viaticos-flow"] || "").toLowerCase() === "wizard";
+
 async function listCandidates(req, res) {
   try {
     const data = await service.listVisitCandidates({
@@ -66,6 +68,19 @@ async function updateStatus(req, res) {
     return res.status(200).json({ ok: true, data });
   } catch (error) {
     return handleError(res, error, "No se pudo actualizar el viatico");
+  }
+}
+
+async function approveSegment(req, res) {
+  try {
+    const allowanceId = Number(req.params.id);
+    const data = await service.approveAllowanceSegment({
+      allowanceId,
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo aprobar el bloque del viatico");
   }
 }
 
@@ -286,22 +301,45 @@ async function report(req, res) {
 }
 
 async function uploadInvoiceTxt(req, res) {
-  try {
-    const allowanceId = Number(req.params.id);
-    const txtContent = req.body?.txt_content || "";
-    if (!txtContent.trim()) {
-      return res.status(400).json({ ok: false, message: "Se requiere txt_content en el cuerpo" });
-    }
-    const data = await service.uploadSriTxtInvoices({
-      allowanceId,
-      actorUser: req.user,
-      txtContent,
-    });
-    return res.status(201).json({ ok: true, data });
-  } catch (error) {
-    return handleError(res, error, "No se pudo procesar TXT de facturas SRI");
+   try {
+     const allowanceId = Number(req.params.id);
+     const txtContent = req.body?.txt_content || "";
+     if (!txtContent.trim()) {
+       return res.status(400).json({ ok: false, message: "Se requiere txt_content en el cuerpo" });
+     }
+     const categories = req.body?.categories && typeof req.body.categories === "object"
+       ? req.body.categories
+       : {};
+     const data = await service.uploadSriTxtInvoices({
+       allowanceId,
+       actorUser: req.user,
+       txtContent,
+       categories,
+       viaWizard: isWizardFlow(req),
+     });
+     return res.status(201).json({ ok: true, data });
+   } catch (error) {
+     return handleError(res, error, "No se pudo procesar TXT de facturas SRI");
+   }
   }
-}
+
+  async function previewInvoiceTxt(req, res) {
+   try {
+     const allowanceId = Number(req.params.id);
+     const txtContent = req.body?.txt_content || "";
+     if (!txtContent.trim()) {
+       return res.status(400).json({ ok: false, message: "Se requiere txt_content en el cuerpo" });
+     }
+     const data = await service.previewSriTxtInvoices({
+       allowanceId,
+       actorUser: req.user,
+       txtContent,
+     });
+     return res.status(200).json({ ok: true, data });
+   } catch (error) {
+     return handleError(res, error, "No se pudo previsualizar TXT de facturas SRI");
+   }
+  }
 
 async function deleteInvoice(req, res) {
   try {
@@ -348,7 +386,9 @@ async function createManualNote(req, res) {
       driveFileId,
       driveLink,
       notes: req.body?.notes,
+      expenseMode: req.body?.expense_mode,
       actorUser: req.user,
+      viaWizard: isWizardFlow(req),
     });
     return res.status(201).json({ ok: true, data });
   } catch (error) {
@@ -386,7 +426,9 @@ async function updateManualNote(req, res) {
       emissionPoint: req.body?.emission_point,
       sequential: req.body?.sequential,
       notes: req.body?.notes,
+      expenseMode: req.body?.expense_mode,
       actorUser: req.user,
+      viaWizard: isWizardFlow(req),
     });
     return res.status(200).json({ ok: true, data });
   } catch (error) {
@@ -400,6 +442,7 @@ async function deleteManualNote(req, res) {
     const data = await service.deleteManualNote({
       noteId,
       actorUser: req.user,
+      viaWizard: isWizardFlow(req),
     });
     return res.status(200).json({ ok: true, data });
   } catch (error) {
@@ -427,7 +470,9 @@ async function createPurchaseNoInvoice(req, res) {
       purchaseDate: req.body?.purchase_date,
       justification: req.body?.justification,
       driveFileId,
+      expenseMode: req.body?.expense_mode,
       actorUser: req.user,
+      viaWizard: isWizardFlow(req),
     });
     return res.status(201).json({ ok: true, data });
   } catch (error) {
@@ -463,33 +508,49 @@ async function approvePurchaseNoInvoice(req, res) {
   }
 }
 
+async function submitForReview(req, res) {
+  try {
+    const allowanceId = Number(req.params.id);
+    const data = await service.submitAllowanceForReview({
+      allowanceId,
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo enviar el viatico a revision");
+  }
+}
+
 module.exports = {
-  listCandidates,
-  list,
-  upsert,
-  updateStatus,
-  updateWorkflowOperational,
-  listDocuments,
-  addDocument,
-  uploadInvoiceXml,
-  uploadInvoiceZip,
-  uploadInvoiceTxt,
-  deleteInvoice,
-  syncSri,
-  listInvoices,
-  patchInvoice,
-  upsertZone,
-  upsertFixedProfile,
-  listFixedProfiles,
-  updatePolicy,
-  reportSummary,
-  atsXml,
-  report,
-  createManualNote,
-  listManualNotes,
-  updateManualNote,
-  deleteManualNote,
-  createPurchaseNoInvoice,
-  listPurchasesNoInvoice,
-  approvePurchaseNoInvoice,
-};
+   listCandidates,
+   list,
+   upsert,
+   updateStatus,
+   approveSegment,
+   updateWorkflowOperational,
+   listDocuments,
+   addDocument,
+   uploadInvoiceXml,
+   uploadInvoiceZip,
+   uploadInvoiceTxt,
+   previewInvoiceTxt,
+   deleteInvoice,
+   syncSri,
+   listInvoices,
+   patchInvoice,
+   upsertZone,
+   upsertFixedProfile,
+   listFixedProfiles,
+   updatePolicy,
+   reportSummary,
+   atsXml,
+   report,
+   createManualNote,
+   listManualNotes,
+   updateManualNote,
+   deleteManualNote,
+   createPurchaseNoInvoice,
+   listPurchasesNoInvoice,
+   approvePurchaseNoInvoice,
+   submitForReview,
+ };

@@ -118,6 +118,34 @@ const BC_LABEL_FIELD_MAP = new Map([
 
 let templateCache = null;
 let mappingCache = null;
+let equipmentAliasesCache = null;
+
+function loadEquipmentAliases() {
+  if (equipmentAliasesCache) return equipmentAliasesCache;
+  const candidatePaths = [
+    path.resolve(__dirname, "../../../Mapeador_Sheets/equipment_aliases.json"),
+    path.resolve(__dirname, "../../../../Mapeador_Sheets/equipment_aliases.json"),
+    path.resolve(__dirname, "../../../../../Mapeador_Sheets/equipment_aliases.json"),
+  ];
+  const found = candidatePaths.find((p) => fs.existsSync(p));
+  if (!found) {
+    equipmentAliasesCache = new Map();
+    return equipmentAliasesCache;
+  }
+  try {
+    const raw = JSON.parse(fs.readFileSync(found, "utf8"));
+    const byId = new Map();
+    Object.entries(raw.by_id || {}).forEach(([id, aliases]) => {
+      if (Array.isArray(aliases) && aliases.length) byId.set(String(id), aliases);
+    });
+    equipmentAliasesCache = byId;
+    logger.info({ path: found, entries: byId.size }, "[SheetGen] equipment_aliases.json cargado");
+  } catch (err) {
+    logger.warn({ err: err.message }, "[SheetGen] No se pudo cargar equipment_aliases.json");
+    equipmentAliasesCache = new Map();
+  }
+  return equipmentAliasesCache;
+}
 
 function normalizeText(value) {
   return String(value || "")
@@ -584,6 +612,11 @@ function buildRecordAliases(record = {}) {
     const normalized = normalizeCompact(value);
     if (normalized) aliases.add(normalized);
   });
+  const id = String(record.id ?? "");
+  if (id) {
+    const extras = loadEquipmentAliases().get(id) || [];
+    extras.forEach((a) => aliases.add(a));
+  }
   return Array.from(aliases);
 }
 
@@ -671,16 +704,37 @@ async function ensureSpreadsheet({ requiredSheetNames, existingSheetId, outputFo
   if (existingSheetId) {
     try {
       const meta = await getSpreadsheetMeta(existingSheetId);
-      const hasAllSheets = requiredSheetNames.every((name) => meta.sheetMap.has(name));
+      const missingSheetNames = requiredSheetNames.filter((name) => !meta.sheetMap.has(name));
+      const hasAllSheets = missingSheetNames.length === 0;
       if (hasAllSheets) {
         return {
           spreadsheetId: existingSheetId,
           spreadsheetUrl: meta.data?.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${existingSheetId}/edit`,
           sheetMap: meta.sheetMap,
           existing: true,
+          recreated: false,
+          replacementReason: null,
+          missingSheetNames: [],
         };
       }
+
       await deleteFileIfExists(existingSheetId);
+      logger.warn(
+        { existingSheetId, missingSheetNames },
+        "Spreadsheet previo incompleto. Se recreara desde plantilla.",
+      );
+
+      const created = await createSpreadsheetFromTemplate({ outputFolderId, businessCaseName });
+      const createdMeta = await getSpreadsheetMeta(created.sheetId);
+      return {
+        spreadsheetId: created.sheetId,
+        spreadsheetUrl: created.sheetUrl,
+        sheetMap: createdMeta.sheetMap,
+        existing: false,
+        recreated: true,
+        replacementReason: "missing_required_sheets",
+        missingSheetNames,
+      };
     } catch (error) {
       logger.warn({ existingSheetId, error: error.message }, "Spreadsheet previo no utilizable. Se recreara desde plantilla.");
     }
@@ -693,6 +747,9 @@ async function ensureSpreadsheet({ requiredSheetNames, existingSheetId, outputFo
     spreadsheetUrl: created.sheetUrl,
     sheetMap: meta.sheetMap,
     existing: false,
+    recreated: false,
+    replacementReason: existingSheetId ? "existing_sheet_unusable" : null,
+    missingSheetNames: [],
   };
 }
 
@@ -823,9 +880,19 @@ function buildSheetPayloads({ template, equipmentRecords = [], payload = {} }) {
     aliases: buildRecordAliases(record),
   }));
 
+  if (!equipmentRecords.length) {
+    logger.warn("[SheetGen] buildSheetPayloads: no equipment records provided — equipment tabs will be empty");
+  }
+
   template.equipmentSheets.forEach((sheetDefinition) => {
     const matchedRecords = recordsWithAliases.filter((record) => scoreAliases(record.aliases, sheetDefinition.aliases) >= 85);
-    if (!matchedRecords.length) return;
+    if (!matchedRecords.length) {
+      if (equipmentRecords.length) {
+        const scores = recordsWithAliases.map((r) => ({ name: r.name, score: scoreAliases(r.aliases, sheetDefinition.aliases), recordAliases: r.aliases, sheetAliases: sheetDefinition.aliases }));
+        logger.warn({ sheet: sheetDefinition.name, scores }, "[SheetGen] No equipment record matched sheet — alias scoring miss");
+      }
+      return;
+    }
 
     const matchedIds = new Set(matchedRecords.map((record) => Number(record.id)).filter((value) => Number.isInteger(value) && value > 0));
     const matchedItems = (payload.max_quantities || []).filter((item) => {
@@ -895,7 +962,18 @@ async function syncBusinessCaseToGoogleSheet({ businessCase, outputFolderId, pay
     timestamp: new Date().toISOString(),
     provider: "google_sheets_local",
     selected_sheets: requiredSheetNames,
+    reused_existing_file: spreadsheet.existing === true,
+    recreated_file: spreadsheet.recreated === true,
+    replacement_reason: spreadsheet.replacementReason || null,
+    missing_required_sheets: Array.isArray(spreadsheet.missingSheetNames) ? spreadsheet.missingSheetNames : [],
+    previous_sheet_id: previousSheetId || null,
   };
+}
+
+function clearSheetCaches() {
+  templateCache = null;
+  mappingCache = null;
+  equipmentAliasesCache = null;
 }
 
 module.exports = {
@@ -905,4 +983,5 @@ module.exports = {
   buildSheetPayloads,
   pullMaximumQuantitiesFromGoogleSheet,
   syncBusinessCaseToGoogleSheet,
+  clearSheetCaches,
 };

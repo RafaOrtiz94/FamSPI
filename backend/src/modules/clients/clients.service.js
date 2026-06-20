@@ -5,6 +5,8 @@ const { uploadBase64File } = require("../../utils/drive");
 const axios = require("axios");
 const crypto = require("crypto");
 const { callOdoo, IntegrationDisabledError } = require("../integrations/odooClient");
+const { enqueueIntegrationEvent } = require("../integrations/integrationOutbox.service");
+const { isCrmSyncEnabled } = require("../../config/crmDb");
 
 const FULL_ACCESS_ROLES = new Set([
   "jefe_comercial",
@@ -1351,7 +1353,14 @@ async function syncOdooClientsBackfill({ user }) {
   await syncOdooPartnersIntoClientRequests({ user });
 }
 
-async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo = false, filterBySchedule = false }) {
+async function listAccessibleClients({
+  user,
+  q,
+  visitDate,
+  includeScheduleInfo = false,
+  filterBySchedule = false,
+  includeAllForBusinessCase = false,
+}) {
   await ensureTables();
   // Fire-and-forget: sync Odoo in background without blocking the response.
   // Throttled to once per 5 min per role to avoid hammering Odoo on every request.
@@ -1430,7 +1439,9 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
     ? Math.min(Math.max(requestedLimit, 200), 20000)
     : 5000;
 
-  if (!isManager(user) && !hasFieldClientReadAccess(user)) {
+  const canBypassAssignmentScope = includeAllForBusinessCase;
+
+  if (!canBypassAssignmentScope && !isManager(user) && !hasFieldClientReadAccess(user)) {
     params.push(user.email, user.email);
     clauses.push(`(
       LOWER(COALESCE(cr.created_by, '')) = LOWER($${params.length - 1})
@@ -1883,6 +1894,36 @@ async function updateClient({ clientId, user, rawData = {}, rawFiles = {} }) {
     }
   }
 
+  if (isCrmSyncEnabled()) {
+    try {
+      await enqueueIntegrationEvent({
+        eventType: "crm.client.updated",
+        payload: {
+          famspi_client_request_id: updated.id,
+          ruc_cedula: updated.ruc_cedula,
+          commercial_name: updated.commercial_name,
+          client_email: updated.client_email,
+          establishment_phone: updated.establishment_phone,
+          establishment_city: updated.establishment_city,
+          establishment_province: updated.establishment_province,
+          shipping_address: updated.shipping_address,
+          shipping_city: updated.shipping_city,
+          shipping_province: updated.shipping_province,
+          shipping_contact_name: updated.shipping_contact_name,
+          legal_rep_name: updated.legal_rep_name,
+          legal_rep_email: updated.legal_rep_email,
+        },
+        idempotencyKey: `crm.client.updated.${updated.id}.${Date.now()}`,
+        correlationId: String(updated.id),
+      });
+    } catch (crmErr) {
+      logger.warn(
+        { client_request_id: updated.id, error: crmErr?.message },
+        "[CRM_SYNC] Error encolando actualizacion de cliente — no bloquea el update",
+      );
+    }
+  }
+
   return {
     ...updated,
     attachments: canEditFull ? getClientRequestAttachments(updated) : [],
@@ -2199,6 +2240,32 @@ async function upsertVisitStatus({
     { clientId, user: user.email, status: rows[0].status },
     "Visita de cliente registrada",
   );
+
+  if (isCrmSyncEnabled()) {
+    try {
+      await enqueueIntegrationEvent({
+        eventType: "crm.visit.registered",
+        payload: {
+          client_id:        clientId,
+          client_name:      client.legal_person_business_name || client.commercial_name ||
+                            `${client.natural_person_firstname || ""} ${client.natural_person_lastname || ""}`.trim() ||
+                            client.ruc_cedula,
+          user_email:       user.email,
+          visit_date:       dateValue,
+          status:           rows[0].status,
+          hora_entrada:     rows[0].hora_entrada,
+          hora_salida:      rows[0].hora_salida,
+          observaciones:    rows[0].observaciones,
+          duracion_minutos: rows[0].duracion_minutos,
+        },
+        idempotencyKey: `crm.visit.${clientId}.${user.email}.${dateValue}`,
+        correlationId:  String(clientId),
+      });
+    } catch (crmErr) {
+      logger.warn({ client_id: clientId, error: crmErr?.message }, "[CRM_SYNC] Error encolando visita");
+    }
+  }
+
   return rows[0];
 }
 

@@ -28,7 +28,9 @@ const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 const determinationsGateService = require("./businessCaseDeterminationsGate.service");
 const { ensureBusinessCaseDriveFolder } = require("./businessCaseDriveFolder.service");
 const sheetGenerationService = require("./businessCaseSheetGeneration.service");
+const { clearSheetCaches } = require("./businessCaseSheetSyncLocal.service");
 const { createRequest: createServiceRequest, addDriveAttachment } = require("../requests/requests.service");
+const XLSX = require("xlsx");
 
 const createSchema = Joi.object({
   client_name: Joi.string().required(),
@@ -136,7 +138,7 @@ const feasibilityDecisionSchema = Joi.object({
 
 const SECTION_ALIASES = {
   general: "general",
-  lab: "lab",
+  lab: "laboratory_environment",
   equipment: "equipment",
   lis: "lis",
   determinations: "determinations",
@@ -183,10 +185,11 @@ const BUSINESS_CASE_PROCESS_MAIL_ROLES = [
 ];
 const DETERMINATIONS_REACTIVO_TYPES = new Set(["reactivo", "determinacion"]);
 const DETERMINATIONS_TECH_TYPES = new Set(["control", "calibrador", "consumible", "material"]);
-// Public BCs: comercial uploads the statistical document and completes the public commercial phase.
-// Private BCs: backoffice_comercial/backoffice fill reactivos.
-const DETERMINATIONS_REACTIVO_PUBLIC_ROLES = new Set(["comercial"]);
-const DETERMINATIONS_REACTIVO_PRIVATE_ROLES = new Set(["backoffice_comercial", "backoffice"]);
+// Reactivos are filled by the commercial lead plus the flow-specific operator.
+const DETERMINATIONS_REACTIVO_PUBLIC_ROLES = new Set(["jefe_comercial", "jefe_de_comercial", "acp_comercial"]);
+const DETERMINATIONS_REACTIVO_PRIVATE_ROLES = new Set(["jefe_comercial", "jefe_de_comercial", "backoffice_comercial"]);
+// comercial puede solicitar inspección en cualquier tipo de BC; backoffice roles en privados
+const INSPECTION_REQUEST_ROLES = new Set(["comercial", "backoffice_comercial", "backoffice"]);
 // tecnico + jefe_tecnico fill controles/calibradores/materiales regardless of BC type
 const DETERMINATIONS_TECH_EDIT_ROLES = new Set(["tecnico", "jefe_tecnico"]);
 const DETERMINATIONS_TECH_WINDOW_NOTIFY_ROLES = ["tecnico", "jefe_tecnico"];
@@ -402,6 +405,56 @@ function normalizePurchaseTypeForGate(value = "") {
   return "public";
 }
 
+function isPublicBusinessCase(value = "") {
+  return normalizePurchaseTypeForGate(value) === "public";
+}
+
+function resolveBusinessCaseSmartObjective(businessCase = {}) {
+  const metadata = businessCase?.modern_bc_metadata && typeof businessCase.modern_bc_metadata === "object"
+    ? businessCase.modern_bc_metadata
+    : {};
+  const generalData = metadata?.general_data && typeof metadata.general_data === "object"
+    ? metadata.general_data
+    : {};
+
+  return [
+    generalData?.smart_objective,
+    generalData?.smartObjective,
+    metadata?.smart_objective,
+    metadata?.smartObjective,
+    businessCase?.smart_objective,
+  ].find((value) => hasTextValue(value)) || "";
+}
+
+function resolveBusinessCaseGeneralMetadata(businessCase = {}) {
+  const metadata = businessCase?.modern_bc_metadata && typeof businessCase.modern_bc_metadata === "object"
+    ? businessCase.modern_bc_metadata
+    : {};
+  const generalData = metadata?.general_data && typeof metadata.general_data === "object"
+    ? metadata.general_data
+    : {};
+  const isPublic = isPublicBusinessCase(businessCase?.bc_purchase_type);
+
+  return {
+    metadata,
+    generalData,
+    isPublic,
+    smartObjective: resolveBusinessCaseSmartObjective(businessCase),
+    contractingEntity:
+      generalData?.contractingEntity ||
+      metadata?.contractingEntity ||
+      "",
+    provinceCity:
+      generalData?.provinceCity ||
+      metadata?.provinceCity ||
+      "",
+    clientType:
+      generalData?.clientType ||
+      metadata?.clientType ||
+      "",
+  };
+}
+
 function normalizeConsumptionType(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "determinacion") return "reactivo";
@@ -432,8 +485,8 @@ function assertConsumptionRolePolicyOrThrow({ role = "", hasReactivoFamily = fal
     const allowedReactivoRoles = isPublic ? DETERMINATIONS_REACTIVO_PUBLIC_ROLES : DETERMINATIONS_REACTIVO_PRIVATE_ROLES;
     if (!allowedReactivoRoles.has(normalizedRole) && !DETERMINATIONS_TECH_EDIT_ROLES.has(normalizedRole)) {
       const msg = isPublic
-        ? "Solo acp_comercial puede registrar reactivos en un proceso publico."
-        : "Solo backoffice puede registrar reactivos en un proceso privado.";
+        ? "Solo jefe_comercial o acp_comercial pueden registrar reactivos en un proceso publico."
+        : "Solo jefe_comercial o backoffice_comercial pueden registrar reactivos en un proceso privado.";
       const error = new Error(msg);
       error.status = 403;
       error.code = "DETERMINATIONS_REACTIVO_ROLE_REQUIRED";
@@ -886,13 +939,9 @@ function buildBusinessCaseProcessSubject(businessCase = {}) {
     : `${flowLabel} - ${clientName}`;
 }
 
-function canRequestBusinessCaseInspection(role = "", bcPurchaseType = "") {
+function canRequestBusinessCaseInspection(role = "") {
   const normalizedRole = String(role || "").trim().toLowerCase();
-  const normalizedType = normalizePurchaseTypeForGate(bcPurchaseType);
-  const allowedRoles = normalizedType === "public"
-    ? DETERMINATIONS_REACTIVO_PUBLIC_ROLES
-    : DETERMINATIONS_REACTIVO_PRIVATE_ROLES;
-  return allowedRoles.has(normalizedRole);
+  return INSPECTION_REQUEST_ROLES.has(normalizedRole);
 }
 
 async function resolveBusinessCaseMailingList({ businessCase, actorUser }) {
@@ -1050,7 +1099,7 @@ function assertConsumptionPhasePolicyOrThrow({
 
   if (normalizedPhase === "commercial_input") {
     if (hasTechFamily) {
-      const error = new Error("Aun no inicia la revision tecnica. Primero ACP/Backoffice debe terminar reactivos.");
+      const error = new Error("Aun no inicia la revision tecnica. Primero deben terminar reactivos.");
       error.status = 403;
       error.code = "DETERMINATIONS_TECH_REVIEW_NOT_STARTED";
       throw error;
@@ -1058,8 +1107,8 @@ function assertConsumptionPhasePolicyOrThrow({
     if (hasReactivoFamily && !reactivoRoles.has(normalizedRole)) {
       const error = new Error(
         isPublic
-          ? "Solo comercial puede completar reactivos en la fase comercial."
-          : "Solo backoffice_comercial puede completar reactivos en la fase comercial.",
+          ? "Solo jefe_comercial o acp_comercial pueden completar reactivos en la fase comercial."
+          : "Solo jefe_comercial o backoffice_comercial pueden completar reactivos en la fase comercial.",
       );
       error.status = 403;
       error.code = "DETERMINATIONS_REACTIVO_PHASE_ROLE_REQUIRED";
@@ -1375,7 +1424,10 @@ async function buildSectionReadinessForDeterminationsUpload(businessCaseId, busi
     lisIntegration &&
     lisIntegration.includes_lis !== null &&
     lisIntegration.includes_lis !== undefined &&
-    (lisIntegration.includes_lis === false || hasValue(lisIntegration.lis_provider));
+    (
+      (lisIntegration.includes_lis === true && hasValue(lisIntegration.lis_provider)) ||
+      (lisIntegration.requires_interface === true && hasValue(lisIntegration.lis_provider))
+    );
 
   const hasRequirementData =
     requirementData &&
@@ -1389,17 +1441,20 @@ async function buildSectionReadinessForDeterminationsUpload(businessCaseId, busi
 
   const requirementReady = hasRequirementData || hasDeliveryData;
 
-  const metadata = businessCase?.modern_bc_metadata && typeof businessCase.modern_bc_metadata === "object"
-    ? businessCase.modern_bc_metadata
-    : {};
-  const metadataGeneral = metadata?.general_data && typeof metadata.general_data === "object"
-    ? metadata.general_data
-    : {};
+  const {
+    isPublic,
+    smartObjective,
+    contractingEntity,
+    provinceCity,
+    clientType,
+  } = resolveBusinessCaseGeneralMetadata(businessCase);
   const generalReady =
-    (hasValue(businessCase?.client_name) &&
-      hasValue(businessCase?.process_code) &&
-      hasValue(businessCase?.contract_object)) ||
-    hasAnyFields(metadataGeneral, ["contractingEntity", "provinceCity", "clientType"]);
+    hasValue(businessCase?.client_name) &&
+    hasValue(businessCase?.contract_object) &&
+    hasValue(clientType) &&
+    hasValue(provinceCity) &&
+    hasValue(smartObjective) &&
+    (!isPublic || (hasValue(businessCase?.process_code) && hasValue(contractingEntity)));
 
   return {
     general: Boolean(generalReady),
@@ -1410,14 +1465,57 @@ async function buildSectionReadinessForDeterminationsUpload(businessCaseId, busi
   };
 }
 
+const DETERMINATIONS_UPLOAD_REQUIRED_SECTIONS = ["general", "lab", "requirement", "equipment", "lis"];
+const DETERMINATIONS_UPLOAD_SECTION_LABELS = {
+  general: "Datos generales",
+  lab: "Datos comerciales",
+  requirement: "Requerimientos",
+  equipment: "Equipos",
+  lis: "LIS",
+};
+
+async function buildDeterminationsUploadReadiness({ businessCaseId, businessCase, role }) {
+  const ownershipInfo = await BusinessCaseDataOwnership.getOwnershipInfo(businessCaseId);
+  const ownershipRules = buildOwnershipCompletionRules(ownershipInfo);
+  const preflowInfo = preflowService.buildPreflowInfo(businessCase, ownershipRules);
+  const readiness = await buildSectionReadinessForDeterminationsUpload(businessCaseId, businessCase);
+  const missingSectionKeys = DETERMINATIONS_UPLOAD_REQUIRED_SECTIONS.filter((sectionKey) => !readiness?.[sectionKey]);
+  const roleAllowed = determinationsGateService.isUploadRole(role);
+  const preflowExpired = Boolean(preflowInfo?.isActive && preflowInfo?.isExpired);
+
+  let message = null;
+  if (!roleAllowed) {
+    message = "Solo el usuario comercial responsable puede subir el documento estadistico.";
+  } else if (preflowExpired) {
+    message = "La ventana de 48 horas del comercial expiro. No se puede subir el documento de estadistica fuera del plazo.";
+  } else if (missingSectionKeys.length) {
+    message = `Debes completar las secciones previas hasta LIS antes de subir el documento estadistico. Pendientes: ${missingSectionKeys.join(", ")}.`;
+  }
+
+  return {
+    canUpload: roleAllowed && !preflowExpired && missingSectionKeys.length === 0,
+    roleAllowed,
+    preflowExpired,
+    missingSectionKeys,
+    missingSections: missingSectionKeys.map((key) => ({
+      key,
+      label: DETERMINATIONS_UPLOAD_SECTION_LABELS[key] || key,
+    })),
+    readiness,
+    message,
+  };
+}
+
 function buildGroupedDeterminationsEmailPayload({ businessCase, gate, actorEmail }) {
   const clientName = resolveBusinessCaseClientDisplayName(businessCase);
   const processNumber = String(businessCase?.process_code || "").trim();
-  if (!processNumber) {
+  const isPublic = isPublicBusinessCase(businessCase?.bc_purchase_type);
+  if (isPublic && !processNumber) {
     const error = new Error("Debe existir numero de proceso (process_code) para enviar notificaciones.");
     error.status = 409;
     throw error;
   }
+  const processLabel = processNumber || "Sin codigo de proceso";
   const deadlineText = gate?.deadlineAt
     ? new Date(gate.deadlineAt).toLocaleString("es-EC", {
       timeZone: process.env.APP_TIMEZONE || "America/Guayaquil",
@@ -1433,7 +1531,7 @@ function buildGroupedDeterminationsEmailPayload({ businessCase, gate, actorEmail
   const actorLabel = actorEmail || "usuario comercial";
 
   return {
-    subject: `${flowLabel} - ${clientName} - ${processNumber}`,
+    subject: `${flowLabel} - ${clientName} - ${processLabel}`,
     message:
       `Flujo: ${flowLabel}. ` +
       `${actorLabel} cargó el documento de estadística del Business Case ${businessCase?.id || businessCase?.business_case_id}. ` +
@@ -1441,7 +1539,7 @@ function buildGroupedDeterminationsEmailPayload({ businessCase, gate, actorEmail
     metadata: {
       businessCaseId: businessCase?.id || businessCase?.business_case_id,
       clientName,
-      processNumber,
+      processNumber: processNumber || null,
       flowLabel,
       actor: actorEmail || null,
       deadlineAt: gate?.deadlineAt || null,
@@ -2788,10 +2886,20 @@ async function saveLisIntegration(req, res) {
     }
 
     const result = await bcLisIntegrationService.createLisIntegration(id, payload);
+    const savedInterfaces = await bcLisIntegrationService.replaceEquipmentInterfaces(
+      result.id,
+      Array.isArray(payload.interfaces) && payload.requires_interface === true ? payload.interfaces : [],
+    );
     if ((req.user?.role || "").toLowerCase() === "comercial") {
       await notifySectionReview({ businessCaseId: id, section: "lis", actor: req.user?.email || "system" });
     }
-    const responseBody = { success: true, data: result };
+    const responseBody = {
+      success: true,
+      data: {
+        ...result,
+        equipmentInterfaces: savedInterfaces,
+      },
+    };
     await completeIdempotentWrite(idempotencySession, responseBody, 200);
     res.json(responseBody);
   } catch (error) {
@@ -3348,7 +3456,10 @@ async function getUIGuidance(req, res) {
       lisIntegration &&
       lisIntegration.includes_lis !== null &&
       lisIntegration.includes_lis !== undefined &&
-      (lisIntegration.includes_lis === false || isFilled(lisIntegration.lis_provider));
+      (
+        (lisIntegration.includes_lis === true && isFilled(lisIntegration.lis_provider)) ||
+        (lisIntegration.requires_interface === true && isFilled(lisIntegration.lis_provider))
+      );
 
     const requirementData = await bcRequirementsService.getRequirements(id);
     const deliveryData = await bcDeliveriesService.getDeliveries(id);
@@ -3389,22 +3500,36 @@ async function getUIGuidance(req, res) {
     const calculationsComplete = dispatchItems.some((item) => Number(item?.plannedQty) > 0);
     const dispatchWorkspaceComplete = dispatchItems.some((item) => Number(item?.opsDispatchQty) > 0);
 
+    const {
+      metadata: generalMetadata,
+      isPublic: isPublicBusinessCaseFlow,
+      smartObjective: generalSmartObjective,
+      contractingEntity: generalContractingEntity,
+      provinceCity: generalProvinceCity,
+      clientType: generalClientType,
+    } = resolveBusinessCaseGeneralMetadata(bc);
+
     const hasGeneralData = hasAny(bc, [
       "client_name",
       "client_id",
       "process_code",
       "contract_object",
-    ]) || hasAny(bc?.modern_bc_metadata, [
+    ]) || hasAny(generalMetadata, [
       "clientType",
       "contractingEntity",
       "provinceCity",
       "notes",
+      "smartObjective",
+      "smart_objective",
     ]);
 
     const generalComplete =
       isFilled(bc?.client_name) &&
-      isFilled(bc?.process_code) &&
-      isFilled(bc?.contract_object);
+      isFilled(bc?.contract_object) &&
+      isFilled(generalClientType) &&
+      isFilled(generalProvinceCity) &&
+      isFilled(generalSmartObjective) &&
+      (!isPublicBusinessCaseFlow || (isFilled(bc?.process_code) && isFilled(generalContractingEntity)));
 
     const investmentSelections = await investmentsService.getInvestmentSelections(id);
     const hasInvestmentsData = Array.isArray(investmentSelections) && investmentSelections.some((i) => i.selected);
@@ -3481,8 +3606,8 @@ async function getUIGuidance(req, res) {
       } else if (determinationsGate?.phase === "commercial_input") {
         ownershipRules.determinations.currentOwner =
           normalizePurchaseTypeForGate(bc?.bc_purchase_type) === "public"
-            ? "comercial"
-            : "backoffice_comercial";
+            ? "jefe_comercial / acp_comercial"
+            : "jefe_comercial / backoffice_comercial";
       }
     }
     ownershipRules.determinations.metadata = {
@@ -3632,6 +3757,11 @@ async function getDeterminationsGateInfo(req, res) {
     const { id } = req.params;
     const bc = await businessCaseService.getBusinessCaseById(id);
     const role = resolveRequestRole(req) || "comercial";
+    const uploadReadiness = await buildDeterminationsUploadReadiness({
+      businessCaseId: id,
+      businessCase: bc,
+      role,
+    });
     const gate = determinationsGateService.buildGateInfo({
       businessCase: bc,
       role,
@@ -3658,6 +3788,7 @@ async function getDeterminationsGateInfo(req, res) {
       ok: true,
       data: {
         ...gate,
+        uploadReadiness,
         inspectionRequest,
         inspectionDraft,
       },
@@ -3676,7 +3807,7 @@ async function requestEnvironmentInspection(req, res) {
     const { id } = req.params;
     const role = resolveRequestRole(req);
     const bc = await businessCaseService.getBusinessCaseById(id);
-    if (!canRequestBusinessCaseInspection(role, bc?.bc_purchase_type)) {
+    if (!canRequestBusinessCaseInspection(role)) {
       return res.status(403).json({
         ok: false,
         message: "No tienes permisos para solicitar la inspeccion de ambiente en este Business Case.",
@@ -4106,6 +4237,52 @@ async function resolveDeterminationsSubsectionUnlock(req, res) {
   }
 }
 
+async function reopenDeterminationsCommercial(req, res) {
+  try {
+    const { id } = req.params;
+    const role = resolveRequestRole(req);
+    if (!DETERMINATIONS_UNLOCK_DECIDER_ROLES.has(role)) {
+      return res.status(403).json({ ok: false, message: "Solo jefe_comercial puede reabrir la fase comercial de determinaciones." });
+    }
+    const businessCase = await businessCaseService.getBusinessCaseById(id);
+    const metadata = preflowService.toObject(businessCase?.modern_bc_metadata);
+    const currentGate = metadata?.determinations_gate && typeof metadata.determinations_gate === "object"
+      ? { ...metadata.determinations_gate }
+      : {};
+    const currentPhase = String(currentGate?.phase || "commercial_input").toLowerCase();
+    if (currentPhase !== "technical_review") {
+      return res.status(409).json({ ok: false, message: "Solo se puede reabrir cuando la fase está en revisión técnica (después de terminar comercial)." });
+    }
+    const now = new Date().toISOString();
+    const locks = resolveDeterminationsSectionLocks(currentGate);
+    locks.reactivos = false;
+    metadata.determinations_gate = {
+      ...currentGate,
+      phase: "commercial_input",
+      quantities_locked: false,
+      section_locks: locks,
+      completed_commercial_at: null,
+      completed_commercial_by_role: null,
+      completed_commercial_by_email: null,
+      reopened_commercial_at: now,
+      reopened_commercial_by_role: role,
+      reopened_commercial_by_email: req.user?.email || null,
+      updated_at: now,
+    };
+    await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
+    const refreshed = await businessCaseService.getBusinessCaseById(id);
+    const gate = determinationsGateService.buildGateInfo({
+      businessCase: refreshed,
+      role,
+      currentDocument: await determinationsGateService.getCurrentDocument(id),
+    });
+    return res.json({ ok: true, data: { gate } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error reopening commercial determinations phase");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
 async function uploadDeterminationsStatDocument(req, res) {
   let idempotencySession = null;
   try {
@@ -4142,24 +4319,33 @@ async function uploadDeterminationsStatDocument(req, res) {
     }
 
     const bc = await businessCaseService.getBusinessCaseById(id);
-    if (!hasTextValue(bc?.process_code)) {
+    const uploadReadiness = await buildDeterminationsUploadReadiness({
+      businessCaseId: id,
+      businessCase: bc,
+      role,
+    });
+    if (uploadReadiness.preflowExpired) {
       return res.status(409).json({
         ok: false,
-        message: "Debe completar el numero de proceso antes de cargar el documento de estadistica.",
+        message: uploadReadiness.message,
       });
     }
-    const ownershipInfo = await BusinessCaseDataOwnership.getOwnershipInfo(id);
-    const ownershipRules = buildOwnershipCompletionRules(ownershipInfo);
-    const preflowInfo = preflowService.buildPreflowInfo(bc, ownershipRules);
-    if (preflowInfo?.isActive && preflowInfo?.isExpired) {
+    if (uploadReadiness.missingSectionKeys.length) {
+      return res.status(409).json({
+        ok: false,
+        message: uploadReadiness.message,
+        missingSections: uploadReadiness.missingSections,
+      });
+    }
+    if (uploadReadiness.preflowExpired) {
       return res.status(409).json({
         ok: false,
         message:
           "La ventana de 48 horas del comercial expiró. No se puede subir el documento de estadística fuera del plazo.",
       });
     }
-    const requiredBeforeUpload = ["general", "lab", "requirement", "equipment", "lis"];
-    const readiness = await buildSectionReadinessForDeterminationsUpload(id, bc);
+    const requiredBeforeUpload = [];
+    const readiness = uploadReadiness.readiness;
     const missingRequired = requiredBeforeUpload.filter((sectionKey) => !readiness?.[sectionKey]);
     if (missingRequired.length) {
       return res.status(409).json({
@@ -4190,6 +4376,13 @@ async function uploadDeterminationsStatDocument(req, res) {
         message: preflowError.message,
       };
     }
+    const refreshedAfterProcess = await businessCaseService.getBusinessCaseById(id);
+    if (isPublicBusinessCase(refreshedAfterProcess?.bc_purchase_type) && !hasTextValue(refreshedAfterProcess?.process_code)) {
+      return res.status(409).json({
+        ok: false,
+        message: "El proceso no se pudo crear correctamente. Intente nuevamente.",
+      });
+    }
     const currentDocument = await determinationsGateService.getCurrentDocument(id);
     const isSameCurrentHash = String(currentDocument?.document_hash_sha256 || "").toLowerCase() === String(fileHash || "").toLowerCase();
     if (isSameCurrentHash) {
@@ -4212,7 +4405,7 @@ async function uploadDeterminationsStatDocument(req, res) {
         };
       }
       const gate = determinationsGateService.buildGateInfo({
-        businessCase: bc,
+        businessCase: refreshedAfterProcess,
         role,
         currentDocument,
       });
@@ -4229,8 +4422,8 @@ async function uploadDeterminationsStatDocument(req, res) {
       await completeIdempotentWrite(idempotencySession, responseBody, 200);
       return res.json(responseBody);
     }
-    const metadata = bc?.modern_bc_metadata && typeof bc.modern_bc_metadata === "object"
-      ? { ...bc.modern_bc_metadata }
+    const metadata = refreshedAfterProcess?.modern_bc_metadata && typeof refreshedAfterProcess.modern_bc_metadata === "object"
+      ? { ...refreshedAfterProcess.modern_bc_metadata }
       : {};
     const previousGate = metadata?.determinations_gate && typeof metadata.determinations_gate === "object"
       ? { ...metadata.determinations_gate }
@@ -4238,9 +4431,9 @@ async function uploadDeterminationsStatDocument(req, res) {
 
     const driveTarget = await ensureBusinessCaseDriveFolder({
       businessCaseId: id,
-      clientName: bc?.client_name || "Cliente",
-      bcPurchaseType: bc?.bc_purchase_type || "public",
-      existingFolderId: bc?.drive_folder_id || null,
+      clientName: refreshedAfterProcess?.client_name || "Cliente",
+      bcPurchaseType: refreshedAfterProcess?.bc_purchase_type || "public",
+      existingFolderId: refreshedAfterProcess?.drive_folder_id || null,
       persist: true,
     });
     const determinationsFolder = await ensureFolder("Determinaciones", driveTarget.folderId);
@@ -4316,11 +4509,18 @@ async function uploadDeterminationsStatDocument(req, res) {
       now,
       currentDocument: await determinationsGateService.getCurrentDocument(id),
     });
-    await notifyDeterminationsGroupedMail({
-      businessCase: refreshed,
-      gate,
-      actorUser: req.user,
-    });
+    try {
+      await notifyDeterminationsGroupedMail({
+        businessCase: refreshed,
+        gate,
+        actorUser: req.user,
+      });
+    } catch (notificationError) {
+      logger.warn(
+        { error: notificationError.message, businessCaseId: id },
+        "La carga del documento estadistico se completo, pero fallo la notificacion agrupada",
+      );
+    }
 
     const responseBody = {
       ok: true,
@@ -4339,6 +4539,148 @@ async function uploadDeterminationsStatDocument(req, res) {
       ok: false,
       message: error.message || "No se pudo cargar el documento estadistico",
     });
+  }
+}
+
+async function clearSheetTemplateCache(req, res) {
+  try {
+    clearSheetCaches();
+    logger.info({ role: resolveRequestRole(req), user: req.user?.email }, "[SheetGen] Cache de plantilla invalidado manualmente");
+    return res.json({ ok: true, message: "Cache de plantilla de Sheets limpiado. La próxima generación cargará el template y aliases actualizados desde disco." });
+  } catch (err) {
+    logger.error({ err }, "Error al limpiar cache de plantilla de Sheets");
+    return res.status(500).json({ ok: false, message: "Error interno al limpiar el cache." });
+  }
+}
+
+function _normalizeForMatch(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase();
+}
+
+function _normalizeItemId(value) {
+  return String(value || "").replace(/\.0+$/, "").replace(/[^0-9a-zA-Z\-]/g, "").toLowerCase();
+}
+
+function _getItemSection(itemType) {
+  const t = String(itemType || "").toLowerCase();
+  if (t === "reactivo" || t === "determinacion") return "reactivos";
+  if (t === "calibrador") return "calibradores";
+  if (t === "control") return "controles";
+  if (t === "material" || t === "consumible") return "materiales";
+  return "otros";
+}
+
+function _detectXlsxColumns(data) {
+  let headerRowIdx = 0;
+  for (let i = 0; i < Math.min(6, data.length); i++) {
+    const textCount = (data[i] || []).filter((c) => typeof c === "string" && c.trim().length > 1).length;
+    if (textCount >= 2) { headerRowIdx = i; break; }
+  }
+  const headers = (data[headerRowIdx] || []).map((h) => _normalizeForMatch(String(h || "")));
+  let idCol = null, nameCol = null, qtyCol = null;
+  headers.forEach((h, i) => {
+    if (idCol === null && (h === "id" || h === "codigo" || h === "idfabricante" || h === "itemid" || h === "codigoproducto")) idCol = i;
+    if (nameCol === null && (h === "nombre" || h === "reactivo" || h === "descripcion" || h === "producto" || h === "item" || h === "name" || h === "material" || h === "control" || h === "calibrador")) nameCol = i;
+    if (qtyCol === null && (h.includes("anual") || h.includes("cantidad") || h.includes("detano") || h === "qty" || h === "cantidad" || h === "anual")) qtyCol = i;
+  });
+  if (qtyCol === null) {
+    const sampleStart = headerRowIdx + 1;
+    for (let col = 0; col < (data[sampleStart] || []).length; col++) {
+      if (col === idCol) continue;
+      const samples = data.slice(sampleStart, sampleStart + 5).map((r) => String(r[col] || "").replace(",", ".").trim());
+      const numericCount = samples.filter((v) => v && /^\d+(\.\d+)?$/.test(v)).length;
+      if (numericCount >= Math.min(2, samples.filter(Boolean).length)) { qtyCol = col; break; }
+    }
+  }
+  return { headerRowIdx, idCol, nameCol, qtyCol };
+}
+
+async function parseDeterminationsQuantitiesFile(req, res) {
+  try {
+    const role = resolveRequestRole(req);
+    const { id: businessCaseId } = req.params;
+    const sectionFilter = String(req.body?.section || req.query?.section || "").toLowerCase() || null;
+    const businessCase = await businessCaseService.getBusinessCaseById(businessCaseId);
+    const isPublic = normalizePurchaseTypeForGate(businessCase?.bc_purchase_type) === "public";
+    const allowedReactivoRoles = isPublic ? DETERMINATIONS_REACTIVO_PUBLIC_ROLES : DETERMINATIONS_REACTIVO_PRIVATE_ROLES;
+    const appliesReactivoPolicy = !sectionFilter || sectionFilter === "reactivos" || sectionFilter === "reactivo";
+    if (appliesReactivoPolicy && !allowedReactivoRoles.has(role)) {
+      return res.status(403).json({
+        ok: false,
+        message: isPublic
+          ? "Solo jefe_comercial o acp_comercial pueden importar cantidades de reactivos en un proceso publico."
+          : "Solo jefe_comercial o backoffice_comercial pueden importar cantidades de reactivos en un proceso privado.",
+      });
+    }
+    if (!req.file?.buffer) {
+      return res.status(400).json({ ok: false, message: "No se recibio ningun archivo." });
+    }
+
+    let workbook;
+    try {
+      workbook = XLSX.read(req.file.buffer, { type: "buffer", raw: false });
+    } catch {
+      return res.status(400).json({ ok: false, message: "No se pudo leer el archivo. Verifica que sea un Excel o CSV valido." });
+    }
+
+    const { rows: bcItems } = await db.query(
+      `SELECT item_key, item_id, name, item_type, equipment_name FROM bc_consumption_items WHERE business_case_id = $1`,
+      [businessCaseId],
+    );
+    if (!bcItems.length) {
+      return res.status(404).json({ ok: false, message: "No hay items de determinaciones para este Business Case." });
+    }
+
+    const byItemId = new Map();
+    const byNormName = new Map();
+    bcItems.forEach((item) => {
+      if (item.item_id) byItemId.set(_normalizeItemId(item.item_id), item);
+      const normName = _normalizeForMatch(item.name);
+      if (normName && !byNormName.has(normName)) byNormName.set(normName, item);
+    });
+
+    const matched = [];
+    const seenKeys = new Set();
+
+    for (const sheetName of workbook.SheetNames) {
+      const ws = workbook.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
+      if (!data.length) continue;
+
+      const { headerRowIdx, idCol, nameCol, qtyCol } = _detectXlsxColumns(data);
+      if (qtyCol === null) continue;
+
+      for (let i = headerRowIdx + 1; i < data.length; i++) {
+        const row = data[i];
+        const idVal = idCol !== null ? _normalizeItemId(String(row[idCol] || "")) : "";
+        const nameVal = nameCol !== null ? _normalizeForMatch(String(row[nameCol] || "")) : "";
+        const qtyRaw = String(row[qtyCol] || "").replace(",", ".").replace(/[^0-9.]/g, "");
+        const qty = parseFloat(qtyRaw);
+        if (!Number.isFinite(qty) || qty < 0) continue;
+
+        const found = (idVal ? byItemId.get(idVal) : null) || (nameVal ? byNormName.get(nameVal) : null);
+        if (!found || seenKeys.has(found.item_key)) continue;
+        const section = _getItemSection(found.item_type);
+        if (sectionFilter && section !== sectionFilter) continue;
+        seenKeys.add(found.item_key);
+        matched.push({
+          item_key: found.item_key,
+          item_name: found.name,
+          item_type: found.item_type,
+          section,
+          annual_qty: Math.round(qty),
+        });
+      }
+    }
+
+    return res.json({ ok: true, data: { matched, total_bc_items: bcItems.length } });
+  } catch (err) {
+    logger.error({ err }, "Error al parsear archivo de importacion de cantidades");
+    return res.status(500).json({ ok: false, message: "Error interno al procesar el archivo." });
   }
 }
 
@@ -5296,7 +5638,10 @@ module.exports = {
   lockDeterminationsSubsection,
   requestDeterminationsSubsectionUnlock,
   resolveDeterminationsSubsectionUnlock,
+  reopenDeterminationsCommercial,
   uploadDeterminationsStatDocument,
+  parseDeterminationsQuantitiesFile,
+  clearSheetTemplateCache,
   getDataOwnership,
   recordSectionCompletion,
   lockSection,

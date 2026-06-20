@@ -40,6 +40,43 @@ function Invoke-GcloudChecked {
   }
 }
 
+function Show-CloudRunFailureDiagnostics {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ProjectId,
+    [Parameter(Mandatory = $true)]
+    [string]$Region,
+    [Parameter(Mandatory = $true)]
+    [string]$ServiceName
+  )
+
+  try {
+    $revision = & gcloud run revisions list `
+      --service $ServiceName `
+      --region $Region `
+      --project $ProjectId `
+      --limit 1 `
+      --sort-by "~metadata.creationTimestamp" `
+      --format "value(metadata.name)"
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($revision)) {
+      Write-Warning "No se pudo resolver la revision mas reciente para diagnostico."
+      return
+    }
+
+    Write-Host ""
+    Write-Host "=== Diagnostico Cloud Run: $revision ==="
+    & gcloud logging read `
+      "resource.type=cloud_run_revision AND resource.labels.service_name=$ServiceName AND resource.labels.revision_name=$revision" `
+      --project $ProjectId `
+      --limit 40 `
+      --format "value(timestamp,logName,severity,textPayload)"
+  }
+  catch {
+    Write-Warning "No se pudieron obtener logs de diagnostico de Cloud Run: $($_.Exception.Message)"
+  }
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $backendPath = Join-Path $repoRoot "backend"
 $image = "us-central1-docker.pkg.dev/$ProjectId/cloud-run-source-deploy/${ServiceName}:${ImageTag}"
@@ -118,6 +155,9 @@ try {
     "--set-secrets", "DOC_TEMPLATE_SOLICITUD_1=DOC_TEMPLATE_SOLICITUD_1:latest",
     "--set-secrets", "DOC_TEMPLATE_SOLICITUD_2=DOC_TEMPLATE_SOLICITUD_2:latest",
     "--set-secrets", "DOC_TEMPLATE_SOLICITUD_3=DOC_TEMPLATE_SOLICITUD_3:latest",
+    "--set-secrets", "COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID=COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID:latest",
+    "--set-secrets", "TI_ACTA_ENTREGA_TEMPLATE_ID=TI_ACTA_ENTREGA_TEMPLATE_ID:latest",
+    "--set-secrets", "TI_ACTA_RETIRO_TEMPLATE_ID=TI_ACTA_RETIRO_TEMPLATE_ID:latest",
     "--set-secrets", "DB_PASSWORD=DB_PASSWORD:latest",
     "--set-secrets", "SECRET_KEY=SECRET_KEY:latest",
     "--set-secrets", "REFRESH_SECRET_KEY=REFRESH_SECRET_KEY:latest",
@@ -128,7 +168,13 @@ try {
     "--set-secrets", "/secrets/gsa-key.json=GSA_KEY_JSON:latest"
   )
 
-  Invoke-GcloudChecked -Args $deployArgs
+  try {
+    Invoke-GcloudChecked -Args $deployArgs
+  }
+  catch {
+    Show-CloudRunFailureDiagnostics -ProjectId $ProjectId -Region $Region -ServiceName $ServiceName
+    throw
+  }
 
   Write-Step "Verificando revision activa" 90
   $serviceInfo = & gcloud run services describe $ServiceName `

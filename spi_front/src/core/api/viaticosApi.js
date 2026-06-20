@@ -20,6 +20,11 @@ export const updateViaticoStatus = async (viaticoId, payload) => {
  return data?.data || data;
 };
 
+export const approveViaticoSegment = async (viaticoId) => {
+ const { data } = await api.patch(`/viaticos/${viaticoId}/approve-segment`);
+ return data?.data || data;
+};
+
 export const listViaticoDocuments = async (viaticoId) => {
  const { data } = await api.get(`/viaticos/${viaticoId}/documents`);
  return data?.data || [];
@@ -85,9 +90,23 @@ export const syncViaticoSri = async (payload) => {
  return data?.data || data;
 };
 
-export const uploadViaticoInvoicesTxt = async (viaticoId, txtContent) => {
- const { data } = await api.post(`/viaticos/${viaticoId}/invoices/txt`, { txt_content: txtContent });
- return data?.data || data;
+export const uploadViaticoInvoicesTxt = async (viaticoId, txtContent, categories = {}, options = {}) => {
+  const { data } = await api.post(
+    `/viaticos/${viaticoId}/invoices/txt`,
+    { txt_content: txtContent, categories },
+    { headers: options.flow ? { "x-viaticos-flow": options.flow } : {} }
+  );
+  return data?.data || data;
+};
+
+export const submitViaticoForReview = async (viaticoId) => {
+  const { data } = await api.post(`/viaticos/${viaticoId}/submit-review`);
+  return data?.data || data;
+};
+
+export const previewViaticoInvoicesTxt = async (viaticoId, txtContent) => {
+  const { data } = await api.post(`/viaticos/${viaticoId}/invoices/txt/preview`, { txt_content: txtContent });
+  return data?.data || data;
 };
 
 export const deleteViaticoInvoice = async (invoiceId) => {
@@ -101,8 +120,10 @@ export const listViaticoInvoices = async (viaticoId) => {
 };
 
 // Notas de venta manual
-export const createManualNote = async (viaticoId, payload) => {
- const { data } = await api.post(`/viaticos/${viaticoId}/invoices/manual`, payload);
+export const createManualNote = async (viaticoId, payload, options = {}) => {
+ const { data } = await api.post(`/viaticos/${viaticoId}/invoices/manual`, payload, {
+  headers: options.flow ? { "x-viaticos-flow": options.flow } : {},
+ });
  return data?.data || data;
 };
 
@@ -111,19 +132,25 @@ export const listManualNotes = async (viaticoId) => {
  return data?.data || [];
 };
 
-export const updateManualNote = async (noteId, payload) => {
- const { data } = await api.patch(`/viaticos/invoices/manual/${noteId}`, payload);
+export const updateManualNote = async (noteId, payload, options = {}) => {
+ const { data } = await api.patch(`/viaticos/invoices/manual/${noteId}`, payload, {
+  headers: options.flow ? { "x-viaticos-flow": options.flow } : {},
+ });
  return data?.data || data;
 };
 
-export const deleteManualNote = async (noteId) => {
- const { data } = await api.delete(`/viaticos/invoices/manual/${noteId}`);
+export const deleteManualNote = async (noteId, options = {}) => {
+ const { data } = await api.delete(`/viaticos/invoices/manual/${noteId}`, {
+  headers: options.flow ? { "x-viaticos-flow": options.flow } : {},
+ });
  return data?.data || data;
 };
 
 // Compras sin factura
-export const createPurchaseNoInvoice = async (viaticoId, payload) => {
- const { data } = await api.post(`/viaticos/${viaticoId}/purchases-no-invoice`, payload);
+export const createPurchaseNoInvoice = async (viaticoId, payload, options = {}) => {
+ const { data } = await api.post(`/viaticos/${viaticoId}/purchases-no-invoice`, payload, {
+  headers: options.flow ? { "x-viaticos-flow": options.flow } : {},
+ });
  return data?.data || data;
 };
 

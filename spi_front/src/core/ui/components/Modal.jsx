@@ -10,6 +10,7 @@ const Modal = ({
   maxWidth = "max-w-lg",
   disableClose = false,
   closeOnBackdrop = true,
+  hideHeader = false,
 }) => {
   const visible = typeof open !== "undefined" ? open : isOpen;
 
@@ -53,19 +54,21 @@ const Modal = ({
           <div className="h-1 w-9 rounded-full bg-slate-200" />
         </div>
 
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-6 sm:py-4">
-          {title ? <h2 className="text-base font-bold text-slate-900 sm:text-xl">{title}</h2> : <span />}
-          <button
-            type="button"
-            onClick={() => !disableClose && onClose?.()}
-            disabled={disableClose}
-            className="ml-auto rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <FiX className="h-5 w-5" />
-          </button>
-        </div>
+        {!hideHeader && (
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-6 sm:py-4">
+            {title ? <h2 className="text-base font-bold text-slate-900 sm:text-xl">{title}</h2> : <span />}
+            <button
+              type="button"
+              onClick={() => !disableClose && onClose?.()}
+              disabled={disableClose}
+              className="ml-auto rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <FiX className="h-5 w-5" />
+            </button>
+          </div>
+        )}
 
-        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5">{children}</div>
+        <div className={`flex-1 overflow-y-auto overscroll-contain ${hideHeader ? "" : "px-4 py-4 sm:px-6 sm:py-5"}`}>{children}</div>
       </div>
     </div>
   );

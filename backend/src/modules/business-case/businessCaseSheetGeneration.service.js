@@ -16,6 +16,10 @@ const {
   syncBusinessCaseToGoogleSheet,
 } = require("./businessCaseSheetSyncLocal.service");
 const {
+  resolveSheetSyncOutcome,
+  mergeSheetGenerationHistory,
+} = require("./businessCaseSheetVersioning.helper");
+const {
   validateGenerationRequest,
   buildSignedWebAppPayload,
   DEFAULT_MAPPING_VERSION,
@@ -514,15 +518,22 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   setFieldIfPresent(fields, "EquipoComplementarioPrueba", equipmentDetails?.complementary_test_purpose);
 
   const includesLis = pickFirst(lisIntegration?.includes_lis, lisIntegration?.lis_includes);
-  const hasCurrentSystem = hasValue(lisIntegration?.current_system_name) || hasValue(lisIntegration?.current_system_provider);
+  const requiresInterface = Boolean(
+    lisIntegration?.requires_interface ||
+    (
+      !includesLis &&
+      (
+        hasValue(lisIntegration?.current_system_name) ||
+        hasValue(lisIntegration?.current_system_provider) ||
+        Boolean(lisIntegration?.current_system_hardware)
+      )
+    )
+  );
   setFieldIfPresent(fields, "IncluyeLIS", normalizeBool(includesLis));
   setFieldIfPresent(fields, "ProveedorSistemaTrabajar", lisIntegration?.lis_provider);
   setFieldIfPresent(fields, "IncluyeHadwareLIS", normalizeBool(lisIntegration?.includes_hardware));
   setFieldIfPresent(fields, "NumeroPacientesMensual", lisIntegration?.monthly_patients);
-  setFieldIfPresent(fields, "InterfazSistemaActual", normalizeBool(hasCurrentSystem));
-  setFieldIfPresent(fields, "NombreSistema", lisIntegration?.current_system_name);
-  setFieldIfPresent(fields, "ProveedorSistemaActual", lisIntegration?.current_system_provider);
-  setFieldIfPresent(fields, "IncluyeHadwareSistemaActual", normalizeBool(lisIntegration?.current_system_hardware));
+  setFieldIfPresent(fields, "InterfazSistemaActual", normalizeBool(requiresInterface));
   setFieldIfPresent(fields, "ModeloProveedor1", lisInterfaces[0]?.model || lisInterfaces[0]?.provider);
   setFieldIfPresent(fields, "ModeloProveedor2", lisInterfaces[1]?.model || lisInterfaces[1]?.provider);
   setFieldIfPresent(fields, "ModeloProveedor3", lisInterfaces[2]?.model || lisInterfaces[2]?.provider);
@@ -568,20 +579,36 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     ).values(),
   );
   const fallbackEquipmentRecords = !selectedEquipmentRecords.length
-    ? Array.from(
-        new Map(
-          (Array.isArray(maximumQuantities) ? maximumQuantities : [])
-            .map((row) => ({
-              id: Number(row.equipment_id),
-              name: row.equipment_name || null,
-              code: null,
-              model: null,
-            }))
-            .filter((row) => Number.isInteger(row.id) && row.id > 0)
-            .map((row) => [row.id, row]),
-        ).values(),
-      )
+    ? (() => {
+        const byId = new Map();
+        const byName = new Map();
+        for (const row of (Array.isArray(maximumQuantities) ? maximumQuantities : [])) {
+          if (!row.equipment_name) continue;
+          const numId = Number(row.equipment_id);
+          const hasId = Number.isInteger(numId) && numId > 0;
+          const record = { id: hasId ? numId : null, name: row.equipment_name, code: null, model: null };
+          if (hasId) {
+            if (!byId.has(numId)) byId.set(numId, record);
+          } else {
+            const nameKey = String(row.equipment_name).trim().toLowerCase();
+            if (!byName.has(nameKey)) byName.set(nameKey, record);
+          }
+        }
+        return [...byId.values(), ...byName.values()];
+      })()
     : [];
+
+  logger.info(
+    {
+      businessCaseId,
+      equipmentPairsCount: equipmentPairs.length,
+      selectedEquipmentRecordsCount: selectedEquipmentRecords.length,
+      fallbackEquipmentRecordsCount: fallbackEquipmentRecords.length,
+      selectedRecordNames: selectedEquipmentRecords.map((r) => r.name).filter(Boolean),
+      fallbackRecordNames: fallbackEquipmentRecords.map((r) => r.name).filter(Boolean),
+    },
+    "[SheetGen] equipment records for tab matching",
+  );
 
   const sheetContext = {
     deadline_months: requirements?.deadline_months ?? null,
@@ -871,6 +898,8 @@ async function getGenerationPreview({ businessCaseId, input = {} }) {
             sheet_id: lastGeneration.sheet_id || null,
             sheet_url: lastGeneration.sheet_url || null,
             generated_at: lastGeneration.generated_at || null,
+            sync_mode: lastGeneration.sync_mode || null,
+            replacement_reason: lastGeneration.replacement_reason || null,
           }
         : null,
     },
@@ -1077,6 +1106,11 @@ async function persistSheetResultInBusinessCase({
       ? { ...metadata.bc_sheet_generation }
       : {};
     const history = Array.isArray(current.history) ? [...current.history] : [];
+    const previousSheetId = current?.last?.sheet_id || null;
+    const syncOutcome = resolveSheetSyncOutcome({
+      previousSheetId,
+      webAppResponse,
+    });
     let createdByEmail = null;
     if (createdByUserId) {
       const { rows: userRows } = await client.query(
@@ -1094,14 +1128,18 @@ async function persistSheetResultInBusinessCase({
       sheet_url: webAppResponse.url,
       generated_at: webAppResponse.timestamp || nowIso,
       provider: webAppResponse.provider || "apps_script_webapp",
+      sync_mode: syncOutcome.syncMode,
+      replacement_reason: syncOutcome.replacementReason,
+      missing_required_sheets: syncOutcome.missingRequiredSheets,
+      previous_sheet_id: syncOutcome.previousSheetId,
+      selected_sheets: Array.isArray(webAppResponse.selected_sheets) ? webAppResponse.selected_sheets : [],
       updated_at: nowIso,
     };
 
-    history.unshift(record);
+    current.history = mergeSheetGenerationHistory(history, record, syncOutcome);
     current.status = "completed";
     current.updated_at = nowIso;
     current.last = record;
-    current.history = history.slice(0, 10);
     metadata.bc_sheet_generation = current;
 
     const feasibility = toObject(metadata.feasibility);
@@ -1138,6 +1176,7 @@ async function persistSheetResultInBusinessCase({
       [businessCaseId, JSON.stringify(metadata), nextStage],
     );
     await client.query("COMMIT");
+    return { record, syncOutcome };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -1275,7 +1314,7 @@ async function processSingleJob(job) {
           previousSheetId,
         });
 
-    await persistSheetResultInBusinessCase({
+    const persistenceResult = await persistSheetResultInBusinessCase({
       businessCaseId: job.business_case_id,
       jobId: job.id,
       requestId: job.request_id,
@@ -1287,16 +1326,26 @@ async function processSingleJob(job) {
       jobId: job.id,
       webAppResponse,
     });
-    await recordDocumentVersion({
-      businessCaseId: job.business_case_id,
-      documentType: "sheets",
-      documentUrl: webAppResponse.url,
-      sheetId: webAppResponse.sheetId,
-      fileName: null,
-      canonicalState: bcRow.canonical_state || null,
-      generatedBy: job.created_by || null,
-      metadata: { job_id: Number(job.id), mapping_version: job.mapping_version },
-    });
+    if (persistenceResult?.syncOutcome?.shouldCreateDocumentVersion) {
+      await recordDocumentVersion({
+        businessCaseId: job.business_case_id,
+        documentType: "sheets",
+        documentUrl: webAppResponse.url,
+        sheetId: webAppResponse.sheetId,
+        fileName: null,
+        canonicalState: bcRow.canonical_state || null,
+        generatedBy: job.created_by || null,
+        metadata: {
+          job_id: Number(job.id),
+          mapping_version: job.mapping_version,
+          sync_mode: persistenceResult.syncOutcome.syncMode,
+          replacement_reason: persistenceResult.syncOutcome.replacementReason,
+          previous_sheet_id: persistenceResult.syncOutcome.previousSheetId,
+          missing_required_sheets: persistenceResult.syncOutcome.missingRequiredSheets,
+          selected_sheets: Array.isArray(webAppResponse.selected_sheets) ? webAppResponse.selected_sheets : [],
+        },
+      });
+    }
 
     return { ok: true, jobId: Number(job.id) };
   } catch (error) {

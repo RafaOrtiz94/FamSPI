@@ -1,15 +1,17 @@
 const express = require("express");
 const router = express.Router();
-const { rateLimit } = require("express-rate-limit");
+const { rateLimit, ipKeyGenerator } = require("express-rate-limit");
 const controller = require("./permisos.controller");
 const { verifyToken } = require("../../middlewares/auth");
+
+const rateLimitUserOrIpKey = (req) => (req.user?.id ? `uid:${req.user.id}` : ipKeyGenerator(req));
 
 const createLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.user?.id ? `uid:${req.user.id}` : req.ip),
+  keyGenerator: rateLimitUserOrIpKey,
   message: { ok: false, code: "PERMISOS_CREATE_RATE_LIMIT", message: "Demasiadas solicitudes en poco tiempo. Intenta en unos segundos." },
 });
 
@@ -18,7 +20,7 @@ const approvalLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.user?.id ? `uid:${req.user.id}` : req.ip),
+  keyGenerator: rateLimitUserOrIpKey,
   message: { ok: false, code: "PERMISOS_APPROVAL_RATE_LIMIT", message: "Demasiadas acciones de aprobación en poco tiempo." },
 });
 
@@ -27,7 +29,7 @@ const uploadLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.user?.id ? `uid:${req.user.id}` : req.ip),
+  keyGenerator: rateLimitUserOrIpKey,
   message: { ok: false, code: "PERMISOS_UPLOAD_RATE_LIMIT", message: "Demasiadas subidas de archivos. Intenta en unos minutos." },
 });
 

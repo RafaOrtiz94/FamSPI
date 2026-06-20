@@ -122,6 +122,8 @@ const buildLocalPreview = ({ businessCase, catalogItems }) => {
  sheet_id: metadataLast.sheet_id || null,
  sheet_url: metadataLast.sheet_url || null,
  generated_at: metadataLast.generated_at || null,
+ sync_mode: metadataLast.sync_mode || null,
+ replacement_reason: metadataLast.replacement_reason || null,
  }
  : null,
  };
@@ -131,9 +133,11 @@ const resolveLastGeneration = ({ latestJob, previewLast, metadataLast }) => {
  if (latestJob?.status === "completed") {
  return {
  source: "job",
- sheet_url: latestJob.sheet_url || null,
- sheet_id: latestJob.sheet_id || null,
- generated_at: latestJob.updated_at || null,
+ sheet_url: latestJob.sheet_url || previewLast?.sheet_url || metadataLast?.sheet_url || null,
+ sheet_id: latestJob.sheet_id || previewLast?.sheet_id || metadataLast?.sheet_id || null,
+ generated_at: latestJob.updated_at || previewLast?.generated_at || metadataLast?.generated_at || null,
+ sync_mode: previewLast?.sync_mode || metadataLast?.sync_mode || null,
+ replacement_reason: previewLast?.replacement_reason || metadataLast?.replacement_reason || null,
  status: latestJob.status,
  };
  }
@@ -144,6 +148,8 @@ const resolveLastGeneration = ({ latestJob, previewLast, metadataLast }) => {
  sheet_url: previewLast.sheet_url || null,
  sheet_id: previewLast.sheet_id || null,
  generated_at: previewLast.generated_at || null,
+ sync_mode: previewLast.sync_mode || null,
+ replacement_reason: previewLast.replacement_reason || null,
  status: "completed",
  };
  }
@@ -154,6 +160,8 @@ const resolveLastGeneration = ({ latestJob, previewLast, metadataLast }) => {
  sheet_url: metadataLast.sheet_url || null,
  sheet_id: metadataLast.sheet_id || null,
  generated_at: metadataLast.generated_at || null,
+ sync_mode: metadataLast.sync_mode || null,
+ replacement_reason: metadataLast.replacement_reason || null,
  status: "completed",
  };
  }
@@ -183,6 +191,28 @@ const getSyncStepLabel = (status) => {
  if (status === "completed") return "Sincronizacion completada";
  if (status === "failed") return "La sincronizacion fallo";
  return "Preparando sincronizacion...";
+};
+
+const getSyncModeLabel = (syncMode, replacementReason) => {
+ if (syncMode === "file_replaced") {
+ return replacementReason === "missing_required_sheets"
+ ? "Archivo reemplazado porque faltaban hojas del equipo"
+ : "Archivo reemplazado durante la sincronizacion";
+ }
+ if (syncMode === "same_file_updated") return "Se actualizo el mismo archivo en Sheets";
+ if (syncMode === "file_created") return "Se genero un nuevo archivo en Sheets";
+ return null;
+};
+
+const getVersionModeBadge = (metadata = {}) => {
+ const syncMode = metadata?.sync_mode || null;
+ if (syncMode === "file_replaced") {
+ return { label: "reemplazo", className: "bg-rose-50 text-rose-700" };
+ }
+ if (syncMode === "file_created") {
+ return { label: "nuevo", className: "bg-sky-50 text-sky-700" };
+ }
+ return null;
 };
 
 const ConsumptionExportSection = ({ businessCase }) => {
@@ -228,14 +258,16 @@ const ConsumptionExportSection = ({ businessCase }) => {
  }
  }, [bcId, businessCase]);
 
- useEffect(() => {
- loadPreview();
- }, [loadPreview]);
+useEffect(() => {
+loadPreview();
+}, [loadPreview]);
 
- const handleToggleVersionHistory = useCallback(async () => {
- const next = !showVersionHistory;
- setShowVersionHistory(next);
- if (next && !documentVersions && bcId) {
+const loadDocumentVersions = useCallback(async () => {
+ if (!bcId) {
+ setDocumentVersions([]);
+ return;
+ }
+
  try {
  setLoadingVersions(true);
  const res = await api.get(`/business-cases/${bcId}/sheets/document-versions`, { params: { limit: 20 } });
@@ -245,8 +277,15 @@ const ConsumptionExportSection = ({ businessCase }) => {
  } finally {
  setLoadingVersions(false);
  }
+}, [bcId]);
+
+const handleToggleVersionHistory = useCallback(async () => {
+const next = !showVersionHistory;
+setShowVersionHistory(next);
+if (next && !documentVersions && bcId) {
+ await loadDocumentVersions();
  }
- }, [showVersionHistory, documentVersions, bcId]);
+ }, [showVersionHistory, documentVersions, bcId, loadDocumentVersions]);
 
  const appendSyncDebug = useCallback((level, message, data = null) => {
  const event = {
@@ -396,9 +435,12 @@ const ConsumptionExportSection = ({ businessCase }) => {
  });
  appendSyncDebug("info", "Sincronizacion completada", { finalSheetUrl });
 
- showToast("Sincronizacion completada en Google Sheets", "success");
- await loadPreview();
- } catch (error) {
+showToast("Sincronizacion completada en Google Sheets", "success");
+await loadPreview();
+ if (showVersionHistory || documentVersions) {
+ await loadDocumentVersions();
+ }
+} catch (error) {
  console.error(`${SHEETS_SYNC_LOG_PREFIX} Error en sincronizacion`, {
  businessCaseId: bcId,
  message: error?.response?.data?.message || error?.message || "Error desconocido",
@@ -543,11 +585,18 @@ const ConsumptionExportSection = ({ businessCase }) => {
  </div>
  )}
 
- {lastSync?.sheet_url && (
- <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+{lastSync?.sheet_url && (
+<div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+ <div className="flex flex-col gap-1">
  <div className="flex items-center gap-2 text-emerald-800 text-sm font-medium">
  <FiCheckCircle size={16} />
  Documento en Sheets disponible
+ </div>
+ {getSyncModeLabel(lastSync?.sync_mode, lastSync?.replacement_reason) && (
+ <p className="text-xs text-emerald-700">
+ {getSyncModeLabel(lastSync?.sync_mode, lastSync?.replacement_reason)}
+ </p>
+ )}
  </div>
  <a
  href={lastSync.sheet_url}
@@ -582,13 +631,18 @@ const ConsumptionExportSection = ({ businessCase }) => {
  <p className="text-xs text-gray-400 py-2">No hay versiones generadas aún.</p>
  ) : (
  <div className="divide-y divide-gray-50">
- {documentVersions.map((v) => (
- <div key={v.id} className="flex items-center justify-between py-2 gap-3">
- <div className="flex items-center gap-2 min-w-0">
+{documentVersions.map((v) => (
+<div key={v.id} className="flex items-center justify-between py-2 gap-3">
+ <div className="flex items-center gap-2 min-w-0 flex-wrap">
  <span className="text-xs font-mono text-gray-400">v{v.version_number}</span>
  <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${v.document_type === 'sheets' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
  {v.document_type === 'sheets' ? 'Sheets' : 'Excel'}
  </span>
+ {getVersionModeBadge(v.metadata) && (
+ <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${getVersionModeBadge(v.metadata).className}`}>
+ {getVersionModeBadge(v.metadata).label}
+ </span>
+ )}
  {v.is_current && (
  <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-medium">actual</span>
  )}

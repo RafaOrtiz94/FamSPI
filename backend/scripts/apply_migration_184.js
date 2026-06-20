@@ -1,12 +1,10 @@
-const { Client } = require('pg');
-const fs = require('fs');
-const path = require('path');
-require('dotenv').config();
+const { Client } = require("pg");
+const fs = require("fs");
+const path = require("path");
+const { getDbConfig } = require("./dbConnection");
 
 async function applyMigration() {
-  const client = new Client({
-    connectionString: 'postgresql://neondb_owner:npg_IvXRb0pLAku5@ep-muddy-sun-ah5um48r-pooler.c-3.us-east-1.aws.neon.tech/FamSPI?sslmode=require&channel_binding=require'
-  });
+  const client = new Client(getDbConfig());
 
   try {
     console.log('[MIGRACIÓN 184] Connecting...');

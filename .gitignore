@@ -24,6 +24,7 @@ Thumbs.db
 .env.*.local
 backend/.env
 spi_front/.env
+espocrm/.env
 
 # Temporary secrets and local probes
 /db_pass.txt

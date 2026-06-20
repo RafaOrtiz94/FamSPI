@@ -5,6 +5,13 @@ import { useUI } from "../../core/ui/UIContext";
 import Modal from "../../core/ui/components/Modal";
 import { useAuth } from "../../core/auth/AuthContext";
 import CertificationsBoard from "./components/CertificationsBoard";
+import ProfileDocumentsBoard from "./components/ProfileDocumentsBoard";
+import PersonnelProfile from "../talento/components/workspace/PersonnelProfile";
+import {
+  defaultProfile as talentProfileDefaults,
+  profileSections as talentProfileSections,
+  MARITAL_STATUS_OPTIONS,
+} from "../talento/components/collaboratorProfileDefinitions";
 
 const emptyMetadata = {
   job_title: "",
@@ -13,18 +20,19 @@ const emptyMetadata = {
   location: "",
   about: "",
   personal: {
-    telefono_personal: "",
-    email_personal: "",
-    estado_civil: "",
+    ...talentProfileDefaults.personal,
+  },
+  laboral: {
+    ...talentProfileDefaults.laboral,
   },
   domicilio: {
-    ciudad_domicilio: "",
-    direccion_domicilio: "",
-    telefono_fijo: "",
+    ...talentProfileDefaults.domicilio,
   },
   emergencia: {
-    persona_contacto: "",
-    telefono_contacto: "",
+    ...talentProfileDefaults.emergencia,
+  },
+  estudios: {
+    ...talentProfileDefaults.estudios,
   },
 };
 
@@ -43,7 +51,7 @@ const reviewSections = [
     fields: [
       { key: "telefono_personal", label: "Teléfono personal", required: true },
       { key: "email_personal", label: "Email personal", required: true },
-      { key: "estado_civil", label: "Estado civil", required: false },
+      { key: "estado_civil", label: "Estado civil", required: false, type: "select", options: MARITAL_STATUS_OPTIONS, placeholder: "Selecciona estado civil" },
     ],
   },
   {
@@ -69,6 +77,47 @@ const reviewSections = [
   },
 ];
 
+const MY_PROFILE_SYNC_FIELD_MAP = {
+  personal: new Set([
+    "genero",
+    "tipo_sangre",
+    "lugar_nacimiento",
+    "fecha_nacimiento",
+    "estado_civil",
+    "telefono_personal",
+    "email_personal",
+  ]),
+  laboral: new Set([
+    "fecha_ingreso",
+    "cargo",
+    "area",
+    "telefono_celular_famproject",
+    "email_famproject",
+  ]),
+  domicilio: new Set([
+    "ciudad_domicilio",
+    "direccion_domicilio",
+    "telefono_fijo",
+  ]),
+  emergencia: new Set([
+    "persona_contacto",
+    "telefono_contacto",
+  ]),
+  estudios: new Set([
+    "nivel_instruccion",
+  ]),
+};
+
+const MY_PROFILE_UPDATE_SECTIONS = talentProfileSections
+  .filter((section) => MY_PROFILE_SYNC_FIELD_MAP[section.key])
+  .map((section) => ({
+    ...section,
+    fields: (section.fields || []).filter((field) =>
+      MY_PROFILE_SYNC_FIELD_MAP[section.key].has(field.key),
+    ),
+  }))
+  .filter((section) => section.fields.length > 0);
+
 const mergeMetadata = (rawMetadata = {}) => ({
   ...emptyMetadata,
   ...rawMetadata,
@@ -83,6 +132,14 @@ const mergeMetadata = (rawMetadata = {}) => ({
   emergencia: {
     ...emptyMetadata.emergencia,
     ...(rawMetadata.emergencia || {}),
+  },
+  laboral: {
+    ...emptyMetadata.laboral,
+    ...(rawMetadata.laboral || {}),
+  },
+  estudios: {
+    ...emptyMetadata.estudios,
+    ...(rawMetadata.estudios || {}),
   },
 });
 
@@ -327,6 +384,16 @@ const MyProfilePage = ({ embedded = false }) => {
   const openReviewModal = () => {
     setReviewData(buildReviewData(metadata || {}));
     setShowReviewModal(true);
+  };
+
+  const handleExpedienteFieldChange = (section, key, value) => {
+    setMetadata((prev) => ({
+      ...(prev || {}),
+      [section]: {
+        ...(prev?.[section] || {}),
+        [key]: value,
+      },
+    }));
   };
 
   useEffect(() => {
@@ -794,6 +861,42 @@ const MyProfilePage = ({ embedded = false }) => {
             </label>
           </section>
 
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                  Expediente central
+                </p>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+                  Actualizacion de datos
+                </h2>
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  Este bloque replica la estructura de la ficha de Talento Humano para que actualices
+                  tus datos sincronizados desde una sola fuente de verdad.
+                </p>
+              </div>
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-200">
+                Sincronizado con ficha TH
+              </span>
+            </div>
+
+            <PersonnelProfile
+              profileData={metadata}
+              onProfileFieldChange={handleExpedienteFieldChange}
+              loading={saving}
+              saving={saving}
+              readOnly={loadFailed}
+              sections={MY_PROFILE_UPDATE_SECTIONS}
+              draftKey={`my-profile:${identity?.id || user?.id || "me"}`}
+              workflowStage="mi_perfil"
+              showDraftTools={false}
+              showSaveBar={false}
+              extendedSectionPanels={false}
+              panelTitle="Ficha sincronizada"
+              panelDescription="Los campos visibles aqui comparten la misma estructura operativa del workspace de Talento Humano."
+            />
+          </section>
+
           <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-5 shadow-sm dark:border-amber-800 dark:bg-amber-900/40">
             <div className="mb-4 flex items-start gap-3">
               <FiAward
@@ -811,6 +914,8 @@ const MyProfilePage = ({ embedded = false }) => {
             </div>
             <CertificationsBoard />
           </section>
+
+          <ProfileDocumentsBoard />
 
           <section className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5 shadow-sm dark:border-emerald-800 dark:bg-emerald-900/40">
             <h3 className="text-lg font-semibold text-emerald-900 dark:text-emerald-100">
@@ -883,30 +988,51 @@ const MyProfilePage = ({ embedded = false }) => {
                           {field.label}
                           {field.required ? " *" : ""}
                         </span>
-                        <input
-                          type={
-                            fieldType === "email"
-                              ? "email"
-                              : fieldType === "phone"
-                                ? "tel"
-                                : "text"
-                          }
-                          value={fieldValue}
-                          onChange={(e) =>
-                            setReviewData((prev) => ({
-                              ...(prev || {}),
-                              [section.key]: {
-                                ...(prev?.[section.key] || {}),
-                                [field.key]: sanitizeReviewValue(
-                                  section.key,
-                                  field.key,
-                                  e.target.value,
-                                ),
-                              },
-                            }))
-                          }
-                          className={`mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 ${hasError ? "border-amber-400 ring-1 ring-amber-200" : "border-slate-200"}`}
-                        />
+                        {field.type === "select" ? (
+                          <select
+                            value={fieldValue}
+                            onChange={(e) =>
+                              setReviewData((prev) => ({
+                                ...(prev || {}),
+                                [section.key]: {
+                                  ...(prev?.[section.key] || {}),
+                                  [field.key]: e.target.value,
+                                },
+                              }))
+                            }
+                            className={`mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 ${hasError ? "border-amber-400 ring-1 ring-amber-200" : "border-slate-200"}`}
+                          >
+                            <option value="">{field.placeholder || "Selecciona una opcion"}</option>
+                            {(field.options || []).map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type={
+                              fieldType === "email"
+                                ? "email"
+                                : fieldType === "phone"
+                                  ? "tel"
+                                  : "text"
+                            }
+                            value={fieldValue}
+                            onChange={(e) =>
+                              setReviewData((prev) => ({
+                                ...(prev || {}),
+                                [section.key]: {
+                                  ...(prev?.[section.key] || {}),
+                                  [field.key]: sanitizeReviewValue(
+                                    section.key,
+                                    field.key,
+                                    e.target.value,
+                                  ),
+                                },
+                              }))
+                            }
+                            className={`mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 ${hasError ? "border-amber-400 ring-1 ring-amber-200" : "border-slate-200"}`}
+                          />
+                        )}
                       </label>
                     );
                   })}

@@ -4,6 +4,7 @@ import { PatternFormat } from "react-number-format";
 import {
   FiChevronDown,
   FiChevronUp,
+  FiEye,
   FiPlus,
   FiSave,
   FiTrash2,
@@ -15,6 +16,11 @@ const MASK_FORMATS = {
   cedula: "##########",
   ruc: "#############",
   phone: "### ### ####",
+};
+
+const normalizeFreeText = (value, { trim = false } = {}) => {
+  const normalized = String(value || "");
+  return trim ? normalized.trim() : normalized;
 };
 
 const EMPTY_CHILD = Object.freeze({
@@ -77,15 +83,15 @@ const computeAgeFromBirthDate = (rawBirthDate) => {
   return age >= 0 ? String(age) : "";
 };
 
-const normalizeChild = (child = {}) => ({
-  nombre: String(child?.nombre || "").trim(),
+const normalizeChild = (child = {}, options = {}) => ({
+  nombre: normalizeFreeText(child?.nombre || "", options),
   cedula: normalizeDigits(child?.cedula || ""),
   fecha_nacimiento: normalizeDateInputValue(child?.fecha_nacimiento || ""),
 });
 
-const normalizeEmergencyContact = (contact = {}) => ({
-  nombre: String(contact?.nombre || "").trim(),
-  parentesco: String(contact?.parentesco || "").trim(),
+const normalizeEmergencyContact = (contact = {}, options = {}) => ({
+  nombre: normalizeFreeText(contact?.nombre || "", options),
+  parentesco: normalizeFreeText(contact?.parentesco || "", options),
   telefono: normalizeDigits(contact?.telefono || ""),
 });
 
@@ -136,8 +142,8 @@ const ensureEmergencyContacts = (profileData = {}) => {
 };
 
 const childrenToLegacy = (children = []) => {
-  const first = normalizeChild(children[0] || {});
-  const second = normalizeChild(children[1] || {});
+  const first = normalizeChild(children[0] || {}, { trim: true });
+  const second = normalizeChild(children[1] || {}, { trim: true });
   const fallback = "N/A";
 
   return {
@@ -151,7 +157,7 @@ const childrenToLegacy = (children = []) => {
 };
 
 const emergencyToLegacy = (contacts = []) => {
-  const first = normalizeEmergencyContact(contacts[0] || {});
+  const first = normalizeEmergencyContact(contacts[0] || {}, { trim: true });
   const fallback = "N/A";
 
   return {
@@ -194,8 +200,53 @@ const formatLocalDateTime = (rawDate) => {
   }
 };
 
+const normalizeQualificationType = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase();
+
+const QUALIFICATION_GROUPS = [
+  {
+    key: "third_level_title",
+    title: "Titulos 3er nivel",
+    emptyLabel: "Sin titulos de 3er nivel registrados.",
+  },
+  {
+    key: "fourth_level_title",
+    title: "Titulos 4to nivel",
+    emptyLabel: "Sin titulos de 4to nivel registrados.",
+  },
+  {
+    key: "certification",
+    title: "Certificaciones",
+    emptyLabel: "Sin certificaciones registradas.",
+  },
+];
+
+const REQUEST_QUALIFICATION_TYPE_OPTIONS = [
+  { value: "third_level_title", label: "Titulo 3er nivel" },
+  { value: "fourth_level_title", label: "Titulo 4to nivel" },
+  { value: "certification", label: "Certificacion" },
+];
+
+const formatQualificationMeta = (qualification = {}) => {
+  const meta = [];
+  if (qualification.institution) meta.push(qualification.institution);
+  else if (qualification.issuer) meta.push(qualification.issuer);
+  if (qualification.registration_number) meta.push(`Reg. ${qualification.registration_number}`);
+  if (qualification.issue_date) meta.push(qualification.issue_date);
+  return meta.join(" · ");
+};
+
+const resolveQualificationDocumentUrl = (qualification = {}) =>
+  qualification?.drive_url || qualification?.file_url || "";
+
 const PersonnelProfile = ({
   profileData,
+  qualifications = [],
+  qualificationMigrationPending = { total: 0, items: [] },
+  onQualificationsChange,
+  onResolveQualificationPending,
   onProfileFieldChange,
   onChange,
   onProfileSave,
@@ -206,11 +257,23 @@ const PersonnelProfile = ({
   readOnly = false,
   sections = profileSections,
   draftKey,
+  showCentralQualifications = false,
   workflowStage,
+  panelTitle = "Ficha del expediente",
+  panelDescription = "Mantiene la fuente central de verdad del colaborador con una estructura clara, editable y sin duplicidades.",
+  showDraftTools = true,
+  showSaveBar = true,
+  extendedSectionPanels = true,
+  saveButtonLabel = "Guardar ficha",
 }) => {
   const handleProfileFieldChange = onProfileFieldChange || onChange;
   const handleProfileSave = onProfileSave || onSave;
   const [openSections, setOpenSections] = useState(new Set(["personal", "laboral"]));
+  const [qualificationDraft, setQualificationDraft] = useState({
+    qualification_type: "third_level_title",
+    title: "",
+    institution: "",
+  });
   const resolvedDraftId = useMemo(
     () => buildDraftId(draftKey, profileData),
     [draftKey, profileData],
@@ -235,6 +298,86 @@ const PersonnelProfile = ({
     () => ensureEmergencyContacts(profileData),
     [profileData],
   );
+  const qualificationGroups = useMemo(() => {
+    const grouped = new Map(
+      QUALIFICATION_GROUPS.map((group) => [group.key, { ...group, items: [] }]),
+    );
+
+    (Array.isArray(qualifications) ? qualifications : []).forEach((qualification) => {
+      const key = normalizeQualificationType(qualification?.qualification_type);
+      if (!grouped.has(key)) return;
+      grouped.get(key).items.push(qualification);
+    });
+
+    return Array.from(grouped.values());
+  }, [qualifications]);
+
+  const editableQualifications = useMemo(
+    () => (Array.isArray(qualifications) ? qualifications : []),
+    [qualifications],
+  );
+  const sectionSummaries = useMemo(
+    () =>
+      sections.map((section) => {
+        const total = Array.isArray(section.fields) ? section.fields.length : 0;
+        const done = (section.fields || []).reduce((count, field) => {
+          const value = profileData?.[section.key]?.[field.key];
+          return count + (String(value || "").trim() !== "" ? 1 : 0);
+        }, 0);
+        return {
+          key: section.key,
+          title: section.title,
+          total,
+          done,
+          complete: total > 0 && done === total,
+        };
+      }),
+    [profileData, sections],
+  );
+  const completedSections = sectionSummaries.filter((section) => section.complete).length;
+
+  const updateQualificationDraft = useCallback((key, value) => {
+    setQualificationDraft((current) => ({ ...current, [key]: value }));
+  }, []);
+
+  const handleAddQualification = useCallback(() => {
+    if (showCentralQualifications || typeof onQualificationsChange !== "function") return;
+
+    const title = String(qualificationDraft.title || "").trim();
+    const institution = String(qualificationDraft.institution || "").trim();
+    if (!title && !institution) {
+      toast.error("Completa al menos el titulo o la institucion.");
+      return;
+    }
+
+    onQualificationsChange([
+      ...editableQualifications,
+      {
+        id: `draft-${Date.now()}`,
+        qualification_type: qualificationDraft.qualification_type,
+        title: title || "Registro academico",
+        institution: institution || null,
+      },
+    ]);
+
+    setQualificationDraft((current) => ({
+      ...current,
+      title: "",
+      institution: "",
+    }));
+  }, [
+    editableQualifications,
+    onQualificationsChange,
+    qualificationDraft.institution,
+    qualificationDraft.qualification_type,
+    qualificationDraft.title,
+    showCentralQualifications,
+  ]);
+
+  const handleRemoveQualification = useCallback((indexToRemove) => {
+    if (showCentralQualifications || typeof onQualificationsChange !== "function") return;
+    onQualificationsChange(editableQualifications.filter((_, index) => index !== indexToRemove));
+  }, [editableQualifications, onQualificationsChange, showCentralQualifications]);
 
   useEffect(() => {
     const normalizedStage = String(workflowStage || "")
@@ -425,67 +568,109 @@ const PersonnelProfile = ({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-brand-hr-primary/15 bg-brand-hr-primary-soft/50 p-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-xs text-brand-hr-primary-muted">
-            <p className="font-semibold text-brand-hr-primary">Borrador local activo</p>
-            <p>
-              {saveTimestamp
-                ? `Borrador guardado localmente: ${saveTimestamp}`
-                : "Se guardaran cambios parciales cada 30 segundos."}
-            </p>
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                Expediente central
+              </p>
+              <h2 className="mt-1 text-xl font-semibold text-slate-900">{panelTitle}</h2>
+              <p className="mt-1 max-w-3xl text-sm text-slate-600">{panelDescription}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                {completedSections}/{sectionSummaries.length} secciones completas
+              </span>
+              {saveTimestamp ? (
+                <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                  Ultimo borrador: {saveTimestamp}
+                </span>
+              ) : (
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                  Autosave local cada 30 segundos
+                </span>
+              )}
+              {readOnly ? (
+                <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                  Solo lectura
+                </span>
+              ) : null}
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {draftExists ? (
-              <>
-                <button
-                  type="button"
-                  onClick={handleRestoreDraft}
-                  aria-label="Restaurar borrador local del perfil"
-                  tabIndex={10}
-                  className="rounded-md border border-brand-hr-primary/25 bg-brand-hr-primary-contrast px-3 py-1.5 text-xs font-semibold text-brand-hr-primary transition hover:bg-brand-hr-primary-soft"
-                >
-                  Restaurar borrador
-                </button>
-                <button
-                  type="button"
-                  onClick={clearDraft}
-                  aria-label="Limpiar borrador local del perfil"
-                  tabIndex={11}
-                  className="rounded-md border border-brand-hr-primary/20 bg-brand-hr-primary-contrast px-3 py-1.5 text-xs font-semibold text-brand-hr-primary-muted transition hover:bg-brand-hr-primary-soft"
-                >
-                  Limpiar borrador
-                </button>
-              </>
-            ) : null}
-          </div>
+          {showDraftTools ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {draftExists ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleRestoreDraft}
+                    aria-label="Restaurar borrador local del perfil"
+                    tabIndex={10}
+                    className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 active:scale-[0.97]"
+                  >
+                    Restaurar borrador
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearDraft}
+                    aria-label="Limpiar borrador local del perfil"
+                    tabIndex={11}
+                    className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 active:scale-[0.97]"
+                  >
+                    Limpiar borrador
+                  </button>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          {sectionSummaries.map((section) => (
+            <div
+              key={`summary-${section.key}`}
+              className={`rounded-2xl border px-4 py-3 ${
+                section.complete
+                  ? "border-emerald-200 bg-emerald-50"
+                  : "border-slate-200 bg-slate-50"
+              }`}
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                {section.title}
+              </p>
+              <p className="mt-2 text-sm font-semibold text-slate-900">
+                {section.done}/{section.total} campos
+              </p>
+            </div>
+          ))}
         </div>
       </div>
 
       {sections.map((section, sectionIndex) => {
         const isOpen = openSections.has(section.key);
+        const sectionFields = section.fields;
 
         return (
           <div
             key={section.key}
-            className="overflow-hidden rounded-xl border border-brand-hr-primary/15 bg-brand-hr-primary-contrast transition-all hover:shadow-sm"
+            className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition-all"
           >
             <button
               type="button"
               onClick={() => toggleSection(section.key)}
               aria-label={`${isOpen ? "Contraer" : "Expandir"} sección ${section.title}`}
               tabIndex={sectionIndex * 100 + 20}
-              className="flex w-full items-center justify-between bg-brand-hr-primary-soft/45 px-4 py-3 text-left"
+              className="flex w-full items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-4 text-left"
             >
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-brand-hr-primary">{section.title}</span>
+                <span className="text-sm font-semibold text-slate-900">{section.title}</span>
                 {errors[section.key] ? (
-                  <span className="rounded bg-hr-warning-soft px-2 py-0.5 text-[10px] font-bold text-hr-warning-muted">
-                    !
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                    Revisar
                   </span>
                 ) : null}
               </div>
-              <div className="flex items-center gap-2 text-brand-hr-primary-muted">
+              <div className="flex items-center gap-2 text-slate-500">
                 {isOpen ? (
                   <FiChevronUp title="Icono para contraer sección" />
                 ) : (
@@ -497,13 +682,13 @@ const PersonnelProfile = ({
             {isOpen ? (
               <div className="space-y-4 p-4">
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {section.fields.map((field, fieldIndex) => {
+                  {sectionFields.map((field, fieldIndex) => {
                     const fieldPath = `${section.key}.${field.key}`;
                     const hasError = Boolean(errors[fieldPath]);
-                    const inputClass = `w-full rounded-md border px-3 py-2 text-sm shadow-sm transition focus:border-brand-hr-primary focus:ring-1 focus:ring-brand-hr-primary ${
+                    const inputClass = `min-h-11 w-full rounded-xl border px-3 py-2 text-sm text-slate-800 shadow-sm transition focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100 ${
                       hasError
-                        ? "border-hr-warning bg-hr-warning-soft/30"
-                        : "border-brand-hr-primary/25 bg-brand-hr-primary-contrast"
+                        ? "border-amber-300 bg-amber-50"
+                        : "border-slate-200 bg-white"
                     }`;
                     const rawFieldValue = profileData?.[section.key]?.[field.key];
                     const fieldValue = normalizeFieldInputValue(field, rawFieldValue);
@@ -515,13 +700,13 @@ const PersonnelProfile = ({
                         key={field.key}
                         className={`space-y-1 ${field.fullWidth ? "sm:col-span-2 lg:col-span-3" : ""}`}
                       >
-                        <label className="block text-xs font-medium text-brand-hr-primary-muted">
+                        <label className="block text-xs font-medium uppercase tracking-[0.08em] text-slate-500">
                           {field.label}
-                          {field.required ? <span className="ml-1 text-hr-warning">*</span> : null}
+                          {field.required ? <span className="ml-1 text-amber-600">*</span> : null}
                         </label>
 
                         {field.readOnly ? (
-                          <div className="rounded-md border border-transparent bg-brand-hr-primary-soft px-3 py-2 text-sm text-brand-hr-primary">
+                          <div className="min-h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                             {fieldValue || "N/A"}
                           </div>
                         ) : field.type === "select" ? (
@@ -584,19 +769,19 @@ const PersonnelProfile = ({
                         )}
 
                         {hasError ? (
-                          <p className="text-[10px] text-hr-warning-muted">{errors[fieldPath]}</p>
+                          <p className="text-[10px] text-amber-700">{errors[fieldPath]}</p>
                         ) : null}
                       </div>
                     );
                   })}
                 </div>
 
-                {section.key === "familiar" ? (
-                  <div className="space-y-3 rounded-xl border border-brand-hr-primary/15 bg-brand-hr-primary-soft/35 p-3">
+                {extendedSectionPanels && section.key === "familiar" ? (
+                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold text-brand-hr-primary">Hijos</p>
-                        <p className="text-xs text-brand-hr-primary-muted">
+                        <p className="text-sm font-semibold text-slate-900">Hijos</p>
+                        <p className="text-xs text-slate-500">
                           Puedes agregar uno o varios registros.
                         </p>
                       </div>
@@ -604,7 +789,7 @@ const PersonnelProfile = ({
                         <button
                           type="button"
                           onClick={handleAddChild}
-                          className="inline-flex items-center gap-2 rounded-md border border-brand-hr-primary/20 bg-brand-hr-primary-contrast px-3 py-1.5 text-xs font-semibold text-brand-hr-primary hover:bg-brand-hr-primary-soft"
+                          className="inline-flex min-h-11 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 active:scale-[0.97]"
                           aria-label="Agregar hijo"
                         >
                           <FiPlus />
@@ -614,17 +799,17 @@ const PersonnelProfile = ({
                     </div>
 
                     {children.length === 0 ? (
-                      <p className="rounded-md border border-dashed border-brand-hr-primary/20 bg-brand-hr-primary-contrast px-3 py-2 text-xs text-brand-hr-primary-muted">
+                      <p className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-3 text-xs text-slate-500">
                         No hay hijos registrados.
                       </p>
                     ) : (
                       children.map((child, childIndex) => (
                         <div
                           key={`child-${childIndex}`}
-                          className="grid grid-cols-1 gap-3 rounded-lg border border-brand-hr-primary/15 bg-brand-hr-primary-contrast p-3 sm:grid-cols-3"
+                          className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-3"
                         >
                           <div className="space-y-1">
-                            <label className="block text-xs font-medium text-brand-hr-primary-muted">
+                            <label className="block text-xs font-medium uppercase tracking-[0.08em] text-slate-500">
                               Nombre hijo/a
                             </label>
                             <input
@@ -634,11 +819,11 @@ const PersonnelProfile = ({
                               onChange={(event) =>
                                 handleChildChange(childIndex, "nombre", event.target.value)
                               }
-                              className="w-full rounded-md border border-brand-hr-primary/25 bg-brand-hr-primary-contrast px-3 py-2 text-sm shadow-sm focus:border-brand-hr-primary focus:ring-1 focus:ring-brand-hr-primary"
+                              className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
                             />
                           </div>
                           <div className="space-y-1">
-                            <label className="block text-xs font-medium text-brand-hr-primary-muted">
+                            <label className="block text-xs font-medium uppercase tracking-[0.08em] text-slate-500">
                               Cedula
                             </label>
                             <PatternFormat
@@ -651,11 +836,11 @@ const PersonnelProfile = ({
                               onValueChange={({ value }) =>
                                 handleChildChange(childIndex, "cedula", value)
                               }
-                              className="w-full rounded-md border border-brand-hr-primary/25 bg-brand-hr-primary-contrast px-3 py-2 text-sm shadow-sm focus:border-brand-hr-primary focus:ring-1 focus:ring-brand-hr-primary"
+                              className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
                             />
                           </div>
                           <div className="space-y-1">
-                            <label className="block text-xs font-medium text-brand-hr-primary-muted">
+                            <label className="block text-xs font-medium uppercase tracking-[0.08em] text-slate-500">
                               Fecha nacimiento
                             </label>
                             <div className="flex items-center gap-2">
@@ -666,13 +851,13 @@ const PersonnelProfile = ({
                                 onChange={(event) =>
                                   handleChildChange(childIndex, "fecha_nacimiento", event.target.value)
                                 }
-                                className="w-full rounded-md border border-brand-hr-primary/25 bg-brand-hr-primary-contrast px-3 py-2 text-sm shadow-sm focus:border-brand-hr-primary focus:ring-1 focus:ring-brand-hr-primary"
+                                className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
                               />
                               {!readOnly ? (
                                 <button
                                   type="button"
                                   onClick={() => handleRemoveChild(childIndex)}
-                                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100"
+                                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 active:scale-[0.97]"
                                   aria-label="Eliminar hijo"
                                 >
                                   <FiTrash2 />
@@ -686,14 +871,14 @@ const PersonnelProfile = ({
                   </div>
                 ) : null}
 
-                {section.key === "emergencia" ? (
-                  <div className="space-y-3 rounded-xl border border-brand-hr-primary/15 bg-brand-hr-primary-soft/35 p-3">
+                {extendedSectionPanels && section.key === "emergencia" ? (
+                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold text-brand-hr-primary">
+                        <p className="text-sm font-semibold text-slate-900">
                           Contactos de emergencia
                         </p>
-                        <p className="text-xs text-brand-hr-primary-muted">
+                        <p className="text-xs text-slate-500">
                           Puedes registrar multiples contactos.
                         </p>
                       </div>
@@ -701,7 +886,7 @@ const PersonnelProfile = ({
                         <button
                           type="button"
                           onClick={handleAddEmergencyContact}
-                          className="inline-flex items-center gap-2 rounded-md border border-brand-hr-primary/20 bg-brand-hr-primary-contrast px-3 py-1.5 text-xs font-semibold text-brand-hr-primary hover:bg-brand-hr-primary-soft"
+                          className="inline-flex min-h-11 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 active:scale-[0.97]"
                           aria-label="Agregar contacto de emergencia"
                         >
                           <FiPlus />
@@ -711,17 +896,17 @@ const PersonnelProfile = ({
                     </div>
 
                     {emergencyContacts.length === 0 ? (
-                      <p className="rounded-md border border-dashed border-brand-hr-primary/20 bg-brand-hr-primary-contrast px-3 py-2 text-xs text-brand-hr-primary-muted">
+                      <p className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-3 text-xs text-slate-500">
                         No hay contactos de emergencia registrados.
                       </p>
                     ) : (
                       emergencyContacts.map((contact, contactIndex) => (
                         <div
                           key={`emergency-${contactIndex}`}
-                          className="grid grid-cols-1 gap-3 rounded-lg border border-brand-hr-primary/15 bg-brand-hr-primary-contrast p-3 sm:grid-cols-3"
+                          className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-3"
                         >
                           <div className="space-y-1">
-                            <label className="block text-xs font-medium text-brand-hr-primary-muted">
+                            <label className="block text-xs font-medium uppercase tracking-[0.08em] text-slate-500">
                               Nombre
                             </label>
                             <input
@@ -735,11 +920,11 @@ const PersonnelProfile = ({
                                   event.target.value,
                                 )
                               }
-                              className="w-full rounded-md border border-brand-hr-primary/25 bg-brand-hr-primary-contrast px-3 py-2 text-sm shadow-sm focus:border-brand-hr-primary focus:ring-1 focus:ring-brand-hr-primary"
+                              className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
                             />
                           </div>
                           <div className="space-y-1">
-                            <label className="block text-xs font-medium text-brand-hr-primary-muted">
+                            <label className="block text-xs font-medium uppercase tracking-[0.08em] text-slate-500">
                               Parentesco
                             </label>
                             <input
@@ -753,11 +938,11 @@ const PersonnelProfile = ({
                                   event.target.value,
                                 )
                               }
-                              className="w-full rounded-md border border-brand-hr-primary/25 bg-brand-hr-primary-contrast px-3 py-2 text-sm shadow-sm focus:border-brand-hr-primary focus:ring-1 focus:ring-brand-hr-primary"
+                              className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
                             />
                           </div>
                           <div className="space-y-1">
-                            <label className="block text-xs font-medium text-brand-hr-primary-muted">
+                            <label className="block text-xs font-medium uppercase tracking-[0.08em] text-slate-500">
                               Telefono
                             </label>
                             <div className="flex items-center gap-2">
@@ -771,13 +956,13 @@ const PersonnelProfile = ({
                                 onValueChange={({ value }) =>
                                   handleEmergencyContactChange(contactIndex, "telefono", value)
                                 }
-                                className="w-full rounded-md border border-brand-hr-primary/25 bg-brand-hr-primary-contrast px-3 py-2 text-sm shadow-sm focus:border-brand-hr-primary focus:ring-1 focus:ring-brand-hr-primary"
+                                className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
                               />
                               {!readOnly ? (
                                 <button
                                   type="button"
                                   onClick={() => handleRemoveEmergencyContact(contactIndex)}
-                                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100"
+                                  className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 active:scale-[0.97]"
                                   aria-label="Eliminar contacto de emergencia"
                                 >
                                   <FiTrash2 />
@@ -790,28 +975,343 @@ const PersonnelProfile = ({
                     )}
                   </div>
                 ) : null}
+
+                {extendedSectionPanels && section.key === "estudios" ? (
+                  <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 shadow-sm">
+                    <div>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-lg font-semibold text-slate-900">
+                            Credenciales centralizadas del expediente
+                          </p>
+                          <p className="text-sm text-slate-600">
+                            Este bloque consolida títulos y certificaciones desde la fuente
+                            única de Talento Humano.
+                          </p>
+                        </div>
+                        {showCentralQualifications ? (
+                          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                            Solo lectura en esta ficha
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {showCentralQualifications ? (
+                      <div className="rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm text-slate-600">
+                        Los títulos y certificaciones ya no se editan aquí para colaboradores activos.
+                        Se visualizan desde el expediente central y se originan en `Mi Perfil` o en los
+                        flujos operativos autorizados.
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                        En solicitudes previas a contratación aún se conservan campos simples de
+                        estudios porque `personnel_request_profiles` sigue usando ese formato temporal.
+                      </div>
+                    )}
+
+                    {!showCentralQualifications ? (
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">
+                              Credenciales de la solicitud
+                            </p>
+                            <p className="text-sm text-slate-600">
+                              Este bloque se guarda separado del perfil y luego se migra a `collaborator_qualifications`.
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                            Pre-contratacion
+                          </span>
+                        </div>
+
+                        {!readOnly ? (
+                          <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-[220px_minmax(0,1fr)_minmax(0,1fr)_auto]">
+                            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                              Tipo
+                              <select
+                                value={qualificationDraft.qualification_type}
+                                onChange={(event) =>
+                                  updateQualificationDraft("qualification_type", event.target.value)
+                                }
+                                className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                              >
+                                {REQUEST_QUALIFICATION_TYPE_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                              Titulo o nombre
+                              <input
+                                type="text"
+                                value={qualificationDraft.title}
+                                onChange={(event) =>
+                                  updateQualificationDraft("title", event.target.value)
+                                }
+                                className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                              />
+                            </label>
+                            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                              Institucion
+                              <input
+                                type="text"
+                                value={qualificationDraft.institution}
+                                onChange={(event) =>
+                                  updateQualificationDraft("institution", event.target.value)
+                                }
+                                className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                              />
+                            </label>
+                            <div className="flex items-end">
+                              <button
+                                type="button"
+                                onClick={handleAddQualification}
+                                className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-transform duration-150 ease-out hover:bg-blue-700 active:scale-[0.97]"
+                              >
+                                <FiPlus className="mr-2" />
+                                Agregar
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <div className="mt-4 space-y-3">
+                          {editableQualifications.length === 0 ? (
+                            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                              Aun no hay credenciales cargadas para esta solicitud.
+                            </div>
+                          ) : (
+                            editableQualifications.map((qualification, index) => {
+                              const typeLabel =
+                                REQUEST_QUALIFICATION_TYPE_OPTIONS.find(
+                                  (option) =>
+                                    option.value === normalizeQualificationType(qualification?.qualification_type),
+                                )?.label || "Registro";
+                              return (
+                                <div
+                                  key={qualification?.id || `request-qualification-${index}`}
+                                  className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"
+                                >
+                                  <div>
+                                    <p className="text-sm font-semibold text-slate-900">
+                                      {qualification?.title || "Registro academico"}
+                                    </p>
+                                    <p className="mt-1 text-xs text-slate-500">
+                                      {[typeLabel, qualification?.institution].filter(Boolean).join(" · ")}
+                                    </p>
+                                  </div>
+                                  {!readOnly ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveQualification(index)}
+                                      className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition-transform duration-150 ease-out hover:bg-rose-100 active:scale-[0.97]"
+                                    >
+                                      <FiTrash2 className="mr-2" />
+                                      Quitar
+                                    </button>
+                                  ) : null}
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {showCentralQualifications && Number(qualificationMigrationPending?.total || 0) > 0 ? (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 shadow-sm">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-amber-900">
+                              Credenciales legacy pendientes de migracion
+                            </p>
+                            <p className="text-sm text-amber-800">
+                              Hay {qualificationMigrationPending.total} registro(s) historico(s) que aun no entran a
+                              `collaborator_qualifications` porque requieren reclasificacion o validacion manual.
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+                            Revision manual
+                          </span>
+                        </div>
+
+                        <div className="mt-3 space-y-2">
+                          {qualificationMigrationPending.items.map((item) => (
+                            <div
+                              key={`pending-qualification-${item.id}`}
+                              className="rounded-2xl border border-amber-200 bg-white/80 px-4 py-3"
+                            >
+                              <p className="text-sm font-semibold text-slate-900">
+                                {item.title || "Registro sin titulo"}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-600">
+                                {item.pending_reason_label}
+                              </p>
+                              {!readOnly && typeof onResolveQualificationPending === "function" ? (
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {item.pending_reason_code === "title_level_missing" ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          onResolveQualificationPending(item.id, {
+                                            action: "migrate_qualification",
+                                            qualificationType: "third_level_title",
+                                          })
+                                        }
+                                        className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800 hover:bg-sky-100"
+                                      >
+                                        Marcar 3er nivel
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          onResolveQualificationPending(item.id, {
+                                            action: "migrate_qualification",
+                                            qualificationType: "fourth_level_title",
+                                          })
+                                        }
+                                        className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-800 hover:bg-indigo-100"
+                                      >
+                                        Marcar 4to nivel
+                                      </button>
+                                    </>
+                                  ) : null}
+
+                                  {item.pending_reason_code === "document_reclassification_required" ? (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        onResolveQualificationPending(item.id, {
+                                          action: "reclassify_document",
+                                          documentType: "SENESCYT_RECORD",
+                                        })
+                                      }
+                                      className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
+                                    >
+                                      Mover a documento SENESCYT
+                                    </button>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                              {resolveQualificationDocumentUrl(item) ? (
+                                <div className="mt-3">
+                                  <a
+                                    href={resolveQualificationDocumentUrl(item)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                                  >
+                                    <FiEye className="mr-2" />
+                                    Abrir respaldo
+                                  </a>
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                      {qualificationGroups.map((group) => (
+                        <div
+                          key={group.key}
+                          className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)]"
+                        >
+                          <div className="mb-3 flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-base font-semibold text-slate-900">
+                                {group.title}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {group.items.length > 0
+                                  ? "Registros vigentes en la fuente central"
+                                  : group.emptyLabel}
+                              </p>
+                            </div>
+                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                              {group.items.length}
+                            </span>
+                          </div>
+
+                          {group.items.length === 0 ? (
+                            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                              {group.emptyLabel}
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {group.items.map((qualification) => {
+                                const primaryLabel =
+                                  qualification?.title ||
+                                  qualification?.file_name ||
+                                  "Registro sin titulo";
+                                const secondaryLabel = formatQualificationMeta(qualification);
+                                const documentUrl = resolveQualificationDocumentUrl(qualification);
+                                return (
+                                  <div
+                                    key={qualification?.id || `${group.key}-${primaryLabel}`}
+                                    className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                                  >
+                                    <p className="text-sm font-semibold text-slate-900">
+                                      {primaryLabel}
+                                    </p>
+                                    {secondaryLabel ? (
+                                      <p className="mt-1 text-xs text-slate-500">
+                                        {secondaryLabel}
+                                      </p>
+                                    ) : null}
+                                    {documentUrl ? (
+                                      <div className="mt-3">
+                                        <a
+                                          href={documentUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                                        >
+                                          <FiEye className="mr-2" />
+                                          Abrir respaldo
+                                        </a>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
         );
       })}
 
-      <div className="sticky bottom-0 z-10 flex flex-col gap-2 rounded-xl border border-brand-hr-primary/15 bg-brand-hr-primary-contrast/95 p-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs text-brand-hr-primary-muted">
-          Etapa del flujo: <span className="font-semibold text-brand-hr-primary">{workflowStage || "no definida"}</span>
-        </p>
-        <button
-          type="button"
-          onClick={handleSaveWithFeedback}
-          disabled={readOnly || loading || saving}
-          aria-label="Guardar perfil del colaborador"
-          tabIndex={10000}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-hr-primary px-4 py-2 text-sm font-semibold text-brand-hr-primary-contrast transition hover:bg-brand-hr-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <FiSave title="Icono de guardado de perfil" />
-          {saving ? "Guardando..." : "Guardar perfil"}
-        </button>
-      </div>
+      {showSaveBar ? (
+        <div className="sticky bottom-0 z-10 flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-[0_-4px_16px_rgba(15,23,42,0.08)] backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-slate-500">
+            Etapa del flujo: <span className="font-semibold text-slate-900">{workflowStage || "no definida"}</span>
+          </p>
+          <button
+            type="button"
+            onClick={handleSaveWithFeedback}
+            disabled={readOnly || loading || saving}
+            aria-label="Guardar perfil del colaborador"
+            tabIndex={10000}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400 active:scale-[0.97]"
+          >
+            <FiSave title="Icono de guardado de perfil" />
+            {saving ? "Guardando..." : saveButtonLabel}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 };

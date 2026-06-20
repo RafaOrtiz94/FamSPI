@@ -9,6 +9,7 @@ const {
   PROFILE_SYNC_KEYS,
   applyNestedFields,
 } = require("../shared/profileSync");
+const { splitUserProfileMetadata } = require("../shared/userProfileMetadata");
 
 const ALLOWED_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const BLOCKED_METADATA_KEYS = new Set([
@@ -148,7 +149,10 @@ const mergeCollaboratorIntoProfile = (
   collaboratorProfile = {},
 ) => {
   const safe = sanitizeMetadata(metadata);
-  return applyNestedFields(safe, collaboratorProfile, PROFILE_SYNC_KEYS);
+  const merged = applyNestedFields(safe, collaboratorProfile, PROFILE_SYNC_KEYS);
+  const reviewedAt = collaboratorProfile?.extra?.profile_last_reviewed_at;
+  if (reviewedAt) merged.profile_last_reviewed_at = reviewedAt;
+  return merged;
 };
 
 const getByPath = (source, path) =>
@@ -202,6 +206,9 @@ const createProfile = async ({
   const identity = await getIdentity(userId);
   const safeMetadata = sanitizeMetadata(metadata);
   const safePreferences = sanitizePreferences(preferences);
+  const { ownMetadata, collaboratorMetadata } =
+    splitUserProfileMetadata(safeMetadata);
+  const reviewTimestamp = safeMetadata.profile_last_reviewed_at;
 
   if (safeMetadata.profile_last_reviewed_at) {
     const reviewDate = new Date(safeMetadata.profile_last_reviewed_at);
@@ -233,12 +240,40 @@ const createProfile = async ({
       userId,
       avatarInfo.avatar_url || null,
       avatarInfo.avatar_drive_id || null,
-      safeMetadata,
+      {
+        ...ownMetadata,
+        ...(reviewTimestamp ? { profile_last_reviewed_at: reviewTimestamp } : {}),
+      },
       safePreferences,
     ],
   );
 
   const profile = mapProfileRow(rows[0]);
+  try {
+    const mergedCollaboratorProfile = {
+      ...mergeProfileIntoCollaborator({}, collaboratorMetadata),
+      ...(reviewTimestamp
+        ? {
+            extra: {
+              profile_last_reviewed_at: reviewTimestamp,
+            },
+          }
+        : {}),
+    };
+
+    await db.query(
+      `INSERT INTO collaborator_profiles (user_id, profile, updated_by)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id)
+       DO UPDATE SET profile = EXCLUDED.profile, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+      [userId, mergedCollaboratorProfile, userId],
+    );
+  } catch (syncErr) {
+    logger.warn(
+      { syncErr, userId },
+      "No se pudo sincronizar perfil con colaborador",
+    );
+  }
   await auditChange({ userId, action: "crear", before: null, after: profile });
   return profile;
 };
@@ -264,9 +299,19 @@ const updateProfile = async ({
   const current = existing;
   const safeMetadata = sanitizeMetadata(metadata);
   const safePreferences = sanitizePreferences(preferences);
+  const { ownMetadata, collaboratorMetadata } =
+    splitUserProfileMetadata(safeMetadata);
+  const reviewTimestamp = safeMetadata.profile_last_reviewed_at;
 
-  const mergedMetadata = { ...current.metadata, ...safeMetadata };
+  const mergedMetadata = { ...current.metadata, ...ownMetadata };
+  if (reviewTimestamp !== undefined) {
+    mergedMetadata.profile_last_reviewed_at = reviewTimestamp;
+  }
   const mergedPreferences = { ...current.preferences, ...safePreferences };
+  const reviewValidationMetadata = {
+    ...mergeCollaboratorIntoProfile(mergedMetadata, collaboratorMetadata),
+    ...(reviewTimestamp ? { profile_last_reviewed_at: reviewTimestamp } : {}),
+  };
 
   const hasReviewUpdate = Object.prototype.hasOwnProperty.call(
     safeMetadata,
@@ -280,7 +325,7 @@ const updateProfile = async ({
       throw err;
     }
 
-    const missingFields = getMissingAnnualReviewFields(mergedMetadata);
+    const missingFields = getMissingAnnualReviewFields(reviewValidationMetadata);
     if (missingFields.length > 0) {
       const err = new Error(
         `No se puede cerrar la revision anual: faltan campos obligatorios (${missingFields.join(", ")})`,
@@ -320,10 +365,19 @@ const updateProfile = async ({
       [userId],
     );
     const collabProfile = collabRows[0]?.profile || {};
-    const mergedCollaboratorProfile = mergeProfileIntoCollaborator(
+    let mergedCollaboratorProfile = mergeProfileIntoCollaborator(
       collabProfile,
-      mergedMetadata,
+      collaboratorMetadata,
     );
+    if (reviewTimestamp !== undefined) {
+      mergedCollaboratorProfile = {
+        ...mergedCollaboratorProfile,
+        extra: {
+          ...(mergedCollaboratorProfile.extra || {}),
+          profile_last_reviewed_at: reviewTimestamp,
+        },
+      };
+    }
 
     await db.query(
       `INSERT INTO collaborator_profiles (user_id, profile, updated_by)
@@ -500,21 +554,7 @@ const getProfileWithIdentity = async (userId) => {
     collaboratorProfile,
   );
 
-  if (
-    JSON.stringify(mergedMetadata) !== JSON.stringify(profile.metadata || {})
-  ) {
-    const { rows } = await db.query(
-      `UPDATE user_profile
-       SET metadata = $2,
-           updated_at = NOW()
-       WHERE user_id = $1
-       RETURNING id, user_id, avatar_url, avatar_drive_id, metadata, preferences, created_at, updated_at`,
-      [userId, mergedMetadata],
-    );
-    profile = mapProfileRow(rows[0]);
-  } else {
-    profile = mapProfileRow({ ...profile, metadata: mergedMetadata });
-  }
+  profile = mapProfileRow({ ...profile, metadata: mergedMetadata });
 
   return { identity, profile };
 };

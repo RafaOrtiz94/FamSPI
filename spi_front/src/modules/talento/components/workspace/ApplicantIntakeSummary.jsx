@@ -99,7 +99,7 @@ const ApplicantIntakeSummary = ({ applicant }) => {
  return (
  <div className="space-y-3">
  <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
- <p className="text-xs font-semibold text-blue-900">Resumen de formulario del postulante</p>
+ <p className="text-xs font-semibold text-blue-900">Resumen del expediente inicial del postulante</p>
  <p className="mt-1 text-[11px] text-blue-700">
  CV: <strong>{data.hasCv ? "Subido" : "Pendiente"}</strong> · Carta de motivacion: <strong>{data.hasMotivation ? "Subida" : "Pendiente"}</strong>
  </p>
@@ -114,7 +114,7 @@ const ApplicantIntakeSummary = ({ applicant }) => {
  <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-600">Experiencia laboral</h4>
  <div className="mt-2 space-y-2">
  {data.experience.length === 0 ? (
- <p className="text-xs text-gray-500">Sin experiencia registrada</p>
+ <p className="text-xs text-gray-500">El postulante no registra experiencia laboral en este formulario.</p>
  ) : (
  data.experience.map((item, index) => (
  <div key={`exp-${index}`} className="rounded border border-gray-100 bg-gray-50 p-2 text-xs text-gray-800">
@@ -129,7 +129,7 @@ const ApplicantIntakeSummary = ({ applicant }) => {
  <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-600">Referencias laborales</h4>
  <div className="mt-2 space-y-2">
  {data.workReferences.length === 0 ? (
- <p className="text-xs text-gray-500">Sin referencias laborales</p>
+ <p className="text-xs text-gray-500">El postulante no registra referencias laborales en este formulario.</p>
  ) : (
  data.workReferences.map((item, index) => (
  <div key={`wref-${index}`} className="rounded border border-gray-100 bg-gray-50 p-2 text-xs text-gray-800">
@@ -144,7 +144,7 @@ const ApplicantIntakeSummary = ({ applicant }) => {
  <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-600">Referencias personales</h4>
  <div className="mt-2 space-y-2">
  {data.personalReferences.length === 0 ? (
- <p className="text-xs text-gray-500">Sin referencias personales</p>
+ <p className="text-xs text-gray-500">El postulante no registra referencias personales en este formulario.</p>
  ) : (
  data.personalReferences.map((item, index) => (
  <div key={`pref-${index}`} className="rounded border border-gray-100 bg-gray-50 p-2 text-xs text-gray-800">

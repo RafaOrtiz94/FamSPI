@@ -19,6 +19,7 @@ import { getApplicantById } from "../../../core/api/applicantsApi";
 import {
   getCollaboratorProfile,
   listCollaborators,
+  resolveCollaboratorQualificationPending,
   updateCollaboratorProfile,
   uploadCollaboratorDocument,
 } from "../../../core/api/collaboratorsApi";
@@ -84,6 +85,11 @@ const mergeUploadDocuments = (response, current = []) => {
   if (doc?.id) return [doc, ...current.filter((item) => item.id !== doc.id)];
   return current;
 };
+
+const resolveDocumentType = (document = {}) =>
+  String(document?.canonical_doc_type || document?.doc_type || "")
+    .trim()
+    .toUpperCase();
 
 const flattenProfileErrors = (error) => {
   const details = error?.response?.data?.details;
@@ -214,6 +220,8 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
   const [workflowCommentInternal, setWorkflowCommentInternal] = useState(false);
   const [profileData, setProfileData] = useState(null);
   const [documents, setDocuments] = useState([]);
+  const [qualifications, setQualifications] = useState([]);
+  const [qualificationMigrationPending, setQualificationMigrationPending] = useState({ total: 0, items: [] });
   const [profileErrors, setProfileErrors] = useState({});
   const [docUploading, setDocUploading] = useState(null);
   const [docUploadProgress, setDocUploadProgress] = useState({});
@@ -380,15 +388,22 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     if (!WORKSPACE_READY_STATUSES.has(normalizeRequestStatus(selectedRequest.status))) {
       setProfileData(null);
       setDocuments([]);
+      setQualifications([]);
+      setQualificationMigrationPending({ total: 0, items: [] });
       return;
     }
     const profilePayload = requestWorkspaceQuery.data?.profile || {};
     const nextProfile = mergeProfile(profilePayload.profile || {});
     const nextDocuments = Array.isArray(profilePayload.documents) ? profilePayload.documents : [];
-    const nextKey = `request:${selectedRequest.id}:${profilePayload.updated_at || ""}:${nextDocuments.length}`;
+    const nextQualifications = Array.isArray(profilePayload.qualifications)
+      ? profilePayload.qualifications
+      : [];
+    const nextKey = `request:${selectedRequest.id}:${profilePayload.updated_at || ""}:${nextDocuments.length}:${nextQualifications.length}`;
     if (lastHydratedRef.current !== nextKey) {
       setProfileData(nextProfile);
       setDocuments(nextDocuments);
+      setQualifications(nextQualifications);
+      setQualificationMigrationPending({ total: 0, items: [] });
       setProfileErrors({});
       lastHydratedRef.current = nextKey;
     }
@@ -399,10 +414,23 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     const payload = collaboratorProfileQuery.data?.data || collaboratorProfileQuery.data || {};
     const nextProfile = mergeProfile(payload.profile || {});
     const nextDocuments = Array.isArray(payload.documents) ? payload.documents : [];
-    const nextKey = `collaborator:${resolvedCollaboratorId}:${payload.updated_at || ""}:${nextDocuments.length}`;
+    const nextQualifications = Array.isArray(payload.qualifications) ? payload.qualifications : [];
+    const nextQualificationMigrationPending =
+      payload.qualification_migration_pending &&
+      typeof payload.qualification_migration_pending === "object"
+        ? {
+            total: Number(payload.qualification_migration_pending.total || 0),
+            items: Array.isArray(payload.qualification_migration_pending.items)
+              ? payload.qualification_migration_pending.items
+              : [],
+          }
+        : { total: 0, items: [] };
+    const nextKey = `collaborator:${resolvedCollaboratorId}:${payload.updated_at || ""}:${nextDocuments.length}:${nextQualifications.length}:${nextQualificationMigrationPending.total}`;
     if (lastHydratedRef.current !== nextKey) {
       setProfileData(nextProfile);
       setDocuments(nextDocuments);
+      setQualifications(nextQualifications);
+      setQualificationMigrationPending(nextQualificationMigrationPending);
       setProfileErrors({});
       lastHydratedRef.current = nextKey;
     }
@@ -510,7 +538,31 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     },
   });
 
-  const handleSaveProfile = async (payloadOverride = null) => saveProfileMutation.mutateAsync(payloadOverride || profileData);
+  const resolveQualificationPendingMutation = useMutation({
+    mutationFn: async ({ collaboratorId, legacyId, payload }) =>
+      resolveCollaboratorQualificationPending(collaboratorId, legacyId, payload),
+    onSuccess: async (_, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: ["talento", "collaborator-profile", String(variables.collaboratorId)],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["talento", "collaborators"] });
+      toast.success("Pendiente legacy resuelto");
+    },
+    onError: (error) => {
+      toast.error(error?.response?.data?.message || "No se pudo resolver el pendiente legacy.");
+    },
+  });
+
+  const handleSaveProfile = async (payloadOverride = null) => {
+    const profilePayload = payloadOverride || profileData;
+    if (resolvedCollaboratorId) {
+      return saveProfileMutation.mutateAsync(profilePayload);
+    }
+    return saveProfileMutation.mutateAsync({
+      profile: profilePayload,
+      qualifications,
+    });
+  };
   const handleUploadDocument = async (docType, file) => {
     if (!file) return;
     let preparedFile = file;
@@ -531,9 +583,25 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     });
   };
   const handleProfileChange = (section, key, value) => setProfileData((prev) => ({ ...(prev || {}), [section]: { ...(prev?.[section] || {}), [key]: value } }));
+  const handleQualificationsChange = (nextQualifications) =>
+    setQualifications(Array.isArray(nextQualifications) ? nextQualifications : []);
   const handleChecklistToggle = (flagKey) => setProfileData((prev) => ({ ...(prev || {}), onboarding: { ...(prev?.onboarding || {}), [flagKey]: !prev?.onboarding?.[flagKey] } }));
+  const handleResolveQualificationPending = async (legacyId, payload) => {
+    if (!resolvedCollaboratorId) {
+      throw new Error("No existe colaborador activo para resolver el pendiente.");
+    }
+    return resolveQualificationPendingMutation.mutateAsync({
+      collaboratorId: resolvedCollaboratorId,
+      legacyId,
+      payload,
+    });
+  };
   const hasContract = useMemo(() => {
-    return (documents || []).some((doc) => doc.doc_type === "CONTRATO_TRABAJO");
+    const documentTypes = new Set((documents || []).map((doc) => resolveDocumentType(doc)));
+    return (
+      (documentTypes.has("CONTRACT_FAM") && documentTypes.has("CONTRACT_MDT")) ||
+      documentTypes.has("CONTRATO_TRABAJO")
+    );
   }, [documents]);
 
   const profileCompletion = useMemo(() => {
@@ -549,8 +617,21 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
 
   const checklistCompletion = useMemo(() => {
     if (!profileData) return { total: 0, done: 0, complete: false };
+    const documentTypes = new Set((documents || []).map((doc) => resolveDocumentType(doc)));
     const total = checklistSections.reduce((acc, section) => acc + section.items.length, 0);
-    const done = checklistSections.reduce((acc, section) => acc + section.items.reduce((count, item) => count + (item.type === "doc" ? (documents.some((d) => d.doc_type === item.docType) ? 1 : 0) : (profileData?.onboarding?.[item.flagKey] ? 1 : 0)), 0), 0);
+    const done = checklistSections.reduce(
+      (acc, section) =>
+        acc +
+        section.items.reduce(
+          (count, item) =>
+            count +
+            (item.type === "doc"
+              ? (documentTypes.has(String(item.docType || "").trim().toUpperCase()) ? 1 : 0)
+              : (profileData?.onboarding?.[item.flagKey] ? 1 : 0)),
+          0,
+        ),
+      0,
+    );
     return { total, done, complete: total > 0 && done === total };
   }, [checklistSections, documents, profileData]);
 
@@ -733,6 +814,8 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     selectedCollaborator,
     selectedCollaboratorId: resolvedCollaboratorId,
     profileData,
+    qualifications,
+    qualificationMigrationPending,
     profileLoading: requestWorkspaceQuery.isFetching || collaboratorProfileQuery.isFetching || saveProfileMutation.isPending,
     profileSaving: saveProfileMutation.isPending,
     profileErrors,
@@ -781,6 +864,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     requestWorkspaceSyncing,
     collaboratorProfileLoading,
     collaboratorProfileSyncing,
+    resolvingQualificationPending: resolveQualificationPendingMutation.isPending,
     hasEntityRouteTarget,
     entityRouteLoading,
     entityRouteSyncing,
@@ -793,6 +877,8 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     handleUploadDocument,
     handleChecklistToggle,
     handleProfileChange,
+    handleQualificationsChange,
+    handleResolveQualificationPending,
     handleAssignCollaborator,
     handleAddComment,
     handleCreateRequest,

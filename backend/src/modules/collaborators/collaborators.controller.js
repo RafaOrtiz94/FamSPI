@@ -70,6 +70,31 @@ const uploadCollaboratorDocument = async (req, res) => {
   }
 };
 
+const resolveCollaboratorQualificationPending = async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const legacyId = Number(req.params.legacyId);
+    const actorId = req.user?.id || null;
+    const payload = req.body || {};
+
+    const result = await service.resolvePendingLegacyQualification(
+      userId,
+      legacyId,
+      payload,
+      actorId,
+    );
+
+    res.status(200).json({ ok: true, data: result });
+  } catch (err) {
+    console.error('Error resolviendo pendiente legacy de credencial:', err);
+    const status = Number(err?.status || 500);
+    res.status(status).json({
+      ok: false,
+      message: err?.message || 'Error resolviendo pendiente legacy',
+    });
+  }
+};
+
 
 const getCollaboratorStats = async (req, res) => {
   try {
@@ -86,5 +111,6 @@ module.exports = {
   getCollaboratorProfile,
   updateCollaboratorProfile,
   uploadCollaboratorDocument,
+  resolveCollaboratorQualificationPending,
   getCollaboratorStats,
 };

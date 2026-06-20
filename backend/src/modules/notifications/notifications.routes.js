@@ -1,5 +1,5 @@
 const express = require("express");
-const rateLimit = require("express-rate-limit");
+const { rateLimit, ipKeyGenerator } = require("express-rate-limit");
 const router = express.Router();
 const ctrl = require("./notifications.controller");
 const { verifyToken } = require("../../middlewares/auth");
@@ -11,7 +11,7 @@ router.use(verifyToken);
 const notificationsListLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 20,
-  keyGenerator: (req) => String(req.user?.id || req.ip),
+  keyGenerator: (req) => (req.user?.id ? `uid:${req.user.id}` : ipKeyGenerator(req)),
   standardHeaders: true,
   legacyHeaders: false,
   handler: (_req, res) => {

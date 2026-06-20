@@ -25,6 +25,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  const { id: bcId } = useParams();
  const { showToast } = useUI();
  const [saving, setSaving] = useState(false);
+ const [isEditing, setIsEditing] = useState(false);
 
  // ONE-TIME HYDRATION GUARD
  const hydratedRef = useRef(false);
@@ -88,6 +89,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
 
  await api.post(`/business-case/${bcId}/lab-environment`, payload);
  showToast("Datos de laboratorio guardados", "success");
+ setIsEditing(false);
  if (onSave) onSave();
  } catch (err) {
  console.error("Error saving lab data:", err);
@@ -112,17 +114,6 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  <p className="text-sm text-gray-500 mt-1">Configuración operativa y parámetros del laboratorio</p>
  </div>
  </div>
- {canEdit && (
- <button
- type="submit"
- disabled={saving}
- onClick={handleSubmit(handleSave)}
- className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-50 disabled:scale-100 w-full sm:w-auto"
- >
- <FiSave size={18} />
- {saving ? "Guardando..." : "Guardar"}
- </button>
- )}
  </div>
 
  {/* Form */}
@@ -146,7 +137,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  min="1"
  max="7"
  {...register("workDaysPerWeek")}
- disabled={!canEdit}
+ disabled={!isEditing}
  className={inputClasses}
  placeholder="Ej: 5"
  />
@@ -162,7 +153,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  min="1"
  max="3"
  {...register("shiftsPerDay")}
- disabled={!canEdit}
+ disabled={!isEditing}
  className={inputClasses}
  placeholder="Ej: 2"
  />
@@ -179,7 +170,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  max="24"
  step="0.5"
  {...register("hoursPerShift")}
- disabled={!canEdit}
+ disabled={!isEditing}
  className={inputClasses}
  placeholder="Ej: 8"
  />
@@ -195,7 +186,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  min="0"
  step="0.1"
  {...register("qcPerShift")}
- disabled={!canEdit}
+ disabled={!isEditing}
  className={inputClasses}
  placeholder="Ej: 3.5"
  />
@@ -210,7 +201,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  type="number"
  min="1"
  {...register("controlLevels")}
- disabled={!canEdit}
+ disabled={!isEditing}
  className={inputClasses}
  placeholder="Ej: 2"
  />
@@ -224,7 +215,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  <input
  type="text"
  {...register("routineQCFrequency")}
- disabled={!canEdit}
+ disabled={!isEditing}
  className={inputClasses}
  placeholder="Ej: Diario, Por turno..."
  />
@@ -237,7 +228,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  </label>
  <textarea
  {...register("specialTests")}
- disabled={!canEdit}
+ disabled={!isEditing}
  rows={2}
  className={inputClasses}
  placeholder="Describa las pruebas especiales requeridas..."
@@ -252,7 +243,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  <input
  type="text"
  {...register("specialTestQCFrequency")}
- disabled={!canEdit}
+ disabled={!isEditing}
  className={inputClasses}
  placeholder="Ej: Semanal, Por lote..."
  />
@@ -278,15 +269,36 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  {/* Section Actions */}
  {canEdit && (
  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-100">
- <p className="text-xs text-gray-400 font-medium">Los cambios se guardan automáticamente al enviar el formulario.</p>
- <button
- type="submit"
- disabled={saving}
- className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-50 disabled:scale-100 w-full sm:w-auto"
- >
- <FiSave size={18} />
- {saving ? "Guardando..." : "Guardar"}
- </button>
+ <p className="text-xs text-gray-400 font-medium">
+  {isEditing ? "Los cambios se guardan al presionar Guardar." : "Sección en modo solo lectura."}
+ </p>
+ {isEditing ? (
+  <div className="flex gap-2 sm:justify-end">
+  <button
+  type="button"
+  onClick={() => { reset(sectionData); setIsEditing(false); }}
+  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all w-full sm:w-auto"
+  >
+  Cancelar
+  </button>
+  <button
+  type="submit"
+  disabled={saving}
+  className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-50 disabled:scale-100 w-full sm:w-auto"
+  >
+  <FiSave size={16} />
+  {saving ? "Guardando..." : "Guardar"}
+  </button>
+  </div>
+ ) : (
+  <button
+  type="button"
+  onClick={() => setIsEditing(true)}
+  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 bg-white text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all w-full sm:w-auto"
+  >
+  Editar
+  </button>
+ )}
  </div>
  )}
  </form>

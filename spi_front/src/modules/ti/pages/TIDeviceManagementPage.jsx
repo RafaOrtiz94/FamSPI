@@ -21,6 +21,7 @@ import {
 import Button from "../../../core/ui/components/Button";
 import Modal from "../../../core/ui/components/Modal";
 import { useUI } from "../../../core/ui/UIContext";
+import { useAuth } from "../../../core/auth/AuthContext";
 import { getUsers } from "../../../core/api/usersApi";
 import {
   assignTiAsset,
@@ -51,6 +52,8 @@ import {
   updateTiAccessory,
   updateTiAsset,
   updateTiAssetStatus,
+  liberateTiAsset,
+  getTiLiberationPhotos,
 } from "../../../core/api/tiAssetsApi";
 
 const STATUS_LABELS = {
@@ -105,7 +108,7 @@ function TIActasView() {
               }`}>
                 {acta.tipo}
               </span>
-              <span className="text-xs font-mono font-semibold text-slate-600">#{String(acta.id).padStart(6, "0")}</span>
+              <span className="text-xs font-mono font-semibold text-slate-600">{acta.acta_code || `#${String(acta.id).padStart(6, "0")}`}</span>
               {acta.is_complete ? (
                 <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700">
                   <FiCheck size={9} /> Firmada
@@ -266,8 +269,15 @@ const SectionTitle = ({ icon: Icon, children }) => (
   </div>
 );
 
+const TI_WRITE_ROLES = ["ti", "jefe_ti", "admin_ti", "gerencia"];
+const TI_CREATE_ROLES = [...TI_WRITE_ROLES, "financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador"];
+
 const TIDeviceManagementPage = () => {
   const { showToast } = useUI();
+  const { user } = useAuth();
+  const userRole = (user?.role || "").toLowerCase();
+  const canCreate = TI_CREATE_ROLES.includes(userRole);
+  const canWrite  = TI_WRITE_ROLES.includes(userRole);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [assets, setAssets] = useState([]);
@@ -291,7 +301,7 @@ const TIDeviceManagementPage = () => {
   const [accessories, setAccessories] = useState([]);
   const [accessoriesLoading, setAccessoriesLoading] = useState(false);
   const [showAccForm, setShowAccForm] = useState(false);
-  const [accForm, setAccForm] = useState({ name: "", brand: "", model: "", serial_number: "", imei: "", is_new: false, physical_condition: "", observations: "", numero_corporativo: "" });
+  const [accForm, setAccForm] = useState({ name: "", brand: "", model: "", serial_number: "", imei: "", is_new: false, physical_condition: "", observations: "" });
   const [editingAccId, setEditingAccId] = useState(null);
   // Modal de asignación con acta (single asset)
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -305,6 +315,13 @@ const TIDeviceManagementPage = () => {
   const [batchAssignForm, setBatchAssignForm] = useState({ assigned_to_user_id: "", recipient_nombre: "", recipient_cedula: "", recipient_cargo: "", reason: "" });
   const [batchRecipientLoading, setBatchRecipientLoading] = useState(false);
   const [batchRecipientSource, setBatchRecipientSource] = useState(null);
+
+  // FASE 6: Liberación de equipos
+  const [showLiberateModal, setShowLiberateModal] = useState(false);
+  const [liberateForm, setLiberateForm] = useState({ notes: "", photoFiles: [], photoPreviews: [] });
+  const [liberatingAssetId, setLiberatingAssetId] = useState(null);
+  const [liberationPhotos, setLiberationPhotos] = useState([]);
+  const [liberationPhotosLoading, setLiberationPhotosLoading] = useState(false);
 
   // Actas
   const [actas, setActas] = useState([]);
@@ -637,6 +654,45 @@ const TIDeviceManagementPage = () => {
     }
   };
 
+  // FASE 6: Liberar equipo
+  const doLiberateAsset = async () => {
+    if (!liberatingAssetId) {
+      showToast("No hay equipo seleccionado", "error");
+      return;
+    }
+    if (liberateForm.photoFiles.length < 2) {
+      showToast("Se requieren al menos 2 fotos para liberar el equipo", "error");
+      return;
+    }
+    setSaving(true);
+    try {
+      const result = await liberateTiAsset(liberatingAssetId, liberateForm.photoFiles, liberateForm.notes || "");
+      showToast(`Equipo liberado · Acta de retiro generada`, "success");
+      setShowLiberateModal(false);
+      setLiberateForm({ notes: "", photoFiles: [], photoPreviews: [] });
+      setLiberatingAssetId(null);
+      await loadAll();
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo liberar el equipo", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Cargar fotos de liberación
+  const loadLiberationPhotos = async (assetId) => {
+    if (!assetId) return;
+    setLiberationPhotosLoading(true);
+    try {
+      const photos = await getTiLiberationPhotos(assetId);
+      setLiberationPhotos(Array.isArray(photos) ? photos : []);
+    } catch (error) {
+      console.error("Error loading liberation photos:", error);
+    } finally {
+      setLiberationPhotosLoading(false);
+    }
+  };
+
   // Shared helper: fetch profile and update modal recipient fields
   const fetchAndFillRecipient = async (userId, baseNombre = "") => {
     if (!userId) {
@@ -706,7 +762,7 @@ const TIDeviceManagementPage = () => {
         });
         showToast("Accesorio agregado", "success");
       }
-      setAccForm({ name: "", brand: "", model: "", serial_number: "", imei: "", is_new: false, physical_condition: "", observations: "", numero_corporativo: "" });
+      setAccForm({ name: "", brand: "", model: "", serial_number: "", imei: "", is_new: false, physical_condition: "", observations: "" });
       setShowAccForm(false);
       setEditingAccId(null);
       await loadAccessories(selected.id);
@@ -728,7 +784,6 @@ const TIDeviceManagementPage = () => {
       is_new: Boolean(acc.is_new),
       physical_condition: acc.physical_condition ?? "",
       observations: acc.observations || "",
-      numero_corporativo: acc.numero_corporativo || "",
     });
     setShowAccForm(true);
   };
@@ -1010,14 +1065,16 @@ const TIDeviceManagementPage = () => {
           >
             Recargar
           </Button>
-          <Button
-            type="button"
-            variant="primary"
-            icon={showCreate ? FiChevronUp : FiPlus}
-            onClick={() => setShowCreate((v) => !v)}
-          >
-            {showCreate ? "Cancelar" : "Nuevo equipo"}
-          </Button>
+          {canCreate && (
+            <Button
+              type="button"
+              variant="primary"
+              icon={showCreate ? FiChevronUp : FiPlus}
+              onClick={() => setShowCreate((v) => !v)}
+            >
+              {showCreate ? "Cancelar" : "Nuevo equipo"}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1191,7 +1248,7 @@ const TIDeviceManagementPage = () => {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            {selectedAssets.size > 0 && (
+            {selectedAssets.size > 0 && canWrite && (
               <Button
                 type="button"
                 variant="primary"
@@ -1393,7 +1450,7 @@ const TIDeviceManagementPage = () => {
                   <SectionTitle icon={FiPackage}>Accesorios</SectionTitle>
                   <button
                     type="button"
-                    onClick={() => { setShowAccForm((v) => !v); setEditingAccId(null); setAccForm({ name: "", brand: "", model: "", serial_number: "", imei: "", is_new: false, physical_condition: "", observations: "", numero_corporativo: "" }); }}
+                    onClick={() => { setShowAccForm((v) => !v); setEditingAccId(null); setAccForm({ name: "", brand: "", model: "", serial_number: "", imei: "", is_new: false, physical_condition: "", observations: "" }); }}
                     className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors"
                   >
                     {showAccForm ? <><FiX size={12} /> Cancelar</> : <><FiPlus size={12} /> Agregar accesorio</>}
@@ -1429,15 +1486,6 @@ const TIDeviceManagementPage = () => {
                           <option value="1">Nuevo</option>
                         </select>
                       </div>
-                      <div>
-                        <Label>N° corporativo</Label>
-                        <input
-                          className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:border-slate-400"
-                          placeholder="Ej: 0999123456"
-                          value={accForm.numero_corporativo}
-                          onChange={(e) => setAccForm((p) => ({ ...p, numero_corporativo: e.target.value }))}
-                        />
-                      </div>
                       <div className="col-span-2">
                         <Label>Observaciones</Label>
                         <input className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:border-slate-400" value={accForm.observations} onChange={(e) => setAccForm((p) => ({ ...p, observations: e.target.value }))} />
@@ -1461,7 +1509,6 @@ const TIDeviceManagementPage = () => {
                         <tr className="bg-slate-50 text-slate-400 uppercase text-[10px]">
                           <th className="px-3 py-2 text-left font-medium">Nombre</th>
                           <th className="px-3 py-2 text-left font-medium">Marca/Modelo</th>
-                          <th className="px-3 py-2 text-left font-medium">N° corp.</th>
                           <th className="px-3 py-2 text-left font-medium">Nuevo/Usado</th>
                           <th className="px-3 py-2 text-left font-medium">Estado</th>
                           <th className="px-3 py-2 text-left font-medium"></th>
@@ -1472,7 +1519,6 @@ const TIDeviceManagementPage = () => {
                           <tr key={acc.id} className={`border-t border-slate-100 ${i % 2 === 1 ? "bg-slate-50" : ""}`}>
                             <td className="px-3 py-2 font-medium text-slate-800">{acc.name}</td>
                             <td className="px-3 py-2 text-slate-500">{[acc.brand, acc.model].filter(Boolean).join(" ") || "-"}</td>
-                            <td className="px-3 py-2 font-mono text-slate-600">{acc.numero_corporativo || "-"}</td>
                             <td className="px-3 py-2"><span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${acc.is_new ? "bg-green-50 text-green-700" : "bg-slate-100 text-slate-600"}`}>{acc.is_new ? "Nuevo" : "Usado"}</span></td>
                             <td className="px-3 py-2 text-slate-600">{acc.physical_condition != null ? `${acc.physical_condition}/10` : "-"}</td>
                             <td className="px-3 py-2">
@@ -1497,45 +1543,65 @@ const TIDeviceManagementPage = () => {
                     <p className="text-sm font-medium text-slate-800">{selected.assigned_to_name || "Sin asignación"}</p>
                     {selected.assigned_at && <p className="text-xs text-slate-400">Desde {new Date(selected.assigned_at).toLocaleDateString("es-EC")}</p>}
                   </div>
-                  {/* FASE 4: Deshabilitar asignación si estado no lo permite */}
-                  <Button
-                    type="button"
-                    variant="primary"
-                    icon={FiUser}
-                    disabled={saving || (selected.status && !['available', 'unassigned'].includes(selected.status))}
-                    title={selected.status && !['available', 'unassigned'].includes(selected.status) ? `No se puede asignar: equipo en estado "${selected.status}"` : undefined}
-                    onClick={openAssignModal}
-                  >
-                    {selected.assigned_to_user_id ? "Reasignar / Liberar" : "Asignar equipo"}
-                  </Button>
+                  {canWrite && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="primary"
+                        icon={FiUser}
+                        disabled={saving || (selected.status && !['available', 'unassigned'].includes(selected.status))}
+                        title={selected.status && !['available', 'unassigned'].includes(selected.status) ? `No se puede asignar: equipo en estado "${selected.status}"` : undefined}
+                        onClick={openAssignModal}
+                      >
+                        {selected.assigned_to_user_id ? "Reasignar" : "Asignar equipo"}
+                      </Button>
+                      {selected.assigned_to_user_id && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          icon={FiX}
+                          disabled={saving || selected.status !== 'assigned'}
+                          title={selected.status !== 'assigned' ? `No se puede liberar: equipo no está asignado` : undefined}
+                          onClick={() => {
+                            setLiberatingAssetId(selected.id);
+                            setShowLiberateModal(true);
+                          }}
+                        >
+                          Liberar
+                        </Button>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
 
               {/* Status */}
-              <div className="border-t border-slate-100 pt-5">
-                <SectionTitle icon={FiAlertCircle}>Estado del equipo</SectionTitle>
-                <div className="flex gap-2">
-                  <select
-                    value={newStatus}
-                    onChange={(e) => setNewStatus(e.target.value)}
-                    className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
-                  >
-                    {Object.entries(STATUS_LABELS).map(([val, label]) => (
-                      <option key={val} value={val}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={saving}
-                    onClick={doStatus}
-                  >
-                    Actualizar
-                  </Button>
+              {canWrite && (
+                <div className="border-t border-slate-100 pt-5">
+                  <SectionTitle icon={FiAlertCircle}>Estado del equipo</SectionTitle>
+                  <div className="flex gap-2">
+                    <select
+                      value={newStatus}
+                      onChange={(e) => setNewStatus(e.target.value)}
+                      className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
+                    >
+                      {Object.entries(STATUS_LABELS).map(([val, label]) => (
+                        <option key={val} value={val}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={saving}
+                      onClick={doStatus}
+                    >
+                      Actualizar
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* History */}
               <div className="border-t border-slate-100 pt-5">
@@ -1617,7 +1683,7 @@ const TIDeviceManagementPage = () => {
                               <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${acta.tipo === "entrega" ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"}`}>
                                 {acta.tipo}
                               </span>
-                              <span className="text-xs font-medium text-slate-700">#{String(acta.id).padStart(6, "0")}</span>
+                              <span className="text-xs font-medium text-slate-700">{acta.acta_code || `#${String(acta.id).padStart(6, "0")}`}</span>
                               {acta.is_complete ? (
                                 <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700">
                                   <FiCheck size={9} /> Firmada
@@ -2519,6 +2585,147 @@ const TIDeviceManagementPage = () => {
           </Button>
           <Button type="button" variant="primary" icon={FiFileText} disabled={saving} onClick={doBatchAssign}>
             {saving ? "Guardando..." : "Confirmar y generar acta"}
+          </Button>
+        </div>
+      </Modal>
+
+      {/* FASE 6: Modal de liberación de equipo */}
+      <Modal
+        open={showLiberateModal}
+        onClose={() => {
+          setShowLiberateModal(false);
+          setLiberateForm({ notes: "", photoFiles: [], photoPreviews: [] });
+        }}
+        title="Liberar equipo"
+        maxWidth="max-w-lg"
+      >
+        <div className="overflow-auto px-6 py-4 space-y-4" style={{ maxHeight: "75vh" }}>
+          <p className="text-sm text-slate-600">
+            Se requieren <span className="font-semibold">mínimo 2 fotos</span> del estado del equipo para generar el acta de retiro.
+          </p>
+
+          {/* Multi-photo upload */}
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-400 block mb-2">
+              Fotografías del equipo{" "}
+              <span className={liberateForm.photoFiles.length >= 2 ? "text-green-500" : "text-red-400"}>
+                ({liberateForm.photoFiles.length}/mín. 2)
+              </span>
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(e) => {
+                const files = Array.from(e.target.files || []);
+                if (!files.length) return;
+                const previews = [];
+                let loaded = 0;
+                files.forEach((file, idx) => {
+                  const reader = new FileReader();
+                  reader.onload = (evt) => {
+                    previews[idx] = evt.target?.result;
+                    loaded++;
+                    if (loaded === files.length) {
+                      setLiberateForm((p) => ({
+                        ...p,
+                        photoFiles: [...p.photoFiles, ...files],
+                        photoPreviews: [...p.photoPreviews, ...previews],
+                      }));
+                    }
+                  };
+                  reader.readAsDataURL(file);
+                });
+              }}
+              className="w-full text-xs cursor-pointer border border-dashed border-slate-300 rounded-xl px-3 py-2 bg-slate-50 hover:bg-slate-100 transition"
+            />
+            {liberateForm.photoPreviews.length > 0 && (
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {liberateForm.photoPreviews.map((src, idx) => (
+                  <div key={idx} className="relative group rounded-lg overflow-hidden border border-slate-200">
+                    <img src={src} alt={`Foto ${idx + 1}`} className="w-full h-24 object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setLiberateForm((p) => ({
+                        ...p,
+                        photoFiles: p.photoFiles.filter((_, i) => i !== idx),
+                        photoPreviews: p.photoPreviews.filter((_, i) => i !== idx),
+                      }))}
+                      className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
+                    >
+                      ×
+                    </button>
+                    <p className="text-[9px] text-slate-400 text-center py-0.5">Foto {idx + 1}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-400 block mb-2">
+              Observaciones (opcional)
+            </label>
+            <textarea
+              value={liberateForm.notes}
+              onChange={(e) => setLiberateForm((p) => ({ ...p, notes: e.target.value }))}
+              placeholder="Estado del equipo, rayones, daños, etc."
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none"
+              rows={3}
+            />
+          </div>
+
+          {/* Liberation photos history */}
+          {liberationPhotos.length > 0 && (
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
+                Fotos de liberaciones anteriores ({liberationPhotos.length})
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {liberationPhotos.map((photo) => (
+                  <a
+                    key={photo.id}
+                    href={photo.drive_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={`${new Date(photo.liberated_at).toLocaleDateString("es-EC")} · ${photo.liberated_by_name || ""}`}
+                    className="rounded-lg overflow-hidden border border-slate-200 hover:border-blue-400 transition block"
+                  >
+                    {photo.drive_url ? (
+                      <img
+                        src={photo.drive_url}
+                        alt="Liberation photo"
+                        className="w-full h-20 object-cover"
+                        onError={(e) => { e.target.style.display = "none"; }}
+                      />
+                    ) : (
+                      <div className="w-full h-20 bg-slate-100 flex items-center justify-center text-slate-400 text-xs">
+                        Sin preview
+                      </div>
+                    )}
+                    <p className="text-[9px] text-slate-500 px-1.5 py-1 truncate">
+                      {new Date(photo.liberated_at).toLocaleDateString("es-EC")}
+                    </p>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-100 bg-slate-50">
+          <Button type="button" variant="secondary" onClick={() => setShowLiberateModal(false)}>
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            icon={FiCheck}
+            disabled={saving || liberateForm.photoFiles.length < 2}
+            onClick={doLiberateAsset}
+          >
+            {saving ? "Procesando..." : "Generar acta de retiro"}
           </Button>
         </div>
       </Modal>

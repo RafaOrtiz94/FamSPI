@@ -35,6 +35,7 @@ router.get("/ats/xml", requireRole(FINANCE_REVIEWER_ROLES), controller.atsXml);
 router.get("/", controller.list);
 router.post("/", controller.upsert);
 router.patch("/:id/status", requireRole(FINANCE_REVIEWER_ROLES), controller.updateStatus);
+router.patch("/:id/approve-segment", requireRole([...FINANCE_REVIEWER_ROLES, "talento_humano", "jefe_talento_humano"]), controller.approveSegment);
 router.patch("/:id/workflow", controller.updateWorkflowOperational);
 router.post("/config/zones", requireRole(["finanzas", "financiero", "admin", "administrador", "gerencia_general"]), controller.upsertZone);
 router.post("/config/fixed-profiles", requireRole(["finanzas", "financiero", "admin", "administrador", "gerencia_general"]), controller.upsertFixedProfile);
@@ -46,6 +47,7 @@ router.post("/sync-sri", controller.syncSri);
 router.post("/:id/invoices/xml", controller.uploadInvoiceXml);
 router.post("/:id/invoices/zip", controller.uploadInvoiceZip);
 router.post("/:id/invoices/txt", controller.uploadInvoiceTxt);
+router.post("/:id/invoices/txt/preview", controller.previewInvoiceTxt);
 router.get("/:id/invoices", controller.listInvoices);
 router.patch("/invoices/:invoiceId", requireRole(FINANCE_REVIEWER_ROLES), controller.patchInvoice);
 router.delete("/invoices/:invoiceId", controller.deleteInvoice);
@@ -61,5 +63,8 @@ router.delete("/invoices/manual/:noteId", controller.deleteManualNote);
 router.post("/:id/purchases-no-invoice", controller.createPurchaseNoInvoice);
 router.get("/:id/purchases-no-invoice", controller.listPurchasesNoInvoice);
 router.patch("/purchases/:id/approve", requireRole([...FINANCE_REVIEWER_ROLES, "talento_humano", "jefe_talento_humano"]), controller.approvePurchaseNoInvoice);
+
+// Envio a revision por el propio solicitante
+router.post("/:id/submit-review", controller.submitForReview);
 
 module.exports = router;

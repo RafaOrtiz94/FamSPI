@@ -1,136 +1,336 @@
 #!/usr/bin/env node
+"use strict";
+
 /**
- * Script para limpiar datos de prueba del usuario rafael.ortiz@fam-project.com
- * Borra: actas, asignaciones y eventos relacionados
- * Mantiene: los equipos (son reales)
+ * Limpia datos de pruebas E2E del usuario Rafael Ortiz.
+ *
+ * Alcance:
+ * - Entregas a colaboradores: sesiones, entregas, actas, items, eventos, renovaciones.
+ * - TI: actas, items, asignaciones, eventos y docs financieros de prueba asociados al usuario.
+ * - Estado actual de activos TI asignados al usuario.
+ * - Tareas de offboarding derivadas de pruebas.
+ * - Flags de onboarding afectados por entregas / TI.
+ *
+ * Mantiene:
+ * - Catálogos.
+ * - Usuarios.
+ * - Activos TI reales; solo revierte su asignación actual si apunta al usuario objetivo.
  */
 
-const { Pool } = require('pg');
-require('dotenv').config();
+const { Pool } = require("pg");
+const { getDbConfig } = require("./scripts/dbConnection");
 
-// Use correct DATABASE_URL from Neon
-const DATABASE_URL = 'postgresql://neondb_owner:npg_W12CVSvHJEsA@ep-wispy-moon-aqszgsal-pooler.c-8.us-east-1.aws.neon.tech/FamSPI?sslmode=require&channel_binding=require';
+const TARGET_EMAIL = process.env.CLEANUP_USER_EMAIL || "rafael.ortiz@fam-project.com";
+const RESET_ONBOARDING_FLAGS = [
+  "uniformes_entregados",
+  "epp_entregados",
+  "herramientas_trabajo_entregadas",
+  "logistica_entregada",
+  "acta_entrega_equipos_comunicacion",
+  "computadora_entregada",
+  "celular_entregado",
+  "acta_descargo_herramientas",
+];
 
-console.log('📡 Conectando a base de datos FamSPI...');
+const pool = new Pool(getDbConfig());
 
-const pool = new Pool({
-  connectionString: DATABASE_URL,
-});
+function toInt(value) {
+  return Number.parseInt(value, 10) || 0;
+}
+
+async function fetchUser(client) {
+  const { rows } = await client.query(
+    `SELECT id, email, fullname
+       FROM public.users
+      WHERE email = $1
+      LIMIT 1`,
+    [TARGET_EMAIL],
+  );
+  return rows[0] || null;
+}
+
+async function fetchCleanupScope(client, userId) {
+  const collabSessions = await client.query(
+    `SELECT id
+       FROM public.collab_delivery_sessions
+      WHERE user_id = $1 OR created_by = $1
+      ORDER BY id`,
+    [userId],
+  );
+
+  const collabDeliveries = await client.query(
+    `SELECT id
+       FROM public.collab_deliveries
+      WHERE user_id = $1 OR created_by = $1
+      ORDER BY id`,
+    [userId],
+  );
+
+  const collabActas = await client.query(
+    `SELECT id
+       FROM public.collab_delivery_actas
+      WHERE recipient_user_id = $1
+         OR generated_by = $1
+         OR delivery_id IN (
+              SELECT id FROM public.collab_deliveries WHERE user_id = $1 OR created_by = $1
+            )
+         OR session_id IN (
+              SELECT id FROM public.collab_delivery_sessions WHERE user_id = $1 OR created_by = $1
+            )
+      ORDER BY id`,
+    [userId],
+  );
+
+  const tiAssignments = await client.query(
+    `SELECT id, asset_id
+       FROM public.ti_asset_assignments
+      WHERE assigned_to_user_id = $1
+         OR previous_user_id = $1
+         OR created_by = $1
+      ORDER BY id`,
+    [userId],
+  );
+
+  const tiActas = await client.query(
+    `SELECT id, asset_id
+       FROM public.ti_asset_actas
+      WHERE recipient_user_id = $1
+         OR previous_user_id = $1
+         OR generated_by = $1
+      ORDER BY id`,
+    [userId],
+  );
+
+  const tiCurrentAssets = await client.query(
+    `SELECT id
+       FROM public.ti_assets
+      WHERE assigned_to_user_id = $1
+        AND active = true
+      ORDER BY id`,
+    [userId],
+  );
+
+  const tiFinancialDocs = await client.query(
+    `SELECT id
+       FROM public.ti_asset_financial_docs
+      WHERE assigned_user_id = $1
+         OR uploaded_by = $1
+      ORDER BY id`,
+    [userId],
+  );
+
+  const assetIds = new Set();
+  tiAssignments.rows.forEach((row) => row.asset_id && assetIds.add(Number(row.asset_id)));
+  tiActas.rows.forEach((row) => row.asset_id && assetIds.add(Number(row.asset_id)));
+  tiCurrentAssets.rows.forEach((row) => row.id && assetIds.add(Number(row.id)));
+
+  return {
+    collabSessionIds: collabSessions.rows.map((row) => Number(row.id)),
+    collabDeliveryIds: collabDeliveries.rows.map((row) => Number(row.id)),
+    collabActaIds: collabActas.rows.map((row) => Number(row.id)),
+    tiAssignmentIds: tiAssignments.rows.map((row) => Number(row.id)),
+    tiActaIds: tiActas.rows.map((row) => Number(row.id)),
+    tiAssetIds: [...assetIds],
+    tiFinancialDocIds: tiFinancialDocs.rows.map((row) => Number(row.id)),
+  };
+}
+
+async function deleteByIds(client, table, idColumn, ids) {
+  if (!ids.length) return 0;
+  const { rowCount } = await client.query(
+    `DELETE FROM ${table} WHERE ${idColumn} = ANY($1::bigint[])`,
+    [ids],
+  );
+  return rowCount;
+}
 
 async function cleanupRafaelData() {
   const client = await pool.connect();
   try {
-    console.log('🔍 Buscando usuario rafael.ortiz@fam-project.com...');
-
-    // 1. Encontrar el user_id
-    const userResult = await client.query(
-      `SELECT id, email, fullname FROM public.users WHERE email = $1`,
-      ['rafael.ortiz@fam-project.com']
-    );
-
-    if (!userResult.rows.length) {
-      console.log('❌ Usuario no encontrado');
+    console.log(`Buscando usuario objetivo: ${TARGET_EMAIL}`);
+    const user = await fetchUser(client);
+    if (!user) {
+      console.log("Usuario no encontrado. No se realizó ninguna limpieza.");
       return;
     }
 
-    const userId = userResult.rows[0].id;
-    const userName = userResult.rows[0].fullname || userResult.rows[0].email;
-    console.log(`✓ Usuario encontrado: ${userName} (ID: ${userId})`);
+    const userId = Number(user.id);
+    console.log(`Usuario encontrado: ${user.fullname || user.email} (ID: ${userId})`);
 
-    // 2. Contar actas creadas por este usuario
-    const actasResult = await client.query(
-      `SELECT COUNT(*) as count FROM public.ti_asset_actas WHERE generated_by = $1`,
-      [userId]
+    const scope = await fetchCleanupScope(client, userId);
+    console.log("Resumen previo:");
+    console.log(JSON.stringify({
+      collab_sessions: scope.collabSessionIds.length,
+      collab_deliveries: scope.collabDeliveryIds.length,
+      collab_actas: scope.collabActaIds.length,
+      ti_assignments: scope.tiAssignmentIds.length,
+      ti_actas: scope.tiActaIds.length,
+      ti_assets_to_release: scope.tiAssetIds.length,
+      ti_financial_docs: scope.tiFinancialDocIds.length,
+    }, null, 2));
+
+    await client.query("BEGIN");
+
+    const summary = {};
+
+    summary.collab_delivery_docs = scope.collabDeliveryIds.length
+      ? (await client.query(
+          `DELETE FROM public.collab_delivery_docs
+            WHERE delivery_id = ANY($1::bigint[])`,
+          [scope.collabDeliveryIds],
+        )).rowCount
+      : 0;
+
+    summary.collab_renewal_schedule = scope.collabDeliveryIds.length
+      ? (await client.query(
+          `DELETE FROM public.collab_renewal_schedule
+            WHERE delivery_id = ANY($1::bigint[])`,
+          [scope.collabDeliveryIds],
+        )).rowCount
+      : 0;
+
+    summary.collab_delivery_events = scope.collabDeliveryIds.length
+      ? (await client.query(
+          `DELETE FROM public.collab_delivery_events
+            WHERE delivery_id = ANY($1::bigint[])`,
+          [scope.collabDeliveryIds],
+        )).rowCount
+      : 0;
+
+    summary.collab_delivery_actas_items = await deleteByIds(
+      client,
+      "public.collab_delivery_actas_items",
+      "acta_id",
+      scope.collabActaIds,
     );
-    const actasCount = parseInt(actasResult.rows[0].count);
-    console.log(`\n📋 Actas creadas por ${userName}: ${actasCount}`);
 
-    // 3. Contar asignaciones hechas por este usuario
-    const assignResult = await client.query(
-      `SELECT COUNT(*) as count FROM public.ti_asset_assignments WHERE created_by = $1`,
-      [userId]
+    summary.collab_delivery_actas = await deleteByIds(
+      client,
+      "public.collab_delivery_actas",
+      "id",
+      scope.collabActaIds,
     );
-    const assignCount = parseInt(assignResult.rows[0].count);
-    console.log(`📌 Asignaciones hechas por ${userName}: ${assignCount}`);
 
-    // 4. Contar eventos creados
-    const eventsResult = await client.query(
-      `SELECT COUNT(*) as count FROM public.ti_asset_events WHERE created_by = $1`,
-      [userId]
+    summary.collab_deliveries = await deleteByIds(
+      client,
+      "public.collab_deliveries",
+      "id",
+      scope.collabDeliveryIds,
     );
-    const eventsCount = parseInt(eventsResult.rows[0].count);
-    console.log(`📊 Eventos creados por ${userName}: ${eventsCount}`);
 
-    console.log('\n⚠️  Se procederá a ELIMINAR estos registros...\n');
-
-    // Iniciar transacción
-    await client.query('BEGIN');
-
-    // 5. Obtener IDs de actas a eliminar
-    const actasToDelete = await client.query(
-      `SELECT id FROM public.ti_asset_actas WHERE generated_by = $1`,
-      [userId]
+    summary.collab_delivery_sessions = await deleteByIds(
+      client,
+      "public.collab_delivery_sessions",
+      "id",
+      scope.collabSessionIds,
     );
-    const actaIds = actasToDelete.rows.map(r => r.id);
 
-    // 6. Eliminar items de actas
-    let itemsCount = 0;
-    if (actaIds.length) {
-      const deleteItems = await client.query(
-        `DELETE FROM public.ti_asset_actas_items WHERE acta_id = ANY($1)`,
-        [actaIds]
+    summary.offboarding_tasks = (
+      await client.query(
+        `DELETE FROM public.offboarding_tasks
+          WHERE user_id = $1
+            AND (
+              task_key LIKE 'collab\_%' ESCAPE '\'
+              OR task_key IN ('ti_assets_returned', 'salida_equipos')
+            )`,
+        [userId],
+      )
+    ).rowCount;
+
+    summary.ti_asset_actas_items = await deleteByIds(
+      client,
+      "public.ti_asset_actas_items",
+      "acta_id",
+      scope.tiActaIds,
+    );
+
+    summary.ti_asset_financial_docs = await deleteByIds(
+      client,
+      "public.ti_asset_financial_docs",
+      "id",
+      scope.tiFinancialDocIds,
+    );
+
+    summary.ti_asset_actas = await deleteByIds(
+      client,
+      "public.ti_asset_actas",
+      "id",
+      scope.tiActaIds,
+    );
+
+    summary.ti_asset_assignments = await deleteByIds(
+      client,
+      "public.ti_asset_assignments",
+      "id",
+      scope.tiAssignmentIds,
+    );
+
+    summary.ti_asset_events = (
+      await client.query(
+        `DELETE FROM public.ti_asset_events
+          WHERE created_by = $1`,
+        [userId],
+      )
+    ).rowCount;
+
+    summary.ti_assets_released = (
+      await client.query(
+        `UPDATE public.ti_assets
+            SET status = 'available',
+                assigned_to_user_id = NULL,
+                assigned_at = NULL,
+                updated_at = now()
+          WHERE assigned_to_user_id = $1`,
+        [userId],
+      )
+    ).rowCount;
+
+    if (RESET_ONBOARDING_FLAGS.length) {
+      const profileResult = await client.query(
+        `SELECT profile
+           FROM public.collaborator_profiles
+          WHERE user_id = $1
+          LIMIT 1`,
+        [userId],
       );
-      itemsCount = deleteItems.rowCount;
-      console.log(`🗑️  Eliminadas ${deleteItems.rowCount} filas de ti_asset_actas_items`);
+
+      if (profileResult.rows.length) {
+        const profile = profileResult.rows[0].profile || {};
+        const onboarding = { ...(profile.onboarding || {}) };
+        RESET_ONBOARDING_FLAGS.forEach((flag) => {
+          onboarding[flag] = false;
+        });
+        profile.onboarding = onboarding;
+
+        await client.query(
+          `UPDATE public.collaborator_profiles
+              SET profile = $2::jsonb,
+                  updated_at = now()
+            WHERE user_id = $1`,
+          [userId, JSON.stringify(profile)],
+        );
+        summary.collaborator_profile_flags_reset = RESET_ONBOARDING_FLAGS.length;
+      } else {
+        summary.collaborator_profile_flags_reset = 0;
+      }
     }
 
-    // 7. Eliminar actas
-    const deleteActas = await client.query(
-      `DELETE FROM public.ti_asset_actas WHERE generated_by = $1`,
-      [userId]
-    );
-    console.log(`🗑️  Eliminadas ${deleteActas.rowCount} actas`);
+    await client.query("COMMIT");
 
-    // 8. Eliminar asignaciones
-    const deleteAssign = await client.query(
-      `DELETE FROM public.ti_asset_assignments WHERE created_by = $1`,
-      [userId]
-    );
-    console.log(`🗑️  Eliminadas ${deleteAssign.rowCount} asignaciones`);
-
-    // 9. Eliminar eventos
-    const deleteEvents = await client.query(
-      `DELETE FROM public.ti_asset_events WHERE created_by = $1`,
-      [userId]
-    );
-    console.log(`🗑️  Eliminados ${deleteEvents.rowCount} eventos`);
-
-    // Confirmar transacción
-    await client.query('COMMIT');
-
-    console.log('\n✅ Limpieza completada exitosamente');
-    console.log(`\n📊 Resumen:`);
-    console.log(`   - Actas eliminadas: ${deleteActas.rowCount}`);
-    console.log(`   - Items de actas eliminados: ${itemsCount}`);
-    console.log(`   - Asignaciones eliminadas: ${deleteAssign.rowCount}`);
-    console.log(`   - Eventos eliminados: ${deleteEvents.rowCount}`);
-    console.log(`\n✓ Los equipos se mantuvieron intactos (son datos reales)`);
-
+    console.log("Limpieza completada.");
+    console.log(JSON.stringify(summary, null, 2));
   } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('❌ Error durante la limpieza:', error.message);
-    process.exit(1);
+    await client.query("ROLLBACK");
+    console.error("Error durante la limpieza:", error.message);
+    console.error(error.stack);
+    process.exitCode = 1;
   } finally {
     client.release();
     await pool.end();
   }
 }
 
-// Ejecutar
-cleanupRafaelData().then(() => {
-  console.log('\n🎉 Script finalizado');
-  process.exit(0);
-}).catch((error) => {
-  console.error('Error fatal:', error);
+cleanupRafaelData().catch((error) => {
+  console.error("Error fatal:", error);
   process.exit(1);
 });

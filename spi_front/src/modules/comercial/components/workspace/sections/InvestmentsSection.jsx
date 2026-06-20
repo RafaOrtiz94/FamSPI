@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { FiCheckCircle, FiClock, FiSave } from "react-icons/fi";
+import { FiCheckCircle, FiClock, FiPlus, FiSave } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useParams } from "react-router-dom";
 import { useUI } from "../../../../../core/ui/UIContext";
@@ -53,6 +53,7 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
   submitting: false,
  });
  const [confirmCartModalOpen, setConfirmCartModalOpen] = useState(false);
+ const [isEditing, setIsEditing] = useState(false);
 
  const canEditBase = permissions.canEdit !== false && ownership?.canUserEdit !== false;
  const canEdit = canEditBase && !cartStatus?.confirmed;
@@ -235,6 +236,7 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
 
  setItems(workingItems);
  setDirtyMap({});
+ setIsEditing(false);
  showToast(`Se guardaron ${dirtyItemsToSave.length} inversiones del carrito`, "success");
  } catch (err) {
  console.error("Error saving investment cart", err);
@@ -243,6 +245,11 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  setSavingCart(false);
  }
  };
+
+const handleCancelEdit = () => {
+ setIsEditing(false);
+ loadCatalog();
+};
 
 const handleConfirmCart = async () => {
 if (!bcId || !canEdit) return;
@@ -323,7 +330,7 @@ return;
  const pendingCreate = isTempId(item.id);
  const ownerEmail = String(item?.owner_email || "").trim().toLowerCase();
  const isOwner = !ownerEmail || ownerEmail === currentUserEmail;
- const canModifySelectionAndQty = canEdit && isOwner;
+ const canModifySelectionAndQty = isEditing && isOwner;
  return (
  <div key={item.id} className="p-4 flex flex-col gap-3 border-b last:border-b-0">
  <div className="flex items-start justify-between gap-3">
@@ -418,7 +425,7 @@ return;
  <input
  value={item.characteristics || ""}
  onChange={(e) => updateItem(item.id, { characteristics: e.target.value })}
- disabled={!canEdit || !item.selected || savingCart}
+ disabled={!isEditing || !item.selected || savingCart}
  placeholder="Especificaciones solicitadas"
  className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50"
  />
@@ -429,7 +436,7 @@ return;
  <input
  value={item.notes || ""}
  onChange={(e) => updateItem(item.id, { notes: e.target.value })}
- disabled={!canEdit || !item.selected || savingCart}
+ disabled={!isEditing || !item.selected || savingCart}
  placeholder="Detalles adicionales"
  className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50"
  />
@@ -479,27 +486,6 @@ return;
  {pendingCreateCount} nuevos por crear
  </div>
  )}
- {canEdit && (
- <>
- <button
- type="button"
- onClick={() => setConfirmCartModalOpen(true)}
- disabled={savingCart || dirtyCount > 0}
- className="inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-full bg-indigo-600 text-white text-xs sm:text-sm font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500 transition-colors"
- >
- Confirmar carrito
- </button>
- <button
-type="button"
-onClick={handleSaveCart}
-disabled={savingCart || dirtyCount === 0}
-className="inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-full bg-blue-600 text-white text-xs sm:text-sm font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500 transition-colors"
->
-<FiSave size={13} />
-{savingCart ? "Guardando..." : "Guardar cambios"}
-</button>
- </>
- )}
  </div>
  </div>
 
@@ -513,8 +499,8 @@ className="inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-ful
 
  <div className="bg-white border border-gray-100 rounded-2xl p-4 sm:p-5 space-y-3">
  <div>
- <h3 className="text-sm font-semibold text-gray-900">Agregar inversion no listada</h3>
- <p className="text-xs text-gray-500">Si no aparece en el catalogo, puedes crearla y agregarla al carrito.</p>
+ <h3 className="text-sm font-semibold text-gray-900">Agregar inversión no listada</h3>
+ <p className="text-xs text-gray-500">Si no aparece en el catálogo, puedes crearla y agregarla al carrito.</p>
  </div>
  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
  <div className="flex flex-col gap-2">
@@ -523,8 +509,8 @@ className="inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-ful
  value={newName}
  onChange={(e) => setNewName(e.target.value)}
  placeholder="Ej: Control externo"
- className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
- disabled={!canEdit || savingCart}
+ className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50 disabled:text-gray-400"
+ disabled={!isEditing || savingCart}
  />
  </div>
  <div className="flex flex-col gap-2">
@@ -533,8 +519,8 @@ className="inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-ful
  value={newCategory}
  onChange={(e) => setNewCategory(e.target.value)}
  placeholder="Ej: Tecnologia"
- className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
- disabled={!canEdit || savingCart}
+ className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50 disabled:text-gray-400"
+ disabled={!isEditing || savingCart}
  />
  </div>
  <div className="flex flex-col gap-2">
@@ -545,8 +531,8 @@ className="inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-ful
  value={newQuantity}
  onChange={(e) => setNewQuantity(e.target.value)}
  placeholder="0"
- className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
- disabled={!canEdit || savingCart}
+ className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50 disabled:text-gray-400"
+ disabled={!isEditing || savingCart}
  />
  </div>
  <div className="flex flex-col gap-2 md:col-span-2">
@@ -555,8 +541,8 @@ className="inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-ful
  value={newCharacteristics}
  onChange={(e) => setNewCharacteristics(e.target.value)}
  placeholder="Especificaciones"
- className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
- disabled={!canEdit || savingCart}
+ className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50 disabled:text-gray-400"
+ disabled={!isEditing || savingCart}
  />
  </div>
  <div className="flex flex-col gap-2 md:col-span-2">
@@ -565,8 +551,8 @@ className="inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-ful
  value={newNotes}
  onChange={(e) => setNewNotes(e.target.value)}
  placeholder="Detalles adicionales"
- className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
- disabled={!canEdit || savingCart}
+ className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50 disabled:text-gray-400"
+ disabled={!isEditing || savingCart}
  />
  </div>
  </div>
@@ -574,10 +560,11 @@ className="inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-ful
  <button
  type="button"
  onClick={handleCreateCustomInvestment}
- disabled={!canEdit || savingCart}
- className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500"
+ disabled={!isEditing || savingCart}
+ className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500"
  >
- Agregar al carrito
+ <FiPlus size={15} />
+ Agregar inversión no listada
  </button>
  </div>
  </div>
@@ -638,6 +625,50 @@ className="inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-ful
  </>
  )}
  </div>
+
+ {canEdit && (
+ <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-100">
+ <p className="text-xs text-gray-400 font-medium">
+  {isEditing ? "Guarda los cambios pendientes antes de confirmar el carrito." : "Sección en modo solo lectura."}
+ </p>
+ {isEditing ? (
+  <div className="flex flex-wrap gap-2 sm:justify-end">
+  <button
+  type="button"
+  onClick={handleCancelEdit}
+  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all"
+  >
+  Cancelar
+  </button>
+  <button
+  type="button"
+  onClick={() => setConfirmCartModalOpen(true)}
+  disabled={savingCart || dirtyCount > 0}
+  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500 transition-colors"
+  >
+  Confirmar carrito
+  </button>
+  <button
+  type="button"
+  onClick={handleSaveCart}
+  disabled={savingCart || dirtyCount === 0}
+  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500 transition-colors"
+  >
+  <FiSave size={16} />
+  {savingCart ? "Guardando..." : "Guardar cambios"}
+  </button>
+  </div>
+ ) : (
+  <button
+  type="button"
+  onClick={() => setIsEditing(true)}
+  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 bg-white text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all w-full sm:w-auto"
+  >
+  Editar
+  </button>
+ )}
+ </div>
+ )}
 
  <Modal
  open={increaseModal.open}

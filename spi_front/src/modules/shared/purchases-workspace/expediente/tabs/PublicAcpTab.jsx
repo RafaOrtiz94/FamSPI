@@ -11,6 +11,7 @@ import FileUploadZone from '../../../../../core/ui/components/FileUploadZone';
 import {
   getEquipmentPurchaseApiError,
   registerPublicPortalOutcome,
+  requestPublicPurchaseInspection,
   requestProforma,
   reserveEquipment,
   renewReservation,
@@ -334,6 +335,8 @@ const PublicAcpTab = ({ purchase, type, userRoles, refresh }) => {
   const [proformaFile, setProformaFile] = useState(null);
   const [signedProformaFile, setSignedProformaFile] = useState(null);
   const [includesStarterKit, setIncludesStarterKit] = useState(Boolean(purchase?.includes_starter_kit));
+  const [inspectionMinDate, setInspectionMinDate] = useState(purchase?.inspection_min_date ? String(purchase.inspection_min_date).slice(0, 10) : '');
+  const [inspectionMaxDate, setInspectionMaxDate] = useState(purchase?.inspection_max_date ? String(purchase.inspection_max_date).slice(0, 10) : '');
   const [checklistLoading, setChecklistLoading] = useState(false);
   const [portalChecklistEvidenceUrl, setPortalChecklistEvidenceUrl] = useState('');
   const [portalChecklistDueDate, setPortalChecklistDueDate] = useState('');
@@ -417,10 +420,32 @@ const PublicAcpTab = ({ purchase, type, userRoles, refresh }) => {
     setSignedProformaFile(null);
   });
 
+  const handleRequestInspection = () => runProformaAction('request_inspection', async () => {
+    if (!inspectionMinDate || !inspectionMaxDate) {
+      throw new Error('Define la ventana minima y maxima para la inspeccion operativa');
+    }
+    await requestPublicPurchaseInspection(purchase.id, {
+      inspection_min_date: inspectionMinDate,
+      inspection_max_date: inspectionMaxDate,
+      includes_starter_kit: includesStarterKit,
+      expected_updated_at: purchase.updated_at,
+    });
+  });
+
   const checklistState    = purchase?.checklist_state || {};
   const checklistItems    = Array.isArray(checklistState.items) ? checklistState.items : [];
   const checklistPending  = Array.isArray(checklistState.pending) ? checklistState.pending : [];
   const requiredKeys      = Array.isArray(checklistState.requirements) ? checklistState.requirements : [];
+  const linkedBcId = purchase?.extra?.auto_business_case_id || purchase?.business_case_id || null;
+  const hasLinkedBc = Boolean(linkedBcId);
+  const publicOutcomeWon = String(selectedResult || purchase?.public_portal_outcome || '').toLowerCase() === 'won';
+  const hasSignedProforma = Boolean(
+    purchase?.signed_proforma_file_id ||
+    purchase?.signed_proforma_uploaded_at ||
+    purchase?.signed_proforma_file_link
+  );
+  const inspectionRequested = Boolean(purchase?.inspection_request_id);
+  const canRequestInspection = hasSignedProforma && publicOutcomeWon && ['waiting_signed_proforma', 'pending_contract'].includes(purchase?.status || '');
 
   const toggleChecklistItem = async (item) => {
     setChecklistLoading(true);
@@ -533,7 +558,7 @@ const PublicAcpTab = ({ purchase, type, userRoles, refresh }) => {
               <div className="rounded-xl border border-slate-200 p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <FiUpload className="text-operative-green" size={16} />
-                  <h4 className="text-sm font-medium text-ink-slate">Proforma firmada + inspección</h4>
+                  <h4 className="text-sm font-medium text-ink-slate">Proforma firmada + inspección operativa</h4>
                 </div>
                 <div className="space-y-3">
                   <RoleGatedAction allowedRoles={['acp_comercial']} userRoles={userRoles}>
@@ -550,9 +575,79 @@ const PublicAcpTab = ({ purchase, type, userRoles, refresh }) => {
                       uploadedLabel="Proforma firmada"
                     />
                   </RoleGatedAction>
-                  <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
-                    <p className="text-xs font-medium text-sky-800">Inspeccion de ambiente en BC</p>
-                    <p className="text-[11px] text-sky-700 mt-1">Para compras publicas, la evaluacion de ambiente se gestiona en el Business Case vinculado, no en este proceso de compra.</p>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
+                    <div>
+                      <p className="text-xs font-medium text-slate-800">Inspeccion operativa de compra publica</p>
+                      <p className="text-[11px] text-slate-600 mt-1">
+                        Esta solicitud F.ST-20 pertenece al proceso operativo de la compra publica.
+                        {hasLinkedBc ? ' Si existe un Business Case vinculado, su inspeccion por costos o factibilidad es independiente.' : ''}
+                      </p>
+                    </div>
+
+                    {inspectionRequested ? (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+                        <p className="font-semibold">Inspeccion operativa solicitada</p>
+                        <p className="mt-1">
+                          Solicitud #{purchase?.inspection_request_id || '—'} · Ventana {purchase?.inspection_min_date || 'Pendiente'} a {purchase?.inspection_max_date || 'Pendiente'}
+                        </p>
+                        {purchase?.extra?.inspection_acta_link && (
+                          <a
+                            href={purchase.extra.inspection_acta_link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 mt-2 text-action-blue hover:underline font-medium"
+                          >
+                            <FiFileText size={12} />
+                            Ver F.ST-20 operativo
+                          </a>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[11px] font-medium text-slate-700">Fecha minima</span>
+                            <input
+                              type="date"
+                              value={inspectionMinDate}
+                              onChange={(e) => setInspectionMinDate(e.target.value)}
+                              className="min-h-10 rounded-xl border border-slate-200 px-3 text-xs"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-[11px] font-medium text-slate-700">Fecha maxima</span>
+                            <input
+                              type="date"
+                              value={inspectionMaxDate}
+                              onChange={(e) => setInspectionMaxDate(e.target.value)}
+                              min={inspectionMinDate || undefined}
+                              className="min-h-10 rounded-xl border border-slate-200 px-3 text-xs"
+                            />
+                          </label>
+                        </div>
+
+                        {canRequestInspection ? (
+                          <RoleGatedAction allowedRoles={['acp_comercial']} userRoles={userRoles}>
+                            <button
+                              type="button"
+                              onClick={handleRequestInspection}
+                              disabled={proformaLoading === 'request_inspection'}
+                              className="w-full min-h-11 rounded-xl bg-action-blue text-white text-sm font-medium disabled:opacity-50 active:scale-[0.97]"
+                            >
+                              {proformaLoading === 'request_inspection' ? 'Solicitando...' : 'Solicitar inspeccion operativa'}
+                            </button>
+                          </RoleGatedAction>
+                        ) : (
+                          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800">
+                            {!publicOutcomeWon
+                              ? 'Disponible cuando el resultado SOCE sea Ganado.'
+                              : !hasSignedProforma
+                                ? 'Disponible despues de subir la proforma firmada.'
+                                : 'Disponible cuando el expediente entre a la etapa contractual habilitada para inspeccion.'}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <label className="flex items-center gap-2 text-xs text-slate-700">
                     <input type="checkbox" checked={includesStarterKit} onChange={(e) => setIncludesStarterKit(e.target.checked)} />

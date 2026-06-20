@@ -156,6 +156,7 @@ const getUsers = async (req, res) => {
     const roleFilter = normalizeRole(req.query?.role);
     const departmentId = parseDepartmentId(req.query?.department_id);
     const activeFilter = parseBoolean(req.query?.active);
+    const forSigners = req.query?.for_signers === "true" || req.query?.for_signers === "1";
 
     if (Number.isNaN(departmentId)) {
       return res.status(400).json({ ok: false, message: "Departamento inválido" });
@@ -189,14 +190,27 @@ const getUsers = async (req, res) => {
     if (activeFilter !== null) {
       values.push(activeFilter);
       filters.push(`COALESCE(u.active, true) = $${values.length}`);
-    } else if (!canSeeFullUsers) {
+    } else if (!canSeeFullUsers || forSigners) {
       filters.push("COALESCE(u.active, true) = true");
+    }
+
+    // for_signers: excluir colaboradores en proceso de desvinculacion o con estatus pasivo
+    const joins = ["LEFT JOIN departments d ON u.department_id = d.id"];
+    if (forSigners) {
+      joins.push("LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id");
+      joins.push(`LEFT JOIN offboarding_processes op ON op.user_id = u.id`);
+      const PASSIVE = ["pasivo", "desvinculado", "inactivo", "en_desvinculacion"];
+      values.push(PASSIVE);
+      filters.push(
+        `LOWER(TRIM(COALESCE(cp.profile->'laboral'->>'estatus_empleado', 'activo'))) <> ALL($${values.length}::text[])`
+      );
+      filters.push("op.user_id IS NULL");
     }
 
     const { rows } = await db.query(`
       SELECT ${selectClause}
       FROM users u
-      LEFT JOIN departments d ON u.department_id = d.id
+      ${joins.join(" ")}
       ${filters.length ? `WHERE ${filters.join(" AND ")}` : ""}
       ORDER BY fullname ASC
     `, values);

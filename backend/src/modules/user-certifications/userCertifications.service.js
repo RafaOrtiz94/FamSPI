@@ -1,10 +1,21 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
-const { uploadFileToDrive, ensureFolder } = require("../../utils/drive");
+const {
+  uploadFileToDrive,
+  ensureFolderPath,
+  getFileMetadata,
+  moveFileToFolder,
+} = require("../../utils/drive");
 const { logAction } = require("../../utils/audit");
 const crypto = require("crypto");
 const { PDFDocument: PdfLibDocument, StandardFonts, rgb } = require("pdf-lib");
 const QRCode = require("qrcode");
+const {
+  hasCollaboratorQualificationsTable,
+  listQualificationsByUserId,
+  softDeleteQualificationByLegacyId,
+  syncLegacyCertificationToQualification,
+} = require("../shared/collaboratorQualifications");
 
 const ALLOWED_MIME_TYPES = new Set([
   "application/pdf",
@@ -15,19 +26,85 @@ const ALLOWED_MIME_TYPES = new Set([
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
-const resolveUserCertificationsFolder = async (userEmail) => {
-  const base = process.env.DRIVE_PROFILE_FOLDER_ID ||
+const resolveCertificationsDriveRootId = () =>
+  process.env.DRIVE_PROFILE_FOLDER_ID ||
     process.env.DRIVE_DOCS_FOLDER_ID ||
     process.env.DRIVE_ROOT_FOLDER_ID ||
     process.env.DRIVE_FOLDER_ID;
 
+const resolveUserCertificationsFolder = async (userEmail) => {
+  const base = resolveCertificationsDriveRootId();
   if (!base) return null;
 
-  const usersRoot = await ensureFolder("Usuarios", base);
   const userFolderName = userEmail || `user-na`;
-  const userFolder = await ensureFolder(userFolderName, usersRoot.id);
-  const certsFolder = await ensureFolder("Certificaciones", userFolder.id);
-  return certsFolder.id;
+  const certsFolder = await ensureFolderPath(
+    ["Usuarios", userFolderName, "Certificaciones"],
+    base,
+  );
+  return certsFolder?.id || null;
+};
+
+const repairCertificationDriveStorage = async ({
+  certificationId,
+  userEmail,
+  driveFileId,
+  dbExecutor = db,
+}) => {
+  if (!driveFileId || !userEmail) {
+    return { repaired: false, reason: "missing_drive_file_or_email" };
+  }
+
+  const expectedFolderId = await resolveUserCertificationsFolder(userEmail);
+  if (!expectedFolderId) {
+    return { repaired: false, reason: "missing_drive_root" };
+  }
+
+  const currentFile = await getFileMetadata(driveFileId, "id,parents,webViewLink");
+  const currentParents = Array.isArray(currentFile?.parents)
+    ? currentFile.parents.filter(Boolean)
+    : [];
+
+  if (currentParents.includes(expectedFolderId)) {
+    const updatedLink = currentFile?.webViewLink || null;
+    if (updatedLink && certificationId) {
+      await dbExecutor.query(
+        `UPDATE user_certifications
+         SET drive_folder_id = $2,
+             file_url = COALESCE($3, file_url),
+             updated_at = NOW()
+         WHERE id = $1`,
+        [certificationId, expectedFolderId, updatedLink],
+      );
+    }
+    return {
+      repaired: false,
+      reason: "already_in_expected_folder",
+      expectedFolderId,
+      fileUrl: updatedLink,
+    };
+  }
+
+  const moved = await moveFileToFolder(driveFileId, expectedFolderId);
+  const nextLink = moved?.webViewLink || currentFile?.webViewLink || null;
+
+  if (certificationId) {
+    await dbExecutor.query(
+      `UPDATE user_certifications
+       SET drive_folder_id = $2,
+           file_url = COALESCE($3, file_url),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [certificationId, expectedFolderId, nextLink],
+    );
+  }
+
+  return {
+    repaired: true,
+    expectedFolderId,
+    previousParents: currentParents,
+    currentParents: moved?.parents || [expectedFolderId],
+    fileUrl: nextLink,
+  };
 };
 
 const validateCertificationData = (data) => {
@@ -112,6 +189,63 @@ const enrichCertification = (cert = {}) => ({
   ...getCertificationLifecycle(cert),
 });
 
+const getLegacyCertificationsByUserId = async (userId, includeInactive = false) => {
+  const query = `
+    SELECT *
+    FROM user_certifications
+    WHERE user_id = $1 ${includeInactive ? "" : "AND is_active = true"}
+    ORDER BY created_at DESC
+  `;
+  const result = await db.query(query, [userId]);
+  return result.rows.map(enrichCertification);
+};
+
+const getCentralCertificationsByUserId = async (userId) => {
+  const qualificationState = await listQualificationsByUserId(userId);
+  if (!qualificationState.qualifications.length) {
+    return {
+      source: qualificationState.source,
+      certifications: [],
+      summary: summarizeCertifications([]),
+    };
+  }
+
+  const certifications = qualificationState.qualifications.map(
+    mapQualificationToCertification,
+  );
+  return {
+    source: qualificationState.source,
+    certifications,
+    summary: summarizeCertifications(certifications),
+  };
+};
+
+const getCertificationUser = async (userId) => {
+  const result = await db.query(
+    "SELECT id, fullname, email FROM users WHERE id = $1",
+    [userId],
+  );
+  return result.rows[0] || null;
+};
+
+const getCentralQualificationByDisplayedId = async (displayedId) => {
+  if (!(await hasCollaboratorQualificationsTable())) return null;
+
+  const result = await db.query(
+    `SELECT *
+     FROM collaborator_qualifications
+     WHERE id = $1
+        OR metadata->'legacy'->>'legacy_id' = $2
+     ORDER BY
+       CASE WHEN metadata->'legacy'->>'legacy_id' = $2 THEN 0 ELSE 1 END,
+       id DESC
+     LIMIT 1`,
+    [displayedId, String(displayedId)],
+  );
+
+  return result.rows[0] || null;
+};
+
 const summarizeCertifications = (certifications = []) => {
   return certifications.reduce(
     (acc, cert) => {
@@ -125,6 +259,33 @@ const summarizeCertifications = (certifications = []) => {
     },
     { total: 0, active: 0, permanent: 0, expiring_soon: 0, expired: 0 }
   );
+};
+
+const mapQualificationToCertification = (qualification = {}) => {
+  const metadata = qualification.metadata || {};
+  return enrichCertification({
+    id:
+      Number(metadata?.legacy?.legacy_id || 0) ||
+      Number(qualification.id || 0),
+    qualification_id: qualification.id,
+    user_id: qualification.user_id,
+    title: qualification.title,
+    issuer: qualification.issuer,
+    issue_date: qualification.issue_date,
+    expiry_date: qualification.expiry_date,
+    credential_type:
+      qualification.qualification_type === "third_level_title" ||
+      qualification.qualification_type === "fourth_level_title"
+        ? "title"
+        : qualification.qualification_type === "senescyt_record"
+          ? "other"
+          : "certification",
+    description: metadata?.description || null,
+    drive_file_id: qualification.drive_file_id || null,
+    file_url: qualification.drive_url || null,
+    metadata,
+    source_of_truth: "collaborator_qualifications",
+  });
 };
 
 const createCertification = async (userId, certificationData, file = null) => {
@@ -206,6 +367,11 @@ const createCertification = async (userId, certificationData, file = null) => {
   const result = await db.query(insertQuery, values);
   const certification = result.rows[0];
 
+  await syncLegacyCertificationToQualification({
+    legacyCertification: certification,
+    uploadedBy: userId,
+  });
+
   // Audit log
   await logAction({
     usuario_id: userId,
@@ -221,13 +387,17 @@ const createCertification = async (userId, certificationData, file = null) => {
 };
 
 const getUserCertifications = async (userId, includeInactive = false) => {
-  const query = `
-    SELECT * FROM user_certifications
-    WHERE user_id = $1 ${includeInactive ? '' : 'AND is_active = true'}
-    ORDER BY created_at DESC
-  `;
-  const result = await db.query(query, [userId]);
-  const certifications = result.rows.map(enrichCertification);
+  if (!includeInactive) {
+    const centralState = await getCentralCertificationsByUserId(userId);
+    if (centralState.certifications.length > 0) {
+      return {
+        certifications: centralState.certifications,
+        summary: centralState.summary,
+      };
+    }
+  }
+
+  const certifications = await getLegacyCertificationsByUserId(userId, includeInactive);
   return {
     certifications,
     summary: summarizeCertifications(certifications),
@@ -243,16 +413,10 @@ const getCertificationsByUserId = async (targetUserId, requesterUserId, requeste
     throw err;
   }
 
-  const query = `
-    SELECT uc.*, u.email, u.fullname
-    FROM user_certifications uc
-    JOIN users u ON uc.user_id = u.id
-    WHERE uc.user_id = $1 AND uc.is_active = true
-    ORDER BY uc.created_at DESC
-  `;
-
-  const result = await db.query(query, [targetUserId]);
-  const certifications = result.rows.map(enrichCertification);
+  const centralState = await getCentralCertificationsByUserId(targetUserId);
+  const certifications = centralState.certifications.length > 0
+    ? centralState.certifications
+    : await getLegacyCertificationsByUserId(targetUserId, false);
 
   // Audit access by other users
   if (requesterUserId !== targetUserId) {
@@ -274,6 +438,47 @@ const getCertificationsByUserId = async (targetUserId, requesterUserId, requeste
 };
 
 const softDeleteCertification = async (certificationId, userId, requesterRole) => {
+  const centralAllowedRoles = ['acp_comercial', 'talento_humano', 'gerencia', 'gerencia_general'];
+  const qualification = await getCentralQualificationByDisplayedId(certificationId);
+
+  if (qualification) {
+    const certification = mapQualificationToCertification(qualification);
+    if (certification.user_id !== userId && !centralAllowedRoles.includes(requesterRole)) {
+      const err = new Error("No tienes permisos para eliminar esta certificaciÃ³n");
+      err.status = 403;
+      throw err;
+    }
+
+    await db.query(
+      `UPDATE collaborator_qualifications
+       SET is_active = false,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [qualification.id]
+    );
+
+    const legacyId = qualification?.metadata?.legacy?.legacy_id || null;
+    if (legacyId) {
+      await db.query(
+        "UPDATE user_certifications SET is_active = false, updated_at = NOW() WHERE id = $1",
+        [legacyId]
+      );
+      await softDeleteQualificationByLegacyId(legacyId);
+    }
+
+    await logAction({
+      usuario_id: userId,
+      usuario_email: null,
+      rol: requesterRole,
+      modulo: "user-certifications",
+      accion: "certification_deleted",
+      descripcion: `CertificaciÃ³n eliminada: ${certification.title}`,
+      datos_anteriores: certification
+    });
+
+    return { success: true, message: "CertificaciÃ³n eliminada correctamente" };
+  }
+
   // Get certification
   const certQuery = await db.query(
     "SELECT * FROM user_certifications WHERE id = $1 AND is_active = true",
@@ -301,6 +506,7 @@ const softDeleteCertification = async (certificationId, userId, requesterRole) =
     "UPDATE user_certifications SET is_active = false, updated_at = NOW() WHERE id = $1",
     [certificationId]
   );
+  await softDeleteQualificationByLegacyId(certificationId);
 
   // Audit log
   await logAction({
@@ -853,7 +1059,7 @@ const createBulkCertifications = async (userId, bulkData, files = []) => {
           credential_type, description, drive_file_id, drive_folder_id, file_url,
           metadata, created_at, updated_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
-        RETURNING id
+        RETURNING *
       `;
 
       const values = [
@@ -871,7 +1077,13 @@ const createBulkCertifications = async (userId, bulkData, files = []) => {
       ];
 
       const result = await db.query(insertQuery, values);
-      const certificationId = result.rows[0].id;
+      const certification = result.rows[0];
+      const certificationId = certification.id;
+
+      await syncLegacyCertificationToQualification({
+        legacyCertification: certification,
+        uploadedBy: userId,
+      });
 
       results.push({
         index: i,
@@ -1015,46 +1227,18 @@ const buildProfessionalCertificationsDossier = async (userId, options = {}) => {
   const requesterUserId = options?.requesterUserId ? normalizeUserId(options.requesterUserId) : null;
   const requesterRole = String(options?.requesterRole || "").trim().toLowerCase() || null;
 
-  const { rows } = await db.query(
-    `
-      SELECT
-        u.id AS user_id,
-        u.fullname,
-        u.email,
-        uc.id,
-        uc.title,
-        uc.issuer,
-        uc.issue_date,
-        uc.expiry_date,
-        uc.credential_type,
-        uc.description,
-        uc.file_url,
-        uc.drive_file_id,
-        uc.metadata,
-        uc.created_at,
-        uc.updated_at
-      FROM users u
-      LEFT JOIN user_certifications uc
-        ON uc.user_id = u.id
-       AND uc.is_active = true
-      WHERE u.id = $1
-      ORDER BY uc.issue_date DESC NULLS LAST, uc.created_at DESC NULLS LAST
-    `,
-    [targetUserId]
-  );
-
-  if (!rows.length) {
+  const user = await getCertificationUser(targetUserId);
+  if (!user) {
     const err = new Error("Usuario no encontrado");
     err.status = 404;
     throw err;
   }
 
-  const user = {
-    id: rows[0].user_id,
-    fullname: rows[0].fullname || "Sin nombre",
-    email: rows[0].email || "",
-  };
-  const certifications = rows.filter((row) => row.id).map((row) => enrichCertification(row));
+  const centralState = await getCentralCertificationsByUserId(targetUserId);
+  const certifications = centralState.certifications.length > 0
+    ? centralState.certifications
+    : await getLegacyCertificationsByUserId(targetUserId, false);
+
   if (!certifications.length) {
     const err = new Error("El usuario no tiene certificaciones activas");
     err.status = 404;
@@ -1375,5 +1559,7 @@ module.exports = {
   softDeleteCertification,
   generateCertificationsDossier: buildProfessionalCertificationsDossier,
   generateConsolidatedCertificationsPDF: generateConsolidatedCertificationsPDFV2,
-  createBulkCertifications
+  createBulkCertifications,
+  resolveUserCertificationsFolder,
+  repairCertificationDriveStorage,
 };

@@ -15,6 +15,7 @@ export * from "./schedulesApi";
 export * from "./inventarioApi";
 export * from "./permisosApi";
 export * from "./signatureApi";
+export * from "./signatureWorkflowsApi";
 export * from "./externalCasesApi";
 export * from "./integrationsApi";
 export * from "./deliveryRequestsApi";

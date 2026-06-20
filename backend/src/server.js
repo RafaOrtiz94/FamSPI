@@ -33,6 +33,9 @@ const { startPermisosAutoCancelledJustificationJob } = require("./jobs/permisosA
 const { startPermisosApprovalEscalationJob } = require("./jobs/permisosApprovalEscalationScheduler");
 const { startPermisosJustificanteVencimientoJob } = require("./jobs/permisosJustificanteVencimientoScheduler");
 const { startExternalCaseSyncJob } = require("./jobs/externalCaseSyncScheduler");
+const { startCrmSyncJob } = require("./jobs/crmSyncScheduler");
+const { startSignatureWorkflowReminderJob } = require("./jobs/signatureWorkflowReminderScheduler");
+const { startSignatureWorkflowExpiryJob } = require("./jobs/signatureWorkflowExpiryScheduler");
 
 const PORT = Number(process.env.PORT) || 8080;
 const ENV = process.env.NODE_ENV || "development";
@@ -64,6 +67,9 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
       { name: "permisos_justificante_vencimiento", fn: startPermisosJustificanteVencimientoJob },
       { name: "db_backup", fn: startDatabaseBackupJob },
       { name: "external_case_sync", fn: startExternalCaseSyncJob },
+      { name: "crm_sync", fn: startCrmSyncJob },
+      { name: "signature_workflow_reminder", fn: startSignatureWorkflowReminderJob },
+      { name: "signature_workflow_expiry", fn: startSignatureWorkflowExpiryJob },
     ];
 
     jobs.forEach((job, index) => {

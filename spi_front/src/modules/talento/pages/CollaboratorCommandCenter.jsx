@@ -14,6 +14,8 @@ import Button from "../../../core/ui/components/Button";
 import Modal from "../../../core/ui/components/Modal";
 import {
   applicantProfileSections,
+  checklistSections as checklistSectionsTemplate,
+  documentTypes,
   profileSections,
 } from "../components/collaboratorProfileDefinitions";
 import ApplicantIntakeSummary from "../components/workspace/ApplicantIntakeSummary";
@@ -21,6 +23,13 @@ import ApplicantList from "../components/workspace/ApplicantList";
 import PersonnelRequestComments from "../components/workspace/PersonnelRequestComments";
 import PersonnelRequestProgress from "../components/workspace/PersonnelRequestProgress";
 import WorkspaceErrorBoundary from "../components/workspace/WorkspaceErrorBoundary";
+import {
+  canUploadDocumentInAccess,
+  computeChecklistCompletionBySections,
+  filterChecklistSectionsByAccess,
+  filterDocumentDefinitionsByAccess,
+  resolveTalentWorkspaceAccess,
+} from "../components/workspace/workspaceAccess";
 import CommandCenterJourneyPanel from "../components/command-center/CommandCenterJourneyPanel";
 import ActionDrawersSection from "../components/command-center/sections/ActionDrawersSection";
 import useCommandCenterState from "../hooks/useCommandCenterState";
@@ -29,6 +38,7 @@ import commandCenterProfileSchema from "../schemas/commandCenterProfileSchema";
 const PersonnelProfile   = lazy(() => import("../components/workspace/PersonnelProfile"));
 const PersonnelChecklist = lazy(() => import("../components/workspace/PersonnelChecklist"));
 const PersonnelDocuments = lazy(() => import("../components/workspace/PersonnelDocuments"));
+const PersonnelReports = lazy(() => import("../components/workspace/PersonnelReports"));
 const OffboardingWorkspace = lazy(() => import("../components/workspace/OffboardingWorkspace"));
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -41,9 +51,9 @@ const OFFBOARDING_ALLOWED_ROLES   = new Set([
 ]);
 
 const VIEWS = [
-  { key: "requests",      workspaceKey: "solicitudes",   label: "Contratación",  emptyLabel: "solicitud"      },
-  { key: "collaborators", workspaceKey: "colaboradores",  label: "Colaboradores", emptyLabel: "colaborador"    },
-  { key: "offboarding",   workspaceKey: "desvinculacion", label: "Desvinculación", emptyLabel: "desvinculación" },
+  { key: "requests",      workspaceKey: "solicitudes",   label: "Gestión de contratación", emptyLabel: "expediente de contratación" },
+  { key: "collaborators", workspaceKey: "colaboradores",  label: "Gestión de colaboradores", emptyLabel: "expediente de colaborador" },
+  { key: "offboarding",   workspaceKey: "desvinculacion", label: "Gestión de despidos o renuncias", emptyLabel: "expediente de salida laboral" },
 ];
 
 const STATUS_LABELS = {
@@ -54,9 +64,28 @@ const PASSIVE_STATUSES = new Set(["pasivo","desvinculado","inactivo"]);
 
 const toBrowserView  = (v) => ({ solicitudes:"requests", colaboradores:"collaborators", desvinculacion:"offboarding", aspirantes:"applicants", requests:"requests", collaborators:"collaborators", offboarding:"offboarding" }[v] || "requests");
 const toWorkspaceKey = (v) => ({ requests:"solicitudes", collaborators:"colaboradores", offboarding:"desvinculacion" }[v] || v);
+const resolveWorkspaceViewLabel = (viewKey) => ({
+  requests: "Gestion de contratacion",
+  collaborators: "Gestion de colaboradores",
+  offboarding: "Gestion de despidos o renuncias",
+}[viewKey] || "Workspace");
+const resolveWorkspaceScopeBanner = (scope, fallbackBanner) => ({
+  financial:
+    "Vista limitada a la revision de validaciones financieras, documentos financieros y checklist visible para el area financiera dentro del expediente laboral.",
+  ti:
+    "Vista limitada al control de herramientas de comunicacion, accesos, actas tecnologicas y checklist operativo asignado al area de TI.",
+  logistics:
+    "Vista limitada al control de herramientas de trabajo, logistica, ropa de trabajo, EPP y validaciones operativas asignadas a esta area.",
+  restricted:
+    "Vista limitada a funciones especificas del expediente laboral segun los permisos del area asignada.",
+}[scope] || fallbackBanner || "Gestiona unicamente los elementos autorizados para tu area dentro del expediente.");
 
 const asArray   = (v) => (Array.isArray(v) ? v : []);
 const pct       = (p) => (typeof p?.percent === "number" ? Math.max(0, Math.min(100, p.percent)) : p?.total > 0 ? Math.round(((p.done ?? 0) / p.total) * 100) : 0);
+const resolveDocumentType = (document = {}) =>
+  String(document?.canonical_doc_type || document?.doc_type || "")
+    .trim()
+    .toUpperCase();
 
 const resolveCollaboratorStatus = (c = {}) => {
   const s = String(c.estatus_empleado || "").toLowerCase();
@@ -81,18 +110,20 @@ const EmptyState = ({ onOpen, currentView }) => (
       <FiSearch size={22} className="text-slate-400" />
     </div>
     <p className="text-base font-semibold text-slate-800 mb-1">
-      Ningún {currentView?.emptyLabel || "elemento"} seleccionado
+      No hay un expediente seleccionado en el workspace
     </p>
     <p className="text-sm text-slate-500 mb-6 max-w-xs">
-      Selecciona {currentView?.emptyLabel || "un elemento"} del navegador para gestionar su expediente.
+      Abre el navegador y selecciona un registro de {resolveWorkspaceViewLabel(currentView?.key).toLowerCase()} para revisar su informacion operativa, sus documentos y las acciones habilitadas.
     </p>
     <Button onClick={onOpen} leftIcon={<FiSearch size={15} />}>
-      Abrir navegador
+      Abrir navegador de expedientes
     </Button>
   </div>
 );
 
 // ── Main component ───────────────────────────────────────────────────────────
+
+const WorkspaceEmptyState = EmptyState;
 
 const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
   const navigate = useNavigate();
@@ -106,6 +137,8 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
     selectedRequest, selectedApplicant, selectedApplicantId,
     selectedCollaborator, selectedCollaboratorId,
     profileData, profileLoading, profileSaving, profileErrors,
+    qualifications,
+    qualificationMigrationPending,
     documents, docUploading, docUploadProgress,
     activeView, setActiveView,
     activeTab, setActiveTab,
@@ -121,15 +154,14 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
     currentUserRole,
     isRequestContext, isCollaboratorContext,
     currentEntity,
-    filteredRequests, filteredApplicants, filteredCollaborators, filteredOffboardingCollaborators,
+    filteredRequests, filteredCollaborators, filteredOffboardingCollaborators,
     profileCompletion, checklistCompletion,
     hasContract, canHireFinal,
     currentWorkflow,
-    currentContextKind,
     requestWorkspaceLoading, collaboratorProfileLoading,
     handleSelectRequest, handleSelectApplicant, handleSelectCollaborator,
     handleStartOffboarding, handleSaveProfile,
-    handleUploadDocument, handleChecklistToggle, handleProfileChange,
+    handleUploadDocument, handleChecklistToggle, handleProfileChange, handleQualificationsChange, handleResolveQualificationPending,
     handleAssignCollaborator, handleAddComment,
     handleCreateRequest, handleCloseCreateRequest, handleRequestCreated,
     handleReviewRequest, handleCloseReview, handleRequestReviewed,
@@ -140,6 +172,50 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
   const browserView   = toBrowserView(activeView);
   const currentView   = VIEWS.find(v => v.key === browserView) || VIEWS[0];
   const canAccessOffboarding = OFFBOARDING_ALLOWED_ROLES.has(String(currentUserRole || "").toLowerCase());
+  const hasOffboardingStarted = Boolean(
+    selectedCollaborator?.offboarding_requested === true ||
+    profileData?.onboarding?.offboarding_requested === true,
+  );
+  const workspaceAccess = useMemo(
+    () => resolveTalentWorkspaceAccess(currentUserRole),
+    [currentUserRole],
+  );
+  const scopedDocumentDefinitions = useMemo(
+    () => filterDocumentDefinitionsByAccess(documentTypes, workspaceAccess),
+    [workspaceAccess],
+  );
+  const visibleDocumentCodes = useMemo(
+    () =>
+      new Set(
+        scopedDocumentDefinitions.map((definition) =>
+          String(definition?.key || "").trim().toUpperCase(),
+        ),
+      ),
+    [scopedDocumentDefinitions],
+  );
+  const scopedDocuments = useMemo(
+    () =>
+      asArray(documents).filter((document) =>
+        visibleDocumentCodes.has(resolveDocumentType(document)),
+      ),
+    [documents, visibleDocumentCodes],
+  );
+  const scopedChecklistSections = useMemo(
+    () => filterChecklistSectionsByAccess(checklistSectionsTemplate, workspaceAccess),
+    [workspaceAccess],
+  );
+  const displayedChecklistCompletion = useMemo(
+    () =>
+      workspaceAccess.scope === "full"
+        ? checklistCompletion
+        : computeChecklistCompletionBySections(
+            scopedChecklistSections,
+            profileData,
+            documents,
+            resolveDocumentType,
+          ),
+    [checklistCompletion, documents, profileData, scopedChecklistSections, workspaceAccess.scope],
+  );
   const requestWorkspaceReady = !selectedRequest || READY_REQUEST_STATUSES.has(String(selectedRequest?.status || "").toLowerCase());
   const isLoading = (isRequestContext && requestWorkspaceLoading) || (isCollaboratorContext && collaboratorProfileLoading);
 
@@ -176,25 +252,34 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
   // ── Tabs ───────────────────────────────────────────────────────────────────
   const detailTabs = useMemo(() => {
     const tabs = [];
-    if (isRequestContext) tabs.push({ key: "applicant", label: "Postulante" });
-    tabs.push({ key: "profile", label: "Perfil" });
-    tabs.push({ key: "checklist", label: "Checklist" });
-    tabs.push({ key: "documents", label: "Documentos" });
-    if (isCollaboratorContext && canAccessOffboarding) tabs.push({ key: "offboarding", label: "Salida" });
-    if (isRequestContext) tabs.push({ key: "comments", label: "Comentarios" });
+    if (isRequestContext && workspaceAccess.canViewProfile) tabs.push({ key: "applicant", label: "Perfil del postulante" });
+    if (workspaceAccess.canViewProfile) tabs.push({ key: "profile", label: "Ficha y perfil laboral" });
+    if (scopedChecklistSections.length > 0) tabs.push({ key: "checklist", label: "Checklist de cumplimiento" });
+    if (scopedDocumentDefinitions.length > 0) tabs.push({ key: "documents", label: "Documentos del expediente" });
+    if (isCollaboratorContext && workspaceAccess.scope === "full") {
+      tabs.push({ key: "reports", label: "Reporte individual" });
+    }
+    if (isCollaboratorContext && canAccessOffboarding && workspaceAccess.scope !== "restricted") {
+      tabs.push({
+        key: "offboarding",
+        label: "Gestion de salida laboral",
+        disabled: !hasOffboardingStarted,
+      });
+    }
+    if (isRequestContext && workspaceAccess.canViewComments) tabs.push({ key: "comments", label: "Comentarios operativos" });
     return tabs;
-  }, [canAccessOffboarding, isCollaboratorContext, isRequestContext]);
+  }, [canAccessOffboarding, hasOffboardingStarted, isCollaboratorContext, isRequestContext, scopedChecklistSections.length, scopedDocumentDefinitions.length, workspaceAccess]);
 
   const allTabs = useMemo(() => {
     if (!currentEntity) return [];
-    const journey = { key: "journey", label: isRequestContext ? "Progreso" : "Resumen" };
+    const journey = { key: "journey", label: isRequestContext ? "Seguimiento operativo" : "Resumen operativo" };
     return [journey, ...detailTabs.map(t => ({
       ...t,
-      badge: t.key === "documents" ? `${asArray(documents).length}`
-        : t.key === "checklist" ? `${checklistCompletion.done ?? 0}/${checklistCompletion.total ?? 0}`
+      badge: t.key === "documents" ? `${scopedDocuments.length}`
+        : t.key === "checklist" ? `${displayedChecklistCompletion.done ?? 0}/${displayedChecklistCompletion.total ?? 0}`
         : undefined,
     }))];
-  }, [checklistCompletion, currentEntity, detailTabs, documents, isRequestContext]);
+  }, [currentEntity, detailTabs, displayedChecklistCompletion, isRequestContext, scopedDocuments.length]);
 
   useEffect(() => {
     if (currentEntity && !allTabs.some(t => t.key === activeTab)) {
@@ -202,34 +287,97 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
     }
   }, [activeTab, allTabs, currentEntity, setActiveTab]);
 
+  useEffect(() => {
+    if (activeTab === "offboarding" && !hasOffboardingStarted) {
+      setActiveTab("journey");
+    }
+  }, [activeTab, hasOffboardingStarted, setActiveTab]);
+
   // ── Summary strip items ────────────────────────────────────────────────────
   const summaryItems = useMemo(() => {
-    if (selectedCollaborator) return [
-      { key: "profile",    label: "Perfil",    value: `${pct(profileCompletion)}%`,    hint: `${profileCompletion?.done ?? 0}/${profileCompletion?.total ?? 0} campos` },
-      { key: "documents",  label: "Documentos", value: `${asArray(documents).length}`, hint: "archivos" },
-      { key: "checklist",  label: "Checklist",  value: `${checklistCompletion?.done ?? 0}/${checklistCompletion?.total ?? 0}`, hint: "validaciones" },
-    ];
-    if (selectedRequest) return [
-      { key: "status",    label: "Estado",       value: STATUS_LABELS[selectedRequest.status] || "Seguimiento" },
-      { key: "owner",     label: "Responsable",  value: currentWorkflow?.current_responsible_name || selectedRequest.collaborator_name || "Sin asignar" },
-      { key: "profile",   label: "Perfil",       value: `${pct(profileCompletion)}%` },
-      { key: "checklist", label: "Checklist",    value: `${checklistCompletion?.done ?? 0}/${checklistCompletion?.total ?? 0}` },
-    ];
+    if (selectedCollaborator) {
+      const items = [];
+      if (workspaceAccess.canViewProfile) {
+        items.push({ key: "profile", label: "Perfil", value: `${pct(profileCompletion)}%`, hint: `${profileCompletion?.done ?? 0}/${profileCompletion?.total ?? 0} campos` });
+      }
+      if (scopedDocumentDefinitions.length > 0) {
+        items.push({ key: "documents", label: "Documentos", value: `${scopedDocuments.length}`, hint: "archivos visibles" });
+      }
+      if (scopedChecklistSections.length > 0) {
+        items.push({ key: "checklist", label: "Checklist", value: `${displayedChecklistCompletion?.done ?? 0}/${displayedChecklistCompletion?.total ?? 0}`, hint: "validaciones visibles" });
+      }
+      return items;
+    }
+    if (selectedRequest) {
+      const items = [
+        { key: "status", label: "Estado", value: STATUS_LABELS[selectedRequest.status] || "Seguimiento" },
+        { key: "owner", label: "Responsable", value: currentWorkflow?.current_responsible_name || selectedRequest.collaborator_name || "Sin asignar" },
+      ];
+      if (workspaceAccess.canViewProfile) {
+        items.push({ key: "profile", label: "Perfil", value: `${pct(profileCompletion)}%` });
+      }
+      if (scopedChecklistSections.length > 0) {
+        items.push({ key: "checklist", label: "Checklist", value: `${displayedChecklistCompletion?.done ?? 0}/${displayedChecklistCompletion?.total ?? 0}` });
+      }
+      return items;
+    }
     return [];
-  }, [checklistCompletion, currentWorkflow, documents, profileCompletion, selectedCollaborator, selectedRequest]);
+  }, [currentWorkflow, displayedChecklistCompletion, profileCompletion, scopedChecklistSections.length, scopedDocumentDefinitions.length, scopedDocuments.length, selectedCollaborator, selectedRequest, workspaceAccess.canViewProfile]);
 
   // ── Journey data ───────────────────────────────────────────────────────────
   const journey = useMemo(() => {
     if (selectedCollaborator) {
       const profileOk    = pct(profileCompletion) === 100;
-      const checklistOk  = checklistCompletion?.total > 0 && checklistCompletion.done === checklistCompletion.total;
+      const checklistOk  = displayedChecklistCompletion?.total > 0 && displayedChecklistCompletion.done === displayedChecklistCompletion.total;
+
+      if (!workspaceAccess.canViewProfile) {
+        const steps = [];
+
+        if (scopedChecklistSections.length > 0) {
+          steps.push({
+            key: "checklist",
+            label: "Checklist operativo",
+            detail: `${displayedChecklistCompletion?.done ?? 0}/${displayedChecklistCompletion?.total ?? 0} validaciones visibles.`,
+            status: checklistOk ? "complete" : "current",
+            actionLabel: "Abrir checklist",
+            onAction: () => setActiveTab("checklist"),
+          });
+        }
+
+        if (scopedDocumentDefinitions.length > 0) {
+          const documentsOk = scopedDocuments.length >= scopedDocumentDefinitions.length;
+          steps.push({
+            key: "documents",
+            label: "Documentos del área",
+            detail: `${scopedDocuments.length}/${scopedDocumentDefinitions.length} documentos visibles cargados.`,
+            status: documentsOk ? "complete" : steps.length === 0 ? "current" : "pending",
+            actionLabel: "Abrir documentos",
+            onAction: () => setActiveTab("documents"),
+          });
+        }
+
+        const total = steps.length;
+        const done = steps.filter((step) => step.status === "complete").length;
+
+        return {
+          title: "Vista operativa por área",
+          description: resolveWorkspaceScopeBanner(workspaceAccess.scope, workspaceAccess.banner),
+          progress: {
+            done,
+            total,
+            percent: total > 0 ? Math.round((done / total) * 100) : 0,
+          },
+          steps,
+        };
+      }
+
       return {
         title: "Ciclo operativo del colaborador",
-        description: "Mantiene perfil, documentos y checklist dentro del mismo espacio.",
-        progress: { done: (profileOk ? 1 : 0) + (checklistOk ? 1 : 0), total: 2, percent: Math.round((pct(profileCompletion) + pct(checklistCompletion)) / 2) },
+        description: "Concentra la ficha laboral, el control documental y el checklist de cumplimiento dentro del expediente central de Talento Humano.",
+        progress: { done: (profileOk ? 1 : 0) + (checklistOk ? 1 : 0), total: 2, percent: Math.round((pct(profileCompletion) + pct(displayedChecklistCompletion)) / 2) },
         steps: [
           { key: "profile",   label: "Completar expediente",  detail: `${profileCompletion?.done ?? 0}/${profileCompletion?.total ?? 0} campos completos.`,  status: profileOk ? "complete" : "current",  actionLabel: "Abrir perfil",    onAction: () => setActiveTab("profile") },
-          { key: "checklist", label: "Cerrar checklist",       detail: `${checklistCompletion?.done ?? 0}/${checklistCompletion?.total ?? 0} validaciones.`,    status: checklistOk ? "complete" : "pending", actionLabel: "Abrir checklist", onAction: () => setActiveTab("checklist") },
+          { key: "checklist", label: "Cerrar checklist",       detail: `${displayedChecklistCompletion?.done ?? 0}/${displayedChecklistCompletion?.total ?? 0} validaciones.`,    status: checklistOk ? "complete" : "pending", actionLabel: "Abrir checklist", onAction: () => setActiveTab("checklist") },
         ],
       };
     }
@@ -238,33 +386,81 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
       const stalled       = Boolean(currentWorkflow?.stalled);
       const nearSla       = Boolean(currentWorkflow?.near_sla);
       const profileOk     = pct(profileCompletion) === 100;
-      const checklistOk   = checklistCompletion?.total > 0 && checklistCompletion.done === checklistCompletion.total;
+      const checklistOk   = displayedChecklistCompletion?.total > 0 && displayedChecklistCompletion.done === displayedChecklistCompletion.total;
       const applicantOk   = Boolean(selectedApplicant);
       const contractOk    = hasContract;
+      const requestStepStatus = stalled ? "stalled" : nearSla ? "warning" : ready ? "complete" : REVIEWABLE_REQUEST_STATUSES.has(selectedRequest.status) ? "warning" : "pending";
+      const requestAside = currentWorkflow ? (
+        <div className="rounded-xl border p-3 text-xs" style={stalled ? { borderColor:"#FECACA", background:"#FEF2F2", color:"#991B1B" } : nearSla ? { borderColor:"#FDE68A", background:"#FFFBEB", color:"#92400E" } : { borderColor:"#BBF7D0", background:"#F0FDF4", color:"#166534" }}>
+          <p className="font-semibold uppercase tracking-widest text-[10px] mb-1">Control SLA</p>
+          <p className="font-semibold">{stalled ? "Estancamiento detectado" : nearSla ? "Etapa cerca del límite" : "Etapa dentro de SLA"}</p>
+          {currentWorkflow.sla_alert_message && <p className="mt-1">{currentWorkflow.sla_alert_message}</p>}
+        </div>
+      ) : null;
+
+      if (!workspaceAccess.canViewProfile) {
+        const steps = [
+          {
+            key: "request",
+            label: "Solicitud habilitada",
+            detail: stalled ? `Estancada por ${currentWorkflow?.stalled_for_label || "N/A"}` : currentWorkflow?.current_stage_label || STATUS_LABELS[selectedRequest.status] || "Flujo en seguimiento",
+            status: requestStepStatus,
+          },
+        ];
+
+        if (scopedChecklistSections.length > 0) {
+          steps.push({
+            key: "checklist",
+            label: "Checklist operativo",
+            detail: `${displayedChecklistCompletion?.done ?? 0}/${displayedChecklistCompletion?.total ?? 0} validaciones visibles.`,
+            status: checklistOk ? "complete" : "current",
+            actionLabel: "Abrir checklist",
+            onAction: () => setActiveTab("checklist"),
+          });
+        }
+
+        if (scopedDocumentDefinitions.length > 0) {
+          const documentsOk = scopedDocuments.length >= scopedDocumentDefinitions.length;
+          steps.push({
+            key: "documents",
+            label: "Documentos del área",
+            detail: `${scopedDocuments.length}/${scopedDocumentDefinitions.length} documentos visibles cargados.`,
+            status: documentsOk ? "complete" : "pending",
+            actionLabel: "Abrir documentos",
+            onAction: () => setActiveTab("documents"),
+          });
+        }
+
+        const total = steps.length;
+        const done = steps.filter((step) => step.status === "complete").length;
+
+        return {
+          title: "Seguimiento operativo por área",
+          description: resolveWorkspaceScopeBanner(workspaceAccess.scope, workspaceAccess.banner),
+          aside: requestAside,
+          progress: { done, total, percent: total > 0 ? Math.round((done / total) * 100) : 0 },
+          steps,
+        };
+      }
+
       const done = (ready ? 1 : 0) + (profileOk ? 1 : 0) + (checklistOk ? 1 : 0) + (applicantOk ? 1 : 0) + (contractOk ? 1 : 0);
       return {
         title: "Journey de ingreso",
-        description: "La solicitud, el postulante y el expediente se resuelven en un flujo secuencial.",
-        aside: currentWorkflow ? (
-          <div className="rounded-xl border p-3 text-xs" style={stalled ? { borderColor:"#FECACA", background:"#FEF2F2", color:"#991B1B" } : nearSla ? { borderColor:"#FDE68A", background:"#FFFBEB", color:"#92400E" } : { borderColor:"#BBF7D0", background:"#F0FDF4", color:"#166534" }}>
-            <p className="font-semibold uppercase tracking-widest text-[10px] mb-1">Control SLA</p>
-            <p className="font-semibold">{stalled ? "Estancamiento detectado" : nearSla ? "Etapa cerca del límite" : "Etapa dentro de SLA"}</p>
-            {currentWorkflow.sla_alert_message && <p className="mt-1">{currentWorkflow.sla_alert_message}</p>}
-          </div>
-        ) : null,
+        description: "La gestión de contratación avanza en una secuencia controlada: solicitud aprobada, selección del postulante, preparación del expediente, carga documental y cierre de checklist antes de contratar.",
+        aside: requestAside,
         progress: { done, total: 5, percent: Math.round((done / 5) * 100) },
         steps: [
-          { key: "request",   label: "Solicitud habilitada",  detail: stalled ? `Estancada por ${currentWorkflow?.stalled_for_label || "N/A"}` : currentWorkflow?.current_stage_label || STATUS_LABELS[selectedRequest.status] || "Flujo en seguimiento", status: stalled ? "stalled" : nearSla ? "warning" : ready ? "complete" : REVIEWABLE_REQUEST_STATUSES.has(selectedRequest.status) ? "warning" : "pending" },
+          { key: "request",   label: "Solicitud habilitada",  detail: stalled ? `Estancada por ${currentWorkflow?.stalled_for_label || "N/A"}` : currentWorkflow?.current_stage_label || STATUS_LABELS[selectedRequest.status] || "Flujo en seguimiento", status: requestStepStatus },
           { key: "applicant", label: "Elegir postulante",    detail: selectedApplicant ? `${selectedApplicant.fullname || "Postulante"} seleccionado.` : "Selecciona el candidato para iniciar el expediente.", status: applicantOk ? "complete" : "current", actionLabel: applicantOk ? "Cambiar" : "Seleccionar", onAction: () => setActiveTab("applicant") },
           { key: "profile",   label: "Preparar expediente",  detail: applicantOk ? `${profileCompletion?.done ?? 0}/${profileCompletion?.total ?? 0} campos preparados.` : "Primero elige un postulante.", status: !applicantOk ? "pending" : profileOk ? "complete" : "current", actionLabel: "Abrir perfil", onAction: () => setActiveTab("profile") },
-          { key: "checklist", label: "Checklist y evidencias", detail: `${checklistCompletion?.done ?? 0}/${checklistCompletion?.total ?? 0} validaciones cerradas.`, status: checklistOk ? "complete" : "pending", actionLabel: "Abrir checklist", onAction: () => setActiveTab("checklist") },
-          { key: "contract",  label: "Contrato firmado",     detail: contractOk ? "Contrato cargado correctamente." : "Pendiente subir contrato de trabajo.", status: contractOk ? "complete" : "pending", actionLabel: "Subir contrato", onAction: () => setActiveTab("documents") },
-          { key: "hire",      label: "Finalizar contratación", detail: canHireFinal ? "Todos los requisitos cumplidos." : "Pendiente completar los pasos anteriores.", status: canHireFinal ? "complete" : "pending", actionLabel: "Contratar", onAction: handleHireApplicant },
+          { key: "checklist", label: "Checklist y evidencias", detail: `${displayedChecklistCompletion?.done ?? 0}/${displayedChecklistCompletion?.total ?? 0} validaciones cerradas.`, status: checklistOk ? "complete" : "pending", actionLabel: "Abrir checklist", onAction: () => setActiveTab("checklist") },
+          { key: "contract",  label: "Contratos obligatorios",     detail: contractOk ? "Los contratos obligatorios del expediente ya cuentan con archivo registrado." : "Falta cargar los contratos obligatorios definidos para el ingreso.", status: contractOk ? "complete" : "pending", actionLabel: "Abrir documentos", onAction: () => setActiveTab("documents") },
+          { key: "hire",      label: "Finalizar contratación", detail: canHireFinal ? "La solicitud ya cumple los requisitos documentales y operativos para contratar." : "Debes completar primero los pasos previos del expediente para habilitar la contratación.", status: canHireFinal ? "complete" : "pending", actionLabel: "Contratar", onAction: handleHireApplicant },
         ],
       };
     }
-    return { title: "Workspace unificado", description: "Selecciona una solicitud o colaborador para trabajar el flujo.", progress: { done: 0, total: 0, percent: 0 }, steps: [] };
-  }, [canHireFinal, checklistCompletion, currentWorkflow, handleHireApplicant, hasContract, profileCompletion, selectedApplicant, selectedCollaborator, selectedRequest, setActiveTab]);
+    return { title: "Workspace de Talento Humano", description: "Selecciona un expediente para gestionar contratación, colaboración activa o salida laboral dentro del módulo centralizado de Talento Humano.", progress: { done: 0, total: 0, percent: 0 }, steps: [] };
+  }, [canHireFinal, currentWorkflow, displayedChecklistCompletion, handleHireApplicant, hasContract, profileCompletion, scopedChecklistSections.length, scopedDocumentDefinitions.length, scopedDocuments.length, selectedApplicant, selectedCollaborator, selectedRequest, setActiveTab, workspaceAccess]);
 
   // ── Tab content renderer ───────────────────────────────────────────────────
   const renderJourneyContent = () => (
@@ -321,20 +517,41 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
         return (
           <WorkspaceErrorBoundary title="Error en documentos" message="El panel documental encontró un error.">
             <Suspense fallback={<div className="h-32 animate-pulse rounded-xl bg-slate-100" />}>
-              <PersonnelDocuments documents={asArray(documents)} onDocumentUpload={handleUploadDocument} uploadingDocKey={docUploading} uploadProgress={docUploadProgress} />
+              <PersonnelDocuments documents={scopedDocuments} documentDefinitions={scopedDocumentDefinitions} onDocumentUpload={handleUploadDocument} uploadingDocKey={docUploading} uploadProgress={docUploadProgress} canUploadDocument={(definition) => canUploadDocumentInAccess(definition, workspaceAccess)} readOnly={!workspaceAccess.canEditProfile} />
             </Suspense>
           </WorkspaceErrorBoundary>
         );
       case "checklist":
         return (
           <Suspense fallback={<div className="h-32 animate-pulse rounded-xl bg-slate-100" />}>
-            <PersonnelChecklist profileData={profileData} documents={asArray(documents)} onChecklistFlagToggle={handleChecklistToggleValidated} onDocumentUpload={handleUploadDocument} uploadingDocKey={docUploading} userRole={currentUserRole} />
+            <PersonnelChecklist profileData={profileData} documents={asArray(documents)} sections={scopedChecklistSections} onChecklistFlagToggle={handleChecklistToggleValidated} onDocumentUpload={handleUploadDocument} uploadingDocKey={docUploading} userRole={currentUserRole} canUploadDocument={(definition) => canUploadDocumentInAccess(definition, workspaceAccess)} readOnly={!workspaceAccess.canEditProfile} />
           </Suspense>
         );
       case "offboarding":
         return (
           <Suspense fallback={<div className="h-32 animate-pulse rounded-xl bg-slate-100" />}>
             <OffboardingWorkspace collaboratorId={selectedCollaboratorId} profileData={profileData} documents={asArray(documents)} userRole={currentUserRole} onChecklistFlagToggle={handleChecklistToggleValidated} onDocumentUpload={handleUploadDocument} uploadingDocKey={docUploading} />
+          </Suspense>
+        );
+      case "reports":
+        return (
+          <Suspense fallback={<div className="h-32 animate-pulse rounded-xl bg-slate-100" />}>
+            <PersonnelReports
+              selectedCollaborator={selectedCollaborator}
+              profileData={profileData}
+              documents={asArray(documents)}
+              qualifications={asArray(qualifications)}
+              profileSections={profileSections}
+              checklistSections={scopedChecklistSections}
+              documentDefinitions={scopedDocumentDefinitions}
+              visibleCollaborators={
+                browserView === "offboarding"
+                  ? asArray(offboardingCollaborators)
+                  : asArray(collaborators)
+              }
+              activeView={activeView}
+              mode="current"
+            />
           </Suspense>
         );
       case "comments":
@@ -356,6 +573,11 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
             <Suspense fallback={<div className="h-32 animate-pulse rounded-xl bg-slate-100" />}>
               <PersonnelProfile
                 profileData={profileData}
+                qualifications={asArray(qualifications)}
+                qualificationMigrationPending={qualificationMigrationPending}
+                onQualificationsChange={handleQualificationsChange}
+                onResolveQualificationPending={handleResolveQualificationPending}
+                showCentralQualifications={isCollaboratorContext}
                 onProfileFieldChange={handleProfileChangeValidated}
                 onProfileSave={handleValidatedSave}
                 loading={profileLoading}
@@ -364,6 +586,7 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
                 sections={isCollaboratorContext ? profileSections : applicantProfileSections}
                 workflowStage={selectedRequest?.status || (isCollaboratorContext ? "completada" : "pendiente")}
                 draftKey={isCollaboratorContext ? `collaborator:${selectedCollaboratorId || "active"}` : `request:${selectedRequest?.id || "active"}`}
+                readOnly={!workspaceAccess.canEditProfile}
               />
             </Suspense>
           </WorkspaceErrorBoundary>
@@ -372,9 +595,9 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
   };
 
   // ── Primary action ─────────────────────────────────────────────────────────
-  const primaryAction = profileData
+  const primaryAction = profileData && workspaceAccess.canEditProfile
     ? { label: profileSaving ? "Guardando..." : "Guardar expediente", onClick: handleValidatedSave, disabled: profileSaving || profileLoading }
-    : canRequestPersonnel
+    : canRequestPersonnel && workspaceAccess.canCreateRequests
       ? { label: "Nueva solicitud", onClick: handleCreateRequest }
       : null;
 
@@ -489,6 +712,18 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
         · Con entidad: muestra la entidad seleccionada con sus acciones
         No hay card adicional debajo repitiendo la misma información.
       */}
+      <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+        <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+          Workspace de Talento Humano
+        </p>
+        <h1 className="mt-2 text-2xl font-semibold text-slate-900">
+          Gestion integral del ciclo laboral
+        </h1>
+        <p className="mt-2 max-w-3xl text-sm text-slate-600">
+          Administra en un solo modulo la gestion de contratacion, la administracion de colaboradores activos, el control documental del expediente y los procesos de despidos o renuncias con trazabilidad por etapa.
+        </p>
+      </div>
+
       <div className="mb-5 rounded-2xl border border-slate-200 bg-white shadow-soft overflow-hidden">
 
         {/* Fila superior: view toggle + acciones primarias */}
@@ -504,7 +739,7 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
                   : { border: '1px solid #E5E7EB', color: '#6B7280', background: 'transparent' }
                 }
               >
-                {v.label}
+                {resolveWorkspaceViewLabel(v.key)}
               </button>
             ))}
           </div>
@@ -535,7 +770,7 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
             <button type="button" onClick={() => setBrowserOpen(true)}
               className="w-full flex items-center gap-2.5 rounded-xl border border-dashed border-slate-300 px-4 py-2.5 text-sm text-slate-500 hover:border-slate-400 hover:text-slate-700 transition-colors cursor-pointer text-left">
               <FiSearch size={15} className="flex-shrink-0 text-slate-400" />
-              <span>Seleccionar {currentView.emptyLabel}...</span>
+              <span>Seleccionar expediente de {resolveWorkspaceViewLabel(currentView.key).toLowerCase()}...</span>
             </button>
           ) : isLoading ? (
             /* Cargando entidad */
@@ -579,11 +814,11 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
                 <button type="button"
                   onClick={() => navigate(`/dashboard/talento-humano/command-center/${toWorkspaceKey(browserView)}`, { replace: true })}
                   className="rounded-full p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-                  title="Deseleccionar">
+                  title="Cerrar expediente actual">
                   <FiX size={15} />
                 </button>
                 <Button variant="secondary" size="sm" onClick={() => setBrowserOpen(true)}>
-                  Cambiar
+                  Cambiar expediente
                 </Button>
               </div>
             </div>
@@ -605,7 +840,42 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
       </div>
 
       {/* ── Estado vacío ─────────────────────────────────────────────────────── */}
-      {!currentEntity && <EmptyState onOpen={() => setBrowserOpen(true)} currentView={currentView} />}
+      {currentEntity && !isLoading && workspaceAccess.scope !== "full" && workspaceAccess.banner && (
+        <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 shadow-soft">
+          <p className="text-xs font-semibold uppercase tracking-widest text-blue-700">Vista limitada</p>
+          <p className="mt-1 text-sm text-blue-900">{resolveWorkspaceScopeBanner(workspaceAccess.scope, workspaceAccess.banner)}</p>
+        </div>
+      )}
+      {!currentEntity && <WorkspaceEmptyState onOpen={() => setBrowserOpen(true)} currentView={currentView} />}
+
+      {workspaceAccess.scope === "full" && (
+        <div className="mb-5">
+          <Suspense
+            fallback={
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-soft">
+                Cargando reportes...
+              </div>
+            }
+          >
+            <PersonnelReports
+              selectedCollaborator={selectedCollaborator}
+              profileData={profileData}
+              documents={asArray(documents)}
+              qualifications={asArray(qualifications)}
+              profileSections={profileSections}
+              checklistSections={scopedChecklistSections}
+              documentDefinitions={scopedDocumentDefinitions}
+              visibleCollaborators={
+                browserView === "offboarding"
+                  ? asArray(filteredOffboardingCollaborators || offboardingCollaborators)
+                  : asArray(filteredCollaborators || collaborators)
+              }
+              activeView={toWorkspaceKey(browserView)}
+              mode="bulk"
+            />
+          </Suspense>
+        </div>
+      )}
 
       {/* ── Workspace de la entidad ───────────────────────────────────────────── */}
       {currentEntity && !isLoading && (
@@ -619,13 +889,22 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
                   <button key={tab.key} type="button"
                     onClick={() => setActiveTab(tab.key)}
                     disabled={tab.disabled}
-                    className="flex-shrink-0 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-40"
+                    title={tab.disabled ? "Esta vista se habilita solo cuando el expediente ya tiene una desvinculacion iniciada." : undefined}
+                    className="flex-shrink-0 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors cursor-pointer flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-40"
                     style={activeTab === tab.key
                       ? { borderColor: '#2563EB', color: '#2563EB' }
                       : { borderColor: 'transparent', color: '#6B7280' }
                     }
                   >
                     {tab.label}
+                    {tab.disabled && (
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                        style={{ background: '#F3F4F6', color: '#6B7280' }}
+                      >
+                        Bloqueado
+                      </span>
+                    )}
                     {tab.badge != null && (
                       <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
                         style={activeTab === tab.key
@@ -650,13 +929,13 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
 
       {/* ── Modal: navegador de la vista activa ───────────────────────────────── */}
       <Modal isOpen={browserOpen} onClose={() => setBrowserOpen(false)}
-        title={`Seleccionar ${currentView.emptyLabel}`} maxWidth="max-w-lg">
+        title={`Seleccionar expediente de ${resolveWorkspaceViewLabel(currentView.key).toLowerCase()}`} maxWidth="max-w-lg">
         {/* Buscador */}
         <div className="relative mb-1">
           <FiSearch size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input type="search" value={searchQuery} autoFocus
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder={`Buscar ${currentView.emptyLabel}...`}
+            placeholder={`Buscar expediente de ${resolveWorkspaceViewLabel(currentView.key).toLowerCase()}...`}
             className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-sm text-slate-800 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100" />
         </div>
         {/* Lista plana */}

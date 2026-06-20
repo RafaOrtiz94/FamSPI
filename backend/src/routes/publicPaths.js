@@ -13,7 +13,8 @@
   "/api/signature/verificar",
   "/api/signature/verify",
   "/api/v1/signature/verificar",
-  "/api/v1/signature/verify"
+  "/api/v1/signature/verify",
+  "/api/v1/signature-workflows/verify/"
 ];
 
 function isPublicPath(pathname = "") {

@@ -1,0 +1,8 @@
+[
+  {"name":"name","link":true,"width":28},
+  {"name":"cFamspiClientId","width":15},
+  {"name":"cClientType","width":10},
+  {"name":"billingAddressCity","width":15},
+  {"name":"cAssignedAdvisorEmail","width":20},
+  {"name":"createdAt","width":12}
+]

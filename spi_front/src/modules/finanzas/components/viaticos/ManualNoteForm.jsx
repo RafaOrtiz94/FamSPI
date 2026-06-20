@@ -10,10 +10,15 @@ const EXPENSE_CATEGORIES = [
   { value: 'materiales', label: 'MATERIALES' },
 ];
 
+const EXPENSE_MODES = [
+  { value: 'with_card', label: 'Con tarjeta' },
+  { value: 'without_card', label: 'Sin tarjeta' },
+];
+
 const EMPTY = {
   issue_date: '', supplier_ruc: '', supplier_name: '',
   establishment: '', emission_point: '', sequential: '',
-  expense_description: '', total: '', file: null,
+  expense_description: '', expense_mode: '', total: '', file: null,
 };
 
 const ctrl = 'w-full min-h-10 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 transition-colors focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:border-blue-600';
@@ -44,7 +49,7 @@ export default function ManualNoteForm({ allowance, onSubmit, loading = false, d
 
   const validate = () => {
     const e = {};
-    const required = ['issue_date', 'establishment', 'emission_point', 'sequential', 'supplier_ruc', 'supplier_name', 'expense_description', 'total'];
+    const required = ['issue_date', 'establishment', 'emission_point', 'sequential', 'supplier_ruc', 'supplier_name', 'expense_description', 'expense_mode', 'total'];
     required.forEach((f) => { if (!form[f]) e[f] = 'Campo requerido'; });
     if (form.total && Number(form.total) <= 0) e.total = 'Ingresa un monto válido mayor a cero';
     if (!form.file) e.file = 'Adjunta el documento de respaldo';
@@ -65,6 +70,7 @@ export default function ManualNoteForm({ allowance, onSubmit, loading = false, d
         emission_point: form.emission_point,
         sequential: form.sequential,
         expense_description: form.expense_description,
+        expense_mode: form.expense_mode,
         subtotal_12: 0, subtotal_0: 0, iva: 0,
         total: parseFloat(form.total),
         document_state: form.document_state,
@@ -136,7 +142,7 @@ export default function ManualNoteForm({ allowance, onSubmit, loading = false, d
         {errors.supplier_name && <p className="mt-1 text-xs text-red-600">{errors.supplier_name}</p>}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div>
           <label className="mb-1 block text-xs font-medium text-slate-700">Concepto del gasto</label>
           <select value={form.expense_description}
@@ -148,6 +154,18 @@ export default function ManualNoteForm({ allowance, onSubmit, loading = false, d
             ))}
           </select>
           {errors.expense_description && <p className="mt-1 text-xs text-red-600">{errors.expense_description}</p>}
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-700">Modo de gasto</label>
+          <select value={form.expense_mode}
+            onChange={(e) => set('expense_mode', e.target.value)}
+            className={`${ctrl} ${errors.expense_mode ? ctrlErr : ''}`}>
+            <option value="">Selecciona un modo</option>
+            {EXPENSE_MODES.map((mode) => (
+              <option key={mode.value} value={mode.value}>{mode.label}</option>
+            ))}
+          </select>
+          {errors.expense_mode && <p className="mt-1 text-xs text-red-600">{errors.expense_mode}</p>}
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-slate-700">Total factura</label>

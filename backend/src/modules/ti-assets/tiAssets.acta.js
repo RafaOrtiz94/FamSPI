@@ -7,11 +7,13 @@
  *                             real word-wrap via font.widthOfTextAtSize)
  */
 
-const { PDFDocument, rgb, StandardFonts } = require("pdf-lib");
+const { PDFDocument, rgb, PDFName, PDFString } = require("pdf-lib");
+const { loadTimesNewRoman } = require("../../assets/fonts");
 const fs   = require("fs");
 const path = require("path");
 
 const TEMPLATE_ENTREGA = path.join(__dirname, "../../data/plantillas/ACTA-ET-2026-000001.pdf");
+const TEMPLATE_RETIRO  = path.join(__dirname, "../../data/plantillas/ACTA-D-ET-2026-000001.pdf");
 
 // Convert month number (1-12) to Spanish month name
 const getMonthName = (monthNum) => {
@@ -36,9 +38,9 @@ const TABLE_COLS = [
 ];
 // 22 + 100 + 72 + 72 + 55 + 40 + 68.4 = 429.4 ✓
 
-// tabla_equipos field geometry (PDF coords, origin bottom-left, Letter 612×792)
-// Positioned: right after heading section, compact height, moved up
-const TABLE = { x: 87.86, y: 340, width: 429.40, height: 160 };
+// tabla_equipos field geometry per template (measured from PDF inspection)
+const TABLE        = { x: 90.5,  y: 362.4, width: 429.40, height: 153.6 }; // entrega
+const TABLE_RETIRO = { x: 91.0,  y: 388.2, width: 429.40, height: 153.6 }; // retiro
 
 // ─── Typography ───────────────────────────────────────────────────────────────
 
@@ -109,13 +111,13 @@ function computeRowLayout(font, values, fontSize) {
 
 // ─── Table renderer ───────────────────────────────────────────────────────────
 
-function drawTableOnPage(page, items, fonts) {
+function drawTableOnPage(page, items, fonts, tableGeom = TABLE) {
   const { bold, regular } = fonts;
-  const tableTop = TABLE.y + TABLE.height;
+  const tableTop = tableGeom.y + tableGeom.height;
 
-  // White background over flattened tabla_equipos field
+  // White background over flattened tabla field
   page.drawRectangle({
-    x: TABLE.x, y: TABLE.y, width: TABLE.width, height: TABLE.height,
+    x: tableGeom.x, y: tableGeom.y, width: tableGeom.width, height: tableGeom.height,
     color: rgb(1, 1, 1), borderColor: COLOR_BORDER, borderWidth: 0.5,
   });
 
@@ -126,7 +128,7 @@ function drawTableOnPage(page, items, fonts) {
     color: COLOR_HEADER_BG,
   });
 
-  let colX = TABLE.x;
+  let colX = tableGeom.x;
   TABLE_COLS.forEach((col) => {
     page.drawText(col.label, {
       x:        colX + PAD_L,
@@ -166,7 +168,7 @@ function drawTableOnPage(page, items, fonts) {
     const rowY = cursorY - rowHeight; // bottom of this row
 
     // Stop if row would overflow the table boundary
-    if (rowY < TABLE.y) break;
+    if (rowY < tableGeom.y) break;
 
     // Alternating background
     if (idx % 2 === 1) {
@@ -177,7 +179,7 @@ function drawTableOnPage(page, items, fonts) {
     }
 
     // Draw each cell (multi-line aware)
-    let cellX = TABLE.x;
+    let cellX = tableGeom.x;
     TABLE_COLS.forEach((col, ci) => {
       const lines = cellLines[ci];
       lines.forEach((line, li) => {
@@ -198,8 +200,8 @@ function drawTableOnPage(page, items, fonts) {
 
     // Row bottom separator
     page.drawLine({
-      start: { x: TABLE.x, y: rowY },
-      end:   { x: TABLE.x + TABLE.width, y: rowY },
+      start: { x: tableGeom.x, y: rowY },
+      end:   { x: tableGeom.x + tableGeom.width, y: rowY },
       thickness: 0.25, color: COLOR_SEP,
     });
 
@@ -207,30 +209,60 @@ function drawTableOnPage(page, items, fonts) {
   }
 
   // ── Vertical column separators ────────────────────────────────────────────
-  let sepX = TABLE.x;
+  let sepX = tableGeom.x;
   TABLE_COLS.slice(0, -1).forEach((col) => {
     sepX += col.width;
     page.drawLine({
-      start: { x: sepX, y: TABLE.y },
-      end:   { x: sepX, y: TABLE.y + TABLE.height },
+      start: { x: sepX, y: tableGeom.y },
+      end:   { x: sepX, y: tableGeom.y + tableGeom.height },
       thickness: 0.25, color: COLOR_SEP,
     });
   });
 }
 
-// ─── Adaptive font size for text form fields ──────────────────────────────────
+// ─── AcroForm field helpers ───────────────────────────────────────────────────
 
 /**
- * Scales down font until text fits within maxWidth.
- * Uses Times Roman average glyph width (~0.52 * size) as estimate
- * (exact measurement requires the embedded font, which isn't available yet here).
+ * Ensures a field has a /DA entry so updateAppearances() can create a valid
+ * appearance stream. Fields without /DA (like cargoN) silently produce an
+ * empty stream, causing the field to be invisible after flatten().
  */
-function adaptiveFontSize(text, maxWidth, { base = 10, min = 7 } = {}) {
-  const len = String(text || "").length;
-  if (!len) return base;
-  let size = base;
-  while (size > min && len * 0.52 * size > maxWidth) size -= 0.5;
-  return Math.max(size, min);
+function ensureDA(field) {
+  const acro = field.acroField;
+  if (!acro.dict.has(PDFName.of("DA"))) {
+    acro.dict.set(PDFName.of("DA"), PDFString.of("/Helv 10 Tf 0 g"));
+  }
+}
+
+/**
+ * Patches per-widget /DA entries to a fixed font size.
+ * Individual widgets can have their own /DA (e.g. "/Helv 0 Tf 0 g" for auto-size
+ * or "/Helv 12 Tf 0 g" for 12pt) that override the field-level /DA set by
+ * setFontSize(). This replaces the size component in those widget-level DAs
+ * so that updateAppearances() renders all widgets at the same fixed size.
+ */
+function fixWidgetDAs(field, size = 10) {
+  for (const widget of field.acroField.getWidgets()) {
+    const da = widget.dict.get(PDFName.of("DA"));
+    if (!da) continue;
+    const raw = da.decodeText ? da.decodeText() : String(da);
+    const fixed = raw.replace(/([\d.]+)\s+Tf/, `${size} Tf`);
+    widget.dict.set(PDFName.of("DA"), PDFString.of(fixed));
+  }
+}
+
+function splitCargoForSignature(value, maxCharsPerLine = 28) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text || text.length <= maxCharsPerLine) return text;
+
+  const beforeLimit = text.lastIndexOf(" ", maxCharsPerLine);
+  const afterLimit = text.indexOf(" ", maxCharsPerLine + 1);
+  const splitIndex = beforeLimit > 0 ? beforeLimit : afterLimit;
+  if (splitIndex <= 0) return text;
+
+  const firstLine = text.slice(0, splitIndex).trim();
+  const secondLine = text.slice(splitIndex + 1).trim();
+  return secondLine ? `${firstLine}\n${secondLine}` : firstLine;
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -260,8 +292,7 @@ async function generateActaEntregaPdf({ actaCode = "ACTA-ET-2026-000001", nombre
   const templateBytes = fs.readFileSync(TEMPLATE_ENTREGA);
   const pdfDoc = await PDFDocument.load(templateBytes);
 
-  const boldFont    = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
-  const regularFont = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+  const { bold: boldFont, reg: regularFont } = await loadTimesNewRoman(pdfDoc);
 
   const form = pdfDoc.getForm();
 
@@ -274,7 +305,7 @@ async function generateActaEntregaPdf({ actaCode = "ACTA-ET-2026-000001", nombre
   const nombreText = String(nombre || "");
   const cedulaText = String(cedula || "");
   const cargoNormalText = String(cargo || "");              // Tal cual, sin mayúsculas
-  const cargoMayusText  = String(cargo || "").toUpperCase(); // EN MAYÚSCULAS
+  const cargoMayusText  = splitCargoForSignature(String(cargo || "").toUpperCase()); // EN MAYÚSCULAS
 
   const codigoField = form.getTextField("codigo");
   const nombreField = form.getTextField("nombre");
@@ -300,27 +331,34 @@ async function generateActaEntregaPdf({ actaCode = "ACTA-ET-2026-000001", nombre
     anioField = null;
   }
 
-  // Set font sizes where allowed — ALL fields 10pt for consistency
-  codigoField.setFontSize(10);
-  nombreField.setFontSize(10);
-  cedulaField.setFontSize(10);
-  cargoField.setFontSize(10);   // Ensure cargo is 10pt (not larger)
-  if (diaField) diaField.setFontSize(10);
-  if (mesField) mesField.setFontSize(10);
-  if (anioField) anioField.setFontSize(10);
-  // cargoN has predefined formatting, do not modify font size
+  // Fill fields — Times New Roman TTF, fixed 10pt
+  // fixWidgetDAs patches per-widget /DA overrides (e.g. page-3 widgets with "0 Tf")
+  // before updateAppearances() reads them to determine the rendered font size.
+  for (const [field, val, font] of [
+    [codigoField, codigoText,      regularFont],
+    [nombreField, nombreText,      regularFont],
+    [cedulaField, cedulaText,      regularFont],
+    [cargoField,  cargoNormalText, regularFont],
+  ]) {
+    field.setText(val);
+    field.setFontSize(10);
+    fixWidgetDAs(field, 10);
+    field.updateAppearances(font);
+  }
 
-  // Fill all fields
-  codigoField.setText(codigoText);
-  nombreField.setText(nombreText);
-  cedulaField.setText(cedulaText);
-  cargoField.setText(cargoNormalText);    // Superior: tal cual
-  cargoNField.setText(cargoMayusText);    // Inferior: EN MAYÚSCULAS + NEGRITA
+  // cargoN has no /DA in template — inject dummy so updateAppearances creates a valid stream
+  try {
+    ensureDA(cargoNField);
+    try { cargoNField.enableMultiline(); } catch (_) {}
+    cargoNField.setText(cargoMayusText);
+    cargoNField.setFontSize(10);
+    fixWidgetDAs(cargoNField, 10);
+    cargoNField.updateAppearances(boldFont);
+  } catch (_) {}
 
-  // Fill immutable date fields
-  if (diaField) diaField.setText(String(actaDay || "").padStart(2, "0"));
-  if (mesField) mesField.setText(getMonthName(actaMonth));  // Nombre del mes en español (Enero, Febrero, etc.)
-  if (anioField) anioField.setText(String(actaYear || ""));  // Año actual del momento de creación
+  if (diaField)  { diaField.setText(String(actaDay  || "").padStart(2, "0")); diaField.setFontSize(10); fixWidgetDAs(diaField, 10); diaField.updateAppearances(regularFont); }
+  if (mesField)  { mesField.setText(getMonthName(actaMonth)); mesField.setFontSize(10); fixWidgetDAs(mesField, 10); mesField.updateAppearances(regularFont); }
+  if (anioField) { anioField.setText(String(actaYear || "")); anioField.setFontSize(10); fixWidgetDAs(anioField, 10); anioField.updateAppearances(regularFont); }
 
   // Clear tabla_equipos — we draw over it
   const tablaField = form.getTextField("tabla_equipos");
@@ -335,4 +373,73 @@ async function generateActaEntregaPdf({ actaCode = "ACTA-ET-2026-000001", nombre
   return Buffer.from(await pdfDoc.save());
 }
 
-module.exports = { generateActaEntregaPdf };
+/**
+ * Generates the filled Acta de Retiro/Devolución PDF (ACTA-D-ET template).
+ */
+async function generateActaRetiroPdf({ actaCode = "ACTA-D-ET-2026-000001", nombre, cedula, cargo, actaDay, actaMonth, actaYear, items = [] }) {
+  const templateBytes = fs.readFileSync(TEMPLATE_RETIRO);
+  const pdfDoc = await PDFDocument.load(templateBytes);
+
+  const { bold: boldFont, reg: regularFont } = await loadTimesNewRoman(pdfDoc);
+
+  const form = pdfDoc.getForm();
+
+  const codigoMatch = String(actaCode || "").match(/(\d{6})$/);
+  const codigoText  = codigoMatch ? codigoMatch[1] : "000001";
+
+  const nombreText      = String(nombre || "");
+  const cedulaText      = String(cedula || "");
+  const cargoNormalText = String(cargo || "");
+  const cargoMayusText  = splitCargoForSignature(String(cargo || "").toUpperCase());
+
+  // Set fields with explicit font size where /DA exists
+  const codigoField = form.getTextField("codigo");
+  const nombreField = form.getTextField("nombre");
+  const cedulaField = form.getTextField("cedula");
+  const cargoField  = form.getTextField("cargo");
+  const cargoNField = form.getTextField("cargoN"); // no /DA → setText only, no setFontSize
+
+  let diaField, mesField, anioField;
+  try { diaField  = form.getTextField("dia");  } catch (_) { diaField  = null; }
+  try { mesField  = form.getTextField("mes");  } catch (_) { mesField  = null; }
+  try { anioField = form.getTextField("anio"); } catch (_) { anioField = null; }
+
+  for (const [field, val, font] of [
+    [codigoField, codigoText,      regularFont],
+    [nombreField, nombreText,      regularFont],
+    [cedulaField, cedulaText,      regularFont],
+    [cargoField,  cargoNormalText, regularFont],
+  ]) {
+    field.setText(val);
+    field.setFontSize(10);
+    fixWidgetDAs(field, 10);
+    field.updateAppearances(font);
+  }
+
+  // cargoN has no /DA in template — inject dummy so updateAppearances creates a valid stream
+  try {
+    ensureDA(cargoNField);
+    try { cargoNField.enableMultiline(); } catch (_) {}
+    cargoNField.setText(cargoMayusText);
+    cargoNField.setFontSize(10);
+    fixWidgetDAs(cargoNField, 10);
+    cargoNField.updateAppearances(boldFont);
+  } catch (_) {}
+
+  if (diaField)  { diaField.setText(String(actaDay  || new Date().getDate()).toString().padStart(2, "0")); diaField.setFontSize(10); fixWidgetDAs(diaField, 10); diaField.updateAppearances(regularFont); }
+  if (mesField)  { mesField.setText(getMonthName(actaMonth || (new Date().getMonth() + 1))); mesField.setFontSize(10); fixWidgetDAs(mesField, 10); mesField.updateAppearances(regularFont); }
+  if (anioField) { anioField.setText(String(actaYear || new Date().getFullYear())); anioField.setFontSize(10); fixWidgetDAs(anioField, 10); anioField.updateAppearances(regularFont); }
+
+  const tablaField = form.getTextField("tabla_equipos");
+  tablaField.setText("");
+  tablaField.enableReadOnly();
+
+  form.flatten();
+
+  const page1 = pdfDoc.getPages()[0];
+  drawTableOnPage(page1, items, { bold: boldFont, regular: regularFont }, TABLE_RETIRO);
+
+  return Buffer.from(await pdfDoc.save());
+}
+
+module.exports = { generateActaEntregaPdf, generateActaRetiroPdf };

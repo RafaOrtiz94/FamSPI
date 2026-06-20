@@ -333,12 +333,14 @@ const getPriorityGroups = (scope, role, auditActive) => {
  groups.critical.push(purchasesWorkspaceLink);
  groups.primary.push(equipmentWorkspaceLink);
  groups.primary.push(permisosLink);
+ if (["jefe_tecnico"].includes(scope)) groups.primary.push(collabEntregasLink);
  groups.secondary.push(viaticosLink);
  }
 
  // TALENTO HUMANO - Gestión de personal
  else if (["talento-humano", "talento_humano", "jefe_talento_humano"].includes(scope)) {
  groups.primary.push(permisosLink, peopleAdminLink, asistenciaReportesLink, ...talentoLinks);
+ if (["talento_humano","talento-humano"].includes(scope)) groups.primary.push(collabEntregasLink);
  groups.secondary.push(viaticosLink);
  }
 

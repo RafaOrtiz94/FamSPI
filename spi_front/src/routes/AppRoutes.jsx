@@ -42,6 +42,7 @@ import Modal from "../core/ui/components/Modal";
 import DocumentSigner from "../modules/signature/components/DocumentSigner";
 import DocumentVerification from "../modules/signature/pages/DocumentVerification";
 import SignatureDashboard from "../modules/signature/pages/SignatureDashboard";
+import SignatureWorkflowVerificationPage from "../modules/signature/pages/SignatureWorkflowVerificationPage";
 
 
 // Lazy loaded components
@@ -87,7 +88,10 @@ const TIMaintenanceSchedulePage = lazy(() => import("../modules/ti/pages/TIMaint
 const TIDeviceManagementPage = lazy(() => import("../modules/ti/pages/TIDeviceManagementPage"));
 const TIModuleAccessPage = lazy(() => import("../modules/ti/pages/TIModuleAccessPage"));
 const TIAssetsFinancieroPage = lazy(() => import("../modules/ti/pages/TIAssetsFinancieroPage"));
+const CollabDeliveriesFinancieroPage = lazy(() => import("../modules/collab/pages/CollabDeliveriesFinancieroPage"));
+const CollabDeliveriesGerenciaPage   = lazy(() => import("../modules/collab/pages/CollabDeliveriesGerenciaPage"));
 const TIActasPage = lazy(() => import("../modules/ti/pages/TIActasPage"));
+const SignatureWorkflowDetailPage = lazy(() => import("../modules/signature/pages/SignatureWorkflowDetailPage"));
 const DashboardOperaciones = lazy(() => import("../modules/operaciones/Dashboard"));
 const DashboardCalidad = lazy(() => import("../modules/calidad/Dashboard"));
 const CA0101Workspace = lazy(() => import("../modules/calidad/pages/CA0101Workspace"));
@@ -190,6 +194,7 @@ const AppRoutes = () => {
 
         {/* 📝 Verificación pública de documentos firmados */}
         <Route path="/verificar/:token" element={<DocumentVerification />} />
+        <Route path="/verificar/famsign/:token" element={<SignatureWorkflowVerificationPage />} />
         {/* 🚀 Kick Off 2026 — entrada por QR (validación por token, sin rol previo) */}
         <Route path="/kickoff/sala/:token" element={<KickoffQREntryPage />} />
       </Route>
@@ -418,6 +423,12 @@ const AppRoutes = () => {
           ]} />}>
             <Route path="/dashboard/ti/activos" element={<TIAssetsFinancieroPage />} />
           </Route>
+          <Route element={<ProtectedRoute allowedRoles={["financiero", "jefe_financiero", "talento_humano", "jefe_tecnico"]} />}>
+            <Route path="/dashboard/collab/entregas" element={<CollabDeliveriesFinancieroPage />} />
+          </Route>
+          <Route element={<ProtectedRoute allowedRoles={["gerencia_general", "gerencia"]} />}>
+            <Route path="/dashboard/collab/resumen" element={<CollabDeliveriesGerenciaPage />} />
+          </Route>
           <Route path="/dashboard/operaciones" element={<DashboardOperaciones />} />
           <Route path="/dashboard/logistica" element={<DashboardLogistica />} />
           <Route path="/dashboard/calidad" element={<DashboardCalidad />} />
@@ -578,27 +589,17 @@ const AppRoutes = () => {
             <Route path="/dashboard/kickoff/sala/:presentationId" element={<KickoffQuestionRoomPage />} />
           </Route>
 
-          {/* 📝 Sistema de Firma Digital */}
+          {/* 📝 Sistema de Firma Digital — transversal: cualquier rol activo puede ser firmante */}
           <Route
-            element={
-              <ProtectedRoute
-                allowedRoles={[
-                  "gerencia",
-                  "gerencia_general",
-                  "ti",
-                  "jefe_ti",
-                  "admin_ti",
-                  "comercial",
-                  "jefe_comercial",
-                  "talento_humano",
-                  "finanzas",
-                  "calidad"
-                ]}
-              />
-            }
+            element={<ProtectedRoute allowedRoles={[]} />}
           >
-            <Route path="/dashboard/signatures" element={<SignatureDashboard />} />
+            <Route path="/dashboard/signatures" element={<Navigate to="/dashboard/signatures/inbox" replace />} />
+            <Route path="/dashboard/signatures/inbox" element={<SignatureDashboard />} />
+            <Route path="/dashboard/signatures/created" element={<SignatureDashboard />} />
+            <Route path="/dashboard/signatures/completed" element={<SignatureDashboard />} />
+            <Route path="/dashboard/signatures/all" element={<SignatureDashboard />} />
             <Route path="/dashboard/signatures/:documentId/sign" element={<DocumentSigner />} />
+            <Route path="/dashboard/signatures/workflows/:workflowId" element={<SignatureWorkflowDetailPage />} />
           </Route>
           {/* Subrutas Backoffice */}
           <Route

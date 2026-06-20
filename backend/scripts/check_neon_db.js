@@ -1,10 +1,8 @@
-const { Client } = require('pg');
-require('dotenv').config();
+const { Client } = require("pg");
+const { getDbConfig } = require("./dbConnection");
 
 async function checkNeonDatabase() {
-  const client = new Client({
-    connectionString: 'postgresql://neondb_owner:npg_IvXRb0pLAku5@ep-muddy-sun-ah5um48r-pooler.c-3.us-east-1.aws.neon.tech/FamSPI?sslmode=require&channel_binding=require'
-  });
+  const client = new Client(getDbConfig());
 
   try {
     console.log('[NEON] Connecting...');

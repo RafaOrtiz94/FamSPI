@@ -309,10 +309,8 @@ class PrivatePurchasesService {
     });
   }
 
-  _inspectionHandledByBusinessCase(row = {}) {
-    const offerKind = this._normalizeOfferKind(row.offer_kind, { allowLegacyAlias: true }) || row.offer_kind;
-    const businessCaseId = row.business_case_id || row.extra?.auto_business_case_id || null;
-    return offerKind === "comodato" && Boolean(businessCaseId);
+  _inspectionHandledByBusinessCase(_row = {}) {
+    return false;
   }
 
   _getUserRoles(user) {
@@ -4633,12 +4631,6 @@ class PrivatePurchasesService {
     }
 
     const purchase = rows[0];
-    if (this._inspectionHandledByBusinessCase(purchase)) {
-      const error = new Error('La inspeccion de ambiente de este comodato se gestiona en el Business Case vinculado');
-      error.status = 409;
-      error.code = 'INSPECTION_HANDLED_BY_BUSINESS_CASE';
-      throw error;
-    }
     const allowedStates = new Set([
       PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED,
       PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED,
@@ -4814,13 +4806,6 @@ class PrivatePurchasesService {
     );
     if (!rows.length) throw new Error('Solicitud no encontrada');
     const purchase = rows[0];
-
-    if (this._inspectionHandledByBusinessCase(purchase)) {
-      const error = new Error('La inspeccion de ambiente de este comodato se gestiona en el Business Case vinculado');
-      error.status = 409;
-      error.code = 'INSPECTION_HANDLED_BY_BUSINESS_CASE';
-      throw error;
-    }
 
     if (!purchase.inspection_request_id) {
       const error = new Error('La inspeccion de ambiente aun no fue generada');

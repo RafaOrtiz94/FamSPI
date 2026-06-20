@@ -33,6 +33,7 @@ const { createClientFolder, moveClientFolderToApproved } = require("../../utils/
 const notificationManager = require("../notifications/notificationManager");
 const crypto = require("crypto");
 const { enqueueIntegrationEvent } = require("../integrations/integrationOutbox.service");
+const { isCrmSyncEnabled } = require("../../config/crmDb");
 const { callOdoo, IntegrationDisabledError } = require("../integrations/odooClient");
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
@@ -2660,6 +2661,35 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
     } catch (notifyError) {
       logger.warn({ notifyError, requestId: newRequest.id }, "Error enviando notificaciones de cliente");
     }
+    // Hook CRM: sincronizar como Lead/Prospecto en EspoCRM
+    if (isCrmSyncEnabled()) {
+      try {
+        await enqueueIntegrationEvent({
+          eventType: "crm.prospect.upsert",
+          payload: {
+            id:                          newRequest.id,
+            ruc_cedula:                  newRequest.ruc_cedula,
+            commercial_name:             newRequest.commercial_name,
+            legal_person_business_name:  newRequest.legal_person_business_name,
+            natural_person_firstname:    newRequest.natural_person_firstname,
+            natural_person_lastname:     newRequest.natural_person_lastname,
+            client_type:                 newRequest.client_type,
+            client_email:                newRequest.client_email,
+            legal_rep_email:             newRequest.legal_rep_email,
+            establishment_city:          newRequest.establishment_city,
+            establishment_province:      newRequest.establishment_province,
+            shipping_city:               newRequest.shipping_city,
+            shipping_province:           newRequest.shipping_province,
+            assigned_advisor_email:      newRequest.assigned_advisor_email || user.email,
+          },
+          idempotencyKey: `crm.prospect.${newRequest.id}`,
+          correlationId:  String(newRequest.id),
+        });
+      } catch (crmErr) {
+        logger.warn({ request_id: newRequest.id, error: crmErr?.message }, "[CRM_SYNC] Error encolando prospecto");
+      }
+    }
+
     return newRequest;
   } catch (error) {
     await dbClient.query("ROLLBACK");
@@ -2926,6 +2956,45 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
     if (odooSync?.external_id) {
       updatedRequest.external_source = "odoo";
       updatedRequest.external_id = odooSync.external_id;
+    }
+
+    if (isCrmSyncEnabled()) {
+      try {
+        await enqueueIntegrationEvent({
+          eventType: "crm.client.approved",
+          payload: {
+            famspi_client_request_id: updatedRequest.id,
+            ruc_cedula: updatedRequest.ruc_cedula,
+            commercial_name: updatedRequest.commercial_name,
+            legal_person_business_name: updatedRequest.legal_person_business_name,
+            natural_person_firstname: updatedRequest.natural_person_firstname,
+            natural_person_lastname: updatedRequest.natural_person_lastname,
+            client_type: updatedRequest.client_type,
+            client_email: updatedRequest.client_email,
+            establishment_phone: updatedRequest.establishment_phone,
+            establishment_cellphone: updatedRequest.establishment_cellphone,
+            establishment_address: updatedRequest.establishment_address,
+            establishment_city: updatedRequest.establishment_city,
+            establishment_province: updatedRequest.establishment_province,
+            shipping_address: updatedRequest.shipping_address,
+            shipping_city: updatedRequest.shipping_city,
+            shipping_province: updatedRequest.shipping_province,
+            shipping_contact_name: updatedRequest.shipping_contact_name,
+            legal_rep_name: updatedRequest.legal_rep_name,
+            legal_rep_email: updatedRequest.legal_rep_email,
+            approved_at: updatedRequest.approved_at,
+            external_source: updatedRequest.external_source,
+            external_id: updatedRequest.external_id,
+          },
+          idempotencyKey: `crm.client.approved.${updatedRequest.id}`,
+          correlationId: String(updatedRequest.id),
+        });
+      } catch (crmErr) {
+        logger.warn(
+          { client_request_id: updatedRequest.id, error: crmErr?.message },
+          "[CRM_SYNC] Error encolando evento de aprobacion de cliente — no bloquea la aprobacion",
+        );
+      }
     }
   }
   const outcome = newStatus === 'approved' ? 'Aprobada' : 'Rechazada';

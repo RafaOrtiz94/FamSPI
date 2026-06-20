@@ -26,9 +26,7 @@ import ExpedienteAuditTab   from './tabs/ExpedienteAuditTab';
 const EASE_OUT = [0.23, 1, 0.32, 1];
 
 const purchaseInspectionHandledByBusinessCase = (purchase, type) => {
-  if (type === 'public' || purchase?.purchase_type === 'public') return true;
-  const linkedBusinessCaseId = purchase?.extra?.auto_business_case_id || purchase?.business_case_id || null;
-  return String(purchase?.offer_kind || '').toLowerCase() === 'comodato' && Boolean(linkedBusinessCaseId);
+  return false;
 };
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -440,7 +438,7 @@ function computeNextAction(purchase, type, userRoles = []) {
 
     // Solicitar inspección: es acción del asesor comercial, va en Flujo Comercial
     { tabId: 'flujo_comercial',
-      description: 'Solicita la inspección de ambiente para que Servicio Técnico planifique la visita.',
+      description: 'Solicita la inspección operativa de compra para que Servicio Técnico planifique la visita.',
       actor: 'Asesor Comercial',
       urgent: true,
       when: !inspectionHandledByBc && status === 'client_registered' && !purchase?.inspection_request_id && (isComercial || isBackoffice || isManager) },
@@ -510,14 +508,14 @@ function computeNextAction(purchase, type, userRoles = []) {
 
     // Jefe Tecnico -> planificar inspeccion
     { tabId: 'tecnica',
-      description: 'Asigna tecnico y fecha segun el cronograma de Servicio Tecnico.',
+      description: 'Asigna tecnico y fecha para la inspeccion operativa segun el cronograma de Servicio Tecnico.',
       actor: 'Jefe Tecnico',
       urgent: true,
       when: !inspectionHandledByBc && status === 'inspection_requested' && !purchase?.inspection_scheduled_date && (isTecnico || isManager) },
 
     // Tecnico -> registrar F.ST-07
     { tabId: 'tecnica',
-      description: 'Registra el F.ST-07 de inspeccion de ambiente realizada en sitio.',
+      description: 'Registra el F.ST-07 de la inspeccion operativa realizada en sitio.',
       actor: 'Tecnico',
       when: !inspectionHandledByBc && ['inspection_requested','inspection_coordinated'].includes(status) && purchase?.inspection_scheduled_date && !(purchase?.site_inspection_ready_for_installation || purchase?.inspection_site_ready_for_installation) && (isTecnico || isManager) },
 
@@ -583,7 +581,7 @@ function computeNextAction(purchase, type, userRoles = []) {
       when: ['waiting_dispatch','dispatch_ready'].includes(status) && isDelivery },
 
     { tabId: 'tecnica',
-      description: 'Coordina y registra la inspección técnica del equipo.',
+      description: 'Coordina y registra la inspeccion operativa del equipo.',
       actor: 'Técnico',
       when: ['inspection_requested','inspection_coordinated'].includes(status) && (isTecnico || isManager) },
 

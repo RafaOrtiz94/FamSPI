@@ -41,11 +41,13 @@ const collaboratorsRoutes = require("../modules/collaborators/collaborators.rout
 const offboardingRoutes = require("../modules/offboarding/offboarding.routes");
 const signatureRoutes = require("../modules/signature/signature.routes");
 const signatureV1Routes = require("../modules/signature/signature.v1.routes");
+const signatureWorkflowsRoutes = require("../modules/signature-workflows/signatureWorkflows.routes");
 const dashboardRoutes = require("../modules/dashboard/dashboard.routes");
 const supportTicketsRoutes = require("../modules/support-tickets/supportTickets.routes");
 const viaticosRoutes = require("../modules/viaticos/viaticos.routes");
 const mantenimientosRoutes = require("../modules/mantenimientos/mantenimientos.routes");
 const integrationsRoutes = require("../modules/integrations/integrations.routes");
+const crmWebhookRoutes = require("../modules/integrations/crmWebhook.routes");
 const externalCasesRoutes = require("../modules/servicio/externalCases.routes");
 const calidadRoutes = require("../modules/calidad/ca0101.routes");
 const calidadCleaningRoutes = require("../modules/calidad/ca0102.routes");
@@ -65,6 +67,7 @@ const calidadSamplingRoutes = require("../modules/calidad/ca0116.routes");
 const calidadTecnoRoutes = require("../modules/calidad/ca0117.routes");
 const internalJobsRouter = require("./internalJobs.routes");
 const tiAssetsRoutes = require("../modules/ti-assets/tiAssets.routes");
+const collabDeliveriesRoutes = require("../modules/collab-deliveries/collabDeliveries.routes");
 const moduleAccessRoutes = require("../modules/module-access/moduleAccess.routes");
 const kickoffRoutes = require("../modules/kickoff/kickoff.routes");
 const opportunitiesRoutes = require("../modules/opportunities/opportunities.routes");
@@ -72,6 +75,8 @@ const opportunitiesRoutes = require("../modules/opportunities/opportunities.rout
 function mountPublicRoutes(app) {
   app.use("/api/v1/auth", authRoutes);
   app.use("/api/applicants", applicantsRoutes);
+  // Webhook público de EspoCRM — sin JWT, validado por X-Hook-Secret
+  app.use("/api/v1/integrations/crm/webhook", crmWebhookRoutes);
 }
 
 function mountPrivateRoutes(app) {
@@ -135,6 +140,7 @@ app.use("/api/v1/calidad/capa", calidadCapaRoutes);
   app.use("/api/v1/dashboard", dashboardRoutes);
   app.use("/api/v1/support-tickets", supportTicketsRoutes);
   app.use("/api/v1/ti-assets", tiAssetsRoutes);
+  app.use("/api/v1/collab-deliveries", collabDeliveriesRoutes);
   app.use("/api/v1/module-access", moduleAccessRoutes);
   app.use("/api/v1/kickoff", kickoffRoutes);
   app.use("/api/v1/famsheets", opportunitiesRoutes);
@@ -144,6 +150,7 @@ app.use("/api/v1/calidad/capa", calidadCapaRoutes);
   app.use("/api/v1/users/me/profile", userProfileRoutes);
   app.use("/api/v1/users", userCertificationsRoutes);
   app.use("/api/v1/signature", signatureV1Routes);
+  app.use("/api/v1/signature-workflows", signatureWorkflowsRoutes);
   app.use("/api", signatureRoutes);
 }
 

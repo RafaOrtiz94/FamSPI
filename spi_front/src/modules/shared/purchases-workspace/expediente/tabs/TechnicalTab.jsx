@@ -10,8 +10,9 @@
  * NOTA: "Solicitar inspección de ambiente" se gestiona en PrivateFlowTab
  * (Flujo Comercial) ya que es responsabilidad del asesor/backoffice comercial.
  *
- * Para expedientes con inspección gestionada por Business Case,
- * los pasos 1-2 se omiten y solo se muestran 3-4 (numerados 1-2).
+ * Si existe un Business Case vinculado, su inspección por costos se muestra
+ * solo como referencia. La inspección operativa del proceso de compra siempre
+ * se gestiona en este flujo técnico.
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -515,7 +516,7 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
   const iw        = purchase?.installation_workflow || null;
 
   const linkedBcId = purchase?.extra?.auto_business_case_id || purchase?.business_case_id || null;
-  const inspByBc   = !isPrivate || (String(purchase?.offer_kind || '').toLowerCase() === 'comodato' && Boolean(linkedBcId));
+  const hasLinkedBc = Boolean(linkedBcId);
 
   /* ── Carga técnicos ───────────────────── */
   useEffect(() => {
@@ -543,9 +544,9 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
 
   /* activos: el primero sin completar en la secuencia */
   // Paso 1 (planificar) activo cuando se solicitó inspección pero no se planificó
-  const step2Active = !inspByBc && step1Done && !step2Done;
-  const step3Active = !inspByBc && step2Done && !step3Done;
-  const step4Active = (inspByBc || step3Done) && !step4Done;
+  const step2Active = step1Done && !step2Done;
+  const step3Active = step2Done && !step3Done;
+  const step4Active = step3Done && !step4Done;
   const step5Active = step4Done && !step5Done;
 
   /**
@@ -561,9 +562,9 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
   };
 
   /* Cuantos completados para el badge */
-  // Paso 1 (solicitar inspección) se gestiona en PrivateFlowTab → aquí solo 4 pasos (no-BC) o 2 (BC/público)
-  const totalSteps     = inspByBc ? 2 : 4;
-  const completedSteps = (inspByBc ? 0 : (step2Done ? 1 : 0) + (step3Done ? 1 : 0)) + (step4Done ? 1 : 0) + (step5Done ? 1 : 0);
+  // Paso 1 (solicitar inspección) se gestiona desde el flujo comercial/ACP.
+  const totalSteps     = 4;
+  const completedSteps = (step2Done ? 1 : 0) + (step3Done ? 1 : 0) + (step4Done ? 1 : 0) + (step5Done ? 1 : 0);
 
   /* ── Runner genérico ──────────────────── */
   const run = async (name, fn) => {
@@ -656,7 +657,7 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
         <div>
           <h2 className="text-lg font-semibold text-ink-slate">Técnica</h2>
           <p className="text-xs text-warm-ash mt-0.5">
-            Inspección de ambiente, instalación y verificación
+            Inspección operativa, instalación y verificación
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -674,18 +675,18 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
           </div>
         )}
 
-        {/* Banner BC — sin inspeccion de sitio */}
-        {inspByBc && (
+        {/* Banner BC — referencia adicional */}
+        {hasLinkedBc && (
           <div className="bg-sky-50 rounded-xl border border-sky-100 px-4 py-3 text-xs text-sky-800 flex items-center gap-2">
             <FiClipboard size={14} className="shrink-0" />
-            La inspección de ambiente de este comodato se gestiona en el Business Case vinculado. Aquí se registra la ejecución técnica posterior.
+            Este expediente también tiene un Business Case vinculado con una inspección por costos o factibilidad.
+            En esta pestaña se gestiona la inspección operativa del proceso de compra.
           </div>
         )}
 
         {/* ── PASO 1: Planificar visita ─────────────────────────────────── */}
         {/* (Paso 0: Solicitar inspección se gestiona en PrivateFlowTab) */}
-        {!inspByBc && (
-          <WorkflowStep
+        <WorkflowStep
             stepNumber={1}
             title="Planificar visita técnica"
             actor="Jefe Técnico · Jefe Servicio Técnico"
@@ -721,7 +722,7 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
               ) : (
                 <div className="space-y-4">
                   <p className="text-xs text-warm-ash">
-                    Elige la fecha de visita dentro de la ventana solicitada por comercial y asigna al técnico que realizará la inspección.
+                    Elige la fecha de visita dentro de la ventana solicitada por comercial y asigna al técnico que realizará la inspección operativa.
                   </p>
                   {(purchase?.inspection_min_date || purchase?.inspection_max_date) && (
                     <div className="flex flex-wrap gap-2">
@@ -748,12 +749,10 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
                 </div>
               )}
             </RoleGatedAction>
-          </WorkflowStep>
-        )}
+        </WorkflowStep>
 
         {/* ── PASO 2: F.ST-07 Inspección de sitio ──────────────────────── */}
-        {!inspByBc && (
-          <WorkflowStep
+        <WorkflowStep
             stepNumber={2}
             title="F.ST-07 · Inspección de sitio"
             actor="Técnico"
@@ -884,12 +883,11 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
                 </div>
               )}
             </RoleGatedAction>
-          </WorkflowStep>
-        )}
+        </WorkflowStep>
 
         {/* ── PASO 3: F.ST-14 Recepción visual ─────────────────────────── */}
         <WorkflowStep
-          stepNumber={inspByBc ? 1 : 3}
+          stepNumber={3}
           title="F.ST-14 · Recepción visual"
           actor="Técnico"
           status={roleStepStatus(step4Done, step4Active, ['tecnico','jefe_tecnico','jefe_servicio_tecnico'])}
@@ -954,7 +952,7 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
 
         {/* ── PASO 4: F.ST-09 Verificación ─────────────────────────────── */}
         <WorkflowStep
-          stepNumber={inspByBc ? 2 : 4}
+          stepNumber={4}
           title="F.ST-09 · Verificación de instalación"
           actor="Técnico"
           status={roleStepStatus(step5Done, step5Active, ['tecnico','jefe_tecnico','jefe_servicio_tecnico'])}

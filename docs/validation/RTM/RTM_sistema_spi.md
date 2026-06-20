@@ -59,18 +59,22 @@
 | REQ-INV-008 | FRS-INV-001 | backend/src/modules/inventario/inventario.controller.js | requiere validacion funcional |
 | REQ-INV-009 | FRS-INV-002 | backend/src/modules/inventario/inventario.controller.js | requiere validacion funcional |
 | REQ-INV-010 | FRS-INV-003 | backend/src/modules/inventario/inventario.controller.js | requiere validacion funcional |
-| REQ-FAC-001 | FRS-FIN-001 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-002 | FRS-FIN-002 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-003 | FRS-FIN-003 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-004 | FRS-FIN-004 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-005 | FRS-FIN-005 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-006 | FRS-FIN-006 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-007 | FRS-FIN-007 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-008 | FRS-FIN-001 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-009 | FRS-FIN-002 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-010 | FRS-FIN-003 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-011 | FRS-FIN-004 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-012 | FRS-FIN-005 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
+| REQ-VT-001 | FRS-VT-001 | backend/src/modules/viaticos/viaticos.controller.js | Workspace agrupado por período y badge de progreso |
+| REQ-VT-002 | FRS-VT-001 | spi_front/src/modules/finanzas/pages/ViaticosWorkspace.jsx | Selección múltiple y apertura del wizard en lote |
+| REQ-VT-003 | FRS-VT-004, FRS-VT-005 | backend/src/modules/viaticos/viaticos.service.js | Previsualización y carga de TXT SRI con 14 campos |
+| REQ-VT-004 | FRS-VT-005 | backend/src/modules/viaticos/viaticos.service.js | Categorización de facturas en carga TXT (categories map) |
+| REQ-VT-005 | FRS-VT-007, FRS-VT-008, FRS-VT-009 | backend/src/modules/viaticos/viaticos.controller.js | Creación, listado, actualización y eliminación de notas manuales |
+| REQ-VT-006 | FRS-VT-010, FRS-VT-011 | backend/src/modules/viaticos/viaticos.controller.js | Registro y aprobación de compras sin factura |
+| REQ-VT-007 | FRS-VT-001 | spi_front/src/modules/finanzas/components/viaticos/ViaticosWizard.jsx | Resumen consolidado paso 4 del wizard |
+| REQ-VT-008 | FRS-VT-012 | backend/src/modules/viaticos/viaticos.service.js | Envío a revisión por solicitante (submit-review) |
+| REQ-VT-009 | FRS-VT-013 | backend/src/modules/viaticos/viaticos.controller.js | Aprobación operacional de jefe de área (workflow) |
+| REQ-VT-010 | FRS-VT-014 | backend/src/modules/viaticos/viaticos.controller.js | Revisión y aprobación financiera (status) |
+| REQ-VT-011 | FRS-VT-014 | backend/src/modules/viaticos/viaticos.controller.js | Registro de pago del viático |
+| REQ-VT-012 | FRS-VT-015 | backend/src/modules/viaticos/viaticos.service.js | Categorización de facturas por finanzas (patchInvoice) |
+| REQ-VT-013 | FRS-VT-001 | backend/src/modules/viaticos/viaticos.service.js | Control de visibilidad por rol y propietario |
+| REQ-VT-014 | FRS-VT-018 | backend/src/modules/viaticos/viaticos.controller.js | Reporte de cotejo del viático |
+| REQ-VT-015 | FRS-VT-020 | backend/src/modules/viaticos/viaticos.controller.js | Configuración de zonas, perfiles fijos y política |
+| REQ-VT-016 | FRS-VT-019 | backend/src/modules/viaticos/viaticos.controller.js | Reporte resumen y ATS XML |
 | REQ-DOC-001 | FRS-DOC-001 | backend/src/modules/documents/documents.controller.js | requiere validacion funcional |
 | REQ-DOC-002 | FRS-DOC-002 | backend/src/modules/documents/documents.controller.js | requiere validacion funcional |
 | REQ-DOC-003 | FRS-DOC-003 | backend/src/modules/documents/documents.controller.js | requiere validacion funcional |

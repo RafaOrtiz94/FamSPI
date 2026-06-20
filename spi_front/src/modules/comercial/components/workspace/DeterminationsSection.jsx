@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "@headlessui/react";
-import { FiActivity, FiAlertTriangle, FiCalendar, FiCheck, FiChevronDown, FiEdit2, FiFileText, FiTrash2, FiUpload, FiX } from "react-icons/fi";
+import { FiActivity, FiAlertTriangle, FiCalendar, FiCheck, FiChevronDown, FiClipboard, FiEdit2, FiExternalLink, FiFileText, FiRefreshCw, FiSave, FiTrash2, FiUpload, FiX } from "react-icons/fi";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
@@ -9,6 +9,7 @@ import { recordBusinessCaseTelemetry } from "../../../../core/utils/businessCase
 import { promptDialog } from "../../../../core/ui/utils/promptDialog";
 import {
  getDeterminationsStatDocumentInfo,
+ parseDeterminationsQuantitiesFile,
  requestBusinessCaseEnvironmentInspection,
  uploadDeterminationsStatDocument,
 } from "../../../../core/api/businessCaseApi";
@@ -103,6 +104,13 @@ const getNaturalErrorMessage = (err, fallback) => {
  if (!raw) return fallback;
  if (/\b(4\d\d|5\d\d)\b/.test(raw) || /forbidden|conflict|unauthorized|status/i.test(raw)) return fallback;
  return raw;
+};
+
+const formatSelectedFileSize = (bytes) => {
+ const size = Number(bytes || 0);
+ if (!Number.isFinite(size) || size <= 0) return "0 KB";
+ if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+ return `${Math.max(1, Math.round(size / 1024))} KB`;
 };
 
 const completeDeterminationsSection = async (bcId, reason = "determinaciones_finalizadas_workspace") => {
@@ -389,6 +397,16 @@ const DeterminationsSection = ({
  const [gateLoading, setGateLoading] = useState(false);
  const [uploadingDocument, setUploadingDocument] = useState(false);
  const [selectedDocument, setSelectedDocument] = useState(null);
+ const [sheetUrl, setSheetUrl] = useState(null);
+ const [sheetSyncing, setSheetSyncing] = useState(false);
+ const [isDetermEditing, setIsDetermEditing] = useState(false);
+ const [importModal, setImportModal] = useState(null);
+ const [importTab, setImportTab] = useState("paste");
+ const [importPasteText, setImportPasteText] = useState("");
+ const [importPreview, setImportPreview] = useState(null);
+ const [importFileLoading, setImportFileLoading] = useState(false);
+ const importFileRef = useRef(null);
+ const statDocumentInputRef = useRef(null);
  const [inspectionModal, setInspectionModal] = useState({
   open: false,
   minDate: "",
@@ -434,19 +452,31 @@ const DeterminationsSection = ({
 
 const canEditBase = permissions.canEdit !== false && ownership?.canUserEdit !== false;
 const currentRole = user?.role;
-const isJefeComercial = String(currentRole || "").toLowerCase() === "jefe_comercial";
+const normalizedCurrentRole = String(currentRole || "").trim().toLowerCase();
+const isJefeComercial = normalizedCurrentRole === "jefe_comercial" || normalizedCurrentRole === "jefe_de_comercial";
+const canBulkImport = ["backoffice_comercial", "jefe_comercial", "jefe_de_comercial"].includes(normalizedCurrentRole);
  const autosaveEnabled = false;
 const gateActive = gateInfo?.enabledForBusinessCase === true;
 const gatePhase = String(gateInfo?.phase || "commercial_input").toLowerCase();
 const quantitiesLocked = gateInfo?.quantitiesLocked === true;
-const isTechnicalRole = TECNICO_ROLES.has(String(currentRole || "").toLowerCase());
+const isTechnicalRole = TECNICO_ROLES.has(normalizedCurrentRole);
 const canUploadDocument = gateInfo?.permissions?.canUploadDocument === true;
+const uploadReadiness = gateInfo?.uploadReadiness || null;
+const uploadBlockingMessage = uploadReadiness?.message || null;
+const uploadMissingSections = Array.isArray(uploadReadiness?.missingSections)
+ ? uploadReadiness.missingSections
+ : [];
 const inspectionRequestInfo = gateInfo?.inspectionRequest || null;
 const inspectionDraft = gateInfo?.inspectionDraft?.draft || null;
 const inspectionMissingFields = gateInfo?.inspectionDraft?.missingFields || [];
-const canRequestInspection = canUploadDocument && gateInfo?.documentUploaded && !inspectionRequestInfo?.request_id;
+const canRequestInspection = canEditBase && gateInfo?.documentUploaded && !inspectionRequestInfo?.request_id;
+const selectedDocumentSummary = selectedDocument
+ ? `${selectedDocument.name} (${formatSelectedFileSize(selectedDocument.size)})`
+ : "Aun no has seleccionado un archivo.";
 const canEditByGate = gateInfo?.permissions?.canEditDeterminations === true;
-const canEditFinal = (gateActive ? (canEditBase && canEditByGate) : canEditBase) && !quantitiesLocked;
+const canEditFinal = (gateActive ? (canEditBase && canEditByGate) : canEditBase) && !quantitiesLocked && isDetermEditing;
+const canEditItemMeta = canEditBase && !quantitiesLocked;
+const canReopenCommercial = isJefeComercial && gatePhase === "technical_review";
 const sectionLocks = gateInfo?.sectionLocks || {};
 const isSubsectionLocked = (subsectionKey) => Boolean(sectionLocks?.[subsectionKey]) || quantitiesLocked;
 const allSubsectionsLocked = ["reactivos", "controles", "calibradores", "materiales"].every((key) => isSubsectionLocked(key));
@@ -488,15 +518,15 @@ const inspectionSummary = useMemo(() => {
 const canEditType = (type) => {
  if (!canEditFinal) return false;
  if (isSubsectionLocked(subsectionFromType(type))) return false;
- if (ADMIN_ROLES.has(currentRole)) return true;
+ if (ADMIN_ROLES.has(normalizedCurrentRole)) return true;
  // NUEVO-02: jefe_comercial y jefe_de_comercial pueden editar reactivos en BC público y privado
  if (REACTIVO_TYPES.has(type)) {
-   const isJefeComercial = currentRole === "jefe_comercial" || currentRole === "jefe_de_comercial";
+   const isJefeComercial = normalizedCurrentRole === "jefe_comercial" || normalizedCurrentRole === "jefe_de_comercial";
    if (isJefeComercial) return true;
-   return isPublicBC ? currentRole === "acp_comercial" : (currentRole === "backoffice_comercial" || currentRole === "backoffice");
+   return isPublicBC ? normalizedCurrentRole === "acp_comercial" : normalizedCurrentRole === "backoffice_comercial";
  }
  // BUG-01: usar TECNICO_EDIT_ROLES (incluye jefe_comercial/jefe_de_comercial) para sub-secciones técnicas
- if (TECNICO_TYPES.has(type)) return TECNICO_EDIT_ROLES.has(currentRole);
+ if (TECNICO_TYPES.has(type)) return TECNICO_EDIT_ROLES.has(normalizedCurrentRole);
  return false;
  };
 
@@ -1048,7 +1078,7 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  rowWindowByGroup[`${groupKey}:${tableType}`] || ROW_WINDOW_STEP;
 
  const isSectionCollapsed = (groupKey, sectionKey) =>
- Boolean(collapsedSections[`${groupKey}:${sectionKey}`]);
+ collapsedSections[`${groupKey}:${sectionKey}`] !== false;
 
  const toggleSectionCollapsed = (groupKey, sectionKey) => {
  const stateKey = `${groupKey}:${sectionKey}`;
@@ -1598,6 +1628,19 @@ const handleRequestUnlockSubsection = async (sectionKey) => {
  }
 };
 
+const handleReopenCommercial = async () => {
+ if (!bcId) return;
+ try {
+  await api.post(`/business-case/${bcId}/determinations/reopen-commercial`);
+  await loadGateInfo();
+  setIsDetermEditing(false);
+  onSave({ refresh: true, markComplete: false });
+  showToast("Fase comercial reabierta. El equipo comercial puede volver a editar.", "success");
+ } catch (err) {
+  showToast(getNaturalErrorMessage(err, "No se pudo reabrir la fase comercial."), "error");
+ }
+};
+
 const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  if (!bcId || !requestEntry?.id) return;
  const notes = (await promptDialog({
@@ -1670,6 +1713,116 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  });
  };
 
+ const triggerAutoSheetSync = useCallback(async (caseId) => {
+  if (!caseId) return;
+  setSheetSyncing(true);
+  try {
+   const res = await api.post(`/business-case/${caseId}/sheets/generate`);
+   const jobId = res?.data?.data?.job_id;
+   if (!jobId) return;
+   let attempts = 0;
+   const poll = async () => {
+    if (attempts >= 24) return;
+    attempts += 1;
+    await new Promise((r) => setTimeout(r, attempts < 8 ? 1000 : attempts < 16 ? 2000 : 3000));
+    const statusRes = await api.get(`/business-case/${caseId}/sheets/jobs/${jobId}`);
+    const job = statusRes?.data?.data || statusRes?.data;
+    if (job?.status === "completed" && job?.sheet_url) {
+     setSheetUrl(job.sheet_url);
+     return;
+    }
+    if (job?.status === "failed") return;
+    await poll();
+   };
+   await poll();
+  } catch (err) {
+   console.warn("[DET] auto-sheet-sync error", err?.message);
+  } finally {
+   setSheetSyncing(false);
+  }
+ }, []);
+
+ const loadExistingSheetUrl = useCallback(async () => {
+  if (!bcId) return;
+  try {
+   const res = await api.get(`/business-case/${bcId}/sheets/preview`);
+   const url = res?.data?.data?.last_generation?.sheet_url;
+   if (url) setSheetUrl(url);
+  } catch (_) {}
+ }, [bcId]);
+
+ useEffect(() => {
+  loadExistingSheetUrl();
+ }, [loadExistingSheetUrl]);
+
+ const buildImportPreviewFromPaste = useCallback((text, rows) => {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const hasTabs = lines.some((l) => l.includes("\t"));
+  if (hasTabs) {
+   const byId = new Map();
+   const byName = new Map();
+   lines.forEach((line) => {
+    const parts = line.split("\t");
+    const key = String(parts[0] || "").trim();
+    const valStr = String(parts[1] || "").replace(",", ".").replace(/[^0-9.]/g, "");
+    const val = parseFloat(valStr);
+    if (!key || !Number.isFinite(val) || val < 0) return;
+    byId.set(key.toLowerCase(), Math.round(val));
+    byName.set(key.toLowerCase(), Math.round(val));
+   });
+   return rows.map((row) => {
+    const rowId = String(row.itemId || row.manufacturerId || "").trim().toLowerCase();
+    const rowName = String(row.name || "").trim().toLowerCase();
+    const val = (rowId ? byId.get(rowId) : undefined) ?? (rowName ? byName.get(rowName) : undefined) ?? null;
+    return { item_key: row.key, item_name: row.name, current: getQtyInputValue(row), newValue: val };
+   });
+  }
+  return rows.map((row, i) => {
+   const line = lines[i];
+   if (!line) return { item_key: row.key, item_name: row.name, current: getQtyInputValue(row), newValue: null };
+   const valStr = line.replace(",", ".").replace(/[^0-9.]/g, "");
+   const val = parseFloat(valStr);
+   return { item_key: row.key, item_name: row.name, current: getQtyInputValue(row), newValue: Number.isFinite(val) && val >= 0 ? Math.round(val) : null };
+  });
+ }, [getQtyInputValue]);
+
+ const applyImportPreview = useCallback((preview) => {
+  const toApply = (preview || []).filter((p) => p.newValue !== null && Number.isFinite(Number(p.newValue)));
+  toApply.forEach((p) => handleQtyChange(p.item_key, String(p.newValue)));
+  return toApply.length;
+ }, [handleQtyChange]);
+
+ const closeImportModal = useCallback(() => {
+  setImportModal(null);
+  setImportPasteText("");
+  setImportPreview(null);
+  setImportTab("paste");
+  if (importFileRef.current) importFileRef.current.value = "";
+ }, []);
+
+ const handleImportFile = useCallback(async (file, sectionKey) => {
+  if (!file || !bcId) return;
+  try {
+   setImportFileLoading(true);
+   const result = await parseDeterminationsQuantitiesFile(bcId, file, sectionKey || null);
+   const matched = Array.isArray(result?.matched) ? result.matched : [];
+   if (!matched.length) {
+    showToast("No se encontraron ítems reconocibles en el archivo.", "warning");
+    return;
+   }
+   const itemKeyToRow = new Map(mergedRows.map((r) => [r.key, r]));
+   const preview = matched.map((m) => {
+    const row = itemKeyToRow.get(m.item_key);
+    return { item_key: m.item_key, item_name: m.item_name, current: row ? getQtyInputValue(row) : null, newValue: m.annual_qty };
+   });
+   setImportPreview(preview);
+  } catch (err) {
+   showToast(getNaturalErrorMessage(err, "No se pudo procesar el archivo."), "error");
+  } finally {
+   setImportFileLoading(false);
+  }
+ }, [bcId, mergedRows, getQtyInputValue, showToast]);
+
  const handleUploadStatDocument = async () => {
  if (!bcId) {
  showToast("No se encontro el Business Case", "error");
@@ -1701,10 +1854,12 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  try {
  setUploadingDocument(true);
  await uploadDeterminationsStatDocument(bcId, selectedDocument);
- showToast("Documento estadistico cargado correctamente", "success");
+ showToast("Documento estadístico cargado. Generando hoja de Sheets...", "success");
  setSelectedDocument(null);
+ if (statDocumentInputRef.current) statDocumentInputRef.current.value = "";
  await loadGateInfo();
  onSave({ refresh: true, markComplete: false });
+ triggerAutoSheetSync(bcId);
  } catch (err) {
  showToast(getNaturalErrorMessage(err, "No se pudo cargar el documento"), "error");
  } finally {
@@ -1829,23 +1984,38 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  };
 
  const startEditItem = (row) => {
- if (row.source !== "custom") return;
- if (!canEditType(row.type)) return;
+ if (!canEditItemMeta) return;
  setEditingItemKey(row.key);
- setEditingItem({ id: row.itemId || "", name: row.name || "", type: row.type || "reactivo" });
+ setEditingItem({ id: row.itemId || row.manufacturerId || "", name: row.name || "", type: row.type || "reactivo" });
  };
 
  const saveEditItem = () => {
  if (!editingItemKey) return;
- const next = savedItems.map((item) => {
- if (item.key !== editingItemKey) return item;
- return {
- ...item,
- itemId: editingItem.id.trim() || item.itemId,
- name: editingItem.name.trim() || item.name,
- type: editingItem.type || item.type,
- };
- });
+ const existsInSaved = savedItems.some((item) => item.key === editingItemKey);
+ let next;
+ if (existsInSaved) {
+  next = savedItems.map((item) => {
+   if (item.key !== editingItemKey) return item;
+   return {
+    ...item,
+    itemId: editingItem.id.trim() || item.itemId,
+    name: editingItem.name.trim() || item.name,
+    type: editingItem.type || item.type,
+   };
+  });
+ } else {
+  // Item de catálogo sin cantidad guardada aún — crear entrada con override de nombre/ID
+  const catalogRow = mergedRows.find((r) => r.key === editingItemKey);
+  if (catalogRow) {
+   next = [...savedItems, {
+    ...catalogRow,
+    itemId: editingItem.id.trim() || catalogRow.itemId || catalogRow.manufacturerId || "",
+    name: editingItem.name.trim() || catalogRow.name,
+   }];
+  } else {
+   next = savedItems;
+  }
+ }
  setEditingItemKey(null);
  setEditingItem({ id: "", name: "", type: "reactivo" });
  setSavedItems(next);
@@ -1961,25 +2131,139 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  </div>
  )}
 
- {canUploadDocument && (
- <div className="flex flex-col sm:flex-row sm:items-center gap-2">
- <input
- type="file"
- accept=".pdf,.doc,.docx,.xlsx,.xls,.csv,.png,.jpg,.jpeg"
- onChange={(e) => setSelectedDocument(e.target.files?.[0] || null)}
- className="text-xs"
- />
- <button
- type="button"
- onClick={handleUploadStatDocument}
- disabled={!selectedDocument || uploadingDocument}
- className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold disabled:opacity-50"
- >
- <FiUpload size={14} />
- {uploadingDocument ? "Cargando..." : "Subir documento"}
- </button>
+ {/* Sheet URL — auto-generado tras subir documento */}
+ {(sheetUrl || sheetSyncing) && (
+ <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+ {sheetSyncing ? (
+ <>
+  <FiRefreshCw size={14} className="text-emerald-600 animate-spin flex-shrink-0" />
+  <span className="text-xs text-emerald-800 font-medium">Generando hoja de cálculo en Google Sheets...</span>
+ </>
+ ) : (
+ <>
+  <FiExternalLink size={14} className="text-emerald-600 flex-shrink-0" />
+  <span className="text-xs text-emerald-800 font-medium">Hoja de Sheets disponible</span>
+  <a
+  href={sheetUrl}
+  target="_blank"
+  rel="noreferrer"
+  className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors"
+  >
+  <FiExternalLink size={12} />
+  Abrir en Sheets
+  </a>
+ </>
+ )}
  </div>
  )}
+
+  {canUploadDocument && !gateInfo?.documentUploaded && (
+  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
+  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+  <div className="space-y-1">
+  <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+  <FiUpload size={13} />
+  Carga comercial
+  </div>
+  <p className="text-sm font-semibold text-slate-900">Selecciona y carga el documento estadistico</p>
+  <p className="text-xs text-slate-600">
+  Formatos permitidos: PDF, Word, Excel, CSV e imagen. Tamano maximo: 15 MB.
+  </p>
+  </div>
+  <span className="inline-flex items-center rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-slate-600 border border-slate-200">
+  {selectedDocument ? "Archivo listo" : "Pendiente de seleccion"}
+  </span>
+  </div>
+  {uploadBlockingMessage ? (
+  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800 space-y-2">
+  <div className="font-semibold">La carga aun no esta habilitada.</div>
+  <div>{uploadBlockingMessage}</div>
+  {uploadMissingSections.length > 0 ? (
+  <div className="flex flex-wrap gap-2">
+  {uploadMissingSections.map((section) => (
+  <span
+  key={section.key || section.label}
+  className="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-800 border border-amber-200"
+  >
+  {section.label || section.key}
+  </span>
+  ))}
+  </div>
+  ) : null}
+  </div>
+  ) : null}
+  <input
+  ref={statDocumentInputRef}
+  type="file"
+  accept=".pdf,.doc,.docx,.xlsx,.xls,.csv,.png,.jpg,.jpeg"
+  onChange={(e) => setSelectedDocument(e.target.files?.[0] || null)}
+  className="hidden"
+  />
+  <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-4">
+  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+  <div className="space-y-1">
+  <div className="text-xs font-semibold text-slate-900">{selectedDocument ? selectedDocument.name : "Ningun archivo seleccionado"}</div>
+  <div className="text-xs text-slate-500">{selectedDocumentSummary}</div>
+  </div>
+  <div className="flex flex-col sm:flex-row gap-2">
+  <button
+  type="button"
+  onClick={() => statDocumentInputRef.current?.click()}
+  className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+  >
+  <FiFileText size={14} />
+  {selectedDocument ? "Cambiar archivo" : "Elegir archivo"}
+  </button>
+  <button
+  type="button"
+  onClick={handleUploadStatDocument}
+  disabled={!selectedDocument || uploadingDocument || uploadReadiness?.canUpload === false}
+  className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+  >
+  <FiUpload size={14} />
+  {uploadingDocument ? "Cargando documento..." : "Subir documento"}
+  </button>
+  </div>
+  </div>
+  </div>
+  </div>
+  )}
+  {/* Botón reemplazar — solo cuando ya hay documento y el usuario puede subir */}
+  {canUploadDocument && gateInfo?.documentUploaded && (
+  <div className="flex items-center justify-end">
+  <input
+  ref={statDocumentInputRef}
+  type="file"
+  accept=".pdf,.doc,.docx,.xlsx,.xls,.csv,.png,.jpg,.jpeg"
+  onChange={(e) => setSelectedDocument(e.target.files?.[0] || null)}
+  className="hidden"
+  />
+  {selectedDocument ? (
+  <div className="flex items-center gap-2">
+  <span className="text-xs text-slate-600 truncate max-w-[180px]">{selectedDocument.name}</span>
+  <button
+  type="button"
+  onClick={handleUploadStatDocument}
+  disabled={uploadingDocument}
+  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+  >
+  <FiUpload size={12} />
+  {uploadingDocument ? "Subiendo..." : "Subir reemplazo"}
+  </button>
+  <button type="button" onClick={() => setSelectedDocument(null)} className="text-xs text-slate-400 hover:text-slate-600">Cancelar</button>
+  </div>
+  ) : (
+  <button
+  type="button"
+  onClick={() => statDocumentInputRef.current?.click()}
+  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+  >
+  <FiUpload size={12} />
+  Reemplazar documento
+  </button>
+  )}
+  </div>
+  )}
 
  {gateInfo?.documentUploaded && (
  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
@@ -1989,9 +2273,9 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  <FiFileText size={13} />
  Solicitud tecnica
  </div>
- <h4 className="text-sm font-semibold text-slate-900">Solicitar inspeccion de ambiente</h4>
+ <h4 className="text-sm font-semibold text-slate-900">Solicitar inspeccion de ambiente por costos</h4>
  <p className="text-xs text-slate-600">
- Registra el rango estimado de instalacion. El sistema llenara el F.ST-20 con la informacion ya guardada en las secciones previas del Business Case.
+ Registra el rango estimado para la inspeccion de ambiente por costos o factibilidad. El sistema llenara el F.ST-20 con la informacion ya guardada en las secciones previas del Business Case.
  </p>
  </div>
  {inspectionRequestInfo?.request_id ? (
@@ -2035,7 +2319,7 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  className="inline-flex items-center gap-2 text-blue-700 hover:underline"
  >
  <FiFileText size={13} />
- Ver F.ST-20
+ Ver F.ST-20 por costos
  </a>
  )}
  <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sky-700">
@@ -2126,6 +2410,24 @@ const rowLimit = getWindowLimit(group.key, section.key);
  {sectionPendingCount} cambio(s)
  </span>
  )}
+{canBulkImport && canEditFinal && !subsectionLocked && (
+<button
+type="button"
+onClick={(event) => {
+event.stopPropagation();
+setImportModal({ sectionKey: section.key, groupKey: group.key, rows: visibleRows });
+setImportTab("paste");
+setImportPasteText("");
+setImportPreview(null);
+if (importFileRef.current) importFileRef.current.value = "";
+}}
+className="inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-100"
+title="Importar cantidades masivamente desde Excel o archivo"
+>
+<FiUpload size={12} />
+Importar cantidades
+</button>
+)}
 <button
 type="button"
 onClick={(event) => {
@@ -2247,14 +2549,14 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
  placeholder="ID fabricante"
  value={editingItem.id}
  onChange={(e) => setEditingItem({ ...editingItem, id: e.target.value })}
- disabled={!canEditRow}
+ disabled={!canEditItemMeta}
  />
  <input
  className="border rounded-lg px-2 py-1 w-full"
  placeholder="Nombre"
  value={editingItem.name}
  onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
- disabled={!canEditRow}
+ disabled={!canEditItemMeta}
  />
  </div>
  ) : (
@@ -2287,7 +2589,7 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
  <button
  onClick={saveEditItem}
  className="px-2 py-1 text-xs bg-blue-600 text-white rounded flex items-center gap-1 disabled:opacity-50"
- disabled={!canEditRow}
+ disabled={!canEditItemMeta}
  >
  <FiCheck size={12} /> Guardar
  </button>
@@ -2300,11 +2602,11 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
  </div>
  ) : (
  <div className="flex flex-col sm:flex-row gap-2">
- {isCustom && (
+ {canEditItemMeta && (
  <button
  onClick={() => startEditItem(row)}
  className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded flex items-center gap-1 disabled:opacity-50"
- disabled={!canEditRow}
+ disabled={!canEditItemMeta}
  >
  <FiEdit2 size={12} /> Editar
  </button>
@@ -2417,60 +2719,85 @@ setNewItemByEquipment((prev) => ({
  </div>
  )}
 
- <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-gray-50/50 border border-gray-100 rounded-2xl p-4">
- <div className="flex items-center gap-3 text-sm text-gray-600">
- <div className="p-2 bg-amber-50 text-amber-600 rounded-full">
- <FiAlertTriangle size={16} />
- </div>
- <span>Cambios pendientes de guardado en base de datos.</span>
- {(pendingChangesCount > 0 || hasStructureChanges) && (
- <span className="inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-semibold">
- Pendientes: {pendingChangesCount + (hasStructureChanges ? 1 : 0)}
- </span>
- )}
- </div>
- <div className="flex items-center gap-6 text-sm">
-<button
-type="button"
-onClick={handleSaveNow}
-disabled={saving || !canEditFinal}
-className="px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
->
-Guardar ahora
-</button>
-<button
-type="button"
-onClick={handleCompleteSection}
-disabled={saving || !canEditFinal || !allSubsectionsLocked}
-className="px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
->
-Terminar seccion
-</button>
-{saving && (
- <div className="flex items-center gap-2 text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
- <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
- <span className="text-xs font-semibold">Guardando...</span>
- </div>
- )}
- </div>
- </div>
+ {/* Footer principal — patrón Editar / Guardar / Cerrar definitivo */}
+ <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-100">
+  <div className="flex items-center gap-2 text-xs text-gray-400 font-medium">
+   {saving && (
+    <>
+     <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-500" />
+     <span className="text-blue-600">Guardando...</span>
+    </>
+   )}
+   {!saving && isDetermEditing && (pendingChangesCount > 0 || hasStructureChanges) && (
+    <span className="inline-flex items-center gap-1 text-amber-600">
+     <FiAlertTriangle size={12} />
+     {pendingChangesCount + (hasStructureChanges ? 1 : 0)} cambio(s) sin guardar
+    </span>
+   )}
+   {!saving && !isDetermEditing && canReopenCommercial && (
+    <span className="text-amber-600 font-semibold">Sección cerrada por el equipo comercial — solo jefe_comercial puede reabrir.</span>
+   )}
+   {!saving && !isDetermEditing && !canReopenCommercial && (canEditBase) && (
+    <span>Sección en modo solo lectura.</span>
+   )}
+  </div>
 
- <div className="flex flex-col sm:flex-row sm:justify-end pt-4 border-t border-gray-100">
-<button
-onClick={handleSaveNow}
-disabled={!canEditFinal || saving}
-className="inline-flex items-center justify-center bg-blue-600 text-white w-full sm:w-auto px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 active:scale-[0.99] transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
->
-Guardar informacion
-</button>
-<button
-onClick={handleCompleteSection}
-disabled={!canEditFinal || saving || !allSubsectionsLocked}
-className="inline-flex items-center justify-center bg-emerald-600 text-white w-full sm:w-auto px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-700 active:scale-[0.99] transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
->
-Terminar seccion
-</button>
-</div>
+  <div className="flex flex-wrap gap-2 sm:justify-end">
+   {/* jefe_comercial: botón reabrir cuando ya terminó la fase comercial */}
+   {canReopenCommercial && (
+    <button
+     type="button"
+     onClick={handleReopenCommercial}
+     disabled={saving}
+     className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 text-sm font-semibold hover:bg-amber-100 transition-all disabled:opacity-50 w-full sm:w-auto"
+    >
+     Reabrir para edición
+    </button>
+   )}
+
+   {/* Modo lectura: mostrar botón Editar (solo si tiene permiso de edición gate-level) */}
+   {!isDetermEditing && !canReopenCommercial && (canEditBase && canEditByGate && !quantitiesLocked) && (
+    <button
+     type="button"
+     onClick={() => setIsDetermEditing(true)}
+     className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 bg-white text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all w-full sm:w-auto"
+    >
+     Editar
+    </button>
+   )}
+
+   {/* Modo edición: Cancelar + Guardar información + Cerrar definitivamente */}
+   {isDetermEditing && (
+    <>
+     <button
+      type="button"
+      onClick={() => { setIsDetermEditing(false); closeImportModal(); }}
+      className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all w-full sm:w-auto"
+     >
+      Cancelar
+     </button>
+     <button
+      type="button"
+      onClick={handleSaveNow}
+      disabled={saving}
+      className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-50 w-full sm:w-auto"
+     >
+      <FiSave size={16} />
+      {saving ? "Guardando..." : "Guardar información"}
+     </button>
+     <button
+      type="button"
+      onClick={handleCompleteSection}
+      disabled={saving || !allSubsectionsLocked}
+      className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
+      title={!allSubsectionsLocked ? "Primero bloquea todas las subsecciones" : "Cierra definitivamente la fase comercial"}
+     >
+      Cerrar definitivamente
+     </button>
+    </>
+   )}
+  </div>
+ </div>
 
  {/* Modal de solicitud de inspeccion de ambiente — usa Dialog de Headless UI
      para portal correcto, focus-trap, cierre con Escape y z-index DESIGN.md */}
@@ -2490,10 +2817,10 @@ Terminar seccion
     {/* Header */}
     <div className="flex items-start justify-between gap-3 border-b border-soft-border px-6 py-5">
      <div>
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-warm-ash">Inspeccion de ambiente</p>
-      <Dialog.Title className="mt-0.5 text-lg font-semibold text-ink-slate">Solicitar F.ST-20</Dialog.Title>
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-warm-ash">Inspeccion por costos</p>
+      <Dialog.Title className="mt-0.5 text-lg font-semibold text-ink-slate">Solicitar F.ST-20 por costos</Dialog.Title>
       <p className="mt-1 text-sm text-warm-ash">
-       Registra el rango de instalacion estimado. Los datos del cliente, direccion y equipo se tomaran del Business Case.
+       Registra el rango estimado de la inspeccion por costos. Los datos del cliente, direccion y equipo se tomaran del Business Case.
       </p>
      </div>
      <button
@@ -2510,7 +2837,7 @@ Terminar seccion
     <div className="space-y-5 px-6 py-5 max-h-[70vh] overflow-y-auto">
      {inspectionMissingFields.length > 0 && (
       <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-caution-amber">
-       <span className="font-semibold">Faltan datos para F.ST-20:</span>{" "}
+        <span className="font-semibold">Faltan datos para F.ST-20 por costos:</span>{" "}
        {inspectionMissingFields.join(", ")}.
       </div>
      )}
@@ -2641,6 +2968,186 @@ Terminar seccion
    </Dialog.Panel>
   </div>
  </Dialog>
+
+ {/* ===== IMPORT QUANTITIES MODAL ===== */}
+ {importModal && (
+  <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={closeImportModal}>
+   <div
+    className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
+    onClick={(e) => e.stopPropagation()}
+   >
+    {/* Header */}
+    <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gray-50/70">
+     <div>
+      <h2 className="text-base font-bold text-gray-900">Importar cantidades</h2>
+      <p className="text-xs text-gray-500 mt-0.5">
+       Sección: <span className="font-semibold text-violet-700 capitalize">{importModal.sectionKey}</span>
+       {" · "}{importModal.rows.length} ítem(s)
+      </p>
+     </div>
+     <button type="button" onClick={closeImportModal} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
+      <FiX size={18} />
+     </button>
+    </div>
+
+    {/* Tabs */}
+    <div className="flex border-b border-gray-100">
+     {[
+      { key: "paste", label: "Pegar desde Excel", icon: <FiClipboard size={13} /> },
+      { key: "file", label: "Subir documento", icon: <FiUpload size={13} /> },
+     ].map((tab) => (
+      <button
+       key={tab.key}
+       type="button"
+       onClick={() => { setImportTab(tab.key); setImportPreview(null); setImportPasteText(""); if (importFileRef.current) importFileRef.current.value = ""; }}
+       className={`flex items-center gap-1.5 px-5 py-3 text-xs font-semibold border-b-2 transition-colors ${
+        importTab === tab.key
+         ? "border-violet-600 text-violet-700"
+         : "border-transparent text-gray-500 hover:text-gray-700"
+       }`}
+      >
+       {tab.icon}{tab.label}
+      </button>
+     ))}
+    </div>
+
+    {/* Body */}
+    <div className="flex-1 overflow-y-auto p-5 space-y-4">
+     {importTab === "paste" && (
+      <div className="space-y-3">
+       <div className="rounded-xl bg-violet-50 border border-violet-100 px-4 py-3 text-xs text-violet-800 space-y-1">
+        <p className="font-semibold">¿Cómo pegar desde Excel?</p>
+        <p>• <strong>Solo números (una por línea):</strong> Copia la columna de cantidades — cada línea se asigna al ítem en el mismo orden que aparece en la lista.</p>
+        <p>• <strong>Dos columnas (ID [Tab] Cantidad):</strong> Copia ID fabricante y cantidad separados por tabulador para que el sistema haga la correspondencia automáticamente.</p>
+       </div>
+       <textarea
+        rows={8}
+        value={importPasteText}
+        onChange={(e) => { setImportPasteText(e.target.value); setImportPreview(null); }}
+        onPaste={(e) => {
+         const text = e.clipboardData.getData("text");
+         setImportPasteText(text);
+         setImportPreview(null);
+         e.preventDefault();
+        }}
+        placeholder={"100\n250\n80\n...\n\no con ID:\nABC-123\t100\nXYZ-456\t250"}
+        className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-mono text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-200 resize-none"
+       />
+       <div className="flex justify-end">
+        <button
+         type="button"
+         disabled={!importPasteText.trim()}
+         onClick={() => setImportPreview(buildImportPreviewFromPaste(importPasteText, importModal.rows))}
+         className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
+        >
+         <FiActivity size={13} />
+         Previsualizar
+        </button>
+       </div>
+      </div>
+     )}
+
+     {importTab === "file" && (
+      <div className="space-y-3">
+       <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-800 space-y-1">
+        <p className="font-semibold">Sube un archivo Excel o CSV</p>
+        <p>El sistema buscará en el archivo ítems que coincidan por ID de fabricante o nombre con los de esta sección, y leerá la columna de cantidad anual.</p>
+        <p className="text-blue-600">Formatos aceptados: .xlsx, .xls, .csv</p>
+       </div>
+       <div className="flex flex-col gap-3">
+        <input
+         ref={importFileRef}
+         type="file"
+         accept=".xlsx,.xls,.csv"
+         className="block w-full text-xs text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-violet-50 file:text-violet-700 file:font-semibold hover:file:bg-violet-100 cursor-pointer"
+         onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) { setImportPreview(null); }
+         }}
+        />
+        <button
+         type="button"
+         disabled={importFileLoading}
+         onClick={() => {
+          const f = importFileRef.current?.files?.[0];
+          if (!f) { showToast("Selecciona un archivo primero.", "warning"); return; }
+          handleImportFile(f, importModal.sectionKey);
+         }}
+         className="inline-flex items-center gap-1.5 self-end rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
+        >
+         {importFileLoading ? <><div className="h-3 w-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />Procesando...</> : <><FiFileText size={13} />Leer archivo</>}
+        </button>
+       </div>
+      </div>
+     )}
+
+     {/* Preview table */}
+     {importPreview && (
+      <div className="space-y-2">
+       <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-800">Vista previa</h3>
+        <span className="text-xs text-gray-500">
+         {importPreview.filter((p) => p.newValue !== null).length} de {importPreview.length} ítem(s) con valor
+        </span>
+       </div>
+       <div className="rounded-xl border border-gray-200 overflow-hidden">
+        <table className="w-full text-xs">
+         <thead className="bg-gray-50 border-b border-gray-200">
+          <tr>
+           <th className="px-3 py-2 text-left font-semibold text-gray-600">Ítem</th>
+           <th className="px-3 py-2 text-right font-semibold text-gray-600 w-24">Actual</th>
+           <th className="px-3 py-2 text-right font-semibold text-gray-600 w-28">Nuevo valor</th>
+          </tr>
+         </thead>
+         <tbody className="divide-y divide-gray-100">
+          {importPreview.map((p) => (
+           <tr key={p.item_key} className={p.newValue !== null ? "" : "opacity-40"}>
+            <td className="px-3 py-2 text-gray-800 max-w-[260px] truncate">{p.item_name}</td>
+            <td className="px-3 py-2 text-right text-gray-500 font-mono">{p.current ?? "—"}</td>
+            <td className="px-3 py-2 text-right font-mono">
+             {p.newValue !== null
+              ? <span className="font-semibold text-emerald-700">{p.newValue}</span>
+              : <span className="text-gray-300">sin dato</span>
+             }
+            </td>
+           </tr>
+          ))}
+         </tbody>
+        </table>
+       </div>
+      </div>
+     )}
+    </div>
+
+    {/* Footer */}
+    <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-gray-100 bg-gray-50/50">
+     <p className="text-xs text-gray-500">
+      {importPreview
+       ? `${importPreview.filter((p) => p.newValue !== null).length} cantidad(es) listas para aplicar.`
+       : "Previsualiza antes de aplicar."}
+     </p>
+     <div className="flex gap-2">
+      <button type="button" onClick={closeImportModal} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+       Cancelar
+      </button>
+      <button
+       type="button"
+       disabled={!importPreview?.some((p) => p.newValue !== null)}
+       onClick={() => {
+        const n = applyImportPreview(importPreview);
+        showToast(`${n} cantidad(es) aplicada(s). Guarda la sección para confirmar.`, "success");
+        closeImportModal();
+       }}
+       className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+       <FiCheck size={13} />
+       Aplicar {importPreview?.filter((p) => p.newValue !== null).length ?? 0} cambio(s)
+      </button>
+     </div>
+    </div>
+   </div>
+  </div>
+ )}
  </div>
  );
 };

@@ -11,7 +11,7 @@
  *
  * Solo se monta en compras privadas (el tab ni aparece en públicas).
  */
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -34,7 +34,6 @@ import FileUploadZone from '../../../../../core/ui/components/FileUploadZone';
 import NewClientRequestForm from '../../../../comercial/components/NewClientRequestForm';
 import {
   forwardPrivatePurchaseToAcp,
-  registerPrivateClient,
   requestClientRegistration,
   savePrivatePurchaseInspectionRequest,
   sendPrivatePurchaseOffer,
@@ -42,8 +41,6 @@ import {
   uploadPrivateSignedOffer,
 } from '../../../../../core/api/privatePurchasesApi';
 import { promptDialog } from '../../../../../core/ui/utils/promptDialog';
-
-const EASE_OUT = [0.23, 1, 0.32, 1];
 
 /* ─── estados en que cada acción está habilitada ─────────────────────── */
 const OFFER_SEND_STATES    = ['acp_availability_confirmed', 'price_improvement_requested'];
@@ -208,9 +205,9 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
   const needsClientReg       = REQUIRES_CLIENT_REG.has(status) && !isClientRegistered;
   const alreadyRequested     = status === 'client_registration_requested';
 
-  /* ── detección de inspección de ambiente ──────────────────────── */
+  /* ── distinción BC vs inspección operativa ───────────────────── */
   const linkedBcId  = purchase?.extra?.auto_business_case_id || purchase?.business_case_id || null;
-  const inspByBc    = String(purchase?.offer_kind || '').toLowerCase() === 'comodato' && Boolean(linkedBcId);
+  const hasLinkedBc = Boolean(linkedBcId);
   const inspDone    = Boolean(purchase?.inspection_request_id);
 
   /** roleStepStatus — estado del paso según el rol del usuario */
@@ -528,33 +525,40 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             )}
           </WorkflowStep>
 
-          {/* ── Paso 4: Solicitar inspección de ambiente ────────────────── */}
-          {!inspByBc && (
-            <WorkflowStep
-              stepNumber={4}
-              title="Solicitar inspección de ambiente"
-              actor="Asesor Comercial / Backoffice"
-              status={roleStepStatus(
-                inspDone,
-                isClientRegistered && status === 'client_registered',
-                ['comercial','asesor_comercial','analista_comercial',
-                 'backoffice','backoffice_comercial',
-                 'acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
-              )}
-              completedAt={purchase?.inspection_requested_at}
+          {/* ── Paso 4: Solicitar inspección operativa de compra ─────────── */}
+          <WorkflowStep
+            stepNumber={4}
+            title="Solicitar inspección operativa de compra"
+            actor="Asesor Comercial / Backoffice"
+            status={roleStepStatus(
+              inspDone,
+              isClientRegistered && status === 'client_registered',
+              ['comercial','asesor_comercial','analista_comercial',
+               'backoffice','backoffice_comercial',
+               'acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
+            )}
+            completedAt={purchase?.inspection_requested_at}
+          >
+            <RoleGatedAction
+              allowedRoles={['comercial','asesor_comercial','analista_comercial','backoffice','backoffice_comercial']}
+              userRoles={userRoles}
             >
-              <RoleGatedAction
-                allowedRoles={['comercial','asesor_comercial','analista_comercial','backoffice','backoffice_comercial']}
-                userRoles={userRoles}
-              >
+              <div className="space-y-4">
+                {hasLinkedBc && (
+                  <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-800">
+                    Este expediente tiene un Business Case vinculado con una inspección por costos o factibilidad.
+                    La solicitud de esta sección corresponde a la inspección operativa de la compra privada.
+                  </div>
+                )}
+
                 {inspDone ? (
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-3 p-3 rounded-xl bg-green-50 border border-green-200">
                       <FiCheckCircle className="text-operative-green shrink-0" size={18} />
                       <div>
-                        <p className="text-sm font-semibold text-operative-green">Inspección solicitada — F.ST-20 generado</p>
+                        <p className="text-sm font-semibold text-operative-green">Inspección operativa solicitada — F.ST-20 generado</p>
                         <p className="text-xs text-warm-ash mt-0.5">
-                          El Jefe Técnico recibirá la solicitud y planificará la visita de ambiente.
+                          Jefatura Técnica recibirá esta solicitud operativa y planificará la visita.
                         </p>
                       </div>
                     </div>
@@ -566,7 +570,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                         className="inline-flex items-center gap-2 text-xs text-action-blue hover:underline font-medium"
                       >
                         <FiExternalLink size={12} />
-                        Ver F.ST-20 — Solicitud de inspección de ambiente
+                        Ver F.ST-20 operativo
                       </a>
                     )}
                   </div>
@@ -578,9 +582,8 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                 ) : (
                   <div className="space-y-4">
                     <p className="text-xs text-warm-ash">
-                      Define la ventana de disponibilidad para que el Jefe Técnico programe la visita.
+                      Define la ventana de disponibilidad para que Jefatura Técnica programe la inspección operativa del proceso de compra.
                     </p>
-                    {/* Ventana de fechas */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <label className="flex flex-col gap-1.5">
                         <span className="text-xs font-medium text-ink-slate">
@@ -607,7 +610,6 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                       </label>
                     </div>
 
-                    {/* Accesorios y observaciones — se incluyen en el F.ST-20 */}
                     <label className="flex flex-col gap-1.5">
                       <span className="text-xs font-medium text-ink-slate">
                         Accesorios / extras requeridos{' '}
@@ -645,13 +647,13 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                       {action === 'request_inspection'
                         ? <FiLoader className="animate-spin" size={14} />
                         : <FiCalendar size={14} />}
-                      {action === 'request_inspection' ? 'Solicitando…' : 'Solicitar inspección'}
+                      {action === 'request_inspection' ? 'Solicitando…' : 'Solicitar inspección operativa'}
                     </button>
                   </div>
                 )}
-              </RoleGatedAction>
-            </WorkflowStep>
-          )}
+              </div>
+            </RoleGatedAction>
+          </WorkflowStep>
 
           {/* ── Acciones del flujo (condicionales, sin número de paso) ─── */}
           <div className="bg-white rounded-xl border border-soft-border p-5 shadow-ambient">

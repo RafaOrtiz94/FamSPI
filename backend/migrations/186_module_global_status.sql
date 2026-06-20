@@ -20,7 +20,7 @@ VALUES (
     'alex.farino@fam-project.com',
     'pamela.altamirano@fam-project.com',
     'rafael.ortiz@fam-project.com',
-    'eric.gavilanes@fam-project.com'
+    'erick.gavilanes@fam-project.com'
   ]
 )
 ON CONFLICT (module_key) DO NOTHING;

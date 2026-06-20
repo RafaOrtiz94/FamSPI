@@ -3,9 +3,11 @@ import {
   FiAlertTriangle,
   FiBarChart2,
   FiCheck,
+  FiChevronUp,
   FiCpu,
   FiDownload,
   FiFileText,
+  FiPlus,
   FiRefreshCw,
   FiSearch,
   FiUploadCloud,
@@ -14,6 +16,7 @@ import {
 import { useUI } from "../../../core/ui/UIContext";
 import { getUsers } from "../../../core/api/usersApi";
 import {
+  createTiAsset,
   downloadTiActa,
   downloadTiAssetReport,
   downloadTiCollaboratorReport,
@@ -24,6 +27,11 @@ import {
   listTiFinancialDocs,
   uploadTiFinancialDoc,
 } from "../../../core/api/tiAssetsApi";
+
+const EMPTY_FORM = {
+  name: "", brand: "", model: "", serial_number: "", imei: "",
+  purchase_date: "", purchase_value: "", maintenance_frequency_months: "12",
+};
 
 // ─── Design tokens (DESIGN.md) ───────────────────────────────────────────────
 
@@ -86,11 +94,14 @@ const TIAssetsFinancieroPage = () => {
   const { showToast } = useUI();
 
   const [loading, setLoading]     = useState(false);
+  const [saving, setSaving]       = useState(false);
   const [assets, setAssets]       = useState([]);
   const [users, setUsers]         = useState([]);
   const [search, setSearch]       = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [selectedId, setSelectedId]     = useState(null);
+  const [showCreate, setShowCreate]     = useState(false);
+  const [form, setForm]                 = useState(EMPTY_FORM);
 
   // Detail panel
   const [assignHistory, setAssignHistory]   = useState([]);
@@ -196,6 +207,26 @@ const TIAssetsFinancieroPage = () => {
     deprecated: assets.filter((a) => (a.depreciation_pct || 0) >= 100).length,
   }), [assets]);
 
+  const setField = (key) => (e) => setForm((p) => ({ ...p, [key]: e.target.value }));
+
+  const handleCreateAsset = async () => {
+    if (!form.name.trim())          return showToast("El nombre es requerido", "warning");
+    if (!form.serial_number.trim()) return showToast("El número de serie es requerido", "warning");
+    if (!form.purchase_date)        return showToast("La fecha de compra es requerida", "warning");
+    setSaving(true);
+    try {
+      await createTiAsset(form);
+      showToast("Activo registrado correctamente", "success");
+      setForm(EMPTY_FORM);
+      setShowCreate(false);
+      await loadAll();
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo registrar el activo", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -207,14 +238,89 @@ const TIAssetsFinancieroPage = () => {
           <h1 className="text-xl font-bold text-slate-900">Activos de TI</h1>
           <p className="text-xs text-slate-500 mt-0.5">Vista financiera — lectura, depreciación y reportes</p>
         </div>
-        <button
-          type="button"
-          onClick={loadAll}
-          className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors active:scale-[0.97]"
-        >
-          <FiRefreshCw size={14} /> Actualizar
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={loadAll}
+            className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors active:scale-[0.97]"
+          >
+            <FiRefreshCw size={14} /> Actualizar
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCreate((v) => !v)}
+            className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors active:scale-[0.97]"
+          >
+            {showCreate ? <FiChevronUp size={14} /> : <FiPlus size={14} />}
+            {showCreate ? "Cancelar" : "Nuevo equipo"}
+          </button>
+        </div>
       </div>
+
+      {/* Create asset form */}
+      {showCreate && (
+        <div className="rounded-xl border border-blue-100 bg-blue-50 p-5 space-y-4">
+          <p className="text-sm font-semibold text-blue-800">Registrar nuevo activo TI</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[
+              { key: "name",           label: "Nombre *",          placeholder: "Ej: Laptop Dell XPS", required: true },
+              { key: "brand",          label: "Marca",             placeholder: "Ej: Dell" },
+              { key: "model",          label: "Modelo",            placeholder: "Ej: XPS 15" },
+              { key: "serial_number",  label: "N° de serie *",     placeholder: "Ej: SN-ABC123", required: true },
+              { key: "imei",           label: "IMEI",              placeholder: "Solo para móviles" },
+              { key: "purchase_value", label: "Valor de compra ($)", placeholder: "Ej: 1200.00", type: "number" },
+            ].map(({ key, label, placeholder, type = "text" }) => (
+              <div key={key}>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 block mb-1">{label}</label>
+                <input
+                  type={type}
+                  value={form[key]}
+                  onChange={setField(key)}
+                  placeholder={placeholder}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors"
+                />
+              </div>
+            ))}
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 block mb-1">Fecha de compra *</label>
+              <input
+                type="date"
+                value={form.purchase_date}
+                onChange={setField("purchase_date")}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 block mb-1">Frec. mantenimiento (meses)</label>
+              <select
+                value={form.maintenance_frequency_months}
+                onChange={setField("maintenance_frequency_months")}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors"
+              >
+                {[3, 6, 12, 24].map((m) => <option key={m} value={m}>{m} meses</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => { setShowCreate(false); setForm(EMPTY_FORM); }}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={handleCreateAsset}
+              className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors active:scale-[0.97]"
+            >
+              <FiPlus size={14} />
+              {saving ? "Registrando..." : "Registrar equipo"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* KPI strip */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -431,7 +537,7 @@ const TIAssetsFinancieroPage = () => {
                             <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${acta.tipo === "entrega" ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"}`}>
                               {acta.tipo}
                             </span>
-                            <span className="text-xs font-mono text-slate-500">#{String(acta.id).padStart(6, "0")}</span>
+                            <span className="text-xs font-mono text-slate-500">{acta.acta_code || `#${String(acta.id).padStart(6, "0")}`}</span>
                             {acta.is_complete
                               ? <span className="flex items-center gap-0.5 rounded-full bg-green-50 px-1.5 py-0.5 text-[10px] font-semibold text-green-700"><FiCheck size={9} /> Firmada</span>
                               : <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">Pendiente</span>

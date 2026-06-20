@@ -26,10 +26,16 @@ async function ensurePersonnelProfileTables() {
       id SERIAL PRIMARY KEY,
       personnel_request_id INTEGER UNIQUE REFERENCES personnel_requests(id) ON DELETE CASCADE,
       profile JSONB DEFAULT '{}'::jsonb,
+      qualifications JSONB NOT NULL DEFAULT '[]'::jsonb,
       updated_by INTEGER REFERENCES users(id),
       created_at TIMESTAMPTZ DEFAULT now(),
       updated_at TIMESTAMPTZ DEFAULT now()
     );
+  `);
+
+    await db.query(`
+    ALTER TABLE personnel_request_profiles
+    ADD COLUMN IF NOT EXISTS qualifications JSONB NOT NULL DEFAULT '[]'::jsonb;
   `);
 
     await db.query(`
@@ -132,6 +138,37 @@ async function ensureCollaboratorTables() {
     ADD COLUMN IF NOT EXISTS content_hash_sha256 VARCHAR(64),
     ADD COLUMN IF NOT EXISTS hash_algorithm VARCHAR(20) DEFAULT 'SHA-256';
   `);
+
+    await db.query(`
+    CREATE TABLE IF NOT EXISTS collaborator_qualifications (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      qualification_type VARCHAR(50) NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      institution VARCHAR(255),
+      issuer VARCHAR(255),
+      issue_date DATE,
+      expiry_date DATE,
+      registration_number VARCHAR(255),
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      drive_file_id TEXT,
+      drive_url TEXT,
+      file_name TEXT,
+      mime_type TEXT,
+      uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT collaborator_qualifications_type_check_requests CHECK (
+        qualification_type IN (
+          'third_level_title',
+          'fourth_level_title',
+          'certification',
+          'senescyt_record'
+        )
+      )
+    );
+  `);
 }
 
 const REQUIRED_PROFILE_FIELDS = [
@@ -182,10 +219,6 @@ const REQUIRED_PROFILE_FIELDS = [
   'emergencia.parentesco_contacto',
   'emergencia.telefono_contacto',
   'estudios.nivel_instruccion',
-  'estudios.titulo_tercer_nivel',
-  'estudios.universidad_tercer_nivel',
-  'estudios.titulo_cuarto_nivel',
-  'estudios.universidad_cuarto_nivel',
 ];
 
 const REQUIRED_DOC_TYPES = [
@@ -396,6 +429,170 @@ const normalizePersonnelProfilePayload = (payload = {}) => {
   }
 
   return payload || {};
+};
+
+const normalizePersonnelQualificationsPayload = (payload = {}) => {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    Array.isArray(payload.qualifications)
+  ) {
+    return payload.qualifications;
+  }
+
+  return [];
+};
+
+const buildRequestQualificationsFromProfile = (profile = {}) => {
+  const studies = profile?.estudios || {};
+  const qualifications = [];
+
+  if (isFieldFilled(studies?.titulo_tercer_nivel) || isFieldFilled(studies?.universidad_tercer_nivel)) {
+    qualifications.push({
+      qualification_type: 'third_level_title',
+      title: String(studies?.titulo_tercer_nivel || '').trim() || 'Titulo 3er nivel',
+      institution: String(studies?.universidad_tercer_nivel || '').trim() || null,
+      source_channel: 'personnel_request_profile',
+    });
+  }
+
+  if (isFieldFilled(studies?.titulo_cuarto_nivel) || isFieldFilled(studies?.universidad_cuarto_nivel)) {
+    qualifications.push({
+      qualification_type: 'fourth_level_title',
+      title: String(studies?.titulo_cuarto_nivel || '').trim() || 'Titulo 4to nivel',
+      institution: String(studies?.universidad_cuarto_nivel || '').trim() || null,
+      source_channel: 'personnel_request_profile',
+    });
+  }
+
+  return qualifications;
+};
+
+const sanitizeRequestQualifications = (qualifications = [], fallbackProfile = {}) => {
+  const normalized = Array.isArray(qualifications)
+    ? qualifications
+        .map((qualification) => {
+          if (!qualification || typeof qualification !== 'object') return null;
+          const qualificationType = String(qualification.qualification_type || '').trim().toLowerCase();
+          if (!['third_level_title', 'fourth_level_title', 'certification', 'senescyt_record'].includes(qualificationType)) {
+            return null;
+          }
+
+          const title = String(qualification.title || '').trim();
+          const institution = String(qualification.institution || '').trim();
+          if (!title && !institution) return null;
+
+          return {
+            qualification_type: qualificationType,
+            title: title || 'Registro academico',
+            institution: institution || null,
+            issuer: String(qualification.issuer || '').trim() || null,
+            issue_date: qualification.issue_date || null,
+            expiry_date: qualification.expiry_date || null,
+            registration_number: String(qualification.registration_number || '').trim() || null,
+            metadata: qualification.metadata && typeof qualification.metadata === 'object' ? qualification.metadata : {},
+            drive_file_id: qualification.drive_file_id || null,
+            drive_url: qualification.drive_url || null,
+            file_name: qualification.file_name || null,
+            mime_type: qualification.mime_type || null,
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  if (normalized.length > 0) return normalized;
+  return buildRequestQualificationsFromProfile(fallbackProfile);
+};
+
+const buildCollaboratorProfileFromRequestProfile = (profile = {}) => {
+  const nextProfile = JSON.parse(JSON.stringify(profile || {}));
+  const studies = nextProfile?.estudios && typeof nextProfile.estudios === 'object'
+    ? { ...nextProfile.estudios }
+    : {};
+
+  delete studies.titulo_tercer_nivel;
+  delete studies.universidad_tercer_nivel;
+  delete studies.titulo_cuarto_nivel;
+  delete studies.universidad_cuarto_nivel;
+
+  nextProfile.estudios = studies;
+  return nextProfile;
+};
+
+const syncRequestQualificationsToCollaborator = async ({
+  executor,
+  collaboratorUserId,
+  qualifications = [],
+  uploadedBy = null,
+  requestId = null,
+}) => {
+  const activeQualifications = Array.isArray(qualifications) ? qualifications : [];
+  if (!collaboratorUserId || activeQualifications.length === 0) return;
+
+  for (const qualification of activeQualifications) {
+    const title = String(qualification?.title || '').trim();
+    const institution = String(qualification?.institution || '').trim();
+    if (!title && !institution) continue;
+
+    const metadata = {
+      ...(qualification?.metadata && typeof qualification.metadata === 'object' ? qualification.metadata : {}),
+      request_origin: {
+        source_table: 'personnel_request_profiles',
+        personnel_request_id: requestId || null,
+      },
+    };
+
+    await executor.query(
+      `
+      INSERT INTO collaborator_qualifications (
+        user_id,
+        qualification_type,
+        title,
+        institution,
+        issuer,
+        issue_date,
+        expiry_date,
+        registration_number,
+        metadata,
+        drive_file_id,
+        drive_url,
+        file_name,
+        mime_type,
+        uploaded_by,
+        is_active,
+        created_at,
+        updated_at
+      )
+      SELECT
+        $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, true, NOW(), NOW()
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM collaborator_qualifications cq
+        WHERE cq.user_id = $1
+          AND cq.qualification_type = $2
+          AND LOWER(TRIM(cq.title)) = LOWER(TRIM($3))
+          AND COALESCE(LOWER(TRIM(cq.institution)), '') = COALESCE(LOWER(TRIM($4)), '')
+      )
+      `,
+      [
+        collaboratorUserId,
+        qualification.qualification_type,
+        title || 'Registro academico',
+        institution || null,
+        qualification.issuer || null,
+        qualification.issue_date || null,
+        qualification.expiry_date || null,
+        qualification.registration_number || null,
+        JSON.stringify(metadata),
+        qualification.drive_file_id || null,
+        qualification.drive_url || null,
+        qualification.file_name || null,
+        qualification.mime_type || null,
+        uploadedBy,
+      ],
+    );
+  }
 };
 
 const getRequiredProfileFieldsForStatus = (status) => {
@@ -1472,12 +1669,19 @@ async function getPersonnelProfile(requestId) {
     }
 
     const profileQuery = await db.query(
-        'SELECT profile, updated_at, updated_by FROM personnel_request_profiles WHERE personnel_request_id = $1',
+        'SELECT profile, qualifications, updated_at, updated_by FROM personnel_request_profiles WHERE personnel_request_id = $1',
         [requestId]
     );
 
+    const profile = profileQuery.rows[0]?.profile || {};
+    const qualifications = sanitizeRequestQualifications(
+        profileQuery.rows[0]?.qualifications,
+        profile
+    );
+
     return {
-        profile: profileQuery.rows[0]?.profile || {},
+        profile,
+        qualifications,
         updated_at: profileQuery.rows[0]?.updated_at || null,
         updated_by: profileQuery.rows[0]?.updated_by || null,
         documents: await listPersonnelRequestDocuments(requestId),
@@ -1495,11 +1699,15 @@ async function getPersonnelRequestWorkspace(requestId, filters = {}) {
     }
 
     const profileQuery = await db.query(
-        'SELECT profile, updated_at, updated_by FROM personnel_request_profiles WHERE personnel_request_id = $1',
+        'SELECT profile, qualifications, updated_at, updated_by FROM personnel_request_profiles WHERE personnel_request_id = $1',
         [requestId]
     );
 
     const profile = profileQuery.rows[0]?.profile || {};
+    const qualifications = sanitizeRequestQualifications(
+        profileQuery.rows[0]?.qualifications,
+        profile
+    );
     const documents = await listPersonnelRequestDocuments(requestId);
     const applicants = await getPersonnelRequestApplicants(requestId, filters);
     const documentTypes = documents.map((doc) => doc.doc_type).filter(Boolean);
@@ -1508,6 +1716,7 @@ async function getPersonnelRequestWorkspace(requestId, filters = {}) {
         request,
         profile: {
             profile,
+            qualifications,
             updated_at: profileQuery.rows[0]?.updated_at || null,
             updated_by: profileQuery.rows[0]?.updated_by || null,
             documents,
@@ -1540,21 +1749,30 @@ async function upsertPersonnelProfile(requestId, profilePayload = {}, userId = n
     }
 
     const normalizedPayload = normalizePersonnelProfilePayload(profilePayload);
+    const normalizedQualifications = sanitizeRequestQualifications(
+        normalizePersonnelQualificationsPayload(profilePayload),
+        normalizedPayload
+    );
     ensureProfileValidationOrThrow(normalizedPayload, status);
 
     const query = `
-      INSERT INTO personnel_request_profiles (personnel_request_id, profile, updated_by)
-      VALUES ($1, $2, $3)
+      INSERT INTO personnel_request_profiles (personnel_request_id, profile, qualifications, updated_by)
+      VALUES ($1, $2, $3, $4)
       ON CONFLICT (personnel_request_id)
-      DO UPDATE SET profile = EXCLUDED.profile, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+      DO UPDATE SET
+        profile = EXCLUDED.profile,
+        qualifications = EXCLUDED.qualifications,
+        updated_by = EXCLUDED.updated_by,
+        updated_at = NOW()
       RETURNING *
     `;
 
-    const result = await db.query(query, [requestId, normalizedPayload, userId]);
+    const result = await db.query(query, [requestId, normalizedPayload, JSON.stringify(normalizedQualifications), userId]);
 
     const collaboratorUserId = requestQuery.rows[0]?.collaborator_user_id;
     if (collaboratorUserId) {
         await ensureCollaboratorTables();
+        const collaboratorProfile = buildCollaboratorProfileFromRequestProfile(normalizedPayload);
         await db.query(
             `
             INSERT INTO collaborator_profiles (user_id, profile, updated_by)
@@ -1562,8 +1780,16 @@ async function upsertPersonnelProfile(requestId, profilePayload = {}, userId = n
             ON CONFLICT (user_id)
             DO UPDATE SET profile = EXCLUDED.profile, updated_by = EXCLUDED.updated_by, updated_at = NOW()
             `,
-            [collaboratorUserId, normalizedPayload, userId]
+            [collaboratorUserId, collaboratorProfile, userId]
         );
+
+        await syncRequestQualificationsToCollaborator({
+            executor: db,
+            collaboratorUserId,
+            qualifications: normalizedQualifications,
+            uploadedBy: userId,
+            requestId,
+        });
     }
 
     await logAction({
@@ -1576,6 +1802,7 @@ async function upsertPersonnelProfile(requestId, profilePayload = {}, userId = n
             stage: status,
             collaborator_user_id: requestQuery.rows[0]?.collaborator_user_id || null,
             validation_profile_required_fields: getRequiredProfileFieldsForStatus(status).length,
+            qualifications_count: normalizedQualifications.length,
         },
     });
 
@@ -1760,7 +1987,7 @@ async function hirePersonnelRequest(requestId, userId) {
         }
 
         const profileQuery = await client.query(
-            'SELECT profile FROM personnel_request_profiles WHERE personnel_request_id = $1 FOR UPDATE',
+            'SELECT profile, qualifications FROM personnel_request_profiles WHERE personnel_request_id = $1 FOR UPDATE',
             [requestId]
         );
 
@@ -1768,6 +1995,11 @@ async function hirePersonnelRequest(requestId, userId) {
         if (!profile) {
             throw new Error('No hay perfil registrado para contratar');
         }
+
+        const requestQualifications = sanitizeRequestQualifications(
+            profileQuery.rows[0]?.qualifications,
+            profile
+        );
 
         ensureProfileValidationOrThrow(profile, 'en_proceso');
 
@@ -1856,6 +2088,8 @@ async function hirePersonnelRequest(requestId, userId) {
             ]
         );
 
+        const collaboratorProfile = buildCollaboratorProfileFromRequestProfile(profile);
+
         await client.query(
             `
             INSERT INTO collaborator_profiles (user_id, profile, updated_by)
@@ -1863,8 +2097,16 @@ async function hirePersonnelRequest(requestId, userId) {
             ON CONFLICT (user_id)
             DO UPDATE SET profile = EXCLUDED.profile, updated_by = EXCLUDED.updated_by, updated_at = NOW()
             `,
-            [collaboratorUser.id, profile, userId]
+            [collaboratorUser.id, collaboratorProfile, userId]
         );
+
+        await syncRequestQualificationsToCollaborator({
+            executor: client,
+            collaboratorUserId: collaboratorUser.id,
+            qualifications: requestQualifications,
+            uploadedBy: userId,
+            requestId,
+        });
 
         await client.query(
             `

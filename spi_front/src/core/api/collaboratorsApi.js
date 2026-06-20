@@ -25,6 +25,15 @@ export const uploadCollaboratorDocument = async (id, docType, file, options = {}
   });
   return data;
 };
+
+export const resolveCollaboratorQualificationPending = async (id, legacyId, payload) => {
+  const { data } = await api.post(
+    `/collaborators/${id}/qualification-pending/${legacyId}/resolve`,
+    payload,
+  );
+  return data;
+};
+
 export const getCollaboratorStats = async () => {
   const { data } = await api.get('/collaborators/stats');
   return data;

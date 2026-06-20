@@ -2,7 +2,7 @@
 # Script para ejecutar migraciones en Neon usando secretos de gcloud
 
 $PROJECT_ID = "famspi-sbox"
-$DB_HOST = "ep-muddy-sun-ah5um48r-pooler.c-3.us-east-1.aws.neon.tech"
+$DB_HOST = "ep-wispy-moon-aqszgsal-pooler.c-8.us-east-1.aws.neon.tech"
 $DB_PORT = "5432"
 $DB_USER = "neondb_owner"
 $DB_NAME = "FamSPI"

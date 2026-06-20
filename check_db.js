@@ -1,8 +1,7 @@
-const { Client } = require('pg');
+const { Client } = require("pg");
+const { getDbConfig } = require("./backend/scripts/dbConnection");
 
-const connectionString = 'postgresql://neondb_owner:npg_W12CVSvHJEsA@ep-wispy-moon-aqszgsal-pooler.c-8.us-east-1.aws.neon.tech/FamSPI?sslmode=require&channel_binding=require';
-
-const client = new Client({ connectionString });
+const client = new Client(getDbConfig());
 
 async function checkViaticos() {
   try {

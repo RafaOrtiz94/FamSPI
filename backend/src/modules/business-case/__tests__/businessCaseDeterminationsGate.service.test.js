@@ -24,12 +24,12 @@ describe("businessCaseDeterminationsGate.service", () => {
     });
 
     expect(gate.workflowType).toBe("private_comodato");
-    expect(gate.editors).toEqual(["backoffice_comercial", "backoffice"]);
+    expect(gate.editors).toEqual(["jefe_comercial", "jefe_de_comercial", "backoffice_comercial"]);
     expect(gate.permissions.canEditDeterminations).toBe(true);
     expect(gate.documentUploaded).toBe(true);
   });
 
-  test("buildGateInfo en public asigna comercial como responsable de la fase comercial", () => {
+  test("buildGateInfo en public asigna acp_comercial como responsable de la fase comercial", () => {
     const gate = service.buildGateInfo({
       businessCase: {
         bc_purchase_type: "public",
@@ -47,13 +47,13 @@ describe("businessCaseDeterminationsGate.service", () => {
           },
         },
       },
-      role: "comercial",
+      role: "acp_comercial",
       now: new Date("2026-02-01T12:00:00.000Z"),
     });
 
     expect(gate.workflowType).toBe("public");
-    expect(gate.editors).toEqual(["comercial"]);
-    expect(gate.permissions.canUploadDocument).toBe(true);
+    expect(gate.editors).toEqual(["jefe_comercial", "jefe_de_comercial", "acp_comercial"]);
+    expect(gate.permissions.canUploadDocument).toBe(false);
     expect(gate.permissions.canEditDeterminations).toBe(true);
   });
 

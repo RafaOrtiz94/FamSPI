@@ -21,15 +21,19 @@ const helmetConfig = {
 
 const FRONTEND_URL = (process.env.FRONTEND_URL || "https://fam-spi-front.web.app").replace(/\/$/, "");
 
+const CRM_FRONTEND_URL = (process.env.CRM_FRONTEND_URL || "https://crm.fam-project.com").replace(/\/$/, "");
+
 const ORIGIN_WHITELIST = new Set([
   FRONTEND_URL,
   "https://fam-spi-front.web.app",
   "https://fam-spi-front.firebaseapp.com",
   "https://spi-dev.famproject.com.ec",
+  CRM_FRONTEND_URL,
   "http://localhost:3000",
   "http://localhost:3001",
   "http://127.0.0.1:3001",
   "http://localhost:5173",
+  "http://localhost:8000",
 ]);
 
 /* ============================================================
@@ -68,8 +72,10 @@ const corsConfig = {
     "x-idempotency-key",
     "If-Match",
     "if-match",
+    "x-jobs-key",
   ],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  exposedHeaders: ["X-SHA256", "Content-Disposition"],
 };
 
 /* ============================================================

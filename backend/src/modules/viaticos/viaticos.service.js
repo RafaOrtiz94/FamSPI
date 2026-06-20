@@ -39,14 +39,22 @@ const ALLOWED_DOC_TYPES = new Set(["invoice", "liquidation", "support"]);
 const ALLOWED_WORKFLOW_STATUSES = new Set([
   "borrador",
   "pendiente_revision",
+  "pendiente_aprobacion_talento",
+  "pendiente_aprobacion_financiera",
+  "pendiente_aprobacion_mixta",
   "observado",
   "aprobado_jefe",
+  "aprobado_talento_humano",
   "rechazado_jefe",
   "pendiente_financiero",
   "aprobado_financiero",
+  "aprobado_mixto",
   "rechazado_financiero",
   "listo_pago",
   "pagado",
+  "devolucion_registrada",
+  "pago_banco_registrado",
+  "cierre_mixto_registrado",
   "cerrado",
   "incluido_xml_ats",
   "excluido_xml_ats",
@@ -55,9 +63,13 @@ const FINANCE_WORKFLOW_STATUSES = new Set([
   "observado",
   "pendiente_financiero",
   "aprobado_financiero",
+  "aprobado_mixto",
   "rechazado_financiero",
   "listo_pago",
   "pagado",
+  "devolucion_registrada",
+  "pago_banco_registrado",
+  "cierre_mixto_registrado",
   "cerrado",
   "incluido_xml_ats",
   "excluido_xml_ats",
@@ -78,6 +90,8 @@ const ALLOWED_EXPENSE_CATEGORIES = new Set([
   "movilidad",
   "materiales",
 ]);
+const ALLOWED_EXPENSE_MODES = new Set(["with_card", "without_card"]);
+const ALLOWED_APPROVAL_STATUSES = new Set(["not_required", "pending", "approved"]);
 const ALLOWED_DECISION_TYPES = new Set([
   "covered_fixed",
   "extraordinary_outside_zone",
@@ -171,12 +185,22 @@ function isAdminUser(user = {}) {
   return Array.from(roles).some((role) => ["admin", "gerencia_general"].includes(role));
 }
 
+function isTalentoApprover(user = {}) {
+  const roles = collectUserRoles(user);
+  return Array.from(roles).some((role) => ["talento_humano", "jefe_talento_humano"].includes(role));
+}
+
 function assertAdminOrFinance(user = {}) {
   if (!isFinanceUser(user) && !isAdminUser(user)) {
     const error = new Error("Solo finanzas o admin puede ejecutar esta accion");
     error.status = 403;
     throw error;
   }
+}
+
+function normalizeExpenseMode(value) {
+  const normalized = toLower(value);
+  return ALLOWED_EXPENSE_MODES.has(normalized) ? normalized : null;
 }
 
 async function ensureSchema() {
@@ -333,7 +357,17 @@ async function ensureSchema() {
       ADD COLUMN IF NOT EXISTS reimbursable_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
       ADD COLUMN IF NOT EXISTS trip_authorized BOOLEAN NOT NULL DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS trip_authorization_ref TEXT,
-      ADD COLUMN IF NOT EXISTS trip_reason TEXT;
+      ADD COLUMN IF NOT EXISTS trip_reason TEXT,
+      ADD COLUMN IF NOT EXISTS total_with_card NUMERIC(12,2) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS total_without_card NUMERIC(12,2) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS requires_finance_approval BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS requires_talento_approval BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS finance_approval_status TEXT NOT NULL DEFAULT 'not_required',
+      ADD COLUMN IF NOT EXISTS talento_approval_status TEXT NOT NULL DEFAULT 'not_required',
+      ADD COLUMN IF NOT EXISTS finance_approved_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS talento_approved_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS finance_approved_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS talento_approved_at TIMESTAMPTZ;
   `);
 
   await db.query(`
@@ -460,7 +494,13 @@ async function ensureSchema() {
   await db.query(`
     ALTER TABLE travel_allowance_invoices
       ADD COLUMN IF NOT EXISTS receipt_type TEXT,
-      ADD COLUMN IF NOT EXISTS authorization_date TIMESTAMPTZ;
+      ADD COLUMN IF NOT EXISTS authorization_date TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS expense_mode TEXT;
+  `);
+
+  await db.query(`
+    ALTER TABLE travel_allowance_purchases_no_invoice
+      ADD COLUMN IF NOT EXISTS expense_mode TEXT;
   `);
 
   await db.query(`
@@ -551,9 +591,9 @@ function detectCategoryFromKeywords(value) {
   const input = normalizeText(value);
   if (!input) return null;
   const rules = [
-    { category: "combustible", words: ["combustible", "gasolina", "diesel", "diésel", "extra", "super"] },
-    { category: "hospedaje", words: ["hospedaje", "hotel", "habitacion", "habitación"] },
-    { category: "alimentacion", words: ["desayuno", "almuerzo", "cena", "alimentacion", "alimentación", "restaurante"] },
+    { category: "combustible", words: ["combustible", "gasolina", "diesel", "diÃ©sel", "extra", "super"] },
+    { category: "hospedaje", words: ["hospedaje", "hotel", "habitacion", "habitaciÃ³n"] },
+    { category: "alimentacion", words: ["desayuno", "almuerzo", "cena", "alimentacion", "alimentaciÃ³n", "restaurante"] },
     { category: "transporte", words: ["taxi", "uber", "cabify", "pasaje", "transporte", "bus", "terminal", "peaje"] },
     { category: "movilidad", words: ["movilidad", "estacionamiento", "parqueadero", "metro", "trole"] },
     { category: "materiales", words: ["material", "materiales", "insumo", "repuesto", "herramienta", "papeleria", "suministro"] },
@@ -1030,6 +1070,70 @@ function assertAllowanceRequester(allowance, actorUser) {
     error.status = 403;
     throw error;
   }
+}
+
+function assertWizardProcessingFlow({ allowance, actorUser, viaWizard, actionLabel }) {
+  if (isGlobalViaticosViewer(actorUser) || isOperationalApprover(actorUser)) return;
+  const requesterEmail = String(allowance?.requester_email || "").toLowerCase();
+  const actorEmail = String(actorUser?.email || "").toLowerCase();
+  if (!requesterEmail || requesterEmail !== actorEmail) return;
+  if (viaWizard) return;
+  const error = new Error(`Debes ${actionLabel} desde el wizard de viaticos`);
+  error.status = 400;
+  throw error;
+}
+
+async function computeAllowanceModeTotals(allowanceId) {
+  const { rows } = await db.query(
+    `
+      SELECT
+        COALESCE(SUM(CASE WHEN expense_mode = 'with_card' THEN total ELSE 0 END), 0) AS total_with_card,
+        COALESCE(SUM(CASE WHEN expense_mode = 'without_card' THEN total ELSE 0 END), 0) AS total_without_card
+      FROM (
+        SELECT expense_mode, total
+        FROM travel_allowance_invoices
+        WHERE allowance_id = $1
+          AND COALESCE(status, '') <> 'rechazada'
+        UNION ALL
+        SELECT expense_mode, total
+        FROM travel_allowance_purchases_no_invoice
+        WHERE allowance_id = $1
+          AND COALESCE(status, '') <> 'rejected'
+      ) items
+    `,
+    [allowanceId]
+  );
+
+  const row = rows[0] || {};
+  const totalWithCard = Number(row.total_with_card || 0);
+  const totalWithoutCard = Number(row.total_without_card || 0);
+  return {
+    totalWithCard,
+    totalWithoutCard,
+    requiresFinanceApproval: totalWithCard > 0,
+    requiresTalentoApproval: totalWithoutCard > 0,
+  };
+}
+
+function resolvePendingWorkflowStatus({ requiresFinanceApproval, requiresTalentoApproval }) {
+  if (requiresFinanceApproval && requiresTalentoApproval) return "pendiente_aprobacion_mixta";
+  if (requiresFinanceApproval) return "pendiente_aprobacion_financiera";
+  if (requiresTalentoApproval) return "pendiente_aprobacion_talento";
+  return "pendiente_revision";
+}
+
+function resolveApprovedWorkflowStatus({ requiresFinanceApproval, requiresTalentoApproval }) {
+  if (requiresFinanceApproval && requiresTalentoApproval) return "aprobado_mixto";
+  if (requiresFinanceApproval) return "aprobado_financiero";
+  if (requiresTalentoApproval) return "aprobado_talento_humano";
+  return "aprobado_financiero";
+}
+
+function resolveSettlementWorkflowStatus({ requiresFinanceApproval, requiresTalentoApproval }) {
+  if (requiresFinanceApproval && requiresTalentoApproval) return "cierre_mixto_registrado";
+  if (requiresFinanceApproval) return "pago_banco_registrado";
+  if (requiresTalentoApproval) return "devolucion_registrada";
+  return "pagado";
 }
 
 async function upsertAllowance({ actorUser, payload }) {
@@ -1519,7 +1623,10 @@ async function updateAllowanceStatus({
     values.push("rechazado_financiero");
     sets.push(`workflow_status = $${values.length}`);
   } else if (normalizedStatus === "paid") {
-    values.push("pagado");
+    values.push(resolveSettlementWorkflowStatus({
+      requiresFinanceApproval: Boolean(previousAllowance?.requires_finance_approval),
+      requiresTalentoApproval: Boolean(previousAllowance?.requires_talento_approval),
+    }));
     sets.push(`workflow_status = $${values.length}`);
   }
 
@@ -1670,8 +1777,8 @@ async function notifyJefeFinancieroStatusChange({ allowance, actorUser, status, 
       recipients.map((recipient) =>
         notificationsService.createNotification({
           user_id: recipient.id,
-          title: "Actualización viáticos por finanzas",
-          message: `Viático #${allowance?.id || ""} actualizado a ${status || "sin_estado"} (${workflowStatus || "sin_workflow"}) por ${actorUser?.email || "usuario_finanzas"}.`,
+          title: "ActualizaciÃ³n viÃ¡ticos por finanzas",
+          message: `ViÃ¡tico #${allowance?.id || ""} actualizado a ${status || "sin_estado"} (${workflowStatus || "sin_workflow"}) por ${actorUser?.email || "usuario_finanzas"}.`,
           type: "info",
           source: "viaticos",
           priority: 1,
@@ -2420,7 +2527,7 @@ async function uploadSriZipInvoices({ allowanceId, actorUser, file_base64, file_
      };
    } catch (error) {
      if (error.name === 'BadZipFile') {
-       throw new Error("El archivo ZIP proporcionado no es válido");
+       throw new Error("El archivo ZIP proporcionado no es vÃ¡lido");
      }
      throw error;
    }
@@ -3112,11 +3219,11 @@ async function generateAtsXml({ actorUser, period }) {
 }
 
 /**
- * Parse the SRI tab-delimited TXT file (RUC_EMISOR … IMPORTE_TOTAL columns) and
+ * Parse the SRI tab-delimited TXT file (RUC_EMISOR â€¦ IMPORTE_TOTAL columns) and
  * insert each row as a travel_allowance_invoices record, filtering only invoices
  * whose issue_date falls within the allowance's trip date range.
  */
-async function uploadSriTxtInvoices({ allowanceId, actorUser, txtContent }) {
+async function uploadSriTxtInvoices({ allowanceId, actorUser, txtContent, categories = {}, viaWizard = false }) {
   await ensureSchema();
   assertViaticosAccess(actorUser);
 
@@ -3127,6 +3234,7 @@ async function uploadSriTxtInvoices({ allowanceId, actorUser, txtContent }) {
     throw err;
   }
   assertAllowanceAccess(allowance, actorUser);
+  assertWizardProcessingFlow({ allowance, actorUser, viaWizard, actionLabel: "cargar facturas SRI" });
 
   const lines = String(txtContent || "").split(/\r?\n/).filter(Boolean);
   if (lines.length < 2) {
@@ -3178,7 +3286,7 @@ async function uploadSriTxtInvoices({ allowanceId, actorUser, txtContent }) {
     const totalRaw = readSriTxtColumn(cols, headerIndex, ["IMPORTE_TOTAL", "TOTAL", "IMPORTE TOTAL"], 11);
 
     const issueDateEc = String(fechaEmision || "");
-    // Convert DD/MM/YYYY → YYYY-MM-DD
+    // Convert DD/MM/YYYY â†’ YYYY-MM-DD
     const dateMatch = issueDateEc.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
     const issueDate = dateMatch
       ? `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`
@@ -3188,7 +3296,7 @@ async function uploadSriTxtInvoices({ allowanceId, actorUser, txtContent }) {
     const iva = parseFloat(String(ivaRaw).replace(",", ".")) || 0;
     const total = parseFloat(String(totalRaw).replace(",", ".")) || 0;
 
-    // Parse serie → establishment-emission_point-sequential
+    // Parse serie â†’ establishment-emission_point-sequential
     const serieParts = serieComprobante.split("-");
     const establishment = serieParts[0] || null;
     const emissionPoint = serieParts[1] || null;
@@ -3198,7 +3306,7 @@ async function uploadSriTxtInvoices({ allowanceId, actorUser, txtContent }) {
       ? issueDate >= tripStartDate && issueDate <= tripEndDate
       : true;
 
-    // Discard invoices outside the trip date range — only load relevant ones
+    // Discard invoices outside the trip date range â€” only load relevant ones
     if (!inRange) {
       errors.push({ access_key: accessKey, issue_date: issueDate, reason: "fuera_de_rango" });
       continue;
@@ -3208,6 +3316,19 @@ async function uploadSriTxtInvoices({ allowanceId, actorUser, txtContent }) {
       errors.push({ access_key: accessKey, reason: "clave_acceso invalida" });
       continue;
     }
+
+    const requestedClassification = accessKey ? categories[accessKey] : null;
+    const requestedCategory = requestedClassification && typeof requestedClassification === "object"
+      ? String(requestedClassification.category || "").trim().toLowerCase() || null
+      : requestedClassification
+        ? String(requestedClassification).trim().toLowerCase()
+        : null;
+    const requestedExpenseMode = requestedClassification && typeof requestedClassification === "object"
+      ? normalizeExpenseMode(requestedClassification.expense_mode)
+      : null;
+    const validCategory = requestedCategory && ALLOWED_EXPENSE_CATEGORIES.has(requestedCategory)
+      ? requestedCategory
+      : null;
 
     try {
       const { rows } = await db.query(
@@ -3219,6 +3340,8 @@ async function uploadSriTxtInvoices({ allowanceId, actorUser, txtContent }) {
           xml_well_formed, authorized_invoice, duplicate_invoice,
           in_trip_date_range, valid_buyer, valid_supplier,
           status, include_in_ats, xml_original,
+          expense_mode,
+          category, allowed_category, category_source,
           created_by_user_id, created_at, updated_at
         )
         VALUES (
@@ -3227,11 +3350,15 @@ async function uploadSriTxtInvoices({ allowanceId, actorUser, txtContent }) {
           $13, $14, $15,
           FALSE, TRUE, FALSE,
           TRUE, TRUE, TRUE,
-          'pendiente_clasificacion', TRUE, '',
+          CASE WHEN $17::text IS NOT NULL THEN 'clasificada' ELSE 'pendiente_clasificacion' END,
+          TRUE, '',
+          $18,
+          $17, CASE WHEN $17::text IS NOT NULL THEN TRUE ELSE FALSE END,
+          CASE WHEN $17::text IS NOT NULL THEN 'requester' ELSE NULL END,
           $16, NOW(), NOW()
         )
         ON CONFLICT (access_key) DO NOTHING
-        RETURNING id, access_key, supplier_name, issue_date, total, in_trip_date_range
+        RETURNING id, access_key, supplier_name, issue_date, total, in_trip_date_range, category, expense_mode
         `,
         [
           allowanceId, supplierRuc || null, supplierName || null, receiptType || null, buyerId || null,
@@ -3240,6 +3367,8 @@ async function uploadSriTxtInvoices({ allowanceId, actorUser, txtContent }) {
           establishment, emissionPoint, sequential,
           subtotal, iva, total,
           actorUser.id || null,
+          validCategory,
+          requestedExpenseMode,
         ]
       );
       if (rows[0]) results.push(rows[0]);
@@ -3259,7 +3388,117 @@ async function uploadSriTxtInvoices({ allowanceId, actorUser, txtContent }) {
   };
 }
 
-async function deleteAllowanceInvoice({ invoiceId, actorUser }) {
+ 
+ async function previewSriTxtInvoices({ allowanceId, actorUser, txtContent }) {
+   await ensureSchema();
+   assertViaticosAccess(actorUser);
+
+   const allowance = await getAllowanceById(allowanceId);
+   if (!allowance) {
+     const err = new Error("Viatico no encontrado");
+     err.status = 404;
+     throw err;
+   }
+   assertAllowanceAccess(allowance, actorUser);
+
+   const lines = String(txtContent || "").split(/\r?\n/).filter(Boolean);
+   if (lines.length < 2) {
+     const err = new Error("El archivo TXT no contiene datos");
+     err.status = 400;
+     throw err;
+   }
+
+   let tripStart = allowance.visit_date ? new Date(allowance.visit_date) : null;
+   let tripEnd = tripStart;
+
+   if (allowance.source_type === "operational_exit" && allowance.source_id) {
+     const { rows: aeRows } = await db.query(
+       "SELECT start_time, return_time FROM attendance_exceptions WHERE id = $1 LIMIT 1",
+       [allowance.source_id]
+     );
+     if (aeRows[0]) {
+       tripStart = aeRows[0].start_time ? new Date(aeRows[0].start_time) : tripStart;
+       tripEnd = aeRows[0].return_time ? new Date(aeRows[0].return_time) : tripEnd;
+     }
+   }
+
+   const tripStartDate = tripStart ? tripStart.toISOString().slice(0, 10) : null;
+   const tripEndDate = tripEnd ? tripEnd.toISOString().slice(0, 10) : null;
+
+   const headers = lines[0].split("\t").map(normalizeSriTxtHeader);
+   const headerIndex = new Map(headers.map((header, index) => [header, index]));
+   const dataLines = lines.slice(1);
+
+   const inRangeItems = [];
+   const outOfRangeItems = [];
+
+   for (const rawLine of dataLines) {
+     const cols = rawLine.split("\t");
+     if (cols.length < 11) continue;
+
+     const supplierRuc = readSriTxtColumn(cols, headerIndex, ["RUC_EMISOR", "RUC EMISOR"], 0);
+     const supplierName = readSriTxtColumn(cols, headerIndex, ["RAZON_SOCIAL_EMISOR", "RAZON SOCIAL EMISOR"], 1);
+     const receiptType = readSriTxtColumn(cols, headerIndex, ["TIPO_COMPROBANTE", "TIPO COMPROBANTE"], 2);
+     const serieComprobante = readSriTxtColumn(cols, headerIndex, ["SERIE_COMPROBANTE", "SERIE COMPROBANTE"], 3);
+     const accessKey = readSriTxtColumn(cols, headerIndex, ["CLAVE_ACCESO", "CLAVE ACCESO"], 4);
+     const authorizationNumber = readSriTxtColumn(cols, headerIndex, ["NUMERO_AUTORIZACION", "NUMERO AUTORIZACION"], 5);
+     const fechaAutorizacion = readSriTxtColumn(cols, headerIndex, ["FECHA_AUTORIZACION", "FECHA AUTORIZACION"], 6);
+     const fechaEmision = readSriTxtColumn(cols, headerIndex, ["FECHA_EMISION", "FECHA EMISION"], 7);
+     const buyerId = readSriTxtColumn(cols, headerIndex, ["IDENTIFICACION_RECEPTOR", "IDENTIFICACION RECEPTOR"], 8);
+     const subtotalRaw = readSriTxtColumn(cols, headerIndex, ["VALOR_SIN_IMPUESTOS", "SUBTOTAL", "VALOR SIN IMPUESTOS"], 9);
+     const ivaRaw = readSriTxtColumn(cols, headerIndex, ["IVA"], 10);
+     const totalRaw = readSriTxtColumn(cols, headerIndex, ["IMPORTE_TOTAL", "TOTAL", "IMPORTE TOTAL"], 11);
+
+     const issueDateEc = String(fechaEmision || "");
+     const dateMatch = issueDateEc.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+     const issueDate = dateMatch
+       ? `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`
+       : issueDateEc.slice(0, 10);
+
+     const serieParts = String(serieComprobante || "").split("-");
+     const subtotal = parseFloat(String(subtotalRaw).replace(",", ".")) || 0;
+     const iva = parseFloat(String(ivaRaw).replace(",", ".")) || 0;
+     const total = parseFloat(String(totalRaw).replace(",", ".")) || 0;
+
+     const inRange = tripStartDate && tripEndDate
+       ? issueDate >= tripStartDate && issueDate <= tripEndDate
+       : true;
+
+     const item = {
+       supplier_ruc: supplierRuc || null,
+       supplier_name: supplierName || null,
+       receipt_type: receiptType || null,
+       establishment: serieParts[0] || null,
+       emission_point: serieParts[1] || null,
+       sequential: serieParts[2] || null,
+       access_key: accessKey || null,
+       authorization_number: authorizationNumber || null,
+       authorization_date: parseEcDateTime(fechaAutorizacion),
+       issue_date: issueDate,
+       buyer_id: buyerId || null,
+       subtotal,
+       iva,
+       total,
+       in_trip_date_range: inRange,
+     };
+
+     if (inRange) {
+       inRangeItems.push(item);
+     } else {
+       outOfRangeItems.push({ ...item, reason: "fuera_de_rango" });
+     }
+   }
+
+   return {
+     allowance_id: allowanceId,
+     trip_date_range: { start: tripStartDate, end: tripEndDate },
+     total_found: inRangeItems.length + outOfRangeItems.length,
+     in_range_count: inRangeItems.length,
+     out_of_range_count: outOfRangeItems.length,
+     in_range: inRangeItems,
+     out_of_range: outOfRangeItems,
+   };
+ }async function deleteAllowanceInvoice({ invoiceId, actorUser }) {
   await ensureSchema();
   assertViaticosAccess(actorUser);
 
@@ -3291,7 +3530,7 @@ async function deleteAllowanceInvoice({ invoiceId, actorUser }) {
 
   await db.query(`DELETE FROM travel_allowance_invoices WHERE id = $1`, [invoiceId]);
 
-  // Recalcular totales después de eliminar
+  // Recalcular totales despuÃ©s de eliminar
   await recalculateAllowanceTotals(allowanceId);
 
   return { deleted: true, id: invoiceId };
@@ -3313,23 +3552,41 @@ async function createManualNote({
   driveFileId,
   driveLink,
   notes,
+  expenseMode,
   actorUser,
+  viaWizard,
 }) {
   assertViaticosAccess(actorUser);
+  const allowance = await getAllowanceById(allowanceId);
+  if (!allowance) {
+    const err = new Error("Viatico no encontrado");
+    err.status = 404;
+    throw err;
+  }
+  assertAllowanceAccess(allowance, actorUser);
+  assertWizardProcessingFlow({ allowance, actorUser, viaWizard, actionLabel: "registrar notas manuales" });
+
+  const normalizedExpenseMode = normalizeExpenseMode(expenseMode);
+  if (!normalizedExpenseMode) {
+    const err = new Error("Debes indicar si la nota es con tarjeta o sin tarjeta");
+    err.status = 400;
+    throw err;
+  }
 
   const { rows } = await db.query(
     `INSERT INTO travel_allowance_invoices (
       allowance_id, document_type, issue_date, supplier_ruc, supplier_name,
       subtotal_12, subtotal_0, iva, total, details_text,
       document_state, emission_point, sequential,
+      expense_mode,
       drive_file_id, drive_link, validation_notes,
       status, created_by_user_id, created_at, updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())
     RETURNING *`,
     [
       allowanceId, 'nota_venta_manual', issueDate, supplierRuc, supplierName,
       subtotal12, subtotal0, iva, total, expenseDescription,
-      documentState, emissionPoint, sequential,
+      documentState, emissionPoint, sequential, normalizedExpenseMode,
       driveFileId, driveLink, notes,
       'pendiente_clasificacion', actorUser.id
     ]
@@ -3365,7 +3622,9 @@ async function updateManualNote({
   emissionPoint,
   sequential,
   notes,
+  expenseMode,
   actorUser,
+  viaWizard,
 }) {
   assertViaticosAccess(actorUser);
 
@@ -3384,10 +3643,19 @@ async function updateManualNote({
   }
 
   const { allowance_id: allowanceId, requester_email } = noteRows[0];
+  const allowance = await getAllowanceById(allowanceId);
+  assertWizardProcessingFlow({ allowance, actorUser, viaWizard, actionLabel: "editar notas manuales" });
 
   if (!isFinanceUser(actorUser) && String(actorUser?.email || '').toLowerCase() !== String(requester_email || '').toLowerCase()) {
     const err = new Error('No tienes permiso para editar esta nota');
     err.status = 403;
+    throw err;
+  }
+
+  const normalizedExpenseMode = normalizeExpenseMode(expenseMode);
+  if (!normalizedExpenseMode) {
+    const err = new Error("Debes indicar si la nota es con tarjeta o sin tarjeta");
+    err.status = 400;
     throw err;
   }
 
@@ -3396,17 +3664,17 @@ async function updateManualNote({
       issue_date = $1, supplier_ruc = $2, supplier_name = $3,
       subtotal_12 = $4, subtotal_0 = $5, iva = $6, total = $7,
       details_text = $8, document_state = $9, emission_point = $10,
-      sequential = $11, validation_notes = $12, updated_at = NOW()
-     WHERE id = $13 AND document_type = 'nota_venta_manual'
+      sequential = $11, validation_notes = $12, expense_mode = $13, updated_at = NOW()
+     WHERE id = $14 AND document_type = 'nota_venta_manual'
      RETURNING *`,
-    [issueDate, supplierRuc, supplierName, subtotal12, subtotal0, iva, total, expenseDescription, documentState, emissionPoint, sequential, notes, noteId]
+    [issueDate, supplierRuc, supplierName, subtotal12, subtotal0, iva, total, expenseDescription, documentState, emissionPoint, sequential, notes, normalizedExpenseMode, noteId]
   );
 
   await recalculateAllowanceTotals(allowanceId);
   return rows[0];
 }
 
-async function deleteManualNote({ noteId, actorUser }) {
+async function deleteManualNote({ noteId, actorUser, viaWizard }) {
   assertViaticosAccess(actorUser);
 
   const { rows } = await db.query(
@@ -3424,6 +3692,8 @@ async function deleteManualNote({ noteId, actorUser }) {
   }
 
   const { allowance_id: allowanceId, requester_email } = rows[0];
+  const allowance = await getAllowanceById(allowanceId);
+  assertWizardProcessingFlow({ allowance, actorUser, viaWizard, actionLabel: "eliminar notas manuales" });
 
   if (!isFinanceUser(actorUser) && String(actorUser?.email || '').toLowerCase() !== String(requester_email || '').toLowerCase()) {
     const err = new Error('No tienes permiso para eliminar esta nota');
@@ -3447,16 +3717,33 @@ async function createPurchaseNoInvoice({
   purchaseDate,
   justification,
   driveFileId,
+  expenseMode,
   actorUser,
+  viaWizard,
 }) {
   assertViaticosAccess(actorUser);
+  const allowance = await getAllowanceById(allowanceId);
+  if (!allowance) {
+    const err = new Error("Viatico no encontrado");
+    err.status = 404;
+    throw err;
+  }
+  assertAllowanceAccess(allowance, actorUser);
+  assertWizardProcessingFlow({ allowance, actorUser, viaWizard, actionLabel: "registrar compras sin factura" });
+
+  const normalizedExpenseMode = normalizeExpenseMode(expenseMode);
+  if (!normalizedExpenseMode) {
+    const err = new Error("Debes indicar si la compra es con tarjeta o sin tarjeta");
+    err.status = 400;
+    throw err;
+  }
 
   const { rows } = await db.query(
     `INSERT INTO travel_allowance_purchases_no_invoice (
-      allowance_id, description, total, purchase_date, justification, file_id, status, created_at, updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW(), NOW())
+      allowance_id, description, total, purchase_date, justification, file_id, expense_mode, status, created_at, updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW(), NOW())
     RETURNING *`,
-    [allowanceId, description, total, purchaseDate, justification, driveFileId]
+    [allowanceId, description, total, purchaseDate, justification, driveFileId, normalizedExpenseMode]
   );
 
   await recalculateAllowanceTotals(allowanceId);
@@ -3537,21 +3824,238 @@ async function recalculateAllowanceTotals(allowanceId) {
 
   const { rows: purchasesTotal } = await db.query(
     `SELECT COALESCE(SUM(total), 0) as total FROM travel_allowance_purchases_no_invoice
-     WHERE allowance_id = $1 AND status = 'approved'`,
+     WHERE allowance_id = $1 AND COALESCE(status, '') <> 'rejected'`,
     [allowanceId]
   );
 
+  const modeTotals = await computeAllowanceModeTotals(allowanceId);
+
   // Note: total_consolidated y deducible_10_percent son GENERATED ALWAYS AS,
-  // así que se calculan automáticamente. Solo actualizar los totales parciales.
+  // asÃ­ que se calculan automÃ¡ticamente. Solo actualizar los totales parciales.
   await db.query(
     `UPDATE travel_allowances SET
       total_sri_invoices = $1,
       total_manual_notes = $2,
       total_purchases_no_invoice = $3,
+      total_with_card = $4,
+      total_without_card = $5,
+      requires_finance_approval = $6,
+      requires_talento_approval = $7,
       updated_at = NOW()
-     WHERE id = $4`,
-    [sriTotal[0].total, manualTotal[0].total, purchasesTotal[0].total, allowanceId]
+     WHERE id = $8`,
+    [
+      sriTotal[0].total,
+      manualTotal[0].total,
+      purchasesTotal[0].total,
+      modeTotals.totalWithCard,
+      modeTotals.totalWithoutCard,
+      modeTotals.requiresFinanceApproval,
+      modeTotals.requiresTalentoApproval,
+      allowanceId,
+    ]
   );
+}
+
+async function submitAllowanceForReview({ allowanceId, actorUser }) {
+  await ensureSchema();
+  assertViaticosAccess(actorUser);
+
+  const allowance = await getAllowanceById(allowanceId);
+  if (!allowance) {
+    const error = new Error("Viatico no encontrado");
+    error.status = 404;
+    throw error;
+  }
+
+  const actorEmail = String(actorUser?.email || "").toLowerCase();
+  const requesterEmail = String(allowance.requester_email || "").toLowerCase();
+  const isOwner = actorEmail && requesterEmail && actorEmail === requesterEmail;
+  const isPrivileged = isGlobalViaticosViewer(actorUser) || isOperationalApprover(actorUser);
+
+  if (!isOwner && !isPrivileged) {
+    const error = new Error("Solo el solicitante puede enviar este viatico a revision");
+    error.status = 403;
+    throw error;
+  }
+
+  const currentWorkflow = String(allowance.workflow_status || "").toLowerCase();
+  const alreadySubmitted = ["pendiente_revision", "aprobado_jefe", "rechazado_jefe",
+    "pendiente_aprobacion_talento", "pendiente_aprobacion_financiera", "pendiente_aprobacion_mixta",
+    "pendiente_financiero", "aprobado_financiero", "rechazado_financiero",
+    "aprobado_talento_humano", "aprobado_mixto",
+    "listo_pago", "pagado", "cerrado"].includes(currentWorkflow);
+
+  if (alreadySubmitted) {
+    const error = new Error("El viatico ya fue enviado a revision");
+    error.status = 400;
+    throw error;
+  }
+
+  const invoiceValidation = await db.query(
+    `
+      SELECT
+        COUNT(*)::int AS total,
+        COALESCE(SUM(CASE WHEN category IS NULL OR BTRIM(category) = '' THEN 1 ELSE 0 END), 0)::int AS missing_category,
+        COALESCE(SUM(CASE WHEN expense_mode IS NULL OR BTRIM(expense_mode) = '' THEN 1 ELSE 0 END), 0)::int AS missing_expense_mode
+      FROM travel_allowance_invoices
+      WHERE allowance_id = $1
+        AND COALESCE(status, '') <> 'rechazada'
+    `,
+    [allowanceId]
+  );
+  const purchaseValidation = await db.query(
+    `
+      SELECT
+        COUNT(*)::int AS total,
+        COALESCE(SUM(CASE WHEN expense_mode IS NULL OR BTRIM(expense_mode) = '' THEN 1 ELSE 0 END), 0)::int AS missing_expense_mode
+      FROM travel_allowance_purchases_no_invoice
+      WHERE allowance_id = $1
+        AND COALESCE(status, '') <> 'rejected'
+    `,
+    [allowanceId]
+  );
+  const invoiceRow = invoiceValidation.rows[0] || { total: 0, missing_category: 0, missing_expense_mode: 0 };
+  const purchaseRow = purchaseValidation.rows[0] || { total: 0, missing_expense_mode: 0 };
+  const totalItems = Number(invoiceRow.total || 0) + Number(purchaseRow.total || 0);
+  if (totalItems <= 0) {
+    const error = new Error("Debes registrar al menos un gasto antes de enviar el viatico a revision");
+    error.status = 400;
+    throw error;
+  }
+  if (Number(invoiceRow.missing_category || 0) > 0) {
+    const error = new Error("Debes clasificar la categoria en todas las facturas y notas manuales antes de enviar el viatico");
+    error.status = 400;
+    throw error;
+  }
+  if (Number(invoiceRow.missing_expense_mode || 0) > 0 || Number(purchaseRow.missing_expense_mode || 0) > 0) {
+    const error = new Error("Debes indicar si cada gasto es con tarjeta o sin tarjeta antes de enviar el viatico");
+    error.status = 400;
+    throw error;
+  }
+
+  const modeTotals = await computeAllowanceModeTotals(allowanceId);
+  const pendingWorkflowStatus = resolvePendingWorkflowStatus(modeTotals);
+
+  const { rows } = await db.query(
+    `UPDATE travel_allowances
+     SET workflow_status = $2,
+         requires_finance_approval = $3,
+         requires_talento_approval = $4,
+         finance_approval_status = $5,
+         talento_approval_status = $6,
+         finance_approved_by_user_id = NULL,
+         talento_approved_by_user_id = NULL,
+         finance_approved_at = NULL,
+         talento_approved_at = NULL,
+         status = 'pending',
+         updated_at = NOW()
+      WHERE id = $1
+      RETURNING *`,
+    [
+      allowanceId,
+      pendingWorkflowStatus,
+      modeTotals.requiresFinanceApproval,
+      modeTotals.requiresTalentoApproval,
+      modeTotals.requiresFinanceApproval ? "pending" : "not_required",
+      modeTotals.requiresTalentoApproval ? "pending" : "not_required",
+    ]
+  );
+
+  if (!rows.length) {
+    const error = new Error("Viatico no encontrado");
+    error.status = 404;
+    throw error;
+  }
+
+  return rows[0];
+}
+
+async function approveAllowanceSegment({ allowanceId, actorUser }) {
+  await ensureSchema();
+  assertViaticosAccess(actorUser);
+
+  const allowance = await getAllowanceById(allowanceId);
+  if (!allowance) {
+    const error = new Error("Viatico no encontrado");
+    error.status = 404;
+    throw error;
+  }
+
+  const isFinance = isFinanceApprover(actorUser);
+  const isTalento = isTalentoApprover(actorUser);
+  if (!isFinance && !isTalento) {
+    const error = new Error("Solo talento humano o financiero pueden aprobar este viatico");
+    error.status = 403;
+    throw error;
+  }
+
+  const modeTotals = await computeAllowanceModeTotals(allowanceId);
+  let fields;
+  if (isTalento) {
+    if (!modeTotals.requiresTalentoApproval) {
+      const error = new Error("Este viatico no requiere aprobacion de talento humano");
+      error.status = 400;
+      throw error;
+    }
+    fields = {
+      statusField: "talento_approval_status",
+      byField: "talento_approved_by_user_id",
+      atField: "talento_approved_at",
+    };
+  } else {
+    if (!modeTotals.requiresFinanceApproval) {
+      const error = new Error("Este viatico no requiere aprobacion financiera");
+      error.status = 400;
+      throw error;
+    }
+    fields = {
+      statusField: "finance_approval_status",
+      byField: "finance_approved_by_user_id",
+      atField: "finance_approved_at",
+    };
+  }
+
+  const { rows: updatedRows } = await db.query(
+    `
+      UPDATE travel_allowances
+      SET ${fields.statusField} = 'approved',
+          ${fields.byField} = $2,
+          ${fields.atField} = NOW(),
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `,
+    [allowanceId, actorUser.id || null]
+  );
+  const updated = updatedRows[0];
+  if (!updated) {
+    const error = new Error("Viatico no encontrado");
+    error.status = 404;
+    throw error;
+  }
+
+  const financeApproved = updated.finance_approval_status === "approved" || !modeTotals.requiresFinanceApproval;
+  const talentoApproved = updated.talento_approval_status === "approved" || !modeTotals.requiresTalentoApproval;
+
+  if (financeApproved && talentoApproved) {
+    const finalWorkflowStatus = resolveApprovedWorkflowStatus(modeTotals);
+    const { rows: finalRows } = await db.query(
+      `
+        UPDATE travel_allowances
+        SET status = 'approved',
+            workflow_status = $2,
+            reviewed_by_user_id = $3,
+            reviewed_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [allowanceId, finalWorkflowStatus, actorUser.id || null]
+    );
+    return finalRows[0];
+  }
+
+  return updated;
 }
 
 module.exports = {
@@ -3562,11 +4066,13 @@ module.exports = {
   listAllowances,
   upsertAllowance,
   updateAllowanceStatus,
+  approveAllowanceSegment,
   updateAllowanceWorkflowOperational,
   listAllowanceDocuments,
   createAllowanceDocument,
   uploadSriXmlInvoice,
   uploadSriTxtInvoices,
+  previewSriTxtInvoices,
   uploadSriZipInvoices,
   deleteAllowanceInvoice,
   syncSriInvoicesForUser,
@@ -3587,5 +4093,13 @@ module.exports = {
   listPurchasesNoInvoice,
   approvePurchaseNoInvoice,
   recalculateAllowanceTotals,
+  submitAllowanceForReview,
 };
+
+
+
+
+
+
+
 

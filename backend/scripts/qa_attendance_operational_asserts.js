@@ -2,8 +2,9 @@
 "use strict";
 
 const { Client } = require("pg");
+const { DEFAULT_DB_HOST } = require("./dbConnection");
 
-const DB_HOST = process.env.DB_HOST || "ep-muddy-sun-ah5um48r-pooler.c-3.us-east-1.aws.neon.tech";
+const DB_HOST = process.env.DB_HOST || DEFAULT_DB_HOST;
 const DB_PORT = Number(process.env.DB_PORT || 5432);
 const DB_USER = process.env.DB_USER || "neondb_owner";
 const DB_PASSWORD = process.env.DB_PASSWORD || "";

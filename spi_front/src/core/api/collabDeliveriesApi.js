@@ -79,8 +79,11 @@ export const generateCollabActa = async (deliveryId, payload) => {
 };
 
 export const getCollabActaPdf = async (actaId) => {
-  const { data } = await api.get(`${base}/actas/${actaId}/pdf`);
-  return data?.data ?? data;
+  const response = await api.get(`${base}/actas/${actaId}/pdf`, { responseType: "blob" });
+  return {
+    blob: response.data,
+    filename: (response.headers["content-disposition"] || "").match(/filename="?([^"]+)"?/)?.[1] || `acta_${actaId}.pdf`,
+  };
 };
 
 export const uploadCollabSignedActa = async (actaId, file) => {
@@ -89,6 +92,16 @@ export const uploadCollabSignedActa = async (actaId, file) => {
   const { data } = await api.post(`${base}/actas/${actaId}/upload-signed`, form, {
     headers: { "Content-Type": "multipart/form-data" },
   });
+  return data?.data ?? data;
+};
+
+export const getCollabActaSignatureWorkflow = async (actaId) => {
+  const { data } = await api.get(`${base}/actas/${actaId}/signature-workflow`);
+  return data?.data ?? data;
+};
+
+export const startCollabActaSignatureWorkflow = async (actaId, payload = {}) => {
+  const { data } = await api.post(`${base}/actas/${actaId}/start-signature-workflow`, payload);
   return data?.data ?? data;
 };
 
@@ -125,8 +138,23 @@ export const listCollabSessions = async (params = {}) => {
   return Array.isArray(data) ? data : data?.data ?? [];
 };
 
+export const listCollabSessionsByUser = async (userId, params = {}) => {
+  const { data } = await api.get(`${base}/sessions`, { params: { ...params, userId } });
+  return Array.isArray(data) ? data : data?.data ?? [];
+};
+
 export const createCollabSession = async (payload) => {
   const { data } = await api.post(`${base}/sessions`, payload);
+  return data?.data ?? data;
+};
+
+export const updateCollabSession = async (sessionId, payload) => {
+  const { data } = await api.patch(`${base}/sessions/${sessionId}`, payload);
+  return data?.data ?? data;
+};
+
+export const getCollabActaRecipientInfo = async (userId) => {
+  const { data } = await api.get(`${base}/recipient-info/${userId}`);
   return data?.data ?? data;
 };
 
@@ -137,5 +165,55 @@ export const getCollabSession = async (sessionId) => {
 
 export const createCollabTiSession = async (payload) => {
   const { data } = await api.post(`${base}/sessions/ti`, payload);
+  return data?.data ?? data;
+};
+
+// ── Documentos por entrega ────────────────────────────────────────────────────
+
+export const listCollabDeliveryDocsByUser = async (userId) => {
+  const { data } = await api.get(`${base}/user/${userId}/docs`);
+  return Array.isArray(data) ? data : data?.data ?? [];
+};
+
+export const listCollabDeliveryDocs = async (deliveryId) => {
+  const { data } = await api.get(`${base}/${deliveryId}/docs`);
+  return Array.isArray(data) ? data : data?.data ?? [];
+};
+
+export const getCollabFullReport = async () => {
+  const { data } = await api.get(`${base}/report/full`);
+  return Array.isArray(data) ? data : data?.data ?? [];
+};
+
+export const getCollabCollaboratorReport = async (userId) => {
+  const { data } = await api.get(`${base}/report/collaborator/${userId}`);
+  return Array.isArray(data) ? data : data?.data ?? [];
+};
+
+export const downloadCollabFullReportPdf = async () => {
+  const response = await api.get(`${base}/report/full/pdf`, { responseType: "blob" });
+  return {
+    blob: response.data,
+    sha256: response.headers["x-sha256"] || null,
+    filename: (response.headers["content-disposition"] || "").match(/filename="?([^"]+)"?/)?.[1] || "reporte_general.pdf",
+  };
+};
+
+export const downloadCollabCollaboratorReportPdf = async (userId) => {
+  const response = await api.get(`${base}/report/collaborator/${userId}/pdf`, { responseType: "blob" });
+  return {
+    blob: response.data,
+    sha256: response.headers["x-sha256"] || null,
+    filename: (response.headers["content-disposition"] || "").match(/filename="?([^"]+)"?/)?.[1] || `reporte_colaborador_${userId}.pdf`,
+  };
+};
+
+export const uploadCollabDeliveryDoc = async (deliveryId, file, docType = "factura") => {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("doc_type", docType);
+  const { data } = await api.post(`${base}/${deliveryId}/docs`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
   return data?.data ?? data;
 };

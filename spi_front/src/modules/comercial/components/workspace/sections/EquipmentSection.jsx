@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useParams } from "react-router-dom";
-import { FiActivity } from "react-icons/fi";
+import { FiActivity, FiSave } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
 
@@ -32,6 +32,7 @@ const EquipmentSection = ({
 }) => {
  const { id: bcId } = useParams();
  const { showToast } = useUI();
+ const [isEditing, setIsEditing] = useState(false);
 
  // ONE-TIME HYDRATION GUARD
  const hydratedRef = useRef(false);
@@ -135,6 +136,7 @@ const EquipmentSection = ({
  status: res?.status,
  });
 
+ setIsEditing(false);
  showToast("Equipos guardados exitosamente", "success");
 
  // Trigger UI guidance refresh
@@ -154,48 +156,60 @@ const EquipmentSection = ({
  const canEdit = permissions?.canEditEquipment !== false && ownership?.canEdit !== false;
 
  return (
- <div className="space-y-4">
- <div className="flex flex-col sm:flex-row sm:items-center gap-2">
- <FiActivity className="text-blue-600" />
+ <div className="space-y-5">
+ {/* Section Header */}
+ <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+ <div className="flex items-center gap-4">
  <div>
- <h2 className="text-lg font-semibold text-gray-900">Equipamiento</h2>
- <p className="text-sm text-gray-500">
- Seleccion y configuracion de equipos medicos
- {!canEdit && " (Solo lectura)"}
- </p>
+ <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Equipamiento</h2>
+ <p className="text-sm text-gray-500 mt-1">Selección y configuración de equipos médicos</p>
  </div>
  </div>
-
- {/* Permission warning if user cannot edit */}
- {!canEdit && (
- <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
- <div className="flex items-center gap-2 text-amber-800">
- <span className="text-sm">
- No tienes permisos para editar esta seccion en el estado actual.
- </span>
  </div>
- </div>
- )}
 
  {/* Workspace wrapper for equipment selector */}
- <div className={`${!canEdit ? 'opacity-60 pointer-events-none' : ''}`}>
+ <div className={`${!isEditing ? 'opacity-70 pointer-events-none select-none' : ''}`}>
  <EquipmentSelectorWrapper
  equipmentPairs={equipmentPairs}
  onPairsChange={setEquipmentPairs}
  onSave={handleWorkspaceSave}
- disabled={!canEdit}
+ disabled={!isEditing}
  />
  </div>
 
  {/* Section Actions */}
  {canEdit && (
- <div className="flex flex-col sm:flex-row sm:justify-end pt-4 border-t">
+ <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-100">
+ <p className="text-xs text-gray-400 font-medium">
+ {isEditing ? "Selecciona los equipos y guarda los cambios." : "Sección en modo solo lectura."}
+ </p>
+ {isEditing ? (
+ <div className="flex gap-2 sm:justify-end">
  <button
- onClick={() => handleWorkspaceSave(equipmentPairs)}
- className="bg-blue-600 text-white w-full sm:w-auto px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+ type="button"
+ onClick={() => setIsEditing(false)}
+ className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all w-full sm:w-auto"
  >
- Guardar Equipamiento
+ Cancelar
  </button>
+ <button
+ type="button"
+ onClick={() => handleWorkspaceSave(equipmentPairs)}
+ className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-50 disabled:scale-100 w-full sm:w-auto"
+ >
+ <FiSave size={16} />
+ Guardar
+ </button>
+ </div>
+ ) : (
+ <button
+ type="button"
+ onClick={() => setIsEditing(true)}
+ className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 bg-white text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all w-full sm:w-auto"
+ >
+ Editar
+ </button>
+ )}
  </div>
  )}
  </div>
