@@ -1,9 +1,6 @@
 const { asyncHandler } = require("../../middlewares/asyncHandler");
 const svc = require("./tiAssets.service");
 const reportSvc = require("./tiAssets.report");
-const { generateActaEntregaPdf } = require("./tiAssets.acta");
-const { computeSha256HexFromBuffer } = require("../../utils/documentHash");
-const { uploadBase64File, ensureFolder } = require("../../utils/drive");
 const { TI_ROLES } = require("./tiAssets.service");
 
 exports.listAssets = asyncHandler(async (req, res) => {
@@ -34,40 +31,8 @@ exports.assignAsset = asyncHandler(async (req, res) => {
     actaItems: Array.isArray(payload.acta_items) && payload.acta_items.length ? payload.acta_items : null,
   });
 
-  // Generate and upload the PDF acta asynchronously (non-blocking for the HTTP response)
   if (data.acta_id) {
-    setImmediate(async () => {
-      try {
-        const actaDetail = await svc.getActaWithItems(data.acta_id);
-        const pdfBuffer = await generateActaEntregaPdf({
-          actaCode:  actaDetail.acta_code || "ACTA-ET-2026-000001",
-          nombre:    actaDetail.recipient_nombre || "",
-          cedula:    actaDetail.recipient_cedula || "",
-          cargo:     actaDetail.recipient_cargo  || "",
-          actaDay:   actaDetail.acta_day || new Date().getDate(),
-          actaMonth: actaDetail.acta_month || (new Date().getMonth() + 1),
-          actaYear:  actaDetail.acta_year || new Date().getFullYear(),
-          items:     actaDetail.items || [],
-        });
-        const sha256 = computeSha256HexFromBuffer(pdfBuffer);
-        const tipo = actaDetail.tipo === "entrega" ? "ET" : "RT";
-        const filename = `ACTA-${tipo}-${String(actaDetail.id).padStart(6, "0")}.pdf`;
-        let driveUrl = null;
-        let driveFileId = null;
-        try {
-          const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || null;
-          let folderId = null;
-          if (rootFolderId) {
-            const folder = await ensureFolder("Actas TI", rootFolderId);
-            folderId = folder?.id || null;
-          }
-          const uploaded = await uploadBase64File(filename, pdfBuffer.toString("base64"), "application/pdf", folderId);
-          driveUrl = uploaded?.webViewLink || uploaded?.webContentLink || null;
-          driveFileId = uploaded?.id || null;
-        } catch (_driveErr) { /* drive opcional */ }
-        await svc.updateActaPdf({ actaId: data.acta_id, filename, sha256, driveUrl, driveFileId });
-      } catch (_err) { /* no bloquea el flujo */ }
-    });
+    svc.queueTiActaPdfGeneration(data.acta_id);
   }
 
   res.status(200).json({ ok: true, data });
@@ -86,48 +51,8 @@ exports.assignMultipleAssets = asyncHandler(async (req, res) => {
     acta_items: Array.isArray(payload.acta_items) ? payload.acta_items : null,
   });
 
-  // Generate and upload the PDF acta asynchronously
   if (data.acta_id) {
-    setImmediate(async () => {
-      try {
-        const actaDetail = await svc.getActaWithItems(data.acta_id);
-        const pdfBuffer = await generateActaEntregaPdf({
-          actaCode:  actaDetail.acta_code || "ACTA-ET-2026-000001",
-          nombre:    actaDetail.recipient_nombre || "",
-          cedula:    actaDetail.recipient_cedula || "",
-          cargo:     actaDetail.recipient_cargo  || "",
-          actaDay:   actaDetail.acta_day || new Date().getDate(),
-          actaMonth: actaDetail.acta_month || (new Date().getMonth() + 1),
-          actaYear:  actaDetail.acta_year || new Date().getFullYear(),
-          items:     actaDetail.items || [],
-        });
-        const sha256 = computeSha256HexFromBuffer(pdfBuffer);
-        const tipo = actaDetail.tipo === "entrega" ? "ET" : "RT";
-        const filename = `ACTA-${tipo}-${String(actaDetail.id).padStart(6, "0")}.pdf`;
-        let driveUrl = null;
-        let driveFileId = null;
-        try {
-          const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || null;
-          const userEmail = req.user?.email || "unknown@example.com";
-          const result = await uploadBase64File({
-            base64Data: Buffer.from(pdfBuffer).toString("base64"),
-            filename,
-            mimeType: "application/pdf",
-            folderPath: rootFolderId ? `Usuarios/${userEmail}/Documentos/TI-Assets/` : null,
-            rootFolderId,
-          });
-          driveUrl = result.webViewLink;
-          driveFileId = result.id;
-        } catch (_err) { /* no bloquea el flujo */ }
-        await svc.updateActaPdf({
-          actaId: data.acta_id,
-          filename,
-          sha256,
-          driveUrl,
-          driveFileId,
-        });
-      } catch (_err) { /* no bloquea el flujo */ }
-    });
+    svc.queueTiActaPdfGeneration(data.acta_id);
   }
 
   res.status(200).json({ ok: true, data });
@@ -388,19 +313,31 @@ exports.getActa = asyncHandler(async (req, res) => {
   res.json({ ok: true, data });
 });
 
-exports.downloadActaPdf = asyncHandler(async (req, res) => {
-  const acta = await svc.getActaWithItems(req.params.actaId);
-  const pdfBuffer = await generateActaEntregaPdf({
-    actaCode:  acta.acta_code || "ACTA-ET-2026-000001",
-    nombre:    acta.recipient_nombre || "",
-    cedula:    acta.recipient_cedula || "",
-    cargo:     acta.recipient_cargo  || "",
-    actaDay:   acta.acta_day || new Date().getDate(),
-    actaMonth: acta.acta_month || (new Date().getMonth() + 1),
-    actaYear:  acta.acta_year || new Date().getFullYear(),
-    items:     acta.items || [],
+exports.updateActa = asyncHandler(async (req, res) => {
+  const data = await svc.updateActa({
+    actaId: req.params.actaId,
+    data: req.body || {},
+    userId: req.user?.id || null,
   });
-  const filename = acta.acta_code ? `${acta.acta_code}.pdf` : `ACTA-${String(acta.id).padStart(6, "0")}.pdf`;
+  res.status(200).json({ ok: true, data });
+});
+
+exports.getActaSignatureWorkflow = asyncHandler(async (req, res) => {
+  const data = await svc.getActaSignatureWorkflow(req.params.actaId, req.user);
+  res.json({ ok: true, data });
+});
+
+exports.startActaSignatureWorkflow = asyncHandler(async (req, res) => {
+  const data = await svc.startSignatureWorkflowForActa({
+    actaId: req.params.actaId,
+    signers: Array.isArray(req.body?.signers) ? req.body.signers : [],
+    actorUser: req.user,
+  });
+  res.status(201).json({ ok: true, data });
+});
+
+exports.downloadActaPdf = asyncHandler(async (req, res) => {
+  const { filename, pdfBuffer } = await svc.getActaPdfDownload(req.params.actaId, { preferStored: false });
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.send(pdfBuffer);
@@ -513,15 +450,19 @@ exports.uploadFinancialDoc = asyncHandler(async (req, res) => {
 // ─── FASE 6: Liberation ────────────────────────────────────────────────────
 
 exports.liberateAsset = asyncHandler(async (req, res) => {
-  if (!req.file?.buffer) {
-    return res.status(400).json({ ok: false, message: "Se requiere una foto para liberar el equipo" });
+  const files = req.files || (req.file ? [req.file] : []);
+  if (files.length < 2) {
+    return res.status(400).json({ ok: false, message: "Se requieren al menos 2 fotos para liberar el equipo" });
   }
   const payload = req.body || {};
+  const photos = files.map((f, i) => ({
+    buffer:   f.buffer,
+    filename: f.originalname || `liberation_${req.params.id}_${i + 1}.jpg`,
+  }));
   const data = await svc.liberateAsset({
     assetId: req.params.id,
-    photoBuffer: req.file.buffer,
-    photoFilename: req.file.originalname || `liberation_${req.params.id}.jpg`,
-    notes: payload.notes || null,
+    photos,
+    notes:  payload.notes || null,
     userId: req.user?.id || null,
   });
   res.status(200).json({ ok: true, data });

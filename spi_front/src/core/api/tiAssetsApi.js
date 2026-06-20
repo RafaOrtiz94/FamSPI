@@ -164,6 +164,31 @@ export const getTiActa = async (actaId) => {
  return data?.data || null;
 };
 
+export const updateTiActa = async (actaId, payload = {}) => {
+ const { data } = await api.patch(`/ti-assets/actas/${actaId}`, payload);
+ return data?.data || null;
+};
+
+export const getTiActaSignatureWorkflow = async (actaId) => {
+ const { data } = await api.get(`/ti-assets/actas/${actaId}/signature-workflow`);
+ return data?.data || null;
+};
+
+export const startTiActaSignatureWorkflow = async (actaId, payload = {}) => {
+ const { data } = await api.post(`/ti-assets/actas/${actaId}/start-signature-workflow`, payload);
+ return data?.data || null;
+};
+
+export const getTiActaPdf = async (actaId, tipo = "") => {
+ const tipoLabel = String(tipo || "").toLowerCase() === "retiro" ? "RT" : "ET";
+ const response = await api.get(`/ti-assets/actas/${actaId}/pdf`, { responseType: "blob" });
+ return {
+   blob: response.data,
+   filename: (response.headers["content-disposition"] || "").match(/filename="?([^"]+)"?/)?.[1]
+     || `ACTA-${tipoLabel}-${String(actaId).padStart(6, "0")}.pdf`,
+ };
+};
+
 export const downloadTiActa = async (actaId, tipo = "") => {
  const tipoLabel = String(tipo || "").toLowerCase() === "retiro" ? "RT" : "ET";
  await triggerBlobDownload(
@@ -259,14 +284,15 @@ export const getTiCorporateNumberHistory = async (id) => {
 
 // ─── FASE 6: Liberation ───────────────────────────────────────────────────
 
-export const liberateTiAsset = async (assetId, photoFile, notes = "") => {
- const formData = new FormData();
- formData.append("photo", photoFile);
- if (notes) formData.append("notes", notes);
- const { data } = await api.post(`/ti-assets/${assetId}/liberate`, formData, {
-   headers: { "Content-Type": "multipart/form-data" },
- });
- return data?.data || null;
+export const liberateTiAsset = async (assetId, photoFiles, notes = "") => {
+  const formData = new FormData();
+  const files = Array.isArray(photoFiles) ? photoFiles : [photoFiles];
+  files.forEach((f) => formData.append("photos", f));
+  if (notes) formData.append("notes", notes);
+  const { data } = await api.post(`/ti-assets/${assetId}/liberate`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data?.data || null;
 };
 
 export const getTiLiberationPhotos = async (assetId) => {

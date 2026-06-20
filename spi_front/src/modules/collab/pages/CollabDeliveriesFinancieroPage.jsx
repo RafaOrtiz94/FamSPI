@@ -26,7 +26,7 @@ import {
   getTiAssetAssignmentsHistory, listTiActas, listTiAllActas, getTiActa, updateTiActa,
   getTiActaSignatureWorkflow,
   listTiFinancialDocs, uploadTiFinancialDoc,
-  downloadTiActa, downloadTiAssetReport, downloadTiCollaboratorReport,
+  getTiActaPdf, downloadTiActa, downloadTiAssetReport, downloadTiCollaboratorReport,
   downloadTiMaintenanceReport,
 } from "../../../core/api/tiAssetsApi";
 import { downloadSignatureWorkflowFinalPdf, validateSignerProfiles } from "../../../core/api/signatureWorkflowsApi";
@@ -1433,12 +1433,32 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
   const [financialDocs, setFinancialDocs] = useState([]);
   const [uploadingDoc, setUploadingDoc]   = useState(null);
   const [showAssignModal, setShowAssign]  = useState(false);
+  const [downloadingTiActaPdf, setDownloadingTiActaPdf] = useState(null);
 
   // Reports
   const [reportCollab, setReportCollab] = useState("");
   const [reportYear, setReportYear]     = useState(new Date().getFullYear());
 
   const setField = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
+
+  const handleDownloadTiActa = async (actaId, tipo) => {
+    setDownloadingTiActaPdf(actaId);
+    try {
+      const res = await getTiActaPdf(actaId, tipo);
+      const blobUrl = window.URL.createObjectURL(res.blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = res.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      showToast(e?.response?.data?.message || "No se pudo generar el PDF", "error");
+    } finally {
+      setDownloadingTiActaPdf(null);
+    }
+  };
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -1767,9 +1787,16 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
                               <FiFileText size={10} /> Workflow
                             </button>
                           )}
-                          <button type="button" onClick={() => downloadTiActa(acta.id, acta.tipo)}
-                            className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 hover:text-slate-900 transition-colors">
-                            <FiDownload size={10} /> Borrador
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadTiActa(acta.id, acta.tipo)}
+                            disabled={downloadingTiActaPdf === acta.id}
+                            className="cursor-pointer flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 hover:text-slate-900 transition-colors active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+                          >
+                            {downloadingTiActaPdf === acta.id
+                              ? <FiRefreshCw size={10} className="animate-spin" />
+                              : <FiDownload size={10} />}
+                            Borrador
                           </button>
                           {acta.is_complete && acta.signed_pdf_drive_url && (
                             <a href={acta.signed_pdf_drive_url} target="_blank" rel="noreferrer"
@@ -1906,6 +1933,21 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
         <QuickTiAssignModal asset={selected} users={users}
           onSave={() => { setShowAssign(false); loadDetail(selected.id); onRefresh(); }}
           onClose={() => setShowAssign(false)} />
+      )}
+      {downloadingTiActaPdf !== null && (
+        <div className="fixed inset-0 z-[30] flex items-center justify-center bg-[#0F172A]/60">
+          <div className="z-[40] flex flex-col items-center gap-5 rounded-2xl border border-[#E5E7EB] bg-white px-10 py-8 shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
+            <FiRefreshCw size={28} className="animate-spin text-[#2563EB]" />
+            <div className="flex flex-col items-center gap-1 text-center">
+              <span className="text-[17px] font-semibold leading-snug tracking-tight text-[#1F2937]">
+                Generando PDF
+              </span>
+              <span className="max-w-[260px] text-[13px] leading-relaxed text-[#6B7280]">
+                Preparando el acta en Google Docs. Esto puede tomar unos segundos.
+              </span>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
