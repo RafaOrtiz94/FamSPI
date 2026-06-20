@@ -14,7 +14,6 @@ const {
 } = require("../../utils/drive");
 const { computeSha256HexFromBuffer } = require("../../utils/documentHash");
 const { upsertCollaboratorProfile } = require("../collaborators/collaborators.service");
-const { generateActaEntregaPdf, generateActaRetiroPdf } = require("./tiAssets.acta");
 const signatureWorkflowsService = require("../signature-workflows/signatureWorkflows.service");
 const { resolveRecipientOrThrow } = signatureWorkflowsService;
 const { validateCreateWorkflowPayload } = require("../signature-workflows/signatureWorkflows.validation");
@@ -1978,31 +1977,17 @@ function buildTiActaTemplateReplacements(acta) {
   };
 }
 
-async function buildLegacyActaPdfBuffer(acta) {
-  if (!acta) return null;
-
-  const pdfParams = {
-    actaCode: acta.acta_code || "ACTA-ET-2026-000001",
-    nombre: acta.recipient_nombre || "",
-    cedula: acta.recipient_cedula || "",
-    cargo: acta.recipient_cargo || "",
-    actaDay: acta.acta_day || new Date().getDate(),
-    actaMonth: acta.acta_month || (new Date().getMonth() + 1),
-    actaYear: acta.acta_year || new Date().getFullYear(),
-    items: acta.items || [],
-  };
-
-  return acta.tipo === "retiro"
-    ? generateActaRetiroPdf(pdfParams)
-    : generateActaEntregaPdf(pdfParams);
-}
 
 async function buildDriveTemplateActaPdfBuffer(acta) {
   if (!acta) return null;
   const templateId = acta.tipo === "retiro"
     ? TI_ACTA_RETIRO_TEMPLATE_ID
     : TI_ACTA_ENTREGA_TEMPLATE_ID;
-  if (!templateId) return null;
+  if (!templateId) {
+    const err = new Error(`No hay plantilla Google Docs configurada para acta TI tipo "${acta.tipo}"`);
+    err.status = 503;
+    throw err;
+  }
 
   const filename = acta.acta_code ? `${acta.acta_code}.pdf` : `ACTA-${String(acta.id).padStart(6, "0")}.pdf`;
   const sourceName = filename.replace(/\.pdf$/i, "");
@@ -2044,17 +2029,7 @@ async function buildActaPdfBuffer(acta, { preferStored = false } = {}) {
     }
   }
 
-  try {
-    const templateResult = await buildDriveTemplateActaPdfBuffer(acta);
-    if (templateResult?.pdfBuffer) return templateResult;
-  } catch (err) {
-    logger.warn({ err, actaId: acta.id }, "ti: fallo la generacion de acta por plantilla Drive, se usara fallback");
-  }
-
-  return {
-    pdfBuffer: await buildLegacyActaPdfBuffer(acta),
-    mode: "legacy_pdf_lib",
-  };
+  return buildDriveTemplateActaPdfBuffer(acta);
 }
 
 async function getActaPdfDownload(actaId, { preferStored = true } = {}) {

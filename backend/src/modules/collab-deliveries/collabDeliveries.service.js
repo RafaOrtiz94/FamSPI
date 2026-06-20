@@ -2,7 +2,6 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const notificationManager = require("../notifications/notificationManager");
 const { computeSha256HexFromBuffer } = require("../../utils/documentHash");
-const { generateActaHerramientaPdf, generateActaRopaPdf } = require("./collabDeliveries.acta");
 const {
   ensureFolder,
   uploadBase64File,
@@ -526,41 +525,6 @@ async function _updateActaPdfMetadata(actaId, { filename, sha256, driveUrl, driv
   );
 }
 
-async function _buildLegacyActaPdfBuffer(acta) {
-  const category = normalizeActaCategory(
-    acta.resolved_category || acta.category || acta.items?.[0]?.item_category || acta.items?.[0]?.category,
-  );
-  const pdfParams = {
-    actaCode:  acta.acta_code || "",
-    nombre:    acta.recipient_nombre || "",
-    cedula:    acta.recipient_cedula || "",
-    cargo:     acta.recipient_cargo  || "",
-    actaDay:   acta.acta_day   || new Date().getDate(),
-    actaMonth: acta.acta_month || (new Date().getMonth() + 1),
-    actaYear:  acta.acta_year  || new Date().getFullYear(),
-    items:     acta.items || [],
-  };
-
-  if (category === "herramienta") {
-    return {
-      category,
-      pdfBuffer: await generateActaHerramientaPdf(pdfParams),
-    };
-  }
-
-  if (category === "ropa") {
-    return {
-      category,
-      pdfBuffer: await generateActaRopaPdf(pdfParams),
-    };
-  }
-
-  return {
-    category,
-    pdfBuffer: null,
-    mode: "unsupported_category",
-  };
-}
 
 async function _buildDriveTemplateActaPdfBuffer(acta) {
   const category = normalizeActaCategory(
@@ -571,8 +535,9 @@ async function _buildDriveTemplateActaPdfBuffer(acta) {
     : category === "ropa"        ? COLLAB_ACTA_ROPA_TEMPLATE_ID
     : null;
   if (!templateId) {
-    logger.warn({ category, actaId: acta.id }, "collab: no hay TEMPLATE_ID configurado para esta categoria, se usara fallback pdf-lib");
-    return null;
+    const err = new Error(`No hay plantilla Google Docs configurada para la categoría "${category}"`);
+    err.status = 503;
+    throw err;
   }
 
   const getCellValues = category === "ropa" ? _collabRopaCellValues : _collabHerramientaCellValues;
@@ -621,15 +586,7 @@ async function _buildActaPdfBuffer(acta, { preferStored = false } = {}) {
     }
   }
 
-  try {
-    const templateResult = await _buildDriveTemplateActaPdfBuffer(acta);
-    if (templateResult?.pdfBuffer) return templateResult;
-  } catch (err) {
-    logger.error({ err, actaId: acta.id }, "collab: ERROR en generacion por plantilla Drive — usando fallback pdf-lib");
-  }
-
-  logger.warn({ actaId: acta.id, category }, "collab: generando PDF con fallback pdf-lib (Drive no disponible o sin template)");
-  return _buildLegacyActaPdfBuffer(acta);
+  return _buildDriveTemplateActaPdfBuffer(acta);
 }
 
 async function getActaPdfDownload(actaId, { preferStored = true } = {}) {
