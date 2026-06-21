@@ -1731,8 +1731,9 @@ async function updateActa({ actaId, data = {}, userId }) {
     throw err;
   }
 
-  const items = Array.isArray(data.items) ? data.items : [];
-  if (!items.length) {
+  const itemsProvided = Array.isArray(data.items);
+  const items = itemsProvided ? data.items : [];
+  if (itemsProvided && !items.length) {
     const err = new Error("El acta debe incluir al menos un item");
     err.status = 400;
     throw err;
@@ -1771,28 +1772,31 @@ async function updateActa({ actaId, data = {}, userId }) {
       throw err;
     }
 
-    const sanitizedItems = items.map((item, index) => ({
-      order_num: index + 1,
-      item_type: item.item_type || "equipo",
-      asset_id: item.asset_id != null && String(item.asset_id).trim() !== "" ? Number(item.asset_id) : null,
-      accessory_id: item.accessory_id != null && String(item.accessory_id).trim() !== "" ? Number(item.accessory_id) : null,
-      name: String(item.name || "").trim(),
-      brand_model: item.brand_model != null ? String(item.brand_model || "").trim() || null : null,
-      serial_imei: item.serial_imei != null ? String(item.serial_imei || "").trim() || null : null,
-      is_new: item.is_new === null || item.is_new === undefined || item.is_new === "" ? null : Boolean(item.is_new),
-      physical_condition: item.physical_condition === null || item.physical_condition === undefined || item.physical_condition === ""
-        ? null
-        : Number(item.physical_condition),
-      observations: item.observations != null ? String(item.observations || "").trim() || null : null,
-    }));
+    let sanitizedItems = [];
+    if (itemsProvided) {
+      sanitizedItems = items.map((item, index) => ({
+        order_num: index + 1,
+        item_type: item.item_type || "equipo",
+        asset_id: item.asset_id != null && String(item.asset_id).trim() !== "" ? Number(item.asset_id) : null,
+        accessory_id: item.accessory_id != null && String(item.accessory_id).trim() !== "" ? Number(item.accessory_id) : null,
+        name: String(item.name || "").trim(),
+        brand_model: item.brand_model != null ? String(item.brand_model || "").trim() || null : null,
+        serial_imei: item.serial_imei != null ? String(item.serial_imei || "").trim() || null : null,
+        is_new: item.is_new === null || item.is_new === undefined || item.is_new === "" ? null : Boolean(item.is_new),
+        physical_condition: item.physical_condition === null || item.physical_condition === undefined || item.physical_condition === ""
+          ? null
+          : Number(item.physical_condition),
+        observations: item.observations != null ? String(item.observations || "").trim() || null : null,
+      }));
 
-    if (sanitizedItems.some((item) => !item.name)) {
-      const err = new Error("Todos los items del acta deben tener nombre");
-      err.status = 400;
-      throw err;
+      if (sanitizedItems.some((item) => !item.name)) {
+        const err = new Error("Todos los items del acta deben tener nombre");
+        err.status = 400;
+        throw err;
+      }
     }
 
-    const mainAssetId = sanitizedItems.find((item) => item.asset_id)?.asset_id || acta.asset_id || null;
+    const mainAssetId = (itemsProvided ? sanitizedItems.find((item) => item.asset_id)?.asset_id : null) || acta.asset_id || null;
     const nextNotes = data.notes !== undefined ? (String(data.notes || "").trim() || null) : acta.notes;
 
     // Si había un workflow en progreso, cancelarlo antes de editar el acta
@@ -1822,31 +1826,33 @@ async function updateActa({ actaId, data = {}, userId }) {
       [normalizedActaId, mainAssetId, targetRecipientNombre, targetRecipientCedula, targetRecipientCargo, nextNotes],
     );
 
-    await client.query(
-      `DELETE FROM public.ti_asset_actas_items WHERE acta_id = $1`,
-      [normalizedActaId],
-    );
-
-    for (const item of sanitizedItems) {
+    if (itemsProvided) {
       await client.query(
-        `INSERT INTO public.ti_asset_actas_items
-           (acta_id, order_num, item_type, asset_id, accessory_id,
-            name, brand_model, serial_imei, is_new, physical_condition, observations)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-        [
-          normalizedActaId,
-          item.order_num,
-          item.item_type,
-          item.asset_id,
-          item.accessory_id,
-          item.name,
-          item.brand_model,
-          item.serial_imei,
-          item.is_new,
-          item.physical_condition,
-          item.observations,
-        ],
+        `DELETE FROM public.ti_asset_actas_items WHERE acta_id = $1`,
+        [normalizedActaId],
       );
+
+      for (const item of sanitizedItems) {
+        await client.query(
+          `INSERT INTO public.ti_asset_actas_items
+             (acta_id, order_num, item_type, asset_id, accessory_id,
+              name, brand_model, serial_imei, is_new, physical_condition, observations)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          [
+            normalizedActaId,
+            item.order_num,
+            item.item_type,
+            item.asset_id,
+            item.accessory_id,
+            item.name,
+            item.brand_model,
+            item.serial_imei,
+            item.is_new,
+            item.physical_condition,
+            item.observations,
+          ],
+        );
+      }
     }
 
     await client.query(
