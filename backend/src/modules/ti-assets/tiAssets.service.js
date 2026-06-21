@@ -1963,7 +1963,7 @@ function buildTiActaTemplateReplacements(acta) {
   const actaMonth = acta.acta_month || (new Date().getMonth() + 1);
   const actaYear = acta.acta_year || new Date().getFullYear();
   return {
-    ACTA_CODE: acta.acta_code || "",
+    ACTA_CODE: (String(acta.acta_code || "").match(/(\d+)$/) || [])[1] || acta.acta_code || "",
     NOMBRE: acta.recipient_nombre || "",
     CEDULA: acta.recipient_cedula || "",
     CARGO: acta.recipient_cargo || "",
