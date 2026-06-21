@@ -1756,14 +1756,8 @@ async function updateActa({ actaId, data = {}, userId }) {
     }
 
     const acta = actaRows[0];
-    if (
-      acta.signature_workflow_id ||
-      acta.is_complete ||
-      acta.signed_at ||
-      acta.signed_pdf_drive_file_id ||
-      acta.signed_pdf_sha256
-    ) {
-      const err = new Error("El acta ya tiene firma o workflow iniciado y no puede editarse");
+    if (acta.is_complete || acta.signed_at || acta.signed_pdf_drive_file_id || acta.signed_pdf_sha256) {
+      const err = new Error("El acta ya fue firmada y no puede editarse");
       err.status = 409;
       throw err;
     }
@@ -1801,13 +1795,29 @@ async function updateActa({ actaId, data = {}, userId }) {
     const mainAssetId = sanitizedItems.find((item) => item.asset_id)?.asset_id || acta.asset_id || null;
     const nextNotes = data.notes !== undefined ? (String(data.notes || "").trim() || null) : acta.notes;
 
+    // Si había un workflow en progreso, cancelarlo antes de editar el acta
+    if (acta.signature_workflow_id) {
+      try {
+        await signatureWorkflowsService.cancelWorkflow(Number(acta.signature_workflow_id), { id: userId, role: "admin" });
+      } catch (cancelErr) {
+        logger.warn({ cancelErr, workflowId: acta.signature_workflow_id }, "ti: no se pudo cancelar el workflow al editar el acta (puede estar ya cancelado)");
+      }
+    }
+
     await client.query(
       `UPDATE public.ti_asset_actas
           SET asset_id = $2,
               recipient_nombre = $3,
               recipient_cedula = $4,
               recipient_cargo = $5,
-              notes = $6
+              notes = $6,
+              pdf_drive_file_id = NULL,
+              pdf_sha256 = NULL,
+              pdf_filename = NULL,
+              pdf_drive_url = NULL,
+              signature_workflow_id = NULL,
+              signature_workflow_status = NULL,
+              final_verification_token = NULL
         WHERE id = $1`,
       [normalizedActaId, mainAssetId, targetRecipientNombre, targetRecipientCedula, targetRecipientCargo, nextNotes],
     );

@@ -27,7 +27,7 @@ import {
   getTiActaSignatureWorkflow,
   listTiFinancialDocs, uploadTiFinancialDoc,
   getTiActaPdf, downloadTiActa, downloadTiAssetReport, downloadTiCollaboratorReport,
-  downloadTiMaintenanceReport,
+  downloadTiMaintenanceReport, startTiActaSignatureWorkflow,
 } from "../../../core/api/tiAssetsApi";
 import { downloadSignatureWorkflowFinalPdf, validateSignerProfiles } from "../../../core/api/signatureWorkflowsApi";
 
@@ -2404,13 +2404,15 @@ function TiActaEditModal({ open, acta, onClose, onSaved }) {
   );
 }
 
-function TiActaDetail({ acta: actaInitial, onClose, onUpdated }) {
+function TiActaDetail({ acta: actaInitial, onClose, onUpdated, availableUsers = [] }) {
   const { showToast } = useUI();
   const { user: sessionUser } = useAuth();
   const [acta, setActa]               = useState(null);
   const [loading, setLoading]         = useState(true);
   const [editingActa, setEditingActa] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [showWorkflowModal, setShowWorkflowModal] = useState(false);
+  const [startingWorkflow, setStartingWorkflow]   = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -2422,18 +2424,34 @@ function TiActaDetail({ acta: actaInitial, onClose, onUpdated }) {
 
   const data = acta || actaInitial;
   const items = acta?.items || [];
-  const canEditTiActa = ["ti", "jefe_ti", "admin_ti", "gerencia", "admin", "administrador"].includes(String(sessionUser?.role || "").toLowerCase())
-    && !data.signature_workflow_id
-    && !data.is_complete
-    && !data.signed_at
-    && !data.signed_pdf_drive_file_id
-    && !data.signed_pdf_sha256;
+
+  const isTiRole = ["ti", "jefe_ti", "admin_ti", "gerencia", "admin", "administrador"].includes(String(sessionUser?.role || "").toLowerCase());
+  const isAlreadySigned = data.is_complete || data.signed_at || data.signed_pdf_drive_file_id || data.signed_pdf_sha256;
+  const canEditTiActa = isTiRole && !isAlreadySigned;
+  const canStartWorkflow = isTiRole && !isAlreadySigned && !data.signature_workflow_id;
 
   const handleActaUpdated = async () => {
     const updated = await getTiActa(actaInitial.id);
     setActa(updated);
     setEditingActa(false);
     await onUpdated?.();
+  };
+
+  const handleStartWorkflow = async (signerIds) => {
+    if (!signerIds?.length) return showToast("Selecciona al menos un firmante", "warning");
+    setStartingWorkflow(true);
+    try {
+      await startTiActaSignatureWorkflow(data.id, { signers: signerIds.map((id) => ({ user_id: id })) });
+      showToast("Flujo de firma iniciado", "success");
+      const updated = await getTiActa(actaInitial.id);
+      setActa(updated);
+      setShowWorkflowModal(false);
+      await onUpdated?.();
+    } catch (e) {
+      showToast(e?.response?.data?.message || "No se pudo iniciar el flujo de firma", "error");
+    } finally {
+      setStartingWorkflow(false);
+    }
   };
 
   const handleDownloadPdf = async () => {
@@ -2492,10 +2510,24 @@ function TiActaDetail({ acta: actaInitial, onClose, onUpdated }) {
           <button
             type="button"
             onClick={() => setEditingActa(true)}
-            className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+            className="cursor-pointer flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors active:scale-[0.97]"
           >
             <FiEdit2 size={12}/> Editar acta
           </button>
+        )}
+        {canStartWorkflow && (
+          <button
+            type="button"
+            onClick={() => setShowWorkflowModal(true)}
+            className="cursor-pointer flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100 transition-colors active:scale-[0.97]"
+          >
+            <FiShield size={12}/> Iniciar firma FamSign
+          </button>
+        )}
+        {data.signature_workflow_id && !isAlreadySigned && (
+          <span className="flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700">
+            <FiRefreshCw size={12}/> Firma en proceso
+          </span>
         )}
         {data.is_complete && data.signed_pdf_drive_url && (
           <a href={data.signed_pdf_drive_url} target="_blank" rel="noreferrer"
@@ -2543,6 +2575,14 @@ function TiActaDetail({ acta: actaInitial, onClose, onUpdated }) {
         onClose={() => setEditingActa(false)}
         onSaved={handleActaUpdated}
       />
+      <TiWorkflowStartModal
+        open={showWorkflowModal}
+        acta={data}
+        users={availableUsers}
+        submitting={startingWorkflow}
+        onClose={() => setShowWorkflowModal(false)}
+        onSubmit={handleStartWorkflow}
+      />
       {downloadingPdf && (
         <div className="fixed inset-0 z-[30] flex items-center justify-center bg-[#0F172A]/60">
           <div className="z-[40] flex flex-col items-center gap-5 rounded-2xl border border-[#E5E7EB] bg-white px-10 py-8 shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
@@ -2554,6 +2594,68 @@ function TiActaDetail({ acta: actaInitial, onClose, onUpdated }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Modal inicio workflow FamSign para actas TI ───────────────────────────────
+
+function TiWorkflowStartModal({ open, acta, users = [], submitting, onClose, onSubmit }) {
+  const [selectedIds, setSelectedIds] = useState([]);
+
+  useEffect(() => { if (open) setSelectedIds([]); }, [open]);
+
+  const toggle = (id) => setSelectedIds((prev) =>
+    prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+  );
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[30] flex items-center justify-center bg-[#0F172A]/60">
+      <div className="z-[40] w-full max-w-md rounded-2xl border border-[#E5E7EB] bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-[17px] font-semibold text-[#1F2937]">Iniciar firma FamSign</h2>
+            <p className="text-[12px] text-[#6B7280] mt-0.5">
+              {acta?.acta_code || `Acta #${acta?.id}`} — {acta?.tipo === "retiro" ? "Retiro" : "Entrega"} de activos TI
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 transition-colors"><FiX size={16}/></button>
+        </div>
+        <p className="text-[12px] text-[#6B7280] mb-3">Selecciona los firmantes para este documento:</p>
+        <div className="max-h-56 overflow-y-auto space-y-1.5 mb-5">
+          {users.length === 0 && <p className="text-[12px] text-slate-400 text-center py-4">No hay usuarios disponibles</p>}
+          {users.map((u) => (
+            <label key={u.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 cursor-pointer hover:bg-slate-100 transition-colors">
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(u.id)}
+                onChange={() => toggle(u.id)}
+                className="accent-[#2563EB]"
+              />
+              <div className="min-w-0">
+                <p className="text-[13px] font-medium text-slate-800 truncate">{u.fullname || u.name || u.email}</p>
+                {u.email && <p className="text-[11px] text-slate-400 truncate">{u.email}</p>}
+              </div>
+            </label>
+          ))}
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button type="button" onClick={onClose} disabled={submitting}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50">
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={() => onSubmit(selectedIds)}
+            disabled={submitting || !selectedIds.length}
+            className="cursor-pointer flex items-center gap-2 rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-medium text-white hover:bg-[#1D4ED8] transition-colors active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+          >
+            {submitting ? <FiRefreshCw size={14} className="animate-spin"/> : <FiShield size={14}/>}
+            {submitting ? "Iniciando..." : "Iniciar flujo"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -4286,7 +4388,7 @@ const CollabDeliveriesFinancieroPage = () => {
           {/* Panel detalle */}
           <div className="lg:col-span-3 rounded-xl border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)] p-5 overflow-auto max-h-[640px]">
             {selectedTiActa ? (
-              <TiActaDetail acta={selectedTiActa} onClose={() => setTiActa(null)} onUpdated={loadAll} />
+              <TiActaDetail acta={selectedTiActa} onClose={() => setTiActa(null)} onUpdated={loadAll} availableUsers={signerCandidates} />
             ) : selectedSession ? (
               <SessionDetail sessionId={selectedSession.id} onClose={() => setSession(null)} availableUsers={signerCandidates} catalog={catalog} onUpdated={loadAll} />
             ) : (
