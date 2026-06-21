@@ -2407,9 +2407,10 @@ function TiActaEditModal({ open, acta, onClose, onSaved }) {
 function TiActaDetail({ acta: actaInitial, onClose, onUpdated }) {
   const { showToast } = useUI();
   const { user: sessionUser } = useAuth();
-  const [acta, setActa]       = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [acta, setActa]               = useState(null);
+  const [loading, setLoading]         = useState(true);
   const [editingActa, setEditingActa] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -2433,6 +2434,25 @@ function TiActaDetail({ acta: actaInitial, onClose, onUpdated }) {
     setActa(updated);
     setEditingActa(false);
     await onUpdated?.();
+  };
+
+  const handleDownloadPdf = async () => {
+    setDownloadingPdf(true);
+    try {
+      const res = await getTiActaPdf(data.id, data.tipo);
+      const blobUrl = window.URL.createObjectURL(res.blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = res.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      showToast(e?.response?.data?.message || "No se pudo generar el PDF", "error");
+    } finally {
+      setDownloadingPdf(false);
+    }
   };
 
   return (
@@ -2459,9 +2479,14 @@ function TiActaDetail({ acta: actaInitial, onClose, onUpdated }) {
 
       {/* Acciones */}
       <div className="flex gap-2 flex-wrap">
-        <button type="button" onClick={() => downloadTiActa(data.id, data.tipo)}
-          className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
-          <FiDownload size={12}/> Descargar PDF borrador
+        <button
+          type="button"
+          onClick={handleDownloadPdf}
+          disabled={downloadingPdf}
+          className="cursor-pointer flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+        >
+          {downloadingPdf ? <FiRefreshCw size={12} className="animate-spin"/> : <FiDownload size={12}/>}
+          Descargar PDF borrador
         </button>
         {canEditTiActa && (
           <button
@@ -2518,6 +2543,17 @@ function TiActaDetail({ acta: actaInitial, onClose, onUpdated }) {
         onClose={() => setEditingActa(false)}
         onSaved={handleActaUpdated}
       />
+      {downloadingPdf && (
+        <div className="fixed inset-0 z-[30] flex items-center justify-center bg-[#0F172A]/60">
+          <div className="z-[40] flex flex-col items-center gap-5 rounded-2xl border border-[#E5E7EB] bg-white px-10 py-8 shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
+            <FiRefreshCw size={28} className="animate-spin text-[#2563EB]" />
+            <div className="flex flex-col items-center gap-1 text-center">
+              <span className="text-[17px] font-semibold leading-snug tracking-tight text-[#1F2937]">Generando PDF</span>
+              <span className="max-w-[260px] text-[13px] leading-relaxed text-[#6B7280]">Preparando el acta en Google Docs. Esto puede tomar unos segundos.</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2526,11 +2562,12 @@ function TiActaDetail({ acta: actaInitial, onClose, onUpdated }) {
 
 function TiAssetDetailModal({ asset, onClose }) {
   const { showToast } = useUI();
-  const [hist, setHist]         = useState([]);
-  const [actas, setActas]       = useState([]);
-  const [docs, setDocs]         = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [uploadingDoc, setUpD]  = useState(null);
+  const [hist, setHist]           = useState([]);
+  const [actas, setActas]         = useState([]);
+  const [docs, setDocs]           = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [uploadingDoc, setUpD]    = useState(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(null);
 
   useEffect(() => {
     setLoading(true);
@@ -2545,6 +2582,25 @@ function TiAssetDetailModal({ asset, onClose }) {
     }).catch(() => showToast("No se pudo cargar detalle", "error"))
       .finally(() => setLoading(false));
   }, [asset.id, showToast]);
+
+  const handleDownloadActaPdf = async (actaId, tipo) => {
+    setDownloadingPdf(actaId);
+    try {
+      const res = await getTiActaPdf(actaId, tipo);
+      const blobUrl = window.URL.createObjectURL(res.blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = res.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      showToast(e?.response?.data?.message || "No se pudo generar el PDF", "error");
+    } finally {
+      setDownloadingPdf(null);
+    }
+  };
 
   const handleDocUpload = async (docType, file) => {
     setUpD(docType);
@@ -2644,9 +2700,14 @@ function TiAssetDetailModal({ asset, onClose }) {
                         <p className="text-[10px] text-slate-400 mt-0.5">{a.recipient_nombre || "-"} · {new Date(a.generated_at).toLocaleDateString("es-EC")}</p>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <button type="button" onClick={() => downloadTiActa(a.id, a.tipo)}
-                          className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 hover:text-slate-900 transition-colors">
-                          <FiDownload size={10}/> PDF
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadActaPdf(a.id, a.tipo)}
+                          disabled={downloadingPdf === a.id}
+                          className="cursor-pointer flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 hover:text-slate-900 transition-colors active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+                        >
+                          {downloadingPdf === a.id ? <FiRefreshCw size={10} className="animate-spin"/> : <FiDownload size={10}/>}
+                          PDF
                         </button>
                         {a.is_complete && a.signed_pdf_drive_url && (
                           <a href={a.signed_pdf_drive_url} target="_blank" rel="noreferrer"
@@ -2708,6 +2769,17 @@ function TiAssetDetailModal({ asset, onClose }) {
           </div>
         )}
       </div>
+      {downloadingPdf !== null && (
+        <div className="fixed inset-0 z-[30] flex items-center justify-center bg-[#0F172A]/60">
+          <div className="z-[40] flex flex-col items-center gap-5 rounded-2xl border border-[#E5E7EB] bg-white px-10 py-8 shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
+            <FiRefreshCw size={28} className="animate-spin text-[#2563EB]" />
+            <div className="flex flex-col items-center gap-1 text-center">
+              <span className="text-[17px] font-semibold leading-snug tracking-tight text-[#1F2937]">Generando PDF</span>
+              <span className="max-w-[260px] text-[13px] leading-relaxed text-[#6B7280]">Preparando el acta en Google Docs. Esto puede tomar unos segundos.</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
