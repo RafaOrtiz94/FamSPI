@@ -1434,6 +1434,7 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
   const [uploadingDoc, setUploadingDoc]   = useState(null);
   const [showAssignModal, setShowAssign]  = useState(false);
   const [downloadingTiActaPdf, setDownloadingTiActaPdf] = useState(null);
+  const [editingTiActa, setEditingTiActa] = useState(null);
 
   // Reports
   const [reportCollab, setReportCollab] = useState("");
@@ -1798,6 +1799,15 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
                               : <FiDownload size={10} />}
                             Borrador
                           </button>
+                          {!acta.is_complete && !acta.signed_at && !acta.signed_pdf_drive_file_id && !acta.signed_pdf_sha256 && (
+                            <button
+                              type="button"
+                              onClick={() => setEditingTiActa(acta)}
+                              className="cursor-pointer flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 transition-colors active:scale-[0.97]"
+                            >
+                              <FiEdit2 size={10} /> Editar
+                            </button>
+                          )}
                           {acta.is_complete && acta.signed_pdf_drive_url && (
                             <a href={acta.signed_pdf_drive_url} target="_blank" rel="noreferrer"
                               className="flex items-center gap-1 rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-xs text-green-700 hover:bg-green-100 transition-colors">
@@ -1934,6 +1944,12 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
           onSave={() => { setShowAssign(false); loadDetail(selected.id); onRefresh(); }}
           onClose={() => setShowAssign(false)} />
       )}
+      <TiActaEditModal
+        open={Boolean(editingTiActa)}
+        acta={editingTiActa}
+        onClose={() => setEditingTiActa(null)}
+        onSaved={() => { setEditingTiActa(null); if (selectedId) loadDetail(selectedId); }}
+      />
       {downloadingTiActaPdf !== null && (
         <div className="fixed inset-0 z-[30] flex items-center justify-center bg-[#0F172A]/60">
           <div className="z-[40] flex flex-col items-center gap-5 rounded-2xl border border-[#E5E7EB] bg-white px-10 py-8 shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
