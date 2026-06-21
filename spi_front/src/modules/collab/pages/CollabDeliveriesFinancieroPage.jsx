@@ -2406,7 +2406,6 @@ function TiActaEditModal({ open, acta, onClose, onSaved }) {
 
 function TiActaDetail({ acta: actaInitial, onClose, onUpdated, availableUsers = [] }) {
   const { showToast } = useUI();
-  const { user: sessionUser } = useAuth();
   const [acta, setActa]               = useState(null);
   const [loading, setLoading]         = useState(true);
   const [editingActa, setEditingActa] = useState(false);
@@ -2425,10 +2424,9 @@ function TiActaDetail({ acta: actaInitial, onClose, onUpdated, availableUsers = 
   const data = acta || actaInitial;
   const items = acta?.items || [];
 
-  const isTiRole = ["ti", "jefe_ti", "admin_ti", "gerencia", "admin", "administrador"].includes(String(sessionUser?.role || "").toLowerCase());
   const isAlreadySigned = data.is_complete || data.signed_at || data.signed_pdf_drive_file_id || data.signed_pdf_sha256;
-  const canEditTiActa = isTiRole && !isAlreadySigned;
-  const canStartWorkflow = isTiRole && !isAlreadySigned && !data.signature_workflow_id;
+  const canEditTiActa = !isAlreadySigned;
+  const canStartWorkflow = !isAlreadySigned && !data.signature_workflow_id;
 
   const handleActaUpdated = async () => {
     const updated = await getTiActa(actaInitial.id);
