@@ -14,10 +14,12 @@ import {
   FiPlus,
   FiRefreshCw,
   FiSearch,
+  FiShield,
   FiTrash2,
   FiUser,
   FiX,
 } from "react-icons/fi";
+import { TiActaEditModal, TiWorkflowStartModal } from "../components/TiActaModals";
 import Button from "../../../core/ui/components/Button";
 import Modal from "../../../core/ui/components/Modal";
 import { useUI } from "../../../core/ui/UIContext";
@@ -33,9 +35,12 @@ import {
   createTiMaintenance,
   deleteTiAccessory,
   downloadTiActa,
+  getTiActa,
+  getTiActaPdf,
   getTiActaRecipientInfo,
   listTiAllActas,
   downloadTiMaintenanceReport,
+  startTiActaSignatureWorkflow,
   uploadTiActaSigned,
   generateTiMaintenanceFuture,
   generateTiMaintenanceReport,
@@ -70,14 +75,59 @@ function TIActasView() {
   const { showToast } = useUI();
   const [allActas, setAllActas] = useState([]);
   const [actasLoading, setActasLoading] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(null);
+  const [editingActa, setEditingActa] = useState(null);
+  const [workflowActa, setWorkflowActa] = useState(null);
+  const [startingWorkflow, setStartingWorkflow] = useState(false);
+  const [users, setUsers] = useState([]);
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     setActasLoading(true);
     listTiAllActas()
       .then((rows) => setAllActas(rows || []))
       .catch(() => showToast("Error al cargar actas", "error"))
       .finally(() => setActasLoading(false));
   }, [showToast]);
+
+  useEffect(() => {
+    reload();
+    getUsers().then((rows) => setUsers(rows || [])).catch(() => {});
+  }, [reload]);
+
+  const handleDownloadPdf = async (actaId, tipo) => {
+    setDownloadingPdf(actaId);
+    try {
+      const res = await getTiActaPdf(actaId, tipo);
+      const blobUrl = window.URL.createObjectURL(res.blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = res.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      showToast(e?.response?.data?.message || "No se pudo generar el PDF", "error");
+    } finally {
+      setDownloadingPdf(null);
+    }
+  };
+
+  const handleStartWorkflow = async (signerIds) => {
+    if (!signerIds?.length) return showToast("Selecciona al menos un firmante", "warning");
+    if (!workflowActa) return;
+    setStartingWorkflow(true);
+    try {
+      await startTiActaSignatureWorkflow(workflowActa.id, { signers: signerIds.map((id) => ({ user_id: id })) });
+      showToast("Flujo de firma iniciado", "success");
+      reload();
+      setWorkflowActa(null);
+    } catch (e) {
+      showToast(e?.response?.data?.message || "No se pudo iniciar el flujo de firma", "error");
+    } finally {
+      setStartingWorkflow(false);
+    }
+  };
 
   if (actasLoading) {
     return (
@@ -98,41 +148,96 @@ function TIActasView() {
   }
 
   return (
-    <div className="space-y-3">
-      {allActas.map((acta) => (
-        <div key={acta.id} className="rounded-xl border border-slate-200 bg-white p-4 flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap mb-1">
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-                acta.tipo === "entrega" ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"
-              }`}>
-                {acta.tipo}
-              </span>
-              <span className="text-xs font-mono font-semibold text-slate-600">{acta.acta_code || `#${String(acta.id).padStart(6, "0")}`}</span>
-              {acta.is_complete ? (
-                <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700">
-                  <FiCheck size={9} /> Firmada
-                </span>
-              ) : (
-                <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-                  Pendiente
-                </span>
-              )}
+    <>
+      <div className="space-y-3">
+        {allActas.map((acta) => {
+          const isSigned = acta.is_complete || acta.signed_at || acta.signed_pdf_drive_file_id || acta.signed_pdf_sha256;
+          return (
+            <div key={acta.id} className="rounded-xl border border-slate-200 bg-white p-4 flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                    acta.tipo === "entrega" ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"
+                  }`}>
+                    {acta.tipo}
+                  </span>
+                  <span className="text-xs font-mono font-semibold text-slate-600">{acta.acta_code || `#${String(acta.id).padStart(6, "0")}`}</span>
+                  {isSigned ? (
+                    <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700">
+                      <FiCheck size={9} /> Firmada
+                    </span>
+                  ) : acta.signature_workflow_id ? (
+                    <span className="flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                      <FiRefreshCw size={9} /> En firma
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                      Pendiente
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs font-medium text-slate-800">{acta.recipient_nombre || "Sin nombre"}</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">{acta.recipient_cargo || "-"} · {acta.asset_name || "-"}</p>
+                <p className="text-[10px] text-slate-400">{new Date(acta.generated_at).toLocaleString("es-EC", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadPdf(acta.id, acta.tipo)}
+                  disabled={downloadingPdf === acta.id}
+                  className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors whitespace-nowrap disabled:cursor-wait disabled:opacity-60"
+                >
+                  {downloadingPdf === acta.id ? <FiRefreshCw size={12} className="animate-spin" /> : <FiDownload size={12} />} PDF
+                </button>
+                {!isSigned && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingActa(acta)}
+                    className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors whitespace-nowrap"
+                  >
+                    <FiEdit2 size={12} /> Editar
+                  </button>
+                )}
+                {!isSigned && !acta.signature_workflow_id && (
+                  <button
+                    type="button"
+                    onClick={() => setWorkflowActa(acta)}
+                    className="flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100 transition-colors whitespace-nowrap"
+                  >
+                    <FiShield size={12} /> Firma
+                  </button>
+                )}
+              </div>
             </div>
-            <p className="text-xs font-medium text-slate-800">{acta.recipient_nombre || "Sin nombre"}</p>
-            <p className="text-[10px] text-slate-500 mt-0.5">{acta.recipient_cargo || "-"} · {acta.asset_name || "-"}</p>
-            <p className="text-[10px] text-slate-400">{new Date(acta.generated_at).toLocaleString("es-EC", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+          );
+        })}
+      </div>
+      <TiActaEditModal
+        open={Boolean(editingActa)}
+        acta={editingActa}
+        onClose={() => setEditingActa(null)}
+        onSaved={() => { setEditingActa(null); reload(); }}
+      />
+      <TiWorkflowStartModal
+        open={Boolean(workflowActa)}
+        acta={workflowActa}
+        users={users}
+        submitting={startingWorkflow}
+        onClose={() => setWorkflowActa(null)}
+        onSubmit={handleStartWorkflow}
+      />
+      {downloadingPdf !== null && (
+        <div className="fixed inset-0 z-[30] flex items-center justify-center bg-[#0F172A]/60">
+          <div className="z-[40] flex flex-col items-center gap-5 rounded-2xl border border-[#E5E7EB] bg-white px-10 py-8 shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
+            <FiRefreshCw size={28} className="animate-spin text-[#2563EB]" />
+            <div className="flex flex-col items-center gap-1 text-center">
+              <span className="text-[17px] font-semibold leading-snug tracking-tight text-[#1F2937]">Generando PDF</span>
+              <span className="max-w-[260px] text-[13px] leading-relaxed text-[#6B7280]">Preparando el acta en Google Docs. Esto puede tomar unos segundos.</span>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => downloadTiActa(acta.id, acta.tipo)}
-            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors whitespace-nowrap"
-          >
-            <FiDownload size={12} className="inline mr-1" /> PDF
-          </button>
         </div>
-      ))}
-    </div>
+      )}
+    </>
   );
 }
 
@@ -326,6 +431,10 @@ const TIDeviceManagementPage = () => {
   // Actas
   const [actas, setActas] = useState([]);
   const [actasLoading, setActasLoading] = useState(false);
+  const [downloadingActaPdf, setDownloadingActaPdf] = useState(null);
+  const [editingActa, setEditingActa] = useState(null);
+  const [workflowActa, setWorkflowActa] = useState(null);
+  const [startingWorkflow, setStartingWorkflow] = useState(false);
 
   // Tabs: 'dispositivos' | 'todas-actas'
   const [activeTab, setActiveTab] = useState('dispositivos');
@@ -799,6 +908,41 @@ const TIDeviceManagementPage = () => {
       showToast(error?.response?.data?.message || "No se pudo eliminar el accesorio", "error");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDownloadActaPdf = async (actaId, tipo) => {
+    setDownloadingActaPdf(actaId);
+    try {
+      const res = await getTiActaPdf(actaId, tipo);
+      const blobUrl = window.URL.createObjectURL(res.blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = res.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      showToast(e?.response?.data?.message || "No se pudo generar el PDF", "error");
+    } finally {
+      setDownloadingActaPdf(null);
+    }
+  };
+
+  const handleStartWorkflow = async (signerIds) => {
+    if (!signerIds?.length) return showToast("Selecciona al menos un firmante", "warning");
+    if (!workflowActa) return;
+    setStartingWorkflow(true);
+    try {
+      await startTiActaSignatureWorkflow(workflowActa.id, { signers: signerIds.map((id) => ({ user_id: id })) });
+      showToast("Flujo de firma iniciado", "success");
+      if (selected) await loadActas(selected.id);
+      setWorkflowActa(null);
+    } catch (e) {
+      showToast(e?.response?.data?.message || "No se pudo iniciar el flujo de firma", "error");
+    } finally {
+      setStartingWorkflow(false);
     }
   };
 
@@ -1697,13 +1841,39 @@ const TIDeviceManagementPage = () => {
                             <p className="text-xs text-slate-500 mt-0.5 truncate">{acta.recipient_nombre || "Sin nombre"} · {acta.recipient_cargo || "-"}</p>
                             <p className="text-[10px] text-slate-400">{new Date(acta.generated_at).toLocaleString("es-EC", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => downloadTiActa(acta.id, acta.tipo)}
-                            className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 hover:text-slate-900 hover:border-slate-300 transition-colors whitespace-nowrap cursor-pointer"
-                          >
-                            <FiDownload size={10} /> PDF
-                          </button>
+                          <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadActaPdf(acta.id, acta.tipo)}
+                              disabled={downloadingActaPdf === acta.id}
+                              className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 hover:text-slate-900 hover:border-slate-300 transition-colors whitespace-nowrap cursor-pointer disabled:cursor-wait disabled:opacity-60"
+                            >
+                              {downloadingActaPdf === acta.id ? <FiRefreshCw size={10} className="animate-spin" /> : <FiDownload size={10} />} PDF
+                            </button>
+                            {!acta.is_complete && !acta.signed_at && !acta.signed_pdf_drive_file_id && !acta.signed_pdf_sha256 && (
+                              <button
+                                type="button"
+                                onClick={() => setEditingActa(acta)}
+                                className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 transition-colors whitespace-nowrap cursor-pointer"
+                              >
+                                <FiEdit2 size={10} /> Editar
+                              </button>
+                            )}
+                            {!acta.is_complete && !acta.signed_at && !acta.signed_pdf_drive_file_id && !acta.signed_pdf_sha256 && !acta.signature_workflow_id && (
+                              <button
+                                type="button"
+                                onClick={() => setWorkflowActa(acta)}
+                                className="flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-100 transition-colors whitespace-nowrap cursor-pointer"
+                              >
+                                <FiShield size={10} /> Firma
+                              </button>
+                            )}
+                            {acta.signature_workflow_id && !acta.is_complete && (
+                              <span className="flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700 whitespace-nowrap">
+                                <FiRefreshCw size={10} /> En firma
+                              </span>
+                            )}
+                          </div>
                         </div>
                         {/* Upload firmada */}
                         {!acta.is_complete ? (
@@ -1737,6 +1907,33 @@ const TIDeviceManagementPage = () => {
           )}
         </div>
       </div>
+
+      {/* Modales actas */}
+      <TiActaEditModal
+        open={Boolean(editingActa)}
+        acta={editingActa}
+        onClose={() => setEditingActa(null)}
+        onSaved={async () => { setEditingActa(null); if (selected) await loadActas(selected.id); }}
+      />
+      <TiWorkflowStartModal
+        open={Boolean(workflowActa)}
+        acta={workflowActa}
+        users={users}
+        submitting={startingWorkflow}
+        onClose={() => setWorkflowActa(null)}
+        onSubmit={handleStartWorkflow}
+      />
+      {downloadingActaPdf !== null && (
+        <div className="fixed inset-0 z-[30] flex items-center justify-center bg-[#0F172A]/60">
+          <div className="z-[40] flex flex-col items-center gap-5 rounded-2xl border border-[#E5E7EB] bg-white px-10 py-8 shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
+            <FiRefreshCw size={28} className="animate-spin text-[#2563EB]" />
+            <div className="flex flex-col items-center gap-1 text-center">
+              <span className="text-[17px] font-semibold leading-snug tracking-tight text-[#1F2937]">Generando PDF</span>
+              <span className="max-w-[260px] text-[13px] leading-relaxed text-[#6B7280]">Preparando el acta en Google Docs. Esto puede tomar unos segundos.</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Maintenance Schedule */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
