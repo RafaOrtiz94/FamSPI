@@ -113,12 +113,12 @@ function TIActasView() {
     }
   };
 
-  const handleStartWorkflow = async (signerIds) => {
-    if (!signerIds?.length) return showToast("Selecciona al menos un firmante", "warning");
+  const handleStartWorkflow = async (payloadSigners) => {
+    if (!payloadSigners?.length) return showToast("Selecciona al menos un firmante", "warning");
     if (!workflowActa) return;
     setStartingWorkflow(true);
     try {
-      await startTiActaSignatureWorkflow(workflowActa.id, { signers: signerIds.map((id) => ({ user_id: id })) });
+      await startTiActaSignatureWorkflow(workflowActa.id, { signers: payloadSigners });
       showToast("Flujo de firma iniciado", "success");
       reload();
       setWorkflowActa(null);
@@ -930,12 +930,12 @@ const TIDeviceManagementPage = () => {
     }
   };
 
-  const handleStartWorkflow = async (signerIds) => {
-    if (!signerIds?.length) return showToast("Selecciona al menos un firmante", "warning");
+  const handleStartWorkflow = async (payloadSigners) => {
+    if (!payloadSigners?.length) return showToast("Selecciona al menos un firmante", "warning");
     if (!workflowActa) return;
     setStartingWorkflow(true);
     try {
-      await startTiActaSignatureWorkflow(workflowActa.id, { signers: signerIds.map((id) => ({ user_id: id })) });
+      await startTiActaSignatureWorkflow(workflowActa.id, { signers: payloadSigners });
       showToast("Flujo de firma iniciado", "success");
       if (selected) await loadActas(selected.id);
       setWorkflowActa(null);

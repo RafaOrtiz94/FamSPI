@@ -1,11 +1,29 @@
-import React, { useEffect, useState } from "react";
-import { FiX } from "react-icons/fi";
+import React, { useEffect, useMemo, useState } from "react";
+import { FiAlertTriangle, FiPlus, FiShield, FiRefreshCw, FiX } from "react-icons/fi";
 import Modal from "../../../core/ui/components/Modal";
 import { useUI } from "../../../core/ui/UIContext";
 import { updateTiActa } from "../../../core/api/tiAssetsApi";
+import { validateSignerProfiles } from "../../../core/api/signatureWorkflowsApi";
 
 const fieldCls = "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-400 focus:outline-none";
 const labelCls = "text-xs font-semibold text-slate-500 block mb-1";
+
+export const WORKFLOW_ROLE_OPTIONS = [
+  { value: "colaborador_receptor", label: "Colaborador receptor" },
+  { value: "talento_humano", label: "Talento Humano" },
+  { value: "gerencia_general", label: "Gerencia General" },
+  { value: "firmante", label: "Firmante" },
+];
+
+export function buildWorkflowSignerDraft(user = null, role = "firmante") {
+  return {
+    selectedUserId: user?.id ? String(user.id) : "",
+    role,
+    isRequired: true,
+  };
+}
+
+// ── Modal edición de datos del receptor ──────────────────────────────────────
 
 export function TiActaEditModal({ open, acta, onClose, onSaved }) {
   const { showToast } = useUI();
@@ -60,30 +78,15 @@ export function TiActaEditModal({ open, acta, onClose, onSaved }) {
         <div className="space-y-3">
           <div>
             <label className={labelCls}>Nombre completo *</label>
-            <input
-              value={recipientNombre}
-              onChange={(e) => setRecipientNombre(e.target.value)}
-              className={fieldCls}
-              placeholder="Nombre del colaborador"
-            />
+            <input value={recipientNombre} onChange={(e) => setRecipientNombre(e.target.value)} className={fieldCls} placeholder="Nombre del colaborador" />
           </div>
           <div>
             <label className={labelCls}>Cédula *</label>
-            <input
-              value={recipientCedula}
-              onChange={(e) => setRecipientCedula(e.target.value)}
-              className={`${fieldCls} font-mono`}
-              placeholder="0000000000"
-            />
+            <input value={recipientCedula} onChange={(e) => setRecipientCedula(e.target.value)} className={`${fieldCls} font-mono`} placeholder="0000000000" />
           </div>
           <div>
             <label className={labelCls}>Cargo *</label>
-            <input
-              value={recipientCargo}
-              onChange={(e) => setRecipientCargo(e.target.value)}
-              className={fieldCls}
-              placeholder="Cargo del colaborador"
-            />
+            <input value={recipientCargo} onChange={(e) => setRecipientCargo(e.target.value)} className={fieldCls} placeholder="Cargo del colaborador" />
           </div>
         </div>
 
@@ -100,52 +103,185 @@ export function TiActaEditModal({ open, acta, onClose, onSaved }) {
   );
 }
 
+// ── Modal inicio workflow FamSign (TI actas) ─────────────────────────────────
+
 export function TiWorkflowStartModal({ open, acta, users = [], submitting, onClose, onSubmit }) {
-  const [selectedIds, setSelectedIds] = useState([]);
+  const { showToast } = useUI();
+  const [signers, setSigners] = useState([buildWorkflowSignerDraft()]);
+  const [profileWarnings, setProfileWarnings] = useState([]);
+  const [validating, setValidating] = useState(false);
 
-  useEffect(() => { if (open) setSelectedIds([]); }, [open]);
+  useEffect(() => {
+    if (open) {
+      setSigners([buildWorkflowSignerDraft()]);
+      setProfileWarnings([]);
+    }
+  }, [open]);
 
-  const toggle = (id) => setSelectedIds((prev) =>
-    prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-  );
+  const setSigner = (index, patch) => {
+    setProfileWarnings([]);
+    setSigners((current) => current.map((s, i) => (i === index ? { ...s, ...patch } : s)));
+  };
 
-  if (!open) return null;
+  const addSigner = () => {
+    setProfileWarnings([]);
+    setSigners((current) => [...current, buildWorkflowSignerDraft()]);
+  };
+
+  const removeSigner = (index) => {
+    setProfileWarnings([]);
+    setSigners((current) => current.filter((_, i) => i !== index));
+  };
+
+  const handleSubmit = async () => {
+    if (!signers.length) {
+      showToast("Agrega al menos un firmante", "warning");
+      return;
+    }
+
+    const seenIds = new Set();
+    let payloadSigners;
+    try {
+      payloadSigners = signers.map((signer, index) => {
+        const user = users.find((u) => String(u.id) === String(signer.selectedUserId || ""));
+        if (!user?.email) throw new Error(`Firmante ${index + 1}: selecciona un usuario válido`);
+        if (seenIds.has(String(user.id))) throw new Error(`Firmante ${index + 1}: el usuario ya fue seleccionado`);
+        seenIds.add(String(user.id));
+        return {
+          user_id: user.id,
+          email: user.email,
+          name: user.fullname || user.name || user.email,
+          role: signer.role || "firmante",
+          sequence_order: index + 1,
+          is_required: signer.isRequired !== false,
+        };
+      });
+    } catch (err) {
+      showToast(err.message, "warning");
+      return;
+    }
+
+    setValidating(true);
+    setProfileWarnings([]);
+    try {
+      const userIds = payloadSigners.map((s) => s.user_id);
+      const incomplete = await validateSignerProfiles(userIds);
+      if (incomplete.length > 0) {
+        setProfileWarnings(incomplete);
+        return;
+      }
+    } catch {
+      // Si el endpoint falla, continuar
+    } finally {
+      setValidating(false);
+    }
+
+    onSubmit?.(payloadSigners);
+  };
+
   return (
-    <div className="fixed inset-0 z-[30] flex items-center justify-center bg-[#0F172A]/60">
-      <div className="z-[40] w-full max-w-md rounded-2xl border border-[#E5E7EB] bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-[17px] font-semibold text-[#1F2937]">Iniciar firma FamSign</h2>
-            <p className="text-[12px] text-[#6B7280] mt-0.5">
-              {acta?.acta_code || `Acta #${acta?.id}`} — {acta?.tipo === "retiro" ? "Retiro" : "Entrega"} de activos TI
-            </p>
+    <Modal open={open} onClose={(submitting || validating) ? undefined : onClose} title="Iniciar firma FamSign" maxWidth="max-w-2xl">
+      <div className="space-y-5">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">TI</span>
+            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${acta?.tipo === "retiro" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>
+              {acta?.tipo === "retiro" ? "Devolución" : "Entrega"}
+            </span>
+            <span className="rounded-full bg-slate-200 px-2.5 py-1 text-xs font-mono text-slate-600">{acta?.acta_code || `#${acta?.id || ""}`}</span>
           </div>
-          <button type="button" onClick={onClose} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 transition-colors">
-            <FiX size={16} />
-          </button>
+          <p className="mt-2 text-xs text-slate-500">
+            Selecciona el orden de firma. El workflow solo se enviará a los usuarios elegidos aquí.
+          </p>
         </div>
-        <p className="text-[12px] text-[#6B7280] mb-3">Selecciona los firmantes para este documento:</p>
-        <div className="space-y-2 max-h-64 overflow-y-auto">
-          {users.length === 0 && <p className="text-xs text-slate-400 text-center py-4">No hay usuarios disponibles</p>}
-          {users.map((u) => (
-            <label key={u.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 cursor-pointer hover:bg-slate-100 transition-colors">
-              <input type="checkbox" checked={selectedIds.includes(u.id)} onChange={() => toggle(u.id)} className="rounded" />
-              <div>
-                <p className="text-xs font-medium text-slate-800">{u.nombre} {u.apellido}</p>
-                <p className="text-[10px] text-slate-400">{u.email}</p>
+
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Firmantes</p>
+              <p className="text-xs text-slate-500">El orden de la lista define la secuencia de firma.</p>
+            </div>
+            <button type="button" onClick={addSigner} className="cursor-pointer rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors active:scale-[0.97]">
+              Agregar firmante
+            </button>
+          </div>
+
+          {signers.map((signer, index) => (
+            <div key={`${signer.selectedUserId || "new"}-${index}`} className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-slate-900">Firmante {index + 1}</p>
+                <button type="button" onClick={() => removeSigner(index)} disabled={submitting || signers.length === 1}
+                  className="cursor-pointer rounded-2xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:cursor-not-allowed disabled:opacity-50">
+                  Quitar
+                </button>
               </div>
-            </label>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block">
+                  <span className={labelCls}>Usuario</span>
+                  <select value={signer.selectedUserId} onChange={(e) => setSigner(index, { selectedUserId: e.target.value })} className={fieldCls} disabled={submitting}>
+                    <option value="">Selecciona un usuario</option>
+                    {users.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {(u.fullname || u.name || u.email)}{u.role ? ` · ${u.role}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className={labelCls}>Rol documental</span>
+                  <select value={signer.role} onChange={(e) => setSigner(index, { role: e.target.value })} className={fieldCls} disabled={submitting}>
+                    {WORKFLOW_ROLE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm text-slate-600">
+                <input type="checkbox" checked={signer.isRequired !== false} onChange={(e) => setSigner(index, { isRequired: e.target.checked })}
+                  disabled={submitting} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-200" />
+                Firma obligatoria
+              </label>
+            </div>
           ))}
         </div>
-        <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
-          <button type="button" onClick={onClose} disabled={submitting} className="cursor-pointer rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50">
+
+        {profileWarnings.length > 0 && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <div className="flex items-start gap-3">
+              <FiAlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600" />
+              <div className="flex-1 text-sm">
+                <p className="font-semibold text-amber-800">
+                  Ficha incompleta — solicita a Talento Humano completar los datos antes de continuar
+                </p>
+                <ul className="mt-2 space-y-1.5">
+                  {profileWarnings.map((w) => (
+                    <li key={w.user_id} className="text-amber-700">
+                      <span className="font-medium">{w.fullname || w.email}</span>
+                      {" — faltan: "}
+                      <span className="font-medium">{w.missing.join(", ")}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
+          <button type="button" onClick={onClose} disabled={submitting || validating}
+            className="cursor-pointer rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors active:scale-[0.97] disabled:opacity-50">
             Cancelar
           </button>
-          <button type="button" onClick={() => onSubmit(selectedIds)} disabled={submitting || !selectedIds.length} className="cursor-pointer rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-            {submitting ? "Iniciando..." : "Iniciar flujo"}
+          <button type="button" onClick={handleSubmit} disabled={submitting || validating || profileWarnings.length > 0}
+            className="cursor-pointer flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed">
+            {validating ? <><FiRefreshCw size={14} className="animate-spin" /> Validando fichas...</>
+              : submitting ? <><FiRefreshCw size={14} className="animate-spin" /> Iniciando...</>
+              : <><FiShield size={14} /> Iniciar firma colectiva</>}
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
