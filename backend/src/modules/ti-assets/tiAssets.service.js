@@ -1974,6 +1974,11 @@ async function uploadSignedActa({ actaId, fileBuffer, originalFilename, userId }
   return { ok: true, sha256, filename, drive_url: driveUrl };
 }
 
+function _trimLastSurname(fullName = "") {
+  const parts = String(fullName).trim().split(/\s+/);
+  return parts.length >= 3 ? parts.slice(0, -1).join(" ") : String(fullName).trim();
+}
+
 function buildTiActaTemplateReplacements(acta) {
   const actaDay = acta.acta_day || new Date().getDate();
   const actaMonth = acta.acta_month || (new Date().getMonth() + 1);
@@ -1981,6 +1986,7 @@ function buildTiActaTemplateReplacements(acta) {
   return {
     ACTA_CODE: (String(acta.acta_code || "").match(/(\d+)$/) || [])[1] || acta.acta_code || "",
     NOMBRE: acta.recipient_nombre || "",
+    NOMBRE_C: _trimLastSurname(acta.recipient_nombre),
     CEDULA: acta.recipient_cedula || "",
     CARGO: acta.recipient_cargo || "",
     ACTA_DIA: String(actaDay).padStart(2, "0"),
