@@ -885,9 +885,9 @@ function Step1Txt({
               {existingInvoices.map((row) => (
                 <tr key={row.id || row.access_key} className="bg-white">
                   <td className="px-3 py-2">
-                    <p className="font-medium text-slate-800">{row.supplier_name || "â€”"}</p>
+                    <p className="font-medium text-slate-800">{row.supplier_name || "—"}</p>
                   </td>
-                  <td className="px-3 py-2 font-mono text-slate-500">{row.supplier_ruc || "â€”"}</td>
+                  <td className="px-3 py-2 font-mono text-slate-500">{row.supplier_ruc || "—"}</td>
                   <td className="px-3 py-2 font-mono text-slate-600">{fmtDate(row.issue_date)}</td>
                   <td className="px-3 py-2">
                     {row.category ? (
@@ -900,7 +900,7 @@ function Step1Txt({
                   </td>
                   <td className="px-3 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${INV_STATUS_BADGE[row.status] || "bg-slate-100 text-slate-600"}`}>
-                      {row.status || "â€”"}
+                      {row.status || "—"}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right font-mono font-semibold text-slate-900">{toMoney(row.total)}</td>
