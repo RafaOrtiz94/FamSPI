@@ -891,9 +891,9 @@ async function assignMultipleAssets({
     // Create assignments + events for each asset
     for (const asset of assetsQ.rows) {
       await client.query(
-        `INSERT INTO public.ti_asset_assignments (asset_id, assigned_to_user_id, previous_user_id, action, reason, created_by, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,now())`,
-        [asset.id, assignedToUserId, asset.assigned_to_user_id, assignedToUserId ? "assign_or_reassign" : "unassign", reason, userId],
+        `INSERT INTO public.ti_asset_assignments (asset_id, assigned_to_user_id, previous_user_id, action, reason, sin_acta, created_by, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,now())`,
+        [asset.id, assignedToUserId, asset.assigned_to_user_id, assignedToUserId ? "assign_or_reassign" : "unassign", reason, skipActa, userId],
       );
       await client.query(
         `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
