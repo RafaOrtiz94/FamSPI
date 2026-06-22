@@ -15,31 +15,22 @@ export const updateTiAsset = async (assetId, payload = {}) => {
  return data?.data || null;
 };
 
-export const assignTiAsset = async (assetId, payload = {}, evidenceFile = null) => {
-  if (payload.skip_acta && evidenceFile) {
-    const fd = new FormData();
-    Object.entries(payload).forEach(([k, v]) => {
-      if (v !== null && v !== undefined) fd.append(k, typeof v === "object" ? JSON.stringify(v) : v);
-    });
-    fd.append("evidence", evidenceFile);
-    const { data } = await api.post(`/ti-assets/${assetId}/assign`, fd, { headers: { "Content-Type": "multipart/form-data" } });
-    return data?.data || null;
-  }
+export const assignTiAsset = async (assetId, payload = {}) => {
   const { data } = await api.post(`/ti-assets/${assetId}/assign`, payload);
   return data?.data || null;
 };
 
-export const assignMultipleTiAssets = async (payload = {}, evidenceFile = null) => {
-  if (payload.skip_acta && evidenceFile) {
-    const fd = new FormData();
-    Object.entries(payload).forEach(([k, v]) => {
-      if (v !== null && v !== undefined) fd.append(k, typeof v === "object" ? JSON.stringify(v) : v);
-    });
-    fd.append("evidence", evidenceFile);
-    const { data } = await api.post(`/ti-assets/batch/assign`, fd, { headers: { "Content-Type": "multipart/form-data" } });
-    return data?.data || null;
-  }
+export const assignMultipleTiAssets = async (payload = {}) => {
   const { data } = await api.post(`/ti-assets/batch/assign`, payload);
+  return data?.data || null;
+};
+
+export const uploadAssignmentEvidence = async (assignmentId, file) => {
+  const fd = new FormData();
+  fd.append("evidence", file);
+  const { data } = await api.post(`/ti-assets/assignments/${assignmentId}/evidence`, fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
   return data?.data || null;
 };
 

@@ -39,6 +39,7 @@ router.get("/recipient-info/:userId",    requireRole(TI_ROLES), ctrl.getActaReci
 // Dynamic ID routes (MUST BE AFTER all specific routes)
 router.get("/:id/history",              requireRole(TI_READ_ROLES), ctrl.listHistory);
 router.get("/:id/assignments-history",  requireRole(TI_READ_ROLES), ctrl.listAssignmentsHistory);
+router.post("/assignments/:assignmentId/evidence", requireRole(TI_ROLES), upload.single("evidence"), ctrl.uploadAssignmentEvidence);
 router.get("/:id/accessories",          requireRole(TI_READ_ROLES), ctrl.listAccessories);
 router.get("/:id/actas",                requireRole(TI_READ_ROLES), ctrl.listActas);
 router.get("/:id/financial-docs",       requireRole(TI_READ_ROLES), ctrl.listFinancialDocs);

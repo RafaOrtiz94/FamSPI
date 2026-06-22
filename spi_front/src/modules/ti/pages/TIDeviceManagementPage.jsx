@@ -31,6 +31,7 @@ import {
   assignTiAsset,
   assignTiCorporateNumber,
   assignMultipleTiAssets,
+  uploadAssignmentEvidence,
   changeTiCorporateNumber,
   clearTiMaintenance,
   completeTiMaintenance,
@@ -445,7 +446,9 @@ const TIDeviceManagementPage = () => {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [assignModal, setAssignModal] = useState({ assigned_to_user_id: "", recipient_nombre: "", recipient_cedula: "", recipient_cargo: "", reason: "", acta_items: [] });
   const [assignSkipActa, setAssignSkipActa] = useState(false);
-  const [assignEvidenceFile, setAssignEvidenceFile] = useState(null);
+  const [evidenceModal, setEvidenceModal] = useState(null); // { assignmentId, label }
+  const [evidenceFile, setEvidenceFile] = useState(null);
+  const [evidenceSaving, setEvidenceSaving] = useState(false);
   const [recipientLoading, setRecipientLoading] = useState(false);
   const [recipientSource, setRecipientSource] = useState(null); // 'profile' | 'partial' | 'empty' | null
 
@@ -454,7 +457,6 @@ const TIDeviceManagementPage = () => {
   const [selectedAssets, setSelectedAssets] = useState(new Set());
   const [batchAssignForm, setBatchAssignForm] = useState({ assigned_to_user_id: "", recipient_nombre: "", recipient_cedula: "", recipient_cargo: "", reason: "" });
   const [batchSkipActa, setBatchSkipActa] = useState(false);
-  const [batchEvidenceFile, setBatchEvidenceFile] = useState(null);
   const [batchRecipientLoading, setBatchRecipientLoading] = useState(false);
   const [batchRecipientSource, setBatchRecipientSource] = useState(null);
 
@@ -780,17 +782,16 @@ const TIDeviceManagementPage = () => {
         })),
         skip_acta: assignSkipActa,
       };
-      const result = await assignTiAsset(selected.id, payload, assignSkipActa ? assignEvidenceFile : null);
+      const result = await assignTiAsset(selected.id, payload);
       const tipoMsg = payload.assigned_to_user_id ? "Equipo asignado" : "Asignación liberada";
       showToast(
         assignSkipActa
-          ? `${tipoMsg} sin acta${assignEvidenceFile ? " · Evidencia subida" : ""}`
+          ? `${tipoMsg} sin acta — puedes subir la evidencia desde el historial`
           : `${tipoMsg}${result?.acta_id ? ` · Acta #${result.acta_id} generada` : ""}`,
         "success"
       );
       setShowAssignModal(false);
       setAssignSkipActa(false);
-      setAssignEvidenceFile(null);
       await loadAll();
       loadHistory(selected.id);
       loadActas(selected.id);
@@ -837,10 +838,10 @@ const TIDeviceManagementPage = () => {
         acta_items: batchSkipActa ? [] : acta_items,
         skip_acta: batchSkipActa,
       };
-      const result = await assignMultipleTiAssets(payload, batchSkipActa ? batchEvidenceFile : null);
+      const result = await assignMultipleTiAssets(payload);
       showToast(
         batchSkipActa
-          ? `${result.assets_assigned} equipos asignados sin acta${batchEvidenceFile ? " · Evidencia subida" : ""}`
+          ? `${result.assets_assigned} equipos asignados sin acta — puedes subir evidencia desde el historial`
           : `${result.assets_assigned} equipos asignados · Acta #${result.acta_code} generada`,
         "success"
       );
@@ -848,7 +849,6 @@ const TIDeviceManagementPage = () => {
       setSelectedAssets(new Set());
       setBatchAssignForm({ assigned_to_user_id: "", recipient_nombre: "", recipient_cedula: "", recipient_cargo: "", reason: "" });
       setBatchSkipActa(false);
-      setBatchEvidenceFile(null);
       await loadAll();
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo asignar múltiples equipos", "error");
@@ -2170,14 +2170,45 @@ const TIDeviceManagementPage = () => {
                   ) : (
                     assignmentsHistory.map((a, i) => (
                       <div key={a.id} className={`px-3 py-2.5 text-xs ${i < assignmentsHistory.length - 1 ? "border-b border-slate-100" : ""}`}>
-                        <p className="font-medium text-slate-700">
-                          {a.action === "unassign"
-                            ? `Liberado por ${a.created_by_name || "usuario"}`
-                            : `Asignado a ${a.assigned_to_name || "usuario"} por ${a.created_by_name || "usuario"}`}
-                        </p>
-                        <p className="text-slate-500 mt-0.5">Antes: {a.previous_user_name || "Sin asignación"} · Ahora: {a.assigned_to_name || "Sin asignación"}</p>
-                        {a.reason ? <p className="text-slate-500 mt-0.5">Motivo: {a.reason}</p> : null}
-                        <p className="text-slate-400 mt-0.5">{new Date(a.created_at).toLocaleString("es-EC", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-medium text-slate-700">
+                              {a.action === "unassign"
+                                ? `Liberado por ${a.created_by_name || "usuario"}`
+                                : `Asignado a ${a.assigned_to_name || "usuario"} por ${a.created_by_name || "usuario"}`}
+                            </p>
+                            <p className="text-slate-500 mt-0.5">Antes: {a.previous_user_name || "Sin asignación"} · Ahora: {a.assigned_to_name || "Sin asignación"}</p>
+                            {a.reason ? <p className="text-slate-500 mt-0.5">Motivo: {a.reason}</p> : null}
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              <p className="text-slate-400">{new Date(a.created_at).toLocaleString("es-EC", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+                              {a.sin_acta && (
+                                <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">Sin acta</span>
+                              )}
+                            </div>
+                          </div>
+                          {a.sin_acta && (
+                            <div className="shrink-0">
+                              {a.evidence_file_url ? (
+                                <a
+                                  href={a.evidence_file_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 rounded-lg bg-green-50 px-2 py-1 text-[10px] font-medium text-green-700 hover:bg-green-100 transition-colors"
+                                >
+                                  <FiCheck size={9} /> Evidencia
+                                </a>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setEvidenceModal({ assignmentId: a.id, label: `Asignación #${a.id}` })}
+                                  className="flex items-center gap-1 rounded-lg border border-dashed border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+                                >
+                                  <FiFileText size={9} /> Subir evidencia
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ))
                   )}
@@ -2312,7 +2343,7 @@ const TIDeviceManagementPage = () => {
       {/* Modal de asignacion / retiro con acta */}
       <Modal
         open={showAssignModal}
-        onClose={() => { setShowAssignModal(false); setAssignSkipActa(false); setAssignEvidenceFile(null); }}
+        onClose={() => { setShowAssignModal(false); setAssignSkipActa(false); }}
         title={assignModal.assigned_to_user_id ? "Asignación de equipo" : "Retiro de equipo"}
         maxWidth="max-w-3xl"
       >
@@ -2324,7 +2355,7 @@ const TIDeviceManagementPage = () => {
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => { setAssignSkipActa(false); setAssignEvidenceFile(null); }}
+                onClick={() => setAssignSkipActa(false)}
                 className={`flex-1 rounded-lg border py-2.5 text-sm font-medium transition-colors ${
                   !assignSkipActa
                     ? "border-blue-500 bg-blue-50 text-blue-700"
@@ -2348,20 +2379,9 @@ const TIDeviceManagementPage = () => {
               </button>
             </div>
             {assignSkipActa && (
-              <div className="mt-3">
-                <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                  Evidencia de entrega <span className="text-slate-400">(opcional — PDF, imagen, correo escaneado)</span>
-                </label>
-                <input
-                  type="file"
-                  accept=".pdf,.png,.jpg,.jpeg,.webp"
-                  onChange={(e) => setAssignEvidenceFile(e.target.files?.[0] || null)}
-                  className="block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200"
-                />
-                {assignEvidenceFile && (
-                  <p className="mt-1 text-xs text-green-700">{assignEvidenceFile.name}</p>
-                )}
-              </div>
+              <p className="mt-3 text-[11px] text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+                La asignación quedará registrada sin acta. Puedes adjuntar la evidencia de entrega desde el historial de asignaciones del equipo.
+              </p>
             )}
           </div>
 
@@ -2567,7 +2587,7 @@ const TIDeviceManagementPage = () => {
       {/* ─? Modal de asignación múltiple ─?─?─?─?─?─?─?─?─?─?─?─?─?─?─?─?─? */}
       <Modal
         open={showBatchAssignModal}
-        onClose={() => { setShowBatchAssignModal(false); setBatchSkipActa(false); setBatchEvidenceFile(null); }}
+        onClose={() => { setShowBatchAssignModal(false); setBatchSkipActa(false); }}
         title={batchAssignForm.assigned_to_user_id ? "Asignar múltiples equipos" : "Liberar múltiples equipos"}
         maxWidth="max-w-2xl"
       >
@@ -2579,7 +2599,7 @@ const TIDeviceManagementPage = () => {
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => { setBatchSkipActa(false); setBatchEvidenceFile(null); }}
+                onClick={() => setBatchSkipActa(false)}
                 className={`flex-1 rounded-lg border py-2.5 text-sm font-medium transition-colors ${
                   !batchSkipActa
                     ? "border-blue-500 bg-blue-50 text-blue-700"
@@ -2603,20 +2623,9 @@ const TIDeviceManagementPage = () => {
               </button>
             </div>
             {batchSkipActa && (
-              <div className="mt-3">
-                <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                  Evidencia de entrega <span className="text-slate-400">(opcional — PDF, imagen, correo escaneado)</span>
-                </label>
-                <input
-                  type="file"
-                  accept=".pdf,.png,.jpg,.jpeg,.webp"
-                  onChange={(e) => setBatchEvidenceFile(e.target.files?.[0] || null)}
-                  className="block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200"
-                />
-                {batchEvidenceFile && (
-                  <p className="mt-1 text-xs text-green-700">{batchEvidenceFile.name}</p>
-                )}
-              </div>
+              <p className="mt-3 text-[11px] text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+                La asignación quedará registrada sin acta. Puedes adjuntar la evidencia de entrega desde el historial de asignaciones de cada equipo.
+              </p>
             )}
           </div>
 
@@ -2826,6 +2835,59 @@ const TIDeviceManagementPage = () => {
           </Button>
           <Button type="button" variant="primary" icon={FiFileText} disabled={saving} onClick={doBatchAssign}>
             {saving ? "Guardando..." : "Confirmar y generar acta"}
+          </Button>
+        </div>
+      </Modal>
+
+      {/* Modal subir evidencia sin acta */}
+      <Modal
+        open={!!evidenceModal}
+        onClose={() => { setEvidenceModal(null); setEvidenceFile(null); }}
+        title="Subir evidencia de entrega"
+        maxWidth="max-w-sm"
+      >
+        <div className="px-6 py-5 space-y-4">
+          <p className="text-sm text-slate-600">
+            Adjunta la evidencia física de entrega para la asignación <span className="font-medium text-slate-800">{evidenceModal?.label}</span>.
+            Puede ser una firma escaneada, correo impreso, foto del acta manual, etc.
+          </p>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">
+              Archivo <span className="text-slate-400">(PDF, imagen)</span>
+            </label>
+            <input
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg,.webp"
+              onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)}
+              className="block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200"
+            />
+            {evidenceFile && (
+              <p className="mt-1.5 text-xs text-green-700 font-medium">{evidenceFile.name}</p>
+            )}
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-100 px-6 py-4">
+          <Button variant="ghost" onClick={() => { setEvidenceModal(null); setEvidenceFile(null); }}>Cancelar</Button>
+          <Button
+            variant="primary"
+            icon={FiFileText}
+            disabled={!evidenceFile || evidenceSaving}
+            onClick={async () => {
+              setEvidenceSaving(true);
+              try {
+                await uploadAssignmentEvidence(evidenceModal.assignmentId, evidenceFile);
+                showToast("Evidencia adjuntada correctamente", "success");
+                setEvidenceModal(null);
+                setEvidenceFile(null);
+                if (selected) loadHistory(selected.id);
+              } catch (err) {
+                showToast(err?.response?.data?.message || "No se pudo subir el archivo", "error");
+              } finally {
+                setEvidenceSaving(false);
+              }
+            }}
+          >
+            {evidenceSaving ? "Subiendo..." : "Adjuntar evidencia"}
           </Button>
         </div>
       </Modal>

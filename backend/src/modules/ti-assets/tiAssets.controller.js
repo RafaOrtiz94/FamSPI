@@ -123,6 +123,16 @@ exports.listAssignmentsHistory = asyncHandler(async (req, res) => {
   res.status(200).json({ ok: true, total: data.length, data });
 });
 
+exports.uploadAssignmentEvidence = asyncHandler(async (req, res) => {
+  if (!req.file) { return res.status(400).json({ ok: false, message: "Debes adjuntar un archivo de evidencia" }); }
+  const data = await svc.uploadAssignmentEvidence({
+    assignmentId: req.params.assignmentId,
+    file: req.file,
+    userId: req.user?.id || null,
+  });
+  res.status(200).json({ ok: true, data });
+});
+
 exports.generateAnnualMaintenance = asyncHandler(async (req, res) => {
   const payload = req.body || {};
   const data = await svc.generateAnnualMaintenance({

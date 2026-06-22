@@ -1051,6 +1051,9 @@ async function listAssetAssignmentsHistory(assetId) {
             a.previous_user_id,
             a.action,
             a.reason,
+            a.sin_acta,
+            a.evidence_drive_file_id,
+            a.evidence_file_url,
             a.created_by,
             a.created_at,
             COALESCE(u_to.fullname, u_to.name, u_to.email) AS assigned_to_name,
@@ -1065,6 +1068,30 @@ async function listAssetAssignmentsHistory(assetId) {
     [assetId],
   );
   return rows;
+}
+
+async function uploadAssignmentEvidence({ assignmentId, file, userId }) {
+  await ensureTiAssetsSchema();
+  const { rows } = await db.query(
+    `SELECT id, sin_acta FROM public.ti_asset_assignments WHERE id = $1 LIMIT 1`,
+    [assignmentId],
+  );
+  if (!rows.length) { const e = new Error("Asignación no encontrada"); e.status = 404; throw e; }
+  if (!rows[0].sin_acta) { const e = new Error("Solo se puede subir evidencia en asignaciones sin acta"); e.status = 400; throw e; }
+
+  const { ensureFolderPath, uploadFileToDrive } = require("../../utils/drive");
+  const root = process.env.DRIVE_ROOT_FOLDER_ID;
+  const folder = await ensureFolderPath(["Activos TI", "Evidencias sin acta"], root);
+  const uploaded = await uploadFileToDrive(file, `evidencia-asig${assignmentId}-${Date.now()}-${file.originalname}`, folder.id);
+
+  const { rows: updated } = await db.query(
+    `UPDATE public.ti_asset_assignments
+        SET evidence_drive_file_id = $1, evidence_file_url = $2
+      WHERE id = $3
+      RETURNING id, evidence_drive_file_id, evidence_file_url`,
+    [uploaded?.id || null, uploaded?.webViewLink || null, assignmentId],
+  );
+  return updated[0];
 }
 
 async function generateAnnualMaintenance({ year, userId, dryRun = false }) {
@@ -1650,7 +1677,10 @@ async function removeAccessory({ accessoryId, userId }) {
 
 async function generateActaCode(tipo = 'entrega', qc = db) {
   const year = new Date().getFullYear();
-  const { rows } = await qc.query(`SELECT nextval('public.ti_acta_seq') AS seq`);
+  const sequenceName = tipo === "retiro"
+    ? "public.ti_acta_retiro_seq"
+    : "public.ti_acta_entrega_seq";
+  const { rows } = await qc.query(`SELECT nextval($1::regclass) AS seq`, [sequenceName]);
   const seq = String(rows[0].seq).padStart(6, '0');
   const prefix = tipo === 'retiro' ? `ACTA-D-ET-${year}` : `ACTA-ET-${year}`;
   return `${prefix}-${seq}`;
@@ -3103,6 +3133,7 @@ module.exports = {
   getCorporateNumberHistory,
   TI_CORPORATE_ASSIGN_ROLES,
   listAssetAssignmentsHistory,
+  uploadAssignmentEvidence,
   generateAnnualMaintenance,
   generateFutureMaintenance,
   listMaintenance,
