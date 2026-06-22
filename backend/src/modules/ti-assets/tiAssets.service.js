@@ -369,11 +369,9 @@ async function _legacyEnsureTiAssetsSchema_UNUSED() {
   // Alteraciones a ti_asset_actas_items: características
   await db.query(`ALTER TABLE public.ti_asset_actas_items ADD COLUMN IF NOT EXISTS characteristics TEXT`);
 
-  // Alteraciones a ti_asset_assignments: características y evidencia sin acta
+  // Alteraciones a ti_asset_assignments: características
+  // sin_acta, evidence_drive_file_id, evidence_file_url — ver migration 217
   await db.query(`ALTER TABLE public.ti_asset_assignments ADD COLUMN IF NOT EXISTS characteristics TEXT`);
-  await db.query(`ALTER TABLE public.ti_asset_assignments ADD COLUMN IF NOT EXISTS sin_acta BOOLEAN DEFAULT FALSE`);
-  await db.query(`ALTER TABLE public.ti_asset_assignments ADD COLUMN IF NOT EXISTS evidence_drive_file_id TEXT`);
-  await db.query(`ALTER TABLE public.ti_asset_assignments ADD COLUMN IF NOT EXISTS evidence_file_url TEXT`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_asset_assignments_asset_user ON public.ti_asset_assignments(asset_id, assigned_to_user_id)`);
 
   // Alteraciones a ti_asset_financial_docs: columnas añadidas posteriormente
@@ -2105,12 +2103,18 @@ function _trimLastSurname(fullName = "") {
   return parts.slice(0, start).join(" ");
 }
 
+function extractActaSequenceNumber(actaCode) {
+  const match = String(actaCode || "").match(/(\d{6})$/);
+  if (match?.[1]) return match[1];
+  return "";
+}
+
 function buildTiActaTemplateReplacements(acta) {
   const actaDay = acta.acta_day || new Date().getDate();
   const actaMonth = acta.acta_month || (new Date().getMonth() + 1);
   const actaYear = acta.acta_year || new Date().getFullYear();
   return {
-    ACTA_CODE: (String(acta.acta_code || "").match(/(\d+)$/) || [])[1] || acta.acta_code || "",
+    ACTA_CODE: extractActaSequenceNumber(acta.acta_code),
     NOMBRE: acta.recipient_nombre || "",
     NOMBRE_C: _trimLastSurname(acta.recipient_nombre),
     CEDULA: acta.recipient_cedula || "",
