@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FiAlertCircle,
   FiCalendar,
@@ -71,7 +71,7 @@ import {
 const STATUS_LABELS = {
   unassigned: "Sin asignar",
   assigned: "Asignado",
-  damaged: "Dañado",
+  damaged: "DaÃ±ado",
   in_maintenance: "En mantenimiento",
   retired: "Dado de baja",
   available: "Disponible",
@@ -149,7 +149,7 @@ function TIActasView() {
       <div className="flex flex-col items-center justify-center py-14 text-center">
         <FiFileText size={32} className="text-slate-200 mb-3" />
         <p className="text-sm font-medium text-slate-500">Sin actas generadas</p>
-        <p className="text-xs text-slate-400 mt-1">Las actas se crean automáticamente al asignar o retirar equipos.</p>
+        <p className="text-xs text-slate-400 mt-1">Las actas se crean automÃ¡ticamente al asignar o retirar equipos.</p>
       </div>
     );
   }
@@ -184,7 +184,7 @@ function TIActasView() {
                   )}
                 </div>
                 <p className="text-xs font-medium text-slate-800">{acta.recipient_nombre || "Sin nombre"}</p>
-                <p className="text-[10px] text-slate-500 mt-0.5">{acta.recipient_cargo || "-"} · {acta.asset_name || "-"}</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">{acta.recipient_cargo || "-"} Â· {acta.asset_name || "-"}</p>
                 <p className="text-[10px] text-slate-400">{new Date(acta.generated_at).toLocaleString("es-EC", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
               </div>
               <div className="flex items-center gap-1.5 flex-wrap shrink-0">
@@ -272,10 +272,10 @@ const EMPTY_FORM = {
   purchase_date: "",
   characteristics: "",
   maintenance_frequency_months: 12,
-  purchase_value: "", // FASE 3: Depreciación
+  purchase_value: "", // FASE 3: DepreciaciÃ³n
 };
 
-// Funciones de depreciación (FASE 3)
+// Funciones de depreciaciÃ³n (FASE 3)
 const calculateDepreciation = (purchaseValue) => {
   const val = parseFloat(purchaseValue) || 0;
   if (val < 400) {
@@ -286,17 +286,17 @@ const calculateDepreciation = (purchaseValue) => {
       note: 'Bien de control (no deprecia)'
     };
   }
-  const annualDepreciation = val * 0.1111; // 33.33% / 3 años
+  const annualDepreciation = val * 0.1111; // 33.33% / 3 aÃ±os
   const residualValue = val - (annualDepreciation * 3);
   return {
     category: 'asset',
     annual_depreciation: parseFloat(annualDepreciation.toFixed(2)),
     residual_value: parseFloat(residualValue.toFixed(2)),
-    note: 'Activo fijo (deprecia 33.33% en 3 años)'
+    note: 'Activo fijo (deprecia 33.33% en 3 aÃ±os)'
   };
 };
 
-// JSONB characteristics can arrive as object {} from DB — always stringify to string for display/input
+// JSONB characteristics can arrive as object {} from DB â€” always stringify to string for display/input
 const safeChars = (val) => {
   if (!val) return "";
   if (typeof val === "string") return val;
@@ -333,7 +333,7 @@ const DepreciationBar = ({ pct, days }) => {
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-xs text-slate-500">Depreciación acumulada</span>
+        <span className="text-xs text-slate-500">DepreciaciÃ³n acumulada</span>
         <span
           className={`text-xs font-semibold ${
             pct >= 90
@@ -354,8 +354,8 @@ const DepreciationBar = ({ pct, days }) => {
       </div>
       <p className="mt-1 text-xs text-slate-400">
         {years > 0 ? `${years}a ` : ""}
-        {months > 0 ? `${months}m` : days === 0 ? "Recién adquirido" : `${days % 30}d`}
-        {" · "}
+        {months > 0 ? `${months}m` : days === 0 ? "ReciÃ©n adquirido" : `${days % 30}d`}
+        {" Â· "}
         {pct >= 100 ? "Totalmente depreciado" : `Residual ${(100 - pct).toFixed(1)}%`}
       </p>
     </div>
@@ -401,7 +401,7 @@ const isMobileTiAsset = (asset) => {
   return (
     hay.includes("cel") ||
     hay.includes("movil") ||
-    hay.includes("móvil") ||
+    hay.includes("mÃ³vil") ||
     hay.includes("phone") ||
     hay.includes("iphone") ||
     hay.includes("android") ||
@@ -433,7 +433,7 @@ const TIDeviceManagementPage = () => {
   const [newStatus, setNewStatus] = useState("unassigned");
   const [coordinationDates, setCoordinationDates] = useState({});
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
-  // Lock/unlock edición de info del equipo
+  // Lock/unlock ediciÃ³n de info del equipo
   const [isEditing, setIsEditing] = useState(false);
   // Accesorios
   const [accessories, setAccessories] = useState([]);
@@ -441,20 +441,20 @@ const TIDeviceManagementPage = () => {
   const [showAccForm, setShowAccForm] = useState(false);
   const [accForm, setAccForm] = useState({ name: "", brand: "", model: "", serial_number: "", imei: "", is_new: false, physical_condition: "", observations: "" });
   const [editingAccId, setEditingAccId] = useState(null);
-  // Modal de asignación con acta (single asset)
+  // Modal de asignaciÃ³n con acta (single asset)
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [assignModal, setAssignModal] = useState({ assigned_to_user_id: "", recipient_nombre: "", recipient_cedula: "", recipient_cargo: "", reason: "", acta_items: [] });
   const [recipientLoading, setRecipientLoading] = useState(false);
   const [recipientSource, setRecipientSource] = useState(null); // 'profile' | 'partial' | 'empty' | null
 
-  // Modal de asignación múltiple (batch)
+  // Modal de asignaciÃ³n mÃºltiple (batch)
   const [showBatchAssignModal, setShowBatchAssignModal] = useState(false);
   const [selectedAssets, setSelectedAssets] = useState(new Set());
   const [batchAssignForm, setBatchAssignForm] = useState({ assigned_to_user_id: "", recipient_nombre: "", recipient_cedula: "", recipient_cargo: "", reason: "" });
   const [batchRecipientLoading, setBatchRecipientLoading] = useState(false);
   const [batchRecipientSource, setBatchRecipientSource] = useState(null);
 
-  // FASE 6: Liberación de equipos
+  // FASE 6: LiberaciÃ³n de equipos
   const [showLiberateModal, setShowLiberateModal] = useState(false);
   const [liberateForm, setLiberateForm] = useState({ notes: "", photoFiles: [], photoPreviews: [] });
   const [liberatingAssetId, setLiberatingAssetId] = useState(null);
@@ -683,7 +683,7 @@ const TIDeviceManagementPage = () => {
   const createAsset = async () => {
     if (!form.name.trim()) return showToast("El nombre es requerido", "warning");
     if (!form.serial_number.trim())
-      return showToast("El número de serie es requerido", "warning");
+      return showToast("El nÃºmero de serie es requerido", "warning");
     if (!form.purchase_date)
       return showToast("La fecha de compra es requerida", "warning");
     setSaving(true);
@@ -776,14 +776,14 @@ const TIDeviceManagementPage = () => {
         })),
       };
       const result = await assignTiAsset(selected.id, payload);
-      const tipoMsg = payload.assigned_to_user_id ? "Equipo asignado" : "Asignación liberada";
-      showToast(`${tipoMsg}${result?.acta_id ? ` · Acta #${result.acta_id} generada` : ""}`, "success");
+      const tipoMsg = payload.assigned_to_user_id ? "Equipo asignado" : "AsignaciÃ³n liberada";
+      showToast(`${tipoMsg}${result?.acta_id ? ` Â· Acta #${result.acta_id} generada` : ""}`, "success");
       setShowAssignModal(false);
       await loadAll();
       loadHistory(selected.id);
       loadActas(selected.id);
     } catch (error) {
-      showToast(error?.response?.data?.message || "No se pudo actualizar asignación", "error");
+      showToast(error?.response?.data?.message || "No se pudo actualizar asignaciÃ³n", "error");
     } finally {
       setSaving(false);
     }
@@ -825,13 +825,13 @@ const TIDeviceManagementPage = () => {
         acta_items, // Include the items with their state data
       };
       const result = await assignMultipleTiAssets(payload);
-      showToast(`${result.assets_assigned} equipos asignados · Acta #${result.acta_code} generada`, "success");
+      showToast(`${result.assets_assigned} equipos asignados Â· Acta #${result.acta_code} generada`, "success");
       setShowBatchAssignModal(false);
       setSelectedAssets(new Set());
       setBatchAssignForm({ assigned_to_user_id: "", recipient_nombre: "", recipient_cedula: "", recipient_cargo: "", reason: "" });
       await loadAll();
     } catch (error) {
-      showToast(error?.response?.data?.message || "No se pudo asignar múltiples equipos", "error");
+      showToast(error?.response?.data?.message || "No se pudo asignar mÃºltiples equipos", "error");
     } finally {
       setSaving(false);
     }
@@ -972,7 +972,7 @@ const TIDeviceManagementPage = () => {
     setSaving(true);
     try {
       const result = await liberateTiAsset(liberatingAssetId, liberateForm.photoFiles, liberateForm.notes || "");
-      showToast(`Equipo liberado · Acta de retiro generada`, "success");
+      showToast(`Equipo liberado Â· Acta de retiro generada`, "success");
       setShowLiberateModal(false);
       setLiberateForm({ notes: "", photoFiles: [], photoPreviews: [] });
       setLiberatingAssetId(null);
@@ -984,7 +984,7 @@ const TIDeviceManagementPage = () => {
     }
   };
 
-  // Cargar fotos de liberación
+  // Cargar fotos de liberaciÃ³n
   const loadLiberationPhotos = async (assetId) => {
     if (!assetId) return;
     setLiberationPhotosLoading(true);
@@ -1024,7 +1024,7 @@ const TIDeviceManagementPage = () => {
       } else if (nombre) {
         setRecipientSource("partial");     // only name, no cedula/cargo
       } else {
-        setRecipientSource("empty");       // new hire — nothing in system
+        setRecipientSource("empty");       // new hire â€” nothing in system
       }
     } catch (_e) {
       setRecipientSource("empty");
@@ -1180,7 +1180,7 @@ const TIDeviceManagementPage = () => {
       showToast(
         created > 0
           ? `${created} nuevo${created !== 1 ? "s" : ""} registro${created !== 1 ? "s" : ""} generado${created !== 1 ? "s" : ""} para ${result?.assets || 0} equipos`
-          : `Cronograma al día: ${existing} registro${existing !== 1 ? "s" : ""} existente${existing !== 1 ? "s" : ""}, sin cambios`,
+          : `Cronograma al dÃ­a: ${existing} registro${existing !== 1 ? "s" : ""} existente${existing !== 1 ? "s" : ""}, sin cambios`,
         created > 0 ? "success" : "info"
       );
       await loadAll();
@@ -1199,7 +1199,7 @@ const TIDeviceManagementPage = () => {
       showToast(
         created > 0
           ? `Cronograma actualizado: ${created} nuevo${created !== 1 ? "s" : ""} registro${created !== 1 ? "s" : ""} agregado${created !== 1 ? "s" : ""}`
-          : "Cronograma al día, sin cambios pendientes",
+          : "Cronograma al dÃ­a, sin cambios pendientes",
         created > 0 ? "success" : "info"
       );
       await loadAll();
@@ -1269,18 +1269,18 @@ const TIDeviceManagementPage = () => {
   const saveCoordinationDate = async () => {
     if (!coordModal?.id) return;
     const coordinated = String(coordModalDate || "").trim();
-    if (!coordinated) return showToast("Ingresa fecha de coordinación de retiro", "warning");
+    if (!coordinated) return showToast("Ingresa fecha de coordinaciÃ³n de retiro", "warning");
     setSaving(true);
     try {
       await setTiMaintenanceCoordinationDate(coordModal.id, {
         coordinated_withdrawal_date: coordinated,
       });
-      showToast("Fecha de coordinación guardada", "success");
+      showToast("Fecha de coordinaciÃ³n guardada", "success");
       setCoordModal(null);
       await loadAll();
     } catch (error) {
       showToast(
-        error?.response?.data?.message || "No se pudo guardar la fecha de coordinación",
+        error?.response?.data?.message || "No se pudo guardar la fecha de coordinaciÃ³n",
         "error"
       );
     } finally {
@@ -1310,7 +1310,7 @@ const TIDeviceManagementPage = () => {
           ? { period_type: "monthly", year: reportYear, month: reportMonth }
           : { period_type: "annual", year: reportYear }
       );
-      showToast(`Informe generado · SHA-256: ${String(result?.sha256 || "").slice(0, 16)}…`, "success");
+      showToast(`Informe generado Â· SHA-256: ${String(result?.sha256 || "").slice(0, 16)}â€¦`, "success");
       await loadReports();
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo generar el informe", "error");
@@ -1451,6 +1451,17 @@ const TIDeviceManagementPage = () => {
         </button>
         <button
           type="button"
+          onClick={() => setActiveTab('cronograma')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'cronograma'
+              ? 'border-blue-500 text-blue-600'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          Cronograma
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveTab('todas-actas')}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === 'todas-actas'
@@ -1490,7 +1501,7 @@ const TIDeviceManagementPage = () => {
               onChange={setField("model")}
             />
             <FieldInput
-              label="Número de serie"
+              label="NÃºmero de serie"
               required
               placeholder="Ej: SN-123456789"
               value={form.serial_number}
@@ -1498,7 +1509,7 @@ const TIDeviceManagementPage = () => {
             />
             <FieldInput
               label="IMEI (opcional)"
-              placeholder="Solo para equipos móviles"
+              placeholder="Solo para equipos mÃ³viles"
               value={form.imei}
               onChange={setField("imei")}
             />
@@ -1520,7 +1531,7 @@ const TIDeviceManagementPage = () => {
               onChange={setField("purchase_value")}
             />
             <div className="sm:col-span-2 lg:col-span-2">
-              <Label>Características</Label>
+              <Label>CaracterÃ­sticas</Label>
               <input
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
                 placeholder="RAM, disco, procesador, etc."
@@ -1554,19 +1565,19 @@ const TIDeviceManagementPage = () => {
                 return (
                   <>
                     <div>
-                      <p className="text-xs font-medium text-amber-700">Categoría</p>
+                      <p className="text-xs font-medium text-amber-700">CategorÃ­a</p>
                       <p className="text-sm text-amber-900 font-semibold">{depr.category === 'asset' ? 'Activo fijo' : 'Bien de control'}</p>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-amber-700">Depreciación anual</p>
+                      <p className="text-xs font-medium text-amber-700">DepreciaciÃ³n anual</p>
                       <p className="text-sm text-amber-900 font-semibold">${depr.annual_depreciation.toFixed(2)}</p>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-amber-700">Valor residual (3 años)</p>
+                      <p className="text-xs font-medium text-amber-700">Valor residual (3 aÃ±os)</p>
                       <p className="text-sm text-amber-900 font-semibold">${depr.residual_value.toFixed(2)}</p>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-amber-700">Régimen</p>
+                      <p className="text-xs font-medium text-amber-700">RÃ©gimen</p>
                       <p className="text-xs text-amber-800">{depr.note}</p>
                     </div>
                   </>
@@ -1668,7 +1679,7 @@ const TIDeviceManagementPage = () => {
                         {a.name}
                       </p>
                       <p className="text-xs text-slate-500 mt-0.5 truncate">
-                        {[a.brand, a.model].filter(Boolean).join(" · ") || "Sin especificar"}
+                        {[a.brand, a.model].filter(Boolean).join(" Â· ") || "Sin especificar"}
                       </p>
                       {a.serial_number && (
                         <p className="text-xs text-slate-400 font-mono mt-0.5">
@@ -1676,7 +1687,7 @@ const TIDeviceManagementPage = () => {
                         </p>
                       )}
                       <p className="text-xs text-slate-500 mt-1">
-                        {a.assigned_to_name || "Sin asignación"}
+                        {a.assigned_to_name || "Sin asignaciÃ³n"}
                       </p>
                     </div>
                     <StatusBadge status={a.status} />
@@ -1720,7 +1731,7 @@ const TIDeviceManagementPage = () => {
                     {selected.name}
                   </h2>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    {[selected.brand, selected.model].filter(Boolean).join(" · ") ||
+                    {[selected.brand, selected.model].filter(Boolean).join(" Â· ") ||
                       "Sin especificar"}
                   </p>
                 </div>
@@ -1735,14 +1746,14 @@ const TIDeviceManagementPage = () => {
               {/* Info section */}
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <SectionTitle icon={FiCpu}>Información del equipo</SectionTitle>
+                  <SectionTitle icon={FiCpu}>InformaciÃ³n del equipo</SectionTitle>
                   {!isEditing ? (
                     <button
                       type="button"
                       onClick={() => setIsEditing(true)}
                       className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors"
                     >
-                      <FiEdit2 size={12} /> Habilitar edición
+                      <FiEdit2 size={12} /> Habilitar ediciÃ³n
                     </button>
                   ) : (
                     <button
@@ -1759,14 +1770,14 @@ const TIDeviceManagementPage = () => {
                     <FieldInput label="Nombre" required value={editFields.name || ""} onChange={setEditField("name")} />
                     <FieldInput label="Marca" value={editFields.brand || ""} onChange={setEditField("brand")} />
                     <FieldInput label="Modelo" value={editFields.model || ""} onChange={setEditField("model")} />
-                    <FieldInput label="Número de serie" required value={editFields.serial_number || ""} onChange={setEditField("serial_number")} />
+                    <FieldInput label="NÃºmero de serie" required value={editFields.serial_number || ""} onChange={setEditField("serial_number")} />
                     <FieldInput label="IMEI (opcional)" value={editFields.imei || ""} onChange={setEditField("imei")} />
                     <div>
                       <Label>Fecha de compra</Label>
                       <input type="date" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors" value={editFields.purchase_date || ""} onChange={setEditField("purchase_date")} />
                     </div>
                     <div className="sm:col-span-2">
-                      <FieldInput label="Características" placeholder="RAM, disco, procesador, etc." value={safeChars(editFields.characteristics)} onChange={setEditField("characteristics")} />
+                      <FieldInput label="CaracterÃ­sticas" placeholder="RAM, disco, procesador, etc." value={safeChars(editFields.characteristics)} onChange={setEditField("characteristics")} />
                     </div>
                     <div>
                       <Label>Frec. mantenimiento (meses)</Label>
@@ -1784,10 +1795,10 @@ const TIDeviceManagementPage = () => {
                       ["Nombre", selected.name],
                       ["Marca", selected.brand || "-"],
                       ["Modelo", selected.model || "-"],
-                      ["N° de serie", selected.serial_number || "-"],
+                      ["NÂ° de serie", selected.serial_number || "-"],
                       ["IMEI", selected.imei || "-"],
                       ["Fecha de compra", selected.purchase_date ? String(selected.purchase_date).slice(0, 10) : "-"],
-                      ["Características", safeChars(selected.characteristics) || "-"],
+                      ["CaracterÃ­sticas", safeChars(selected.characteristics) || "-"],
                       ["Frec. mantenimiento", `${selected.maintenance_frequency_months || 12} meses`],
                     ].map(([lbl, val]) => (
                       <div key={lbl} className="flex flex-col">
@@ -1796,7 +1807,7 @@ const TIDeviceManagementPage = () => {
                       </div>
                     ))}
                     <div className="col-span-2 flex items-center gap-1.5 mt-1 text-xs text-slate-400">
-                      <FiLock size={10} /> Bloqueado — usa "Habilitar edición" para modificar
+                      <FiLock size={10} /> Bloqueado â€” usa "Habilitar ediciÃ³n" para modificar
                     </div>
                   </div>
                 )}
@@ -1838,7 +1849,7 @@ const TIDeviceManagementPage = () => {
                         <input type="number" min={1} max={10} className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:border-slate-400" value={accForm.physical_condition} onChange={(e) => setAccForm((p) => ({ ...p, physical_condition: e.target.value }))} />
                       </div>
                       <div>
-                        <Label>¿Es nuevo?</Label>
+                        <Label>Â¿Es nuevo?</Label>
                         <select className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:border-slate-400" value={accForm.is_new ? "1" : "0"} onChange={(e) => setAccForm((p) => ({ ...p, is_new: e.target.value === "1" }))}>
                           <option value="0">Usado</option>
                           <option value="1">Nuevo</option>
@@ -1895,10 +1906,10 @@ const TIDeviceManagementPage = () => {
 
               {/* Assignment */}
               <div className="border-t border-slate-100 pt-5">
-                <SectionTitle icon={FiUser}>Asignación</SectionTitle>
+                <SectionTitle icon={FiUser}>AsignaciÃ³n</SectionTitle>
                 <div className="flex items-center justify-between gap-3 mb-2">
                   <div>
-                    <p className="text-sm font-medium text-slate-800">{selected.assigned_to_name || "Sin asignación"}</p>
+                    <p className="text-sm font-medium text-slate-800">{selected.assigned_to_name || "Sin asignaciÃ³n"}</p>
                     {selected.assigned_at && <p className="text-xs text-slate-400">Desde {new Date(selected.assigned_at).toLocaleDateString("es-EC")}</p>}
                   </div>
                   {canWrite && (
@@ -1919,7 +1930,7 @@ const TIDeviceManagementPage = () => {
                           variant="secondary"
                           icon={FiX}
                           disabled={saving || selected.status !== 'assigned'}
-                          title={selected.status !== 'assigned' ? `No se puede liberar: equipo no está asignado` : undefined}
+                          title={selected.status !== 'assigned' ? `No se puede liberar: equipo no estÃ¡ asignado` : undefined}
                           onClick={() => {
                             setLiberatingAssetId(selected.id);
                             setShowLiberateModal(true);
@@ -2102,12 +2113,12 @@ const TIDeviceManagementPage = () => {
               </div>
 
               <div className="border-t border-slate-100 pt-5">
-                <SectionTitle icon={FiUser}>Historial de asignación</SectionTitle>
+                <SectionTitle icon={FiUser}>Historial de asignaciÃ³n</SectionTitle>
                 <div className="max-h-56 overflow-auto rounded-xl border border-slate-100 bg-slate-50">
                   {historyLoading ? (
                     <p className="text-xs text-slate-400 text-center py-4">Cargando...</p>
                   ) : assignmentsHistory.length === 0 ? (
-                    <p className="text-xs text-slate-400 text-center py-4">Sin movimientos de asignación</p>
+                    <p className="text-xs text-slate-400 text-center py-4">Sin movimientos de asignaciÃ³n</p>
                   ) : (
                     assignmentsHistory.map((a, i) => (
                       <div key={a.id} className={`px-3 py-2.5 text-xs ${i < assignmentsHistory.length - 1 ? "border-b border-slate-100" : ""}`}>
@@ -2116,7 +2127,7 @@ const TIDeviceManagementPage = () => {
                             ? `Liberado por ${a.created_by_name || "usuario"}`
                             : `Asignado a ${a.assigned_to_name || "usuario"} por ${a.created_by_name || "usuario"}`}
                         </p>
-                        <p className="text-slate-500 mt-0.5">Antes: {a.previous_user_name || "Sin asignación"} · Ahora: {a.assigned_to_name || "Sin asignación"}</p>
+                        <p className="text-slate-500 mt-0.5">Antes: {a.previous_user_name || "Sin asignaciÃ³n"} Â· Ahora: {a.assigned_to_name || "Sin asignaciÃ³n"}</p>
                         {a.reason ? <p className="text-slate-500 mt-0.5">Motivo: {a.reason}</p> : null}
                         <p className="text-slate-400 mt-0.5">{new Date(a.created_at).toLocaleString("es-EC", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
                       </div>
@@ -2153,7 +2164,7 @@ const TIDeviceManagementPage = () => {
                                 </span>
                               )}
                             </div>
-                            <p className="text-xs text-slate-500 mt-0.5 truncate">{acta.recipient_nombre || "Sin nombre"} · {acta.recipient_cargo || "-"}</p>
+                            <p className="text-xs text-slate-500 mt-0.5 truncate">{acta.recipient_nombre || "Sin nombre"} Â· {acta.recipient_cargo || "-"}</p>
                             <p className="text-[10px] text-slate-400">{new Date(acta.generated_at).toLocaleString("es-EC", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
                           </div>
                           <div className="flex items-center gap-1.5 flex-wrap shrink-0">
@@ -2250,420 +2261,7 @@ const TIDeviceManagementPage = () => {
         </div>
       )}
 
-      {/* Maintenance Schedule */}
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-        {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <FiCalendar size={15} className="text-slate-400" />
-            <span className="text-sm font-semibold text-slate-800">Cronograma de mantenimiento</span>
-            <span className="text-xs text-slate-400">({filteredMaintenance.length} de {maintenance.length})</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button type="button" variant="primary" icon={FiCalendar} disabled={saving} onClick={generateSchedules}>
-              Generar
-            </Button>
-            <button type="button" title="Actualizar cronograma" disabled={saving} onClick={refreshSchedules}
-              className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-[0.97]">
-              <FiRefreshCw size={15} />
-            </button>
-            <button type="button" title="Programar mantenimiento manual" disabled={saving} onClick={() => setShowManualForm(true)}
-              className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-[0.97]">
-              <FiPlus size={15} />
-            </button>
-            <button type="button" title="Eliminar todos los cronogramas" disabled={saving} onClick={clearMaintenanceSchedule}
-              className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200 disabled:opacity-50 transition-colors active:scale-[0.97]">
-              <FiTrash2 size={15} />
-            </button>
-          </div>
-        </div>
-
-        {/* Device type filter */}
-        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-100">
-          <span className="text-xs text-slate-400 shrink-0">Filtrar:</span>
-          {[
-            { key: "all", label: "Todos" },
-            { key: "computadora", label: "Computadoras" },
-            { key: "celular", label: "Celulares" },
-          ].map((f) => (
-            <button key={f.key} type="button" onClick={() => setDeviceFilter(f.key)}
-              className={`cursor-pointer rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                deviceFilter === f.key ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}>
-              {f.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Table */}
-        <div className="overflow-x-auto">
-          {filteredMaintenance.length === 0 ? (
-            <div className="flex flex-col items-center py-10 text-center">
-              <FiCalendar size={28} className="text-slate-200 mb-2" />
-              <p className="text-sm text-slate-400">
-                {maintenance.length === 0
-                  ? `Sin cronogramas para ${year}. Usa "Generar" para crearlos.`
-                  : "Sin resultados para este filtro."}
-              </p>
-            </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs uppercase text-slate-400 border-b border-slate-100">
-                  <th className="px-4 py-3 text-left font-medium">Equipo</th>
-                  <th className="px-4 py-3 text-left font-medium">Asignado a</th>
-                  <th className="px-4 py-3 text-left font-medium">Tipo</th>
-                  <th className="px-4 py-3 text-left font-medium">Cumple</th>
-                  <th className="px-4 py-3 text-left font-medium">Máximo</th>
-                  <th className="px-4 py-3 text-left font-medium">Estado</th>
-                  <th className="px-4 py-3 text-left font-medium sr-only">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredMaintenance.map((m) => {
-                  const tipo = (String(m.notes || "").split("|")[0] || "Preventivo").trim();
-                  const coordDate = m.coordinated_withdrawal_date ? String(m.coordinated_withdrawal_date).slice(0, 10) : null;
-                  return (
-                    <tr key={m.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-slate-800 leading-tight">{m.asset_name}</p>
-                        {m.model && <p className="text-xs text-slate-400 mt-0.5">{m.model}</p>}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 text-xs">{m.assigned_to_name || "Sin asignar"}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                          tipo === "Correctivo" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"
-                        }`}>{tipo}</span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 text-xs font-mono">
-                        {new Date(m.planned_date).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" })}
-                      </td>
-                      <td className="px-4 py-3 text-xs">
-                        <span className="font-mono text-slate-600">
-                          {m.max_due_date ? new Date(m.max_due_date).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" }) : "-"}
-                        </span>
-                        {coordDate && (
-                          <p className="text-[11px] text-slate-400 mt-0.5">Retiro: {coordDate}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                          m.status === "completed" ? "bg-green-50 text-green-700"
-                          : m.status === "overdue" ? "bg-red-50 text-red-700"
-                          : "bg-slate-100 text-slate-600"
-                        }`}>
-                          {MAINTENANCE_STATUS_LABELS[m.status] || m.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {m.status !== "completed" ? (
-                          <div className="flex items-center gap-1">
-                            <button type="button" title="Coordinar fecha de retiro" disabled={saving} onClick={() => openCoordModal(m)}
-                              className="cursor-pointer rounded-xl border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-[0.97]">
-                              <FiCalendar size={13} />
-                            </button>
-                            <button type="button" title="Solicitar entrega para mantenimiento" disabled={saving} onClick={() => requestMaintenanceDelivery(m.id)}
-                              className="cursor-pointer rounded-xl border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-[0.97]">
-                              <FiTruck size={13} />
-                            </button>
-                            <button type="button" title="Marcar como completado" disabled={saving} onClick={() => completeMaintenanceRow(m.id)}
-                              className="cursor-pointer rounded-xl border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-green-50 hover:text-green-700 hover:border-green-200 disabled:opacity-50 transition-colors active:scale-[0.97]">
-                              <FiCheck size={13} />
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-slate-400">Completado</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        {/* Calendar toggle */}
-        <div className="border-t border-slate-100">
-          <button type="button" onClick={() => setShowCalendar((v) => !v)}
-            className="cursor-pointer flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
-            <div className="flex items-center gap-2">
-              <FiCalendar size={14} className="text-slate-400" />
-              <span>Calendario mensual</span>
-              {!showCalendar && (
-                <span className="text-xs text-slate-400 font-normal">
-                  — {monthStart.toLocaleDateString("es-EC", { month: "long", year: "numeric" })}
-                </span>
-              )}
-            </div>
-            {showCalendar ? <FiChevronUp size={15} className="text-slate-400" /> : <FiChevronDown size={15} className="text-slate-400" />}
-          </button>
-          {showCalendar && (
-            <div className="px-4 pb-4 border-t border-slate-100">
-              <div className="flex items-center justify-end gap-2 py-3">
-                <button type="button" onClick={() => setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
-                  className="cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
-                  &larr;
-                </button>
-                <span className="text-sm text-slate-600 min-w-[140px] text-center">
-                  {monthStart.toLocaleDateString("es-EC", { month: "long", year: "numeric" })}
-                </span>
-                <button type="button" onClick={() => setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
-                  className="cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
-                  &rarr;
-                </button>
-              </div>
-              <div className="grid grid-cols-7 gap-1 text-xs text-slate-500 mb-1">
-                {["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"].map((d) => (
-                  <div key={d} className="px-1 py-1 font-semibold text-center">{d}</div>
-                ))}
-              </div>
-              <div className="grid grid-cols-7 gap-1">
-                {calendarDays.map((d) => {
-                  const key = d.toISOString().slice(0, 10);
-                  const dayItems = maintenanceByDate[key] || [];
-                  const inMonth = d.getMonth() === monthStart.getMonth() && d.getFullYear() === monthStart.getFullYear();
-                  return (
-                    <div key={key} className={`min-h-[80px] rounded-xl border p-1.5 ${inMonth ? "bg-white border-slate-200" : "bg-slate-50 border-slate-100"}`}>
-                      <p className={`text-[11px] mb-1 font-medium ${inMonth ? "text-slate-700" : "text-slate-400"}`}>{d.getDate()}</p>
-                      <div className="space-y-1">
-                        {dayItems.slice(0, 2).map((item) => {
-                          const tipoItem = (String(item.notes || "").split("|")[0] || "Preventivo").trim();
-                          const cls = item.status === "completed"
-                            ? "bg-emerald-50 border-emerald-200 text-emerald-700"
-                            : item.status === "overdue"
-                            ? "bg-red-50 border-red-200 text-red-700"
-                            : "bg-blue-50 border-blue-200 text-blue-700";
-                          return (
-                            <div key={item.id} className={`rounded border px-1 py-0.5 text-[10px] leading-tight ${cls}`}>
-                              <p className="font-semibold truncate">{item.asset_name}</p>
-                              <p className="truncate opacity-80">{tipoItem}</p>
-                            </div>
-                          );
-                        })}
-                        {dayItems.length > 2 && <p className="text-[10px] text-slate-400">+{dayItems.length - 2}</p>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Modal: Programar mantenimiento manual */}
-      <Modal open={showManualForm} onClose={saving ? undefined : () => setShowManualForm(false)} title="Programar mantenimiento" maxWidth="max-w-lg">
-        <div className="space-y-4">
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-500">Equipo *</label>
-            <select value={manualForm.asset_id} onChange={(e) => setManualForm((p) => ({ ...p, asset_id: e.target.value }))}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors">
-              <option value="">Selecciona equipo</option>
-              {assets.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}{a.brand ? ` · ${a.brand}` : ""}{a.model ? ` ${a.model}` : ""}</option>
-              ))}
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-500">Tipo</label>
-              <select value={manualForm.tipo} onChange={(e) => setManualForm((p) => ({ ...p, tipo: e.target.value }))}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors">
-                <option value="Preventivo">Preventivo</option>
-                <option value="Correctivo">Correctivo</option>
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-500">Fecha programada *</label>
-              <input type="date" value={manualForm.fecha_programada} onChange={(e) => setManualForm((p) => ({ ...p, fecha_programada: e.target.value }))}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors" />
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-500">Responsable</label>
-            <input type="text" placeholder="Nombre del responsable" value={manualForm.responsable} onChange={(e) => setManualForm((p) => ({ ...p, responsable: e.target.value }))}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none transition-colors" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-500">Observaciones</label>
-            <input type="text" placeholder="Notas adicionales" value={manualForm.observaciones} onChange={(e) => setManualForm((p) => ({ ...p, observaciones: e.target.value }))}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none transition-colors" />
-          </div>
-          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-            <button type="button" onClick={() => setShowManualForm(false)} disabled={saving}
-              className="cursor-pointer rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50">
-              Cancelar
-            </button>
-            <button type="button" onClick={createManualMaintenance} disabled={saving}
-              className="cursor-pointer rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-50">
-              {saving ? "Guardando..." : "Programar"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Modal: Coordinar fecha de retiro */}
-      <Modal open={!!coordModal} onClose={saving ? undefined : () => setCoordModal(null)} title="Coordinar retiro" maxWidth="max-w-sm">
-        <div className="space-y-4">
-          {coordModal && (
-            <p className="text-sm text-slate-600">
-              Equipo: <span className="font-medium text-slate-800">{coordModal.assetName}</span>
-            </p>
-          )}
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-500">Fecha coordinada de retiro *</label>
-            <input type="date" value={coordModalDate} onChange={(e) => setCoordModalDate(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors" />
-          </div>
-          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-            <button type="button" onClick={() => setCoordModal(null)} disabled={saving}
-              className="cursor-pointer rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50">
-              Cancelar
-            </button>
-            <button type="button" onClick={saveCoordinationDate} disabled={saving}
-              className="cursor-pointer rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-50">
-              {saving ? "Guardando..." : "Guardar"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Reports */}
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 p-5 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <FiFileText size={15} className="text-slate-400" />
-            <span className="text-sm font-semibold text-slate-800">Informes de cronograma</span>
-            <span className="text-xs text-slate-400">({reports.length})</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <select
-              value={reportPeriodType}
-              onChange={(e) => setReportPeriodType(e.target.value)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
-            >
-              <option value="annual">Anual</option>
-              <option value="monthly">Mensual</option>
-            </select>
-            <input
-              type="number"
-              min={2020}
-              max={2100}
-              value={reportYear}
-              onChange={(e) => setReportYear(Number(e.target.value || new Date().getFullYear()))}
-              className="w-24 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
-            />
-            {reportPeriodType === "monthly" ? (
-              <select
-                value={reportMonth}
-                onChange={(e) => setReportMonth(Number(e.target.value))}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
-              >
-                {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-                  <option key={m} value={m}>{String(m).padStart(2, "0")}</option>
-                ))}
-              </select>
-            ) : null}
-            <Button
-              type="button"
-              variant="primary"
-              icon={FiFileText}
-              disabled={generatingReport}
-              onClick={handleGenerateReport}
-            >
-              {generatingReport ? "Generando..." : "Generar informe"}
-            </Button>
-            <Button type="button" variant="secondary" icon={FiRefreshCw} onClick={loadReports}>
-              Recargar
-            </Button>
-          </div>
-        </div>
-
-        {reportsLoading ? (
-          <p className="text-sm text-slate-400 text-center py-8">Cargando informes...</p>
-        ) : reports.length === 0 ? (
-          <div className="flex flex-col items-center py-10 text-center">
-            <FiFileText size={28} className="text-slate-200 mb-2" />
-            <p className="text-sm text-slate-400">No hay informes generados. El sistema los genera automáticamente cada mes.</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs uppercase text-slate-400 border-b border-slate-100">
-                  <th className="px-4 py-3 text-left font-medium">Período</th>
-                  <th className="px-4 py-3 text-left font-medium">Generado</th>
-                  <th className="px-4 py-3 text-left font-medium">Por</th>
-                  <th className="px-4 py-3 text-left font-medium">Equipos</th>
-                  <th className="px-4 py-3 text-left font-medium">SHA-256</th>
-                  <th className="px-4 py-3 text-left font-medium">Drive</th>
-                  <th className="px-4 py-3 text-left font-medium">Descargar</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reports.map((r) => (
-                  <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-                        {String(r.period || "").match(/^\d{4}-\d{2}$/) ? `Mes ${r.period}` : `A�o ${r.period}`}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-600">
-                      {new Date(r.generated_at).toLocaleString("es-EC", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-600">{r.generated_by_name || "Sistema"}</td>
-                    <td className="px-4 py-3 text-xs text-slate-600">{r.assets_count ?? "-"}</td>
-                    <td className="px-4 py-3">
-                      <span
-                        className="font-mono text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 cursor-pointer"
-                        title={r.sha256}
-                        onClick={() => navigator.clipboard?.writeText(r.sha256)}
-                      >
-                        {String(r.sha256 || "").slice(0, 12)}…
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.drive_url ? (
-                        <a
-                          href={r.drive_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs text-blue-600 hover:underline"
-                        >
-                          Ver en Drive
-                        </a>
-                      ) : (
-                        <span className="text-xs text-slate-400">No disponible</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => String(r.period || "").match(/^\d{4}-\d{2}$/)
-                          ? downloadTiMaintenanceReport({ period_type: "monthly", year: Number(String(r.period).slice(0, 4)), month: Number(String(r.period).slice(5, 7)) })
-                          : downloadTiMaintenanceReport({ period_type: "annual", year: Number(r.period) })}
-                        className="inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 cursor-pointer"
-                      >
-                        <FiDownload size={12} />
-                        PDF
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* ── Modal de asignación / retiro con acta ─────────────────────────── */}
+      {/* Modal de asignacion / retiro con acta */}
       <Modal
         open={showAssignModal}
         onClose={() => setShowAssignModal(false)}
@@ -2683,17 +2281,17 @@ const TIDeviceManagementPage = () => {
                   )}
                   {!recipientLoading && recipientSource === "profile" && (
                     <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-700">
-                      <FiCheck size={9} /> Datos del perfil — editables
+                      <FiCheck size={9} /> Datos del perfil â€” editables
                     </span>
                   )}
                   {!recipientLoading && recipientSource === "partial" && (
                     <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                      Perfil incompleto — completa cédula y cargo
+                      Perfil incompleto â€” completa cÃ©dula y cargo
                     </span>
                   )}
                   {!recipientLoading && recipientSource === "empty" && (
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
-                      Sin perfil registrado — ingresa los datos manualmente
+                      Sin perfil registrado â€” ingresa los datos manualmente
                     </span>
                   )}
                 </div>
@@ -2706,7 +2304,7 @@ const TIDeviceManagementPage = () => {
                       onChange={(e) => handleModalUserChange(e.target.value)}
                       className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
                     >
-                      <option value="">Sin asignación (retiro)</option>
+                      <option value="">Sin asignaciÃ³n (retiro)</option>
                       {users.map((u) => (
                         <option key={u.id} value={u.id}>{u.fullname || u.name || u.email}</option>
                       ))}
@@ -2720,14 +2318,14 @@ const TIDeviceManagementPage = () => {
                           ? "border-slate-200 bg-slate-100 text-slate-400"
                           : "border-slate-200 bg-white focus:border-blue-400"
                       }`}
-                      placeholder="Ej: María Fernanda González Ortega"
+                      placeholder="Ej: MarÃ­a Fernanda GonzÃ¡lez Ortega"
                       value={assignModal.recipient_nombre}
                       disabled={recipientLoading}
                       onChange={(e) => setAssignModal((p) => ({ ...p, recipient_nombre: e.target.value }))}
                     />
                   </div>
                   <div>
-                    <Label required>Cédula</Label>
+                    <Label required>CÃ©dula</Label>
                     <input
                       className={`w-full rounded-xl border px-3 py-2 text-sm font-mono text-slate-900 focus:outline-none transition-colors ${
                         recipientLoading
@@ -2736,13 +2334,13 @@ const TIDeviceManagementPage = () => {
                           ? "border-amber-200 bg-amber-50 focus:border-blue-400 focus:bg-white"
                           : "border-slate-200 bg-white focus:border-blue-400"
                       }`}
-                      placeholder="10 dígitos"
+                      placeholder="10 dÃ­gitos"
                       value={assignModal.recipient_cedula}
                       disabled={recipientLoading}
                       onChange={(e) => setAssignModal((p) => ({ ...p, recipient_cedula: e.target.value }))}
                     />
                     {!recipientLoading && !assignModal.recipient_cedula && assignModal.assigned_to_user_id && (
-                      <p className="mt-1 text-[10px] text-amber-600">Cédula no encontrada en el perfil — ingresa manualmente</p>
+                      <p className="mt-1 text-[10px] text-amber-600">CÃ©dula no encontrada en el perfil â€” ingresa manualmente</p>
                     )}
                   </div>
                   <div>
@@ -2761,14 +2359,14 @@ const TIDeviceManagementPage = () => {
                       onChange={(e) => setAssignModal((p) => ({ ...p, recipient_cargo: e.target.value }))}
                     />
                     {!recipientLoading && !assignModal.recipient_cargo && assignModal.assigned_to_user_id && (
-                      <p className="mt-1 text-[10px] text-amber-600">Cargo no encontrado en el perfil — ingresa manualmente</p>
+                      <p className="mt-1 text-[10px] text-amber-600">Cargo no encontrado en el perfil â€” ingresa manualmente</p>
                     )}
                   </div>
                   <div className="sm:col-span-2">
                     <Label>Motivo</Label>
                     <input
                       className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors"
-                      placeholder="Motivo de la asignación / retiro"
+                      placeholder="Motivo de la asignaciÃ³n / retiro"
                       value={assignModal.reason}
                       onChange={(e) => setAssignModal((p) => ({ ...p, reason: e.target.value }))}
                     />
@@ -2777,7 +2375,7 @@ const TIDeviceManagementPage = () => {
 
                 {/* Hint about editability */}
                 <p className="mt-2 text-[10px] text-slate-400">
-                  Los datos se cargan automáticamente del perfil del colaborador registrado en el sistema. Puedes editarlos antes de generar el acta.
+                  Los datos se cargan automÃ¡ticamente del perfil del colaborador registrado en el sistema. Puedes editarlos antes de generar el acta.
                 </p>
               </div>
 
@@ -2792,7 +2390,7 @@ const TIDeviceManagementPage = () => {
                         <th className="px-2 py-2 text-left font-medium">Equipo/Accesorio</th>
                         <th className="px-2 py-2 text-left font-medium">Marca/Modelo</th>
                         <th className="px-2 py-2 text-left font-medium">Serie/IMEI</th>
-                        <th className="px-2 py-2 text-left font-medium w-24">¿Nuevo o Usado?</th>
+                        <th className="px-2 py-2 text-left font-medium w-24">Â¿Nuevo o Usado?</th>
                         <th className="px-2 py-2 text-left font-medium w-20">Estado (1-10)</th>
                         <th className="px-2 py-2 text-left font-medium">Observaciones</th>
                       </tr>
@@ -2841,7 +2439,7 @@ const TIDeviceManagementPage = () => {
                           <td className="px-2 py-2">
                             <input
                               type="text"
-                              placeholder="Observación..."
+                              placeholder="ObservaciÃ³n..."
                               value={item.observations || ""}
                               onChange={(e) => {
                                 const updated = [...assignModal.acta_items];
@@ -2856,7 +2454,7 @@ const TIDeviceManagementPage = () => {
                     </tbody>
                   </table>
                 </div>
-                <p className="mt-2 text-[10px] text-slate-400">Los campos Equipo/Accesorio, Marca/Modelo y Serie/IMEI se generan automáticamente del registro del activo.</p>
+                <p className="mt-2 text-[10px] text-slate-400">Los campos Equipo/Accesorio, Marca/Modelo y Serie/IMEI se generan automÃ¡ticamente del registro del activo.</p>
               </div>
         </div>
 
@@ -2870,11 +2468,11 @@ const TIDeviceManagementPage = () => {
         </div>
       </Modal>
 
-      {/* ── Modal de asignación múltiple ─────────────────────────────────── */}
+      {/* â”€â”€ Modal de asignaciÃ³n mÃºltiple â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <Modal
         open={showBatchAssignModal}
         onClose={() => setShowBatchAssignModal(false)}
-        title={batchAssignForm.assigned_to_user_id ? "Asignar múltiples equipos" : "Liberar múltiples equipos"}
+        title={batchAssignForm.assigned_to_user_id ? "Asignar mÃºltiples equipos" : "Liberar mÃºltiples equipos"}
         maxWidth="max-w-2xl"
       >
         <div className="overflow-auto px-6 py-4 space-y-5" style={{ maxHeight: "65vh" }}>
@@ -2889,17 +2487,17 @@ const TIDeviceManagementPage = () => {
               )}
               {!batchRecipientLoading && batchRecipientSource === "profile" && (
                 <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-700">
-                  <FiCheck size={9} /> Datos del perfil — editables
+                  <FiCheck size={9} /> Datos del perfil â€” editables
                 </span>
               )}
               {!batchRecipientLoading && batchRecipientSource === "partial" && (
                 <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                  Perfil incompleto — completa cédula y cargo
+                  Perfil incompleto â€” completa cÃ©dula y cargo
                 </span>
               )}
               {!batchRecipientLoading && batchRecipientSource === "empty" && (
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
-                  Sin perfil registrado — ingresa los datos manualmente
+                  Sin perfil registrado â€” ingresa los datos manualmente
                 </span>
               )}
             </div>
@@ -2921,7 +2519,7 @@ const TIDeviceManagementPage = () => {
                   }}
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
                 >
-                  <option value="">Sin asignación (liberar)</option>
+                  <option value="">Sin asignaciÃ³n (liberar)</option>
                   {users.map((u) => (
                     <option key={u.id} value={u.id}>{u.fullname || u.name || u.email}</option>
                   ))}
@@ -2935,14 +2533,14 @@ const TIDeviceManagementPage = () => {
                       ? "border-slate-200 bg-slate-100 text-slate-400"
                       : "border-slate-200 bg-white focus:border-blue-400"
                   }`}
-                  placeholder="Ej: María Fernanda González Ortega"
+                  placeholder="Ej: MarÃ­a Fernanda GonzÃ¡lez Ortega"
                   value={batchAssignForm.recipient_nombre}
                   disabled={batchRecipientLoading}
                   onChange={(e) => setBatchAssignForm((p) => ({ ...p, recipient_nombre: e.target.value }))}
                 />
               </div>
               <div>
-                <Label required>Cédula</Label>
+                <Label required>CÃ©dula</Label>
                 <input
                   className={`w-full rounded-xl border px-3 py-2 text-sm font-mono text-slate-900 focus:outline-none transition-colors ${
                     batchRecipientLoading
@@ -2951,7 +2549,7 @@ const TIDeviceManagementPage = () => {
                       ? "border-amber-200 bg-amber-50 focus:border-blue-400 focus:bg-white"
                       : "border-slate-200 bg-white focus:border-blue-400"
                   }`}
-                  placeholder="10 dígitos"
+                  placeholder="10 dÃ­gitos"
                   value={batchAssignForm.recipient_cedula}
                   disabled={batchRecipientLoading}
                   onChange={(e) => setBatchAssignForm((p) => ({ ...p, recipient_cedula: e.target.value }))}
@@ -2977,7 +2575,7 @@ const TIDeviceManagementPage = () => {
                 <Label>Motivo</Label>
                 <input
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors"
-                  placeholder="Motivo de la asignación / retiro"
+                  placeholder="Motivo de la asignaciÃ³n / retiro"
                   value={batchAssignForm.reason}
                   onChange={(e) => setBatchAssignForm((p) => ({ ...p, reason: e.target.value }))}
                 />
@@ -2985,7 +2583,7 @@ const TIDeviceManagementPage = () => {
             </div>
 
             <p className="mt-2 text-[10px] text-slate-400">
-              Se generará una acta con todos los {selectedAssets.size} equipo{selectedAssets.size !== 1 ? 's' : ''} seleccionado{selectedAssets.size !== 1 ? 's' : ''} y sus accesorios.
+              Se generarÃ¡ una acta con todos los {selectedAssets.size} equipo{selectedAssets.size !== 1 ? 's' : ''} seleccionado{selectedAssets.size !== 1 ? 's' : ''} y sus accesorios.
             </p>
           </div>
 
@@ -2999,7 +2597,7 @@ const TIDeviceManagementPage = () => {
                     <th className="px-2 py-2 text-left font-medium w-7">No.</th>
                     <th className="px-2 py-2 text-left font-medium">Equipo</th>
                     <th className="px-2 py-2 text-left font-medium">Marca/Modelo</th>
-                    <th className="px-2 py-2 text-left font-medium w-24">¿Nuevo o Usado?</th>
+                    <th className="px-2 py-2 text-left font-medium w-24">Â¿Nuevo o Usado?</th>
                     <th className="px-2 py-2 text-left font-medium w-20">Estado (1-10)</th>
                     <th className="px-2 py-2 text-left font-medium">Observaciones</th>
                   </tr>
@@ -3057,7 +2655,7 @@ const TIDeviceManagementPage = () => {
                         <td className="px-2 py-2">
                           <input
                             type="text"
-                            placeholder="Observación..."
+                            placeholder="ObservaciÃ³n..."
                             value={itemData.observations || ""}
                             onChange={(e) => {
                               setBatchAssignForm((p) => ({
@@ -3074,7 +2672,7 @@ const TIDeviceManagementPage = () => {
                 </tbody>
               </table>
             </div>
-            <p className="mt-2 text-[10px] text-slate-400">Completa el estado de cada equipo. Los datos se incluirán en el acta.</p>
+            <p className="mt-2 text-[10px] text-slate-400">Completa el estado de cada equipo. Los datos se incluirÃ¡n en el acta.</p>
           </div>
         </div>
 
@@ -3088,7 +2686,7 @@ const TIDeviceManagementPage = () => {
         </div>
       </Modal>
 
-      {/* FASE 6: Modal de liberación de equipo */}
+      {/* FASE 6: Modal de liberaciÃ³n de equipo */}
       <Modal
         open={showLiberateModal}
         onClose={() => {
@@ -3100,15 +2698,15 @@ const TIDeviceManagementPage = () => {
       >
         <div className="overflow-auto px-6 py-4 space-y-4" style={{ maxHeight: "75vh" }}>
           <p className="text-sm text-slate-600">
-            Se requieren <span className="font-semibold">mínimo 2 fotos</span> del estado del equipo para generar el acta de retiro.
+            Se requieren <span className="font-semibold">mÃ­nimo 2 fotos</span> del estado del equipo para generar el acta de retiro.
           </p>
 
           {/* Multi-photo upload */}
           <div>
             <label className="text-xs font-semibold uppercase tracking-wide text-slate-400 block mb-2">
-              Fotografías del equipo{" "}
+              FotografÃ­as del equipo{" "}
               <span className={liberateForm.photoFiles.length >= 2 ? "text-green-500" : "text-red-400"}>
-                ({liberateForm.photoFiles.length}/mín. 2)
+                ({liberateForm.photoFiles.length}/mÃ­n. 2)
               </span>
             </label>
             <input
@@ -3152,7 +2750,7 @@ const TIDeviceManagementPage = () => {
                       }))}
                       className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
                     >
-                      ×
+                      Ã—
                     </button>
                     <p className="text-[9px] text-slate-400 text-center py-0.5">Foto {idx + 1}</p>
                   </div>
@@ -3169,7 +2767,7 @@ const TIDeviceManagementPage = () => {
             <textarea
               value={liberateForm.notes}
               onChange={(e) => setLiberateForm((p) => ({ ...p, notes: e.target.value }))}
-              placeholder="Estado del equipo, rayones, daños, etc."
+              placeholder="Estado del equipo, rayones, daÃ±os, etc."
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none"
               rows={3}
             />
@@ -3188,7 +2786,7 @@ const TIDeviceManagementPage = () => {
                     href={photo.drive_url}
                     target="_blank"
                     rel="noreferrer"
-                    title={`${new Date(photo.liberated_at).toLocaleDateString("es-EC")} · ${photo.liberated_by_name || ""}`}
+                    title={`${new Date(photo.liberated_at).toLocaleDateString("es-EC")} Â· ${photo.liberated_by_name || ""}`}
                     className="rounded-lg overflow-hidden border border-slate-200 hover:border-blue-400 transition block"
                   >
                     {photo.drive_url ? (
@@ -3558,6 +3156,381 @@ const TIDeviceManagementPage = () => {
           </div>
         </div>
       </>
+      )}
+
+      {/* Tab: Cronograma */}
+      {activeTab === 'cronograma' && (
+        <>
+          {/* Cronograma de mantenimiento */}
+          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <FiCalendar size={15} className="text-slate-400" />
+                <span className="text-sm font-semibold text-slate-800">Cronograma de mantenimiento</span>
+                <span className="text-xs text-slate-400">({filteredMaintenance.length} de {maintenance.length})</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="primary" icon={FiCalendar} disabled={saving} onClick={generateSchedules}>
+                  Generar
+                </Button>
+                <button type="button" title="Actualizar cronograma" disabled={saving} onClick={refreshSchedules}
+                  className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-[0.97]">
+                  <FiRefreshCw size={15} />
+                </button>
+                <button type="button" title="Programar mantenimiento manual" disabled={saving} onClick={() => setShowManualForm(true)}
+                  className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-[0.97]">
+                  <FiPlus size={15} />
+                </button>
+                <button type="button" title="Eliminar todos los cronogramas" disabled={saving} onClick={clearMaintenanceSchedule}
+                  className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200 disabled:opacity-50 transition-colors active:scale-[0.97]">
+                  <FiTrash2 size={15} />
+                </button>
+              </div>
+            </div>
+
+            {/* Filtro por tipo */}
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-100">
+              <span className="text-xs text-slate-400 shrink-0">Filtrar:</span>
+              {[{ key: "all", label: "Todos" }, { key: "computadora", label: "Computadoras" }, { key: "celular", label: "Celulares" }].map((f) => (
+                <button key={f.key} type="button" onClick={() => setDeviceFilter(f.key)}
+                  className={`cursor-pointer rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                    deviceFilter === f.key ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Tabla */}
+            <div className="overflow-x-auto">
+              {filteredMaintenance.length === 0 ? (
+                <div className="flex flex-col items-center py-10 text-center">
+                  <FiCalendar size={28} className="text-slate-200 mb-2" />
+                  <p className="text-sm text-slate-400">
+                    {maintenance.length === 0
+                      ? `Sin cronogramas para ${year}. Usa "Generar" para crearlos.`
+                      : "Sin resultados para este filtro."}
+                  </p>
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs uppercase text-slate-400 border-b border-slate-100">
+                      <th className="px-4 py-3 text-left font-medium">Equipo</th>
+                      <th className="px-4 py-3 text-left font-medium">Asignado a</th>
+                      <th className="px-4 py-3 text-left font-medium">Tipo</th>
+                      <th className="px-4 py-3 text-left font-medium">Cumple</th>
+                      <th className="px-4 py-3 text-left font-medium">Máximo</th>
+                      <th className="px-4 py-3 text-left font-medium">Estado</th>
+                      <th className="px-4 py-3 text-left font-medium sr-only">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredMaintenance.map((m) => {
+                      const tipo = (String(m.notes || "").split("|")[0] || "Preventivo").trim();
+                      const coordDate = m.coordinated_withdrawal_date ? String(m.coordinated_withdrawal_date).slice(0, 10) : null;
+                      return (
+                        <tr key={m.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                          <td className="px-4 py-3">
+                            <p className="font-medium text-slate-800 leading-tight">{m.asset_name}</p>
+                            {m.model && <p className="text-xs text-slate-400 mt-0.5">{m.model}</p>}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600 text-xs">{m.assigned_to_name || "Sin asignar"}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                              tipo === "Correctivo" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"
+                            }`}>{tipo}</span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600 text-xs font-mono">
+                            {new Date(m.planned_date).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" })}
+                          </td>
+                          <td className="px-4 py-3 text-xs">
+                            <span className="font-mono text-slate-600">
+                              {m.max_due_date ? new Date(m.max_due_date).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" }) : "-"}
+                            </span>
+                            {coordDate && <p className="text-[11px] text-slate-400 mt-0.5">Retiro: {coordDate}</p>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                              m.status === "completed" ? "bg-green-50 text-green-700"
+                              : m.status === "overdue" ? "bg-red-50 text-red-700"
+                              : "bg-slate-100 text-slate-600"
+                            }`}>
+                              {MAINTENANCE_STATUS_LABELS[m.status] || m.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            {m.status !== "completed" ? (
+                              <div className="flex items-center gap-1">
+                                <button type="button" title="Coordinar fecha de retiro" disabled={saving} onClick={() => openCoordModal(m)}
+                                  className="cursor-pointer rounded-xl border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-[0.97]">
+                                  <FiCalendar size={13} />
+                                </button>
+                                <button type="button" title="Solicitar entrega para mantenimiento" disabled={saving} onClick={() => requestMaintenanceDelivery(m.id)}
+                                  className="cursor-pointer rounded-xl border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-[0.97]">
+                                  <FiTruck size={13} />
+                                </button>
+                                <button type="button" title="Marcar como completado" disabled={saving} onClick={() => completeMaintenanceRow(m.id)}
+                                  className="cursor-pointer rounded-xl border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-green-50 hover:text-green-700 hover:border-green-200 disabled:opacity-50 transition-colors active:scale-[0.97]">
+                                  <FiCheck size={13} />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400">Completado</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Calendario colapsible */}
+            <div className="border-t border-slate-100">
+              <button type="button" onClick={() => setShowCalendar((v) => !v)}
+                className="cursor-pointer flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                <div className="flex items-center gap-2">
+                  <FiCalendar size={14} className="text-slate-400" />
+                  <span>Calendario mensual</span>
+                  {!showCalendar && (
+                    <span className="text-xs text-slate-400 font-normal">
+                      — {monthStart.toLocaleDateString("es-EC", { month: "long", year: "numeric" })}
+                    </span>
+                  )}
+                </div>
+                {showCalendar ? <FiChevronUp size={15} className="text-slate-400" /> : <FiChevronDown size={15} className="text-slate-400" />}
+              </button>
+              {showCalendar && (
+                <div className="px-4 pb-4 border-t border-slate-100">
+                  <div className="flex items-center justify-end gap-2 py-3">
+                    <button type="button" onClick={() => setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+                      className="cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+                      &larr;
+                    </button>
+                    <span className="text-sm text-slate-600 min-w-[140px] text-center">
+                      {monthStart.toLocaleDateString("es-EC", { month: "long", year: "numeric" })}
+                    </span>
+                    <button type="button" onClick={() => setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+                      className="cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+                      &rarr;
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-7 gap-1 text-xs text-slate-500 mb-1">
+                    {["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"].map((d) => (
+                      <div key={d} className="px-1 py-1 font-semibold text-center">{d}</div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1">
+                    {calendarDays.map((d) => {
+                      const key = d.toISOString().slice(0, 10);
+                      const dayItems = maintenanceByDate[key] || [];
+                      const inMonth = d.getMonth() === monthStart.getMonth() && d.getFullYear() === monthStart.getFullYear();
+                      return (
+                        <div key={key} className={`min-h-[80px] rounded-xl border p-1.5 ${inMonth ? "bg-white border-slate-200" : "bg-slate-50 border-slate-100"}`}>
+                          <p className={`text-[11px] mb-1 font-medium ${inMonth ? "text-slate-700" : "text-slate-400"}`}>{d.getDate()}</p>
+                          <div className="space-y-1">
+                            {dayItems.slice(0, 2).map((item) => {
+                              const tipoItem = (String(item.notes || "").split("|")[0] || "Preventivo").trim();
+                              const cls = item.status === "completed"
+                                ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                                : item.status === "overdue"
+                                ? "bg-red-50 border-red-200 text-red-700"
+                                : "bg-blue-50 border-blue-200 text-blue-700";
+                              return (
+                                <div key={item.id} className={`rounded border px-1 py-0.5 text-[10px] leading-tight ${cls}`}>
+                                  <p className="font-semibold truncate">{item.asset_name}</p>
+                                  <p className="truncate opacity-80">{tipoItem}</p>
+                                </div>
+                              );
+                            })}
+                            {dayItems.length > 2 && <p className="text-[10px] text-slate-400">+{dayItems.length - 2}</p>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Informes de cronograma */}
+          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <FiFileText size={15} className="text-slate-400" />
+                <span className="text-sm font-semibold text-slate-800">Informes de cronograma</span>
+                <span className="text-xs text-slate-400">({reports.length})</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select value={reportPeriodType} onChange={(e) => setReportPeriodType(e.target.value)}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none">
+                  <option value="annual">Anual</option>
+                  <option value="monthly">Mensual</option>
+                </select>
+                <input type="number" min={2020} max={2100} value={reportYear}
+                  onChange={(e) => setReportYear(Number(e.target.value || new Date().getFullYear()))}
+                  className="w-24 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none" />
+                {reportPeriodType === "monthly" && (
+                  <select value={reportMonth} onChange={(e) => setReportMonth(Number(e.target.value))}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none">
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                      <option key={m} value={m}>{String(m).padStart(2, "0")}</option>
+                    ))}
+                  </select>
+                )}
+                <Button type="button" variant="primary" icon={FiFileText} disabled={generatingReport} onClick={handleGenerateReport}>
+                  {generatingReport ? "Generando..." : "Generar informe"}
+                </Button>
+                <button type="button" title="Recargar informes" onClick={loadReports}
+                  className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-50 transition-colors active:scale-[0.97]">
+                  <FiRefreshCw size={15} />
+                </button>
+              </div>
+            </div>
+            {reportsLoading ? (
+              <p className="text-sm text-slate-400 text-center py-8">Cargando informes...</p>
+            ) : reports.length === 0 ? (
+              <div className="flex flex-col items-center py-10 text-center">
+                <FiFileText size={28} className="text-slate-200 mb-2" />
+                <p className="text-sm text-slate-400">No hay informes generados. El sistema los genera automáticamente cada mes.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs uppercase text-slate-400 border-b border-slate-100">
+                      <th className="px-4 py-3 text-left font-medium">Período</th>
+                      <th className="px-4 py-3 text-left font-medium">Generado</th>
+                      <th className="px-4 py-3 text-left font-medium">Por</th>
+                      <th className="px-4 py-3 text-left font-medium">Equipos</th>
+                      <th className="px-4 py-3 text-left font-medium">SHA-256</th>
+                      <th className="px-4 py-3 text-left font-medium">Drive</th>
+                      <th className="px-4 py-3 text-left font-medium">PDF</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reports.map((r) => (
+                      <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                            {String(r.period || "").match(/^\d{4}-\d{2}$/) ? `Mes ${r.period}` : `Año ${r.period}`}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-600 font-mono">
+                          {new Date(r.generated_at).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" })}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-600">{r.generated_by_name || "Sistema"}</td>
+                        <td className="px-4 py-3 text-xs text-slate-600">{r.assets_count ?? "-"}</td>
+                        <td className="px-4 py-3">
+                          <span className="font-mono text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 cursor-pointer"
+                            title={r.sha256} onClick={() => navigator.clipboard?.writeText(r.sha256)}>
+                            {String(r.sha256 || "").slice(0, 12)}…
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {r.drive_url ? (
+                            <a href={r.drive_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">Ver</a>
+                          ) : (
+                            <span className="text-xs text-slate-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <button type="button"
+                            onClick={() => String(r.period || "").match(/^\d{4}-\d{2}$/)
+                              ? downloadTiMaintenanceReport({ period_type: "monthly", year: Number(String(r.period).slice(0, 4)), month: Number(String(r.period).slice(5, 7)) })
+                              : downloadTiMaintenanceReport({ period_type: "annual", year: Number(r.period) })}
+                            className="cursor-pointer inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900">
+                            <FiDownload size={12} /> PDF
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Modal: Programar mantenimiento manual */}
+          <Modal open={showManualForm} onClose={saving ? undefined : () => setShowManualForm(false)} title="Programar mantenimiento" maxWidth="max-w-lg">
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-500">Equipo *</label>
+                <select value={manualForm.asset_id} onChange={(e) => setManualForm((p) => ({ ...p, asset_id: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors">
+                  <option value="">Selecciona equipo</option>
+                  {assets.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}{a.brand ? ` · ${a.brand}` : ""}{a.model ? ` ${a.model}` : ""}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-500">Tipo</label>
+                  <select value={manualForm.tipo} onChange={(e) => setManualForm((p) => ({ ...p, tipo: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors">
+                    <option value="Preventivo">Preventivo</option>
+                    <option value="Correctivo">Correctivo</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-500">Fecha programada *</label>
+                  <input type="date" value={manualForm.fecha_programada} onChange={(e) => setManualForm((p) => ({ ...p, fecha_programada: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors" />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-500">Responsable</label>
+                <input type="text" placeholder="Nombre del responsable" value={manualForm.responsable} onChange={(e) => setManualForm((p) => ({ ...p, responsable: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none transition-colors" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-500">Observaciones</label>
+                <input type="text" placeholder="Notas adicionales" value={manualForm.observaciones} onChange={(e) => setManualForm((p) => ({ ...p, observaciones: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none transition-colors" />
+              </div>
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+                <button type="button" onClick={() => setShowManualForm(false)} disabled={saving}
+                  className="cursor-pointer rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50">
+                  Cancelar
+                </button>
+                <button type="button" onClick={createManualMaintenance} disabled={saving}
+                  className="cursor-pointer rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-50">
+                  {saving ? "Guardando..." : "Programar"}
+                </button>
+              </div>
+            </div>
+          </Modal>
+
+          {/* Modal: Coordinar fecha de retiro */}
+          <Modal open={!!coordModal} onClose={saving ? undefined : () => setCoordModal(null)} title="Coordinar retiro" maxWidth="max-w-sm">
+            <div className="space-y-4">
+              {coordModal && (
+                <p className="text-sm text-slate-600">
+                  Equipo: <span className="font-medium text-slate-800">{coordModal.assetName}</span>
+                </p>
+              )}
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-500">Fecha coordinada de retiro *</label>
+                <input type="date" value={coordModalDate} onChange={(e) => setCoordModalDate(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors" />
+              </div>
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+                <button type="button" onClick={() => setCoordModal(null)} disabled={saving}
+                  className="cursor-pointer rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50">
+                  Cancelar
+                </button>
+                <button type="button" onClick={saveCoordinationDate} disabled={saving}
+                  className="cursor-pointer rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-50">
+                  {saving ? "Guardando..." : "Guardar"}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        </>
       )}
 
       {/* Tab: Todas las actas */}
