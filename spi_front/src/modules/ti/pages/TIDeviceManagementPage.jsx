@@ -3,6 +3,7 @@ import {
   FiAlertCircle,
   FiCalendar,
   FiCheck,
+  FiChevronDown,
   FiChevronUp,
   FiClock,
   FiCpu,
@@ -16,6 +17,7 @@ import {
   FiSearch,
   FiShield,
   FiTrash2,
+  FiTruck,
   FiUser,
   FiX,
 } from "react-icons/fi";
@@ -27,11 +29,14 @@ import { useAuth } from "../../../core/auth/AuthContext";
 import { getUsers } from "../../../core/api/usersApi";
 import {
   assignTiAsset,
+  assignTiCorporateNumber,
   assignMultipleTiAssets,
+  changeTiCorporateNumber,
   clearTiMaintenance,
   completeTiMaintenance,
   createTiAsset,
   createTiAccessory,
+  createTiCorporateNumber,
   createTiMaintenance,
   deleteTiAccessory,
   downloadTiActa,
@@ -49,6 +54,7 @@ import {
   listTiAccessories,
   listTiActas,
   listTiAssets,
+  listTiCorporateNumbers,
   listTiMaintenance,
   listTiMaintenanceReports,
   refreshTiMaintenanceSchedule,
@@ -56,6 +62,7 @@ import {
   setTiMaintenanceCoordinationDate,
   updateTiAccessory,
   updateTiAsset,
+  updateTiCorporateNumber,
   updateTiAssetStatus,
   liberateTiAsset,
   getTiLiberationPhotos,
@@ -376,6 +383,31 @@ const SectionTitle = ({ icon: Icon, children }) => (
 
 const TI_WRITE_ROLES = ["ti", "jefe_ti", "admin_ti", "gerencia"];
 const TI_CREATE_ROLES = [...TI_WRITE_ROLES, "financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador"];
+const TI_CORPORATE_MANAGE_ROLES = ["ti", "jefe_ti"];
+
+const isMobileTiAsset = (asset) => {
+  const hay = [
+    asset?.name,
+    asset?.brand,
+    asset?.model,
+    asset?.serial_number,
+    asset?.imei,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (!hay) return false;
+  return (
+    hay.includes("cel") ||
+    hay.includes("movil") ||
+    hay.includes("móvil") ||
+    hay.includes("phone") ||
+    hay.includes("iphone") ||
+    hay.includes("android") ||
+    Boolean(String(asset?.imei || "").trim())
+  );
+};
 
 const TIDeviceManagementPage = () => {
   const { showToast } = useUI();
@@ -383,6 +415,7 @@ const TIDeviceManagementPage = () => {
   const userRole = (user?.role || "").toLowerCase();
   const canCreate = TI_CREATE_ROLES.includes(userRole);
   const canWrite  = TI_WRITE_ROLES.includes(userRole);
+  const canManageCorporateNumber = TI_CORPORATE_MANAGE_ROLES.includes(userRole);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [assets, setAssets] = useState([]);
@@ -427,6 +460,10 @@ const TIDeviceManagementPage = () => {
   const [liberatingAssetId, setLiberatingAssetId] = useState(null);
   const [liberationPhotos, setLiberationPhotos] = useState([]);
   const [liberationPhotosLoading, setLiberationPhotosLoading] = useState(false);
+  const [corporateNumbers, setCorporateNumbers] = useState([]);
+  const [corporateNumbersLoading, setCorporateNumbersLoading] = useState(false);
+  const [selectedCorporateNumberId, setSelectedCorporateNumberId] = useState("");
+  const [corporateChangeReason, setCorporateChangeReason] = useState("");
 
   // Actas
   const [actas, setActas] = useState([]);
@@ -436,7 +473,7 @@ const TIDeviceManagementPage = () => {
   const [workflowActa, setWorkflowActa] = useState(null);
   const [startingWorkflow, setStartingWorkflow] = useState(false);
 
-  // Tabs: 'dispositivos' | 'todas-actas'
+  // Tabs: 'dispositivos' | 'numeros-corporativos' | 'todas-actas'
   const [activeTab, setActiveTab] = useState('dispositivos');
   const [uploadingActaId, setUploadingActaId] = useState(null);
   const [deviceFilter, setDeviceFilter] = useState("all");
@@ -447,6 +484,14 @@ const TIDeviceManagementPage = () => {
   const [reportPeriodType, setReportPeriodType] = useState("annual");
   const [reportYear, setReportYear] = useState(new Date().getFullYear());
   const [reportMonth, setReportMonth] = useState(new Date().getMonth() + 1);
+  const [showCorporateCreate, setShowCorporateCreate] = useState(false);
+  const [corporateForm, setCorporateForm] = useState({ number: "", status: "available" });
+  const [editingCorporateId, setEditingCorporateId] = useState(null);
+  const [corporateFilterStatus, setCorporateFilterStatus] = useState("all");
+  const [corporateSearch, setCorporateSearch] = useState("");
+  const [coordModal, setCoordModal] = useState(null); // { id, currentDate }
+  const [coordModalDate, setCoordModalDate] = useState("");
+  const [showCalendar, setShowCalendar] = useState(false);
   const [manualForm, setManualForm] = useState({
     asset_id: "",
     tipo: "Preventivo",
@@ -490,6 +535,44 @@ const TIDeviceManagementPage = () => {
     () => assets.find((a) => String(a.id) === String(selectedId || "")) || null,
     [assets, selectedId]
   );
+
+  const selectedIsMobile = useMemo(() => isMobileTiAsset(selected), [selected]);
+
+  const currentCorporateNumber = useMemo(() => {
+    if (!selected) return null;
+    return corporateNumbers.find(
+      (item) => String(item.asset_id || "") === String(selected.id) && String(item.status || "").toLowerCase() === "assigned"
+    ) || null;
+  }, [corporateNumbers, selected]);
+
+  const availableCorporateNumbers = useMemo(
+    () => corporateNumbers.filter((item) => String(item.status || "").toLowerCase() === "available"),
+    [corporateNumbers]
+  );
+
+  const filteredCorporateNumbers = useMemo(() => {
+    return corporateNumbers.filter((item) => {
+      const matchesStatus =
+        corporateFilterStatus === "all"
+          ? true
+          : String(item.status || "").toLowerCase() === corporateFilterStatus;
+      const haystack = [
+        item.number,
+        item.asset_name,
+        item.asset_code,
+        item.assigned_user_name,
+        item.assigned_user_cedula,
+        item.assigned_user_department,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      const matchesSearch = corporateSearch.trim()
+        ? haystack.includes(corporateSearch.trim().toLowerCase())
+        : true;
+      return matchesStatus && matchesSearch;
+    });
+  }, [corporateNumbers, corporateFilterStatus, corporateSearch]);
 
   const filteredAssets = useMemo(() => {
     if (!search.trim()) return assets;
@@ -545,6 +628,24 @@ const TIDeviceManagementPage = () => {
     }
   }, []);
 
+  const loadCorporateNumbers = useCallback(async () => {
+    setCorporateNumbersLoading(true);
+    try {
+      const rows = await listTiCorporateNumbers();
+      setCorporateNumbers(Array.isArray(rows) ? rows : []);
+    } catch (_e) {
+      setCorporateNumbers([]);
+    } finally {
+      setCorporateNumbersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "numeros-corporativos") {
+      loadCorporateNumbers();
+    }
+  }, [activeTab, loadCorporateNumbers]);
+
   const handleSelectAsset = (a) => {
     setSelectedId(a.id);
     setIsEditing(false);
@@ -561,9 +662,16 @@ const TIDeviceManagementPage = () => {
     });
     setShowAccForm(false);
     setEditingAccId(null);
+    setSelectedCorporateNumberId("");
+    setCorporateChangeReason("");
     loadHistory(a.id);
     loadAccessories(a.id);
     loadActas(a.id);
+    if (isMobileTiAsset(a)) {
+      loadCorporateNumbers();
+    } else {
+      setCorporateNumbers([]);
+    }
   };
 
   const setField = (key) => (e) =>
@@ -724,6 +832,94 @@ const TIDeviceManagementPage = () => {
       await loadAll();
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo asignar múltiples equipos", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveCorporateNumberAssignment = async () => {
+    if (!selected) return;
+    if (!selectedIsMobile) {
+      showToast("Solo los dispositivos celulares pueden tener numero corporativo", "warning");
+      return;
+    }
+    if (!selectedCorporateNumberId) {
+      showToast("Selecciona un numero corporativo disponible", "warning");
+      return;
+    }
+    if (currentCorporateNumber && String(currentCorporateNumber.id) === String(selectedCorporateNumberId)) {
+      showToast("Ese numero ya esta asignado a este dispositivo", "warning");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      if (currentCorporateNumber) {
+        await changeTiCorporateNumber(currentCorporateNumber.id, {
+          new_number_id: Number(selectedCorporateNumberId),
+          reason: corporateChangeReason || null,
+        });
+        showToast("Numero corporativo actualizado", "success");
+      } else {
+        await assignTiCorporateNumber(selectedCorporateNumberId, {
+          asset_id: selected.id,
+          assigned_to_user_id: selected.assigned_to_user_id || null,
+        });
+        showToast("Numero corporativo asignado", "success");
+      }
+
+      setSelectedCorporateNumberId("");
+      setCorporateChangeReason("");
+      await Promise.all([loadCorporateNumbers(), loadAll()]);
+      loadHistory(selected.id);
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo guardar el numero corporativo", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const resetCorporateEditor = () => {
+    setEditingCorporateId(null);
+    setCorporateForm({ number: "", status: "available" });
+    setShowCorporateCreate(false);
+  };
+
+  const startEditCorporateNumber = (row) => {
+    setEditingCorporateId(row.id);
+    setCorporateForm({
+      number: row.number || "",
+      status: row.status || "available",
+    });
+    setShowCorporateCreate(true);
+  };
+
+  const submitCorporateNumber = async () => {
+    const cleanNumber = String(corporateForm.number || "").trim();
+    if (!cleanNumber) {
+      showToast("El numero corporativo es obligatorio", "warning");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      if (editingCorporateId) {
+        await updateTiCorporateNumber(editingCorporateId, {
+          number: cleanNumber,
+          status: corporateForm.status,
+        });
+        showToast("Numero corporativo actualizado", "success");
+      } else {
+        await createTiCorporateNumber({
+          number: cleanNumber,
+        });
+        showToast("Numero corporativo creado", "success");
+      }
+
+      resetCorporateEditor();
+      await loadCorporateNumbers();
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo guardar el numero corporativo", "error");
     } finally {
       setSaving(false);
     }
@@ -1065,15 +1261,22 @@ const TIDeviceManagementPage = () => {
     }
   };
 
-  const saveCoordinationDate = async (id) => {
-    const coordinated = String(coordinationDates[id] || "").trim();
+  const openCoordModal = (m) => {
+    setCoordModal({ id: m.id, assetName: m.asset_name });
+    setCoordModalDate(m.coordinated_withdrawal_date ? String(m.coordinated_withdrawal_date).slice(0, 10) : "");
+  };
+
+  const saveCoordinationDate = async () => {
+    if (!coordModal?.id) return;
+    const coordinated = String(coordModalDate || "").trim();
     if (!coordinated) return showToast("Ingresa fecha de coordinación de retiro", "warning");
     setSaving(true);
     try {
-      await setTiMaintenanceCoordinationDate(id, {
+      await setTiMaintenanceCoordinationDate(coordModal.id, {
         coordinated_withdrawal_date: coordinated,
       });
       showToast("Fecha de coordinación guardada", "success");
+      setCoordModal(null);
       await loadAll();
     } catch (error) {
       showToast(
@@ -1234,6 +1437,17 @@ const TIDeviceManagementPage = () => {
           }`}
         >
           Dispositivos
+        </button>
+        <button
+          type="button"
+          onClick={() => { setActiveTab('numeros-corporativos'); setShowCreate(false); }}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'numeros-corporativos'
+              ? 'border-blue-500 text-blue-600'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          Numeros corporativos
         </button>
         <button
           type="button"
@@ -1719,6 +1933,107 @@ const TIDeviceManagementPage = () => {
                 </div>
               </div>
 
+              <div className="border-t border-slate-100 pt-5">
+                <SectionTitle icon={FiShield}>Numero corporativo</SectionTitle>
+                {!selectedIsMobile ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-sm font-medium text-slate-700">No aplica para este equipo</p>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                      El numero corporativo solo puede asignarse a dispositivos celulares.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-[0.01em] text-slate-400">Estado actual</p>
+                        {corporateNumbersLoading ? (
+                          <p className="mt-2 text-sm text-slate-500">Cargando numeros corporativos...</p>
+                        ) : currentCorporateNumber ? (
+                          <>
+                            <p className="mt-1 font-mono text-base font-semibold text-slate-900">{currentCorporateNumber.number}</p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              Vinculado al dispositivo y listo para trazabilidad operativa.
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="mt-1 text-sm font-medium text-slate-700">Sin numero asignado</p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              Selecciona un numero disponible para este celular.
+                            </p>
+                          </>
+                        )}
+                      </div>
+                      <span className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                        currentCorporateNumber ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"
+                      }`}>
+                        {currentCorporateNumber ? "Activo" : "Pendiente"}
+                      </span>
+                    </div>
+
+                    {!canManageCorporateNumber ? (
+                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <p className="text-sm font-medium text-slate-700">Accion restringida</p>
+                        <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                          Solo los roles <span className="font-semibold text-slate-700">ti</span> y <span className="font-semibold text-slate-700">jefe_ti</span> pueden asignar o cambiar numeros corporativos.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                        <div className="space-y-3">
+                          <div>
+                            <Label required>{currentCorporateNumber ? "Cambiar numero" : "Asignar numero"}</Label>
+                            <select
+                              value={selectedCorporateNumberId}
+                              onChange={(e) => setSelectedCorporateNumberId(e.target.value)}
+                              disabled={corporateNumbersLoading || availableCorporateNumbers.length === 0}
+                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                            >
+                              <option value="">
+                                {corporateNumbersLoading
+                                  ? "Cargando numeros..."
+                                  : availableCorporateNumbers.length
+                                  ? "Selecciona un numero disponible"
+                                  : "No hay numeros disponibles"}
+                              </option>
+                              {availableCorporateNumbers.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.number}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          {currentCorporateNumber ? (
+                            <div>
+                              <Label>Motivo del cambio</Label>
+                              <input
+                                type="text"
+                                value={corporateChangeReason}
+                                onChange={(e) => setCorporateChangeReason(e.target.value)}
+                                placeholder="Ej: reposicion de linea o cambio operativo"
+                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
+                              />
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="flex items-end">
+                          <Button
+                            type="button"
+                            variant="primary"
+                            icon={FiCheck}
+                            disabled={saving || corporateNumbersLoading || !selectedCorporateNumberId}
+                            onClick={saveCorporateNumberAssignment}
+                          >
+                            {currentCorporateNumber ? "Actualizar numero" : "Asignar numero"}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Status */}
               {canWrite && (
                 <div className="border-t border-slate-100 pt-5">
@@ -1938,137 +2253,56 @@ const TIDeviceManagementPage = () => {
       {/* Maintenance Schedule */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 p-5 border-b border-slate-100">
+        <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <FiCalendar size={15} className="text-slate-400" />
             <span className="text-sm font-semibold text-slate-800">Cronograma de mantenimiento</span>
-            <span className="text-xs text-slate-400">
-              ({filteredMaintenance.length} de {maintenance.length})
-            </span>
+            <span className="text-xs text-slate-400">({filteredMaintenance.length} de {maintenance.length})</span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2">
             <Button type="button" variant="primary" icon={FiCalendar} disabled={saving} onClick={generateSchedules}>
-              Generar cronogramas
+              Generar
             </Button>
-            <Button type="button" variant="secondary" icon={FiRefreshCw} disabled={saving} onClick={refreshSchedules}>
-              Actualizar cronograma
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              icon={showManualForm ? FiChevronUp : FiPlus}
-              disabled={saving}
-              onClick={() => setShowManualForm((v) => !v)}
-            >
-              {showManualForm ? "Cancelar" : "Programar manual"}
-            </Button>
-            <Button type="button" variant="secondary" disabled={saving} onClick={clearMaintenanceSchedule}>
-              Eliminar todo
-            </Button>
+            <button type="button" title="Actualizar cronograma" disabled={saving} onClick={refreshSchedules}
+              className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-[0.97]">
+              <FiRefreshCw size={15} />
+            </button>
+            <button type="button" title="Programar mantenimiento manual" disabled={saving} onClick={() => setShowManualForm(true)}
+              className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-[0.97]">
+              <FiPlus size={15} />
+            </button>
+            <button type="button" title="Eliminar todos los cronogramas" disabled={saving} onClick={clearMaintenanceSchedule}
+              className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200 disabled:opacity-50 transition-colors active:scale-[0.97]">
+              <FiTrash2 size={15} />
+            </button>
           </div>
         </div>
 
-        {/* Manual maintenance form */}
-        {showManualForm && (
-          <div className="p-5 border-b border-slate-100 bg-slate-50">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
-              Programar mantenimiento individual
-            </p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <div>
-                <Label required>Equipo</Label>
-                <select
-                  value={manualForm.asset_id}
-                  onChange={(e) => setManualForm((p) => ({ ...p, asset_id: e.target.value }))}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none transition-colors"
-                >
-                  <option value="">Selecciona equipo</option>
-                  {assets.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}{a.brand ? ` · ${a.brand}` : ""}{a.model ? ` ${a.model}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <Label>Tipo</Label>
-                <select
-                  value={manualForm.tipo}
-                  onChange={(e) => setManualForm((p) => ({ ...p, tipo: e.target.value }))}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none transition-colors"
-                >
-                  <option value="Preventivo">Preventivo</option>
-                  <option value="Correctivo">Correctivo</option>
-                </select>
-              </div>
-              <div>
-                <Label required>Fecha programada</Label>
-                <input
-                  type="date"
-                  value={manualForm.fecha_programada}
-                  onChange={(e) => setManualForm((p) => ({ ...p, fecha_programada: e.target.value }))}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none transition-colors"
-                />
-              </div>
-              <div>
-                <Label>Responsable</Label>
-                <input
-                  type="text"
-                  placeholder="Nombre del responsable"
-                  value={manualForm.responsable}
-                  onChange={(e) => setManualForm((p) => ({ ...p, responsable: e.target.value }))}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none transition-colors"
-                />
-              </div>
-              <div className="sm:col-span-2 lg:col-span-1">
-                <Label>Observaciones</Label>
-                <input
-                  type="text"
-                  placeholder="Notas adicionales"
-                  value={manualForm.observaciones}
-                  onChange={(e) => setManualForm((p) => ({ ...p, observaciones: e.target.value }))}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none transition-colors"
-                />
-              </div>
-            </div>
-            <div className="mt-3 flex justify-end">
-              <Button type="button" variant="primary" icon={FiCheck} disabled={saving} onClick={createManualMaintenance}>
-                Confirmar programación
-              </Button>
-            </div>
-          </div>
-        )}
-
         {/* Device type filter */}
-        <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-100">
-          <span className="text-xs text-slate-400 mr-1">Filtrar:</span>
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-100">
+          <span className="text-xs text-slate-400 shrink-0">Filtrar:</span>
           {[
             { key: "all", label: "Todos" },
             { key: "computadora", label: "Computadoras" },
             { key: "celular", label: "Celulares" },
           ].map((f) => (
-            <button
-              key={f.key}
-              type="button"
-              onClick={() => setDeviceFilter(f.key)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                deviceFilter === f.key
-                  ? "bg-slate-800 text-white"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
-            >
+            <button key={f.key} type="button" onClick={() => setDeviceFilter(f.key)}
+              className={`cursor-pointer rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                deviceFilter === f.key ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}>
               {f.label}
             </button>
           ))}
         </div>
 
+        {/* Table */}
         <div className="overflow-x-auto">
           {filteredMaintenance.length === 0 ? (
             <div className="flex flex-col items-center py-10 text-center">
               <FiCalendar size={28} className="text-slate-200 mb-2" />
               <p className="text-sm text-slate-400">
                 {maintenance.length === 0
-                  ? `Sin cronogramas para ${year}. Usa "Generar cronogramas" para crearlos.`
+                  ? `Sin cronogramas para ${year}. Usa "Generar" para crearlos.`
                   : "Sin resultados para este filtro."}
               </p>
             </div>
@@ -2079,84 +2313,63 @@ const TIDeviceManagementPage = () => {
                   <th className="px-4 py-3 text-left font-medium">Equipo</th>
                   <th className="px-4 py-3 text-left font-medium">Asignado a</th>
                   <th className="px-4 py-3 text-left font-medium">Tipo</th>
-                  <th className="px-4 py-3 text-left font-medium">Cumple fecha</th>
-                  <th className="px-4 py-3 text-left font-medium">Coord. retiro</th>
-                  <th className="px-4 py-3 text-left font-medium">Fecha maxima</th>
+                  <th className="px-4 py-3 text-left font-medium">Cumple</th>
+                  <th className="px-4 py-3 text-left font-medium">Máximo</th>
                   <th className="px-4 py-3 text-left font-medium">Estado</th>
-                  <th className="px-4 py-3 text-left font-medium">Acciones</th>
+                  <th className="px-4 py-3 text-left font-medium sr-only">Acciones</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredMaintenance.map((m) => {
-                  const notesParts = String(m.notes || "").split("|").map((s) => s.trim());
-                  const tipo = notesParts[0] || "Preventivo";
+                  const tipo = (String(m.notes || "").split("|")[0] || "Preventivo").trim();
+                  const coordDate = m.coordinated_withdrawal_date ? String(m.coordinated_withdrawal_date).slice(0, 10) : null;
                   return (
                     <tr key={m.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                       <td className="px-4 py-3">
-                        <p className="font-medium text-slate-800">{m.asset_name}</p>
-                        {m.model && <p className="text-xs text-slate-400">{m.model}</p>}
+                        <p className="font-medium text-slate-800 leading-tight">{m.asset_name}</p>
+                        {m.model && <p className="text-xs text-slate-400 mt-0.5">{m.model}</p>}
                       </td>
                       <td className="px-4 py-3 text-slate-600 text-xs">{m.assigned_to_name || "Sin asignar"}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                           tipo === "Correctivo" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"
-                        }`}>
-                          {tipo}
+                        }`}>{tipo}</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 text-xs font-mono">
+                        {new Date(m.planned_date).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" })}
+                      </td>
+                      <td className="px-4 py-3 text-xs">
+                        <span className="font-mono text-slate-600">
+                          {m.max_due_date ? new Date(m.max_due_date).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" }) : "-"}
                         </span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 text-xs">
-                        {new Date(m.planned_date).toLocaleDateString("es-EC", {
-                          day: "2-digit",
-                          month: "short",
-                          year: "numeric",
-                        })}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            type="date"
-                            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
-                            value={coordinationDates[m.id] || ""}
-                            onChange={(e) =>
-                              setCoordinationDates((prev) => ({ ...prev, [m.id]: e.target.value }))
-                            }
-                          />
-                          <Button type="button" variant="secondary" disabled={saving} onClick={() => saveCoordinationDate(m.id)}>
-                            OK
-                          </Button>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 text-xs">
-                        {m.max_due_date
-                          ? new Date(m.max_due_date).toLocaleDateString("es-EC", {
-                              day: "2-digit",
-                              month: "short",
-                              year: "numeric",
-                            })
-                          : "-"}
+                        {coordDate && (
+                          <p className="text-[11px] text-slate-400 mt-0.5">Retiro: {coordDate}</p>
+                        )}
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                            m.status === "completed"
-                              ? "bg-green-50 text-green-700"
-                              : m.status === "overdue"
-                              ? "bg-red-50 text-red-700"
-                              : "bg-slate-100 text-slate-600"
-                          }`}
-                        >
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                          m.status === "completed" ? "bg-green-50 text-green-700"
+                          : m.status === "overdue" ? "bg-red-50 text-red-700"
+                          : "bg-slate-100 text-slate-600"
+                        }`}>
                           {MAINTENANCE_STATUS_LABELS[m.status] || m.status}
                         </span>
                       </td>
                       <td className="px-4 py-3">
                         {m.status !== "completed" ? (
-                          <div className="flex items-center gap-1.5">
-                            <Button type="button" variant="secondary" disabled={saving} onClick={() => requestMaintenanceDelivery(m.id)}>
-                              Solicitar entrega
-                            </Button>
-                            <Button type="button" variant="secondary" icon={FiCheck} disabled={saving} onClick={() => completeMaintenanceRow(m.id)}>
-                              Completar
-                            </Button>
+                          <div className="flex items-center gap-1">
+                            <button type="button" title="Coordinar fecha de retiro" disabled={saving} onClick={() => openCoordModal(m)}
+                              className="cursor-pointer rounded-xl border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-[0.97]">
+                              <FiCalendar size={13} />
+                            </button>
+                            <button type="button" title="Solicitar entrega para mantenimiento" disabled={saving} onClick={() => requestMaintenanceDelivery(m.id)}
+                              className="cursor-pointer rounded-xl border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50 disabled:opacity-50 transition-colors active:scale-[0.97]">
+                              <FiTruck size={13} />
+                            </button>
+                            <button type="button" title="Marcar como completado" disabled={saving} onClick={() => completeMaintenanceRow(m.id)}
+                              className="cursor-pointer rounded-xl border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-green-50 hover:text-green-700 hover:border-green-200 disabled:opacity-50 transition-colors active:scale-[0.97]">
+                              <FiCheck size={13} />
+                            </button>
                           </div>
                         ) : (
                           <span className="text-xs text-slate-400">Completado</span>
@@ -2170,62 +2383,151 @@ const TIDeviceManagementPage = () => {
           )}
         </div>
 
-        <div className="border-t border-slate-100 p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-800">Calendario mensual</h3>
+        {/* Calendar toggle */}
+        <div className="border-t border-slate-100">
+          <button type="button" onClick={() => setShowCalendar((v) => !v)}
+            className="cursor-pointer flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
             <div className="flex items-center gap-2">
-              <Button type="button" variant="secondary" onClick={() => setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}>
-                Mes anterior
-              </Button>
-              <span className="text-sm text-slate-600 min-w-[140px] text-center">
-                {monthStart.toLocaleDateString("es-EC", { month: "long", year: "numeric" })}
-              </span>
-              <Button type="button" variant="secondary" onClick={() => setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}>
-                Mes siguiente
-              </Button>
+              <FiCalendar size={14} className="text-slate-400" />
+              <span>Calendario mensual</span>
+              {!showCalendar && (
+                <span className="text-xs text-slate-400 font-normal">
+                  — {monthStart.toLocaleDateString("es-EC", { month: "long", year: "numeric" })}
+                </span>
+              )}
             </div>
-          </div>
-          <div className="grid grid-cols-7 gap-2 text-xs text-slate-500 mb-2">
-            {["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"].map((d) => (
-              <div key={d} className="px-2 py-1 font-semibold">{d}</div>
-            ))}
-          </div>
-          <div className="grid grid-cols-7 gap-2">
-            {calendarDays.map((d) => {
-              const key = d.toISOString().slice(0, 10);
-              const dayItems = maintenanceByDate[key] || [];
-              const inMonth = d.getMonth() === monthStart.getMonth() && d.getFullYear() === monthStart.getFullYear();
-              return (
-                <div key={key} className={`min-h-[130px] rounded-xl border p-2 ${inMonth ? "bg-white border-slate-200" : "bg-slate-50 border-slate-100"}`}>
-                  <p className={`text-xs mb-1 ${inMonth ? "text-slate-700" : "text-slate-400"}`}>{d.getDate()}</p>
-                  <div className="space-y-1.5">
-                    {dayItems.slice(0, 2).map((item) => {
-                      const notesParts = String(item.notes || "").split("|").map((s) => s.trim());
-                      const tipo = notesParts[0] || "Preventivo";
-                      const statusClass =
-                        item.status === "completed"
-                          ? "bg-emerald-50 border-emerald-200 text-emerald-700"
-                          : item.status === "overdue"
-                          ? "bg-red-50 border-red-200 text-red-700"
-                          : "bg-blue-50 border-blue-200 text-blue-700";
-                      return (
-                        <div key={item.id} className={`rounded-md border px-1.5 py-1 text-[11px] leading-tight ${statusClass}`}>
-                          <p className="font-semibold truncate">{item.asset_name}</p>
-                          <p className="truncate opacity-90">{item.model || "Sin modelo"} · {tipo}</p>
-                          <p className="truncate opacity-90">Asignado: {item.assigned_to_name || "Sin asignar"}</p>
-                          <p className="truncate opacity-90">Max: {item.max_due_date ? String(item.max_due_date).slice(0, 10) : "-"}</p>
-                          <p className="truncate opacity-90">Retiro: {item.coordinated_withdrawal_date ? String(item.coordinated_withdrawal_date).slice(0, 10) : "Pendiente"}</p>
-                        </div>
-                      );
-                    })}
-                    {dayItems.length > 2 ? <div className="text-[11px] text-slate-500">+{dayItems.length - 2} mas</div> : null}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+            {showCalendar ? <FiChevronUp size={15} className="text-slate-400" /> : <FiChevronDown size={15} className="text-slate-400" />}
+          </button>
+          {showCalendar && (
+            <div className="px-4 pb-4 border-t border-slate-100">
+              <div className="flex items-center justify-end gap-2 py-3">
+                <button type="button" onClick={() => setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+                  className="cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+                  &larr;
+                </button>
+                <span className="text-sm text-slate-600 min-w-[140px] text-center">
+                  {monthStart.toLocaleDateString("es-EC", { month: "long", year: "numeric" })}
+                </span>
+                <button type="button" onClick={() => setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+                  className="cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+                  &rarr;
+                </button>
+              </div>
+              <div className="grid grid-cols-7 gap-1 text-xs text-slate-500 mb-1">
+                {["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"].map((d) => (
+                  <div key={d} className="px-1 py-1 font-semibold text-center">{d}</div>
+                ))}
+              </div>
+              <div className="grid grid-cols-7 gap-1">
+                {calendarDays.map((d) => {
+                  const key = d.toISOString().slice(0, 10);
+                  const dayItems = maintenanceByDate[key] || [];
+                  const inMonth = d.getMonth() === monthStart.getMonth() && d.getFullYear() === monthStart.getFullYear();
+                  return (
+                    <div key={key} className={`min-h-[80px] rounded-xl border p-1.5 ${inMonth ? "bg-white border-slate-200" : "bg-slate-50 border-slate-100"}`}>
+                      <p className={`text-[11px] mb-1 font-medium ${inMonth ? "text-slate-700" : "text-slate-400"}`}>{d.getDate()}</p>
+                      <div className="space-y-1">
+                        {dayItems.slice(0, 2).map((item) => {
+                          const tipoItem = (String(item.notes || "").split("|")[0] || "Preventivo").trim();
+                          const cls = item.status === "completed"
+                            ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                            : item.status === "overdue"
+                            ? "bg-red-50 border-red-200 text-red-700"
+                            : "bg-blue-50 border-blue-200 text-blue-700";
+                          return (
+                            <div key={item.id} className={`rounded border px-1 py-0.5 text-[10px] leading-tight ${cls}`}>
+                              <p className="font-semibold truncate">{item.asset_name}</p>
+                              <p className="truncate opacity-80">{tipoItem}</p>
+                            </div>
+                          );
+                        })}
+                        {dayItems.length > 2 && <p className="text-[10px] text-slate-400">+{dayItems.length - 2}</p>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Modal: Programar mantenimiento manual */}
+      <Modal open={showManualForm} onClose={saving ? undefined : () => setShowManualForm(false)} title="Programar mantenimiento" maxWidth="max-w-lg">
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-500">Equipo *</label>
+            <select value={manualForm.asset_id} onChange={(e) => setManualForm((p) => ({ ...p, asset_id: e.target.value }))}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors">
+              <option value="">Selecciona equipo</option>
+              {assets.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}{a.brand ? ` · ${a.brand}` : ""}{a.model ? ` ${a.model}` : ""}</option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-500">Tipo</label>
+              <select value={manualForm.tipo} onChange={(e) => setManualForm((p) => ({ ...p, tipo: e.target.value }))}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors">
+                <option value="Preventivo">Preventivo</option>
+                <option value="Correctivo">Correctivo</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-500">Fecha programada *</label>
+              <input type="date" value={manualForm.fecha_programada} onChange={(e) => setManualForm((p) => ({ ...p, fecha_programada: e.target.value }))}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors" />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-500">Responsable</label>
+            <input type="text" placeholder="Nombre del responsable" value={manualForm.responsable} onChange={(e) => setManualForm((p) => ({ ...p, responsable: e.target.value }))}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none transition-colors" />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-500">Observaciones</label>
+            <input type="text" placeholder="Notas adicionales" value={manualForm.observaciones} onChange={(e) => setManualForm((p) => ({ ...p, observaciones: e.target.value }))}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none transition-colors" />
+          </div>
+          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <button type="button" onClick={() => setShowManualForm(false)} disabled={saving}
+              className="cursor-pointer rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50">
+              Cancelar
+            </button>
+            <button type="button" onClick={createManualMaintenance} disabled={saving}
+              className="cursor-pointer rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-50">
+              {saving ? "Guardando..." : "Programar"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal: Coordinar fecha de retiro */}
+      <Modal open={!!coordModal} onClose={saving ? undefined : () => setCoordModal(null)} title="Coordinar retiro" maxWidth="max-w-sm">
+        <div className="space-y-4">
+          {coordModal && (
+            <p className="text-sm text-slate-600">
+              Equipo: <span className="font-medium text-slate-800">{coordModal.assetName}</span>
+            </p>
+          )}
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-500">Fecha coordinada de retiro *</label>
+            <input type="date" value={coordModalDate} onChange={(e) => setCoordModalDate(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors" />
+          </div>
+          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <button type="button" onClick={() => setCoordModal(null)} disabled={saving}
+              className="cursor-pointer rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50">
+              Cancelar
+            </button>
+            <button type="button" onClick={saveCoordinationDate} disabled={saving}
+              className="cursor-pointer rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-50">
+              {saving ? "Guardando..." : "Guardar"}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Reports */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -2930,6 +3232,334 @@ const TIDeviceManagementPage = () => {
       </>
       )}
 
+      {activeTab === 'numeros-corporativos' && (
+      <>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.01em] text-slate-400">Total</p>
+            <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{corporateNumbers.length}</p>
+            <p className="mt-1 text-xs text-slate-500">Numeros registrados en inventario TI.</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.01em] text-slate-400">Disponibles</p>
+            <p className="mt-2 text-2xl font-semibold tracking-tight text-emerald-700">
+              {corporateNumbers.filter((item) => String(item.status || "").toLowerCase() === "available").length}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">Listos para asignarse a celulares.</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.01em] text-slate-400">Asignados</p>
+            <p className="mt-2 text-2xl font-semibold tracking-tight text-blue-700">
+              {corporateNumbers.filter((item) => String(item.status || "").toLowerCase() === "assigned").length}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">Vinculados a equipo y colaborador.</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.01em] text-slate-400">Inactivos</p>
+            <p className="mt-2 text-2xl font-semibold tracking-tight text-amber-700">
+              {corporateNumbers.filter((item) => String(item.status || "").toLowerCase() === "inactive").length}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">Reservados fuera de uso operativo.</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:sticky xl:top-6 xl:self-start">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">
+                  {editingCorporateId ? "Editar numero corporativo" : "Nuevo numero corporativo"}
+                </h2>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  Administra el inventario de lineas y deja listas solo las que TI debe operar.
+                </p>
+              </div>
+              {(showCorporateCreate || editingCorporateId) ? (
+                <button
+                  type="button"
+                  onClick={resetCorporateEditor}
+                  className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+              ) : null}
+            </div>
+
+            {!canWrite ? (
+              <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-medium text-slate-700">Modo solo lectura</p>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  Tu rol puede consultar el inventario de lineas, pero no crear ni editar numeros corporativos.
+                </p>
+              </div>
+            ) : !showCorporateCreate && !editingCorporateId ? (
+              <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-medium text-slate-700">Alta controlada</p>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  Registra un nuevo numero y luego podras asignarlo solo desde TI o Jefe TI a un dispositivo celular.
+                </p>
+                <Button
+                  type="button"
+                  variant="primary"
+                  icon={FiPlus}
+                  className="mt-4"
+                  onClick={() => setShowCorporateCreate(true)}
+                >
+                  Agregar numero
+                </Button>
+              </div>
+            ) : (
+              <div className="mt-5 space-y-4">
+                <div>
+                  <Label required>Numero corporativo</Label>
+                  <input
+                    type="text"
+                    value={corporateForm.number}
+                    onChange={(e) => setCorporateForm((prev) => ({ ...prev, number: e.target.value }))}
+                    placeholder="Ej: 0999999999"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
+                  />
+                </div>
+                {editingCorporateId ? (
+                  <div>
+                    <Label>Estado administrativo</Label>
+                    <select
+                      value={corporateForm.status}
+                      onChange={(e) => setCorporateForm((prev) => ({ ...prev, status: e.target.value }))}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
+                    >
+                      <option value="available">Disponible</option>
+                      <option value="assigned">Asignado</option>
+                      <option value="inactive">Inactivo</option>
+                    </select>
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                      Un numero asignado no puede pasar manualmente a otro estado mientras siga vinculado a un equipo.
+                    </p>
+                  </div>
+                ) : null}
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    icon={FiCheck}
+                    disabled={saving}
+                    onClick={submitCorporateNumber}
+                  >
+                    {editingCorporateId ? "Guardar cambios" : "Registrar numero"}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-100 p-5">
+              <div className="flex flex-col gap-4">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-900">Inventario de numeros corporativos</h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Filtra por estado y revisa a que equipo celular y a que colaborador esta asociada cada linea.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_200px_auto]">
+                  <div className="relative">
+                    <FiSearch size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={corporateSearch}
+                      onChange={(e) => setCorporateSearch(e.target.value)}
+                      placeholder="Buscar por numero, equipo o colaborador"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
+                    />
+                  </div>
+                  <select
+                    value={corporateFilterStatus}
+                    onChange={(e) => setCorporateFilterStatus(e.target.value)}
+                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
+                  >
+                    <option value="all">Todos los estados</option>
+                    <option value="available">Disponibles</option>
+                    <option value="assigned">Asignados</option>
+                    <option value="inactive">Inactivos</option>
+                  </select>
+                  <Button type="button" variant="secondary" icon={FiRefreshCw} onClick={loadCorporateNumbers}>
+                    Recargar
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {corporateNumbersLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <FiRefreshCw size={20} className="animate-spin text-slate-300" />
+              </div>
+            ) : filteredCorporateNumbers.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <FiShield size={32} className="text-slate-200" />
+                <p className="mt-3 text-sm font-medium text-slate-500">Sin numeros para este filtro</p>
+                <p className="mt-1 text-xs text-slate-400">Ajusta la busqueda o registra una nueva linea corporativa.</p>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-3 p-4 lg:hidden">
+                  {filteredCorporateNumbers.map((row) => {
+                    const statusValue = String(row.status || "").toLowerCase();
+                    const statusClass =
+                      statusValue === "assigned"
+                        ? "bg-blue-50 text-blue-700"
+                        : statusValue === "inactive"
+                        ? "bg-amber-50 text-amber-700"
+                        : "bg-green-50 text-green-700";
+                    return (
+                      <div key={row.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-mono text-sm font-semibold text-slate-900">{row.number}</p>
+                            <p className="mt-1 text-xs text-slate-500">{row.asset_name || "Sin equipo asignado"}</p>
+                          </div>
+                          <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusClass}`}>
+                            {statusValue === "assigned" ? "Asignado" : statusValue === "inactive" ? "Inactivo" : "Disponible"}
+                          </span>
+                        </div>
+                        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.01em] text-slate-400">Equipo</p>
+                            <p className="mt-1 text-sm font-medium text-slate-800">{row.asset_name || "Sin asignar"}</p>
+                            <p className="text-xs text-slate-500">{row.asset_code || "-"}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.01em] text-slate-400">Colaborador</p>
+                            <p className="mt-1 text-sm font-medium text-slate-800">{row.assigned_user_name || "Sin colaborador"}</p>
+                            <p className="text-xs text-slate-500">{row.assigned_user_cedula || row.assigned_user_department || "-"}</p>
+                          </div>
+                          <div className="sm:col-span-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.01em] text-slate-400">Actualizado</p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {row.updated_at
+                                ? new Date(row.updated_at).toLocaleString("es-EC", {
+                                    day: "2-digit",
+                                    month: "short",
+                                    year: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })
+                                : "-"}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-4 flex justify-end">
+                          {canWrite ? (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              icon={FiEdit2}
+                              onClick={() => startEditCorporateNumber(row)}
+                            >
+                              Editar
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-slate-400">Solo lectura</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="hidden lg:block">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-[920px] w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-left text-[11px] uppercase tracking-[0.01em] text-slate-400">
+                          <th className="px-4 py-3 font-medium">Numero</th>
+                          <th className="px-4 py-3 font-medium">Estado</th>
+                          <th className="px-4 py-3 font-medium">Equipo</th>
+                          <th className="px-4 py-3 font-medium">Colaborador</th>
+                          <th className="px-4 py-3 font-medium">Area</th>
+                          <th className="px-4 py-3 font-medium">Actualizado</th>
+                          <th className="px-4 py-3 font-medium">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredCorporateNumbers.map((row) => {
+                          const statusValue = String(row.status || "").toLowerCase();
+                          const statusClass =
+                            statusValue === "assigned"
+                              ? "bg-blue-50 text-blue-700"
+                              : statusValue === "inactive"
+                              ? "bg-amber-50 text-amber-700"
+                              : "bg-green-50 text-green-700";
+                          return (
+                            <tr key={row.id} className="border-b border-slate-50 align-top transition-colors hover:bg-slate-50">
+                              <td className="px-4 py-3">
+                                <p className="font-mono text-sm font-semibold text-slate-900">{row.number}</p>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass}`}>
+                                  {statusValue === "assigned" ? "Asignado" : statusValue === "inactive" ? "Inactivo" : "Disponible"}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-slate-600">
+                                {row.asset_name ? (
+                                  <>
+                                    <p className="text-sm font-medium text-slate-800">{row.asset_name}</p>
+                                    <p className="mt-0.5 text-xs text-slate-400">{row.asset_code || "Sin codigo"}</p>
+                                  </>
+                                ) : (
+                                  <span className="text-xs text-slate-400">Sin asignar</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-slate-600">
+                                {row.assigned_user_name ? (
+                                  <>
+                                    <p className="text-sm font-medium text-slate-800">{row.assigned_user_name}</p>
+                                    <p className="mt-0.5 text-xs text-slate-400">{row.assigned_user_cedula || "Sin cedula"}</p>
+                                  </>
+                                ) : (
+                                  <span className="text-xs text-slate-400">Sin colaborador</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-slate-500">{row.assigned_user_department || "-"}</td>
+                              <td className="px-4 py-3 text-xs text-slate-500">
+                                {row.updated_at
+                                  ? new Date(row.updated_at).toLocaleString("es-EC", {
+                                      day: "2-digit",
+                                      month: "short",
+                                      year: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })
+                                  : "-"}
+                              </td>
+                              <td className="px-4 py-3">
+                                {canWrite ? (
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    icon={FiEdit2}
+                                    onClick={() => startEditCorporateNumber(row)}
+                                  >
+                                    Editar
+                                  </Button>
+                                ) : (
+                                  <span className="text-xs text-slate-400">Solo lectura</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </>
+      )}
+
       {/* Tab: Todas las actas */}
       {activeTab === 'todas-actas' && (
         <TIActasView />
@@ -2939,5 +3569,3 @@ const TIDeviceManagementPage = () => {
 };
 
 export default TIDeviceManagementPage;
-
-
