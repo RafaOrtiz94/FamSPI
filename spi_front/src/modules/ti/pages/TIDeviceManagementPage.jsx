@@ -1835,7 +1835,7 @@ const TIDeviceManagementPage = () => {
                       </div>
                     ))}
                     <div className="col-span-2 flex items-center gap-1.5 mt-1 text-xs text-slate-400">
-                      <FiLock size={10} /> Bloqueado �?" usa "Habilitar edición" para modificar
+                      <FiLock size={10} /> Bloqueado — usa "Habilitar edición" para modificar
                     </div>
                   </div>
                 )}
