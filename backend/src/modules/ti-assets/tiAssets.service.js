@@ -1799,6 +1799,21 @@ async function updateActa({ actaId, data = {}, userId }) {
     const mainAssetId = (itemsProvided ? sanitizedItems.find((item) => item.asset_id)?.asset_id : null) || acta.asset_id || null;
     const nextNotes = data.notes !== undefined ? (String(data.notes || "").trim() || null) : acta.notes;
 
+    // Fecha de entrega — permite retroactivar para equipos entregados antes del sistema
+    let targetDay = acta.acta_day;
+    let targetMonth = acta.acta_month;
+    let targetYear = acta.acta_year;
+    let targetGeneratedAt = null; // null → no cambiar
+    if (data.acta_date) {
+      const parsed = new Date(data.acta_date);
+      if (!Number.isNaN(parsed.getTime())) {
+        targetDay   = parsed.getUTCDate();
+        targetMonth = parsed.getUTCMonth() + 1;
+        targetYear  = parsed.getUTCFullYear();
+        targetGeneratedAt = parsed;
+      }
+    }
+
     // Si había un workflow en progreso, cancelarlo antes de editar el acta
     if (acta.signature_workflow_id) {
       try {
@@ -1815,6 +1830,10 @@ async function updateActa({ actaId, data = {}, userId }) {
               recipient_cedula = $4,
               recipient_cargo = $5,
               notes = $6,
+              acta_day = $7,
+              acta_month = $8,
+              acta_year = $9,
+              generated_at = COALESCE($10, generated_at),
               pdf_drive_file_id = NULL,
               pdf_sha256 = NULL,
               pdf_filename = NULL,
@@ -1823,7 +1842,8 @@ async function updateActa({ actaId, data = {}, userId }) {
               signature_workflow_status = NULL,
               final_verification_token = NULL
         WHERE id = $1`,
-      [normalizedActaId, mainAssetId, targetRecipientNombre, targetRecipientCedula, targetRecipientCargo, nextNotes],
+      [normalizedActaId, mainAssetId, targetRecipientNombre, targetRecipientCedula, targetRecipientCargo, nextNotes,
+       targetDay, targetMonth, targetYear, targetGeneratedAt],
     );
 
     if (itemsProvided) {

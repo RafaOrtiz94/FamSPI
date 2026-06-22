@@ -25,11 +25,24 @@ export function buildWorkflowSignerDraft(user = null, role = "firmante") {
 
 // ── Modal edición de datos del receptor ──────────────────────────────────────
 
+function _toDateInputValue(acta) {
+  if (!acta) return "";
+  if (acta.acta_year && acta.acta_month && acta.acta_day) {
+    const y = acta.acta_year;
+    const m = String(acta.acta_month).padStart(2, "0");
+    const d = String(acta.acta_day).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  if (acta.generated_at) return String(acta.generated_at).slice(0, 10);
+  return "";
+}
+
 export function TiActaEditModal({ open, acta, onClose, onSaved }) {
   const { showToast } = useUI();
   const [recipientNombre, setRecipientNombre] = useState("");
   const [recipientCedula, setRecipientCedula] = useState("");
   const [recipientCargo, setRecipientCargo] = useState("");
+  const [actaDate, setActaDate] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -37,6 +50,7 @@ export function TiActaEditModal({ open, acta, onClose, onSaved }) {
     setRecipientNombre(acta.recipient_nombre || "");
     setRecipientCedula(acta.recipient_cedula || "");
     setRecipientCargo(acta.recipient_cargo || "");
+    setActaDate(_toDateInputValue(acta));
   }, [open, acta]);
 
   const handleSave = async () => {
@@ -44,6 +58,7 @@ export function TiActaEditModal({ open, acta, onClose, onSaved }) {
     if (!recipientNombre.trim()) return showToast("Ingresa el nombre del colaborador", "warning");
     if (!recipientCedula.trim()) return showToast("Ingresa la cédula del colaborador", "warning");
     if (!recipientCargo.trim()) return showToast("Ingresa el cargo del colaborador", "warning");
+    if (!actaDate) return showToast("Ingresa la fecha de entrega", "warning");
 
     setSaving(true);
     try {
@@ -51,6 +66,7 @@ export function TiActaEditModal({ open, acta, onClose, onSaved }) {
         recipient_nombre: recipientNombre.trim(),
         recipient_cedula: recipientCedula.trim(),
         recipient_cargo: recipientCargo.trim(),
+        acta_date: actaDate,
       });
       showToast("Datos del acta actualizados", "success");
       await onSaved?.();
@@ -71,7 +87,7 @@ export function TiActaEditModal({ open, acta, onClose, onSaved }) {
             {acta?.acta_code && <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-mono text-slate-500">{acta.acta_code}</span>}
           </div>
           <p className="text-xs text-slate-500">
-            Solo se puede corregir el nombre, cédula y cargo. Los equipos asignados no se modifican.
+            Corrige nombre, cédula, cargo y fecha de entrega. Los equipos asignados no se modifican.
           </p>
         </div>
 
@@ -87,6 +103,10 @@ export function TiActaEditModal({ open, acta, onClose, onSaved }) {
           <div>
             <label className={labelCls}>Cargo *</label>
             <input value={recipientCargo} onChange={(e) => setRecipientCargo(e.target.value)} className={fieldCls} placeholder="Cargo del colaborador" />
+          </div>
+          <div>
+            <label className={labelCls}>Fecha de entrega *</label>
+            <input type="date" value={actaDate} onChange={(e) => setActaDate(e.target.value)} className={fieldCls} />
           </div>
         </div>
 
