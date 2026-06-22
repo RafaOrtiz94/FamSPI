@@ -136,9 +136,17 @@ async function _resolveCollabActaFolderId() {
   return folder?.id || rootFolderId;
 }
 
+const _SURNAME_PARTICLES = new Set(["de", "del", "la", "el", "los", "las", "van", "von", "le", "y"]);
+
 function _trimLastSurname(fullName = "") {
   const parts = String(fullName).trim().split(/\s+/);
-  return parts.length >= 3 ? parts.slice(0, -1).join(" ") : String(fullName).trim();
+  if (parts.length < 3) return String(fullName).trim();
+  // Retroceder desde el final incluyendo partículas del apellido compuesto
+  let start = parts.length - 1;
+  while (start > 1 && _SURNAME_PARTICLES.has(parts[start - 1].toLowerCase())) {
+    start--;
+  }
+  return parts.slice(0, start).join(" ");
 }
 
 function _buildActaTemplateReplacements(acta) {
