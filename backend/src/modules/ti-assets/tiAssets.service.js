@@ -28,6 +28,7 @@ const ALLOWED_STATUSES = new Set([
 ]);
 
 const TI_ROLES = ["ti", "jefe_ti", "admin_ti", "gerencia"];
+const TI_CORPORATE_ASSIGN_ROLES = ["ti", "jefe_ti"];
 const TI_READ_ROLES = [
   "ti", "jefe_ti", "admin_ti", "gerencia", "gerencia_general",
   "financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador",
@@ -40,6 +41,42 @@ const TI_ACTA_RETIRO_TEMPLATE_ID = process.env.TI_ACTA_RETIRO_TEMPLATE_ID || nul
 
 // Schema managed via migration 202_ti_assets_v2.sql — run it once against the DB.
 async function ensureTiAssetsSchema() { /* no-op */ }
+
+const normalizeAssetIdentifier = (value) => {
+  const normalized = String(value || "").trim();
+  return normalized || null;
+};
+
+async function assertUniqueAssetImei(imei, assetId = null, executor = db) {
+  const normalizedImei = normalizeAssetIdentifier(imei);
+  if (!normalizedImei) return null;
+
+  const params = [normalizedImei];
+  let where = `WHERE BTRIM(COALESCE(imei, '')) = $1`;
+
+  if (assetId != null) {
+    params.push(assetId);
+    where += ` AND id <> $2`;
+  }
+
+  const duplicate = await executor.query(
+    `SELECT id, asset_code, name, brand, model, serial_number, imei, active
+       FROM public.ti_assets
+       ${where}
+       ORDER BY id
+       LIMIT 1`,
+    params,
+  );
+
+  if (!duplicate.rows.length) return normalizedImei;
+
+  const err = new Error(
+    `Ya existe un activo TI con el IMEI ${normalizedImei} (ID ${duplicate.rows[0].id})`,
+  );
+  err.status = 409;
+  err.code = "DUPLICATE_IMEI";
+  throw err;
+}
 
 const getMonthNameEs = (monthNum) => {
   const months = [
@@ -332,8 +369,11 @@ async function _legacyEnsureTiAssetsSchema_UNUSED() {
   // Alteraciones a ti_asset_actas_items: características
   await db.query(`ALTER TABLE public.ti_asset_actas_items ADD COLUMN IF NOT EXISTS characteristics TEXT`);
 
-  // Alteraciones a ti_asset_assignments: características
+  // Alteraciones a ti_asset_assignments: características y evidencia sin acta
   await db.query(`ALTER TABLE public.ti_asset_assignments ADD COLUMN IF NOT EXISTS characteristics TEXT`);
+  await db.query(`ALTER TABLE public.ti_asset_assignments ADD COLUMN IF NOT EXISTS sin_acta BOOLEAN DEFAULT FALSE`);
+  await db.query(`ALTER TABLE public.ti_asset_assignments ADD COLUMN IF NOT EXISTS evidence_drive_file_id TEXT`);
+  await db.query(`ALTER TABLE public.ti_asset_assignments ADD COLUMN IF NOT EXISTS evidence_file_url TEXT`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_asset_assignments_asset_user ON public.ti_asset_assignments(asset_id, assigned_to_user_id)`);
 
   // Alteraciones a ti_asset_financial_docs: columnas añadidas posteriormente
@@ -554,6 +594,8 @@ async function createAsset({ data, userId }) {
     throw err;
   }
   const safePurchaseDate = purchase_date ? String(purchase_date).trim() : null;
+  const normalizedSerialNumber = normalizeAssetIdentifier(serial_number);
+  const normalizedImei = await assertUniqueAssetImei(imei);
 
   // FASE 3: Calcular categoría automáticamente
   const parsedValue = purchase_value ? parseFloat(purchase_value) : null;
@@ -572,8 +614,8 @@ async function createAsset({ data, userId }) {
       model || null,
       JSON.stringify(characteristics || {}),
       Number.isFinite(Number(maintenance_frequency_months)) ? Number(maintenance_frequency_months) : 12,
-      serial_number || null,
-      imei || null,
+      normalizedSerialNumber,
+      normalizedImei,
       safePurchaseDate,
       parsedValue || null,
       valueCategory,
@@ -584,7 +626,7 @@ async function createAsset({ data, userId }) {
   await db.query(
     `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
      VALUES ($1,'asset_created',$2::jsonb,$3,now())`,
-    [asset.id, JSON.stringify({ name, brand, model, serial_number, imei, purchase_date: safePurchaseDate, purchase_value: parsedValue }), userId],
+    [asset.id, JSON.stringify({ name, brand, model, serial_number: normalizedSerialNumber, imei: normalizedImei, purchase_date: safePurchaseDate, purchase_value: parsedValue }), userId],
   );
   return { ...asset, ...computeDepreciation(asset.purchase_date) };
 }
@@ -592,6 +634,14 @@ async function createAsset({ data, userId }) {
 async function updateAsset({ assetId, data, userId }) {
   await ensureTiAssetsSchema();
   const safePurchaseDate = data?.purchase_date ? String(data.purchase_date).trim() : undefined;
+  const normalizedSerialNumber =
+    data?.serial_number !== undefined
+      ? normalizeAssetIdentifier(data.serial_number)
+      : null;
+  const normalizedImei =
+    data?.imei !== undefined
+      ? await assertUniqueAssetImei(data.imei, assetId)
+      : null;
   const { rows } = await db.query(
     `UPDATE public.ti_assets
         SET name = COALESCE($1, name),
@@ -612,8 +662,8 @@ async function updateAsset({ assetId, data, userId }) {
       data?.model ?? null,
       data?.characteristics ? JSON.stringify(data.characteristics) : null,
       Number.isFinite(Number(data?.maintenance_frequency_months)) ? Number(data.maintenance_frequency_months) : null,
-      data?.serial_number ?? null,
-      data?.imei ?? null,
+      normalizedSerialNumber,
+      normalizedImei,
       safePurchaseDate ?? null,
       userId,
       assetId,
@@ -642,6 +692,10 @@ async function assignAsset({
   recipientCedula = null,
   recipientCargo = null,
   actaItems = null,   // [{item_type, asset_id, accessory_id, name, brand_model, serial_imei, is_new, physical_condition, observations}]
+  // Sin acta: skip doc generation, optionally attach evidence file
+  skipActa = false,
+  evidenceDriveFileId = null,
+  evidenceFileUrl = null,
 }) {
   await ensureTiAssetsSchema();
   const client = await db.getClient();
@@ -678,10 +732,10 @@ async function assignAsset({
     );
     // FASE 5: Insertar asignación con características
     const assignmentRes = await client.query(
-      `INSERT INTO public.ti_asset_assignments (asset_id, assigned_to_user_id, previous_user_id, action, reason, characteristics, created_by, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+      `INSERT INTO public.ti_asset_assignments (asset_id, assigned_to_user_id, previous_user_id, action, reason, characteristics, sin_acta, evidence_drive_file_id, evidence_file_url, created_by, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())
        RETURNING id`,
-      [assetId, assignedToUserId, current.assigned_to_user_id, assignedToUserId ? "assign_or_reassign" : "unassign", reason, actaItems ? JSON.stringify(actaItems) : null, userId],
+      [assetId, assignedToUserId, current.assigned_to_user_id, assignedToUserId ? "assign_or_reassign" : "unassign", reason, actaItems ? JSON.stringify(actaItems) : null, skipActa, evidenceDriveFileId, evidenceFileUrl, userId],
     );
     const assignmentId = assignmentRes.rows[0]?.id || null;
     await client.query(
@@ -722,28 +776,31 @@ async function assignAsset({
       ];
     }
 
-    const tipo = assignedToUserId ? "entrega" : "retiro";
-    // Frontend puede enviar datos manuales cuando la ficha está incompleta; si los 3 vienen, úsalos directamente
-    let rNombre, rCedula, rCargo;
-    if (recipientNombre && recipientCedula && recipientCargo) {
-      rNombre = recipientNombre; rCedula = recipientCedula; rCargo = recipientCargo;
-    } else {
-      const actaRecipientId = assignedToUserId || current.assigned_to_user_id;
-      ({ nombre: rNombre, cedula: rCedula, cargo: rCargo } = await resolveRecipientOrThrow(actaRecipientId, client));
+    let acta = null;
+    if (!skipActa) {
+      const tipo = assignedToUserId ? "entrega" : "retiro";
+      // Frontend puede enviar datos manuales cuando la ficha está incompleta; si los 3 vienen, úsalos directamente
+      let rNombre, rCedula, rCargo;
+      if (recipientNombre && recipientCedula && recipientCargo) {
+        rNombre = recipientNombre; rCedula = recipientCedula; rCargo = recipientCargo;
+      } else {
+        const actaRecipientId = assignedToUserId || current.assigned_to_user_id;
+        ({ nombre: rNombre, cedula: rCedula, cargo: rCargo } = await resolveRecipientOrThrow(actaRecipientId, client));
+      }
+      acta = await createActa({
+        tipo,
+        assetId,
+        recipientUserId: assignedToUserId,
+        previousUserId: current.assigned_to_user_id,
+        recipientNombre: rNombre,
+        recipientCedula: rCedula,
+        recipientCargo:  rCargo,
+        generatedBy: userId,
+        notes: reason,
+        items: resolvedItems,
+        client,
+      });
     }
-    const acta = await createActa({
-      tipo,
-      assetId,
-      recipientUserId: assignedToUserId,
-      previousUserId: current.assigned_to_user_id,
-      recipientNombre: rNombre,
-      recipientCedula: rCedula,
-      recipientCargo:  rCargo,
-      generatedBy: userId,
-      notes: reason,
-      items: resolvedItems,
-      client,
-    });
 
     // FASE 5: Crear letra de cambio automáticamente si se está asignando
     if (assignedToUserId && assignmentId) {
@@ -769,7 +826,10 @@ async function assignAsset({
     return {
       ...upd.rows[0],
       ...computeDepreciation(upd.rows[0].purchase_date),
-      acta_id: acta.id,
+      acta_id: acta?.id || null,
+      sin_acta: skipActa,
+      evidence_drive_file_id: evidenceDriveFileId,
+      evidence_file_url: evidenceFileUrl,
     };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -790,6 +850,10 @@ async function assignMultipleAssets({
   recipientCedula = null,
   recipientCargo = null,
   acta_items = null, // Optional: pre-built items with state data
+  // Sin acta
+  skipActa = false,
+  evidenceDriveFileId = null,
+  evidenceFileUrl = null,
 }) {
   await ensureTiAssetsSchema();
   if (!assetIds.length) {
@@ -898,35 +962,39 @@ async function assignMultipleAssets({
       }
     }
 
-    // Create acta with all items
-    const tipo = assignedToUserId ? "entrega" : "retiro";
-    let rNombre, rCedula, rCargo;
-    if (recipientNombre && recipientCedula && recipientCargo) {
-      rNombre = recipientNombre; rCedula = recipientCedula; rCargo = recipientCargo;
-    } else {
-      const batchRecipientId = assignedToUserId || assetsQ.rows[0]?.assigned_to_user_id || null;
-      ({ nombre: rNombre, cedula: rCedula, cargo: rCargo } = await resolveRecipientOrThrow(batchRecipientId, client));
+    // Create acta with all items (unless skipActa)
+    let acta = null;
+    if (!skipActa) {
+      const tipo = assignedToUserId ? "entrega" : "retiro";
+      let rNombre, rCedula, rCargo;
+      if (recipientNombre && recipientCedula && recipientCargo) {
+        rNombre = recipientNombre; rCedula = recipientCedula; rCargo = recipientCargo;
+      } else {
+        const batchRecipientId = assignedToUserId || assetsQ.rows[0]?.assigned_to_user_id || null;
+        ({ nombre: rNombre, cedula: rCedula, cargo: rCargo } = await resolveRecipientOrThrow(batchRecipientId, client));
+      }
+      acta = await createActa({
+        tipo,
+        assetId: null,
+        recipientUserId: assignedToUserId,
+        previousUserId: assetsQ.rows[0]?.assigned_to_user_id || null,
+        recipientNombre: rNombre,
+        recipientCedula: rCedula,
+        recipientCargo:  rCargo,
+        generatedBy: userId,
+        notes: reason,
+        items: resolvedItems,
+        client,
+      });
     }
-    const acta = await createActa({
-      tipo,
-      assetId: null,
-      recipientUserId: assignedToUserId,
-      previousUserId: assetsQ.rows[0]?.assigned_to_user_id || null,
-      recipientNombre: rNombre,
-      recipientCedula: rCedula,
-      recipientCargo:  rCargo,
-      generatedBy: userId,
-      notes: reason,
-      items: resolvedItems,
-      client,
-    });
 
     await client.query("COMMIT");
     return {
-      acta_id: acta.id,
-      acta_code: acta.acta_code,
+      acta_id: acta?.id || null,
+      acta_code: acta?.acta_code || null,
       assets_assigned: assetIds.length,
       items_count: resolvedItems.length,
+      sin_acta: skipActa,
     };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -2728,12 +2796,14 @@ async function listCorporateNumbers({ status, q }) {
   const { rows } = await db.query(
     `SELECT cn.*,
             COALESCE(u.fullname, u.name, u.email) AS assigned_user_name,
-            COALESCE(u.cedula, '') AS assigned_user_cedula,
-            COALESCE(u.departamento, '') AS assigned_user_department,
+            COALESCE(cp.profile->'personal'->>'cedula', '') AS assigned_user_cedula,
+            COALESCE(d.name, '') AS assigned_user_department,
             COALESCE(a.name, '') AS asset_name,
             COALESCE(a.asset_code, '') AS asset_code
        FROM public.ti_corporate_numbers cn
        LEFT JOIN public.users u ON u.id = cn.assigned_to_user_id
+       LEFT JOIN public.collaborator_profiles cp ON cp.user_id = u.id
+       LEFT JOIN public.departments d ON d.id = u.department_id
        LEFT JOIN public.ti_assets a ON a.id = cn.asset_id
        ${where}
        ORDER BY cn.number ASC`,
@@ -2792,6 +2862,54 @@ async function createCorporateNumber({ number, notes, userId }) {
   return rows[0];
 }
 
+async function updateCorporateNumber({ numberId, number, status, userId }) {
+  await ensureTiAssetsSchema();
+
+  const current = await getCorporateNumber(numberId);
+  const nextNumber = number !== undefined ? String(number || "").trim() : current.number;
+  const nextStatus = status !== undefined ? String(status || "").trim().toLowerCase() : current.status;
+
+  if (!nextNumber) {
+    const err = new Error("Numero corporativo es obligatorio");
+    err.status = 400;
+    throw err;
+  }
+
+  if (!["available", "assigned", "inactive"].includes(nextStatus)) {
+    const err = new Error("Estado de numero corporativo invalido");
+    err.status = 400;
+    throw err;
+  }
+
+  if (nextStatus !== "assigned" && current.asset_id) {
+    const err = new Error("No se puede cambiar manualmente el estado de un numero que ya esta asignado");
+    err.status = 400;
+    throw err;
+  }
+
+  const duplicate = await db.query(
+    `SELECT id FROM public.ti_corporate_numbers WHERE number = $1 AND id <> $2 LIMIT 1`,
+    [nextNumber, numberId],
+  );
+  if (duplicate.rows.length) {
+    const err = new Error("Numero corporativo ya existe");
+    err.status = 409;
+    throw err;
+  }
+
+  const { rows } = await db.query(
+    `UPDATE public.ti_corporate_numbers
+        SET number = $1,
+            status = $2,
+            updated_at = now()
+      WHERE id = $3
+      RETURNING *`,
+    [nextNumber, nextStatus, numberId],
+  );
+
+  return rows[0];
+}
+
 async function assignCorporateNumber({ numberId, assetId, assignedToUserId, userId }) {
   await ensureTiAssetsSchema();
 
@@ -2805,6 +2923,12 @@ async function assignCorporateNumber({ numberId, assetId, assignedToUserId, user
   if (!asset) {
     const err = new Error("Activo no encontrado");
     err.status = 404;
+    throw err;
+  }
+
+  if (!isMobileAsset(asset)) {
+    const err = new Error("Solo se puede asignar un numero corporativo a dispositivos celulares");
+    err.status = 400;
     throw err;
   }
 
@@ -2870,6 +2994,19 @@ async function changeCorporateNumber({ currentNumberId, newNumberId, reason, use
   }
 
   const assetId = currentNum.asset_id;
+  const asset = await getAsset(assetId);
+
+  if (!asset) {
+    const err = new Error("Activo no encontrado");
+    err.status = 404;
+    throw err;
+  }
+
+  if (!isMobileAsset(asset)) {
+    const err = new Error("Solo se puede cambiar el numero corporativo de dispositivos celulares");
+    err.status = 400;
+    throw err;
+  }
 
   // Actualizar números
   await db.query(
@@ -2920,6 +3057,30 @@ async function getAsset(assetId) {
   return rows[0] || null;
 }
 
+function isMobileAsset(asset = {}) {
+  const haystack = [
+    asset?.name,
+    asset?.brand,
+    asset?.model,
+    asset?.serial_number,
+    asset?.imei,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (!haystack) return false;
+  return (
+    haystack.includes("cel") ||
+    haystack.includes("movil") ||
+    haystack.includes("móvil") ||
+    haystack.includes("phone") ||
+    haystack.includes("iphone") ||
+    haystack.includes("android") ||
+    Boolean(String(asset?.imei || "").trim())
+  );
+}
+
 module.exports = {
   TI_ROLES,
   TI_READ_ROLES,
@@ -2936,9 +3097,11 @@ module.exports = {
   listCorporateNumbers,
   getCorporateNumber,
   createCorporateNumber,
+  updateCorporateNumber,
   assignCorporateNumber,
   changeCorporateNumber,
   getCorporateNumberHistory,
+  TI_CORPORATE_ASSIGN_ROLES,
   listAssetAssignmentsHistory,
   generateAnnualMaintenance,
   generateFutureMaintenance,

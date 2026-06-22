@@ -3,7 +3,7 @@ const multer  = require("multer");
 const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
 const ctrl = require("./tiAssets.controller");
-const { TI_ROLES, TI_READ_ROLES, TI_ASSET_CREATE_ROLES } = require("./tiAssets.service");
+const { TI_ROLES, TI_READ_ROLES, TI_ASSET_CREATE_ROLES, TI_CORPORATE_ASSIGN_ROLES } = require("./tiAssets.service");
 
 const router   = express.Router();
 const upload   = multer({ storage: multer.memoryStorage() });
@@ -16,8 +16,9 @@ router.get("/corporate-numbers",                    requireRole(TI_READ_ROLES), 
 router.get("/corporate-numbers/:id",                requireRole(TI_READ_ROLES), ctrl.getCorporateNumber);
 router.get("/corporate-numbers/:id/history",       requireRole(TI_READ_ROLES), ctrl.getCorporateNumberHistory);
 router.post("/corporate-numbers",                   requireRole(TI_ROLES), ctrl.createCorporateNumber);
-router.post("/corporate-numbers/:id/assign",       requireRole(TI_ROLES), ctrl.assignCorporateNumber);
-router.post("/corporate-numbers/:currentId/change", requireRole(TI_ROLES), ctrl.changeCorporateNumber);
+router.patch("/corporate-numbers/:id",              requireRole(TI_ROLES), ctrl.updateCorporateNumber);
+router.post("/corporate-numbers/:id/assign",       requireRole(TI_CORPORATE_ASSIGN_ROLES), ctrl.assignCorporateNumber);
+router.post("/corporate-numbers/:currentId/change", requireRole(TI_CORPORATE_ASSIGN_ROLES), ctrl.changeCorporateNumber);
 
 // ── Read-only routes (TI + Financiero) ───────────────────────────────────────
 router.get("/",                          requireRole(TI_READ_ROLES), ctrl.listAssets);
@@ -47,9 +48,9 @@ router.post("/:id/financial-docs",      requireRole(TI_READ_ROLES), upload.singl
 
 // ── Write routes (TI only) ────────────────────────────────────────────────────
 router.post("/",                         requireRole(TI_ASSET_CREATE_ROLES), ctrl.createAsset);
-router.post("/batch/assign",             requireRole(TI_ROLES), ctrl.assignMultipleAssets);
+router.post("/batch/assign",             requireRole(TI_ROLES), upload.single("evidence"), ctrl.assignMultipleAssets);
 router.patch("/:id",                     requireRole(TI_ROLES), ctrl.updateAsset);
-router.post("/:id/assign",               requireRole(TI_ROLES), ctrl.assignAsset);
+router.post("/:id/assign",               requireRole(TI_ROLES), upload.single("evidence"), ctrl.assignAsset);
 router.post("/:id/status",               requireRole(TI_ROLES), ctrl.updateStatus);
 router.post("/:id/accessories",          requireRole(TI_ROLES), ctrl.createAccessory);
 router.patch("/:id/accessories/:accId",  requireRole(TI_ROLES), ctrl.updateAccessory);

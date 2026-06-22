@@ -15,14 +15,32 @@ export const updateTiAsset = async (assetId, payload = {}) => {
  return data?.data || null;
 };
 
-export const assignTiAsset = async (assetId, payload = {}) => {
- const { data } = await api.post(`/ti-assets/${assetId}/assign`, payload);
- return data?.data || null;
+export const assignTiAsset = async (assetId, payload = {}, evidenceFile = null) => {
+  if (payload.skip_acta && evidenceFile) {
+    const fd = new FormData();
+    Object.entries(payload).forEach(([k, v]) => {
+      if (v !== null && v !== undefined) fd.append(k, typeof v === "object" ? JSON.stringify(v) : v);
+    });
+    fd.append("evidence", evidenceFile);
+    const { data } = await api.post(`/ti-assets/${assetId}/assign`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+    return data?.data || null;
+  }
+  const { data } = await api.post(`/ti-assets/${assetId}/assign`, payload);
+  return data?.data || null;
 };
 
-export const assignMultipleTiAssets = async (payload = {}) => {
- const { data } = await api.post(`/ti-assets/batch/assign`, payload);
- return data?.data || null;
+export const assignMultipleTiAssets = async (payload = {}, evidenceFile = null) => {
+  if (payload.skip_acta && evidenceFile) {
+    const fd = new FormData();
+    Object.entries(payload).forEach(([k, v]) => {
+      if (v !== null && v !== undefined) fd.append(k, typeof v === "object" ? JSON.stringify(v) : v);
+    });
+    fd.append("evidence", evidenceFile);
+    const { data } = await api.post(`/ti-assets/batch/assign`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+    return data?.data || null;
+  }
+  const { data } = await api.post(`/ti-assets/batch/assign`, payload);
+  return data?.data || null;
 };
 
 export const updateTiAssetStatus = async (assetId, payload = {}) => {
@@ -264,6 +282,11 @@ export const getTiCorporateNumber = async (id) => {
 
 export const createTiCorporateNumber = async (payload = {}) => {
  const { data } = await api.post("/ti-assets/corporate-numbers", payload);
+ return data?.data || null;
+};
+
+export const updateTiCorporateNumber = async (id, payload = {}) => {
+ const { data } = await api.patch(`/ti-assets/corporate-numbers/${id}`, payload);
  return data?.data || null;
 };
 

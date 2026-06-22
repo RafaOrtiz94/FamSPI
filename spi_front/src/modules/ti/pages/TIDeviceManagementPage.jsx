@@ -296,7 +296,7 @@ const calculateDepreciation = (purchaseValue) => {
   };
 };
 
-// JSONB characteristics can arrive as object {} from DB �?" always stringify to string for display/input
+// JSONB characteristics can arrive as object {} from DB — always stringify to string for display/input
 const safeChars = (val) => {
   if (!val) return "";
   if (typeof val === "string") return val;
@@ -444,6 +444,8 @@ const TIDeviceManagementPage = () => {
   // Modal de asignación con acta (single asset)
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [assignModal, setAssignModal] = useState({ assigned_to_user_id: "", recipient_nombre: "", recipient_cedula: "", recipient_cargo: "", reason: "", acta_items: [] });
+  const [assignSkipActa, setAssignSkipActa] = useState(false);
+  const [assignEvidenceFile, setAssignEvidenceFile] = useState(null);
   const [recipientLoading, setRecipientLoading] = useState(false);
   const [recipientSource, setRecipientSource] = useState(null); // 'profile' | 'partial' | 'empty' | null
 
@@ -451,6 +453,8 @@ const TIDeviceManagementPage = () => {
   const [showBatchAssignModal, setShowBatchAssignModal] = useState(false);
   const [selectedAssets, setSelectedAssets] = useState(new Set());
   const [batchAssignForm, setBatchAssignForm] = useState({ assigned_to_user_id: "", recipient_nombre: "", recipient_cedula: "", recipient_cargo: "", reason: "" });
+  const [batchSkipActa, setBatchSkipActa] = useState(false);
+  const [batchEvidenceFile, setBatchEvidenceFile] = useState(null);
   const [batchRecipientLoading, setBatchRecipientLoading] = useState(false);
   const [batchRecipientSource, setBatchRecipientSource] = useState(null);
 
@@ -770,15 +774,23 @@ const TIDeviceManagementPage = () => {
         recipient_nombre: assignModal.recipient_nombre || null,
         recipient_cedula: assignModal.recipient_cedula || null,
         recipient_cargo: assignModal.recipient_cargo || null,
-        acta_items: assignModal.acta_items.map((it) => ({
+        acta_items: assignSkipActa ? [] : assignModal.acta_items.map((it) => ({
           ...it,
           physical_condition: it.physical_condition !== "" && it.physical_condition != null ? Number(it.physical_condition) : null,
         })),
+        skip_acta: assignSkipActa,
       };
-      const result = await assignTiAsset(selected.id, payload);
+      const result = await assignTiAsset(selected.id, payload, assignSkipActa ? assignEvidenceFile : null);
       const tipoMsg = payload.assigned_to_user_id ? "Equipo asignado" : "Asignación liberada";
-      showToast(`${tipoMsg}${result?.acta_id ? ` · Acta #${result.acta_id} generada` : ""}`, "success");
+      showToast(
+        assignSkipActa
+          ? `${tipoMsg} sin acta${assignEvidenceFile ? " · Evidencia subida" : ""}`
+          : `${tipoMsg}${result?.acta_id ? ` · Acta #${result.acta_id} generada` : ""}`,
+        "success"
+      );
       setShowAssignModal(false);
+      setAssignSkipActa(false);
+      setAssignEvidenceFile(null);
       await loadAll();
       loadHistory(selected.id);
       loadActas(selected.id);
@@ -822,13 +834,21 @@ const TIDeviceManagementPage = () => {
         recipient_nombre: batchAssignForm.recipient_nombre || null,
         recipient_cedula: batchAssignForm.recipient_cedula || null,
         recipient_cargo: batchAssignForm.recipient_cargo || null,
-        acta_items, // Include the items with their state data
+        acta_items: batchSkipActa ? [] : acta_items,
+        skip_acta: batchSkipActa,
       };
-      const result = await assignMultipleTiAssets(payload);
-      showToast(`${result.assets_assigned} equipos asignados · Acta #${result.acta_code} generada`, "success");
+      const result = await assignMultipleTiAssets(payload, batchSkipActa ? batchEvidenceFile : null);
+      showToast(
+        batchSkipActa
+          ? `${result.assets_assigned} equipos asignados sin acta${batchEvidenceFile ? " · Evidencia subida" : ""}`
+          : `${result.assets_assigned} equipos asignados · Acta #${result.acta_code} generada`,
+        "success"
+      );
       setShowBatchAssignModal(false);
       setSelectedAssets(new Set());
       setBatchAssignForm({ assigned_to_user_id: "", recipient_nombre: "", recipient_cedula: "", recipient_cargo: "", reason: "" });
+      setBatchSkipActa(false);
+      setBatchEvidenceFile(null);
       await loadAll();
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo asignar múltiples equipos", "error");
@@ -1024,7 +1044,7 @@ const TIDeviceManagementPage = () => {
       } else if (nombre) {
         setRecipientSource("partial");     // only name, no cedula/cargo
       } else {
-        setRecipientSource("empty");       // new hire �?" nothing in system
+        setRecipientSource("empty");       // new hire — nothing in system
       }
     } catch (_e) {
       setRecipientSource("empty");
@@ -1310,7 +1330,7 @@ const TIDeviceManagementPage = () => {
           ? { period_type: "monthly", year: reportYear, month: reportMonth }
           : { period_type: "annual", year: reportYear }
       );
-      showToast(`Informe generado · SHA-256: ${String(result?.sha256 || "").slice(0, 16)}�?�`, "success");
+      showToast(`Informe generado · SHA-256: ${String(result?.sha256 || "").slice(0, 16)}`, "success");
       await loadReports();
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo generar el informe", "error");
@@ -2292,11 +2312,59 @@ const TIDeviceManagementPage = () => {
       {/* Modal de asignacion / retiro con acta */}
       <Modal
         open={showAssignModal}
-        onClose={() => setShowAssignModal(false)}
-        title={assignModal.assigned_to_user_id ? "Acta de entrega de equipos" : "Acta de retiro de equipos"}
+        onClose={() => { setShowAssignModal(false); setAssignSkipActa(false); setAssignEvidenceFile(null); }}
+        title={assignModal.assigned_to_user_id ? "Asignación de equipo" : "Retiro de equipo"}
         maxWidth="max-w-3xl"
       >
         <div className="overflow-auto px-6 py-4 space-y-5" style={{ maxHeight: "65vh" }}>
+
+          {/* Toggle Con acta / Sin acta */}
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">Tipo de registro</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setAssignSkipActa(false); setAssignEvidenceFile(null); }}
+                className={`flex-1 rounded-lg border py-2.5 text-sm font-medium transition-colors ${
+                  !assignSkipActa
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+                }`}
+              >
+                Con acta
+                <p className="text-[10px] font-normal mt-0.5 opacity-70">Genera documento firmable</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAssignSkipActa(true)}
+                className={`flex-1 rounded-lg border py-2.5 text-sm font-medium transition-colors ${
+                  assignSkipActa
+                    ? "border-amber-500 bg-amber-50 text-amber-700"
+                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+                }`}
+              >
+                Sin acta
+                <p className="text-[10px] font-normal mt-0.5 opacity-70">Solo registra la asignación</p>
+              </button>
+            </div>
+            {assignSkipActa && (
+              <div className="mt-3">
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                  Evidencia de entrega <span className="text-slate-400">(opcional — PDF, imagen, correo escaneado)</span>
+                </label>
+                <input
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp"
+                  onChange={(e) => setAssignEvidenceFile(e.target.files?.[0] || null)}
+                  className="block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200"
+                />
+                {assignEvidenceFile && (
+                  <p className="mt-1 text-xs text-green-700">{assignEvidenceFile.name}</p>
+                )}
+              </div>
+            )}
+          </div>
+
               {/* Datos del colaborador */}
               <div>
                 <div className="flex items-center justify-between mb-3">
@@ -2309,17 +2377,17 @@ const TIDeviceManagementPage = () => {
                   )}
                   {!recipientLoading && recipientSource === "profile" && (
                     <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-700">
-                      <FiCheck size={9} /> Datos del perfil �?" editables
+                      <FiCheck size={9} /> Datos del perfil — editables
                     </span>
                   )}
                   {!recipientLoading && recipientSource === "partial" && (
                     <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                      Perfil incompleto �?" completa cédula y cargo
+                      Perfil incompleto — completa cédula y cargo
                     </span>
                   )}
                   {!recipientLoading && recipientSource === "empty" && (
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
-                      Sin perfil registrado �?" ingresa los datos manualmente
+                      Sin perfil registrado — ingresa los datos manualmente
                     </span>
                   )}
                 </div>
@@ -2368,7 +2436,7 @@ const TIDeviceManagementPage = () => {
                       onChange={(e) => setAssignModal((p) => ({ ...p, recipient_cedula: e.target.value }))}
                     />
                     {!recipientLoading && !assignModal.recipient_cedula && assignModal.assigned_to_user_id && (
-                      <p className="mt-1 text-[10px] text-amber-600">Cédula no encontrada en el perfil �?" ingresa manualmente</p>
+                      <p className="mt-1 text-[10px] text-amber-600">Cédula no encontrada en el perfil — ingresa manualmente</p>
                     )}
                   </div>
                   <div>
@@ -2387,7 +2455,7 @@ const TIDeviceManagementPage = () => {
                       onChange={(e) => setAssignModal((p) => ({ ...p, recipient_cargo: e.target.value }))}
                     />
                     {!recipientLoading && !assignModal.recipient_cargo && assignModal.assigned_to_user_id && (
-                      <p className="mt-1 text-[10px] text-amber-600">Cargo no encontrado en el perfil �?" ingresa manualmente</p>
+                      <p className="mt-1 text-[10px] text-amber-600">Cargo no encontrado en el perfil — ingresa manualmente</p>
                     )}
                   </div>
                   <div className="sm:col-span-2">
@@ -2496,14 +2564,62 @@ const TIDeviceManagementPage = () => {
         </div>
       </Modal>
 
-      {/* �"?�"? Modal de asignación múltiple �"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"?�"? */}
+      {/* ─? Modal de asignación múltiple ─?─?─?─?─?─?─?─?─?─?─?─?─?─?─?─?─? */}
       <Modal
         open={showBatchAssignModal}
-        onClose={() => setShowBatchAssignModal(false)}
+        onClose={() => { setShowBatchAssignModal(false); setBatchSkipActa(false); setBatchEvidenceFile(null); }}
         title={batchAssignForm.assigned_to_user_id ? "Asignar múltiples equipos" : "Liberar múltiples equipos"}
         maxWidth="max-w-2xl"
       >
         <div className="overflow-auto px-6 py-4 space-y-5" style={{ maxHeight: "65vh" }}>
+
+          {/* Toggle Con acta / Sin acta */}
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">Tipo de registro</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setBatchSkipActa(false); setBatchEvidenceFile(null); }}
+                className={`flex-1 rounded-lg border py-2.5 text-sm font-medium transition-colors ${
+                  !batchSkipActa
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+                }`}
+              >
+                Con acta
+                <p className="text-[10px] font-normal mt-0.5 opacity-70">Genera documento firmable</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBatchSkipActa(true)}
+                className={`flex-1 rounded-lg border py-2.5 text-sm font-medium transition-colors ${
+                  batchSkipActa
+                    ? "border-amber-500 bg-amber-50 text-amber-700"
+                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+                }`}
+              >
+                Sin acta
+                <p className="text-[10px] font-normal mt-0.5 opacity-70">Solo registra la asignación</p>
+              </button>
+            </div>
+            {batchSkipActa && (
+              <div className="mt-3">
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                  Evidencia de entrega <span className="text-slate-400">(opcional — PDF, imagen, correo escaneado)</span>
+                </label>
+                <input
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp"
+                  onChange={(e) => setBatchEvidenceFile(e.target.files?.[0] || null)}
+                  className="block w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200"
+                />
+                {batchEvidenceFile && (
+                  <p className="mt-1 text-xs text-green-700">{batchEvidenceFile.name}</p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Datos del colaborador */}
           <div>
             <div className="flex items-center justify-between mb-3">
@@ -2515,17 +2631,17 @@ const TIDeviceManagementPage = () => {
               )}
               {!batchRecipientLoading && batchRecipientSource === "profile" && (
                 <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-700">
-                  <FiCheck size={9} /> Datos del perfil �?" editables
+                  <FiCheck size={9} /> Datos del perfil — editables
                 </span>
               )}
               {!batchRecipientLoading && batchRecipientSource === "partial" && (
                 <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                  Perfil incompleto �?" completa cédula y cargo
+                  Perfil incompleto — completa cédula y cargo
                 </span>
               )}
               {!batchRecipientLoading && batchRecipientSource === "empty" && (
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
-                  Sin perfil registrado �?" ingresa los datos manualmente
+                  Sin perfil registrado — ingresa los datos manualmente
                 </span>
               )}
             </div>
@@ -2778,7 +2894,7 @@ const TIDeviceManagementPage = () => {
                       }))}
                       className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
                     >
-                      �-
+                      —
                     </button>
                     <p className="text-[9px] text-slate-400 text-center py-0.5">Foto {idx + 1}</p>
                   </div>
@@ -3248,7 +3364,7 @@ const TIDeviceManagementPage = () => {
                       <th className="px-4 py-3 text-left font-medium">Asignado a</th>
                       <th className="px-4 py-3 text-left font-medium">Tipo</th>
                       <th className="px-4 py-3 text-left font-medium">Cumple</th>
-                      <th className="px-4 py-3 text-left font-medium">M�ximo</th>
+                      <th className="px-4 py-3 text-left font-medium">Máximo</th>
                       <th className="px-4 py-3 text-left font-medium">Estado</th>
                       <th className="px-4 py-3 text-left font-medium sr-only">Acciones</th>
                     </tr>
@@ -3423,14 +3539,14 @@ const TIDeviceManagementPage = () => {
             ) : reports.length === 0 ? (
               <div className="flex flex-col items-center py-10 text-center">
                 <FiFileText size={28} className="text-slate-200 mb-2" />
-                <p className="text-sm text-slate-400">No hay informes generados. El sistema los genera autom�ticamente cada mes.</p>
+                <p className="text-sm text-slate-400">No hay informes generados. El sistema los genera automáticamente cada mes.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-xs uppercase text-slate-400 border-b border-slate-100">
-                      <th className="px-4 py-3 text-left font-medium">Per�odo</th>
+                      <th className="px-4 py-3 text-left font-medium">Período</th>
                       <th className="px-4 py-3 text-left font-medium">Generado</th>
                       <th className="px-4 py-3 text-left font-medium">Por</th>
                       <th className="px-4 py-3 text-left font-medium">Equipos</th>
@@ -3444,7 +3560,7 @@ const TIDeviceManagementPage = () => {
                       <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                         <td className="px-4 py-3">
                           <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-                            {String(r.period || "").match(/^\d{4}-\d{2}$/) ? `Mes ${r.period}` : `A�o ${r.period}`}
+                            {String(r.period || "").match(/^\d{4}-\d{2}$/) ? `Mes ${r.period}` : `Año ${r.period}`}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-xs text-slate-600 font-mono">
@@ -3491,7 +3607,7 @@ const TIDeviceManagementPage = () => {
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors">
                   <option value="">Selecciona equipo</option>
                   {assets.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}{a.brand ? ` � ${a.brand}` : ""}{a.model ? ` ${a.model}` : ""}</option>
+                    <option key={a.id} value={a.id}>{a.name}{a.brand ? ` · ${a.brand}` : ""}{a.model ? ` ${a.model}` : ""}</option>
                   ))}
                 </select>
               </div>

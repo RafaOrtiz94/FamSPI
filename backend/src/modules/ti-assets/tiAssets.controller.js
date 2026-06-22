@@ -2,6 +2,7 @@ const { asyncHandler } = require("../../middlewares/asyncHandler");
 const svc = require("./tiAssets.service");
 const reportSvc = require("./tiAssets.report");
 const { TI_ROLES } = require("./tiAssets.service");
+const { uploadFileToDrive, ensureFolderPath } = require("../../utils/drive");
 
 exports.listAssets = asyncHandler(async (req, res) => {
   const data = await svc.listAssets({ status: req.query?.status, q: req.query?.q });
@@ -18,8 +19,28 @@ exports.updateAsset = asyncHandler(async (req, res) => {
   res.status(200).json({ ok: true, data });
 });
 
+const TI_EVIDENCE_FOLDER = process.env.TI_EVIDENCE_FOLDER_ID || null;
+
+async function resolveEvidenceUpload(file) {
+  if (!file) return { evidenceDriveFileId: null, evidenceFileUrl: null };
+  let folderId = TI_EVIDENCE_FOLDER;
+  if (!folderId) {
+    const root = process.env.DRIVE_ROOT_FOLDER_ID;
+    const folder = await ensureFolderPath(["Activos TI", "Evidencias sin acta"], root);
+    folderId = folder.id;
+  }
+  const result = await uploadFileToDrive(file, `evidencia-${Date.now()}-${file.originalname}`, folderId);
+  return { evidenceDriveFileId: result?.id || null, evidenceFileUrl: result?.webViewLink || null };
+}
+
 exports.assignAsset = asyncHandler(async (req, res) => {
   const payload = req.body || {};
+  const skipActa = payload.skip_acta === true || payload.skip_acta === "true";
+  let evidenceDriveFileId = null;
+  let evidenceFileUrl = null;
+  if (skipActa && req.file) {
+    ({ evidenceDriveFileId, evidenceFileUrl } = await resolveEvidenceUpload(req.file));
+  }
   const data = await svc.assignAsset({
     assetId: req.params.id,
     assignedToUserId: payload.assigned_to_user_id || null,
@@ -29,6 +50,9 @@ exports.assignAsset = asyncHandler(async (req, res) => {
     recipientCedula: payload.recipient_cedula || null,
     recipientCargo:  payload.recipient_cargo  || null,
     actaItems: Array.isArray(payload.acta_items) && payload.acta_items.length ? payload.acta_items : null,
+    skipActa,
+    evidenceDriveFileId,
+    evidenceFileUrl,
   });
 
   if (data.acta_id) {
@@ -40,6 +64,12 @@ exports.assignAsset = asyncHandler(async (req, res) => {
 
 exports.assignMultipleAssets = asyncHandler(async (req, res) => {
   const payload = req.body || {};
+  const skipActa = payload.skip_acta === true || payload.skip_acta === "true";
+  let evidenceDriveFileId = null;
+  let evidenceFileUrl = null;
+  if (skipActa && req.file) {
+    ({ evidenceDriveFileId, evidenceFileUrl } = await resolveEvidenceUpload(req.file));
+  }
   const data = await svc.assignMultipleAssets({
     assetIds: Array.isArray(payload.asset_ids) ? payload.asset_ids : [],
     assignedToUserId: payload.assigned_to_user_id || null,
@@ -49,6 +79,9 @@ exports.assignMultipleAssets = asyncHandler(async (req, res) => {
     recipientCedula: payload.recipient_cedula || null,
     recipientCargo:  payload.recipient_cargo  || null,
     acta_items: Array.isArray(payload.acta_items) ? payload.acta_items : null,
+    skipActa,
+    evidenceDriveFileId,
+    evidenceFileUrl,
   });
 
   if (data.acta_id) {
@@ -496,6 +529,17 @@ exports.createCorporateNumber = asyncHandler(async (req, res) => {
     userId: req.user?.id || null,
   });
   res.status(201).json({ ok: true, data });
+});
+
+exports.updateCorporateNumber = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const data = await svc.updateCorporateNumber({
+    numberId: req.params.id,
+    number: payload.number,
+    status: payload.status,
+    userId: req.user?.id || null,
+  });
+  res.json({ ok: true, data });
 });
 
 exports.assignCorporateNumber = asyncHandler(async (req, res) => {
