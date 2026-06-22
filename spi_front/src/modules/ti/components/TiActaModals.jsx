@@ -10,9 +10,17 @@ const labelCls = "text-xs font-semibold text-slate-500 block mb-1";
 
 export const WORKFLOW_ROLE_OPTIONS = [
   { value: "colaborador_receptor", label: "Colaborador receptor" },
+  { value: "ingeniero_ti", label: "Ingeniero de TICS" },
+  { value: "responsable_activos", label: "Responsable de Activos Fijos" },
   { value: "talento_humano", label: "Talento Humano" },
   { value: "gerencia_general", label: "Gerencia General" },
   { value: "firmante", label: "Firmante" },
+];
+
+// Firmantes fijos del módulo TI — orden de firma
+const TI_DEFAULT_SIGNERS = [
+  { email: "rafael.ortiz@fam-project.com", role: "ingeniero_ti" },
+  { email: "soledad.fiallos@fam-project.com", role: "responsable_activos" },
 ];
 
 export function buildWorkflowSignerDraft(user = null, role = "firmante") {
@@ -132,11 +140,31 @@ export function TiWorkflowStartModal({ open, acta, users = [], submitting, onClo
   const [validating, setValidating] = useState(false);
 
   useEffect(() => {
-    if (open) {
-      setSigners([buildWorkflowSignerDraft()]);
-      setProfileWarnings([]);
+    if (!open) return;
+    setProfileWarnings([]);
+
+    const drafts = [];
+
+    // 1. Colaborador receptor (usuario al que se le asignó el equipo)
+    if (acta?.recipient_user_id) {
+      const recipient = users.find((u) => String(u.id) === String(acta.recipient_user_id));
+      if (recipient) {
+        drafts.push({ selectedUserId: String(recipient.id), role: "colaborador_receptor", isRequired: true });
+      }
     }
-  }, [open]);
+
+    // 2. Firmantes fijos del módulo TI (Ingeniero TI + Responsable Activos)
+    const usedIds = new Set(drafts.map((d) => d.selectedUserId));
+    for (const fixed of TI_DEFAULT_SIGNERS) {
+      const user = users.find((u) => u.email === fixed.email);
+      if (user && !usedIds.has(String(user.id))) {
+        drafts.push({ selectedUserId: String(user.id), role: fixed.role, isRequired: true });
+        usedIds.add(String(user.id));
+      }
+    }
+
+    setSigners(drafts.length > 0 ? drafts : [buildWorkflowSignerDraft()]);
+  }, [open, acta, users]);
 
   const setSigner = (index, patch) => {
     setProfileWarnings([]);
