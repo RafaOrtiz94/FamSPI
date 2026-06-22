@@ -1476,6 +1476,34 @@ const TIDeviceManagementPage = () => {
       {activeTab === 'dispositivos' && (
       <>
 
+      {/* KPIs */}
+      {!loading && assets.length > 0 && (() => {
+        const total       = assets.length;
+        const assigned    = assets.filter((a) => a.status === "assigned").length;
+        const available   = assets.filter((a) => a.status === "unassigned" || a.status === "available").length;
+        const maintenance = assets.filter((a) => a.status === "in_maintenance").length;
+        const damaged     = assets.filter((a) => a.status === "damaged").length;
+        const kpis = [
+          { label: "Total",             value: total,       color: "text-slate-900" },
+          { label: "Asignados",         value: assigned,    color: "text-blue-700"  },
+          { label: "Disponibles",       value: available,   color: "text-green-700" },
+          { label: "En mantenimiento",  value: maintenance, color: "text-amber-700", hide: maintenance === 0 },
+          { label: "Dañados",           value: damaged,     color: "text-red-700",   hide: damaged === 0 },
+        ].filter((k) => !k.hide);
+        return (
+          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className={`grid divide-x divide-slate-100`} style={{ gridTemplateColumns: `repeat(${kpis.length}, minmax(0, 1fr))` }}>
+              {kpis.map((k) => (
+                <div key={k.label} className="flex flex-col items-center justify-center px-4 py-5 text-center">
+                  <span className={`text-2xl font-semibold tracking-tight leading-none ${k.color}`}>{k.value}</span>
+                  <span className="mt-1.5 text-xs font-medium text-slate-400">{k.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Create Form */}
       {showCreate && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
