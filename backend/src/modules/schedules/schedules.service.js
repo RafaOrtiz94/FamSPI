@@ -627,8 +627,13 @@ async function getOwnerUserIdByEmail(email) {
   return rows[0]?.id || null;
 }
 
+function toDateOnlyString(value) {
+  if (!value) return "";
+  return value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
+}
+
 function buildScheduledVisitTimestamp(plannedDate) {
-  const normalized = String(plannedDate || "").slice(0, 10);
+  const normalized = toDateOnlyString(plannedDate);
   if (!normalized) return null;
   return `${normalized}T09:00:00-05:00`;
 }
@@ -643,7 +648,7 @@ async function upsertCrmFamActivityForScheduledVisit({ schedule, visit, ownerUse
     `Origen: cronograma comercial aprobado`,
     `Asesor: ${schedule.user_email}`,
     `Cronograma: ${String(schedule.month).padStart(2, "0")}/${schedule.year}`,
-    `Visita planificada: ${String(visit.planned_date || "").slice(0, 10)}`,
+    `Visita planificada: ${toDateOnlyString(visit.planned_date)}`,
     visit.city ? `Ciudad: ${visit.city}` : null,
     visit.notes ? `Notas: ${visit.notes}` : null,
     `Schedule ID: ${schedule.id}`,
@@ -1004,13 +1009,13 @@ function buildScheduleVisitCalendarPayload({ schedule, visit }) {
     visit.city ? `Ciudad: ${visit.city}` : null,
     visit.notes ? `Notas: ${visit.notes}` : null,
     `Cronograma: ${String(schedule.month).padStart(2, "0")}/${schedule.year}`,
-    `Visita planificada: ${String(visit.planned_date).slice(0, 10)}`,
+    `Visita planificada: ${toDateOnlyString(visit.planned_date)}`,
   ].filter(Boolean).join("\n");
 
   return {
     summary,
     description,
-    date: String(visit.planned_date).slice(0, 10),
+    date: toDateOnlyString(visit.planned_date),
     attendees: schedule.user_email ? [schedule.user_email] : [],
   };
 }
