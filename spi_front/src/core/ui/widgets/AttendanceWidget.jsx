@@ -14,6 +14,9 @@ import {
   validateOperationalCategoryStep,
   validateOperationalVehicleStart,
   validateOperationalVehicleClosure,
+  buildOperationalStartPayload,
+  buildOperationalClosurePayload,
+  buildOperationalTripClosePayload,
 } from "../attendanceFlowUtils";
 
 import {
@@ -1483,14 +1486,13 @@ const AttendanceWidget = () => {
     try {
       actionLocation = await getLocationForAction();
       if (operationalModalPhase === "start") {
-        const description = String(operationalDetail || "").trim() || "Salida operacional de campo / oficina";
-        const res = await marcarSalidaOficina(actionLocation, {
-          description,
-          operational_category: operationalCategory,
-          uses_personal_vehicle: operationalVehicleMode === "personal",
-          odometer_start_km: operationalStartKm,
-          start_odometer_photo: operationalStartPhoto,
-        });
+        const res = await marcarSalidaOficina(actionLocation, buildOperationalStartPayload({
+          description: operationalDetail,
+          category: operationalCategory,
+          usesPersonalVehicle: operationalVehicleMode === "personal",
+          startKm: operationalStartKm,
+          startPhoto: operationalStartPhoto,
+        }));
         if (res?.ok) {
           await ensureSyncExceptionTargetLocation("start", actionLocation);
           showToast("Salida operacional registrada.", "success");
@@ -1505,10 +1507,10 @@ const AttendanceWidget = () => {
       }
 
       if (operationalModalPhase === "end") {
-        const res = await marcarEntradaOficina(actionLocation, {
-          odometer_end_km: operationalEndKm,
-          end_odometer_photo: operationalEndPhoto,
-        });
+        const res = await marcarEntradaOficina(actionLocation, buildOperationalClosurePayload({
+          endKm: operationalEndKm,
+          endPhoto: operationalEndPhoto,
+        }));
         if (res?.ok) {
           await ensureSyncExceptionTargetLocation("return", actionLocation);
           const allowanceId = res?.data?.travel_allowance_id;
@@ -1528,11 +1530,11 @@ const AttendanceWidget = () => {
         return;
       }
 
-      const res = await marcarCierreViaje(actionLocation, {
-        closure_reason: String(operationalDetail || tripClosureReason || "").trim() || null,
-        odometer_end_km: operationalEndKm,
-        end_odometer_photo: operationalEndPhoto,
-      });
+      const res = await marcarCierreViaje(actionLocation, buildOperationalTripClosePayload({
+        closureReason: operationalDetail || tripClosureReason,
+        endKm: operationalEndKm,
+        endPhoto: operationalEndPhoto,
+      }));
       if (res?.ok) {
         const allowanceId = res?.data?.travel_allowance_id;
         showToast(

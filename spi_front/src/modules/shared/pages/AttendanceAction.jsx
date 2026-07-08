@@ -35,6 +35,9 @@ import {
   validateOperationalCategoryStep,
   validateOperationalVehicleStart,
   validateOperationalVehicleClosure,
+  buildOperationalStartPayload,
+  buildOperationalClosurePayload,
+  buildOperationalTripClosePayload,
 } from "../../../core/ui/attendanceFlowUtils";
 
 
@@ -260,13 +263,13 @@ const AttendanceAction = () => {
     },
     "salida-oficina": {
       fn: async (currentLoc, params, markMeta) =>
-        marcarSalidaOficina(currentLoc, {
-          description: params.description || "Salida operacional de campo / oficina",
-          operational_category: params.operationalCategory,
-          uses_personal_vehicle: params.usesPersonalVehicle,
-          odometer_start_km: params.startOdometerKm,
-          start_odometer_photo: params.startOdometerPhoto,
-        }, markMeta),
+        marcarSalidaOficina(currentLoc, buildOperationalStartPayload({
+          description: params.description,
+          category: params.operationalCategory,
+          usesPersonalVehicle: params.usesPersonalVehicle,
+          startKm: params.startOdometerKm,
+          startPhoto: params.startOdometerPhoto,
+        }), markMeta),
       label: "Salida operacional",
       syncTarget: "start",
       requiresParams: false,
@@ -275,10 +278,10 @@ const AttendanceAction = () => {
     "entrada-oficina": {
       fn: async (currentLoc, _params, markMeta) => {
         await ensureExceptionFlow("operational");
-        return marcarEntradaOficina(currentLoc, {
-          odometer_end_km: _params.endOdometerKm,
-          end_odometer_photo: _params.endOdometerPhoto,
-        }, markMeta);
+        return marcarEntradaOficina(currentLoc, buildOperationalClosurePayload({
+          endKm: _params.endOdometerKm,
+          endPhoto: _params.endOdometerPhoto,
+        }), markMeta);
       },
       label: "Cierre operacional",
       syncTarget: "return",
@@ -287,13 +290,13 @@ const AttendanceAction = () => {
     },
     "salida-campo": {
       fn: async (currentLoc, params, markMeta) =>
-        marcarSalidaCampo(currentLoc, {
-          description: params.description || "Salida operacional de campo / oficina",
-          operational_category: params.operationalCategory,
-          uses_personal_vehicle: params.usesPersonalVehicle,
-          odometer_start_km: params.startOdometerKm,
-          start_odometer_photo: params.startOdometerPhoto,
-        }, markMeta),
+        marcarSalidaCampo(currentLoc, buildOperationalStartPayload({
+          description: params.description,
+          category: params.operationalCategory,
+          usesPersonalVehicle: params.usesPersonalVehicle,
+          startKm: params.startOdometerKm,
+          startPhoto: params.startOdometerPhoto,
+        }), markMeta),
       label: "Salida operacional",
       syncTarget: "start",
       requiresParams: false,
@@ -302,10 +305,10 @@ const AttendanceAction = () => {
     "entrada-campo": {
       fn: async (currentLoc, _params, markMeta) => {
         await ensureExceptionFlow("operational");
-        return marcarEntradaCampo(currentLoc, {
-          odometer_end_km: _params.endOdometerKm,
-          end_odometer_photo: _params.endOdometerPhoto,
-        }, markMeta);
+        return marcarEntradaCampo(currentLoc, buildOperationalClosurePayload({
+          endKm: _params.endOdometerKm,
+          endPhoto: _params.endOdometerPhoto,
+        }), markMeta);
       },
       label: "Cierre operacional",
       syncTarget: "return",
@@ -325,11 +328,11 @@ const AttendanceAction = () => {
     "cierre-viaje": {
       fn: async (currentLoc, params, markMeta) => {
         await ensureExceptionFlow("operational");
-        return marcarCierreViaje(currentLoc, {
-          closure_reason: params.description || "Cierre de viaje operacional",
-          odometer_end_km: params.endOdometerKm,
-          end_odometer_photo: params.endOdometerPhoto,
-        }, markMeta);
+        return marcarCierreViaje(currentLoc, buildOperationalTripClosePayload({
+          closureReason: params.description,
+          endKm: params.endOdometerKm,
+          endPhoto: params.endOdometerPhoto,
+        }), markMeta);
       },
       label: "Cierre de viaje",
       syncTarget: "return",

@@ -448,3 +448,39 @@ export const validateOperationalVehicleClosure = ({ requiresClosure, endKm, endP
   return { ok: true, error: null };
 };
 
+// Mitigacion D1 (segundo tramo): los objetos enviados a marcarSalidaOficina /
+// marcarEntradaOficina / marcarCierreViaje se armaban de forma independiente en
+// AttendanceWidget.submitOperationalModal y en AttendanceAction.ACTION_MAP, con
+// la misma forma pero leyendo de variables con nombres distintos. Se extraen
+// como builders puros para que un cambio de contrato (ej. un campo nuevo que
+// pida el backend) se haga una sola vez. NO se tocan las llamadas HTTP ni el
+// manejo de exito/error de cada componente — esa orquestacion sigue separada
+// a proposito (ver nota en el commit: cada pantalla tiene una estrategia de
+// recuperacion ante 409 distinta y unificarla es una decision de producto,
+// no un refactor mecanico).
+
+export const buildOperationalStartPayload = ({
+  description,
+  category,
+  usesPersonalVehicle,
+  startKm,
+  startPhoto,
+}) => ({
+  description: String(description || "").trim() || "Salida operacional de campo / oficina",
+  operational_category: category,
+  uses_personal_vehicle: Boolean(usesPersonalVehicle),
+  odometer_start_km: startKm,
+  start_odometer_photo: startPhoto,
+});
+
+export const buildOperationalClosurePayload = ({ endKm, endPhoto }) => ({
+  odometer_end_km: endKm,
+  end_odometer_photo: endPhoto,
+});
+
+export const buildOperationalTripClosePayload = ({ closureReason, endKm, endPhoto }) => ({
+  closure_reason: String(closureReason || "").trim() || "Cierre de viaje operacional",
+  odometer_end_km: endKm,
+  end_odometer_photo: endPhoto,
+});
+

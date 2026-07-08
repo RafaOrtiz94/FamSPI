@@ -7,6 +7,9 @@ import {
   validateOperationalCategoryStep,
   validateOperationalVehicleStart,
   validateOperationalVehicleClosure,
+  buildOperationalStartPayload,
+  buildOperationalClosurePayload,
+  buildOperationalTripClosePayload,
 } from "../attendanceFlowUtils";
 
 describe("attendanceFlowUtils - action map", () => {
@@ -149,5 +152,74 @@ describe("attendanceFlowUtils - operational step validation (shared rule, D1 mit
     expect(
       validateOperationalVehicleClosure({ requiresClosure: true, endKm: "150", endPhoto: "file.jpg" }),
     ).toEqual({ ok: true, error: null });
+  });
+});
+
+// Mitigacion D1 (segundo tramo): estos builders son la forma exacta de payload
+// que hoy arma cada componente por su cuenta antes de llamar a
+// marcarSalidaOficina/marcarEntradaOficina/marcarCierreViaje. Fijar el shape
+// aqui evita que un componente mande un campo y el otro no sin que nadie lo note.
+describe("attendanceFlowUtils - operational payload builders (shared shape, D1 mitigation)", () => {
+  test("start payload falls back to a default description when blank", () => {
+    expect(
+      buildOperationalStartPayload({
+        description: "  ",
+        category: "cliente",
+        usesPersonalVehicle: true,
+        startKm: "100",
+        startPhoto: "foto.jpg",
+      }),
+    ).toEqual({
+      description: "Salida operacional de campo / oficina",
+      operational_category: "cliente",
+      uses_personal_vehicle: true,
+      odometer_start_km: "100",
+      start_odometer_photo: "foto.jpg",
+    });
+  });
+
+  test("start payload keeps a real description and coerces vehicle flag to boolean", () => {
+    expect(
+      buildOperationalStartPayload({
+        description: "Reunion con proveedor",
+        category: "proveedor",
+        usesPersonalVehicle: "si", // AttendanceAction guarda este campo como string "si"/"no"
+        startKm: "",
+        startPhoto: null,
+      }),
+    ).toEqual({
+      description: "Reunion con proveedor",
+      operational_category: "proveedor",
+      uses_personal_vehicle: true,
+      odometer_start_km: "",
+      start_odometer_photo: null,
+    });
+  });
+
+  test("closure payload only carries odometer fields", () => {
+    expect(buildOperationalClosurePayload({ endKm: "250", endPhoto: "foto2.jpg" })).toEqual({
+      odometer_end_km: "250",
+      end_odometer_photo: "foto2.jpg",
+    });
+  });
+
+  test("trip close payload falls back to a default closure reason when blank", () => {
+    expect(
+      buildOperationalTripClosePayload({ closureReason: "", endKm: "300", endPhoto: "foto3.jpg" }),
+    ).toEqual({
+      closure_reason: "Cierre de viaje operacional",
+      odometer_end_km: "300",
+      end_odometer_photo: "foto3.jpg",
+    });
+  });
+
+  test("trip close payload keeps a real closure reason", () => {
+    expect(
+      buildOperationalTripClosePayload({ closureReason: "Fin de ruta", endKm: "300", endPhoto: "foto3.jpg" }),
+    ).toEqual({
+      closure_reason: "Fin de ruta",
+      odometer_end_km: "300",
+      end_odometer_photo: "foto3.jpg",
+    });
   });
 });
