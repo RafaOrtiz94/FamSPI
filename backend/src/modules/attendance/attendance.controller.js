@@ -10,9 +10,10 @@
 
 const db = require("../../config/db");
 const logger = require("../../config/logger");
+const schedulesService = require("../schedules/schedules.service");
 const { normalizeDateTime, normalizeRow } = require("../../utils/normalizers");
 const { getBusinessDate, ensureDailyClockIn } = require("./attendance.utils");
-const { generateAttendancePDF } = require("./attendance.service");
+const { generateAttendancePDF, generateAttendanceBulkPDF } = require("./attendance.service");
 const { hasReportingAccess } = require("./attendance.auth");
 const { normalizeAttendanceRangeFilters } = require("./attendanceRangeFilters");
 const { buildAttendanceRangeQuery } = require("./attendanceReports.service");
@@ -29,9 +30,13 @@ const {
   upsertLearningPoint,
   validateLocationAgainstOfficialGeofence,
 } = require("./attendanceGeofence.service");
+const attendanceWorkspaceService = require("./attendanceWorkspace.service");
 const notificationManager = require("../notifications/notificationManager");
 const { sendMail } = require("../../utils/mailer");
 const { createTimeOffEvent } = require("../../utils/calendar");
+const { ensureFolderPath, uploadFileToDrive } = require("../../utils/drive");
+const viaticosService = require("../viaticos/viaticos.service");
+const birthdayBenefitService = require("./attendanceBirthdayBenefit.service");
 
 const ATTENDANCE_LOCATION_TARGETS = Object.freeze({
   entry: { timeColumn: "entry_time", locationColumn: "entry_location" },
@@ -55,9 +60,34 @@ const OPERATIONAL_EXCEPTION_TYPES = Object.freeze([
   "campo",
 ]);
 
+const OPERATIONAL_CATEGORY_LABELS = Object.freeze({
+  cliente: "Cliente",
+  reunion: "Reunion",
+  banco: "Banco",
+  ministerio: "Ministerio",
+  proveedor: "Proveedor",
+  gestion_oficina: "Gestion operativa",
+  otro: "Otro",
+});
+
+const OPERATIONAL_EVIDENCE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+]);
+
+const MAX_OPERATIONAL_EVIDENCE_FILE_SIZE = 8 * 1024 * 1024;
+
 const isOperationalFlowException = (exception) => {
   const normalizedType = String(exception?.type || "").trim().toLowerCase();
   return OPERATIONAL_EXCEPTION_TYPES.includes(normalizedType);
+};
+
+const isPermissionLikeExceptionType = (value) => {
+  const normalizedType = String(value || "").trim().toLowerCase();
+  return normalizedType === "permiso" || normalizedType === "medico";
 };
 
 const getActiveExceptionByFlow = async ({ userId, flow = "any" }) => {
@@ -80,6 +110,159 @@ const getActiveExceptionByFlow = async ({ userId, flow = "any" }) => {
 
   const result = await db.query(`${baseQuery}${flowFilter} ORDER BY id DESC LIMIT 1`, params);
   return result.rows[0] || null;
+};
+
+const ACTIVE_TECHNICAL_VISIT_STATUSES = Object.freeze(["programado", "confirmado", "en_proceso"]);
+const TECHNICAL_CLIENT_ACTIVITY_SYNC_ROLES = new Set([
+  "servicio_tecnico",
+  "tecnico",
+  "ing_servicio",
+  "esp_app",
+  "jefe_tecnico",
+  "jefe_servicio",
+  "jefe_servicio_tecnico",
+  "ing_servicio_ext",
+  "esp_app_ext",
+]);
+
+const shouldSyncTechnicalClientActivity = (role) =>
+  TECHNICAL_CLIENT_ACTIVITY_SYNC_ROLES.has(String(role || "").trim().toLowerCase());
+
+const relationExists = async (qualifiedName) => {
+  const { rows } = await db.query(`SELECT to_regclass($1) IS NOT NULL AS exists`, [qualifiedName]);
+  return Boolean(rows?.[0]?.exists);
+};
+
+const findTechnicalClientActivityForAttendance = async ({ clientId, userId, userEmail, businessDate }) => {
+  if (!Number.isInteger(Number(clientId)) || Number(clientId) <= 0 || !businessDate) return null;
+
+  const [hasTechnicalScheduleTable, hasPublicPurchases, hasPrivatePurchases] = await Promise.all([
+    relationExists("servicio.cronograma_actividades_tecnicas"),
+    relationExists("public.equipment_purchase_requests"),
+    relationExists("public.private_purchase_requests"),
+  ]);
+
+  if (!hasTechnicalScheduleTable || (!hasPublicPurchases && !hasPrivatePurchases)) {
+    return null;
+  }
+
+  const publicClientMatch = hasPublicPurchases ? "epr.client_id = $5" : "FALSE";
+  const privateClientMatch = hasPrivatePurchases ? "ppr.client_request_id = $5" : "FALSE";
+
+  const { rows } = await db.query(
+    `
+      SELECT
+        a.id,
+        COALESCE(lower(a.status), 'programado') AS status,
+        lower(COALESCE(a.source_type, 'manual')) AS source_type
+      FROM servicio.cronograma_actividades_tecnicas a
+      LEFT JOIN public.users u
+        ON u.id = a.user_id
+      LEFT JOIN equipment_purchase_requests epr
+        ON epr.id::text = a.source_id
+       AND lower(COALESCE(a.source_type, '')) IN ('public_purchase_inspection', 'public_purchase_reinspection')
+      LEFT JOIN private_purchase_requests ppr
+        ON ppr.id::text = a.source_id
+       AND lower(COALESCE(a.source_type, '')) IN ('private_purchase_inspection', 'private_purchase_reinspection')
+      WHERE a.activity_date = $1::date
+        AND COALESCE(lower(a.status), 'programado') = ANY($2::text[])
+        AND (
+          a.user_id = $3
+          OR LOWER(COALESCE(u.email, '')) = LOWER($4)
+        )
+        AND (
+          ${publicClientMatch}
+          OR ${privateClientMatch}
+        )
+      ORDER BY
+        CASE WHEN COALESCE(lower(a.status), 'programado') = 'en_proceso' THEN 0 ELSE 1 END,
+        a.updated_at DESC,
+        a.id DESC
+      LIMIT 1
+    `,
+    [businessDate, ACTIVE_TECHNICAL_VISIT_STATUSES, Number(userId), String(userEmail || ""), Number(clientId)],
+  );
+
+  return rows?.[0] || null;
+};
+
+const syncTechnicalClientActivityStatus = async ({
+  clientId,
+  userId,
+  userEmail,
+  userRole,
+  businessDate,
+  nextStatus,
+}) => {
+  if (!shouldSyncTechnicalClientActivity(userRole)) return null;
+
+  let activity = null;
+  try {
+    activity = await findTechnicalClientActivityForAttendance({
+      clientId,
+      userId,
+      userEmail,
+      businessDate,
+    });
+  } catch (error) {
+    logger.warn(
+      { error: error?.message, userId, clientId, businessDate, userRole },
+      "[ATTENDANCE] Sincronizacion tecnica omitida por inconsistencia de esquema o consulta",
+    );
+    return null;
+  }
+
+  if (!activity?.id) return null;
+  if (String(activity.status || "").trim().toLowerCase() === String(nextStatus || "").trim().toLowerCase()) {
+    return activity;
+  }
+
+  await db.query(
+    `UPDATE servicio.cronograma_actividades_tecnicas
+        SET status = $1,
+            updated_at = now()
+      WHERE id = $2`,
+    [nextStatus, activity.id],
+  );
+
+  return { ...activity, status: nextStatus };
+};
+
+const syncOperationalAllowanceFromAttendance = async ({
+  actorUser,
+  operationalException,
+  fallbackVisitDate = null,
+  closureReason = null,
+}) => {
+  const exceptionId = Number(operationalException?.id);
+  if (!Number.isInteger(exceptionId) || exceptionId <= 0) return null;
+
+  const visitDate = String(
+    fallbackVisitDate
+      || operationalException?.date
+      || operationalException?.operational_start_date
+      || operationalException?.start_time
+      || "",
+  ).slice(0, 10);
+
+  const description = String(operationalException?.description || "").trim();
+  const tripReason = String(closureReason || "").trim() || null;
+
+  return viaticosService.upsertAllowance({
+    actorUser,
+    payload: {
+      source_type: "operational_exit",
+      source_id: exceptionId,
+      visit_date: visitDate || null,
+      city: description || "Salida operacional",
+      amount: 0,
+      workflow_status: "borrador",
+      classification_completed: false,
+      outside_labor_area: false,
+      notes: tripReason || description || "Salida operacional cerrada desde asistencia",
+      trip_reason: tripReason,
+    },
+  });
 };
 
 const OPERATIONAL_SUMMARY_MARKER = "[RESUMEN_OPERACIONAL]";
@@ -126,6 +309,204 @@ const appendOperationalSummary = ({ baseDescription, tracking }) => {
     tracking.operational_end_date || "-"
   } | Dias: ${tracking.operational_span_days} | Horas: ${tracking.operational_elapsed_hours}`;
   return [cleanBase, summaryText].filter(Boolean).join("\n");
+};
+
+const normalizeOperationalToken = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+const normalizeBooleanInput = (value) => {
+  if (typeof value === "boolean") return value;
+  const token = normalizeOperationalToken(value);
+  if (!token) return null;
+  if (["1", "true", "si", "yes"].includes(token)) return true;
+  if (["0", "false", "no"].includes(token)) return false;
+  return null;
+};
+
+const parseOperationalDecimal = (value, fieldLabel) => {
+  if (value === null || value === undefined || value === "") return null;
+  const normalized = Number(String(value).replace(",", "."));
+  if (!Number.isFinite(normalized) || normalized < 0) {
+    const err = new Error(`${fieldLabel} invalido`);
+    err.status = 400;
+    throw err;
+  }
+  return Number(normalized.toFixed(2));
+};
+
+const normalizeOperationalCategory = (value) => {
+  const token = normalizeOperationalToken(value);
+  if (!token) return null;
+  return OPERATIONAL_CATEGORY_LABELS[token] ? token : null;
+};
+
+const getOperationalCategoryLabel = (value) => {
+  const token = normalizeOperationalCategory(value);
+  return token ? OPERATIONAL_CATEGORY_LABELS[token] : null;
+};
+
+const sanitizeOperationalFileToken = (value, fallback = "archivo") => {
+  const normalized = String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return normalized || fallback;
+};
+
+const getOperationalPhotoFile = (req, fieldName) => {
+  const entry = req.files?.[fieldName];
+  if (Array.isArray(entry) && entry.length) return entry[0];
+  return null;
+};
+
+const validateOperationalPhotoFile = (file, label) => {
+  if (!file) return null;
+
+  const mimeType = String(file.mimetype || "").toLowerCase();
+  if (!OPERATIONAL_EVIDENCE_MIME_TYPES.has(mimeType)) {
+    const err = new Error(`La foto de ${label} debe ser JPG, PNG, WEBP o HEIC`);
+    err.status = 400;
+    throw err;
+  }
+
+  if (Number(file.size || 0) > MAX_OPERATIONAL_EVIDENCE_FILE_SIZE) {
+    const err = new Error(`La foto de ${label} no puede superar 8 MB`);
+    err.status = 400;
+    throw err;
+  }
+
+  return file;
+};
+
+const getOperationalScopeFromRequest = (req) =>
+  String(req.path || "").toLowerCase().includes("campo") ? "campo" : "oficina";
+
+const buildOperationalDefaultDescription = ({ scope, category }) => {
+  const categoryLabel = getOperationalCategoryLabel(category);
+  if (categoryLabel) return `Salida operacional: ${categoryLabel}`;
+  return scope === "campo" ? "Salida operacional de campo / oficina" : "Salida operacional de oficina / campo";
+};
+
+const resolveOperationalJourneyPayload = async ({
+  req,
+  phase,
+  userId,
+  userEmail,
+  businessDate,
+  activeOperational = null,
+}) => {
+  const category = normalizeOperationalCategory(req.body?.operational_category || req.body?.operationalCategory);
+  const explicitVehicle = normalizeBooleanInput(req.body?.uses_personal_vehicle ?? req.body?.usesPersonalVehicle);
+  const usesPersonalVehicle = phase === "start"
+    ? explicitVehicle === true
+    : normalizeBooleanInput(activeOperational?.uses_personal_vehicle) === true;
+
+  if (phase === "start" && !category) {
+    const err = new Error("La categoria operacional es obligatoria");
+    err.status = 400;
+    throw err;
+  }
+
+  const startKm = parseOperationalDecimal(
+    req.body?.odometer_start_km ?? req.body?.odometerStartKm,
+    "Kilometraje inicial"
+  );
+  const endKm = parseOperationalDecimal(
+    req.body?.odometer_end_km ?? req.body?.odometerEndKm,
+    "Kilometraje final"
+  );
+
+  const startPhoto = validateOperationalPhotoFile(getOperationalPhotoFile(req, "start_odometer_photo"), "kilometraje inicial");
+  const endPhoto = validateOperationalPhotoFile(getOperationalPhotoFile(req, "end_odometer_photo"), "kilometraje final");
+
+  if (phase === "start" && usesPersonalVehicle) {
+    if (startKm === null) {
+      const err = new Error("Debes registrar el kilometraje inicial del vehiculo personal");
+      err.status = 400;
+      throw err;
+    }
+    if (!startPhoto) {
+      const err = new Error("Debes tomar la foto del kilometraje inicial del vehiculo personal");
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  if (phase !== "start" && usesPersonalVehicle) {
+    if (endKm === null) {
+      const err = new Error("Debes registrar el kilometraje final del vehiculo personal");
+      err.status = 400;
+      throw err;
+    }
+    if (!endPhoto) {
+      const err = new Error("Debes tomar la foto del kilometraje final del vehiculo personal");
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  const storePhoto = async (file, suffix) => {
+    if (!file) return { driveFileId: null, driveUrl: null };
+    const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_ID || null;
+    let folderId = null;
+    if (rootFolderId) {
+      const identityToken = sanitizeOperationalFileToken(userEmail || `user-${userId}`, `user-${userId}`);
+      const folder = await ensureFolderPath(["Asistencia", "Salidas operacionales", businessDate, identityToken], rootFolderId);
+      folderId = folder?.id || null;
+    }
+
+    const extension = String(file.originalname || "").split(".").pop()?.toLowerCase();
+    const safeExtension = extension && extension.length <= 6
+      ? extension
+      : (String(file.mimetype || "").includes("png") ? "png" : String(file.mimetype || "").includes("webp") ? "webp" : "jpg");
+    const fileName = `operacional_${userId}_${businessDate}_${suffix}.${safeExtension}`;
+    const uploaded = await uploadFileToDrive(file, fileName, folderId || undefined, { makeAnyoneReader: true });
+    return {
+      driveFileId: uploaded?.id || null,
+      driveUrl: uploaded?.webContentLink || uploaded?.webViewLink || null,
+    };
+  };
+
+  const startReferenceKm = parseOperationalDecimal(activeOperational?.odometer_start_km, "Kilometraje inicial");
+  if (phase !== "start" && usesPersonalVehicle && startReferenceKm !== null && endKm !== null && endKm < startReferenceKm) {
+    const err = new Error("El kilometraje final no puede ser menor al kilometraje inicial");
+    err.status = 400;
+    throw err;
+  }
+
+  let startPhotoUpload = { driveFileId: null, driveUrl: null };
+  let endPhotoUpload = { driveFileId: null, driveUrl: null };
+
+  if (phase === "start" && startPhoto) {
+    startPhotoUpload = await storePhoto(startPhoto, "odometro_inicio");
+  }
+  if (phase !== "start" && endPhoto) {
+    endPhotoUpload = await storePhoto(endPhoto, "odometro_fin");
+  }
+
+  const distanceKm = phase !== "start" && usesPersonalVehicle && startReferenceKm !== null && endKm !== null
+    ? Number((endKm - startReferenceKm).toFixed(2))
+    : null;
+
+  return {
+    category,
+    categoryLabel: getOperationalCategoryLabel(category),
+    usesPersonalVehicle,
+    startKm,
+    endKm,
+    distanceKm,
+    startPhoto: startPhotoUpload,
+    endPhoto: endPhotoUpload,
+    scope: getOperationalScopeFromRequest(req),
+  };
 };
 const normalizeLocationInput = (rawLocation) => {
   if (rawLocation === null || rawLocation === undefined) return "";
@@ -204,6 +585,7 @@ const TEAM_ATTENDANCE_LEAD_ROLES = Object.freeze([
   "jefe_comercial",
   "jefe_de_comercial",
   "jefe_tecnico",
+  "jefe_servicio",
   "jefe_servicio_tecnico",
   "jefe_ti",
   "jefe_logistica",
@@ -229,7 +611,8 @@ const ATTENDANCE_LUNCH_END = process.env.ATTENDANCE_LUNCH_END || "14:00";
 const ATTENDANCE_OPERATIONAL_LUNCH_START = process.env.ATTENDANCE_OPERATIONAL_LUNCH_START || "14:00";
 const ATTENDANCE_OPERATIONAL_LUNCH_END = process.env.ATTENDANCE_OPERATIONAL_LUNCH_END || "15:00";
 const LATE_BASE_MINUTES = 9 * 60;
-const LATE_TOLERANCE_MINUTES = 5;
+const LATE_TOLERANCE_MINUTES = 6;
+const ENTRY_MARK_CUTOFF_MINUTES = 9 * 60 + 20; // 09:20 — after this, entry mark is blocked; must request regularization
 const LATE_JUSTIFICATION_MONTHLY_LIMIT = Number(process.env.ATTENDANCE_LATE_JUSTIFICATION_MONTHLY_LIMIT || 5);
 const LATE_JUSTIFICATION_CUTOFF_HOUR = Number(process.env.ATTENDANCE_LATE_JUSTIFICATION_CUTOFF_HOUR || 21);
 const LATE_TIMEZONE = process.env.APP_TIMEZONE || process.env.TZ || "America/Guayaquil";
@@ -242,7 +625,7 @@ const ATTENDANCE_V2_MARK_META_ENABLED = String(process.env.ATTENDANCE_V2_MARK_ME
 const ATTENDANCE_GEOFENCE_ENFORCE = String(process.env.ATTENDANCE_GEOFENCE_ENFORCE || "").toLowerCase() === "true";
 const ATTENDANCE_GEOFENCE_LEARNING_ENABLED = String(process.env.ATTENDANCE_GEOFENCE_LEARNING_ENABLED || "").toLowerCase() === "true";
 const ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED =
-  String(process.env.ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED || "").toLowerCase() === "true";
+  String(process.env.ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED ?? "true").toLowerCase() !== "false";
 
 const ATTENDANCE_STATUS_ALIASES = Object.freeze({
   no_entry: "no_entry",
@@ -301,16 +684,16 @@ const buildMarkTimingMetadata = ({ requestContext, now, resolvedTimestamp }) => 
 };
 
 const deriveAttendanceState = (record = {}) => {
-  if (!record?.entry_time) {
-    return "no_entry";
-  }
-
   if (record?.exit_time) {
     return "completed";
   }
 
   if (record?.lunch_start_time && !record?.lunch_end_time) {
     return "lunch_open";
+  }
+
+  if (!record?.entry_time && !record?.lunch_start_time && !record?.lunch_end_time) {
+    return "no_entry";
   }
 
   return "working";
@@ -541,7 +924,16 @@ const resolveRequiredLocation = async ({
       payload,
       errorMessage: "Marcacion rechazada por falta de ubicacion valida",
     });
-    logger.warn({ userId, actionKey, targetKey }, "Attendance mark rejected: missing location");
+    logger.warn(
+      buildAttendanceRequestMeta({
+        req,
+        userId,
+        actionKey,
+        targetKey,
+        businessDate,
+      }),
+      "Attendance mark rejected: missing location"
+    );
     res.status(409).json({
       ok: false,
       code: "LOCATION_REQUIRED_RETRY",
@@ -559,7 +951,17 @@ const resolveRequiredLocation = async ({
       payload,
       errorMessage: `Marcacion rechazada por precision baja (${accuracy}m)`,
     });
-    logger.warn({ userId, actionKey, targetKey, accuracy }, "Attendance mark rejected: low accuracy");
+    logger.warn(
+      buildAttendanceRequestMeta({
+        req,
+        userId,
+        actionKey,
+        targetKey,
+        businessDate,
+        extra: { accuracy },
+      }),
+      "Attendance mark rejected: low accuracy"
+    );
     res.status(422).json({
       ok: false,
       code: "LOCATION_ACCURACY_LOW",
@@ -569,6 +971,209 @@ const resolveRequiredLocation = async ({
   }
 
   return normalizedLocation;
+};
+
+const buildAttendanceRequestMeta = ({ req, userId, actionKey, targetKey = null, businessDate = null, extra = {} }) => ({
+  userId: userId || null,
+  actionKey: actionKey || null,
+  targetKey: targetKey || null,
+  businessDate: businessDate || null,
+  method: req?.method || null,
+  path: req?.originalUrl || req?.url || null,
+  appPath: req?.headers?.["x-app-path"] || null,
+  ip: req?.headers?.["x-forwarded-for"]?.split(",")[0] || req?.socket?.remoteAddress || req?.ip || null,
+  userAgent: req?.headers?.["user-agent"] || null,
+  ...extra,
+});
+
+const CANONICAL_ATTENDANCE_ACTIONS = Object.freeze({
+  entry: "entrada",
+  lunchOut: "almuerzo-salida",
+  lunchIn: "almuerzo-entrada",
+  exit: "salida",
+  permissionStart: "permission-entry-start",
+  permissionFinish: "permission-exit-finish",
+  operationalOut: "salida-oficina",
+  operationalArrival: "llegada-destino",
+  operationalClose: "cierre-viaje",
+  fieldVisitIn: "visita-entrada",
+  fieldVisitOut: "visita-salida",
+  unexpectedArrival: "llegada-imprevista",
+  unexpectedReturn: "regreso-imprevisto",
+  unexpectedClose: "entrada-imprevista",
+});
+
+const uniqCanonicalActions = (items = []) => [...new Set(items.filter(Boolean))];
+
+const buildCanonicalFlowEnvelope = ({
+  attendance = null,
+  activeException = null,
+  activeTimeOff = null,
+  activeFieldVisit = null,
+  businessDate = null,
+}) => {
+  const exceptionType = String(activeException?.type || "").trim().toLowerCase();
+  const activeVisitStatus = String(activeFieldVisit?.status || "").trim().toLowerCase();
+  const timeOffActive = Boolean(activeTimeOff && !activeTimeOff?.is_upcoming);
+  const hasActiveFieldVisit = activeVisitStatus === "in_visit";
+
+  let flowKind = "none";
+  let currentStep = "idle";
+  let nextStep = null;
+  let allowedActions = [];
+
+  if (activeException) {
+    if (isOperationalFlowException(activeException)) {
+      flowKind = "operational";
+
+      if (hasActiveFieldVisit) {
+        currentStep = "field_visit_in_progress";
+        nextStep = CANONICAL_ATTENDANCE_ACTIONS.fieldVisitOut;
+        allowedActions = [
+          CANONICAL_ATTENDANCE_ACTIONS.fieldVisitOut,
+          CANONICAL_ATTENDANCE_ACTIONS.operationalClose,
+        ];
+      } else if (!activeException.arrival_time) {
+        currentStep = "operational_departure_marked";
+        nextStep = CANONICAL_ATTENDANCE_ACTIONS.operationalArrival;
+        allowedActions = [
+          CANONICAL_ATTENDANCE_ACTIONS.operationalArrival,
+          CANONICAL_ATTENDANCE_ACTIONS.operationalClose,
+        ];
+      } else if (!activeException.return_time) {
+        currentStep = "operational_destination_reached";
+        nextStep = CANONICAL_ATTENDANCE_ACTIONS.operationalClose;
+        allowedActions = [
+          CANONICAL_ATTENDANCE_ACTIONS.fieldVisitIn,
+          CANONICAL_ATTENDANCE_ACTIONS.operationalClose,
+        ];
+      } else {
+        currentStep = "operational_return_marked";
+      }
+    } else if (isPermissionLikeExceptionType(exceptionType)) {
+      flowKind = "permission";
+      currentStep = "permission_in_progress";
+      nextStep = CANONICAL_ATTENDANCE_ACTIONS.permissionFinish;
+      allowedActions = [CANONICAL_ATTENDANCE_ACTIONS.permissionFinish];
+    } else {
+      flowKind = "unexpected";
+
+      if (!activeException.arrival_time) {
+        currentStep = "unexpected_departure_marked";
+        nextStep = CANONICAL_ATTENDANCE_ACTIONS.unexpectedArrival;
+        allowedActions = [CANONICAL_ATTENDANCE_ACTIONS.unexpectedArrival];
+      } else if (!activeException.return_time) {
+        currentStep = "unexpected_arrival_marked";
+        nextStep = CANONICAL_ATTENDANCE_ACTIONS.unexpectedReturn;
+        allowedActions = [CANONICAL_ATTENDANCE_ACTIONS.unexpectedReturn];
+      } else {
+        currentStep = "unexpected_return_marked";
+        nextStep = CANONICAL_ATTENDANCE_ACTIONS.unexpectedClose;
+        allowedActions = [CANONICAL_ATTENDANCE_ACTIONS.unexpectedClose];
+      }
+    }
+  } else if (!attendance?.entry_time) {
+    flowKind = timeOffActive ? "time_off" : "regular";
+
+    if (timeOffActive) {
+      currentStep = "time_off_pending_departure";
+      nextStep = CANONICAL_ATTENDANCE_ACTIONS.permissionStart;
+      allowedActions = [
+        CANONICAL_ATTENDANCE_ACTIONS.permissionStart,
+        CANONICAL_ATTENDANCE_ACTIONS.entry,
+      ];
+    } else if (attendance?.entry_pending_regularization) {
+      currentStep = "entry_pending_regularization";
+    } else {
+      currentStep = "awaiting_entry";
+      nextStep = CANONICAL_ATTENDANCE_ACTIONS.entry;
+      allowedActions = [CANONICAL_ATTENDANCE_ACTIONS.entry];
+    }
+  } else if (!attendance?.lunch_start_time) {
+    flowKind = timeOffActive ? "time_off" : "regular";
+    currentStep = timeOffActive ? "working_before_time_off" : "working_morning";
+    nextStep = timeOffActive
+      ? CANONICAL_ATTENDANCE_ACTIONS.permissionStart
+      : CANONICAL_ATTENDANCE_ACTIONS.lunchOut;
+    allowedActions = timeOffActive
+      ? [
+          CANONICAL_ATTENDANCE_ACTIONS.permissionStart,
+          CANONICAL_ATTENDANCE_ACTIONS.lunchOut,
+          CANONICAL_ATTENDANCE_ACTIONS.exit,
+        ]
+      : [
+          CANONICAL_ATTENDANCE_ACTIONS.lunchOut,
+          CANONICAL_ATTENDANCE_ACTIONS.operationalOut,
+          CANONICAL_ATTENDANCE_ACTIONS.exit,
+        ];
+  } else if (!attendance?.lunch_end_time) {
+    flowKind = "regular";
+    currentStep = "lunch_break";
+    nextStep = CANONICAL_ATTENDANCE_ACTIONS.lunchIn;
+    allowedActions = [CANONICAL_ATTENDANCE_ACTIONS.lunchIn];
+  } else if (!attendance?.exit_time) {
+    flowKind = timeOffActive ? "time_off" : "regular";
+    currentStep = timeOffActive ? "working_after_lunch_time_off" : "working_afternoon";
+    nextStep = timeOffActive
+      ? CANONICAL_ATTENDANCE_ACTIONS.permissionStart
+      : CANONICAL_ATTENDANCE_ACTIONS.exit;
+    allowedActions = timeOffActive
+      ? [
+          CANONICAL_ATTENDANCE_ACTIONS.permissionStart,
+          CANONICAL_ATTENDANCE_ACTIONS.exit,
+        ]
+      : [
+          CANONICAL_ATTENDANCE_ACTIONS.exit,
+          CANONICAL_ATTENDANCE_ACTIONS.operationalOut,
+        ];
+  } else {
+    flowKind = "completed";
+    currentStep = "day_closed";
+  }
+
+  return {
+    flow_kind: flowKind,
+    current_step: currentStep,
+    next_step: nextStep,
+    allowed_actions: uniqCanonicalActions(allowedActions),
+    context_flags: {
+      business_date: businessDate || null,
+      has_attendance_record: Boolean(attendance),
+      has_entry: Boolean(attendance?.entry_time),
+      has_lunch_start: Boolean(attendance?.lunch_start_time),
+      has_lunch_end: Boolean(attendance?.lunch_end_time),
+      has_exit: Boolean(attendance?.exit_time),
+      has_active_exception: Boolean(activeException),
+      has_active_operational: Boolean(activeException && isOperationalFlowException(activeException)),
+      has_active_unexpected: Boolean(activeException && !isOperationalFlowException(activeException) && !isPermissionLikeExceptionType(exceptionType)),
+      has_active_permission_exception: Boolean(activeException && isPermissionLikeExceptionType(exceptionType)),
+      has_active_field_visit: hasActiveFieldVisit,
+      has_active_time_off: timeOffActive,
+      has_upcoming_time_off: Boolean(activeTimeOff?.is_upcoming),
+      entry_pending_regularization: Boolean(attendance?.entry_pending_regularization),
+    },
+  };
+};
+
+const withCanonicalFlow = (payload = {}, flowEnvelope = null) => {
+  if (!flowEnvelope) return payload;
+  const nextPayload = {
+    ...payload,
+    flow_kind: flowEnvelope.flow_kind,
+    current_step: flowEnvelope.current_step,
+    next_step: flowEnvelope.next_step,
+    allowed_actions: flowEnvelope.allowed_actions,
+    context_flags: flowEnvelope.context_flags,
+  };
+
+  if (payload?.data && typeof payload.data === "object" && !Array.isArray(payload.data)) {
+    nextPayload.data = {
+      ...payload.data,
+      canonical_flow: flowEnvelope,
+    };
+  }
+
+  return nextPayload;
 };
 
 const getLateJustificationByDate = async ({ userId, attendanceDate }) => {
@@ -721,13 +1326,15 @@ const autoSeedScheduledLunchWindow = async ({ userId, location, timestamp = new 
   }
 };
 
-// Seeds acta lunch window to 14:00-15:00 for collaborators with active operational exits.
-// Always seeds regardless of current time (no hour check), and never overwrites an existing value.
+// Seeds acta lunch window for collaborators with active operational exits.
+// It must never create future lunch marks before their scheduled hour.
 const autoSeedOperationalLunchWindow = async ({ userId, location, timestamp = new Date() }) => {
   const businessDate = getBusinessDate(timestamp);
   const lunchStartTime = buildDateTimeFromBusinessDate(businessDate, ATTENDANCE_OPERATIONAL_LUNCH_START);
   const lunchEndTime = buildDateTimeFromBusinessDate(businessDate, ATTENDANCE_OPERATIONAL_LUNCH_END);
   const normalizedLocation = normalizeLocationInput(location) || null;
+  const applyLunchStart = lunchStartTime.getTime() <= timestamp.getTime() ? lunchStartTime : null;
+  const applyLunchEnd = lunchEndTime.getTime() <= timestamp.getTime() ? lunchEndTime : null;
 
   const result = await db.query(
     `UPDATE user_attendance_records
@@ -740,13 +1347,13 @@ const autoSeedOperationalLunchWindow = async ({ userId, location, timestamp = ne
         AND date = $2
         AND entry_time IS NOT NULL
       RETURNING id`,
-    [userId, businessDate, lunchStartTime, normalizedLocation, lunchEndTime]
+    [userId, businessDate, applyLunchStart, normalizedLocation, applyLunchEnd]
   );
 
   if (result.rowCount > 0) {
     logger.info(
       { userId, businessDate, lunchStart: ATTENDANCE_OPERATIONAL_LUNCH_START, lunchEnd: ATTENDANCE_OPERATIONAL_LUNCH_END },
-      "[ATTENDANCE] Auto-seeded operational lunch window (14:00-15:00) in acta"
+      "[ATTENDANCE] Auto-seeded operational lunch window in acta without future marks"
     );
   }
 };
@@ -767,6 +1374,8 @@ const syncNormalExitFromFieldOp = async ({ userId, location, timestamp = new Dat
   if (!record?.entry_time || record?.exit_time) {
     return { updated: false, reason: "no_open_attendance" };
   }
+
+  const normalizedLocation = normalizeLocationInput(location) || null;
 
   // Auto-close an open lunch so worked time is calculated correctly
   let lunchEndResolved = record.lunch_end_time ? new Date(record.lunch_end_time) : null;
@@ -794,8 +1403,6 @@ const syncNormalExitFromFieldOp = async ({ userId, location, timestamp = new Dat
       ? ATTENDANCE_STANDARD_WORK_HOURS
       : 8;
   const overtimeHours = workedHours > standardWorkHours ? workedHours - standardWorkHours : 0;
-
-  const normalizedLocation = normalizeLocationInput(location) || null;
   const updated = await db.query(
     `
       UPDATE user_attendance_records
@@ -829,7 +1436,26 @@ const syncNormalExitFromFieldOp = async ({ userId, location, timestamp = new Dat
 
 const buildDateTimeFromBusinessDate = (businessDate, hhmm) => {
   const normalized = normalizeHHMM(hhmm, "00:00");
-  return new Date(`${businessDate}T${normalized}:00`);
+  const [yearRaw, monthRaw, dayRaw] = String(businessDate || "").split("-");
+  const [hoursRaw, minutesRaw] = String(normalized).split(":");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hours = Number(hoursRaw);
+  const minutes = Number(minutesRaw);
+
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    !Number.isInteger(hours) ||
+    !Number.isInteger(minutes)
+  ) {
+    return new Date(`${businessDate}T${normalized}:00`);
+  }
+
+  // Stored timestamps must reflect Ecuador local clock time regardless of server timezone.
+  return new Date(Date.UTC(year, month - 1, day, hours + 5, minutes, 0));
 };
 
 const getBusinessDateFromStringDate = (value) => {
@@ -1058,7 +1684,8 @@ const sendTalentoHumanoMailboxEmail = async ({
   if (!TALENTO_HUMANO_ALERT_EMAIL) return;
 
   const whenLabel = normalizeDateTime(occurredAt) || new Date(occurredAt).toISOString();
-  const subject = `[Asistencia] ${exceptionType} - ${collaboratorName || collaboratorEmail || "Colaborador"}`;
+  const targetLabel = collaboratorName || collaboratorEmail || "Colaborador";
+  const subject = `[Urgente][Asistencia] Incumplimiento de horario de ${targetLabel}`;
   const text = [
     "Se detectó una irregularidad de asistencia.",
     "",
@@ -1081,6 +1708,189 @@ const sendTalentoHumanoMailboxEmail = async ({
       { error: error?.message, mailbox: TALENTO_HUMANO_ALERT_EMAIL, exceptionType, collaboratorEmail },
       "[ATTENDANCE] Error enviando correo al buzón de Talento Humano"
     );
+  }
+};
+
+const getAttendanceWorkspaceOverview = async (req, res) => {
+  try {
+    if (!hasHrDashboardAccess(req.user || {})) {
+      return res.status(403).json({
+        ok: false,
+        code: "ATTENDANCE_WORKSPACE_FORBIDDEN",
+        message: "No tienes permisos para consultar el workspace administrativo de asistencia",
+      });
+    }
+
+    const response = await attendanceWorkspaceService.getAttendanceWorkspaceOverview(req.query, req.user || {});
+    return res.status(200).json(response);
+  } catch (err) {
+    logger.error({ err }, "Error obteniendo overview del workspace de asistencia");
+    return res.status(err.status || 500).json({
+      ok: false,
+      message: err.message || "Error obteniendo workspace de asistencia",
+    });
+  }
+};
+
+const getAttendanceWorkspaceCollaborator = async (req, res) => {
+  try {
+    if (!hasHrDashboardAccess(req.user || {})) {
+      return res.status(403).json({
+        ok: false,
+        code: "ATTENDANCE_WORKSPACE_FORBIDDEN",
+        message: "No tienes permisos para consultar el detalle administrativo de asistencia",
+      });
+    }
+
+    const userId = Number(req.params?.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ ok: false, message: "Usuario invalido" });
+    }
+
+    const response = await attendanceWorkspaceService.getAttendanceWorkspaceCollaborator(
+      userId,
+      req.query,
+      req.user || {},
+    );
+    return res.status(200).json(response);
+  } catch (err) {
+    logger.error({ err }, "Error obteniendo detalle del workspace de asistencia");
+    return res.status(err.status || 500).json({
+      ok: false,
+      message: err.message || "Error obteniendo detalle de asistencia",
+    });
+  }
+};
+
+const getAttendanceWorkspaceBreaches = async (req, res) => {
+  try {
+    if (!hasHrDashboardAccess(req.user || {})) {
+      return res.status(403).json({
+        ok: false,
+        code: "ATTENDANCE_WORKSPACE_FORBIDDEN",
+        message: "No tienes permisos para consultar reportes de incumplimiento de horario",
+      });
+    }
+
+    const response = await attendanceWorkspaceService.getAttendanceWorkspaceBreaches(req.query, req.user || {});
+    return res.status(200).json(response);
+  } catch (err) {
+    logger.error({ err }, "Error obteniendo reporte de incumplimientos del workspace de asistencia");
+    return res.status(err.status || 500).json({
+      ok: false,
+      message: err.message || "Error obteniendo incumplimientos de asistencia",
+    });
+  }
+};
+
+const getCollaboratorBirthdayBenefit = async (req, res) => {
+  try {
+    if (!hasHrDashboardAccess(req.user || {})) {
+      return res.status(403).json({
+        ok: false,
+        code: "ATTENDANCE_WORKSPACE_FORBIDDEN",
+        message: "No tienes permisos para consultar el beneficio de cumpleaños",
+      });
+    }
+    const userId = Number(req.params?.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ ok: false, message: "Usuario invalido" });
+    }
+    const summary = await birthdayBenefitService.getBirthdayBenefitSummaryForUser(userId);
+    return res.status(200).json({ ok: true, data: summary });
+  } catch (err) {
+    logger.error({ err }, "Error obteniendo beneficio de cumpleaños");
+    return res.status(err.status || 500).json({
+      ok: false,
+      message: err.message || "Error obteniendo beneficio de cumpleaños",
+    });
+  }
+};
+
+const generateCollaboratorBirthdayBenefitQr = async (req, res) => {
+  try {
+    if (!hasHrDashboardAccess(req.user || {})) {
+      return res.status(403).json({
+        ok: false,
+        code: "ATTENDANCE_WORKSPACE_FORBIDDEN",
+        message: "No tienes permisos para generar QR de cumpleaños",
+      });
+    }
+    const userId = Number(req.params?.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ ok: false, message: "Usuario invalido" });
+    }
+    const summary = await birthdayBenefitService.generateBirthdayBenefitQr({
+      targetUserId: userId,
+      actorUser: req.user || {},
+    });
+    return res.status(200).json({ ok: true, data: summary });
+  } catch (err) {
+    logger.error({ err }, "Error generando QR de cumpleaños");
+    return res.status(err.status || 500).json({
+      ok: false,
+      message: err.message || "Error generando QR de cumpleaños",
+    });
+  }
+};
+
+const validateBirthdayBenefitQr = async (req, res) => {
+  try {
+    const token = String(req.params?.token || "").trim();
+    if (!token) {
+      return res.status(400).json({ ok: false, message: "Token invalido" });
+    }
+    const summary = await birthdayBenefitService.getBirthdayBenefitByTokenForAccess({ token });
+    return res.status(200).json({ ok: true, data: summary });
+  } catch (err) {
+    logger.error({ err }, "Error validando QR de cumpleaños");
+    return res.status(err.status || 500).json({
+      ok: false,
+      message: err.message || "Error validando QR de cumpleaños",
+    });
+  }
+};
+
+const submitBirthdayBenefitEvidence = async (req, res) => {
+  try {
+    const token = String(req.params?.token || "").trim();
+    if (!token) {
+      return res.status(400).json({ ok: false, message: "Token invalido" });
+    }
+    const files = Array.isArray(req.files) ? req.files : [];
+    const summary = await birthdayBenefitService.submitBirthdayBenefitEvidence({
+      token,
+      actorUser: req.user || {},
+      files,
+    });
+    return res.status(200).json({ ok: true, data: summary });
+  } catch (err) {
+    logger.error({ err }, "Error subiendo evidencia de cumpleaños");
+    return res.status(err.status || 500).json({
+      ok: false,
+      message: err.message || "Error subiendo evidencia de cumpleaños",
+    });
+  }
+};
+
+const redeemBirthdayBenefit = async (req, res) => {
+  try {
+    const token = String(req.params?.token || "").trim();
+    if (!token) {
+      return res.status(400).json({ ok: false, message: "Token invalido" });
+    }
+    const summary = await birthdayBenefitService.redeemBirthdayBenefit({
+      token,
+      actorUser: req.user || {},
+      redeemDate: req.body?.redeemDate,
+    });
+    return res.status(200).json({ ok: true, data: summary });
+  } catch (err) {
+    logger.error({ err }, "Error canjeando beneficio de cumpleaños");
+    return res.status(err.status || 500).json({
+      ok: false,
+      message: err.message || "Error canjeando beneficio de cumpleaños",
+    });
   }
 };
 
@@ -1248,6 +2058,18 @@ const enforceNoActiveTimeOffForMarking = async ({ res, userEmail, now }) => {
 
   const type = normalizeTimeOffType(activeTimeOff.tipo_solicitud) || "permiso";
   const label = TIME_OFF_LABELS[type] || "Tiempo no laborable aprobado";
+  logger.warn(
+    {
+      userEmail: userEmail || null,
+      businessDate,
+      timeOffType: type,
+      timeOffLabel: label,
+      startAt: activeTimeOff.fecha_inicio_hora || null,
+      endAt: activeTimeOff.fecha_fin_hora || null,
+      tipoPermiso: activeTimeOff.tipo_permiso || null,
+    },
+    "Attendance mark blocked by active time off"
+  );
 
   res.status(409).json({
     ok: false,
@@ -1264,6 +2086,47 @@ const enforceNoActiveTimeOffForMarking = async ({ res, userEmail, now }) => {
     },
   });
   return false;
+};
+
+const buildPermissionExceptionPreset = (timeOff) => {
+  const tipoPermiso = String(timeOff?.tipo_permiso || "").trim().toLowerCase();
+  if (tipoPermiso === "salud") {
+    return {
+      type: "medico",
+      description: "Salida por permiso de salud aprobado",
+    };
+  }
+
+  return {
+    type: "permiso",
+    description: `Salida por permiso de ${tipoPermiso || "colaborador"} aprobado`,
+  };
+};
+
+const permissionCoincidesWithWorkdayStart = (timeOff) => {
+  const startAtRaw = timeOff?.fecha_inicio_hora;
+  if (!startAtRaw) return false;
+  const startAt = new Date(startAtRaw);
+  if (Number.isNaN(startAt.getTime())) return false;
+  const startClockParts = getEcuadorClockParts(startAt);
+  if (!startClockParts) return false;
+
+  const startMinutes = startClockParts.hour * 60 + startClockParts.minute;
+  const workdayStartMinutes = parseClockHHMM(ATTENDANCE_WORKING_DAY_START) ?? (9 * 60);
+  return startMinutes <= workdayStartMinutes;
+};
+
+const permissionEndsWithWorkdayClose = (timeOff) => {
+  const endAtRaw = timeOff?.fecha_fin_hora;
+  if (!endAtRaw) return false;
+  const endAt = new Date(endAtRaw);
+  if (Number.isNaN(endAt.getTime())) return false;
+  const endClockParts = getEcuadorClockParts(endAt);
+  if (!endClockParts) return false;
+
+  const endMinutes = endClockParts.hour * 60 + endClockParts.minute;
+  const workdayEndMinutes = parseClockHHMM(ATTENDANCE_WORKING_DAY_END) ?? (18 * 60);
+  return endMinutes >= workdayEndMinutes;
 };
 
 /**
@@ -1353,6 +2216,26 @@ const clockIn = async (req, res) => {
         await autoSeedOperationalLunchWindow({ userId, location: normalizedLocation, timestamp: now });
       }
     }
+
+    // Block entry after 09:20 cutoff — only when no active field exception (field ops auto-sync entry)
+    if (!activeAnyException) {
+      const clockParts = getEcuadorClockParts(serverNow);
+      if (clockParts && (clockParts.hour * 60 + clockParts.minute) >= ENTRY_MARK_CUTOFF_MINUTES) {
+        const existingCheck = await db.query(
+          "SELECT 1 FROM user_attendance_records WHERE user_id = $1 AND date = $2 AND entry_time IS NOT NULL LIMIT 1",
+          [userId, today]
+        );
+        if (!existingCheck.rows.length) {
+          return res.status(422).json({
+            ok: false,
+            code: "ENTRY_MARK_CUTOFF_REACHED",
+            message: "La marcacion de entrada esta bloqueada. El limite fue a las 09:20. Solicita la regularizacion a Talento Humano desde el widget.",
+            data: { cutoffTime: "09:20" },
+          });
+        }
+      }
+    }
+
     const ensured = await ensureDailyClockIn({ userId, location: normalizedLocation, timestamp: now });
 
     if (!ensured.created) {
@@ -1473,6 +2356,384 @@ const clockIn = async (req, res) => {
   }
 };
 
+const startPermissionEntry = async (req, res) => {
+  let client = null;
+  try {
+    const { id: userId, email } = req.user || {};
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+
+    const now = resolveMarkTimestamp(req.body, new Date());
+    const today = getBusinessDate(now);
+    const normalizedLocation = await resolveRequiredLocation({
+      req,
+      res,
+      userId,
+      actionKey: "permission-entry-start",
+      targetKey: "start",
+      businessDate: today,
+    });
+    if (!normalizedLocation) return;
+
+    const activeTimeOff = await findActiveTimeOffForMarking({
+      userEmail: email || null,
+      now,
+      businessDate: today,
+    });
+
+    if (!activeTimeOff || normalizeTimeOffType(activeTimeOff.tipo_solicitud) !== "permiso") {
+      return res.status(409).json({
+        ok: false,
+        message: "No tienes un permiso aprobado activo para iniciar este flujo.",
+      });
+    }
+
+    if (!permissionCoincidesWithWorkdayStart(activeTimeOff)) {
+      return res.status(409).json({
+        ok: false,
+        message: "Este permiso no coincide con el inicio de jornada.",
+      });
+    }
+
+    const exceptionPreset = buildPermissionExceptionPreset(activeTimeOff);
+    const officialEntryTime = activeTimeOff?.fecha_inicio_hora
+      ? new Date(activeTimeOff.fecha_inicio_hora)
+      : now;
+
+    client = await db.getClient();
+    await client.query("BEGIN");
+
+    const activeExceptionResult = await client.query(
+      "SELECT id FROM attendance_exceptions WHERE user_id = $1 AND UPPER(COALESCE(status, '')) <> 'COMPLETED' ORDER BY id DESC LIMIT 1",
+      [userId]
+    );
+    if (activeExceptionResult.rows.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        ok: false,
+        message: "Ya tienes una salida en curso. Complétala antes de iniciar otra.",
+      });
+    }
+
+    const existingAttendance = await client.query(
+      "SELECT id, entry_time, entry_location FROM user_attendance_records WHERE user_id = $1 AND date = $2 LIMIT 1",
+      [userId, today]
+    );
+    if (existingAttendance.rows[0]?.entry_time) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        ok: false,
+        message: "Ya tienes una entrada registrada para hoy.",
+      });
+    }
+
+    let attendanceResult;
+    try {
+      attendanceResult = await client.query(
+        `
+        INSERT INTO user_attendance_records (user_id, date, entry_time, entry_location, real_entry_time, entry_source)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (user_id, date)
+        DO UPDATE SET
+          entry_time = COALESCE(user_attendance_records.entry_time, EXCLUDED.entry_time),
+          entry_location = COALESCE(user_attendance_records.entry_location, EXCLUDED.entry_location),
+          real_entry_time = COALESCE(user_attendance_records.real_entry_time, EXCLUDED.real_entry_time),
+          entry_source = COALESCE(user_attendance_records.entry_source, EXCLUDED.entry_source),
+          updated_at = NOW()
+        RETURNING *;
+        `,
+        [userId, today, officialEntryTime, normalizedLocation, now, "permission_start"]
+      );
+    } catch (entryErr) {
+      if (entryErr?.code === "42703" || entryErr?.code === "42P10") {
+        attendanceResult = await client.query(
+          `
+          INSERT INTO user_attendance_records (user_id, date, entry_time, entry_location)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (user_id, date)
+          DO UPDATE SET
+            entry_time = COALESCE(user_attendance_records.entry_time, EXCLUDED.entry_time),
+            entry_location = COALESCE(user_attendance_records.entry_location, EXCLUDED.entry_location),
+            updated_at = NOW()
+          RETURNING *;
+          `,
+          [userId, today, officialEntryTime, normalizedLocation]
+        );
+      } else {
+        throw entryErr;
+      }
+    }
+
+    const exceptionResult = await client.query(
+      `
+      INSERT INTO attendance_exceptions (
+        user_id, date, type, description,
+        start_time, start_location,
+        status
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, 'ACTIVE')
+      RETURNING *;
+      `,
+      [userId, today, exceptionPreset.type, exceptionPreset.description, now, normalizedLocation]
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      ok: true,
+      message: "Entrada y salida a permiso registradas correctamente.",
+      data: {
+        attendance: attendanceResult.rows[0] || null,
+        exception: exceptionResult.rows[0] || null,
+        time_off: {
+          id: activeTimeOff.id,
+          tipo_solicitud: activeTimeOff.tipo_solicitud || null,
+          tipo_permiso: activeTimeOff.tipo_permiso || null,
+          fecha_inicio_hora: activeTimeOff.fecha_inicio_hora || null,
+          fecha_fin_hora: activeTimeOff.fecha_fin_hora || null,
+        },
+      },
+    });
+  } catch (err) {
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {}
+    }
+    logger.error({ err }, "Error iniciando entrada + permiso");
+    return res.status(500).json({
+      ok: false,
+      message: "Error registrando entrada y salida a permiso",
+    });
+  } finally {
+    client?.release?.();
+  }
+};
+
+const finishPermissionExit = async (req, res) => {
+  let client = null;
+  try {
+    const { id: userId, email } = req.user || {};
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+
+    const now = resolveMarkTimestamp(req.body, new Date());
+    const today = getBusinessDate(now);
+    const normalizedLocation = await resolveRequiredLocation({
+      req,
+      res,
+      userId,
+      actionKey: "permission-exit-finish",
+      targetKey: "return",
+      businessDate: today,
+    });
+    if (!normalizedLocation) return;
+
+    const activeExceptionResult = await db.query(
+      "SELECT * FROM attendance_exceptions WHERE user_id = $1 AND UPPER(COALESCE(status, '')) <> 'COMPLETED' ORDER BY id DESC LIMIT 1",
+      [userId]
+    );
+    const activeException = activeExceptionResult.rows[0] || null;
+    if (!activeException || !isPermissionLikeExceptionType(activeException?.type)) {
+      return res.status(409).json({
+        ok: false,
+        message: "No tienes un permiso en curso para finalizar con salida.",
+      });
+    }
+
+    const activeTimeOff = await findActiveTimeOffForMarking({
+      userEmail: email || null,
+      now,
+      businessDate: today,
+    });
+
+    const displayTimeOff = activeTimeOff || await (async () => {
+      const normalizedEmail = String(email || "").trim().toLowerCase();
+      if (!normalizedEmail) return null;
+      const { rows } = await db.query(
+        `
+        SELECT id, tipo_solicitud, tipo_permiso, fecha_inicio, fecha_fin, fecha_inicio_hora, fecha_fin_hora, status
+          FROM permisos_vacaciones
+         WHERE LOWER(COALESCE(user_email, '')) = $1
+           AND LOWER(COALESCE(status, '')) IN ('approved', 'aprobado')
+           AND LOWER(COALESCE(tipo_solicitud, '')) = 'permiso'
+           AND $2::date BETWEEN COALESCE(fecha_inicio, $2::date) AND COALESCE(fecha_fin, $2::date)
+         ORDER BY COALESCE(fecha_fin_hora, fecha_fin::timestamptz) DESC, id DESC
+         LIMIT 1
+        `,
+        [normalizedEmail, today]
+      );
+      return rows?.[0] || null;
+    })();
+
+    if (!displayTimeOff || !permissionEndsWithWorkdayClose(displayTimeOff)) {
+      return res.status(409).json({
+        ok: false,
+        message: "Este permiso no coincide con el cierre de jornada.",
+      });
+    }
+
+    client = await db.getClient();
+    await client.query("BEGIN");
+
+    let exceptionUpdate;
+    try {
+      exceptionUpdate = await client.query(
+        `
+        UPDATE attendance_exceptions
+           SET status = 'COMPLETED',
+               return_time = COALESCE(return_time, $1),
+               return_location = COALESCE(return_location, $2),
+               end_time = COALESCE(end_time, $1),
+               end_location = COALESCE(end_location, $2),
+               updated_at = NOW()
+         WHERE id = $3
+         RETURNING *;
+        `,
+        [now, normalizedLocation, activeException.id]
+      );
+    } catch (updateErr) {
+      if (updateErr?.code === "42703") {
+        exceptionUpdate = await client.query(
+          `
+          UPDATE attendance_exceptions
+             SET status = 'COMPLETED',
+                 return_time = COALESCE(return_time, $1),
+                 return_location = COALESCE(return_location, $2)
+           WHERE id = $3
+           RETURNING *;
+          `,
+          [now, normalizedLocation, activeException.id]
+        );
+      } else {
+        throw updateErr;
+      }
+    }
+
+    const attendanceResult = await client.query(
+      `
+      SELECT id, entry_time, lunch_start_time, lunch_end_time, exit_time
+        FROM user_attendance_records
+       WHERE user_id = $1
+         AND date = $2
+       LIMIT 1
+      `,
+      [userId, today]
+    );
+    const currentRecord = attendanceResult.rows[0] || null;
+    if (!currentRecord?.entry_time) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        ok: false,
+        message: "No existe una entrada abierta para cerrar la jornada.",
+      });
+    }
+
+    if (currentRecord?.exit_time) {
+      await client.query("COMMIT");
+      return res.status(200).json({
+        ok: true,
+        message: "Permiso finalizado. La salida ya estaba registrada.",
+        data: {
+          exception: exceptionUpdate.rows[0] || null,
+          attendance: currentRecord,
+        },
+      });
+    }
+
+    let lunchEndResolved = currentRecord.lunch_end_time ? new Date(currentRecord.lunch_end_time) : null;
+    if (currentRecord?.lunch_start_time && !currentRecord?.lunch_end_time) {
+      lunchEndResolved = now;
+      await client.query(
+        `
+        UPDATE user_attendance_records
+           SET lunch_end_time = $1,
+               lunch_end_location = COALESCE(lunch_end_location, $2),
+               updated_at = NOW()
+         WHERE id = $3
+        `,
+        [now, normalizedLocation, currentRecord.id]
+      );
+    }
+
+    const entryTime = new Date(currentRecord.entry_time);
+    let workedMs = now - entryTime;
+    if (currentRecord?.lunch_start_time && lunchEndResolved) {
+      const lunchStart = new Date(currentRecord.lunch_start_time);
+      workedMs -= (lunchEndResolved - lunchStart);
+    }
+
+    const workedHours = workedMs / (1000 * 60 * 60);
+    const standardWorkHours =
+      Number.isFinite(ATTENDANCE_STANDARD_WORK_HOURS) && ATTENDANCE_STANDARD_WORK_HOURS > 0
+        ? ATTENDANCE_STANDARD_WORK_HOURS
+        : 8;
+    const overtimeHours = workedHours > standardWorkHours ? workedHours - standardWorkHours : 0;
+
+    const exitUpdate = await client.query(
+      `
+      UPDATE user_attendance_records
+         SET exit_time = $1,
+             exit_location = COALESCE($4, exit_location),
+             is_overtime = $5,
+             overtime_hours = $6,
+             total_hours = $7,
+             updated_at = NOW()
+       WHERE user_id = $2
+         AND date = $3
+         AND exit_time IS NULL
+       RETURNING id, user_id, date, entry_time, exit_time, total_hours, overtime_hours;
+      `,
+      [
+        now,
+        userId,
+        today,
+        normalizedLocation,
+        overtimeHours > 0,
+        overtimeHours,
+        workedHours,
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      ok: true,
+      message: "Permiso y jornada finalizados correctamente.",
+      data: {
+        exception: exceptionUpdate.rows[0] || null,
+        attendance: exitUpdate.rows[0] || currentRecord,
+        time_off: {
+          id: displayTimeOff.id,
+          tipo_solicitud: displayTimeOff.tipo_solicitud || null,
+          tipo_permiso: displayTimeOff.tipo_permiso || null,
+          fecha_inicio_hora: displayTimeOff.fecha_inicio_hora || null,
+          fecha_fin_hora: displayTimeOff.fecha_fin_hora || null,
+        },
+      },
+      overtime: overtimeHours > 0 ? {
+        hours: overtimeHours,
+        isSignificant: overtimeHours > 2,
+      } : null,
+    });
+  } catch (err) {
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {}
+    }
+    logger.error({ err }, "Error finalizando permiso y jornada");
+    return res.status(500).json({
+      ok: false,
+      message: "Error registrando salida del permiso y cierre de jornada",
+    });
+  } finally {
+    client?.release?.();
+  }
+};
+
 /**
  * ðŸ½ï¸ Clock Out for Lunch - Record lunch start time
  * POST /api/attendance/clock-out-lunch
@@ -1510,13 +2771,36 @@ const clockOutLunch = async (req, res) => {
     );
 
     if (existing.rows.length === 0 || !existing.rows[0].entry_time) {
-      return res.status(400).json({
-        ok: false,
-        message: "Debes marcar entrada primero",
-      });
+      const clockParts = getEcuadorClockParts(now);
+      const ecMins = clockParts ? clockParts.hour * 60 + clockParts.minute : 0;
+      if (ecMins < ENTRY_MARK_CUTOFF_MINUTES) {
+        return res.status(400).json({
+          ok: false,
+          message: "Debes marcar entrada primero",
+        });
+      }
+      // Entry cutoff (09:20) passed — allow lunch mark without prior entry; mark pending regularization
+      try {
+        await db.query(
+          `INSERT INTO user_attendance_records (user_id, date, entry_pending_regularization)
+           VALUES ($1, $2, TRUE)
+           ON CONFLICT (user_id, date) DO UPDATE SET entry_pending_regularization = TRUE, updated_at = NOW()`,
+          [userId, today]
+        );
+      } catch (pendingErr) {
+        if (pendingErr?.code === "42703") {
+          // Column not yet added (pre-migration 235) — just ensure record exists
+          await db.query(
+            "INSERT INTO user_attendance_records (user_id, date) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            [userId, today]
+          );
+        } else {
+          throw pendingErr;
+        }
+      }
     }
 
-    if (existing.rows[0].lunch_start_time) {
+    if (existing.rows[0]?.lunch_start_time) {
       return res.status(400).json({
         ok: false,
         message: "Ya has marcado salida a almuerzo",
@@ -1784,28 +3068,47 @@ const clockOut = async (req, res) => {
 
     // Check if record exists
     const existing = await db.query(
-      "SELECT id, entry_time, exit_time, overtime_hours FROM user_attendance_records WHERE user_id = $1 AND date = $2",
+      "SELECT id, entry_time, lunch_start_time, lunch_end_time, exit_time, overtime_hours, entry_pending_regularization FROM user_attendance_records WHERE user_id = $1 AND date = $2",
       [userId, today]
+    ).catch(async (err) => {
+      if (err?.code === "42703") {
+        return db.query(
+          "SELECT id, entry_time, lunch_start_time, lunch_end_time, exit_time, overtime_hours FROM user_attendance_records WHERE user_id = $1 AND date = $2",
+          [userId, today]
+        );
+      }
+      throw err;
+    });
+
+    const currentRecord = existing.rows[0] || null;
+    const hasAttendanceFlow = Boolean(
+      currentRecord?.entry_time ||
+      currentRecord?.lunch_start_time ||
+      currentRecord?.lunch_end_time ||
+      currentRecord?.entry_pending_regularization
     );
 
-    if (existing.rows.length === 0 || !existing.rows[0].entry_time) {
+    if (existing.rows.length === 0 || !hasAttendanceFlow) {
       return res.status(400).json({
         ok: false,
         message: "Debes marcar entrada primero",
       });
     }
 
-    if (existing.rows[0].exit_time) {
+    if (currentRecord?.exit_time) {
       return res.status(400).json({
         ok: false,
         message: "Ya has marcado salida",
-        data: existing.rows[0],
+        data: currentRecord,
       });
     }
 
     // Calculate worked hours and determine if overtime
-    const entryTime = new Date(existing.rows[0].entry_time);
-    let workedMs = now - entryTime;
+    let workedHours = 0;
+    let overtimeHours = 0;
+    const hasFormalEntry = Boolean(currentRecord?.entry_time);
+    const entryTime = hasFormalEntry ? new Date(currentRecord.entry_time) : null;
+    let workedMs = hasFormalEntry ? (now - entryTime) : 0;
 
     // Subtract lunch break if exists
     const lunchQuery = await db.query(
@@ -1813,18 +3116,20 @@ const clockOut = async (req, res) => {
       [userId, today]
     );
 
-    if (lunchQuery.rows[0]?.lunch_start_time && lunchQuery.rows[0]?.lunch_end_time) {
+    if (hasFormalEntry && lunchQuery.rows[0]?.lunch_start_time && lunchQuery.rows[0]?.lunch_end_time) {
       const lunchStart = new Date(lunchQuery.rows[0].lunch_start_time);
       const lunchEnd = new Date(lunchQuery.rows[0].lunch_end_time);
       workedMs -= (lunchEnd - lunchStart);
     }
 
-    const workedHours = workedMs / (1000 * 60 * 60);
-    const standardWorkHours =
-      Number.isFinite(ATTENDANCE_STANDARD_WORK_HOURS) && ATTENDANCE_STANDARD_WORK_HOURS > 0
-        ? ATTENDANCE_STANDARD_WORK_HOURS
-        : 8; // Jornada laboral estandar
-    const overtimeHours = workedHours > standardWorkHours ? workedHours - standardWorkHours : 0;
+    if (hasFormalEntry) {
+      workedHours = workedMs / (1000 * 60 * 60);
+      const standardWorkHours =
+        Number.isFinite(ATTENDANCE_STANDARD_WORK_HOURS) && ATTENDANCE_STANDARD_WORK_HOURS > 0
+          ? ATTENDANCE_STANDARD_WORK_HOURS
+          : 8; // Jornada laboral estandar
+      overtimeHours = workedHours > standardWorkHours ? workedHours - standardWorkHours : 0;
+    }
     const overtimeDeclared = parseBooleanFlag(isOvertime);
     const isOvertimeMarked = overtimeDeclared || overtimeHours > 0;
 
@@ -2020,7 +3325,8 @@ const registerException = async (req, res) => {
  * ðŸ”„ Update Exception Status (Steps 2, 3, 4)
  * POST /api/attendance/exception/status
  * Body: { status, location }
- * Status: 'ON_SITE' (Llegada), 'RETURNING' (Salida Destino), 'COMPLETED' (Regreso Oficina)
+ * Status: 'ON_SITE' (Llegada), 'ACTIVE' (Salida destino y continuar operacion),
+ *         'RETURNING' (Salida Destino e iniciar retorno), 'COMPLETED' (Regreso Oficina)
  */
 const updateExceptionStatus = async (req, res) => {
   try {
@@ -2059,6 +3365,10 @@ const updateExceptionStatus = async (req, res) => {
       updateQuery = "UPDATE attendance_exceptions SET status = 'ON_SITE', arrival_time = $1, arrival_location = $2, updated_at = NOW() WHERE id = $3 RETURNING *";
       params = [now, normalizedLocation, exceptionId];
       message = "Llegada registrada. Notifica cuando salgas del destino.";
+    } else if (status === 'ACTIVE') {
+      updateQuery = "UPDATE attendance_exceptions SET status = 'ACTIVE', departure_time = COALESCE(departure_time, $1), departure_location = COALESCE(departure_location, $2), updated_at = NOW() WHERE id = $3 RETURNING *";
+      params = [now, normalizedLocation, exceptionId];
+      message = "Salida de destino registrada. La salida operacional sigue activa para continuar.";
     } else if (status === 'RETURNING') {
       updateQuery = "UPDATE attendance_exceptions SET status = 'RETURNING', departure_time = COALESCE(departure_time, $1), departure_location = COALESCE(departure_location, $2), updated_at = NOW() WHERE id = $3 RETURNING *";
       params = [now, normalizedLocation, exceptionId];
@@ -2079,6 +3389,7 @@ const updateExceptionStatus = async (req, res) => {
         // Fallback for DBs with legacy attendance_exceptions schema.
         const fallbackQueryMap = {
           ON_SITE: "UPDATE attendance_exceptions SET status = 'ON_SITE', arrival_time = $1, arrival_location = $2 WHERE id = $3 RETURNING *",
+          ACTIVE: "UPDATE attendance_exceptions SET status = 'ACTIVE', departure_time = COALESCE(departure_time, $1), departure_location = COALESCE(departure_location, $2) WHERE id = $3 RETURNING *",
           RETURNING: "UPDATE attendance_exceptions SET status = 'RETURNING', departure_time = COALESCE(departure_time, $1), departure_location = COALESCE(departure_location, $2) WHERE id = $3 RETURNING *",
           COMPLETED: "UPDATE attendance_exceptions SET status = 'COMPLETED', return_time = COALESCE(return_time, $1), return_location = COALESCE(return_location, $2) WHERE id = $3 RETURNING *",
         };
@@ -2161,10 +3472,14 @@ const updateExceptionStatus = async (req, res) => {
         }
       : null;
 
-    return res.status(200).json({
+    const flowEnvelope = buildCanonicalFlowEnvelope({
+      activeException: normalizedException,
+    });
+
+    return res.status(200).json(withCanonicalFlow({
       ok: true,
       data: normalizedException,
-    });
+    }, flowEnvelope));
   } catch (err) {
     logger.error({ err }, "âŒ Error obteniendo excepciÃ³n activa");
     return res.status(500).json({
@@ -2187,6 +3502,7 @@ const getToday = async (req, res) => {
 
     const now = new Date();
     const today = getBusinessDate(now);
+    const activeAnyException = await getActiveExceptionByFlow({ userId, flow: "any" });
     const activeOperational = await getActiveExceptionByFlow({ userId, flow: "operational" });
     if (activeOperational) {
       await autoCompleteOperationalAttendanceSpan({
@@ -2258,6 +3574,27 @@ const getToday = async (req, res) => {
       now,
       businessDate: today,
     });
+
+    // For display: also surface upcoming permissions that start later today
+    const displayTimeOff = activeTimeOff || await (async () => {
+      const userEmail = String(req.user?.email || "").trim().toLowerCase();
+      if (!userEmail) return null;
+      try {
+        const { rows } = await db.query(
+          `SELECT id, tipo_solicitud, tipo_permiso, fecha_inicio, fecha_fin, fecha_inicio_hora, fecha_fin_hora, status
+             FROM permisos_vacaciones
+            WHERE LOWER(COALESCE(user_email, '')) = $1
+              AND LOWER(COALESCE(status, '')) IN ('approved', 'aprobado')
+              AND fecha_inicio_hora IS NOT NULL
+              AND fecha_inicio_hora::date = $2::date
+              AND $3::timestamptz < fecha_inicio_hora
+            ORDER BY fecha_inicio_hora ASC
+            LIMIT 1`,
+          [userEmail, today, now]
+        );
+        return rows?.[0] || null;
+      } catch { return null; }
+    })();
     const lateJustification = await getLateJustificationByDate({
       userId,
       attendanceDate: today,
@@ -2271,6 +3608,10 @@ const getToday = async (req, res) => {
     const isLate = Number.isFinite(lateMinutes) && lateMinutes > LATE_TOLERANCE_MINUTES;
     const cutoffIso = getLateCutoffIsoForDateKey(today);
     const cutoffReached = cutoffIso ? now.getTime() >= new Date(cutoffIso).getTime() : false;
+    const nowClockParts = getEcuadorClockParts(now);
+    const entryMarkCutoffPassed = Boolean(
+      nowClockParts && (nowClockParts.hour * 60 + nowClockParts.minute) >= ENTRY_MARK_CUTOFF_MINUTES
+    );
 
     const latePolicy = {
       timezone: LATE_TIMEZONE,
@@ -2283,6 +3624,9 @@ const getToday = async (req, res) => {
       hasTimeOff: Boolean(activeTimeOff),
       cutoffAt: cutoffIso,
       cutoffReached,
+      entryCutoff: "09:20",
+      entryMarkCutoffPassed,
+      entryPendingRegularization: Boolean(data?.entry_pending_regularization),
       justification: {
         exists: Boolean(lateJustification),
         reason: lateJustification?.reason || null,
@@ -2307,14 +3651,40 @@ const getToday = async (req, res) => {
       regularizedEntryTime: lateJustification?.regularized_entry_time || null,
     };
 
-    return res.status(200).json({
+    const responsePayload = {
       ok: true,
       data: {
         ...(data || {}),
         active_field_visit: activeFieldVisit,
+        active_time_off: displayTimeOff
+          ? {
+              id: displayTimeOff.id,
+              tipo_solicitud: normalizeTimeOffType(displayTimeOff.tipo_solicitud) || displayTimeOff.tipo_solicitud || null,
+              tipo_permiso: displayTimeOff.tipo_permiso || null,
+              fecha_inicio: displayTimeOff.fecha_inicio || null,
+              fecha_fin: displayTimeOff.fecha_fin || null,
+              fecha_inicio_hora: displayTimeOff.fecha_inicio_hora || null,
+              fecha_fin_hora: displayTimeOff.fecha_fin_hora || null,
+              status: displayTimeOff.status || null,
+              is_upcoming: !activeTimeOff && Boolean(displayTimeOff),
+              label:
+                TIME_OFF_LABELS[normalizeTimeOffType(displayTimeOff.tipo_solicitud) || ""] ||
+                "Tiempo no laborable aprobado",
+            }
+          : null,
         late_policy: latePolicy,
       },
+    };
+
+    const flowEnvelope = buildCanonicalFlowEnvelope({
+      attendance: data,
+      activeException: activeAnyException,
+      activeTimeOff: displayTimeOff,
+      activeFieldVisit,
+      businessDate: today,
     });
+
+    return res.status(200).json(withCanonicalFlow(responsePayload, flowEnvelope));
   } catch (err) {
     logger.error({ err }, "âŒ Error obteniendo asistencia de hoy");
     return res.status(500).json({
@@ -3112,7 +4482,10 @@ const clockInField = async (req, res) => {
     ].includes(normalizedRole);
     const isTech = [
       "tecnico",
+      "ing_servicio",
+      "esp_app",
       "jefe_tecnico",
+      "jefe_servicio",
       "ti",
       "jefe_ti",
       "logistica",
@@ -3234,25 +4607,29 @@ const clockInField = async (req, res) => {
         });
       }
       // ðŸ•µï¸ Cotejar con cronograma (Schedules)
-      let scheduleCheck;
+      // Fase 9 hardening: si la tabla de cronogramas no existe/no es accesible
+      // en este entorno, no debe bloquear el marcado con un 500 — se registra
+      // como visita no planificada (ver comentario debajo), igual que cuando
+      // simplemente no hay match en el cronograma.
+      let scheduledVisitMatch = null;
       try {
-        scheduleCheck = await db.query(
-          `SELECT id FROM schedules 
-           WHERE user_email = $1 AND client_request_id = $2 
-           AND visit_date = $3 AND status IN ('pending', 'approved')`,
-          [email, numericClientId, today]
-        );
+        scheduledVisitMatch = await schedulesService.findTodayScheduledVisit({
+          userEmail: email,
+          clientRequestId: numericClientId,
+          date: today,
+        });
       } catch (scheduleErr) {
-        // Some environments still do not have the schedules table.
-        if (scheduleErr?.code === "42P01") {
-          scheduleCheck = { rows: [] };
-        } else {
+        if (!["42P01", "42703", "42501"].includes(String(scheduleErr?.code || ""))) {
           throw scheduleErr;
         }
+        logger.warn(
+          { code: scheduleErr?.code, message: scheduleErr?.message },
+          "[ATTENDANCE] Schedule match skipped due DB schema/permissions mismatch"
+        );
       }
 
       // Si no existe en cronograma, registrar como visita no planificada pero permitir el marcado
-      const isPlanned = scheduleCheck.rows.length > 0;
+      const isPlanned = Boolean(scheduledVisitMatch);
       const normalizedObservations = String(observations || "").trim() || null;
       const upsertParams = [
         numericClientId,
@@ -3342,18 +4719,44 @@ const clockInField = async (req, res) => {
         }
       }
 
-      // Actualizar estado del cronograma si existe
-      if (isPlanned) {
-        await db.query(
-          `UPDATE schedules SET status = 'in_progress', actual_start_time = $1 
-           WHERE id = $2`,
-          [now, scheduleCheck.rows[0].id]
+      await syncTechnicalClientActivityStatus({
+        clientId: numericClientId,
+        userId,
+        userEmail: email,
+        userRole: role,
+        businessDate: today,
+        nextStatus: "en_proceso",
+      }).catch((syncError) => {
+        logger.warn(
+          { error: syncError?.message, userId, clientId: numericClientId, businessDate: today },
+          "[ATTENDANCE] No se pudo sincronizar actividad tecnica en entrada de visita",
         );
-      }
+      });
     } else if (prospect_name) {
       const normalizedProspectName = String(prospect_name || "").trim();
       if (!normalizedProspectName) {
         return res.status(400).json({ ok: false, message: "El nombre del prospecto es requerido" });
+      }
+      const normalizedLeadId = String(req.body?.lead_id || "").trim() || null;
+
+      let isLeadPlanned = false;
+      if (normalizedLeadId) {
+        try {
+          const scheduledLeadMatch = await schedulesService.findTodayScheduledVisit({
+            userEmail: email,
+            leadId: normalizedLeadId,
+            date: today,
+          });
+          isLeadPlanned = Boolean(scheduledLeadMatch);
+        } catch (scheduleErr) {
+          if (!["42P01", "42703", "42501"].includes(String(scheduleErr?.code || ""))) {
+            throw scheduleErr;
+          }
+          logger.warn(
+            { code: scheduleErr?.code, message: scheduleErr?.message },
+            "[ATTENDANCE] Schedule match (lead) skipped due DB schema/permissions mismatch"
+          );
+        }
       }
 
       const prospectInsertParams = [
@@ -3363,6 +4766,8 @@ const clockInField = async (req, res) => {
         now,
         parsedLocation?.latitude ?? null,
         parsedLocation?.longitude ?? null,
+        normalizedLeadId,
+        isLeadPlanned,
       ];
 
       const upsertProspectVisitLegacy = async () => {
@@ -3382,7 +4787,9 @@ const clockInField = async (req, res) => {
                 SET status = 'in_visit',
                     check_in_time = COALESCE(check_in_time, $4),
                     check_in_lat = COALESCE(check_in_lat, $5),
-                    check_in_lng = COALESCE(check_in_lng, $6)
+                    check_in_lng = COALESCE(check_in_lng, $6),
+                    lead_id = COALESCE($7, lead_id),
+                    is_planned = $8
               WHERE LOWER(COALESCE(user_email, '')) = LOWER($1)
                 AND prospect_name = $2
                 AND visit_date = $3
@@ -3392,8 +4799,8 @@ const clockInField = async (req, res) => {
         }
 
         return db.query(
-          `INSERT INTO prospect_visits (user_email, prospect_name, visit_date, status, check_in_time, check_in_lat, check_in_lng)
-           VALUES ($1, $2, $3, 'in_visit', $4, $5, $6)
+          `INSERT INTO prospect_visits (user_email, prospect_name, visit_date, status, check_in_time, check_in_lat, check_in_lng, lead_id, is_planned)
+           VALUES ($1, $2, $3, 'in_visit', $4, $5, $6, $7, $8)
            RETURNING *`,
           prospectInsertParams
         );
@@ -3401,12 +4808,14 @@ const clockInField = async (req, res) => {
 
       try {
         result = await db.query(
-          `INSERT INTO prospect_visits (user_email, prospect_name, visit_date, status, check_in_time, check_in_lat, check_in_lng)
-           VALUES ($1, $2, $3, 'in_visit', $4, $5, $6)
+          `INSERT INTO prospect_visits (user_email, prospect_name, visit_date, status, check_in_time, check_in_lat, check_in_lng, lead_id, is_planned)
+           VALUES ($1, $2, $3, 'in_visit', $4, $5, $6, $7, $8)
            ON CONFLICT (user_email, prospect_name, visit_date)
            DO UPDATE SET
              status = 'in_visit',
-             check_in_time = COALESCE(prospect_visits.check_in_time, EXCLUDED.check_in_time)
+             check_in_time = COALESCE(prospect_visits.check_in_time, EXCLUDED.check_in_time),
+             lead_id = COALESCE(EXCLUDED.lead_id, prospect_visits.lead_id),
+             is_planned = EXCLUDED.is_planned
            RETURNING *`,
           prospectInsertParams
         );
@@ -3464,7 +4873,7 @@ const clockInField = async (req, res) => {
  */
 const clockOutField = async (req, res) => {
   try {
-    const { id: userId, email } = req.user || {};
+    const { id: userId, email, role } = req.user || {};
     const { client_id, prospect_name, observations } = req.body;
     const normalizedProspectName = String(prospect_name || "").trim();
 
@@ -3568,17 +4977,20 @@ const clockOutField = async (req, res) => {
         }
       }
 
-      // Actualizar cronograma a completado
       if (result.rows.length > 0) {
-        try {
-          await db.query(
-            `UPDATE schedules SET status = 'completed', actual_end_time = $1 
-             WHERE LOWER(COALESCE(user_email, '')) = $2 AND client_request_id = $3 AND visit_date = $4`,
-            [now, normalizedEmail, numericClientId, today]
+        await syncTechnicalClientActivityStatus({
+          clientId: numericClientId,
+          userId,
+          userEmail: email,
+          userRole: role,
+          businessDate: today,
+          nextStatus: "completado",
+        }).catch((syncError) => {
+          logger.warn(
+            { error: syncError?.message, userId, clientId: numericClientId, businessDate: today },
+            "[ATTENDANCE] No se pudo sincronizar actividad tecnica en salida de visita",
           );
-        } catch (scheduleErr) {
-          if (scheduleErr?.code !== "42P01") throw scheduleErr;
-        }
+        });
       }
     } else if (normalizedProspectName) {
       result = await db.query(
@@ -3643,6 +5055,36 @@ const clockOutField = async (req, res) => {
             WHERE id = $5
             RETURNING *`,
           [now, parsedLocation?.latitude ?? null, parsedLocation?.longitude ?? null, observations, prospectRow.id]
+        );
+      }
+    }
+
+    // Cumplimiento de cronograma: si la visita cerrada corresponde a un cliente/lead
+    // planificado y aprobado, marcar la actividad de CRM-FAM vinculada como completada.
+    if (result?.rows?.length) {
+      try {
+        const closedVisit = result.rows[0];
+        const scheduledMatch = closedVisit.client_request_id
+          ? await schedulesService.findTodayScheduledVisit({
+              userEmail: email,
+              clientRequestId: closedVisit.client_request_id,
+              date: closedVisit.visit_date || today,
+            })
+          : closedVisit.lead_id
+            ? await schedulesService.findTodayScheduledVisit({
+                userEmail: email,
+                leadId: closedVisit.lead_id,
+                date: closedVisit.visit_date || today,
+              })
+            : null;
+
+        if (scheduledMatch?.crm_activity_id) {
+          await schedulesService.markCrmActivityCompleted(scheduledMatch.crm_activity_id, userId);
+        }
+      } catch (err) {
+        logger.warn(
+          { err: err?.message, userId },
+          "[ATTENDANCE] No se pudo marcar actividad CRM-FAM como completada",
         );
       }
     }
@@ -4022,12 +5464,19 @@ const clockUnexpectedReturn = async (req, res) => {
 const clockOutOperational = async (req, res) => {
   try {
     const { id: userId, email } = req.user || {};
-    const { description } = req.body;
+    const rawDescription = String(req.body?.description || "").trim();
 
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
     const now = resolveMarkTimestamp(req.body, new Date());
     const today = getBusinessDate(now);
+    const operationalPayload = await resolveOperationalJourneyPayload({
+      req,
+      phase: "start",
+      userId,
+      userEmail: email,
+      businessDate: today,
+    });
     const normalizedLocation = await resolveRequiredLocation({
       req,
       res,
@@ -4086,12 +5535,47 @@ const clockOutOperational = async (req, res) => {
       );
     }
 
-    const result = await db.query(
-      `INSERT INTO attendance_exceptions (user_id, date, type, description, start_time, start_location, status)
-       VALUES ($1, $2, 'operacion_campo', $3, $4, $5, 'ACTIVE')
-       RETURNING *`,
-      [userId, today, description || "Salida operacional de campo via atajo", now, normalizedLocation]
-    );
+    const description = rawDescription || buildOperationalDefaultDescription({
+      scope: operationalPayload.scope,
+      category: operationalPayload.category,
+    });
+
+    let result;
+    try {
+      result = await db.query(
+        `INSERT INTO attendance_exceptions (
+            user_id, date, type, description, start_time, start_location, status,
+            operational_scope, operational_category, uses_personal_vehicle,
+            odometer_start_km, odometer_start_photo_drive_file_id, odometer_start_photo_drive_url
+          )
+         VALUES ($1, $2, 'operacion_campo', $3, $4, $5, 'ACTIVE', $6, $7, $8, $9, $10, $11)
+         RETURNING *`,
+        [
+          userId,
+          today,
+          description,
+          now,
+          normalizedLocation,
+          operationalPayload.scope,
+          operationalPayload.category,
+          operationalPayload.usesPersonalVehicle,
+          operationalPayload.startKm,
+          operationalPayload.startPhoto.driveFileId,
+          operationalPayload.startPhoto.driveUrl,
+        ]
+      );
+    } catch (insertErr) {
+      if (insertErr?.code === "42703") {
+        result = await db.query(
+          `INSERT INTO attendance_exceptions (user_id, date, type, description, start_time, start_location, status)
+           VALUES ($1, $2, 'operacion_campo', $3, $4, $5, 'ACTIVE')
+           RETURNING *`,
+          [userId, today, description, now, normalizedLocation]
+        );
+      } else {
+        throw insertErr;
+      }
+    }
 
     const tracking = computeOperationalTracking({ startTime: result.rows[0]?.start_time, now });
     if (ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED) {
@@ -4114,6 +5598,9 @@ const clockOutOperational = async (req, res) => {
       },
     });
   } catch (err) {
+    if (err?.status) {
+      return res.status(err.status).json({ ok: false, message: err.message });
+    }
     logger.error({ err }, "Error en clock-out-operational");
     return res.status(500).json({ ok: false, message: "Error registrando salida operacional" });
   }
@@ -4143,20 +5630,18 @@ const clockInOperational = async (req, res) => {
     if (!activeOperational) {
       return res.status(404).json({ ok: false, code: "NO_ACTIVE_OPERATIONAL", message: "No se encontro una salida operacional activa" });
     }
-    if (ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED) {
-      await autoCompleteOperationalAttendanceSpan({
-        userId,
-        operationalException: activeOperational,
-        location: activeOperational.start_location || normalizedLocation,
-        now,
-      }).catch((err) =>
-        logger.warn({ err: err?.message, userId }, "[ATTENDANCE] Non-fatal autoCompleteOperationalAttendanceSpan failure (return op)")
-      );
-    }
 
+    const operationalPayload = await resolveOperationalJourneyPayload({
+      req,
+      phase: "end",
+      userId,
+      userEmail: email,
+      businessDate: getBusinessDate(now),
+      activeOperational,
+    });
     const tracking = computeOperationalTracking({ startTime: activeOperational.start_time, endTime: now, now });
     const descriptionWithSummary = appendOperationalSummary({
-      baseDescription: activeOperational.description || "Salida operacional de campo",
+      baseDescription: activeOperational.description || "Salida operacional de campo / oficina",
       tracking,
     });
 
@@ -4165,14 +5650,25 @@ const clockInOperational = async (req, res) => {
       result = await db.query(
         `UPDATE attendance_exceptions
             SET status = 'COMPLETED',
-                end_time = $1,
-                end_location = $2,
                 return_time = COALESCE(return_time, $1),
                 return_location = COALESCE(return_location, $2),
-                description = $3
-          WHERE id = $4
+                description = $3,
+                odometer_end_km = $4,
+                odometer_distance_km = $5,
+                odometer_end_photo_drive_file_id = $6,
+                odometer_end_photo_drive_url = $7
+          WHERE id = $8
          RETURNING *`,
-        [now, normalizedLocation, descriptionWithSummary, activeOperational.id]
+        [
+          now,
+          normalizedLocation,
+          descriptionWithSummary,
+          operationalPayload.endKm,
+          operationalPayload.distanceKm,
+          operationalPayload.endPhoto.driveFileId,
+          operationalPayload.endPhoto.driveUrl,
+          activeOperational.id,
+        ]
       );
     } catch (updateErr) {
       if (updateErr?.code === "42703") {
@@ -4195,8 +5691,33 @@ const clockInOperational = async (req, res) => {
       return res.status(404).json({ ok: false, code: "NO_ACTIVE_OPERATIONAL", message: "No se encontro una salida operacional activa" });
     }
 
+    if (ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED) {
+      await autoCompleteOperationalAttendanceSpan({
+        userId,
+        operationalException: activeOperational,
+        location: activeOperational.start_location || normalizedLocation,
+        now,
+      }).catch((err) =>
+        logger.warn({ err: err?.message, userId }, "[ATTENDANCE] Non-fatal autoCompleteOperationalAttendanceSpan failure (return op)")
+      );
+    }
+
     if (ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED && (shouldMirrorAttendanceForFieldOp(now) || shouldMirrorRegularExitBySchedule(now))) {
       await syncNormalExitFromFieldOp({ userId, location: normalizedLocation, timestamp: now });
+    }
+
+    let syncedAllowance = null;
+    try {
+      syncedAllowance = await syncOperationalAllowanceFromAttendance({
+        actorUser: req.user || {},
+        operationalException: result.rows[0],
+        fallbackVisitDate: getBusinessDate(now),
+      });
+    } catch (allowanceError) {
+      logger.warn(
+        { error: allowanceError?.message, userId, operationalExceptionId: result.rows?.[0]?.id || activeOperational.id },
+        "[ATTENDANCE] No se pudo preparar viatico automatico para salida operacional cerrada",
+      );
     }
 
     return res.status(200).json({
@@ -4205,9 +5726,15 @@ const clockInOperational = async (req, res) => {
       data: {
         ...result.rows[0],
         ...tracking,
+        travel_allowance_id: syncedAllowance?.id || null,
+        travel_allowance_workflow_status: syncedAllowance?.workflow_status || null,
+        ...(operationalPayload.distanceKm !== null ? { odometer_distance_km: operationalPayload.distanceKm } : {}),
       },
     });
   } catch (err) {
+    if (err?.status) {
+      return res.status(err.status).json({ ok: false, message: err.message });
+    }
     logger.error({ err }, "Error en clock-in-operational");
     return res.status(500).json({ ok: false, message: "Error registrando regreso operacional" });
   }
@@ -4520,15 +6047,18 @@ const generatePDF = async (req, res) => {
   try {
     const { userId } = req.params;
     const { start, end, periodType, period, year } = req.query;
+    const requestedType = String(periodType || period || "monthly").trim().toLowerCase();
     const normalizedPeriodType =
-      String(periodType || period || "monthly").trim().toLowerCase() === "annual"
+      requestedType === "annual"
         ? "annual"
-        : "monthly";
+        : requestedType.startsWith("week")
+          ? "weekly"
+          : "monthly";
 
-    if (normalizedPeriodType === "monthly" && (!start || !end)) {
+    if (normalizedPeriodType !== "annual" && (!start || !end)) {
       return res.status(400).json({
         ok: false,
-        message: "Fechas de inicio y fin requeridas (start, end) para reporte mensual",
+        message: "Fechas de inicio y fin requeridas (start, end) para reporte semanal o mensual",
       });
     }
 
@@ -4591,6 +6121,91 @@ const generatePDF = async (req, res) => {
     return res.status(500).json({
       ok: false,
       message: err.message || "Error generando PDF",
+    });
+  }
+};
+
+const generateBulkPDF = async (req, res) => {
+  try {
+    const { start, end, periodType, period, year, search, includeInactive } = req.query;
+    const normalizedFilters = normalizeAttendanceRangeFilters(req.query);
+    const requestedType = String(periodType || period || "monthly").trim().toLowerCase();
+    const normalizedPeriodType = requestedType === "annual"
+      ? "annual"
+      : requestedType.startsWith("week")
+        ? "weekly"
+        : "monthly";
+
+    if (normalizedPeriodType !== "annual" && (!start || !end)) {
+      return res.status(400).json({
+        ok: false,
+        message: "Fechas de inicio y fin requeridas (start, end) para reporte semanal o mensual",
+      });
+    }
+
+    if (normalizedPeriodType === "annual" && year !== undefined) {
+      const parsedYear = Number.parseInt(year, 10);
+      if (!Number.isInteger(parsedYear) || parsedYear < 2000 || parsedYear > 2100) {
+        return res.status(400).json({
+          ok: false,
+          message: "El anio del reporte anual es invalido",
+        });
+      }
+    }
+
+    const collaborators = await attendanceWorkspaceService.listScopedCollaborators({
+      search,
+      departmentId: normalizedFilters.departmentId,
+      includeInactive: String(includeInactive || "").toLowerCase() === "true",
+    });
+
+    const scopedIds = collaborators
+      .map((item) => Number(item.user_id))
+      .filter((value) => Number.isInteger(value) && value > 0);
+    const requestedIds = Array.isArray(normalizedFilters.userIds) && normalizedFilters.userIds.length
+      ? normalizedFilters.userIds.filter((value) => scopedIds.includes(value))
+      : scopedIds;
+
+    if (!requestedIds.length) {
+      return res.status(404).json({
+        ok: false,
+        message: "No hay colaboradores para generar el reporte F-RH",
+      });
+    }
+
+    const pdfResult = await generateAttendanceBulkPDF(requestedIds, start, end, {
+      periodType: normalizedPeriodType,
+      year,
+    });
+    const pdfBuffer = pdfResult?.buffer;
+    const hashSha256 = pdfResult?.hashSha256;
+    const hashAlgorithm = pdfResult?.hashAlgorithm || "SHA-256";
+    const fileLabel =
+      normalizedPeriodType === "annual"
+        ? `${year || new Date().getFullYear()}-anual`
+        : `${start}-${end}`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=asistencia-general-${fileLabel}.pdf`
+    );
+    res.setHeader("Cache-Control", "no-store");
+    if (hashSha256) {
+      res.setHeader("X-Document-Hash-SHA256", hashSha256);
+      res.setHeader("X-Document-Hash-Algorithm", hashAlgorithm);
+    }
+    res.setHeader(
+      "X-Document-Integrity-Notice",
+      "Documento bloqueado al generarse. Cualquier alteracion invalida su integridad."
+    );
+
+    return res.send(pdfBuffer);
+  } catch (err) {
+    logger.error({ err }, "Error en endpoint de PDF masivo");
+    return res.status(500).json({
+      ok: false,
+      message: err.message || "Error generando PDF masivo",
     });
   }
 };
@@ -4711,7 +6326,8 @@ const getOperationalHealth = async (req, res) => {
 /**
  * POST /api/attendance/marcar/cierre-viaje
  * Closes an active operational trip from outside the office (closure_type = 'outside_office').
- * Mirrors the formal exit on the acta if the day is still open.
+ * Mirrors the formal exit on the acta only when the operational closure happens
+ * at or after the configured end of workday.
  */
 const clockCloseTrip = async (req, res) => {
   try {
@@ -4743,6 +6359,15 @@ const clockCloseTrip = async (req, res) => {
       });
     }
 
+    const operationalPayload = await resolveOperationalJourneyPayload({
+      req,
+      phase: "close",
+      userId,
+      userEmail: email,
+      businessDate: today,
+      activeOperational,
+    });
+
     // Close the operational exception
     try {
       await db.query(
@@ -4752,9 +6377,21 @@ const clockCloseTrip = async (req, res) => {
                 return_location = $2,
                 closure_type = 'outside_office',
                 closure_reason = $3,
-                updated_at = NOW()
-          WHERE id = $4`,
-        [now, normalizedLocation, closureReason, activeOperational.id]
+                odometer_end_km = $4,
+                odometer_distance_km = $5,
+                odometer_end_photo_drive_file_id = $6,
+                odometer_end_photo_drive_url = $7
+          WHERE id = $8`,
+        [
+          now,
+          normalizedLocation,
+          closureReason,
+          operationalPayload.endKm,
+          operationalPayload.distanceKm,
+          operationalPayload.endPhoto.driveFileId,
+          operationalPayload.endPhoto.driveUrl,
+          activeOperational.id,
+        ]
       );
     } catch (closeErr) {
       if (closeErr?.code === "42703") {
@@ -4771,20 +6408,66 @@ const clockCloseTrip = async (req, res) => {
       }
     }
 
-    // Mirror formal exit on attendance record
-    const exitResult = await syncNormalExitFromFieldOp({ userId, location: normalizedLocation, timestamp: now });
+    // Fill attendance marks for all days spanned by this operational event
+    try {
+      await autoCompleteOperationalAttendanceSpan({
+        userId,
+        operationalException: activeOperational,
+        location: normalizedLocation,
+        now,
+      });
+    } catch (spanErr) {
+      logger.warn({ err: spanErr?.message, userId }, "[ATTENDANCE] Non-fatal autoCompleteOperationalAttendanceSpan failure (close-trip)");
+    }
+
+    const shouldCloseRegularDay =
+      ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED &&
+      shouldMirrorRegularExitBySchedule(now);
+    const exitResult = shouldCloseRegularDay
+      ? await syncNormalExitFromFieldOp({ userId, location: normalizedLocation, timestamp: now })
+      : { updated: false, reason: "regular_day_kept_open" };
+
+    let syncedAllowance = null;
+    try {
+      const refreshedOperational = {
+        ...activeOperational,
+        id: activeOperational.id,
+        description: activeOperational.description,
+        date: today,
+        return_time: now,
+      };
+      syncedAllowance = await syncOperationalAllowanceFromAttendance({
+        actorUser: req.user || {},
+        operationalException: refreshedOperational,
+        fallbackVisitDate: today,
+        closureReason,
+      });
+    } catch (allowanceError) {
+      logger.warn(
+        { error: allowanceError?.message, userId, operationalExceptionId: activeOperational.id },
+        "[ATTENDANCE] No se pudo preparar viatico automatico para cierre fuera de oficina",
+      );
+    }
 
     return res.status(200).json({
       ok: true,
-      message: "Viaje operacional cerrado desde fuera de oficina",
-      nextStep: "fin_jornada",
-      data: {
-        exception_id: activeOperational.id,
-        closure_type: "outside_office",
-        exit_mirrored: exitResult?.updated ?? false,
-      },
-    });
+        message: shouldCloseRegularDay
+          ? "Operacion cerrada desde fuera de oficina. La jornada normal tambien fue cerrada."
+          : "Operacion cerrada desde fuera de oficina. La jornada normal permanece abierta.",
+        nextStep: shouldCloseRegularDay ? "fin_jornada" : "continuar_jornada_normal",
+        data: {
+          exception_id: activeOperational.id,
+          closure_type: "outside_office",
+          exit_mirrored: exitResult?.updated ?? false,
+          travel_allowance_id: syncedAllowance?.id || null,
+          travel_allowance_workflow_status: syncedAllowance?.workflow_status || null,
+          ...(operationalPayload.distanceKm !== null ? { odometer_distance_km: operationalPayload.distanceKm } : {}),
+        },
+      });
   } catch (err) {
+    if (err?.status) {
+      return res.status(err.status).json({ ok: false, message: err.message });
+    }
     logger.error({ err }, "Error en clock-close-trip");
     return res.status(500).json({ ok: false, message: "Error cerrando el viaje operacional" });
   }
@@ -4831,15 +6514,31 @@ const clockOutOperationalLunch = async (req, res) => {
       });
     }
 
-    const { rows } = await db.query(
-      `UPDATE attendance_exceptions
-          SET op_lunch_start_time = $1,
-              op_lunch_start_location = $2,
-              updated_at = NOW()
-        WHERE id = $3
-        RETURNING *`,
-      [now, normalizedLocation, activeOperational.id]
-    );
+    let rows;
+    try {
+      ({ rows } = await db.query(
+        `UPDATE attendance_exceptions
+            SET op_lunch_start_time = $1,
+                op_lunch_start_location = $2,
+                updated_at = NOW()
+          WHERE id = $3
+          RETURNING *`,
+        [now, normalizedLocation, activeOperational.id]
+      ));
+    } catch (updateErr) {
+      if (updateErr?.code === "42703") {
+        ({ rows } = await db.query(
+          `UPDATE attendance_exceptions
+              SET op_lunch_start_time = $1,
+                  op_lunch_start_location = $2
+            WHERE id = $3
+            RETURNING *`,
+          [now, normalizedLocation, activeOperational.id]
+        ));
+      } else {
+        throw updateErr;
+      }
+    }
 
     logger.info({ userId, email, exceptionId: activeOperational.id }, "[ATTENDANCE] Operational lunch-out marked");
 
@@ -4903,15 +6602,31 @@ const clockInOperationalLunch = async (req, res) => {
       });
     }
 
-    const { rows } = await db.query(
-      `UPDATE attendance_exceptions
-          SET op_lunch_end_time = $1,
-              op_lunch_end_location = $2,
-              updated_at = NOW()
-        WHERE id = $3
-        RETURNING *`,
-      [now, normalizedLocation, activeOperational.id]
-    );
+    let rows;
+    try {
+      ({ rows } = await db.query(
+        `UPDATE attendance_exceptions
+            SET op_lunch_end_time = $1,
+                op_lunch_end_location = $2,
+                updated_at = NOW()
+          WHERE id = $3
+          RETURNING *`,
+        [now, normalizedLocation, activeOperational.id]
+      ));
+    } catch (updateErr) {
+      if (updateErr?.code === "42703") {
+        ({ rows } = await db.query(
+          `UPDATE attendance_exceptions
+              SET op_lunch_end_time = $1,
+                  op_lunch_end_location = $2
+            WHERE id = $3
+            RETURNING *`,
+          [now, normalizedLocation, activeOperational.id]
+        ));
+      } else {
+        throw updateErr;
+      }
+    }
 
     logger.info({ userId, email, exceptionId: activeOperational.id }, "[ATTENDANCE] Operational lunch-in marked");
 
@@ -4923,6 +6638,300 @@ const clockInOperationalLunch = async (req, res) => {
   } catch (err) {
     logger.error({ err }, "Error en clock-in-operational-lunch");
     return res.status(500).json({ ok: false, message: "Error registrando regreso de almuerzo operacional" });
+  }
+};
+
+/**
+ * POST /api/attendance/regularize-entry
+ * Usuario solicita regularizacion de entrada (cuando paso del cutoff 09:20 sin marcar)
+ */
+const requestEntryRegularization = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
+
+    const { reason } = req.body || {};
+    const normalizedReason = String(reason || "").trim();
+    if (normalizedReason.length < 8) {
+      return res.status(400).json({
+        ok: false,
+        message: "El motivo de regularizacion debe tener al menos 8 caracteres.",
+      });
+    }
+
+    const now = new Date();
+    const today = getBusinessDate(now);
+
+    await notifyTalentoHumanoAttendanceIrregularity({
+      collaboratorId: userId,
+      collaboratorName: resolveActorDisplayName({ id: userId, email }),
+      collaboratorEmail: email || null,
+      exceptionType: "SOLICITUD_REGULARIZACION_ENTRADA",
+      detail: `El colaborador solicita regularizacion de entrada del ${today}. Motivo: ${normalizedReason}`,
+      occurredAt: now,
+      meta: { attendance_date: today, reason: normalizedReason },
+    }).catch((err) => logger.error({ err }, "[ATTENDANCE] Error notificando regularizacion de entrada (non-fatal)"));
+
+    try {
+      await db.query(
+        `INSERT INTO user_attendance_records (user_id, date, entry_pending_regularization)
+         VALUES ($1, $2, TRUE)
+         ON CONFLICT (user_id, date) DO UPDATE SET entry_pending_regularization = TRUE, updated_at = NOW()`,
+        [userId, today]
+      );
+    } catch (dbErr) {
+      if (dbErr?.code === "42703") {
+        await db.query(
+          "INSERT INTO user_attendance_records (user_id, date) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+          [userId, today]
+        );
+      } else {
+        throw dbErr;
+      }
+    }
+
+    // Persist request in attendance_regularizations so TH can see reason + status
+    await db.query(
+      `INSERT INTO attendance_regularizations
+          (requester_user_id, affected_user_id, attendance_date, regularization_type, reason, status)
+        VALUES ($1, $1, $2, 'missing_clock_in', $3, 'pending')
+        ON CONFLICT DO NOTHING`,
+      [userId, today, normalizedReason]
+    ).catch(() => {}); // non-fatal: table may not exist in all envs
+
+    logger.info(`[ATTENDANCE] Entry regularization requested: ${email} for ${today}`);
+    return res.status(200).json({
+      ok: true,
+      message: "Solicitud de regularizacion enviada a Talento Humano.",
+    });
+  } catch (err) {
+    logger.error({ err }, "Error en solicitud de regularizacion de entrada");
+    return res.status(500).json({ ok: false, message: "Error procesando solicitud de regularizacion" });
+  }
+};
+
+// ── TH: panel de justificaciones y regularizaciones por colaborador ────────────
+
+const getCollaboratorJustificationsPanel = async (req, res) => {
+  try {
+    if (!hasHrDashboardAccess(req.user || {})) {
+      return res.status(403).json({ ok: false, code: "FORBIDDEN", message: "Sin acceso" });
+    }
+    const userId = Number(req.params?.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ ok: false, message: "Usuario invalido" });
+    }
+
+    const [lateRes, pendingRes, formalRes] = await Promise.all([
+      db.query(
+        `SELECT lj.*, uar.entry_time AS actual_entry_time
+           FROM attendance_late_justifications lj
+           LEFT JOIN user_attendance_records uar
+                  ON uar.user_id = lj.user_id AND uar.date = lj.attendance_date
+          WHERE lj.user_id = $1
+          ORDER BY lj.attendance_date DESC
+          LIMIT 200`,
+        [userId]
+      ).catch(() => ({ rows: [] })),
+      db.query(
+        `SELECT date, entry_time, entry_pending_regularization
+           FROM user_attendance_records
+          WHERE user_id = $1 AND entry_pending_regularization = TRUE
+          ORDER BY date DESC`,
+        [userId]
+      ).catch(() => ({ rows: [] })),
+      db.query(
+        `SELECT r.*,
+                COALESCE(NULLIF(u.fullname,''), u.name, u.email) AS requester_name,
+                COALESCE(NULLIF(u2.fullname,''), u2.name, u2.email) AS approver_name
+           FROM attendance_regularizations r
+           LEFT JOIN users u ON u.id = r.requester_user_id
+           LEFT JOIN users u2 ON u2.id = r.approver_user_id
+          WHERE r.affected_user_id = $1
+          ORDER BY r.created_at DESC
+          LIMIT 200`,
+        [userId]
+      ).catch(() => ({ rows: [] })),
+    ]);
+
+    return res.status(200).json({
+      ok: true,
+      data: {
+        late_justifications: lateRes.rows,
+        pending_entry_regularizations: pendingRes.rows,
+        formal_regularizations: formalRes.rows,
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, "Error obteniendo panel de justificaciones del colaborador");
+    return res.status(500).json({ ok: false, message: "Error obteniendo panel de justificaciones" });
+  }
+};
+
+const updateLateJustification = async (req, res) => {
+  try {
+    if (!hasHrDashboardAccess(req.user || {})) {
+      return res.status(403).json({ ok: false, code: "FORBIDDEN", message: "Sin acceso" });
+    }
+    const id = Number(req.params?.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ ok: false, message: "Justificacion invalida" });
+    }
+
+    const newStatus = String(req.body?.status || "approved").trim().toLowerCase();
+    const validStatuses = new Set(["approved", "rejected"]);
+    if (!validStatuses.has(newStatus)) {
+      return res.status(400).json({ ok: false, message: "Estado invalido" });
+    }
+
+    const timeRaw = String(req.body?.regularized_entry_time || "09:00").trim();
+    const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/;
+    if (!timeRegex.test(timeRaw)) {
+      return res.status(400).json({ ok: false, message: "Hora invalida" });
+    }
+
+    const result = await db.query(
+      `UPDATE attendance_late_justifications
+          SET status = $2, regularized_entry_time = $3, updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [id, newStatus, timeRaw]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ ok: false, message: "Justificacion no encontrada" });
+    }
+    return res.status(200).json({ ok: true, data: result.rows[0] });
+  } catch (err) {
+    logger.error({ err }, "Error actualizando justificacion de atraso");
+    return res.status(500).json({ ok: false, message: "Error actualizando justificacion" });
+  }
+};
+
+const applyEntryRegularization = async (req, res) => {
+  try {
+    if (!hasHrDashboardAccess(req.user || {})) {
+      return res.status(403).json({ ok: false, code: "FORBIDDEN", message: "Sin acceso" });
+    }
+
+    const targetUserId = Number(req.body?.userId);
+    const rawDate = String(req.body?.date || "").trim();
+    const entryTime = String(req.body?.entryTime || "").trim();
+    const date = (() => {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) return rawDate;
+      const isoLikeMatch = rawDate.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s].*)?$/);
+      return isoLikeMatch?.[1] || "";
+    })();
+
+    if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+      return res.status(400).json({ ok: false, message: "Usuario invalido" });
+    }
+    if (!date) {
+      return res.status(400).json({ ok: false, message: "Fecha invalida" });
+    }
+    const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/;
+    if (!timeRegex.test(entryTime)) {
+      return res.status(400).json({ ok: false, message: "Hora de entrada invalida (HH:MM)" });
+    }
+
+    const normalizedEntryTimestamp = buildDateTimeFromBusinessDate(date, entryTime);
+    if (!(normalizedEntryTimestamp instanceof Date) || Number.isNaN(normalizedEntryTimestamp.getTime())) {
+      return res.status(400).json({ ok: false, message: "Hora de entrada invalida" });
+    }
+
+    const upsertAttendanceEntry = async ({ includePendingFlag = true, useConflictClause = true } = {}) => {
+      if (useConflictClause) {
+        if (includePendingFlag) {
+          return db.query(
+            `INSERT INTO user_attendance_records (user_id, date, entry_time, entry_location, entry_pending_regularization)
+             VALUES ($1, $2, $3, 'Regularizacion TH', FALSE)
+             ON CONFLICT (user_id, date)
+             DO UPDATE SET
+               entry_time = EXCLUDED.entry_time,
+               entry_location = COALESCE(NULLIF(user_attendance_records.entry_location, ''), 'Regularizacion TH'),
+               entry_pending_regularization = FALSE,
+               updated_at = NOW()
+             RETURNING *`,
+            [targetUserId, date, normalizedEntryTimestamp]
+          );
+        }
+
+        return db.query(
+          `INSERT INTO user_attendance_records (user_id, date, entry_time, entry_location)
+           VALUES ($1, $2, $3, 'Regularizacion TH')
+           ON CONFLICT (user_id, date)
+           DO UPDATE SET
+             entry_time = EXCLUDED.entry_time,
+             entry_location = COALESCE(NULLIF(user_attendance_records.entry_location, ''), 'Regularizacion TH'),
+             updated_at = NOW()
+           RETURNING *`,
+          [targetUserId, date, normalizedEntryTimestamp]
+        );
+      }
+
+      const updateQuery = includePendingFlag
+        ? `UPDATE user_attendance_records
+              SET entry_time = $3,
+                  entry_location = COALESCE(NULLIF(entry_location, ''), 'Regularizacion TH'),
+                  entry_pending_regularization = FALSE,
+                  updated_at = NOW()
+            WHERE user_id = $1 AND date = $2
+            RETURNING *`
+        : `UPDATE user_attendance_records
+              SET entry_time = $3,
+                  entry_location = COALESCE(NULLIF(entry_location, ''), 'Regularizacion TH'),
+                  updated_at = NOW()
+            WHERE user_id = $1 AND date = $2
+            RETURNING *`;
+
+      const updated = await db.query(updateQuery, [targetUserId, date, normalizedEntryTimestamp]);
+      if (updated.rows.length) return updated;
+
+      const insertQuery = includePendingFlag
+        ? `INSERT INTO user_attendance_records (user_id, date, entry_time, entry_location, entry_pending_regularization)
+             VALUES ($1, $2, $3, 'Regularizacion TH', FALSE)
+           RETURNING *`
+        : `INSERT INTO user_attendance_records (user_id, date, entry_time, entry_location)
+             VALUES ($1, $2, $3, 'Regularizacion TH')
+           RETURNING *`;
+
+      return db.query(insertQuery, [targetUserId, date, normalizedEntryTimestamp]);
+    };
+
+    try {
+      await upsertAttendanceEntry({ includePendingFlag: true, useConflictClause: true });
+    } catch (dbErr) {
+      if (dbErr?.code === "42703") {
+        // entry_pending_regularization column not yet migrated
+        await upsertAttendanceEntry({ includePendingFlag: false, useConflictClause: true });
+      } else if (dbErr?.code === "42P10") {
+        // Schema without expected unique constraint on (user_id, date)
+        try {
+          await upsertAttendanceEntry({ includePendingFlag: true, useConflictClause: false });
+        } catch (fallbackErr) {
+          if (fallbackErr?.code === "42703") {
+            await upsertAttendanceEntry({ includePendingFlag: false, useConflictClause: false });
+          } else {
+            throw fallbackErr;
+          }
+        }
+      } else {
+        throw dbErr;
+      }
+    }
+
+    // Mark associated formal regularization as applied
+    await db.query(
+      `UPDATE attendance_regularizations
+          SET status = 'applied', applied_at = NOW(), updated_at = NOW()
+        WHERE affected_user_id = $1 AND attendance_date = $2 AND regularization_type = 'missing_clock_in'
+          AND status IN ('pending','approved')`,
+      [targetUserId, date]
+    ).catch(() => {});
+
+    return res.status(200).json({ ok: true, message: "Entrada regularizada correctamente." });
+  } catch (err) {
+    logger.error({ err }, "Error aplicando regularizacion de entrada");
+    return res.status(500).json({ ok: false, message: "Error aplicando regularizacion" });
   }
 };
 
@@ -4945,19 +6954,32 @@ module.exports = {
   clockCloseTrip,
   justifyLateArrival,
   registerException,
+  startPermissionEntry,
+  finishPermissionExit,
   updateExceptionStatus,
   getActiveException,
   getToday,
   getUserAttendance,
   getRange,
   getTeamRange,
+  getAttendanceWorkspaceOverview,
+  getAttendanceWorkspaceCollaborator,
+  getAttendanceWorkspaceBreaches,
   getAttendanceNonCompliance,
   scheduleAttendanceFollowUpMeeting,
   getOperationalHealth,
   generatePDF,
+  generateBulkPDF,
   syncLocation,
   markOvertime,
   getOvertimeRecords,
+  requestEntryRegularization,
+  getCollaboratorJustificationsPanel,
+  updateLateJustification,
+  applyEntryRegularization,
+  getCollaboratorBirthdayBenefit,
+  generateCollaboratorBirthdayBenefitQr,
+  validateBirthdayBenefitQr,
+  submitBirthdayBenefitEvidence,
+  redeemBirthdayBenefit,
 };
-
-

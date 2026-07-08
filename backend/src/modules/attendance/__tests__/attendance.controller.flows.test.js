@@ -62,7 +62,12 @@ describe("attendance flow separation", () => {
   test("blocks operational exit start when unexpected flow is active", async () => {
     const req = {
       user: { id: 11, email: "field2@fam.com" },
-      body: { location: "-2.170998,-79.922359", location_accuracy: 25, description: "visita no planificada" },
+      body: {
+        location: "-2.170998,-79.922359",
+        location_accuracy: 25,
+        description: "visita no planificada",
+        operational_category: "cliente",
+      },
     };
     const res = createRes();
 
@@ -85,16 +90,27 @@ describe("attendance flow separation", () => {
   test("registers operational exit successfully", async () => {
     const req = {
       user: { id: 12, email: "ops@fam.com" },
-      body: { location: "-2.170998,-79.922359", location_accuracy: 20, description: "salida oficina" },
+      body: {
+        location: "-2.170998,-79.922359",
+        location_accuracy: 20,
+        description: "salida oficina",
+        operational_category: "cliente",
+      },
     };
     const res = createRes();
     const inserted = { id: 501, type: "operacion_campo", status: "ACTIVE" };
 
     db.query
-      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
-      .mockResolvedValueOnce({ rows: [] }) // no active operational
-      .mockResolvedValueOnce({ rows: [] }) // no active unexpected
-      .mockResolvedValueOnce({ rows: [inserted] }); // insert exception
+      .mockResolvedValue({ rows: [], rowCount: 0 }) // permanent fallback for autoComplete calls
+      .mockResolvedValueOnce({ rows: [] })           // no active timeoff
+      .mockResolvedValueOnce({ rows: [] })           // no active operational
+      .mockResolvedValueOnce({ rows: [] })           // no active unexpected
+      .mockResolvedValueOnce({ rows: [] })           // syncNormalEntry: ensureDailyClockIn SELECT (no entry)
+      .mockResolvedValueOnce({ rows: [{ id: 1, entry_time: new Date().toISOString() }], rowCount: 1 }) // ensureDailyClockIn INSERT
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // autoSeedOperationalLunchWindow UPDATE
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // closePendingLunchForOperationalStart SELECT
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // closePendingLunchForOperationalStart UPDATE
+      .mockResolvedValueOnce({ rows: [inserted] });  // INSERT exception
 
     await controller.clockOutOperational(req, res);
 
@@ -111,7 +127,12 @@ describe("attendance flow separation", () => {
   test("returns operational cycle as active when user starts it again on another day", async () => {
     const req = {
       user: { id: 120, email: "ops-repeat@fam.com" },
-      body: { location: "-2.170998,-79.922359", location_accuracy: 20, description: "seguimiento multi-dia" },
+      body: {
+        location: "-2.170998,-79.922359",
+        location_accuracy: 20,
+        description: "seguimiento multi-dia",
+        operational_category: "cliente",
+      },
     };
     const res = createRes();
     const activeOperational = {
@@ -154,9 +175,10 @@ describe("attendance flow separation", () => {
     const completed = { id: 502, type: "operacion_campo", status: "COMPLETED", description: "salida operacional" };
 
     db.query
-      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
-      .mockResolvedValueOnce({ rows: [activeOperational] }) // active operational
-      .mockResolvedValueOnce({ rows: [completed] }); // update exception
+      .mockResolvedValue({ rows: [], rowCount: 0 }) // permanent fallback for autoComplete calls
+      .mockResolvedValueOnce({ rows: [] })                   // no active timeoff
+      .mockResolvedValueOnce({ rows: [activeOperational] })  // active operational
+      .mockResolvedValueOnce({ rows: [completed] });         // update exception (index [2] — assertion below checks this)
 
     await controller.clockInOperational(req, res);
 
@@ -170,6 +192,48 @@ describe("attendance flow separation", () => {
     );
     const updateCallArgs = db.query.mock.calls[2][1];
     expect(updateCallArgs[2]).toContain("[RESUMEN_OPERACIONAL]");
+  });
+
+  test("closes operational trip without closing regular day before 18:00", async () => {
+    const req = {
+      user: { id: 131, email: "ops-close@fam.com" },
+      body: {
+        location: "-2.170998,-79.922359",
+        location_accuracy: 20,
+        occurred_at: "2026-07-02T22:30:00.000Z",
+        closure_reason: "fin de operacion",
+      },
+    };
+    const res = createRes();
+    const activeOperational = {
+      id: 8801,
+      type: "operacion_campo",
+      status: "ACTIVE",
+      description: "operacion en ruta",
+      start_time: null,
+      uses_personal_vehicle: false,
+    };
+
+    db.query
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
+      .mockResolvedValueOnce({ rows: [activeOperational] }) // active operational
+      .mockResolvedValueOnce({ rows: [] }); // update exception
+
+    await controller.clockCloseTrip(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: true,
+        message: expect.stringContaining("jornada normal permanece abierta"),
+        nextStep: "continuar_jornada_normal",
+        data: expect.objectContaining({
+          exception_id: 8801,
+          exit_mirrored: false,
+        }),
+      }),
+    );
   });
 
   test("registers unexpected exit successfully", async () => {
@@ -207,6 +271,11 @@ describe("attendance flow separation", () => {
     const completed = { id: 504, type: "IMPREVISTO", status: "COMPLETED" };
 
     db.query
+      // Fase 9 hardening: shouldMirrorAttendanceForFieldOp/shouldMirrorRegularExitBySchedule
+      // dependen de la hora real (no se fija occurred_at en este test), y pueden disparar
+      // una consulta extra de sincronizacion segun la hora del dia. Default seguro para
+      // cualquier llamada mas alla de las dos explicitamente esperadas.
+      .mockResolvedValue({ rows: [], rowCount: 0 })
       .mockResolvedValueOnce({ rows: [] }) // no active timeoff
       .mockResolvedValueOnce({ rows: [completed] }); // update exception
 
@@ -230,11 +299,15 @@ describe("attendance flow separation", () => {
     const res = createRes();
     const visit = { id: 601, status: "in_visit", prospect_name: "Prospecto A" };
 
+    const existingEntry = { id: 1601, entry_time: new Date().toISOString() };
     db.query
-      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
-      .mockResolvedValueOnce({ rows: [{ id: 1601, entry_time: new Date().toISOString() }] }) // ensure daily clock-in
-      .mockResolvedValueOnce({ rows: [visit] }) // insert prospect visit
-      .mockResolvedValueOnce({ rows: [] }); // no active operational flow
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] })             // no active timeoff
+      .mockResolvedValueOnce({ rows: [existingEntry] }) // ensureDailyClockIn SELECT
+      .mockResolvedValueOnce({ rows: [] })             // getActiveOp (auto-sync)
+      .mockResolvedValueOnce({ rows: [existingEntry] }) // syncNormalEntry: ensureDailyClockIn SELECT
+      .mockResolvedValueOnce({ rows: [visit] })        // insert prospect visit
+      .mockResolvedValueOnce({ rows: [] });             // getActiveOp (final, line 3889)
 
     await controller.clockInField(req, res);
 
@@ -257,9 +330,11 @@ describe("attendance flow separation", () => {
     const visit = { id: 602, status: "visited", prospect_name: "Prospecto B" };
 
     db.query
-      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] })      // no active timeoff
+      .mockResolvedValueOnce({ rows: [] })      // getActiveOp (auto-sync)
       .mockResolvedValueOnce({ rows: [visit] }) // update prospect visit
-      .mockResolvedValueOnce({ rows: [] }); // no active operational flow
+      .mockResolvedValueOnce({ rows: [] });     // getActiveOp (final)
 
     await controller.clockOutField(req, res);
 
@@ -287,10 +362,12 @@ describe("attendance flow separation", () => {
     const visit = { id: 603, status: "visited", prospect_name: "Prospecto B" };
 
     db.query
-      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
-      .mockResolvedValueOnce({ rows: [] }) // no active operational flow before visit exit
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] })      // no active timeoff
+      .mockResolvedValueOnce({ rows: [] })      // getActiveOp (postVisitAction check, line 3969)
+      .mockResolvedValueOnce({ rows: [] })      // getActiveOp (auto-sync, line 3972)
       .mockResolvedValueOnce({ rows: [visit] }) // update prospect visit
-      .mockResolvedValueOnce({ rows: [] }); // no active operational flow after visit exit
+      .mockResolvedValueOnce({ rows: [] });     // getActiveOp (final)
 
     await controller.clockOutField(req, res);
 
@@ -480,6 +557,29 @@ describe("attendance flow separation", () => {
     );
   });
 
+  test("allows operational destination exit to continue with active status", async () => {
+    const req = {
+      user: { id: 241, email: "continue-op@fam.com" },
+      body: { status: "ACTIVE", location: "-2.170998,-79.922359", location_accuracy: 20 },
+    };
+    const res = createRes();
+
+    db.query
+      .mockResolvedValueOnce({ rows: [{ id: 901, status: "ON_SITE", type: "operacion_campo" }] })
+      .mockResolvedValueOnce({ rows: [{ id: 901, status: "ACTIVE", type: "operacion_campo" }] });
+
+    await controller.updateExceptionStatus(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: true,
+        message: expect.stringContaining("sigue activa"),
+        data: expect.objectContaining({ id: 901, status: "ACTIVE" }),
+      }),
+    );
+  });
+
   test("blocks field visit entry for users without field role", async () => {
     const req = {
       user: { id: 25, email: "norole@fam.com", role: "finanzas" },
@@ -511,7 +611,9 @@ describe("attendance flow separation", () => {
     const res = createRes();
 
     db.query
+      .mockResolvedValue({ rows: [], rowCount: 0 })
       .mockResolvedValueOnce({ rows: [] }) // no active timeoff
+      .mockResolvedValueOnce({ rows: [] }) // getActiveOp (auto-sync)
       .mockResolvedValueOnce({ rows: [] }) // no active visit to close
       .mockResolvedValueOnce({ rows: [] }); // no recently closed visit
 
@@ -540,9 +642,11 @@ describe("attendance flow separation", () => {
     const res = createRes();
 
     db.query
-      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
-      .mockResolvedValueOnce({ rows: [] }) // strict close no rows
-      .mockResolvedValueOnce({ rows: [] }) // fallback open visit no rows
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] })                             // no active timeoff
+      .mockResolvedValueOnce({ rows: [] })                             // getActiveOp (auto-sync)
+      .mockResolvedValueOnce({ rows: [] })                             // strict close no rows
+      .mockResolvedValueOnce({ rows: [] })                             // fallback open visit no rows
       .mockResolvedValueOnce({ rows: [{ id: 45, status: "visited" }] }); // already closed recent visit
 
     await controller.clockOutField(req, res);
@@ -565,14 +669,18 @@ describe("attendance flow separation", () => {
     };
     const res = createRes();
 
+    const existingEntry2701 = { id: 2701, entry_time: new Date().toISOString() };
     db.query
-      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
-      .mockResolvedValueOnce({ rows: [{ id: 2701, entry_time: new Date().toISOString() }] }) // ensure daily clock-in
-      .mockRejectedValueOnce({ code: "42P01" }) // client_access query with client_assignments fails
-      .mockResolvedValueOnce({ rows: [{ id: 150 }] }) // fallback client_access query
-      .mockResolvedValueOnce({ rows: [] }) // no schedule match
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] })                  // no active timeoff
+      .mockResolvedValueOnce({ rows: [existingEntry2701] }) // ensureDailyClockIn SELECT
+      .mockResolvedValueOnce({ rows: [] })                  // getActiveOp (auto-sync)
+      .mockResolvedValueOnce({ rows: [existingEntry2701] }) // syncNormalEntry: ensureDailyClockIn SELECT
+      .mockRejectedValueOnce({ code: "42P01" })             // client_access with client_assignments fails
+      .mockResolvedValueOnce({ rows: [{ id: 150 }] })       // fallback client_access
+      .mockResolvedValueOnce({ rows: [] })                  // no schedule match
       .mockResolvedValueOnce({ rows: [{ id: 700, status: "in_visit" }] }) // insert/update visit
-      .mockResolvedValueOnce({ rows: [] }); // no active operational flow
+      .mockResolvedValueOnce({ rows: [] });                 // getActiveOp (final)
 
     await controller.clockInField(req, res);
 
@@ -593,15 +701,19 @@ describe("attendance flow separation", () => {
     };
     const res = createRes();
 
+    const existingEntry2801 = { id: 2801, entry_time: new Date().toISOString() };
     db.query
-      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
-      .mockResolvedValueOnce({ rows: [{ id: 2801, entry_time: new Date().toISOString() }] }) // ensure daily clock-in
-      .mockResolvedValueOnce({ rows: [{ id: 151 }] }) // client access
-      .mockResolvedValueOnce({ rows: [] }) // no schedule match
-      .mockRejectedValueOnce({ code: "42703" }) // upsert with optional columns fails
-      .mockResolvedValueOnce({ rows: [] }) // legacy select existing visit
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] })                  // no active timeoff
+      .mockResolvedValueOnce({ rows: [existingEntry2801] }) // ensureDailyClockIn SELECT
+      .mockResolvedValueOnce({ rows: [] })                  // getActiveOp (auto-sync)
+      .mockResolvedValueOnce({ rows: [existingEntry2801] }) // syncNormalEntry: ensureDailyClockIn SELECT
+      .mockResolvedValueOnce({ rows: [{ id: 151 }] })       // client access
+      .mockResolvedValueOnce({ rows: [] })                  // no schedule match
+      .mockRejectedValueOnce({ code: "42703" })             // upsert with optional columns fails
+      .mockResolvedValueOnce({ rows: [] })                  // legacy select existing visit
       .mockResolvedValueOnce({ rows: [{ id: 701, status: "in_visit" }] }) // legacy insert
-      .mockResolvedValueOnce({ rows: [] }); // no active operational flow
+      .mockResolvedValueOnce({ rows: [] });                 // getActiveOp (final)
 
     await controller.clockInField(req, res);
 
@@ -622,13 +734,17 @@ describe("attendance flow separation", () => {
     };
     const res = createRes();
 
+    const existingEntry3001 = { id: 3001, entry_time: new Date().toISOString() };
     db.query
-      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
-      .mockResolvedValueOnce({ rows: [{ id: 3001, entry_time: new Date().toISOString() }] }) // ensure daily clock-in
-      .mockResolvedValueOnce({ rows: [{ id: 152 }] }) // client access
-      .mockRejectedValueOnce({ code: "42P01" }) // schedules table missing
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] })                  // no active timeoff
+      .mockResolvedValueOnce({ rows: [existingEntry3001] }) // ensureDailyClockIn SELECT
+      .mockResolvedValueOnce({ rows: [] })                  // getActiveOp (auto-sync)
+      .mockResolvedValueOnce({ rows: [existingEntry3001] }) // syncNormalEntry: ensureDailyClockIn SELECT
+      .mockResolvedValueOnce({ rows: [{ id: 152 }] })       // client access
+      .mockRejectedValueOnce({ code: "42P01" })             // schedules table missing
       .mockResolvedValueOnce({ rows: [{ id: 702, status: "in_visit" }] }) // insert/update visit
-      .mockResolvedValueOnce({ rows: [] }); // no active operational flow
+      .mockResolvedValueOnce({ rows: [] });                 // getActiveOp (final)
 
     await controller.clockInField(req, res);
 
@@ -649,9 +765,13 @@ describe("attendance flow separation", () => {
     };
     const res = createRes();
 
+    const existingEntry3101 = { id: 3101, entry_time: new Date().toISOString() };
     db.query
-      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
-      .mockResolvedValueOnce({ rows: [{ id: 3101, entry_time: new Date().toISOString() }] }); // ensure daily clock-in
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] })                  // no active timeoff
+      .mockResolvedValueOnce({ rows: [existingEntry3101] }) // ensureDailyClockIn SELECT
+      .mockResolvedValueOnce({ rows: [] })                  // getActiveOp (auto-sync)
+      .mockResolvedValueOnce({ rows: [existingEntry3101] }); // syncNormalEntry: ensureDailyClockIn SELECT
 
     await controller.clockInField(req, res);
 
@@ -671,7 +791,10 @@ describe("attendance flow separation", () => {
     };
     const res = createRes();
 
-    db.query.mockResolvedValueOnce({ rows: [] }); // no active timeoff
+    db.query
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
+      .mockResolvedValueOnce({ rows: [] }); // getActiveOp (auto-sync)
 
     await controller.clockOutField(req, res);
 
@@ -697,12 +820,14 @@ describe("attendance flow separation", () => {
     const res = createRes();
 
     db.query
-      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
-      .mockResolvedValueOnce({ rows: [] }) // strict close by today -> no rows
-      .mockResolvedValueOnce({ rows: [{ id: 999 }] }) // fallback finds latest in_visit
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] })                              // no active timeoff
+      .mockResolvedValueOnce({ rows: [] })                              // getActiveOp (auto-sync)
+      .mockResolvedValueOnce({ rows: [] })                              // strict close → no rows
+      .mockResolvedValueOnce({ rows: [{ id: 999 }] })                   // fallback finds latest in_visit
       .mockResolvedValueOnce({ rows: [{ id: 999, status: "visited" }] }) // fallback close by id
-      .mockResolvedValueOnce({ rows: [] }) // schedules update
-      .mockResolvedValueOnce({ rows: [] }); // no active operational flow
+      .mockResolvedValueOnce({ rows: [] })                              // schedules update
+      .mockResolvedValueOnce({ rows: [] });                             // getActiveOp (final)
 
     await controller.clockOutField(req, res);
 
@@ -729,10 +854,13 @@ describe("attendance flow separation", () => {
     const res = createRes();
 
     db.query
-      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] })                              // no active timeoff
+      .mockResolvedValueOnce({ rows: [] })                              // getActiveOp (auto-sync)
       .mockResolvedValueOnce({ rows: [{ id: 1000, status: "visited" }] }) // strict close success
-      .mockRejectedValueOnce({ code: "42P01" }) // schedules table missing
-      .mockResolvedValueOnce({ rows: [] }); // no active operational flow
+      .mockResolvedValueOnce({ rows: [] })                              // getActiveOp (post-close sync)
+      .mockRejectedValueOnce({ code: "42P01" })                         // schedules table missing
+      .mockResolvedValueOnce({ rows: [] });                             // getActiveOp (final)
 
     await controller.clockOutField(req, res);
 
