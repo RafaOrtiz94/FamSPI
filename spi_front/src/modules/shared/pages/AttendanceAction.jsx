@@ -518,12 +518,20 @@ const AttendanceAction = () => {
 
   // Regla de negocio confirmada: si el cronograma aplica (hay clientes
   // planificados para hoy), se elige de una lista cerrada -- no se permite
-  // escribir un nombre libre (mismo criterio que AttendanceWidget).
+  // escribir un nombre libre (mismo criterio que AttendanceWidget). Los ya
+  // visitados hoy (visit_status del fetchClients) van al final, pero siguen
+  // seleccionables por si hace falta una re-visita.
   const scheduledClientsToday = useMemo(
-    () => availableClients.filter((client) => {
-      const info = client?.scheduled_info || {};
-      return Boolean(info?.is_planned_commercial || info?.is_planned_technical || info?.is_planned);
-    }),
+    () => availableClients
+      .filter((client) => {
+        const info = client?.scheduled_info || {};
+        return Boolean(info?.is_planned_commercial || info?.is_planned_technical || info?.is_planned);
+      })
+      .sort((a, b) => {
+        const aVisited = String(a?.visit_status || "").trim().toLowerCase() === "visited";
+        const bVisited = String(b?.visit_status || "").trim().toLowerCase() === "visited";
+        return Number(aVisited) - Number(bVisited);
+      }),
     [availableClients],
   );
 
@@ -915,6 +923,7 @@ const AttendanceAction = () => {
                     client?.commercial_name || client?.business_name || client?.name || client?.nombre || `Cliente #${client.id}`
                   ).trim();
                   const city = String(client?.city || client?.ciudad || "").trim();
+                  const isVisitedToday = String(client?.visit_status || "").trim().toLowerCase() === "visited";
                   return (
                     <button
                       key={client.id}
@@ -927,11 +936,25 @@ const AttendanceAction = () => {
                       className={`rounded-md border px-3 py-2.5 text-left transition ${
                         active
                           ? "border-primary bg-primary/10 dark:border-primary dark:bg-primary/20"
-                          : "border-gray-300 bg-white hover:border-primary/60 dark:border-gray-700 dark:bg-gray-800"
+                          : isVisitedToday
+                            ? "border-gray-200 bg-gray-50 opacity-70 hover:opacity-100 dark:border-gray-700 dark:bg-gray-800/40"
+                            : "border-gray-300 bg-white hover:border-primary/60 dark:border-gray-700 dark:bg-gray-800"
                       }`}
                     >
-                      <p className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{name}</p>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{name}</p>
+                        {isVisitedToday ? (
+                          <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                            Visitado
+                          </span>
+                        ) : null}
+                      </div>
                       {city ? <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{city}</p> : null}
+                      {isVisitedToday ? (
+                        <p className="mt-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                          Ya visitado hoy. Selecciona si necesitas una re-visita.
+                        </p>
+                      ) : null}
                     </button>
                   );
                 })}

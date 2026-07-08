@@ -588,6 +588,10 @@ const AttendanceWidget = () => {
             String(scheduleInfo?.planned_city || client?.shipping_city || "").trim() || "Sin ciudad";
           const name =
             String(client?.commercial_name || client?.nombre || `Cliente #${client?.id || ""}`).trim();
+          // fetchClients ya trae el estado de la visita de HOY (client_visit_logs
+          // filtrado por fecha) via visit_status -- lo usamos para marcar
+          // "Visitado" y mandarlo al final de la lista (permite re-visita).
+          const isVisitedToday = String(client?.visit_status || "").trim().toLowerCase() === "visited";
           return {
             id: Number(client.id),
             name,
@@ -598,10 +602,15 @@ const AttendanceWidget = () => {
             notes: String(scheduleInfo?.notes || "").trim(),
             isCommercial,
             isTechnical,
+            isVisitedToday,
           };
         })
         .filter(Boolean)
         .sort((a, b) => {
+          // Ya visitados van al final -- siguen seleccionables por si hace
+          // falta una re-visita, pero no compiten con los pendientes.
+          const byVisited = Number(a.isVisitedToday) - Number(b.isVisitedToday);
+          if (byVisited !== 0) return byVisited;
           const byPriority = Number(b.priority || 0) - Number(a.priority || 0);
           if (byPriority !== 0) return byPriority;
           return a.name.localeCompare(b.name, "es", { sensitivity: "base" });
@@ -1055,7 +1064,9 @@ const AttendanceWidget = () => {
                   className={`rounded-xl border px-3 py-2.5 text-left transition ${
                     active
                       ? "border-sky-500 bg-sky-50 shadow-sm"
-                      : "border-slate-200 bg-white hover:border-sky-300 hover:bg-sky-50/40"
+                      : item.isVisitedToday
+                        ? "border-slate-200 bg-slate-50/70 opacity-70 hover:opacity-100"
+                        : "border-slate-200 bg-white hover:border-sky-300 hover:bg-sky-50/40"
                   }`}
                   style={{ touchAction: "manipulation" }}
                 >
@@ -1064,12 +1075,22 @@ const AttendanceWidget = () => {
                       <p className="truncate text-sm font-semibold text-slate-800">{item.name}</p>
                       <p className="mt-0.5 text-xs text-slate-500">{item.city}</p>
                     </div>
-                    <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${visitMeta.badgeClass}`}>
-                      {visitMeta.label}
-                    </span>
+                    <div className="flex flex-shrink-0 flex-col items-end gap-1">
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${visitMeta.badgeClass}`}>
+                        {visitMeta.label}
+                      </span>
+                      {item.isVisitedToday ? (
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                          Visitado
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                   {item.notes ? (
                     <p className="mt-1.5 text-xs leading-4 text-slate-500">{item.notes}</p>
+                  ) : null}
+                  {item.isVisitedToday ? (
+                    <p className="mt-1.5 text-xs font-medium text-emerald-600">Ya visitado hoy. Selecciona si necesitas una re-visita.</p>
                   ) : null}
                 </button>
               );
