@@ -520,6 +520,17 @@ const AttendanceAction = () => {
     }).slice(0, 120);
   }, [availableClients, manualClientSearch]);
 
+  // Regla de negocio confirmada: si el cronograma aplica (hay clientes
+  // planificados para hoy), se elige de una lista cerrada -- no se permite
+  // escribir un nombre libre (mismo criterio que AttendanceWidget).
+  const scheduledClientsToday = useMemo(
+    () => availableClients.filter((client) => {
+      const info = client?.scheduled_info || {};
+      return Boolean(info?.is_planned_commercial || info?.is_planned_technical || info?.is_planned);
+    }),
+    [availableClients],
+  );
+
   const resolveClientIdFromSearch = (value) => {
     const raw = String(value || "").trim();
     if (!raw) return "";
@@ -904,37 +915,60 @@ const AttendanceAction = () => {
             Este atajo requiere identificar el cliente para completar la marcacion.
           </p>
 
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Buscar cliente por coincidencia
-          </label>
-          <input
-            type="text"
-            value={manualClientSearch}
-            list="attendance-shortcut-clients-list"
-            onChange={(e) => {
-              const value = e.target.value;
-              setManualClientSearch(value);
-              const resolvedId = resolveClientIdFromSearch(value);
-              setManualClientId(resolvedId);
-              if (resolvedId) setManualProspectName("");
-            }}
-            placeholder={loadingClients ? "Cargando clientes..." : "Escribe nombre, ciudad o ID del cliente"}
-            className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 mb-2"
-            disabled={loadingClients}
-          />
-          <datalist id="attendance-shortcut-clients-list">
-            {filteredClients.map((client) => (
-              <option key={client.id} value={buildClientDisplayLabel(client)}>{buildClientDisplayLabel(client)}</option>
-            ))}
-          </datalist>
-          {manualClientId ? (
-            <p className="mb-4 text-xs font-medium text-emerald-700 dark:text-emerald-400">
-              Cliente seleccionado: #{manualClientId}
-            </p>
+          {!loadingClients && scheduledClientsToday.length > 0 ? (
+            <>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Cliente de tu cronograma
+              </label>
+              <select
+                value={manualClientId}
+                onChange={(e) => {
+                  setManualClientId(e.target.value);
+                  if (e.target.value) setManualProspectName("");
+                }}
+                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 mb-4"
+              >
+                <option value="">Selecciona un cliente de tu cronograma...</option>
+                {scheduledClientsToday.map((client) => (
+                  <option key={client.id} value={client.id}>{buildClientDisplayLabel(client)}</option>
+                ))}
+              </select>
+            </>
           ) : (
-            <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
-              {loadingClients ? "Cargando clientes..." : "Selecciona una coincidencia de la lista sugerida."}
-            </p>
+            <>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Buscar cliente por coincidencia
+              </label>
+              <input
+                type="text"
+                value={manualClientSearch}
+                list="attendance-shortcut-clients-list"
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setManualClientSearch(value);
+                  const resolvedId = resolveClientIdFromSearch(value);
+                  setManualClientId(resolvedId);
+                  if (resolvedId) setManualProspectName("");
+                }}
+                placeholder={loadingClients ? "Cargando clientes..." : "Escribe nombre, ciudad o ID del cliente"}
+                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 mb-2"
+                disabled={loadingClients}
+              />
+              <datalist id="attendance-shortcut-clients-list">
+                {filteredClients.map((client) => (
+                  <option key={client.id} value={buildClientDisplayLabel(client)}>{buildClientDisplayLabel(client)}</option>
+                ))}
+              </datalist>
+              {manualClientId ? (
+                <p className="mb-4 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                  Cliente seleccionado: #{manualClientId}
+                </p>
+              ) : (
+                <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+                  {loadingClients ? "Cargando clientes..." : "Selecciona una coincidencia de la lista sugerida."}
+                </p>
+              )}
+            </>
           )}
 
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">

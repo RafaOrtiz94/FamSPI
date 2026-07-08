@@ -392,7 +392,6 @@ const AttendanceWidget = () => {
   const [selectedFieldAction, setSelectedFieldAction] = useState("office_exit");
   const [fieldExitMode, setFieldExitMode] = useState("continue_operation");
   const [fieldClientId, setFieldClientId] = useState("");
-  const [fieldClientSearch, setFieldClientSearch] = useState("");
   const [fieldProspectName, setFieldProspectName] = useState("");
   const [fieldLeadId, setFieldLeadId] = useState("");
   const [fieldEmergencyReason, setFieldEmergencyReason] = useState("");
@@ -979,32 +978,10 @@ const AttendanceWidget = () => {
   );
 
   useEffect(() => {
-    if (fieldVisitType !== "cronograma") return;
-    if (!scheduledClientsToday.length) {
-      setFieldClientId("");
-      return;
-    }
-    if (!fieldClientSearch) {
-      setFieldClientId("");
-      return;
-    }
+    if (fieldVisitType !== "cronograma" || !fieldClientId) return;
     const exists = scheduledClientsToday.some((client) => String(client.id) === String(fieldClientId));
     if (!exists) setFieldClientId("");
-  }, [fieldClientId, fieldClientSearch, fieldVisitType, scheduledClientsToday]);
-
-  const filteredScheduledClients = useMemo(() => {
-    const term = String(fieldClientSearch || "").trim().toLowerCase();
-    if (!term) return scheduledClientsToday;
-    return scheduledClientsToday.filter((client) => {
-      const haystack = [
-        String(client?.name || ""),
-        String(client?.city || ""),
-      ]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(term);
-    });
-  }, [fieldClientSearch, scheduledClientsToday]);
+  }, [fieldClientId, fieldVisitType, scheduledClientsToday]);
 
   useEffect(() => {
     if (fieldVisitType !== "emergencia") return;
@@ -1066,35 +1043,29 @@ const AttendanceWidget = () => {
       </div>
 
       {fieldVisitType === "cronograma" ? (
-        <>
-          <input
-            type="text"
-            value={fieldClientSearch}
-            list="attendance-scheduled-clients-list"
-            onChange={(e) => {
-              const value = e.target.value;
-              setFieldClientSearch(value);
-              const resolvedId = resolveClientIdFromInput(value, scheduledClientsToday);
-              setFieldClientId(resolvedId ? String(resolvedId) : "");
-            }}
-            placeholder="Buscar cliente por nombre o ciudad"
+        scheduledClientsLoading ? (
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-500">Cargando clientes de tu cronograma...</p>
+        ) : scheduledClientsToday.length > 0 ? (
+          // Regla de negocio confirmada: si el cronograma aplica (hay clientes
+          // planificados para hoy), se elige de una lista cerrada -- no se
+          // permite escribir un nombre libre, para no marcar visitas a
+          // clientes que no estan en el cronograma aprobado bajo este tipo.
+          <select
+            value={fieldClientId}
+            onChange={(e) => setFieldClientId(e.target.value)}
             className={CONTROL_INPUT_SUBTLE_CLASS}
-            aria-label="Buscar cliente por nombre o ciudad"
-          />
-          <datalist id="attendance-scheduled-clients-list">
-            {filteredScheduledClients.map((client) => (
-              <option key={client.id} value={getClientDisplayLabel(client)}>{getClientDisplayLabel(client)}</option>
+            aria-label="Selecciona el cliente de tu cronograma"
+          >
+            <option value="">Selecciona un cliente de tu cronograma...</option>
+            {scheduledClientsToday.map((client) => (
+              <option key={client.id} value={client.id}>{getClientDisplayLabel(client)}</option>
             ))}
-          </datalist>
-          {!scheduledClientsLoading && filteredScheduledClients.length === 0 && fieldClientSearch ? (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-700">Sin coincidencias con la busqueda.</p>
-          ) : null}
-          {fieldClientId ? (
-            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-700">
-              {getClientDisplayLabel(scheduledClientsToday.find((c) => String(c.id) === String(fieldClientId)))}
-            </p>
-          ) : null}
-        </>
+          </select>
+        ) : (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-700">
+            No tienes clientes en tu cronograma aprobado para hoy. Si la visita no estaba planificada, usa "Prospecto" o "Emergencia".
+          </p>
+        )
       ) : null}
 
       {fieldVisitType === "prospecto" ? (
@@ -1201,7 +1172,7 @@ const AttendanceWidget = () => {
     }
 
     if (!payload.client_id && !payload.prospect_name && fieldVisitType === "cronograma") {
-      const numericClientId = Number(fieldClientId || resolveClientIdFromInput(fieldClientSearch, scheduledClientsToday));
+      const numericClientId = Number(fieldClientId);
       if (!Number.isInteger(numericClientId) || numericClientId <= 0) {
         throw new Error("Debes seleccionar un cliente planificado del cronograma del dia.");
       }
@@ -1334,7 +1305,6 @@ const AttendanceWidget = () => {
   const resetFieldVisitDraft = useCallback(() => {
     setFieldVisitType("cronograma");
     setFieldClientId("");
-    setFieldClientSearch("");
     setFieldProspectName("");
     setFieldLeadId("");
     setFieldEmergencyClientId("");
