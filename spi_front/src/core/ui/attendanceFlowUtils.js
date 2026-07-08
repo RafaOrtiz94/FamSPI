@@ -244,3 +244,76 @@ export const resolveAttendanceFlowStep = (canonicalFlow) => {
   };
 };
 
+// Fase 4 (Plan Maestro Asistencia): bandeja de pendientes accionables, derivada
+// del mismo payload que ya devuelve getTodayAttendance() (canonical_flow,
+// active_time_off, active_field_visit, late_policy). No requiere un endpoint
+// nuevo — es una proyeccion de datos ya existentes para timeline/resumen del dia.
+export const resolveAttendancePendingActions = (attendanceData = {}) => {
+  const canonicalFlow = attendanceData?.canonical_flow || null;
+  const flowStep = resolveAttendanceFlowStep(canonicalFlow);
+  const pending = [];
+
+  if (flowStep.contextFlags?.has_active_operational) {
+    pending.push({
+      id: "operational_open",
+      severity: "warning",
+      label: "Salida operacional abierta",
+      detail: "Tienes una salida operacional sin cerrar.",
+      actionKey: flowStep.nextActionKey,
+    });
+  }
+
+  if (flowStep.contextFlags?.has_active_unexpected) {
+    pending.push({
+      id: "unexpected_open",
+      severity: "warning",
+      label: "Salida inesperada abierta",
+      detail: "Registra tu regreso para cerrar esta salida.",
+      actionKey: flowStep.nextActionKey,
+    });
+  }
+
+  if (flowStep.contextFlags?.has_active_field_visit) {
+    pending.push({
+      id: "field_visit_open",
+      severity: "info",
+      label: "Visita en curso",
+      detail: "Cierra la visita cuando termines la gestion con el cliente.",
+      actionKey: flowStep.nextActionKey,
+    });
+  }
+
+  if (flowStep.contextFlags?.has_active_permission_exception || flowStep.contextFlags?.has_active_time_off) {
+    pending.push({
+      id: "permission_active",
+      severity: "info",
+      label: "Permiso en curso",
+      detail: "Tu permiso aprobado esta activo hoy.",
+      actionKey: flowStep.nextActionKey,
+    });
+  }
+
+  if (flowStep.contextFlags?.entry_pending_regularization) {
+    pending.push({
+      id: "entry_regularization",
+      severity: "warning",
+      label: "Entrada pendiente de regularizacion",
+      detail: "Tu entrada de hoy quedo pendiente de aprobacion de Talento Humano.",
+      actionKey: null,
+    });
+  }
+
+  const justification = attendanceData?.late_policy?.justification;
+  if (justification?.canJustify) {
+    pending.push({
+      id: "late_justification",
+      severity: "warning",
+      label: "Atraso sin justificar",
+      detail: "Puedes justificar tu atraso de hoy antes del corte.",
+      actionKey: null,
+    });
+  }
+
+  return pending;
+};
+

@@ -8,7 +8,7 @@ import Modal from "../components/Modal";
 import CameraCaptureField from "../components/CameraCaptureField";
 import { useUI } from "../useUI";
 import { getAttendanceErrorInfo } from "../attendanceErrorUtils";
-import { isOperationalFlow } from "../attendanceFlowUtils";
+import { isOperationalFlow, resolveAttendancePendingActions } from "../attendanceFlowUtils";
 
 import {
   clockIn,
@@ -2310,6 +2310,10 @@ const AttendanceWidget = () => {
     activeTimeOffPreset?.actionLabel,
   ]);
 
+  // Fase 4 (Plan Maestro Asistencia): bandeja de pendientes derivada del mismo
+  // payload de getTodayAttendance() (canonical_flow + late_policy), sin endpoint nuevo.
+  const pendingActions = useMemo(() => resolveAttendancePendingActions(attendance || {}), [attendance]);
+
   const TripStep = ({ label, time, state }) => {
     const isDone = state === "done";
     const isCurrent = state === "current";
@@ -2917,6 +2921,24 @@ const AttendanceWidget = () => {
                   className={`h-full rounded-full ${isOnLunch ? "bg-amber-400" : "bg-emerald-500"}`}
                 />
               </div>
+            </div>
+          )}
+
+          {pendingActions.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {pendingActions.map((item) => (
+                <span
+                  key={item.id}
+                  title={item.detail}
+                  className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                    item.severity === "warning"
+                      ? "bg-amber-100 text-amber-800"
+                      : "bg-sky-100 text-sky-800"
+                  }`}
+                >
+                  {item.label}
+                </span>
+              ))}
             </div>
           )}
         </div>
