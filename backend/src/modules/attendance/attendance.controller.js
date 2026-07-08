@@ -5178,25 +5178,23 @@ const clockOutField = async (req, res) => {
       });
     }
 
+    // "continue_operation" (salida neutral) NO fuerza la excepcion a ACTIVE:
+    // la persona sigue ON_SITE hasta que decida explicitamente entrar a otro
+    // cliente (se queda ON_SITE) o terminar la operacion (pantalla de eleccion
+    // en el frontend). Forzar ACTIVE aqui reabria automaticamente el flujo de
+    // "llegada a destino" en cuanto cerraba la visita, generando un bucle
+    // infinito llegada->entrada->salida->llegada sin poder llegar nunca a la
+    // pantalla donde se elige terminar operaciones.
     const activeOperational = await getActiveExceptionByFlow({ userId, flow: "operational" });
-    if (activeOperational) {
-      if (returnToOffice) {
-        await db.query(
-          `UPDATE attendance_exceptions
-              SET status = 'RETURNING',
-                  departure_time = $1,
-                  departure_location = $2
-            WHERE id = $3`,
-          [now, normalizedLocation, activeOperational.id]
-        );
-      } else {
-        await db.query(
-          `UPDATE attendance_exceptions
-              SET status = 'ACTIVE'
-            WHERE id = $1`,
-          [activeOperational.id]
-        );
-      }
+    if (activeOperational && returnToOffice) {
+      await db.query(
+        `UPDATE attendance_exceptions
+            SET status = 'RETURNING',
+                departure_time = $1,
+                departure_location = $2
+          WHERE id = $3`,
+        [now, normalizedLocation, activeOperational.id]
+      );
     }
 
     if (ATTENDANCE_V2_OPERATIONAL_AUTOSYNC_ENABLED && shouldMirrorAttendanceForFieldOp(now)) {

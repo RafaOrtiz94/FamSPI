@@ -914,6 +914,43 @@ describe("attendance flow separation", () => {
     );
   });
 
+  // Regresion: un usuario reporto quedar en bucle "llegada a destino y entrada
+  // a cliente" -> "salir del cliente" -> otra vez "llegada a destino" sin
+  // poder nunca llegar a la pantalla de "terminar operaciones". Causa: al
+  // cerrar la visita con post_visit_action=continue_operation (salida
+  // neutral, la decision de continuar/terminar se toma en una pantalla
+  // posterior del frontend), este endpoint forzaba la excepcion operacional
+  // de vuelta a ACTIVE, lo que reabria automaticamente el flujo de "llegada a
+  // destino" antes de que el frontend pudiera mostrar esa pantalla.
+  test("keeps the operational exception ON_SITE (does not force ACTIVE) when a client visit closes with continue_operation", async () => {
+    const req = {
+      user: { id: 36, email: "loop-regression@fam.com", role: "comercial" },
+      body: {
+        location: "-2.170998,-79.922359",
+        location_accuracy: 20,
+        client_id: 900,
+        post_visit_action: "continue_operation",
+      },
+    };
+    const res = createRes();
+
+    db.query
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] })                                                   // no active timeoff
+      .mockResolvedValueOnce({ rows: [{ id: 950, status: "ON_SITE", type: "operacion_campo" }] }) // getActiveOp (postVisitAction check)
+      .mockResolvedValueOnce({ rows: [{ id: 950, status: "ON_SITE", type: "operacion_campo" }] }) // getActiveOp (auto-sync)
+      .mockResolvedValueOnce({ rows: [{ id: 1100, status: "visited" }] })                     // strict close success
+      .mockResolvedValueOnce({ rows: [{ id: 950, status: "ON_SITE", type: "operacion_campo" }] }); // getActiveOp (final, decides ACTIVE/RETURNING)
+
+    await controller.clockOutField(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const forcedActiveCall = db.query.mock.calls.find(
+      ([sql]) => /UPDATE\s+attendance_exceptions/i.test(sql) && /'ACTIVE'/.test(sql),
+    );
+    expect(forcedActiveCall).toBeUndefined();
+  });
+
   // Regresion: rafael.ortiz@fam-project.com reporto "Atraso registrado 900 min"
   // a las 00:01, sin haber marcado entrada todavia. computeLateMinutesFromEntry
   // usaba `new Date(entryValue)` sin validar que entryValue existiera; con
