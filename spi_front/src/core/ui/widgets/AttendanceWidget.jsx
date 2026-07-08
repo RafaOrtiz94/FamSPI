@@ -2535,41 +2535,67 @@ const AttendanceWidget = () => {
                 </>
               ) : (
                 <>
-                  <p className="text-sm text-slate-700">Registra la visita al cliente o prospecto en este destino.</p>
+                  {/* Eleccion explicita como dos tarjetas, no un select secundario
+                      escondido -- la salida del cliente ya no decide nada por su
+                      cuenta, esta es la unica pantalla donde se elige que sigue. */}
                   <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-                    {renderClientPickerSection({ title: "Tipo de visita a cliente", stepLabel: "Paso 1" })}
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">Despues de salir del cliente</p>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => setDestinationExitMode("continue_operation")}
+                        aria-pressed={destinationExitMode === "continue_operation"}
+                        className={`rounded-xl border px-3 py-2.5 text-left transition ${
+                          destinationExitMode === "continue_operation"
+                            ? "border-sky-500 bg-sky-50 shadow-sm"
+                            : "border-slate-200 bg-white hover:border-sky-300 hover:bg-sky-50/40"
+                        }`}
+                        style={{ touchAction: "manipulation" }}
+                      >
+                        <p className="text-sm font-semibold text-slate-800">Entrar a otro cliente</p>
+                        <p className="text-xs text-slate-500">Sigues la salida operacional con otra visita.</p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDestinationExitMode("end_jornada")}
+                        aria-pressed={destinationExitMode === "end_jornada"}
+                        className={`rounded-xl border px-3 py-2.5 text-left transition ${
+                          destinationExitMode === "end_jornada"
+                            ? "border-amber-500 bg-amber-50 shadow-sm"
+                            : "border-slate-200 bg-white hover:border-amber-300 hover:bg-amber-50/40"
+                        }`}
+                        style={{ touchAction: "manipulation" }}
+                      >
+                        <p className="text-sm font-semibold text-slate-800">Terminar operaciones</p>
+                        <p className="text-xs text-slate-500">Cierra la salida operacional desde aqui.</p>
+                      </button>
+                    </div>
                   </div>
-                  <Button
-                    variant="primary"
-                    onClick={() => handleFieldVisitMark("entry")}
-                    disabled={clientEntryDisabled}
-                    className={ACTION_BTN_BASE_CLASS}
-                  >
-                    {fieldVisitSubmitting ? "Registrando..." : "Entrada a cliente"}
-                  </Button>
-                  <div className="h-px bg-slate-100" />
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-                    <label className="text-[11px] font-semibold text-slate-600">Si no registraras cliente en este destino</label>
-                    <select
-                      value={destinationExitMode}
-                      onChange={(e) => setDestinationExitMode(e.target.value)}
-                      className={`${CONTROL_INPUT_CLASS} mt-2`}
-                      aria-label="Accion despues de salir del destino sin cliente"
+
+                  {destinationExitMode === "continue_operation" ? (
+                    <>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                        {renderClientPickerSection({ title: "Tipo de visita a cliente", stepLabel: "Paso 1" })}
+                      </div>
+                      <Button
+                        variant="primary"
+                        onClick={() => handleFieldVisitMark("entry")}
+                        disabled={clientEntryDisabled}
+                        className={ACTION_BTN_BASE_CLASS}
+                      >
+                        {fieldVisitSubmitting ? "Registrando..." : "Entrada a cliente"}
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      variant="warning"
+                      onClick={handleSalidaDestino}
+                      disabled={fieldVisitSubmitting}
+                      className={ACTION_BTN_BASE_CLASS}
                     >
-                      <option value="continue_operation">Seguir con otra salida operacional</option>
-                      <option value="end_jornada">Terminar operacion en este destino</option>
-                    </select>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    onClick={handleSalidaDestino}
-                    disabled={fieldVisitSubmitting}
-                    className={ACTION_BTN_NEUTRAL_CLASS}
-                  >
-                    {destinationExitMode === "continue_operation"
-                      ? "Salir del destino y continuar"
-                      : "Terminar operacion sin cliente"}
-                  </Button>
+                      {fieldVisitSubmitting ? "Registrando..." : "Terminar operación"}
+                    </Button>
+                  )}
                 </>
               )
             ) : (
@@ -2578,16 +2604,37 @@ const AttendanceWidget = () => {
                   <p className="text-sm text-sky-800">La gestion sigue activa en el destino. Indica si vas a continuar con otra salida operacional o si aqui termina la operacion.</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-                  <label className="text-[11px] font-semibold text-slate-600">Despues de salir del destino</label>
-                  <select
-                    value={destinationExitMode}
-                    onChange={(e) => setDestinationExitMode(e.target.value)}
-                    className={`${CONTROL_INPUT_CLASS} mt-2`}
-                    aria-label="Accion despues de salir del destino"
-                  >
-                    <option value="continue_operation">Seguir con otra salida operacional</option>
-                    <option value="end_jornada">Terminar operacion en este destino</option>
-                  </select>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">Despues de salir del destino</p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setDestinationExitMode("continue_operation")}
+                      aria-pressed={destinationExitMode === "continue_operation"}
+                      className={`rounded-xl border px-3 py-2.5 text-left transition ${
+                        destinationExitMode === "continue_operation"
+                          ? "border-sky-500 bg-sky-50 shadow-sm"
+                          : "border-slate-200 bg-white hover:border-sky-300 hover:bg-sky-50/40"
+                      }`}
+                      style={{ touchAction: "manipulation" }}
+                    >
+                      <p className="text-sm font-semibold text-slate-800">Seguir con otra salida</p>
+                      <p className="text-xs text-slate-500">Continua la salida operacional en otro destino.</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDestinationExitMode("end_jornada")}
+                      aria-pressed={destinationExitMode === "end_jornada"}
+                      className={`rounded-xl border px-3 py-2.5 text-left transition ${
+                        destinationExitMode === "end_jornada"
+                          ? "border-amber-500 bg-amber-50 shadow-sm"
+                          : "border-slate-200 bg-white hover:border-amber-300 hover:bg-amber-50/40"
+                      }`}
+                      style={{ touchAction: "manipulation" }}
+                    >
+                      <p className="text-sm font-semibold text-slate-800">Terminar operaciones</p>
+                      <p className="text-xs text-slate-500">Cierra la salida operacional desde aqui.</p>
+                    </button>
+                  </div>
                 </div>
                 <Button
                   variant="warning"
@@ -2599,7 +2646,7 @@ const AttendanceWidget = () => {
                     ? "Registrando..."
                     : destinationExitMode === "continue_operation"
                       ? "Salida del destino y continuar"
-                      : "Terminar operacion desde aqui"}
+                      : "Terminar operación"}
                 </Button>
               </>
             )}
