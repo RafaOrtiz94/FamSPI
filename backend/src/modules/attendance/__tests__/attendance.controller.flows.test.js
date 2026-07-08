@@ -873,4 +873,64 @@ describe("attendance flow separation", () => {
       }),
     );
   });
+
+  // Regresion: rafael.ortiz@fam-project.com reporto "Atraso registrado 900 min"
+  // a las 00:01, sin haber marcado entrada todavia. computeLateMinutesFromEntry
+  // usaba `new Date(entryValue)` sin validar que entryValue existiera; con
+  // entry_time null/undefined, new Date(null) no lanza error -- da el epoch
+  // (1970-01-01) silenciosamente, y esa hora arbitraria se comparaba contra las
+  // 09:00 como si fuera la entrada real.
+  test("getToday never reports a late arrival for a user who has not clocked in yet", async () => {
+    const req = { user: { id: 777, email: "rafael.ortiz@fam-project.com" } };
+    const res = createRes();
+
+    db.query.mockResolvedValue({ rows: [], rowCount: 0 }); // no hay registro de asistencia hoy
+
+    await controller.getToday(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          late_policy: expect.objectContaining({
+            isLate: false,
+            lateMinutes: null,
+          }),
+        }),
+      }),
+    );
+  });
+
+  test("getToday still reports a real late arrival once entry_time exists", async () => {
+    const req = { user: { id: 778, email: "puntual.tarde@fam-project.com" } };
+    const res = createRes();
+
+    // 09:20 America/Guayaquil == 14:20 UTC
+    const lateEntry = new Date(Date.UTC(2026, 6, 8, 14, 20, 0));
+
+    db.query.mockImplementation((sql) => {
+      if (typeof sql === "string" && sql.includes("FROM user_attendance_records") && sql.includes("date = $2")) {
+        return Promise.resolve({
+          rows: [{ id: 1, user_id: 778, date: "2026-07-08", entry_time: lateEntry.toISOString() }],
+        });
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+
+    await controller.getToday(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          late_policy: expect.objectContaining({
+            isLate: true,
+            lateMinutes: 20,
+          }),
+        }),
+      }),
+    );
+  });
 });

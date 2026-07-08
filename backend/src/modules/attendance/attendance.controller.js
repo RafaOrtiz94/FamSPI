@@ -781,6 +781,12 @@ const getEcuadorClockParts = (dateValue = new Date()) => {
 };
 
 const computeLateMinutesFromEntry = (entryValue) => {
+  // Bug real reportado: si entryValue es null/undefined (aun no hay entrada
+  // marcada), new Date(null) no lanza error -- da silenciosamente el epoch
+  // (1970-01-01), lo que producia un "atraso" arbitrario de cientos de
+  // minutos para usuarios que ni siquiera habian marcado entrada todavia.
+  // Sin entrada real, no hay atraso que calcular.
+  if (!entryValue) return null;
   const parts = getEcuadorClockParts(entryValue);
   if (!parts) return null;
   return (parts.hour * 60) + parts.minute - LATE_BASE_MINUTES;
