@@ -37,8 +37,12 @@ const getTemplateBytes = () => {
   return templateBytesCache;
 };
 
-const normalizePeriodType = (value) =>
-  String(value || "monthly").trim().toLowerCase() === "annual" ? "annual" : "monthly";
+const normalizePeriodType = (value) => {
+  const normalized = String(value || "monthly").trim().toLowerCase();
+  if (normalized === "annual" || normalized === "yearly") return "annual";
+  if (normalized === "weekly" || normalized === "week") return "weekly";
+  return "monthly";
+};
 
 const parseDateOnly = (value) => {
   if (!value) return null;
@@ -101,6 +105,19 @@ const isDateBefore = (a, b) =>
 
 const monthKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 
+const getMonthSequenceBetween = (startDate, endDate) => {
+  const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1, 12, 0, 0, 0);
+  const endCursor = new Date(endDate.getFullYear(), endDate.getMonth(), 1, 12, 0, 0, 0);
+  const months = [];
+
+  while (cursor <= endCursor) {
+    months.push(new Date(cursor));
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  return months;
+};
+
 const normalizeMonthName = (date) =>
   date
     .toLocaleString("es-EC", { month: "long" })
@@ -131,8 +148,11 @@ const parseDateTime = (value) => {
   return parsed;
 };
 
-const buildPermissionLabel = (id, timeLabel = "") =>
-  `PER-ID ${id}${timeLabel ? ` ${timeLabel}` : ""}`;
+const buildPermissionLabel = (id) => `PER-${id}`;
+const buildVacationLabel = (ids = []) => {
+  const sorted = [...new Set(ids.filter((n) => Number.isInteger(n)))].sort((a, b) => a - b);
+  return sorted.length ? sorted.map((id) => `VAC-${id}`).join(" / ") : "VAC";
+};
 const WEEKEND_LABEL = "FIN DE SEMANA";
 const VACATION_LABEL = "VACACIONES";
 const DAY_TEXT_FIELD_PREFIXES = Object.freeze([
@@ -175,6 +195,7 @@ const formatTime = (timestamp) => {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    hourCycle: "h23",
   });
 };
 
@@ -238,7 +259,7 @@ const setDayFieldText = (form, dayFieldLookup, prefix, day, value) =>
 
 const resolveDayOverrideLabel = ({ currentDate, dayTimeOff }) => {
   if (isWeekendDate(currentDate)) return WEEKEND_LABEL;
-  if (dayTimeOff?.vacations?.size) return VACATION_LABEL;
+  if (dayTimeOff?.vacations?.size) return buildVacationLabel(uniqueNumericIds([...dayTimeOff.vacations]));
   return null;
 };
 
@@ -558,7 +579,7 @@ const resolveHourlySlotValue = ({ rawValue, slotName, dayTimeOff, regularizedEnt
 
   const vacationIds = uniqueNumericIds([...dayTimeOff.vacations]);
   if (vacationIds.length) {
-    return VACATION_LABEL;
+    return buildVacationLabel(vacationIds);
   }
 
   const permissions = Array.isArray(dayTimeOff.permissions) ? dayTimeOff.permissions : [];
@@ -576,7 +597,7 @@ const resolveHourlySlotValue = ({ rawValue, slotName, dayTimeOff, regularizedEnt
           rawDate >= item.start &&
           rawDate <= item.end
       );
-      if (match) return buildPermissionLabel(match.id, formattedTime);
+      if (match) return buildPermissionLabel(match.id);
     }
     return formattedTime;
   }
@@ -585,7 +606,7 @@ const resolveHourlySlotValue = ({ rawValue, slotName, dayTimeOff, regularizedEnt
   if (slotName === "entry") {
     const first = sortedByStart[0];
     const resumeTime = first?.end ? formatTime(first.end) : "";
-    return buildPermissionLabel(first.id, resumeTime);
+    return buildPermissionLabel(first.id);
   }
 
   const permissionIds = uniqueNumericIds(sortedByStart.map((item) => item.id));
@@ -756,7 +777,7 @@ const buildMonthlyPdfBuffer = async ({
       : isWeekend
       ? WEEKEND_LABEL
       : dayTimeOff?.vacations?.size
-      ? VACATION_LABEL
+      ? buildVacationLabel(uniqueNumericIds([...dayTimeOff.vacations]))
       : dayTimeOff?.permissions?.length
       ? uniqueNumericIds(dayTimeOff.permissions.map((item) => item.id))
           .map((id) => buildPermissionLabel(id))
@@ -819,12 +840,50 @@ const finalizeResult = (buffer, extra = {}) => {
   };
 };
 
+const buildRangePdfBuffer = async ({
+  user,
+  startDate,
+  endDate,
+  records = [],
+  timeOffRecords = [],
+  signatureBuffer = null,
+  hireDate = null,
+}) => {
+  const months = getMonthSequenceBetween(startDate, endDate);
+  const recordsByMonth = groupRecordsByMonth(records);
+  const mergedPdf = await PDFDocument.create();
+
+  for (const periodDate of months) {
+    const key = monthKey(periodDate);
+    const monthRecords = (recordsByMonth.get(key) || []).filter((record) => {
+      const recordDate = parseRecordDate(record?.date);
+      if (!recordDate) return false;
+      return recordDate >= startDate && recordDate <= endDate;
+    });
+
+    const monthPdfBuffer = await buildMonthlyPdfBuffer({
+      user,
+      periodDate,
+      records: monthRecords,
+      timeOffRecords,
+      signatureBuffer,
+      hireDate,
+    });
+    const monthPdfDoc = await PDFDocument.load(monthPdfBuffer);
+    const copiedPages = await mergedPdf.copyPages(monthPdfDoc, monthPdfDoc.getPageIndices());
+    copiedPages.forEach((page) => mergedPdf.addPage(page));
+  }
+
+  const mergedBytes = await mergedPdf.save();
+  return Buffer.from(mergedBytes);
+};
+
 /**
  * Generate attendance PDF report.
  * @param {number|string} userId
  * @param {string} startDate YYYY-MM-DD
  * @param {string} endDate YYYY-MM-DD
- * @param {{ periodType?: 'monthly'|'annual', year?: number|string }} options
+ * @param {{ periodType?: 'weekly'|'monthly'|'annual', year?: number|string }} options
  */
 const generateAttendancePDF = async (userId, startDate, endDate, options = {}) => {
   const targetUserId = Number(userId);
@@ -916,30 +975,58 @@ const generateAttendancePDF = async (userId, startDate, endDate, options = {}) =
     formatDateOnly(parsedStartDate),
     formatDateOnly(parsedEndDate)
   );
-  const monthRecords = monthRecordsRaw.filter((record) => {
-    const recordDate = parseRecordDate(record?.date);
-    return Boolean(recordDate && isSameMonth(recordDate, periodDate));
-  });
-
-  const monthlyBuffer = await buildMonthlyPdfBuffer({
+  const rangeBuffer = await buildRangePdfBuffer({
     user,
-    periodDate,
-    records: monthRecords,
+    startDate: parsedStartDate,
+    endDate: parsedEndDate,
+    records: monthRecordsRaw,
     timeOffRecords: monthTimeOffRecords,
     signatureBuffer,
     hireDate,
   });
 
-  return finalizeResult(monthlyBuffer, {
-    periodType: "monthly",
-    fileLabel: `${periodDate.getFullYear()}-${String(periodDate.getMonth() + 1).padStart(2, "0")}`,
+  const rangeLabel =
+    parsedStartDate.getFullYear() === parsedEndDate.getFullYear() &&
+    parsedStartDate.getMonth() === parsedEndDate.getMonth()
+      ? `${periodDate.getFullYear()}-${String(periodDate.getMonth() + 1).padStart(2, "0")}`
+      : `${formatDateOnly(parsedStartDate)}_${formatDateOnly(parsedEndDate)}`;
+
+  return finalizeResult(rangeBuffer, {
+    periodType,
+    fileLabel: rangeLabel,
     periodStart: formatDateOnly(parsedStartDate),
     periodEnd: formatDateOnly(parsedEndDate),
   });
 };
 
+const generateAttendanceBulkPDF = async (userIds = [], startDate, endDate, options = {}) => {
+  const normalizedIds = [...new Set((Array.isArray(userIds) ? userIds : []).map(Number).filter((value) => Number.isInteger(value) && value > 0))];
+  if (!normalizedIds.length) {
+    throw new Error("No hay usuarios para generar el reporte masivo");
+  }
+
+  const mergedPdf = await PDFDocument.create();
+  for (const userId of normalizedIds) {
+    const pdfResult = await generateAttendancePDF(userId, startDate, endDate, options);
+    const pdfBuffer = pdfResult?.buffer;
+    if (!pdfBuffer) continue;
+    const userPdf = await PDFDocument.load(pdfBuffer);
+    const copiedPages = await mergedPdf.copyPages(userPdf, userPdf.getPageIndices());
+    copiedPages.forEach((page) => mergedPdf.addPage(page));
+  }
+
+  const mergedBytes = await mergedPdf.save();
+  const mergedBuffer = Buffer.from(mergedBytes);
+  return finalizeResult(mergedBuffer, {
+    periodType: normalizePeriodType(options?.periodType),
+    periodStart: startDate || null,
+    periodEnd: endDate || null,
+  });
+};
+
 module.exports = {
   generateAttendancePDF,
+  generateAttendanceBulkPDF,
   __private: {
     VACATION_LABEL,
     WEEKEND_LABEL,

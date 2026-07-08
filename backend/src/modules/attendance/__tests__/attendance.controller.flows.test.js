@@ -88,40 +88,51 @@ describe("attendance flow separation", () => {
   });
 
   test("registers operational exit successfully", async () => {
-    const req = {
-      user: { id: 12, email: "ops@fam.com" },
-      body: {
-        location: "-2.170998,-79.922359",
-        location_accuracy: 20,
-        description: "salida oficina",
-        operational_category: "cliente",
-      },
-    };
-    const res = createRes();
-    const inserted = { id: 501, type: "operacion_campo", status: "ACTIVE" };
+    // Fijamos "now" a las 10:00 America/Guayaquil: syncNormalEntryFromFieldOp
+    // solo hace su mirror completo (SELECT+INSERT) cuando la salida operacional
+    // arranca en/despues del inicio oficial de jornada (09:00) -- antes de esa
+    // hora ahora se salta (regla real: una gestion antes de las 9am no
+    // sustituye la entrada del dia, el colaborador debe marcarla aparte).
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-07-08T15:00:00.000Z"));
+    try {
+      const req = {
+        user: { id: 12, email: "ops@fam.com" },
+        body: {
+          location: "-2.170998,-79.922359",
+          location_accuracy: 20,
+          description: "salida oficina",
+          operational_category: "cliente",
+        },
+      };
+      const res = createRes();
+      const inserted = { id: 501, type: "operacion_campo", status: "ACTIVE" };
 
-    db.query
-      .mockResolvedValue({ rows: [], rowCount: 0 }) // permanent fallback for autoComplete calls
-      .mockResolvedValueOnce({ rows: [] })           // no active timeoff
-      .mockResolvedValueOnce({ rows: [] })           // no active operational
-      .mockResolvedValueOnce({ rows: [] })           // no active unexpected
-      .mockResolvedValueOnce({ rows: [] })           // syncNormalEntry: ensureDailyClockIn SELECT (no entry)
-      .mockResolvedValueOnce({ rows: [{ id: 1, entry_time: new Date().toISOString() }], rowCount: 1 }) // ensureDailyClockIn INSERT
-      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // autoSeedOperationalLunchWindow UPDATE
-      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // closePendingLunchForOperationalStart SELECT
-      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // closePendingLunchForOperationalStart UPDATE
-      .mockResolvedValueOnce({ rows: [inserted] });  // INSERT exception
+      db.query
+        .mockResolvedValue({ rows: [], rowCount: 0 }) // permanent fallback for autoComplete calls
+        .mockResolvedValueOnce({ rows: [] })           // no active timeoff
+        .mockResolvedValueOnce({ rows: [] })           // no active operational
+        .mockResolvedValueOnce({ rows: [] })           // no active unexpected
+        .mockResolvedValueOnce({ rows: [] })           // syncNormalEntry: ensureDailyClockIn SELECT (no entry)
+        .mockResolvedValueOnce({ rows: [{ id: 1, entry_time: new Date().toISOString() }], rowCount: 1 }) // ensureDailyClockIn INSERT
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // autoSeedOperationalLunchWindow UPDATE
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // closePendingLunchForOperationalStart SELECT
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // closePendingLunchForOperationalStart UPDATE
+        .mockResolvedValueOnce({ rows: [inserted] });  // INSERT exception
 
-    await controller.clockOutOperational(req, res);
+      await controller.clockOutOperational(req, res);
 
-    expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ok: true,
-        message: expect.stringContaining("Salida operacional registrada"),
-        data: expect.objectContaining({ id: 501 }),
-      }),
-    );
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ok: true,
+          message: expect.stringContaining("Salida operacional registrada"),
+          data: expect.objectContaining({ id: 501 }),
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test("returns operational cycle as active when user starts it again on another day", async () => {
@@ -292,33 +303,41 @@ describe("attendance flow separation", () => {
   });
 
   test("registers field visit entry successfully for prospect", async () => {
-    const req = {
-      user: { id: 16, email: "field.entry@fam.com", role: "comercial" },
-      body: { location: "-2.170998,-79.922359", location_accuracy: 14, prospect_name: "Prospecto A" },
-    };
-    const res = createRes();
-    const visit = { id: 601, status: "in_visit", prospect_name: "Prospecto A" };
+    // Fijamos "now" a las 10:00 America/Guayaquil (ver nota en "registers
+    // operational exit successfully" sobre syncNormalEntryFromFieldOp).
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-07-08T15:00:00.000Z"));
+    try {
+      const req = {
+        user: { id: 16, email: "field.entry@fam.com", role: "comercial" },
+        body: { location: "-2.170998,-79.922359", location_accuracy: 14, prospect_name: "Prospecto A" },
+      };
+      const res = createRes();
+      const visit = { id: 601, status: "in_visit", prospect_name: "Prospecto A" };
 
-    const existingEntry = { id: 1601, entry_time: new Date().toISOString() };
-    db.query
-      .mockResolvedValue({ rows: [], rowCount: 0 })
-      .mockResolvedValueOnce({ rows: [] })             // no active timeoff
-      .mockResolvedValueOnce({ rows: [existingEntry] }) // ensureDailyClockIn SELECT
-      .mockResolvedValueOnce({ rows: [] })             // getActiveOp (auto-sync)
-      .mockResolvedValueOnce({ rows: [existingEntry] }) // syncNormalEntry: ensureDailyClockIn SELECT
-      .mockResolvedValueOnce({ rows: [visit] })        // insert prospect visit
-      .mockResolvedValueOnce({ rows: [] });             // getActiveOp (final, line 3889)
+      const existingEntry = { id: 1601, entry_time: new Date().toISOString() };
+      db.query
+        .mockResolvedValue({ rows: [], rowCount: 0 })
+        .mockResolvedValueOnce({ rows: [] })             // no active timeoff
+        .mockResolvedValueOnce({ rows: [existingEntry] }) // ensureDailyClockIn SELECT
+        .mockResolvedValueOnce({ rows: [] })             // getActiveOp (auto-sync)
+        .mockResolvedValueOnce({ rows: [existingEntry] }) // syncNormalEntry: ensureDailyClockIn SELECT
+        .mockResolvedValueOnce({ rows: [visit] })        // insert prospect visit
+        .mockResolvedValueOnce({ rows: [] });             // getActiveOp (final, line 3889)
 
-    await controller.clockInField(req, res);
+      await controller.clockInField(req, res);
 
-    expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ok: true,
-        message: expect.stringContaining("Entrada a visita registrada"),
-        data: expect.objectContaining({ id: 601 }),
-      }),
-    );
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ok: true,
+          message: expect.stringContaining("Entrada a visita registrada"),
+          data: expect.objectContaining({ id: 601 }),
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test("registers field visit exit successfully for prospect", async () => {
@@ -663,99 +682,119 @@ describe("attendance flow separation", () => {
   });
 
   test("falls back when client_assignments table is missing and still registers client visit entry", async () => {
-    const req = {
-      user: { id: 27, email: "fallback-assignments@fam.com", role: "comercial" },
-      body: { location: "-2.170998,-79.922359", location_accuracy: 20, client_id: 150 },
-    };
-    const res = createRes();
+    // Fijamos "now" a las 10:00 America/Guayaquil (ver nota en "registers
+    // operational exit successfully" sobre syncNormalEntryFromFieldOp).
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-07-08T15:00:00.000Z"));
+    try {
+      const req = {
+        user: { id: 27, email: "fallback-assignments@fam.com", role: "comercial" },
+        body: { location: "-2.170998,-79.922359", location_accuracy: 20, client_id: 150 },
+      };
+      const res = createRes();
 
-    const existingEntry2701 = { id: 2701, entry_time: new Date().toISOString() };
-    db.query
-      .mockResolvedValue({ rows: [], rowCount: 0 })
-      .mockResolvedValueOnce({ rows: [] })                  // no active timeoff
-      .mockResolvedValueOnce({ rows: [existingEntry2701] }) // ensureDailyClockIn SELECT
-      .mockResolvedValueOnce({ rows: [] })                  // getActiveOp (auto-sync)
-      .mockResolvedValueOnce({ rows: [existingEntry2701] }) // syncNormalEntry: ensureDailyClockIn SELECT
-      .mockRejectedValueOnce({ code: "42P01" })             // client_access with client_assignments fails
-      .mockResolvedValueOnce({ rows: [{ id: 150 }] })       // fallback client_access
-      .mockResolvedValueOnce({ rows: [] })                  // no schedule match
-      .mockResolvedValueOnce({ rows: [{ id: 700, status: "in_visit" }] }) // insert/update visit
-      .mockResolvedValueOnce({ rows: [] });                 // getActiveOp (final)
+      const existingEntry2701 = { id: 2701, entry_time: new Date().toISOString() };
+      db.query
+        .mockResolvedValue({ rows: [], rowCount: 0 })
+        .mockResolvedValueOnce({ rows: [] })                  // no active timeoff
+        .mockResolvedValueOnce({ rows: [existingEntry2701] }) // ensureDailyClockIn SELECT
+        .mockResolvedValueOnce({ rows: [] })                  // getActiveOp (auto-sync)
+        .mockResolvedValueOnce({ rows: [existingEntry2701] }) // syncNormalEntry: ensureDailyClockIn SELECT
+        .mockRejectedValueOnce({ code: "42P01" })             // client_access with client_assignments fails
+        .mockResolvedValueOnce({ rows: [{ id: 150 }] })       // fallback client_access
+        .mockResolvedValueOnce({ rows: [] })                  // no schedule match
+        .mockResolvedValueOnce({ rows: [{ id: 700, status: "in_visit" }] }) // insert/update visit
+        .mockResolvedValueOnce({ rows: [] });                 // getActiveOp (final)
 
-    await controller.clockInField(req, res);
+      await controller.clockInField(req, res);
 
-    expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ok: true,
-        message: expect.stringContaining("Entrada a visita registrada"),
-        data: expect.objectContaining({ id: 700 }),
-      }),
-    );
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ok: true,
+          message: expect.stringContaining("Entrada a visita registrada"),
+          data: expect.objectContaining({ id: 700 }),
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test("falls back to legacy insert when optional client visit columns are missing", async () => {
-    const req = {
-      user: { id: 28, email: "fallback-columns@fam.com", role: "comercial" },
-      body: { location: "-2.170998,-79.922359", location_accuracy: 20, client_id: 151, observations: "emergencia" },
-    };
-    const res = createRes();
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-07-08T15:00:00.000Z"));
+    try {
+      const req = {
+        user: { id: 28, email: "fallback-columns@fam.com", role: "comercial" },
+        body: { location: "-2.170998,-79.922359", location_accuracy: 20, client_id: 151, observations: "emergencia" },
+      };
+      const res = createRes();
 
-    const existingEntry2801 = { id: 2801, entry_time: new Date().toISOString() };
-    db.query
-      .mockResolvedValue({ rows: [], rowCount: 0 })
-      .mockResolvedValueOnce({ rows: [] })                  // no active timeoff
-      .mockResolvedValueOnce({ rows: [existingEntry2801] }) // ensureDailyClockIn SELECT
-      .mockResolvedValueOnce({ rows: [] })                  // getActiveOp (auto-sync)
-      .mockResolvedValueOnce({ rows: [existingEntry2801] }) // syncNormalEntry: ensureDailyClockIn SELECT
-      .mockResolvedValueOnce({ rows: [{ id: 151 }] })       // client access
-      .mockResolvedValueOnce({ rows: [] })                  // no schedule match
-      .mockRejectedValueOnce({ code: "42703" })             // upsert with optional columns fails
-      .mockResolvedValueOnce({ rows: [] })                  // legacy select existing visit
-      .mockResolvedValueOnce({ rows: [{ id: 701, status: "in_visit" }] }) // legacy insert
-      .mockResolvedValueOnce({ rows: [] });                 // getActiveOp (final)
+      const existingEntry2801 = { id: 2801, entry_time: new Date().toISOString() };
+      db.query
+        .mockResolvedValue({ rows: [], rowCount: 0 })
+        .mockResolvedValueOnce({ rows: [] })                  // no active timeoff
+        .mockResolvedValueOnce({ rows: [existingEntry2801] }) // ensureDailyClockIn SELECT
+        .mockResolvedValueOnce({ rows: [] })                  // getActiveOp (auto-sync)
+        .mockResolvedValueOnce({ rows: [existingEntry2801] }) // syncNormalEntry: ensureDailyClockIn SELECT
+        .mockResolvedValueOnce({ rows: [{ id: 151 }] })       // client access
+        .mockResolvedValueOnce({ rows: [] })                  // no schedule match
+        .mockRejectedValueOnce({ code: "42703" })             // upsert with optional columns fails
+        .mockResolvedValueOnce({ rows: [] })                  // legacy select existing visit
+        .mockResolvedValueOnce({ rows: [{ id: 701, status: "in_visit" }] }) // legacy insert
+        .mockResolvedValueOnce({ rows: [] });                 // getActiveOp (final)
 
-    await controller.clockInField(req, res);
+      await controller.clockInField(req, res);
 
-    expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ok: true,
-        message: expect.stringContaining("Entrada a visita registrada"),
-        data: expect.objectContaining({ id: 701, status: "in_visit" }),
-      }),
-    );
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ok: true,
+          message: expect.stringContaining("Entrada a visita registrada"),
+          data: expect.objectContaining({ id: 701, status: "in_visit" }),
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test("continues field visit entry when schedules table is missing", async () => {
-    const req = {
-      user: { id: 30, email: "no-schedules@fam.com", role: "comercial" },
-      body: { location: "-2.170998,-79.922359", location_accuracy: 20, client_id: 152 },
-    };
-    const res = createRes();
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-07-08T15:00:00.000Z"));
+    try {
+      const req = {
+        user: { id: 30, email: "no-schedules@fam.com", role: "comercial" },
+        body: { location: "-2.170998,-79.922359", location_accuracy: 20, client_id: 152 },
+      };
+      const res = createRes();
 
-    const existingEntry3001 = { id: 3001, entry_time: new Date().toISOString() };
-    db.query
-      .mockResolvedValue({ rows: [], rowCount: 0 })
-      .mockResolvedValueOnce({ rows: [] })                  // no active timeoff
-      .mockResolvedValueOnce({ rows: [existingEntry3001] }) // ensureDailyClockIn SELECT
-      .mockResolvedValueOnce({ rows: [] })                  // getActiveOp (auto-sync)
-      .mockResolvedValueOnce({ rows: [existingEntry3001] }) // syncNormalEntry: ensureDailyClockIn SELECT
-      .mockResolvedValueOnce({ rows: [{ id: 152 }] })       // client access
-      .mockRejectedValueOnce({ code: "42P01" })             // schedules table missing
-      .mockResolvedValueOnce({ rows: [{ id: 702, status: "in_visit" }] }) // insert/update visit
-      .mockResolvedValueOnce({ rows: [] });                 // getActiveOp (final)
+      const existingEntry3001 = { id: 3001, entry_time: new Date().toISOString() };
+      db.query
+        .mockResolvedValue({ rows: [], rowCount: 0 })
+        .mockResolvedValueOnce({ rows: [] })                  // no active timeoff
+        .mockResolvedValueOnce({ rows: [existingEntry3001] }) // ensureDailyClockIn SELECT
+        .mockResolvedValueOnce({ rows: [] })                  // getActiveOp (auto-sync)
+        .mockResolvedValueOnce({ rows: [existingEntry3001] }) // syncNormalEntry: ensureDailyClockIn SELECT
+        .mockResolvedValueOnce({ rows: [{ id: 152 }] })       // client access
+        .mockRejectedValueOnce({ code: "42P01" })             // schedules table missing
+        .mockResolvedValueOnce({ rows: [{ id: 702, status: "in_visit" }] }) // insert/update visit
+        .mockResolvedValueOnce({ rows: [] });                 // getActiveOp (final)
 
-    await controller.clockInField(req, res);
+      await controller.clockInField(req, res);
 
-    expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ok: true,
-        message: expect.stringContaining("Entrada a visita registrada"),
-        data: expect.objectContaining({ id: 702, status: "in_visit" }),
-      }),
-    );
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ok: true,
+          message: expect.stringContaining("Entrada a visita registrada"),
+          data: expect.objectContaining({ id: 702, status: "in_visit" }),
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test("returns 400 when client_id is invalid in field visit entry", async () => {
@@ -932,5 +971,106 @@ describe("attendance flow separation", () => {
         }),
       }),
     );
+  });
+
+  // Regresion: usuario marco salida operacional a las 00:35 y, mas tarde el
+  // mismo dia (despues de las 18:00), getToday reportaba la jornada NORMAL
+  // como completada (Entrada: 00:35, Salida: 18:00) aunque la salida
+  // operacional seguia activa. Causa: autoCompleteOperationalAttendanceSpan
+  // autocompletaba almuerzo/salida del dia de HOY con el horario estandar
+  // apenas la hora del reloj los superaba, sin verificar que la excepcion
+  // operacional de hoy seguia sin cerrar (la funcion solo se llama cuando
+  // hay una excepcion operacional activa, es decir, siempre para "hoy").
+  test("does not auto-close today's regular exit while an operational exception is still open, even late at night", async () => {
+    jest.useFakeTimers();
+    try {
+      // 2026-07-08T23:30:00-05:00 (America/Guayaquil) -- bien despues de las 18:00
+      jest.setSystemTime(new Date("2026-07-09T04:30:00.000Z"));
+
+      const req = { user: { id: 555, email: "operacional.medianoche@fam-project.com" } };
+      const res = createRes();
+
+      // Salida operacional iniciada hoy a las 00:35 America/Guayaquil (05:35 UTC)
+      const operationalStart = "2026-07-08T05:35:00.000Z";
+      let autoCompleteUpdateParams = null;
+
+      db.query.mockImplementation((sql, params) => {
+        const text = typeof sql === "string" ? sql : "";
+        if (text.includes("FROM attendance_exceptions") && text.includes("<> 'COMPLETED'")) {
+          return Promise.resolve({
+            rows: [{
+              id: 4242,
+              user_id: 555,
+              type: "salida_oficina",
+              status: "ACTIVE",
+              start_time: operationalStart,
+              start_location: "-2.170998,-79.922359",
+              uses_personal_vehicle: false,
+            }],
+          });
+        }
+        if (text.includes("UPDATE user_attendance_records") && text.includes("lunch_start_time")) {
+          autoCompleteUpdateParams = params;
+          return Promise.resolve({ rows: [] });
+        }
+        if (text.includes("FROM user_attendance_records") && text.includes("date = $2")) {
+          return Promise.resolve({
+            rows: [{ id: 1, user_id: 555, date: "2026-07-08", entry_time: operationalStart, exit_time: null }],
+          });
+        }
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      });
+
+      await controller.getToday(req, res);
+
+      // El dia de hoy nunca se autocompleta (ni entrada, ni almuerzo, ni
+      // salida) mientras la excepcion operacional de hoy sigue activa -- por
+      // eso la UPDATE de autocompletado ni siquiera deberia ejecutarse.
+      expect(autoCompleteUpdateParams).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  // Regla de negocio confirmada: una gestion operacional que arranca antes
+  // del inicio oficial de jornada (09:00) no debe sustituir la entrada del
+  // dia. El colaborador debe marcar su entrada normal por separado.
+  test("does not mirror entry_time from an operational exit that starts before the official workday", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-07-08T05:35:00.000Z")); // 00:35 America/Guayaquil
+    try {
+      const req = {
+        user: { id: 556, email: "madrugador@fam-project.com" },
+        body: {
+          location: "-2.170998,-79.922359",
+          location_accuracy: 20,
+          description: "tramite bancario temprano",
+          operational_category: "banco",
+        },
+      };
+      const res = createRes();
+      let ensureDailyClockInCalled = false;
+
+      db.query.mockImplementation((sql) => {
+        const text = typeof sql === "string" ? sql : "";
+        if (text.includes("entry_location") && text.includes("FROM user_attendance_records")) {
+          ensureDailyClockInCalled = true;
+        }
+        if (text.includes("INSERT INTO user_attendance_records") && text.includes("entry_source")) {
+          ensureDailyClockInCalled = true;
+        }
+        if (text.includes("INSERT INTO attendance_exceptions")) {
+          return Promise.resolve({ rows: [{ id: 8801, type: "operacion_campo", status: "ACTIVE" }] });
+        }
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      });
+
+      await controller.clockOutOperational(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(ensureDailyClockInCalled).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

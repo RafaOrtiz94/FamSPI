@@ -762,6 +762,11 @@ const getEcuadorClockParts = (dateValue = new Date()) => {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
+    // hour12:false por si solo no garantiza el rango 0-23 en todas las
+    // versiones de ICU/Node -- algunas devuelven "24" para la medianoche
+    // (ciclo horario h24 en vez de h23), lo que rompe cualquier aritmetica
+    // que asuma hour*60+minute en 0-1439. hourCycle explicito lo fuerza.
+    hourCycle: "h23",
   }).formatToParts(date);
 
   const map = parts.reduce((acc, part) => {
@@ -1224,28 +1229,28 @@ const shouldMirrorAttendanceForFieldOp = (timestamp = new Date()) => {
 const syncNormalEntryFromFieldOp = async ({ userId, location, timestamp = new Date() }) => {
   const normalizedLocation = normalizeLocationInput(location) || null;
 
-  // If the collaborator departs before the official workday start (e.g. 07:00 vs 09:00),
-  // the acta RH-09 must reflect the official start time, not the real departure time.
-  // real_entry_time stores what actually happened for operational traceability.
+  // Bug real reportado: si la gestion operacional arrancaba antes del inicio
+  // oficial de jornada (ej. tramite bancario a las 6am), este mirror antes
+  // clampeaba la entrada oficial a las 09:00 usando Date.setHours(), que
+  // opera en la zona horaria LOCAL DEL SERVIDOR (no America/Guayaquil) --
+  // en Cloud Run (UTC) esto producia una entrada oficial incorrecta.
+  //
+  // Regla de negocio confirmada: una gestion operacional antes de las 09:00
+  // NO debe sustituir la entrada del dia. El colaborador debe marcar su
+  // entrada normal por separado cuando realmente inicie su jornada.
   const workyDayMinutes = parseClockHHMM(ATTENDANCE_WORKING_DAY_START) ?? (9 * 60);
   const clockParts = getEcuadorClockParts(timestamp);
   const realMinutes = clockParts ? (clockParts.hour * 60 + clockParts.minute) : workyDayMinutes;
 
-  let officialEntryTime = timestamp;
   if (realMinutes < workyDayMinutes) {
-    // Build a Date at the official start time on the same calendar day
-    const officialHour = Math.floor(workyDayMinutes / 60);
-    const officialMin = workyDayMinutes % 60;
-    const d = new Date(timestamp);
-    d.setHours(officialHour, officialMin, 0, 0);
-    officialEntryTime = d;
+    return { ok: true, created: false, skippedBeforeWorkday: true };
   }
 
   return ensureDailyClockIn({
     userId,
     location: normalizedLocation,
     timestamp,
-    officialEntryTime,
+    officialEntryTime: timestamp,
     entrySource: "field_op",
   });
 };
@@ -1545,6 +1550,18 @@ const autoCompleteOperationalAttendanceSpan = async ({
 
   for (let offset = 0; offset <= totalDays; offset += 1) {
     const businessDate = addBusinessDays(startDateKey, offset);
+    // Bug real reportado: esta funcion solo se llama mientras la excepcion
+    // operacional sigue ACTIVA (sin cerrar) para el dia de hoy -- por eso NUNCA
+    // debe autocompletar nada del dia de HOY (ni entrada, ni almuerzo, ni
+    // salida). Antes autocompletaba entrada=09:00 y, mas tarde en el dia,
+    // exit_time=18:00 apenas la hora del reloj los superaba, cerrando la
+    // jornada normal como si el usuario ya hubiera marcado entrada y salida
+    // -- aunque la salida operacional siguiera abierta y el usuario nunca
+    // hubiera marcado su entrada real. El colaborador debe marcar su propia
+    // entrada normal; el autocompletado con horario estandar solo aplica a
+    // dias YA CERRADOS de un viaje operacional de varios dias.
+    if (businessDate === todayKey) continue;
+
     const entryTime = buildDateTimeFromBusinessDate(businessDate, ATTENDANCE_WORKING_DAY_START);
     const lunchStartTime = buildDateTimeFromBusinessDate(businessDate, ATTENDANCE_LUNCH_START);
     const lunchEndTime = buildDateTimeFromBusinessDate(businessDate, ATTENDANCE_LUNCH_END);
