@@ -390,7 +390,6 @@ const AttendanceWidget = () => {
   const [entryRegularizationSent, setEntryRegularizationSent] = useState(false);
   const [fieldVisitType, setFieldVisitType] = useState("cronograma");
   const [selectedFieldAction, setSelectedFieldAction] = useState("office_exit");
-  const [fieldExitMode, setFieldExitMode] = useState("continue_operation");
   const [fieldClientId, setFieldClientId] = useState("");
   const [fieldProspectName, setFieldProspectName] = useState("");
   const [fieldLeadId, setFieldLeadId] = useState("");
@@ -1215,15 +1214,12 @@ const AttendanceWidget = () => {
     setFieldVisitSubmitting(true);
     try {
       const payload = await buildFieldVisitPayload({ includeObservations: kind === "exit", mode: kind });
-      const shouldCloseJourneyFromDestination = kind === "exit" && fieldExitMode === "end_jornada";
       if (kind === "exit") {
-        if (shouldCloseJourneyFromDestination) {
-          payload.return_to_office = false;
-          payload.post_visit_action = "continue_operation";
-        } else {
-          payload.return_to_office = fieldExitMode === "return_to_office";
-          payload.post_visit_action = fieldExitMode;
-        }
+        // "Salir del cliente" es neutral: no decide si la operacion termina
+        // aqui. Esa decision se toma despues, con el selector "despues de
+        // salir del destino" que ya existe para el caso sin visita abierta.
+        payload.return_to_office = false;
+        payload.post_visit_action = "continue_operation";
       }
       const res =
         kind === "entry"
@@ -1232,10 +1228,9 @@ const AttendanceWidget = () => {
 
       if (res?.ok) {
         if (res.queued) {
-          // Sin conexion: no avanzamos el estado local (selectedFieldAction,
-          // cierre automatico de operacion) porque el servidor todavia no
-          // confirmo esta visita -- eso podria adelantar pasos que dependen
-          // de un estado que aun no es real.
+          // Sin conexion: no avanzamos el estado local (selectedFieldAction)
+          // porque el servidor todavia no confirmo esta visita -- eso podria
+          // adelantar pasos que dependen de un estado que aun no es real.
           showToast(res.message || "Sin conexión: se guardó y se enviará automáticamente.", "warning");
           return;
         }
@@ -1245,22 +1240,8 @@ const AttendanceWidget = () => {
             : "Salida de cliente registrada correctamente.",
           "success",
         );
-        if (kind === "entry") {
-          setSelectedFieldAction("client_exit");
-        } else {
-          setSelectedFieldAction(
-            shouldCloseJourneyFromDestination
-              ? "client_exit"
-              : fieldExitMode === "return_to_office"
-                ? "office_entry"
-                : "client_entry"
-          );
-        }
+        setSelectedFieldAction(kind === "entry" ? "client_exit" : "client_entry");
         await refreshAll();
-        if (shouldCloseJourneyFromDestination) {
-          setTripClosureReason(String(fieldVisitNotes || "").trim());
-          openOperationalModal("close");
-        }
       } else {
         showToast("No se pudo registrar la visita de campo.", "error");
       }
@@ -1277,7 +1258,7 @@ const AttendanceWidget = () => {
         )
       ) {
         await refreshAll();
-        setSelectedFieldAction(fieldExitMode === "return_to_office" ? "office_entry" : "client_entry");
+        setSelectedFieldAction("client_entry");
         showToast("No habia una visita activa pendiente. El estado ya fue sincronizado.", "info");
         return;
       }
@@ -1311,7 +1292,6 @@ const AttendanceWidget = () => {
     setFieldEmergencyClientSearch("");
     setFieldEmergencyReason("");
     setFieldVisitNotes("");
-    setFieldExitMode("continue_operation");
     setDestinationExitMode("continue_operation");
   }, []);
 
@@ -2525,25 +2505,17 @@ const AttendanceWidget = () => {
                   <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
                     <p className="text-sm font-medium text-amber-800">Tienes una visita de cliente abierta. Cierrala antes de continuar.</p>
                   </div>
-                  <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3">
-                    <label className="text-[11px] font-semibold text-slate-600">Despues de salir del cliente</label>
-                    <select
-                      value={fieldExitMode}
-                      onChange={(e) => setFieldExitMode(e.target.value)}
-                      className={`${CONTROL_INPUT_CLASS} mt-2`}
-                      aria-label="Accion despues de salir del cliente"
-                    >
-                      <option value="continue_operation">Continuar operacion (puede ir a otro cliente)</option>
-                      <option value="end_jornada">Terminar operacion en este destino</option>
-                    </select>
-                  </div>
+                  {/* "Salir del cliente" es neutral -- no decide aqui si la operacion
+                      termina. Esa decision (continuar vs terminar en este destino) se
+                      toma despues, en el selector que ya aparece una vez cerrada la
+                      visita (ver la rama sin hasOpenFieldVisit, mas abajo). */}
                   <Button
                     variant="warning"
                     onClick={() => handleFieldVisitMark("exit")}
                     disabled={fieldVisitSubmitting}
                     className={ACTION_BTN_BASE_CLASS}
                   >
-                    {fieldVisitSubmitting ? "Registrando..." : "Salida de cliente"}
+                    {fieldVisitSubmitting ? "Registrando..." : "Salir del cliente"}
                   </Button>
                 </>
               ) : (

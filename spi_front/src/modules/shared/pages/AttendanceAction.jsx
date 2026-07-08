@@ -475,12 +475,8 @@ const AttendanceAction = () => {
       description: actionParams.description || operationalDetail || manualReason,
       observations: actionParams.observations || manualObservations,
       returnToOffice: actionParams.returnToOffice ?? (manualPostVisitAction === "return_to_office"),
-      // El backend (clockOutField) solo acepta "continue_operation"/"return_to_office"
-      // en post_visit_action (ver INVALID_POST_VISIT_ACTION) -- "end_jornada" es una
-      // decision puramente de frontend (encadenar a cierre-viaje despues), nunca se
-      // manda tal cual al backend.
       postVisitAction: actionParams.returnToOffice === null
-        ? (manualPostVisitAction === "end_jornada" ? "continue_operation" : manualPostVisitAction || undefined)
+        ? manualPostVisitAction || undefined
         : (actionParams.returnToOffice ? "return_to_office" : "continue_operation"),
       operationalCategory,
       usesPersonalVehicle: usesPersonalVehicle === "si",
@@ -659,17 +655,14 @@ const AttendanceAction = () => {
         setStatus("success");
         setMessage(response.message || `${config.label} registrada correctamente.`);
         showToast(response.message || `${config.label} registrada`, "success");
-        // Si el usuario eligio "Terminar operación aquí" al salir del cliente,
-        // encadenamos directo a cierre-viaje en vez de volver al dashboard --
-        // igual que el widget, que abre el modal de cierre inmediatamente
-        // despues de cerrar la visita (ver handleFieldVisitMark).
-        const shouldChainToTripClose = isClientExitAction && manualPostVisitAction === "end_jornada";
-        const destination = shouldChainToTripClose
-          ? `/asistencia/marcar/cierre-viaje${actionParams.returnUrl ? `?return_url=${encodeURIComponent(actionParams.returnUrl)}` : ""}`
-          : actionParams.returnUrl || "/dashboard";
+        // "Salir del cliente" es neutral -- no decide aqui si la operacion
+        // termina. Si el usuario ya esta en el destino donde cierra la
+        // jornada, cierra con el atajo "cierre-viaje" por separado, cuando
+        // este listo (mismo criterio que el widget, ver handleFieldVisitMark).
+        const destination = actionParams.returnUrl || "/dashboard";
         setTimeout(() => {
           navigate(destination, { replace: true });
-        }, shouldChainToTripClose ? 1200 : 3500);
+        }, 3500);
         return;
       }
       throw new Error(response?.message || "Error al procesar la solicitud.");
@@ -721,8 +714,6 @@ const AttendanceAction = () => {
     actionParams.returnUrl,
     config,
     effectiveActionParams,
-    isClientExitAction,
-    manualPostVisitAction,
     navigate,
     resolveFriendlyDuplicateMessage,
     showToast,
@@ -869,7 +860,7 @@ const AttendanceAction = () => {
             Selecciona que ocurrira despues de cerrar la visita.
           </p>
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <Button
               onClick={() => handlePostVisitDecision("continue_operation")}
               variant="primary"
@@ -886,15 +877,10 @@ const AttendanceAction = () => {
               <span className="font-semibold">Iniciar retorno</span>
               <span className="text-xs opacity-90">Cambia el viaje a estado de regreso.</span>
             </Button>
-            <Button
-              onClick={() => handlePostVisitDecision("end_jornada")}
-              variant="warning"
-              className="min-h-[96px] flex-col items-start justify-center text-left"
-            >
-              <span className="font-semibold">Terminar operación aquí</span>
-              <span className="text-xs opacity-90">Cierra la operación en este mismo destino, sin volver a oficina.</span>
-            </Button>
           </div>
+          <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
+            ¿Ya terminaste la jornada aqui? Usa el atajo "Cierre viaje" por separado cuando estes listo para cerrar.
+          </p>
 
           <Button onClick={() => navigate("/dashboard")} variant="ghost" className="mt-6">
             Cancelar
