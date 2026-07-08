@@ -475,8 +475,12 @@ const AttendanceAction = () => {
       description: actionParams.description || operationalDetail || manualReason,
       observations: actionParams.observations || manualObservations,
       returnToOffice: actionParams.returnToOffice ?? (manualPostVisitAction === "return_to_office"),
+      // El backend (clockOutField) solo acepta "continue_operation"/"return_to_office"
+      // en post_visit_action (ver INVALID_POST_VISIT_ACTION) -- "end_jornada" es una
+      // decision puramente de frontend (encadenar a cierre-viaje despues), nunca se
+      // manda tal cual al backend.
       postVisitAction: actionParams.returnToOffice === null
-        ? manualPostVisitAction || undefined
+        ? (manualPostVisitAction === "end_jornada" ? "continue_operation" : manualPostVisitAction || undefined)
         : (actionParams.returnToOffice ? "return_to_office" : "continue_operation"),
       operationalCategory,
       usesPersonalVehicle: usesPersonalVehicle === "si",
@@ -644,10 +648,17 @@ const AttendanceAction = () => {
         setStatus("success");
         setMessage(response.message || `${config.label} registrada correctamente.`);
         showToast(response.message || `${config.label} registrada`, "success");
-        const destination = actionParams.returnUrl || "/dashboard";
+        // Si el usuario eligio "Terminar operación aquí" al salir del cliente,
+        // encadenamos directo a cierre-viaje en vez de volver al dashboard --
+        // igual que el widget, que abre el modal de cierre inmediatamente
+        // despues de cerrar la visita (ver handleFieldVisitMark).
+        const shouldChainToTripClose = isClientExitAction && manualPostVisitAction === "end_jornada";
+        const destination = shouldChainToTripClose
+          ? `/asistencia/marcar/cierre-viaje${actionParams.returnUrl ? `?return_url=${encodeURIComponent(actionParams.returnUrl)}` : ""}`
+          : actionParams.returnUrl || "/dashboard";
         setTimeout(() => {
           navigate(destination, { replace: true });
-        }, 3500);
+        }, shouldChainToTripClose ? 1200 : 3500);
         return;
       }
       throw new Error(response?.message || "Error al procesar la solicitud.");
@@ -699,6 +710,8 @@ const AttendanceAction = () => {
     actionParams.returnUrl,
     config,
     effectiveActionParams,
+    isClientExitAction,
+    manualPostVisitAction,
     navigate,
     resolveFriendlyDuplicateMessage,
     showToast,
@@ -845,7 +858,7 @@ const AttendanceAction = () => {
             Selecciona que ocurrira despues de cerrar la visita.
           </p>
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-3">
             <Button
               onClick={() => handlePostVisitDecision("continue_operation")}
               variant="primary"
@@ -861,6 +874,14 @@ const AttendanceAction = () => {
             >
               <span className="font-semibold">Iniciar retorno</span>
               <span className="text-xs opacity-90">Cambia el viaje a estado de regreso.</span>
+            </Button>
+            <Button
+              onClick={() => handlePostVisitDecision("end_jornada")}
+              variant="warning"
+              className="min-h-[96px] flex-col items-start justify-center text-left"
+            >
+              <span className="font-semibold">Terminar operación aquí</span>
+              <span className="text-xs opacity-90">Cierra la operación en este mismo destino, sin volver a oficina.</span>
             </Button>
           </div>
 
