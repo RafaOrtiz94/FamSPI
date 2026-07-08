@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FiClock, FiCoffee, FiSun, FiMoon, FiTrendingUp, FiChevronDown, FiChevronUp, FiCheckCircle } from "react-icons/fi";
+import { FiClock, FiCoffee, FiSun, FiMoon, FiTrendingUp, FiCheckCircle } from "react-icons/fi";
 import confetti from "canvas-confetti";
 
 import Button, { actionBtnClass, actionBtnNeutralClass } from "../components/Button";
@@ -44,7 +44,6 @@ import {
   getAttendanceRange,
   syncAttendanceLocation,
 } from "../../api/attendanceApi";
-import { getMisSolicitudes } from "../../api/permisosApi";
 import { useAutoUpdate } from "../../api/index";
 import { fetchClients } from "../../api/clientsApi";
 import { formatDateSafe, formatTimeSafe, toDate } from "../../../shared/utils/dateUtils";
@@ -72,7 +71,6 @@ const EXCEPTION_LOCATION_FIELDS = Object.freeze({
   return: "return_location",
 });
 
-const APPROVED_PERMISSION_STATUSES = new Set(["approved", "aprobado", "partially_approved"]);
 const FIELD_VISIT_TYPE_OPTIONS = Object.freeze([
   { value: "cronograma", label: "Cliente de cronograma", helper: "Visita planificada del dia" },
   { value: "prospecto", label: "Prospecto", helper: "Gestion comercial nueva" },
@@ -206,13 +204,6 @@ const normalizeDateKey = (value) => {
   return getLocalDateKey(parsed);
 };
 
-const isDateWithinRange = (dateKey, startValue, endValue = null) => {
-  const startKey = normalizeDateKey(startValue);
-  const endKey = normalizeDateKey(endValue || startValue);
-  if (!dateKey || !startKey) return false;
-  return dateKey >= startKey && dateKey <= (endKey || startKey);
-};
-
 const getElapsedMinutes = (value, now = new Date()) => {
   const parsed = toDate(value);
   if (!parsed) return 0;
@@ -264,29 +255,6 @@ const getEcuadorEntryMinutes = (entryTime) => {
   const minute = Number(partMap.minute);
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return Number.POSITIVE_INFINITY;
   return (hour * 60) + minute;
-};
-
-const mapPermisoToExceptionSuggestion = (permiso) => {
-  if (!permiso || permiso.tipo_solicitud !== "permiso") return null;
-  const tipoPermiso = String(permiso.tipo_permiso || "").toLowerCase();
-
-  if (tipoPermiso === "salud") {
-    return {
-      type: "medico",
-      description: "Salida por permiso de salud aprobado para hoy",
-      source: "permiso_aprobado_hoy",
-    };
-  }
-
-  if (["personal", "estudios", "calamidad"].includes(tipoPermiso)) {
-    return {
-      type: "permiso",
-      description: `Salida por permiso de ${tipoPermiso} aprobado para hoy`,
-      source: "permiso_aprobado_hoy",
-    };
-  }
-
-  return null;
 };
 
 const mapActiveTimeOffToExceptionPreset = (timeOff) => {
@@ -395,9 +363,6 @@ const AttendanceWidget = () => {
   const [showCelebration, setShowCelebration] = useState(false);
 
   const [activeException, setActiveException] = useState(null);
-  const [exceptionModalOpen, setExceptionModalOpen] = useState(false);
-  const [exceptionType, setExceptionType] = useState("");
-  const [exceptionDescription, setExceptionDescription] = useState("");
 
   // Geolocation state
   const [locationLoading, setLocationLoading] = useState(false);
@@ -405,11 +370,7 @@ const AttendanceWidget = () => {
   const [, setCachedLocationAccuracy] = useState(null);
   const [, setLocationTimestamp] = useState(null);
   const [widgetModalOpen, setWidgetModalOpen] = useState(false);
-  const [showTimelineDetails, setShowTimelineDetails] = useState(false);
-  const [, setShowExceptionTools] = useState(false);
   const [recentHistory, setRecentHistory] = useState([]);
-  const [exceptionSuggestion, setExceptionSuggestion] = useState(null);
-  const [reminderMessage] = useState(null);
   const [overtimePrompt, setOvertimePrompt] = useState(null);
   const [overtimeReason, setOvertimeReason] = useState("");
   const [overtimeSubmitting, setOvertimeSubmitting] = useState(false);
@@ -420,7 +381,6 @@ const AttendanceWidget = () => {
   const [entryRegularizationReason, setEntryRegularizationReason] = useState("");
   const [entryRegularizationLoading, setEntryRegularizationLoading] = useState(false);
   const [entryRegularizationSent, setEntryRegularizationSent] = useState(false);
-  const [showFieldTools, setShowFieldTools] = useState(true);
   const [fieldVisitType, setFieldVisitType] = useState("cronograma");
   const [selectedFieldAction, setSelectedFieldAction] = useState("office_exit");
   const [fieldExitMode, setFieldExitMode] = useState("continue_operation");
@@ -456,7 +416,6 @@ const AttendanceWidget = () => {
   const initializedRef = useRef(false);
   const openLateJustificationFlow = useCallback(() => {
     setWidgetModalOpen(false);
-    setExceptionModalOpen(false);
     setLateJustificationModalOpen(true);
   }, []);
   useEffect(() => {
@@ -475,19 +434,6 @@ const AttendanceWidget = () => {
     refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
-
-  useEffect(() => {
-    if (activeException) {
-      setShowExceptionTools(true);
-    }
-  }, [activeException]);
-
-  useEffect(() => {
-    if (!exceptionModalOpen || !exceptionSuggestion) return;
-    if (exceptionType || exceptionDescription) return;
-    setExceptionType(exceptionSuggestion.type);
-    setExceptionDescription(exceptionSuggestion.description);
-  }, [exceptionDescription, exceptionModalOpen, exceptionSuggestion, exceptionType]);
 
   // Sistema de actualizaciones automaticas sin loops
   useAutoUpdate(() => {
@@ -569,36 +515,6 @@ const AttendanceWidget = () => {
       console.error("Error loading attendance history:", err);
       setRecentHistory([]);
     }
-  };
-
-  const loadExceptionSuggestion = async () => {
-    const todayKey = attendance?.date || getLocalDateKey(new Date());
-    const suggestionCandidates = [];
-
-    try {
-      const res = await getMisSolicitudes();
-      const rows = Array.isArray(res?.data) ? res.data : [];
-
-      const suggestion = rows
-        .filter((row) => APPROVED_PERMISSION_STATUSES.has(String(row?.status || "").toLowerCase()))
-        .find((row) =>
-          row?.tipo_solicitud === "permiso" &&
-          isDateWithinRange(
-            todayKey,
-            row?.fecha_inicio_hora || row?.fecha_inicio,
-            row?.fecha_fin_hora || row?.fecha_fin || row?.fecha_inicio_hora || row?.fecha_inicio,
-          )
-        );
-
-      const permisoSuggestion = mapPermisoToExceptionSuggestion(suggestion);
-      if (permisoSuggestion) {
-        suggestionCandidates.push(permisoSuggestion);
-      }
-    } catch (err) {
-      console.error("Error loading permission suggestion:", err);
-    }
-
-    setExceptionSuggestion(suggestionCandidates[0] || null);
   };
 
   const loadScheduledClientsForToday = async () => {
@@ -711,7 +627,6 @@ const AttendanceWidget = () => {
       loadAttendance(),
       fetchException(),
       loadRecentHistory(),
-      loadExceptionSuggestion(),
       loadScheduledClientsForToday(),
       loadAccessibleClientsForEmergency(),
     ]);
@@ -812,49 +727,6 @@ const AttendanceWidget = () => {
 
     const hours = workedMs / (1000 * 60 * 60);
     return Math.min(Math.round((hours / 8) * 100), 100);
-  };
-
-  const getStatusInfo = () => {
-    if (isPermissionFlowActive)
-      return {
-        text: permissionNeedsExitClose ? "Permiso cierra la jornada" : "Permiso en curso",
-        icon: <FiTrendingUp className="text-sky-500" />,
-      };
-
-    if (permissionNeedsEntryStart)
-      return {
-        text: "Permiso activo al iniciar jornada",
-        icon: <FiTrendingUp className="text-sky-500" />,
-      };
-
-    if (hasActiveApprovedPermission && !hasActiveException)
-      return {
-        text: activeTimeOff?.is_upcoming ? "Permiso programado hoy" : "Permiso aprobado activo",
-        icon: <FiTrendingUp className="text-sky-500" />,
-      };
-
-    if (!attendance?.entry_time)
-      return {
-        text: "Marca tu entrada",
-        icon: <FiSun className="text-yellow-500" />,
-      };
-
-    if (attendance.exit_time)
-      return {
-        text: "Jornada completada",
-        icon: <FiMoon className="text-indigo-500" />,
-      };
-
-    if (attendance.lunch_start_time && !attendance.lunch_end_time)
-      return {
-        text: "En almuerzo",
-        icon: <FiCoffee className="text-orange-500" />,
-      };
-
-    return {
-      text: "Jornada en progreso",
-      icon: <FiClock className="text-blue-500" />,
-    };
   };
 
   /**
@@ -1871,7 +1743,6 @@ const AttendanceWidget = () => {
     );
 
   const progress = calculateProgress();
-  const status = getStatusInfo();
   const latePolicy = attendance?.late_policy || null;
   const shouldPromptLateJustification = Boolean(latePolicy?.justification?.canJustify);
   const punctualityInsights = useMemo(() => {
@@ -1949,7 +1820,7 @@ const AttendanceWidget = () => {
   useEffect(() => {
     const dateKey = attendance?.date || getLocalDateKey(new Date());
     if (!dateKey) return;
-    const hasBlockingModalOpen = widgetModalOpen || exceptionModalOpen || Boolean(overtimePrompt);
+    const hasBlockingModalOpen = widgetModalOpen || Boolean(overtimePrompt);
 
     if (shouldPromptLateJustification && attendance?.entry_time) {
       const promptKey = `late-justif-prompt:${dateKey}`;
@@ -1980,7 +1851,6 @@ const AttendanceWidget = () => {
   }, [
     attendance?.entry_time,
     attendance?.date,
-    exceptionModalOpen,
     latePolicy?.countsAsLate,
     latePolicy?.justification?.remainingMonthly,
     overtimePrompt,
@@ -2021,100 +1891,6 @@ const AttendanceWidget = () => {
     }
   }, [activeOperationRequiresClientVisitFlow, exceptionStatus, hasOpenFieldVisit, isFieldOperationFlow, selectedFieldAction]);
 
-  const timeEntries = useMemo(() => {
-    const baseEntries = [
-      ["Entrada", attendance?.entry_time, "bg-emerald-50 border-emerald-200 text-emerald-800"],
-      ["Salida Almuerzo", attendance?.lunch_start_time, "bg-orange-50 border-orange-200 text-orange-800"],
-      ["Entrada Almuerzo", attendance?.lunch_end_time, "bg-blue-50 border-blue-200 text-blue-800"],
-      ["Salida", attendance?.exit_time, "bg-indigo-50 border-indigo-200 text-indigo-800"],
-    ].map(([label, time, colors]) => ({ label, value: time, colors }));
-
-    if (!hasActiveException) {
-      return baseEntries;
-    }
-
-    const isPermEx = isPermissionLikeException(activeException);
-    const exceptionLabel = isPermEx ? "Salida permiso" : "Salida o visita";
-
-    if (isPermEx) {
-      return [
-        ...baseEntries,
-        {
-          label: exceptionLabel,
-          value: activeException.start_time,
-          colors: "bg-sky-50 border-sky-200 text-sky-800",
-          note: activeException.type === "medico" ? "SALUD" : "PERMISO",
-        },
-        {
-          label: "Regreso permiso",
-          value: activeException.return_time || activeException.end_time,
-          colors: "bg-emerald-50 border-emerald-200 text-emerald-800",
-          note: activeException.status === "COMPLETED" ? "Completado" : "Pendiente",
-        },
-      ];
-    }
-
-    return [
-      ...baseEntries,
-      {
-        label: exceptionLabel,
-        value: activeException.start_time,
-        colors: "bg-amber-50 border-amber-200 text-amber-800",
-        note: activeException.type ? activeException.type.replace(/_/g, " ").toUpperCase() : "Sin motivo",
-      },
-      {
-        label: "Arribo a destino",
-        value: activeException.arrival_time,
-        colors: "bg-orange-50 border-orange-200 text-orange-800",
-        note: activeException.status === "ON_SITE" ? "Llegaste" : "Pendiente",
-      },
-      {
-        label: "Salida del destino",
-        value: activeException.departure_time,
-        colors: "bg-yellow-50 border-yellow-200 text-yellow-800",
-        note: activeException.status === "RETURNING" ? "Regresando" : "Pendiente",
-      },
-      {
-        label: "Regreso a oficina",
-        value: activeException.return_time,
-        colors: "bg-emerald-50 border-emerald-200 text-emerald-800",
-        note: activeException.status === "COMPLETED" ? "Completado" : "Pendiente",
-      },
-    ];
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    activeException?.arrival_time,
-    activeException?.departure_time,
-    activeException?.end_time,
-    activeException?.return_time,
-    activeException?.start_time,
-    activeException?.status,
-    activeException?.type,
-    attendance?.entry_time,
-    attendance?.exit_time,
-    attendance?.lunch_end_time,
-    attendance?.lunch_start_time,
-    hasActiveException,
-    isFieldOperationFlow,
-  ]);
-
-  const timelineSteps = useMemo(() => {
-    const firstPendingIndex = timeEntries.findIndex((entry) => !entry.value);
-
-    return timeEntries.map((entry, index) => {
-      let state = "upcoming";
-      if (entry.value) {
-        state = "done";
-      } else if (firstPendingIndex === index) {
-        state = "current";
-      }
-
-      return {
-        ...entry,
-        state,
-      };
-    });
-  }, [timeEntries]);
 
   const dayStatusBadge = hasActiveException
     ? "bg-amber-100 text-amber-900 border-amber-200"
@@ -2231,32 +2007,49 @@ const AttendanceWidget = () => {
     );
   };
 
-  const nextActionMeta = useMemo(() => {
+  // Rework UI: fuente unica de estado/siguiente-paso, reemplaza a los antiguos
+  // getStatusInfo() + nextActionMeta (cadenas de prioridad separadas que ya
+  // divergian entre si — ver nota del plan). Incluye una rama para excepcion
+  // generica/imprevista que ninguna de las dos originales cubria (ambas caian
+  // por error en los chequeos de entrada/almuerzo/salida, que no aplican
+  // mientras hay una salida imprevista sin cerrar).
+  const primaryStepInfo = useMemo(() => {
     if (isFieldOperationFlow) {
+      const icon = <FiTrendingUp className="text-amber-500" />;
       if (exceptionStatus === "RETURNING") {
         return {
-          label: "Llegada a oficina nuevamente",
-          detail: "Cierra la salida operacional cuando regreses a la oficina.",
+          icon,
+          badgeText: "Salida operacional",
+          statusText: "Salida operacional: regresando a oficina",
+          actionLabel: "Llegada a oficina nuevamente",
+          actionDetail: "Cierra la salida operacional cuando regreses a la oficina.",
         };
       }
-
       if (exceptionStatus === "ON_SITE") {
         return {
-          label: "Salida del destino",
-          detail: "Registra la salida cuando termines la gestion en el destino.",
+          icon,
+          badgeText: "Salida operacional",
+          statusText: "Salida operacional: en el destino",
+          actionLabel: "Salida del destino",
+          actionDetail: "Registra la salida cuando termines la gestion en el destino.",
         };
       }
-
       return {
-        label: "Llegada a destino",
-        detail: "Confirma la llegada cuando completes el traslado.",
+        icon,
+        badgeText: "Salida operacional",
+        statusText: "Salida operacional: en camino",
+        actionLabel: "Llegada a destino",
+        actionDetail: "Confirma la llegada cuando completes el traslado.",
       };
     }
 
     if (isPermissionFlowActive) {
       return {
-        label: permissionNeedsExitClose ? "Salida del permiso y jornada" : "Entrada de permiso",
-        detail: permissionNeedsExitClose
+        icon: <FiTrendingUp className="text-sky-500" />,
+        badgeText: "Permiso en curso",
+        statusText: permissionNeedsExitClose ? "Permiso cierra la jornada" : "Permiso en curso",
+        actionLabel: permissionNeedsExitClose ? "Salida del permiso y jornada" : "Entrada de permiso",
+        actionDetail: permissionNeedsExitClose
           ? "Este permiso coincide con el cierre de jornada. Esta accion registra ambas marcaciones."
           : "Registra el regreso cuando termine el permiso aprobado.",
       };
@@ -2264,55 +2057,89 @@ const AttendanceWidget = () => {
 
     if (permissionNeedsEntryStart) {
       return {
-        label: "Entrada + salida a permiso",
-        detail: "Tu permiso coincide con el inicio de jornada. Esta accion registra ambas marcaciones.",
+        icon: <FiTrendingUp className="text-sky-500" />,
+        badgeText: "Permiso activo al iniciar jornada",
+        statusText: "Permiso activo al iniciar jornada",
+        actionLabel: "Entrada + salida a permiso",
+        actionDetail: "Tu permiso coincide con el inicio de jornada. Esta accion registra ambas marcaciones.",
       };
     }
 
     if (hasActiveApprovedPermission && !hasActiveException) {
+      const statusText = activeTimeOff?.is_upcoming ? "Permiso programado hoy" : "Permiso aprobado activo";
       return {
-        label: activeTimeOffPreset?.actionLabel || "Salida a permiso",
-        detail: "Tienes un permiso aprobado activo. Registra tu salida para iniciar el permiso.",
+        icon: <FiTrendingUp className="text-sky-500" />,
+        badgeText: statusText,
+        statusText,
+        actionLabel: activeTimeOffPreset?.actionLabel || "Salida a permiso",
+        actionDetail: "Tienes un permiso aprobado activo. Registra tu salida para iniciar el permiso.",
       };
     }
 
-    if (attendance?.exit_time) {
+    if (hasActiveException) {
+      // Excepcion no operacional y no tipo permiso: salida imprevista sin cerrar.
       return {
-        label: "Sin acciones pendientes",
-        detail: "La jornada de hoy ya fue completada.",
-      };
-    }
-
-    if (attendance?.lunch_start_time && !attendance?.lunch_end_time) {
-      return {
-        label: "Regresar de almuerzo",
-        detail: "Solo falta registrar el retorno del almuerzo.",
-      };
-    }
-
-    if (attendance?.lunch_end_time) {
-      return {
-        label: "Finalizar jornada",
-        detail: "Solo falta registrar tu salida final.",
+        icon: <FiTrendingUp className="text-amber-500" />,
+        badgeText: "Excepción activa",
+        statusText: "Salida imprevista en curso",
+        actionLabel: "Continuar salida imprevista",
+        actionDetail: "Actualiza el estado desde Salidas operacionales para cerrarla.",
       };
     }
 
     if (!attendance?.entry_time) {
       return {
-        label: "Marcar entrada",
-        detail: "Tu jornada inicia con la entrada.",
+        icon: <FiSun className="text-yellow-500" />,
+        badgeText: "Marca tu entrada",
+        statusText: "Marca tu entrada",
+        actionLabel: "Marcar entrada",
+        actionDetail: "Tu jornada inicia con la entrada.",
+      };
+    }
+
+    if (attendance?.exit_time) {
+      return {
+        icon: <FiMoon className="text-indigo-500" />,
+        badgeText: "Jornada completada",
+        statusText: "Jornada completada",
+        actionLabel: "Sin acciones pendientes",
+        actionDetail: "La jornada de hoy ya fue completada.",
+      };
+    }
+
+    if (attendance?.lunch_start_time && !attendance?.lunch_end_time) {
+      return {
+        icon: <FiCoffee className="text-orange-500" />,
+        badgeText: "En almuerzo",
+        statusText: "En almuerzo",
+        actionLabel: "Regresar de almuerzo",
+        actionDetail: "Solo falta registrar el retorno del almuerzo.",
+      };
+    }
+
+    if (attendance?.lunch_end_time) {
+      return {
+        icon: <FiClock className="text-blue-500" />,
+        badgeText: "Jornada en progreso",
+        statusText: "Jornada en progreso",
+        actionLabel: "Finalizar jornada",
+        actionDetail: "Solo falta registrar tu salida final.",
       };
     }
 
     return {
-      label: "Salir a almuerzo",
-      detail: "Tu siguiente paso operativo es registrar la salida a almuerzo.",
+      icon: <FiClock className="text-blue-500" />,
+      badgeText: "Jornada en progreso",
+      statusText: "Jornada en progreso",
+      actionLabel: "Salir a almuerzo",
+      actionDetail: "Tu siguiente paso operativo es registrar la salida a almuerzo.",
     };
   }, [
     attendance?.entry_time,
     attendance?.exit_time,
     attendance?.lunch_end_time,
     attendance?.lunch_start_time,
+    activeTimeOff?.is_upcoming,
     exceptionStatus,
     hasActiveApprovedPermission,
     hasActiveException,
@@ -2883,7 +2710,7 @@ const AttendanceWidget = () => {
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-5">
           <div className="flex items-center gap-2.5">
             <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${statusIconBg}`}>
-              {status.icon}
+              {primaryStepInfo.icon}
             </div>
             <div className="flex items-center gap-2">
               <span className="font-mono text-xs font-semibold text-slate-600">
@@ -2891,7 +2718,7 @@ const AttendanceWidget = () => {
               </span>
               <span className="text-slate-200">|</span>
               <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${dayStatusBadge}`}>
-                {isPermissionFlowActive ? "Permiso en curso" : hasActiveException ? "Excepción activa" : status.text}
+                {primaryStepInfo.badgeText}
               </span>
             </div>
           </div>
@@ -2905,22 +2732,23 @@ const AttendanceWidget = () => {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Estado actual</div>
-              <div className="mt-0.5 text-xl font-semibold text-slate-900">{status.text}</div>
+              <div className="mt-0.5 text-xl font-semibold text-slate-900">{primaryStepInfo.statusText}</div>
               {hasEntry && !isDayComplete && (
                 <div className="mt-0.5 font-mono text-sm text-slate-500">{elapsedDisplay} en jornada</div>
               )}
               {attendance?.entry_time && (
                 <div className="mt-1 font-mono text-xs text-slate-400">
                   Entrada: {formatTime(attendance.entry_time)}
+                  {attendance?.lunch_start_time && ` · Almuerzo: ${formatTime(attendance.lunch_start_time)}${attendance?.lunch_end_time ? `–${formatTime(attendance.lunch_end_time)}` : ""}`}
                   {attendance?.exit_time && ` · Salida: ${formatTime(attendance.exit_time)}`}
                 </div>
               )}
             </div>
             <div className="min-w-0 sm:text-right">
               <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Siguiente acción</div>
-              <div className="mt-0.5 text-sm font-bold text-slate-800">{nextActionMeta.label}</div>
-              {nextActionMeta.detail && (
-                <p className="mt-0.5 text-xs leading-4 text-slate-500 sm:ml-auto sm:max-w-[200px]">{nextActionMeta.detail}</p>
+              <div className="mt-0.5 text-sm font-bold text-slate-800">{primaryStepInfo.actionLabel}</div>
+              {primaryStepInfo.actionDetail && (
+                <p className="mt-0.5 text-xs leading-4 text-slate-500 sm:ml-auto sm:max-w-[200px]">{primaryStepInfo.actionDetail}</p>
               )}
             </div>
           </div>
@@ -2961,13 +2789,6 @@ const AttendanceWidget = () => {
 
         {/* ACTION ZONE */}
         <div className="px-4 py-4 sm:px-5">
-          {reminderMessage && (
-            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-              <div className="text-[10px] font-semibold uppercase tracking-widest text-amber-700">Aviso operativo</div>
-              <div className="mt-0.5 text-sm text-amber-900">{reminderMessage}</div>
-            </div>
-          )}
-
           {latePolicy?.isLate && (
             <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
               <div className="text-[10px] font-semibold uppercase tracking-widest text-rose-700">Atraso registrado</div>
@@ -3066,103 +2887,18 @@ const AttendanceWidget = () => {
           )}
         </div>
 
-        {/* ACCORDIONS */}
-        <div className="border-t border-slate-100">
-          <div className="divide-y divide-slate-100">
-
-            {/* Jornada del día */}
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowTimelineDetails((prev) => !prev)}
-                className="flex min-h-[44px] w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-slate-50 sm:px-5"
-              >
-                <div className="flex items-center gap-2.5">
-                  <FiClock size={14} className="flex-shrink-0 text-slate-400" />
-                  <div>
-                    <span className="text-xs font-semibold text-slate-700">Jornada del día</span>
-                    <span className="ml-2 text-[10px] text-slate-400">
-                      {timeEntries.filter((e) => e.value).length}/{timeEntries.length} marcas
-                    </span>
-                  </div>
-                </div>
-                <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-slate-400">
-                  {showTimelineDetails ? <FiChevronUp size={13} /> : <FiChevronDown size={13} />}
-                </span>
-              </button>
-              {showTimelineDetails && (
-                <div className="border-t border-slate-100 px-4 pb-4 pt-3 sm:px-5">
-                  <div className="space-y-1">
-                    {timelineSteps.map((entry, index) => (
-                      <div
-                        key={`${entry.label}-${entry.value ?? "pending"}`}
-                        className={`flex items-center gap-3 rounded-lg px-3 py-2.5 ${
-                          entry.state === "done"
-                            ? "bg-emerald-50"
-                            : entry.state === "current"
-                              ? "bg-blue-50"
-                              : "bg-slate-50"
-                        }`}
-                      >
-                        <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md text-[10px] font-bold ${
-                          entry.state === "done"
-                            ? "bg-emerald-500 text-white"
-                            : entry.state === "current"
-                              ? "bg-blue-500 text-white"
-                              : "bg-slate-200 text-slate-500"
-                        }`}>
-                          {entry.state === "done" ? <FiCheckCircle size={10} /> : index + 1}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <span className={`text-xs font-semibold ${
-                            entry.state === "done" ? "text-emerald-800" : entry.state === "current" ? "text-blue-800" : "text-slate-400"
-                          }`}>{entry.label}</span>
-                          {entry.note && (
-                            <span className="ml-2 text-[10px] uppercase tracking-wide text-slate-400">{entry.note}</span>
-                          )}
-                        </div>
-                        <span className={`flex-shrink-0 font-mono text-sm font-bold ${
-                          entry.state === "done" ? "text-emerald-700" : entry.state === "current" ? "text-blue-600" : "text-slate-300"
-                        }`}>
-                          {formatTime(entry.value)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Salidas laborales y visitas */}
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowFieldTools((prev) => !prev)}
-                className="flex min-h-[44px] w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-slate-50 sm:px-5"
-              >
-                <div className="flex items-center gap-2.5">
-                  <FiTrendingUp size={14} className="flex-shrink-0 text-slate-400" />
-                  <div>
-                    <span className="text-xs font-semibold text-slate-700">Salidas y visitas</span>
-                    {isFieldOperationFlow && (
-                      <span className="ml-2 inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
-                        Activo
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-slate-400">
-                  {showFieldTools ? <FiChevronUp size={13} /> : <FiChevronDown size={13} />}
-                </span>
-              </button>
-              {showFieldTools && (
-                <div className="border-t border-slate-100 px-4 pb-4 pt-3 sm:px-5">
-                  {renderFieldOperationsControls()}
-                </div>
-              )}
-            </div>
-
+        {/* SALIDAS OPERACIONALES — siempre visible, no es un accordion generico */}
+        <div className="border-t border-slate-100 px-4 py-4 sm:px-5">
+          <div className="mb-3 flex items-center gap-2.5">
+            <FiTrendingUp size={14} className="flex-shrink-0 text-slate-400" />
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-700">Salidas operacionales</span>
+            {isFieldOperationFlow && (
+              <span className="inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+                Activo
+              </span>
+            )}
           </div>
+          {renderFieldOperationsControls()}
         </div>
 
         {/* PUNTUALIDAD + HISTORIAL */}
@@ -3246,8 +2982,8 @@ const AttendanceWidget = () => {
           <motion.button
             onClick={() => setWidgetModalOpen(true)}
             className={`relative flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg shadow-slate-900/20 transition focus-visible:ring-2 focus-visible:ring-accent ${launcherColorClass}`}
-            aria-label={`Abrir asistencia - ${nextActionMeta.label}`}
-            title={`Asistencia - ${nextActionMeta.label}`}
+            aria-label={`Abrir asistencia - ${primaryStepInfo.actionLabel}`}
+            title={`Asistencia - ${primaryStepInfo.actionLabel}`}
             whileHover={{ y: -1 }}
             whileTap={{ scale: 0.97 }}
             animate={showCelebration ? { scale: [1, 1.04, 1] } : { scale: 1 }}
