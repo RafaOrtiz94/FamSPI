@@ -135,6 +135,7 @@ const AttendanceAction = () => {
   const [startOdometerPhoto, setStartOdometerPhoto] = useState(null);
   const [endOdometerPhoto, setEndOdometerPhoto] = useState(null);
   const [manualSubmitNonce, setManualSubmitNonce] = useState(0);
+  const [retryTick, setRetryTick] = useState(0);
   const processedRef = useRef(false);
   const executionKeyRef = useRef("");
   const actionParams = parseActionParams(location.search);
@@ -726,11 +727,22 @@ const AttendanceAction = () => {
     needsPostVisitDecisionStep,
     requiresOperationalStep,
     manualSubmitNonce,
+    retryTick,
     effectiveActionParams,
     actionParams.returnUrl,
     handleConfirmMark,
     resolveFriendlyDuplicateMessage,
   ]);
+
+  // Fase 3 (Plan Maestro Asistencia): reintento sin recargar la pagina, para no
+  // perder el contexto ya ingresado (cliente, motivo, kilometraje) en el paso manual.
+  const handleRetry = useCallback(() => {
+    processedRef.current = false;
+    setStatus("initializing");
+    setMessage("");
+    setErrorDetails("");
+    setRetryTick((tick) => tick + 1);
+  }, []);
 
 
   const handleManualClientSubmit = () => {
@@ -1168,7 +1180,7 @@ const AttendanceAction = () => {
                   {errorDetails}
                 </div>
                 <div className="flex gap-3">
-                  <Button onClick={() => window.location.reload()} variant="primary">Reintentar</Button>
+                  <Button onClick={handleRetry} variant="primary">Reintentar</Button>
                   <Button onClick={() => navigate("/dashboard")} variant="ghost">Ir al Dashboard</Button>
                 </div>
               </motion.div>

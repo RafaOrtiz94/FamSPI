@@ -1,3 +1,5 @@
+// Fase 3 (Plan Maestro Asistencia): mapa completo de codigos reales emitidos por
+// attendance.controller.js (backend). Mantener sincronizado si el backend agrega codigos.
 const ATTENDANCE_ERROR_CODE_MESSAGES = Object.freeze({
   LOCATION_REQUIRED_RETRY: {
     type: "warning",
@@ -11,9 +13,37 @@ const ATTENDANCE_ERROR_CODE_MESSAGES = Object.freeze({
     type: "warning",
     message: "No puedes marcar asistencia mientras tengas permiso/vacaciones activos.",
   },
-  ATTENDANCE_OPS_FORBIDDEN: {
+  ENTRY_MARK_CUTOFF_REACHED: {
     type: "warning",
-    message: "No tienes permisos para esta operacion de asistencia.",
+    message: "Ya pasó la hora límite para marcar entrada (09:20). Solicita regularización.",
+  },
+  INVALID_POST_VISIT_ACTION: {
+    type: "warning",
+    message: "Selecciona una accion valida para continuar despues de la visita.",
+  },
+  OPERATIONAL_ALREADY_ACTIVE: {
+    type: "info",
+    message: "Ya tienes una salida operacional activa. Ciérrala antes de iniciar otra.",
+  },
+  NO_ACTIVE_OPERATIONAL: {
+    type: "warning",
+    message: "No tienes una salida operacional activa en este momento.",
+  },
+  OPERATIONAL_LUNCH_ALREADY_STARTED: {
+    type: "warning",
+    message: "Ya registraste la salida a almuerzo de esta gestion operacional.",
+  },
+  OPERATIONAL_LUNCH_NOT_STARTED: {
+    type: "warning",
+    message: "Debes registrar la salida a almuerzo antes de marcar el regreso.",
+  },
+  OPERATIONAL_LUNCH_ALREADY_ENDED: {
+    type: "warning",
+    message: "Ya registraste el regreso de almuerzo de esta gestion operacional.",
+  },
+  ATTENDANCE_INVALID_TRANSITION: {
+    type: "warning",
+    message: "Esa marcacion no corresponde al estado actual de tu jornada.",
   },
   NO_ACTIVE_VISIT: {
     type: "warning",
@@ -22,6 +52,22 @@ const ATTENDANCE_ERROR_CODE_MESSAGES = Object.freeze({
   VISIT_ALREADY_CLOSED: {
     type: "info",
     message: "La visita ya estaba cerrada.",
+  },
+  FORBIDDEN: {
+    type: "warning",
+    message: "No tienes permisos para esta operacion de asistencia.",
+  },
+  ATTENDANCE_WORKSPACE_FORBIDDEN: {
+    type: "warning",
+    message: "No tienes permisos para ver este panel de asistencia.",
+  },
+  ATTENDANCE_TEAM_FORBIDDEN: {
+    type: "warning",
+    message: "No tienes permisos para ver la asistencia de este equipo.",
+  },
+  ATTENDANCE_NON_COMPLIANCE_FORBIDDEN: {
+    type: "warning",
+    message: "No tienes permisos para ver este reporte de incumplimientos.",
   },
 });
 
