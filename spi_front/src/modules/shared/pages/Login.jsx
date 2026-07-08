@@ -39,14 +39,21 @@ export default function Login() {
  case "missing_refresh_token":
  setError("Tu sesión no tiene habilitada la renovación automática. Por favor, inicia sesión de nuevo para habilitarla (30 días).");
  break;
+ case "session_expired":
+ setError("Tu sesión venció. Inicia sesión nuevamente para continuar donde te quedaste.");
+ break;
  default:
  setError("Error durante la autenticación. Inténtalo de nuevo.");
  }
  }
  }, [location]);
 
- // Preserve returnUrl for post-login redirect (used by QR and deep links)
+ // Preserve returnUrl for post-login redirect (used by QR y deep links directos a /login)
  const returnUrl = new URLSearchParams(location.search).get("returnUrl");
+ // Fase 2: AuthContext ya guarda el atajo interrumpido en sessionStorage("redirectTo")
+ // cuando la sesion vence. Si apunta a un atajo de asistencia, avisamos que se retomara.
+ const pendingRedirect = sessionStorage.getItem("redirectTo") || "";
+ const isAttendanceShortcutPending = pendingRedirect.startsWith("/asistencia/marcar/");
  if (isAuthenticated) {
    const dest = returnUrl ? decodeURIComponent(returnUrl) : "/dashboard";
    return <Navigate to={dest} replace />;
@@ -119,6 +126,13 @@ export default function Login() {
  {error && (
  <div className="bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300 rounded-xl py-2 px-3 text-sm mb-5">
  {error}
+ </div>
+ )}
+
+ {/* Reentrada de atajo interrumpido (Fase 2) */}
+ {isAttendanceShortcutPending && (
+ <div className="bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300 rounded-xl py-2 px-3 text-sm mb-5">
+ Vamos a continuar tu marcación de asistencia después de iniciar sesión.
  </div>
  )}
 

@@ -40,12 +40,28 @@ export const AuthProvider = ({ children }) => {
  }
  };
 
- const forceLogoutAndRedirect = (error = null) => {
+ // Fase 2 (Plan Maestro Asistencia): distingue "sesion expirada" (recordamos
+ // a donde volver) de "logout manual" (el usuario decidio salir, no hay que
+ // reofrecer continuidad). manual=true => no guarda redirectTo ni marca error.
+ const forceLogoutAndRedirect = (error = null, { manual = false } = {}) => {
  clearSessionTimer();
  setUser(null);
  setIsAuthenticated(false);
  clearTokens();
+
+ if (manual) {
+ sessionStorage.removeItem("redirectTo");
  redirectToLogin(error);
+ return;
+ }
+
+ if (!window.location.pathname.startsWith("/login")) {
+ const currentPath = window.location.pathname + window.location.search;
+ if (currentPath && currentPath !== "/") {
+ sessionStorage.setItem("redirectTo", currentPath);
+ }
+ }
+ redirectToLogin(error || "session_expired");
  };
 
  const decodeJwtExp = (token) => {
@@ -194,7 +210,7 @@ export const AuthProvider = ({ children }) => {
  } catch (err) {
  console.error("❌ Error cerrando sesión:", err);
  } finally {
- forceLogoutAndRedirect();
+ forceLogoutAndRedirect(null, { manual: true });
  }
  };
 
@@ -262,11 +278,15 @@ export const AuthProvider = ({ children }) => {
  window.removeEventListener("visibilitychange", handleVisibilityOrFocus);
  window.removeEventListener("focus", handleVisibilityOrFocus);
  };
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, []);
 
  // ✅ Alias esperados por otros componentes
  const login = refresh;
  const logoutFn = signOut;
+ // Fase 2: para 401 detectados en vivo (ej. AttendanceWidget) — a diferencia
+ // de logout() (manual), preserva returnUrl y marca error=session_expired.
+ const handleSessionExpired = () => forceLogoutAndRedirect(null);
 
  return (
  <AuthContext.Provider
@@ -279,6 +299,7 @@ export const AuthProvider = ({ children }) => {
  login,
  logout: logoutFn, // alias usado por Header y navegación
  signOut,
+ handleSessionExpired,
  }}
  >
  {children}

@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FiClock, FiCoffee, FiSun, FiMoon, FiAlertTriangle, FiTrendingUp, FiChevronDown, FiChevronUp, FiCheckCircle } from "react-icons/fi";
+import { FiClock, FiCoffee, FiSun, FiMoon, FiTrendingUp, FiChevronDown, FiChevronUp, FiCheckCircle } from "react-icons/fi";
 import confetti from "canvas-confetti";
 
 import Button, { actionBtnClass, actionBtnNeutralClass } from "../components/Button";
 import Modal from "../components/Modal";
+import CameraCaptureField from "../components/CameraCaptureField";
 import { useUI } from "../useUI";
 import { getAttendanceErrorInfo } from "../attendanceErrorUtils";
 import { isOperationalFlow } from "../attendanceFlowUtils";
@@ -18,11 +19,16 @@ import {
   marcarVisitaSalida,
   marcarSalidaOficina,
   marcarEntradaOficina,
+  marcarAlmuerzoSalidaOperacional,
+  marcarAlmuerzoEntradaOperacional,
   marcarLlegadaDestino,
   marcarCierreViaje,
   markOvertime,
   justifyLateArrival,
+  requestEntryRegularization,
   registerException,
+  startPermissionEntry,
+  finishPermissionExit,
   updateExceptionStatus,
   getActiveException,
   getTodayAttendance,
@@ -32,7 +38,7 @@ import {
 import { getMisSolicitudes } from "../../api/permisosApi";
 import { useAutoUpdate } from "../../api/index";
 import { fetchClients } from "../../api/clientsApi";
-import { formatDateSafe, formatTimeSafe, formatDateTimeSafe, toDate } from "../../../shared/utils/dateUtils";
+import { formatDateSafe, formatTimeSafe, toDate } from "../../../shared/utils/dateUtils";
 import { useAuth } from "../../auth/useAuth";
 import {
   getLocationForAction as getSharedLocation,
@@ -40,21 +46,10 @@ import {
   stopLocationPrewarm,
 } from "../../../shared/utils/attendanceLocationCache";
 
-const EXCEPTION_PRESETS = Object.freeze({
-  permiso: "Salida por permiso personal",
-  medico: "Salida por cita medica",
-  proveedor: "Salida por reunion con proveedor",
-  otro: "Salida inesperada",
-});
-
 const RECENT_HISTORY_DAYS = 5;
-const LUNCH_REMINDER_MINUTES = 50;
-const LUNCH_SUGGESTION_AFTER_HOURS = 4;
-const EXIT_REMINDER_AFTER_HOURS = 8;
 const PUNCTUALITY_BASE_MINUTES = 9 * 60;
-const PUNCTUALITY_TOLERANCE_MINUTES = 5;
-const RECENT_LOCATION_STORAGE_KEY = "attendance_recent_valid_location";
-const RECENT_LOCATION_MAX_AGE_MS = 90 * 1000;
+const PUNCTUALITY_TOLERANCE_MINUTES = 6;
+const ENTRY_MARK_CUTOFF_MINUTES = 9 * 60 + 20; // 09:20 — after this, entry is blocked
 const ATTENDANCE_LOCATION_FIELDS = Object.freeze({
   entry: "entry_location",
   lunch_start: "lunch_start_location",
@@ -69,16 +64,36 @@ const EXCEPTION_LOCATION_FIELDS = Object.freeze({
 });
 
 const APPROVED_PERMISSION_STATUSES = new Set(["approved", "aprobado", "partially_approved"]);
-const ATTENDANCE_STATUS_LABELS = Object.freeze({
-  no_entry: "Sin entrada",
-  working: "Jornada abierta",
-  lunch_open: "Almuerzo abierto",
-  completed: "Jornada cerrada",
-});
 const FIELD_VISIT_TYPE_OPTIONS = Object.freeze([
   { value: "cronograma", label: "Cliente de cronograma", helper: "Visita planificada del dia" },
   { value: "prospecto", label: "Prospecto", helper: "Gestion comercial nueva" },
   { value: "emergencia", label: "Emergencia", helper: "Atencion urgente en cliente" },
+]);
+const OPERATIONAL_CATEGORY_OPTIONS = Object.freeze([
+  { value: "cliente", label: "Visita a cliente", helper: "Cliente, prospecto o atencion tecnica" },
+  { value: "reunion", label: "Reunion externa", helper: "Reunion de trabajo fuera de oficina" },
+  { value: "banco", label: "Gestion bancaria", helper: "Depositos, tramites o diligencias" },
+  { value: "ministerio", label: "Entidad publica", helper: "Ministerio u otra institucion" },
+  { value: "proveedor", label: "Visita a proveedor", helper: "Compras, entregas o coordinacion" },
+  { value: "gestion_oficina", label: "Gestion operativa", helper: "Diligencia administrativa externa" },
+  { value: "otro", label: "Otra salida", helper: "Cualquier otra gestion laboral" },
+]);
+const COMMERCIAL_SCHEDULE_ROLES = new Set([
+  "comercial",
+  "asesor_comercial",
+  "acp_comercial",
+  "jefe_comercial",
+  "backoffice",
+  "backoffice_comercial",
+]);
+const TECHNICAL_SCHEDULE_ROLES = new Set([
+  "tecnico",
+  "ing_servicio",
+  "esp_app",
+  "servicio_tecnico",
+  "jefe_tecnico",
+  "jefe_servicio",
+  "jefe_servicio_tecnico",
 ]);
 const CONTROL_INPUT_CLASS =
   "h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm transition placeholder:text-slate-400 focus-visible:border-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200";
@@ -91,8 +106,6 @@ const ACTION_BTN_MODAL_PRIMARY_CLASS =
   "w-full sm:w-auto min-h-[44px] rounded-xl px-6 py-2 font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-70";
 const ACTION_BTN_MODAL_SECONDARY_CLASS =
   "w-full sm:w-auto min-h-[44px] rounded-lg px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-70";
-const SECTION_PANEL_CLASS = "rounded-2xl border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)]";
-const SECTION_TITLE_CLASS = "text-sm font-bold uppercase tracking-wide text-slate-800";
 
 const getLocalDateKey = (date = new Date()) => {
   const year = date.getFullYear();
@@ -105,6 +118,25 @@ const getClientDisplayLabel = (client) => {
   const name = String(client?.name || "").trim() || `Cliente ${client?.id || ""}`;
   const city = String(client?.city || "").trim();
   return [name, city].filter(Boolean).join(" · ");
+};
+
+const getPlannedVisitTypeMeta = ({ isCommercial, isTechnical }) => {
+  if (isCommercial && isTechnical) {
+    return {
+      label: "Comercial y tecnica",
+      badgeClass: "bg-[#DBEAFE] text-[#1D4ED8]",
+    };
+  }
+  if (isTechnical) {
+    return {
+      label: "Tecnica",
+      badgeClass: "bg-[#DCFCE7] text-[#166534]",
+    };
+  }
+  return {
+    label: "Comercial",
+    badgeClass: "bg-[#E0F2FE] text-[#0C4A6E]",
+  };
 };
 
 const normalizeClientSearchValue = (value) =>
@@ -140,6 +172,19 @@ const resolveClientIdFromInput = (inputValue, clients = []) => {
   return null;
 };
 
+const resolveLeadIdFromInput = (inputValue, leads = []) => {
+  const raw = String(inputValue || "").trim();
+  if (!raw) return null;
+
+  const exact = leads.find((lead) => getClientDisplayLabel(lead).toLowerCase() === raw.toLowerCase());
+  if (exact?.id != null) return String(exact.id);
+
+  const byName = leads.filter((lead) => String(lead?.name || "").trim().toLowerCase() === raw.toLowerCase());
+  if (byName.length === 1 && byName[0]?.id != null) return String(byName[0].id);
+
+  return null;
+};
+
 const normalizeDateKey = (value) => {
   if (!value) return null;
   if (typeof value === "string") {
@@ -163,23 +208,6 @@ const getElapsedMinutes = (value, now = new Date()) => {
   const parsed = toDate(value);
   if (!parsed) return 0;
   return Math.max(0, Math.round((now.getTime() - parsed.getTime()) / 60000));
-};
-
-const getOperationalTrackingLabel = (exception) => {
-  const spanDays = Number(exception?.operational_span_days || 0);
-  const elapsedHours = Number(exception?.operational_elapsed_hours || 0);
-  if (!Number.isFinite(spanDays) || spanDays <= 0) return null;
-  if (spanDays <= 1) {
-    return `Operacion abierta hoy (${elapsedHours.toFixed(1)} h acumuladas)`;
-  }
-  return `Operacion abierta hace ${spanDays} dias (${elapsedHours.toFixed(1)} h acumuladas)`;
-};
-
-const deriveAttendanceState = (record = {}) => {
-  if (!record?.entry_time) return "no_entry";
-  if (record?.exit_time) return "completed";
-  if (record?.lunch_start_time && !record?.lunch_end_time) return "lunch_open";
-  return "working";
 };
 
 const ECUADOR_TZ = "America/Guayaquil";
@@ -252,29 +280,43 @@ const mapPermisoToExceptionSuggestion = (permiso) => {
   return null;
 };
 
-const getBrowserLocationFallback = () =>
-  new Promise((resolve) => {
-    if (!navigator?.geolocation) {
-      resolve(null);
-      return;
-    }
+const mapActiveTimeOffToExceptionPreset = (timeOff) => {
+  if (!timeOff || String(timeOff?.tipo_solicitud || "").toLowerCase() !== "permiso") return null;
+  const tipoPermiso = String(timeOff?.tipo_permiso || "").toLowerCase();
+  if (tipoPermiso === "salud") {
+    return {
+      type: "medico",
+      description: "Salida por permiso de salud aprobado",
+      actionLabel: "Salida a permiso",
+      returnLabel: "Entrada de permiso",
+    };
+  }
+  return {
+    type: "permiso",
+    description: `Salida por permiso de ${tipoPermiso || "colaborador"} aprobado`,
+    actionLabel: "Salida a permiso",
+    returnLabel: "Entrada de permiso",
+  };
+};
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: Number(position.coords.accuracy || 0),
-        });
-      },
-      () => resolve(null),
-      {
-        enableHighAccuracy: false,
-        timeout: 6000,
-        maximumAge: 5 * 60 * 1000,
-      }
-    );
-  });
+const isPermissionLikeException = (exception) => {
+  const type = String(exception?.type || "").trim().toLowerCase();
+  return type === "permiso" || type === "medico";
+};
+
+const permissionCoincidesWithEntryStart = (timeOff) => {
+  const tipoSolicitud = String(timeOff?.tipo_solicitud || "").trim().toLowerCase();
+  if (tipoSolicitud !== "permiso") return false;
+  const startMinutes = getEcuadorEntryMinutes(timeOff?.fecha_inicio_hora);
+  return Number.isFinite(startMinutes) && startMinutes <= PUNCTUALITY_BASE_MINUTES;
+};
+
+const permissionEndsWithWorkdayClose = (timeOff) => {
+  const tipoSolicitud = String(timeOff?.tipo_solicitud || "").trim().toLowerCase();
+  if (tipoSolicitud !== "permiso") return false;
+  const endMinutes = getEcuadorEntryMinutes(timeOff?.fecha_fin_hora);
+  return Number.isFinite(endMinutes) && endMinutes >= (18 * 60);
+};
 
 const parseLocationCoord = (value) => {
   if (!value || typeof value !== "string") return null;
@@ -336,7 +378,7 @@ const selectBestTodayAttendance = (rows = []) => {
 
 const AttendanceWidget = () => {
   const { showToast } = useUI();
-  const { user, logout } = useAuth();
+  const { user, handleSessionExpired } = useAuth();
 
   const [attendance, setAttendance] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -347,25 +389,28 @@ const AttendanceWidget = () => {
   const [exceptionModalOpen, setExceptionModalOpen] = useState(false);
   const [exceptionType, setExceptionType] = useState("");
   const [exceptionDescription, setExceptionDescription] = useState("");
-  const [exceptionLoading, setExceptionLoading] = useState(false);
 
   // Geolocation state
   const [locationLoading, setLocationLoading] = useState(false);
   const [cachedLocation, setCachedLocation] = useState(null);
-  const [cachedLocationAccuracy, setCachedLocationAccuracy] = useState(null);
-  const [locationTimestamp, setLocationTimestamp] = useState(null);
+  const [, setCachedLocationAccuracy] = useState(null);
+  const [, setLocationTimestamp] = useState(null);
   const [widgetModalOpen, setWidgetModalOpen] = useState(false);
   const [showTimelineDetails, setShowTimelineDetails] = useState(false);
-  const [showExceptionTools, setShowExceptionTools] = useState(false);
+  const [, setShowExceptionTools] = useState(false);
   const [recentHistory, setRecentHistory] = useState([]);
   const [exceptionSuggestion, setExceptionSuggestion] = useState(null);
-  const [reminderMessage, setReminderMessage] = useState(null);
+  const [reminderMessage] = useState(null);
   const [overtimePrompt, setOvertimePrompt] = useState(null);
   const [overtimeReason, setOvertimeReason] = useState("");
   const [overtimeSubmitting, setOvertimeSubmitting] = useState(false);
   const [lateJustificationModalOpen, setLateJustificationModalOpen] = useState(false);
   const [lateJustificationReason, setLateJustificationReason] = useState("");
   const [lateJustificationSubmitting, setLateJustificationSubmitting] = useState(false);
+  const [entryRegularizationOpen, setEntryRegularizationOpen] = useState(false);
+  const [entryRegularizationReason, setEntryRegularizationReason] = useState("");
+  const [entryRegularizationLoading, setEntryRegularizationLoading] = useState(false);
+  const [entryRegularizationSent, setEntryRegularizationSent] = useState(false);
   const [showFieldTools, setShowFieldTools] = useState(true);
   const [fieldVisitType, setFieldVisitType] = useState("cronograma");
   const [selectedFieldAction, setSelectedFieldAction] = useState("office_exit");
@@ -373,19 +418,32 @@ const AttendanceWidget = () => {
   const [fieldClientId, setFieldClientId] = useState("");
   const [fieldClientSearch, setFieldClientSearch] = useState("");
   const [fieldProspectName, setFieldProspectName] = useState("");
+  const [fieldLeadId, setFieldLeadId] = useState("");
   const [fieldEmergencyReason, setFieldEmergencyReason] = useState("");
   const [fieldVisitNotes, setFieldVisitNotes] = useState("");
   const [tripClosureReason, setTripClosureReason] = useState("");
   const [fieldVisitSubmitting, setFieldVisitSubmitting] = useState(false);
+  const [destinationExitMode, setDestinationExitMode] = useState("continue_operation");
   const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
   const doClockOutRef = useRef(null);
   const [scheduledClientsToday, setScheduledClientsToday] = useState([]);
+  const [scheduledLeadsToday, setScheduledLeadsToday] = useState([]);
   const [scheduledClientsLoading, setScheduledClientsLoading] = useState(false);
+  const [plannedVisitAgenda, setPlannedVisitAgenda] = useState([]);
   const [emergencyClients, setEmergencyClients] = useState([]);
   const [emergencyClientsLoading, setEmergencyClientsLoading] = useState(false);
   const [fieldEmergencyClientId, setFieldEmergencyClientId] = useState("");
   const [fieldEmergencyClientSearch, setFieldEmergencyClientSearch] = useState("");
-  const autoOpenSessionRef = useRef(null);
+  const [operationalModalOpen, setOperationalModalOpen] = useState(false);
+  const [operationalModalPhase, setOperationalModalPhase] = useState("start");
+  const [operationalModalError, setOperationalModalError] = useState("");
+  const [operationalCategory, setOperationalCategory] = useState("");
+  const [operationalDetail, setOperationalDetail] = useState("");
+  const [operationalVehicleMode, setOperationalVehicleMode] = useState("company");
+  const [operationalStartKm, setOperationalStartKm] = useState("");
+  const [operationalEndKm, setOperationalEndKm] = useState("");
+  const [operationalStartPhoto, setOperationalStartPhoto] = useState(null);
+  const [operationalEndPhoto, setOperationalEndPhoto] = useState(null);
   const initializedRef = useRef(false);
   const openLateJustificationFlow = useCallback(() => {
     setWidgetModalOpen(false);
@@ -441,7 +499,7 @@ const AttendanceWidget = () => {
         showToast("Tu sesión expiró. Por favor inicia sesión nuevamente.", "warning");
         setAttendance(null);
         try {
-          await logout?.();
+          handleSessionExpired?.();
         } catch (logoutErr) {
           console.error("AttendanceWidget logout after 401 failed:", logoutErr);
         }
@@ -473,7 +531,7 @@ const AttendanceWidget = () => {
   const fetchException = async () => {
     try {
       const res = await getActiveException();
-      setActiveException(res.data);
+      setActiveException(res?.data || null);
     } catch (err) {
       console.error("Error fetching active exception:", err);
     }
@@ -537,6 +595,7 @@ const AttendanceWidget = () => {
   const loadScheduledClientsForToday = async () => {
     if (!canUseFieldOperations) {
       setScheduledClientsToday([]);
+      setPlannedVisitAgenda([]);
       return;
     }
 
@@ -546,20 +605,67 @@ const AttendanceWidget = () => {
       const result = await fetchClients({
         date: dateKey,
         include_schedule_info: true,
-        filter_by_schedule: true,
+        schedule_scope: "mine",
       });
       const clients = Array.isArray(result?.clients) ? result.clients : [];
-      const planned = clients
+      const agenda = clients
         .filter((client) => !client?.is_prospect)
-        .map((client) => ({
-          id: Number(client.id),
-          name: client.commercial_name || client.nombre || `Cliente #${client.id}`,
-          city: client.shipping_city || "Sin ciudad",
-        }));
+        .map((client) => {
+          const scheduleInfo = client?.scheduled_info || {};
+          const isCommercial = Boolean(scheduleInfo?.is_planned_commercial || scheduleInfo?.is_planned);
+          const isTechnical = Boolean(scheduleInfo?.is_planned_technical);
+          const roleMatches =
+            (canSeeCommercialScheduleAgenda && isCommercial) ||
+            (canSeeTechnicalScheduleAgenda && isTechnical);
 
-      setScheduledClientsToday(planned);
+          if (!roleMatches) return null;
+
+          const city =
+            String(scheduleInfo?.planned_city || client?.shipping_city || "").trim() || "Sin ciudad";
+          const name =
+            String(client?.commercial_name || client?.nombre || `Cliente #${client?.id || ""}`).trim();
+          return {
+            id: Number(client.id),
+            name,
+            city,
+            displayLabel: getClientDisplayLabel({ id: client.id, name, city }),
+            plannedDate: scheduleInfo?.planned_date || scheduleInfo?.technical_date || dateKey,
+            priority: Number(scheduleInfo?.priority || 0),
+            notes: String(scheduleInfo?.notes || "").trim(),
+            isCommercial,
+            isTechnical,
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => {
+          const byPriority = Number(b.priority || 0) - Number(a.priority || 0);
+          if (byPriority !== 0) return byPriority;
+          return a.name.localeCompare(b.name, "es", { sensitivity: "base" });
+        });
+
+      setPlannedVisitAgenda(agenda);
+      setScheduledClientsToday(
+        agenda.map((item) => ({
+          id: item.id,
+          name: item.name,
+          city: item.city,
+        })),
+      );
+
+      const leadsToday = Array.isArray(result?.leads) ? result.leads : [];
+      setScheduledLeadsToday(
+        canSeeCommercialScheduleAgenda
+          ? leadsToday.map((lead) => ({
+              id: lead.lead_id,
+              name: String(lead.full_name || lead.company_name || `Lead ${lead.lead_id}`).trim(),
+              city: String(lead.city || "").trim() || "Sin ciudad",
+            }))
+          : [],
+      );
     } catch (_error) {
       setScheduledClientsToday([]);
+      setPlannedVisitAgenda([]);
+      setScheduledLeadsToday([]);
     } finally {
       setScheduledClientsLoading(false);
     }
@@ -600,114 +706,6 @@ const AttendanceWidget = () => {
       loadScheduledClientsForToday(),
       loadAccessibleClientsForEmergency(),
     ]);
-  };
-
-  const persistRecentLocation = (locationPayload) => {
-    try {
-      localStorage.setItem(RECENT_LOCATION_STORAGE_KEY, JSON.stringify(locationPayload));
-    } catch {
-      // noop
-    }
-  };
-
-  const readRecentLocation = () => {
-    try {
-      const raw = localStorage.getItem(RECENT_LOCATION_STORAGE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      const latitude = Number(parsed?.latitude);
-      const longitude = Number(parsed?.longitude);
-      const accuracy = Number(parsed?.accuracy);
-      const timestamp = Number(parsed?.timestamp || 0);
-      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
-      if (Math.abs(latitude) <= 0.0005 && Math.abs(longitude) <= 0.0005) return null;
-      if (!Number.isFinite(timestamp) || (Date.now() - timestamp) > RECENT_LOCATION_MAX_AGE_MS) return null;
-      return {
-        latitude,
-        longitude,
-        accuracy: Number.isFinite(accuracy) ? accuracy : null,
-        timestamp,
-        source: parsed?.source || "cached_recent",
-      };
-    } catch {
-      return null;
-    }
-  };
-
-  const getLocation = async (showErrors = true) => {
-    const inMemoryRecent =
-      cachedLocation &&
-        locationTimestamp &&
-        (Date.now() - locationTimestamp) <= RECENT_LOCATION_MAX_AGE_MS
-        ? {
-          latitude: Number(cachedLocation?.latitude),
-          longitude: Number(cachedLocation?.longitude),
-          accuracy: Number(cachedLocationAccuracy),
-          timestamp: Number(locationTimestamp),
-          source: "memory_cache",
-        }
-        : null;
-
-    if (inMemoryRecent && Number.isFinite(inMemoryRecent.latitude) && Number.isFinite(inMemoryRecent.longitude)) {
-      return inMemoryRecent;
-    }
-
-    const persisted = readRecentLocation();
-    if (persisted) {
-      setCachedLocation({ latitude: persisted.latitude, longitude: persisted.longitude });
-      setCachedLocationAccuracy(persisted.accuracy);
-      setLocationTimestamp(persisted.timestamp);
-      return persisted;
-    }
-
-    setLocationLoading(true);
-    try {
-      const precise = await getSharedLocation({ forceRefresh: true });
-
-      const preciseLatitude = Number(precise?.latitude);
-      const preciseLongitude = Number(precise?.longitude);
-      if (!Number.isFinite(preciseLatitude) || !Number.isFinite(preciseLongitude)) {
-        throw new Error("GPS_SIN_COORDENADAS");
-      }
-
-      const payload = {
-        latitude: preciseLatitude,
-        longitude: preciseLongitude,
-        accuracy: Number(precise?.accuracy || 0),
-        timestamp: Date.now(),
-        source: precise?.source || "precise",
-      };
-      setCachedLocation({ latitude: payload.latitude, longitude: payload.longitude });
-      setCachedLocationAccuracy(payload.accuracy);
-      setLocationTimestamp(payload.timestamp);
-      persistRecentLocation(payload);
-      return payload;
-    } catch (err) {
-      const fallback = await getBrowserLocationFallback();
-      const fallbackLat = Number(fallback?.latitude);
-      const fallbackLng = Number(fallback?.longitude);
-      if (Number.isFinite(fallbackLat) && Number.isFinite(fallbackLng)) {
-        const payload = {
-          latitude: fallbackLat,
-          longitude: fallbackLng,
-          accuracy: Number(fallback?.accuracy || 0),
-          timestamp: Date.now(),
-          source: "browser_fallback",
-        };
-        setCachedLocation({ latitude: payload.latitude, longitude: payload.longitude });
-        setCachedLocationAccuracy(payload.accuracy);
-        setLocationTimestamp(payload.timestamp);
-        persistRecentLocation(payload);
-        return payload;
-      }
-
-      if (showErrors) {
-        showToast("No se pudo obtener ubicacion valida. Verifica GPS y reintenta.", "warning");
-      }
-      throw err;
-    } finally {
-      setLocationLoading(false);
-    }
   };
 
   const getLocationForAction = async ({ forceRefresh = false } = {}) => {
@@ -775,20 +773,8 @@ const AttendanceWidget = () => {
     }
   };
 
-  const handleExceptionTypeChange = (value) => {
-    setExceptionType(value);
-
-    const presetDescription = EXCEPTION_PRESETS[value] || "";
-    if (!exceptionDescription || Object.values(EXCEPTION_PRESETS).includes(exceptionDescription)) {
-      setExceptionDescription(presetDescription);
-    }
-  };
   const formatTime = (ts) => {
     return formatTimeSafe(ts);
-  };
-
-  const formatDateTime = (ts) => {
-    return formatDateTimeSafe(ts, 'dd/MM/yyyy HH:mm');
   };
 
   const celebrate = () => {
@@ -820,6 +806,24 @@ const AttendanceWidget = () => {
   };
 
   const getStatusInfo = () => {
+    if (isPermissionFlowActive)
+      return {
+        text: permissionNeedsExitClose ? "Permiso cierra la jornada" : "Permiso en curso",
+        icon: <FiTrendingUp className="text-sky-500" />,
+      };
+
+    if (permissionNeedsEntryStart)
+      return {
+        text: "Permiso activo al iniciar jornada",
+        icon: <FiTrendingUp className="text-sky-500" />,
+      };
+
+    if (hasActiveApprovedPermission && !hasActiveException)
+      return {
+        text: activeTimeOff?.is_upcoming ? "Permiso programado hoy" : "Permiso aprobado activo",
+        icon: <FiTrendingUp className="text-sky-500" />,
+      };
+
     if (!attendance?.entry_time)
       return {
         text: "Marca tu entrada",
@@ -891,54 +895,6 @@ const AttendanceWidget = () => {
   };
 
   /**
-  * Optimized exception registration with background geolocation
-  */
-  const handleRegisterException = async () => {
-    const finalType = exceptionType || "otro";
-    const finalDescription = exceptionDescription || "Salida inesperada";
-    const syncTarget = "start";
-
-    setExceptionLoading(true);
-    let actionLocation = null;
-    try {
-      const activeResponse = await getActiveException();
-      const currentActive = activeResponse?.data || null;
-      if (currentActive && isOperationalFlow(currentActive)) {
-        showToast("Tienes una salida operacional activa. Cierrala antes de registrar una salida inesperada.", "warning");
-        return;
-      }
-
-      actionLocation = await getLocationForAction();
-      const res = await registerException(finalType, finalDescription, actionLocation);
-      if (res.ok) {
-        await ensureSyncExceptionTargetLocation(syncTarget, actionLocation);
-        showToast("Salida registrada. Notifica tu llegada.", "success");
-        setExceptionModalOpen(false);
-        setExceptionType("");
-        setExceptionDescription("");
-        await refreshAll();
-      } else {
-        showToast("Error registrando salida", "error");
-      }
-    } catch (err) {
-      console.error("Exception registration error:", err);
-      const status = Number(err?.response?.status || 0);
-      if (status === 400 || status === 409 || status === 404) {
-        const recovered = await resolveExceptionConflict(syncTarget, actionLocation || cachedLocation || null);
-        if (recovered) {
-          showToast("La salida ya existia. Se actualizo el estado operativo.", "warning");
-          await refreshAll();
-          return;
-        }
-      }
-      const info = getAttendanceErrorInfo(err, "Error registrando salida", "error");
-      showToast(info.message, info.type);
-    } finally {
-      setExceptionLoading(false);
-    }
-  };
-
-  /**
   * Optimized exception status update with background geolocation
   */
   const handleExceptionUpdate = async (status, successMsg) => {
@@ -986,6 +942,73 @@ const AttendanceWidget = () => {
     }
   };
 
+  const handleStartApprovedPermission = async () => {
+    const preset = mapActiveTimeOffToExceptionPreset(attendance?.active_time_off);
+    if (!preset) {
+      showToast("No tienes un permiso activo para marcar.", "warning");
+      return;
+    }
+
+    setLoading(true);
+    let actionLocation = null;
+    try {
+      actionLocation = await getLocationForAction();
+      const res = await registerException(preset.type, preset.description, actionLocation, { isJustified: true });
+      if (res?.ok) {
+        await ensureSyncExceptionTargetLocation("start", actionLocation);
+        showToast(`Salida a permiso registrada a las ${formatTimeSafe(new Date(), "HH:mm")}.`, "success");
+        await refreshAll();
+      } else {
+        showToast("No se pudo registrar la salida a permiso.", "error");
+      }
+    } catch (err) {
+      const info = getAttendanceErrorInfo(err, "Error registrando salida a permiso", "error");
+      showToast(info.message, info.type);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleStartPermissionWithEntry = async () => {
+    setLoading(true);
+    let actionLocation = null;
+    try {
+      actionLocation = await getLocationForAction();
+      const res = await startPermissionEntry(actionLocation);
+      if (res?.ok) {
+        showToast("Entrada y salida a permiso registradas.", "success");
+        await refreshAll();
+      } else {
+        showToast("No se pudo registrar la entrada y salida a permiso.", "error");
+      }
+    } catch (err) {
+      const info = getAttendanceErrorInfo(err, "Error registrando entrada y salida a permiso", "error");
+      showToast(info.message, info.type);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFinishPermissionWithExit = async () => {
+    setLoading(true);
+    let actionLocation = null;
+    try {
+      actionLocation = await getLocationForAction();
+      const res = await finishPermissionExit(actionLocation);
+      if (res?.ok) {
+        showToast("Permiso y jornada finalizados.", "success");
+        await refreshAll();
+      } else {
+        showToast("No se pudo finalizar el permiso y la jornada.", "error");
+      }
+    } catch (err) {
+      const info = getAttendanceErrorInfo(err, "Error registrando salida del permiso y cierre de jornada", "error");
+      showToast(info.message, info.type);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const canUseFieldOperations = useMemo(() => {
     const role = String(user?.role || "").toLowerCase();
     return [
@@ -996,13 +1019,30 @@ const AttendanceWidget = () => {
       "backoffice_comercial",
       "backoffice",
       "tecnico",
+      "ing_servicio",
+      "esp_app",
+      "servicio_tecnico",
       "jefe_tecnico",
+      "jefe_servicio",
+      "jefe_servicio_tecnico",
       "ti",
       "jefe_ti",
       "logistica",
       "jefe_logistica",
     ].includes(role);
   }, [user?.role]);
+  const normalizedUserRole = useMemo(
+    () => String(user?.role || "").trim().toLowerCase(),
+    [user?.role],
+  );
+  const canSeeCommercialScheduleAgenda = useMemo(
+    () => COMMERCIAL_SCHEDULE_ROLES.has(normalizedUserRole),
+    [normalizedUserRole],
+  );
+  const canSeeTechnicalScheduleAgenda = useMemo(
+    () => TECHNICAL_SCHEDULE_ROLES.has(normalizedUserRole),
+    [normalizedUserRole],
+  );
 
   useEffect(() => {
     if (fieldVisitType !== "cronograma") return;
@@ -1059,9 +1099,152 @@ const AttendanceWidget = () => {
     });
   }, [emergencyClients, fieldEmergencyClientSearch]);
 
-  const buildFieldVisitPayload = async ({ includeObservations = false, mode = "entry" } = {}) => {
+  const renderClientPickerSection = ({
+    title = "Tipo de gestion",
+    stepLabel = "Paso 1",
+  } = {}) => (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-700">{title}</p>
+        <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-semibold text-slate-500">{stepLabel}</span>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {FIELD_VISIT_TYPE_OPTIONS.map((option) => {
+          const active = fieldVisitType === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => setFieldVisitType(option.value)}
+              className={`rounded-xl border px-3 py-2.5 text-left transition ${
+                active
+                  ? "border-sky-500 bg-sky-50 text-sky-900 shadow-sm"
+                  : "border-slate-200 bg-slate-50 text-slate-700 hover:border-sky-300 hover:bg-sky-50/40"
+              }`}
+              aria-pressed={active}
+              style={{ touchAction: "manipulation" }}
+            >
+              <p className="text-xs font-semibold">{option.label}</p>
+              <p className={`text-[10px] ${active ? "text-sky-700" : "text-slate-500"}`}>{option.helper}</p>
+            </button>
+          );
+        })}
+      </div>
+
+      {fieldVisitType === "cronograma" ? (
+        <>
+          <input
+            type="text"
+            value={fieldClientSearch}
+            list="attendance-scheduled-clients-list"
+            onChange={(e) => {
+              const value = e.target.value;
+              setFieldClientSearch(value);
+              const resolvedId = resolveClientIdFromInput(value, scheduledClientsToday);
+              setFieldClientId(resolvedId ? String(resolvedId) : "");
+            }}
+            placeholder="Buscar cliente por nombre o ciudad"
+            className={CONTROL_INPUT_SUBTLE_CLASS}
+            aria-label="Buscar cliente por nombre o ciudad"
+          />
+          <datalist id="attendance-scheduled-clients-list">
+            {filteredScheduledClients.map((client) => (
+              <option key={client.id} value={getClientDisplayLabel(client)}>{getClientDisplayLabel(client)}</option>
+            ))}
+          </datalist>
+          {!scheduledClientsLoading && filteredScheduledClients.length === 0 && fieldClientSearch ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-700">Sin coincidencias con la busqueda.</p>
+          ) : null}
+          {fieldClientId ? (
+            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-700">
+              {getClientDisplayLabel(scheduledClientsToday.find((c) => String(c.id) === String(fieldClientId)))}
+            </p>
+          ) : null}
+        </>
+      ) : null}
+
+      {fieldVisitType === "prospecto" ? (
+        <>
+          <input
+            type="text"
+            value={fieldProspectName}
+            list="attendance-scheduled-leads-list"
+            onChange={(e) => {
+              const value = e.target.value;
+              setFieldProspectName(value);
+              setFieldLeadId(resolveLeadIdFromInput(value, scheduledLeadsToday) || "");
+            }}
+            placeholder="Nombre del prospecto o lead del cronograma"
+            className={CONTROL_INPUT_SUBTLE_CLASS}
+            aria-label="Nombre del prospecto"
+          />
+          <datalist id="attendance-scheduled-leads-list">
+            {scheduledLeadsToday.map((lead) => (
+              <option key={lead.id} value={getClientDisplayLabel(lead)}>{getClientDisplayLabel(lead)}</option>
+            ))}
+          </datalist>
+          {fieldLeadId ? (
+            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-700">
+              Lead del cronograma: {getClientDisplayLabel(scheduledLeadsToday.find((l) => String(l.id) === String(fieldLeadId)))}
+            </p>
+          ) : null}
+        </>
+      ) : null}
+
+      {fieldVisitType === "emergencia" ? (
+        <>
+          <input
+            type="text"
+            value={fieldEmergencyClientSearch}
+            list="attendance-emergency-clients-list"
+            onChange={(e) => {
+              const value = e.target.value;
+              setFieldEmergencyClientSearch(value);
+              const resolvedId = resolveClientIdFromInput(value, emergencyClients);
+              setFieldEmergencyClientId(resolvedId ? String(resolvedId) : "");
+            }}
+            placeholder="Buscar cliente para emergencia"
+            className={CONTROL_INPUT_SUBTLE_CLASS}
+            aria-label="Buscar cliente para emergencia"
+          />
+          <datalist id="attendance-emergency-clients-list">
+            {filteredEmergencyClients.map((client) => (
+              <option key={client.id} value={getClientDisplayLabel(client)}>{getClientDisplayLabel(client)}</option>
+            ))}
+          </datalist>
+          {!emergencyClientsLoading && filteredEmergencyClients.length === 0 && fieldEmergencyClientSearch ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-700">Sin coincidencias.</p>
+          ) : null}
+          {fieldEmergencyClientId ? (
+            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-700">
+              {getClientDisplayLabel(emergencyClients.find((c) => String(c.id) === String(fieldEmergencyClientId)))}
+            </p>
+          ) : null}
+          <input
+            type="text"
+            value={fieldEmergencyReason}
+            onChange={(e) => setFieldEmergencyReason(e.target.value)}
+            placeholder="Motivo de emergencia"
+            className={CONTROL_INPUT_SUBTLE_CLASS}
+            aria-label="Motivo de emergencia"
+          />
+        </>
+      ) : null}
+
+      <textarea
+        rows={2}
+        value={fieldVisitNotes}
+        onChange={(e) => setFieldVisitNotes(e.target.value)}
+        placeholder="Observaciones (opcional)"
+        className={CONTROL_TEXTAREA_CLASS}
+        aria-label="Observaciones opcionales de la gestion"
+      />
+    </div>
+  );
+
+  const buildFieldVisitPayload = async ({ includeObservations = false, mode = "entry", locationOverride = null } = {}) => {
     const payload = {};
-    const location = await getLocationForAction();
+    const location = locationOverride || await getLocationForAction();
     payload.location = `${location.latitude},${location.longitude}`;
     if (Number.isFinite(location.accuracy) && location.accuracy >= 0) {
       payload.location_accuracy = location.accuracy;
@@ -1095,6 +1278,9 @@ const AttendanceWidget = () => {
         throw new Error("Para prospecto debes ingresar un nombre.");
       }
       payload.prospect_name = normalizedName;
+      if (fieldLeadId) {
+        payload.lead_id = fieldLeadId;
+      }
     } else if (!payload.client_id && !payload.prospect_name) {
       const numericEmergencyClientId = Number(fieldEmergencyClientId || resolveClientIdFromInput(fieldEmergencyClientSearch, emergencyClients));
       if (!Number.isInteger(numericEmergencyClientId) || numericEmergencyClientId <= 0) {
@@ -1124,9 +1310,15 @@ const AttendanceWidget = () => {
     setFieldVisitSubmitting(true);
     try {
       const payload = await buildFieldVisitPayload({ includeObservations: kind === "exit", mode: kind });
+      const shouldCloseJourneyFromDestination = kind === "exit" && fieldExitMode === "end_jornada";
       if (kind === "exit") {
-        payload.return_to_office = fieldExitMode === "return_to_office";
-        payload.post_visit_action = fieldExitMode;
+        if (shouldCloseJourneyFromDestination) {
+          payload.return_to_office = false;
+          payload.post_visit_action = "continue_operation";
+        } else {
+          payload.return_to_office = fieldExitMode === "return_to_office";
+          payload.post_visit_action = fieldExitMode;
+        }
       }
       const res =
         kind === "entry"
@@ -1143,9 +1335,19 @@ const AttendanceWidget = () => {
         if (kind === "entry") {
           setSelectedFieldAction("client_exit");
         } else {
-          setSelectedFieldAction(fieldExitMode === "return_to_office" ? "office_entry" : "client_entry");
+          setSelectedFieldAction(
+            shouldCloseJourneyFromDestination
+              ? "client_exit"
+              : fieldExitMode === "return_to_office"
+                ? "office_entry"
+                : "client_entry"
+          );
         }
         await refreshAll();
+        if (shouldCloseJourneyFromDestination) {
+          setTripClosureReason(String(fieldVisitNotes || "").trim());
+          openOperationalModal("close");
+        }
       } else {
         showToast("No se pudo registrar la visita de campo.", "error");
       }
@@ -1176,6 +1378,198 @@ const AttendanceWidget = () => {
     }
   };
 
+  const resetOperationalModal = useCallback(() => {
+    setOperationalModalError("");
+    setOperationalCategory("");
+    setOperationalDetail("");
+    setOperationalVehicleMode("company");
+    setOperationalStartKm("");
+    setOperationalEndKm("");
+    setOperationalStartPhoto(null);
+    setOperationalEndPhoto(null);
+  }, []);
+
+  const resetFieldVisitDraft = useCallback(() => {
+    setFieldVisitType("cronograma");
+    setFieldClientId("");
+    setFieldClientSearch("");
+    setFieldProspectName("");
+    setFieldLeadId("");
+    setFieldEmergencyClientId("");
+    setFieldEmergencyClientSearch("");
+    setFieldEmergencyReason("");
+    setFieldVisitNotes("");
+    setFieldExitMode("continue_operation");
+    setDestinationExitMode("continue_operation");
+  }, []);
+
+  const openOperationalModal = useCallback((phase) => {
+    setOperationalModalPhase(phase);
+    setOperationalModalError("");
+    if (phase === "start") {
+      resetOperationalModal();
+      resetFieldVisitDraft();
+    } else {
+      setOperationalDetail("");
+      setOperationalEndKm("");
+      setOperationalEndPhoto(null);
+    }
+    setOperationalModalOpen(true);
+  }, [resetFieldVisitDraft, resetOperationalModal]);
+
+  const submitOperationalModal = async () => {
+    const requiresVehicleClosure = operationalModalPhase !== "start" && Boolean(activeException?.uses_personal_vehicle);
+    const isClientVisitDraft = canUseFieldOperations && String(operationalCategory || "").trim().toLowerCase() === "cliente";
+
+    if (operationalModalPhase === "start" && !operationalCategory) {
+      setOperationalModalError("Selecciona la categoria de la salida operacional.");
+      return;
+    }
+    if (operationalModalPhase === "start" && isClientVisitDraft) {
+      if (fieldVisitType === "cronograma" && !fieldClientId) {
+        setOperationalModalError("Selecciona el cliente del cronograma que vas a visitar.");
+        return;
+      }
+      if (fieldVisitType === "prospecto" && !String(fieldProspectName || "").trim()) {
+        setOperationalModalError("Ingresa el nombre del prospecto que vas a visitar.");
+        return;
+      }
+      if (fieldVisitType === "emergencia") {
+        if (!fieldEmergencyClientId) {
+          setOperationalModalError("Selecciona el cliente relacionado con la atencion urgente.");
+          return;
+        }
+        if (!String(fieldEmergencyReason || "").trim()) {
+          setOperationalModalError("Ingresa el motivo de la atencion urgente.");
+          return;
+        }
+      }
+    }
+    if (operationalModalPhase === "start" && operationalVehicleMode === "personal") {
+      if (!String(operationalStartKm || "").trim()) {
+        setOperationalModalError("Debes registrar el kilometraje inicial.");
+        return;
+      }
+      if (!operationalStartPhoto) {
+        setOperationalModalError("Debes tomar la foto del kilometraje inicial.");
+        return;
+      }
+    }
+    if (requiresVehicleClosure) {
+      if (!String(operationalEndKm || "").trim()) {
+        setOperationalModalError("Debes registrar el kilometraje final.");
+        return;
+      }
+      if (!operationalEndPhoto) {
+        setOperationalModalError("Debes tomar la foto del kilometraje final.");
+        return;
+      }
+    }
+
+    setOperationalModalError("");
+    setFieldVisitSubmitting(true);
+    let actionLocation = null;
+    try {
+      actionLocation = await getLocationForAction();
+      if (operationalModalPhase === "start") {
+        const description = String(operationalDetail || "").trim() || "Salida operacional de campo / oficina";
+        const res = await marcarSalidaOficina(actionLocation, {
+          description,
+          operational_category: operationalCategory,
+          uses_personal_vehicle: operationalVehicleMode === "personal",
+          odometer_start_km: operationalStartKm,
+          start_odometer_photo: operationalStartPhoto,
+        });
+        if (res?.ok) {
+          await ensureSyncExceptionTargetLocation("start", actionLocation);
+          showToast("Salida operacional registrada.", "success");
+          setOperationalModalOpen(false);
+          resetOperationalModal();
+          setSelectedFieldAction(isClientVisitDraft ? "client_entry" : "office_exit");
+          await refreshAll();
+          return;
+        }
+        showToast("No se pudo registrar la salida operacional.", "error");
+        return;
+      }
+
+      if (operationalModalPhase === "end") {
+        const res = await marcarEntradaOficina(actionLocation, {
+          odometer_end_km: operationalEndKm,
+          end_odometer_photo: operationalEndPhoto,
+        });
+        if (res?.ok) {
+          await ensureSyncExceptionTargetLocation("return", actionLocation);
+          const allowanceId = res?.data?.travel_allowance_id;
+          showToast(
+            allowanceId
+              ? `Salida operacional cerrada. Viatico #${allowanceId} preparado.`
+              : "Salida operacional cerrada.",
+            "success",
+          );
+          setOperationalModalOpen(false);
+          setOperationalEndKm("");
+          setOperationalEndPhoto(null);
+          await refreshAll();
+          return;
+        }
+        showToast("No se pudo cerrar la salida operacional.", "error");
+        return;
+      }
+
+      const res = await marcarCierreViaje(actionLocation, {
+        closure_reason: String(operationalDetail || tripClosureReason || "").trim() || null,
+        odometer_end_km: operationalEndKm,
+        end_odometer_photo: operationalEndPhoto,
+      });
+      if (res?.ok) {
+        const allowanceId = res?.data?.travel_allowance_id;
+        showToast(
+          allowanceId
+            ? `Viaje cerrado. Viatico #${allowanceId} preparado.`
+            : "Viaje cerrado correctamente desde fuera de oficina.",
+          "success",
+        );
+        setTripClosureReason("");
+        setOperationalModalOpen(false);
+        setOperationalEndKm("");
+        setOperationalEndPhoto(null);
+        await refreshAll();
+        return;
+      }
+      showToast("No se pudo cerrar el viaje.", "error");
+    } catch (err) {
+      const status = Number(err?.response?.status || 0);
+      if (operationalModalPhase === "start" && (status === 400 || status === 404 || status === 409)) {
+        const recovered = await resolveExceptionConflict("start", actionLocation || cachedLocation || null);
+        if (recovered) {
+          showToast("La salida operacional ya existia. Estado actualizado.", "warning");
+          setOperationalModalOpen(false);
+          await refreshAll();
+          return;
+        }
+      }
+      if (operationalModalPhase === "end" && (status === 400 || status === 404 || status === 409)) {
+        const recovered = await resolveExceptionConflict("return", actionLocation || cachedLocation || null);
+        if (recovered) {
+          showToast("La entrada operacional ya existia. Estado actualizado.", "warning");
+          setOperationalModalOpen(false);
+          await refreshAll();
+          return;
+        }
+      }
+      const fallbackMessage = operationalModalPhase === "close"
+        ? "Error cerrando viaje"
+        : operationalModalPhase === "end"
+          ? "Error registrando cierre operacional"
+          : "Error registrando salida operacional";
+      const info = getAttendanceErrorInfo(err, fallbackMessage, "error");
+      showToast(info.message, info.type);
+    } finally {
+      setFieldVisitSubmitting(false);
+    }
+  };
+
   const handleOfficeDepartureQuick = async () => {
     if (hasActiveException) {
       if (isFieldOperationFlow) {
@@ -1185,40 +1579,7 @@ const AttendanceWidget = () => {
       }
       return;
     }
-
-    const emergencyDetail = String(fieldEmergencyReason || "").trim();
-    const description = emergencyDetail
-      ? `Salida de oficina para atencion: ${emergencyDetail}`
-      : "Salida de oficina para gestion de campo";
-
-    setFieldVisitSubmitting(true);
-    let actionLocation = null;
-    try {
-      actionLocation = await getLocationForAction();
-      const res = await marcarSalidaOficina(actionLocation, description);
-      if (res?.ok) {
-        await ensureSyncExceptionTargetLocation("start", actionLocation);
-        showToast("Salida de oficina registrada.", "success");
-        setSelectedFieldAction("client_entry");
-        await refreshAll();
-      } else {
-        showToast("No se pudo registrar la salida de oficina.", "error");
-      }
-    } catch (err) {
-      const status = Number(err?.response?.status || 0);
-      if (status === 400 || status === 404 || status === 409) {
-        const recovered = await resolveExceptionConflict("start", actionLocation || cachedLocation || null);
-        if (recovered) {
-          showToast("La salida operacional ya existia. Estado actualizado.", "warning");
-          await refreshAll();
-          return;
-        }
-      }
-      const info = getAttendanceErrorInfo(err, "Error registrando salida de oficina", "error");
-      showToast(info.message, info.type);
-    } finally {
-      setFieldVisitSubmitting(false);
-    }
+    openOperationalModal("start");
   };
 
   const handleOfficeArrivalQuick = async () => {
@@ -1231,34 +1592,7 @@ const AttendanceWidget = () => {
       return;
     }
 
-    setFieldVisitSubmitting(true);
-    let actionLocation = null;
-    try {
-      actionLocation = await getLocationForAction();
-      const res = await marcarEntradaOficina(actionLocation);
-      if (res?.ok) {
-        await ensureSyncExceptionTargetLocation("return", actionLocation);
-        showToast("Entrada a oficina registrada.", "success");
-        setSelectedFieldAction("office_exit");
-        await refreshAll();
-      } else {
-        showToast("No se pudo registrar la entrada a oficina.", "error");
-      }
-    } catch (err) {
-      const status = Number(err?.response?.status || 0);
-      if (status === 400 || status === 404 || status === 409) {
-        const recovered = await resolveExceptionConflict("return", actionLocation || cachedLocation || null);
-        if (recovered) {
-          showToast("La entrada operacional ya existia. Estado actualizado.", "warning");
-          await refreshAll();
-          return;
-        }
-      }
-      const info = getAttendanceErrorInfo(err, "Error registrando entrada a oficina", "error");
-      showToast(info.message, info.type);
-    } finally {
-      setFieldVisitSubmitting(false);
-    }
+    openOperationalModal("end");
   };
 
   const handleLlegadaDestino = async () => {
@@ -1285,26 +1619,117 @@ const AttendanceWidget = () => {
     }
   };
 
-  const handleCierreViaje = async () => {
+  const handleSalidaDestino = async () => {
     if (!isFieldOperationFlow) {
       showToast("No tienes una salida operacional activa.", "warning");
+      return;
+    }
+    if (destinationExitMode === "end_jornada") {
+      setTripClosureReason(String(fieldVisitNotes || "").trim());
+      openOperationalModal("close");
       return;
     }
     setFieldVisitSubmitting(true);
     let actionLocation = null;
     try {
       actionLocation = await getLocationForAction();
-      const reason = String(tripClosureReason || "").trim() || null;
-      const res = await marcarCierreViaje(actionLocation, reason);
+      const res = await updateExceptionStatus("ACTIVE", actionLocation);
       if (res?.ok) {
-        showToast("Viaje cerrado correctamente desde fuera de oficina.", "success");
-        setTripClosureReason("");
+        await ensureSyncExceptionTargetLocation("departure", actionLocation);
+        showToast("Salida del destino registrada. Puedes continuar con otra gestion.", "success");
         await refreshAll();
       } else {
-        showToast("No se pudo cerrar el viaje.", "error");
+        showToast("No se pudo registrar la salida del destino.", "error");
       }
     } catch (err) {
-      const info = getAttendanceErrorInfo(err, "Error cerrando viaje", "error");
+      const recovered = await resolveExceptionConflict("departure", actionLocation || cachedLocation || null);
+      if (recovered) {
+        showToast("La salida del destino ya existia. Estado operativo sincronizado.", "warning");
+        await refreshAll();
+        return;
+      }
+      const info = getAttendanceErrorInfo(err, "Error registrando salida del destino", "error");
+      showToast(info.message, info.type);
+    } finally {
+      setFieldVisitSubmitting(false);
+    }
+  };
+
+  const handleOperationalLunchMark = async (direction) => {
+    if (!isFieldOperationFlow) {
+      showToast("No tienes una salida operacional activa.", "warning");
+      return;
+    }
+
+    setFieldVisitSubmitting(true);
+    try {
+      const actionLocation = await getLocationForAction();
+      const res = direction === "out"
+        ? await marcarAlmuerzoSalidaOperacional(actionLocation)
+        : await marcarAlmuerzoEntradaOperacional(actionLocation);
+
+      if (res?.ok) {
+        showToast(
+          direction === "out"
+            ? "Salida a almuerzo operacional registrada."
+            : "Regreso de almuerzo operacional registrado.",
+          "success",
+        );
+        await refreshAll();
+        return;
+      }
+
+      showToast("No se pudo registrar la marcacion operacional de almuerzo.", "error");
+    } catch (err) {
+      const info = getAttendanceErrorInfo(
+        err,
+        direction === "out"
+          ? "Error registrando salida a almuerzo operacional"
+          : "Error registrando regreso de almuerzo operacional",
+        "error",
+      );
+      showToast(info.message, info.type);
+    } finally {
+      setFieldVisitSubmitting(false);
+    }
+  };
+
+  const handleLlegadaDestinoConVisita = async () => {
+    if (!isFieldOperationFlow) {
+      showToast("No tienes una salida operacional activa.", "warning");
+      return;
+    }
+    if (!activeOperationRequiresClientVisitFlow) {
+      await handleLlegadaDestino();
+      return;
+    }
+
+    setFieldVisitSubmitting(true);
+    let actionLocation = null;
+    try {
+      actionLocation = await getLocationForAction();
+      const arrivalRes = await marcarLlegadaDestino(actionLocation);
+      if (!arrivalRes?.ok) {
+        showToast("No se pudo registrar la llegada a destino.", "error");
+        return;
+      }
+
+      const payload = await buildFieldVisitPayload({
+        mode: "entry",
+        locationOverride: actionLocation,
+      });
+      const visitRes = await marcarVisitaEntrada(payload);
+      if (visitRes?.ok) {
+        showToast("Llegada a destino y entrada a cliente registradas.", "success");
+        setSelectedFieldAction("client_exit");
+        await refreshAll();
+        return;
+      }
+
+      showToast("La llegada a destino se registro, pero no la entrada a cliente.", "warning");
+      await refreshAll();
+    } catch (err) {
+      const info = getAttendanceErrorInfo(err, "Error registrando llegada y entrada a cliente", "error");
       showToast(info.message, info.type);
     } finally {
       setFieldVisitSubmitting(false);
@@ -1372,10 +1797,68 @@ const AttendanceWidget = () => {
     }
   };
 
+  const handleEntryRegularization = async () => {
+    const normalizedReason = String(entryRegularizationReason || "").trim();
+    if (normalizedReason.length < 8) {
+      showToast("Describe el motivo con al menos 8 caracteres.", "warning");
+      return;
+    }
+    setEntryRegularizationLoading(true);
+    try {
+      const res = await requestEntryRegularization({ reason: normalizedReason });
+      if (res?.ok) {
+        showToast("Solicitud enviada a Talento Humano.", "success");
+        setEntryRegularizationOpen(false);
+        setEntryRegularizationReason("");
+        setEntryRegularizationSent(true);
+      } else {
+        showToast(res?.message || "No se pudo enviar la solicitud.", "error");
+      }
+    } catch (err) {
+      const info = getAttendanceErrorInfo(err, "Error enviando solicitud", "error");
+      showToast(info.message, info.type);
+    } finally {
+      setEntryRegularizationLoading(false);
+    }
+  };
+
+  const hasActiveException = Boolean(activeException);
+  const isFieldOperationFlow = hasActiveException && isOperationalFlow(activeException);
+  const isPermissionFlowActive = hasActiveException && !isFieldOperationFlow && isPermissionLikeException(activeException);
+  const activeTimeOff = attendance?.active_time_off || null;
+  const activeTimeOffPreset = mapActiveTimeOffToExceptionPreset(activeTimeOff);
+  const hasActiveApprovedPermission = Boolean(activeTimeOffPreset);
+  const permissionNeedsEntryStart = Boolean(
+    hasActiveApprovedPermission &&
+    !activeTimeOff?.is_upcoming &&
+    !attendance?.entry_time &&
+    !hasActiveException &&
+    permissionCoincidesWithEntryStart(activeTimeOff)
+  );
+  const permissionNeedsExitClose = Boolean(
+    isPermissionFlowActive &&
+    permissionEndsWithWorkdayClose(activeTimeOff)
+  );
+  const permissionEndsAtEndOfDay = (() => {
+    const endRaw = activeTimeOff?.fecha_fin_hora;
+    if (!endRaw) return false;
+    const d = toDate(endRaw);
+    return d ? d.getHours() >= 18 : false;
+  })();
+  const permissionStartHour = (() => {
+    const d = toDate(activeTimeOff?.fecha_inicio_hora);
+    return d ? d.getHours() : null;
+  })();
+  // True when all normal flow steps before the permission have been completed
+  const permissionFlowReady = hasActiveApprovedPermission &&
+    !!attendance?.entry_time &&
+    !attendance?.exit_time &&
+    !(attendance?.lunch_start_time && !attendance?.lunch_end_time) && (
+      Boolean(attendance?.lunch_end_time) || (permissionStartHour !== null && permissionStartHour < 14)
+    );
+
   const progress = calculateProgress();
   const status = getStatusInfo();
-  const attendanceState = attendance?.attendance_status || deriveAttendanceState(attendance);
-  const attendanceStateLabel = attendance?.attendance_status_label || ATTENDANCE_STATUS_LABELS[attendanceState] || "Sin estado";
   const latePolicy = attendance?.late_policy || null;
   const shouldPromptLateJustification = Boolean(latePolicy?.justification?.canJustify);
   const punctualityInsights = useMemo(() => {
@@ -1493,10 +1976,11 @@ const AttendanceWidget = () => {
     widgetModalOpen,
   ]);
 
-  const hasActiveException = Boolean(activeException);
-  const isFieldOperationFlow = hasActiveException && isOperationalFlow(activeException);
   const exceptionStatus = activeException?.status || "NONE";
   const hasOpenFieldVisit = String(attendance?.active_field_visit?.status || "").trim().toLowerCase() === "in_visit";
+  const activeOperationalCategory = String(activeException?.operational_category || "").trim().toLowerCase();
+  const activeOperationRequiresClientVisitFlow = canUseFieldOperations && activeOperationalCategory === "cliente";
+  const draftOperationRequiresClientVisitFlow = canUseFieldOperations && String(operationalCategory || "").trim().toLowerCase() === "cliente";
 
   useEffect(() => {
     if (isFieldOperationFlow) {
@@ -1506,28 +1990,23 @@ const AttendanceWidget = () => {
         }
         return;
       }
-      if (hasOpenFieldVisit) {
-        if (selectedFieldAction !== "client_exit") {
-          setSelectedFieldAction("client_exit");
+      if (activeOperationRequiresClientVisitFlow) {
+        if (hasOpenFieldVisit) {
+          if (selectedFieldAction !== "client_exit") {
+            setSelectedFieldAction("client_exit");
+          }
+          return;
         }
-        return;
+        if (selectedFieldAction === "office_exit" || selectedFieldAction === "office_entry") {
+          setSelectedFieldAction("client_entry");
+        }
       }
-      if (selectedFieldAction === "office_exit" || selectedFieldAction === "office_entry") {
-        setSelectedFieldAction("client_entry");
-      }
+      return;
     }
     if (!isFieldOperationFlow && exceptionStatus === "NONE" && selectedFieldAction === "office_entry") {
       setSelectedFieldAction("office_exit");
     }
-  }, [exceptionStatus, hasOpenFieldVisit, isFieldOperationFlow, selectedFieldAction]);
-  const exceptionStepLabel =
-    {
-      ACTIVE: "Operacion abierta",
-      ON_SITE: hasOpenFieldVisit ? "En cliente" : "Operacion abierta",
-      RETURNING: "Regresando",
-      COMPLETED: "Completada",
-      NONE: "Sin salidas inesperadas",
-    }[exceptionStatus] || "Sin salidas inesperadas";
+  }, [activeOperationRequiresClientVisitFlow, exceptionStatus, hasOpenFieldVisit, isFieldOperationFlow, selectedFieldAction]);
 
   const timeEntries = useMemo(() => {
     const baseEntries = [
@@ -1541,7 +2020,26 @@ const AttendanceWidget = () => {
       return baseEntries;
     }
 
-    const exceptionLabel = isFieldOperationFlow ? "Salida operacional" : "Salida inesperada";
+    const isPermEx = isPermissionLikeException(activeException);
+    const exceptionLabel = isPermEx ? "Salida permiso" : "Salida o visita";
+
+    if (isPermEx) {
+      return [
+        ...baseEntries,
+        {
+          label: exceptionLabel,
+          value: activeException.start_time,
+          colors: "bg-sky-50 border-sky-200 text-sky-800",
+          note: activeException.type === "medico" ? "SALUD" : "PERMISO",
+        },
+        {
+          label: "Regreso permiso",
+          value: activeException.return_time || activeException.end_time,
+          colors: "bg-emerald-50 border-emerald-200 text-emerald-800",
+          note: activeException.status === "COMPLETED" ? "Completado" : "Pendiente",
+        },
+      ];
+    }
 
     return [
       ...baseEntries,
@@ -1570,9 +2068,11 @@ const AttendanceWidget = () => {
         note: activeException.status === "COMPLETED" ? "Completado" : "Pendiente",
       },
     ];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeException?.arrival_time,
     activeException?.departure_time,
+    activeException?.end_time,
     activeException?.return_time,
     activeException?.start_time,
     activeException?.status,
@@ -1584,278 +2084,6 @@ const AttendanceWidget = () => {
     hasActiveException,
     isFieldOperationFlow,
   ]);
-
-  const lastRecordedEntry = useMemo(() => {
-    const populatedEntries = timeEntries.filter((entry) => entry.value).map((entry) => ({
-      ...entry,
-      timestamp: toDate(entry.value)?.getTime() || 0,
-    }));
-
-    populatedEntries.sort((a, b) => b.timestamp - a.timestamp);
-    return populatedEntries[0] || null;
-  }, [timeEntries]);
-
-  const nextActionMeta = useMemo(() => {
-    if (isFieldOperationFlow) {
-      if (exceptionStatus === "RETURNING") {
-        return {
-          label: "Llegar a oficina",
-          detail: "Completa la entrada a oficina o viaje cuando regreses.",
-        };
-      }
-
-      if (hasOpenFieldVisit) {
-        return {
-          label: "Salir de cliente",
-          detail: "Cierra la visita actual y define si la operacion sigue abierta o si ya vuelves a oficina.",
-        };
-      }
-
-      return {
-        label: "Entrar a cliente",
-        detail: "Selecciona el cliente, prospecto o emergencia para registrar la llegada al destino.",
-      };
-    }
-
-    if (hasActiveException) {
-      if (activeException.status === "ACTIVE") {
-        return {
-          label: "Llegar a destino",
-          detail: "Confirma cuando hayas llegado al destino de la salida.",
-        };
-      }
-
-      if (activeException.status === "ON_SITE") {
-        return {
-          label: "Salir de destino",
-          detail: "Registra la salida del sitio cuando termines la gestion.",
-        };
-      }
-
-      if (activeException.status === "RETURNING") {
-        return {
-          label: "Llegar a oficina",
-          detail: "Cierra el ciclo cuando regreses a la oficina.",
-        };
-      }
-    }
-
-    if (!attendance?.entry_time) {
-      return {
-        label: "Marcar entrada",
-        detail: "Tu jornada inicia con el login y puede ajustarse aqui si hace falta.",
-      };
-    }
-
-    if (attendance?.exit_time) {
-      return {
-        label: "Sin acciones pendientes",
-        detail: "La jornada de hoy ya fue completada.",
-      };
-    }
-
-    if (attendance?.lunch_start_time && !attendance?.lunch_end_time) {
-      return {
-        label: "Regresar de almuerzo",
-        detail: "Solo falta registrar el retorno del almuerzo.",
-      };
-    }
-
-    if (attendance?.lunch_end_time) {
-      return {
-        label: "Finalizar jornada",
-        detail: "Solo falta registrar tu salida final.",
-      };
-    }
-
-    return {
-      label: "Salir a almuerzo",
-      detail: "Tu siguiente paso operativo es registrar la salida a almuerzo.",
-    };
-  }, [
-    activeException?.status,
-    attendance?.entry_time,
-    attendance?.exit_time,
-    attendance?.lunch_end_time,
-    attendance?.lunch_start_time,
-    exceptionStatus,
-    hasActiveException,
-    hasOpenFieldVisit,
-    isFieldOperationFlow,
-  ]);
-
-  const reminderMeta = useMemo(() => {
-    const now = currentTime;
-
-    if (hasActiveException) {
-      const flowLabel = isFieldOperationFlow ? "salida operacional" : "salida inesperada";
-      const operationalTracking = isFieldOperationFlow ? getOperationalTrackingLabel(activeException) : null;
-      const operationalElapsedHours = Number(activeException?.operational_elapsed_hours || 0);
-      if (isFieldOperationFlow) {
-        if (Number.isFinite(operationalElapsedHours) && operationalElapsedHours >= 12) {
-          return {
-            key: "field-operation-over-12h",
-            text: `${operationalTracking || "Operacion abierta"} superíor a 12h. Regulariza para acta y continúa con entrada a cliente al día siguiente o cierra con retorno operacional.`,
-          };
-        }
-        if (activeException?.status === "RETURNING") {
-          return {
-            key: "field-operation-returning",
-            text: "Ya marcaste el retorno desde cliente. Solo falta la entrada a oficina o viaje para cerrar el ciclo.",
-          };
-        }
-
-        if (hasOpenFieldVisit) {
-          return {
-            key: "field-operation-client-open",
-            text: "Tienes una visita de cliente abierta. Registra la salida del cliente al terminar esa gestion.",
-          };
-        }
-
-        return {
-          key: "field-operation-open",
-          text: operationalTracking
-            ? `${operationalTracking}. Puedes registrar la entrada del siguiente cliente o dejar la operacion abierta hasta mañana.`
-            : "La salida operacional sigue abierta. Registra la entrada del siguiente cliente o deja la operacion abierta hasta mañana.",
-        };
-      }
-
-      if (activeException?.status === "ACTIVE") {
-        return {
-          key: "exception-active",
-          text: operationalTracking
-            ? `${operationalTracking}. Confirma la llegada al destino cuando corresponda.`
-            : `Tienes una ${flowLabel} en curso. Confirma la llegada al destino cuando corresponda.`,
-        };
-      }
-
-      if (activeException?.status === "ON_SITE") {
-        return {
-          key: "exception-on-site",
-          text: `La ${flowLabel} sigue abierta. Registra la salida del destino cuando termines la gestión.`,
-        };
-      }
-
-      if (activeException?.status === "RETURNING") {
-        return {
-          key: "exception-returning",
-          text: "El ciclo de salida sigue abierto. Falta confirmar tu regreso a la oficina.",
-        };
-      }
-    }
-
-    if (attendance?.lunch_start_time && !attendance?.lunch_end_time) {
-      const lunchOpenMinutes = getElapsedMinutes(attendance.lunch_start_time, now);
-      return {
-        key: lunchOpenMinutes >= LUNCH_REMINDER_MINUTES ? "lunch-open-delayed" : "lunch-open",
-        text:
-          lunchOpenMinutes >= LUNCH_REMINDER_MINUTES
-            ? "Tu almuerzo sigue abierto desde hace un rato. Registra el regreso para retomar la jornada."
-            : "Tu almuerzo sigue abierto. Registra el regreso para retomar la jornada.",
-      };
-    }
-
-    if (attendance?.entry_time && attendance?.lunch_end_time && !attendance?.exit_time) {
-      const workedHours = Number(attendance?.total_hours || 0);
-      const entryHours = getElapsedMinutes(attendance.entry_time, now) / 60;
-      return {
-        key: workedHours >= EXIT_REMINDER_AFTER_HOURS || entryHours >= EXIT_REMINDER_AFTER_HOURS
-          ? "shift-open-final"
-          : "shift-open",
-        text:
-          workedHours >= EXIT_REMINDER_AFTER_HOURS || entryHours >= EXIT_REMINDER_AFTER_HOURS
-            ? "Tu jornada ya deberia estar cerrada. Registra la salida final para completar el dia."
-            : "Tu jornada sigue abierta. Registra la salida final cuando corresponda.",
-      };
-    }
-
-    if (attendance?.entry_time && !attendance?.lunch_start_time && !attendance?.lunch_end_time) {
-      const entryHours = getElapsedMinutes(attendance.entry_time, now) / 60;
-      if (entryHours >= LUNCH_SUGGESTION_AFTER_HOURS) {
-        return {
-          key: "lunch-suggestion",
-          text: "Ya tienes varias horas continuas desde la entrada. Si saliste a almuerzo, registra esa marca.",
-        };
-      }
-    }
-
-    if (!attendance?.entry_time) {
-      return {
-        key: "missing-entry",
-        text: "Aun no hay entrada registrada hoy. Marca tu entrada para iniciar la jornada.",
-      };
-    }
-
-    return null;
-  }, [
-    activeException,
-    attendance?.entry_time,
-    attendance?.exit_time,
-    attendance?.lunch_end_time,
-    attendance?.lunch_start_time,
-    attendance?.total_hours,
-    currentTime,
-    hasActiveException,
-    hasOpenFieldVisit,
-    isFieldOperationFlow,
-  ]);
-
-  useEffect(() => {
-    setReminderMessage(reminderMeta?.text || null);
-
-    if (!reminderMeta?.key) return;
-
-    const todayKey = attendance?.date || getLocalDateKey(new Date());
-    const storageKey = `attendance-reminder:${todayKey}:${reminderMeta.key}`;
-    if (localStorage.getItem(storageKey)) return;
-
-    showToast(reminderMeta.text, "info");
-    localStorage.setItem(storageKey, "1");
-  }, [attendance?.date, reminderMeta, showToast]);
-
-  useEffect(() => {
-    if (!nextActionMeta?.label || nextActionMeta.label === "Sin acciones pendientes") return;
-    if (widgetModalOpen) return;
-    const todayKey = attendance?.date || getLocalDateKey(new Date());
-    const autoOpenSessionKey = `attendance-auto-open-session:${todayKey}`;
-    const autoOpenKey = `attendance-auto-open:${todayKey}:${hasActiveException ? exceptionStatus : nextActionMeta.label}`;
-    if (autoOpenSessionRef.current === autoOpenSessionKey) return;
-    if (sessionStorage.getItem(autoOpenSessionKey)) return;
-    if (localStorage.getItem(autoOpenKey)) return;
-
-    autoOpenSessionRef.current = autoOpenSessionKey;
-    sessionStorage.setItem(autoOpenSessionKey, "1");
-
-    const timeoutId = window.setTimeout(() => {
-      setWidgetModalOpen(true);
-      localStorage.setItem(autoOpenKey, "1");
-    }, 700);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [attendance?.date, exceptionStatus, hasActiveException, nextActionMeta?.label, widgetModalOpen]);
-
-  const summaryCards = [
-    {
-      label: "Estado actual",
-      value: status.text,
-      hint: hasActiveException ? exceptionStepLabel : "Jornada del dia",
-    },
-    {
-      label: "Ultimo registro",
-      value: lastRecordedEntry?.label || "Sin registros",
-      hint: lastRecordedEntry?.value ? formatDateTime(lastRecordedEntry.value) : "Aun no hay marcas hoy",
-    },
-    {
-      label: "Siguiente accion",
-      value: nextActionMeta.label,
-      hint: nextActionMeta.detail,
-    },
-    {
-      label: "Estado tecnico",
-      value: attendanceStateLabel,
-      hint: attendance?.attendance_status ? "Estado calculado desde el backend" : "Estado derivado localmente",
-    },
-  ];
 
   const timelineSteps = useMemo(() => {
     const firstPendingIndex = timeEntries.findIndex((entry) => !entry.value);
@@ -1883,347 +2111,462 @@ const AttendanceWidget = () => {
         ? "bg-blue-100 text-blue-900 border-blue-200"
         : "bg-emerald-100 text-emerald-900 border-emerald-200";
 
-  const renderExceptionBanner = () => {
-    if (isFieldOperationFlow) return null;
-    if (!hasActiveException) return null;
-    const items = [
-      { label: "Salida de oficina", value: activeException.start_time, icon: "1" },
-      { label: "Llegada a destino", value: activeException.arrival_time, icon: "2" },
-      { label: "Salida de destino", value: activeException.departure_time, icon: "3" },
-      { label: "Regreso a oficina", value: activeException.return_time, icon: "4" },
-    ];
+  const tripSteps = useMemo(() => ([
+    {
+      key: "office_departure",
+      label: "Salida de oficina",
+      time: activeException?.start_time || null,
+      state: activeException?.start_time ? "done" : "current",
+    },
+    {
+      key: "destination_arrival",
+      label: "Llegada a destino",
+      time: activeException?.arrival_time || null,
+      state: activeException?.arrival_time
+        ? "done"
+        : exceptionStatus === "ACTIVE"
+          ? "current"
+          : "pending",
+    },
+    {
+      key: "destination_departure",
+      label: "Salida del destino",
+      time: activeException?.departure_time || null,
+      state: activeException?.departure_time
+        ? "done"
+        : exceptionStatus === "ON_SITE"
+          ? "current"
+          : "pending",
+    },
+    {
+      key: "office_arrival",
+      label: "Llegada a oficina",
+      time: activeException?.return_time || null,
+      state: activeException?.return_time
+        ? "done"
+        : exceptionStatus === "RETURNING"
+          ? "current"
+          : "pending",
+    },
+  ]), [
+    activeException?.arrival_time,
+    activeException?.departure_time,
+    activeException?.return_time,
+    activeException?.start_time,
+    exceptionStatus,
+  ]);
+
+  const operationalLunchState = useMemo(() => {
+    if (!isFieldOperationFlow) return { visible: false, next: null, completed: false };
+    const hasLunchOut = Boolean(activeException?.op_lunch_start_time);
+    const hasLunchIn = Boolean(activeException?.op_lunch_end_time);
+    return {
+      visible: true,
+      hasLunchOut,
+      hasLunchIn,
+      completed: hasLunchOut && hasLunchIn,
+      next: !hasLunchOut ? "out" : !hasLunchIn ? "in" : null,
+    };
+  }, [activeException?.op_lunch_end_time, activeException?.op_lunch_start_time, isFieldOperationFlow]);
+
+  const renderOperationalLunchCard = () => {
+    if (!operationalLunchState.visible) return null;
 
     return (
-      <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-        <div className="mb-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <FiAlertTriangle className="flex-shrink-0 text-amber-600" size={14} />
-            <div>
-              <span className="text-xs font-bold uppercase tracking-wider text-amber-900">Salida Inesperada Activa</span>
-              <span className="ml-2 text-xs text-amber-700">{exceptionStepLabel}</span>
+      <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-900">Almuerzo operacional opcional</p>
+            <p className="mt-1 text-sm text-amber-800">
+              Estas marcaciones solo dejan trazabilidad real. El acta sigue regularizada a las 14:00 y 15:00.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-amber-900">
+              <span className="rounded-full bg-white/80 px-2 py-1">
+                Salida: {activeException?.op_lunch_start_time ? formatTimeSafe(activeException.op_lunch_start_time) : "--"}
+              </span>
+              <span className="rounded-full bg-white/80 px-2 py-1">
+                Regreso: {activeException?.op_lunch_end_time ? formatTimeSafe(activeException.op_lunch_end_time) : "--"}
+              </span>
             </div>
           </div>
-          <span className="rounded-full border border-amber-200 bg-white px-2.5 py-0.5 text-[10px] font-bold uppercase text-amber-800">
-            {activeException.type}
-          </span>
+          {operationalLunchState.completed ? (
+            <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">
+              Completo
+            </span>
+          ) : (
+            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-semibold text-amber-700">
+              Opcional
+            </span>
+          )}
         </div>
-        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-          {items.map((item) => (
-            <div key={item.label} className="rounded-lg border border-amber-100 bg-white px-3 py-2">
-              <div className="text-[9px] font-semibold uppercase tracking-wider text-amber-700">{item.label}</div>
-              <div className="mt-0.5 font-mono text-sm font-bold text-amber-900">{formatDateTime(item.value)}</div>
-            </div>
-          ))}
-        </div>
+
+        {operationalLunchState.next ? (
+          <Button
+            variant={operationalLunchState.next === "out" ? "warning" : "primary"}
+            onClick={() => handleOperationalLunchMark(operationalLunchState.next)}
+            disabled={fieldVisitSubmitting}
+            className={`mt-3 ${operationalLunchState.next === "out" ? ACTION_BTN_NEUTRAL_CLASS : ACTION_BTN_BASE_CLASS}`}
+          >
+            {fieldVisitSubmitting
+              ? "Registrando..."
+              : operationalLunchState.next === "out"
+                ? "Salida a almuerzo operacional"
+                : "Regreso de almuerzo operacional"}
+          </Button>
+        ) : null}
       </div>
     );
   };
 
-  const renderExceptionControls = () => {
+  const nextActionMeta = useMemo(() => {
     if (isFieldOperationFlow) {
-      // Field operation is managed by renderFieldOperationsControls below no duplicate controls here
-      return null;
+      if (exceptionStatus === "RETURNING") {
+        return {
+          label: "Llegada a oficina nuevamente",
+          detail: "Cierra la salida operacional cuando regreses a la oficina.",
+        };
+      }
+
+      if (exceptionStatus === "ON_SITE") {
+        return {
+          label: "Salida del destino",
+          detail: "Registra la salida cuando termines la gestion en el destino.",
+        };
+      }
+
+      return {
+        label: "Llegada a destino",
+        detail: "Confirma la llegada cuando completes el traslado.",
+      };
     }
-    if (!hasActiveException) {
-      return (
-        <div className="mt-2 rounded-xl border border-slate-200 bg-white p-4">
-          <div className="flex items-center gap-2.5 mb-2.5">
-            <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-600">
-              <FiAlertTriangle size={13} />
-            </span>
-            <span className="text-sm font-semibold text-slate-800">Salida inesperada</span>
-          </div>
-          <p className="mb-3 text-xs leading-5 text-slate-500">
-            Registra una salida inesperada solo cuando aplique una excepcion fuera del flujo normal.
-          </p>
-          <Button
-            variant="warning"
-            onClick={() => setExceptionModalOpen(true)}
-            className={ACTION_BTN_BASE_CLASS}
-            disabled={loading}
-          >
-            Registrar salida inesperada
-          </Button>
-        </div>
-      );
+
+    if (isPermissionFlowActive) {
+      return {
+        label: permissionNeedsExitClose ? "Salida del permiso y jornada" : "Entrada de permiso",
+        detail: permissionNeedsExitClose
+          ? "Este permiso coincide con el cierre de jornada. Esta accion registra ambas marcaciones."
+          : "Registra el regreso cuando termine el permiso aprobado.",
+      };
     }
+
+    if (permissionNeedsEntryStart) {
+      return {
+        label: "Entrada + salida a permiso",
+        detail: "Tu permiso coincide con el inicio de jornada. Esta accion registra ambas marcaciones.",
+      };
+    }
+
+    if (hasActiveApprovedPermission && !hasActiveException) {
+      return {
+        label: activeTimeOffPreset?.actionLabel || "Salida a permiso",
+        detail: "Tienes un permiso aprobado activo. Registra tu salida para iniciar el permiso.",
+      };
+    }
+
+    if (attendance?.exit_time) {
+      return {
+        label: "Sin acciones pendientes",
+        detail: "La jornada de hoy ya fue completada.",
+      };
+    }
+
+    if (attendance?.lunch_start_time && !attendance?.lunch_end_time) {
+      return {
+        label: "Regresar de almuerzo",
+        detail: "Solo falta registrar el retorno del almuerzo.",
+      };
+    }
+
+    if (attendance?.lunch_end_time) {
+      return {
+        label: "Finalizar jornada",
+        detail: "Solo falta registrar tu salida final.",
+      };
+    }
+
+    if (!attendance?.entry_time) {
+      return {
+        label: "Marcar entrada",
+        detail: "Tu jornada inicia con la entrada.",
+      };
+    }
+
+    return {
+      label: "Salir a almuerzo",
+      detail: "Tu siguiente paso operativo es registrar la salida a almuerzo.",
+    };
+  }, [
+    attendance?.entry_time,
+    attendance?.exit_time,
+    attendance?.lunch_end_time,
+    attendance?.lunch_start_time,
+    exceptionStatus,
+    hasActiveApprovedPermission,
+    hasActiveException,
+    isPermissionFlowActive,
+    isFieldOperationFlow,
+    permissionNeedsEntryStart,
+    permissionNeedsExitClose,
+    activeTimeOffPreset?.actionLabel,
+  ]);
+
+  const TripStep = ({ label, time, state }) => {
+    const isDone = state === "done";
+    const isCurrent = state === "current";
 
     return (
-      <div className="mt-4 overflow-hidden rounded-xl border border-amber-200 bg-white">
-        <div className="flex items-center gap-2.5 border-b border-amber-100 bg-amber-50 px-4 py-2.5">
-          <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-amber-200 text-amber-700">
-            <FiAlertTriangle size={12} />
-          </span>
-          <span className="text-xs font-semibold text-amber-900">
-            Salida en curso: {String(activeException.type).replace(/_/g, " ")}
-          </span>
-        </div>
-
-        <div className="p-4 space-y-3">
-          {activeException.status === "ACTIVE" && (
-            <>
-              <p className="text-xs leading-5 text-slate-500">Estás en camino a tu destino.</p>
-              <Button
-                variant="warning"
-                onClick={() => handleExceptionUpdate("ON_SITE", "Has llegado a tu destino")}
-                className={ACTION_BTN_BASE_CLASS}
-                disabled={loading}
-              >
-                Llegué a destino
-              </Button>
-            </>
-          )}
-
-          {activeException.status === "ON_SITE" && (
-            <>
-              <p className="text-xs leading-5 text-slate-500">Estás en el sitio. Registra cuando salgas.</p>
-              <Button
-                variant="warning"
-                onClick={() => handleExceptionUpdate("RETURNING", "Has salido del destino")}
-                className={ACTION_BTN_BASE_CLASS}
-                disabled={loading}
-              >
-                Salir de destino
-              </Button>
-            </>
-          )}
-
-          {activeException.status === "RETURNING" && (
-            <>
-              <p className="text-xs leading-5 text-slate-500">Estás regresando a la oficina.</p>
-              <Button
-                variant="success"
-                onClick={() => handleExceptionUpdate("COMPLETED", "Ciclo de salida completado")}
-                className={ACTION_BTN_BASE_CLASS}
-                disabled={loading}
-              >
-                Llegué a oficina
-              </Button>
-            </>
-          )}
+      <div className={`flex items-start gap-3 py-1.5 ${isDone ? "opacity-100" : isCurrent ? "opacity-100" : "opacity-45"}`}>
+        <div
+          className={`mt-0.5 h-2.5 w-2.5 flex-shrink-0 rounded-full border-2 ${
+            isDone
+              ? "border-emerald-500 bg-emerald-500"
+              : isCurrent
+                ? "border-blue-500 bg-blue-100"
+                : "border-slate-300 bg-white"
+          }`}
+        />
+        <div className="min-w-0">
+          <p
+            className={`text-[11px] font-semibold ${
+              isDone
+                ? "text-emerald-800"
+                : isCurrent
+                  ? "text-blue-800"
+                  : "text-slate-400"
+            }`}
+          >
+            {label}
+          </p>
+          {time ? <p className="text-[10px] text-slate-500">{formatTimeSafe(time)}</p> : null}
         </div>
       </div>
     );
   };
 
   const renderFieldOperationsControls = () => {
-    if (!canUseFieldOperations) {
+    const tripTypeLabel = String(activeException?.type || "operacion_campo").replace(/_/g, " ").trim();
+    const elapsedHours = Number(activeException?.operational_elapsed_hours || 0);
+    const canUseAdvancedFieldFlow = canUseFieldOperations;
+
+    const renderAgendaPanel = () => {
+      if (!plannedVisitAgenda.length) return null;
+
       return (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <p className="text-xs text-slate-500">Este bloque aplica solo para personal de campo autorizado.</p>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+              Cronograma del dia
+            </span>
+            <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+              {plannedVisitAgenda.length} actividad{plannedVisitAgenda.length === 1 ? "" : "es"}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {plannedVisitAgenda.slice(0, 3).map((item) => {
+              const visitMeta = getPlannedVisitTypeMeta({
+                isCommercial: item?.isCommercial,
+                isTechnical: item?.isTechnical,
+              });
+              return (
+                <div key={`${item.id}-${item.plannedDate}`} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-800">{item.name}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">{item.city}</p>
+                    </div>
+                    <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${visitMeta.badgeClass}`}>
+                      {visitMeta.label}
+                    </span>
+                  </div>
+                  {item.notes ? (
+                    <p className="mt-2 text-xs leading-5 text-slate-600">{item.notes}</p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    };
+
+    if (!isFieldOperationFlow && hasActiveException) {
+      const normalizedUnexpectedStatus = String(activeException?.status || "ACTIVE").trim().toUpperCase();
+      const exceptionTypeLabel =
+        activeException?.type === "medico"
+          ? "Permiso de salud"
+          : activeException?.type === "permiso"
+            ? "Permiso aprobado"
+            : String(activeException?.type || "salida").replace(/_/g, " ");
+
+      const genericUnexpectedAction =
+        normalizedUnexpectedStatus === "ACTIVE"
+          ? {
+              label: "Llegada a destino",
+              action: () => handleExceptionUpdate("ON_SITE", "Llegada registrada correctamente."),
+            }
+          : normalizedUnexpectedStatus === "ON_SITE"
+            ? {
+                label: "Iniciar retorno",
+                action: () => handleExceptionUpdate("RETURNING", "Retorno registrado correctamente."),
+              }
+            : {
+                label: "Regreso final",
+                action: () => handleExceptionUpdate("COMPLETED", "Regreso registrado correctamente."),
+              };
+
+      return (
+        <div className="space-y-4">
+          <div className="overflow-hidden rounded-2xl border border-sky-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between bg-sky-700 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <FiTrendingUp size={14} className="text-white" />
+                <span className="text-sm font-bold uppercase tracking-wide text-white">
+                  {isPermissionFlowActive ? "Permiso en curso" : "Salida en curso"}
+                </span>
+              </div>
+              <span className="rounded-full bg-sky-500 px-2 py-0.5 text-[10px] font-semibold text-white capitalize">
+                {exceptionTypeLabel}
+              </span>
+            </div>
+            <div className="space-y-4 p-4">
+              <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
+                <p className="text-sm text-sky-800">
+                  {isPermissionFlowActive
+                    ? "El permiso aprobado ya fue iniciado. Registra la entrada cuando termine."
+                    : "Tienes una salida no operacional activa. Continúa el flujo desde aquí."}
+                </p>
+                {activeException?.start_time ? (
+                  <p className="mt-2 font-mono text-xs text-sky-700">
+                    Salida: {formatTimeSafe(activeException.start_time, "HH:mm")}
+                    {activeException?.start_location
+                      ? <span className="ml-2 text-sky-500">· {String(activeException.start_location).split(",").map(c => Number(c).toFixed(4)).join(", ")}</span>
+                      : null}
+                  </p>
+                ) : null}
+              </div>
+              <Button
+                variant={isPermissionFlowActive ? "primary" : "success"}
+                onClick={
+                  isPermissionFlowActive
+                    ? async () => {
+                        if (permissionNeedsExitClose) {
+                          await handleFinishPermissionWithExit();
+                          return;
+                        }
+                        await handleExceptionUpdate(
+                          "COMPLETED",
+                          permissionEndsAtEndOfDay
+                            ? "Permiso finalizado. Tu jornada laboral ha concluido, recuerda registrar tu salida."
+                            : "Permiso finalizado. Ya puedes continuar tu jornada."
+                        );
+                      }
+                    : genericUnexpectedAction.action
+                }
+                disabled={loading || fieldVisitSubmitting}
+                className={ACTION_BTN_BASE_CLASS}
+              >
+                {loading || fieldVisitSubmitting
+                  ? "Registrando..."
+                  : isPermissionFlowActive
+                    ? (permissionNeedsExitClose ? "Finalizar permiso y jornada" : "Finalizar permiso")
+                    : genericUnexpectedAction.label}
+              </Button>
+            </div>
+          </div>
         </div>
       );
     }
 
-    const TripStep = ({ label, time, done, active }) => (
-      <div className={`flex items-start gap-2 py-1 ${active ? "opacity-100" : done ? "opacity-70" : "opacity-40"}`}>
-        <div className={`mt-0.5 h-2.5 w-2.5 flex-shrink-0 rounded-full border-2 ${done ? "border-emerald-500 bg-emerald-500" : active ? "border-blue-500 bg-blue-100 animate-pulse" : "border-slate-300 bg-white"}`} />
-        <div className="min-w-0">
-          <p className={`text-[11px] font-semibold ${active ? "text-blue-800" : done ? "text-emerald-800" : "text-slate-400"}`}>{label}</p>
-          {time ? <p className="text-[10px] text-slate-500">{formatTimeSafe(time)}</p> : null}
-        </div>
-      </div>
-    );
-
-    const renderClientPickerSection = () => (
-      <div className="space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-700">Tipo de gestion</p>
-          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-semibold text-slate-500">Paso 1</span>
-        </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          {FIELD_VISIT_TYPE_OPTIONS.map((option) => {
-            const active = fieldVisitType === option.value;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setFieldVisitType(option.value)}
-                className={`rounded-xl border px-3 py-2.5 text-left transition ${active
-                  ? "border-sky-500 bg-sky-50 text-sky-900 shadow-sm"
-                  : "border-slate-200 bg-slate-50 text-slate-700 hover:border-sky-300 hover:bg-sky-50/40"
-                  }`}
-                aria-pressed={active}
-                style={{ touchAction: "manipulation" }}
-              >
-                <p className="text-xs font-semibold">{option.label}</p>
-                <p className={`text-[10px] ${active ? "text-sky-700" : "text-slate-500"}`}>{option.helper}</p>
-              </button>
-            );
-          })}
-        </div>
-
-        {fieldVisitType === "cronograma" ? (
-          <>
-            <input
-              type="text"
-              value={fieldClientSearch}
-              list="attendance-scheduled-clients-list"
-              onChange={(e) => {
-                const value = e.target.value;
-                setFieldClientSearch(value);
-                const resolvedId = resolveClientIdFromInput(value, scheduledClientsToday);
-                setFieldClientId(resolvedId ? String(resolvedId) : "");
-              }}
-              placeholder="Buscar cliente por nombre o ciudad"
-              className={CONTROL_INPUT_SUBTLE_CLASS}
-              aria-label="Buscar cliente por nombre o ciudad"
-            />
-            <datalist id="attendance-scheduled-clients-list">
-              {filteredScheduledClients.map((client) => (
-                <option key={client.id} value={getClientDisplayLabel(client)}>{getClientDisplayLabel(client)}</option>
-              ))}
-            </datalist>
-            {!scheduledClientsLoading && filteredScheduledClients.length === 0 && fieldClientSearch ? (
-              <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-700">Sin coincidencias con la busqueda.</p>
-            ) : null}
-            {fieldClientId ? (
-              <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-700">
-                {getClientDisplayLabel(scheduledClientsToday.find((c) => String(c.id) === String(fieldClientId)))}
-              </p>
-            ) : null}
-          </>
-        ) : null}
-
-        {fieldVisitType === "prospecto" ? (
-          <input
-            type="text"
-            value={fieldProspectName}
-            onChange={(e) => setFieldProspectName(e.target.value)}
-            placeholder="Nombre del prospecto"
-            className={CONTROL_INPUT_SUBTLE_CLASS}
-            aria-label="Nombre del prospecto"
-          />
-        ) : null}
-
-        {fieldVisitType === "emergencia" ? (
-          <>
-            <input
-              type="text"
-              value={fieldEmergencyClientSearch}
-              list="attendance-emergency-clients-list"
-              onChange={(e) => {
-                const value = e.target.value;
-                setFieldEmergencyClientSearch(value);
-                const resolvedId = resolveClientIdFromInput(value, emergencyClients);
-                setFieldEmergencyClientId(resolvedId ? String(resolvedId) : "");
-              }}
-              placeholder="Buscar cliente para emergencia"
-              className={CONTROL_INPUT_SUBTLE_CLASS}
-              aria-label="Buscar cliente para emergencia"
-            />
-            <datalist id="attendance-emergency-clients-list">
-              {filteredEmergencyClients.map((client) => (
-                <option key={client.id} value={getClientDisplayLabel(client)}>{getClientDisplayLabel(client)}</option>
-              ))}
-            </datalist>
-            {!emergencyClientsLoading && filteredEmergencyClients.length === 0 && fieldEmergencyClientSearch ? (
-              <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-700">Sin coincidencias.</p>
-            ) : null}
-            {fieldEmergencyClientId ? (
-              <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-700">
-                {getClientDisplayLabel(emergencyClients.find((c) => String(c.id) === String(fieldEmergencyClientId)))}
-              </p>
-            ) : null}
-            <input
-              type="text"
-              value={fieldEmergencyReason}
-              onChange={(e) => setFieldEmergencyReason(e.target.value)}
-              placeholder="Motivo de emergencia"
-              className={CONTROL_INPUT_SUBTLE_CLASS}
-              aria-label="Motivo de emergencia"
-            />
-          </>
-        ) : null}
-
-        <textarea
-          rows={2}
-          value={fieldVisitNotes}
-          onChange={(e) => setFieldVisitNotes(e.target.value)}
-          placeholder="Observaciones (opcional)"
-          className={CONTROL_TEXTAREA_CLASS}
-          aria-label="Observaciones opcionales de la gestion"
-        />
-      </div>
-    );
-
     if (!isFieldOperationFlow) {
       return (
         <div className="space-y-4">
-          <div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center gap-2">
-              <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-sky-100">
-                <FiTrendingUp size={13} className="text-sky-700" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                <FiTrendingUp size={14} />
               </div>
-              <span className={SECTION_TITLE_CLASS}>Operacion de campo</span>
-              <span className="ml-auto flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">Sin viaje activo</span>
+              <div>
+                <p className="text-sm font-bold text-slate-800">Salida operacional</p>
+                <p className="text-xs text-slate-500">
+                  {canUseAdvancedFieldFlow
+                    ? "Personal de campo autorizado puede vincular la salida con visitas, clientes y cronograma."
+                    : "Inicia el flujo general de salida, destino, retorno y llegada a oficina."}
+                </p>
+              </div>
             </div>
-            <p className="mt-1.5 text-sm leading-5 text-slate-600">
-              Registra tu salida, visita a cliente y retorno. El acta se regulariza automaticamente.
-            </p>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-            {renderClientPickerSection()}
-          </div>
-          <input
-            type="text"
-            value={fieldEmergencyReason}
-            onChange={(e) => setFieldEmergencyReason(e.target.value)}
-            placeholder="Motivo del viaje (opcional)"
-            className={CONTROL_INPUT_CLASS}
-            aria-label="Motivo del viaje operacional"
-          />
+          {canUseAdvancedFieldFlow ? renderAgendaPanel() : null}
           <Button
             variant="primary"
             onClick={handleOfficeDepartureQuick}
             disabled={fieldVisitSubmitting}
             className={ACTION_BTN_BASE_CLASS}
           >
-            {fieldVisitSubmitting ? "Registrando..." : "Salida de oficina / Inicio de viaje"}
+            {fieldVisitSubmitting ? "Registrando..." : "Salida de oficina"}
           </Button>
         </div>
       );
     }
 
-    // Trip timeline data
-    const tripSteps = [
-      { label: "Salida de oficina", time: activeException?.start_time, done: Boolean(activeException?.start_time), active: exceptionStatus === "ACTIVE" && !activeException?.arrival_time },
-      { label: "Llegada a destino", time: activeException?.arrival_time, done: Boolean(activeException?.arrival_time), active: exceptionStatus === "ACTIVE" && !activeException?.arrival_time },
-      { label: "En sitio / con cliente", time: null, done: exceptionStatus === "ON_SITE" || exceptionStatus === "RETURNING" || exceptionStatus === "COMPLETED", active: exceptionStatus === "ON_SITE" },
-      { label: "Regresando", time: activeException?.departure_time, done: Boolean(activeException?.departure_time), active: exceptionStatus === "RETURNING" },
-      { label: "Cierre de viaje", time: activeException?.return_time, done: exceptionStatus === "COMPLETED", active: false },
-    ];
-
-    const tripTypeLabel = String(activeException?.type || "viaje").replace(/_/g, " ");
-    const elapsedHours = Number(activeException?.operational_elapsed_hours || 0);
-
     if (exceptionStatus === "ACTIVE") {
+      const clientEntryDisabled =
+        fieldVisitSubmitting ||
+        (fieldVisitType === "cronograma" && !fieldClientId) ||
+        (fieldVisitType === "prospecto" && !fieldProspectName.trim()) ||
+        (fieldVisitType === "emergencia" && (!fieldEmergencyClientId || !String(fieldEmergencyReason || "").trim()));
+
       return (
         <div className="overflow-hidden rounded-2xl border border-sky-200 bg-white shadow-sm">
           <div className="flex items-center justify-between bg-sky-700 px-4 py-3">
             <div className="flex items-center gap-2">
               <FiTrendingUp size={14} className="text-white" />
-              <span className="text-sm font-bold uppercase tracking-wide text-white">Viaje en curso</span>
+              <span className="text-sm font-bold uppercase tracking-wide text-white">Salida operacional en curso</span>
             </div>
-            <span className="rounded-full bg-sky-500 px-2 py-0.5 text-[10px] font-semibold text-white capitalize">{tripTypeLabel}</span>
+            <span className="rounded-full bg-sky-500 px-2 py-0.5 text-[10px] font-semibold text-white capitalize">
+              {tripTypeLabel}
+            </span>
           </div>
-          <div className="p-4 space-y-4">
-            <div className="rounded-xl bg-sky-50/60 p-3">
-              {tripSteps.slice(0, 2).map((s) => (
-                <TripStep key={s.label} {...s} />
+          <div className="space-y-4 p-4">
+            <div className="rounded-xl bg-sky-50/70 p-3">
+              {tripSteps.slice(0, 2).map((step) => (
+                <TripStep key={step.key} label={step.label} time={step.time} state={step.state} />
               ))}
             </div>
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-              <p className="text-sm text-amber-800">Estás en camino al destino. Registra tu llegada cuando estés ahí.</p>
-            </div>
-            <Button
-              variant="success"
-              onClick={handleLlegadaDestino}
-              disabled={fieldVisitSubmitting}
-              className={ACTION_BTN_BASE_CLASS}
-            >
-              {fieldVisitSubmitting ? "Registrando..." : "Llegué al destino"}
-            </Button>
+            {renderOperationalLunchCard()}
+            {activeOperationRequiresClientVisitFlow ? (
+              <>
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-sm text-amber-800">
+                    Estas en camino al destino. Al llegar, registra en una sola accion la llegada y la entrada al cliente.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                  {renderClientPickerSection({ title: "Destino y visita a cliente", stepLabel: "Paso 1" })}
+                </div>
+                <Button
+                  variant="success"
+                  onClick={handleLlegadaDestinoConVisita}
+                  disabled={clientEntryDisabled}
+                  className={ACTION_BTN_BASE_CLASS}
+                >
+                  {fieldVisitSubmitting ? "Registrando..." : "Llegada a destino y entrada a cliente"}
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-sm text-amber-800">Estas en camino al destino. Registra la llegada cuando completes el traslado.</p>
+                </div>
+                <Button
+                  variant="success"
+                  onClick={handleLlegadaDestino}
+                  disabled={fieldVisitSubmitting}
+                  className={ACTION_BTN_BASE_CLASS}
+                >
+                  {fieldVisitSubmitting ? "Registrando..." : "Llegada a destino"}
+                </Button>
+              </>
+            )}
           </div>
         </div>
       );
@@ -2233,74 +2576,124 @@ const AttendanceWidget = () => {
       const clientEntryDisabled =
         fieldVisitSubmitting ||
         (fieldVisitType === "cronograma" && !fieldClientId) ||
-        (fieldVisitType === "prospecto" && !fieldProspectName.trim());
+        (fieldVisitType === "prospecto" && !fieldProspectName.trim()) ||
+        (fieldVisitType === "emergencia" && (!fieldEmergencyClientId || !String(fieldEmergencyReason || "").trim()));
 
       return (
         <div className="overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-sm">
           <div className="flex items-center justify-between bg-emerald-700 px-4 py-3">
             <div className="flex items-center gap-2">
               <FiCheckCircle size={14} className="text-white" />
-              <span className="text-sm font-bold uppercase tracking-wide text-white">En sitio</span>
+              <span className="text-sm font-bold uppercase tracking-wide text-white">Gestion en destino</span>
             </div>
             {elapsedHours > 0 ? (
-              <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-semibold text-white">{elapsedHours.toFixed(1)} h</span>
+              <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-semibold text-white">
+                {elapsedHours.toFixed(1)} h
+              </span>
             ) : null}
           </div>
-          <div className="p-4 space-y-4">
-            <div className="rounded-xl bg-emerald-50/60 p-3">
-              {tripSteps.slice(0, 3).map((s) => (
-                <TripStep key={s.label} {...s} />
+          <div className="space-y-4 p-4">
+            <div className="rounded-xl bg-emerald-50/70 p-3">
+              {tripSteps.slice(0, 3).map((step) => (
+                <TripStep key={step.key} label={step.label} time={step.time} state={step.state} />
               ))}
             </div>
+            {renderOperationalLunchCard()}
 
-            {hasOpenFieldVisit ? (
-              <>
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                  <p className="text-sm font-medium text-amber-800">Tienes una visita de cliente abierta. Ciérrala antes de continuar.</p>
-                </div>
-                <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3">
-                  <label className="text-[11px] font-semibold text-slate-600">Después de salir del cliente</label>
-                  <select
-                    value={fieldExitMode}
-                    onChange={(e) => setFieldExitMode(e.target.value)}
-                    className={`${CONTROL_INPUT_CLASS} mt-2`}
-                    aria-label="Accion despues de salir del cliente"
+            {activeOperationRequiresClientVisitFlow ? (
+              hasOpenFieldVisit ? (
+                <>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                    <p className="text-sm font-medium text-amber-800">Tienes una visita de cliente abierta. Cierrala antes de continuar.</p>
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3">
+                    <label className="text-[11px] font-semibold text-slate-600">Despues de salir del cliente</label>
+                    <select
+                      value={fieldExitMode}
+                      onChange={(e) => setFieldExitMode(e.target.value)}
+                      className={`${CONTROL_INPUT_CLASS} mt-2`}
+                      aria-label="Accion despues de salir del cliente"
+                    >
+                      <option value="continue_operation">Continuar operacion (puede ir a otro cliente)</option>
+                      <option value="end_jornada">Terminar operacion en este destino</option>
+                    </select>
+                  </div>
+                  <Button
+                    variant="warning"
+                    onClick={() => handleFieldVisitMark("exit")}
+                    disabled={fieldVisitSubmitting}
+                    className={ACTION_BTN_BASE_CLASS}
                   >
-                    <option value="continue_operation">Continuar operacion (puede ir a otro cliente)</option>
-                    <option value="return_to_office">Iniciar retorno a oficina</option>
+                    {fieldVisitSubmitting ? "Registrando..." : "Salida de cliente"}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-slate-700">Registra la visita al cliente o prospecto en este destino.</p>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                    {renderClientPickerSection({ title: "Tipo de visita a cliente", stepLabel: "Paso 1" })}
+                  </div>
+                  <Button
+                    variant="primary"
+                    onClick={() => handleFieldVisitMark("entry")}
+                    disabled={clientEntryDisabled}
+                    className={ACTION_BTN_BASE_CLASS}
+                  >
+                    {fieldVisitSubmitting ? "Registrando..." : "Entrada a cliente"}
+                  </Button>
+                  <div className="h-px bg-slate-100" />
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                    <label className="text-[11px] font-semibold text-slate-600">Si no registraras cliente en este destino</label>
+                    <select
+                      value={destinationExitMode}
+                      onChange={(e) => setDestinationExitMode(e.target.value)}
+                      className={`${CONTROL_INPUT_CLASS} mt-2`}
+                      aria-label="Accion despues de salir del destino sin cliente"
+                    >
+                      <option value="continue_operation">Seguir con otra salida operacional</option>
+                      <option value="end_jornada">Terminar operacion en este destino</option>
+                    </select>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    onClick={handleSalidaDestino}
+                    disabled={fieldVisitSubmitting}
+                    className={ACTION_BTN_NEUTRAL_CLASS}
+                  >
+                    {destinationExitMode === "continue_operation"
+                      ? "Salir del destino y continuar"
+                      : "Terminar operacion sin cliente"}
+                  </Button>
+                </>
+              )
+            ) : (
+              <>
+                <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
+                  <p className="text-sm text-sky-800">La gestion sigue activa en el destino. Indica si vas a continuar con otra salida operacional o si aqui termina la operacion.</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                  <label className="text-[11px] font-semibold text-slate-600">Despues de salir del destino</label>
+                  <select
+                    value={destinationExitMode}
+                    onChange={(e) => setDestinationExitMode(e.target.value)}
+                    className={`${CONTROL_INPUT_CLASS} mt-2`}
+                    aria-label="Accion despues de salir del destino"
+                  >
+                    <option value="continue_operation">Seguir con otra salida operacional</option>
+                    <option value="end_jornada">Terminar operacion en este destino</option>
                   </select>
                 </div>
                 <Button
                   variant="warning"
-                  onClick={() => handleFieldVisitMark("exit")}
+                  onClick={handleSalidaDestino}
                   disabled={fieldVisitSubmitting}
                   className={ACTION_BTN_BASE_CLASS}
                 >
-                  {fieldVisitSubmitting ? "Registrando..." : "Salida de cliente"}
-                </Button>
-              </>
-            ) : (
-              <>
-                <p className="text-sm text-slate-700">Registra la visita al cliente o prospecto en este destino.</p>
-                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-                  {renderClientPickerSection()}
-                </div>
-                <Button
-                  variant="primary"
-                  onClick={() => handleFieldVisitMark("entry")}
-                  disabled={clientEntryDisabled}
-                  className={ACTION_BTN_BASE_CLASS}
-                >
-                  {fieldVisitSubmitting ? "Registrando..." : "Entrada a cliente"}
-                </Button>
-                <div className="h-px bg-slate-100" />
-                <Button
-                  variant="ghost"
-                  onClick={() => handleExceptionUpdate("RETURNING", "Retorno iniciado desde destino")}
-                  disabled={fieldVisitSubmitting}
-                  className={ACTION_BTN_NEUTRAL_CLASS}
-                >
-                  Iniciar retorno a oficina (sin cliente)
+                  {fieldVisitSubmitting
+                    ? "Registrando..."
+                    : destinationExitMode === "continue_operation"
+                      ? "Salida del destino y continuar"
+                      : "Terminar operacion desde aqui"}
                 </Button>
               </>
             )}
@@ -2315,47 +2708,32 @@ const AttendanceWidget = () => {
           <div className="flex items-center justify-between bg-indigo-700 px-4 py-3">
             <div className="flex items-center gap-2">
               <FiClock size={14} className="text-white" />
-              <span className="text-sm font-bold uppercase tracking-wide text-white">Regresando</span>
+              <span className="text-sm font-bold uppercase tracking-wide text-white">Retorno en curso</span>
             </div>
             {elapsedHours > 0 ? (
-              <span className="rounded-full bg-indigo-500 px-2 py-0.5 text-[10px] font-semibold text-white">{elapsedHours.toFixed(1)} h total</span>
+              <span className="rounded-full bg-indigo-500 px-2 py-0.5 text-[10px] font-semibold text-white">
+                {elapsedHours.toFixed(1)} h total
+              </span>
             ) : null}
           </div>
-          <div className="p-4 space-y-4">
-            <div className="rounded-xl bg-indigo-50/50 p-3">
-              {tripSteps.map((s) => (
-                <TripStep key={s.label} {...s} />
+          <div className="space-y-4 p-4">
+            <div className="rounded-xl bg-indigo-50/60 p-3">
+              {tripSteps.map((step) => (
+                <TripStep key={step.key} label={step.label} time={step.time} state={step.state} />
               ))}
             </div>
-
+            {renderOperationalLunchCard()}
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3">
+              <p className="text-sm text-indigo-800">Ya saliste del destino. Solo falta registrar la llegada final a oficina.</p>
+            </div>
             <Button
               variant="success"
               onClick={handleOfficeArrivalQuick}
               disabled={fieldVisitSubmitting}
               className={ACTION_BTN_BASE_CLASS}
             >
-              {fieldVisitSubmitting ? "Registrando..." : "Llegué a la oficina"}
+              {fieldVisitSubmitting ? "Registrando..." : "Llegada a oficina nuevamente"}
             </Button>
-
-            <div className="space-y-2 border-t border-slate-100 pt-3">
-              <p className="text-xs font-semibold text-slate-700">¿Cierras el viaje fuera de la oficina?</p>
-              <input
-                type="text"
-                value={tripClosureReason}
-                onChange={(e) => setTripClosureReason(e.target.value)}
-                placeholder="Motivo del cierre fuera de oficina (opcional)"
-                className={CONTROL_INPUT_CLASS}
-                aria-label="Motivo del cierre fuera de oficina"
-              />
-              <Button
-                variant="warning"
-                onClick={handleCierreViaje}
-                disabled={fieldVisitSubmitting}
-                className={ACTION_BTN_BASE_CLASS}
-              >
-                {fieldVisitSubmitting ? "Cerrando..." : "Cerrar viaje fuera de oficina"}
-              </Button>
-            </div>
           </div>
         </div>
       );
@@ -2365,26 +2743,26 @@ const AttendanceWidget = () => {
       <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
         <div className="mb-2 flex items-center gap-2">
           <FiCheckCircle size={14} className="text-emerald-600" />
-          <span className="text-xs font-bold uppercase tracking-wide text-emerald-800">Viaje completado</span>
+          <span className="text-xs font-bold uppercase tracking-wide text-emerald-800">Salida operacional completada</span>
         </div>
         <div className="space-y-0.5">
-          {tripSteps.map((s) => (
-            <TripStep key={s.label} {...s} />
+          {tripSteps.map((step) => (
+            <TripStep key={step.key} label={step.label} time={step.time} state={step.state} />
           ))}
         </div>
-        <p className="mt-3 text-xs text-emerald-700">El viaje fue cerrado correctamente. El acta formal fue regularizada.</p>
+        <p className="mt-3 text-xs text-emerald-700">La salida operacional fue cerrada correctamente.</p>
       </div>
     );
   };
 
-  const launcherMode = !attendance?.entry_time
-    ? "pending_entry"
-    : attendance?.exit_time
-      ? "exit_marked"
-      : attendance?.lunch_start_time && !attendance?.lunch_end_time
-        ? "lunch_marked"
-        : attendance?.lunch_end_time
-          ? "return_marked"
+  const launcherMode = attendance?.exit_time
+    ? "exit_marked"
+    : attendance?.lunch_start_time && !attendance?.lunch_end_time
+      ? "lunch_marked"
+      : attendance?.lunch_end_time
+        ? "return_marked"
+        : !attendance?.entry_time
+          ? "pending_entry"
           : "entry_marked";
   const launcherColorClass = launcherMode === "lunch_marked"
     ? "bg-amber-500 hover:bg-amber-600"
@@ -2409,22 +2787,15 @@ const AttendanceWidget = () => {
     const isOnLunch = attendance?.lunch_start_time && !attendance?.lunch_end_time;
     const isDayComplete = !!attendance?.exit_time;
     const hasEntry = !!attendance?.entry_time;
+    const hasRecordedFlow = hasEntry || Boolean(attendance?.lunch_start_time) || Boolean(attendance?.lunch_end_time);
+    const ecCurrentMins = getEcuadorEntryMinutes(currentTime);
+    const isEntryCutoffPassed = !hasRecordedFlow && !isDayComplete && ecCurrentMins >= ENTRY_MARK_CUTOFF_MINUTES;
     const elapsedMins = hasEntry && !isDayComplete
       ? getElapsedMinutes(attendance.entry_time, currentTime)
       : 0;
     const elapsedDisplay = elapsedMins >= 60
       ? `${Math.floor(elapsedMins / 60)}h ${elapsedMins % 60}m`
       : `${elapsedMins}m`;
-
-    const statusZoneBg = hasActiveException
-      ? "bg-amber-50 border-b border-amber-200"
-      : isDayComplete
-        ? "bg-slate-50 border-b border-slate-200"
-        : isOnLunch
-          ? "bg-amber-50 border-b border-amber-200"
-          : hasEntry
-            ? "bg-green-50 border-b border-green-200"
-            : "bg-white border-b border-gray-200";
 
     const statusIconBg = hasActiveException
       ? "bg-amber-100 text-amber-700"
@@ -2436,25 +2807,31 @@ const AttendanceWidget = () => {
             ? "bg-green-100 text-green-700"
             : "bg-slate-100 text-slate-500";
 
-    const primaryBtnClass = !hasEntry
-      ? "bg-green-600 hover:bg-green-700 text-white"
+    const primaryBtnClass = isEntryCutoffPassed
+      ? "bg-amber-500 hover:bg-amber-600 text-white"
       : isOnLunch
         ? "bg-blue-600 hover:bg-blue-700 text-white"
         : attendance?.lunch_end_time
           ? "bg-[#1E293B] hover:bg-[#0F172A] text-white"
-          : "bg-amber-500 hover:bg-amber-600 text-white";
+          : !hasEntry
+            ? "bg-green-600 hover:bg-green-700 text-white"
+            : "bg-amber-500 hover:bg-amber-600 text-white";
 
     const primaryBtnLabel = loading
       ? "Registrando..."
       : locationLoading
         ? "Obteniendo ubicacion..."
-        : !hasEntry
-          ? "Marcar entrada"
+        : permissionNeedsEntryStart
+          ? "Entrada + salida a permiso"
+        : isEntryCutoffPassed
+          ? "Salida al almuerzo"
           : isOnLunch
-            ? "Regresar de almuerzo"
+            ? "Retorno del almuerzo"
             : attendance?.lunch_end_time
               ? "Finalizar jornada"
-              : "Salir a almuerzo";
+              : !hasEntry
+                ? "Registrar entrada"
+                : "Salida al almuerzo";
 
     doClockOutRef.current = () => handle(clockOut, "Buen trabajo!", true, {
       syncTarget: "exit",
@@ -2466,16 +2843,22 @@ const AttendanceWidget = () => {
       },
     });
 
-    const handlePrimaryAction = !hasEntry
-      ? () => handle(clockIn, "Entrada registrada", false, { syncTarget: "entry" })
+    const handlePrimaryAction = isEntryCutoffPassed
+      ? permissionNeedsEntryStart
+        ? handleStartPermissionWithEntry
+        : () => handle(clockOutLunch, "Buen provecho", false, { syncTarget: "lunch_start" })
       : isOnLunch
         ? () => handle(clockInLunch, "Regresaste del almuerzo", false, { syncTarget: "lunch_end" })
+        : permissionNeedsEntryStart
+          ? handleStartPermissionWithEntry
         : attendance?.lunch_end_time
           ? () => setExitConfirmOpen(true)
-          : () => handle(clockOutLunch, "Buen provecho", false, { syncTarget: "lunch_start" });
+          : !hasEntry
+            ? () => handle(clockIn, "Entrada registrada", false, { syncTarget: "entry" })
+            : () => handle(clockOutLunch, "Buen provecho", false, { syncTarget: "lunch_start" });
 
     return (
-      <div className={SECTION_PANEL_CLASS}>
+      <div>
         {/* HEADER: fecha + estado + reloj */}
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-5">
           <div className="flex items-center gap-2.5">
@@ -2488,7 +2871,7 @@ const AttendanceWidget = () => {
               </span>
               <span className="text-slate-200">|</span>
               <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${dayStatusBadge}`}>
-                {hasActiveException ? "Excepción activa" : status.text}
+                {isPermissionFlowActive ? "Permiso en curso" : hasActiveException ? "Excepción activa" : status.text}
               </span>
             </div>
           </div>
@@ -2529,10 +2912,8 @@ const AttendanceWidget = () => {
                 <span className="font-mono text-xs font-bold text-slate-500">{progress}%</span>
               </div>
               <div className="h-1 overflow-hidden rounded-full bg-black/8">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${progress}%` }}
-                  transition={{ type: "spring", stiffness: 120, damping: 20 }}
+                <div
+                  style={{ width: `${progress}%`, transition: "width 600ms cubic-bezier(0.23,1,0.32,1)" }}
                   className={`h-full rounded-full ${isOnLunch ? "bg-amber-400" : "bg-emerald-500"}`}
                 />
               </div>
@@ -2578,7 +2959,31 @@ const AttendanceWidget = () => {
             </div>
           )}
 
-          {renderExceptionBanner()}
+          {isEntryCutoffPassed && (
+            <div className="mb-3 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
+              <div className="text-[10px] font-semibold uppercase tracking-widest text-orange-700">Entrada bloqueada — 09:20</div>
+              <div className="mt-0.5 text-sm text-orange-900">
+                El plazo para marcar entrada ya paso. Tu siguiente accion es salir a almuerzo.
+                Solicita a Talento Humano que regularice tu entrada de hoy.
+              </div>
+              {!latePolicy?.entryPendingRegularization && !entryRegularizationSent ? (
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setEntryRegularizationOpen(true)}
+                    className="min-h-[44px] rounded-xl bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 active:scale-[0.98] [touch-action:manipulation]"
+                  >
+                    Solicitar regularizacion
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-orange-700">
+                  <FiCheckCircle size={12} />
+                  Solicitud enviada a Talento Humano.
+                </div>
+              )}
+            </div>
+          )}
 
           {isDayComplete ? (
             <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
@@ -2591,7 +2996,7 @@ const AttendanceWidget = () => {
               </div>
             </div>
           ) : !hasActiveException && (
-            <div>
+            <div className="space-y-2">
               <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
                 Acción requerida
               </div>
@@ -2604,20 +3009,35 @@ const AttendanceWidget = () => {
               >
                 {primaryBtnLabel}
               </button>
+              {permissionFlowReady && (
+                <button
+                  type="button"
+                  onClick={handleStartApprovedPermission}
+                  disabled={loading || locationLoading}
+                  className="min-h-[44px] w-full rounded-xl bg-sky-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-sky-700 active:scale-[0.98] disabled:opacity-60"
+                  style={{ touchAction: "manipulation" }}
+                >
+                  {loading ? "Registrando..." : (
+                    activeTimeOff?.is_upcoming
+                      ? `Salida al permiso · ${formatTimeSafe(activeTimeOff.fecha_inicio_hora, "HH:mm")}`
+                      : (activeTimeOffPreset?.actionLabel || "Salida al permiso")
+                  )}
+                </button>
+              )}
             </div>
           )}
         </div>
 
         {/* ACCORDIONS */}
-        <div className="border-t border-slate-100 px-4 pb-4 pt-2 sm:px-5">
-          <div className="space-y-1.5">
+        <div className="border-t border-slate-100">
+          <div className="divide-y divide-slate-100">
 
             {/* Jornada del día */}
-            <div className="overflow-hidden rounded-xl border border-slate-200">
+            <div>
               <button
                 type="button"
                 onClick={() => setShowTimelineDetails((prev) => !prev)}
-                className="flex min-h-[44px] w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-slate-50"
+                className="flex min-h-[44px] w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-slate-50 sm:px-5"
               >
                 <div className="flex items-center gap-2.5">
                   <FiClock size={14} className="flex-shrink-0 text-slate-400" />
@@ -2633,7 +3053,7 @@ const AttendanceWidget = () => {
                 </span>
               </button>
               {showTimelineDetails && (
-                <div className="border-t border-slate-100 px-4 pb-4 pt-3">
+                <div className="border-t border-slate-100 px-4 pb-4 pt-3 sm:px-5">
                   <div className="space-y-1">
                     {timelineSteps.map((entry, index) => (
                       <div
@@ -2675,17 +3095,17 @@ const AttendanceWidget = () => {
               )}
             </div>
 
-            {/* Operaciones de campo */}
-            <div className="overflow-hidden rounded-xl border border-slate-200">
+            {/* Salidas laborales y visitas */}
+            <div>
               <button
                 type="button"
                 onClick={() => setShowFieldTools((prev) => !prev)}
-                className="flex min-h-[44px] w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-slate-50"
+                className="flex min-h-[44px] w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-slate-50 sm:px-5"
               >
                 <div className="flex items-center gap-2.5">
                   <FiTrendingUp size={14} className="flex-shrink-0 text-slate-400" />
                   <div>
-                    <span className="text-xs font-semibold text-slate-700">Operaciones de campo</span>
+                    <span className="text-xs font-semibold text-slate-700">Salidas y visitas</span>
                     {isFieldOperationFlow && (
                       <span className="ml-2 inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
                         Activo
@@ -2698,37 +3118,8 @@ const AttendanceWidget = () => {
                 </span>
               </button>
               {showFieldTools && (
-                <div className="border-t border-slate-100 px-4 pb-4 pt-3">
+                <div className="border-t border-slate-100 px-4 pb-4 pt-3 sm:px-5">
                   {renderFieldOperationsControls()}
-                </div>
-              )}
-            </div>
-
-            {/* Salidas inesperadas */}
-            <div className="overflow-hidden rounded-xl border border-slate-200">
-              <button
-                type="button"
-                onClick={() => setShowExceptionTools((prev) => !prev)}
-                className="flex min-h-[44px] w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-slate-50"
-              >
-                <div className="flex items-center gap-2.5">
-                  <FiAlertTriangle size={14} className={`flex-shrink-0 ${hasActiveException && !isFieldOperationFlow ? "text-amber-500" : "text-slate-400"}`} />
-                  <div>
-                    <span className="text-xs font-semibold text-slate-700">Salidas inesperadas</span>
-                    {hasActiveException && !isFieldOperationFlow && (
-                      <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-                        Activa
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-slate-400">
-                  {showExceptionTools ? <FiChevronUp size={13} /> : <FiChevronDown size={13} />}
-                </span>
-              </button>
-              {showExceptionTools && (
-                <div className="border-t border-slate-100 px-4 pb-4 pt-3">
-                  {renderExceptionControls()}
                 </div>
               )}
             </div>
@@ -2738,7 +3129,7 @@ const AttendanceWidget = () => {
 
         {/* PUNTUALIDAD + HISTORIAL */}
         <div className="border-t border-slate-100 px-4 pb-6 pt-4 sm:px-5">
-          <div className="mb-4 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="mb-4 flex items-center justify-between py-3">
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Puntualidad</div>
               <div className="mt-0.5 text-sm font-bold text-slate-800">{punctualityInsights.league}</div>
@@ -2762,11 +3153,11 @@ const AttendanceWidget = () => {
                 {recentHistory.length}/{RECENT_HISTORY_DAYS} días
               </span>
             </div>
-            <div className="overflow-hidden rounded-xl border border-slate-200">
-              {recentHistory.length ? recentHistory.map((row, idx) => (
+            <div>
+              {recentHistory.length ? recentHistory.map((row) => (
                 <div
                   key={`${row.date}-${row.id}`}
-                  className={`grid grid-cols-[60px_minmax(0,1fr)_52px] items-center gap-3 px-3 py-2.5 ${idx < recentHistory.length - 1 ? "border-b border-slate-100" : ""}`}
+                  className="grid grid-cols-[60px_minmax(0,1fr)_52px] items-center gap-3 border-b border-slate-100 px-3 py-2.5 last:border-b-0"
                 >
                   <div>
                     <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">Fecha</div>
@@ -2838,67 +3229,168 @@ const AttendanceWidget = () => {
         {renderWidgetContent()}
       </Modal>
       <Modal
-        isOpen={exceptionModalOpen}
-        onClose={() => setExceptionModalOpen(false)}
-        title="Registrar salida inesperada"
-        maxWidth="max-w-md"
+        isOpen={operationalModalOpen}
+        onClose={() => {
+          if (fieldVisitSubmitting) return;
+          setOperationalModalOpen(false);
+        }}
+        title={operationalModalPhase === "start" ? "Registrar salida o visita" : "Cerrar salida o visita"}
+        maxWidth="max-w-2xl"
       >
         <div className="space-y-5">
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-            <p className="text-sm text-amber-800">
-              Registra tu salida por motivos excepcionales para mantener trazabilidad.
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm text-slate-700">
+              {operationalModalPhase === "start"
+                ? "Selecciona el tipo de actividad laboral que realizaras fuera de la oficina y registra tu movilidad."
+                : "Si la salida activa usa vehiculo personal, el cierre requiere kilometraje final y foto tomada en el momento."}
             </p>
           </div>
 
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-gray-800">
-              Tipo de salida
-            </label>
-            <select
-              className={CONTROL_INPUT_CLASS}
-              value={exceptionType}
-              onChange={(e) => handleExceptionTypeChange(e.target.value)}
-              aria-label="Tipo de salida inesperada"
-            >
-              <option value="">Selecciona un motivo...</option>
-              <option value="permiso">Permiso personal</option>
-              <option value="medico">Cita medica</option>
-              <option value="proveedor">Reunion con proveedor</option>
-              <option value="otro">Otro motivo</option>
-            </select>
-          </div>
+          {operationalModalPhase === "start" ? (
+            <>
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                  Tipo de salida
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {OPERATIONAL_CATEGORY_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setOperationalCategory(option.value)}
+                      aria-pressed={operationalCategory === option.value}
+                      className={`min-h-[64px] rounded-2xl border px-3 py-2.5 text-left transition active:scale-[0.97] ${operationalCategory === option.value ? "border-[#2563EB] bg-[#DBEAFE] text-[#1D4ED8]" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"}`}
+                    >
+                      <span className="block text-sm font-semibold">{option.label}</span>
+                      <span className="mt-0.5 block text-[11px] font-normal opacity-75">{option.helper}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-gray-800">
-              Descripcion detallada
-            </label>
-            <textarea
-              className={CONTROL_TEXTAREA_CLASS}
-              rows="3"
-              placeholder="Describe brevemente el motivo de tu salida..."
-              value={exceptionDescription}
-              onChange={(e) => setExceptionDescription(e.target.value)}
-              aria-label="Descripcion de la salida inesperada"
-            />
-            <p className="mt-1 text-xs text-gray-500">
-              Incluye detalles como destino y duracion aproximada.
-            </p>
-          </div>
+              {draftOperationRequiresClientVisitFlow ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  {renderClientPickerSection({ title: "Tipo de visita a cliente", stepLabel: "Paso 2" })}
+                </div>
+              ) : null}
+
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                  Detalle
+                </label>
+                <textarea
+                  value={operationalDetail}
+                  onChange={(e) => setOperationalDetail(e.target.value)}
+                  rows="3"
+                  placeholder="Ejemplo: salida al banco, reunion o gestion ministerial"
+                  className={CONTROL_TEXTAREA_CLASS}
+                />
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setOperationalVehicleMode("company")}
+                  className={`min-h-[52px] rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition active:scale-[0.97] ${operationalVehicleMode === "company" ? "border-[#2563EB] bg-[#DBEAFE] text-[#1D4ED8]" : "border-slate-200 bg-white text-slate-700"}`}
+                >
+                  Sin vehiculo personal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOperationalVehicleMode("personal")}
+                  className={`min-h-[52px] rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition active:scale-[0.97] ${operationalVehicleMode === "personal" ? "border-[#2563EB] bg-[#DBEAFE] text-[#1D4ED8]" : "border-slate-200 bg-white text-slate-700"}`}
+                >
+                  Con vehiculo personal
+                </button>
+              </div>
+
+              {operationalVehicleMode === "personal" ? (
+                <div className="grid gap-5">
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                      Kilometraje inicial
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={operationalStartKm}
+                      onChange={(e) => setOperationalStartKm(e.target.value)}
+                      className={CONTROL_INPUT_CLASS}
+                      placeholder="Ejemplo: 152340"
+                    />
+                  </div>
+                  <CameraCaptureField
+                    label="Foto de kilometraje inicial"
+                    hint="La captura se toma en el momento de la salida."
+                    value={operationalStartPhoto}
+                    onChange={setOperationalStartPhoto}
+                    fileNamePrefix="odometro_inicio"
+                  />
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="grid gap-5">
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                  {operationalModalPhase === "close" ? "Motivo del cierre fuera de oficina" : "Observacion de cierre"}
+                </label>
+                <textarea
+                  value={operationalDetail}
+                  onChange={(e) => setOperationalDetail(e.target.value)}
+                  rows="3"
+                  placeholder="Detalle final de la salida operacional"
+                  className={CONTROL_TEXTAREA_CLASS}
+                />
+              </div>
+
+              {activeException?.uses_personal_vehicle ? (
+                <>
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                      Kilometraje final
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={operationalEndKm}
+                      onChange={(e) => setOperationalEndKm(e.target.value)}
+                      className={CONTROL_INPUT_CLASS}
+                      placeholder="Ejemplo: 152380"
+                    />
+                  </div>
+                  <CameraCaptureField
+                    label="Foto de kilometraje final"
+                    hint="La captura se toma en el momento del cierre."
+                    value={operationalEndPhoto}
+                    onChange={setOperationalEndPhoto}
+                    fileNamePrefix="odometro_fin"
+                  />
+                </>
+              ) : null}
+            </div>
+          )}
+
+          {operationalModalError ? <p className="text-sm text-[#DC2626]">{operationalModalError}</p> : null}
 
           <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end sm:gap-3">
             <button
-              onClick={() => setExceptionModalOpen(false)}
+              type="button"
+              onClick={() => setOperationalModalOpen(false)}
               className={ACTION_BTN_MODAL_SECONDARY_CLASS}
+              disabled={fieldVisitSubmitting}
             >
               Cancelar
             </button>
             <Button
-              variant="warning"
-              onClick={handleRegisterException}
-              disabled={exceptionLoading}
+              variant="primary"
+              onClick={submitOperationalModal}
+              disabled={fieldVisitSubmitting}
               className={ACTION_BTN_MODAL_PRIMARY_CLASS}
             >
-              {exceptionLoading ? "Registrando..." : "Registrar salida"}
+              {fieldVisitSubmitting ? "Guardando..." : "Registrar marcacion"}
             </Button>
           </div>
         </div>
@@ -3006,6 +3498,55 @@ const AttendanceWidget = () => {
         </div>
       </Modal>
       <Modal
+        isOpen={entryRegularizationOpen}
+        onClose={() => {
+          if (entryRegularizationLoading) return;
+          setEntryRegularizationOpen(false);
+        }}
+        title="Solicitar regularizacion de entrada"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-3">
+            <p className="text-sm text-orange-900">
+              El plazo para marcar entrada (09:20) ya paso. Talento Humano recibira tu solicitud
+              y regularizara la entrada de hoy en el sistema.
+            </p>
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-gray-800">
+              Motivo de la solicitud
+            </label>
+            <textarea
+              className={CONTROL_TEXTAREA_CLASS}
+              rows="3"
+              placeholder="Describe por que no pudiste marcar la entrada antes de las 09:20..."
+              value={entryRegularizationReason}
+              onChange={(e) => setEntryRegularizationReason(e.target.value)}
+              aria-label="Motivo de solicitud de regularizacion de entrada"
+            />
+          </div>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
+            <button
+              type="button"
+              onClick={() => setEntryRegularizationOpen(false)}
+              className={ACTION_BTN_MODAL_SECONDARY_CLASS}
+              disabled={entryRegularizationLoading}
+            >
+              Cerrar
+            </button>
+            <Button
+              variant="primary"
+              onClick={handleEntryRegularization}
+              disabled={entryRegularizationLoading || entryRegularizationReason.trim().length < 8}
+              className={ACTION_BTN_MODAL_PRIMARY_CLASS}
+            >
+              {entryRegularizationLoading ? "Enviando..." : "Enviar a Talento Humano"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+      <Modal
         isOpen={exitConfirmOpen}
         onClose={() => setExitConfirmOpen(false)}
         title="Confirmar salida"
@@ -3040,5 +3581,3 @@ const AttendanceWidget = () => {
 };
 
 export default AttendanceWidget;
-
-
