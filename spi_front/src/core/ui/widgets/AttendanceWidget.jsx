@@ -400,7 +400,6 @@ const AttendanceWidget = () => {
   const [destinationExitMode, setDestinationExitMode] = useState("continue_operation");
   const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
   const doClockOutRef = useRef(null);
-  const [scheduledClientsToday, setScheduledClientsToday] = useState([]);
   const [scheduledLeadsToday, setScheduledLeadsToday] = useState([]);
   const [scheduledClientsLoading, setScheduledClientsLoading] = useState(false);
   const [plannedVisitAgenda, setPlannedVisitAgenda] = useState([]);
@@ -560,7 +559,6 @@ const AttendanceWidget = () => {
 
   const loadScheduledClientsForToday = async () => {
     if (!canUseFieldOperations) {
-      setScheduledClientsToday([]);
       setPlannedVisitAgenda([]);
       return;
     }
@@ -610,13 +608,6 @@ const AttendanceWidget = () => {
         });
 
       setPlannedVisitAgenda(agenda);
-      setScheduledClientsToday(
-        agenda.map((item) => ({
-          id: item.id,
-          name: item.name,
-          city: item.city,
-        })),
-      );
 
       const leadsToday = Array.isArray(result?.leads) ? result.leads : [];
       setScheduledLeadsToday(
@@ -629,7 +620,6 @@ const AttendanceWidget = () => {
           : [],
       );
     } catch (_error) {
-      setScheduledClientsToday([]);
       setPlannedVisitAgenda([]);
       setScheduledLeadsToday([]);
     } finally {
@@ -978,9 +968,9 @@ const AttendanceWidget = () => {
 
   useEffect(() => {
     if (fieldVisitType !== "cronograma" || !fieldClientId) return;
-    const exists = scheduledClientsToday.some((client) => String(client.id) === String(fieldClientId));
+    const exists = plannedVisitAgenda.some((client) => String(client.id) === String(fieldClientId));
     if (!exists) setFieldClientId("");
-  }, [fieldClientId, fieldVisitType, scheduledClientsToday]);
+  }, [fieldClientId, fieldVisitType, plannedVisitAgenda]);
 
   useEffect(() => {
     if (fieldVisitType !== "emergencia") return;
@@ -1044,22 +1034,47 @@ const AttendanceWidget = () => {
       {fieldVisitType === "cronograma" ? (
         scheduledClientsLoading ? (
           <p className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-500">Cargando clientes de tu cronograma...</p>
-        ) : scheduledClientsToday.length > 0 ? (
+        ) : plannedVisitAgenda.length > 0 ? (
           // Regla de negocio confirmada: si el cronograma aplica (hay clientes
           // planificados para hoy), se elige de una lista cerrada -- no se
-          // permite escribir un nombre libre, para no marcar visitas a
-          // clientes que no estan en el cronograma aprobado bajo este tipo.
-          <select
-            value={fieldClientId}
-            onChange={(e) => setFieldClientId(e.target.value)}
-            className={CONTROL_INPUT_SUBTLE_CLASS}
-            aria-label="Selecciona el cliente de tu cronograma"
-          >
-            <option value="">Selecciona un cliente de tu cronograma...</option>
-            {scheduledClientsToday.map((client) => (
-              <option key={client.id} value={client.id}>{getClientDisplayLabel(client)}</option>
-            ))}
-          </select>
+          // permite escribir un nombre libre. Tarjetas tocables en vez de un
+          // <select> nativo para que sea mas visual/interactivo en movil.
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {plannedVisitAgenda.map((item) => {
+              const active = String(fieldClientId) === String(item.id);
+              const visitMeta = getPlannedVisitTypeMeta({
+                isCommercial: item?.isCommercial,
+                isTechnical: item?.isTechnical,
+              });
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setFieldClientId(String(item.id))}
+                  aria-pressed={active}
+                  className={`rounded-xl border px-3 py-2.5 text-left transition ${
+                    active
+                      ? "border-sky-500 bg-sky-50 shadow-sm"
+                      : "border-slate-200 bg-white hover:border-sky-300 hover:bg-sky-50/40"
+                  }`}
+                  style={{ touchAction: "manipulation" }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-800">{item.name}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">{item.city}</p>
+                    </div>
+                    <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${visitMeta.badgeClass}`}>
+                      {visitMeta.label}
+                    </span>
+                  </div>
+                  {item.notes ? (
+                    <p className="mt-1.5 text-xs leading-4 text-slate-500">{item.notes}</p>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
         ) : (
           <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-700">
             No tienes clientes en tu cronograma aprobado para hoy. Si la visita no estaba planificada, usa "Prospecto" o "Emergencia".

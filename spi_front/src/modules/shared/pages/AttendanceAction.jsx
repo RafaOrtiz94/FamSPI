@@ -906,19 +906,36 @@ const AttendanceAction = () => {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Cliente de tu cronograma
               </label>
-              <select
-                value={manualClientId}
-                onChange={(e) => {
-                  setManualClientId(e.target.value);
-                  if (e.target.value) setManualProspectName("");
-                }}
-                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 mb-4"
-              >
-                <option value="">Selecciona un cliente de tu cronograma...</option>
-                {scheduledClientsToday.map((client) => (
-                  <option key={client.id} value={client.id}>{buildClientDisplayLabel(client)}</option>
-                ))}
-              </select>
+              {/* Tarjetas tocables en vez de un <select> nativo -- mas visual
+                  e interactivo en movil (mismo criterio que AttendanceWidget). */}
+              <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {scheduledClientsToday.map((client) => {
+                  const active = String(manualClientId) === String(client.id);
+                  const name = String(
+                    client?.commercial_name || client?.business_name || client?.name || client?.nombre || `Cliente #${client.id}`
+                  ).trim();
+                  const city = String(client?.city || client?.ciudad || "").trim();
+                  return (
+                    <button
+                      key={client.id}
+                      type="button"
+                      onClick={() => {
+                        setManualClientId(String(client.id));
+                        setManualProspectName("");
+                      }}
+                      aria-pressed={active}
+                      className={`rounded-md border px-3 py-2.5 text-left transition ${
+                        active
+                          ? "border-primary bg-primary/10 dark:border-primary dark:bg-primary/20"
+                          : "border-gray-300 bg-white hover:border-primary/60 dark:border-gray-700 dark:bg-gray-800"
+                      }`}
+                    >
+                      <p className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{name}</p>
+                      {city ? <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{city}</p> : null}
+                    </button>
+                  );
+                })}
+              </div>
             </>
           ) : (
             <>
