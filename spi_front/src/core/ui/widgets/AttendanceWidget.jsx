@@ -2467,7 +2467,6 @@ const AttendanceWidget = () => {
                 <TripStep key={step.key} label={step.label} time={step.time} state={step.state} />
               ))}
             </div>
-            {renderOperationalLunchCard()}
             {activeOperationRequiresClientVisitFlow ? (
               <>
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
@@ -2502,6 +2501,7 @@ const AttendanceWidget = () => {
                 </Button>
               </>
             )}
+            {renderOperationalLunchCard()}
           </div>
         </div>
       );
@@ -2533,7 +2533,6 @@ const AttendanceWidget = () => {
                 <TripStep key={step.key} label={step.label} time={step.time} state={step.state} />
               ))}
             </div>
-            {renderOperationalLunchCard()}
 
             {activeOperationRequiresClientVisitFlow ? (
               hasOpenFieldVisit ? (
@@ -2671,6 +2670,7 @@ const AttendanceWidget = () => {
                 </Button>
               </>
             )}
+            {renderOperationalLunchCard()}
           </div>
         </div>
       );
@@ -2696,7 +2696,6 @@ const AttendanceWidget = () => {
                 <TripStep key={step.key} label={step.label} time={step.time} state={step.state} />
               ))}
             </div>
-            {renderOperationalLunchCard()}
             <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3">
               <p className="text-sm text-indigo-800">Ya saliste del destino. Cuando llegues al lugar donde terminas la gestión, marca el cierre de la operación.</p>
             </div>
@@ -2708,6 +2707,7 @@ const AttendanceWidget = () => {
             >
               {fieldVisitSubmitting ? "Registrando..." : "Cerrar operación"}
             </Button>
+            {renderOperationalLunchCard()}
           </div>
         </div>
       );
