@@ -248,7 +248,17 @@ export const resolveAttendanceFlowStep = (canonicalFlow) => {
 // del mismo payload que ya devuelve getTodayAttendance() (canonical_flow,
 // active_time_off, active_field_visit, late_policy). No requiere un endpoint
 // nuevo — es una proyeccion de datos ya existentes para timeline/resumen del dia.
-export const resolveAttendancePendingActions = (attendanceData = {}) => {
+const LUNCH_REMINDER_MINUTES = 75;
+const LONG_SHIFT_REMINDER_MINUTES = 10.5 * 60;
+
+const minutesSince = (isoValue, now) => {
+  if (!isoValue) return null;
+  const parsed = new Date(isoValue);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return Math.round((now.getTime() - parsed.getTime()) / 60000);
+};
+
+export const resolveAttendancePendingActions = (attendanceData = {}, now = new Date()) => {
   const canonicalFlow = attendanceData?.canonical_flow || null;
   const flowStep = resolveAttendanceFlowStep(canonicalFlow);
   const pending = [];
@@ -312,6 +322,39 @@ export const resolveAttendancePendingActions = (attendanceData = {}) => {
       detail: "Puedes justificar tu atraso de hoy antes del corte.",
       actionKey: null,
     });
+  }
+
+  // Fase 6 (Plan Maestro Asistencia): recordatorios suaves basados en tiempo
+  // transcurrido, calculados en el cliente con datos que ya llegan en el payload
+  // (sin job de backend ni notificacion push).
+  const lunchStart = attendanceData?.lunch_start_time;
+  const lunchEnd = attendanceData?.lunch_end_time;
+  if (lunchStart && !lunchEnd) {
+    const elapsed = minutesSince(lunchStart, now);
+    if (Number.isFinite(elapsed) && elapsed > LUNCH_REMINDER_MINUTES) {
+      pending.push({
+        id: "lunch_overdue",
+        severity: "warning",
+        label: "Almuerzo mas largo de lo habitual",
+        detail: `Llevas ${elapsed} minutos en almuerzo. Registra tu regreso cuando puedas.`,
+        actionKey: "almuerzo-entrada",
+      });
+    }
+  }
+
+  const entryTime = attendanceData?.entry_time;
+  const exitTime = attendanceData?.exit_time;
+  if (entryTime && !exitTime && !flowStep.contextFlags?.has_active_operational && !flowStep.contextFlags?.has_active_unexpected) {
+    const elapsed = minutesSince(entryTime, now);
+    if (Number.isFinite(elapsed) && elapsed > LONG_SHIFT_REMINDER_MINUTES) {
+      pending.push({
+        id: "long_open_shift",
+        severity: "warning",
+        label: "Jornada muy extendida",
+        detail: "Verifica si olvidaste marcar tu salida.",
+        actionKey: "salida",
+      });
+    }
   }
 
   return pending;
