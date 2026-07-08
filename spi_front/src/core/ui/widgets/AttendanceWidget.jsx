@@ -8,7 +8,13 @@ import Modal from "../components/Modal";
 import CameraCaptureField from "../components/CameraCaptureField";
 import { useUI } from "../useUI";
 import { getAttendanceErrorInfo } from "../attendanceErrorUtils";
-import { isOperationalFlow, resolveAttendancePendingActions } from "../attendanceFlowUtils";
+import {
+  isOperationalFlow,
+  resolveAttendancePendingActions,
+  validateOperationalCategoryStep,
+  validateOperationalVehicleStart,
+  validateOperationalVehicleClosure,
+} from "../attendanceFlowUtils";
 
 import {
   clockIn,
@@ -1421,9 +1427,14 @@ const AttendanceWidget = () => {
     const requiresVehicleClosure = operationalModalPhase !== "start" && Boolean(activeException?.uses_personal_vehicle);
     const isClientVisitDraft = canUseFieldOperations && String(operationalCategory || "").trim().toLowerCase() === "cliente";
 
-    if (operationalModalPhase === "start" && !operationalCategory) {
-      setOperationalModalError("Selecciona la categoria de la salida operacional.");
-      return;
+    if (operationalModalPhase === "start") {
+      // Mitigacion D1: regla compartida con AttendanceAction.handleManualClientSubmit
+      // via attendanceFlowUtils.js (misma logica, un solo lugar para mantenerla).
+      const categoryCheck = validateOperationalCategoryStep(operationalCategory);
+      if (!categoryCheck.ok) {
+        setOperationalModalError(categoryCheck.error);
+        return;
+      }
     }
     if (operationalModalPhase === "start" && isClientVisitDraft) {
       if (fieldVisitType === "cronograma" && !fieldClientId) {
@@ -1445,25 +1456,25 @@ const AttendanceWidget = () => {
         }
       }
     }
-    if (operationalModalPhase === "start" && operationalVehicleMode === "personal") {
-      if (!String(operationalStartKm || "").trim()) {
-        setOperationalModalError("Debes registrar el kilometraje inicial.");
-        return;
-      }
-      if (!operationalStartPhoto) {
-        setOperationalModalError("Debes tomar la foto del kilometraje inicial.");
+    if (operationalModalPhase === "start") {
+      const vehicleStartCheck = validateOperationalVehicleStart({
+        usesPersonalVehicle: operationalVehicleMode === "personal",
+        startKm: operationalStartKm,
+        startPhoto: operationalStartPhoto,
+      });
+      if (!vehicleStartCheck.ok) {
+        setOperationalModalError(vehicleStartCheck.error);
         return;
       }
     }
-    if (requiresVehicleClosure) {
-      if (!String(operationalEndKm || "").trim()) {
-        setOperationalModalError("Debes registrar el kilometraje final.");
-        return;
-      }
-      if (!operationalEndPhoto) {
-        setOperationalModalError("Debes tomar la foto del kilometraje final.");
-        return;
-      }
+    const vehicleClosureCheck = validateOperationalVehicleClosure({
+      requiresClosure: requiresVehicleClosure,
+      endKm: operationalEndKm,
+      endPhoto: operationalEndPhoto,
+    });
+    if (!vehicleClosureCheck.ok) {
+      setOperationalModalError(vehicleClosureCheck.error);
+      return;
     }
 
     setOperationalModalError("");

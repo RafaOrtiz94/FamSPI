@@ -410,3 +410,41 @@ export const resolveAttendancePendingActions = (attendanceData = {}, now = new D
   return pending;
 };
 
+// Mitigacion D1 (Fase 0 inventario): AttendanceWidget.submitOperationalModal y
+// AttendanceAction.handleManualClientSubmit validaban el mismo paso operacional
+// (categoria + kilometraje/foto de vehiculo personal) con dos copias de la regla
+// que ya habian divergido en nombres de variable. Se extraen aqui como funciones
+// puras, sin estado, para que ambos consuman la misma regla. Se mantienen 3
+// funciones separadas (no una sola combinada) para preservar el orden exacto de
+// validacion que cada pantalla ya tenia (evita cambiar cual mensaje de error
+// aparece primero cuando hay mas de un campo invalido a la vez).
+
+export const validateOperationalCategoryStep = (category) => {
+  if (!String(category || "").trim()) {
+    return { ok: false, error: "Selecciona la categoria de la salida operacional." };
+  }
+  return { ok: true, error: null };
+};
+
+export const validateOperationalVehicleStart = ({ usesPersonalVehicle, startKm, startPhoto }) => {
+  if (!usesPersonalVehicle) return { ok: true, error: null };
+  if (!String(startKm || "").trim()) {
+    return { ok: false, error: "Debes registrar el kilometraje inicial." };
+  }
+  if (!startPhoto) {
+    return { ok: false, error: "Debes tomar la foto del kilometraje inicial." };
+  }
+  return { ok: true, error: null };
+};
+
+export const validateOperationalVehicleClosure = ({ requiresClosure, endKm, endPhoto }) => {
+  if (!requiresClosure) return { ok: true, error: null };
+  if (!String(endKm || "").trim()) {
+    return { ok: false, error: "Debes registrar el kilometraje final." };
+  }
+  if (!endPhoto) {
+    return { ok: false, error: "Debes tomar la foto del kilometraje final." };
+  }
+  return { ok: true, error: null };
+};
+

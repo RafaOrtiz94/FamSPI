@@ -28,7 +28,14 @@ import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
 import CameraCaptureField from "../../../core/ui/components/CameraCaptureField";
 import { getAttendanceErrorInfo } from "../../../core/ui/attendanceErrorUtils";
-import { isOperationalFlow, getAttendanceNextStepHint, getAttendanceHelpHint } from "../../../core/ui/attendanceFlowUtils";
+import {
+  isOperationalFlow,
+  getAttendanceNextStepHint,
+  getAttendanceHelpHint,
+  validateOperationalCategoryStep,
+  validateOperationalVehicleStart,
+  validateOperationalVehicleClosure,
+} from "../../../core/ui/attendanceFlowUtils";
 
 
 const resolveShortcutParam = (params, keys = []) => {
@@ -762,27 +769,32 @@ const AttendanceAction = () => {
   const handleManualClientSubmit = () => {
     setManualStepError("");
     if (requiresOperationalStep) {
-      if (operationalPhase === "start" && !operationalCategory) {
-        setManualStepError("Selecciona la categoria de la salida operacional.");
-        return;
+      // Mitigacion D1: regla compartida con AttendanceWidget.submitOperationalModal
+      // via attendanceFlowUtils.js (misma logica, un solo lugar para mantenerla).
+      if (operationalPhase === "start") {
+        const categoryCheck = validateOperationalCategoryStep(operationalCategory);
+        if (!categoryCheck.ok) {
+          setManualStepError(categoryCheck.error);
+          return;
+        }
+        const vehicleStartCheck = validateOperationalVehicleStart({
+          usesPersonalVehicle: usesPersonalVehicle === "si",
+          startKm: startOdometerKm,
+          startPhoto: startOdometerPhoto,
+        });
+        if (!vehicleStartCheck.ok) {
+          setManualStepError(vehicleStartCheck.error);
+          return;
+        }
       }
-      if (operationalPhase === "start" && usesPersonalVehicle === "si") {
-        if (!String(startOdometerKm || "").trim()) {
-          setManualStepError("Debes registrar el kilometraje inicial.");
-          return;
-        }
-        if (!startOdometerPhoto) {
-          setManualStepError("Debes tomar la foto del kilometraje inicial.");
-          return;
-        }
-      }
-      if ((operationalPhase === "end" || operationalPhase === "close") && activeOperationalUsesPersonalVehicle) {
-        if (!String(endOdometerKm || "").trim()) {
-          setManualStepError("Debes registrar el kilometraje final.");
-          return;
-        }
-        if (!endOdometerPhoto) {
-          setManualStepError("Debes tomar la foto del kilometraje final.");
+      if (operationalPhase === "end" || operationalPhase === "close") {
+        const vehicleClosureCheck = validateOperationalVehicleClosure({
+          requiresClosure: activeOperationalUsesPersonalVehicle,
+          endKm: endOdometerKm,
+          endPhoto: endOdometerPhoto,
+        });
+        if (!vehicleClosureCheck.ok) {
+          setManualStepError(vehicleClosureCheck.error);
           return;
         }
       }
