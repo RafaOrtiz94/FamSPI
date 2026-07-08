@@ -181,12 +181,11 @@ const normalizeOperationalEndPayload = (location, payloadOrMarkMeta = {}, maybeM
 export const clockIn = async (location = null) => {
  const normalizedLocation = ensureLocationOrThrow(location);
  const accuracy = extractLocationAccuracy(location);
- const { data } = await api.post(
- "/attendance/clock-in",
- { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }
+ return postQueueableMark(
+   "/attendance/clock-in",
+   { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) },
+   "Entrada"
  );
-
- return data;
 };
 
 /**
@@ -195,12 +194,11 @@ export const clockIn = async (location = null) => {
 export const clockOutLunch = async (location = null) => {
  const normalizedLocation = ensureLocationOrThrow(location);
  const accuracy = extractLocationAccuracy(location);
- const { data } = await api.post(
- "/attendance/clock-out-lunch",
- { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }
+ return postQueueableMark(
+   "/attendance/clock-out-lunch",
+   { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) },
+   "Salida a almuerzo"
  );
-
- return data;
 };
 
 /**
@@ -209,12 +207,11 @@ export const clockOutLunch = async (location = null) => {
 export const clockInLunch = async (location = null) => {
  const normalizedLocation = ensureLocationOrThrow(location);
  const accuracy = extractLocationAccuracy(location);
- const { data } = await api.post(
- "/attendance/clock-in-lunch",
- { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }
+ return postQueueableMark(
+   "/attendance/clock-in-lunch",
+   { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) },
+   "Entrada de almuerzo"
  );
-
- return data;
 };
 
 /**
@@ -223,12 +220,11 @@ export const clockInLunch = async (location = null) => {
 export const clockOut = async (location = null) => {
  const normalizedLocation = ensureLocationOrThrow(location);
  const accuracy = extractLocationAccuracy(location);
- const { data } = await api.post(
- "/attendance/clock-out",
- { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }
+ return postQueueableMark(
+   "/attendance/clock-out",
+   { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) },
+   "Salida final"
  );
-
- return data;
 };
 
 /**
