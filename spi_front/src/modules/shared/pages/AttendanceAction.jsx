@@ -78,7 +78,12 @@ const buildClientDisplayLabel = (client = {}) => {
   ).trim();
   const safeName = rawName.length >= 3 ? rawName : `Cliente #${client?.id || ""}`;
   const city = String(client?.city || client?.ciudad || "").trim();
-  return city ? `${safeName} - ${city} (#${client?.id})` : `${safeName} (#${client?.id})`;
+  const scheduleInfo = client?.scheduled_info || {};
+  const isScheduledToday = Boolean(
+    scheduleInfo?.is_planned_commercial || scheduleInfo?.is_planned_technical || scheduleInfo?.is_planned
+  );
+  const base = city ? `${safeName} - ${city} (#${client?.id})` : `${safeName} (#${client?.id})`;
+  return isScheduledToday ? `${base} · Programado hoy` : base;
 };
 
 const withTimeout = (promise, ms, timeoutMessage) =>
@@ -522,10 +527,17 @@ const AttendanceAction = () => {
     const loadClients = async () => {
       setLoadingClients(true);
       try {
-        const response = await fetchClients();
+        // Fase 5 (Plan Maestro Asistencia): trae info de cronograma para priorizar
+        // en la lista a los clientes ya planificados para hoy (contexto conocido).
+        const response = await fetchClients({ include_schedule_info: true, schedule_scope: "mine" });
         const clients = Array.isArray(response?.clients) ? response.clients : [];
+        const isScheduledToday = (client) => {
+          const info = client?.scheduled_info || {};
+          return Boolean(info?.is_planned_commercial || info?.is_planned_technical || info?.is_planned);
+        };
+        const sorted = [...clients].sort((a, b) => Number(isScheduledToday(b)) - Number(isScheduledToday(a)));
         if (isMounted) {
-          setAvailableClients(clients);
+          setAvailableClients(sorted);
           setStatus("initializing");
         }
       } catch (err) {
