@@ -112,6 +112,56 @@ const getActiveExceptionByFlow = async ({ userId, flow = "any" }) => {
   return result.rows[0] || null;
 };
 
+// Regla de negocio confirmada: una salida operacional con visita a cliente
+// abierta no puede cerrarse (cierre operacional / cierre de viaje) hasta que
+// se marque la salida del cliente. Se extrae aqui (antes vivia inline solo
+// en getToday) para reutilizarla tambien como validacion de bloqueo en
+// clockInOperational y clockCloseTrip.
+const findActiveFieldVisitForUser = async ({ userEmail, businessDate }) => {
+  const result = await db.query(
+    `
+      SELECT *
+      FROM (
+        SELECT
+          'client'::text AS visit_scope,
+          cvl.id,
+          cvl.client_request_id AS client_id,
+          NULL::text AS prospect_name,
+          cvl.status,
+          cvl.visit_date,
+          cvl.hora_entrada AS entry_time,
+          cvl.hora_salida AS exit_time
+        FROM client_visit_logs cvl
+        WHERE LOWER(COALESCE(cvl.user_email, '')) = LOWER($1)
+          AND cvl.status = 'in_visit'
+          AND cvl.visit_date >= ($2::date - INTERVAL '1 day')::date
+
+        UNION ALL
+
+        SELECT
+          'prospect'::text AS visit_scope,
+          pv.id,
+          NULL::integer AS client_id,
+          pv.prospect_name,
+          pv.status,
+          pv.visit_date,
+          pv.check_in_time AS entry_time,
+          pv.check_out_time AS exit_time
+        FROM prospect_visits pv
+        WHERE LOWER(COALESCE(pv.user_email, '')) = LOWER($1)
+          AND pv.status = 'in_visit'
+          AND pv.visit_date >= ($2::date - INTERVAL '1 day')::date
+      ) visits
+      ORDER BY entry_time DESC NULLS LAST, id DESC
+      LIMIT 1
+    `,
+    [userEmail || "", businessDate]
+  );
+  return result.rows[0]
+    ? normalizeRow(result.rows[0], ["visit_date", "entry_time", "exit_time"])
+    : null;
+};
+
 const ACTIVE_TECHNICAL_VISIT_STATUSES = Object.freeze(["programado", "confirmado", "en_proceso"]);
 const TECHNICAL_CLIENT_ACTIVITY_SYNC_ROLES = new Set([
   "servicio_tecnico",
@@ -3549,48 +3599,7 @@ const getToday = async (req, res) => {
       'lunch_end_location_timestamp', 'exit_location_timestamp'
     ], ['overtime_hours', 'total_hours'])) : null;
 
-    const activeFieldVisitResult = await db.query(
-      `
-        SELECT *
-        FROM (
-          SELECT
-            'client'::text AS visit_scope,
-            cvl.id,
-            cvl.client_request_id AS client_id,
-            NULL::text AS prospect_name,
-            cvl.status,
-            cvl.visit_date,
-            cvl.hora_entrada AS entry_time,
-            cvl.hora_salida AS exit_time
-          FROM client_visit_logs cvl
-          WHERE LOWER(COALESCE(cvl.user_email, '')) = LOWER($1)
-            AND cvl.status = 'in_visit'
-            AND cvl.visit_date >= ($2::date - INTERVAL '1 day')::date
-
-          UNION ALL
-
-          SELECT
-            'prospect'::text AS visit_scope,
-            pv.id,
-            NULL::integer AS client_id,
-            pv.prospect_name,
-            pv.status,
-            pv.visit_date,
-            pv.check_in_time AS entry_time,
-            pv.check_out_time AS exit_time
-          FROM prospect_visits pv
-          WHERE LOWER(COALESCE(pv.user_email, '')) = LOWER($1)
-            AND pv.status = 'in_visit'
-            AND pv.visit_date >= ($2::date - INTERVAL '1 day')::date
-        ) visits
-        ORDER BY entry_time DESC NULLS LAST, id DESC
-        LIMIT 1
-      `,
-      [email || "", today]
-    );
-    const activeFieldVisit = activeFieldVisitResult.rows[0]
-      ? normalizeRow(activeFieldVisitResult.rows[0], ["visit_date", "entry_time", "exit_time"])
-      : null;
+    const activeFieldVisit = await findActiveFieldVisitForUser({ userEmail: email, businessDate: today });
 
     const activeTimeOff = await findActiveTimeOffForMarking({
       userEmail: req.user?.email || null,
@@ -5654,6 +5663,18 @@ const clockInOperational = async (req, res) => {
       return res.status(404).json({ ok: false, code: "NO_ACTIVE_OPERATIONAL", message: "No se encontro una salida operacional activa" });
     }
 
+    // Regla de negocio confirmada: no se puede cerrar la operacion con una
+    // visita a cliente todavia abierta -- primero hay que marcar la salida
+    // del cliente.
+    const activeFieldVisit = await findActiveFieldVisitForUser({ userEmail: email, businessDate: getBusinessDate(now) });
+    if (activeFieldVisit) {
+      return res.status(409).json({
+        ok: false,
+        code: "CLIENT_VISIT_MUST_CLOSE_FIRST",
+        message: "Tienes una visita a cliente en curso. Marca la salida del cliente antes de cerrar la operacion.",
+      });
+    }
+
     const operationalPayload = await resolveOperationalJourneyPayload({
       req,
       phase: "end",
@@ -6379,6 +6400,18 @@ const clockCloseTrip = async (req, res) => {
         ok: false,
         code: "NO_ACTIVE_OPERATIONAL",
         message: "No hay un viaje operacional activo para cerrar",
+      });
+    }
+
+    // Regla de negocio confirmada: no se puede cerrar la operacion con una
+    // visita a cliente todavia abierta -- primero hay que marcar la salida
+    // del cliente.
+    const activeFieldVisit = await findActiveFieldVisitForUser({ userEmail: email, businessDate: today });
+    if (activeFieldVisit) {
+      return res.status(409).json({
+        ok: false,
+        code: "CLIENT_VISIT_MUST_CLOSE_FIRST",
+        message: "Tienes una visita a cliente en curso. Marca la salida del cliente antes de cerrar la operacion.",
       });
     }
 

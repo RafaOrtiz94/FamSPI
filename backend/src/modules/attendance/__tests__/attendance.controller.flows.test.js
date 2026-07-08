@@ -189,7 +189,8 @@ describe("attendance flow separation", () => {
       .mockResolvedValue({ rows: [], rowCount: 0 }) // permanent fallback for autoComplete calls
       .mockResolvedValueOnce({ rows: [] })                   // no active timeoff
       .mockResolvedValueOnce({ rows: [activeOperational] })  // active operational
-      .mockResolvedValueOnce({ rows: [completed] });         // update exception (index [2] — assertion below checks this)
+      .mockResolvedValueOnce({ rows: [] })                   // no active client visit (findActiveFieldVisitForUser)
+      .mockResolvedValueOnce({ rows: [completed] });         // update exception
 
     await controller.clockInOperational(req, res);
 
@@ -201,7 +202,7 @@ describe("attendance flow separation", () => {
         data: expect.objectContaining({ id: 502, status: "COMPLETED" }),
       }),
     );
-    const updateCallArgs = db.query.mock.calls[2][1];
+    const updateCallArgs = db.query.mock.calls[3][1];
     expect(updateCallArgs[2]).toContain("[RESUMEN_OPERACIONAL]");
   });
 
@@ -1072,5 +1073,71 @@ describe("attendance flow separation", () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  // Regla de negocio confirmada: no se puede cerrar la operacion (cierre
+  // operacional o cierre de viaje) con una visita a cliente todavia abierta.
+  test("blocks closing the operation (clockInOperational) while a client visit is still open", async () => {
+    const req = {
+      user: { id: 557, email: "visita-abierta@fam-project.com" },
+      body: { location: "-2.170998,-79.922359", location_accuracy: 20 },
+    };
+    const res = createRes();
+    const activeOperational = {
+      id: 4243,
+      type: "operacion_campo",
+      status: "ACTIVE",
+      start_time: "2026-07-08T14:00:00.000Z",
+      description: "salida operacional",
+    };
+    const openVisit = { id: 900, visit_scope: "client", client_id: 150, status: "in_visit", visit_date: "2026-07-08", entry_time: "2026-07-08T15:00:00.000Z" };
+
+    db.query
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] })                  // no active timeoff
+      .mockResolvedValueOnce({ rows: [activeOperational] }) // active operational
+      .mockResolvedValueOnce({ rows: [openVisit] });        // findActiveFieldVisitForUser: visita abierta
+
+    await controller.clockInOperational(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        code: "CLIENT_VISIT_MUST_CLOSE_FIRST",
+      }),
+    );
+  });
+
+  test("blocks closing the trip (clockCloseTrip) while a client visit is still open", async () => {
+    const req = {
+      user: { id: 558, email: "visita-abierta-viaje@fam-project.com" },
+      body: { location: "-2.170998,-79.922359", location_accuracy: 20, closure_reason: "fin de ruta" },
+    };
+    const res = createRes();
+    const activeOperational = {
+      id: 4244,
+      type: "operacion_campo",
+      status: "ON_SITE",
+      start_time: "2026-07-08T14:00:00.000Z",
+      description: "salida operacional",
+    };
+    const openVisit = { id: 901, visit_scope: "client", client_id: 151, status: "in_visit", visit_date: "2026-07-08", entry_time: "2026-07-08T15:00:00.000Z" };
+
+    db.query
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] })                  // no active timeoff
+      .mockResolvedValueOnce({ rows: [activeOperational] }) // active operational
+      .mockResolvedValueOnce({ rows: [openVisit] });        // findActiveFieldVisitForUser: visita abierta
+
+    await controller.clockCloseTrip(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        code: "CLIENT_VISIT_MUST_CLOSE_FIRST",
+      }),
+    );
   });
 });

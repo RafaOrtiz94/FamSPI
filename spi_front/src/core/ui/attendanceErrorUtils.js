@@ -13,6 +13,10 @@ const ATTENDANCE_ERROR_CODE_MESSAGES = Object.freeze({
     type: "warning",
     message: "No puedes marcar asistencia mientras tengas permiso/vacaciones activos.",
   },
+  CLIENT_VISIT_MUST_CLOSE_FIRST: {
+    type: "warning",
+    message: "Tienes una visita a cliente en curso. Marca la salida del cliente antes de cerrar la operacion.",
+  },
   ENTRY_MARK_CUTOFF_REACHED: {
     type: "warning",
     message: "Ya pasó la hora límite para marcar entrada (09:20). Solicita regularización.",

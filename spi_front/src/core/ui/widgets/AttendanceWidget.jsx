@@ -218,11 +218,14 @@ const getPunctualityState = (entryTime) => {
     return { state: "no_entry", minutesLate: null, points: 0 };
   }
 
+  // hourCycle explicito: hour12:false por si solo no garantiza 0-23 en todas
+  // las versiones de ICU (puede devolver "24" para la medianoche).
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: ECUADOR_TZ,
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    hourCycle: "h23",
   }).formatToParts(parsed);
   const partMap = parts.reduce((acc, p) => { if (p.type !== "literal") acc[p.type] = Number(p.value); return acc; }, {});
   const minutes = (partMap.hour || 0) * 60 + (partMap.minute || 0);
@@ -246,6 +249,7 @@ const getEcuadorEntryMinutes = (entryTime) => {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    hourCycle: "h23",
   }).formatToParts(parsed);
   const partMap = parts.reduce((acc, p) => {
     if (p.type !== "literal") acc[p.type] = Number(p.value);
@@ -1469,11 +1473,19 @@ const AttendanceWidget = () => {
 
   const handleOfficeArrivalQuick = async () => {
     if (!hasActiveException) {
-      showToast("No tienes una salida de oficina activa para cerrar.", "warning");
+      showToast("No tienes una salida operacional activa para cerrar.", "warning");
       return;
     }
     if (!isFieldOperationFlow) {
       showToast("La salida activa actual es inesperada. Usa el flujo de salida inesperada para cerrarla.", "warning");
+      return;
+    }
+    // Regla de negocio confirmada: no se puede cerrar la operacion con una
+    // visita a cliente todavia abierta. El backend tambien la valida
+    // (CLIENT_VISIT_MUST_CLOSE_FIRST); este chequeo es solo para dar el
+    // aviso de inmediato sin abrir el modal de cierre.
+    if (hasOpenFieldVisit) {
+      showToast("Tienes una visita a cliente en curso. Marca la salida del cliente antes de cerrar la operacion.", "warning");
       return;
     }
 
@@ -1903,7 +1915,7 @@ const AttendanceWidget = () => {
   const tripSteps = useMemo(() => ([
     {
       key: "office_departure",
-      label: "Salida de oficina",
+      label: "Salida operacional",
       time: activeException?.start_time || null,
       state: activeException?.start_time ? "done" : "current",
     },
@@ -1929,7 +1941,7 @@ const AttendanceWidget = () => {
     },
     {
       key: "office_arrival",
-      label: "Llegada a oficina",
+      label: "Cierre de operación",
       time: activeException?.return_time || null,
       state: activeException?.return_time
         ? "done"
@@ -2020,9 +2032,9 @@ const AttendanceWidget = () => {
         return {
           icon,
           badgeText: "Salida operacional",
-          statusText: "Salida operacional: regresando a oficina",
-          actionLabel: "Llegada a oficina nuevamente",
-          actionDetail: "Cierra la salida operacional cuando regreses a la oficina.",
+          statusText: "Salida operacional: cerrando",
+          actionLabel: "Cerrar operación",
+          actionDetail: "Cuando llegues al lugar donde terminas la gestión, marca el cierre de la operación.",
         };
       }
       if (exceptionStatus === "ON_SITE") {
@@ -2337,7 +2349,7 @@ const AttendanceWidget = () => {
                 <p className="text-xs text-slate-500">
                   {canUseAdvancedFieldFlow
                     ? "Personal de campo autorizado puede vincular la salida con visitas, clientes y cronograma."
-                    : "Inicia el flujo general de salida, destino, retorno y llegada a oficina."}
+                    : "Inicia el flujo general: salida operacional, llegada a destino, salida del destino y cierre de la operación."}
                 </p>
               </div>
             </div>
@@ -2349,7 +2361,7 @@ const AttendanceWidget = () => {
             disabled={fieldVisitSubmitting}
             className={ACTION_BTN_BASE_CLASS}
           >
-            {fieldVisitSubmitting ? "Registrando..." : "Salida de oficina"}
+            {fieldVisitSubmitting ? "Registrando..." : "Salida operacional"}
           </Button>
         </div>
       );
@@ -2571,7 +2583,7 @@ const AttendanceWidget = () => {
             </div>
             {renderOperationalLunchCard()}
             <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3">
-              <p className="text-sm text-indigo-800">Ya saliste del destino. Solo falta registrar la llegada final a oficina.</p>
+              <p className="text-sm text-indigo-800">Ya saliste del destino. Cuando llegues al lugar donde terminas la gestión, marca el cierre de la operación.</p>
             </div>
             <Button
               variant="success"
@@ -2579,7 +2591,7 @@ const AttendanceWidget = () => {
               disabled={fieldVisitSubmitting}
               className={ACTION_BTN_BASE_CLASS}
             >
-              {fieldVisitSubmitting ? "Registrando..." : "Llegada a oficina nuevamente"}
+              {fieldVisitSubmitting ? "Registrando..." : "Cerrar operación"}
             </Button>
           </div>
         </div>
