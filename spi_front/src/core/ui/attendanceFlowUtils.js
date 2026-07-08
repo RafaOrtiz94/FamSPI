@@ -258,7 +258,7 @@ const minutesSince = (isoValue, now) => {
   return Math.round((now.getTime() - parsed.getTime()) / 60000);
 };
 
-export const resolveAttendancePendingActions = (attendanceData = {}, now = new Date()) => {
+export const resolveAttendancePendingActions = (attendanceData = {}, now = new Date(), activeException = null) => {
   const canonicalFlow = attendanceData?.canonical_flow || null;
   const flowStep = resolveAttendanceFlowStep(canonicalFlow);
   const pending = [];
@@ -270,7 +270,24 @@ export const resolveAttendancePendingActions = (attendanceData = {}, now = new D
       label: "Salida operacional abierta",
       detail: "Tienes una salida operacional sin cerrar.",
       actionKey: flowStep.nextActionKey,
+      linkTo: null,
     });
+
+    // Fase 7 (Plan Maestro Asistencia): si la salida usa vehiculo personal, el
+    // cierre generara un registro de viatico por kilometraje — se lo anticipamos
+    // al usuario para que no le sorprenda (recomendacion 17).
+    if (activeException?.uses_personal_vehicle) {
+      pending.push({
+        id: "viatico_expected",
+        severity: "info",
+        label: "Esta salida generara viatico",
+        detail: "Usaste vehiculo personal: al cerrar se registrara el kilometraje para viaticos.",
+        actionKey: null,
+        // linkTo pendiente: no hay ruta de "mis viaticos" confirmada y accesible
+        // para todos los roles operativos en AppRoutes.jsx (ver backlog Fase 7).
+        linkTo: null,
+      });
+    }
   }
 
   if (flowStep.contextFlags?.has_active_unexpected) {
@@ -280,6 +297,7 @@ export const resolveAttendancePendingActions = (attendanceData = {}, now = new D
       label: "Salida inesperada abierta",
       detail: "Registra tu regreso para cerrar esta salida.",
       actionKey: flowStep.nextActionKey,
+      linkTo: null,
     });
   }
 
@@ -290,6 +308,7 @@ export const resolveAttendancePendingActions = (attendanceData = {}, now = new D
       label: "Visita en curso",
       detail: "Cierra la visita cuando termines la gestion con el cliente.",
       actionKey: flowStep.nextActionKey,
+      linkTo: null,
     });
   }
 
@@ -300,6 +319,10 @@ export const resolveAttendancePendingActions = (attendanceData = {}, now = new D
       label: "Permiso en curso",
       detail: "Tu permiso aprobado esta activo hoy.",
       actionKey: flowStep.nextActionKey,
+      // linkTo pendiente: PermisosPage solo esta montada bajo
+      // /dashboard/talento-humano/permisos en AppRoutes.jsx, no hay ruta
+      // confirmada de "mis permisos" para todos los roles (ver backlog Fase 7).
+      linkTo: null,
     });
   }
 
@@ -310,6 +333,7 @@ export const resolveAttendancePendingActions = (attendanceData = {}, now = new D
       label: "Entrada pendiente de regularizacion",
       detail: "Tu entrada de hoy quedo pendiente de aprobacion de Talento Humano.",
       actionKey: null,
+      linkTo: null,
     });
   }
 
@@ -321,6 +345,7 @@ export const resolveAttendancePendingActions = (attendanceData = {}, now = new D
       label: "Atraso sin justificar",
       detail: "Puedes justificar tu atraso de hoy antes del corte.",
       actionKey: null,
+      linkTo: null,
     });
   }
 
@@ -338,6 +363,7 @@ export const resolveAttendancePendingActions = (attendanceData = {}, now = new D
         label: "Almuerzo mas largo de lo habitual",
         detail: `Llevas ${elapsed} minutos en almuerzo. Registra tu regreso cuando puedas.`,
         actionKey: "almuerzo-entrada",
+        linkTo: null,
       });
     }
   }
@@ -353,6 +379,7 @@ export const resolveAttendancePendingActions = (attendanceData = {}, now = new D
         label: "Jornada muy extendida",
         detail: "Verifica si olvidaste marcar tu salida.",
         actionKey: "salida",
+        linkTo: null,
       });
     }
   }

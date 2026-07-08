@@ -2313,8 +2313,8 @@ const AttendanceWidget = () => {
   // Fase 4 (Plan Maestro Asistencia): bandeja de pendientes derivada del mismo
   // payload de getTodayAttendance() (canonical_flow + late_policy), sin endpoint nuevo.
   const pendingActions = useMemo(
-    () => resolveAttendancePendingActions(attendance || {}, currentTime),
-    [attendance, currentTime],
+    () => resolveAttendancePendingActions(attendance || {}, currentTime, activeException),
+    [attendance, currentTime, activeException],
   );
 
   const TripStep = ({ label, time, state }) => {
