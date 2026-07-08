@@ -206,6 +206,29 @@ export const getAttendanceActionLabel = (rawAction, fallback = "Marcación") =>
 export const getAttendanceNextStepHint = (rawAction) =>
   getAttendanceActionMeta(rawAction)?.nextStepHint || "Continúa con la siguiente marcación de tu flujo.";
 
+// Fase 8 (Plan Maestro Asistencia): ayuda contextual breve por accion, mostrada
+// antes de pedir GPS/confirmar, para que el usuario sepa que va a pasar.
+const ATTENDANCE_HELP_HINTS = Object.freeze({
+  entrada: "Se registrara tu hora de entrada con tu ubicacion actual.",
+  "almuerzo-salida": "Se registrara tu salida a almuerzo. Recuerda marcar el regreso despues.",
+  "almuerzo-entrada": "Se registrara tu regreso de almuerzo.",
+  salida: "Se registrara el cierre de tu jornada de hoy.",
+  "salida-oficina": "Vas a iniciar una salida operacional (visita, banco, gestion externa, etc).",
+  "entrada-oficina": "Vas a cerrar tu salida operacional activa y regresar a oficina.",
+  "llegada-destino": "Confirma que llegaste al lugar de tu gestion.",
+  "cierre-viaje": "Vas a cerrar tu salida operacional desde fuera de la oficina.",
+  "retorno-operacional": "Vas a iniciar tu regreso a oficina.",
+  "cliente-entrada": "Vas a registrar el inicio de una visita a cliente o prospecto.",
+  "cliente-salida": "Vas a cerrar la visita activa y elegir tu siguiente paso.",
+  "permission-entry-start": "Se registrara la entrada y salida a tu permiso aprobado en un solo paso.",
+  "permission-exit-finish": "Se cerrara tu permiso y tu jornada de hoy.",
+});
+
+export const getAttendanceHelpHint = (rawAction) => {
+  const canonicalKey = resolveAttendanceActionKey(rawAction);
+  return (canonicalKey && ATTENDANCE_HELP_HINTS[canonicalKey]) || null;
+};
+
 // Fase 1: resolver unico de flujo. Consume el envelope canonico que el backend
 // ya expone en getTodayAttendance()/getActiveException() como `data.canonical_flow`
 // (flow_kind, current_step, next_step, allowed_actions, context_flags).

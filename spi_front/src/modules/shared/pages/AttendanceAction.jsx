@@ -28,7 +28,7 @@ import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
 import CameraCaptureField from "../../../core/ui/components/CameraCaptureField";
 import { getAttendanceErrorInfo } from "../../../core/ui/attendanceErrorUtils";
-import { isOperationalFlow, getAttendanceNextStepHint } from "../../../core/ui/attendanceFlowUtils";
+import { isOperationalFlow, getAttendanceNextStepHint, getAttendanceHelpHint } from "../../../core/ui/attendanceFlowUtils";
 
 
 const resolveShortcutParam = (params, keys = []) => {
@@ -422,6 +422,8 @@ const AttendanceAction = () => {
   }), [ensureExceptionFlow, resolveVisitExitPayload]);
 
   const config = ACTION_MAP[action];
+  // Fase 8 (Plan Maestro Asistencia): ayuda contextual breve antes de pedir GPS.
+  const helpHint = useMemo(() => getAttendanceHelpHint(action), [action]);
   const operationalPhase = action === "salida-oficina" || action === "salida-campo"
     ? "start"
     : action === "entrada-oficina" || action === "entrada-campo"
@@ -1142,6 +1144,9 @@ const AttendanceAction = () => {
                 </div>
                 <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Obteniendo ubicación</h2>
                 <p className="text-gray-500 dark:text-gray-400 italic">Un momento, por favor...</p>
+                {helpHint && (
+                  <p className="mt-4 max-w-xs text-xs text-gray-400 dark:text-gray-500">{helpHint}</p>
+                )}
               </motion.div>
             )}
 
