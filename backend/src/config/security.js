@@ -73,6 +73,7 @@ const corsConfig = {
     "If-Match",
     "if-match",
     "x-jobs-key",
+    "x-viaticos-flow",
   ],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   exposedHeaders: ["X-SHA256", "Content-Disposition"],

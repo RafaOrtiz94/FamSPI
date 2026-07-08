@@ -103,8 +103,13 @@ if (!DISABLE_RATE_LIMIT) {
 }
 
 app.use(cors(corsConfig));
-app.use(express.json({ limit: "5mb" }));
-app.use(express.urlencoded({ extended: true, limit: "5mb" }));
+// 25mb: viaticos ya valida documentos de respaldo (file_base64) hasta 15MB
+// en negocio (viaticos.service.js createAllowanceDocument), pero base64
+// infla el tamano ~33% y el body JSON le suma overhead -- con 5mb ese limite
+// de negocio era inalcanzable, el body parser rechazaba antes con un 413
+// crudo (sin el mensaje "El archivo excede 15MB").
+app.use(express.json({ limit: "25mb" }));
+app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
 const requestContextMiddleware = require("./middlewares/requestContext");
 app.use(requestContextMiddleware);
