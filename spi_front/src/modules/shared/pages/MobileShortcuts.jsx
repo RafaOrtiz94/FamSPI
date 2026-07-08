@@ -1,7 +1,6 @@
 import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
-  FiAlertTriangle,
   FiArrowLeft,
   FiBriefcase,
   FiCheckCircle,
@@ -14,6 +13,7 @@ import {
   FiUserCheck,
 } from "react-icons/fi";
 import { useAuth } from "../../../core/auth/AuthContext";
+import { getAttendanceActionMeta } from "../../../core/ui/attendanceFlowUtils";
 
 const FIELD_OPERATION_ROLES = new Set([
   "comercial",
@@ -23,6 +23,8 @@ const FIELD_OPERATION_ROLES = new Set([
   "backoffice_comercial",
   "backoffice",
   "tecnico",
+  "ing_servicio",
+  "esp_app",
   "servicio_tecnico",
   "jefe_tecnico",
   "jefe_servicio_tecnico",
@@ -50,118 +52,32 @@ const shortcutHref = (action, params = {}) => {
   return `/asistencia/marcar/${action}${query ? `?${query}` : ""}`;
 };
 
+const withShortcutMeta = (action, icon, tone) => {
+  const meta = getAttendanceActionMeta(action);
+  return {
+    label: meta?.shortcutLabel || meta?.actionLabel || action,
+    detail: meta?.shortcutDetail || "",
+    action,
+    icon,
+    tone,
+  };
+};
+
 const baseShortcuts = [
-  {
-    label: "Marcar entrada",
-    detail: "Inicio de jornada",
-    action: "entrada",
-    icon: FiLogIn,
-    tone: "bg-emerald-600 text-white",
-  },
-  {
-    label: "Salida almuerzo",
-    detail: "Pausa de mediodia",
-    action: "almuerzo-salida",
-    icon: FiCoffee,
-    tone: "bg-amber-500 text-white",
-  },
-  {
-    label: "Entrada almuerzo",
-    detail: "Regreso de almuerzo",
-    action: "almuerzo-entrada",
-    icon: FiCoffee,
-    tone: "bg-lime-600 text-white",
-  },
-  {
-    label: "Salida final",
-    detail: "Cierre de jornada",
-    action: "salida",
-    icon: FiLogOut,
-    tone: "bg-rose-600 text-white",
-  },
+  withShortcutMeta("entrada", FiLogIn, "bg-emerald-600 text-white"),
+  withShortcutMeta("almuerzo-salida", FiCoffee, "bg-amber-500 text-white"),
+  withShortcutMeta("almuerzo-entrada", FiCoffee, "bg-lime-600 text-white"),
+  withShortcutMeta("salida", FiLogOut, "bg-rose-600 text-white"),
 ];
 
 const fieldShortcuts = [
-  {
-    label: "Salida operacional",
-    detail: "Inicio de viaje",
-    action: "salida-oficina",
-    icon: FiBriefcase,
-    tone: "bg-sky-700 text-white",
-  },
-  {
-    label: "Llegada destino",
-    detail: "Arribo al sitio",
-    action: "llegada-destino",
-    icon: FiMapPin,
-    tone: "bg-cyan-700 text-white",
-  },
-  {
-    label: "Entrada cliente",
-    detail: "Inicio de visita",
-    action: "cliente-entrada",
-    icon: FiUserCheck,
-    tone: "bg-violet-700 text-white",
-  },
-  {
-    label: "Salida cliente",
-    detail: "Cerrar visita y elegir siguiente paso",
-    action: "cliente-salida",
-    icon: FiCheckCircle,
-    tone: "bg-indigo-700 text-white",
-  },
-  {
-    label: "Retorno operacional",
-    detail: "Iniciar regreso a oficina",
-    action: "retorno-operacional",
-    icon: FiNavigation,
-    tone: "bg-slate-800 text-white",
-  },
-  {
-    label: "Entrada oficina",
-    detail: "Cerrar ciclo operacional",
-    action: "entrada-oficina",
-    icon: FiArrowLeft,
-    tone: "bg-teal-700 text-white",
-  },
-  {
-    label: "Cierre viaje",
-    detail: "Cerrar desde fuera de oficina",
-    action: "cierre-viaje",
-    icon: FiCheckCircle,
-    tone: "bg-fuchsia-700 text-white",
-  },
-];
-
-const exceptionShortcuts = [
-  {
-    label: "Salida inesperada",
-    detail: "Permiso, emergencia o gestion puntual",
-    action: "salida-imprevista",
-    icon: FiAlertTriangle,
-    tone: "bg-orange-600 text-white",
-  },
-  {
-    label: "Llegada imprevista",
-    detail: "Arribo al punto de gestion",
-    action: "llegada-imprevista",
-    icon: FiMapPin,
-    tone: "bg-yellow-600 text-white",
-  },
-  {
-    label: "Retorno imprevisto",
-    detail: "Salida del punto de gestion",
-    action: "retorno-imprevisto",
-    icon: FiNavigation,
-    tone: "bg-stone-700 text-white",
-  },
-  {
-    label: "Regreso imprevisto",
-    detail: "Cierre de salida inesperada",
-    action: "regreso-imprevisto",
-    icon: FiArrowLeft,
-    tone: "bg-zinc-700 text-white",
-  },
+  withShortcutMeta("salida-oficina", FiBriefcase, "bg-sky-700 text-white"),
+  withShortcutMeta("llegada-destino", FiMapPin, "bg-cyan-700 text-white"),
+  withShortcutMeta("cliente-entrada", FiUserCheck, "bg-violet-700 text-white"),
+  withShortcutMeta("cliente-salida", FiCheckCircle, "bg-indigo-700 text-white"),
+  withShortcutMeta("retorno-operacional", FiNavigation, "bg-slate-800 text-white"),
+  withShortcutMeta("entrada-oficina", FiArrowLeft, "bg-teal-700 text-white"),
+  withShortcutMeta("cierre-viaje", FiCheckCircle, "bg-fuchsia-700 text-white"),
 ];
 
 const ShortcutButton = ({ item }) => {
@@ -202,6 +118,12 @@ const MobileShortcuts = () => {
     () => buildRoleTokens(user).some((role) => FIELD_OPERATION_ROLES.has(role)),
     [user],
   );
+  const visibleOperationalShortcuts = useMemo(
+    () => canUseFieldOperations
+      ? fieldShortcuts
+      : fieldShortcuts.filter((item) => !["cliente-entrada", "cliente-salida"].includes(item.action)),
+    [canUseFieldOperations],
+  );
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-5 text-slate-900">
@@ -215,14 +137,7 @@ const MobileShortcuts = () => {
         </header>
 
         <ShortcutSection title="Jornada" items={baseShortcuts} />
-        <ShortcutSection title="Operacion de campo" items={canUseFieldOperations ? fieldShortcuts : []} />
-        <ShortcutSection title="Salidas inesperadas" items={exceptionShortcuts} />
-
-        {!canUseFieldOperations ? (
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
-            Tu rol no tiene atajos de salida operacional habilitados.
-          </div>
-        ) : null}
+        <ShortcutSection title="Salidas y visitas" items={visibleOperationalShortcuts} />
       </div>
     </main>
   );

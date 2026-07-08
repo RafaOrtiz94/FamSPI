@@ -10,10 +10,6 @@ import {
   marcarAlmuerzoSalida,
   marcarAlmuerzoEntrada,
   marcarSalida,
-  marcarSalidaImprevista,
-  marcarRegresoImprevisto,
-  marcarLlegadaImprevista,
-  marcarRetornoImprevisto,
   marcarSalidaOficina,
   marcarEntradaOficina,
   marcarSalidaCampo,
@@ -30,8 +26,9 @@ import { getLocationForAction, startLocationPrewarm, stopLocationPrewarm } from 
 import { fetchClients } from "../../../core/api/clientsApi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
+import CameraCaptureField from "../../../core/ui/components/CameraCaptureField";
 import { getAttendanceErrorInfo } from "../../../core/ui/attendanceErrorUtils";
-import { isOperationalFlow } from "../../../core/ui/attendanceFlowUtils";
+import { isOperationalFlow, getAttendanceNextStepHint } from "../../../core/ui/attendanceFlowUtils";
 
 
 const resolveShortcutParam = (params, keys = []) => {
@@ -100,6 +97,16 @@ const withTimeout = (promise, ms, timeoutMessage) =>
       });
   });
 
+const OPERATIONAL_CATEGORY_OPTIONS = [
+  { value: "cliente", label: "Cliente" },
+  { value: "reunion", label: "Reunion" },
+  { value: "banco", label: "Banco" },
+  { value: "ministerio", label: "Ministerio" },
+  { value: "proveedor", label: "Proveedor" },
+  { value: "gestion_oficina", label: "Gestion operativa" },
+  { value: "otro", label: "Otro" },
+];
+
 const AttendanceAction = () => {
   const { action } = useParams();
   const navigate = useNavigate();
@@ -119,6 +126,14 @@ const AttendanceAction = () => {
   const [manualObservations, setManualObservations] = useState("");
   const [manualPostVisitAction, setManualPostVisitAction] = useState("");
   const [manualStepError, setManualStepError] = useState("");
+  const [activeOperationalException, setActiveOperationalException] = useState(null);
+  const [operationalCategory, setOperationalCategory] = useState("");
+  const [operationalDetail, setOperationalDetail] = useState("");
+  const [usesPersonalVehicle, setUsesPersonalVehicle] = useState("no");
+  const [startOdometerKm, setStartOdometerKm] = useState("");
+  const [endOdometerKm, setEndOdometerKm] = useState("");
+  const [startOdometerPhoto, setStartOdometerPhoto] = useState(null);
+  const [endOdometerPhoto, setEndOdometerPhoto] = useState(null);
   const [manualSubmitNonce, setManualSubmitNonce] = useState(0);
   const processedRef = useRef(false);
   const executionKeyRef = useRef("");
@@ -140,7 +155,7 @@ const AttendanceAction = () => {
     }
 
     if (!activeException) {
-      throw new Error("No tienes una salida inesperada activa para completar este paso.");
+      throw new Error("La marcacion solicitada ya no esta disponible en la interfaz.");
     }
     if (operationalFlow) {
       throw new Error("La salida activa actual es operacional. Usa el flujo operacional para continuar.");
@@ -230,48 +245,16 @@ const AttendanceAction = () => {
       requiresParams: false,
       icon: <FiClock className="text-red-500" />,
     },
-    "salida-imprevista": {
-      fn: async (currentLoc, params, markMeta) =>
-        marcarSalidaImprevista(currentLoc, params.description || "Salida imprevista via atajo", markMeta),
-      label: "Salida inesperada",
-      syncTarget: "start",
-      requiresParams: false,
-      icon: <FiClock className="text-rose-500" />,
-    },
-    "regreso-imprevisto": {
-      fn: async (currentLoc, _params, markMeta) => {
-        await ensureExceptionFlow("unexpected");
-        return marcarRegresoImprevisto(currentLoc, markMeta);
-      },
-      label: "Entrada inesperada",
-      syncTarget: "return",
-      requiresParams: false,
-      icon: <FiClock className="text-rose-500" />,
-    },
-    "llegada-imprevista": {
-      fn: async (currentLoc, _params, markMeta) => {
-        await ensureExceptionFlow("unexpected");
-        return marcarLlegadaImprevista(currentLoc, markMeta);
-      },
-      label: "Llegada al lugar inesperado",
-      syncTarget: "onsite",
-      requiresParams: false,
-      icon: <FiClock className="text-rose-500" />,
-    },
-    "retorno-imprevisto": {
-      fn: async (currentLoc, _params, markMeta) => {
-        await ensureExceptionFlow("unexpected");
-        return marcarRetornoImprevisto(currentLoc, markMeta);
-      },
-      label: "Salida del lugar (retorno oficina)",
-      syncTarget: "returning",
-      requiresParams: false,
-      icon: <FiClock className="text-rose-500" />,
-    },
     "salida-oficina": {
       fn: async (currentLoc, params, markMeta) =>
-        marcarSalidaOficina(currentLoc, params.description || "Salida de oficina o viaje via atajo", markMeta),
-      label: "Salida oficina o viaje",
+        marcarSalidaOficina(currentLoc, {
+          description: params.description || "Salida operacional de campo / oficina",
+          operational_category: params.operationalCategory,
+          uses_personal_vehicle: params.usesPersonalVehicle,
+          odometer_start_km: params.startOdometerKm,
+          start_odometer_photo: params.startOdometerPhoto,
+        }, markMeta),
+      label: "Salida operacional",
       syncTarget: "start",
       requiresParams: false,
       icon: <FiClock className="text-amber-500" />,
@@ -279,17 +262,26 @@ const AttendanceAction = () => {
     "entrada-oficina": {
       fn: async (currentLoc, _params, markMeta) => {
         await ensureExceptionFlow("operational");
-        return marcarEntradaOficina(currentLoc, markMeta);
+        return marcarEntradaOficina(currentLoc, {
+          odometer_end_km: _params.endOdometerKm,
+          end_odometer_photo: _params.endOdometerPhoto,
+        }, markMeta);
       },
-      label: "Entrada oficina o viaje",
+      label: "Cierre operacional",
       syncTarget: "return",
       requiresParams: false,
       icon: <FiClock className="text-amber-500" />,
     },
     "salida-campo": {
       fn: async (currentLoc, params, markMeta) =>
-        marcarSalidaCampo(currentLoc, params.description || "Salida de campo via atajo", markMeta),
-      label: "Salida de campo",
+        marcarSalidaCampo(currentLoc, {
+          description: params.description || "Salida operacional de campo / oficina",
+          operational_category: params.operationalCategory,
+          uses_personal_vehicle: params.usesPersonalVehicle,
+          odometer_start_km: params.startOdometerKm,
+          start_odometer_photo: params.startOdometerPhoto,
+        }, markMeta),
+      label: "Salida operacional",
       syncTarget: "start",
       requiresParams: false,
       icon: <FiClock className="text-amber-500" />,
@@ -297,9 +289,12 @@ const AttendanceAction = () => {
     "entrada-campo": {
       fn: async (currentLoc, _params, markMeta) => {
         await ensureExceptionFlow("operational");
-        return marcarEntradaCampo(currentLoc, markMeta);
+        return marcarEntradaCampo(currentLoc, {
+          odometer_end_km: _params.endOdometerKm,
+          end_odometer_photo: _params.endOdometerPhoto,
+        }, markMeta);
       },
-      label: "Entrada de campo",
+      label: "Cierre operacional",
       syncTarget: "return",
       requiresParams: false,
       icon: <FiClock className="text-amber-500" />,
@@ -317,7 +312,11 @@ const AttendanceAction = () => {
     "cierre-viaje": {
       fn: async (currentLoc, params, markMeta) => {
         await ensureExceptionFlow("operational");
-        return marcarCierreViaje(currentLoc, params.description || "Cierre de viaje via atajo", markMeta);
+        return marcarCierreViaje(currentLoc, {
+          closure_reason: params.description || "Cierre de viaje operacional",
+          odometer_end_km: params.endOdometerKm,
+          end_odometer_photo: params.endOdometerPhoto,
+        }, markMeta);
       },
       label: "Cierre de viaje",
       syncTarget: "return",
@@ -417,36 +416,17 @@ const AttendanceAction = () => {
   }), [ensureExceptionFlow, resolveVisitExitPayload]);
 
   const config = ACTION_MAP[action];
+  const operationalPhase = action === "salida-oficina" || action === "salida-campo"
+    ? "start"
+    : action === "entrada-oficina" || action === "entrada-campo"
+      ? "end"
+      : action === "cierre-viaje"
+        ? "close"
+        : null;
+  const requiresOperationalStep = Boolean(operationalPhase);
+  const activeOperationalUsesPersonalVehicle = Boolean(activeOperationalException?.uses_personal_vehicle);
 
-  const getNextStepHint = useCallback((currentAction) => {
-    const hints = {
-      entrada: "Continúa con salida a almuerzo cuando corresponda.",
-      "salida-almuerzo": "Continúa con entrada de almuerzo cuando regreses.",
-      "almuerzo-salida": "Continúa con entrada de almuerzo cuando regreses.",
-      almuerzo: "Continúa con entrada de almuerzo cuando regreses.",
-      "entrada-almuerzo": "Continúa con salida final al cerrar tu jornada.",
-      "almuerzo-entrada": "Continúa con salida final al cerrar tu jornada.",
-      salida: "Tu jornada ya está cerrada.",
-      "salida-final": "Tu jornada ya está cerrada.",
-      "salida-imprevista": "Continúa con llegada y regreso imprevisto para cerrar el ciclo.",
-      "llegada-imprevista": "Continúa con retorno imprevisto al salir del lugar.",
-      "retorno-imprevisto": "Continúa con regreso imprevisto al volver a oficina.",
-      "regreso-imprevisto": "Ciclo imprevisto cerrado correctamente.",
-      "salida-oficina": "Continúa con llegada a destino y luego entrada oficina para cerrar.",
-      "salida-campo": "Continúa con llegada a destino y luego entrada campo para cerrar.",
-      "llegada-destino": "Continúa con salida/entrada de cliente o cierre de viaje.",
-      "entrada-oficina": "Ciclo operacional cerrado correctamente.",
-      "entrada-campo": "Ciclo operacional cerrado correctamente.",
-      "cierre-viaje": "Viaje cerrado correctamente.",
-      "retorno-operacional": "Continúa con entrada oficina para cerrar el ciclo operacional.",
-      "regreso-operacional": "Continúa con entrada oficina para cerrar el ciclo operacional.",
-      "cliente-entrada": "Continúa con salida de cliente al terminar la visita.",
-      "entrada-cliente": "Continúa con salida de cliente al terminar la visita.",
-      "cliente-salida": "Visita cerrada correctamente.",
-      "salida-cliente": "Visita cerrada correctamente.",
-    };
-    return hints[currentAction] || "Continúa con la siguiente marcación de tu flujo.";
-  }, []);
+  const getNextStepHint = useCallback((currentAction) => getAttendanceNextStepHint(currentAction), []);
 
   const resolveFriendlyDuplicateMessage = useCallback(({ currentAction, statusCode, backendCode, backendMessage }) => {
     const msg = String(backendMessage || "").toLowerCase();
@@ -455,9 +435,7 @@ const AttendanceAction = () => {
       msg.includes("ya tienes una salida") ||
       msg.includes("ya se encontraba cerrada") ||
       msg.includes("ya estaba cerrada");
-    const noActiveButLikelyCompleted =
-      (statusCode === 404 && backendCode === "NO_ACTIVE_OPERATIONAL") ||
-      (statusCode === 404 && /no se encontro una salida imprevista activa/.test(msg));
+    const noActiveButLikelyCompleted = statusCode === 404 && backendCode === "NO_ACTIVE_OPERATIONAL";
 
     if (!hasAlreadyMarked && !noActiveButLikelyCompleted) {
       return null;
@@ -476,12 +454,18 @@ const AttendanceAction = () => {
     () => ({
       clientId: actionParams.clientId || manualClientId,
       prospectName: actionParams.prospectName || manualProspectName,
-      description: actionParams.description || manualReason,
+      description: actionParams.description || operationalDetail || manualReason,
       observations: actionParams.observations || manualObservations,
       returnToOffice: actionParams.returnToOffice ?? (manualPostVisitAction === "return_to_office"),
       postVisitAction: actionParams.returnToOffice === null
         ? manualPostVisitAction || undefined
         : (actionParams.returnToOffice ? "return_to_office" : "continue_operation"),
+      operationalCategory,
+      usesPersonalVehicle: usesPersonalVehicle === "si",
+      startOdometerKm,
+      endOdometerKm,
+      startOdometerPhoto,
+      endOdometerPhoto,
     }),
     [
       actionParams.clientId,
@@ -494,6 +478,13 @@ const AttendanceAction = () => {
       manualReason,
       manualObservations,
       manualPostVisitAction,
+      operationalCategory,
+      operationalDetail,
+      usesPersonalVehicle,
+      startOdometerKm,
+      endOdometerKm,
+      startOdometerPhoto,
+      endOdometerPhoto,
     ]
   );
 
@@ -554,6 +545,32 @@ const AttendanceAction = () => {
   }, [needsManualClientStep, user, authLoading]);
 
   useEffect(() => {
+    if (!requiresOperationalStep || operationalPhase === "start" || !user || authLoading) return;
+
+    let cancelled = false;
+    const loadActiveOperational = async () => {
+      try {
+        const response = await getActiveException();
+        if (cancelled) return;
+        const activeException = response?.data || null;
+        setActiveOperationalException(activeException);
+        if (activeException?.description && !operationalDetail) {
+          setOperationalDetail(String(activeException.description).split("\n")[0] || "");
+        }
+      } catch {
+        if (!cancelled) {
+          setManualStepError("No se pudo cargar la salida operacional activa. Reintenta.");
+        }
+      }
+    };
+
+    loadActiveOperational();
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, operationalDetail, operationalPhase, requiresOperationalStep, user]);
+
+  useEffect(() => {
     if (executionKeyRef.current !== executionKey) {
       executionKeyRef.current = executionKey;
       processedRef.current = false;
@@ -561,6 +578,16 @@ const AttendanceAction = () => {
       setMessage("");
       setErrorDetails("");
       setManualPostVisitAction("");
+      setManualStepError("");
+      setActiveOperationalException(null);
+      setOperationalCategory("");
+      setOperationalDetail("");
+      setUsesPersonalVehicle("no");
+      setStartOdometerKm("");
+      setEndOdometerKm("");
+      setStartOdometerPhoto(null);
+      setEndOdometerPhoto(null);
+      setManualSubmitNonce(0);
     }
   }, [executionKey]);
 
@@ -656,6 +683,7 @@ const AttendanceAction = () => {
     if (authLoading || !user || processedRef.current || !config) return;
     if (needsManualClientStep && manualSubmitNonce === 0) return;
     if (needsPostVisitDecisionStep) return;
+    if (requiresOperationalStep && manualSubmitNonce === 0) return;
 
     let cancelled = false;
     const resolveLocationOnly = async () => {
@@ -696,6 +724,7 @@ const AttendanceAction = () => {
     showToast,
     needsManualClientStep,
     needsPostVisitDecisionStep,
+    requiresOperationalStep,
     manualSubmitNonce,
     effectiveActionParams,
     actionParams.returnUrl,
@@ -706,6 +735,35 @@ const AttendanceAction = () => {
 
   const handleManualClientSubmit = () => {
     setManualStepError("");
+    if (requiresOperationalStep) {
+      if (operationalPhase === "start" && !operationalCategory) {
+        setManualStepError("Selecciona la categoria de la salida operacional.");
+        return;
+      }
+      if (operationalPhase === "start" && usesPersonalVehicle === "si") {
+        if (!String(startOdometerKm || "").trim()) {
+          setManualStepError("Debes registrar el kilometraje inicial.");
+          return;
+        }
+        if (!startOdometerPhoto) {
+          setManualStepError("Debes tomar la foto del kilometraje inicial.");
+          return;
+        }
+      }
+      if ((operationalPhase === "end" || operationalPhase === "close") && activeOperationalUsesPersonalVehicle) {
+        if (!String(endOdometerKm || "").trim()) {
+          setManualStepError("Debes registrar el kilometraje final.");
+          return;
+        }
+        if (!endOdometerPhoto) {
+          setManualStepError("Debes tomar la foto del kilometraje final.");
+          return;
+        }
+      }
+      setManualSubmitNonce(Date.now());
+      return;
+    }
+
     if (!manualClientId && !manualProspectName.trim()) {
       setManualStepError("Selecciona un cliente o escribe el nombre del prospecto.");
       return;
@@ -863,6 +921,160 @@ const AttendanceAction = () => {
             <Button onClick={() => navigate("/dashboard")} variant="ghost">
               Cancelar
             </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (requiresOperationalStep && manualSubmitNonce === 0) {
+    const requiresVehicleClosure = operationalPhase !== "start" && activeOperationalUsesPersonalVehicle;
+    const vehicleBadgeText = operationalPhase === "start"
+      ? "Define si la salida sera en vehiculo personal."
+      : (requiresVehicleClosure ? "Esta salida activa requiere kilometraje final y foto." : "Esta salida no requiere control de kilometraje.");
+
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F9FAFB] p-4">
+        <Card className="w-full max-w-2xl overflow-hidden rounded-2xl border border-[#E5E7EB] bg-white p-0 shadow-[0_15px_35px_rgba(15,23,42,0.08)]">
+          <div className="border-b border-slate-100 bg-[#1E293B] px-6 py-5 text-white">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-sky-200">Asistencia</p>
+            <h2 className="mt-1 text-2xl font-bold">
+              {operationalPhase === "start" ? "Registrar salida o visita" : "Cerrar salida o visita"}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-200">
+              Usa este flujo para visitas a clientes, reuniones, bancos, proveedores y cualquier otra gestion laboral externa.
+            </p>
+          </div>
+
+          <div className="space-y-5 px-6 py-6">
+            {operationalPhase === "start" ? (
+              <>
+                <label className="flex flex-col gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Tipo de salida</span>
+                  <select
+                    value={operationalCategory}
+                    onChange={(e) => setOperationalCategory(e.target.value)}
+                    className="min-h-[44px] rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                  >
+                    <option value="">Selecciona una categoria</option>
+                    {OPERATIONAL_CATEGORY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="flex flex-col gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Detalle</span>
+                  <textarea
+                    value={operationalDetail}
+                    onChange={(e) => setOperationalDetail(e.target.value)}
+                    rows={3}
+                    placeholder="Ejemplo: reunion externa, salida al banco o gestion ministerial"
+                    className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                  />
+                </label>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Movilidad</p>
+                  <p className="mt-1 text-sm text-slate-600">{vehicleBadgeText}</p>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setUsesPersonalVehicle("no")}
+                      className={`min-h-[52px] rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition active:scale-[0.97] ${usesPersonalVehicle === "no" ? "border-[#2563EB] bg-[#DBEAFE] text-[#1D4ED8]" : "border-slate-200 bg-white text-slate-700"}`}
+                    >
+                      Sin vehiculo personal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUsesPersonalVehicle("si")}
+                      className={`min-h-[52px] rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition active:scale-[0.97] ${usesPersonalVehicle === "si" ? "border-[#2563EB] bg-[#DBEAFE] text-[#1D4ED8]" : "border-slate-200 bg-white text-slate-700"}`}
+                    >
+                      Con vehiculo personal
+                    </button>
+                  </div>
+                </div>
+
+                {usesPersonalVehicle === "si" ? (
+                  <div className="grid gap-5">
+                    <label className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Kilometraje inicial</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={startOdometerKm}
+                        onChange={(e) => setStartOdometerKm(e.target.value)}
+                        className="min-h-[44px] rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                        placeholder="Ejemplo: 152340"
+                      />
+                    </label>
+                    <CameraCaptureField
+                      label="Foto de kilometraje inicial"
+                      hint="La foto debe tomarse en el momento de la salida."
+                      value={startOdometerPhoto}
+                      onChange={setStartOdometerPhoto}
+                      fileNamePrefix="odometro_inicio"
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="grid gap-5">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Estado del cierre</p>
+                  <p className="mt-1 text-sm text-slate-600">{vehicleBadgeText}</p>
+                </div>
+
+                <label className="flex flex-col gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                    {operationalPhase === "close" ? "Motivo del cierre fuera de oficina" : "Observacion de cierre"}
+                  </span>
+                  <textarea
+                    value={operationalDetail}
+                    onChange={(e) => setOperationalDetail(e.target.value)}
+                    rows={3}
+                    placeholder="Detalle final de la salida operacional"
+                    className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                  />
+                </label>
+
+                {requiresVehicleClosure ? (
+                  <>
+                    <label className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Kilometraje final</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={endOdometerKm}
+                        onChange={(e) => setEndOdometerKm(e.target.value)}
+                        className="min-h-[44px] rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                        placeholder="Ejemplo: 152380"
+                      />
+                    </label>
+                    <CameraCaptureField
+                      label="Foto de kilometraje final"
+                      hint="La foto debe tomarse en el momento del cierre."
+                      value={endOdometerPhoto}
+                      onChange={setEndOdometerPhoto}
+                      fileNamePrefix="odometro_fin"
+                    />
+                  </>
+                ) : null}
+              </div>
+            )}
+
+            {manualStepError ? <p className="text-sm text-[#DC2626]">{manualStepError}</p> : null}
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button onClick={handleManualClientSubmit} variant="primary">
+                Continuar con la marcacion
+              </Button>
+              <Button onClick={() => navigate("/dashboard")} variant="ghost">
+                Cancelar
+              </Button>
+            </div>
           </div>
         </Card>
       </div>
