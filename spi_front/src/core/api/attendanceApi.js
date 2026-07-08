@@ -1,5 +1,6 @@
 // src/core/api/attendanceApi.js
 import api from "./index";
+import { enqueueOfflineMark, flushOfflineQueue, getQueueSize, onOfflineQueueChanged } from "../../shared/utils/attendanceOfflineQueue";
 
 const normalizeLocation = (location) => {
   if (!location) return null;
@@ -52,6 +53,115 @@ const appendOccurredAt = (payload = {}, markMeta = {}) => {
   const parsed = new Date(occurredAt);
   if (Number.isNaN(parsed.getTime())) return payload;
   return { ...payload, occurred_at: parsed.toISOString() };
+};
+
+const postAttendancePayload = async (endpoint, payload = {}) => {
+  const hasFile = Object.values(payload || {}).some((value) => value instanceof File);
+  if (hasFile) {
+    const formData = new FormData();
+    Object.entries(payload || {}).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === "") return;
+      if (value instanceof File) {
+        formData.append(key, value);
+        return;
+      }
+      formData.append(key, value);
+    });
+    const { data } = await api.post(endpoint, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return data;
+  }
+
+  const { data } = await api.post(endpoint, payload);
+  return data;
+};
+
+// Cola offline: solo para marcas cuyo payload es 100% JSON-serializable (sin
+// File/Blob) -- ver src/shared/utils/attendanceOfflineQueue.js. Las marcas con
+// foto (salida/cierre operacional con vehiculo personal) pasan por
+// postAttendancePayload y NO se encolan; siguen dependiendo del reintento en
+// memoria del componente.
+const isNetworkError = (err) => !err?.response;
+
+const postQueueableMark = async (endpoint, payload = {}, label) => {
+  try {
+    const { data } = await api.post(endpoint, payload);
+    return data;
+  } catch (err) {
+    if (!isNetworkError(err)) throw err;
+    enqueueOfflineMark({ endpoint, payload, label });
+    return {
+      ok: true,
+      queued: true,
+      message: "Sin conexión: se guardó en este dispositivo y se enviará automáticamente cuando vuelva la señal.",
+    };
+  }
+};
+
+/**
+ * Reintenta las marcas guardadas offline, en orden. Pensado para llamarse al
+ * volver la conexion (evento "online") o al abrir el widget/AttendanceAction.
+ */
+export const flushAttendanceOfflineQueue = () =>
+  flushOfflineQueue({ post: (endpoint, payload) => api.post(endpoint, payload) });
+
+export const getAttendanceOfflineQueueSize = () => getQueueSize();
+
+export const subscribeAttendanceOfflineQueue = (handler) => onOfflineQueueChanged(handler);
+
+const looksLikeMarkMeta = (value) =>
+  Boolean(
+    value &&
+    typeof value === "object" &&
+    !(value instanceof File) &&
+    (
+      Object.prototype.hasOwnProperty.call(value, "occurred_at") ||
+      Object.prototype.hasOwnProperty.call(value, "occurredAt")
+    ) &&
+    !Object.prototype.hasOwnProperty.call(value, "odometer_end_km") &&
+    !Object.prototype.hasOwnProperty.call(value, "odometerEndKm") &&
+    !Object.prototype.hasOwnProperty.call(value, "end_odometer_photo") &&
+    !Object.prototype.hasOwnProperty.call(value, "endOdometerPhoto")
+  );
+
+const normalizeOperationalStartPayload = (location, descriptionOrPayload, markMeta = {}) => {
+  const normalizedLocation = ensureLocationOrThrow(location);
+  const accuracy = extractLocationAccuracy(location);
+  const rawPayload =
+    descriptionOrPayload && typeof descriptionOrPayload === "object" && !(descriptionOrPayload instanceof File)
+      ? { ...descriptionOrPayload }
+      : { description: descriptionOrPayload };
+  const payload = appendOccurredAt(
+    {
+      ...rawPayload,
+      location: normalizedLocation,
+      ...(accuracy !== null ? { location_accuracy: accuracy } : {}),
+    },
+    markMeta
+  );
+  return payload;
+};
+
+const normalizeOperationalEndPayload = (location, payloadOrMarkMeta = {}, maybeMarkMeta = {}) => {
+  const normalizedLocation = ensureLocationOrThrow(location);
+  const accuracy = extractLocationAccuracy(location);
+  const rawPayload =
+    payloadOrMarkMeta && typeof payloadOrMarkMeta === "object" && !(payloadOrMarkMeta instanceof File) && !looksLikeMarkMeta(payloadOrMarkMeta)
+      ? { ...payloadOrMarkMeta }
+      : {};
+  const markMeta =
+    payloadOrMarkMeta && typeof payloadOrMarkMeta === "object" && !(payloadOrMarkMeta instanceof File) && !looksLikeMarkMeta(payloadOrMarkMeta)
+      ? maybeMarkMeta
+      : payloadOrMarkMeta;
+  return appendOccurredAt(
+    {
+      ...rawPayload,
+      location: normalizedLocation,
+      ...(accuracy !== null ? { location_accuracy: accuracy } : {}),
+    },
+    markMeta
+  );
 };
 
 /**
@@ -133,32 +243,28 @@ export const marcarEntrada = async (location = null, markMeta = {}) => {
  const normalizedLocation = ensureLocationOrThrow(location);
  const accuracy = extractLocationAccuracy(location);
  const payload = appendOccurredAt({ location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }, markMeta);
- const { data } = await api.post("/attendance/marcar/entrada", payload);
- return data;
+ return postQueueableMark("/attendance/marcar/entrada", payload, "Entrada");
 };
 
 export const marcarAlmuerzoSalida = async (location = null, markMeta = {}) => {
  const normalizedLocation = ensureLocationOrThrow(location);
  const accuracy = extractLocationAccuracy(location);
  const payload = appendOccurredAt({ location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }, markMeta);
- const { data } = await api.post("/attendance/marcar/almuerzo-salida", payload);
- return data;
+ return postQueueableMark("/attendance/marcar/almuerzo-salida", payload, "Salida a almuerzo");
 };
 
 export const marcarAlmuerzoEntrada = async (location = null, markMeta = {}) => {
  const normalizedLocation = ensureLocationOrThrow(location);
  const accuracy = extractLocationAccuracy(location);
  const payload = appendOccurredAt({ location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }, markMeta);
- const { data } = await api.post("/attendance/marcar/almuerzo-entrada", payload);
- return data;
+ return postQueueableMark("/attendance/marcar/almuerzo-entrada", payload, "Entrada de almuerzo");
 };
 
 export const marcarSalida = async (location = null, markMeta = {}) => {
  const normalizedLocation = ensureLocationOrThrow(location);
  const accuracy = extractLocationAccuracy(location);
  const payload = appendOccurredAt({ location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }, markMeta);
- const { data } = await api.post("/attendance/marcar/salida", payload);
- return data;
+ return postQueueableMark("/attendance/marcar/salida", payload, "Salida final");
 };
 
 export const marcarSalidaImprevista = async (location = null, description = null, markMeta = {}) => {
@@ -167,86 +273,78 @@ export const marcarSalidaImprevista = async (location = null, description = null
  if (accuracy !== null) payload.location_accuracy = accuracy;
  if (description) payload.description = description;
  payload = appendOccurredAt(payload, markMeta);
- const { data } = await api.post("/attendance/marcar/salida-imprevista", payload);
- return data;
+ return postQueueableMark("/attendance/marcar/salida-imprevista", payload, "Salida imprevista");
 };
 
 export const marcarRegresoImprevisto = async (location = null, markMeta = {}) => {
  const normalizedLocation = ensureLocationOrThrow(location);
  const accuracy = extractLocationAccuracy(location);
  const payload = appendOccurredAt({ location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }, markMeta);
- const { data } = await api.post("/attendance/marcar/regreso-imprevisto", payload);
- return data;
+ return postQueueableMark("/attendance/marcar/regreso-imprevisto", payload, "Regreso imprevisto");
 };
 
 export const marcarLlegadaImprevista = async (location = null, markMeta = {}) => {
  const normalizedLocation = ensureLocationOrThrow(location);
  const accuracy = extractLocationAccuracy(location);
  const payload = appendOccurredAt({ location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }, markMeta);
- const { data } = await api.post("/attendance/marcar/llegada-imprevista", payload);
- return data;
+ return postQueueableMark("/attendance/marcar/llegada-imprevista", payload, "Llegada imprevista");
 };
 
 export const marcarRetornoImprevisto = async (location = null, markMeta = {}) => {
  const normalizedLocation = ensureLocationOrThrow(location);
  const accuracy = extractLocationAccuracy(location);
  const payload = appendOccurredAt({ location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }, markMeta);
- const { data } = await api.post("/attendance/marcar/retorno-imprevisto", payload);
- return data;
+ return postQueueableMark("/attendance/marcar/retorno-imprevisto", payload, "Retorno imprevisto");
 };
 
 export const marcarSalidaOficina = async (location = null, description = null, markMeta = {}) => {
- let payload = { location: ensureLocationOrThrow(location) };
- const accuracy = extractLocationAccuracy(location);
- if (accuracy !== null) payload.location_accuracy = accuracy;
- if (description) payload.description = description;
- payload = appendOccurredAt(payload, markMeta);
- const { data } = await api.post("/attendance/marcar/salida-oficina", payload);
- return data;
+ const payload = normalizeOperationalStartPayload(location, description, markMeta);
+ return postAttendancePayload("/attendance/marcar/salida-oficina", payload);
 };
 
-export const marcarEntradaOficina = async (location = null, markMeta = {}) => {
- const normalizedLocation = ensureLocationOrThrow(location);
- const accuracy = extractLocationAccuracy(location);
- const payload = appendOccurredAt({ location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }, markMeta);
- const { data } = await api.post("/attendance/marcar/entrada-oficina", payload);
- return data;
+export const marcarEntradaOficina = async (location = null, payloadOrMarkMeta = {}, maybeMarkMeta = {}) => {
+ const payload = normalizeOperationalEndPayload(location, payloadOrMarkMeta, maybeMarkMeta);
+ return postAttendancePayload("/attendance/marcar/entrada-oficina", payload);
 };
 
 export const marcarSalidaCampo = async (location = null, description = null, markMeta = {}) => {
- let payload = { location: ensureLocationOrThrow(location) };
- const accuracy = extractLocationAccuracy(location);
- if (accuracy !== null) payload.location_accuracy = accuracy;
- if (description) payload.description = description;
- payload = appendOccurredAt(payload, markMeta);
- const { data } = await api.post("/attendance/marcar/salida-campo", payload);
- return data;
+ const payload = normalizeOperationalStartPayload(location, description, markMeta);
+ return postAttendancePayload("/attendance/marcar/salida-campo", payload);
 };
 
-export const marcarEntradaCampo = async (location = null, markMeta = {}) => {
- const normalizedLocation = ensureLocationOrThrow(location);
- const accuracy = extractLocationAccuracy(location);
- const payload = appendOccurredAt({ location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }, markMeta);
- const { data } = await api.post("/attendance/marcar/entrada-campo", payload);
- return data;
+export const marcarEntradaCampo = async (location = null, payloadOrMarkMeta = {}, maybeMarkMeta = {}) => {
+ const payload = normalizeOperationalEndPayload(location, payloadOrMarkMeta, maybeMarkMeta);
+ return postAttendancePayload("/attendance/marcar/entrada-campo", payload);
 };
 
 export const marcarLlegadaDestino = async (location = null, markMeta = {}) => {
  const normalizedLocation = ensureLocationOrThrow(location);
  const accuracy = extractLocationAccuracy(location);
  const payload = appendOccurredAt({ location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }, markMeta);
- const { data } = await api.post("/attendance/marcar/llegada-destino", payload);
- return data;
+ return postQueueableMark("/attendance/marcar/llegada-destino", payload, "Llegada a destino");
+};
+
+export const marcarAlmuerzoSalidaOperacional = async (location = null, markMeta = {}) => {
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
+ const payload = appendOccurredAt({ location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }, markMeta);
+ return postQueueableMark("/attendance/marcar/almuerzo-salida-operacional", payload, "Salida a almuerzo operacional");
+};
+
+export const marcarAlmuerzoEntradaOperacional = async (location = null, markMeta = {}) => {
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
+ const payload = appendOccurredAt({ location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }, markMeta);
+ return postQueueableMark("/attendance/marcar/almuerzo-entrada-operacional", payload, "Entrada de almuerzo operacional");
 };
 
 export const marcarCierreViaje = async (location = null, reason = null, markMeta = {}) => {
- let payload = { location: ensureLocationOrThrow(location) };
- const accuracy = extractLocationAccuracy(location);
- if (accuracy !== null) payload.location_accuracy = accuracy;
- if (reason) payload.closure_reason = reason;
- payload = appendOccurredAt(payload, markMeta);
- const { data } = await api.post("/attendance/marcar/cierre-viaje", payload);
- return data;
+ const rawPayload =
+  reason && typeof reason === "object" && !(reason instanceof File)
+   ? { ...reason }
+   : { closure_reason: reason };
+ const payload = normalizeOperationalEndPayload(location, rawPayload, markMeta);
+ return postAttendancePayload("/attendance/marcar/cierre-viaje", payload);
 };
 
 /**
@@ -258,8 +356,7 @@ export const marcarVisitaEntrada = async (payload = {}) => {
  normalizedPayload.location = ensureLocationOrThrow(normalizedPayload.location);
  if (accuracy !== null) normalizedPayload.location_accuracy = accuracy;
  const payloadWithOccurredAt = appendOccurredAt(normalizedPayload, normalizedPayload);
- const { data } = await api.post("/attendance/marcar/visita-entrada", payloadWithOccurredAt);
- return data;
+ return postQueueableMark("/attendance/marcar/visita-entrada", payloadWithOccurredAt, "Entrada cliente");
 };
 
 export const justifyLateArrival = async ({ reason, date } = {}) => {
@@ -271,14 +368,20 @@ export const justifyLateArrival = async ({ reason, date } = {}) => {
  return data;
 };
 
+export const requestEntryRegularization = async ({ reason } = {}) => {
+ const { data } = await api.post("/attendance/regularize-entry", {
+  reason: String(reason || "").trim(),
+ });
+ return data;
+};
+
 export const marcarVisitaSalida = async (payload = {}) => {
  const normalizedPayload = { ...payload };
  const accuracy = extractLocationAccuracy(normalizedPayload.location);
  normalizedPayload.location = ensureLocationOrThrow(normalizedPayload.location);
  if (accuracy !== null) normalizedPayload.location_accuracy = accuracy;
  const payloadWithOccurredAt = appendOccurredAt(normalizedPayload, normalizedPayload);
- const { data } = await api.post("/attendance/marcar/visita-salida", payloadWithOccurredAt);
- return data;
+ return postQueueableMark("/attendance/marcar/visita-salida", payloadWithOccurredAt, "Salida cliente");
 };
 
 /**
@@ -316,18 +419,42 @@ export const registerException = async (type, description, location = null, opti
  return data;
 };
 
-/**
- * Update Exception Status (ON_SITE, RETURNING, COMPLETED)
- */
-export const updateExceptionStatus = async (status, location = null) => {
+export const startPermissionEntry = async (location = null) => {
  const normalizedLocation = ensureLocationOrThrow(location);
  const accuracy = extractLocationAccuracy(location);
  const { data } = await api.post(
- "/attendance/exception/status",
- { status, location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }
+ "/attendance/permission-entry-start",
+ {
+  location: normalizedLocation,
+  ...(accuracy !== null ? { location_accuracy: accuracy } : {}),
+ }
  );
 
  return data;
+};
+
+export const finishPermissionExit = async (location = null) => {
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
+ const { data } = await api.post(
+ "/attendance/permission-exit-finish",
+ {
+  location: normalizedLocation,
+  ...(accuracy !== null ? { location_accuracy: accuracy } : {}),
+ }
+ );
+
+ return data;
+};
+
+/**
+ * Update Exception Status (ON_SITE, ACTIVE, RETURNING, COMPLETED)
+ */
+export const updateExceptionStatus = async (status, location = null, extraPayload = {}) => {
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
+ const payload = { status, location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}), ...(extraPayload || {}) };
+ return postQueueableMark("/attendance/exception/status", payload, `Estado operacional: ${status}`);
 };
 
 /**
@@ -457,8 +584,90 @@ export const getAttendanceNonCompliance = async (days = 7) => {
   return data;
 };
 
+export const getAttendanceWorkspaceOverview = async (query = {}) => {
+  const params = new URLSearchParams();
+  if (query?.startDate || query?.start) params.set("start", query.startDate || query.start);
+  if (query?.endDate || query?.end) params.set("end", query.endDate || query.end);
+  if (query?.search) params.set("search", query.search);
+  if (query?.departmentId) params.set("departmentId", String(query.departmentId));
+  if (query?.includeInactive) params.set("includeInactive", "true");
+  const { data } = await api.get(`/attendance/workspace/overview?${params.toString()}`);
+  return data;
+};
+
+export const getAttendanceWorkspaceCollaborator = async (userId, query = {}) => {
+  const params = new URLSearchParams();
+  if (query?.startDate || query?.start) params.set("start", query.startDate || query.start);
+  if (query?.endDate || query?.end) params.set("end", query.endDate || query.end);
+  const { data } = await api.get(`/attendance/workspace/collaborators/${userId}?${params.toString()}`);
+  return data;
+};
+
+export const getAttendanceWorkspaceBreaches = async (query = {}) => {
+  const params = new URLSearchParams();
+  if (query?.startDate || query?.start) params.set("start", query.startDate || query.start);
+  if (query?.endDate || query?.end) params.set("end", query.endDate || query.end);
+  if (query?.search) params.set("search", query.search);
+  if (query?.departmentId) params.set("departmentId", String(query.departmentId));
+  if (Array.isArray(query?.userIds) && query.userIds.length) {
+    params.set("userIds", query.userIds.join(","));
+  }
+  if (query?.includeInactive) params.set("includeInactive", "true");
+  const { data } = await api.get(`/attendance/workspace/breaches?${params.toString()}`);
+  return data;
+};
+
 export const scheduleAttendanceFollowUpMeeting = async (userId, payload = {}) => {
   const { data } = await api.post(`/attendance/non-compliance/${userId}/schedule-meeting`, payload);
+  return data;
+};
+
+export const getCollaboratorJustificationsPanel = async (userId) => {
+  const { data } = await api.get(`/attendance/admin/collaborator/${userId}/justifications-panel`);
+  return data;
+};
+
+export const updateLateJustification = async (id, { status, regularized_entry_time }) => {
+  const { data } = await api.put(`/attendance/admin/late-justification/${id}`, { status, regularized_entry_time });
+  return data;
+};
+
+export const applyEntryRegularization = async ({ userId, date, entryTime }) => {
+  const { data } = await api.post("/attendance/admin/apply-entry-regularization", { userId, date, entryTime });
+  return data;
+};
+
+export const transitionAttendanceRegularization = async (id, { status, comment }) => {
+  const { data } = await api.post(`/attendance/regularizations/${id}/status`, { status, comment });
+  return data;
+};
+
+export const getCollaboratorBirthdayBenefit = async (userId) => {
+  const { data } = await api.get(`/attendance/admin/collaborator/${userId}/birthday-benefit`);
+  return data;
+};
+
+export const generateCollaboratorBirthdayBenefitQr = async (userId) => {
+  const { data } = await api.post(`/attendance/admin/collaborator/${userId}/birthday-benefit/qr`);
+  return data;
+};
+
+export const validateBirthdayBenefitQr = async (token) => {
+  const { data } = await api.get(`/attendance/birthday-benefit/qr/${token}`);
+  return data;
+};
+
+export const uploadBirthdayBenefitEvidence = async (token, files = []) => {
+  const formData = new FormData();
+  files.forEach((file) => formData.append("files", file));
+  const { data } = await api.post(`/attendance/birthday-benefit/${token}/evidence`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+};
+
+export const redeemBirthdayBenefit = async (token, redeemDate) => {
+  const { data } = await api.post(`/attendance/birthday-benefit/${token}/redeem`, { redeemDate });
   return data;
 };
 
@@ -466,7 +675,11 @@ export const scheduleAttendanceFollowUpMeeting = async (userId, payload = {}) =>
  * Download Attendance PDF
  */
 export const downloadAttendancePDF = async (userId, startDate, endDate, options = {}) => {
- const reportType = String(options?.periodType || "monthly").toLowerCase() === "annual" ? "annual" : "monthly";
+ const reportType = String(options?.periodType || "monthly").toLowerCase() === "annual"
+  ? "annual"
+  : String(options?.periodType || "monthly").toLowerCase().startsWith("week")
+   ? "weekly"
+   : "monthly";
  const params = new URLSearchParams();
 
  if (reportType === "annual") {
@@ -478,7 +691,7 @@ export const downloadAttendancePDF = async (userId, startDate, endDate, options 
  } else {
  params.set("start", startDate);
  params.set("end", endDate);
- params.set("periodType", "monthly");
+ params.set("periodType", reportType);
  }
 
   const response = await api.get(
@@ -512,6 +725,58 @@ export const downloadAttendancePDF = async (userId, startDate, endDate, options 
   notice: response.headers?.["x-document-integrity-notice"] || null,
   fileName,
   };
+};
+
+export const downloadAttendanceBulkPDF = async (query = {}) => {
+ const reportType = String(query?.periodType || "monthly").toLowerCase() === "annual"
+  ? "annual"
+  : String(query?.periodType || "monthly").toLowerCase().startsWith("week")
+   ? "weekly"
+   : "monthly";
+ const params = new URLSearchParams();
+
+ if (reportType === "annual") {
+  const reportYear = Number.parseInt(query?.year, 10);
+  if (Number.isInteger(reportYear)) params.set("year", String(reportYear));
+  params.set("periodType", "annual");
+ } else {
+  if (query?.startDate || query?.start) params.set("start", query.startDate || query.start);
+  if (query?.endDate || query?.end) params.set("end", query.endDate || query.end);
+  params.set("periodType", reportType);
+ }
+
+ if (query?.search) params.set("search", query.search);
+ if (query?.departmentId) params.set("departmentId", String(query.departmentId));
+ if (Array.isArray(query?.userIds) && query.userIds.length) params.set("userIds", query.userIds.join(","));
+ if (query?.includeInactive) params.set("includeInactive", "true");
+
+ const response = await api.get(`/attendance/pdf-bulk?${params.toString()}`, {
+  responseType: "blob",
+ });
+
+ const fileNameByType = reportType === "annual"
+  ? `asistencia-general-anual-${query?.year || new Date().getFullYear()}.pdf`
+  : `asistencia-general-${query?.startDate || query?.start}-${query?.endDate || query?.end}.pdf`;
+ const disposition = response.headers?.["content-disposition"] || "";
+ const match = disposition.match(/filename=([^;]+)/i);
+ const fileName = match ? String(match[1]).replace(/"/g, "").trim() : fileNameByType;
+
+ const url = window.URL.createObjectURL(new Blob([response.data]));
+ const link = document.createElement("a");
+ link.href = url;
+ link.setAttribute("download", fileName);
+ document.body.appendChild(link);
+ link.click();
+ link.remove();
+ window.URL.revokeObjectURL(url);
+
+ return {
+  ok: true,
+  hash: response.headers?.["x-document-hash-sha256"] || null,
+  hashAlgorithm: response.headers?.["x-document-hash-algorithm"] || null,
+  notice: response.headers?.["x-document-integrity-notice"] || null,
+  fileName,
+ };
 };
 
 /**

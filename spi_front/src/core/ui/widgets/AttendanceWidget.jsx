@@ -43,6 +43,9 @@ import {
   getTodayAttendance,
   getAttendanceRange,
   syncAttendanceLocation,
+  flushAttendanceOfflineQueue,
+  getAttendanceOfflineQueueSize,
+  subscribeAttendanceOfflineQueue,
 } from "../../api/attendanceApi";
 import { useAutoUpdate } from "../../api/index";
 import { fetchClients } from "../../api/clientsApi";
@@ -417,6 +420,7 @@ const AttendanceWidget = () => {
   const [operationalEndKm, setOperationalEndKm] = useState("");
   const [operationalStartPhoto, setOperationalStartPhoto] = useState(null);
   const [operationalEndPhoto, setOperationalEndPhoto] = useState(null);
+  const [offlineQueueSize, setOfflineQueueSize] = useState(() => getAttendanceOfflineQueueSize());
   const initializedRef = useRef(false);
   const openLateJustificationFlow = useCallback(() => {
     setWidgetModalOpen(false);
@@ -438,6 +442,41 @@ const AttendanceWidget = () => {
     refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  // Cola offline (ver src/shared/utils/attendanceOfflineQueue.js): reintenta
+  // las marcaciones guardadas sin conexion apenas vuelve la señal, y mantiene
+  // el contador de pendientes actualizado para la bandeja de la Fase 4.
+  useEffect(() => {
+    const unsubscribe = subscribeAttendanceOfflineQueue((event) => {
+      setOfflineQueueSize(Number(event?.detail?.size ?? getAttendanceOfflineQueueSize()));
+    });
+
+    const attemptFlush = async () => {
+      if (getAttendanceOfflineQueueSize() === 0) return;
+      const result = await flushAttendanceOfflineQueue();
+      if (result.flushed.length > 0) {
+        showToast(
+          `${result.flushed.length} marcación(es) pendiente(s) se enviaron correctamente.`,
+          "success",
+        );
+        await refreshAll();
+      }
+      if (result.failed.length > 0) {
+        showToast(
+          `${result.failed.length} marcación(es) pendiente(s) ya no se pudieron aplicar y se descartaron.`,
+          "warning",
+        );
+      }
+    };
+
+    attemptFlush();
+    window.addEventListener("online", attemptFlush);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("online", attemptFlush);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Sistema de actualizaciones automaticas sin loops
   useAutoUpdate(() => {
@@ -748,6 +787,12 @@ const AttendanceWidget = () => {
       const res = await fn(actionLocation);
 
       if (res.ok) {
+        if (res.queued) {
+          // Sin conexion: postQueueableMark ya la guardo en localStorage.
+          // No hay que refrescar (el servidor no cambio de estado todavia).
+          showToast(res.message || "Sin conexión: se guardó y se enviará automáticamente.", "warning");
+          return;
+        }
         if (options?.syncTarget) {
           await ensureSyncTargetLocation(options.syncTarget, actionLocation);
         }
@@ -801,6 +846,10 @@ const AttendanceWidget = () => {
       actionLocation = await getLocationForAction();
       const res = await updateExceptionStatus(status, actionLocation);
       if (res.ok) {
+        if (res.queued) {
+          showToast(res.message || "Sin conexión: se guardó y se enviará automáticamente.", "warning");
+          return;
+        }
         if (syncTarget) {
           await ensureSyncExceptionTargetLocation(syncTarget, actionLocation);
         }
@@ -1211,6 +1260,14 @@ const AttendanceWidget = () => {
           : await marcarVisitaSalida(payload);
 
       if (res?.ok) {
+        if (res.queued) {
+          // Sin conexion: no avanzamos el estado local (selectedFieldAction,
+          // cierre automatico de operacion) porque el servidor todavia no
+          // confirmo esta visita -- eso podria adelantar pasos que dependen
+          // de un estado que aun no es real.
+          showToast(res.message || "Sin conexión: se guardó y se enviará automáticamente.", "warning");
+          return;
+        }
         showToast(
           kind === "entry"
             ? "Entrada de cliente registrada correctamente."
@@ -1503,6 +1560,10 @@ const AttendanceWidget = () => {
       actionLocation = await getLocationForAction();
       const res = await marcarLlegadaDestino(actionLocation);
       if (res?.ok) {
+        if (res.queued) {
+          showToast(res.message || "Sin conexión: se guardó y se enviará automáticamente.", "warning");
+          return;
+        }
         showToast("Llegada a destino registrada.", "success");
         await refreshAll();
       } else {
@@ -1532,6 +1593,10 @@ const AttendanceWidget = () => {
       actionLocation = await getLocationForAction();
       const res = await updateExceptionStatus("ACTIVE", actionLocation);
       if (res?.ok) {
+        if (res.queued) {
+          showToast(res.message || "Sin conexión: se guardó y se enviará automáticamente.", "warning");
+          return;
+        }
         await ensureSyncExceptionTargetLocation("departure", actionLocation);
         showToast("Salida del destino registrada. Puedes continuar con otra gestion.", "success");
         await refreshAll();
@@ -1566,6 +1631,10 @@ const AttendanceWidget = () => {
         : await marcarAlmuerzoEntradaOperacional(actionLocation);
 
       if (res?.ok) {
+        if (res.queued) {
+          showToast(res.message || "Sin conexión: se guardó y se enviará automáticamente.", "warning");
+          return;
+        }
         showToast(
           direction === "out"
             ? "Salida a almuerzo operacional registrada."
@@ -1610,6 +1679,13 @@ const AttendanceWidget = () => {
         showToast("No se pudo registrar la llegada a destino.", "error");
         return;
       }
+      if (arrivalRes.queued) {
+        // Sin conexion: encolamos solo la llegada. La entrada a cliente
+        // depende de que la llegada ya este confirmada por el servidor,
+        // asi que no se encadena mientras siga offline.
+        showToast(arrivalRes.message || "Sin conexión: se guardó y se enviará automáticamente.", "warning");
+        return;
+      }
 
       const payload = await buildFieldVisitPayload({
         mode: "entry",
@@ -1617,6 +1693,10 @@ const AttendanceWidget = () => {
       });
       const visitRes = await marcarVisitaEntrada(payload);
       if (visitRes?.ok) {
+        if (visitRes.queued) {
+          showToast(visitRes.message || "Sin conexión: se guardó y se enviará automáticamente.", "warning");
+          return;
+        }
         showToast("Llegada a destino y entrada a cliente registradas.", "success");
         setSelectedFieldAction("client_exit");
         await refreshAll();
@@ -2164,10 +2244,20 @@ const AttendanceWidget = () => {
 
   // Fase 4 (Plan Maestro Asistencia): bandeja de pendientes derivada del mismo
   // payload de getTodayAttendance() (canonical_flow + late_policy), sin endpoint nuevo.
-  const pendingActions = useMemo(
-    () => resolveAttendancePendingActions(attendance || {}, currentTime, activeException),
-    [attendance, currentTime, activeException],
-  );
+  const pendingActions = useMemo(() => {
+    const items = resolveAttendancePendingActions(attendance || {}, currentTime, activeException);
+    if (offlineQueueSize > 0) {
+      items.push({
+        id: "offline_queue",
+        severity: "warning",
+        label: `${offlineQueueSize} marcación(es) sin enviar`,
+        detail: "Se guardaron en este dispositivo por falta de conexión. Se enviarán solas cuando vuelva la señal.",
+        actionKey: null,
+        linkTo: null,
+      });
+    }
+    return items;
+  }, [attendance, currentTime, activeException, offlineQueueSize]);
 
   const TripStep = ({ label, time, state }) => {
     const isDone = state === "done";
