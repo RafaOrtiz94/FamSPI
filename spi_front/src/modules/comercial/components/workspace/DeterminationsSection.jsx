@@ -399,6 +399,7 @@ const DeterminationsSection = ({
  const [selectedDocument, setSelectedDocument] = useState(null);
  const [sheetUrl, setSheetUrl] = useState(null);
  const [sheetSyncing, setSheetSyncing] = useState(false);
+ const [pullingFromSheet, setPullingFromSheet] = useState(false);
  const [isDetermEditing, setIsDetermEditing] = useState(false);
  const [importModal, setImportModal] = useState(null);
  const [importTab, setImportTab] = useState("paste");
@@ -469,7 +470,7 @@ const uploadMissingSections = Array.isArray(uploadReadiness?.missingSections)
 const inspectionRequestInfo = gateInfo?.inspectionRequest || null;
 const inspectionDraft = gateInfo?.inspectionDraft?.draft || null;
 const inspectionMissingFields = gateInfo?.inspectionDraft?.missingFields || [];
-const canRequestInspection = canEditBase && gateInfo?.documentUploaded && !inspectionRequestInfo?.request_id;
+const canRequestInspection = (canEditBase || gateInfo?.permissions?.canRequestInspection) && gateInfo?.documentUploaded && !inspectionRequestInfo?.request_id;
 const selectedDocumentSummary = selectedDocument
  ? `${selectedDocument.name} (${formatSelectedFileSize(selectedDocument.size)})`
  : "Aun no has seleccionado un archivo.";
@@ -1010,6 +1011,7 @@ return map;
  ).trim();
  };
 
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  const getQtyInputValue = (row) => {
  const draftValue = quantityDrafts[row.key];
  if (draftValue !== undefined) return draftValue;
@@ -1456,6 +1458,7 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
   nextItemsSummary: summarizeItemsForAudit(nextItems),
   });
  return { nextItems, nextExcluded };
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [bcId, getSavedRow, hasStructureChanges, mergedRows]);
 
  const flushPendingQtyChanges = async (options = {}) => {
@@ -1484,6 +1487,7 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  debugInfo("[DET_DEBUG] flushPendingQtyChanges:done", { bcId });
  };
 
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  const handleQtyChange = (rowKey, value) => {
  const row = mergedRows.find((item) => item.key === rowKey);
  if (!row || !canEditType(row.type)) return;
@@ -1713,11 +1717,19 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  });
  };
 
- const triggerAutoSheetSync = useCallback(async (caseId) => {
+ const triggerAutoSheetSync = useCallback(async (caseId, options = {}) => {
   if (!caseId) return;
   setSheetSyncing(true);
   try {
-   const res = await api.post(`/business-case/${caseId}/sheets/generate`);
+   // force_recreate solo cuando el usuario dispara la sincronizacion a mano
+   // (boton "Actualizar hoja") -- garantiza formato correcto (copia fresca
+   // del Sheet maestro) en vez de reescribir valores sobre un archivo previo
+   // que pudo haberse creado con el metodo viejo. El trigger automatico tras
+   // subir el documento estadistico no fuerza recreacion (primera vez, no
+   // hay archivo previo que corregir).
+   const res = await api.post(`/business-case/${caseId}/sheets/generate`, {
+    force_recreate: Boolean(options.forceRecreate),
+   });
    const jobId = res?.data?.data?.job_id;
    if (!jobId) return;
    let attempts = 0;
@@ -1750,6 +1762,26 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
    if (url) setSheetUrl(url);
   } catch (_) {}
  }, [bcId]);
+
+ const handleSyncFromSheet = useCallback(async () => {
+  if (!bcId) return;
+  setPullingFromSheet(true);
+  try {
+   const res = await api.post(`/business-case/${bcId}/consumption-items/sync-from-sheet`);
+   const updated = res?.data?.data?.updated ?? 0;
+   if (updated > 0) {
+    showToast(`Se sincronizaron ${updated} cantidad(es) desde el Sheet.`, "success");
+    await loadExisting();
+    onSave({ refresh: true, markComplete: false });
+   } else {
+    showToast("No hay cambios en el Sheet para sincronizar.", "info");
+   }
+  } catch (err) {
+   showToast(getNaturalErrorMessage(err, "No se pudo sincronizar desde el Sheet"), "error");
+  } finally {
+   setPullingFromSheet(false);
+  }
+ }, [bcId, loadExisting, onSave, showToast]);
 
  useEffect(() => {
   loadExistingSheetUrl();
@@ -1784,12 +1816,14 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
    const val = parseFloat(valStr);
    return { item_key: row.key, item_name: row.name, current: getQtyInputValue(row), newValue: Number.isFinite(val) && val >= 0 ? Math.round(val) : null };
   });
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [getQtyInputValue]);
 
  const applyImportPreview = useCallback((preview) => {
   const toApply = (preview || []).filter((p) => p.newValue !== null && Number.isFinite(Number(p.newValue)));
   toApply.forEach((p) => handleQtyChange(p.item_key, String(p.newValue)));
   return toApply.length;
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [handleQtyChange]);
 
  const closeImportModal = useCallback(() => {
@@ -1821,6 +1855,7 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
   } finally {
    setImportFileLoading(false);
   }
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [bcId, mergedRows, getQtyInputValue, showToast]);
 
  const handleUploadStatDocument = async () => {
@@ -2143,15 +2178,36 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  <>
   <FiExternalLink size={14} className="text-emerald-600 flex-shrink-0" />
   <span className="text-xs text-emerald-800 font-medium">Hoja de Sheets disponible</span>
+  <div className="ml-auto flex items-center gap-2">
+  <button
+  type="button"
+  onClick={() => triggerAutoSheetSync(bcId, { forceRecreate: true })}
+  disabled={sheetSyncing}
+  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 cursor-pointer transition-transform duration-150 hover:bg-emerald-50 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
+  >
+  <FiRefreshCw size={12} />
+  Actualizar hoja
+  </button>
+  <button
+  type="button"
+  onClick={handleSyncFromSheet}
+  disabled={pullingFromSheet || sheetSyncing}
+  title="Trae las cantidades que el usuario haya llenado directamente en la columna Cantidad Anual del Sheet"
+  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 cursor-pointer transition-transform duration-150 hover:bg-emerald-50 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
+  >
+  <FiRefreshCw size={12} className={pullingFromSheet ? "animate-spin" : ""} />
+  Sincronizar cantidades desde Sheet
+  </button>
   <a
   href={sheetUrl}
   target="_blank"
   rel="noreferrer"
-  className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors"
+  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors"
   >
   <FiExternalLink size={12} />
   Abrir en Sheets
   </a>
+  </div>
  </>
  )}
  </div>
@@ -2323,13 +2379,13 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  </a>
  )}
  <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sky-700">
- Jefatura Tecnica seleccionara la fecha exacta de inspeccion dentro del rango registrado.
+ El departamento de servicio seleccionara la fecha exacta de inspeccion dentro del rango registrado.
  </div>
  </div>
  ) : (
  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-3">
  <div className="text-xs text-slate-600">
- Despues de enviarla, Jefatura Tecnica podra escoger la fecha exacta dentro del rango indicado.
+ Despues de enviarla, el departamento de servicio podra escoger la fecha exacta dentro del rango indicado.
  </div>
  <button
  type="button"
@@ -2530,7 +2586,6 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
  </thead>
  <tbody className="divide-y divide-gray-50">
  {visibleRows.map((row) => {
- const isCustom = row.source === "custom";
  const isEditing = editingItemKey === row.key;
  const canEditRow = canEditType(row.type);
  const manufacturerId = getManufacturerId(row);

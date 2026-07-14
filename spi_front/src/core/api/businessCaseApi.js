@@ -605,3 +605,8 @@ export const getBusinessCaseDocumentVersions = async (businessCaseId, limit = 20
  const { data } = await api.get(`/business-cases/${businessCaseId}/sheets/document-versions`, { params: { limit } });
  return data;
 };
+
+export const reviewBcInspectionRequest = async (businessCaseId, payload = {}) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/inspection-request/review`, payload);
+ return data;
+};

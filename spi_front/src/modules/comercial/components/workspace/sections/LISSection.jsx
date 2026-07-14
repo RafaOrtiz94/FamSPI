@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { FiLink, FiSave, FiPlus, FiTrash2 } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
+import { useAutoEditSection } from "../BusinessCaseWorkspaceContext";
 
 // EMPTY SCHEMA - Initialize with no default values
 const EMPTY_SCHEMA = {
@@ -29,6 +30,7 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
  const { showToast } = useUI();
  const [saving, setSaving] = useState(false);
  const [isEditing, setIsEditing] = useState(false);
+ useAutoEditSection("lis", () => setIsEditing(true));
 
  // ONE-TIME HYDRATION GUARD
  const hydratedRef = useRef(false);

@@ -5,6 +5,7 @@ const PDFDocument = require("pdfkit");
 const { ensureFolder, uploadBase64File, copyTemplate, replaceTags } = require("../../utils/drive");
 const { createAllDayEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
+const { renderProviderEmail } = require("../../utils/emailTemplate");
 const inventarioService = require("../inventario/inventario.service");
 const notificationManager = require("../notifications/notificationManager");
 const { trackFst07WorkflowDocument } = require("../servicio/fst07.service");
@@ -17,6 +18,7 @@ const {
   buildVisualReceptionPatch,
   buildVerificationDecisionPatch,
   buildVerificationRemediationPatch,
+  appendVerificationAttempt,
   buildCuProviderReportPatch,
   computeInstallationClosureGate,
   enrichInstallationWorkflowWithGate,
@@ -393,7 +395,7 @@ function hasRoleToken(user, token) {
 }
 
 function canViewInspectionQueue(user) {
-  return ["jefe_tecnico", "jefe_servicio_tecnico", "tecnico"].some((role) =>
+  return ["jefe_tecnico", "jefe_servicio", "jefe_servicio_tecnico", "tecnico"].some((role) =>
     hasRoleToken(user, role),
   );
 }
@@ -401,6 +403,7 @@ function canViewInspectionQueue(user) {
 function canCoordinateInspection(user) {
   return [
     "jefe_tecnico",
+    "jefe_servicio",
     "jefe_servicio_tecnico",
   ].some((role) => hasRoleToken(user, role));
 }
@@ -408,6 +411,7 @@ function canCoordinateInspection(user) {
 function canReviewInspectionCoordination(user) {
   return [
     "jefe_tecnico",
+    "jefe_servicio",
     "jefe_servicio_tecnico",
   ].some((role) => hasRoleToken(user, role));
 }
@@ -416,6 +420,7 @@ function canRegisterSiteInspection(user) {
   return [
     "tecnico",
     "jefe_tecnico",
+    "jefe_servicio",
     "jefe_servicio_tecnico",
   ].some((role) => hasRoleToken(user, role));
 }
@@ -426,6 +431,7 @@ function getInspectionResponsibleName(user) {
   return String(user?.email || "").trim() || "N/D";
 }
 
+// Ejecución física: llegada del equipo, despacho, entrega completada.
 function canManageDelivery(user) {
   return [
     "acp_comercial",
@@ -435,8 +441,21 @@ function canManageDelivery(user) {
     "jefe_operaciones",
     "jefe_logistica",
     "jefe_tecnico",
+    "jefe_servicio",
     "jefe_servicio_tecnico",
     "tecnico",
+  ].some((role) => hasRoleToken(user, role));
+}
+
+// Planificación: solicitar y confirmar fechas de entrega con el cliente.
+function canPlanDelivery(user) {
+  return [
+    "acp_comercial",
+    "gerencia",
+    "gerencia_general",
+    "jefe_comercial",
+    "jefe_operaciones",
+    "operaciones",
   ].some((role) => hasRoleToken(user, role));
 }
 
@@ -572,7 +591,7 @@ async function notifyDeliveryStage({ request, title, message, meta = {}, priorit
     purchaseType: "equipment_purchase",
     id: request.id,
     status: request.status,
-    businessCaseId: request?.extra?.auto_business_case_id || request?.auto_business_case_id || null,
+    businessCaseId: request?.business_case_id || null,
   });
 }
 
@@ -970,11 +989,7 @@ async function enrichRequestsWithClientDocuments(requests = []) {
 }
 
 function getAutoBusinessCaseIdFromRequest(request = {}) {
-  const extra = request?.extra && typeof request.extra === "object" && !Array.isArray(request.extra)
-    ? request.extra
-    : {};
-  const rawId = extra?.auto_business_case_id;
-  const value = String(rawId || "").trim();
+  const value = String(request?.business_case_id || "").trim();
   return value || null;
 }
 
@@ -1976,8 +1991,7 @@ async function closeReinspectionTechnicalActivity(requestId) {
 
 async function ensureAutoBusinessCaseForPurchase({ purchaseRequest, user, inspectionId }) {
   if (!purchaseRequest?.id) return null;
-  const extra = purchaseRequest.extra || {};
-  const existingBcId = extra.auto_business_case_id || null;
+  const existingBcId = purchaseRequest.business_case_id || null;
   if (existingBcId) return existingBcId;
 
   const businessCaseService = require("../business-case/businessCase.service");
@@ -2023,19 +2037,12 @@ async function ensureAutoBusinessCaseForPurchase({ purchaseRequest, user, inspec
   const bcId = bc?.business_case_id || bc?.id || null;
   if (!bcId) return null;
 
-  const mergedExtra = {
-    ...extra,
-    auto_business_case_id: bcId,
-    auto_business_case_stage: "pending_comercial",
-    auto_business_case_status: "draft",
-    auto_business_case_created_at: new Date().toISOString(),
-  };
   await db.query(
     `UPDATE equipment_purchase_requests
-        SET extra = $1::jsonb,
+        SET business_case_id = $1,
             updated_at = now()
       WHERE id = $2`,
-    [JSON.stringify(mergedExtra), purchaseRequest.id],
+    [bcId, purchaseRequest.id],
   );
 
   return bcId;
@@ -2067,8 +2074,21 @@ async function archiveEmail({ html, subject, folderId, prefix = "correo", reques
   return stored?.id || null;
 }
 
-async function sendAndArchive({ user, to, subject, html, cc, folderId, prefix, request, actionLabel }) {
-  await sendMail({
+// threadContext encadena los correos de una misma solicitud como respuestas
+// del mismo hilo de Gmail en vez de crear un correo nuevo en cada etapa.
+async function sendAndArchive({
+  user,
+  to,
+  subject,
+  html,
+  cc,
+  folderId,
+  prefix,
+  request,
+  actionLabel,
+  threadContext = null,
+}) {
+  const sendResult = await sendMail({
     to,
     cc,
     subject,
@@ -2076,8 +2096,16 @@ async function sendAndArchive({ user, to, subject, html, cc, folderId, prefix, r
     gmailUserId: user?.id,
     from: user?.email,
     replyTo: user?.email,
+    threadId: threadContext?.threadId || undefined,
+    inReplyTo: threadContext?.lastMessageId || undefined,
+    references: threadContext?.lastMessageId || undefined,
   });
-  return archiveEmail({ html, subject, folderId, prefix, request, actionLabel, user });
+  const fileId = await archiveEmail({ html, subject, folderId, prefix, request, actionLabel, user });
+  return {
+    fileId,
+    threadId: sendResult?.providerThreadId || threadContext?.threadId || null,
+    lastMessageId: sendResult?.rfc822MessageId || threadContext?.lastMessageId || null,
+  };
 }
 
 async function getApprovedClients() {
@@ -2111,10 +2139,10 @@ async function getTechnicalInspectionUsers() {
     `SELECT id, email, fullname, name, role
        FROM users
       WHERE active = true
-        AND lower(role) IN ('tecnico', 'jefe_tecnico', 'jefe_servicio_tecnico')
+        AND lower(role) IN ('tecnico', 'ing_servicio', 'jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico')
       ORDER BY
         CASE
-          WHEN lower(role) IN ('jefe_tecnico', 'jefe_servicio_tecnico') THEN 0
+          WHEN lower(role) IN ('jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico') THEN 0
           ELSE 1
         END,
         fullname NULLS LAST,
@@ -2662,12 +2690,16 @@ async function startAvailabilityRequest({ id, user, providerEmail, notes, expect
     })
     .join("<br>");
 
-  const html = `
-    <h2>Solicitud de disponibilidad</h2>
-    <p>Equipos requeridos para la solicitud #${request.id}:</p>
-    <p>${equipmentList}</p>
-    ${notes ? `<p>Notas: ${notes}</p>` : request.notes ? `<p>Notas: ${request.notes}</p>` : ""}
-  `;
+  const html = renderProviderEmail({
+    title: "Solicitud de disponibilidad de equipos",
+    bodyHtml: `
+      <p>Nos gustaría confirmar la disponibilidad de los siguientes equipos para la solicitud <strong>#${request.id}</strong>:</p>
+      <p>${equipmentList}</p>
+      ${notes ? `<p><strong>Notas:</strong> ${notes}</p>` : request.notes ? `<p><strong>Notas:</strong> ${request.notes}</p>` : ""}
+    `,
+    user,
+    requestId: request.id,
+  });
 
   const requestSnapshot = {
     id: request.id,
@@ -2678,10 +2710,10 @@ async function startAvailabilityRequest({ id, user, providerEmail, notes, expect
     notes: notes || request.notes,
   };
 
-  const emailFileId = await sendAndArchive({
+  const { fileId: emailFileId, threadId, lastMessageId } = await sendAndArchive({
     user,
     to: providerEmail,
-    subject: `Disponibilidad de equipos - Solicitud #${request.id}`,
+    subject: `Solicitud de equipos #${request.id}`,
     html,
     folderId: request.drive_folder_id,
     prefix: "disponibilidad",
@@ -2697,10 +2729,13 @@ async function startAvailabilityRequest({ id, user, providerEmail, notes, expect
             availability_email_sent_at = now(),
             availability_email_file_id = $4,
             availability_status = 'supplier_requested',
+            provider_email_thread_id = $6,
+            provider_email_last_message_id = $7,
+            disponibilidad_last_actor_email = $8,
             updated_at = now()
       WHERE id = $5
       RETURNING *`,
-    [providerEmail, notes || request.notes || null, STATUS.WAITING_PROVIDER, emailFileId, id],
+    [providerEmail, notes || request.notes || null, STATUS.WAITING_PROVIDER, emailFileId, id, threadId, lastMessageId, user?.email || null],
   );
   await upsertProviderContact({
     email: providerEmail,
@@ -2757,6 +2792,7 @@ async function saveProviderResponse({ id, user, outcome, items = [], notes, expe
             provider_response_at = now(),
             status = $2,
             availability_status = $4,
+            disponibilidad_last_actor_email = $5,
             updated_at = now()
       WHERE id = $3
       RETURNING *`,
@@ -2765,6 +2801,7 @@ async function saveProviderResponse({ id, user, outcome, items = [], notes, expe
       normalizedOutcome,
       id,
       availabilityStatus,
+      user?.email || null,
     ],
   );
   const updated = rows[0];
@@ -2955,21 +2992,29 @@ async function requestProforma({ id, user, expected_updated_at }) {
     }
   }
 
-  const html = `
-    <p>Hola,</p>
-    <p>Por favor envÃ­anos la proforma de los siguientes equipos para la solicitud #${request.id}:</p>
-    ${formatEquipmentList(acceptedItems)}
-  `;
+  const html = renderProviderEmail({
+    title: "Solicitud de proforma",
+    bodyHtml: `
+      <p>Por favor envíanos la proforma de los siguientes equipos para la solicitud <strong>#${request.id}</strong>:</p>
+      ${formatEquipmentList(acceptedItems)}
+    `,
+    user,
+    requestId: request.id,
+  });
 
-  const emailFileId = await sendAndArchive({
+  const { fileId: emailFileId, threadId, lastMessageId } = await sendAndArchive({
     user,
     to: request.provider_email,
-    subject: `Proforma requerida - Solicitud #${request.id}`,
+    subject: request.provider_email_thread_id ? `Re: Solicitud de equipos #${request.id}` : `Solicitud de equipos #${request.id}`,
     html,
     folderId: request.drive_folder_id,
     prefix: "proforma",
     request,
     actionLabel: "Solicitud de proforma",
+    threadContext: {
+      threadId: request.provider_email_thread_id,
+      lastMessageId: request.provider_email_last_message_id,
+    },
   });
 
   const { rows } = await db.query(
@@ -2977,10 +3022,13 @@ async function requestProforma({ id, user, expected_updated_at }) {
         SET status = $1,
             proforma_requested_at = now(),
             proforma_request_email_file_id = $2,
+            provider_email_thread_id = $4,
+            provider_email_last_message_id = $5,
+            disponibilidad_last_actor_email = $6,
             updated_at = now()
       WHERE id = $3
       RETURNING *`,
-    [STATUS.WAITING_PROFORMA, emailFileId, id],
+    [STATUS.WAITING_PROFORMA, emailFileId, id, threadId, lastMessageId, user?.email || null],
   );
   const updated = rows[0];
   try {
@@ -3059,21 +3107,30 @@ async function reserveEquipment({ id, user, expected_updated_at }) {
   }
   assertChecklistReady(request, "reserve_equipment");
 
-  const html = `
-    <p>Solicitamos reservar los equipos cotizados para la solicitud #${request.id}.</p>
-    <p>Adjuntamos la proforma recibida y confirmamos reserva para:</p>
-    ${formatEquipmentList(acceptedItems)}
-  `;
+  const html = renderProviderEmail({
+    title: "Confirmación de reserva de equipos",
+    bodyHtml: `
+      <p>Solicitamos reservar los equipos cotizados para la solicitud <strong>#${request.id}</strong>.</p>
+      <p>Adjuntamos la proforma recibida y confirmamos reserva para:</p>
+      ${formatEquipmentList(acceptedItems)}
+    `,
+    user,
+    requestId: request.id,
+  });
 
-  const emailFileId = await sendAndArchive({
+  const { fileId: emailFileId, threadId, lastMessageId } = await sendAndArchive({
     user,
     to: request.provider_email,
-    subject: `Reserva de equipos - Solicitud #${request.id}`,
+    subject: request.provider_email_thread_id ? `Re: Solicitud de equipos #${request.id}` : `Solicitud de equipos #${request.id}`,
     html,
     folderId: request.drive_folder_id,
     prefix: "reserva",
     request,
     actionLabel: "ConfirmaciÃ³n de reserva",
+    threadContext: {
+      threadId: request.provider_email_thread_id,
+      lastMessageId: request.provider_email_last_message_id,
+    },
   });
 
   const reservationExpiresAt = new Date();
@@ -3101,6 +3158,9 @@ async function reserveEquipment({ id, user, expected_updated_at }) {
             reservation_email_file_id = $3,
             reservation_calendar_event_id = $4,
             reservation_calendar_event_link = $5,
+            provider_email_thread_id = $7,
+            provider_email_last_message_id = $8,
+            disponibilidad_last_actor_email = $9,
             updated_at = now()
       WHERE id = $6
       RETURNING *`,
@@ -3111,6 +3171,9 @@ async function reserveEquipment({ id, user, expected_updated_at }) {
       calendarEvent.id || null,
       calendarEvent.htmlLink || null,
       id,
+      threadId,
+      lastMessageId,
+      user?.email || null,
     ],
   );
   const updated = rows[0];
@@ -3148,21 +3211,30 @@ async function uploadSignedProforma({
   const fileId = await uploadDocument(file, request.drive_folder_id, "proforma-firmada");
 
   const acceptedItems = getAcceptedItems(request);
-  const arrivalHtml = `
-    <p>Hemos recibido la proforma firmada asociada a la solicitud #${request.id}.</p>
-    <p>Por favor confirma el tiempo de llegada de los siguientes equipos:</p>
-    ${formatEquipmentList(acceptedItems)}
-  `;
+  const arrivalHtml = renderProviderEmail({
+    title: "Confirmación de tiempo de llegada",
+    bodyHtml: `
+      <p>Hemos recibido la proforma firmada asociada a la solicitud <strong>#${request.id}</strong>.</p>
+      <p>Por favor confirma el tiempo de llegada de los siguientes equipos:</p>
+      ${formatEquipmentList(acceptedItems)}
+    `,
+    user,
+    requestId: request.id,
+  });
 
-  const arrivalFileId = await sendAndArchive({
+  const { fileId: arrivalFileId, threadId: arrivalThreadId, lastMessageId: arrivalLastMessageId } = await sendAndArchive({
     user,
     to: request.provider_email,
-    subject: `Tiempo de llegada - Solicitud #${request.id}`,
+    subject: request.provider_email_thread_id ? `Re: Solicitud de equipos #${request.id}` : `Solicitud de equipos #${request.id}`,
     html: arrivalHtml,
     folderId: request.drive_folder_id,
     prefix: "tiempo-llegada",
     request,
     actionLabel: "Solicitud de tiempo de llegada",
+    threadContext: {
+      threadId: request.provider_email_thread_id,
+      lastMessageId: request.provider_email_last_message_id,
+    },
   });
 
   const signedAt = new Date();
@@ -3200,6 +3272,9 @@ async function uploadSignedProforma({
             contract_reminder_email_sent_at = NULL,
             contract_reminder_email_to = NULL,
             status = $6,
+            provider_email_thread_id = $8,
+            provider_email_last_message_id = $9,
+            disponibilidad_last_actor_email = $10,
             updated_at = now()
       WHERE id = $7
       RETURNING *`,
@@ -3211,6 +3286,9 @@ async function uploadSignedProforma({
       contractReminder.htmlLink || null,
       STATUS.PENDING_CONTRACT,
       id,
+      arrivalThreadId,
+      arrivalLastMessageId,
+      user?.email || null,
     ],
   );
   const updated = rows[0];
@@ -4233,6 +4311,47 @@ async function upsertInstallationWorkflow({
       payload,
       user,
     });
+  } else if (normalizedAction === "verification_attempt") {
+    // Registra un intento del ciclo de verificacion F.ST-09 (solo aplica si
+    // verification_decision.applies === true). appendVerificationAttempt ya
+    // estaba implementado pero nunca se conecto a ninguna accion -- no habia
+    // forma de registrar un intento (mismo gap que en private-purchases).
+    if (!canRegisterSiteInspection(user)) {
+      throw createInstallationWorkflowError("Solo el equipo tecnico puede registrar la verificacion F.ST-09", {
+        status: 403,
+        code: "FORBIDDEN_ROLE_ACTION",
+      });
+    }
+
+    let attemptFileId = payload.document_file_id || payload.file_id || null;
+    let attemptFileLink = payload.document_link || payload.link || null;
+    if (!attemptFileId && payload.file_base64 && payload.file_name) {
+      const folderId = request?.drive_folder_id || null;
+      if (!folderId) {
+        throw createInstallationWorkflowError("No hay carpeta de Drive para almacenar el reporte de verificacion", {
+          status: 409,
+          code: "VERIFICATION_DRIVE_FOLDER_MISSING",
+        });
+      }
+      const verificationFolder = await ensureFolder("F.ST-09", folderId);
+      const stored = await uploadBase64File(
+        payload.file_name,
+        String(payload.file_base64).includes(",")
+          ? String(payload.file_base64).split(",")[1]
+          : String(payload.file_base64),
+        payload.mime_type || "application/pdf",
+        verificationFolder?.id || folderId,
+      );
+      attemptFileId = stored?.id || null;
+      attemptFileLink = stored?.webViewLink || (attemptFileId ? driveLink(attemptFileId) : null);
+    }
+
+    nextWorkflow = appendVerificationAttempt({
+      workflow: currentWorkflow,
+      payload,
+      user,
+      document: { file_id: attemptFileId, link: attemptFileLink },
+    });
   } else if (normalizedAction === "cu_provider_report") {
     let fileId = payload.provider_repair_report_file_id || payload.file_id || null;
     let link = payload.provider_repair_report_link || payload.link || null;
@@ -4551,7 +4670,7 @@ async function registerPublicPortalOutcome({ id, user, outcome, notes, expected_
     });
   }
 
-  let autoBusinessCaseId = request?.extra?.auto_business_case_id || null;
+  let autoBusinessCaseId = request?.business_case_id || null;
   if (!autoBusinessCaseId) {
     try {
       autoBusinessCaseId = await ensureAutoBusinessCaseForPurchase({
@@ -4653,10 +4772,11 @@ async function registerPublicPortalOutcome({ id, user, outcome, notes, expected_
     `UPDATE equipment_purchase_requests
         SET status = $1,
             extra = $2::jsonb,
+            disponibilidad_last_actor_email = $4,
             updated_at = now()
       WHERE id = $3
       RETURNING *`,
-    [nextStatus, JSON.stringify(mergedExtra), id],
+    [nextStatus, JSON.stringify(mergedExtra), id, user?.email || null],
   );
 
   const updated = mapRequestRow(rows[0]);
@@ -4695,7 +4815,7 @@ async function registerPublicPortalOutcome({ id, user, outcome, notes, expected_
     purchaseType: "equipment_purchase",
     id: updated.id,
     status: updated.status,
-    businessCaseId: updated?.extra?.auto_business_case_id || null,
+    businessCaseId: updated?.business_case_id || null,
   });
 
   return updated;
@@ -4709,7 +4829,7 @@ async function uploadContract({ id, user, file, expected_updated_at }) {
   assertActionStatus(request, "upload_contract");
   assertChecklistReady(request, "upload_contract");
 
-  let autoBusinessCaseId = request?.extra?.auto_business_case_id || null;
+  let autoBusinessCaseId = request?.business_case_id || null;
   if (!autoBusinessCaseId) {
     try {
       autoBusinessCaseId = await ensureAutoBusinessCaseForPurchase({
@@ -4766,10 +4886,11 @@ async function uploadContract({ id, user, file, expected_updated_at }) {
         SET contract_file_id = $1,
             contract_uploaded_at = now(),
             status = $2,
+            contrato_last_actor_email = $4,
             updated_at = now()
       WHERE id = $3
       RETURNING *`,
-    [fileId, STATUS.CONTRACT_AVAILABLE, id],
+    [fileId, STATUS.CONTRACT_AVAILABLE, id, user?.email || null],
   );
 
   const completed = rows[0];
@@ -4878,7 +4999,7 @@ async function markEquipmentArrived({ id, user, notes, expected_updated_at }) {
 
 async function requestDeliveryDates({ id, user, notes, expected_updated_at }) {
   await ensureTables();
-  if (!canManageDelivery(user)) {
+  if (!canPlanDelivery(user)) {
     throw createAppError("Tu rol no puede solicitar fechas de entrega", {
       status: 403,
       code: "FORBIDDEN_ROLE_ACTION",
@@ -4914,7 +5035,7 @@ async function requestDeliveryDates({ id, user, notes, expected_updated_at }) {
 
 async function submitDeliveryDates({ id, user, delivery_start_at, delivery_end_at, notes, expected_updated_at }) {
   await ensureTables();
-  if (!canManageDelivery(user)) {
+  if (!canPlanDelivery(user)) {
     throw createAppError("Tu rol no puede registrar fechas de entrega", {
       status: 403,
       code: "FORBIDDEN_ROLE_ACTION",
@@ -5185,7 +5306,6 @@ async function getFreedReservations({ user } = {}) {
     `SELECT
         id,
         client_name,
-        client_business_name,
         equipment,
         provider_email,
         reservation_email_sent_at,
@@ -5217,7 +5337,6 @@ async function getActiveReservations({ user } = {}) {
         id,
         status,
         client_name,
-        client_business_name,
         equipment,
         reservation_email_sent_at,
         reservation_expires_at,
@@ -5236,7 +5355,7 @@ async function getActiveReservations({ user } = {}) {
     id: row.id,
     status: row.status,
     purchase_type: "public",
-    client_name: row.client_name || row.client_business_name || "Cliente",
+    client_name: row.client_name || "Cliente",
     process_number: row.soce_process_code || row.pac_code || row.orden_compra_number || null,
     equipment: Array.isArray(row.equipment) ? row.equipment : [],
     reservation_email_sent_at: row.reservation_email_sent_at,
@@ -5644,7 +5763,7 @@ async function registerParticipationDecision({ id, user, decision, notes, expect
     purchaseType: "equipment_purchase",
     id: updated.id,
     status: updated.status,
-    businessCaseId: updated?.extra?.auto_business_case_id || null,
+    businessCaseId: updated?.business_case_id || null,
   });
 
   return updated;
@@ -5770,7 +5889,7 @@ async function setPurchaseType({ id, user, purchaseType, expected_updated_at }) 
     purchaseType: "equipment_purchase",
     id: updated.id,
     status: updated.status,
-    businessCaseId: updated?.extra?.auto_business_case_id || null,
+    businessCaseId: updated?.business_case_id || null,
   });
 
   return updated;
@@ -5820,7 +5939,7 @@ async function setPrivateModality({ id, user, privateModality, expected_updated_
     purchaseType: "equipment_purchase",
     id: updated.id,
     status: updated.status,
-    businessCaseId: updated?.extra?.auto_business_case_id || null,
+    businessCaseId: updated?.business_case_id || null,
   });
 
   return updated;
@@ -5895,7 +6014,7 @@ async function setAvailability({ id, user, availabilitySource, availabilityStatu
     purchaseType: "equipment_purchase",
     id: updated.id,
     status: updated.status,
-    businessCaseId: updated?.extra?.auto_business_case_id || null,
+    businessCaseId: updated?.business_case_id || null,
   });
 
   return updated;
@@ -5921,9 +6040,12 @@ async function activateSupplyControl({ id, user, supplyControlType, expected_upd
     });
   }
 
-  // GAP-01: bc_maximums requiere un Business Case vinculado al expediente
+  // GAP-01: bc_maximums requiere un Business Case vinculado al expediente.
+  // business_case_id es la unica columna de vinculo (unificada para compra
+  // publica y privada; comodato_business_case_id nunca se escribe en ningun
+  // flujo real y no se usa).
   if (normalizedType === "bc_maximums") {
-    const linkedBcId = request?.extra?.auto_business_case_id || request?.business_case_id || request?.comodato_business_case_id || null;
+    const linkedBcId = request?.business_case_id || null;
     if (!linkedBcId) {
       throw createAppError("No se puede activar 'BC MÃ¡ximos' porque este expediente no tiene un Business Case vinculado.", {
         status: 409,
@@ -5949,7 +6071,7 @@ async function activateSupplyControl({ id, user, supplyControlType, expected_upd
     purchaseType: "equipment_purchase",
     id: updated.id,
     status: updated.status,
-    businessCaseId: updated?.extra?.auto_business_case_id || null,
+    businessCaseId: updated?.business_case_id || null,
   });
 
   return updated;

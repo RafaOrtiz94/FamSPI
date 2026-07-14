@@ -3,6 +3,7 @@ import { FiSave } from "react-icons/fi";
 import { useParams } from "react-router-dom";
 import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
+import { useAutoEditSection } from "../BusinessCaseWorkspaceContext";
 
 const DELIVERY_OPTIONS = [
   { value: "total", label: "Total" },
@@ -26,6 +27,7 @@ const RequirementsSection = ({ permissions = {}, ownership = {}, onSave }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  useAutoEditSection("requirement", () => setIsEditing(true));
 
   const canEdit = permissions.canEdit !== false && ownership?.canUserEdit !== false;
 
@@ -60,6 +62,7 @@ const RequirementsSection = ({ permissions = {}, ownership = {}, onSave }) => {
     };
 
     loadRequirementData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bcId]);
 
   const handleSave = async () => {

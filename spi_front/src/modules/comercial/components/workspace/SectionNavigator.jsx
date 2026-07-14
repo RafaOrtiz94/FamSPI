@@ -123,7 +123,6 @@ const SectionNavigator = ({
  const isObserved = observationData?.observedSections?.includes(sectionId);
  const hasComment = observationData?.comments?.[sectionId];
  const isLocked = Boolean(rule?.isLocked);
- const isReadOnly = !canEditSection(sectionId);
 
  // Priority: locked > observed > completed > in-progress > pending
  if (isLocked && !rule?.isCompleted) {

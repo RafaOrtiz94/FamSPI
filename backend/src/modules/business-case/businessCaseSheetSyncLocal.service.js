@@ -7,6 +7,17 @@ const logger = require("../../config/logger");
 const TEMPLATE_FILENAME = "FORMATO_BC.xlsx";
 const MAPPING_FILENAME = "mapping_auto.json";
 
+// Google Sheet maestro con el diseño/formato oficial ("FORMATO BC - 15-01-2026").
+// Cada BC se crea copiando este archivo (drive.files.copy) en vez de subir el
+// .xlsx local y dejar que Google lo convierta -- la conversion xlsx->Sheets
+// puede perder bordes/colores/anchos de columna; una copia de un Sheet nativo
+// preserva el formato al 100%. El .xlsx local (TEMPLATE_FILENAME) se sigue
+// usando solo para la estructura (loadTemplateDefinition: nombres de pestañas,
+// filas, aliases) ya que ambos comparten el mismo layout.
+const TEMPLATE_SPREADSHEET_ID =
+  String(process.env.BC_SHEET_TEMPLATE_SPREADSHEET_ID || "").trim() ||
+  "1hKrjRq8cT3yVwlLHyKo-CTxZx_qO3uqKqLyI759-mRk";
+
 function resolveTemplatePath() {
   const envPath = String(process.env.BC_SHEET_TEMPLATE_PATH || "").trim();
   const candidatePaths = [];
@@ -494,7 +505,7 @@ function buildSheetItemLookup(items = []) {
   return { byId, byLabel };
 }
 
-async function pullMaximumQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = [] }) {
+async function pullColumnQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = [], columnField, resultField }) {
   if (!jwtClient || !sheetId) return [];
   const template = loadTemplateDefinition();
   const normalizedTabs = Array.isArray(equipmentTabs) ? equipmentTabs : [];
@@ -503,14 +514,14 @@ async function pullMaximumQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = [
   const targets = [];
   for (const tab of normalizedTabs) {
     const definition = template.equipmentSheets.find((entry) => entry.name === tab.sheet_name);
-    if (!definition?.columns?.deliver) continue;
+    if (!definition?.columns?.[columnField]) continue;
     const rows = Array.isArray(definition.rows) ? definition.rows : [];
     if (!rows.length) continue;
     const rowNumbers = rows.map((row) => Number(row.rowNumber)).filter((row) => Number.isInteger(row) && row > 0);
     if (!rowNumbers.length) continue;
     const minRow = Math.min(...rowNumbers);
     const maxRow = Math.max(...rowNumbers);
-    const column = columnLetter(definition.columns.deliver);
+    const column = columnLetter(definition.columns[columnField]);
     targets.push({
       sheetName: definition.name,
       range: `${definition.name}!${column}${minRow}:${column}${maxRow}`,
@@ -552,12 +563,25 @@ async function pullMaximumQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = [
 
       updatesByItemKey.set(itemKey, {
         item_key: itemKey,
-        planned_qty: parsedValue,
+        [resultField]: parsedValue,
       });
     }
   }
 
   return Array.from(updatesByItemKey.values());
+}
+
+async function pullMaximumQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = [] }) {
+  return pullColumnQuantitiesFromGoogleSheet({ sheetId, equipmentTabs, columnField: "deliver", resultField: "planned_qty" });
+}
+
+// Sincronizacion inversa Sheet -> SPI para la columna "Cantidad Anual"
+// (reactivos, calibradores, controles, materiales en bc_consumption_items).
+// A diferencia de pullMaximumQuantitiesFromGoogleSheet (que corre automatico
+// al cargar el dispatch workspace), esta se dispara solo por accion manual
+// del usuario (boton "Sincronizar cantidades desde Sheet").
+async function pullAnnualQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = [] }) {
+  return pullColumnQuantitiesFromGoogleSheet({ sheetId, equipmentTabs, columnField: "annual", resultField: "annual_qty" });
 }
 
 function loadTemplateDefinition() {
@@ -638,27 +662,14 @@ function buildValueRange(range, values) {
 
 async function createSpreadsheetFromTemplate({ outputFolderId, businessCaseName }) {
   const name = businessCaseName || `BC-${Date.now()}`;
-  const { path: templatePath } = resolveTemplatePath();
-  if (!fs.existsSync(templatePath)) {
-    const error = new Error(`No existe la plantilla de Sheets: ${templatePath}`);
-    error.code = "BC_SHEET_TEMPLATE_MISSING";
-    error.retryable = false;
-    error.status = 500;
-    throw error;
-  }
-  const media = {
-    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    body: fs.createReadStream(templatePath),
-  };
 
-  const { data } = await drive.files.create({
+  const { data } = await drive.files.copy({
+    fileId: TEMPLATE_SPREADSHEET_ID,
     supportsAllDrives: true,
     requestBody: {
       name,
       parents: outputFolderId ? [outputFolderId] : undefined,
-      mimeType: "application/vnd.google-apps.spreadsheet",
     },
-    media,
     fields: "id, name, webViewLink",
   });
 
@@ -700,13 +711,13 @@ async function deleteFileIfExists(fileId) {
   }
 }
 
-async function ensureSpreadsheet({ requiredSheetNames, existingSheetId, outputFolderId, businessCaseName }) {
+async function ensureSpreadsheet({ requiredSheetNames, existingSheetId, outputFolderId, businessCaseName, forceRecreate = false }) {
   if (existingSheetId) {
     try {
       const meta = await getSpreadsheetMeta(existingSheetId);
       const missingSheetNames = requiredSheetNames.filter((name) => !meta.sheetMap.has(name));
       const hasAllSheets = missingSheetNames.length === 0;
-      if (hasAllSheets) {
+      if (hasAllSheets && !forceRecreate) {
         return {
           spreadsheetId: existingSheetId,
           spreadsheetUrl: meta.data?.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${existingSheetId}/edit`,
@@ -720,8 +731,10 @@ async function ensureSpreadsheet({ requiredSheetNames, existingSheetId, outputFo
 
       await deleteFileIfExists(existingSheetId);
       logger.warn(
-        { existingSheetId, missingSheetNames },
-        "Spreadsheet previo incompleto. Se recreara desde plantilla.",
+        { existingSheetId, missingSheetNames, forceRecreate },
+        forceRecreate
+          ? "Regeneracion forzada solicitada. Se recreara desde plantilla."
+          : "Spreadsheet previo incompleto. Se recreara desde plantilla.",
       );
 
       const created = await createSpreadsheetFromTemplate({ outputFolderId, businessCaseName });
@@ -732,7 +745,7 @@ async function ensureSpreadsheet({ requiredSheetNames, existingSheetId, outputFo
         sheetMap: createdMeta.sheetMap,
         existing: false,
         recreated: true,
-        replacementReason: "missing_required_sheets",
+        replacementReason: forceRecreate && hasAllSheets ? "forced_regenerate" : "missing_required_sheets",
         missingSheetNames,
       };
     } catch (error) {
@@ -920,7 +933,7 @@ function buildSheetPayloads({ template, equipmentRecords = [], payload = {} }) {
   return selectedSheets;
 }
 
-async function syncBusinessCaseToGoogleSheet({ businessCase, outputFolderId, payload = {}, previousSheetId = null }) {
+async function syncBusinessCaseToGoogleSheet({ businessCase, outputFolderId, payload = {}, previousSheetId = null, forceRecreate = false }) {
   if (!jwtClient) {
     const error = new Error("Google JWT Client no inicializado para sincronizar Business Case a Sheets");
     error.code = "GOOGLE_AUTH_UNAVAILABLE";
@@ -937,6 +950,7 @@ async function syncBusinessCaseToGoogleSheet({ businessCase, outputFolderId, pay
     existingSheetId: previousSheetId,
     outputFolderId,
     businessCaseName: resolveBusinessCaseName(businessCase),
+    forceRecreate,
   });
 
   await pruneSheets(spreadsheet.spreadsheetId, spreadsheet.sheetMap, requiredSheetNames);
@@ -982,6 +996,7 @@ module.exports = {
   scoreAliases,
   buildSheetPayloads,
   pullMaximumQuantitiesFromGoogleSheet,
+  pullAnnualQuantitiesFromGoogleSheet,
   syncBusinessCaseToGoogleSheet,
   clearSheetCaches,
 };

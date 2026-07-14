@@ -4,6 +4,7 @@ import api from "../../../../../core/api";
 import { useParams } from "react-router-dom";
 import { useUI } from "../../../../../core/ui/UIContext";
 import { useAuth } from "../../../../../core/auth/AuthContext";
+import { useAutoEditSection } from "../BusinessCaseWorkspaceContext";
 import Modal from "../../../../../core/ui/components/Modal";
 const makeTempId = () => `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const isTempId = (id) => String(id).startsWith("tmp-");
@@ -54,6 +55,7 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  });
  const [confirmCartModalOpen, setConfirmCartModalOpen] = useState(false);
  const [isEditing, setIsEditing] = useState(false);
+ useAutoEditSection("investments", () => setIsEditing(true));
 
  const canEditBase = permissions.canEdit !== false && ownership?.canUserEdit !== false;
  const canEdit = canEditBase && !cartStatus?.confirmed;

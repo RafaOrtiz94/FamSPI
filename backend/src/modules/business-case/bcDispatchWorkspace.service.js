@@ -131,9 +131,14 @@ function toObject(value) {
 }
 
 async function resolveBusinessCaseSheetId(businessCaseId, client = null) {
+  // BUG corregido: esta query pedia bc_spreadsheet_id, columna que no existe
+  // en equipment_purchase_requests -- la query fallaba siempre (atrapada en
+  // el try/catch del caller), asi que el pull de PRODUCTO A ENTREGAR desde
+  // Sheets nunca se ejecutaba. El sheet_id real vive solo en
+  // modern_bc_metadata.bc_sheet_generation.last.sheet_id.
   const { rows } = await queryWithClient(
     client,
-    `SELECT bc_spreadsheet_id, modern_bc_metadata
+    `SELECT modern_bc_metadata
        FROM equipment_purchase_requests
       WHERE id = $1
       LIMIT 1`,
@@ -143,8 +148,7 @@ async function resolveBusinessCaseSheetId(businessCaseId, client = null) {
   if (!row) return null;
 
   const metadata = toObject(row.modern_bc_metadata);
-  const fromMetadata = metadata?.bc_sheet_generation?.last?.sheet_id || null;
-  return fromMetadata || row.bc_spreadsheet_id || null;
+  return metadata?.bc_sheet_generation?.last?.sheet_id || null;
 }
 
 function buildSheetContextFromConsumptionRows(consumptionRows = []) {

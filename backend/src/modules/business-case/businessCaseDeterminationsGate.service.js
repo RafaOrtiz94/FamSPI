@@ -2,6 +2,7 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { resolveExternalDriveIntegrity } = require("../../utils/documentHash");
 const { drive } = require("../../utils/drive");
+const { BusinessCasePermissions } = require("./businessCasePermissions");
 
 const DETERMINATIONS_DEADLINE_HOURS = 48;
 const DETERMINATIONS_DOCUMENT_VIEW_ROLES = new Set([
@@ -11,6 +12,13 @@ const DETERMINATIONS_DOCUMENT_VIEW_ROLES = new Set([
   "backoffice_comercial",
 ]);
 const DETERMINATIONS_ALLOWED_UPLOAD_ROLES = new Set(["comercial"]);
+const DETERMINATIONS_INSPECTION_REQUEST_ROLES = new Set([
+  "comercial",
+  "jefe_comercial",
+  "jefe_de_comercial",
+  "acp_comercial",
+  "backoffice_comercial",
+]);
 let determinationsDocsTableEnsured = false;
 
 function normalizePurchaseType(value) {
@@ -21,22 +29,28 @@ function normalizePurchaseType(value) {
   return "public";
 }
 
+// technicalEditors: quien puede editar determinaciones en fase technical_review.
+// BUG corregido: la lista tenia "tecnico" (rol legacy, reemplazado por
+// ing_servicio, que hoy es de solo visualizacion en BC) y le faltaba
+// "jefe_servicio" (reemplazo real de jefe_tecnico) -- jefe_servicio recibia
+// 403 al intentar cargar calibradores/controles/materiales por reactivo, su
+// tarea principal. ing_servicio/esp_app quedan fuera a proposito (solo ven).
 function getRoleConfig(businessCase = {}) {
   const normalizedType = normalizePurchaseType(businessCase?.bc_purchase_type);
   if (normalizedType === "private_comodato") {
     return {
       type: "private_comodato",
       commercialEditors: ["jefe_comercial", "jefe_de_comercial", "backoffice_comercial"],
-      technicalEditors: ["tecnico", "jefe_tecnico"],
-      notify: ["tecnico", "jefe_tecnico"],
+      technicalEditors: ["jefe_tecnico", "jefe_servicio"],
+      notify: ["jefe_tecnico", "jefe_servicio"],
       label: "Compra privada comodato",
     };
   }
   return {
     type: "public",
     commercialEditors: ["jefe_comercial", "jefe_de_comercial", "acp_comercial"],
-    technicalEditors: ["tecnico", "jefe_tecnico"],
-    notify: ["tecnico", "jefe_tecnico"],
+    technicalEditors: ["jefe_tecnico", "jefe_servicio"],
+    notify: ["jefe_tecnico", "jefe_servicio"],
     label: "Compra publica",
   };
 }
@@ -52,7 +66,8 @@ function toIsoOrNull(value) {
 }
 
 function isUploadRole(role = "") {
-  return DETERMINATIONS_ALLOWED_UPLOAD_ROLES.has(String(role || "").toLowerCase());
+  const normalized = BusinessCasePermissions.normalizeRole(String(role || "").toLowerCase());
+  return DETERMINATIONS_ALLOWED_UPLOAD_ROLES.has(normalized);
 }
 
 async function ensureDeterminationsDocumentsTable() {
@@ -265,7 +280,7 @@ function buildGateInfo({
   const expiredByTime = Boolean(deadlineAt && deadlineAt.getTime() < now.getTime());
   const expiredByFlag = Boolean(rawGate?.is_expired);
   const expired = expiredByTime || expiredByFlag;
-  const normalizedRole = String(role || "").toLowerCase();
+  const normalizedRole = BusinessCasePermissions.normalizeRole(String(role || "").toLowerCase());
   const editorsByPhase = phase === "technical_review"
     ? config.technicalEditors
     : phase === "locked"
@@ -277,6 +292,7 @@ function buildGateInfo({
     DETERMINATIONS_DOCUMENT_VIEW_ROLES.has(normalizedRole)
   );
   const canEditDeterminations = enabled && !expired && !quantitiesLocked && editorsByPhase.includes(normalizedRole);
+  const canRequestInspection = enabled && hasDocument && DETERMINATIONS_INSPECTION_REQUEST_ROLES.has(normalizedRole);
 
   return {
     enabledForBusinessCase: true,
@@ -298,6 +314,7 @@ function buildGateInfo({
       canUploadDocument: canUpload,
       canViewDocument,
       canEditDeterminations,
+      canRequestInspection,
     },
     document: hasDocument
       ? {

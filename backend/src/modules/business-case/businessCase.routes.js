@@ -28,6 +28,9 @@ const businessCaseRoles = [
   "jefe_operaciones",
   "operaciones",          // BUG-06: necesita editar dispatch_workspace en BC
   "jefe_tecnico",
+  "jefe_servicio",        // reemplaza a jefe_tecnico
+  "ing_servicio",         // reemplaza a tecnico — acceso de visualización en BC
+  "esp_app",              // solo visualización en BC
   "jefe_financiero",      // BC-02: ve el BC desde BORRADOR
   "jefe_ti",              // BC-10: puede ver y agregar ítems al carrito
   "gerencia",
@@ -45,6 +48,8 @@ const investmentRoles = [
   "jefe_de_comercial",
   "jefe_operaciones",
   "jefe_tecnico",
+  "jefe_servicio",        // reemplaza a jefe_tecnico
+  "ing_servicio",         // mismo nivel que tecnico en inversiones
   "jefe_financiero",
   "jefe_ti",              // BC-10: puede agregar ítems al carrito
   "gerencia",
@@ -60,11 +65,12 @@ const investmentValuesRoles = [
   "gerencia_general",
   "jefe_comercial",       // BC-12: puede VER valores (no guardar — validar en servicio)
 ];
-const adminRoles = ["admin", "gerencia", "jefe_tecnico"];
+const adminRoles = ["admin", "gerencia", "jefe_tecnico", "jefe_servicio"];
 const determinationsCatalogWriteRoles = [
   "admin",
   "gerencia",
   "jefe_tecnico",
+  "jefe_servicio",
   "comercial",
   "acp_comercial",
 ];
@@ -182,6 +188,12 @@ router.post(
   ctrl.requestEnvironmentInspection,
 );
 router.post(
+  "/:id/inspection-request/review",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  ctrl.reviewEnvironmentInspectionRequest,
+);
+router.post(
   "/:id/determinations",
   verifyToken,
   requireRole(businessCaseRoles),
@@ -270,6 +282,7 @@ router.post("/:id/investments/values", verifyToken, requireRole(investmentValues
 router.get("/:id/consumption-items", verifyToken, requireRole(businessCaseRoles), ctrl.getConsumptionItems);
 router.put("/:id/consumption-items", verifyToken, requireRole(businessCaseRoles), ctrl.saveConsumptionItems);
 router.patch("/:id/consumption-items/:itemKey", verifyToken, requireRole(businessCaseRoles), ctrl.patchConsumptionItem);
+router.post("/:id/consumption-items/sync-from-sheet", verifyToken, requireRole(businessCaseRoles), ctrl.syncConsumptionFromSheet);
 router.get("/:id/dispatch-workspace", verifyToken, requireRole(businessCaseRoles), ctrl.getDispatchWorkspace);
 router.put(
   "/:id/dispatch-workspace/commercial-plan",
@@ -302,16 +315,16 @@ router.get("/:id/requirements", verifyToken, requireRole(businessCaseRoles), ctr
 router.post("/:id/deliveries", verifyToken, requireRole(businessCaseRoles), ctrl.saveDeliveries);
 router.get("/:id/deliveries", verifyToken, requireRole(businessCaseRoles), ctrl.getDeliveries);
 
-  // Orchestrator routes (Unified BC Workflow)
-  router.post("/orchestrator/create-economic", verifyToken, requireRole(businessCaseRoles), ctrl.createEconomicBC);
-  router.post("/:id/orchestrator/calculate-roi", verifyToken, requireRole(businessCaseRoles), ctrl.calculateROI);
-  router.post("/:id/orchestrator/evaluate-approval", verifyToken, requireRole(businessCaseRoles), ctrl.evaluateEconomicApproval);
-  router.post("/:id/orchestrator/attach-operational", verifyToken, requireRole(businessCaseRoles), ctrl.attachOperationalData);
-  router.post("/:id/orchestrator/attach-lis", verifyToken, requireRole(businessCaseRoles), ctrl.attachLISData);
-  router.post("/:id/orchestrator/recalculate", verifyToken, requireRole(businessCaseRoles), ctrl.recalculateWithOperational);
-  router.post("/:id/orchestrator/validate", verifyToken, requireRole(businessCaseRoles), ctrl.validateBC);
-  router.post("/:id/orchestrator/promote-stage", verifyToken, requireRole(businessCaseRoles), ctrl.promoteStage);
-  router.get("/:id/orchestrator/complete", verifyToken, requireRole(businessCaseRoles), ctrl.getCompleteBCMaster);
+  // Eliminado (verificado muerto): 9 rutas /orchestrator/* que llamaban a
+  // BusinessCaseOrchestrator.service.js, un flujo BC completo alternativo
+  // construido sobre el esquema legacy bc_master (migracion 022). 0 de 10
+  // endpoints orchestrator tenian caller real en el frontend; bc_master solo
+  // conserva 6 filas historicas y las tablas satelite (bc_operational_data,
+  // bc_lis_data, bc_validations) estaban vacias. Ver git history si se
+  // necesita recuperar.
+  // emergency-transition SI se mantiene: no es del orquestador, llama a
+  // BusinessCaseStateMachine.emergencyTransition (el state machine moderno
+  // real), solo compartia el prefijo de URL por convencion.
   // BC-15: gerencia y gerencia_general son el mismo nivel — ambos pueden hacer emergency-transition
   router.post("/:id/orchestrator/emergency-transition", verifyToken, requireRole(["gerencia", "gerencia_general"]), ctrl.emergencyTransition);
   router.get("/:id/state-history", verifyToken, requireRole(businessCaseRoles), ctrl.getStateHistory);

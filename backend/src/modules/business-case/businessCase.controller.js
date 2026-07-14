@@ -12,7 +12,6 @@ const bcEquipmentDetailsService = require("./bcEquipmentDetails.service");
 const bcLisIntegrationService = require("./bcLisIntegration.service");
 const bcRequirementsService = require("./bcRequirements.service");
 const bcDeliveriesService = require("./bcDeliveries.service");
-const orchestrator = require("./BusinessCaseOrchestrator.service");
 const pdfGenerator = require("./pdfGenerator.service");
 const excelExporter = require("./excelExporter.service");
 const equipmentCompatibilityService = require("./equipmentCompatibility.service");
@@ -20,8 +19,9 @@ const observabilityService = require("./businessCaseObservability.service");
 const featureFlagsService = require("./businessCaseFeatureFlags.service");
 const idempotencyService = require("./businessCaseIdempotency.service");
 const { BusinessCaseDataOwnership } = require("./businessCaseDataOwnership");
+const { BusinessCasePermissions } = require("./businessCasePermissions");
 const notificationManager = require("../notifications/notificationManager");
-const BusinessCaseStateMachine = require("./businessCaseStateMachine");
+const { BusinessCaseStateMachine } = require("./businessCaseStateMachine");
 const { STATES } = require("./businessCaseStates.constants");
 const preflowService = require("./businessCasePreflow.service");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
@@ -82,6 +82,18 @@ const equipmentDetailsV2Schema = Joi.object({
         backup_id: Joi.number().integer().allow(null),
         backup_install_simultaneous: Joi.boolean().default(false),
         requires_backup: Joi.boolean().default(false),
+        // Campos recuperados de equipment-details v1 (bc_equipment_details),
+        // huerfano desde que el frontend migro a equipment-details-v2: nadie
+        // los escribia y la hoja de Sheets generada los mostraba siempre
+        // vacios. Se capturan ahora por par, no a nivel de BC completo.
+        equipment_status: Joi.string().trim().allow(null, "").optional(),
+        reservation_image_url: Joi.string().trim().allow(null, "").optional(),
+        backup_status: Joi.string().trim().allow(null, "").optional(),
+        backup_manufacture_year: Joi.number().integer().allow(null).optional(),
+        installation_location: Joi.string().trim().allow(null, "").optional(),
+        allows_provisional: Joi.boolean().allow(null).optional(),
+        requires_complementary: Joi.boolean().allow(null).optional(),
+        complementary_test_purpose: Joi.string().trim().allow(null, "").optional(),
       }),
     )
     .min(1)
@@ -171,7 +183,9 @@ const DETERMINATIONS_UPLOAD_MAIL_ROLES = [
   "backoffice_comercial",
   "jefe_comercial",
   "jefe_tecnico",
+  "jefe_servicio",
   "tecnico",
+  "ing_servicio",
   "jefe_operaciones",
 ];
 const BUSINESS_CASE_PROCESS_MAIL_ROLES = [
@@ -180,7 +194,9 @@ const BUSINESS_CASE_PROCESS_MAIL_ROLES = [
   "backoffice_comercial",
   "jefe_comercial",
   "jefe_tecnico",
+  "jefe_servicio",
   "tecnico",
+  "ing_servicio",
   "jefe_operaciones",
 ];
 const DETERMINATIONS_REACTIVO_TYPES = new Set(["reactivo", "determinacion"]);
@@ -190,9 +206,9 @@ const DETERMINATIONS_REACTIVO_PUBLIC_ROLES = new Set(["jefe_comercial", "jefe_de
 const DETERMINATIONS_REACTIVO_PRIVATE_ROLES = new Set(["jefe_comercial", "jefe_de_comercial", "backoffice_comercial"]);
 // comercial puede solicitar inspección en cualquier tipo de BC; backoffice roles en privados
 const INSPECTION_REQUEST_ROLES = new Set(["comercial", "backoffice_comercial", "backoffice"]);
-// tecnico + jefe_tecnico fill controles/calibradores/materiales regardless of BC type
-const DETERMINATIONS_TECH_EDIT_ROLES = new Set(["tecnico", "jefe_tecnico"]);
-const DETERMINATIONS_TECH_WINDOW_NOTIFY_ROLES = ["tecnico", "jefe_tecnico"];
+// ing_servicio + jefe_servicio reemplazan a tecnico + jefe_tecnico para controls/calibrators/materials
+const DETERMINATIONS_TECH_EDIT_ROLES = new Set(["tecnico", "ing_servicio", "jefe_tecnico", "jefe_servicio"]);
+const DETERMINATIONS_TECH_WINDOW_NOTIFY_ROLES = ["tecnico", "ing_servicio", "jefe_tecnico", "jefe_servicio"];
 const DETERMINATIONS_SUBSECTIONS = new Set(["reactivos", "controles", "calibradores", "materiales"]);
 const DETERMINATIONS_UNLOCK_DECIDER_ROLES = new Set(["jefe_comercial"]);
 const INVESTMENT_VALUES_DEADLINE_HOURS = 48;
@@ -1714,6 +1730,22 @@ async function notifyBusinessCaseFirstProcessEmail({ businessCaseId, actorUser }
   return { sent: true, subject };
 }
 
+// "lab" y "requirement" son los nombres de seccion usados por los handlers
+// (saveLabEnvironment/saveRequirements/saveDeliveries) pero no existen como
+// claves en SECTIONS de businessCasePermissions.js -- sin este alias,
+// canEdit() siempre devuelve false para cualquier rol (bug real: nadie podia
+// guardar Lab Environment ni Requirements/Deliveries). "lab" es el nombre
+// corto de "lab_environment"; "requirement" comparte exactamente el mismo
+// bucket de permiso que "general" (verificado: en roleSectionConfig.js del
+// frontend, "requirement" aparece en canEdit siempre junto con "general",
+// nunca uno sin el otro, para los 9 roles comparados).
+// No confundir con SECTION_ALIASES (linea 139): ese mapea a claves de
+// BusinessCaseDataOwnership (bloqueo/lock), un namespace distinto.
+const PERMISSION_SECTION_ALIASES = {
+  lab: "lab_environment",
+  requirement: "general",
+};
+
 async function assertSectionEditable(businessCaseId, section, user) {
   if (section === "investments") return;
   const lockMap = await BusinessCaseDataOwnership.getLockStatus(businessCaseId);
@@ -1721,6 +1753,18 @@ async function assertSectionEditable(businessCaseId, section, user) {
   if (lockInfo?.isLocked) {
     const error = new Error("Seccion bloqueada para edicion");
     error.status = 409;
+    throw error;
+  }
+
+  const currentState = await BusinessCaseStateMachine.getCurrentState(businessCaseId);
+  const canEdit = BusinessCasePermissions.canEdit({
+    role: user?.role,
+    canonicalState: currentState,
+    section: PERMISSION_SECTION_ALIASES[section] || section
+  });
+  if (!canEdit) {
+    const error = new Error("No tienes permisos para editar esta seccion en el estado actual del caso de negocio");
+    error.status = 403;
     throw error;
   }
 }
@@ -1781,6 +1825,21 @@ async function update(req, res) {
 
     await assertSectionEditable(req.params.id, "general", req.user);
 
+    const currentState = await BusinessCaseStateMachine.getCurrentState(req.params.id);
+    const permissionValidation = BusinessCasePermissions.validateUpdatePayload({
+      role: req.user?.role,
+      canonicalState: currentState,
+      updateData: value
+    });
+
+    if (permissionValidation.hasForbiddenFields) {
+      return res.status(403).json({
+        ok: false,
+        message: "No tienes permisos para editar los siguientes campos en el estado actual",
+        forbiddenFields: Object.keys(permissionValidation.forbidden)
+      });
+    }
+
     const bc = await businessCaseService.updateBusinessCase(req.params.id, value);
     if (preflowService.isPreflowCase(bc) && hasGeneralPayloadChanges(value)) {
       const metadata = preflowService.toObject(bc?.modern_bc_metadata);
@@ -1829,6 +1888,8 @@ async function selectEquipment(req, res) {
   try {
     const { error, value } = equipmentSchema.validate(req.body);
     if (error) return res.status(400).json({ ok: false, message: error.message });
+
+    await assertSectionEditable(req.params.id, "equipment", req.user);
 
     const selection = await equipmentSelectionService.selectEquipment(
       req.params.id,
@@ -2013,6 +2074,21 @@ async function updateEconomicData(req, res) {
     const { error, value } = schema.validate(req.body);
     if (error) {
       return res.status(400).json({ ok: false, message: error.message });
+    }
+
+    const currentState = await BusinessCaseStateMachine.getCurrentState(req.params.id);
+    const permissionValidation = BusinessCasePermissions.validateUpdatePayload({
+      role: req.user?.role,
+      canonicalState: currentState,
+      updateData: value
+    });
+
+    if (permissionValidation.hasForbiddenFields) {
+      return res.status(403).json({
+        ok: false,
+        message: "No tienes permisos para editar los siguientes campos en el estado actual",
+        forbiddenFields: Object.keys(permissionValidation.forbidden)
+      });
     }
 
     const bc = await businessCaseService.updateEconomicData(req.params.id, value);
@@ -2322,6 +2398,26 @@ async function getConsumptionItems(req, res) {
     res.json({ ok: true, data });
   } catch (error) {
     logger.error({ error: error.message }, 'Error getting consumption items');
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function syncConsumptionFromSheet(req, res) {
+  try {
+    const { id } = req.params;
+    await assertSectionEditable(id, "determinations", req.user);
+    const currentBusinessCase = await businessCaseService.getBusinessCaseById(id);
+    const gate = determinationsGateService.buildGateInfo({
+      businessCase: currentBusinessCase,
+      role: resolveRequestRole(req),
+      currentDocument: await determinationsGateService.getCurrentDocument(id),
+    });
+    determinationsGateService.assertCanEditDeterminationsOrThrow(gate);
+
+    const result = await businessCaseService.syncConsumptionQuantitiesFromSheet(id);
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Error sincronizando cantidades desde Sheet');
     res.status(error.status || 500).json({ ok: false, message: error.message });
   }
 }
@@ -2790,8 +2886,11 @@ async function saveEquipmentDetailsV2(req, res) {
       return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
     }
 
-    // Resolver nombres de equipos desde equipment_models para incluirlos en los pares almacenados.
+    // Resolver nombres de equipos para incluirlos en los pares almacenados.
     // Esto evita que mapBusinessCaseEquipmentToRequestList use "Equipo ${id}" como fallback.
+    // Los ids de equipment_pairs son de servicio.equipos (id_equipo), la misma
+    // tabla que usa bc_equipment_selection -- no public.equipment_models (tabla
+    // huerfana sin FK real, ver v_equipment_full_catalog).
     const allEquipmentIds = [
       ...new Set(
         value.equipment_pairs.flatMap((pair) => [pair.primary_id, pair.backup_id].filter(Number.isFinite)),
@@ -2800,7 +2899,7 @@ async function saveEquipmentDetailsV2(req, res) {
     const namesById = {};
     if (allEquipmentIds.length) {
       const { rows: modelRows } = await db.query(
-        `SELECT id, name, model FROM public.equipment_models WHERE id = ANY($1::int[])`,
+        `SELECT id_equipo AS id, nombre AS name, modelo AS model FROM servicio.equipos WHERE id_equipo = ANY($1::int[])`,
         [allEquipmentIds],
       );
       modelRows.forEach((row) => {
@@ -2820,6 +2919,14 @@ async function saveEquipmentDetailsV2(req, res) {
         backup_id: pair.requires_backup ? (pair.backup_id ?? null) : null,
         backup_name: (pair.requires_backup && pair.backup_id) ? (namesById[String(pair.backup_id)] || null) : null,
         backup_install_simultaneous: pair.backup_install_simultaneous || false,
+        equipment_status: pair.equipment_status || null,
+        reservation_image_url: pair.reservation_image_url || null,
+        backup_status: pair.requires_backup ? (pair.backup_status || null) : null,
+        backup_manufacture_year: pair.requires_backup ? (pair.backup_manufacture_year ?? null) : null,
+        installation_location: pair.installation_location || null,
+        allows_provisional: pair.allows_provisional ?? null,
+        requires_complementary: pair.requires_complementary ?? null,
+        complementary_test_purpose: pair.requires_complementary ? (pair.complementary_test_purpose || null) : null,
       })),
     };
 
@@ -3071,106 +3178,10 @@ async function getComplete(req, res) {
   }
 }
 
-// ===== ORCHESTRATOR ENDPOINTS (UNIFIED BC WORKFLOW) =====
-
-// FASE 1: Crear BC Económico
-async function createEconomicBC(req, res) {
-  try {
-    const bc = await orchestrator.createEconomicBC({
-      ...req.body,
-      created_by: req.user?.email || 'system'
-    });
-    res.json({ success: true, data: bc });
-  } catch (error) {
-    logger.error({ error: error.message }, 'Error creating economic BC');
-    res.status(500).json({ success: false, message: error.message });
-  }
-}
-
-// FASE 2: Calcular ROI Inicial
-async function calculateROI(req, res) {
-  try {
-    const { id } = req.params;
-    const results = await orchestrator.calculateInitialROI(id);
-    res.json({ success: true, data: results });
-  } catch (error) {
-    logger.error({ error: error.message }, 'Error calculating ROI');
-    res.status(500).json({ success: false, message: error.message });
-  }
-}
-
-// FASE 3: Evaluar Aprobación Económica
-async function evaluateEconomicApproval(req, res) {
-  try {
-    const { id } = req.params;
-    const result = await orchestrator.evaluateEconomicApproval(id);
-    res.json({ success: true, data: result });
-  } catch (error) {
-    logger.error({ error: error.message }, 'Error evaluating approval');
-    res.status(500).json({ success: false, message: error.message });
-  }
-}
-
-// FASE 4: Adjuntar Datos Operativos
-async function attachOperationalData(req, res) {
-  try {
-    const { id } = req.params;
-    await orchestrator.attachOperationalData(id, req.body);
-    res.json({ success: true, message: 'Operational data attached' });
-  } catch (error) {
-    logger.error({ error: error.message }, 'Error attaching operational data');
-    res.status(500).json({ success: false, message: error.message });
-  }
-}
-
-// FASE 4: Adjuntar Datos LIS
-async function attachLISData(req, res) {
-  try {
-    const { id } = req.params;
-    await orchestrator.attachLISData(id, req.body);
-    res.json({ success: true, message: 'LIS data attached' });
-  } catch (error) {
-    logger.error({ error: error.message }, 'Error attaching LIS data');
-    res.status(500).json({ success: false, message: error.message });
-  }
-}
-
-// FASE 5: Recalcular con Datos Operativos
-async function recalculateWithOperational(req, res) {
-  try {
-    const { id } = req.params;
-    const result = await orchestrator.recalculateWithOperationalData(id);
-    res.json({ success: true, data: result });
-  } catch (error) {
-    logger.error({ error: error.message }, 'Error recalculating');
-    res.status(500).json({ success: false, message: error.message });
-  }
-}
-
-// FASE 6: Validar Coherencia
-async function validateBC(req, res) {
-  try {
-    const { id } = req.params;
-    const validations = await orchestrator.validateCoherence(id);
-    res.json({ success: true, data: validations });
-  } catch (error) {
-    logger.error({ error: error.message }, 'Error validating BC');
-    res.status(500).json({ success: false, message: error.message });
-  }
-}
-
-// FASE 7: Promover Etapa
-async function promoteStage(req, res) {
-  try {
-    const { id } = req.params;
-    const { stage, notes } = req.body;
-    await orchestrator.promoteStage(id, stage, req.user?.email || 'system', notes);
-    res.json({ success: true, message: 'Stage promoted' });
-  } catch (error) {
-    logger.error({ error: error.message }, 'Error promoting stage');
-    res.status(500).json({ success: false, message: error.message });
-  }
-}
+// Eliminadas (verificado muerto, ver businessCase.routes.js para detalle):
+// createEconomicBC, calculateROI, evaluateEconomicApproval,
+// attachOperationalData, attachLISData, recalculateWithOperational,
+// validateBC, promoteStage -- las 8 fases del BusinessCaseOrchestrator.
 
 // Audit log de accesos a secciones sensibles (admin/gerencia)
 async function getSectionAccessLog(req, res) {
@@ -3275,59 +3286,9 @@ async function emergencyTransition(req, res) {
   }
 }
 
-// Obtener BC Completo (con todos los módulos)
-async function getCompleteBCMaster(req, res) {
-  try {
-    const { id } = req.params;
-
-    const bc = await orchestrator.getBCMaster(id);
-    const economicData = await orchestrator.getEconomicData(id);
-    const operationalData = await orchestrator.getOperationalData(id);
-    const determinations = await orchestrator.getDeterminations(id);
-    const investments = await orchestrator.getInvestments(id);
-
-    // LIS data
-    const { rows: lisRows } = await require('../../config/db').query(
-      'SELECT * FROM bc_lis_data WHERE bc_master_id = $1', [id]
-    );
-    const lisData = lisRows[0];
-
-    let lisInterfaces = [];
-    if (lisData) {
-      const { rows: ifaceRows } = await require('../../config/db').query(
-        'SELECT * FROM bc_lis_equipment_interfaces WHERE bc_lis_data_id = $1', [lisData.id]
-      );
-      lisInterfaces = ifaceRows;
-    }
-
-    // Workflow history
-    const { rows: historyRows } = await require('../../config/db').query(
-      'SELECT * FROM bc_workflow_history WHERE bc_master_id = $1 ORDER BY changed_at DESC', [id]
-    );
-
-    // Validations
-    const { rows: validationRows } = await require('../../config/db').query(
-      'SELECT * FROM bc_validations WHERE bc_master_id = $1 AND NOT resolved ORDER BY created_at DESC', [id]
-    );
-
-    res.json({
-      success: true,
-      data: {
-        ...bc,
-        economicData,
-        operationalData,
-        lisData: lisData ? { ...lisData, equipmentInterfaces: lisInterfaces } : null,
-        determinations,
-        investments,
-        workflowHistory: historyRows,
-        validations: validationRows
-      }
-    });
-  } catch (error) {
-    logger.error({ error: error.message }, 'Error getting complete BC');
-    res.status(500).json({ success: false, message: error.message });
-  }
-}
+// Eliminada (verificado muerto): getCompleteBCMaster -- leia de
+// bc_master/bc_lis_data/bc_workflow_history/bc_validations, tablas del
+// BusinessCaseOrchestrator sin caller real en el frontend.
 
 // ===== UI GUIDANCE ENDPOINTS (WORKSPACE) =====
 
@@ -3881,6 +3842,126 @@ async function requestEnvironmentInspection(req, res) {
       ok: false,
       message: error.message || "No se pudo solicitar la inspeccion de ambiente",
       code: error.code || null,
+    });
+  }
+}
+
+const INSPECTION_REVIEW_ROLES = new Set([
+  "jefe_servicio", "jefe_servicio_tecnico", "jefe_tecnico",
+]);
+
+async function reviewEnvironmentInspectionRequest(req, res) {
+  try {
+    const { id } = req.params;
+    const role = resolveRequestRole(req);
+
+    if (!INSPECTION_REVIEW_ROLES.has(role)) {
+      return res.status(403).json({
+        ok: false,
+        message: "No tienes permisos para revisar solicitudes de inspeccion de ambiente.",
+        code: "BC_INSPECTION_REVIEW_FORBIDDEN",
+      });
+    }
+
+    const bc = await businessCaseService.getBusinessCaseById(id);
+    if (!bc) {
+      return res.status(404).json({ ok: false, message: "Business Case no encontrado." });
+    }
+
+    const metadata = bc?.modern_bc_metadata && typeof bc.modern_bc_metadata === "object"
+      ? { ...bc.modern_bc_metadata }
+      : {};
+
+    const inspectionReq = metadata?.environment_inspection_request;
+    if (!inspectionReq?.request_id) {
+      return res.status(409).json({
+        ok: false,
+        message: "Este Business Case no tiene una solicitud de inspeccion pendiente.",
+        code: "BC_INSPECTION_NOT_REQUESTED",
+      });
+    }
+
+    const action = String(req.body?.action || "").toLowerCase();
+    if (!["approve", "reject"].includes(action)) {
+      return res.status(400).json({ ok: false, message: "action debe ser 'approve' o 'reject'." });
+    }
+
+    const nowIso = new Date().toISOString();
+    const reviewedBy = req.user?.email || req.user?.fullname || null;
+
+    if (action === "reject") {
+      const reason = String(req.body?.reason || "").trim();
+      if (!reason) {
+        return res.status(400).json({ ok: false, message: "Debes indicar el motivo del rechazo." });
+      }
+      metadata.environment_inspection_request = {
+        ...inspectionReq,
+        status: "rejected",
+        rejection_reason: reason,
+        reviewed_by: reviewedBy,
+        reviewed_at: nowIso,
+      };
+    } else {
+      const assignedUserId = Number.isFinite(Number(req.body?.assigned_user_id))
+        ? Number(req.body.assigned_user_id)
+        : null;
+      const inspectionDate = String(req.body?.inspection_date || "").slice(0, 10);
+      const notes = String(req.body?.notes || "").trim() || null;
+
+      if (!assignedUserId) {
+        return res.status(400).json({ ok: false, message: "Debes asignar un usuario para realizar la inspeccion." });
+      }
+      if (!inspectionDate || !/^\d{4}-\d{2}-\d{2}$/.test(inspectionDate)) {
+        return res.status(400).json({ ok: false, message: "Debes indicar la fecha exacta de inspeccion (YYYY-MM-DD)." });
+      }
+
+      const { rows: [assignedUser] } = await db.query(
+        `SELECT id, COALESCE(fullname, name, email) AS display_name FROM public.users WHERE id = $1`,
+        [assignedUserId],
+      );
+      if (!assignedUser) {
+        return res.status(400).json({ ok: false, message: "El usuario asignado no existe." });
+      }
+
+      await db.query(
+        `INSERT INTO servicio.cronograma_actividades_tecnicas
+          (user_id, activity_date, title, notes, status, source_type, source_id, created_by, created_by_email)
+         VALUES ($1, $2::date, $3, $4, 'programado', 'inspeccion_bc', $5, $6, $7)`,
+        [
+          assignedUserId,
+          inspectionDate,
+          `Inspeccion de ambiente BC – ${bc.client_name || String(id).slice(0, 8)}`,
+          notes,
+          String(id),
+          req.user?.id || null,
+          req.user?.email || null,
+        ],
+      );
+
+      metadata.environment_inspection_request = {
+        ...inspectionReq,
+        status: "approved",
+        assigned_user_id: assignedUserId,
+        assigned_user_name: assignedUser.display_name,
+        inspection_date: inspectionDate,
+        notes,
+        reviewed_by: reviewedBy,
+        reviewed_at: nowIso,
+      };
+    }
+
+    await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
+
+    return res.json({
+      ok: true,
+      action,
+      inspectionRequest: metadata.environment_inspection_request,
+    });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error reviewing BC inspection request");
+    return res.status(error.status || 500).json({
+      ok: false,
+      message: error.message || "No se pudo procesar la revision de la inspeccion",
     });
   }
 }
@@ -4915,13 +4996,13 @@ async function ensureExpedientPausedReasonColumns() {
       ADD COLUMN IF NOT EXISTS paused_reason TEXT DEFAULT NULL
   `);
   await db.query(`
-    ALTER TABLE equipment_purchases
+    ALTER TABLE equipment_purchase_requests
       ADD COLUMN IF NOT EXISTS paused_reason TEXT DEFAULT NULL
   `);
 }
 
 /**
- * Pausa todos los expedientes vinculados al BC (private_purchase_requests + equipment_purchases).
+ * Pausa todos los expedientes vinculados al BC (private_purchase_requests + equipment_purchase_requests).
  * Llamado cuando se registra una apelación de factibilidad pendiente.
  */
 async function pauseLinkedExpedients(bcId) {
@@ -4936,9 +5017,9 @@ async function pauseLinkedExpedients(bcId) {
       [bcId],
     );
     await db.query(
-      `UPDATE equipment_purchases
+      `UPDATE equipment_purchase_requests
           SET paused_reason = 'feasibility_appeal_pending', updated_at = NOW()
-        WHERE extra->>'auto_business_case_id' = $1
+        WHERE business_case_id = $1
           AND paused_reason IS NULL`,
       [bcId],
     );
@@ -4962,9 +5043,9 @@ async function unpauseLinkedExpedients(bcId) {
       [bcId],
     );
     await db.query(
-      `UPDATE equipment_purchases
+      `UPDATE equipment_purchase_requests
           SET paused_reason = NULL, updated_at = NOW()
-        WHERE extra->>'auto_business_case_id' = $1
+        WHERE business_case_id = $1
           AND paused_reason = 'feasibility_appeal_pending'`,
       [bcId],
     );
@@ -4990,11 +5071,11 @@ async function cancelLinkedExpedients(bcId) {
       [bcId],
     );
     await db.query(
-      `UPDATE equipment_purchases
+      `UPDATE equipment_purchase_requests
           SET status = 'rejected',
               paused_reason = NULL,
               updated_at = NOW()
-        WHERE extra->>'auto_business_case_id' = $1
+        WHERE business_case_id = $1
           AND status NOT IN ('rejected', 'delivered', 'completed')`,
       [bcId],
     );
@@ -5623,6 +5704,7 @@ module.exports = {
   getConsumptionItems,
   saveConsumptionItems,
   patchConsumptionItem,
+  syncConsumptionFromSheet,
   getDispatchWorkspace,
   saveCommercialDispatchPlan,
   saveOperationsDispatchControl,
@@ -5635,6 +5717,7 @@ module.exports = {
   getUIGuidance,
   getDeterminationsGateInfo,
   requestEnvironmentInspection,
+  reviewEnvironmentInspectionRequest,
   lockDeterminationsSubsection,
   requestDeterminationsSubsectionUnlock,
   resolveDeterminationsSubsectionUnlock,
@@ -5665,22 +5748,12 @@ module.exports = {
   saveDeliveries,
   getDeliveries,
   getComplete,
-  // Orchestrator endpoints
-  createEconomicBC,
-  calculateROI,
-  evaluateEconomicApproval,
-  attachOperationalData,
-  attachLISData,
-  recalculateWithOperational,
-  validateBC,
-  promoteStage,
   emergencyTransition,
   getStateHistory,
   getSectionAccessLog,
   getSectionCompleteness,
   getBcSlaStatus,
   getSlaAtRisk,
-  getCompleteBCMaster,
   // Equipment compatibility endpoints
   getCompatibleBackupCandidates,
   validateEquipmentCompatibility,

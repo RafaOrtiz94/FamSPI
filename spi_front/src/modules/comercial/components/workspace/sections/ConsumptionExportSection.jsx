@@ -317,7 +317,10 @@ if (next && !documentVersions && bcId) {
  setSyncProgress(5);
  setSyncStepLabel("Preparando sincronizacion...");
 
- const enqueueRes = await api.post(`/business-case/${bcId}/sheets/generate`, {});
+ // force_recreate: una sincronizacion manual debe garantizar el formato
+ // correcto (copia fresca del Sheet maestro), no solo reescribir valores
+ // sobre un archivo previo que pudo haberse creado con el metodo viejo.
+ const enqueueRes = await api.post(`/business-case/${bcId}/sheets/generate`, { force_recreate: true });
  const jobId = enqueueRes?.data?.data?.job_id;
  if (!jobId) throw new Error("No se pudo encolar la sincronizacion a Sheets");
  console.info(`${SHEETS_SYNC_LOG_PREFIX} Job encolado`, {

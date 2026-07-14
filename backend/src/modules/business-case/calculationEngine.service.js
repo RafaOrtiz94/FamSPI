@@ -231,11 +231,14 @@ async function getApplicableFormula(determinationId, equipmentId, calculationTyp
     }
 
     // 2. Buscar fórmula en el equipo
+    // equipmentId viene de bc_equipment_selection, que referencia servicio.equipos
+    // (id_equipo) -- no public.equipment_models, tabla huerfana sin FK real y sin
+    // formulas cargadas (0 filas con default_calculation_formula poblado).
     if (equipmentId) {
         const eqResult = await db.query(
-            `SELECT default_calculation_formula 
-       FROM public.equipment_models 
-       WHERE id = $1`,
+            `SELECT default_calculation_formula
+       FROM servicio.equipos
+       WHERE id_equipo = $1`,
             [equipmentId]
         );
 

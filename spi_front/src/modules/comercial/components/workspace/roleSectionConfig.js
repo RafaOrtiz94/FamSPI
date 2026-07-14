@@ -49,12 +49,6 @@ export const ALL_SECTIONS = [
   "feasibility",
 ];
 
-// Secciones de solo lectura para roles que las ven pero no editan
-const READ_ONLY_SECTIONS_BASE = [
-  "general", "lab", "requirement", "equipment", "lis",
-  "determinations", "investments", "consumption_export", "dispatch_workspace",
-];
-
 export const ROLE_SECTION_CONFIG = {
 
   // ─────────────────────────────────────────────────────────────────

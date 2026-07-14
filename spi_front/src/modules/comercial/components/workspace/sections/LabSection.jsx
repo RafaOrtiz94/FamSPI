@@ -5,6 +5,7 @@ import { FiActivity, FiSave } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
 import Card from "../../../../../core/ui/components/Card";
+import { useAutoEditSection } from "../BusinessCaseWorkspaceContext";
 
 // EMPTY SCHEMA - Initialize with no default values
 const EMPTY_SCHEMA = {
@@ -26,6 +27,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  const { showToast } = useUI();
  const [saving, setSaving] = useState(false);
  const [isEditing, setIsEditing] = useState(false);
+ useAutoEditSection("lab", () => setIsEditing(true));
 
  // ONE-TIME HYDRATION GUARD
  const hydratedRef = useRef(false);
@@ -52,8 +54,6 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  register,
  handleSubmit,
  reset,
- watch,
- formState: { errors },
  } = useForm({
  defaultValues: EMPTY_SCHEMA,
  });

@@ -298,20 +298,14 @@ async function getEquipmentNamesMapByIds(ids = []) {
   );
   if (!cleanIds.length) return new Map();
 
+  // equipment_id de v_equipment_full_catalog es servicio.equipos.id_equipo, la
+  // misma tabla que bc_equipment_selection -- no public.equipment_models (tabla
+  // huerfana sin FK real, siempre vacia para ids reales de BC).
   const { rows } = await db.query(
     `
-    WITH source AS (
-      SELECT equipment_id::int AS id, equipment_name::text AS name
-      FROM v_equipment_full_catalog
-      WHERE equipment_id = ANY($1::int[])
-      UNION
-      SELECT id::int AS id, name::text AS name
-      FROM equipment_models
-      WHERE id = ANY($1::int[])
-    )
-    SELECT id, MAX(name) AS name
-    FROM source
-    GROUP BY id
+    SELECT equipment_id::int AS id, equipment_name::text AS name
+    FROM v_equipment_full_catalog
+    WHERE equipment_id = ANY($1::int[])
     `,
     [cleanIds],
   );
@@ -333,11 +327,12 @@ async function getEquipmentCatalogMapByIds(ids = []) {
   );
   if (!cleanIds.length) return new Map();
 
+  // equipment_id aqui es servicio.equipos.id_equipo (ver comentario arriba).
   const { rows } = await db.query(
     `
-    SELECT id, name, code, model
-    FROM equipment_models
-    WHERE id = ANY($1::int[])
+    SELECT equipment_id AS id, equipment_name AS name, equipment_code AS code, model
+    FROM v_equipment_full_catalog
+    WHERE equipment_id = ANY($1::int[])
     `,
     [cleanIds],
   );
@@ -498,6 +493,7 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   ));
   setFieldIfPresent(fields, "EstadoEquipoPrincipal", pickFirst(
     equipmentDetails?.equipment_status,
+    primaryPair?.equipment_status,
     normalizeEquipmentTypeLabel(primaryPair?.primary_type),
   ));
   setFieldIfPresent(fields, "PropiedadEquipoPrincipal", equipmentDetails?.ownership_status);
@@ -507,15 +503,25 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   ));
   setFieldIfPresent(fields, "EstadoEquipoBackUp", pickFirst(
     equipmentDetails?.backup_status,
+    primaryPair?.backup_status,
     normalizeEquipmentTypeLabel(primaryPair?.backup_type),
   ));
   setFieldIfPresent(fields, "InstalarJuntoPrincipal", normalizeBool(pickFirst(
     primaryPair?.backup_install_simultaneous,
     equipmentDetails?.install_with_primary,
   )));
-  setFieldIfPresent(fields, "UbicacionEquipos", equipmentDetails?.installation_location);
-  setFieldIfPresent(fields, "RequiereEquipoComplementario", normalizeBool(equipmentDetails?.requires_complementary));
-  setFieldIfPresent(fields, "EquipoComplementarioPrueba", equipmentDetails?.complementary_test_purpose);
+  setFieldIfPresent(fields, "UbicacionEquipos", pickFirst(
+    equipmentDetails?.installation_location,
+    primaryPair?.installation_location,
+  ));
+  setFieldIfPresent(fields, "RequiereEquipoComplementario", normalizeBool(pickFirst(
+    equipmentDetails?.requires_complementary,
+    primaryPair?.requires_complementary,
+  )));
+  setFieldIfPresent(fields, "EquipoComplementarioPrueba", pickFirst(
+    equipmentDetails?.complementary_test_purpose,
+    primaryPair?.complementary_test_purpose,
+  ));
 
   const includesLis = pickFirst(lisIntegration?.includes_lis, lisIntegration?.lis_includes);
   const requiresInterface = Boolean(
@@ -800,6 +806,7 @@ async function enqueueGenerationJob({
           max_quantities: normalized.max_quantities || [],
           equipment_tabs: normalized.equipment_tabs || [],
           sheet_context: normalized.sheet_context || {},
+          force_recreate: Boolean(normalized.force_recreate),
         }),
         Math.max(1, MAX_ATTEMPTS_DEFAULT),
         correlationId,
@@ -1301,6 +1308,7 @@ async function processSingleJob(job) {
     const previousSheetId = previousSheetMeta?.provider === "google_sheets_local"
       ? previousSheetMeta.sheet_id || null
       : null;
+    const forceRecreate = Boolean(storedPayload.force_recreate);
     const enrichedPayload = {
       ...refreshedPayload,
       output_folder_id: outputFolderId,
@@ -1312,6 +1320,7 @@ async function processSingleJob(job) {
           outputFolderId,
           payload: enrichedPayload,
           previousSheetId,
+          forceRecreate,
         });
 
     const persistenceResult = await persistSheetResultInBusinessCase({

@@ -119,9 +119,13 @@ const STATE_READINESS_REQUIREMENTS = {
         section: 'determinations',
         friendlyName: 'Determinaciones',
         validator: async (bc) => {
-          // This would check if determinations are configured
-          // For now, we'll assume this passes - actual implementation would query determinations table
-          return true; // Placeholder
+          const bcId = bc.business_case_id || bc.id;
+          if (!bcId) return false;
+          const { rows } = await db.query(
+            `SELECT 1 FROM bc_determinations WHERE business_case_id = $1 LIMIT 1`,
+            [bcId]
+          );
+          return rows.length > 0;
         },
         errorMessage: 'Debe configurar al menos una determinación'
       },
@@ -186,11 +190,13 @@ const STATE_READINESS_REQUIREMENTS = {
         field: 'viability_evaluation',
         section: 'determinations',
         friendlyName: 'Evaluación de viabilidad',
-        validator: async (bc) => {
-          // Check if viability evaluation has been performed
-          // This would check evaluation results/status
-          return true; // Placeholder - actual implementation would check evaluation status
-        },
+        // No bloqueante deliberadamente: hoy no existe en el modulo un mecanismo
+        // para capturar "motivo de la observacion" en el momento en que se
+        // levanta (solo existe el checkeo inverso, resolution_notes, para
+        // volver de OBSERVADO a EN_EVALUACION). Implementar un chequeo aqui
+        // exigiria inventar un campo que ningun flujo real escribe todavia.
+        // Si se agrega esa captura, reemplazar este validador por uno real.
+        validator: async () => true,
         errorMessage: 'Debe completar la evaluación de viabilidad antes de marcar como observado'
       }
     ]
@@ -205,10 +211,13 @@ const STATE_READINESS_REQUIREMENTS = {
         field: 'viability_assessment',
         section: 'determinations',
         friendlyName: 'Evaluación de viabilidad',
+        // Fuente real: businessCase.service.js (saveFeasibilityDecision-equivalente)
+        // guarda el resultado en modern_bc_metadata.feasibility.status
+        // ('factible' | 'no_factible') al registrar la decision de viabilidad.
         validator: async (bc) => {
-          // Check if viability assessment passed
-          // This would check evaluation results
-          return true; // Placeholder - actual implementation would check assessment results
+          const metadata = parseExtraField(bc.modern_bc_metadata);
+          const feasibility = parseExtraField(metadata.feasibility);
+          return feasibility.status === 'factible';
         },
         errorMessage: 'La evaluación de viabilidad debe ser positiva para marcar como viable'
       },
@@ -216,9 +225,13 @@ const STATE_READINESS_REQUIREMENTS = {
         field: 'roi_calculation',
         section: 'determinations',
         friendlyName: 'Cálculo de ROI',
+        // Mismo origen: la decision de factibilidad guarda los calculos
+        // recibidos en modern_bc_metadata.feasibility.decision.calculations.
         validator: async (bc) => {
-          // Check if ROI calculation is complete and positive
-          return true; // Placeholder - actual implementation would check ROI results
+          const metadata = parseExtraField(bc.modern_bc_metadata);
+          const feasibility = parseExtraField(metadata.feasibility);
+          const decision = parseExtraField(feasibility.decision);
+          return Boolean(decision.calculations);
         },
         errorMessage: 'Debe completar el cálculo de ROI con resultado positivo'
       }

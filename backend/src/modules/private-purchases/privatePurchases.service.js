@@ -14,6 +14,7 @@ const { createAllDayEvent } = require("../../utils/calendar");
 const { uploadBase64File, ensureFolder, drive } = require("../../utils/drive");
 const { resolveExternalDriveIntegrity } = require("../../utils/documentHash");
 const { sendAndArchive } = require("../../utils/emailArchive");
+const { renderProviderEmail } = require("../../utils/emailTemplate");
 const { generateDeliveryActPdf } = require("./privatePurchases.acta");
 const businessCaseService = require('../business-case/businessCase.service');
 const { enqueuePurchaseStatusChangedEvent } = require("../integrations/hooks");
@@ -38,6 +39,7 @@ const {
   buildVisualReceptionPatch,
   buildVerificationDecisionPatch,
   buildVerificationRemediationPatch,
+  appendVerificationAttempt,
   buildCuProviderReportPatch,
   computeInstallationClosureGate,
   enrichInstallationWorkflowWithGate,
@@ -219,15 +221,20 @@ class PrivatePurchasesService {
     if (!Array.isArray(acceptedItems) || acceptedItems.length === 0) return;
 
     const folderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
-    const reservationHtml = `
-      <p>Solicitamos reservar los equipos cotizados para la solicitud #${purchaseId}.</p>
-      <p>Confirmamos reserva para:</p>
-      ${formatEquipmentList(acceptedItems)}
-    `;
-    const reservationFileId = await sendAndArchive({
+    const reservationHtml = renderProviderEmail({
+      title: "Confirmación de reserva de equipos",
+      bodyHtml: `
+        <p>Solicitamos reservar los equipos cotizados para la solicitud <strong>#${purchaseId}</strong>.</p>
+        <p>Confirmamos reserva para:</p>
+        ${formatEquipmentList(acceptedItems)}
+      `,
+      user,
+      requestId: purchaseId,
+    });
+    const { fileId: reservationFileId, threadId, lastMessageId } = await sendAndArchive({
       user,
       to: purchase.provider_email,
-      subject: `Reserva de equipos - Solicitud #${purchaseId}`,
+      subject: purchase.provider_email_thread_id ? `Re: Solicitud privada #${purchaseId}` : `Solicitud privada #${purchaseId}`,
       html: reservationHtml,
       folderId,
       prefix: 'reserva',
@@ -238,6 +245,10 @@ class PrivatePurchasesService {
         equipment: acceptedItems,
       },
       actionLabel: 'Confirmacion de reserva',
+      threadContext: {
+        threadId: purchase.provider_email_thread_id,
+        lastMessageId: purchase.provider_email_last_message_id,
+      },
     });
 
     const reservationExpiresAt = new Date();
@@ -265,6 +276,8 @@ class PrivatePurchasesService {
               reservation_email_file_id     = $3,
               reservation_calendar_event_id = $4,
               reservation_calendar_event_link = $5,
+              provider_email_thread_id = $6,
+              provider_email_last_message_id = $7,
               updated_at = NOW()
         WHERE id = $1`,
       [
@@ -273,6 +286,8 @@ class PrivatePurchasesService {
         reservationFileId,
         calendarEvent?.id || null,
         calendarEvent?.htmlLink || null,
+        threadId,
+        lastMessageId,
       ],
     );
   }
@@ -404,10 +419,10 @@ class PrivatePurchasesService {
           WHERE id = $2 AND inspection_request_id IS NULL`,
         [resolvedRequestId, purchaseId],
       );
-      // Notificar a jefe_tecnico
+      // Notificar a jefes de servicio
       const { rows: jefesTecnico } = await db.query(
         `SELECT id FROM users WHERE active = true AND lower(role) = ANY($1::text[])`,
-        [['jefe_tecnico', 'jefe_servicio_tecnico']],
+        [['jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico']],
       );
       for (const jefe of jefesTecnico) {
         notificationManager.sendNotification({
@@ -1581,6 +1596,7 @@ class PrivatePurchasesService {
         break;
 
       case 'jefe_tecnico':
+      case 'jefe_servicio':
       case 'jefe_servicio_tecnico':
         whereClause = 'status = ANY($1)';
         params = [[
@@ -1595,6 +1611,7 @@ class PrivatePurchasesService {
         break;
 
       case 'tecnico':
+      case 'ing_servicio':
         whereClause = 'status = ANY($1)';
         params = [[
           PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED,
@@ -1747,7 +1764,9 @@ class PrivatePurchasesService {
     }
 
     if (toState === PRIVATE_PURCHASE_STATES.PRICE_IMPROVEMENT_REQUESTED) {
-      const isJefeComercial = this._hasRoleToken(user, 'jefe_comercial');
+      // _hasRoleToken usa substring: 'jefe_de_comercial' no contiene 'jefe_comercial'
+      // (el '_de_' rompe el match), por eso se listan ambos explicitamente.
+      const isJefeComercial = this._hasAnyRoleToken(user, ['jefe_comercial', 'jefe_de_comercial']);
       if (!isJefeComercial) {
         const error = new Error('Solo jefe comercial puede solicitar mejora de precios');
         error.status = 403;
@@ -1763,7 +1782,7 @@ class PrivatePurchasesService {
     }
 
     if (toState === PRIVATE_PURCHASE_STATES.REJECTED && currentState === PRIVATE_PURCHASE_STATES.OFFER_REJECTED_BY_COMMERCIAL) {
-      const isJefeComercial = this._hasRoleToken(user, 'jefe_comercial');
+      const isJefeComercial = this._hasAnyRoleToken(user, ['jefe_comercial', 'jefe_de_comercial']);
       if (!isJefeComercial) {
         const error = new Error('Solo jefe comercial puede confirmar el rechazo final');
         error.status = 403;
@@ -1776,7 +1795,8 @@ class PrivatePurchasesService {
 
     const transitionResult = await PrivatePurchaseStateMachine.transition(purchaseId, toState, user.id, reason, {
       user_role: user.role,
-      user_name: user.fullname || user.name
+      user_name: user.fullname || user.name,
+      user_email: user.email
     });
 
     // REQ-SPI-013: no await externo en el request path.
@@ -1873,7 +1893,10 @@ class PrivatePurchasesService {
               site_inspection_status,
               site_inspection_result,
               site_inspection_follow_up_date,
-              site_inspection_ready_for_installation
+              site_inspection_ready_for_installation,
+              offer_kind,
+              business_case_id,
+              extra
          FROM private_purchase_requests
         WHERE id = $1`,
       [purchaseId]
@@ -1901,14 +1924,26 @@ class PrivatePurchasesService {
       throw error;
     }
 
-    if (!rows[0].equipment_arrived_at) {
-      const error = new Error('Debe marcar la llegada del equipo antes de solicitar fecha de entrega');
-      error.status = 409;
-      error.code = 'EQUIPMENT_NOT_ARRIVED';
-      throw error;
-    }
+    // No se exige equipment_arrived_at: operaciones puede coordinar/solicitar
+    // fecha de entrega con el cliente usando la fecha tentativa del proveedor
+    // (registrada por ACP en Disponibilidad) sin esperar a que el equipo
+    // llegue fisicamente -- son dos acciones independientes.
+    //
+    // La inspeccion de ambiente (F.ST-07) si es obligatoria: antes esta funcion
+    // solo validaba el sitio SI ya se habia solicitado una inspeccion, permitiendo
+    // solicitar fecha de entrega sin haber inspeccionado nunca. Excepcion: comodato
+    // con Business Case vinculado usa su propio mecanismo de inspeccion (no F.ST-07).
+    const inspectionHandledByBusinessCase =
+      String(rows[0]?.offer_kind || '').toLowerCase() === 'comodato' &&
+      Boolean(rows[0]?.business_case_id);
 
-    if (rows[0]?.inspection_request_id || rows[0]?.inspection_scheduled_date) {
+    if (!inspectionHandledByBusinessCase) {
+      if (!rows[0]?.inspection_request_id) {
+        const error = new Error('Falta solicitar la inspeccion de ambiente antes de solicitar fecha de entrega');
+        error.status = 409;
+        error.code = 'SITE_INSPECTION_MISSING';
+        throw error;
+      }
       this._assertSiteReadyForInstallation(rows[0]);
     }
 
@@ -2585,12 +2620,16 @@ class PrivatePurchasesService {
     }
 
     const equipmentList = formatEquipmentList(equipment);
-    const html = `
-      <h2>Solicitud de disponibilidad</h2>
-      <p>Equipos requeridos para la solicitud #${purchaseId}:</p>
-      <p>${equipmentList}</p>
-      ${notes ? `<p>Notas: ${notes}</p>` : purchase.notes ? `<p>Notas: ${purchase.notes}</p>` : ""}
-    `;
+    const html = renderProviderEmail({
+      title: "Solicitud de disponibilidad de equipos",
+      bodyHtml: `
+        <p>Nos gustaría confirmar la disponibilidad de los siguientes equipos para la solicitud <strong>#${purchaseId}</strong>:</p>
+        <p>${equipmentList}</p>
+        ${notes ? `<p><strong>Notas:</strong> ${notes}</p>` : purchase.notes ? `<p><strong>Notas:</strong> ${purchase.notes}</p>` : ""}
+      `,
+      user,
+      requestId: purchaseId,
+    });
 
     const folderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
     const clientName =
@@ -2598,10 +2637,10 @@ class PrivatePurchasesService {
       purchase.client_snapshot?.name ||
       'Cliente';
 
-    const emailFileId = await sendAndArchive({
+    const { fileId: emailFileId, threadId, lastMessageId } = await sendAndArchive({
       user,
       to: providerEmail,
-      subject: `Disponibilidad de equipos - Solicitud #${purchaseId}`,
+      subject: `Solicitud privada #${purchaseId}`,
       html,
       folderId,
       prefix: 'disponibilidad',
@@ -2622,10 +2661,12 @@ class PrivatePurchasesService {
               availability_request_notes = $2,
               availability_email_sent_at = NOW(),
               availability_email_file_id = $3,
+              provider_email_thread_id = $5,
+              provider_email_last_message_id = $6,
               updated_at = NOW()
         WHERE id = $4
         RETURNING *`,
-      [providerEmail, notes || null, emailFileId, purchaseId]
+      [providerEmail, notes || null, emailFileId, purchaseId, threadId, lastMessageId]
     );
 
     logger.debug('[FLOW_PRIVADA][BE][ACP][EMAIL][SUCCESS]', {
@@ -2645,7 +2686,8 @@ class PrivatePurchasesService {
 
     const { rows } = await db.query(
       `SELECT id, status, provider_response_at, equipment, provider_email, reservation_email_sent_at,
-              availability_email_sent_at, client_snapshot, drive_folder_id
+              availability_email_sent_at, client_snapshot, drive_folder_id,
+              provider_email_thread_id, provider_email_last_message_id
          FROM private_purchase_requests
         WHERE id = $1`,
       [id]
@@ -2831,6 +2873,69 @@ class PrivatePurchasesService {
     return updatedRows[0];
   }
 
+  /**
+   * Fecha tentativa de entrega informada por el proveedor. Se acumula como
+   * historial (no se sobreescribe) porque el proveedor puede dar nuevas fechas
+   * a lo largo del proceso. acp_comercial la registra; acp_comercial o
+   * jefe_operaciones pueden agregar una nueva version; jefe_logistica y el
+   * resto solo la consultan (gate de lectura vive en el frontend, esta ruta
+   * solo permite escritura a esos dos roles).
+   */
+  async registerProviderDeliveryDate(purchaseId, { date, notes } = {}, user) {
+    const canRegister = this._hasAnyRoleToken(user, ['acp_comercial', 'jefe_operaciones', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']);
+    if (!canRegister) {
+      const error = new Error('Solo ACP Comercial o Jefe de Operaciones pueden registrar la fecha tentativa de entrega del proveedor');
+      error.status = 403;
+      error.code = 'ROLE_NOT_ALLOWED';
+      throw error;
+    }
+
+    if (!date) {
+      const error = new Error('Fecha tentativa de entrega requerida');
+      error.status = 400;
+      throw error;
+    }
+
+    const parsedDate = new Date(date);
+    if (Number.isNaN(parsedDate.getTime())) {
+      const error = new Error('Fecha tentativa de entrega invalida');
+      error.status = 400;
+      throw error;
+    }
+
+    const { rows: existingRows } = await db.query(
+      'SELECT provider_delivery_dates_history FROM private_purchase_requests WHERE id = $1',
+      [purchaseId]
+    );
+    if (!existingRows.length) {
+      throw Object.assign(new Error('Solicitud no encontrada'), { status: 404 });
+    }
+
+    const history = Array.isArray(existingRows[0].provider_delivery_dates_history)
+      ? existingRows[0].provider_delivery_dates_history
+      : [];
+
+    const entry = {
+      date: parsedDate.toISOString(),
+      notes: notes || null,
+      registered_by: user?.id || null,
+      registered_by_email: user?.email || null,
+      registered_at: new Date().toISOString(),
+    };
+
+    const nextHistory = [...history, entry];
+
+    const { rows } = await db.query(
+      `UPDATE private_purchase_requests
+          SET provider_delivery_dates_history = $1,
+              updated_at = NOW()
+        WHERE id = $2
+        RETURNING *`,
+      [JSON.stringify(nextHistory), purchaseId]
+    );
+
+    return rows[0];
+  }
 
   /**
    * El usuario comercial registra la decisiÃ³n del cliente sobre disponibilidad en CU.
@@ -2840,7 +2945,8 @@ class PrivatePurchasesService {
   async confirmClientCuApproval(purchaseId, user, decision) {
     await ensurePrivateExtraColumn();
     const { rows } = await db.query(
-      `SELECT id, status, extra, client_snapshot, provider_email, provider_response, reservation_email_sent_at, drive_folder_id
+      `SELECT id, status, extra, client_snapshot, provider_email, provider_response, reservation_email_sent_at, drive_folder_id,
+              provider_email_thread_id, provider_email_last_message_id
          FROM private_purchase_requests
         WHERE id = $1`,
       [purchaseId]
@@ -2897,7 +3003,8 @@ class PrivatePurchasesService {
   async confirmClientImportApproval(purchaseId, user, decision) {
     await ensurePrivateExtraColumn();
     const { rows } = await db.query(
-      `SELECT id, status, extra, client_snapshot, provider_email, provider_response, reservation_email_sent_at, drive_folder_id
+      `SELECT id, status, extra, client_snapshot, provider_email, provider_response, reservation_email_sent_at, drive_folder_id,
+              provider_email_thread_id, provider_email_last_message_id
          FROM private_purchase_requests
         WHERE id = $1`,
       [purchaseId]
@@ -3000,13 +3107,17 @@ class PrivatePurchasesService {
   }
 
   /**
-   * Solicitar proforma al proveedor por email.
+   * Solicitar proforma al proveedor.
    * Aplica cuando ACP ya confirmó disponibilidad con el cliente y necesita pedirle al
    * proveedor que envíe la proforma para reservar el equipo.
+   *
+   * viaEmail=false cubre el caso donde ACP ya solicitó la proforma respondiendo
+   * manualmente el hilo de Gmail (no por SPI) y solo necesita registrar el paso
+   * como hecho, sin disparar un correo nuevo.
    */
-  async requestProformaFromProvider(purchaseId, user, { providerEmail, notes = '' } = {}) {
+  async requestProformaFromProvider(purchaseId, user, { providerEmail, notes = '', viaEmail = true } = {}) {
     await ensurePrivateExtraColumn();
-    if (!providerEmail) {
+    if (viaEmail && !providerEmail) {
       const error = new Error('El correo del proveedor es obligatorio');
       error.status = 400;
       throw error;
@@ -3014,7 +3125,7 @@ class PrivatePurchasesService {
 
     const { rows } = await db.query(
       `SELECT id, status, equipment, notes, client_snapshot, drive_folder_id, provider_email,
-              provider_response, extra
+              provider_response, extra, provider_email_thread_id, provider_email_last_message_id
          FROM private_purchase_requests
         WHERE id = $1`,
       [purchaseId],
@@ -3049,55 +3160,77 @@ class PrivatePurchasesService {
     const itemsForProforma = acceptedItems.length > 0
       ? acceptedItems
       : (Array.isArray(purchase.equipment) ? purchase.equipment : []);
-    const equipmentList = formatEquipmentList(itemsForProforma);
 
-    const html = `
-      <h2>Solicitud de proforma</h2>
-      <p>Estimado proveedor,</p>
-      <p>Solicitamos por favor proforma para los siguientes equipos de la solicitud #${purchaseId}:</p>
-      <p>${equipmentList}</p>
-      ${notes ? `<p>Notas: ${notes}</p>` : ''}
-      <p>Quedamos atentos a su respuesta.</p>
-    `;
+    let emailFileId = null;
+    let threadId = purchase.provider_email_thread_id || null;
+    let lastMessageId = purchase.provider_email_last_message_id || null;
+    const resolvedProviderEmail = providerEmail || purchase.provider_email || null;
 
-    const folderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
-    const clientName =
-      purchase.client_snapshot?.commercial_name ||
-      purchase.client_snapshot?.name ||
-      'Cliente';
+    if (viaEmail) {
+      const equipmentList = formatEquipmentList(itemsForProforma);
+      const html = renderProviderEmail({
+        title: "Solicitud de proforma",
+        bodyHtml: `
+          <p>Solicitamos por favor proforma para los siguientes equipos de la solicitud <strong>#${purchaseId}</strong>:</p>
+          <p>${equipmentList}</p>
+          ${notes ? `<p><strong>Notas:</strong> ${notes}</p>` : ''}
+          <p>Quedamos atentos a su respuesta.</p>
+        `,
+        user,
+        requestId: purchaseId,
+      });
 
-    const emailFileId = await sendAndArchive({
-      user,
-      to: providerEmail,
-      subject: `Solicitud de proforma - Solicitud #${purchaseId}`,
-      html,
-      folderId,
-      prefix: 'solicitud_proforma',
-      request: {
-        id: purchaseId,
-        client_name: clientName,
-        provider_email: providerEmail,
-        equipment: itemsForProforma,
-        notes,
-      },
-      actionLabel: 'Solicitud de proforma',
-    });
+      const folderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
+      const clientName =
+        purchase.client_snapshot?.commercial_name ||
+        purchase.client_snapshot?.name ||
+        'Cliente';
+
+      const sendResult = await sendAndArchive({
+        user,
+        to: providerEmail,
+        subject: purchase.provider_email_thread_id ? `Re: Solicitud privada #${purchaseId}` : `Solicitud privada #${purchaseId}`,
+        html,
+        folderId,
+        prefix: 'solicitud_proforma',
+        request: {
+          id: purchaseId,
+          client_name: clientName,
+          provider_email: providerEmail,
+          equipment: itemsForProforma,
+          notes,
+        },
+        actionLabel: 'Solicitud de proforma',
+        threadContext: {
+          threadId: purchase.provider_email_thread_id,
+          lastMessageId: purchase.provider_email_last_message_id,
+        },
+      });
+      emailFileId = sendResult.fileId;
+      threadId = sendResult.threadId;
+      lastMessageId = sendResult.lastMessageId;
+    }
 
     await db.query(
       `UPDATE private_purchase_requests
           SET provider_email = COALESCE(provider_email, $1),
               extra = extra || $2::jsonb,
+              provider_email_thread_id = $4,
+              provider_email_last_message_id = $5,
               updated_at = NOW()
         WHERE id = $3`,
       [
-        providerEmail,
+        resolvedProviderEmail,
         JSON.stringify({
           proforma_request_sent_at: new Date().toISOString(),
           proforma_request_email_file_id: emailFileId || null,
-          proforma_request_provider_email: providerEmail,
+          proforma_request_provider_email: resolvedProviderEmail,
           proforma_request_notes: notes || null,
+          proforma_request_channel: viaEmail ? 'spi_email' : 'manual_thread',
         }),
         purchaseId,
+        threadId,
+        lastMessageId,
       ],
     );
 
@@ -3189,7 +3322,8 @@ class PrivatePurchasesService {
 
     const { rows } = await db.query(
       `SELECT id, status, client_snapshot, drive_folder_id, provider_email,
-              provider_response, reservation_email_sent_at, extra, equipment
+              provider_response, reservation_email_sent_at, extra, equipment,
+              provider_email_thread_id, provider_email_last_message_id
          FROM private_purchase_requests WHERE id = $1`,
       [purchaseId],
     );
@@ -3301,7 +3435,7 @@ class PrivatePurchasesService {
           reservation_email_sent_at IS NOT NULL
           OR (extra->>'proforma_file_id' IS NOT NULL AND extra->>'proforma_reserve_import' IS DISTINCT FROM 'false')
         )
-          AND status NOT IN ('completed', 'cancelled', 'rejected')
+          AND status::text NOT IN ('completed', 'cancelled', 'rejected')
         ORDER BY COALESCE(reservation_expires_at,
                           (extra->>'proforma_uploaded_at')::timestamptz + (${RESERVATION_VALIDITY_DAYS} * INTERVAL '1 day')
                          ) ASC NULLS LAST`,
@@ -3568,6 +3702,18 @@ class PrivatePurchasesService {
    */
   async setDeliveryDates(purchaseId, deliveryDates, user, deliveryNotes = '') {
     await ensurePrivateSiteInspectionColumns();
+
+    // Planificacion (igual que requestDeliveryDates): Operaciones confirma las
+    // fechas propuestas. Antes esta funcion no validaba rol propio -- solo
+    // confiaba en el gate de ruta (deliveryRoles = todos combinados).
+    const canPlan = this._hasAnyRoleToken(user, ['jefe_operaciones', 'operaciones', 'jefe_comercial', 'gerencia', 'acp_comercial']);
+    if (!canPlan) {
+      const error = new Error('Solo operaciones puede confirmar fechas de entrega');
+      error.status = 403;
+      error.code = 'ROLE_NOT_ALLOWED';
+      throw error;
+    }
+
     logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][CHECK] Verificando duplicado delivery dates para purchase ${purchaseId}`);
 
     const { rows: existingRows } = await db.query(
@@ -3713,6 +3859,15 @@ class PrivatePurchasesService {
    */
   async markReadyForDelivery(purchaseId, user) {
     await ensurePrivateSiteInspectionColumns();
+
+    const canExecute = this._hasAnyRoleToken(user, ['jefe_logistica', 'logistica', 'jefe_comercial', 'gerencia', 'acp_comercial']);
+    if (!canExecute) {
+      const error = new Error('Solo logistica puede marcar la solicitud como lista para entrega');
+      error.status = 403;
+      error.code = 'ROLE_NOT_ALLOWED';
+      throw error;
+    }
+
     const { rows: inspectionRows } = await db.query(
       `SELECT id,
               inspection_request_id,
@@ -3779,6 +3934,15 @@ class PrivatePurchasesService {
    */
   async completeDelivery(purchaseId, user, deliveryNotes = '') {
     await ensurePrivateSiteInspectionColumns();
+
+    const canExecute = this._hasAnyRoleToken(user, ['jefe_logistica', 'logistica', 'jefe_comercial', 'gerencia', 'acp_comercial']);
+    if (!canExecute) {
+      const error = new Error('Solo logistica puede completar la entrega');
+      error.status = 403;
+      error.code = 'ROLE_NOT_ALLOWED';
+      throw error;
+    }
+
     const { rows: inspectionRows } = await db.query(
       `SELECT id,
               inspection_request_id,
@@ -3960,7 +4124,11 @@ class PrivatePurchasesService {
 
   async updateDispatchDetails(purchaseId, { items = [], notes = '', dispatchedAt, observations } = {}, user) {
     await ensurePrivateInstallationWorkflowColumns();
-    const isLogisticsRole = this._hasAnyRoleToken(user, ['jefe_logistica', 'logistica']);
+    // Mismo criterio que uploadDeliveryGuides/markReadyForDelivery/completeDelivery:
+    // jefe_logistica/logistica ejecutan, managers pueden respaldar. El frontend
+    // (LOGISTICS_ROLES) ya habilitaba estos roles -- el backend solo aceptaba
+    // jefe_logistica/logistica y rechazaba a gerencia/jefe_comercial/acp_comercial con 403.
+    const isLogisticsRole = this._hasAnyRoleToken(user, ['jefe_logistica', 'logistica', 'jefe_comercial', 'gerencia', 'acp_comercial']);
 
     if (!isLogisticsRole) {
       const error = new Error('Rol no autorizado para registrar despacho');
@@ -4134,7 +4302,7 @@ class PrivatePurchasesService {
   }
 
   async assignDeliveryActTechnician(purchaseId, { assigned_to_email, assigned_to_name } = {}, user) {
-    const isLeadRole = this._hasAnyRoleToken(user, ['jefe_tecnico', 'jefe_servicio_tecnico']);
+    const isLeadRole = this._hasAnyRoleToken(user, ['jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico']);
 
     if (!isLeadRole) {
       const error = new Error('Rol no autorizado para asignar tecnico');
@@ -4228,7 +4396,10 @@ class PrivatePurchasesService {
   }
 
   async uploadDeliveryActLogisticsSigned(purchaseId, { fileId, actBase64, fileName, mimeType } = {}, user) {
-    const isLogisticsRole = this._hasRoleToken(user, 'logistica');
+    // CP-05: jefe_logistica/logistica ejecutan; managers pueden respaldar
+    // (mismo criterio que markReadyForDelivery/completeDelivery). El frontend
+    // ya habilitaba estos roles -- el backend solo aceptaba 'logistica'.
+    const isLogisticsRole = this._hasAnyRoleToken(user, ['jefe_logistica', 'logistica', 'jefe_comercial', 'gerencia', 'acp_comercial']);
 
     if (!isLogisticsRole) {
       const error = new Error('Rol no autorizado para firmar acta');
@@ -4303,7 +4474,7 @@ class PrivatePurchasesService {
 
   async uploadDeliveryActFinalSigned(purchaseId, { fileId, actBase64, fileName, mimeType } = {}, user) {
     await ensurePrivateInstallationWorkflowColumns();
-    const isTechnicalRole = this._hasRoleToken(user, 'tecnico');
+    const isTechnicalRole = this._hasAnyRoleToken(user, ['tecnico', 'ing_servicio', 'jefe_servicio']);
 
     if (!isTechnicalRole) {
       const error = new Error('Rol no autorizado para subir acta final');
@@ -4577,7 +4748,7 @@ class PrivatePurchasesService {
   async _notifyInspectionStakeholders(purchaseId, purchaseRow, user, message) {
     try {
       const creatorId = purchaseRow?.created_by || null;
-      const technicalRoles = ["jefe_tecnico", "jefe_servicio_tecnico", "tecnico"];
+      const technicalRoles = ["jefe_tecnico", "jefe_servicio", "jefe_servicio_tecnico", "tecnico"];
       const technicalUsers = await Promise.all(technicalRoles.map((role) => this._getUsersByRole(role)));
       const recipients = new Map();
 
@@ -4789,7 +4960,7 @@ class PrivatePurchasesService {
 
   async coordinateInspectionDate(purchaseId, { inspection_date, notes = '', assigned_technician_id = null } = {}, user) {
     await ensurePrivateExtraColumn();
-    const canCoordinate = this._hasAnyRoleToken(user, ['jefe_tecnico', 'jefe_servicio_tecnico']);
+    const canCoordinate = this._hasAnyRoleToken(user, ['jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico']);
     if (!canCoordinate) {
       const error = new Error('No autorizado para coordinar inspeccion');
       error.status = 403;
@@ -4855,7 +5026,7 @@ class PrivatePurchasesService {
     }
 
     const assignedTechnician = await this._getUserById(assigned_technician_id || user?.id);
-    if (!assignedTechnician || !this._hasAnyRoleToken(assignedTechnician, ['tecnico', 'jefe_tecnico', 'jefe_servicio_tecnico'])) {
+    if (!assignedTechnician || !this._hasAnyRoleToken(assignedTechnician, ['tecnico', 'ing_servicio', 'jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico'])) {
       const error = new Error('Debes asignar un tecnico valido para la inspeccion');
       error.status = 409;
       error.code = 'TECHNICAL_ASSIGNEE_INVALID';
@@ -4947,7 +5118,7 @@ class PrivatePurchasesService {
     return updated;
   }
   async reviewInspectionDate(purchaseId, { decision, review_notes = '' } = {}, user) {
-    const canReview = this._hasAnyRoleToken(user, ['jefe_tecnico', 'jefe_servicio_tecnico']);
+    const canReview = this._hasAnyRoleToken(user, ['jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico']);
     if (!canReview) {
       const error = new Error('No autorizado para revisar coordinaciÃ³n de inspecciÃ³n');
       error.status = 403;
@@ -5085,7 +5256,7 @@ class PrivatePurchasesService {
     user,
   ) {
     await ensurePrivateSiteInspectionColumns();
-    const canRegister = this._hasAnyRoleToken(user, ["tecnico", "jefe_tecnico", "jefe_servicio_tecnico"]);
+    const canRegister = this._hasAnyRoleToken(user, ["tecnico", "jefe_tecnico", "jefe_servicio", "jefe_servicio_tecnico"]);
     if (!canRegister) {
       const error = new Error("No autorizado para registrar F.ST-07");
       error.status = 403;
@@ -5426,6 +5597,7 @@ class PrivatePurchasesService {
     const allowedRoles = [
       "tecnico",
       "jefe_tecnico",
+      "jefe_servicio",
       "jefe_servicio_tecnico",
       "jefe_operaciones",
       "jefe_logistica",
@@ -5523,6 +5695,7 @@ class PrivatePurchasesService {
       const canVisualInspect = this._hasAnyRoleToken(user, [
         "tecnico",
         "jefe_tecnico",
+        "jefe_servicio",
         "jefe_servicio_tecnico",
       ]);
       if (!canVisualInspect) {
@@ -5636,6 +5809,7 @@ class PrivatePurchasesService {
     } else if (normalizedAction === "verification_decision") {
       const canDecideVerification = this._hasAnyRoleToken(user, [
         "jefe_tecnico",
+        "jefe_servicio",
         "jefe_servicio_tecnico",
       ]);
       if (!canDecideVerification) {
@@ -5657,6 +5831,52 @@ class PrivatePurchasesService {
         workflow: currentWorkflow,
         payload,
         user,
+      });
+    } else if (normalizedAction === "verification_attempt") {
+      // Registra un intento del ciclo de verificacion F.ST-09 (solo aplica si
+      // verification_decision.applies === true). appendVerificationAttempt ya
+      // estaba implementado en installationWorkflow.service.js pero nunca se
+      // conecto a ninguna accion -- no habia forma de registrar un intento.
+      const canRegisterVerification = this._hasAnyRoleToken(user, [
+        "tecnico",
+        "jefe_tecnico",
+        "jefe_servicio",
+        "jefe_servicio_tecnico",
+      ]);
+      if (!canRegisterVerification) {
+        throw createInstallationWorkflowError("Solo el equipo tecnico puede registrar la verificacion F.ST-09", {
+          status: 403,
+          code: "FORBIDDEN",
+        });
+      }
+
+      let attemptFileId = payload.document_file_id || payload.file_id || null;
+      let attemptFileLink = payload.document_link || payload.link || null;
+      if (!attemptFileId && payload.file_base64 && payload.file_name) {
+        const baseFolderId = await this._ensureDriveFolder(
+          purchaseId,
+          purchase.client_snapshot,
+          purchase.drive_folder_id,
+        );
+        const installationFolder = await ensureFolder("Instalacion y entrega", baseFolderId);
+        const verificationFolder = await ensureFolder("F.ST-09", installationFolder?.id || baseFolderId);
+        const stored = await uploadBase64File(
+          payload.file_name,
+          String(payload.file_base64).includes(",")
+            ? String(payload.file_base64).split(",")[1]
+            : String(payload.file_base64),
+          payload.mime_type || "application/pdf",
+          verificationFolder?.id || baseFolderId,
+        );
+        attemptFileId = stored?.id || null;
+        attemptFileLink = stored?.webViewLink || (attemptFileId ? driveLink(attemptFileId) : null);
+      }
+
+      nextWorkflow = appendVerificationAttempt({
+        workflow: currentWorkflow,
+        payload,
+        user,
+        document: { file_id: attemptFileId, link: attemptFileLink },
       });
     } else if (normalizedAction === "cu_provider_report") {
       let fileId = payload.provider_repair_report_file_id || payload.file_id || null;
@@ -5767,6 +5987,14 @@ class PrivatePurchasesService {
   }
 
   async uploadDeliveryGuides(purchaseId, { guides = [] } = {}, user) {
+    const canExecute = this._hasAnyRoleToken(user, ['jefe_logistica', 'logistica', 'jefe_comercial', 'gerencia', 'acp_comercial']);
+    if (!canExecute) {
+      const error = new Error('Solo logistica puede subir guias de entrega');
+      error.status = 403;
+      error.code = 'ROLE_NOT_ALLOWED';
+      throw error;
+    }
+
     if (!Array.isArray(guides) || guides.length === 0) {
       const error = new Error('Debe adjuntar al menos una guia');
       error.status = 400;
@@ -7039,9 +7267,9 @@ class PrivatePurchasesService {
       `SELECT id, email, fullname, name, role
          FROM users
         WHERE active = true
-          AND lower(role) IN ('tecnico', 'jefe_tecnico', 'jefe_servicio_tecnico')
+          AND lower(role) IN ('tecnico', 'ing_servicio', 'jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico')
         ORDER BY
-          CASE WHEN lower(role) IN ('jefe_tecnico', 'jefe_servicio_tecnico') THEN 0 ELSE 1 END,
+          CASE WHEN lower(role) IN ('jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico') THEN 0 ELSE 1 END,
           fullname NULLS LAST, email ASC`,
     );
 

@@ -115,7 +115,7 @@ function normalizeFallbackOfferKind(value) {
   return null;
 }
 
-const FEASIBILITY_ALLOWED_ROLES = new Set(["jefe_operaciones", "jefe_tecnico"]);
+const FEASIBILITY_ALLOWED_ROLES = new Set(["jefe_operaciones", "jefe_tecnico", "jefe_servicio"]);
 
 function normalizeRoleToken(value) {
   return String(value || "")
@@ -1244,6 +1244,110 @@ async function saveConsumptionItems(businessCaseId, items = [], excluded = [], o
   return reloaded;
 }
 
+// Sincronizacion inversa Sheet -> SPI: si el usuario llena la columna
+// "Cantidad Anual" directamente en el Sheet oficial (reactivos, calibradores,
+// controles, materiales), esta funcion lee esos valores y los aplica sobre
+// bc_consumption_items. Disparada solo por accion manual del usuario, nunca
+// automatica -- una edicion en SPI hecha despues de generar el Sheet no debe
+// perderse silenciosamente si el usuario no pidio explicitamente sincronizar.
+async function syncConsumptionQuantitiesFromSheet(businessCaseId) {
+  await assertModernBusinessCase(businessCaseId);
+
+  const { rows: consumptionRows } = await db.query(
+    `SELECT item_key, item_id, name, item_type, source, equipment_id, equipment_name, annual_qty
+       FROM bc_consumption_items
+      WHERE business_case_id = $1`,
+    [businessCaseId],
+  );
+
+  if (!consumptionRows.length) {
+    return { updated: 0, items: await loadConsumptionData(businessCaseId) };
+  }
+
+  const { rows: bcRows } = await db.query(
+    `SELECT modern_bc_metadata FROM equipment_purchase_requests WHERE id = $1 LIMIT 1`,
+    [businessCaseId],
+  );
+  const bcRow = bcRows[0] || {};
+  const metadata = bcRow.modern_bc_metadata && typeof bcRow.modern_bc_metadata === "object" ? bcRow.modern_bc_metadata : {};
+  const sheetId = metadata?.bc_sheet_generation?.last?.sheet_id || null;
+
+  if (!sheetId) {
+    const error = new Error("Este Business Case no tiene una hoja de Sheets generada todavia.");
+    error.status = 409;
+    error.code = "SHEET_NOT_GENERATED";
+    throw error;
+  }
+
+  const {
+    loadTemplateDefinition,
+    buildSheetPayloads,
+    pullAnnualQuantitiesFromGoogleSheet,
+  } = require("./businessCaseSheetSyncLocal.service");
+
+  const equipmentMap = new Map();
+  consumptionRows.forEach((row) => {
+    const equipmentId = Number(row.equipment_id);
+    if (!Number.isInteger(equipmentId) || equipmentId <= 0) return;
+    if (!equipmentMap.has(equipmentId)) {
+      equipmentMap.set(equipmentId, { id: equipmentId, name: row.equipment_name || null, code: null, model: null });
+    }
+  });
+
+  const maxQuantities = consumptionRows.map((row) => ({
+    item_key: row.item_key,
+    item_id: row.item_id || null,
+    item_name: row.name || null,
+    item_type: row.item_type || null,
+    source: row.source || null,
+    equipment_id: row.equipment_id || null,
+    equipment_name: row.equipment_name || null,
+    annual_qty: row.annual_qty === null || row.annual_qty === undefined ? null : Number(row.annual_qty),
+  }));
+
+  const equipmentTabs = buildSheetPayloads({
+    template: loadTemplateDefinition(),
+    equipmentRecords: Array.from(equipmentMap.values()),
+    payload: { fields: {}, max_quantities: maxQuantities, sheet_context: {} },
+  });
+
+  const sheetUpdates = await pullAnnualQuantitiesFromGoogleSheet({ sheetId, equipmentTabs });
+  const current = await loadConsumptionData(businessCaseId);
+  if (!sheetUpdates.length) {
+    return { updated: 0, items: current };
+  }
+
+  const updatesByKey = new Map(sheetUpdates.map((entry) => [entry.item_key, entry.annual_qty]));
+  let changedCount = 0;
+  const nextItems = (current?.items || []).map((item) => {
+    if (!updatesByKey.has(item.key)) return item;
+    const nextQty = Math.max(0, Number(updatesByKey.get(item.key)) || 0);
+    if (Number(item.annualQty) === nextQty) return item;
+    changedCount += 1;
+    return { ...item, annualQty: nextQty };
+  });
+
+  if (!changedCount) {
+    return { updated: 0, items: current };
+  }
+
+  await syncConsumptionData(businessCaseId, {
+    consumption_items: nextItems,
+    consumption_excluded: current?.excluded || [],
+  });
+
+  try {
+    await recalculateBusinessCase(businessCaseId);
+  } catch (error) {
+    logger.warn(
+      { businessCaseId, error: error.message },
+      "No se pudo recalcular tras sincronizar cantidades desde Sheet",
+    );
+  }
+
+  return { updated: changedCount, items: await loadConsumptionData(businessCaseId) };
+}
+
 async function patchConsumptionItem(businessCaseId, itemKey, patch = {}, options = {}) {
   await assertModernBusinessCase(businessCaseId);
   const normalizedKey = String(itemKey || "").trim();
@@ -1418,6 +1522,13 @@ function isComodato(businessCase) {
   return true;
 }
 
+// NO es codigo muerto: bc_master/bc_economic_data son tablas de un diseño
+// anterior (migracion 022) reemplazado por el enfoque actual (reusar
+// equipment_purchase_requests, ver README_TABLE_STRUCTURE.md), pero todavia
+// tienen 6 filas reales en produccion (verificado). Esta funcion migra ese BC
+// legacy a equipment_purchase_requests la primera vez que se toca via el
+// endpoint moderno (PUT /:id/economic-data). No borrar sin antes migrar o
+// archivar esas 6 filas.
 async function insertEquipmentPurchaseRequestFromBcMaster(id) {
   const { rows } = await db.query(
     "SELECT client_name, client_id, bc_type FROM bc_master WHERE id = $1",
@@ -1530,6 +1641,7 @@ module.exports = {
   getConsumptionItems,
   saveConsumptionItems,
   patchConsumptionItem,
+  syncConsumptionQuantitiesFromSheet,
   getBusinessCaseType,
   isPublicComodato,
   isPrivateComodato,

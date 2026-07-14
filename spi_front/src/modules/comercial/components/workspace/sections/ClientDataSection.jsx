@@ -7,6 +7,8 @@ import { useUI } from "../../../../../core/ui/UIContext";
 import { useAuth } from "../../../../../core/auth/AuthContext";
 import SectionObservationAlert from "../SectionObservationAlert";
 import LocationManager from "../../LocationManager";
+import ProvinciaCiudadInput from "../../../../../components/ProvinciaCiudadInput";
+import { useAutoEditSection } from "../BusinessCaseWorkspaceContext";
 
 const SECTION_FIELDS = {
  general: [
@@ -172,12 +174,13 @@ const ClientDataSection = ({
  const [saving, setSaving] = useState(false);
  const [loading, setLoading] = useState(true);
  const [isEditing, setIsEditing] = useState(false);
+ useAutoEditSection("general", () => setIsEditing(true));
 
  const [showClientDropdown, setShowClientDropdown] = useState(false);
  const [filteredClients, setFilteredClients] = useState([]);
  const [isClientInputFocused, setIsClientInputFocused] = useState(false);
- const [showLocationDropdown, setShowLocationDropdown] = useState(false);
- const [filteredLocations, setFilteredLocations] = useState([]);
+ const [, setShowLocationDropdown] = useState(false);
+ const [, setFilteredLocations] = useState([]);
  const [isNewClient, setIsNewClient] = useState(false);
  const [clientLocations, setClientLocations] = useState([]);
  const [selectedLocation, setSelectedLocation] = useState(null);
@@ -739,7 +742,7 @@ const watchProvinceCity = watch("provinceCity");
 
  <label className="flex flex-col gap-1.5">
  <span className="text-sm font-bold text-gray-700 flex items-center gap-2">
- <FiUsers className="text-gray-400" /> Cliente
+ <FiUsers className="text-gray-400" /> Nombre del cliente
  </span>
  <div className="relative">
  <input
@@ -897,65 +900,24 @@ const watchProvinceCity = watch("provinceCity");
  <div className="flex items-center justify-between">
  <span className="text-sm font-bold text-gray-700">Provincia / Ciudad</span>
  </div>
- <div className="relative">
- <input
- type="text"
- className="w-full border rounded-xl px-4 py-2.5 transition-all outline-none bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900 disabled:bg-gray-100 disabled:text-gray-500"
- placeholder={selectedClient ? "Busca una sede por provincia o ciudad" : isNewClient ? "Ej: Quito, Pichincha" : "Selecciona primero un cliente"}
- {...register("provinceCity")}
- disabled={!isEditing || (!selectedClient && !isNewClient)}
- onChange={(event) => {
- const nextValue = event.target.value;
- setValue("provinceCity", nextValue, { shouldDirty: true, shouldValidate: true });
- if (selectedLocation && normalizeText(getLocationLabel(selectedLocation)) !== normalizeText(nextValue)) {
- setSelectedLocation(null);
- setValue("locationId", "", { shouldDirty: true, shouldValidate: true });
- }
- if (selectedClient) setShowLocationDropdown(true);
+ <ProvinciaCiudadInput
+ value={watchProvinceCity || ""}
+ disabled={!isEditing}
+ onChange={(text) => {
+   setValue("provinceCity", text, { shouldDirty: true, shouldValidate: true });
+   if (selectedLocation && normalizeText(getLocationLabel(selectedLocation)) !== normalizeText(text)) {
+     setSelectedLocation(null);
+     setValue("locationId", "", { shouldDirty: true, shouldValidate: true });
+   }
  }}
- onFocus={() => {
- if (selectedClient && filteredLocations.length > 0) setShowLocationDropdown(true);
+ onSelect={(loc) => {
+   setValue("provinceCity", loc.label, { shouldDirty: true, shouldValidate: true });
  }}
- onBlur={() => setTimeout(() => setShowLocationDropdown(false), 120)}
  />
- {showLocationDropdown && selectedClient && filteredLocations.length > 0 && (
- <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
- {filteredLocations.map((location) => (
- <button
- key={location.id}
- type="button"
- className="w-full border-b border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
- onMouseDown={(event) => event.preventDefault()}
- onClick={() => {
- setSelectedLocation(location);
- setValue("locationId", String(location.id), { shouldDirty: true, shouldValidate: true });
- setValue("provinceCity", getLocationLabel(location), { shouldDirty: true, shouldValidate: true });
- setShowLocationDropdown(false);
- }}
- >
- <p className="text-sm font-medium text-slate-900">{getLocationLabel(location)}</p>
- <p className="text-xs text-slate-500">
- {[location?.address, location?.city, location?.province].filter(Boolean).join(" • ") || "Sede registrada"}
- </p>
- </button>
- ))}
- </div>
- )}
- </div>
  </label>
- {isNewClient && !selectedClient && (
- <p className="text-xs text-blue-600 -mt-2 md:col-span-2">
- Cliente no registrado. Ingresa Provincia / Ciudad manualmente.
- </p>
- )}
- {selectedClient && !clientLocations.length && (
- <p className="text-xs text-amber-600 -mt-2 md:col-span-2">
- Este cliente no tiene sedes registradas. Puedes crear una desde el módulo de Clientes o escribir provincia/ciudad manualmente.
- </p>
- )}
  {selectedClient && clientLocations.length > 0 && !watchLocationId && (
  <p className="text-xs text-amber-600 -mt-2 md:col-span-2">
- Selecciona una sede usando la búsqueda de provincia/ciudad para continuar.
+ Selecciona una sede de instalación desde el selector de sedes.
  </p>
  )}
  {startedAsPublic && (

@@ -56,6 +56,11 @@ const generationRequestSchema = Joi.object({
     projected_deadline_months: Joi.alternatives().try(Joi.number().min(0).optional(), Joi.allow(null)),
     modality: Joi.alternatives().try(Joi.string().allow("").optional(), Joi.allow(null)),
   }).default({}),
+  // Si true, se descarta el archivo existente y se crea una copia fresca del
+  // Sheet maestro (drive.files.copy), incluso si el archivo actual ya tiene
+  // todas las pestañas requeridas. Uso: forzar la correccion de formato en
+  // BCs cuyo Sheet se genero antes de que existiera la copia del maestro.
+  force_recreate: Joi.boolean().default(false),
 }).required();
 
 function sortRecursively(value) {
