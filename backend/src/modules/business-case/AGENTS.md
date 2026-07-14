@@ -102,6 +102,35 @@ editar cantidades de determinaciones en fase `commercial_input` (solo
 jefe_comercial/jefe_de_comercial/acp_comercial editan ahi) — eso quedo igual,
 a proposito.
 
+## Bug corregido (canonical_state atascado en DRAFT_INICIAL, bloqueaba determinaciones para TODOS)
+Investigando el reporte "acp_comercial no puede registrar reactivos" se
+encontro que el problema real no era de rol: el BC de prueba tenia
+`canonical_state = DRAFT_INICIAL` permanentemente. En ese estado,
+`businessCasePermissions.js` bloquea la seccion DETERMINATIONS para
+**cualquier rol** (por diseño, "Early stage, limited editing" -- confirmado
+que hasta jefe_comercial estaba bloqueado igual). `uploadDeterminationsStatDocument`
+marcaba `determinations_gate.enabled = true` y avanzaba el flujo de preflow,
+pero **nunca llamaba a `BusinessCaseStateMachine.transition()`** -- nada
+avanzaba `canonical_state` de `DRAFT_INICIAL` a `DATOS_BASE_COMPLETOS`.
+Confirmado con el usuario: subir el documento estadistico SI debe disparar
+esa transicion automaticamente.
+
+Corregido: `uploadDeterminationsStatDocument` ahora intenta la transicion
+automatica (no fatal si falla por falta de readiness -- se reintenta la
+proxima vez que se llame al endpoint, es idempotente). De paso se encontro y
+corrigio otro bug en el camino: el validador de readiness para esta transicion
+exigia `business_case_type` (enum `comodato_publico`/`comodato_privado`/`venta_privada`)
+pero los BC creados por flujo automatico (`ensureAutoBusinessCaseForPurchase`/
+`ensureBusinessCaseForComodato`) solo llenan `bc_purchase_type` (`public`/
+`private_comodato`) -- mismo patron de "dos campos para el mismo concepto"
+visto varias veces en este modulo. Ahora acepta cualquiera de los dos.
+
+Los otros 2 requisitos de esa transicion (`client_id` real y
+`sercof_code`/`contracting_object` para flujo publico) NO se relajaron --
+son datos genuinamente faltantes, no bugs; el BC de prueba necesita
+completarlos en la seccion General antes de que la transicion automatica
+tenga efecto.
+
 ## Bug corregido (acp_comercial no podia registrar reactivos en compra publica)
 `businessCasePermissions.js`: `acp_comercial` tenia `DETERMINATIONS: false` en
 **todos** los estados. `jefe_comercial` y `backoffice_comercial` (su

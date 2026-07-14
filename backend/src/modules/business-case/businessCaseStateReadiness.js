@@ -58,7 +58,19 @@ const STATE_READINESS_REQUIREMENTS = {
         field: 'business_case_type',
         section: 'general',
         friendlyName: 'Tipo de caso de negocio',
-        validator: (bc) => bc.business_case_type && ['comodato_publico', 'comodato_privado', 'venta_privada'].includes(bc.business_case_type),
+        // business_case_type y bc_purchase_type representan el mismo concepto
+        // con dos convenciones de nombres distintas (ver getBusinessCaseFlowType
+        // arriba, que ya hace este mismo fallback para LEER el tipo). Los BC
+        // creados via flujo automatico (ensureAutoBusinessCaseForPurchase /
+        // ensureBusinessCaseForComodato) solo llenan bc_purchase_type
+        // ('public' / 'private_comodato'), nunca business_case_type -- sin
+        // este fallback, esos BCs nunca podian avanzar de estado.
+        validator: (bc) => {
+          if (bc.business_case_type && ['comodato_publico', 'comodato_privado', 'venta_privada'].includes(bc.business_case_type)) {
+            return true;
+          }
+          return ['public', 'private_comodato', 'comodato_publico', 'comodato_privado'].includes(String(bc.bc_purchase_type || '').trim());
+        },
         errorMessage: 'Debe seleccionar un tipo de caso de negocio válido'
       },
       {

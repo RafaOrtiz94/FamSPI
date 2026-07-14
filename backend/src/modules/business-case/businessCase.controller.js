@@ -4565,6 +4565,33 @@ async function uploadDeterminationsStatDocument(req, res) {
     });
 
     await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
+
+    // Subir el documento estadistico es la señal de que los datos base ya
+    // estan completos -- avanzar automaticamente DRAFT_INICIAL ->
+    // DATOS_BASE_COMPLETOS. Antes de este fix, canonical_state se quedaba
+    // atascado en DRAFT_INICIAL para siempre (nada mas lo movia), bloqueando
+    // la seccion de determinaciones para TODOS los roles (businessCasePermissions.js
+    // bloquea DETERMINATIONS en DRAFT_INICIAL por diseño). No fatal si la
+    // transicion no esta lista (ej: falta client_id/sercof_code) -- el
+    // usuario debe completar esos datos y la transicion se reintentara la
+    // proxima vez que se llame a este endpoint (es idempotente).
+    try {
+      const currentState = await BusinessCaseStateMachine.getCurrentState(id);
+      if (currentState === STATES.DRAFT_INICIAL) {
+        await BusinessCaseStateMachine.transition(
+          id,
+          STATES.DATOS_BASE_COMPLETOS,
+          req.user?.id,
+          "stat_document_uploaded",
+        );
+      }
+    } catch (transitionError) {
+      logger.warn(
+        { error: transitionError.message, businessCaseId: id },
+        "No se pudo avanzar automaticamente a DATOS_BASE_COMPLETOS tras cargar el documento estadistico",
+      );
+    }
+
     try {
       preflowHandoffResult = await preflowService.completeCommercialStageAndStartReview({
         businessCaseId: id,
