@@ -125,11 +125,13 @@ pero los BC creados por flujo automatico (`ensureAutoBusinessCaseForPurchase`/
 `private_comodato`) -- mismo patron de "dos campos para el mismo concepto"
 visto varias veces en este modulo. Ahora acepta cualquiera de los dos.
 
-Los otros 2 requisitos de esa transicion (`client_id` real y
-`sercof_code`/`contracting_object` para flujo publico) NO se relajaron --
-son datos genuinamente faltantes, no bugs; el BC de prueba necesita
-completarlos en la seccion General antes de que la transicion automatica
-tenga efecto.
+Los otros 2 requisitos de esa transicion se relajaron a pedido explicito del
+usuario: `client_id` (a esta etapa el cliente puede ser un prospecto sin
+registrar formalmente, basta el nombre libre) y `flow_specific_data`
+(`sercof_code`/`contracting_object` para publico, `backoffice_client_data`
+para privado -- esos datos se completan mas adelante en el flujo, no son
+necesarios tan temprano). Verificado: la transicion pasa `isReady: true`
+para el BC de prueba tras ambos cambios.
 
 ## Bug corregido (acp_comercial no podia registrar reactivos en compra publica)
 `businessCasePermissions.js`: `acp_comercial` tenia `DETERMINATIONS: false` en

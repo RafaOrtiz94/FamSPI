@@ -44,15 +44,11 @@ const STATE_READINESS_REQUIREMENTS = {
         field: 'client_name',
         section: 'general',
         friendlyName: 'Nombre del cliente',
+        // client_id NO es requisito aqui a proposito: en esta etapa el
+        // cliente puede ser un prospecto sin registrar formalmente en el
+        // catalogo de clientes. Basta con el nombre libre.
         validator: (bc) => bc.client_name && bc.client_name.trim().length > 0,
         errorMessage: 'El nombre del cliente es obligatorio'
-      },
-      {
-        field: 'client_id',
-        section: 'general',
-        friendlyName: 'ID del cliente',
-        validator: (bc) => bc.client_id && bc.client_id > 0,
-        errorMessage: 'Debe seleccionar un cliente válido'
       },
       {
         field: 'business_case_type',
@@ -88,36 +84,11 @@ const STATE_READINESS_REQUIREMENTS = {
         },
         errorMessage: 'Debe seleccionar y configurar el equipo principal'
       },
-      // Branching requirements based on business case type
-      {
-        field: 'flow_specific_data',
-        section: 'general',
-        friendlyName: 'Datos específicos del flujo',
-        validator: (bc) => {
-          const flowType = getBusinessCaseFlowType(bc);
-
-          if (flowType === 'PUBLIC') {
-            // PUBLIC flow: Check for SERCOF code and contracting object
-            const extra = parseExtraField(bc.extra);
-            return extra && extra.sercof_code && extra.sercof_code.trim().length > 0 &&
-                   extra.contracting_object && extra.contracting_object.trim().length > 0;
-          } else {
-            // PRIVATE flow: Check for backoffice client data
-            const extra = parseExtraField(bc.extra);
-            return extra && extra.backoffice_client_data &&
-                   extra.backoffice_client_data.client_code &&
-                   extra.backoffice_client_data.client_code.trim().length > 0;
-          }
-        },
-        errorMessage: (bc) => {
-          const flowType = getBusinessCaseFlowType(bc);
-          if (flowType === 'PUBLIC') {
-            return 'Para casos públicos se requiere código SERCOF y objeto contractual';
-          } else {
-            return 'Para casos privados se requieren datos del cliente en backoffice';
-          }
-        }
-      }
+      // NOTA: el requisito de "flow_specific_data" (sercof_code/contracting_object
+      // para publico, backoffice_client_data para privado) se removio de esta
+      // transicion a pedido del usuario -- esos datos se completan mas
+      // adelante en el flujo, no son necesarios tan temprano como
+      // DRAFT_INICIAL -> DATOS_BASE_COMPLETOS.
     ]
   },
 
