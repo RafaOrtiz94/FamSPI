@@ -4485,6 +4485,25 @@ async function uploadDeterminationsStatDocument(req, res) {
           message: handoffError.message,
         };
       }
+      // Mismo intento de auto-avance que en el camino de subida nueva (ver
+      // mas abajo) -- sin esto, reintentar con el mismo archivo (hash igual)
+      // nunca dispara la transicion de estado.
+      try {
+        const currentState = await BusinessCaseStateMachine.getCurrentState(id);
+        if (currentState === STATES.DRAFT_INICIAL) {
+          await BusinessCaseStateMachine.transition(
+            id,
+            STATES.DATOS_BASE_COMPLETOS,
+            req.user?.id,
+            "stat_document_reused_same_hash",
+          );
+        }
+      } catch (transitionError) {
+        logger.warn(
+          { error: transitionError.message, businessCaseId: id },
+          "No se pudo avanzar automaticamente a DATOS_BASE_COMPLETOS (documento reutilizado)",
+        );
+      }
       const gate = determinationsGateService.buildGateInfo({
         businessCase: refreshedAfterProcess,
         role,
