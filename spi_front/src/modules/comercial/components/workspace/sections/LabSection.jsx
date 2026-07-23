@@ -6,6 +6,7 @@ import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
 import Card from "../../../../../core/ui/components/Card";
 import { useAutoEditSection } from "../BusinessCaseWorkspaceContext";
+import SectionEditorBadge from "../SectionEditorBadge";
 
 // EMPTY SCHEMA - Initialize with no default values
 const EMPTY_SCHEMA = {
@@ -112,6 +113,9 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  <div>
  <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Entorno Laboratorio</h2>
  <p className="text-sm text-gray-500 mt-1">Configuración operativa y parámetros del laboratorio</p>
+ <div className="mt-2">
+ <SectionEditorBadge ownership={ownership} />
+ </div>
  </div>
  </div>
  </div>

@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
+import { FiExternalLink } from "react-icons/fi";
 import {
  getBusinessCaseDispatchWorkspace,
+ getBusinessCaseSheetPreview,
  saveBusinessCaseCommercialDispatchPlan,
  saveBusinessCaseOperationsDispatchControl,
 } from "../../../../../core/api/businessCaseApi";
 import { useUI } from "../../../../../core/ui/UIContext";
 import { useAuth } from "../../../../../core/auth/AuthContext";
+import SectionEditorBadge from "../SectionEditorBadge";
 
 const TYPE_LABELS = {
  determinacion: "Determinación",
@@ -18,7 +21,7 @@ const TYPE_LABELS = {
  otro: "Otro",
 };
 
-const COMMERCIAL_ROLES = new Set(["jefe_comercial", "gerencia", "gerencia_general"]);
+const COMMERCIAL_ROLES = new Set(["acp_comercial", "jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]);
 const OPERATIONS_ROLES = new Set(["jefe_operaciones", "gerencia", "gerencia_general"]);
 
 const toNumber = (value, fallback = 0) => {
@@ -36,6 +39,8 @@ const DispatchWorkspaceSection = ({ onSave = () => {}, ownership = {} }) => {
  const [savingOperations, setSavingOperations] = useState(false);
  const [rows, setRows] = useState([]);
  const [summary, setSummary] = useState(null);
+ const [sheetSync, setSheetSync] = useState(null);
+ const [sheetUrl, setSheetUrl] = useState(null);
  const [draftByKey, setDraftByKey] = useState({});
 
  const normalizedRole = String(user?.role || user?.scope || "").toLowerCase();
@@ -58,15 +63,26 @@ const DispatchWorkspaceSection = ({ onSave = () => {}, ownership = {} }) => {
  setDraftByKey(next);
  }, []);
 
- const loadWorkspace = useCallback(async () => {
+ const loadWorkspace = useCallback(async (options = {}) => {
  if (!businessCaseId) return;
  try {
  setLoading(true);
  const data = await getBusinessCaseDispatchWorkspace(businessCaseId);
  const items = Array.isArray(data?.items) ? data.items : [];
+ const syncInfo = data?.sheetSync || null;
  setRows(items);
  setSummary(data?.summary || null);
+ setSheetSync(syncInfo);
  hydrateDraft(items);
+ if (options.showSyncToast && syncInfo) {
+ const protectionText = syncInfo.sheetProtected
+ ? " El Sheet quedo protegido."
+ : " No se pudo confirmar la proteccion del Sheet.";
+ showToast(
+ `Cantidades maximas sincronizadas: ${syncInfo.maximumQuantitiesFound ?? 0} encontrada(s), ${syncInfo.maximumQuantitiesApplied ?? 0} aplicada(s).${protectionText}`,
+ syncInfo.sheetProtected ? "success" : "warning",
+ );
+ }
  } catch (error) {
  showToast(error?.response?.data?.message || "No se pudo cargar el workspace de despacho", "error");
  } finally {
@@ -74,9 +90,29 @@ const DispatchWorkspaceSection = ({ onSave = () => {}, ownership = {} }) => {
  }
  }, [businessCaseId, hydrateDraft, showToast]);
 
+ const loadSheetUrl = useCallback(async () => {
+ if (!businessCaseId) return;
+ try {
+ const data = await getBusinessCaseSheetPreview(businessCaseId);
+ const url = data?.last_generation?.sheet_url || null;
+ setSheetUrl(url);
+ } catch (_error) {
+ setSheetUrl(null);
+ }
+ }, [businessCaseId]);
+
  useEffect(() => {
  loadWorkspace();
- }, [loadWorkspace]);
+ loadSheetUrl();
+ }, [loadWorkspace, loadSheetUrl]);
+
+ const handleOpenSheet = () => {
+ if (!sheetUrl) {
+ showToast("Todavia no existe un Sheet generado para este Business Case.", "warning");
+ return;
+ }
+ window.open(sheetUrl, "_blank", "noopener,noreferrer");
+ };
 
  const groupedRows = useMemo(() => {
  const groups = new Map();
@@ -180,8 +216,9 @@ const DispatchWorkspaceSection = ({ onSave = () => {}, ownership = {} }) => {
  <div className="flex flex-col gap-2">
  <h2 className="text-xl font-bold text-gray-900">Cantidades Maximas</h2>
  <p className="text-sm text-gray-600">
- Disponible solo después de que el BC sea marcado como factible. Jefe Comercial define las cantidades máximas; Jefe Operaciones mantiene el control de despacho.
+ Disponible solo despues de que el BC sea marcado como factible. El responsable sincroniza cantidades maximas desde el Sheet oficial; Jefe Operaciones mantiene el control de despacho.
  </p>
+ <SectionEditorBadge ownership={ownership} />
  </div>
 
  {isBlocked && (
@@ -192,7 +229,25 @@ const DispatchWorkspaceSection = ({ onSave = () => {}, ownership = {} }) => {
  </div>
  )}
 
- {!isBlocked && <></>}
+ {!isBlocked && (
+ <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+ Proceso posterior a factibilidad: sincroniza las cantidades maximas desde el Sheet oficial.
+ {sheetSync && (
+ <span className="ml-1">
+ Ultima lectura: {sheetSync.maximumQuantitiesFound ?? 0} encontrada(s), {sheetSync.maximumQuantitiesApplied ?? 0} aplicada(s).
+ </span>
+ )}
+ {sheetSync?.sheetProtected && (
+ <span className="ml-1 font-semibold">Sheet protegido contra nuevas modificaciones.</span>
+ )}
+ {sheetSync?.sheetProtectionReason && !sheetSync?.sheetProtected && (
+ <span className="ml-1 text-amber-800">No se pudo confirmar la proteccion del Sheet.</span>
+ )}
+ {sheetSync?.maximumQuantitiesFound > sheetSync?.maximumQuantitiesApplied && (
+ <span className="ml-1 text-emerald-800">Las cantidades con ajuste manual previo se conservaron.</span>
+ )}
+ </div>
+ )}
 
  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
  <StatCard title="Elementos" value={summary?.totalItems ?? 0} />
@@ -323,10 +378,21 @@ const DispatchWorkspaceSection = ({ onSave = () => {}, ownership = {} }) => {
  <div className="flex flex-col md:flex-row gap-3 md:justify-between md:items-center pt-2">
  <button
  type="button"
- onClick={loadWorkspace}
+ onClick={() => loadWorkspace({ showSyncToast: true })}
  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50"
  >
- Refrescar
+ Sincronizar cantidades maximas desde Sheet
+ </button>
+
+ <button
+ type="button"
+ onClick={handleOpenSheet}
+ className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50 disabled:opacity-50"
+ disabled={!sheetUrl}
+ title={sheetUrl ? "Abrir Sheet oficial" : "No hay Sheet generado"}
+ >
+ <FiExternalLink size={16} />
+ Abrir Sheet
  </button>
 
  <div className="flex flex-col sm:flex-row gap-2">
@@ -364,4 +430,3 @@ const StatCard = ({ title, value }) => (
 );
 
 export default DispatchWorkspaceSection;
-

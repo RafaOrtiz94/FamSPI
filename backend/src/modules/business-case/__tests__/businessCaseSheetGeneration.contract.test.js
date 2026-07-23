@@ -10,12 +10,13 @@ describe("businessCaseSheetGeneration.contract", () => {
   it("validates generation payload and sets defaults", () => {
     const result = validateGenerationRequest({
       fields: { client_name: "Cliente Demo" },
-      inversiones: { Servidor: { cantidad: 1, precio: 3200 } },
+      inversiones: { Servidor: { cantidad: 1, precio: 3200, descripcion: "Servidor en rack" } },
     });
 
     expect(result.ok).toBe(true);
     expect(result.value.mapping_version).toBe(DEFAULT_MAPPING_VERSION);
     expect(result.value.inversiones.Servidor.cantidad).toBe(1);
+    expect(result.value.inversiones.Servidor.descripcion).toBe("Servidor en rack");
   });
 
   it("rejects invalid inversiones payload", () => {
@@ -68,6 +69,9 @@ describe("businessCaseSheetGeneration.contract", () => {
           output_folder_id: payloadA.output_folder_id,
           fields: payloadA.fields,
           inversiones: payloadA.inversiones,
+          max_quantities: [],
+          equipment_tabs: [],
+          sheet_context: {},
         }),
         "utf8",
       )

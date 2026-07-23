@@ -45,8 +45,8 @@ export const ALL_SECTIONS = [
   "investment_values_op",
   "investment_values_fin",
   "consumption_export",
-  "dispatch_workspace",
   "feasibility",
+  "dispatch_workspace",
 ];
 
 export const ROLE_SECTION_CONFIG = {
@@ -205,9 +205,10 @@ export const ROLE_SECTION_CONFIG = {
   // dispatch_workspace editable (control operativo).
   // ─────────────────────────────────────────────────────────────────
   operaciones: {
-    visible: ["equipment", "determinations", "dispatch_workspace", "feasibility"],
+    visible: ["equipment", "determinations", "investments", "dispatch_workspace", "feasibility"],
     canEdit: [
       // BC-06/BC-07: equipment y determinations son solo lectura
+      "investments",
       "dispatch_workspace",
     ],
   },
@@ -263,6 +264,37 @@ export const ROLE_SECTION_CONFIG = {
       // BC-06: equipment → solo lectura (antes era editable)
       "determinations",   // calibradores, controles, materiales (no reactivos)
       "investments",      // puede agregar ítems al carrito
+    ],
+  },
+
+  jefe_servicio: {
+    visible: [
+      "general", "lab", "equipment", "lis", "determinations",
+      "requirement", "investments", "feasibility",
+    ],
+    canEdit: [
+      "determinations",
+      "investments",
+    ],
+  },
+
+  ing_servicio: {
+    visible: [
+      "general", "lab", "equipment", "lis", "determinations",
+      "requirement", "investments", "feasibility",
+    ],
+    canEdit: [
+      "investments",
+    ],
+  },
+
+  esp_app: {
+    visible: [
+      "general", "lab", "equipment", "lis", "determinations",
+      "requirement", "investments", "feasibility",
+    ],
+    canEdit: [
+      "investments",
     ],
   },
 

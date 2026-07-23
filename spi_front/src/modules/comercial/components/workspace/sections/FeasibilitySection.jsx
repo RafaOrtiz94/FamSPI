@@ -7,6 +7,7 @@ import {
   resolveBusinessCaseFeasibilityAppeal,
 } from "../../../../../core/api/businessCaseApi";
 import { useUI } from "../../../../../core/ui/UIContext";
+import SectionEditorBadge from "../SectionEditorBadge";
 
 const FALLBACK_OPTIONS = [
  { value: "venta", label: "Compra directa" },
@@ -188,6 +189,7 @@ const FeasibilitySection = ({
  Ultimo paso del Business Case. ACP Comercial o Jefe Comercial registran la decision final
  para cerrar el BC y continuar el flujo en compras.
  </p>
+ <SectionEditorBadge ownership={ownership} />
  </div>
 
  {!hasExport && (

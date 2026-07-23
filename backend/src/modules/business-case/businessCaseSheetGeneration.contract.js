@@ -13,8 +13,13 @@ const generationRequestSchema = Joi.object({
     .pattern(
       Joi.string().trim().min(1),
       Joi.object({
+        nombre: Joi.string().allow("").optional(),
+        categoria: Joi.string().allow("").optional(),
+        caracteristicas: Joi.string().allow("").optional(),
+        observaciones: Joi.string().allow("").optional(),
         cantidad: Joi.number().min(0).required(),
         precio: Joi.number().min(0).required(),
+        descripcion: Joi.string().allow("").optional(),
       }).required(),
     )
     .default({}),

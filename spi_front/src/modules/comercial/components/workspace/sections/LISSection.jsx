@@ -4,6 +4,7 @@ import { FiLink, FiSave, FiPlus, FiTrash2 } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
 import { useAutoEditSection } from "../BusinessCaseWorkspaceContext";
+import SectionEditorBadge from "../SectionEditorBadge";
 
 // EMPTY SCHEMA - Initialize with no default values
 const EMPTY_SCHEMA = {
@@ -183,6 +184,9 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
  <div>
  <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Integración LIS</h2>
  <p className="text-sm text-gray-500 mt-1">Defina si el proyecto requiere LIS o requiere interfaz con equipos</p>
+ <div className="mt-2">
+ <SectionEditorBadge ownership={ownership} />
+ </div>
  </div>
  </div>
  </div>

@@ -1244,25 +1244,30 @@ async function saveConsumptionItems(businessCaseId, items = [], excluded = [], o
   return reloaded;
 }
 
-// Sincronizacion inversa Sheet -> SPI: si el usuario llena la columna
-// "Cantidad Anual" directamente en el Sheet oficial (reactivos, calibradores,
-// controles, materiales), esta funcion lee esos valores y los aplica sobre
-// bc_consumption_items. Disparada solo por accion manual del usuario, nunca
-// automatica -- una edicion en SPI hecha despues de generar el Sheet no debe
-// perderse silenciosamente si el usuario no pidio explicitamente sincronizar.
-async function syncConsumptionQuantitiesFromSheet(businessCaseId) {
+// Sincronizacion inversa Sheet -> SPI: la hoja oficial es la fuente de verdad
+// de CANTIDADES para reactivos, calibradores, controles y materiales. La
+// columna real difiere por bloque: reactivos usa "DET/AÑO PROCESO"; jefe de
+// servicio registra calibradores/controles/materiales en "PRODUCTO CALCULADO"
+// (ver ANNUAL_QUANTITY_HEADERS en businessCaseSheetSyncLocal.service.js).
+// Esta funcion no solo actualiza cantidades de items
+// que ya existen en bc_consumption_items -- tambien CREA los que esten
+// llenos en la hoja pero todavia no se hayan agregado en SPI, usando el
+// catalogo del equipo (catalog_equipment_consumables) como fuente de
+// item_type/nombre, ya que la hoja nunca indica el tipo, solo la cantidad.
+// Se dispara automaticamente al cargar la pantalla de consumo (ver
+// getConsumptionItems en el controller, que la salta si la subseccion ya
+// esta bloqueada) y tambien queda disponible como accion manual via
+// POST /:id/consumption-items/sync-from-sheet para forzar un re-sync.
+async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) {
   await assertModernBusinessCase(businessCaseId);
-
-  const { rows: consumptionRows } = await db.query(
-    `SELECT item_key, item_id, name, item_type, source, equipment_id, equipment_name, annual_qty
-       FROM bc_consumption_items
-      WHERE business_case_id = $1`,
-    [businessCaseId],
-  );
-
-  if (!consumptionRows.length) {
-    return { updated: 0, items: await loadConsumptionData(businessCaseId) };
-  }
+  const requestedItemTypes = Array.isArray(options?.itemTypes)
+    ? new Set(
+      options.itemTypes
+        .map((value) => String(value || "").trim().toLowerCase())
+        .filter(Boolean),
+    )
+    : null;
+  const annualQuantityProtectionSubsection = String(options?.protectAnnualQuantities || "").trim().toLowerCase();
 
   const { rows: bcRows } = await db.query(
     `SELECT modern_bc_metadata FROM equipment_purchase_requests WHERE id = $1 LIMIT 1`,
@@ -1279,56 +1284,154 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId) {
     throw error;
   }
 
+  const current = await loadConsumptionData(businessCaseId);
+
+  const { rows: selectionRows } = await db.query(
+    `SELECT equipment_id FROM bc_equipment_selection WHERE business_case_id = $1`,
+    [businessCaseId],
+  );
+  const equipmentIds = Array.from(new Set(
+    selectionRows.map((row) => Number(row.equipment_id)).filter((id) => Number.isInteger(id) && id > 0),
+  ));
+  if (!equipmentIds.length) {
+    if (annualQuantityProtectionSubsection) {
+      const error = new Error("No existen equipos seleccionados para localizar las celdas anuales del Sheet.");
+      error.status = 409;
+      error.code = "ANNUAL_QUANTITY_PROTECTION_FAILED";
+      throw error;
+    }
+    return { updated: 0, created: 0, items: current };
+  }
+
+  const { rows: equipmentRows } = await db.query(
+    `SELECT equipment_id, equipment_name FROM v_equipment_full_catalog WHERE equipment_id = ANY($1::int[])`,
+    [equipmentIds],
+  );
+  const equipmentNameById = new Map(equipmentRows.map((row) => [Number(row.equipment_id), row.equipment_name]));
+
+  const { rows: catalogRows } = await db.query(
+    `SELECT ec.equipment_id, c.id AS catalog_id, c.name, c.type AS item_type, c.supplier_code
+       FROM catalog_equipment_consumables ec
+       JOIN catalog_consumables c ON c.id = ec.consumable_id
+      WHERE ec.equipment_id = ANY($1::int[])`,
+    [equipmentIds],
+  );
+
   const {
     loadTemplateDefinition,
     buildSheetPayloads,
     pullAnnualQuantitiesFromGoogleSheet,
   } = require("./businessCaseSheetSyncLocal.service");
 
-  const equipmentMap = new Map();
-  consumptionRows.forEach((row) => {
-    const equipmentId = Number(row.equipment_id);
-    if (!Number.isInteger(equipmentId) || equipmentId <= 0) return;
-    if (!equipmentMap.has(equipmentId)) {
-      equipmentMap.set(equipmentId, { id: equipmentId, name: row.equipment_name || null, code: null, model: null });
-    }
-  });
+  const equipmentRecords = equipmentIds.map((id) => ({
+    id,
+    name: equipmentNameById.get(id) || null,
+    code: null,
+    model: null,
+  }));
 
-  const maxQuantities = consumptionRows.map((row) => ({
-    item_key: row.item_key,
-    item_id: row.item_id || null,
+  // The sync catalog only identifies rows. Quantities are read exclusively
+  // from the annual column DET/AÑO/PROCESO, never from PRODUCTO A ENVIAR.
+  const catalogRowsForSync = requestedItemTypes?.size
+    ? catalogRows.filter((row) => requestedItemTypes.has(String(row.item_type || "").trim().toLowerCase()))
+    : catalogRows;
+  const catalogItemsForSync = catalogRowsForSync.map((row) => ({
+    item_key: `cons:${row.equipment_id}:${row.catalog_id}`,
+    item_id: row.supplier_code || null,
     item_name: row.name || null,
     item_type: row.item_type || null,
-    source: row.source || null,
-    equipment_id: row.equipment_id || null,
-    equipment_name: row.equipment_name || null,
-    annual_qty: row.annual_qty === null || row.annual_qty === undefined ? null : Number(row.annual_qty),
+    equipment_id: row.equipment_id,
+    equipment_name: equipmentNameById.get(Number(row.equipment_id)) || null,
+    catalog_id: row.catalog_id,
   }));
 
   const equipmentTabs = buildSheetPayloads({
     template: loadTemplateDefinition(),
-    equipmentRecords: Array.from(equipmentMap.values()),
-    payload: { fields: {}, max_quantities: maxQuantities, sheet_context: {} },
+    equipmentRecords,
+    payload: { fields: {}, sync_items: catalogItemsForSync, sheet_context: {} },
   });
 
-  const sheetUpdates = await pullAnnualQuantitiesFromGoogleSheet({ sheetId, equipmentTabs });
-  const current = await loadConsumptionData(businessCaseId);
-  if (!sheetUpdates.length) {
-    return { updated: 0, items: current };
+  let annualQuantityProtection = null;
+  if (annualQuantityProtectionSubsection) {
+    const {
+      protectAnnualQuantityCellsForSubsection,
+    } = require("./businessCaseSheetSyncLocal.service");
+    annualQuantityProtection = await protectAnnualQuantityCellsForSubsection({
+      sheetId,
+      businessCaseId,
+      subsection: annualQuantityProtectionSubsection,
+      equipmentTabs,
+    });
+    if (!annualQuantityProtection?.protected) {
+      const error = new Error(
+        annualQuantityProtection?.reason === "NO_ANNUAL_CELLS_FOUND"
+          ? "No se encontraron celdas de cantidades anuales para proteger en el Sheet."
+          : "No se pudo proteger la columna de cantidades anuales en el Sheet.",
+      );
+      error.status = annualQuantityProtection?.reason === "NO_ANNUAL_CELLS_FOUND" ? 409 : 503;
+      error.code = "ANNUAL_QUANTITY_PROTECTION_FAILED";
+      throw error;
+    }
   }
 
+  const sheetUpdatesFromSheet = await pullAnnualQuantitiesFromGoogleSheet({ sheetId, equipmentTabs });
+  const currentItems = Array.isArray(current?.items) ? current.items : [];
+  const eligibleCurrentKeys = requestedItemTypes?.size
+    ? new Set(
+      currentItems
+        .filter((item) => requestedItemTypes.has(String(item?.type || "").trim().toLowerCase()))
+        .map((item) => String(item?.key || "").trim())
+        .filter(Boolean),
+    )
+    : null;
+  const eligibleCatalogKeys = new Set(catalogItemsForSync.map((item) => item.item_key));
+  const sheetUpdates = requestedItemTypes?.size
+    ? sheetUpdatesFromSheet.filter((entry) =>
+      eligibleCatalogKeys.has(String(entry?.item_key || "").trim()) ||
+      eligibleCurrentKeys.has(String(entry?.item_key || "").trim()),
+    )
+    : sheetUpdatesFromSheet;
+  if (!sheetUpdates.length) {
+    return { updated: 0, created: 0, items: current, annualQuantityProtection };
+  }
+
+  const catalogByKey = new Map(catalogItemsForSync.map((row) => [row.item_key, row]));
+  const currentByKey = new Map(currentItems.map((item) => [item.key, item]));
+  const excludedSet = new Set(current?.excluded || []);
   const updatesByKey = new Map(sheetUpdates.map((entry) => [entry.item_key, entry.annual_qty]));
-  let changedCount = 0;
+
+  let updatedCount = 0;
   const nextItems = (current?.items || []).map((item) => {
     if (!updatesByKey.has(item.key)) return item;
     const nextQty = Math.max(0, Number(updatesByKey.get(item.key)) || 0);
     if (Number(item.annualQty) === nextQty) return item;
-    changedCount += 1;
+    updatedCount += 1;
     return { ...item, annualQty: nextQty };
   });
 
-  if (!changedCount) {
-    return { updated: 0, items: current };
+  let createdCount = 0;
+  for (const entry of sheetUpdates) {
+    if (currentByKey.has(entry.item_key)) continue; // ya actualizado arriba
+    if (excludedSet.has(entry.item_key)) continue; // el usuario lo excluyo a proposito
+    const catalogInfo = catalogByKey.get(entry.item_key);
+    if (!catalogInfo) continue;
+
+    nextItems.push({
+      key: entry.item_key,
+      itemId: catalogInfo.item_id,
+      name: catalogInfo.item_name,
+      type: catalogInfo.item_type,
+      source: "catalog",
+      catalogId: catalogInfo.catalog_id,
+      annualQty: Math.max(0, Number(entry.annual_qty) || 0),
+      equipmentId: catalogInfo.equipment_id,
+      equipmentName: catalogInfo.equipment_name,
+    });
+    createdCount += 1;
+  }
+
+  if (!updatedCount && !createdCount) {
+    return { updated: 0, created: 0, items: current, annualQuantityProtection };
   }
 
   await syncConsumptionData(businessCaseId, {
@@ -1345,7 +1448,12 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId) {
     );
   }
 
-  return { updated: changedCount, items: await loadConsumptionData(businessCaseId) };
+  return {
+    updated: updatedCount,
+    created: createdCount,
+    items: await loadConsumptionData(businessCaseId),
+    annualQuantityProtection,
+  };
 }
 
 async function patchConsumptionItem(businessCaseId, itemKey, patch = {}, options = {}) {

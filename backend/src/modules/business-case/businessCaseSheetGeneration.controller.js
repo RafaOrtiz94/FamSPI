@@ -38,6 +38,15 @@ function sendError(res, error, fallbackMessage) {
 async function enqueueSheetGeneration(req, res) {
   try {
     const { id } = req.params;
+    const forceRecreate = Boolean(req.body?.force_recreate);
+    const actorRole = String(req.user?.role || req.user?.scope || "").trim().toLowerCase();
+    if (forceRecreate && actorRole !== "jefe_ti") {
+      return res.status(403).json({
+        ok: false,
+        message: "Solo Jefe TI puede actualizar la hoja de Sheets.",
+        code: "SHEET_UPDATE_REQUIRES_JEFE_TI",
+      });
+    }
     const result = await sheetGenerationService.enqueueGenerationJob({
       businessCaseId: id,
       input: req.body || {},

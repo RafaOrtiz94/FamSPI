@@ -3,6 +3,7 @@ const logger = require("../../config/logger");
 const {
   buildSheetPayloads,
   loadTemplateDefinition,
+  protectSpreadsheetAfterMaximumQuantitiesSync,
   pullMaximumQuantitiesFromGoogleSheet,
 } = require("./businessCaseSheetSyncLocal.service");
 
@@ -194,6 +195,12 @@ function buildSheetContextFromConsumptionRows(consumptionRows = []) {
 async function syncDispatchWorkspaceFromConsumption(businessCaseId, options = {}) {
   const client = options.client || null;
   const allowMissingTable = Boolean(options.allowMissingTable);
+  const sheetSync = {
+    maximumQuantitiesFound: 0,
+    maximumQuantitiesApplied: 0,
+    sheetProtected: false,
+    sheetProtectionReason: null,
+  };
   try {
     const { rows: consumptionRows } = await queryWithClient(
       client,
@@ -310,9 +317,10 @@ async function syncDispatchWorkspaceFromConsumption(businessCaseId, options = {}
           sheetId,
           equipmentTabs,
         });
+        sheetSync.maximumQuantitiesFound = sheetUpdates.length;
 
         if (sheetUpdates.length) {
-          await queryWithClient(
+          const result = await queryWithClient(
             client,
             `WITH payload AS (
                SELECT *
@@ -322,26 +330,37 @@ async function syncDispatchWorkspaceFromConsumption(businessCaseId, options = {}
                )
              )
              UPDATE bc_dispatch_items d
-                SET planned_qty = CASE
-                    WHEN d.commercial_updated_at IS NULL THEN GREATEST(COALESCE(p.planned_qty, 0), 0)
-                    ELSE d.planned_qty
-                  END,
+                SET planned_qty = GREATEST(COALESCE(p.planned_qty, 0), 0),
                     updated_at = NOW()
                FROM payload p
               WHERE d.business_case_id = $1
-                AND d.item_key = p.item_key`,
+                AND d.item_key = p.item_key
+                AND d.commercial_updated_at IS NULL`,
             [businessCaseId, JSON.stringify(sheetUpdates)],
           );
+          sheetSync.maximumQuantitiesApplied = result.rowCount || 0;
+        }
+
+        if (sheetUpdates.length) {
+          const protection = await protectSpreadsheetAfterMaximumQuantitiesSync({
+            sheetId,
+            businessCaseId,
+          });
+          sheetSync.sheetProtected = protection.protected === true;
+          sheetSync.sheetProtectionReason = protection.reason || null;
+          sheetSync.protectedSheets = protection.protectedSheets || 0;
         }
       }
     } catch (sheetSyncError) {
       logger.warn(
         { businessCaseId, error: sheetSyncError.message },
-        "No se pudo sincronizar PRODUCTO A ENTREGAR/ENVIAR desde Google Sheet. Continua con datos locales.",
+        "No se pudo sincronizar o proteger PRODUCTO A ENTREGAR/ENVIAR desde Google Sheet. Continua con datos locales.",
       );
+      sheetSync.sheetProtectionReason = sheetSyncError.message || "SHEET_SYNC_OR_PROTECTION_ERROR";
     }
 
-    return getDispatchWorkspace(businessCaseId, { client, skipSync: true });
+    const workspace = await getDispatchWorkspace(businessCaseId, { client, skipSync: true });
+    return { ...workspace, sheetSync };
   } catch (error) {
     if (isDispatchTableMissing(error)) {
       if (allowMissingTable) {
@@ -401,7 +420,7 @@ async function getDispatchWorkspace(businessCaseId, options = {}) {
 
   if (!skipSync) {
     const synced = await syncDispatchWorkspaceFromConsumption(businessCaseId, { client, allowMissingTable: true });
-    if (synced?.migrationRequired) {
+    if (synced?.migrationRequired || synced?.items) {
       return synced;
     }
   }

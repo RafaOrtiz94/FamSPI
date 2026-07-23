@@ -6,6 +6,7 @@ import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
 import { useAuth } from "../../../../../core/auth/AuthContext";
 import SectionObservationAlert from "../SectionObservationAlert";
+import SectionEditorBadge from "../SectionEditorBadge";
 import LocationManager from "../../LocationManager";
 import ProvinciaCiudadInput from "../../../../../components/ProvinciaCiudadInput";
 import { useAutoEditSection } from "../BusinessCaseWorkspaceContext";
@@ -705,8 +706,11 @@ const watchProvinceCity = watch("provinceCity");
  Captura lo necesario para que operaciones pueda continuar con el Business Case.
  {!canEdit() && " (Solo lectura)"}
  </p>
- <div className="mt-2 inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+ <div className="mt-2 flex flex-wrap items-center gap-2">
+ <div className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
  Origen del flujo: {originLabel}
+ </div>
+ <SectionEditorBadge ownership={ownership} />
  </div>
  </div>
  </div>

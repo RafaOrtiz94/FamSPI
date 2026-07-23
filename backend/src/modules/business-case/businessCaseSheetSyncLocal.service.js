@@ -3,9 +3,27 @@ const path = require("path");
 const XLSX = require("xlsx");
 const { drive, sheets, jwtClient } = require("../../config/google");
 const logger = require("../../config/logger");
+const { googleDelegatedUser } = require("../../utils/googleCredentials");
 
 const TEMPLATE_FILENAME = "FORMATO_BC.xlsx";
 const MAPPING_FILENAME = "mapping_auto.json";
+const DYNAMIC_INVESTMENTS_START_ROW = 126;
+const DYNAMIC_INVESTMENTS_CLEAR_ROWS = 75;
+const MAX_QUANTITIES_LOCK_DESCRIPTION = "SPI_LOCK_MAX_QUANTITIES_POST_FEASIBILITY";
+const ANNUAL_QUANTITIES_LOCK_DESCRIPTION = "SPI_LOCK_ANNUAL_QUANTITIES_VALIDATED";
+const ANNUAL_QUANTITY_ITEM_TYPES = {
+  reactivos: new Set(["reactivo", "determinacion"]),
+  controles: new Set(["control"]),
+  calibradores: new Set(["calibrador"]),
+  materiales: new Set(["consumible", "material"]),
+};
+// Columna de cantidad anual: en el bloque de reactivos de la plantilla se
+// llama "DET/AÑO PROCESO"; en los bloques de calibradores/controles/
+// materiales (mas abajo en la misma pestaña) ese header no existe -- ahi
+// jefe_servicio/ing_servicio registra en "PRODUCTO CALCULADO". Cada bloque
+// declara solo uno de los dos, por lo que buscar ambos resuelve el correcto
+// por fila sin necesidad de conocer el item_type en tiempo de parseo.
+const ANNUAL_QUANTITY_HEADERS = ["DET/AÑO PROCESO", "PRODUCTO CALCULADO"];
 
 // Google Sheet maestro con el diseño/formato oficial ("FORMATO BC - 15-01-2026").
 // Cada BC se crea copiando este archivo (drive.files.copy) en vez de subir el
@@ -171,6 +189,87 @@ function normalizeCompact(value) {
   return normalizeText(value).replace(/\s+/g, "");
 }
 
+function levenshteinDistance(a = "", b = "") {
+  const left = String(a || "");
+  const right = String(b || "");
+  if (left === right) return 0;
+  if (!left) return right.length;
+  if (!right) return left.length;
+
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  const current = Array(right.length + 1).fill(0);
+
+  for (let i = 1; i <= left.length; i += 1) {
+    current[0] = i;
+    for (let j = 1; j <= right.length; j += 1) {
+      const substitutionCost = left[i - 1] === right[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        previous[j] + 1,
+        current[j - 1] + 1,
+        previous[j - 1] + substitutionCost,
+      );
+    }
+    for (let j = 0; j <= right.length; j += 1) previous[j] = current[j];
+  }
+
+  return previous[right.length];
+}
+
+function textSimilarityScore(leftValue, rightValue) {
+  const left = normalizeText(leftValue);
+  const right = normalizeText(rightValue);
+  if (!left || !right) return 0;
+  if (left === right) return 100;
+
+  const leftCompact = normalizeCompact(left);
+  const rightCompact = normalizeCompact(right);
+  if (!leftCompact || !rightCompact) return 0;
+  if (leftCompact === rightCompact) return 100;
+
+  const minLength = Math.min(leftCompact.length, rightCompact.length);
+  if (minLength >= 6 && (leftCompact.includes(rightCompact) || rightCompact.includes(leftCompact))) {
+    return 92;
+  }
+
+  const leftTokens = new Set(left.split(/\s+/).filter(Boolean));
+  const rightTokens = new Set(right.split(/\s+/).filter(Boolean));
+  const intersection = Array.from(leftTokens).filter((token) => rightTokens.has(token)).length;
+  const union = new Set([...leftTokens, ...rightTokens]).size || 1;
+  const tokenScore = (intersection / union) * 100;
+
+  const distance = levenshteinDistance(leftCompact, rightCompact);
+  const distanceScore = (1 - (distance / Math.max(leftCompact.length, rightCompact.length))) * 100;
+  return Math.max(tokenScore, distanceScore);
+}
+
+function resolveObjectiveRow(objectiveRows, investmentName) {
+  const normalizedName = normalizeText(investmentName);
+  if (!normalizedName) return null;
+
+  const exactRow = objectiveRows.get(normalizedName);
+  if (exactRow) {
+    return { rowNumber: exactRow, matchedLabel: normalizedName, score: 100, strategy: "exact" };
+  }
+
+  const compactName = normalizeCompact(normalizedName);
+  let best = null;
+  objectiveRows.forEach((rowNumber, label) => {
+    const compactLabel = normalizeCompact(label);
+    if (compactName && compactLabel && compactName === compactLabel) {
+      best = { rowNumber, matchedLabel: label, score: 100, strategy: "compact" };
+      return;
+    }
+    const score = textSimilarityScore(normalizedName, label);
+    if (!best || score > best.score) {
+      best = { rowNumber, matchedLabel: label, score, strategy: "fuzzy" };
+    }
+  });
+
+  if (!best) return null;
+  const threshold = compactName.length <= 6 ? 92 : 85;
+  return best.score >= threshold ? best : null;
+}
+
 function normalizeProductId(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
@@ -294,7 +393,7 @@ function parseEquipmentSheetDefinition(name, ws) {
 
   const idColumn = findColumnIndex(headers, (value) => value === "id" || value === "i d");
   const labelColumn = findColumnIndex(headers, (value) => value === "producto" || value === "reactivo" || value === "descripcion");
-  const annualColumn = findColumnIndex(headers, (value) => value.includes("det ano proceso") || value.includes("cantidad proceso ano"));
+  const annualColumn = findColumnIndex(headers, (value) => value.includes("det ano proceso") || value.includes("cantidad proceso ano") || value.includes("producto calculado"));
   const deliverColumn = findColumnIndex(headers, (value) => value.includes("producto a entregar") || value.includes("producto a enviar"));
 
   const rows = [];
@@ -357,13 +456,16 @@ function loadMappingDefinition() {
   }
 }
 
-function findColumnByTargetHeader(mappingSheet, targetHeader) {
-  const headers = Array.isArray(mappingSheet?.fillable_headers) ? mappingSheet.fillable_headers : [];
-  const needle = normalizeText(targetHeader);
-  const targetIsDeliver = needle.includes("producto") && (needle.includes("entregar") || needle.includes("enviar"));
-  const match = headers.find((entry) => {
-    const normalizedTargetHeader = normalizeText(entry?.target_header);
-    const normalizedHeaderText = normalizeText(entry?.header_text);
+// targetHeader acepta un string o un array de strings candidatos (ej. la
+// columna de cantidad anual se llama "DET/AÑO PROCESO" en el bloque de
+// reactivos y "PRODUCTO CALCULADO" en el bloque de calibradores/controles/
+// materiales de la misma pestaña -- cada bloque solo declara uno de los dos,
+// asi que buscar ambos a la vez resuelve el correcto sin ambiguedad).
+function _matchesAnyTargetHeader(entry, needles) {
+  const normalizedTargetHeader = normalizeText(entry?.target_header);
+  const normalizedHeaderText = normalizeText(entry?.header_text);
+  return needles.some((needle) => {
+    const targetIsDeliver = needle.includes("producto") && (needle.includes("entregar") || needle.includes("enviar"));
     if (targetIsDeliver) {
       return (
         (normalizedTargetHeader.includes("producto") && (normalizedTargetHeader.includes("entregar") || normalizedTargetHeader.includes("enviar"))) ||
@@ -372,25 +474,31 @@ function findColumnByTargetHeader(mappingSheet, targetHeader) {
     }
     return normalizedTargetHeader.includes(needle) || normalizedHeaderText.includes(needle);
   });
+}
+
+function findColumnByTargetHeader(mappingSheet, targetHeader) {
+  const headers = Array.isArray(mappingSheet?.fillable_headers) ? mappingSheet.fillable_headers : [];
+  const needles = (Array.isArray(targetHeader) ? targetHeader : [targetHeader]).map(normalizeText);
+  const match = headers.find((entry) => _matchesAnyTargetHeader(entry, needles));
   return Number(match?.column || 0) || null;
 }
 
 function findHeaderRowByTargetHeader(mappingSheet, targetHeader) {
   const headers = Array.isArray(mappingSheet?.fillable_headers) ? mappingSheet.fillable_headers : [];
-  const needle = normalizeText(targetHeader);
-  const targetIsDeliver = needle.includes("producto") && (needle.includes("entregar") || needle.includes("enviar"));
-  const match = headers.find((entry) => {
-    const normalizedTargetHeader = normalizeText(entry?.target_header);
-    const normalizedHeaderText = normalizeText(entry?.header_text);
-    if (targetIsDeliver) {
-      return (
-        (normalizedTargetHeader.includes("producto") && (normalizedTargetHeader.includes("entregar") || normalizedTargetHeader.includes("enviar"))) ||
-        (normalizedHeaderText.includes("producto") && (normalizedHeaderText.includes("entregar") || normalizedHeaderText.includes("enviar")))
-      );
-    }
-    return normalizedTargetHeader.includes(needle) || normalizedHeaderText.includes(needle);
-  });
+  const needles = (Array.isArray(targetHeader) ? targetHeader : [targetHeader]).map(normalizeText);
+  const match = headers.find((entry) => _matchesAnyTargetHeader(entry, needles));
   return Number(match?.row || 0) || null;
+}
+
+function findColumnForRowByTargetHeader(mappingSheet, targetHeader, rowNumber, fallbackColumn = null) {
+  const headers = Array.isArray(mappingSheet?.fillable_headers) ? mappingSheet.fillable_headers : [];
+  const needles = (Array.isArray(targetHeader) ? targetHeader : [targetHeader]).map(normalizeText);
+  const candidates = headers
+    .filter((entry) => _matchesAnyTargetHeader(entry, needles))
+    .filter((entry) => Number(entry?.row || 0) <= Number(rowNumber || 0))
+    .sort((left, right) => Number(left.row || 0) - Number(right.row || 0));
+
+  return Number(candidates[candidates.length - 1]?.column || 0) || fallbackColumn;
 }
 
 function buildRowsFromMappingObjectiveTargets(mappingSheet, annualColumn, deliverColumn) {
@@ -420,10 +528,16 @@ function buildRowsFromMappingObjectiveTargets(mappingSheet, annualColumn, delive
       itemId: "",
       label: labelFromField || "",
       labelColumn,
+      columns: {
+        annual: annualColumn,
+        deliver: deliverColumn,
+      },
     };
 
     if (!existing.label && labelFromField) existing.label = labelFromField;
     if (!existing.labelColumn && labelColumn) existing.labelColumn = labelColumn;
+    if (isAnnual && Number(target?.column || 0) > 0) existing.columns.annual = Number(target.column);
+    if (isDeliver && Number(target?.column || 0) > 0) existing.columns.deliver = Number(target.column);
     byRow.set(rowNumber, existing);
   });
 
@@ -434,10 +548,7 @@ function buildRowsFromMappingObjectiveTargets(mappingSheet, annualColumn, delive
       itemId: entry.itemId || "",
       label: entry.label || "",
       labelColumn: entry.labelColumn || null,
-      columns: {
-        annual: annualColumn,
-        deliver: deliverColumn,
-      },
+      columns: entry.columns,
     }));
 
   return rows;
@@ -447,9 +558,9 @@ function parseEquipmentSheetDefinitionWithMapping(name, ws, mappingSheet) {
   const fallback = parseEquipmentSheetDefinition(name, ws);
   if (!mappingSheet) return fallback;
 
-  const annualColumn = findColumnByTargetHeader(mappingSheet, "DET/AÑO PROCESO") || fallback.columns.annual;
+  const annualColumn = findColumnByTargetHeader(mappingSheet, ANNUAL_QUANTITY_HEADERS) || fallback.columns.annual;
   const deliverColumn = findColumnByTargetHeader(mappingSheet, "PRODUCTO A ENTREGAR") || fallback.columns.deliver;
-  const headerRow = findHeaderRowByTargetHeader(mappingSheet, "DET/AÑO PROCESO") || fallback.headerRow;
+  const headerRow = findHeaderRowByTargetHeader(mappingSheet, ANNUAL_QUANTITY_HEADERS) || fallback.headerRow;
   const mappedRows = buildRowsFromMappingObjectiveTargets(mappingSheet, annualColumn, deliverColumn);
   const fallbackByRow = new Map((fallback.rows || []).map((row) => [Number(row.rowNumber), row]));
 
@@ -471,14 +582,28 @@ function parseEquipmentSheetDefinitionWithMapping(name, ws, mappingSheet) {
       annual: annualColumn,
       deliver: deliverColumn,
     },
-    rows: mappedRows.map((row) => {
-      const fromFallback = fallbackByRow.get(Number(row.rowNumber));
-      return {
+    rows: Array.from(new Map([
+      ...(fallback.rows || []).map((row) => [Number(row.rowNumber), {
         ...row,
-        itemId: row.itemId || fromFallback?.itemId || "",
-        label: row.label || fromFallback?.label || "",
-      };
-    }),
+        columns: {
+          annual: findColumnForRowByTargetHeader(mappingSheet, ANNUAL_QUANTITY_HEADERS, row.rowNumber, annualColumn),
+          deliver: findColumnForRowByTargetHeader(mappingSheet, "PRODUCTO A ENTREGAR", row.rowNumber, deliverColumn),
+        },
+      }]),
+      ...mappedRows.map((row) => {
+        const fromFallback = fallbackByRow.get(Number(row.rowNumber));
+        return [Number(row.rowNumber), {
+          ...fromFallback,
+          ...row,
+          itemId: row.itemId || fromFallback?.itemId || "",
+          label: row.label || fromFallback?.label || "",
+          columns: {
+            annual: findColumnForRowByTargetHeader(mappingSheet, ANNUAL_QUANTITY_HEADERS, row.rowNumber, row.columns?.annual || annualColumn),
+            deliver: findColumnForRowByTargetHeader(mappingSheet, "PRODUCTO A ENTREGAR", row.rowNumber, row.columns?.deliver || deliverColumn),
+          },
+        }];
+      }),
+    ]).values()).sort((left, right) => Number(left.rowNumber) - Number(right.rowNumber)),
   };
 }
 
@@ -517,17 +642,27 @@ async function pullColumnQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = []
     if (!definition?.columns?.[columnField]) continue;
     const rows = Array.isArray(definition.rows) ? definition.rows : [];
     if (!rows.length) continue;
-    const rowNumbers = rows.map((row) => Number(row.rowNumber)).filter((row) => Number.isInteger(row) && row > 0);
-    if (!rowNumbers.length) continue;
-    const minRow = Math.min(...rowNumbers);
-    const maxRow = Math.max(...rowNumbers);
-    const column = columnLetter(definition.columns[columnField]);
-    targets.push({
-      sheetName: definition.name,
-      range: `${definition.name}!${column}${minRow}:${column}${maxRow}`,
-      minRow,
-      rows,
-      tabItems: Array.isArray(tab.items) ? tab.items : [],
+    const rowsByColumn = new Map();
+    rows.forEach((row) => {
+      const columnIndex = Number(row?.columns?.[columnField] || definition.columns?.[columnField] || 0);
+      const rowNumber = Number(row?.rowNumber || 0);
+      if (!Number.isInteger(columnIndex) || columnIndex <= 0 || !Number.isInteger(rowNumber) || rowNumber <= 0) return;
+      if (!rowsByColumn.has(columnIndex)) rowsByColumn.set(columnIndex, []);
+      rowsByColumn.get(columnIndex).push(row);
+    });
+
+    rowsByColumn.forEach((columnRows, columnIndex) => {
+      const rowNumbers = columnRows.map((row) => Number(row.rowNumber));
+      const minRow = Math.min(...rowNumbers);
+      const maxRow = Math.max(...rowNumbers);
+      const column = columnLetter(columnIndex);
+      targets.push({
+        sheetName: definition.name,
+        range: `${definition.name}!${column}${minRow}:${column}${maxRow}`,
+        minRow,
+        rows: columnRows,
+        tabItems: Array.isArray(tab.items) ? tab.items : [],
+      });
     });
   }
 
@@ -582,6 +717,177 @@ async function pullMaximumQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = [
 // del usuario (boton "Sincronizar cantidades desde Sheet").
 async function pullAnnualQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = [] }) {
   return pullColumnQuantitiesFromGoogleSheet({ sheetId, equipmentTabs, columnField: "annual", resultField: "annual_qty" });
+}
+
+function buildAnnualQuantityProtectionRanges({ template, equipmentTabs = [], businessCaseId, subsection }) {
+  const normalizedSubsection = String(subsection || "").trim().toLowerCase();
+  const descriptionPrefix = `${ANNUAL_QUANTITIES_LOCK_DESCRIPTION}:${businessCaseId || "unknown"}:${normalizedSubsection}`;
+  const protectedRanges = [];
+
+  (Array.isArray(equipmentTabs) ? equipmentTabs : []).forEach((tab) => {
+    const definition = template?.equipmentSheets?.find((entry) => entry.name === tab?.sheet_name);
+    if (!definition) return;
+
+    const allowedTypes = ANNUAL_QUANTITY_ITEM_TYPES[normalizedSubsection] || null;
+    const eligibleItems = (Array.isArray(tab.items) ? tab.items : []).filter((item) => {
+      if (!allowedTypes) return true;
+      return allowedTypes.has(String(item?.item_type || item?.itemType || item?.type || "").trim().toLowerCase());
+    });
+    const lookup = buildSheetItemLookup(eligibleItems);
+    const rowsByColumn = new Map();
+    (Array.isArray(definition.rows) ? definition.rows : []).forEach((row) => {
+      const item = row?.itemId
+        ? lookup.byId.get(normalizeProductId(row.itemId))
+        : lookup.byLabel.get(normalizeText(row?.label));
+      if (!item) return;
+
+      const columnIndex = Number(row?.columns?.annual || definition.columns?.annual || 0);
+      const rowNumber = Number(row?.rowNumber || 0);
+      if (!Number.isInteger(columnIndex) || columnIndex <= 0 || !Number.isInteger(rowNumber) || rowNumber <= 0) return;
+      if (!rowsByColumn.has(columnIndex)) rowsByColumn.set(columnIndex, []);
+      rowsByColumn.get(columnIndex).push(rowNumber);
+    });
+
+    rowsByColumn.forEach((rawRows, columnIndex) => {
+      const rowNumbers = Array.from(new Set(rawRows)).sort((left, right) => left - right);
+      let startRow = null;
+      let previousRow = null;
+
+      const appendRange = (endRow) => {
+        if (!Number.isInteger(startRow)) return;
+        protectedRanges.push({
+          description: `${descriptionPrefix}:${definition.name}:${startRow}-${endRow}`,
+          range: {
+            sheetTitle: definition.name,
+            startRowIndex: startRow - 1,
+            endRowIndex: endRow,
+            startColumnIndex: columnIndex - 1,
+            endColumnIndex: columnIndex,
+          },
+        });
+      };
+
+      rowNumbers.forEach((rowNumber) => {
+        if (startRow === null) {
+          startRow = rowNumber;
+        } else if (rowNumber !== previousRow + 1) {
+          appendRange(previousRow);
+          startRow = rowNumber;
+        }
+        previousRow = rowNumber;
+      });
+      appendRange(previousRow);
+    });
+  });
+
+  return protectedRanges;
+}
+
+async function getProtectedRangesForSpreadsheet(sheetId) {
+  const { data } = await sheets.spreadsheets.get({
+    spreadsheetId: sheetId,
+    includeGridData: false,
+    fields: "sheets(properties(sheetId,title),protectedRanges(protectedRangeId,description))",
+  });
+  return data;
+}
+
+async function protectAnnualQuantityCellsForSubsection({ sheetId, businessCaseId, subsection, equipmentTabs = [] }) {
+  if (!jwtClient || !sheetId) {
+    return { protected: false, reason: "GOOGLE_SHEETS_DISABLED", protectedRanges: 0 };
+  }
+
+  const template = loadTemplateDefinition();
+  const requestedRanges = buildAnnualQuantityProtectionRanges({
+    template,
+    equipmentTabs,
+    businessCaseId,
+    subsection,
+  });
+  const normalizedSubsection = String(subsection || "").trim().toLowerCase();
+  const descriptionPrefix = `${ANNUAL_QUANTITIES_LOCK_DESCRIPTION}:${businessCaseId || "unknown"}:${normalizedSubsection}`;
+  const { data } = await getProtectedRangesForSpreadsheet(sheetId);
+  const sheetIdsByTitle = new Map(
+    (data.sheets || []).map((sheet) => [sheet?.properties?.title, sheet?.properties?.sheetId]),
+  );
+  const requests = [];
+
+  (data.sheets || []).forEach((sheet) => {
+    (sheet.protectedRanges || []).forEach((range) => {
+      if (!String(range?.description || "").startsWith(descriptionPrefix)) return;
+      if (Number.isInteger(range?.protectedRangeId)) {
+        requests.push({ deleteProtectedRange: { protectedRangeId: range.protectedRangeId } });
+      }
+    });
+  });
+
+  requestedRanges.forEach((entry) => {
+    const sheetNumericId = sheetIdsByTitle.get(entry.range.sheetTitle);
+    if (!Number.isInteger(sheetNumericId)) return;
+    const { sheetTitle, ...gridRange } = entry.range;
+    requests.push({
+      addProtectedRange: {
+        protectedRange: {
+          description: entry.description,
+          warningOnly: false,
+          range: { sheetId: sheetNumericId, ...gridRange },
+          ...(googleDelegatedUser
+            ? {
+                editors: {
+                  users: [googleDelegatedUser],
+                  domainUsersCanEdit: false,
+                },
+              }
+            : {}),
+        },
+      },
+    });
+  });
+
+  if (!requests.length) {
+    return { protected: false, reason: "NO_ANNUAL_CELLS_FOUND", protectedRanges: 0 };
+  }
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: { requests },
+  });
+
+  return {
+    protected: requestedRanges.length > 0,
+    reason: requestedRanges.length > 0 ? null : "NO_ANNUAL_CELLS_FOUND",
+    protectedRanges: requestedRanges.length,
+  };
+}
+
+async function unprotectAnnualQuantityCellsForSubsection({ sheetId, businessCaseId, subsection }) {
+  if (!jwtClient || !sheetId) {
+    return { unprotected: false, reason: "GOOGLE_SHEETS_DISABLED", protectedRanges: 0 };
+  }
+
+  const normalizedSubsection = String(subsection || "").trim().toLowerCase();
+  const descriptionPrefix = `${ANNUAL_QUANTITIES_LOCK_DESCRIPTION}:${businessCaseId || "unknown"}:${normalizedSubsection}`;
+  const { data } = await getProtectedRangesForSpreadsheet(sheetId);
+  const requests = [];
+  let deletedRanges = 0;
+
+  (data.sheets || []).forEach((sheet) => {
+    (sheet.protectedRanges || []).forEach((range) => {
+      if (!String(range?.description || "").startsWith(descriptionPrefix)) return;
+      if (!Number.isInteger(range?.protectedRangeId)) return;
+      requests.push({ deleteProtectedRange: { protectedRangeId: range.protectedRangeId } });
+      deletedRanges += 1;
+    });
+  });
+
+  if (requests.length) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: { requests },
+    });
+  }
+
+  return { unprotected: deletedRanges > 0, reason: null, protectedRanges: deletedRanges };
 }
 
 function loadTemplateDefinition() {
@@ -644,18 +950,6 @@ function buildRecordAliases(record = {}) {
   return Array.from(aliases);
 }
 
-function buildSheetItemLookup(items = []) {
-  const byId = new Map();
-  const byLabel = new Map();
-  items.forEach((item) => {
-    const itemId = normalizeProductId(item.itemId || item.item_id);
-    const label = normalizeText(item.itemName || item.item_name || item.name);
-    if (itemId) byId.set(itemId, item);
-    if (label) byLabel.set(label, item);
-  });
-  return { byId, byLabel };
-}
-
 function buildValueRange(range, values) {
   return { range, values: [[values]] };
 }
@@ -700,6 +994,79 @@ async function getSpreadsheetMeta(sheetId) {
     }
   }
   throw lastError;
+}
+
+async function protectSpreadsheetAfterMaximumQuantitiesSync({ sheetId, businessCaseId }) {
+  if (!jwtClient || !sheetId) {
+    return {
+      protected: false,
+      reason: "GOOGLE_SHEETS_DISABLED",
+      protectedSheets: 0,
+    };
+  }
+
+  const description = `${MAX_QUANTITIES_LOCK_DESCRIPTION}:${businessCaseId || "unknown"}`;
+  const { data } = await sheets.spreadsheets.get({
+    spreadsheetId: sheetId,
+    includeGridData: false,
+    fields: "sheets(properties(sheetId,title),protectedRanges(protectedRangeId,description))",
+  });
+
+  const requests = [];
+  (data.sheets || []).forEach((sheet) => {
+    const sheetProperties = sheet?.properties || {};
+    const sheetNumericId = sheetProperties.sheetId;
+    if (!Number.isInteger(sheetNumericId)) return;
+
+    (sheet.protectedRanges || []).forEach((range) => {
+      if (String(range?.description || "").startsWith(MAX_QUANTITIES_LOCK_DESCRIPTION)) {
+        requests.push({
+          deleteProtectedRange: {
+            protectedRangeId: range.protectedRangeId,
+          },
+        });
+      }
+    });
+
+    requests.push({
+      addProtectedRange: {
+        protectedRange: {
+          description,
+          warningOnly: false,
+          range: {
+            sheetId: sheetNumericId,
+          },
+          ...(googleDelegatedUser
+            ? {
+                editors: {
+                  users: [googleDelegatedUser],
+                  domainUsersCanEdit: false,
+                },
+              }
+            : {}),
+        },
+      },
+    });
+  });
+
+  if (!requests.length) {
+    return {
+      protected: false,
+      reason: "NO_SHEETS_FOUND",
+      protectedSheets: 0,
+    };
+  }
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: { requests },
+  });
+
+  return {
+    protected: true,
+    protectedSheets: (data.sheets || []).length,
+    reason: null,
+  };
 }
 
 async function deleteFileIfExists(fileId) {
@@ -827,15 +1194,99 @@ function buildBusinessCaseRanges(template, payload) {
     clears.push(`BC!D${rowNumber}`);
     clears.push(`BC!E${rowNumber}`);
   });
+  clears.push(
+    `BC!A${DYNAMIC_INVESTMENTS_START_ROW}:E${DYNAMIC_INVESTMENTS_START_ROW + DYNAMIC_INVESTMENTS_CLEAR_ROWS - 1}`,
+  );
+
+  const unmatchedInvestments = [];
+  const fuzzyMatchedInvestments = [];
+  const rowPayloads = new Map();
+
+  const stageInvestmentRow = (rowNumber, name, investment, strategy = "exact") => {
+    const cantidad = Number(investment?.cantidad ?? 0);
+    const precio = Number(investment?.precio ?? 0);
+    const safeCantidad = Number.isFinite(cantidad) ? cantidad : 0;
+    const safePrecio = Number.isFinite(precio) ? precio : 0;
+    const current = rowPayloads.get(rowNumber) || {
+      names: [],
+      descriptions: [],
+      quantitySum: 0,
+      totalValue: 0,
+      firstQuantity: "",
+      firstPrice: "",
+      strategies: new Set(),
+    };
+    current.names.push(name);
+    current.descriptions.push(String(investment?.descripcion || investment?.observaciones || investment?.notes || name || "").trim());
+    current.quantitySum += safeCantidad;
+    current.totalValue += safeCantidad * safePrecio;
+    if (current.firstQuantity === "") current.firstQuantity = investment?.cantidad ?? "";
+    if (current.firstPrice === "") current.firstPrice = investment?.precio ?? "";
+    current.strategies.add(strategy);
+    rowPayloads.set(rowNumber, current);
+  };
 
   Object.entries(payload.inversiones || {}).forEach(([name, investment]) => {
-    const normalizedName = normalizeText(name);
-    const rowNumber = objectiveRows.get(normalizedName);
-    if (!rowNumber) return;
-    updates.push(buildValueRange(`BC!B${rowNumber}`, name));
+    const match = resolveObjectiveRow(objectiveRows, name);
+    if (!match?.rowNumber) {
+      unmatchedInvestments.push({ name, investment });
+      return;
+    }
+    const rowNumber = match.rowNumber;
+    if (match.strategy !== "exact") {
+      fuzzyMatchedInvestments.push({
+        input: name,
+        matched_label: match.matchedLabel,
+        row: rowNumber,
+        score: Number(match.score.toFixed(2)),
+        strategy: match.strategy,
+      });
+    }
+    stageInvestmentRow(rowNumber, name, investment, match.strategy);
+  });
+
+  rowPayloads.forEach((entry, rowNumber) => {
+    const isGrouped = entry.names.length > 1;
+    const displayValues = (entry.descriptions.length ? entry.descriptions : entry.names)
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    const label = isGrouped ? displayValues.join("; ") : (displayValues[0] || entry.names[0]);
+    const quantity = isGrouped ? (entry.totalValue > 0 ? 1 : entry.quantitySum) : entry.firstQuantity;
+    const price = isGrouped ? (entry.totalValue > 0 ? entry.totalValue : entry.firstPrice) : entry.firstPrice;
+    updates.push(buildValueRange(`BC!B${rowNumber}`, label));
+    updates.push(buildValueRange(`BC!D${rowNumber}`, quantity));
+    updates.push(buildValueRange(`BC!E${rowNumber}`, price));
+  });
+
+  unmatchedInvestments.forEach(({ name, investment }, index) => {
+    const rowNumber = DYNAMIC_INVESTMENTS_START_ROW + index;
+    const description = String(
+      investment?.caracteristicas ||
+      investment?.descripcion ||
+      investment?.observaciones ||
+      investment?.notes ||
+      "",
+    ).trim();
+    updates.push(buildValueRange(`BC!A${rowNumber}`, investment?.nombre || name));
+    updates.push(buildValueRange(`BC!B${rowNumber}`, description));
+    updates.push(buildValueRange(`BC!C${rowNumber}`, investment?.categoria || ""));
     updates.push(buildValueRange(`BC!D${rowNumber}`, investment?.cantidad ?? ""));
     updates.push(buildValueRange(`BC!E${rowNumber}`, investment?.precio ?? ""));
   });
+
+  if (fuzzyMatchedInvestments.length) {
+    logger.info({ matches: fuzzyMatchedInvestments }, "[SheetGen] inversiones mapeadas con normalizacion tolerante");
+  }
+  if (unmatchedInvestments.length) {
+    logger.warn(
+      {
+        names: unmatchedInvestments.map((entry) => entry.name),
+        start_row: DYNAMIC_INVESTMENTS_START_ROW,
+        rows: unmatchedInvestments.length,
+      },
+      "[SheetGen] inversiones nuevas enviadas a filas dinamicas",
+    );
+  }
 
   return { updates, clears };
 }
@@ -853,12 +1304,19 @@ function buildEquipmentSheetRanges(template, sheetPayload = {}) {
   if (meta.plazo) updates.push(buildValueRange(`${definition.name}!${meta.plazo}`, sheetPayload.deadline_months ?? ""));
   if (meta.projection) updates.push(buildValueRange(`${definition.name}!${meta.projection}`, sheetPayload.projected_deadline_months ?? ""));
 
-  const lastRowNumber = definition.rows.length
-    ? definition.rows[definition.rows.length - 1].rowNumber
-    : definition.headerRow + 1;
-  if (definition.columns.annual) {
-    clears.push(`${definition.name}!${columnLetter(definition.columns.annual)}${definition.headerRow + 1}:${columnLetter(definition.columns.annual)}${Math.max(definition.headerRow + 1, lastRowNumber)}`);
-  }
+  const rowsByAnnualColumn = new Map();
+  (definition.rows || []).forEach((row) => {
+    const columnIndex = Number(row?.columns?.annual || definition.columns?.annual || 0);
+    const rowNumber = Number(row?.rowNumber || 0);
+    if (!Number.isInteger(columnIndex) || columnIndex <= 0 || !Number.isInteger(rowNumber) || rowNumber <= 0) return;
+    if (!rowsByAnnualColumn.has(columnIndex)) rowsByAnnualColumn.set(columnIndex, []);
+    rowsByAnnualColumn.get(columnIndex).push(rowNumber);
+  });
+  rowsByAnnualColumn.forEach((rowNumbers, columnIndex) => {
+    const minRow = Math.min(...rowNumbers);
+    const maxRow = Math.max(...rowNumbers);
+    clears.push(`${definition.name}!${columnLetter(columnIndex)}${minRow}:${columnLetter(columnIndex)}${maxRow}`);
+  });
   // PRODUCTO A ENTREGAR is user-owned in the sheet.
   // Do not clear it during sync to avoid overwriting manually curated maximum quantities.
 
@@ -866,8 +1324,9 @@ function buildEquipmentSheetRanges(template, sheetPayload = {}) {
   definition.rows.forEach((row) => {
     const item = row.itemId ? lookup.byId.get(row.itemId) : lookup.byLabel.get(row.label);
     if (!item) return;
-    if (definition.columns.annual) {
-      updates.push(buildValueRange(`${definition.name}!${columnLetter(definition.columns.annual)}${row.rowNumber}`, item.annual_qty ?? item.annualQty ?? ""));
+    const annualColumn = Number(row?.columns?.annual || definition.columns?.annual || 0);
+    if (annualColumn > 0) {
+      updates.push(buildValueRange(`${definition.name}!${columnLetter(annualColumn)}${row.rowNumber}`, item.annual_qty ?? item.annualQty ?? ""));
     }
     // PRODUCTO A ENTREGAR is intentionally not written from backend mapping.
     // SPI must consume the maximum quantities entered directly by users in the sheet.
@@ -908,7 +1367,10 @@ function buildSheetPayloads({ template, equipmentRecords = [], payload = {} }) {
     }
 
     const matchedIds = new Set(matchedRecords.map((record) => Number(record.id)).filter((value) => Number.isInteger(value) && value > 0));
-    const matchedItems = (payload.max_quantities || []).filter((item) => {
+    // The reverse annual sync passes catalog identities separately from the
+    // maximum-quantity values stored in PRODUCTO A ENTREGAR.
+    const syncItems = payload.sync_items || payload.max_quantities || [];
+    const matchedItems = syncItems.filter((item) => {
       if (matchedIds.size && matchedIds.has(Number(item.equipment_id || item.equipmentId))) return true;
       const itemAliases = buildRecordAliases({
         name: item.equipment_name || item.equipmentName,
@@ -991,12 +1453,18 @@ function clearSheetCaches() {
 }
 
 module.exports = {
+  ANNUAL_QUANTITY_HEADERS,
+  findColumnForRowByTargetHeader,
   loadTemplateDefinition,
   buildRecordAliases,
   scoreAliases,
   buildSheetPayloads,
   pullMaximumQuantitiesFromGoogleSheet,
   pullAnnualQuantitiesFromGoogleSheet,
+  buildAnnualQuantityProtectionRanges,
+  protectAnnualQuantityCellsForSubsection,
+  unprotectAnnualQuantityCellsForSubsection,
+  protectSpreadsheetAfterMaximumQuantitiesSync,
   syncBusinessCaseToGoogleSheet,
   clearSheetCaches,
 };

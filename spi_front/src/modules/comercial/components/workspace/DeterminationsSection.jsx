@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "@headlessui/react";
-import { FiActivity, FiAlertTriangle, FiCalendar, FiCheck, FiChevronDown, FiClipboard, FiEdit2, FiExternalLink, FiFileText, FiRefreshCw, FiSave, FiTrash2, FiUpload, FiX } from "react-icons/fi";
+import { FiActivity, FiAlertTriangle, FiCalendar, FiCheck, FiChevronDown, FiClipboard, FiExternalLink, FiFileText, FiRefreshCw, FiSave, FiUpload, FiX } from "react-icons/fi";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
 import { useAuth } from "../../../../core/auth/AuthContext";
 import { recordBusinessCaseTelemetry } from "../../../../core/utils/businessCaseTelemetry";
 import { promptDialog } from "../../../../core/ui/utils/promptDialog";
+import SectionEditorBadge from "./SectionEditorBadge";
 import {
  getDeterminationsStatDocumentInfo,
  parseDeterminationsQuantitiesFile,
@@ -14,24 +15,19 @@ import {
  uploadDeterminationsStatDocument,
 } from "../../../../core/api/businessCaseApi";
 
-const ITEM_TYPES = [
- { value: "reactivo", label: "Reactivo" },
- { value: "control", label: "Control" },
- { value: "calibrador", label: "Calibrador" },
- { value: "consumible", label: "Consumible" },
- { value: "material", label: "Material" },
- { value: "determinacion", label: "Determinacion" },
-];
-
 const REACTIVO_TYPES = new Set(["reactivo", "determinacion"]);
 const TECNICO_TYPES = new Set(["control", "calibrador", "consumible", "material"]);
+const isAffirmative = (value) => {
+ const normalized = String(value ?? "").trim().toLowerCase();
+ return value === true || ["true", "1", "yes", "si", "sí"].includes(normalized);
+};
 // Public BC: only acp_comercial. Private BC: only backoffice.
 const PUBLIC_BC_TYPES = new Set(["public", "comodato_publico"]);
 // Roles que ejecutan la parte técnica (inspección, actas, calibradores propios)
-const TECNICO_ROLES = new Set(["tecnico", "jefe_tecnico"]);
+const TECNICO_ROLES = new Set(["jefe_tecnico", "jefe_servicio"]);
 // BUG-01: jefe_comercial y jefe_de_comercial son editores directos de TECNICO_TYPES
 // (calibradores, controles, materiales — según PASO BC-4 del flujo documentado)
-const TECNICO_EDIT_ROLES = new Set(["tecnico", "jefe_tecnico", "jefe_comercial", "jefe_de_comercial"]);
+const TECNICO_EDIT_ROLES = new Set(["jefe_tecnico", "jefe_servicio", "jefe_comercial", "jefe_de_comercial"]);
 const ADMIN_ROLES = new Set(["administrador", "super_admin"]);
 const ROW_WINDOW_STEP = 24;
 const IDEMPOTENCY_TTL_MS = 60 * 1000;
@@ -100,6 +96,7 @@ const getNaturalErrorMessage = (err, fallback) => {
  const code = String(err?.response?.data?.code || "").trim().toUpperCase();
  if (status === 403) return "No tienes permiso para realizar esta acción en esta etapa.";
  if (status === 409 && code.startsWith("BC_INSPECTION")) return raw || fallback;
+ if (status === 409 && code === "DETERMINATIONS_SLA_EXPIRED_EXTENSION_REQUIRED") return raw || fallback;
  if (status === 409) return "La información cambió mientras trabajabas. Recarga esta sección e intenta nuevamente.";
  if (!raw) return fallback;
  if (/\b(4\d\d|5\d\d)\b/.test(raw) || /forbidden|conflict|unauthorized|status/i.test(raw)) return fallback;
@@ -119,19 +116,6 @@ const completeDeterminationsSection = async (bcId, reason = "determinaciones_fin
  const response = await api.post(`/business-case/${bcId}/ownership/complete`, payload);
  console.log("[BC_AUDIT][FE][COMPLETE_SECTION][RESPONSE]", {
   bcId,
-  status: response?.status || null,
-  data: response?.data || null,
- });
- return response?.data || null;
-};
-
-const lockDeterminationsSubsection = async (bcId, subsection) => {
- const payload = { subsection };
- console.log("[BC_AUDIT][FE][LOCK_SUBSECTION][REQUEST]", { bcId, payload });
- const response = await api.post(`/business-case/${bcId}/determinations/lock-subsection`, payload);
- console.log("[BC_AUDIT][FE][LOCK_SUBSECTION][RESPONSE]", {
-  bcId,
-  subsection,
   status: response?.status || null,
   data: response?.data || null,
  });
@@ -279,14 +263,22 @@ const getCatalogRowCompletenessScore = (row = {}) => {
  if (String(row?.manufacturerId || "").trim()) score += 2;
  if (String(row?.equipmentName || "").trim()) score += 1;
  if (row?.catalogId != null) score += 1;
+ if (row?.catalogKind === "consumable") score += 5;
  if (normalizeTextKey(row?.type) === "determinacion") score += 1;
  return score;
+};
+
+const getCatalogRowBusinessKey = (row = {}) => {
+ const equipmentKey = normalizeTextKey(row?.equipmentId);
+ const manufacturerKey = normalizeTextKey(row?.manufacturerId || row?.itemId);
+ if (manufacturerKey) return [equipmentKey, "manufacturer", manufacturerKey].join("|");
+ return [equipmentKey, normalizeTextKey(row?.name), getTypeFamily(row?.type)].join("|");
 };
 
 const dedupeCatalogRowsForUI = (items = []) => {
  const picked = new Map();
  items.forEach((row) => {
- const key = [normalizeTextKey(row?.equipmentId), normalizeTextKey(row?.name), getTypeFamily(row?.type)].join("|");
+ const key = getCatalogRowBusinessKey(row);
  const current = picked.get(key);
  if (!current) {
  picked.set(key, row);
@@ -399,7 +391,6 @@ const DeterminationsSection = ({
  const [selectedDocument, setSelectedDocument] = useState(null);
  const [sheetUrl, setSheetUrl] = useState(null);
  const [sheetSyncing, setSheetSyncing] = useState(false);
- const [pullingFromSheet, setPullingFromSheet] = useState(false);
  const [isDetermEditing, setIsDetermEditing] = useState(false);
  const [importModal, setImportModal] = useState(null);
  const [importTab, setImportTab] = useState("paste");
@@ -438,50 +429,41 @@ const DeterminationsSection = ({
  const [equipmentIds, setEquipmentIds] = useState([]);
  const [equipmentMeta, setEquipmentMeta] = useState({});
 
- const [newItemByEquipment, setNewItemByEquipment] = useState({});
-
- const [editingItemKey, setEditingItemKey] = useState(null);
- const [editingItem, setEditingItem] = useState({
- id: "",
- name: "",
- type: "reactivo",
- });
  const idempotencyCacheRef = useRef(new Map());
  const lastSavedKeysRef = useRef([]);
  const lastEditedRowRef = useRef(null);
  const persistInFlightRef = useRef(false);
 
-const canEditBase = permissions.canEdit !== false && ownership?.canUserEdit !== false;
-const currentRole = user?.role;
-const normalizedCurrentRole = String(currentRole || "").trim().toLowerCase();
-const isJefeComercial = normalizedCurrentRole === "jefe_comercial" || normalizedCurrentRole === "jefe_de_comercial";
-const canBulkImport = ["backoffice_comercial", "jefe_comercial", "jefe_de_comercial"].includes(normalizedCurrentRole);
+ const canEditBase = permissions.canEditDeterminations === true && ownership?.canUserEdit !== false;
+ const currentRole = user?.role;
+ const normalizedCurrentRole = String(currentRole || "").trim().toLowerCase();
+ const isJefeComercial = normalizedCurrentRole === "jefe_comercial" || normalizedCurrentRole === "jefe_de_comercial";
  const autosaveEnabled = false;
-const gateActive = gateInfo?.enabledForBusinessCase === true;
-const gatePhase = String(gateInfo?.phase || "commercial_input").toLowerCase();
-const quantitiesLocked = gateInfo?.quantitiesLocked === true;
-const isTechnicalRole = TECNICO_ROLES.has(normalizedCurrentRole);
-const canUploadDocument = gateInfo?.permissions?.canUploadDocument === true;
-const uploadReadiness = gateInfo?.uploadReadiness || null;
-const uploadBlockingMessage = uploadReadiness?.message || null;
-const uploadMissingSections = Array.isArray(uploadReadiness?.missingSections)
+ const gateActive = gateInfo?.enabledForBusinessCase === true;
+ const gatePhase = String(gateInfo?.phase || "commercial_input").toLowerCase();
+ const quantitiesLocked = gateInfo?.quantitiesLocked === true;
+ const isTechnicalRole = TECNICO_ROLES.has(normalizedCurrentRole);
+ const canUploadDocument = gateInfo?.permissions?.canUploadDocument === true;
+ const uploadReadiness = gateInfo?.uploadReadiness || null;
+ const uploadBlockingMessage = uploadReadiness?.message || null;
+ const uploadMissingSections = Array.isArray(uploadReadiness?.missingSections)
  ? uploadReadiness.missingSections
  : [];
-const inspectionRequestInfo = gateInfo?.inspectionRequest || null;
-const inspectionDraft = gateInfo?.inspectionDraft?.draft || null;
-const inspectionMissingFields = gateInfo?.inspectionDraft?.missingFields || [];
-const canRequestInspection = (canEditBase || gateInfo?.permissions?.canRequestInspection) && gateInfo?.documentUploaded && !inspectionRequestInfo?.request_id;
-const selectedDocumentSummary = selectedDocument
+ const inspectionRequestInfo = gateInfo?.inspectionRequest || null;
+ const inspectionDraft = gateInfo?.inspectionDraft?.draft || null;
+ const inspectionMissingFields = gateInfo?.inspectionDraft?.missingFields || [];
+ const canRequestInspection = (canEditBase || gateInfo?.permissions?.canRequestInspection) && gateInfo?.documentUploaded && !inspectionRequestInfo?.request_id;
+ const selectedDocumentSummary = selectedDocument
  ? `${selectedDocument.name} (${formatSelectedFileSize(selectedDocument.size)})`
  : "Aun no has seleccionado un archivo.";
-const canEditByGate = gateInfo?.permissions?.canEditDeterminations === true;
-const canEditFinal = (gateActive ? (canEditBase && canEditByGate) : canEditBase) && !quantitiesLocked && isDetermEditing;
-const canEditItemMeta = canEditBase && !quantitiesLocked;
-const canReopenCommercial = isJefeComercial && gatePhase === "technical_review";
-const sectionLocks = gateInfo?.sectionLocks || {};
-const isSubsectionLocked = (subsectionKey) => Boolean(sectionLocks?.[subsectionKey]) || quantitiesLocked;
-const allSubsectionsLocked = ["reactivos", "controles", "calibradores", "materiales"].every((key) => isSubsectionLocked(key));
-const pendingUnlockBySubsection = useMemo(() => {
+ const canEditByGate = gateInfo?.permissions?.canEditDeterminations === true;
+ const canEditFinal = (gateActive ? (canEditBase && canEditByGate) : canEditBase) && !quantitiesLocked && isDetermEditing;
+ const technicalSlaExpired = gateInfo?.extensionRequired === true || gateInfo?.technicalSlaExpired === true;
+ const canReopenCommercial = isJefeComercial && gatePhase === "technical_review";
+ const sectionLocks = gateInfo?.sectionLocks || {};
+ const isSubsectionLocked = (subsectionKey) => Boolean(sectionLocks?.[subsectionKey]) || quantitiesLocked;
+ const allSubsectionsLocked = ["reactivos", "controles", "calibradores", "materiales"].every((key) => isSubsectionLocked(key));
+ const pendingUnlockBySubsection = useMemo(() => {
  const map = {};
  (gateInfo?.unlockRequests || [])
   .filter((entry) => String(entry?.status || "").toLowerCase() === "pending")
@@ -581,9 +563,14 @@ const canEditType = (type) => {
 
  const loadEquipmentData = useCallback(async () => {
  if (!bcId) return;
+ // Solo el backup que se instala simultaneamente forma parte del equipo
+ // operativo que debe aparecer en determinaciones y consumibles.
  const detailsFromExtra = businessCase?.extra?.equipment_details;
  if (Array.isArray(detailsFromExtra) && detailsFromExtra.length > 0) {
- const ids = detailsFromExtra.map((pair) => pair?.primary_id).filter(Boolean);
+ const ids = detailsFromExtra.flatMap((pair) => [
+  pair?.primary_id,
+  isAffirmative(pair?.backup_install_simultaneous) ? pair?.backup_id : null,
+ ]).filter(Boolean);
  if (ids.length) {
  setEquipmentIds(Array.from(new Set(ids)));
  return;
@@ -593,7 +580,10 @@ const canEditType = (type) => {
  const res = await api.get(`/business-case/${bcId}/equipment-details`);
  const equipmentDetails = res.data?.data || [];
  if (equipmentDetails.length > 0) {
- const ids = equipmentDetails.map((pair) => pair?.primary_id).filter(Boolean);
+ const ids = equipmentDetails.flatMap((pair) => [
+  pair?.primary_id,
+  isAffirmative(pair?.backup_install_simultaneous ?? pair?.install_with_primary) ? pair?.backup_id : null,
+ ]).filter(Boolean);
  if (ids.length) {
  setEquipmentIds(Array.from(new Set(ids)));
  }
@@ -772,6 +762,17 @@ const canEditType = (type) => {
  }
  }, [bcId]);
 
+ const loadExistingSheetUrl = useCallback(async () => {
+  if (!bcId) return;
+  try {
+   const res = await api.get(`/business-case/${bcId}/sheets/preview`);
+   const url = res?.data?.data?.last_generation?.sheet_url;
+   setSheetUrl(url || null);
+  } catch (_err) {
+   setSheetUrl(null);
+  }
+ }, [bcId]);
+
  useEffect(() => {
  debugInfo("[DET_DEBUG_VERSION]", DET_DEBUG_VERSION, { bcId });
  }, [bcId]);
@@ -822,6 +823,10 @@ const canEditType = (type) => {
  }, [loadGateInfo]);
 
  useEffect(() => {
+ loadExistingSheetUrl();
+ }, [loadExistingSheetUrl]);
+
+ useEffect(() => {
  savedItemsRef.current = savedItems;
  }, [savedItems]);
 
@@ -844,6 +849,7 @@ const canEditType = (type) => {
  key: `det:${det.equipment_id}:${det.id}`,
  legacyKey: `det:${det.id}`,
  type: toUiType("determinacion"),
+ catalogKind: "determination",
  name: det.name,
  itemId: det.roche_code || null,
  manufacturerId: det.roche_code || null,
@@ -856,6 +862,7 @@ const canEditType = (type) => {
  key: `cons:${item.equipment_id}:${item.id}`,
  legacyKey: `cons:${item.id}`,
  type: toUiType(item.type || "consumible"),
+ catalogKind: "consumable",
  name: item.name,
  itemId: item.supplier_code || null,
  manufacturerId: item.supplier_code || null,
@@ -1044,6 +1051,23 @@ return map;
  if (!Number.isFinite(parsed)) return 0;
  return parsed > 0 ? parsed : 0;
  };
+
+ const hasSyncedReactivos = (mergedRows || []).some((row) =>
+  subsectionFromType(row?.type) === "reactivos" &&
+  toPositiveNumber(quantityDraftsRef.current?.[row?.key] ?? getSavedRow(row)?.annualQty ?? row?.annualQty ?? 0) > 0
+ );
+ const canValidateReactivosByRole =
+  isJefeComercial ||
+  (isPublicBC ? normalizedCurrentRole === "acp_comercial" : normalizedCurrentRole === "backoffice_comercial");
+
+ const canValidateReactivos =
+  gatePhase === "commercial_input" &&
+  gateInfo?.documentUploaded === true &&
+  gateInfo?.isExpired !== true &&
+  canValidateReactivosByRole &&
+  !quantitiesLocked &&
+  !isSubsectionLocked("reactivos") &&
+  hasSyncedReactivos;
 
 const syncQuantityDrafts = useCallback((items = []) => {
  const next = {};
@@ -1519,26 +1543,6 @@ const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallb
  if (!autosaveEnabled) return;
  };
 
- const handleQtyBlur = (rowKey) => {
- if (!autosaveEnabled) return;
- if (!Object.prototype.hasOwnProperty.call(quantityDraftsRef.current, rowKey)) return;
- const row = mergedRows.find((item) => item.key === rowKey);
- if (!row || !canEditType(row.type)) return;
- const value = quantityDraftsRef.current[rowKey];
- const numeric = toPositiveNumber(value);
- const savedNumeric = toPositiveNumber(getSavedRow(row)?.annualQty ?? 0);
- if (numeric !== savedNumeric) {
- pendingQtyChangesRef.current[rowKey] = true;
- } else {
- delete pendingQtyChangesRef.current[rowKey];
- }
- setPendingChangesCount(Object.keys(pendingQtyChangesRef.current).length);
- if (autosaveTimeoutRef.current) {
- clearTimeout(autosaveTimeoutRef.current);
- autosaveTimeoutRef.current = null;
- }
- };
-
 const handleSaveNow = () => {
  // Guardado manual explícito: siempre persistimos snapshot actual para dejar avance en base.
  if (autosaveTimeoutRef.current) {
@@ -1580,37 +1584,30 @@ const handleCompleteSection = async () => {
  });
 };
 
-const handleLockSubsection = async (sectionKey, rows = []) => {
- if (!canEditFinal || saving) return;
- if (isSubsectionLocked(sectionKey)) {
- showToast(`La subseccion ${sectionKey} ya esta bloqueada.`, "info");
- return;
- }
- const hasRows = Array.isArray(rows) && rows.length > 0;
- if (!hasRows) {
- showToast(`No hay items en ${sectionKey} para bloquear.`, "warning");
- return;
- }
- const hasPending = rows.some((row) => toPositiveNumber(getQtyInputValue(row)) <= 0);
- if (hasPending) {
- showToast(`Completa todas las cantidades de ${sectionKey} antes de bloquear.`, "warning");
- return;
- }
+const handleValidateSubsection = async (sectionKey, sectionTitle = "seccion") => {
+ if (!bcId || saving) return;
  try {
- const { nextItems, nextExcluded } = buildPersistPayloadFromDrafts();
- await persistItems(nextItems, nextExcluded, {
- refresh: false,
- silent: false,
- revalidate: true,
- markComplete: false,
- });
- await lockDeterminationsSubsection(bcId, sectionKey);
- await loadGateInfo();
- onSave({ refresh: true, markComplete: false });
- showToast(`Subseccion ${sectionKey} bloqueada correctamente.`, "success");
+  await api.post(`/business-case/${bcId}/determinations/lock-subsection`, {
+   subsection: sectionKey,
+  });
+  await loadExisting();
+  await loadGateInfo();
+  if (sectionKey === "reactivos") setIsDetermEditing(false);
+  onSave({ refresh: true, markComplete: false });
+  showToast(
+   sectionKey === "reactivos"
+    ? "Reactivos validados. Se notifico a Servicio para completar controles, calibradores y materiales."
+    : `${sectionTitle} validado y cerrado correctamente.`,
+   "success",
+  );
  } catch (err) {
- showToast(getNaturalErrorMessage(err, `No se pudo bloquear ${sectionKey}.`), "error");
+  showToast(getNaturalErrorMessage(err, `No se pudo validar ${sectionTitle.toLowerCase()}.`), "error");
  }
+};
+
+const handleValidateReactivos = async () => {
+ if (!canValidateReactivos) return;
+ await handleValidateSubsection("reactivos", "Reactivos");
 };
 
 const handleRequestUnlockSubsection = async (sectionKey) => {
@@ -1672,51 +1669,6 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  }
 };
 
- const getSectionPendingCount = (rows = []) => {
- let count = 0;
- rows.forEach((row) => {
- if (!row?.key) return;
- const draftValue =
- quantityDraftsRef.current[row.key]
- ?? undefined;
- const hasDraft = draftValue !== undefined;
- if (!hasDraft) return;
- const draftQty = toPositiveNumber(draftValue);
- const savedQty = toPositiveNumber(getSavedRow(row)?.annualQty ?? 0);
- if (draftQty !== savedQty) count += 1;
- });
- return count;
- };
-
- const handleSaveSection = async (rows = []) => {
- const pending = getSectionPendingCount(rows);
- const globalPending = Object.keys(pendingQtyChangesRef.current || {}).length;
- debugInfo("[DET_DEBUG] handleSaveSection", {
- bcId,
- rows: rows.length,
- pending,
- globalPending,
- hasStructureChanges,
- rowKeysSample: rows.slice(0, 10).map((r) => r?.key),
- });
- if (!pending && !hasStructureChanges) {
- showToast("No hay cambios pendientes en esta seccion.", "info");
- return;
- }
- debugInfo("[DET_DEBUG] handleSaveSection:full_snapshot", {
- bcId,
- force: true,
- markComplete: false,
- });
- const { nextItems, nextExcluded } = buildPersistPayloadFromDrafts();
- await persistItems(nextItems, nextExcluded, {
- refresh: false,
- silent: false,
- revalidate: true,
- markComplete: false,
- });
- };
-
  const triggerAutoSheetSync = useCallback(async (caseId, options = {}) => {
   if (!caseId) return;
   setSheetSyncing(true);
@@ -1737,12 +1689,12 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
     if (attempts >= 24) return;
     attempts += 1;
     await new Promise((r) => setTimeout(r, attempts < 8 ? 1000 : attempts < 16 ? 2000 : 3000));
-    const statusRes = await api.get(`/business-case/${caseId}/sheets/jobs/${jobId}`);
-    const job = statusRes?.data?.data || statusRes?.data;
-    if (job?.status === "completed" && job?.sheet_url) {
+     const statusRes = await api.get(`/business-case/${caseId}/sheets/jobs/${jobId}`);
+     const job = statusRes?.data?.data || statusRes?.data;
+     if (job?.status === "completed" && job?.sheet_url) {
      setSheetUrl(job.sheet_url);
-     return;
-    }
+      return;
+     }
     if (job?.status === "failed") return;
     await poll();
    };
@@ -1753,39 +1705,6 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
    setSheetSyncing(false);
   }
  }, []);
-
- const loadExistingSheetUrl = useCallback(async () => {
-  if (!bcId) return;
-  try {
-   const res = await api.get(`/business-case/${bcId}/sheets/preview`);
-   const url = res?.data?.data?.last_generation?.sheet_url;
-   if (url) setSheetUrl(url);
-  } catch (_) {}
- }, [bcId]);
-
- const handleSyncFromSheet = useCallback(async () => {
-  if (!bcId) return;
-  setPullingFromSheet(true);
-  try {
-   const res = await api.post(`/business-case/${bcId}/consumption-items/sync-from-sheet`);
-   const updated = res?.data?.data?.updated ?? 0;
-   if (updated > 0) {
-    showToast(`Se sincronizaron ${updated} cantidad(es) desde el Sheet.`, "success");
-    await loadExisting();
-    onSave({ refresh: true, markComplete: false });
-   } else {
-    showToast("No hay cambios en el Sheet para sincronizar.", "info");
-   }
-  } catch (err) {
-   showToast(getNaturalErrorMessage(err, "No se pudo sincronizar desde el Sheet"), "error");
-  } finally {
-   setPullingFromSheet(false);
-  }
- }, [bcId, loadExisting, onSave, showToast]);
-
- useEffect(() => {
-  loadExistingSheetUrl();
- }, [loadExistingSheetUrl]);
 
  const buildImportPreviewFromPaste = useCallback((text, rows) => {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
@@ -1977,7 +1896,7 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  },
  {
  id: "window",
- label: "Ventana 48h",
+ label: expired ? "Ventana 48h vencida" : "Ventana 48h",
  status: expired ? "blocked" : hasDoc ? "active" : "pending",
  },
  {
@@ -1988,100 +1907,10 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  ];
  }, [gateInfo]);
 
- const handleAddCustom = (groupKey, equipmentName, equipmentId) => {
- const draft = newItemByEquipment[groupKey] || { id: "", name: "", type: "reactivo" };
- if (!canEditType(draft.type)) {
- showToast("No tienes permisos para registrar este tipo de item", "warning");
- return;
- }
- if (!draft.id.trim() || !draft.name.trim()) {
- showToast("Ingrese el ID y el nombre del item", "warning");
- return;
- }
- const key = `custom:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
- const next = [
- ...savedItems,
- {
- key,
- itemId: draft.id.trim(),
- name: draft.name.trim(),
- type: draft.type,
- source: "custom",
- catalogId: null,
- annualQty: 0,
- equipmentName,
- equipmentId: equipmentId || null,
- },
- ];
- setNewItemByEquipment((prev) => ({ ...prev, [groupKey]: { id: "", name: "", type: "reactivo" } }));
- setSavedItems(next);
- setHasStructureChanges(true);
- };
-
- const startEditItem = (row) => {
- if (!canEditItemMeta) return;
- setEditingItemKey(row.key);
- setEditingItem({ id: row.itemId || row.manufacturerId || "", name: row.name || "", type: row.type || "reactivo" });
- };
-
- const saveEditItem = () => {
- if (!editingItemKey) return;
- const existsInSaved = savedItems.some((item) => item.key === editingItemKey);
- let next;
- if (existsInSaved) {
-  next = savedItems.map((item) => {
-   if (item.key !== editingItemKey) return item;
-   return {
-    ...item,
-    itemId: editingItem.id.trim() || item.itemId,
-    name: editingItem.name.trim() || item.name,
-    type: editingItem.type || item.type,
-   };
-  });
- } else {
-  // Item de catálogo sin cantidad guardada aún — crear entrada con override de nombre/ID
-  const catalogRow = mergedRows.find((r) => r.key === editingItemKey);
-  if (catalogRow) {
-   next = [...savedItems, {
-    ...catalogRow,
-    itemId: editingItem.id.trim() || catalogRow.itemId || catalogRow.manufacturerId || "",
-    name: editingItem.name.trim() || catalogRow.name,
-   }];
-  } else {
-   next = savedItems;
-  }
- }
- setEditingItemKey(null);
- setEditingItem({ id: "", name: "", type: "reactivo" });
- setSavedItems(next);
- setHasStructureChanges(true);
- };
-
- const cancelEditItem = () => {
- setEditingItemKey(null);
- setEditingItem({ id: "", name: "", type: "reactivo" });
- };
-
- const removeItem = async (row) => {
- if (!canEditType(row.type)) return;
- const itemLabel = row?.name || row?.itemId || "este elemento";
- const actionLabel = row?.source === "catalog" ? "quitar del listado" : "eliminar";
- const confirmed = window.confirm(
- `¿Confirmas ${actionLabel} "${itemLabel}"?\\n\\nLa acción quedará en borrador hasta presionar "Guardar informacion".`
- );
- if (!confirmed) return;
-
- const next = savedItems.filter((item) => item.key !== row.key);
- if (row.source === "catalog") {
- const nextExcluded = Array.from(new Set([...excludedKeys, row.key]));
- setSavedItems(next);
- setExcludedKeys(nextExcluded);
- setHasStructureChanges(true);
- return;
- }
- setSavedItems(next);
- setHasStructureChanges(true);
- };
+ // ponytail: administracion manual de items (agregar/editar/quitar) removida --
+ // las cantidades ahora se sincronizan desde el Sheet oficial
+ // (syncConsumptionQuantitiesFromSheet en el backend). Esta seccion solo
+ // muestra el resumen de lo ya sincronizado.
 
  return (
  <div className="space-y-5 animate-fadeIn">
@@ -2094,6 +1923,9 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  <p className="text-sm text-gray-500">
  Registre el consumo anual informado por el laboratorio para cada item segun los equipos seleccionados.
  </p>
+ <div className="mt-2">
+ <SectionEditorBadge ownership={ownership} />
+ </div>
  </div>
  </div>
 
@@ -2127,89 +1959,76 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  ))}
  </div>
  {gateInfo?.documentUploaded ? (
- <div className="text-xs text-gray-700 space-y-1">
+ <div className="rounded-xl border border-gray-100 bg-gray-50/60 px-4 py-3 space-y-3">
+ {/* Fila 1: identidad del documento (izquierda) | fechas (derecha) */}
+ <div className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-0 text-xs text-gray-700">
+ <div className="flex-1 min-w-0 space-y-1">
  <div>
- <span className="font-semibold">Documento:</span>{" "}
+ <span className="font-semibold text-gray-500">Documento:</span>{" "}
  {gateInfo?.document?.driveLink ? (
  <a
  href={gateInfo.document.driveLink}
  target="_blank"
  rel="noreferrer"
- className="text-blue-700 hover:underline"
+ className="text-blue-700 hover:underline break-words"
  >
  {gateInfo?.document?.name || "Ver archivo"}
  </a>
  ) : (
- <span>{gateInfo?.document?.name || "Cargado"}</span>
+ <span className="break-words">{gateInfo?.document?.name || "Cargado"}</span>
  )}
+
  </div>
  <div>
- <span className="font-semibold">Subido por:</span> {gateInfo?.document?.uploadedByEmail || "N/A"}
+ <span className="font-semibold text-gray-500">Subido por:</span> {gateInfo?.document?.uploadedByEmail || "N/A"}
+ </div>
+ </div>
+
+ <div className="hidden sm:block w-px self-stretch bg-gray-200 mx-4" aria-hidden="true" />
+
+ <div className="flex-1 min-w-0 space-y-1 sm:text-right">
+ <div>
+ <span className="font-semibold text-gray-500">Habilitado:</span> {formatGateDateTime(gateInfo?.enabledAt)}
  </div>
  <div>
- <span className="font-semibold">Habilitado:</span> {formatGateDateTime(gateInfo?.enabledAt)}
+ <span className="font-semibold text-gray-500">Vence:</span> {formatGateDateTime(gateInfo?.deadlineAt)}
  </div>
- <div>
- <span className="font-semibold">Vence:</span> {formatGateDateTime(gateInfo?.deadlineAt)}
  </div>
-<div>
-<span className="font-semibold">Responsables:</span> {(gateInfo?.editors || []).join(", ") || "N/A"}
-</div>
-<div>
-<span className="font-semibold">Fase actual:</span>{" "}
-{gatePhase === "technical_review" ? "Revision tecnica" : gatePhase === "locked" ? "Bloqueada" : "Carga comercial"}
-</div>
-</div>
+ </div>
+
+ {/* Fila 2: responsables (izquierda) | fase actual como badge (derecha) */}
+ <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-0 pt-2 border-t border-gray-200 text-xs text-gray-700">
+ <div className="flex-1 min-w-0">
+ <span className="font-semibold text-gray-500">Responsables:</span> {(gateInfo?.editors || []).join(", ") || "N/A"}
+ </div>
+ <div className="flex-shrink-0">
+ <span
+ className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+ gatePhase === "technical_review"
+ ? "bg-sky-100 text-sky-700"
+ : gatePhase === "locked"
+ ? "bg-rose-100 text-rose-700"
+ : "bg-blue-100 text-blue-700"
+ }`}
+ >
+ Fase: {gatePhase === "technical_review" ? "Revision tecnica" : gatePhase === "locked" ? "Bloqueada" : "Carga comercial"}
+ </span>
+ </div>
+ </div>
+ </div>
  ) : (
  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
  Aun no se ha cargado el documento estadistico. La seccion de determinaciones permanece bloqueada.
  </div>
  )}
 
- {/* Sheet URL — auto-generado tras subir documento */}
- {(sheetUrl || sheetSyncing) && (
+ {/* ponytail: el bloque "Hoja de Sheets disponible / Actualizar hoja /
+     Sincronizar cantidades / Abrir en Sheets" se movio a CaseHeader.jsx --
+     es un elemento universal del BC, no solo de Determinaciones. */}
+ {sheetSyncing && (
  <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
- {sheetSyncing ? (
- <>
   <FiRefreshCw size={14} className="text-emerald-600 animate-spin flex-shrink-0" />
   <span className="text-xs text-emerald-800 font-medium">Generando hoja de cálculo en Google Sheets...</span>
- </>
- ) : (
- <>
-  <FiExternalLink size={14} className="text-emerald-600 flex-shrink-0" />
-  <span className="text-xs text-emerald-800 font-medium">Hoja de Sheets disponible</span>
-  <div className="ml-auto flex items-center gap-2">
-  <button
-  type="button"
-  onClick={() => triggerAutoSheetSync(bcId, { forceRecreate: true })}
-  disabled={sheetSyncing}
-  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 cursor-pointer transition-transform duration-150 hover:bg-emerald-50 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
-  >
-  <FiRefreshCw size={12} />
-  Actualizar hoja
-  </button>
-  <button
-  type="button"
-  onClick={handleSyncFromSheet}
-  disabled={pullingFromSheet || sheetSyncing}
-  title="Trae las cantidades que el usuario haya llenado directamente en la columna Cantidad Anual del Sheet"
-  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 cursor-pointer transition-transform duration-150 hover:bg-emerald-50 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
-  >
-  <FiRefreshCw size={12} className={pullingFromSheet ? "animate-spin" : ""} />
-  Sincronizar cantidades desde Sheet
-  </button>
-  <a
-  href={sheetUrl}
-  target="_blank"
-  rel="noreferrer"
-  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors"
-  >
-  <FiExternalLink size={12} />
-  Abrir en Sheets
-  </a>
-  </div>
- </>
- )}
  </div>
  )}
 
@@ -2412,7 +2231,9 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
 
 {!canEditFinal && (
 <div className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
- {quantitiesLocked
+ {technicalSlaExpired
+ ? "No se puede editar ni sincronizar determinaciones por SLA vencido. Solicita una prorroga de 24 horas a Jefe Comercial."
+ : quantitiesLocked
  ? "Las cantidades quedaron bloqueadas tras cierre tecnico. Solicita reapertura con Jefe Comercial."
  : "No tienes habilitada la edicion de determinaciones para este flujo o la ventana de 48 horas ya expiro."}
 </div>
@@ -2433,7 +2254,9 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  <div className="flex items-center justify-between">
  <div>
  <h3 className="text-base font-semibold text-gray-900">{group.name}</h3>
- <p className="text-xs text-gray-500">Consumos anuales por equipo</p>
+ <p className="text-xs text-gray-500">
+ Resumen de consumos anuales sincronizados desde el Sheet oficial del Business Case.
+ </p>
  </div>
  </div>
 
@@ -2448,10 +2271,15 @@ const pendingUnlock = pendingUnlockBySubsection[section.key] || null;
 const rowLimit = getWindowLimit(group.key, section.key);
  const visibleRows = rows.slice(0, rowLimit);
  const isCollapsed = isSectionCollapsed(group.key, section.key);
- const isDone =
- rows.length > 0 &&
- rows.every((row) => toPositiveNumber(getQtyInputValue(row)) > 0);
- const sectionPendingCount = getSectionPendingCount(rows);
+ // Al menos un item con cantidad sincronizada desde el Sheet ya cuenta como
+ // "Sincronizado" -- no hace falta que todos tengan cantidad para dejar de
+ // verse "Pendiente".
+ const hasSyncedItems = rows.some((row) => toPositiveNumber(getQtyInputValue(row)) > 0);
+ const sectionReadyToClose = rows.length > 0 && rows.every((row) => toPositiveNumber(getQtyInputValue(row)) > 0);
+ const canValidateSection =
+ section.key === "reactivos"
+ ? canValidateReactivos
+ : canEditFinal && !subsectionLocked && sectionReadyToClose;
 
  return (
  <div key={`${group.key}:${section.key}`} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -2461,51 +2289,40 @@ const rowLimit = getWindowLimit(group.key, section.key);
  <p className="text-xs text-gray-500">{section.description}</p>
  </div>
  <div className="flex items-center gap-2">
- {sectionPendingCount > 0 && (
- <span className="inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold bg-amber-100 text-amber-700">
- {sectionPendingCount} cambio(s)
- </span>
- )}
-{canBulkImport && canEditFinal && !subsectionLocked && (
+{sheetUrl && (
+<a
+href={sheetUrl}
+target="_blank"
+rel="noreferrer"
+onClick={(event) => event.stopPropagation()}
+className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-white text-emerald-700 shadow-sm transition-colors hover:bg-emerald-50"
+title={`Abrir Sheet oficial para ${section.title.toLowerCase()}`}
+aria-label={`Abrir Sheet oficial para ${section.title.toLowerCase()}`}
+>
+<FiExternalLink size={14} />
+</a>
+)}
+{canValidateSection && (
 <button
 type="button"
 onClick={(event) => {
 event.stopPropagation();
-setImportModal({ sectionKey: section.key, groupKey: group.key, rows: visibleRows });
-setImportTab("paste");
-setImportPasteText("");
-setImportPreview(null);
-if (importFileRef.current) importFileRef.current.value = "";
+handleValidateSubsection(section.key, section.title);
 }}
-className="inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-100"
-title="Importar cantidades masivamente desde Excel o archivo"
+disabled={saving}
+className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-600 text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+title={`Validar y cerrar ${section.title.toLowerCase()}`}
+aria-label={`Validar y cerrar ${section.title.toLowerCase()}`}
 >
-<FiUpload size={12} />
-Importar cantidades
+<FiCheck size={14} />
 </button>
 )}
-<button
-type="button"
-onClick={(event) => {
-event.stopPropagation();
-handleSaveSection(rows);
-}}
-disabled={saving || !canEditFinal || subsectionLocked}
-className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
->
-Guardar seccion
-</button>
-<button
-type="button"
-onClick={(event) => {
-event.stopPropagation();
-handleLockSubsection(section.key, rows);
-}}
-disabled={saving || !canEditFinal || subsectionLocked}
-className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed"
->
-{subsectionLocked ? "Subseccion bloqueada" : "Bloquear subseccion"}
-</button>
+{/* ponytail: las cantidades ahora se sincronizan desde el Sheet oficial
+    (ver syncConsumptionQuantitiesFromSheet en el backend) -- se quitaron
+    "Guardar seccion" e "Importar cantidades", ya no aplican. "Bloquear
+    subseccion" tambien se quito: sin edicion manual no hay nada que
+    bloquear yendo hacia adelante. Se deja el flujo de desbloqueo por si
+    alguna subseccion ya quedo bloqueada de antes de este cambio. */}
 {subsectionLocked && !pendingUnlock && !isJefeComercial && (
 <button
 type="button"
@@ -2552,11 +2369,11 @@ Rechazar desbloqueo
 )}
 <span
 className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${
- isDone ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+ hasSyncedItems ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
 }`}
  >
  <FiCheck size={11} />
- {isDone ? "Realizado" : "Pendiente"}
+ {hasSyncedItems ? "Sincronizado" : "Pendiente"}
  </span>
  <button
  type="button"
@@ -2580,14 +2397,13 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
  <tr className="text-left text-gray-500 border-b border-gray-100">
  <th className="py-3 px-4 font-semibold">Tipo</th>
  <th className="py-3 px-4 font-semibold">Nombre</th>
- <th className="py-3 px-4 font-semibold">Cantidad anual</th>
- <th className="py-3 px-4 font-semibold">Acciones</th>
+ <th className="py-3 px-4 font-semibold">
+ {section.key === "reactivos" ? "Cantidad anual (Sheet)" : "Producto calculado (Sheet)"}
+ </th>
  </tr>
  </thead>
  <tbody className="divide-y divide-gray-50">
  {visibleRows.map((row) => {
- const isEditing = editingItemKey === row.key;
- const canEditRow = canEditType(row.type);
  const manufacturerId = getManufacturerId(row);
  return (
  <tr key={row.key} className="hover:bg-gray-50/50 transition-colors">
@@ -2597,91 +2413,22 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
  </span>
  </td>
  <td className="py-3 px-4">
- {isEditing ? (
- <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
- <input
- className="border rounded-lg px-2 py-1 w-full"
- placeholder="ID fabricante"
- value={editingItem.id}
- onChange={(e) => setEditingItem({ ...editingItem, id: e.target.value })}
- disabled={!canEditItemMeta}
- />
- <input
- className="border rounded-lg px-2 py-1 w-full"
- placeholder="Nombre"
- value={editingItem.name}
- onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
- disabled={!canEditItemMeta}
- />
- </div>
- ) : (
  <div className="space-y-0.5">
  <span className="font-semibold text-gray-900">{row.name}</span>
  {manufacturerId && (
  <div className="text-xs text-gray-400">ID fabricante: {manufacturerId}</div>
  )}
  </div>
- )}
- {row.source === "catalog" && (
- <span className="ml-2 text-xs text-gray-400">(catalogo)</span>
- )}
  </td>
- <td className="py-3 px-4">
- <input
- type="number"
- min={0}
- value={getQtyInputValue(row)}
- onChange={(e) => handleQtyChange(row.key, e.target.value)}
- onBlur={() => handleQtyBlur(row.key)}
- className="w-32 border border-gray-200 rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all text-gray-900 font-medium disabled:bg-gray-50 disabled:text-gray-400"
- placeholder="0"
- disabled={!canEditRow}
- />
- </td>
- <td className="py-3 px-4">
- {isEditing ? (
- <div className="flex flex-col sm:flex-row gap-2">
- <button
- onClick={saveEditItem}
- className="px-2 py-1 text-xs bg-blue-600 text-white rounded flex items-center gap-1 disabled:opacity-50"
- disabled={!canEditItemMeta}
- >
- <FiCheck size={12} /> Guardar
- </button>
- <button
- onClick={cancelEditItem}
- className="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded flex items-center gap-1"
- >
- <FiX size={12} /> Cancelar
- </button>
- </div>
- ) : (
- <div className="flex flex-col sm:flex-row gap-2">
- {canEditItemMeta && (
- <button
- onClick={() => startEditItem(row)}
- className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded flex items-center gap-1 disabled:opacity-50"
- disabled={!canEditItemMeta}
- >
- <FiEdit2 size={12} /> Editar
- </button>
- )}
- <button
- onClick={() => removeItem(row)}
- className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded flex items-center gap-1 disabled:opacity-50"
- disabled={!canEditRow}
- >
- <FiTrash2 size={12} /> Quitar
- </button>
- </div>
- )}
+ <td className="py-3 px-4 font-medium text-gray-900">
+ {getQtyInputValue(row)}
  </td>
  </tr>
  );
  })}
  {!rows.length && (
  <tr>
- <td colSpan={4} className="py-8 text-center text-gray-500">
+ <td colSpan={3} className="py-8 text-center text-gray-500">
  No hay elementos en {section.title.toLowerCase()} para este equipo.
  </td>
  </tr>
@@ -2705,69 +2452,6 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
  </div>
  );
  })}
-
- <div className="p-4 border border-gray-100 bg-gray-50/50 rounded-2xl">
- <div className="text-sm font-semibold text-gray-800 mb-2">
- Agregar item manual para {group.name}
- </div>
- <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
- <input
- type="text"
- className="border rounded-lg px-2 py-1"
- placeholder="ID fabricante"
- value={newItemByEquipment[group.key]?.id || ""}
- onChange={(e) =>
- setNewItemByEquipment((prev) => ({
- ...prev,
- [group.key]: { ...(prev[group.key] || { type: "reactivo" }), id: e.target.value },
- }))
- }
- disabled={!canEditType((newItemByEquipment[group.key]?.type || "reactivo"))}
- />
- <input
- type="text"
- className="border rounded-lg px-2 py-1"
- placeholder="Nombre del item"
- value={newItemByEquipment[group.key]?.name || ""}
- onChange={(e) =>
- setNewItemByEquipment((prev) => ({
- ...prev,
- [group.key]: { ...(prev[group.key] || { type: "reactivo" }), name: e.target.value },
- }))
- }
- disabled={!canEditType((newItemByEquipment[group.key]?.type || "reactivo"))}
- />
-<select
-className="border rounded-lg px-2 py-1"
-value={newItemByEquipment[group.key]?.type || "reactivo"}
-disabled={!canEditFinal}
-onChange={(e) =>
-setNewItemByEquipment((prev) => ({
- ...prev,
- [group.key]: { ...(prev[group.key] || {}), type: e.target.value },
- }))
- }
- >
- {ITEM_TYPES.map((type) => (
- <option key={type.value} value={type.value}>
- {type.label}
- </option>
- ))}
- </select>
- <button
- onClick={() => handleAddCustom(group.key, group.name, group.equipmentId)}
- className="bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 w-full sm:w-auto disabled:opacity-50"
- disabled={!canEditType((newItemByEquipment[group.key]?.type || "reactivo"))}
- >
- Agregar
- </button>
- </div>
- {!canEditType((newItemByEquipment[group.key]?.type || "reactivo")) && (
- <div className="mt-2 text-xs text-gray-500">
- No tienes permisos para agregar items de este tipo.
- </div>
- )}
- </div>
  </div>
  );
  })}
@@ -2811,6 +2495,19 @@ setNewItemByEquipment((prev) => ({
    )}
 
    {/* Modo lectura: mostrar botón Editar (solo si tiene permiso de edición gate-level) */}
+   {canValidateReactivos && (
+    <button
+     type="button"
+     onClick={handleValidateReactivos}
+     disabled={saving}
+     className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-50 w-full sm:w-auto"
+     title="Valida los reactivos sincronizados y habilita la etapa tecnica"
+    >
+     <FiCheck size={16} />
+     Validar reactivos y enviar a Servicio
+    </button>
+   )}
+
    {!isDetermEditing && !canReopenCommercial && (canEditBase && canEditByGate && !quantitiesLocked) && (
     <button
      type="button"

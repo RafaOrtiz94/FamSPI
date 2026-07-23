@@ -782,8 +782,10 @@ class BusinessCasePermissions {
    * @returns {boolean} True if editing is allowed
    */
   static canEdit({ role, canonicalState, section, field }) {
-    // Validate inputs
-    if (!role || !canonicalState || !section) {
+    // Validate inputs (canonicalState se valida mas abajo, despues del bypass
+    // de INVESTMENTS -- esa seccion es state-independent por diseño y no debe
+    // depender de que canonical_state ya este seteado).
+    if (!role || !section) {
       return false;
     }
 
@@ -798,6 +800,10 @@ class BusinessCasePermissions {
     // Investments section is ALWAYS accessible (state-independent)
     if (section === SECTIONS.INVESTMENTS) {
       return true;
+    }
+
+    if (!canonicalState) {
+      return false;
     }
 
     // Check permission matrix

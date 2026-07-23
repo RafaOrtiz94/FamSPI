@@ -65,6 +65,11 @@ function toIsoOrNull(value) {
   return value instanceof Date && !Number.isNaN(value.getTime()) ? value.toISOString() : null;
 }
 
+function phaseIsTechnicalReview(gatePhase, preflowPhase) {
+  return String(gatePhase || "").trim().toLowerCase() === "technical_review"
+    && String(preflowPhase || "").trim().toLowerCase() === "review";
+}
+
 function isUploadRole(role = "") {
   const normalized = BusinessCasePermissions.normalizeRole(String(role || "").toLowerCase());
   return DETERMINATIONS_ALLOWED_UPLOAD_ROLES.has(normalized);
@@ -246,11 +251,23 @@ function buildGateInfo({
     : metadataDocument;
 
   const uploadedAt = toDateOrNull(rawGate?.enabled_at || document?.uploaded_at || null);
-  const deadlineAt = toDateOrNull(rawGate?.deadline_at || null)
+  const phase = String(rawGate?.phase || "commercial_input").trim().toLowerCase();
+  const metadataPreflow = businessCase?.modern_bc_metadata && typeof businessCase.modern_bc_metadata === "object"
+    ? businessCase.modern_bc_metadata
+    : {};
+  const preflowPhase = String(metadataPreflow?.preflow_phase || "").trim().toLowerCase();
+  const preflowReviewDeadlineAt = toDateOrNull(metadataPreflow?.preflow_review_deadline_at || null);
+  const rawDeadlineAt = toDateOrNull(rawGate?.deadline_at || null)
     || (uploadedAt ? new Date(uploadedAt.getTime() + DETERMINATIONS_DEADLINE_HOURS * 60 * 60 * 1000) : null);
+  // La ventana visible para Jefe de Servicio pertenece al preflow de revisión.
+  // Usar también el deadline interno de determinaciones permitía que ambos SLA
+  // quedaran desalineados y mantuvieran activa la sincronización después del vencimiento.
+  const usesTechnicalPreflowSla = phaseIsTechnicalReview(rawGate?.phase, preflowPhase);
+  const deadlineAt = usesTechnicalPreflowSla && preflowReviewDeadlineAt
+    ? preflowReviewDeadlineAt
+    : rawDeadlineAt;
   const hasDocument = Boolean(document?.drive_file_id || document?.drive_link);
   const enabled = Boolean(rawGate?.enabled && hasDocument && uploadedAt);
-  const phase = String(rawGate?.phase || "commercial_input").trim().toLowerCase();
   const quantitiesLocked = Boolean(rawGate?.quantities_locked || phase === "locked");
   const rawSectionLocks = rawGate?.section_locks && typeof rawGate.section_locks === "object"
     ? rawGate.section_locks
@@ -280,6 +297,7 @@ function buildGateInfo({
   const expiredByTime = Boolean(deadlineAt && deadlineAt.getTime() < now.getTime());
   const expiredByFlag = Boolean(rawGate?.is_expired);
   const expired = expiredByTime || expiredByFlag;
+  const technicalSlaExpired = usesTechnicalPreflowSla && expired;
   const normalizedRole = BusinessCasePermissions.normalizeRole(String(role || "").toLowerCase());
   const editorsByPhase = phase === "technical_review"
     ? config.technicalEditors
@@ -308,6 +326,9 @@ function buildGateInfo({
     deadlineAt: toIsoOrNull(deadlineAt),
     remainingMs: deadlineAt ? Math.max(0, deadlineAt.getTime() - now.getTime()) : null,
     isExpired: expired,
+    technicalSlaExpired,
+    extensionRequired: technicalSlaExpired,
+    extensionHours: technicalSlaExpired ? 24 : null,
     editors: editorsByPhase,
     notificationsTargetRoles: config.notify,
     permissions: {
@@ -346,9 +367,16 @@ function assertCanEditDeterminationsOrThrow(gate) {
     throw error;
   }
   if (gate?.isExpired) {
-    const error = new Error("La ventana de 48 horas para determinaciones ya expiro.");
+    const error = gate?.extensionRequired
+      ? new Error("La ventana SLA de 48 horas de Jefe de Servicio vencio. La sincronizacion esta bloqueada. Solicita una prorroga de 24 horas a Jefe Comercial.")
+      : new Error("La ventana de 48 horas para determinaciones ya expiro.");
     error.status = 409;
-    error.code = "DETERMINATIONS_EDIT_WINDOW_EXPIRED";
+    error.code = gate?.extensionRequired
+      ? "DETERMINATIONS_SLA_EXPIRED_EXTENSION_REQUIRED"
+      : "DETERMINATIONS_EDIT_WINDOW_EXPIRED";
+    if (gate?.extensionRequired) {
+      error.details = { extensionHours: 24, responsibleRole: "jefe_servicio" };
+    }
     throw error;
   }
   if (!gate?.permissions?.canEditDeterminations) {

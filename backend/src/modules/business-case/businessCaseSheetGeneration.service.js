@@ -24,6 +24,10 @@ const {
   buildSignedWebAppPayload,
   DEFAULT_MAPPING_VERSION,
 } = require("./businessCaseSheetGeneration.contract");
+const {
+  filterEquipmentPairsForSheet,
+  shouldIncludeBackupInSheet,
+} = require("./businessCaseSheetEquipment.helper");
 
 const OPERATION_SCOPE_ENQUEUE = "bc_sheet_generation_enqueue_v1";
 const RETRYABLE_ERROR_CODES = new Set([
@@ -360,8 +364,13 @@ function buildInversionesPayload(investments = []) {
       const cantidad = normalizeInvestmentNumber(item?.quantity);
       const precio = normalizeInvestmentNumber(item?.unit_price);
       out[name] = {
+        nombre: name,
+        categoria: String(item?.category || "").trim(),
+        caracteristicas: String(item?.characteristics || "").trim(),
+        observaciones: String(item?.notes || "").trim(),
         cantidad: cantidad === null ? 0 : cantidad,
         precio: precio === null ? 0 : precio,
+        descripcion: String(item?.characteristics || item?.notes || name || "").trim(),
       };
     });
   return out;
@@ -429,8 +438,10 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   const extra = toObject(bcRow?.extra);
   const equipmentPairs = Array.isArray(extra?.equipment_details) ? extra.equipment_details : [];
   const primaryPair = equipmentPairs.find((pair) => Number(pair?.primary_id) > 0) || equipmentPairs[0] || null;
+  const sheetEquipmentPairs = filterEquipmentPairsForSheet(equipmentPairs);
+  const includePrimaryBackup = shouldIncludeBackupInSheet(primaryPair || {});
   const primaryId = Number(primaryPair?.primary_id) || null;
-  const backupId = Number(primaryPair?.backup_id) || null;
+  const backupId = includePrimaryBackup ? Number(primaryPair?.backup_id) || null : null;
 
   const [
     labEnvironment,
@@ -451,7 +462,7 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     investmentsService.getCatalogWithSelections(businessCaseId),
     getEquipmentNamesMapByIds([primaryId, backupId]),
     getEquipmentCatalogMapByIds(
-      equipmentPairs.flatMap((pair) => [pair?.primary_id, pair?.backup_id]),
+      sheetEquipmentPairs.flatMap((pair) => [pair?.primary_id, pair?.backup_id]),
     ),
     getMaximumQuantitiesByBusinessCaseId(businessCaseId),
   ]);
@@ -497,19 +508,18 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     normalizeEquipmentTypeLabel(primaryPair?.primary_type),
   ));
   setFieldIfPresent(fields, "PropiedadEquipoPrincipal", equipmentDetails?.ownership_status);
-  setFieldIfPresent(fields, "NombreEquipoBackUp", pickFirst(
-    equipmentNamesMap.get(backupId),
-    equipmentDetails?.backup_equipment_name,
-  ));
-  setFieldIfPresent(fields, "EstadoEquipoBackUp", pickFirst(
-    equipmentDetails?.backup_status,
-    primaryPair?.backup_status,
-    normalizeEquipmentTypeLabel(primaryPair?.backup_type),
-  ));
-  setFieldIfPresent(fields, "InstalarJuntoPrincipal", normalizeBool(pickFirst(
-    primaryPair?.backup_install_simultaneous,
-    equipmentDetails?.install_with_primary,
-  )));
+  if (includePrimaryBackup) {
+    setFieldIfPresent(fields, "NombreEquipoBackUp", pickFirst(
+      equipmentNamesMap.get(backupId),
+      equipmentDetails?.backup_equipment_name,
+    ));
+    setFieldIfPresent(fields, "EstadoEquipoBackUp", pickFirst(
+      equipmentDetails?.backup_status,
+      primaryPair?.backup_status,
+      normalizeEquipmentTypeLabel(primaryPair?.backup_type),
+    ));
+    setFieldIfPresent(fields, "InstalarJuntoPrincipal", normalizeBool(primaryPair?.backup_install_simultaneous));
+  }
   setFieldIfPresent(fields, "UbicacionEquipos", pickFirst(
     equipmentDetails?.installation_location,
     primaryPair?.installation_location,
@@ -576,7 +586,7 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
 
   const selectedEquipmentRecords = Array.from(
     new Map(
-      equipmentPairs
+      sheetEquipmentPairs
         .flatMap((pair) => [pair?.primary_id, pair?.backup_id])
         .map((rawId) => Number(rawId))
         .filter((value) => Number.isInteger(value) && value > 0)
@@ -1558,4 +1568,6 @@ module.exports = {
   ensureQueueTable,
   recordDocumentVersion,
   getDocumentVersions,
+  filterEquipmentPairsForSheet,
+  shouldIncludeBackupInSheet,
 };

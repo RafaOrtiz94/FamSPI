@@ -11,6 +11,7 @@ import {
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
+import SectionEditorBadge from "./SectionEditorBadge";
 
 const generateLocalId = () => {
  if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -743,6 +744,9 @@ const EquipmentSection = ({
  <div>
  <h2 className={UI.title}>Seleccion de equipos</h2>
  <p className={UI.subtitle}>Define principal y backup por grupo.</p>
+ <div className="mt-2">
+ <SectionEditorBadge ownership={ownership} />
+ </div>
  </div>
  <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
  <button

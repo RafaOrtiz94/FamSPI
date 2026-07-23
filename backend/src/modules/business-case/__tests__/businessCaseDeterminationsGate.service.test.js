@@ -67,4 +67,37 @@ describe("businessCaseDeterminationsGate.service", () => {
       /documento estadistico/i,
     );
   });
+
+  test("usa el SLA de revision tecnica y bloquea al vencer", () => {
+    const gate = service.buildGateInfo({
+      businessCase: {
+        bc_purchase_type: "public",
+        modern_bc_metadata: {
+          preflow_phase: "review",
+          preflow_review_role: "jefe_servicio",
+          preflow_review_deadline_at: "2026-02-02T10:00:00.000Z",
+          determinations_gate: {
+            enabled: true,
+            phase: "technical_review",
+            enabled_at: "2026-02-01T10:00:00.000Z",
+            deadline_at: "2026-02-03T10:00:00.000Z",
+            document: {
+              drive_file_id: "tech123",
+              drive_link: "https://drive.google.com/file/d/tech123/view",
+              uploaded_at: "2026-02-01T10:00:00.000Z",
+            },
+          },
+        },
+      },
+      role: "jefe_servicio",
+      now: new Date("2026-02-02T11:00:00.000Z"),
+    });
+
+    expect(gate.deadlineAt).toBe("2026-02-02T10:00:00.000Z");
+    expect(gate.technicalSlaExpired).toBe(true);
+    expect(gate.permissions.canEditDeterminations).toBe(false);
+    expect(() => service.assertCanEditDeterminationsOrThrow(gate)).toThrow(
+      /prorroga de 24 horas/i,
+    );
+  });
 });

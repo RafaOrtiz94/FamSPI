@@ -36,25 +36,9 @@ const businessCaseRoles = [
   "gerencia",
   "gerencia_general",
 ];
-// BC-10: investmentRoles — quienes pueden agregar ítems al carrito de inversiones
-const investmentRoles = [
-  "comercial",
-  "asesor_comercial",
-  "analista_comercial",
-  "acp_comercial",
-  "backoffice",
-  "backoffice_comercial",
-  "jefe_comercial",
-  "jefe_de_comercial",
-  "jefe_operaciones",
-  "jefe_tecnico",
-  "jefe_servicio",        // reemplaza a jefe_tecnico
-  "ing_servicio",         // mismo nivel que tecnico en inversiones
-  "jefe_financiero",
-  "jefe_ti",              // BC-10: puede agregar ítems al carrito
-  "gerencia",
-  "gerencia_general",
-];
+// Carrito de inversiones: todos los participantes del BC pueden aportar items
+// cuando el documento estadistico ya fue cargado; el controller valida ese gate.
+const investmentRoles = businessCaseRoles;
 // BC-12: Solo jefe_operaciones y jefe_financiero GUARDAN valores
 // jefe_comercial y gerencia solo VER — la separación GET/POST se hace aquí
 const investmentValuesRoles = [
@@ -194,6 +178,12 @@ router.post(
   ctrl.reviewEnvironmentInspectionRequest,
 );
 router.post(
+  "/:id/inspection-request/result",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  ctrl.registerEnvironmentInspectionResult,
+);
+router.post(
   "/:id/determinations",
   verifyToken,
   requireRole(businessCaseRoles),
@@ -279,6 +269,9 @@ router.post("/:id/investments/selections/request-increase", verifyToken, require
 router.post("/:id/investments/confirm-cart", verifyToken, requireRole(investmentRoles), ctrl.confirmInvestmentCart);
 router.get("/:id/investments/values", verifyToken, requireRole(investmentValuesRoles), ctrl.getInvestmentValues);
 router.post("/:id/investments/values", verifyToken, requireRole(investmentValuesRoles), ctrl.saveInvestmentValues);
+router.get("/:id/investments/values/assignees", verifyToken, requireRole(investmentValuesRoles), ctrl.getInvestmentQuotationAssignees);
+router.post("/:id/investments/values/assignment", verifyToken, requireRole(investmentValuesRoles), ctrl.assignInvestmentQuotation);
+router.post("/:id/investments/values/request-quotation", verifyToken, requireRole(investmentValuesRoles), ctrl.requestInvestmentQuotation);
 router.get("/:id/consumption-items", verifyToken, requireRole(businessCaseRoles), ctrl.getConsumptionItems);
 router.put("/:id/consumption-items", verifyToken, requireRole(businessCaseRoles), ctrl.saveConsumptionItems);
 router.patch("/:id/consumption-items/:itemKey", verifyToken, requireRole(businessCaseRoles), ctrl.patchConsumptionItem);

@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
 import { useAutoEditSection } from "../BusinessCaseWorkspaceContext";
+import SectionEditorBadge from "../SectionEditorBadge";
 
 const DELIVERY_OPTIONS = [
   { value: "total", label: "Total" },
@@ -125,6 +126,9 @@ const RequirementsSection = ({ permissions = {}, ownership = {}, onSave }) => {
           <div>
             <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Condiciones del BC</h2>
             <p className="text-sm text-gray-500 mt-1">Plazos, entregas y observaciones antes del cálculo</p>
+            <div className="mt-2">
+              <SectionEditorBadge ownership={ownership} />
+            </div>
           </div>
         </div>
       </div>

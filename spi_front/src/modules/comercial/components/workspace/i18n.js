@@ -124,21 +124,21 @@ export const WORKSPACE_TEXTS = {
       warnings: ['El analisis financiero es clave para aprobacion']
     },
     consumption_export: {
-      title: 'Sincronizacion de Business Case',
-      description: 'Vista previa y sincronizacion del formato oficial en Google Sheets',
+      title: 'Resumen del Business Case',
+      description: 'Resumen de solo lectura de todo lo registrado hasta este punto (sin precios)',
       tips: [
-        'Revise la vista previa antes de sincronizar',
-        'Confirme que campos e inversiones esten completos para evitar reprocesos'
+        'Las cantidades de reactivos/calibradores/controles/materiales se sincronizan desde el Sheet oficial',
+        'Usa el bloque de Sheets en el header superior para abrir o actualizar el documento'
       ],
-      warnings: ['La sincronizacion genera el documento oficial en Drive y Sheets']
+      warnings: []
     },
     dispatch_workspace: {
       title: 'Cantidades Maximas',
-      description: 'Definicion comercial de cantidades maximas y control operativo de elementos a despachar',
+      description: 'Sincronizacion posterior a factibilidad de cantidades maximas y control operativo de despacho',
       tips: [
-        'Jefe Comercial define la cantidad maxima por elemento',
+        'Sincronice las cantidades maximas desde el Sheet oficial',
         'Jefe Operaciones registra cantidades a despachar y avance despachado',
-        'Use observaciones para trazabilidad de cambios en cada item'
+        'Los ajustes manuales previos se conservan para evitar perdida de datos'
       ],
       warnings: ['Debe existir consumo anual para que los elementos aparezcan en este workspace']
     },
