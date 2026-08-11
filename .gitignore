@@ -37,5 +37,13 @@ backend/src/data/dashboard-*.json
 backend/src/data/service-account*.json
 !backend/src/data/service-account.example.json
 
+# Shortcuts de iPhone (Cherri): traen el JWT del atajo hardcodeado
+atajo/
+
+# Backups locales de base de datos (datos de produccion, nunca a git)
+backend/backups/
+*.sql
+*.sql.gz
+
 # Optional local assets
 

@@ -30,7 +30,7 @@ Módulo CRUD de usuarios del sistema. Permite listar, crear, actualizar y elimin
 
 ## 6. Relaciones
 - `departments`: asociación de usuarios a departamentos
-- `collaborators`: vista extendida de usuarios
+- `collaborators`: extiende el perfil de un usuario del sistema. Sincronización automática de status: `users.active` se actualiza cuando `collaborator_profiles.profile->'laboral'->>'estatus_empleado'` cambia a valor pasivo
 - `auth`: base de creación de cuenta via OAuth2 Google
 
 ## 7. Frontend asociado

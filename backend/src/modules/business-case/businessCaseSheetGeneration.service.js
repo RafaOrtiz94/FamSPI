@@ -5,7 +5,6 @@ const logger = require("../../config/logger");
 const idempotencyService = require("./businessCaseIdempotency.service");
 const investmentsService = require("./investments.service");
 const bcLabEnvironmentService = require("./bcLabEnvironment.service");
-const bcEquipmentDetailsService = require("./bcEquipmentDetails.service");
 const bcLisIntegrationService = require("./bcLisIntegration.service");
 const bcRequirementsService = require("./bcRequirements.service");
 const bcDeliveriesService = require("./bcDeliveries.service");
@@ -262,6 +261,34 @@ function normalizePurchaseTypeLabel(value) {
   return normalized;
 }
 
+function normalizeClientProcessTypeLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.includes("public") || normalized.includes("publico")) return "publico";
+  if (normalized.includes("priv") || normalized.includes("privado")) return "privado";
+  if (normalized.includes("juridica") || normalized.includes("natural")) return null;
+  return normalized;
+}
+
+function normalizeLisProviderLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "other" || normalized === "otro") return "Otro";
+  if (normalized === "cobas_infiniti" || normalized.includes("infiniti")) return "Cobas Infinity";
+  if (normalized === "orion" || normalized.includes("orion")) return "Orion";
+  return value;
+}
+
+function resolveSmartObjective(metadata = {}, generalData = {}, bcRow = {}) {
+  return pickFirst(
+    generalData.smart_objective,
+    generalData.smartObjective,
+    metadata.smart_objective,
+    metadata.smartObjective,
+    bcRow.smart_objective,
+  );
+}
+
 function normalizeEquipmentTypeLabel(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return null;
@@ -281,6 +308,19 @@ function normalizeInvestmentNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function calculateProcessDepreciation({ unitPrice, percentage, projectedMonths }) {
+  const base = normalizeInvestmentNumber(unitPrice);
+  if (base === null) return null;
+
+  const rate = normalizeInvestmentNumber(percentage);
+  const months = normalizeInvestmentNumber(projectedMonths);
+  const safeRate = rate === null || rate < 0 ? 0 : rate;
+  const safeMonths = months === null || months <= 0 ? 0 : months;
+  const annual = base * (safeRate / 100);
+  const monthly = annual / 12;
+  return Number((monthly * safeMonths).toFixed(2));
 }
 
 function normalizeBool(value) {
@@ -353,7 +393,7 @@ async function getEquipmentCatalogMapByIds(ids = []) {
   return map;
 }
 
-function buildInversionesPayload(investments = []) {
+function buildInversionesPayload(investments = [], options = {}) {
   const out = {};
   const safeInvestments = Array.isArray(investments) ? investments : [];
   safeInvestments
@@ -362,14 +402,21 @@ function buildInversionesPayload(investments = []) {
       const name = String(item?.name || "").trim();
       if (!name) return;
       const cantidad = normalizeInvestmentNumber(item?.quantity);
-      const precio = normalizeInvestmentNumber(item?.unit_price);
+      const financialPrice = normalizeInvestmentNumber(item?.unit_price_financial ?? item?.unit_price);
+      const processDepreciation = calculateProcessDepreciation({
+        unitPrice: financialPrice,
+        percentage: item?.depreciation_percentage,
+        projectedMonths: options.projectedMonths,
+      });
       out[name] = {
         nombre: name,
         categoria: String(item?.category || "").trim(),
         caracteristicas: String(item?.characteristics || "").trim(),
         observaciones: String(item?.notes || "").trim(),
         cantidad: cantidad === null ? 0 : cantidad,
-        precio: precio === null ? 0 : precio,
+        precio: processDepreciation === null ? 0 : processDepreciation,
+        precio_operativo: normalizeInvestmentNumber(item?.unit_price) ?? 0,
+        precio_financiero: normalizeInvestmentNumber(item?.unit_price_financial) ?? null,
         descripcion: String(item?.characteristics || item?.notes || name || "").trim(),
       };
     });
@@ -445,7 +492,6 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
 
   const [
     labEnvironment,
-    equipmentDetails,
     lisIntegration,
     requirements,
     deliveries,
@@ -455,7 +501,6 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     maximumQuantities,
   ] = await Promise.all([
     bcLabEnvironmentService.getLabEnvironment(businessCaseId),
-    bcEquipmentDetailsService.getEquipmentDetails(businessCaseId),
     bcLisIntegrationService.getLisIntegration(businessCaseId),
     bcRequirementsService.getRequirements(businessCaseId),
     bcDeliveriesService.getDeliveries(businessCaseId),
@@ -473,9 +518,9 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
 
   const fields = {};
   setFieldIfPresent(fields, "TipoDeCliente", pickFirst(
-    generalData.clientType,
-    metadata.clientType,
-    normalizePurchaseTypeLabel(bcRow?.bc_purchase_type),
+    normalizeClientProcessTypeLabel(bcRow?.bc_purchase_type),
+    normalizeClientProcessTypeLabel(generalData.purchaseType),
+    normalizeClientProcessTypeLabel(metadata.purchaseType),
   ));
   setFieldIfPresent(fields, "EntidadContratante", pickFirst(
     generalData.contractingEntity,
@@ -484,6 +529,7 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   setFieldIfPresent(fields, "Cliente", bcRow?.client_name);
   setFieldIfPresent(fields, "CodigoProceso", bcRow?.process_code);
   setFieldIfPresent(fields, "ObjetoContratacion", bcRow?.contract_object);
+  setFieldIfPresent(fields, "SmartObjective", resolveSmartObjective(metadata, generalData, bcRow));
   setFieldIfPresent(fields, "ProvinciaCiudad", pickFirst(
     generalData.provinceCity,
     metadata.provinceCity,
@@ -498,40 +544,22 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   setFieldIfPresent(fields, "PruebasEspeciales", labEnvironment?.special_tests);
   setFieldIfPresent(fields, "FrecuenciaControlesEspeciales", labEnvironment?.special_qc_frequency);
 
-  setFieldIfPresent(fields, "NombreEquipoPrincipal", pickFirst(
-    equipmentNamesMap.get(primaryId),
-    equipmentDetails?.equipment_name,
-  ));
+  setFieldIfPresent(fields, "NombreEquipoPrincipal", equipmentNamesMap.get(primaryId));
   setFieldIfPresent(fields, "EstadoEquipoPrincipal", pickFirst(
-    equipmentDetails?.equipment_status,
     primaryPair?.equipment_status,
     normalizeEquipmentTypeLabel(primaryPair?.primary_type),
   ));
-  setFieldIfPresent(fields, "PropiedadEquipoPrincipal", equipmentDetails?.ownership_status);
   if (includePrimaryBackup) {
-    setFieldIfPresent(fields, "NombreEquipoBackUp", pickFirst(
-      equipmentNamesMap.get(backupId),
-      equipmentDetails?.backup_equipment_name,
-    ));
+    setFieldIfPresent(fields, "NombreEquipoBackUp", equipmentNamesMap.get(backupId));
     setFieldIfPresent(fields, "EstadoEquipoBackUp", pickFirst(
-      equipmentDetails?.backup_status,
       primaryPair?.backup_status,
       normalizeEquipmentTypeLabel(primaryPair?.backup_type),
     ));
     setFieldIfPresent(fields, "InstalarJuntoPrincipal", normalizeBool(primaryPair?.backup_install_simultaneous));
   }
-  setFieldIfPresent(fields, "UbicacionEquipos", pickFirst(
-    equipmentDetails?.installation_location,
-    primaryPair?.installation_location,
-  ));
-  setFieldIfPresent(fields, "RequiereEquipoComplementario", normalizeBool(pickFirst(
-    equipmentDetails?.requires_complementary,
-    primaryPair?.requires_complementary,
-  )));
-  setFieldIfPresent(fields, "EquipoComplementarioPrueba", pickFirst(
-    equipmentDetails?.complementary_test_purpose,
-    primaryPair?.complementary_test_purpose,
-  ));
+  setFieldIfPresent(fields, "UbicacionEquipos", primaryPair?.installation_location);
+  setFieldIfPresent(fields, "RequiereEquipoComplementario", normalizeBool(primaryPair?.requires_complementary));
+  setFieldIfPresent(fields, "EquipoComplementarioPrueba", primaryPair?.complementary_test_purpose);
 
   const includesLis = pickFirst(lisIntegration?.includes_lis, lisIntegration?.lis_includes);
   const requiresInterface = Boolean(
@@ -546,7 +574,7 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     )
   );
   setFieldIfPresent(fields, "IncluyeLIS", normalizeBool(includesLis));
-  setFieldIfPresent(fields, "ProveedorSistemaTrabajar", lisIntegration?.lis_provider);
+  setFieldIfPresent(fields, "ProveedorSistemaTrabajar", normalizeLisProviderLabel(lisIntegration?.lis_provider));
   setFieldIfPresent(fields, "IncluyeHadwareLIS", normalizeBool(lisIntegration?.includes_hardware));
   setFieldIfPresent(fields, "NumeroPacientesMensual", lisIntegration?.monthly_patients);
   setFieldIfPresent(fields, "InterfazSistemaActual", normalizeBool(requiresInterface));
@@ -661,7 +689,9 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   return {
     ...input,
     fields,
-    inversiones: hasManualInversiones ? input.inversiones : buildInversionesPayload(investments),
+    inversiones: hasManualInversiones
+      ? input.inversiones
+      : buildInversionesPayload(investments, { projectedMonths: sheetContext.projected_deadline_months }),
     max_quantities: preparedMaximumQuantities,
     equipment_tabs: equipmentTabs,
     sheet_context: sheetContext,
@@ -1149,6 +1179,8 @@ async function persistSheetResultInBusinessCase({
       replacement_reason: syncOutcome.replacementReason,
       missing_required_sheets: syncOutcome.missingRequiredSheets,
       previous_sheet_id: syncOutcome.previousSheetId,
+      previous_sheet_preserved: webAppResponse.previous_sheet_preserved === true,
+      previous_sheet_preservation_reason: webAppResponse.previous_sheet_preservation_reason || null,
       selected_sheets: Array.isArray(webAppResponse.selected_sheets) ? webAppResponse.selected_sheets : [],
       updated_at: nowIso,
     };

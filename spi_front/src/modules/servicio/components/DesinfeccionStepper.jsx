@@ -1,14 +1,11 @@
 import React, { useState, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { useSearchParams } from "react-router-dom";
-import { FiChevronLeft, FiChevronRight, FiCheckCircle, FiDownload, FiUpload } from "react-icons/fi";
+import { FiChevronLeft, FiChevronRight, FiCheckCircle, FiUpload } from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
 import { generateDisinfectionPDF } from "../../../core/api/servicioApi";
 import { useUI } from "../../../core/ui/UIContext";
-import FirmaDigital from "./FirmaDigital";
-import DocumentSigner from "../../signature/components/DocumentSigner";
-import { signDocument, fileToBase64 } from "../../../core/api";
 
 const STEPS = [
  {
@@ -108,15 +105,6 @@ const DesinfeccionStepper = () => {
  if (stepIndex <= Math.max(...completedSteps) + 1) {
  setCurrentStep(stepIndex);
  }
- };
-
- const handleSignatureCapture = (signatureData) => {
- console.log("📝 DesinfeccionStepper: Signature captured", {
- dataLength: signatureData?.length,
- dataPreview: signatureData?.substring(0, 50) + "..."
- });
- setValue("firma_ing_SC", signatureData);
- console.log("📝 DesinfeccionStepper: Signature stored in form");
  };
 
  const handleFileUpload = async (event) => {
@@ -248,23 +236,6 @@ const DesinfeccionStepper = () => {
  console.log("PDF Generation API Response:", result);
 
  if (result.ok) {
- // Crear documento en el sistema de firma electrónica
- const documentData = {
- title: `Desinfección - ${data.equipo} - ${data.fecha}`,
- type: 'DESINFECTION_REPORT',
- content: `Registro de desinfección de instrumento médico según F.ST-02 V04`,
- metadata: {
- form_type: 'F.ST-02',
- form_version: 'V04',
- equipment: data.equipo,
- serial: data.serie,
- responsible: data.responsable,
- disinfection_date: data.fecha,
- drive_folder_id: result.driveFolderId,
- pdf_url: result.pdfUrl
- }
- };
-
  // Aquí iría la lógica para crear el documento y redirigir a firma avanzada
  // Por ahora, mostramos el resultado del PDF
  setIsCompleted(true);

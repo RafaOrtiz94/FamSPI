@@ -3,7 +3,7 @@ const multer  = require("multer");
 const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
 const ctrl = require("./tiAssets.controller");
-const { TI_ROLES, TI_READ_ROLES, TI_ASSET_CREATE_ROLES, TI_CORPORATE_ASSIGN_ROLES } = require("./tiAssets.service");
+const { TI_ROLES, TI_READ_ROLES, TI_ASSET_CREATE_ROLES, TI_CORPORATE_ASSIGN_ROLES, TI_LEGACY_ACTA_UPLOAD_ROLES } = require("./tiAssets.service");
 
 const router   = express.Router();
 const upload   = multer({ storage: multer.memoryStorage() });
@@ -35,6 +35,8 @@ router.get("/actas/:actaId",             requireRole(TI_READ_ROLES), ctrl.getAct
 router.get("/actas/:actaId/signature-workflow", requireRole(TI_READ_ROLES), ctrl.getActaSignatureWorkflow);
 router.get("/actas/:actaId/pdf",         requireRole(TI_READ_ROLES), ctrl.downloadActaPdf);
 router.get("/recipient-info/:userId",    requireRole(TI_ROLES), ctrl.getActaRecipientInfo);
+router.get("/assignments/:assignmentId/evidence/file", requireRole(TI_READ_ROLES), ctrl.downloadAssignmentEvidenceFile);
+router.get("/liberation-photos/:photoId/file", requireRole(TI_READ_ROLES), ctrl.downloadLiberationPhotoFile);
 
 // Dynamic ID routes (MUST BE AFTER all specific routes)
 router.get("/:id/history",              requireRole(TI_READ_ROLES), ctrl.listHistory);
@@ -77,6 +79,11 @@ router.post("/actas/:actaId/upload-signed",
   requireRole(TI_ROLES),
   upload.single("file"),
   ctrl.uploadSignedActa,
+);
+router.post("/legacy-assignments/:assignmentId/upload-signed",
+  requireRole(TI_LEGACY_ACTA_UPLOAD_ROLES),
+  upload.single("file"),
+  ctrl.uploadLegacySignedActa,
 );
 
 // ── FASE 6: Liberation (TI only) ──────────────────────────────────────────

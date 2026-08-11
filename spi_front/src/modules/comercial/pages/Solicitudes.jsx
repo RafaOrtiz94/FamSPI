@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  FiClipboard, FiCheckCircle, FiClock, FiAlertTriangle,
+  FiClipboard,
   FiList, FiBarChart2, FiActivity, FiTrendingUp,
 } from "react-icons/fi";
 import { useAuth } from "../../../core/auth/useAuth";
@@ -11,12 +11,14 @@ import { useRequestModals } from "../../../core/hooks/useRequestModals";
 import ACPComercialSolicitudesView from "../components/solicitudes/ACPComercialSolicitudesView";
 import ComercialSolicitudesView from "../components/solicitudes/ComercialSolicitudesView";
 import UserRequestsView from "../components/solicitudes/UserRequestsView";
+import JefeFinancieroSolicitudesView from "../components/solicitudes/JefeFinancieroSolicitudesView";
 import {
   MaintenanceRequestModal,
   PrivatePurchaseRequestModal,
   EquipmentRequestModal,
 } from "../../../core/ui/components/RequestModals";
 import CreateRequestModal from "../components/CreateRequestModal";
+import CreditRequestModal from "../components/solicitudes/CreditRequestModal";
 import PermisoVacacionModal from "../../shared/solicitudes/modals/PermisoVacacionModal";
 import PersonnelRequestForm from "../../../core/ui/widgets/PersonnelRequestForm";
 import { createRequest } from "../../../core/api/requestsApi";
@@ -45,6 +47,12 @@ const SolicitudesPage = () => {
   const navigate = useNavigate();
   const { showToast, showLoader, hideLoader } = useUI();
   const [activeTab, setActiveTab] = useState("overview");
+  const [creditStats, setCreditStats] = useState({
+    total: 0,
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+  });
 
   const {
     privatePurchaseModalOpen,
@@ -63,6 +71,7 @@ const SolicitudesPage = () => {
   const [newPurchaseIntent, setNewPurchaseIntent] = useState('provider_handoff');
   const [createCompraModalOpen, setCreateCompraModalOpen] = useState(false);
   const [createClienteModalOpen, setCreateClienteModalOpen] = useState(false);
+  const [creditModalOpen, setCreditModalOpen] = useState(false);
   const [permisosModalOpen, setPermisosModalOpen] = useState(false);
   const [personnelModalOpen, setPersonnelModalOpen] = useState(false);
   const [privatePurchasePreset, setPrivatePurchasePreset] = useState({
@@ -76,12 +85,15 @@ const SolicitudesPage = () => {
     const isACP = roleName.includes('acp');
     const isBackofficeCommercial = roleName === "backoffice_comercial";
     const isJefeComercial = roleName.includes("jefe_comercial") || roleName.includes("jefe comercial");
+    const isJefeFinanciero = roleName.includes("jefe_financiero") || roleName.includes("jefe financiero");
 
-    const baseActions = ["cliente", "compra", "permisos"];
+    const baseActions = ["cliente", "compra", "credito", "permisos"];
     const fullActions = ["inspection", "retiro", ...baseActions];
 
     let availableActionIds;
-    if (isBackofficeCommercial) {
+    if (isJefeFinanciero) {
+      availableActionIds = [];
+    } else if (isBackofficeCommercial) {
       availableActionIds = baseActions;
     } else if (isACP) {
       availableActionIds = baseActions;
@@ -95,21 +107,28 @@ const SolicitudesPage = () => {
       isACP,
       isBackofficeCommercial,
       isJefeComercial,
-      viewComponent: isBackofficeCommercial ? null : (isACP ? ACPComercialSolicitudesView : ComercialSolicitudesView),
+      isJefeFinanciero,
+      viewComponent: isJefeFinanciero
+        ? JefeFinancieroSolicitudesView
+        : (isBackofficeCommercial ? null : (isACP ? ACPComercialSolicitudesView : ComercialSolicitudesView)),
       availableActions: availableActionIds.map(id => REQUEST_TYPES_CONFIG[id]).filter(Boolean),
     };
   }, [user]);
 
-  const stats = useMemo(() => ({
-    total: 45,
-    pending: 12,
-    approved: 28,
-    rejected: 5,
-  }), []);
+  const stats = useMemo(() => {
+    if (roleConfig.isJefeFinanciero) return creditStats;
+    return {
+      total: 45,
+      pending: 12,
+      approved: 28,
+      rejected: 5,
+    };
+  }, [creditStats, roleConfig.isJefeFinanciero]);
 
   const handleQuickAction = useCallback((actionId) => {
     switch (actionId) {
       case 'cliente':    setCreateClienteModalOpen(true); break;
+      case 'credito':    setCreditModalOpen(true); break;
       case 'compra':     setPurchaseTypeSelectionModalOpen(true); break;
       case 'permisos':   setPermisosModalOpen(true); break;
       case 'personal':   setPersonnelModalOpen(true); break;
@@ -148,11 +167,15 @@ const SolicitudesPage = () => {
 
   const tabs = [
     { id: 'overview',    label: 'Vista General',  icon: FiBarChart2 },
-    { id: 'my-requests', label: 'Mis Solicitudes', icon: FiList },
+    ...(roleConfig.isJefeFinanciero ? [] : [{ id: 'my-requests', label: 'Mis Solicitudes', icon: FiList }]),
     ...(roleConfig.isBackofficeCommercial ? [] : [{ id: 'analytics', label: 'Análisis', icon: FiActivity }]),
   ];
 
   /* Stats strip data — numbers use font-mono per Geist Mono Rule */
+  const visibleTabs = roleConfig.isJefeFinanciero
+    ? tabs.filter((tab) => tab.id === "overview")
+    : tabs;
+
   const statsData = [
     { label: "Total",      value: stats.total,    sub: "Gestiones activas",      color: "text-slate-900" },
     { label: "Aprobadas",  value: stats.approved, sub: `${stats.total > 0 ? Math.round((stats.approved / stats.total) * 100) : 0}% de éxito`, color: "text-emerald-700" },
@@ -160,6 +183,14 @@ const SolicitudesPage = () => {
     { label: "Rechazadas", value: stats.rejected, sub: "Requieren corrección",   color: "text-red-600"   },
   ];
 
+  const visibleStatsData = roleConfig.isJefeFinanciero
+    ? [
+      { label: "Credito", value: stats.total, sub: "Solicitudes F.VE-02", color: "text-slate-900" },
+      { label: "Aprobadas", value: stats.approved, sub: `${stats.total > 0 ? Math.round((stats.approved / stats.total) * 100) : 0}% de exito`, color: "text-emerald-700" },
+      { label: "En proceso", value: stats.pending, sub: "Credito pendiente", color: "text-amber-700" },
+      { label: "Rechazadas", value: stats.rejected, sub: "Credito negado", color: "text-red-600" },
+    ]
+    : statsData;
   const renderTabContent = () => {
     switch (activeTab) {
       case 'overview':
@@ -168,7 +199,7 @@ const SolicitudesPage = () => {
             {/* Franja de métricas — una sola superficie, no tarjetas individuales */}
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
               <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-slate-100 divide-y sm:divide-y-0">
-                {statsData.map((s, i) => (
+                {visibleStatsData.map((s, i) => (
                   <div key={i} className="px-5 py-4">
                     <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">{s.label}</p>
                     <p className={`text-3xl font-bold mt-1 font-mono tabular-nums tracking-tight ${s.color}`}>
@@ -181,6 +212,7 @@ const SolicitudesPage = () => {
             </div>
 
             {/* Acciones rápidas */}
+            {roleConfig.availableActions.length > 0 && (
             <div>
               <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-3">
                 {roleConfig.isACP ? 'Operaciones ACP' : 'Acciones rápidas'}
@@ -210,10 +242,11 @@ const SolicitudesPage = () => {
                 ))}
               </div>
             </div>
+            )}
 
             {/* Vista específica del rol */}
             {roleConfig.viewComponent && (
-              <roleConfig.viewComponent />
+              <roleConfig.viewComponent onStatsChange={roleConfig.isJefeFinanciero ? setCreditStats : undefined} />
             )}
           </div>
         );
@@ -313,7 +346,7 @@ const SolicitudesPage = () => {
 
         {/* Tab nav — underline style, Action Blue solo en activo */}
         <div className="flex mt-5 border-b border-slate-100 -mb-px gap-0 overflow-x-auto scrollbar-hide">
-          {tabs.map((tab) => {
+          {visibleTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
@@ -458,6 +491,23 @@ const SolicitudesPage = () => {
           }
         }}
         presetType="retiro"
+      />
+
+      <CreditRequestModal
+        open={creditModalOpen}
+        onClose={() => setCreditModalOpen(false)}
+        onSubmit={async (payload) => {
+          try {
+            showLoader();
+            await createRequest({ request_type_id: "F.VE-02", payload, files: [] });
+            showToast("Solicitud de credito enviada correctamente", "success");
+            setCreditModalOpen(false);
+          } catch (error) {
+            showToast(error?.response?.data?.message || "No se pudo enviar la solicitud de credito.", "error");
+          } finally {
+            hideLoader();
+          }
+        }}
       />
 
       <PrivatePurchaseRequestModal

@@ -11,6 +11,7 @@ router.use(verifyToken);
 
 router.get("/me/pending", ctrl.listMyPending);
 router.get("/me/completed", ctrl.listMyCompleted);
+router.get("/signer-candidates", ctrl.listSignerCandidates);
 router.post("/validate-signer-profiles", ctrl.validateSignerProfiles);
 router.get("/", ctrl.listWorkflows);
 router.post("/", ctrl.createWorkflow);

@@ -59,6 +59,155 @@ const resolveDocumentType = (document) =>
 const resolveIntegrationStatus = (document) =>
   String(document?.integration_status || "").trim().toLowerCase();
 
+const normalizeQualificationType = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase();
+
+const QUALIFICATION_GROUPS = [
+  {
+    key: "third_level_title",
+    title: "Titulo 3er nivel",
+  },
+  {
+    key: "fourth_level_title",
+    title: "Titulo 4to nivel",
+  },
+  {
+    key: "certification",
+    title: "Certificacion",
+  },
+];
+
+const formatQualificationMeta = (qualification = {}) => {
+  const meta = [];
+  if (qualification.institution) meta.push(qualification.institution);
+  else if (qualification.issuer) meta.push(qualification.issuer);
+  if (qualification.registration_number) meta.push(`Reg. ${qualification.registration_number}`);
+  if (qualification.issue_date) meta.push(String(qualification.issue_date).slice(0, 10));
+  if (qualification.expiry_date) meta.push(`Vence ${String(qualification.expiry_date).slice(0, 10)}`);
+  return meta.join(" · ");
+};
+
+const resolveQualificationDocumentUrl = (qualification = {}) =>
+  qualification?.drive_url || qualification?.file_url || qualification?.document_url || "";
+
+const QualificationCard = ({ qualification, group }) => {
+  const documentUrl = resolveQualificationDocumentUrl(qualification);
+  const title =
+    qualification?.title ||
+    qualification?.file_name ||
+    "Registro sin titulo";
+  const meta = formatQualificationMeta(qualification);
+
+  return (
+    <motion.article
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, ease: "easeOut" }}
+      className="relative flex min-h-[176px] flex-col justify-between rounded-xl border border-hr-success/30 bg-hr-success-soft/30 p-4 transition-all"
+    >
+      <div>
+        <div className="mb-2 flex items-start justify-between gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-hr-success-soft text-hr-success">
+            <FiFileText size={18} title="Icono de credencial academica" />
+          </div>
+          <span className="rounded-full bg-hr-success-soft px-2 py-0.5 text-[10px] font-bold text-hr-success-muted">
+            MI PERFIL
+          </span>
+        </div>
+
+        <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-brand-hr-primary-muted">
+          {group.title}
+        </p>
+        <h5 className="line-clamp-2 text-xs font-semibold leading-tight text-brand-hr-primary">
+          {title}
+        </h5>
+        <p className="mt-2 line-clamp-3 text-[10px] text-brand-hr-primary-muted">
+          {meta || "Registro academico sincronizado desde Mi Perfil"}
+        </p>
+      </div>
+
+      <div className="mt-4">
+        {documentUrl ? (
+          <a
+            href={documentUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Abrir respaldo de ${title}`}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-brand-hr-primary/20 bg-brand-hr-primary-contrast px-3 py-1.5 text-xs font-medium text-brand-hr-primary transition hover:bg-brand-hr-primary-soft"
+          >
+            <FiEye className="h-4 w-4 shrink-0" title="Icono de visualizacion" />
+            <span className="min-w-0 truncate">Abrir respaldo</span>
+          </a>
+        ) : (
+          <span className="inline-flex w-full items-center justify-center rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700">
+            Sin respaldo adjunto
+          </span>
+        )}
+      </div>
+    </motion.article>
+  );
+};
+
+const QualificationsDossierSection = ({ qualifications = [] }) => {
+  const qualificationGroups = useMemo(() => {
+    const grouped = new Map(
+      QUALIFICATION_GROUPS.map((group) => [group.key, { ...group, items: [] }]),
+    );
+
+    (Array.isArray(qualifications) ? qualifications : []).forEach((qualification) => {
+      const key = normalizeQualificationType(qualification?.qualification_type);
+      if (!grouped.has(key)) return;
+      grouped.get(key).items.push(qualification);
+    });
+
+    return Array.from(grouped.values());
+  }, [qualifications]);
+
+  const totalQualifications = qualificationGroups.reduce(
+    (total, group) => total + group.items.length,
+    0,
+  );
+  const hasQualifications = totalQualifications > 0;
+
+  return (
+    <section className="mb-4 rounded-xl border border-brand-hr-primary/10 bg-brand-hr-primary-contrast p-4">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h4 className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-hr-primary-muted">
+            Credenciales academicas sincronizadas
+          </h4>
+          <p className="mt-1 text-xs text-brand-hr-primary-muted">
+            Titulos y certificaciones cargados por el colaborador desde Mi Perfil.
+          </p>
+        </div>
+        <span className="self-start rounded-full bg-brand-hr-primary-soft px-3 py-1 text-xs font-semibold text-brand-hr-primary">
+          {totalQualifications} registro{totalQualifications === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      {hasQualifications ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {qualificationGroups.flatMap((group) =>
+            group.items.map((qualification) => (
+              <QualificationCard
+                key={qualification?.id || `${group.key}-${qualification?.title || qualification?.file_name || "registro"}`}
+                qualification={qualification}
+                group={group}
+              />
+            )),
+          )}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-brand-hr-primary/15 bg-brand-hr-primary-soft/30 px-4 py-5 text-sm text-brand-hr-primary-muted">
+          No existen titulos o certificaciones cargados desde Mi Perfil.
+        </div>
+      )}
+    </section>
+  );
+};
+
 const DocumentCard = ({
   definition,
   existingDoc,
@@ -309,6 +458,7 @@ const GroupGrid = ({
 
 const PersonnelDocuments = ({
   documents,
+  qualifications = [],
   onDocumentUpload,
   onUpload,
   onDocumentPreview,
@@ -460,6 +610,9 @@ const PersonnelDocuments = ({
                   className="overflow-hidden"
                 >
                   <div className="border-t border-slate-100 px-4 py-4">
+                    {groupKey === "profile" ? (
+                      <QualificationsDossierSection qualifications={qualifications} />
+                    ) : null}
                     <GroupGrid
                       items={items}
                       getDocStatus={getDocStatus}

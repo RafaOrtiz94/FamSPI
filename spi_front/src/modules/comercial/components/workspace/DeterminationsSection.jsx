@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "@headlessui/react";
-import { FiActivity, FiAlertTriangle, FiCalendar, FiCheck, FiChevronDown, FiClipboard, FiExternalLink, FiFileText, FiRefreshCw, FiSave, FiUpload, FiX } from "react-icons/fi";
+import { FiActivity, FiCalendar, FiCheck, FiChevronDown, FiExternalLink, FiFileText, FiRefreshCw, FiUpload, FiX } from "react-icons/fi";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
@@ -10,13 +10,10 @@ import { promptDialog } from "../../../../core/ui/utils/promptDialog";
 import SectionEditorBadge from "./SectionEditorBadge";
 import {
  getDeterminationsStatDocumentInfo,
- parseDeterminationsQuantitiesFile,
  requestBusinessCaseEnvironmentInspection,
  uploadDeterminationsStatDocument,
 } from "../../../../core/api/businessCaseApi";
 
-const REACTIVO_TYPES = new Set(["reactivo", "determinacion"]);
-const TECNICO_TYPES = new Set(["control", "calibrador", "consumible", "material"]);
 const isAffirmative = (value) => {
  const normalized = String(value ?? "").trim().toLowerCase();
  return value === true || ["true", "1", "yes", "si", "sí"].includes(normalized);
@@ -25,12 +22,7 @@ const isAffirmative = (value) => {
 const PUBLIC_BC_TYPES = new Set(["public", "comodato_publico"]);
 // Roles que ejecutan la parte técnica (inspección, actas, calibradores propios)
 const TECNICO_ROLES = new Set(["jefe_tecnico", "jefe_servicio"]);
-// BUG-01: jefe_comercial y jefe_de_comercial son editores directos de TECNICO_TYPES
-// (calibradores, controles, materiales — según PASO BC-4 del flujo documentado)
-const TECNICO_EDIT_ROLES = new Set(["jefe_tecnico", "jefe_servicio", "jefe_comercial", "jefe_de_comercial"]);
-const ADMIN_ROLES = new Set(["administrador", "super_admin"]);
 const ROW_WINDOW_STEP = 24;
-const IDEMPOTENCY_TTL_MS = 60 * 1000;
 const DET_DEBUG_VERSION = "2026-05-13-det-save-v5";
 const DET_DEBUG_ENABLED = (() => {
  const envFlag = String(process.env.REACT_APP_BC_CONSUMPTION_DEBUG || "").trim().toLowerCase() === "true";
@@ -391,13 +383,6 @@ const DeterminationsSection = ({
  const [selectedDocument, setSelectedDocument] = useState(null);
  const [sheetUrl, setSheetUrl] = useState(null);
  const [sheetSyncing, setSheetSyncing] = useState(false);
- const [isDetermEditing, setIsDetermEditing] = useState(false);
- const [importModal, setImportModal] = useState(null);
- const [importTab, setImportTab] = useState("paste");
- const [importPasteText, setImportPasteText] = useState("");
- const [importPreview, setImportPreview] = useState(null);
- const [importFileLoading, setImportFileLoading] = useState(false);
- const importFileRef = useRef(null);
  const statDocumentInputRef = useRef(null);
  const [inspectionModal, setInspectionModal] = useState({
   open: false,
@@ -417,8 +402,6 @@ const DeterminationsSection = ({
  const autosaveTimeoutRef = useRef(null);
  const pendingQtyChangesRef = useRef({});
  const editedRowsRef = useRef({});
- const [pendingChangesCount, setPendingChangesCount] = useState(0);
- const [hasStructureChanges, setHasStructureChanges] = useState(false);
  const [quantityDrafts, setQuantityDrafts] = useState({});
  const quantityDraftsRef = useRef({});
  const [rowWindowByGroup, setRowWindowByGroup] = useState({});
@@ -429,16 +412,12 @@ const DeterminationsSection = ({
  const [equipmentIds, setEquipmentIds] = useState([]);
  const [equipmentMeta, setEquipmentMeta] = useState({});
 
- const idempotencyCacheRef = useRef(new Map());
  const lastSavedKeysRef = useRef([]);
- const lastEditedRowRef = useRef(null);
- const persistInFlightRef = useRef(false);
 
  const canEditBase = permissions.canEditDeterminations === true && ownership?.canUserEdit !== false;
  const currentRole = user?.role;
  const normalizedCurrentRole = String(currentRole || "").trim().toLowerCase();
  const isJefeComercial = normalizedCurrentRole === "jefe_comercial" || normalizedCurrentRole === "jefe_de_comercial";
- const autosaveEnabled = false;
  const gateActive = gateInfo?.enabledForBusinessCase === true;
  const gatePhase = String(gateInfo?.phase || "commercial_input").toLowerCase();
  const quantitiesLocked = gateInfo?.quantitiesLocked === true;
@@ -457,12 +436,36 @@ const DeterminationsSection = ({
  ? `${selectedDocument.name} (${formatSelectedFileSize(selectedDocument.size)})`
  : "Aun no has seleccionado un archivo.";
  const canEditByGate = gateInfo?.permissions?.canEditDeterminations === true;
- const canEditFinal = (gateActive ? (canEditBase && canEditByGate) : canEditBase) && !quantitiesLocked && isDetermEditing;
+ const canEditFinal = (gateActive ? (canEditBase && canEditByGate) : canEditBase) && !quantitiesLocked;
  const technicalSlaExpired = gateInfo?.extensionRequired === true || gateInfo?.technicalSlaExpired === true;
  const canReopenCommercial = isJefeComercial && gatePhase === "technical_review";
+ // Ventana de 48h vencida ANTES de validar reactivos (fase aun comercial) --
+ // reopenDeterminationsCommercial solo aplica DESPUES de validar, asi que sin
+ // esto el BC quedaba bloqueado sin ninguna accion visible para nadie.
+ const canRenewCommercialWindow = isJefeComercial && gatePhase === "commercial_input" && gateInfo?.isExpired === true;
  const sectionLocks = gateInfo?.sectionLocks || {};
  const isSubsectionLocked = (subsectionKey) => Boolean(sectionLocks?.[subsectionKey]) || quantitiesLocked;
  const allSubsectionsLocked = ["reactivos", "controles", "calibradores", "materiales"].every((key) => isSubsectionLocked(key));
+ // Bloquea controles + calibradores + materiales (no cierra la seccion).
+ // Se oculta una vez que las 3 ya estan bloqueadas -- a partir de ahi el
+ // unico paso pendiente es el cierre explicito de mas abajo.
+ const canCloseAllTechnicalSubsections =
+ canEditFinal &&
+ isTechnicalRole &&
+ gatePhase === "technical_review" &&
+ !quantitiesLocked &&
+ !allSubsectionsLocked;
+ // Cierre EXPLICITO de la seccion "Determinaciones" -- nunca automatico.
+ // Solo aparece cuando las 4 subsecciones (incluyendo reactivos) ya estan
+ // bloqueadas; el usuario debe hacer click a proposito para avanzar a
+ // Inversiones, no ocurre como efecto secundario de bloquear la ultima
+ // subseccion.
+ const canCloseDeterminationsSection =
+ canEditFinal &&
+ isTechnicalRole &&
+ gatePhase === "technical_review" &&
+ !quantitiesLocked &&
+ allSubsectionsLocked;
  const pendingUnlockBySubsection = useMemo(() => {
  const map = {};
  (gateInfo?.unlockRequests || [])
@@ -497,69 +500,6 @@ const inspectionSummary = useMemo(() => {
 }, [businessCase, inspectionDraft, equipmentIds, equipmentMeta]);
 
  const isPublicBC = PUBLIC_BC_TYPES.has(businessCase?.bc_purchase_type);
-
-const canEditType = (type) => {
- if (!canEditFinal) return false;
- if (isSubsectionLocked(subsectionFromType(type))) return false;
- if (ADMIN_ROLES.has(normalizedCurrentRole)) return true;
- // NUEVO-02: jefe_comercial y jefe_de_comercial pueden editar reactivos en BC público y privado
- if (REACTIVO_TYPES.has(type)) {
-   const isJefeComercial = normalizedCurrentRole === "jefe_comercial" || normalizedCurrentRole === "jefe_de_comercial";
-   if (isJefeComercial) return true;
-   return isPublicBC ? normalizedCurrentRole === "acp_comercial" : normalizedCurrentRole === "backoffice_comercial";
- }
- // BUG-01: usar TECNICO_EDIT_ROLES (incluye jefe_comercial/jefe_de_comercial) para sub-secciones técnicas
- if (TECNICO_TYPES.has(type)) return TECNICO_EDIT_ROLES.has(normalizedCurrentRole);
- return false;
- };
-
- const getStableJson = useCallback((value) => {
- if (Array.isArray(value)) {
- return `[${value.map((entry) => getStableJson(entry)).join(",")}]`;
- }
- if (!value || typeof value !== "object") {
- return JSON.stringify(value);
- }
- const keys = Object.keys(value).sort();
- const body = keys.map((key) => `${JSON.stringify(key)}:${getStableJson(value[key])}`).join(",");
- return `{${body}}`;
- }, []);
-
- const buildFastHash = useCallback((input) => {
- const str = String(input || "");
- let hash = 0;
- for (let index = 0; index < str.length; index += 1) {
- hash = (hash * 31 + str.charCodeAt(index)) >>> 0;
- }
- return hash.toString(16);
- }, []);
-
- const getIdempotencyKey = useCallback(
- (scope, payload) => {
- const now = Date.now();
- const fingerprint = `${scope}:${buildFastHash(getStableJson(payload))}`;
- const existing = idempotencyCacheRef.current.get(fingerprint);
- if (existing && existing.expiresAt > now) {
- return existing.key;
- }
-
- const randomKey =
- (typeof window !== "undefined" && window.crypto?.randomUUID?.()) ||
- `${now}-${Math.random().toString(16).slice(2)}`;
- const key = `${scope}:${bcId}:${randomKey}`;
- idempotencyCacheRef.current.set(fingerprint, { key, expiresAt: now + IDEMPOTENCY_TTL_MS });
-
- if (idempotencyCacheRef.current.size > 100) {
- const entries = Array.from(idempotencyCacheRef.current.entries());
- entries
- .filter(([, value]) => value.expiresAt <= now)
- .forEach(([fingerprintKey]) => idempotencyCacheRef.current.delete(fingerprintKey));
- }
-
- return key;
- },
- [bcId, buildFastHash, getStableJson],
- );
 
  const loadEquipmentData = useCallback(async () => {
  if (!bcId) return;
@@ -684,7 +624,6 @@ const canEditType = (type) => {
  });
  pendingQtyChangesRef.current = {};
  editedRowsRef.current = {};
- setPendingChangesCount(0);
  if (autosaveTimeoutRef.current) {
  clearTimeout(autosaveTimeoutRef.current);
  autosaveTimeoutRef.current = null;
@@ -701,7 +640,6 @@ const canEditType = (type) => {
  quantityDraftsRef.current = next;
  return next;
  });
- setHasStructureChanges(false);
   debugInfo("[DET_DEBUG] loadExisting:success", {
   bcId,
   items: items.length,
@@ -1029,6 +967,15 @@ return map;
  return String(savedValue ?? 0);
  };
 
+ const getPlannedQtyValue = (row) => {
+ const value = getSavedRow(row)?.plannedQty;
+ return value === null || value === undefined ? "0" : String(value);
+ };
+
+ const getSheetQtyDisplayValue = (row, sectionKey) => (
+ sectionKey === "reactivos" ? getQtyInputValue(row) : getPlannedQtyValue(row)
+ );
+
  useEffect(() => {
  if (!DET_DEBUG_ENABLED) return;
  if (!mergedRows.length) return;
@@ -1069,530 +1016,49 @@ return map;
   !isSubsectionLocked("reactivos") &&
   hasSyncedReactivos;
 
-const syncQuantityDrafts = useCallback((items = []) => {
- const next = {};
- (Array.isArray(items) ? items : []).forEach((item) => {
- if (!item) return;
- const qty = String(item.annualQty ?? item.annualQuantity ?? 0);
- const itemKey = String(item?.key || "").trim();
- if (itemKey) next[itemKey] = qty;
- });
- quantityDraftsRef.current = next;
- setQuantityDrafts(next);
- }, []);
+ // Boton "Validar reactivos" oculto por falta de sync (no por permisos/fase)
+ // -- sin este aviso el paso parece trabado para jefe_comercial/acp_comercial.
+ const needsReactivoSyncBeforeValidate =
+  gatePhase === "commercial_input" &&
+  gateInfo?.documentUploaded === true &&
+  gateInfo?.isExpired !== true &&
+  canValidateReactivosByRole &&
+  !quantitiesLocked &&
+  !isSubsectionLocked("reactivos") &&
+  !hasSyncedReactivos;
 
-const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallbackExcluded = []) => {
- const persistedItemsRaw = Array.isArray(persisted?.items) ? persisted.items : fallbackItems;
- const persistedItems = normalizePersistedItemsForUI(persistedItemsRaw);
- const rawExcluded = Array.isArray(persisted?.excluded) ? persisted.excluded : fallbackExcluded;
- const persistedExcluded = normalizeExcludedAgainstItems(persistedItems, rawExcluded);
- consumptionVersionRef.current = persisted?.version || consumptionVersionRef.current;
- lastSavedKeysRef.current = persistedItems.map((item) => item?.key).filter(Boolean);
- savedItemsRef.current = persistedItems;
- excludedKeysRef.current = persistedExcluded;
- setSavedItems(persistedItems);
- setExcludedKeys(persistedExcluded);
- syncQuantityDrafts(persistedItems);
- pendingQtyChangesRef.current = {};
- editedRowsRef.current = {};
- setPendingChangesCount(0);
- setHasStructureChanges(false);
- return { persistedItems, persistedExcluded };
- }, [syncQuantityDrafts]);
 
- const getWindowLimit = (groupKey, tableType) =>
+const getWindowLimit = (groupKey, tableType) =>
  rowWindowByGroup[`${groupKey}:${tableType}`] || ROW_WINDOW_STEP;
 
- const isSectionCollapsed = (groupKey, sectionKey) =>
+const isSectionCollapsed = (groupKey, sectionKey) =>
  collapsedSections[`${groupKey}:${sectionKey}`] !== false;
 
- const toggleSectionCollapsed = (groupKey, sectionKey) => {
+const toggleSectionCollapsed = (groupKey, sectionKey) => {
  const stateKey = `${groupKey}:${sectionKey}`;
  setCollapsedSections((prev) => ({
  ...prev,
  [stateKey]: !prev[stateKey],
  }));
- };
+};
 
- const expandRowWindow = (groupKey, tableType) => {
+const expandRowWindow = (groupKey, tableType) => {
  setRowWindowByGroup((prev) => {
  const key = `${groupKey}:${tableType}`;
  const current = prev[key] || ROW_WINDOW_STEP;
  return { ...prev, [key]: current + ROW_WINDOW_STEP };
  });
- };
-
- const persistItems = async (nextItems, nextExcluded = excludedKeys, options = {}) => {
- if (!bcId) {
- showToast("Primero crea el Business Case", "warning");
- return;
- }
- if (persistInFlightRef.current) {
- debugWarn("[DET_DEBUG] persistItems:skipped_inflight", { bcId });
- return;
- }
- const { refresh = false, silent = false, revalidate = false, markComplete = false } = options;
- const effectiveRefresh = markComplete ? Boolean(refresh) : false;
- const effectiveRevalidate = markComplete ? Boolean(revalidate) : false;
- debugInfo("[DET_DEBUG] persistItems:start", {
- bcId,
- options: { refresh, silent, revalidate, markComplete },
- effectiveOptions: { refresh: effectiveRefresh, revalidate: effectiveRevalidate },
- nextItemsCount: Array.isArray(nextItems) ? nextItems.length : 0,
- nextExcludedCount: Array.isArray(nextExcluded) ? nextExcluded.length : 0,
- version: consumptionVersionRef.current,
- });
- persistInFlightRef.current = true;
- setSaving(true);
- const startedAt = Date.now();
- try {
- const debugItemPayload = (nextItems || []).find((item) => String(item?.itemId || "").trim() === "3321193001");
- debugInfo("[BC_CONSUMPTION][FE][SAVE][REQUEST]", {
- bcId,
- itemsCount: Array.isArray(nextItems) ? nextItems.length : 0,
- excludedCount: Array.isArray(nextExcluded) ? nextExcluded.length : 0,
- debugItem: debugItemPayload
- ? {
- key: debugItemPayload.key,
- itemId: debugItemPayload.itemId,
- annualQty: debugItemPayload.annualQty,
- source: debugItemPayload.source,
- }
- : null,
- });
- const payload = {
- items: (nextItems || []).map((item) => ({
- ...item,
- annualQuantity: item?.annualQty ?? item?.annualQuantity ?? 0,
- })),
- excluded: nextExcluded,
- version: consumptionVersionRef.current,
- idempotency_key: getIdempotencyKey("bc.consumption.save", {
- items: (nextItems || []).map((item) => ({
- ...item,
- annualQuantity: item?.annualQty ?? item?.annualQuantity ?? 0,
- })),
- excluded: nextExcluded,
- version: consumptionVersionRef.current,
- }),
- };
- console.log("[BC_AUDIT][FE][SAVE_REQUEST]", {
- bcId,
- version: payload.version || null,
- itemsCount: payload.items.length,
- excludedCount: payload.excluded.length,
- nonZeroItems: payload.items.filter((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) > 0).length,
- markComplete,
- });
- const querySuffix = silent ? "?silent=true" : "";
- logFrontAudit("[BC_AUDIT][FE][PUT_CONSUMPTION_ITEMS][REQUEST]", {
- bcId,
- url: `/business-case/${bcId}/consumption-items${querySuffix}`,
- version: payload.version || null,
- excludedCount: payload.excluded.length,
- itemsSummary: summarizeItemsForAudit(payload.items),
- excludedSample: payload.excluded.slice(0, 40),
- markComplete,
- });
- const runSaveRequest = async (body) =>
- api.put(`/business-case/${bcId}/consumption-items${querySuffix}`, body);
-
- let response;
- try {
- response = await runSaveRequest(payload);
- } catch (firstErr) {
- const firstCode = firstErr?.response?.data?.code;
- const currentVersion = firstErr?.response?.data?.details?.currentVersion || null;
- if (firstCode !== "CONSUMPTION_VERSION_CONFLICT" || !currentVersion) {
- throw firstErr;
- }
- debugWarn("[DET_DEBUG] persistItems:retry_on_version_conflict", {
- bcId,
- previousVersion: payload.version || null,
- currentVersion,
- });
- consumptionVersionRef.current = currentVersion;
- const retryPayload = {
- ...payload,
- version: currentVersion,
- idempotency_key: getIdempotencyKey("bc.consumption.save.retry", {
- items: payload.items,
- excluded: payload.excluded,
- version: currentVersion,
- }),
- };
- response = await runSaveRequest(retryPayload);
- }
- debugInfo("[DET_DEBUG] persistItems:api_success", {
- bcId,
- status: response?.status,
- hasData: Boolean(response?.data),
- ms: Date.now() - startedAt,
- });
- const persisted = response?.data?.data || {};
- logFrontAudit("[BC_AUDIT][FE][PUT_CONSUMPTION_ITEMS][RESPONSE]", {
- bcId,
- httpStatus: response?.status || null,
- version: persisted?.version || null,
- excludedCount: Array.isArray(persisted?.excluded) ? persisted.excluded.length : 0,
- itemsSummary: summarizeItemsForAudit(Array.isArray(persisted?.items) ? persisted.items : []),
- excludedSample: Array.isArray(persisted?.excluded) ? persisted.excluded.slice(0, 40) : [],
- markComplete,
- });
- console.log("[BC_AUDIT][FE][SAVE_RESPONSE]", {
- bcId,
- version: persisted?.version || null,
- itemsCount: Array.isArray(persisted?.items) ? persisted.items.length : 0,
- excludedCount: Array.isArray(persisted?.excluded) ? persisted.excluded.length : 0,
- nonZeroItems: Array.isArray(persisted?.items)
- ? persisted.items.filter((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) > 0).length
- : 0,
- markComplete,
- });
- const { persistedItems, persistedExcluded } = applyPersistedSnapshot(
- persisted,
- nextItems,
- nextExcluded,
- );
- const debugItemResponse = (persistedItems || []).find((item) => String(item?.itemId || "").trim() === "3321193001");
- debugInfo("[BC_CONSUMPTION][FE][SAVE][RESPONSE]", {
- bcId,
- itemsCount: persistedItems.length,
- excludedCount: persistedExcluded.length,
- debugItem: debugItemResponse
- ? {
- key: debugItemResponse.key,
- itemId: debugItemResponse.itemId,
- annualQty: debugItemResponse.annualQty,
- source: debugItemResponse.source,
- }
- : null,
- });
- if (effectiveRevalidate) {
- debugInfo("[DET_DEBUG] persistItems:revalidate_start", { bcId });
- await loadExisting();
- debugInfo("[DET_DEBUG] persistItems:revalidate_done", { bcId });
- }
- if (!silent) {
- showToast("Determinaciones guardadas correctamente.", "success");
- }
- if (markComplete) {
- debugInfo("[DET_DEBUG] persistItems:mark_complete_request", { bcId, gatePhase, role: currentRole });
- try {
- await completeDeterminationsSection(bcId);
- await loadGateInfo();
- } catch (completeErr) {
- console.error("[BC_AUDIT][FE][COMPLETE_SECTION][ERROR]", {
-  bcId,
-  message: completeErr?.response?.data?.message || completeErr?.message,
-  code: completeErr?.response?.data?.code || null,
-  status: completeErr?.response?.status || null,
-  data: completeErr?.response?.data || null,
- });
- showToast(
-  getNaturalErrorMessage(
-   completeErr,
-   "Las cantidades se guardaron, pero no se pudo terminar la sección.",
-  ),
-  "warning",
- );
- }
- }
- if (effectiveRefresh) {
- debugInfo("[DET_DEBUG] persistItems:onSave", {
- bcId,
- refresh: effectiveRefresh,
- markComplete,
- });
- onSave({ refresh: effectiveRefresh, markComplete });
- } else {
- debugInfo("[DET_DEBUG] persistItems:onSave:skipped_refresh", { bcId, markComplete });
- }
- recordBusinessCaseTelemetry({
- section: "determinations",
- type: "save_full_success",
- durationMs: Date.now() - startedAt,
- success: true,
- });
- } catch (err) {
- debugError("[DET_DEBUG] persistItems:error", {
- bcId,
- message: err?.response?.data?.message || err?.message,
- code: err?.response?.data?.code || null,
- status: err?.response?.status || null,
- data: err?.response?.data || null,
- });
- const code = err?.response?.data?.code;
- if (code === "CONSUMPTION_VERSION_CONFLICT") {
- console.warn("[BC_AUDIT][FE][VERSION_CONFLICT]", {
- bcId,
- expectedVersion: err?.response?.data?.details?.expectedVersion || null,
- currentVersion: err?.response?.data?.details?.currentVersion || null,
- });
- showToast("Otro usuario actualizo esta seccion. Recargando datos...", "warning");
- await loadExisting();
- } else {
- showToast(getNaturalErrorMessage(err, "No se pudo guardar la información"), "error");
- }
- recordBusinessCaseTelemetry({
- section: "determinations",
- type: "save_full_error",
- durationMs: Date.now() - startedAt,
- success: false,
- });
- } finally {
- persistInFlightRef.current = false;
- setSaving(false);
- }
- };
-
- const buildPersistPayloadFromDrafts = useCallback(() => {
-  const visibleRowMap = new Map();
-  mergedRows.forEach((row) => {
-  if (row?.key) visibleRowMap.set(row.key, row);
-  });
- Object.values(editedRowsRef.current || {}).forEach((row) => {
- if (row?.key && !visibleRowMap.has(row.key)) {
- visibleRowMap.set(row.key, row);
- }
- });
-
- // Conserva filas guardadas que no estén visibles por cambios de catálogo/equipo.
-  (savedItemsRef.current || []).forEach((item) => {
-  if (item?.key && !visibleRowMap.has(item.key)) {
-  visibleRowMap.set(item.key, item);
-  }
-  });
-
-  // Blindaje: cualquier draft con cantidad > 0 debe terminar en payload, incluso
-  // si no quedó en mergedRows por desalineación temporal de UI.
-  const rowIndexByKey = new Map();
-  const indexCandidate = (rowLike) => {
-  if (!rowLike) return;
-  const key = String(rowLike?.key || "").trim();
-  if (key) rowIndexByKey.set(key, rowLike);
-  const legacyKey = String(rowLike?.legacyKey || "").trim();
-  if (legacyKey) rowIndexByKey.set(legacyKey, rowLike);
-  };
-  (catalogItems || []).forEach(indexCandidate);
-  mergedRows.forEach(indexCandidate);
-  (savedItemsRef.current || []).forEach(indexCandidate);
-  Object.values(editedRowsRef.current || {}).forEach(indexCandidate);
-
-  Object.entries(quantityDraftsRef.current || {}).forEach(([draftKey, draftValue]) => {
-  const numeric = toPositiveNumber(draftValue);
-  if (numeric <= 0) return;
-  if (visibleRowMap.has(draftKey)) return;
-  const resolved = rowIndexByKey.get(draftKey);
-  if (resolved?.key) {
-  visibleRowMap.set(resolved.key, resolved);
-  return;
-  }
-  const fromLegacy = (catalogItems || []).find((row) => row?.legacyKey && row.legacyKey === draftKey);
-  if (fromLegacy?.key) {
-  visibleRowMap.set(fromLegacy.key, fromLegacy);
-  }
-  });
-
-  const nextExcluded = Array.from(new Set(excludedKeysRef.current || []));
-  const nextItems = [];
-
- visibleRowMap.forEach((row) => {
- const saved = getSavedRow(row);
- const rawQty = quantityDraftsRef.current[row.key]
-  ?? quantityDrafts[row.key]
-  ?? saved?.annualQty
-  ?? saved?.annualQuantity
-  ?? row?.annualQty
- ?? row?.annualQuantity
- ?? 0;
- const annualQty = toPositiveNumber(rawQty);
- const isCatalog = String(row?.source || saved?.source || "").toLowerCase() === "catalog";
- // Si el usuario puso cantidad > 0, reactivamos el item aunque haya quedado excluido previamente.
- if (annualQty > 0) {
- const keySet = new Set([row.key, row.legacyKey].filter(Boolean));
- for (const key of keySet) {
- const idx = nextExcluded.indexOf(key);
- if (idx >= 0) nextExcluded.splice(idx, 1);
- }
- }
- const isExcluded = nextExcluded.includes(row.key) || (row.legacyKey && nextExcluded.includes(row.legacyKey));
-
- // Catálogo: solo persistimos cantidades > 0. Con 0 sigue visible en UI, no se excluye.
- if (isCatalog) {
- if (isExcluded || annualQty <= 0) return;
- }
-
- const name = String(row?.name || saved?.name || "").trim();
- if (!name) return;
-
- nextItems.push({
- key: row.key,
- itemId: row?.itemId ?? saved?.itemId ?? null,
- name,
- type: String(row?.type || saved?.type || "consumible").trim().toLowerCase(),
- source: String(row?.source || saved?.source || "custom").trim().toLowerCase(),
- catalogId: row?.catalogId ?? saved?.catalogId ?? null,
- annualQty,
- annualQuantity: annualQty,
- equipmentId: row?.equipmentId ?? saved?.equipmentId ?? null,
- equipmentName: row?.equipmentName ?? saved?.equipmentName ?? null,
- });
- });
-
- const debugItemFromPayload = nextItems.find((item) => String(item?.itemId || "").trim() === "3321193001");
-  debugInfo("[BC_CONSUMPTION][FE][BUILD_PAYLOAD]", {
-  bcId,
-  rowsVisible: visibleRowMap.size,
-  itemsToSave: nextItems.length,
-  excludedToSave: nextExcluded.length,
-  nonZeroItemsSample: nextItems
-  .filter((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) > 0)
-  .slice(0, 15)
-  .map((item) => ({
-  key: item?.key || null,
-  itemId: item?.itemId || null,
-  annualQty: item?.annualQty ?? item?.annualQuantity ?? 0,
-  })),
-  debugItem: debugItemFromPayload
-  ? {
-  key: debugItemFromPayload.key,
- itemId: debugItemFromPayload.itemId,
- annualQty: debugItemFromPayload.annualQty,
- source: debugItemFromPayload.source,
- }
- : null,
- });
-  debugInfo("[DET_DEBUG] buildPersistPayloadFromDrafts", {
- bcId,
- visibleRows: visibleRowMap.size,
- nextItems: nextItems.length,
- nextExcluded: nextExcluded.length,
- pendingQtyKeys: Object.keys(pendingQtyChangesRef.current || {}),
- hasStructureChanges,
-  sampleKeys: nextItems.slice(0, 8).map((item) => item?.key),
-  qtySample: buildDebugQtySample(Array.from(visibleRowMap.values()), quantityDraftsRef.current, getSavedRow),
-  });
-  logFrontAudit("[BC_AUDIT][FE][BUILD_PERSIST_PAYLOAD]", {
-  bcId,
-  visibleRows: visibleRowMap.size,
-  hasStructureChanges,
-  nextExcludedCount: nextExcluded.length,
-  nextExcludedSample: nextExcluded.slice(0, 40),
-  nextItemsSummary: summarizeItemsForAudit(nextItems),
-  });
- return { nextItems, nextExcluded };
- // eslint-disable-next-line react-hooks/exhaustive-deps
- }, [bcId, getSavedRow, hasStructureChanges, mergedRows]);
-
- const flushPendingQtyChanges = async (options = {}) => {
- const { force = false, markComplete = false } = options;
- const changedKeys = Object.keys(pendingQtyChangesRef.current || {});
- debugInfo("[DET_DEBUG] flushPendingQtyChanges:start", {
- bcId,
- force,
- markComplete,
- changedKeys,
- hasStructureChanges,
- });
- if (!force && !changedKeys.length && !hasStructureChanges) return;
- const { nextItems, nextExcluded } = buildPersistPayloadFromDrafts();
- debugInfo("[DET_DEBUG] flushPendingQtyChanges:payload_ready", {
- bcId,
- nextItems: nextItems.length,
- nextExcluded: nextExcluded.length,
- });
- await persistItems(nextItems, nextExcluded, {
- refresh: false,
- silent: false,
- revalidate: Boolean(force),
- markComplete,
- });
- debugInfo("[DET_DEBUG] flushPendingQtyChanges:done", { bcId });
- };
-
- // eslint-disable-next-line react-hooks/exhaustive-deps
- const handleQtyChange = (rowKey, value) => {
- const row = mergedRows.find((item) => item.key === rowKey);
- if (!row || !canEditType(row.type)) return;
- lastEditedRowRef.current = row;
- editedRowsRef.current[rowKey] = row;
- const nextDraftsRef = { ...quantityDraftsRef.current, [rowKey]: value };
- quantityDraftsRef.current = nextDraftsRef;
- setQuantityDrafts((prev) => {
- return { ...prev, [rowKey]: value };
- });
- const numeric = toPositiveNumber(value);
- const savedNumeric = toPositiveNumber(getSavedRow(row)?.annualQty ?? 0);
- if (numeric !== savedNumeric) {
- pendingQtyChangesRef.current[rowKey] = true;
- } else {
- delete pendingQtyChangesRef.current[rowKey];
- }
- setPendingChangesCount(Object.keys(pendingQtyChangesRef.current).length);
- if (String(row?.itemId || "").trim() === "3321193001") {
- debugInfo("[BC_CONSUMPTION][FE][QTY_CHANGE]", {
- bcId,
- rowKey,
- itemId: row.itemId,
- rawValue: value,
- parsedValue: numeric,
- savedQty: savedNumeric,
- });
- }
- if (!autosaveEnabled) return;
- };
-
-const handleSaveNow = () => {
- // Guardado manual explícito: siempre persistimos snapshot actual para dejar avance en base.
- if (autosaveTimeoutRef.current) {
- clearTimeout(autosaveTimeoutRef.current);
- autosaveTimeoutRef.current = null;
- }
- debugInfo("[DET_DEBUG] handleSaveNow", {
- bcId,
- pendingQtyKeys: Object.keys(pendingQtyChangesRef.current || {}),
- hasStructureChanges,
- });
- flushPendingQtyChanges({ force: true, markComplete: false });
-};
-
-const handleCompleteSection = async () => {
- if (!canEditFinal || saving) return;
- if (!allSubsectionsLocked) {
- showToast("Primero debes bloquear reactivos, controles, calibradores y materiales.", "warning");
- return;
- }
- if (autosaveTimeoutRef.current) {
- clearTimeout(autosaveTimeoutRef.current);
- autosaveTimeoutRef.current = null;
- }
- const { nextItems, nextExcluded } = buildPersistPayloadFromDrafts();
- console.log("[BC_AUDIT][FE][COMPLETE_SECTION_CLICK]", {
- bcId,
- gatePhase,
- role: currentRole,
- nextItemsCount: nextItems.length,
- nextExcludedCount: nextExcluded.length,
- nonZeroItems: nextItems.filter((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) > 0).length,
- });
- await persistItems(nextItems, nextExcluded, {
- refresh: true,
- silent: false,
- revalidate: true,
- markComplete: true,
- });
 };
 
 const handleValidateSubsection = async (sectionKey, sectionTitle = "seccion") => {
  if (!bcId || saving) return;
+ setSaving(true);
  try {
   await api.post(`/business-case/${bcId}/determinations/lock-subsection`, {
    subsection: sectionKey,
   });
   await loadExisting();
   await loadGateInfo();
-  if (sectionKey === "reactivos") setIsDetermEditing(false);
   onSave({ refresh: true, markComplete: false });
   showToast(
    sectionKey === "reactivos"
@@ -1602,6 +1068,8 @@ const handleValidateSubsection = async (sectionKey, sectionTitle = "seccion") =>
   );
  } catch (err) {
   showToast(getNaturalErrorMessage(err, `No se pudo validar ${sectionTitle.toLowerCase()}.`), "error");
+ } finally {
+  setSaving(false);
  }
 };
 
@@ -1610,8 +1078,49 @@ const handleValidateReactivos = async () => {
  await handleValidateSubsection("reactivos", "Reactivos");
 };
 
+// Bloqueo en un solo paso, solo para jefe_servicio: controles + calibradores
+// + materiales. NO cierra la seccion "Determinaciones" -- eso es una accion
+// explicita y separada (ver handleCloseDeterminationsSection), nunca un
+// efecto secundario automatico de este boton.
+const handleCloseAllTechnicalSubsections = async () => {
+ if (!bcId || saving) return;
+ setSaving(true);
+ try {
+  await api.post(`/business-case/${bcId}/determinations/lock-all-technical-subsections`);
+  await loadExisting();
+  await loadGateInfo();
+  onSave({ refresh: true, markComplete: false });
+  showToast("Controles, calibradores y materiales bloqueados correctamente.", "success");
+ } catch (err) {
+  showToast(getNaturalErrorMessage(err, "No se pudieron bloquear las subsecciones tecnicas."), "error");
+ } finally {
+  setSaving(false);
+ }
+};
+
+// Cierre EXPLICITO de la seccion "Determinaciones" completa, solo para
+// jefe_servicio, solo disponible cuando las 4 subsecciones ya estan
+// bloqueadas. Reutiliza el endpoint generico /ownership/complete (misma
+// logica de applyDeterminationsCompletionTransition que ya usan otras
+// secciones), habilitando avanzar a Inversiones.
+const handleCloseDeterminationsSection = async () => {
+ if (!bcId || saving || !canCloseDeterminationsSection) return;
+ setSaving(true);
+ try {
+  await completeDeterminationsSection(bcId, "jefe_servicio_cierre_determinaciones");
+  await loadExisting();
+  await loadGateInfo();
+  onSave({ refresh: true, markComplete: false });
+  showToast("Determinaciones cerradas. Ya puedes continuar con Inversiones.", "success");
+ } catch (err) {
+  showToast(getNaturalErrorMessage(err, "No se pudo cerrar la seccion de determinaciones."), "error");
+ } finally {
+  setSaving(false);
+ }
+};
+
 const handleRequestUnlockSubsection = async (sectionKey) => {
- if (!bcId) return;
+ if (!bcId || saving) return;
  const reason = await promptDialog({
   title: "Solicitar desbloqueo",
   message: `Motivo para solicitar desbloqueo de ${sectionKey}:`,
@@ -1619,6 +1128,7 @@ const handleRequestUnlockSubsection = async (sectionKey) => {
   confirmText: "Enviar solicitud",
  });
  if (!reason || !reason.trim()) return;
+ setSaving(true);
  try {
  await requestUnlockSubsection(bcId, sectionKey, reason.trim());
  await loadGateInfo();
@@ -1626,24 +1136,43 @@ const handleRequestUnlockSubsection = async (sectionKey) => {
  showToast(`Solicitud enviada a jefe_comercial para ${sectionKey}.`, "success");
  } catch (err) {
  showToast(getNaturalErrorMessage(err, `No se pudo solicitar desbloqueo para ${sectionKey}.`), "error");
+ } finally {
+ setSaving(false);
+ }
+};
+
+const handleRenewCommercialWindow = async () => {
+ if (!bcId || saving) return;
+ setSaving(true);
+ try {
+  await api.post(`/business-case/${bcId}/determinations/renew-commercial-window`);
+  await loadGateInfo();
+  onSave({ refresh: true, markComplete: false });
+  showToast("Ventana comercial renovada por 48 horas.", "success");
+ } catch (err) {
+  showToast(getNaturalErrorMessage(err, "No se pudo renovar la ventana comercial."), "error");
+ } finally {
+  setSaving(false);
  }
 };
 
 const handleReopenCommercial = async () => {
- if (!bcId) return;
+ if (!bcId || saving) return;
+ setSaving(true);
  try {
   await api.post(`/business-case/${bcId}/determinations/reopen-commercial`);
   await loadGateInfo();
-  setIsDetermEditing(false);
   onSave({ refresh: true, markComplete: false });
   showToast("Fase comercial reabierta. El equipo comercial puede volver a editar.", "success");
  } catch (err) {
   showToast(getNaturalErrorMessage(err, "No se pudo reabrir la fase comercial."), "error");
+ } finally {
+  setSaving(false);
  }
 };
 
 const handleResolveUnlockSubsection = async (requestEntry, approve) => {
- if (!bcId || !requestEntry?.id) return;
+ if (!bcId || !requestEntry?.id || saving) return;
  const notes = (await promptDialog({
   title: approve ? "Aprobar desbloqueo" : "Rechazar desbloqueo",
   message: approve ? "Notas de aprobación (opcional):" : "Motivo de rechazo:",
@@ -1654,6 +1183,7 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  showToast("Debes indicar el motivo de rechazo.", "warning");
  return;
  }
+ setSaving(true);
  try {
  await resolveUnlockSubsection(bcId, requestEntry.id, approve, notes.trim());
  await loadGateInfo();
@@ -1666,6 +1196,8 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  );
  } catch (err) {
  showToast(getNaturalErrorMessage(err, "No se pudo resolver la solicitud."), "error");
+ } finally {
+ setSaving(false);
  }
 };
 
@@ -1705,77 +1237,6 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
    setSheetSyncing(false);
   }
  }, []);
-
- const buildImportPreviewFromPaste = useCallback((text, rows) => {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const hasTabs = lines.some((l) => l.includes("\t"));
-  if (hasTabs) {
-   const byId = new Map();
-   const byName = new Map();
-   lines.forEach((line) => {
-    const parts = line.split("\t");
-    const key = String(parts[0] || "").trim();
-    const valStr = String(parts[1] || "").replace(",", ".").replace(/[^0-9.]/g, "");
-    const val = parseFloat(valStr);
-    if (!key || !Number.isFinite(val) || val < 0) return;
-    byId.set(key.toLowerCase(), Math.round(val));
-    byName.set(key.toLowerCase(), Math.round(val));
-   });
-   return rows.map((row) => {
-    const rowId = String(row.itemId || row.manufacturerId || "").trim().toLowerCase();
-    const rowName = String(row.name || "").trim().toLowerCase();
-    const val = (rowId ? byId.get(rowId) : undefined) ?? (rowName ? byName.get(rowName) : undefined) ?? null;
-    return { item_key: row.key, item_name: row.name, current: getQtyInputValue(row), newValue: val };
-   });
-  }
-  return rows.map((row, i) => {
-   const line = lines[i];
-   if (!line) return { item_key: row.key, item_name: row.name, current: getQtyInputValue(row), newValue: null };
-   const valStr = line.replace(",", ".").replace(/[^0-9.]/g, "");
-   const val = parseFloat(valStr);
-   return { item_key: row.key, item_name: row.name, current: getQtyInputValue(row), newValue: Number.isFinite(val) && val >= 0 ? Math.round(val) : null };
-  });
- // eslint-disable-next-line react-hooks/exhaustive-deps
- }, [getQtyInputValue]);
-
- const applyImportPreview = useCallback((preview) => {
-  const toApply = (preview || []).filter((p) => p.newValue !== null && Number.isFinite(Number(p.newValue)));
-  toApply.forEach((p) => handleQtyChange(p.item_key, String(p.newValue)));
-  return toApply.length;
- // eslint-disable-next-line react-hooks/exhaustive-deps
- }, [handleQtyChange]);
-
- const closeImportModal = useCallback(() => {
-  setImportModal(null);
-  setImportPasteText("");
-  setImportPreview(null);
-  setImportTab("paste");
-  if (importFileRef.current) importFileRef.current.value = "";
- }, []);
-
- const handleImportFile = useCallback(async (file, sectionKey) => {
-  if (!file || !bcId) return;
-  try {
-   setImportFileLoading(true);
-   const result = await parseDeterminationsQuantitiesFile(bcId, file, sectionKey || null);
-   const matched = Array.isArray(result?.matched) ? result.matched : [];
-   if (!matched.length) {
-    showToast("No se encontraron ítems reconocibles en el archivo.", "warning");
-    return;
-   }
-   const itemKeyToRow = new Map(mergedRows.map((r) => [r.key, r]));
-   const preview = matched.map((m) => {
-    const row = itemKeyToRow.get(m.item_key);
-    return { item_key: m.item_key, item_name: m.item_name, current: row ? getQtyInputValue(row) : null, newValue: m.annual_qty };
-   });
-   setImportPreview(preview);
-  } catch (err) {
-   showToast(getNaturalErrorMessage(err, "No se pudo procesar el archivo."), "error");
-  } finally {
-   setImportFileLoading(false);
-  }
- // eslint-disable-next-line react-hooks/exhaustive-deps
- }, [bcId, mergedRows, getQtyInputValue, showToast]);
 
  const handleUploadStatDocument = async () => {
  if (!bcId) {
@@ -1896,8 +1357,8 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  },
  {
  id: "window",
- label: expired ? "Ventana 48h vencida" : "Ventana 48h",
- status: expired ? "blocked" : hasDoc ? "active" : "pending",
+ label: expired ? "Ventana 48h vencida" : "Ventana 48h tras validacion",
+ status: expired ? "blocked" : hasDoc ? "pending" : "pending",
  },
  {
  id: "inspection",
@@ -1933,7 +1394,7 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  <div className="flex flex-col gap-1">
  <h3 className="text-sm font-semibold text-gray-900">Documento estadistico para determinaciones</h3>
  <p className="text-xs text-gray-500">
- El comercial debe cargar este documento para habilitar la edicion de determinaciones y activar la ventana de 48 horas.
+ El comercial debe cargar este documento para habilitar determinaciones. La ventana general de 48 horas inicia solo cuando se validan los reactivos y se envia el caso a servicio.
  </p>
  </div>
  {gateLoading ? (
@@ -2238,9 +1699,59 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  : "No tienes habilitada la edicion de determinaciones para este flujo o la ventana de 48 horas ya expiro."}
 </div>
 )}
+{canRenewCommercialWindow && (
+<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+ <div className="text-xs text-amber-800">
+ La ventana de 48 horas para sincronizar y validar reactivos vencio. Renuevala para continuar.
+ </div>
+ <button
+ type="button"
+ onClick={handleRenewCommercialWindow}
+ disabled={saving}
+ className="inline-flex items-center justify-center gap-2 rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+ >
+ <FiRefreshCw size={14} />
+ Renovar ventana 48h
+ </button>
+</div>
+)}
  </div>
  )}
  </div>
+
+ {canCloseAllTechnicalSubsections && (
+ <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+ <div className="text-xs text-emerald-800">
+ Cuando controles, calibradores y materiales ya tengan sus cantidades sincronizadas, puedes bloquearlos todos de una vez.
+ </div>
+ <button
+ type="button"
+ onClick={handleCloseAllTechnicalSubsections}
+ disabled={saving}
+ className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+ >
+ <FiCheck size={14} />
+ Bloquear controles, calibradores y materiales
+ </button>
+ </div>
+ )}
+
+ {canCloseDeterminationsSection && (
+ <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+ <div className="text-xs text-blue-800">
+ Reactivos, controles, calibradores y materiales ya estan bloqueados. Cierra Determinaciones para continuar con Inversiones.
+ </div>
+ <button
+ type="button"
+ onClick={handleCloseDeterminationsSection}
+ disabled={saving}
+ className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+ >
+ <FiCheck size={14} />
+ Cerrar Determinaciones y continuar con Inversiones
+ </button>
+ </div>
+ )}
 
  {loading ? (
  <div className="flex justify-center py-12">
@@ -2271,15 +1782,18 @@ const pendingUnlock = pendingUnlockBySubsection[section.key] || null;
 const rowLimit = getWindowLimit(group.key, section.key);
  const visibleRows = rows.slice(0, rowLimit);
  const isCollapsed = isSectionCollapsed(group.key, section.key);
- // Al menos un item con cantidad sincronizada desde el Sheet ya cuenta como
- // "Sincronizado" -- no hace falta que todos tengan cantidad para dejar de
- // verse "Pendiente".
- const hasSyncedItems = rows.some((row) => toPositiveNumber(getQtyInputValue(row)) > 0);
- const sectionReadyToClose = rows.length > 0 && rows.every((row) => toPositiveNumber(getQtyInputValue(row)) > 0);
- const canValidateSection =
- section.key === "reactivos"
- ? canValidateReactivos
- : canEditFinal && !subsectionLocked && sectionReadyToClose;
+ // Reactivos se validan con DET/AÑO/PROCESO. Las subsecciones técnicas
+ // (controles, calibradores y materiales) se validan visualmente con Producto
+ // a Enviar, porque es la columna que llena jefe_servicio en el Sheet.
+ const hasSyncedItems = !rows.length || rows.some((row) => (
+ toPositiveNumber(getSheetQtyDisplayValue(row, section.key)) > 0
+ ));
+ // Reactivos: cierre individual de acp_comercial/jefe_comercial (es su unica
+ // seccion). Controles/calibradores/materiales: el cierre NUNCA es
+ // individual por subseccion -- jefe_servicio debe usar el boton combinado
+ // "Bloquear controles, calibradores y materiales" mas abajo, que bloquea
+ // las 3 juntas. Por eso aqui siempre es false para esas 3.
+ const canValidateSection = section.key === "reactivos" ? canValidateReactivos : false;
 
  return (
  <div key={`${group.key}:${section.key}`} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -2398,7 +1912,11 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
  <th className="py-3 px-4 font-semibold">Tipo</th>
  <th className="py-3 px-4 font-semibold">Nombre</th>
  <th className="py-3 px-4 font-semibold">
- {section.key === "reactivos" ? "Cantidad anual (Sheet)" : "Producto calculado (Sheet)"}
+ {/* acp_comercial/jefe_comercial cierran reactivos mirando la
+     cantidad negociada (DET/AÑO/PROCESO); jefe_servicio ve las 4
+     secciones desde su propia perspectiva de despacho, por eso ve
+     Producto a Enviar incluso en reactivos. */}
+ {section.key === "reactivos" ? "DET/AÑO/PROCESO (Sheet)" : "PRODUCTO A ENTREGAR (Sheet)"}
  </th>
  </tr>
  </thead>
@@ -2421,7 +1939,7 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
  </div>
  </td>
  <td className="py-3 px-4 font-medium text-gray-900">
- {getQtyInputValue(row)}
+ {getSheetQtyDisplayValue(row, section.key)}
  </td>
  </tr>
  );
@@ -2458,7 +1976,8 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
  </div>
  )}
 
- {/* Footer principal — patrón Editar / Guardar / Cerrar definitivo */}
+ {/* Footer principal: acciones directas, sin modo "Editar" -- todo viene del
+     Sheet, no hay nada que editar/guardar a mano en esta pantalla. */}
  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-100">
   <div className="flex items-center gap-2 text-xs text-gray-400 font-medium">
    {saving && (
@@ -2467,19 +1986,16 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
      <span className="text-blue-600">Guardando...</span>
     </>
    )}
-   {!saving && isDetermEditing && (pendingChangesCount > 0 || hasStructureChanges) && (
-    <span className="inline-flex items-center gap-1 text-amber-600">
-     <FiAlertTriangle size={12} />
-     {pendingChangesCount + (hasStructureChanges ? 1 : 0)} cambio(s) sin guardar
-    </span>
-   )}
-   {!saving && !isDetermEditing && canReopenCommercial && (
+   {!saving && canReopenCommercial && (
     <span className="text-amber-600 font-semibold">Sección cerrada por el equipo comercial — solo jefe_comercial puede reabrir.</span>
    )}
-   {!saving && !isDetermEditing && !canReopenCommercial && (canEditBase) && (
-    <span>Sección en modo solo lectura.</span>
-   )}
   </div>
+
+  {needsReactivoSyncBeforeValidate && (
+   <div className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 sm:text-right">
+    Aun no hay cantidades de reactivos sincronizadas. Usa "Sincronizar cantidades desde Sheet" en la parte superior para poder validar y enviar a Servicio.
+   </div>
+  )}
 
   <div className="flex flex-wrap gap-2 sm:justify-end">
    {/* jefe_comercial: botón reabrir cuando ya terminó la fase comercial */}
@@ -2494,7 +2010,7 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
     </button>
    )}
 
-   {/* Modo lectura: mostrar botón Editar (solo si tiene permiso de edición gate-level) */}
+   {/* acp_comercial/jefe_comercial: cierra Reactivos (unica seccion de comercial) */}
    {canValidateReactivos && (
     <button
      type="button"
@@ -2506,47 +2022,6 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
      <FiCheck size={16} />
      Validar reactivos y enviar a Servicio
     </button>
-   )}
-
-   {!isDetermEditing && !canReopenCommercial && (canEditBase && canEditByGate && !quantitiesLocked) && (
-    <button
-     type="button"
-     onClick={() => setIsDetermEditing(true)}
-     className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 bg-white text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all w-full sm:w-auto"
-    >
-     Editar
-    </button>
-   )}
-
-   {/* Modo edición: Cancelar + Guardar información + Cerrar definitivamente */}
-   {isDetermEditing && (
-    <>
-     <button
-      type="button"
-      onClick={() => { setIsDetermEditing(false); closeImportModal(); }}
-      className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all w-full sm:w-auto"
-     >
-      Cancelar
-     </button>
-     <button
-      type="button"
-      onClick={handleSaveNow}
-      disabled={saving}
-      className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-50 w-full sm:w-auto"
-     >
-      <FiSave size={16} />
-      {saving ? "Guardando..." : "Guardar información"}
-     </button>
-     <button
-      type="button"
-      onClick={handleCompleteSection}
-      disabled={saving || !allSubsectionsLocked}
-      className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
-      title={!allSubsectionsLocked ? "Primero bloquea todas las subsecciones" : "Cierra definitivamente la fase comercial"}
-     >
-      Cerrar definitivamente
-     </button>
-    </>
    )}
   </div>
  </div>
@@ -2721,185 +2196,6 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
   </div>
  </Dialog>
 
- {/* ===== IMPORT QUANTITIES MODAL ===== */}
- {importModal && (
-  <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={closeImportModal}>
-   <div
-    className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
-    onClick={(e) => e.stopPropagation()}
-   >
-    {/* Header */}
-    <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gray-50/70">
-     <div>
-      <h2 className="text-base font-bold text-gray-900">Importar cantidades</h2>
-      <p className="text-xs text-gray-500 mt-0.5">
-       Sección: <span className="font-semibold text-violet-700 capitalize">{importModal.sectionKey}</span>
-       {" · "}{importModal.rows.length} ítem(s)
-      </p>
-     </div>
-     <button type="button" onClick={closeImportModal} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
-      <FiX size={18} />
-     </button>
-    </div>
-
-    {/* Tabs */}
-    <div className="flex border-b border-gray-100">
-     {[
-      { key: "paste", label: "Pegar desde Excel", icon: <FiClipboard size={13} /> },
-      { key: "file", label: "Subir documento", icon: <FiUpload size={13} /> },
-     ].map((tab) => (
-      <button
-       key={tab.key}
-       type="button"
-       onClick={() => { setImportTab(tab.key); setImportPreview(null); setImportPasteText(""); if (importFileRef.current) importFileRef.current.value = ""; }}
-       className={`flex items-center gap-1.5 px-5 py-3 text-xs font-semibold border-b-2 transition-colors ${
-        importTab === tab.key
-         ? "border-violet-600 text-violet-700"
-         : "border-transparent text-gray-500 hover:text-gray-700"
-       }`}
-      >
-       {tab.icon}{tab.label}
-      </button>
-     ))}
-    </div>
-
-    {/* Body */}
-    <div className="flex-1 overflow-y-auto p-5 space-y-4">
-     {importTab === "paste" && (
-      <div className="space-y-3">
-       <div className="rounded-xl bg-violet-50 border border-violet-100 px-4 py-3 text-xs text-violet-800 space-y-1">
-        <p className="font-semibold">¿Cómo pegar desde Excel?</p>
-        <p>• <strong>Solo números (una por línea):</strong> Copia la columna de cantidades — cada línea se asigna al ítem en el mismo orden que aparece en la lista.</p>
-        <p>• <strong>Dos columnas (ID [Tab] Cantidad):</strong> Copia ID fabricante y cantidad separados por tabulador para que el sistema haga la correspondencia automáticamente.</p>
-       </div>
-       <textarea
-        rows={8}
-        value={importPasteText}
-        onChange={(e) => { setImportPasteText(e.target.value); setImportPreview(null); }}
-        onPaste={(e) => {
-         const text = e.clipboardData.getData("text");
-         setImportPasteText(text);
-         setImportPreview(null);
-         e.preventDefault();
-        }}
-        placeholder={"100\n250\n80\n...\n\no con ID:\nABC-123\t100\nXYZ-456\t250"}
-        className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-mono text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-200 resize-none"
-       />
-       <div className="flex justify-end">
-        <button
-         type="button"
-         disabled={!importPasteText.trim()}
-         onClick={() => setImportPreview(buildImportPreviewFromPaste(importPasteText, importModal.rows))}
-         className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
-        >
-         <FiActivity size={13} />
-         Previsualizar
-        </button>
-       </div>
-      </div>
-     )}
-
-     {importTab === "file" && (
-      <div className="space-y-3">
-       <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3 text-xs text-blue-800 space-y-1">
-        <p className="font-semibold">Sube un archivo Excel o CSV</p>
-        <p>El sistema buscará en el archivo ítems que coincidan por ID de fabricante o nombre con los de esta sección, y leerá la columna de cantidad anual.</p>
-        <p className="text-blue-600">Formatos aceptados: .xlsx, .xls, .csv</p>
-       </div>
-       <div className="flex flex-col gap-3">
-        <input
-         ref={importFileRef}
-         type="file"
-         accept=".xlsx,.xls,.csv"
-         className="block w-full text-xs text-gray-700 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-violet-50 file:text-violet-700 file:font-semibold hover:file:bg-violet-100 cursor-pointer"
-         onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) { setImportPreview(null); }
-         }}
-        />
-        <button
-         type="button"
-         disabled={importFileLoading}
-         onClick={() => {
-          const f = importFileRef.current?.files?.[0];
-          if (!f) { showToast("Selecciona un archivo primero.", "warning"); return; }
-          handleImportFile(f, importModal.sectionKey);
-         }}
-         className="inline-flex items-center gap-1.5 self-end rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
-        >
-         {importFileLoading ? <><div className="h-3 w-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />Procesando...</> : <><FiFileText size={13} />Leer archivo</>}
-        </button>
-       </div>
-      </div>
-     )}
-
-     {/* Preview table */}
-     {importPreview && (
-      <div className="space-y-2">
-       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-800">Vista previa</h3>
-        <span className="text-xs text-gray-500">
-         {importPreview.filter((p) => p.newValue !== null).length} de {importPreview.length} ítem(s) con valor
-        </span>
-       </div>
-       <div className="rounded-xl border border-gray-200 overflow-hidden">
-        <table className="w-full text-xs">
-         <thead className="bg-gray-50 border-b border-gray-200">
-          <tr>
-           <th className="px-3 py-2 text-left font-semibold text-gray-600">Ítem</th>
-           <th className="px-3 py-2 text-right font-semibold text-gray-600 w-24">Actual</th>
-           <th className="px-3 py-2 text-right font-semibold text-gray-600 w-28">Nuevo valor</th>
-          </tr>
-         </thead>
-         <tbody className="divide-y divide-gray-100">
-          {importPreview.map((p) => (
-           <tr key={p.item_key} className={p.newValue !== null ? "" : "opacity-40"}>
-            <td className="px-3 py-2 text-gray-800 max-w-[260px] truncate">{p.item_name}</td>
-            <td className="px-3 py-2 text-right text-gray-500 font-mono">{p.current ?? "—"}</td>
-            <td className="px-3 py-2 text-right font-mono">
-             {p.newValue !== null
-              ? <span className="font-semibold text-emerald-700">{p.newValue}</span>
-              : <span className="text-gray-300">sin dato</span>
-             }
-            </td>
-           </tr>
-          ))}
-         </tbody>
-        </table>
-       </div>
-      </div>
-     )}
-    </div>
-
-    {/* Footer */}
-    <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-gray-100 bg-gray-50/50">
-     <p className="text-xs text-gray-500">
-      {importPreview
-       ? `${importPreview.filter((p) => p.newValue !== null).length} cantidad(es) listas para aplicar.`
-       : "Previsualiza antes de aplicar."}
-     </p>
-     <div className="flex gap-2">
-      <button type="button" onClick={closeImportModal} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50">
-       Cancelar
-      </button>
-      <button
-       type="button"
-       disabled={!importPreview?.some((p) => p.newValue !== null)}
-       onClick={() => {
-        const n = applyImportPreview(importPreview);
-        showToast(`${n} cantidad(es) aplicada(s). Guarda la sección para confirmar.`, "success");
-        closeImportModal();
-       }}
-       className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-       <FiCheck size={13} />
-       Aplicar {importPreview?.filter((p) => p.newValue !== null).length ?? 0} cambio(s)
-      </button>
-     </div>
-    </div>
-   </div>
-  </div>
- )}
  </div>
  );
 };

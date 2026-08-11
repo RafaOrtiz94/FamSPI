@@ -10,9 +10,14 @@ const handleError = (res, error, fallbackMessage) => {
 
 async function create(req, res) {
   try {
+    const evidencePhotos = [
+      ...(req.files?.evidence_photos || []),
+      ...(req.files?.evidence_photo || []),
+    ];
     const ticket = await service.createTicket({
       requester: req.user,
       payload: req.body || {},
+      evidencePhotos,
     });
     return res.status(201).json({ ok: true, data: ticket });
   } catch (error) {
@@ -26,6 +31,22 @@ async function listMy(req, res) {
     return res.status(200).json({ ok: true, data: tickets });
   } catch (error) {
     return handleError(res, error, "No se pudieron listar tus tickets");
+  }
+}
+
+async function getEvidenceFile(req, res) {
+  try {
+    const file = await service.getTicketEvidenceFile({
+      attachmentId: req.params.attachmentId,
+      actorUser: req.user,
+    });
+    const safeFilename = String(file.filename || "evidencia-ticket.jpg").replace(/[\r\n"]/g, "_");
+    res.setHeader("Content-Type", file.mimeType || "image/jpeg");
+    res.setHeader("Content-Disposition", `inline; filename="${safeFilename}"`);
+    res.setHeader("Cache-Control", "private, max-age=300");
+    return res.send(file.buffer);
+  } catch (error) {
+    return handleError(res, error, "No se pudo obtener la evidencia");
   }
 }
 
@@ -156,6 +177,7 @@ async function rateSatisfaction(req, res) {
 module.exports = {
   create,
   listMy,
+  getEvidenceFile,
   listWorkspace,
   kpiWorkspace,
   listEvents,

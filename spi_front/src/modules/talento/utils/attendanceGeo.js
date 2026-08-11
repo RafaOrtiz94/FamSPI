@@ -126,6 +126,8 @@ export const getMarkerColor = (type) => {
     entry: "#22c55e",
     lunch_start: "#eab308",
     lunch_end: "#eab308",
+    op_lunch_start: "#f59e0b",
+    op_lunch_end: "#f59e0b",
     exit: "#ef4444",
     start: "#f97316",
     return: "#3b82f6",

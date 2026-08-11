@@ -44,28 +44,6 @@ const UserAvatar = ({ name, size = "md" }) => {
   );
 };
 
-const getUnexpectedExitLabel = (row = {}) => {
-  if (!row?.exception_id) return null;
-  const status = String(row.exception_status || "").trim().toUpperCase();
-  if (status === "ACTIVE") return "Imprevista activa";
-  if (status === "ON_SITE") return "En sitio";
-  if (status === "RETURNING") return "Retornando";
-  if (status === "COMPLETED") return "Imprevista cerrada";
-  return "Imprevista";
-};
-
-const getUnexpectedMarks = (row = {}) => {
-  const hasUnexpected = Boolean(row?.exception_id);
-  if (!hasUnexpected) return null;
-
-  return {
-    out: formatTimeSafe(row?.start_time) || "--",
-    in: formatTimeSafe(row?.return_time) || "--",
-    clientIn: formatTimeSafe(row?.arrival_time) || "--",
-    clientOut: formatTimeSafe(row?.departure_time) || "--",
-  };
-};
-
 const getFieldOpsCount = (row = {}) => {
   if (Array.isArray(row?.field_events)) {
     return row.field_events.filter((event) => Boolean(event?.time || event?.timestamp || event?.occurred_at)).length;
@@ -221,8 +199,7 @@ const AttendanceReportsTableView = ({ rows = [], onRowClick, onProfileClick, onM
               </th>
               <th className="sticky top-0 z-20 w-48 bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Departamento</th>
               <th className="sticky top-0 z-20 w-44 bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Estado</th>
-              <th className="sticky top-0 z-20 w-64 bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Imprevistas</th>
-              <th className="sticky top-0 z-20 w-64 bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Operación campo</th>
+              <th className="sticky top-0 z-20 w-64 bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Salidas y visitas</th>
               <th className="sticky top-0 z-20 w-24 bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Disc.</th>
               <th className="sticky top-0 z-20 w-24 bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Geo</th>
               <th className="sticky top-0 z-20 w-[440px] bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Resumen de marcaciones</th>
@@ -240,7 +217,6 @@ const AttendanceReportsTableView = ({ rows = [], onRowClick, onProfileClick, onM
             {sortedRows.map((row) => {
               const fieldOpsSummary = getFieldOpsBreakdown(row);
               const fieldOpsTimes = getFieldOpsTimeSummary(row);
-              const unexpectedMarks = getUnexpectedMarks(row);
               const fieldOpsCount = getFieldOpsCount(row);
               const operationalSpanDays = Number(row?.operational_span_days || 0);
               const hasOperationalMultiDay = isOperationalExceptionType(row?.exception_type) && operationalSpanDays > 1;
@@ -278,23 +254,6 @@ const AttendanceReportsTableView = ({ rows = [], onRowClick, onProfileClick, onM
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  {getUnexpectedExitLabel(row) ? (
-                    <div className="space-y-2 text-xs">
-                      <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-1 font-medium text-rose-700">
-                        {getUnexpectedExitLabel(row)}
-                      </span>
-                      {unexpectedMarks ? (
-                        <div className="rounded-lg border border-rose-100 bg-rose-50/70 p-2 text-[11px] text-rose-800">
-                          <div>Salida: <span className="font-semibold">{unexpectedMarks.out}</span></div>
-                          <div>Entrada: <span className="font-semibold">{unexpectedMarks.in}</span></div>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <span className="text-xs text-slate-400">-</span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
                   {fieldOpsCount > 0 ? (
                     <div className="space-y-2 text-xs">
                       <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-1 font-medium text-blue-700">
@@ -303,11 +262,6 @@ const AttendanceReportsTableView = ({ rows = [], onRowClick, onProfileClick, onM
                       <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-2 text-[11px] text-slate-700">
                         <div>Oficina/viaje: <span className="font-semibold">{fieldOpsSummary.officeExit}</span> salida / <span className="font-semibold">{fieldOpsSummary.officeEntry}</span> entrada</div>
                         <div>Cliente: <span className="font-semibold">{fieldOpsSummary.clientEntry}</span> entrada / <span className="font-semibold">{fieldOpsSummary.clientExit}</span> salida</div>
-                        {unexpectedMarks ? (
-                          <div className="text-rose-700">
-                            Imprevista cliente: {unexpectedMarks.clientIn} entrada / {unexpectedMarks.clientOut} salida
-                          </div>
-                        ) : null}
                       </div>
                       {hasOperationalMultiDay ? (
                         <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-2 text-[11px] text-indigo-800">
@@ -368,11 +322,6 @@ const AttendanceReportsTableView = ({ rows = [], onRowClick, onProfileClick, onM
                       <div>Entrada: <span className="font-medium">{formatTimeSafe(row.entry_time) || "--"}</span></div>
                       <div>Salida: <span className="font-medium">{formatTimeSafe(row.exit_time) || "--"}</span></div>
                     </div>
-                    <div className="rounded-lg border border-rose-200 bg-rose-50 p-2">
-                      <div className="mb-1 font-semibold text-rose-700">Inesperada</div>
-                      <div>Salida: <span className="font-medium">{unexpectedMarks?.out || "--"}</span></div>
-                      <div>Entrada: <span className="font-medium">{unexpectedMarks?.in || "--"}</span></div>
-                    </div>
                     <div className="rounded-lg border border-blue-200 bg-blue-50 p-2">
                       <div className="mb-1 font-semibold text-blue-700">Oficina / viaje</div>
                       <div>Salida: <span className="font-medium">{fieldOpsTimes.officeExit}</span></div>
@@ -381,10 +330,10 @@ const AttendanceReportsTableView = ({ rows = [], onRowClick, onProfileClick, onM
                     <div className="rounded-lg border border-violet-200 bg-violet-50 p-2">
                       <div className="mb-1 font-semibold text-violet-700">Cliente</div>
                       <div>
-                        Entrada: <span className="font-medium">{fieldOpsTimes.clientEntry !== "--" ? fieldOpsTimes.clientEntry : unexpectedMarks?.clientIn || "--"}</span>
+                        Entrada: <span className="font-medium">{fieldOpsTimes.clientEntry}</span>
                       </div>
                       <div>
-                        Salida: <span className="font-medium">{fieldOpsTimes.clientExit !== "--" ? fieldOpsTimes.clientExit : unexpectedMarks?.clientOut || "--"}</span>
+                        Salida: <span className="font-medium">{fieldOpsTimes.clientExit}</span>
                       </div>
                     </div>
                   </div>

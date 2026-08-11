@@ -157,6 +157,56 @@ const getApprovedJustificationsMap = async ({ userIds, start, end }) => {
   }, new Map());
 };
 
+const getFollowUpMeetingsMap = async ({ userIds, start, end }) => {
+  const normalizedUserIds = [...new Set((Array.isArray(userIds) ? userIds : []).map(Number).filter((value) => Number.isInteger(value) && value > 0))];
+  if (!normalizedUserIds.length || !start || !end) return new Map();
+
+  const result = await db.query(
+    `
+      SELECT
+        m.id,
+        m.collaborator_id,
+        m.scheduled_by_user_id,
+        m.breach_date,
+        m.breach_type,
+        m.meeting_date,
+        m.start_time,
+        m.duration_minutes,
+        m.reason,
+        m.calendar_event_id,
+        m.calendar_event_link,
+        m.calendar_event_calendar_id,
+        m.created_at,
+        COALESCE(NULLIF(s.fullname, ''), NULLIF(s.name, ''), s.email) AS scheduled_by_name,
+        s.email AS scheduled_by_email
+      FROM attendance_follow_up_meetings m
+      LEFT JOIN users s ON s.id = m.scheduled_by_user_id
+      WHERE m.collaborator_id = ANY($1::int[])
+        AND m.breach_date BETWEEN $2::date AND $3::date
+      ORDER BY m.created_at DESC
+    `,
+    [normalizedUserIds, start, end],
+  );
+
+  return (result.rows || []).reduce((map, row) => {
+    map.set(`${row.collaborator_id}:${normalizeDateKey(row.breach_date)}:${normalizeToken(row.breach_type)}`, {
+      id: row.id,
+      meeting_date: normalizeDateKey(row.meeting_date),
+      start_time: row.start_time ? String(row.start_time).slice(0, 5) : null,
+      duration_minutes: Number(row.duration_minutes || 30),
+      reason: row.reason || null,
+      event_id: row.calendar_event_id || null,
+      event_link: row.calendar_event_link || null,
+      calendar_id: row.calendar_event_calendar_id || null,
+      scheduled_by_user_id: row.scheduled_by_user_id || null,
+      scheduled_by_name: row.scheduled_by_name || null,
+      scheduled_by_email: row.scheduled_by_email || null,
+      created_at: row.created_at || null,
+    });
+    return map;
+  }, new Map());
+};
+
 const listCollaboratorApprovedPermissions = async ({
   userId,
   userEmail,
@@ -236,6 +286,7 @@ const buildBaseMetrics = () => ({
   unexpected_exits: 0,
   irregular_exits: 0,
   real_overtime_hours: 0,
+  real_overtime_seconds: 0,
   operational_hours: 0,
 });
 
@@ -275,11 +326,15 @@ const buildMetricsFromRows = (rows = [], justificationMap = new Map()) => {
       }
     }
 
-    metrics.real_overtime_hours += Number(row.real_overtime_hours || 0);
+    const overtimeSeconds = Number.isFinite(Number(row.real_overtime_seconds))
+      ? Math.max(0, Math.round(Number(row.real_overtime_seconds || 0)))
+      : Math.max(0, Math.round(Number(row.real_overtime_hours || 0) * 3600));
+    metrics.real_overtime_seconds += overtimeSeconds;
+    metrics.real_overtime_hours += overtimeSeconds / 3600;
     metrics.operational_hours += Number(row.operational_elapsed_hours || 0);
   });
 
-  metrics.real_overtime_hours = Number(metrics.real_overtime_hours.toFixed(2));
+  metrics.real_overtime_hours = Number(metrics.real_overtime_hours.toFixed(6));
   metrics.operational_hours = Number(metrics.operational_hours.toFixed(2));
 
   return metrics;
@@ -289,6 +344,7 @@ const buildIncidentEntries = ({
   rows = [],
   justificationMap = new Map(),
   collaboratorMap = new Map(),
+  followUpMeetingsMap = new Map(),
 }) =>
   rows.flatMap((row) => {
     const incidents = [];
@@ -318,32 +374,39 @@ const buildIncidentEntries = ({
       exception_description: row.exception_description || null,
       operational_hours: Number(row.operational_elapsed_hours || 0),
       real_overtime_hours: Number(row.real_overtime_hours || 0),
+      real_overtime_seconds: Number(row.real_overtime_seconds || 0),
     };
 
+    const withFollowUpMeeting = (incident) => ({
+      ...incident,
+      follow_up_meeting:
+        followUpMeetingsMap.get(`${incident.user_id}:${normalizeDateKey(incident.date)}:${normalizeToken(incident.breach_type)}`) || null,
+    });
+
     if (Number.isFinite(lateMinutes) && lateMinutes > LATE_TOLERANCE_MINUTES && approvedJustificationCount === 0) {
-      incidents.push({
+      incidents.push(withFollowUpMeeting({
         ...baseIncident,
         breach_type: "late_without_justification",
         breach_label: "Llegada tarde sin justificacion",
         detail: `Entrada registrada con ${lateMinutes} minutos de atraso.`,
         late_minutes: lateMinutes,
         lunch_minutes: lunchMinutes,
-      });
+      }));
     }
 
     if (Number.isFinite(lunchMinutes) && lunchMinutes > 60) {
-      incidents.push({
+      incidents.push(withFollowUpMeeting({
         ...baseIncident,
         breach_type: "lunch_over_60",
         breach_label: "Almuerzo mayor a 60 minutos",
         detail: `El almuerzo registrado fue de ${lunchMinutes} minutos.`,
         late_minutes: lateMinutes,
         lunch_minutes: lunchMinutes,
-      });
+      }));
     }
 
     if (exceptionType && !isOperational) {
-      incidents.push({
+      incidents.push(withFollowUpMeeting({
         ...baseIncident,
         breach_type: isUnexpectedExitType(exceptionType) ? "unexpected_exit" : "irregular_exit",
         breach_label: isUnexpectedExitType(exceptionType)
@@ -352,18 +415,18 @@ const buildIncidentEntries = ({
         detail: row.exception_description || `Excepcion registrada con tipo ${exceptionType}.`,
         late_minutes: lateMinutes,
         lunch_minutes: lunchMinutes,
-      });
+      }));
     }
 
     if (row.attendance_status && row.attendance_status !== "completed") {
-      incidents.push({
+      incidents.push(withFollowUpMeeting({
         ...baseIncident,
         breach_type: "open_shift",
         breach_label: "Jornada abierta o incompleta",
         detail: "La jornada no quedo cerrada correctamente para la fecha consultada.",
         late_minutes: lateMinutes,
         lunch_minutes: lunchMinutes,
-      });
+      }));
     }
 
     return incidents;
@@ -410,6 +473,7 @@ const validateWorkspaceFilters = (filters = {}) => {
 
 const buildOverviewSummary = ({ collaborators = [], breaches = [], metricsByUser = new Map() }) => {
   let realOvertimeHours = 0;
+  let realOvertimeSeconds = 0;
   let operationalHours = 0;
   let unexpectedExits = 0;
   let collaboratorsWithBreaches = 0;
@@ -417,6 +481,7 @@ const buildOverviewSummary = ({ collaborators = [], breaches = [], metricsByUser
   collaborators.forEach((collaborator) => {
     const metrics = metricsByUser.get(Number(collaborator.user_id)) || buildBaseMetrics();
     realOvertimeHours += Number(metrics.real_overtime_hours || 0);
+    realOvertimeSeconds += Number(metrics.real_overtime_seconds || 0);
     operationalHours += Number(metrics.operational_hours || 0);
     unexpectedExits += Number(metrics.unexpected_exits || 0);
     if (Number(metrics.breaches_total || 0) > 0) collaboratorsWithBreaches += 1;
@@ -426,7 +491,8 @@ const buildOverviewSummary = ({ collaborators = [], breaches = [], metricsByUser
     collaborators_total: collaborators.length,
     collaborators_with_breaches: collaboratorsWithBreaches,
     breaches_total: breaches.length,
-    real_overtime_hours: Number(realOvertimeHours.toFixed(2)),
+    real_overtime_hours: Number(realOvertimeHours.toFixed(6)),
+    real_overtime_seconds: realOvertimeSeconds,
     operational_hours: Number(operationalHours.toFixed(2)),
     unexpected_exits: unexpectedExits,
   };
@@ -452,6 +518,11 @@ const getAttendanceWorkspaceOverview = async (filters = {}, requesterUser = {}) 
     start: normalized.start,
     end: normalized.end,
   });
+  const followUpMeetings = await getFollowUpMeetingsMap({
+    userIds: collaboratorIds,
+    start: normalized.start,
+    end: normalized.end,
+  });
 
   const groupedRows = rows.reduce((map, row) => {
     const key = Number(row.user_id || 0);
@@ -473,6 +544,7 @@ const getAttendanceWorkspaceOverview = async (filters = {}, requesterUser = {}) 
     rows,
     justificationMap: justifications,
     collaboratorMap,
+    followUpMeetingsMap: followUpMeetings,
   });
 
   return {
@@ -539,11 +611,17 @@ const getAttendanceWorkspaceCollaborator = async (userId, filters = {}, requeste
     start: normalized.start,
     end: normalized.end,
   });
+  const followUpMeetings = await getFollowUpMeetingsMap({
+    userIds: [Number(userId)],
+    start: normalized.start,
+    end: normalized.end,
+  });
   const collaboratorMap = new Map([[Number(userId), collaborator]]);
   const incidents = buildIncidentEntries({
     rows,
     justificationMap: justifications,
     collaboratorMap,
+    followUpMeetingsMap: followUpMeetings,
   });
   const permissions = await listCollaboratorApprovedPermissions({
     userId: Number(userId),
@@ -597,6 +675,11 @@ const getAttendanceWorkspaceBreaches = async (filters = {}, requesterUser = {}) 
     start: normalized.start,
     end: normalized.end,
   });
+  const followUpMeetings = await getFollowUpMeetingsMap({
+    userIds: requestedIds,
+    start: normalized.start,
+    end: normalized.end,
+  });
   const collaboratorMap = new Map(
     collaborators.map((collaborator) => [Number(collaborator.user_id), collaborator]),
   );
@@ -604,6 +687,7 @@ const getAttendanceWorkspaceBreaches = async (filters = {}, requesterUser = {}) 
     rows,
     justificationMap: justifications,
     collaboratorMap,
+    followUpMeetingsMap: followUpMeetings,
   });
 
   return {

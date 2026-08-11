@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiClipboard, FiUsers, FiCheckSquare, FiFileText, FiCalendar, FiRefreshCw, FiShoppingCart, FiBriefcase, FiUser, FiBarChart2 } from "react-icons/fi";
+import { FiClipboard, FiUsers, FiCheckSquare, FiFileText, FiCalendar, FiRefreshCw, FiShoppingCart, FiBarChart2 } from "react-icons/fi";
 import { Doughnut, Bar } from "react-chartjs-2";
 import {
  Chart as ChartJS,
@@ -13,14 +13,7 @@ import {
  PointElement,
  Filler,
 } from "chart.js";
-import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
-import Modal from "../../../../core/ui/components/Modal";
-import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
-import StatCard from "../../../../core/ui/patterns/StatCard";
-import ChartCard from "../../../gerencia/components/ChartCard";
-import PurchaseHandoffWidget from "../../components/PurchaseHandoffWidget";
-import PurchaseTypeSelector from "../../../../shared/purchases/PurchaseTypeSelector";
 
 // Register Chart.js components
 ChartJS.register(
@@ -48,75 +41,9 @@ const LoadingChartState = () => (
  </div>
 );
 
-const quickAccessLinks = [
- {
- label: "Crear Solicitud",
- description: "Compra de equipos",
- icon: FiShoppingCart,
- action: { type: "modal", target: "purchaseType" },
- color: "from-indigo-500 via-indigo-600 to-indigo-700",
- },
- {
- label: "Clientes",
- description: "Gestión desde navegación",
- icon: FiUsers,
- action: { type: "navigate", target: "/dashboard/comercial/clientes" },
- color: "from-emerald-500 via-emerald-600 to-emerald-700",
- },
- {
- label: "Solicitudes",
- description: "Historial completo",
- icon: FiClipboard,
- action: { type: "navigate", target: "/dashboard/comercial/solicitudes" },
- color: "from-sky-500 via-sky-600 to-sky-700",
- },
- {
- label: "Business Case",
- description: "Inicia y completa tu caso",
- icon: FiFileText,
- action: { type: "navigate", target: "/dashboard/business-case" },
- color: "from-orange-500 via-orange-600 to-orange-700",
- },
- {
- label: "Planificación",
- description: "Cronograma mensual",
- icon: FiCalendar,
- action: { type: "navigate", target: "/dashboard/comercial/planificacion" },
- color: "from-purple-500 via-purple-600 to-purple-700",
- },
-];
-
-const QuickAccessCard = ({ label, description, Icon, colorClasses, onClick }) => (
- <Card className="p-0">
- <button
- className="w-full h-full rounded-2xl border border-transparent bg-gradient-to-br from-white/80 to-white shadow-sm transition hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-300"
- onClick={onClick}
- type="button"
- >
- <div className="flex items-center gap-3 p-4">
- <div className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${colorClasses} text-white shadow-md`}>
- <Icon size={22} />
- </div>
- <div>
- <p className="text-sm font-bold text-gray-900">{label}</p>
- <p className="text-xs text-gray-500">{description}</p>
- </div>
- </div>
- </button>
- </Card>
-);
-
 const ComercialView = ({ onRefresh, summaryData, summaryLoading, summaryError }) => {
  const navigate = useNavigate();
- const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
- const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
-
- const handlePurchaseTypeSelection = (type) => {
- // Log TEMPORAL para debugging
- console.log('[UI_COMERCIAL][FASE2][DASHBOARD_ENTRYPOINT_CLICK]');
- // El PurchaseTypeSelector ya maneja la navegación al workspace
- // No necesitamos lógica adicional aquí
- };
+ const [, setShowPurchaseTypeModal] = useState(false);
 
  // Error state component
  const ErrorState = ({ message = "Error cargando datos", onRetry }) => (

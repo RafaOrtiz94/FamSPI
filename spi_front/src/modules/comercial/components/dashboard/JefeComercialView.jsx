@@ -78,7 +78,7 @@ const quickAccessLinks = [
  label: "Compras Privadas",
  description: "Supervisión",
  icon: FiLayers,
- path: "/dashboard/backoffice/private-purchases",
+ path: "/dashboard/purchases/workspace?tab=private",
  gradient: "from-fuchsia-500 to-fuchsia-700",
  color: "fuchsia",
  },

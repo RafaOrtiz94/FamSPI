@@ -104,39 +104,11 @@ Reportes y Auditoria
 - Dependencia de Google Drive para descarga/subida documental (riesgo de indisponibilidad externa).
 
 ## Diagrama tecnico
-```mermaid
+`mermaid
 flowchart LR
-  subgraph Frontend
-    DB_UI[Dashboard.jsx\n Comercial]
-    AUD_UI[Auditoria.jsx]
-    PREP_UI[AuditPrepPage.jsx]
-  end
-
-  subgraph Backend
-    DASH_RT[dashboard.routes.js\n requireRole comercial/gerencia]
-    AUD_RT[audit.routes.js\n requireRole ti/gerencia/th]
-    PREP_RT[auditPrep.routes.js\n requireRole admin_ti/jefe_ti]
-    DASH_SV[dashboard.service.js\n Cache 60s + 6 KPIs paralelos]
-    AUD_SV[auditoria.service.js\n Paginado + filtros + CSV]
-    PREP_SV[auditPrep.service.js\n Expediente + accesos externos]
-  end
-
-  subgraph Persistencia
-    DB[(PostgreSQL\n auditoria.logs\n audit_settings\n audit_sections\n audit_documents\n audit_access_grants\n bc_master, requests, clients)]
-  end
-
-  subgraph Externos
-    GD[Google Drive\n Documentos expediente]
-  end
-
-  DB_UI --> DASH_RT
-  AUD_UI --> AUD_RT
-  PREP_UI --> PREP_RT
-  DASH_RT --> DASH_SV
-  AUD_RT --> AUD_SV
-  PREP_RT --> PREP_SV
-  DASH_SV --> DB
-  AUD_SV --> DB
-  PREP_SV --> DB
-  PREP_SV --> GD
-```
+  UI[Frontend o consumidor] --> API[API RPT]
+  API --> CTRL[Controladores]
+  CTRL --> SVC[Servicios]
+  SVC --> DB[(Base de datos)]
+  SVC --> EXT[Dependencias externas o modulos transversales]
+`

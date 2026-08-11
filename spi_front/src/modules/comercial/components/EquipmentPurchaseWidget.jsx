@@ -34,22 +34,10 @@ import RequestActions from "./RequestActions";
 import { usePurchaseSSE } from "../../../core/hooks/usePurchaseSSE";
 import {
  STATUS_CONFIG,
- VALIDATION_MESSAGES,
- MODAL_TITLES,
- PROCESSING_STEPS,
- SUCCESS_MESSAGES,
- EMPTY_STATES,
- LOADING_MESSAGES,
- ARIA_LABELS,
 } from "./EquipmentPurchaseWidget.constants";
 import {
  normalizeResponseItems,
  dedupeEquipmentList,
- getEquipmentDisplayList,
- getFormattedProviderResponse,
- getPaginationInfo,
- validateForm,
- getEquipmentPayload,
  formatProviderOutcome,
 } from "./EquipmentPurchaseWidget.utils";
 import { formatDateTimeEC } from "../../../core/utils/dateUtils";
@@ -209,7 +197,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  notes: "",
  });
  const [responseDraft, setResponseDraft] = useState({ open: false, id: null, outcome: "new", notes: "", items: [] });
- const [inspectionDraft, setInspectionDraft] = useState({});
+ const [inspectionDraft] = useState({});
  const [inspectionModal, setInspectionModal] = useState({
  open: false,
  requestId: null,

@@ -34,6 +34,19 @@ export const uploadAssignmentEvidence = async (assignmentId, file) => {
   return data?.data || null;
 };
 
+export const getTiAssignmentEvidenceFile = async (assignmentId) => {
+  const response = await api.get(`/ti-assets/assignments/${assignmentId}/evidence/file`, {
+    responseType: "blob",
+  });
+  return {
+    blob: response.data,
+    contentType: response.headers["content-type"] || "application/octet-stream",
+    filename:
+      (response.headers["content-disposition"] || "").match(/filename="?([^"]+)"?/)?.[1] ||
+      `evidencia-asignacion-${assignmentId}`,
+  };
+};
+
 export const updateTiAssetStatus = async (assetId, payload = {}) => {
  const { data } = await api.post(`/ti-assets/${assetId}/status`, payload);
  return data?.data || null;
@@ -215,6 +228,15 @@ export const uploadTiActaSigned = async (actaId, file) => {
  return data?.data || null;
 };
 
+export const uploadTiLegacyActaSigned = async (assignmentId, file) => {
+ const formData = new FormData();
+ formData.append("file", file);
+ const { data } = await api.post(`/ti-assets/legacy-assignments/${assignmentId}/upload-signed`, formData, {
+   headers: { "Content-Type": "multipart/form-data" },
+ });
+ return data?.data || null;
+};
+
 export const downloadTiAssetReport = async (assetId) => {
  await triggerBlobDownload(
    `/ti-assets/reports/asset/${assetId}`,
@@ -248,11 +270,18 @@ export const listTiLetrasDeChangioHistory = async (assetId) => {
  return data?.data || [];
 };
 
-export const uploadTiFinancialDoc = async (assetId, docType, file, notes = "") => {
+export const uploadTiFinancialDoc = async (assetId, docType, file, options = {}) => {
+ const normalizedOptions =
+   typeof options === "string"
+     ? { notes: options }
+     : (options || {});
+ const notes = normalizedOptions.notes || "";
+ const invoiceNumber = normalizedOptions.invoiceNumber || "";
  const formData = new FormData();
  formData.append("file", file);
  formData.append("doc_type", docType);
  if (notes) formData.append("notes", notes);
+ if (invoiceNumber) formData.append("invoice_number", invoiceNumber);
  const { data } = await api.post(`/ti-assets/${assetId}/financial-docs`, formData, {
    headers: { "Content-Type": "multipart/form-data" },
  });
@@ -312,4 +341,17 @@ export const liberateTiAsset = async (assetId, photoFiles, notes = "") => {
 export const getTiLiberationPhotos = async (assetId) => {
  const { data } = await api.get(`/ti-assets/${assetId}/liberation-photos`);
  return data?.data || [];
+};
+
+export const getTiLiberationPhotoFile = async (photoId) => {
+ const response = await api.get(`/ti-assets/liberation-photos/${photoId}/file`, {
+   responseType: "blob",
+ });
+ return {
+   blob: response.data,
+   contentType: response.headers["content-type"] || "image/jpeg",
+   filename:
+     (response.headers["content-disposition"] || "").match(/filename="?([^"]+)"?/)?.[1] ||
+     `liberacion-${photoId}.jpg`,
+ };
 };

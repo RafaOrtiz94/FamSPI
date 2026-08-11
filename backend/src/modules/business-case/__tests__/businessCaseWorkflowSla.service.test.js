@@ -1,6 +1,8 @@
 const {
   POST_STATISTICS_SLA_HOURS,
   PARTICIPANT_ROLES,
+  addWeekdayHours,
+  countWeekdayHoursBetween,
   getPostStatisticsSla,
   getReminderCode,
   buildPersonalPendingTasks,
@@ -8,16 +10,55 @@ const {
 } = require("../businessCaseWorkflowSla.service");
 
 describe("business case workflow SLA", () => {
-  test("uses the statistics upload timestamp and a single 48 hour deadline", () => {
+  test("does not start the SLA from the statistics upload timestamp", () => {
     const sla = getPostStatisticsSla({
       determinations_gate: {
         document: { uploaded_at: "2026-07-22T10:00:00.000Z" },
       },
     });
 
+    expect(sla).toBeNull();
+  });
+
+  test("uses the determinations validation timestamp and a single 48 weekday-hour deadline", () => {
+    const sla = getPostStatisticsSla({
+      determinations_gate: {
+        completed_commercial_at: "2026-07-22T10:00:00.000Z",
+      },
+    });
+
     expect(sla.started_at).toBe("2026-07-22T10:00:00.000Z");
     expect(sla.deadline_at).toBe("2026-07-24T10:00:00.000Z");
+    expect(sla.calculation).toBe("weekdays_only_v1");
     expect(POST_STATISTICS_SLA_HOURS).toBe(48);
+  });
+
+  test("ignores legacy statistics SLA deadlines when determinations validation exists", () => {
+    const sla = getPostStatisticsSla({
+      post_statistics_sla: {
+        started_at: "2026-07-20T10:00:00.000Z",
+        deadline_at: "2026-07-22T10:00:00.000Z",
+      },
+      determinations_gate: {
+        completed_commercial_at: "2026-07-23T08:30:00.000Z",
+      },
+    });
+
+    expect(sla.started_at).toBe("2026-07-23T08:30:00.000Z");
+    expect(sla.deadline_at).toBe("2026-07-27T08:30:00.000Z");
+  });
+
+  test("pauses the 48 hour SLA during weekends", () => {
+    expect(addWeekdayHours(new Date("2026-07-24T15:00:00.000Z"), 48).toISOString())
+      .toBe("2026-07-28T15:00:00.000Z");
+    expect(countWeekdayHoursBetween(
+      new Date("2026-07-24T15:00:00.000Z"),
+      new Date("2026-07-27T15:00:00.000Z"),
+    )).toBe(24);
+    expect(countWeekdayHoursBetween(
+      new Date("2026-07-25T12:00:00.000Z"),
+      new Date("2026-07-26T12:00:00.000Z"),
+    )).toBe(0);
   });
 
   test("increases reminder frequency as the 48 hour deadline approaches", () => {
@@ -54,10 +95,6 @@ describe("business case workflow SLA", () => {
             materiales: false,
           },
         },
-        investments_cart: {
-          acp_confirmed: true,
-          service_confirmed: false,
-        },
       },
       consumptionItems: [
         { item_type: "control", name: "Control B", annual_qty: 0 },
@@ -69,7 +106,6 @@ describe("business case workflow SLA", () => {
       "determinations_controles",
       "determinations_calibradores",
       "determinations_materiales",
-      "service_investment_cart",
     ]);
     expect(tasks[0].detail).toContain("Control B");
   });
@@ -83,10 +119,6 @@ describe("business case workflow SLA", () => {
           calibradores: true,
           materiales: true,
         },
-      },
-      investments_cart: {
-        acp_confirmed: true,
-        service_confirmed: true,
       },
       feasibility: {
         decision: { decided_at: "2026-07-23T10:00:00.000Z" },
@@ -111,10 +143,6 @@ describe("business case workflow SLA", () => {
             calibradores: false,
             materiales: true,
           },
-        },
-        investments_cart: {
-          acp_confirmed: true,
-          service_confirmed: false,
         },
       },
       investments: [],

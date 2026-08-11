@@ -17,7 +17,7 @@ const ActionDrawersSection = ({
     <Modal
       isOpen={createDrawerOpen}
       onClose={onCloseCreateDrawer}
-      title="Nueva solicitud de personal"
+      title="Solicitud de requerimiento de personal"
       maxWidth="max-w-4xl"
     >
       <PersonnelRequestForm

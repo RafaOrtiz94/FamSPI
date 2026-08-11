@@ -1,209 +1,133 @@
-# URS — MÓDULO DE VIÁTICOS
+# DOCUMENTO DE REQUERIMIENTOS DEL SISTEMA (URS)
 
-**Sistema:** FamSPI  
-**Versión:** 2.0  
-**Fecha:** 2026-06-18  
-**Estado:** En revisión  
-**Alineación:** WHO TRS 1019, Annex 3, Appendix 5
+## Nombre del modulo
+Control Financiero Operativo y Viaticos
 
----
+## Descripcion general del modulo
+Gestiona procesos financieros internos vinculados al inventario operativo y al ciclo de viaticos corporativos (solicitud, soporte documental, validacion, aprobacion y pago). El alcance observado no implementa facturacion tributaria.
 
-## 1. Introducción
+## Objetivo del modulo
+Asegurar control financiero operativo y soporte documental de gastos internos, con reglas de negocio verificables y trazabilidad para auditoria.
 
-El presente documento define los requerimientos de usuario del módulo de Viáticos del sistema SPI. Su finalidad es establecer, desde la perspectiva del negocio y de los actores que usan el sistema, qué capacidades deben existir, por qué son necesarias, cómo deben manifestarse en la operación diaria y cuándo deben activarse dentro del ciclo real del sistema.
+## Actores del sistema
+- Finanzas.
+- Jefatura financiera/Gerencia.
+- Comercial.
+- Backoffice Comercial.
+- Servicio Tecnico/Tecnico.
+- Sistema externo Silver.
 
-El módulo cubre el ciclo completo de viáticos corporativos: desde la creación del viático vinculado a una salida operacional, pasando por la carga documental (facturas electrónicas SRI mediante archivo TXT, notas de venta manuales, compras sin factura), hasta la revisión multinivel, aprobación y pago. Incluye un workspace agrupado por período que permite al colaborador procesar sus viáticos de forma individual o en lote mediante un asistente guiado de cuatro pasos.
+## Alcance funcional
+- Consulta de inventario financiero y movimientos.
+- Registro de entradas/salidas de inventario con motivo.
+- Exportacion de reporte CSV de movimientos.
+- Conciliacion con sistema externo Silver.
+- Gestion de viaticos desde visitas o viajes manuales.
+- Control de estado de viaticos y generacion de reporte de cotejo.
+- Carga y consulta de evidencias documentales de viaticos.
 
-Estos requerimientos son consistentes con el marco de control financiero interno de la organización y con los principios de trazabilidad y evidencia documental que exige el entorno regulado en que opera FamSPI.
+## Listado de requerimientos del usuario
+### REQ-FAC-001
+- Actor: Finanzas / Gerencia.
+- Requerimiento: El sistema debe permitir consultar inventario financiero ordenado por item.
+- Resultado esperado: Se obtiene lista actualizada de existencias para control financiero.
 
----
+### REQ-FAC-002
+- Actor: Finanzas / Gerencia.
+- Requerimiento: El sistema debe permitir registrar entradas y salidas de inventario con motivo.
+- Resultado esperado: Se actualiza stock y se crea movimiento financiero trazable.
 
-## 2. Objetivo
+### REQ-FAC-003
+- Actor: Finanzas / Gerencia.
+- Requerimiento: El sistema debe impedir salidas con cantidad mayor al stock disponible.
+- Resultado esperado: La operacion es rechazada sin afectar datos persistidos.
 
-Definir los requerimientos de usuario de alto nivel para el módulo `viaticos` del sistema SPI, estableciendo su justificación funcional, su forma esperada de operación y el contexto en que deben intervenir, de modo que sirvan como base verificable para la especificación funcional (FRS), el diseño técnico (DS) y la calificación operacional (OQ/PQ).
+### REQ-FAC-004
+- Actor: Finanzas / Gerencia.
+- Requerimiento: El sistema debe permitir exportar movimientos de inventario en formato CSV.
+- Resultado esperado: Se descarga reporte estructurado para conciliacion y auditoria.
 
----
+### REQ-FAC-005
+- Actor: Finanzas / Gerencia.
+- Requerimiento: El sistema debe permitir comparar inventario local contra inventario remoto Silver.
+- Resultado esperado: Se retorna listado de discrepancias para reconciliacion.
 
-## 3. Alcance
+### REQ-FAC-006
+- Actor: Comercial / Backoffice / Tecnico / Finanzas.
+- Requerimiento: El sistema debe permitir listar candidatos de viaticos por rango de fechas.
+- Resultado esperado: Se muestran visitas elegibles con su estado de viatico.
 
-**Incluye:**
-- Backend Express con lógica de servicio en `viaticos.service.js` y rutas en `viaticos.routes.js`
-- Frontend React con `ViaticosWorkspace.jsx` (vista de workspace agrupada) y `ViaticosWizard.jsx` (asistente de cuatro pasos)
-- Persistencia PostgreSQL en las tablas del dominio: `travel_allowances`, `travel_allowance_invoices`, `travel_allowance_documents`, `travel_allowance_purchases_no_invoice` y tablas de configuración
-- Integración con Google Drive para adjuntos documentales
-- Ciclo de aprobación multinivel: solicitante → jefe de área → financiero → pago
+### REQ-FAC-007
+- Actor: Comercial / Backoffice / Tecnico / Finanzas.
+- Requerimiento: El sistema debe permitir crear o actualizar solicitudes de viaticos.
+- Resultado esperado: Se registra viatico con origen, montos y metadatos de desplazamiento.
 
-**Excluye:**
-- Módulo de inventario financiero (`finanzas`) y conciliación con sistema externo Silver
-- Generación de facturación tributaria de la empresa hacia terceros
-- Módulo de compras corporativas (private purchases)
-- Infraestructura de base de datos y mecanismos de respaldo
+### REQ-FAC-008
+- Actor: Finanzas.
+- Requerimiento: El sistema debe permitir aprobar, rechazar o marcar como pagado un viatico.
+- Resultado esperado: El estado y montos aprobados quedan actualizados con trazabilidad del revisor.
 
----
+### REQ-FAC-009
+- Actor: Solicitante de viatico / Finanzas.
+- Requerimiento: El sistema debe permitir registrar documentos soporte de viaticos.
+- Resultado esperado: Los documentos quedan vinculados al viatico con metadata y enlace de almacenamiento.
 
-## 4. Actores
+### REQ-FAC-010
+- Actor: Finanzas.
+- Requerimiento: El sistema debe generar reporte de cotejo de viatico contra asistencia y soportes.
+- Resultado esperado: Se obtiene recomendacion de monto y estado tecnico de validacion.
 
-| Actor | Rol en el sistema | Acciones principales |
-|---|---|---|
-| Solicitante | Colaborador con salidas operacionales (comercial, técnico, backoffice, talento humano) | Crea viático, carga soportes, envía a revisión |
-| Jefe de área | `jefe_comercial`, `jefe_tecnico`, `jefe_operaciones`, `jefe_talento_humano` | Aprueba o rechaza en primer nivel |
-| Revisión financiera | `finanzas`, `financiero`, `jefe_financiero`, `jefe_finanzas` | Aprueba, rechaza, categoriza facturas y registra pago |
-| Gerencia general | `gerencia_general` | Consulta resúmenes y reportes consolidados |
-| Administrador | `admin`, `administrador` | Configura zonas, perfiles fijos y política del módulo |
-| Sistema | Proceso automatizado | Aplica validaciones de reglas de negocio y trazabilidad |
+### REQ-FAC-011
+- Actor: Sistema.
+- Requerimiento: El sistema debe limitar visibilidad de viaticos segun rol y propietario.
+- Resultado esperado: Usuarios no financieros solo visualizan sus propios registros.
 
----
+### REQ-FAC-012
+- Actor: Sistema.
+- Requerimiento: El sistema debe aplicar validaciones de negocio para kilometraje, gasolina y ambito laboral.
+- Resultado esperado: Solicitudes inconsistentes son rechazadas antes de persistencia.
 
-## 5. Justificación del módulo
+## Listado de requerimientos no funcionales
+### RNF-FAC-001 Seguridad de acceso
+Las rutas de inventario financiero y viaticos deben exigir autenticacion JWT.
 
-El módulo de Viáticos existe porque la organización necesita controlar y documentar los gastos de desplazamiento de sus colaboradores de forma trazable, verificable y auditable. Sin este módulo, los gastos de viáticos no tienen respaldo documental estructurado, no hay flujo de aprobación formal y no es posible cruzar los gastos contra la asistencia operacional del colaborador.
+### RNF-FAC-002 Control de autorizacion
+Las operaciones de cambio de estado y reportes de viatico deben limitarse a rol financiero.
 
-La integración con el SRI mediante carga de archivos TXT permite automatizar la ingesta de facturas electrónicas con todos sus campos tributarios, eliminando la transcripción manual. El workspace agrupado por período responde a la necesidad operativa de procesar múltiples viáticos del mismo mes o semana en una sola sesión. El asistente de cuatro pasos reduce errores al guiar al colaborador a través de todos los tipos de soporte antes de enviar a revisión.
+### RNF-FAC-003 Integridad transaccional
+Los movimientos de inventario deben ejecutarse de forma transaccional para evitar descuadres.
 
----
+### RNF-FAC-004 Trazabilidad
+Cada movimiento y cambio relevante debe registrar actor, timestamp y motivo.
 
-## 6. Requerimientos funcionales del usuario
+### RNF-FAC-005 Validacion de documentos
+El sistema debe validar tipo de documento y tamano maximo (15MB) en adjuntos de viaticos.
 
-### REQ-VT-001 — Workspace de viáticos agrupado por período
-**Actor:** Solicitante  
-**Enunciado:** El sistema debe mostrar los viáticos del usuario autenticado agrupados por período (mes o semana), con indicador de avance documental por viático.  
-**Resultado esperado:** Vista de workspace con grupos etiquetados por período, mostrando para cada viático su estado del flujo de trabajo y su nivel de completitud documental (sin documentos, en progreso, enviado, aprobado, etc.).  
-**Criticidad:** Alta
+### RNF-FAC-006 Manejo de errores
+Las fallas de integracion con Silver o Drive deben reportarse sin perder consistencia local.
 
-### REQ-VT-002 — Selección múltiple y procesamiento en lote
-**Actor:** Solicitante  
-**Enunciado:** El sistema debe permitir seleccionar uno o varios viáticos del mismo período para procesarlos en conjunto mediante el asistente guiado.  
-**Resultado esperado:** Checkbox por viático y por grupo de período, con botón que abre el asistente para el lote seleccionado. El asistente avanza de viático en viático hasta completar todos los seleccionados.  
-**Criticidad:** Alta
+### RNF-FAC-007 Rendimiento de reportes
+La exportacion CSV y reportes de cotejo deben ser aptos para ejecucion operativa recurrente.
 
-### REQ-VT-003 — Carga de archivo TXT del SRI con previsualización
-**Actor:** Solicitante  
-**Enunciado:** El sistema debe permitir cargar un archivo TXT generado por el portal del SRI, mostrar una previsualización con todos los campos del comprobante y permitir eliminar filas que no correspondan al viático antes de confirmar la carga.  
-**Resultado esperado:** Tabla de previsualización con las 14 columnas del TXT: RUC del emisor, razón social del emisor, tipo de comprobante, número de establecimiento, punto de emisión, número secuencial, clave de acceso, número de autorización, fecha de autorización, fecha de emisión, identificación del receptor, subtotal sin impuestos, IVA e importe total. Las filas cuya fecha de emisión está fuera del rango de fechas del viático se identifican visualmente y no pueden ser categorizadas por el solicitante.  
-**Criticidad:** Alta
+### RNF-FAC-008 Consistencia de esquema
+Las tablas de viaticos y documentos deben estar disponibles y coherentes para operaciones del modulo.
 
-### REQ-VT-004 — Categorización de facturas durante la carga del TXT
-**Actor:** Solicitante  
-**Enunciado:** El sistema debe permitir asignar una categoría de gasto a cada factura del TXT en el momento de la carga y adjuntar un documento soporte por factura.  
-**Resultado esperado:** Selector de categoría por fila con las opciones válidas del catálogo (`combustible`, `alimentacion`, `hospedaje`, `transporte`, `movilidad`, `materiales`) y campo de adjunto de archivo por fila. Las categorías asignadas se guardan junto con cada factura al confirmar la carga; las facturas sin categoría quedan con estado `pendiente_clasificacion`.  
-**Criticidad:** Alta
+## Reglas de negocio identificadas
+- Tipos de movimiento de inventario permitidos: `in`, `out`.
+- Cantidad de movimiento debe ser mayor a cero.
+- No se permite stock negativo.
+- Estados de viatico permitidos: `pending`, `approved`, `paid`, `rejected`.
+- Solo Finanzas puede cambiar estado de viaticos.
+- Tipos de origen de viatico permitidos: `client_visit`, `prospect_visit`, `manual_trip`.
+- Para solicitantes no financieros, el viatico aplica a gastos fuera de area laboral.
+- `fuel_amount` solo aplica cuando `distance_km > 1000`.
+- Tipos documentales permitidos: `invoice`, `liquidation`, `support`.
 
-### REQ-VT-005 — Registro de notas de venta manuales
-**Actor:** Solicitante  
-**Enunciado:** El sistema debe permitir registrar notas de venta manuales con los campos: RUC del proveedor, nombre del proveedor, fecha de emisión, punto de emisión, número secuencial, subtotal gravado al 12%, subtotal gravado al 0%, IVA, total, descripción del gasto y estado del documento.  
-**Resultado esperado:** Formulario de creación con listado de las notas ya registradas para el viático y opción de editar o eliminar cada una. Se admiten múltiples notas por viático.  
-**Criticidad:** Media
-
-### REQ-VT-006 — Registro de compras sin factura
-**Actor:** Solicitante  
-**Enunciado:** El sistema debe permitir registrar compras sin comprobante tributario con los campos: descripción, monto total, categoría de gasto y justificación.  
-**Resultado esperado:** Formulario de creación con listado de los registros existentes para el viático. Se admiten múltiples registros por viático. Las compras sin factura requieren aprobación posterior por roles financieros o de talento humano.  
-**Criticidad:** Media
-
-### REQ-VT-007 — Resumen consolidado previo al envío a revisión
-**Actor:** Solicitante  
-**Enunciado:** El sistema debe mostrar un resumen consolidado de todos los soportes del viático con totales por tipo de documento y por categoría de gasto antes de enviar a revisión.  
-**Resultado esperado:** Paso final del asistente con conteo de facturas TXT, notas manuales y compras sin factura; totales monetarios por categoría; y botón de envío a revisión activo únicamente cuando el viático está en estado `borrador`.  
-**Criticidad:** Alta
-
-### REQ-VT-008 — Envío a revisión por el solicitante
-**Actor:** Solicitante  
-**Enunciado:** El sistema debe permitir al solicitante enviar su propio viático a revisión cuando esté en estado `borrador`; la acción debe ser bloqueada si el viático ya fue enviado o se encuentra en un estado posterior.  
-**Resultado esperado:** Cambio de estado a `pendiente_revision` con registro del actor y timestamp. Endpoint dedicado al solicitante independiente del endpoint de flujo de trabajo de jefes.  
-**Criticidad:** Alta
-
-### REQ-VT-009 — Aprobación de primer nivel por jefe de área
-**Actor:** Jefe de área  
-**Enunciado:** El sistema debe permitir a los jefes de área aprobar o rechazar viáticos en estado `pendiente_revision` indicando motivo cuando corresponda.  
-**Resultado esperado:** Cambio de estado a `aprobado_jefe` o `rechazado_jefe` con registro del revisor, timestamp y notas de rechazo si aplica.  
-**Criticidad:** Alta
-
-### REQ-VT-010 — Revisión y aprobación financiera
-**Actor:** Revisión financiera  
-**Enunciado:** El sistema debe permitir a roles financieros aprobar, rechazar o marcar como listo para pago un viático que haya sido aprobado por el jefe de área.  
-**Resultado esperado:** Transiciones de estado desde `pendiente_financiero` hacia `aprobado_financiero`, `rechazado_financiero` o `listo_pago` con registro del responsable financiero.  
-**Criticidad:** Alta
-
-### REQ-VT-011 — Registro de pago
-**Actor:** Revisión financiera  
-**Enunciado:** El sistema debe permitir registrar el pago de un viático marcado como listo para pago y actualizarlo al estado `pagado`.  
-**Resultado esperado:** Cambio de estado a `pagado` con fecha y responsable del pago persistidos en el registro del viático.  
-**Criticidad:** Alta
-
-### REQ-VT-012 — Categorización de facturas por roles financieros
-**Actor:** Revisión financiera  
-**Enunciado:** El sistema debe permitir a roles financieros categorizar o recategorizar facturas ya guardadas de un viático, incluyendo las que el solicitante no categorizó.  
-**Resultado esperado:** PATCH sobre la factura actualiza la categoría, registra la fuente de categorización como `finance` y cambia el estado de la factura a `clasificada`. Operación restringida a `FINANCE_REVIEWER_ROLES`.  
-**Criticidad:** Media
-
-### REQ-VT-013 — Control de visibilidad por rol y propietario
-**Actor:** Sistema  
-**Enunciado:** El sistema debe limitar la visibilidad de viáticos según rol y propietario; los usuarios sin rol financiero o de gerencia solo deben visualizar sus propios viáticos.  
-**Resultado esperado:** Consultas de listado filtradas por `created_by` para solicitantes; acceso sin restricción de propietario para roles financieros, gerencia y administración.  
-**Criticidad:** Alta
-
-### REQ-VT-014 — Reporte de cotejo del viático
-**Actor:** Revisión financiera  
-**Enunciado:** El sistema debe generar un reporte de cotejo que cruce los gastos declarados del viático contra la asistencia operacional y los documentos soporte registrados.  
-**Resultado esperado:** Reporte con recomendación de monto, estado técnico de validación y detalle de discrepancias encontradas.  
-**Criticidad:** Media
-
-### REQ-VT-015 — Configuración de zonas, perfiles fijos y política
-**Actor:** Admin / Revisión financiera  
-**Enunciado:** El sistema debe permitir a roles autorizados configurar las zonas de viáticos, los perfiles de viáticos fijos por colaborador y la política general del módulo.  
-**Resultado esperado:** Endpoints de configuración que persisten parámetros operativos y los aplican en los cálculos del módulo.  
-**Criticidad:** Media
-
-### REQ-VT-016 — Reporte resumen y ATS XML
-**Actor:** Revisión financiera  
-**Enunciado:** El sistema debe generar un reporte resumen de viáticos por período y un archivo ATS en formato XML conforme al esquema SRI.  
-**Resultado esperado:** Endpoint de reporte resumen con filas filtradas por período, y endpoint de ATS que retorna el XML con la estructura requerida por el SRI para la declaración del anexo transaccional.  
-**Criticidad:** Media
-
----
-
-## 7. Requerimientos no funcionales
-
-**RNF-VT-001 — Seguridad de acceso:** Todas las rutas del módulo exigen autenticación JWT válida mediante `verifyToken`.
-
-**RNF-VT-002 — Control de autorización:** Las operaciones de cambio de estado financiero, categorización de facturas, configuración y reportes se limitan a roles definidos en `FINANCE_REVIEWER_ROLES` (`finanzas`, `financiero`, `jefe_financiero`, `jefe_finanzas`).
-
-**RNF-VT-003 — Trazabilidad:** Cada cambio de estado persiste el actor, el timestamp y el motivo en la tabla `travel_allowances`. Los registros documentales almacenan `created_by_user_id` y `created_at`.
-
-**RNF-VT-004 — Validación documental:** El sistema valida tipo MIME y tamaño máximo de 15 MB para adjuntos cargados al módulo de documentos del viático.
-
-**RNF-VT-005 — Integridad del flujo:** El sistema bloquea transiciones de estado ilegales. El intento de enviar a `pendiente_revision` un viático que ya se encuentra en ese estado o en uno posterior es rechazado con error descriptivo.
-
-**RNF-VT-006 — Rendimiento:** Las consultas de listado de viáticos con filtros por período y las consultas de totales consolidados deben responder en tiempo operativo para uso recurrente diario.
-
-**RNF-VT-007 — Consistencia del esquema:** Las tablas del módulo se crean mediante `ensureSchema` al iniciar el servicio; este mecanismo usa `CREATE TABLE IF NOT EXISTS` y no altera tablas ya existentes en producción.
-
----
-
-## 8. Reglas de negocio
-
-- **Ciclo de vida del estado:** `borrador → pendiente_revision → aprobado_jefe | rechazado_jefe → pendiente_financiero → aprobado_financiero | rechazado_financiero → listo_pago → pagado → cerrado`
-- Solo el propietario del viático o un rol privilegiado puede enviarlo a revisión mediante `POST /:id/submit-review`.
-- Las facturas TXT sin categoría asignada por el solicitante quedan en estado `pendiente_clasificacion`; las categorizadas quedan en `clasificada`.
-- Las categorías válidas de gasto son: `combustible`, `alimentacion`, `hospedaje`, `transporte`, `movilidad`, `materiales`.
-- Solo roles financieros (`FINANCE_REVIEWER_ROLES`) pueden categorizar o recategorizar facturas ya persistidas en base de datos mediante `PATCH /invoices/:invoiceId`.
-- Los comprobantes del TXT cuya fecha de emisión está fuera del rango de fechas del viático se marcan con `in_trip_date_range = false` y no pueden ser categorizados por el solicitante.
-- Las notas de venta manual se almacenan en `travel_allowance_invoices` con `document_type = 'nota_venta_manual'`.
-- Los tipos de origen del viático permitidos son: `client_visit`, `prospect_visit`, `manual_trip`, `operational_exit`.
-- El solicitante no puede acceder a `PATCH /:id/workflow` (reservado para jefes); usa `POST /:id/submit-review` para iniciar el flujo de revisión.
-
----
-
-## 9. Dependencias con otros módulos
-
-- **Salidas operacionales / Oportunidades:** Los viáticos se originan en salidas operacionales registradas en el módulo de oportunidades o en viajes manuales con `source_type = 'manual_trip'`.
-- **Usuarios / Autenticación:** Roles, propietario del viático y trazabilidad por usuario autenticado.
-- **Asistencia:** Validación geoespacial y de marcaciones en el reporte de cotejo.
-- **Documentos / Google Drive:** Almacenamiento de adjuntos de viáticos a través del módulo de integración con Drive.
-- **Notificaciones:** Eventos de cambio de estado relevantes para solicitante y revisores.
-
----
-
-## 10. Conclusión
-
-Los requerimientos del módulo de Viáticos se justifican por la necesidad institucional de controlar, documentar y auditar los gastos de desplazamiento con respaldo documental estructurado, flujo de aprobación multinivel trazable, integración tributaria SRI automatizada y un workspace operativo eficiente para el colaborador. La versión 2.0 incorpora el workspace agrupado por período, el asistente de cuatro pasos con categorización en carga TXT, registro de notas manuales, compras sin factura y el endpoint dedicado de envío a revisión por el solicitante.
+## Dependencias con otros modulos
+- Inventario (stock y movimientos).
+- Clientes (visitas comerciales que originan viaticos).
+- Usuarios/Autenticacion (roles y trazabilidad por usuario).
+- Asistencia (validacion geoespacial y de marcaciones en reporte de viatico).
+- Documentos/Integraciones Google (almacenamiento de soportes en Drive).
+- Integracion externa Silver (conciliacion de inventario financiero).
+- Solicitudes internas (origen indirecto de visitas/clientes y contexto operativo).

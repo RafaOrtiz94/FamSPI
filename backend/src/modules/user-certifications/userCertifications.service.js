@@ -1553,6 +1553,7 @@ const generateConsolidatedCertificationsPDFV2 = async (targetUserId, requesterUs
 };
 
 module.exports = {
+  formatDateLabel,
   createCertification,
   getUserCertifications,
   getCertificationsByUserId,

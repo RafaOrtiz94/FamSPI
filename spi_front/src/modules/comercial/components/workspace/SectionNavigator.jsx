@@ -77,13 +77,15 @@ const SectionNavigator = ({
  // uno su clase), pero nunca se agregaron aqui -- por eso nunca aparecian en
  // el sidebar aunque el backend/permiso ya las dejara editar.
  {
- id: "investment_values_op",
+ id: "investment_values",
  title: "Precios — Inversiones Operativas",
- description: "Precio unitario de productos y adquisiciones del carrito (solo Jefe de Operaciones)",
- icon: "$OP"
+ label: "Precios financieros y operativos",
+ description: "Cotizacion, precio operativo, precio financiero y depreciacion en una sola vista",
+ icon: "$"
  },
  {
  id: "investment_values_fin",
+ hidden: true,
  title: "Precios — Inversiones Financieras",
  description: "Precio unitario de servicios y mano de obra del carrito (solo Jefe Financiero)",
  icon: "$FIN"
@@ -109,9 +111,15 @@ const SectionNavigator = ({
  ];
 
  // Filter sections based on role
- const visibleSections = roleConfig.visible === "all"
- ? allSections
- : allSections.filter(s => roleConfig.visible.includes(s.id));
+ const availableSections = allSections.filter((section) => !section.hidden);
+ const roleVisibleSections = roleConfig.visible === "all"
+ ? availableSections
+ : availableSections.filter(s => roleConfig.visible.includes(s.id));
+ // BC cerrado no factible: solo el Resumen queda navegable, sin importar el rol.
+ const isClosedNoFactible = uiGuidance?.workflowState?.currentStage === "cerrado_no_factible";
+ const visibleSections = isClosedNoFactible
+ ? availableSections.filter((s) => s.id === "consumption_export")
+ : roleVisibleSections;
 
  // Check if section is editable by current role
  const canEditSection = (sectionId) => {
@@ -151,7 +159,16 @@ const SectionNavigator = ({
  };
 
  const getSectionStatus = (sectionId) => {
- const rule = rules[sectionId];
+ const rule = sectionId === "investment_values"
+ ? {
+ ...(rules.investment_values_fin || {}),
+ isCompleted: Boolean(rules.investment_values_fin?.isCompleted),
+ isLocked: Boolean(rules.investment_values_op?.isLocked || rules.investment_values_fin?.isLocked),
+ currentOwner: rules.investment_values_fin?.currentOwner || rules.investment_values_op?.currentOwner || null,
+ completedBy: rules.investment_values_fin?.completedBy || rules.investment_values_op?.completedBy || null,
+ completedAt: rules.investment_values_fin?.completedAt || rules.investment_values_op?.completedAt || null,
+ }
+ : rules[sectionId];
  const isObserved = observationData?.observedSections?.includes(sectionId);
  const hasComment = observationData?.comments?.[sectionId];
  const isLocked = Boolean(rule?.isLocked);
@@ -220,7 +237,7 @@ const SectionNavigator = ({
   <div className="mb-4 flex min-w-0 items-center justify-between gap-3 lg:mb-6">
   <h3 className="min-w-0 text-lg font-bold tracking-tight text-gray-900">Secciones</h3>
   <span className="shrink-0 rounded-full bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-500">
- {visibleSections.length} de {allSections.length}
+ {visibleSections.length} de {availableSections.length}
  </span>
  </div>
 
@@ -262,7 +279,7 @@ const SectionNavigator = ({
  <span className="text-sm">{section.icon}</span>
   <h4 className={`min-w-0 flex-1 break-words text-sm font-semibold ${status.isLocked ? "text-gray-500" : isSelected ? "text-blue-900" : "text-gray-900"
  }`}>
- {section.title}
+ {section.label || section.title}
  </h4>
  {status.hasComment && (
  <FiMessageSquare
@@ -390,7 +407,7 @@ const SectionNavigator = ({
   </span>
   <span className="min-w-0 flex-1">
   <span className="block truncate text-sm font-semibold text-blue-950">
-  {selectedSectionData?.title || "Selecciona una seccion"}
+  {selectedSectionData?.label || selectedSectionData?.title || "Selecciona una seccion"}
   </span>
   <span className="mt-0.5 block truncate text-xs text-blue-700">
   {selectedSectionData?.description || "Navega por los apartados del caso"}
@@ -430,7 +447,7 @@ const SectionNavigator = ({
   <StatusIcon className={`shrink-0 ${status.color}`} size={18} />
   <span className="min-w-0 flex-1">
   <span className={`block break-words text-sm font-semibold ${isSelected ? "text-blue-900" : "text-gray-900"}`}>
-  {section.title}
+  {section.label || section.title}
   </span>
   <span className="mt-0.5 block break-words text-xs text-gray-500">{section.description}</span>
   </span>

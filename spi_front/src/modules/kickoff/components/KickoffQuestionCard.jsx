@@ -47,7 +47,7 @@ function timeAgo(iso) {
 // Aportes nunca pueden ocultarse. Cualquier usuario puede calificarlos (excepto el autor).
 function AporteCard({ question, isModerator, currentUserId, onRefresh }) {
   const alreadyRated = question.user_rating != null;
-  const [busy,      setBusy]      = useState(false);
+  const [,         setBusy]      = useState(false);
   const [starValue, setStarValue] = useState(alreadyRated ? question.user_rating : 0);
   const [rated,     setRated]     = useState(alreadyRated);
 

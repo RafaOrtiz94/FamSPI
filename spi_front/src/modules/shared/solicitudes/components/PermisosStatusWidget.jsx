@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
   FiClock,
-  FiCheck,
   FiFileText,
   FiDownload,
   FiAlertCircle,
@@ -10,12 +9,21 @@ import {
   FiEye,
   FiShield,
 } from "react-icons/fi";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useAuth } from "../../../../core/auth/AuthContext";
-import { STATUS_META, getTipoLabel, formatDateShort, hasJustificantes, JUSTIFICANTE_STATUS_META, ESCALATION_STATUS_META, PROVISIONAL_STATUS_META } from "../utils/solicitudesHelpers";
+import {
+  STATUS_META,
+  getTipoLabel,
+  formatDateShort,
+  hasJustificantes,
+  hasExternalCoordinationEvidence,
+  JUSTIFICANTE_STATUS_META,
+  ESCALATION_STATUS_META,
+  PROVISIONAL_STATUS_META,
+} from "../utils/solicitudesHelpers";
 import { formatVacationDaysHours } from "../utils/vacationDisplay";
 import {
   getMisSolicitudes,
@@ -25,9 +33,7 @@ import {
   convertirAVacaciones,
 } from "../../../../core/api/permisosApi";
 import UploadJustificantesModal from "../modals/UploadJustificantesModal";
-import { getActiveException } from "../../../../core/api/attendanceApi";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
-import { formatTimeSafe } from "../../../../shared/utils/dateUtils";
 
 const normalizeRole = (value = "") => value.toLowerCase();
 
@@ -159,7 +165,6 @@ const PermisosStatusWidget = () => {
   const [visibleItemsBySection, setVisibleItemsBySection] = useState(INITIAL_VISIBLE_COUNTS);
   const [recoveryRows, setRecoveryRows] = useState([]);
   const [recoveryModalAction, setRecoveryModalAction] = useState("propose");
-  const [activeException, setActiveException] = useState(null);
   const [regularizacionModal, setRegularizacionModal] = useState({ open: false, solicitudId: null, action: null });
   const [regularizacionReason, setRegularizacionReason] = useState("");
   const refreshPromiseRef = useRef(null);
@@ -210,27 +215,10 @@ const PermisosStatusWidget = () => {
     updated_at: normalizeDateValue(solicitud?.updated_at),
   });
 
-  const isApprovedSolicitud = (solicitud) =>
-    ["approved", "aprobado"].includes(String(solicitud?.status || "").toLowerCase());
-
   const canCoordinateRecoveryByStatus = (solicitud) =>
     ["partially_approved", "pending_final", "approved", "aprobado"].includes(
       String(solicitud?.status || "").toLowerCase()
     );
-
-  const fetchActiveException = async () => {
-    try {
-      const response = await getActiveException();
-      if (response?.ok) {
-        setActiveException(response.data || null);
-      } else {
-        setActiveException(null);
-      }
-    } catch (error) {
-      console.error("Error fetching active exception:", error);
-      setActiveException(null);
-    }
-  };
 
   const loadData = async ({ silent = false } = {}) => {
     if (refreshPromiseRef.current) return refreshPromiseRef.current;
@@ -246,9 +234,6 @@ const PermisosStatusWidget = () => {
         console.error("Error loading permisos:", error);
         if (!silent) showToast("Error al cargar solicitudes", "error");
       } finally {
-        if (!isTalentRole) {
-          await fetchActiveException();
-        }
         if (!silent) setLoading(false);
       }
     })();
@@ -454,20 +439,9 @@ const PermisosStatusWidget = () => {
     ((userId && selectedSolicitud?.user_id && Number(userId) === Number(selectedSolicitud.user_id)) ||
       isSameEmail(userEmail, selectedSolicitud?.user_email));
 
-  const canSelectedUserApproveRecovery =
-    Boolean(selectedSolicitud) &&
-    ["pending_requester_acceptance", "pending_approver_proposal"].includes(selectedRecoveryStatus) &&
-    isSelectedRequester;
   const canSelectedRequesterCounterPropose =
     selectedRecoveryStatus === "pending_requester_acceptance" &&
     isSelectedRequester;
-  const selectedStatus = String(selectedSolicitud?.status || "").toLowerCase();
-  const selectedIsApprover =
-    Boolean(selectedSolicitud) &&
-    ((userId &&
-      selectedSolicitud?.approver_user_id &&
-      Number(userId) === Number(selectedSolicitud.approver_user_id)) ||
-      isSameEmail(userEmail, selectedSolicitud?.approver_email));
   const selectedRequiresCancellationRequestFlow = false;
 
   const pendientesDeJustificante = useMemo(
@@ -487,45 +461,6 @@ const PermisosStatusWidget = () => {
       ),
     [misSolicitudes]
   );
-
-  const exceptionStatus = activeException?.status || "NONE";
-  const exceptionStepLabel =
-    {
-      ACTIVE: "En ruta",
-      ON_SITE: "En sitio",
-      RETURNING: "Regresando",
-      COMPLETED: "Completada",
-      NONE: "Sin salidas inesperadas",
-    }[exceptionStatus] || "Sin salidas inesperadas";
-
-  const exceptionTimeEntries = activeException
-    ? [
-      {
-        label: "Salida inesperada",
-        value: activeException.start_time,
-        colors: "bg-amber-50 border-amber-200 text-amber-800",
-        note: activeException.type ? activeException.type.replace(/_/g, " ").toUpperCase() : "Sin motivo",
-      },
-      {
-        label: "Llegada a destino",
-        value: activeException.arrival_time,
-        colors: "bg-orange-50 border-orange-200 text-orange-800",
-        note: exceptionStatus === "ON_SITE" ? "Llegaste" : "Pendiente",
-      },
-      {
-        label: "Salida del destino",
-        value: activeException.departure_time,
-        colors: "bg-yellow-50 border-yellow-200 text-yellow-800",
-        note: exceptionStatus === "RETURNING" ? "Regresando" : "Pendiente",
-      },
-      {
-        label: "Regreso a oficina",
-        value: activeException.return_time,
-        colors: "bg-emerald-50 border-emerald-200 text-emerald-800",
-        note: exceptionStatus === "COMPLETED" ? "Completado" : "Pendiente",
-      },
-    ]
-    : [];
 
   const tabs = useMemo(() => {
     return [
@@ -643,9 +578,6 @@ const PermisosStatusWidget = () => {
     const isRequesterOfSolicitud =
       Boolean(userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id)) ||
       isSameEmail(userEmail, solicitud?.user_email);
-    const isApproverOfSolicitud =
-      (userId && solicitud?.approver_user_id && Number(userId) === Number(solicitud.approver_user_id)) ||
-      isSameEmail(userEmail, solicitud?.approver_email);
     const normalizedStatus = String(solicitud?.status || "").toLowerCase();
 
     const canEditRecovery =
@@ -913,6 +845,23 @@ const PermisosStatusWidget = () => {
           </div>
         )}
 
+        {hasExternalCoordinationEvidence(solicitud) && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {solicitud.external_coordination_urls.map((url, idx) => (
+              <a
+                key={`${solicitud.id}-coord-${idx}`}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[10px] font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+              >
+                <FiEye className="w-3 h-3" />
+                Coordinación externa {idx + 1}
+              </a>
+            ))}
+          </div>
+        )}
+
         {solicitud.pdf_generado_url && (
           <div className="mt-2">
             <a
@@ -1069,44 +1018,6 @@ const PermisosStatusWidget = () => {
   return (
     <>
     <div className="space-y-4">
-      {/* Widget de Salida Inesperada */}
-      {!isTalentRole && (
-        <Card className="p-4 border-amber-100 bg-gradient-to-br from-amber-50/50 to-white">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-bold text-gray-900">Gestión de Salidas Inesperadas</h3>
-              <p className="text-xs text-gray-500 mt-0.5">Control de excepciones de asistencia en tiempo real</p>
-            </div>
-            <div className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
-              activeException ? "bg-amber-100 border-amber-200 text-amber-800 animate-pulse" : "bg-gray-100 border-gray-200 text-gray-500"
-            }`}>
-              {exceptionStepLabel.toUpperCase()}
-            </div>
-          </div>
-
-          {activeException ? (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {exceptionTimeEntries.map((entry, idx) => (
-                  <div key={`exc-time-${idx}`} className={`p-2 rounded-lg border ${entry.colors} transition-all`}>
-                    <p className="text-[10px] font-semibold opacity-80 mb-1 uppercase tracking-wider">{entry.label}</p>
-                    <p className="text-xs font-bold font-mono">
-                      {entry.value ? formatTimeSafe(entry.value) : "--:--"}
-                    </p>
-                    <p className="text-[9px] mt-1 font-medium italic opacity-70">{entry.note}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="py-4 text-center border-2 border-dashed border-gray-100 rounded-xl bg-gray-50/30">
-              <FiClock className="w-8 h-8 text-gray-200 mx-auto mb-2" />
-              <p className="text-xs text-gray-400 font-medium">No tienes salidas inesperadas activas en este momento</p>
-            </div>
-          )}
-        </Card>
-      )}
-
       {/* Widget de Carga de Justificantes */}
       {pendientesDeJustificante.length > 0 && (
         <Card className="p-4 border-blue-100 bg-gradient-to-br from-blue-50/50 to-white">
@@ -1354,14 +1265,14 @@ const PermisosStatusWidget = () => {
                   Guardar progreso
                 </Button>
               )}
-              {canSelectedRequesterCounterPropose && recoveryModalAction !== "log_progress" && (
+              {isSelectedRequester && recoveryModalAction !== "log_progress" && (
                 <Button
                   variant="primary"
                   onClick={() => handleSaveRecoveryPlan("propose")}
                   disabled={actionLoading === `recovery-${selectedSolicitud?.id}`}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-700 rounded-xl"
                 >
-                  Enviar propuesta
+                  {canSelectedRequesterCounterPropose ? "Enviar contrapropuesta" : "Enviar propuesta"}
                 </Button>
               )}
             </div>

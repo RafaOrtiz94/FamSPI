@@ -5,7 +5,6 @@ import {
  FiSettings,
  FiDatabase,
  FiActivity,
- FiFileText,
  FiShield,
  FiArrowRight,
  FiLink,
@@ -72,10 +71,11 @@ const DashboardTI = () => {
  const activos = users.filter((u) => u.active !== false).length;
  const inactivos = users.filter((u) => u.active === false).length;
  const departamentos = departments.filter((d) => String(d.status || "").toLowerCase() !== "inactive").length;
- const departamentosInactivos = departments.filter((d) => String(d.status || "").toLowerCase() === "inactive").length;
- const role = (user?.role || "").toLowerCase();
- const auditActive = Boolean(auditStatus?.active);
- const canSeeAudit = auditActive || ["admin_ti", "jefe_ti", "ti"].includes(role);
+const departamentosInactivos = departments.filter((d) => String(d.status || "").toLowerCase() === "inactive").length;
+const role = (user?.role || "").toLowerCase();
+const auditActive = Boolean(auditStatus?.active);
+const canSeeAudit = auditActive || ["admin_ti", "jefe_ti", "ti"].includes(role);
+const canManagePeopleAdmin = ["ti", "jefe_ti"].includes(role);
 
  // ============================================================
  // 🔹 Render principal
@@ -149,13 +149,15 @@ const DashboardTI = () => {
  {/* ACCESOS DIRECTOS */}
  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
  {[
- {
+ canManagePeopleAdmin
+ ? {
  title: "Usuarios y Departamentos",
  desc: "Centraliza la gestion de usuarios, roles y estructura organizacional.",
  path: "/dashboard/talento-humano/gestion",
  gradient: "from-blue-600 via-blue-500 to-blue-400",
  icon: <FiSettings size={24} />,
- },
+ }
+ : null,
  {
  title: "Auditoría y Trazabilidad",
  desc: "Consulta la actividad completa y la bitácora de sesiones.",

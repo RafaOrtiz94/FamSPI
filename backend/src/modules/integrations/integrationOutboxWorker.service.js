@@ -1,6 +1,5 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
-const { isOdooIntegrationEnabled } = require("../../config/odooIntegration");
 const crmService = require("./crm.service");
 
 const DEFAULT_BATCH_LIMIT = Number(process.env.INTEGRATION_OUTBOX_BATCH_LIMIT || 20);
@@ -16,46 +15,6 @@ const normalizeMaxAttempts = (value) => {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed)) return Math.max(1, DEFAULT_MAX_ATTEMPTS);
   return Math.max(1, Math.min(20, parsed));
-};
-
-const sendToOdooStub = async (payload) => {
-  if (payload && payload.simulate_failure === true) {
-    const error = new Error("Simulated Odoo transport error");
-    error.code = "ODOO_STUB_ERROR";
-    throw error;
-  }
-
-  return {
-    acknowledged: true,
-    provider: "odoo_stub",
-    sent_at: new Date().toISOString(),
-  };
-};
-
-const markPendingAsSkipped = async (limit) => {
-  const { rowCount } = await db.query(
-    `
-    WITH candidates AS (
-      SELECT id
-      FROM public.integration_outbox
-      WHERE status = 'pending'
-      ORDER BY id ASC
-      LIMIT $1
-      FOR UPDATE SKIP LOCKED
-    )
-    UPDATE public.integration_outbox o
-    SET
-      status = 'skipped',
-      processed_at = NOW(),
-      updated_at = NOW(),
-      last_error = 'odoo_integration_disabled'
-    FROM candidates c
-    WHERE o.id = c.id
-    `,
-    [limit],
-  );
-
-  return Number(rowCount || 0);
 };
 
 const CRM_EVENT_PREFIX = "crm.";
@@ -157,23 +116,6 @@ async function processPendingOutboxBatch({
   const safeLimit = normalizeBatchLimit(limit);
   const safeMaxAttempts = normalizeMaxAttempts(maxAttempts);
 
-  const isCrmFilter = eventTypeFilter && String(eventTypeFilter).startsWith("crm.");
-
-  if (!isCrmFilter && !isOdooIntegrationEnabled()) {
-    const skipped = await markPendingAsSkipped(safeLimit);
-    const summary = {
-      enabled: false,
-      scanned: skipped,
-      sent: 0,
-      failed: 0,
-      dead: 0,
-      skipped,
-      processed_ids: [],
-    };
-    logger.info({ summary }, "[INTEGRATION_OUTBOX] Batch procesado (flag OFF)");
-    return summary;
-  }
-
   const batch = await claimPendingBatch(safeLimit, eventTypeFilter);
   const summary = {
     enabled: true,
@@ -187,20 +129,28 @@ async function processPendingOutboxBatch({
 
   for (const row of batch) {
     try {
-      if (isCrmEvent(row.event_type)) {
-        if (!crmService.isCrmSyncEnabled()) {
-          await db.query(
-            `UPDATE public.integration_outbox SET status='skipped', processed_at=NOW(), updated_at=NOW(), last_error='crm_sync_disabled' WHERE id=$1`,
-            [row.id],
-          );
-          summary.skipped += 1;
-          summary.processed_ids.push(Number(row.id));
-          continue;
-        }
-        await sendToCrm(row);
-      } else {
-        await sendToOdooStub(row.payload || {});
+      if (!isCrmEvent(row.event_type)) {
+        // ponytail: no queda ningun provider para eventos no-CRM (Odoo se
+        // elimino del sistema). Si en el futuro se agrega otra integracion,
+        // este es el lugar para despacharla.
+        await db.query(
+          `UPDATE public.integration_outbox SET status='skipped', processed_at=NOW(), updated_at=NOW(), last_error='no_provider_for_event_type' WHERE id=$1`,
+          [row.id],
+        );
+        summary.skipped += 1;
+        summary.processed_ids.push(Number(row.id));
+        continue;
       }
+      if (!crmService.isCrmSyncEnabled()) {
+        await db.query(
+          `UPDATE public.integration_outbox SET status='skipped', processed_at=NOW(), updated_at=NOW(), last_error='crm_sync_disabled' WHERE id=$1`,
+          [row.id],
+        );
+        summary.skipped += 1;
+        summary.processed_ids.push(Number(row.id));
+        continue;
+      }
+      await sendToCrm(row);
 
       await markSent({ id: row.id });
       summary.sent += 1;
@@ -244,7 +194,6 @@ async function processPendingOutboxBatch({
 }
 
 module.exports = {
-  sendToOdooStub,
   sendToCrm,
   processPendingOutboxBatch,
 };

@@ -13,6 +13,9 @@ import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
 import SectionEditorBadge from "./SectionEditorBadge";
 
+// Mismos roles que ya autoriza el backend en POST /sections/:section/unlock.
+const EQUIPMENT_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_de_comercial"]);
+
 const generateLocalId = () => {
  if (typeof crypto !== "undefined" && crypto.randomUUID) {
  return crypto.randomUUID();
@@ -251,6 +254,24 @@ const EquipmentSection = ({
  const { id: bcId } = useParams();
  const { showToast, showLoader, hideLoader } = useUI();
  const canEdit = permissions.canEdit !== false && ownership?.canUserEdit !== false;
+ // Reabrir "equipment" tras el auto-bloqueo al guardar comercial (ver
+ // saveEquipmentDetailsV2 en businessCase.controller.js). Mismos roles que
+ // ya autoriza el backend en POST /sections/:section/unlock.
+ const canReopenEquipment = ownership?.isLocked === true && EQUIPMENT_REOPEN_ROLES.has(permissions?.userRole || "");
+ const [reopening, setReopening] = useState(false);
+ const handleReopenEquipment = async () => {
+  if (!bcId || reopening) return;
+  setReopening(true);
+  try {
+   await api.post(`/business-case/${bcId}/sections/equipment/unlock`);
+   onSave();
+   showToast("Sección reabierta para edición.", "success");
+  } catch (err) {
+   showToast(err?.response?.data?.message || "No se pudo reabrir la sección.", "error");
+  } finally {
+   setReopening(false);
+  }
+ };
 
  const [items, setItems] = useState([]);
  const [loadingCatalog, setLoadingCatalog] = useState(false);
@@ -771,8 +792,22 @@ const EquipmentSection = ({
  </div>
 
  {!canEdit && (
- <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-700">
- Esta seccion esta en modo solo lectura para tu rol.
+ <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+ <span>
+ {ownership?.isLocked
+  ? "Comercial ya guardó esta sección y quedó en solo lectura."
+  : "Esta seccion esta en modo solo lectura para tu rol."}
+ </span>
+ {canReopenEquipment && (
+ <button
+  type="button"
+  onClick={handleReopenEquipment}
+  disabled={reopening}
+  className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 w-full sm:w-auto"
+ >
+  Reabrir para edición
+ </button>
+ )}
  </div>
  )}
 

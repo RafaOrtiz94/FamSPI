@@ -20,6 +20,12 @@ async function runOnce() {
     const metadata = row.modern_bc_metadata && typeof row.modern_bc_metadata === 'object'
       ? row.modern_bc_metadata
       : {};
+    // Once the statistics document exists, the commercial preflow is closed
+    // and the single 48h workflow SLA is handled by the dedicated scheduler.
+    if (
+      metadata.post_statistics_sla?.started_at ||
+      metadata.determinations_gate?.document?.uploaded_at
+    ) continue;
     const deadlineRaw = metadata.preflow_deadline_at || null;
     if (!deadlineRaw) continue;
 
@@ -49,11 +55,26 @@ async function runOnce() {
       [row.id, SYSTEM_ACTOR_UUID, JSON.stringify({ deadline_at: deadlineRaw })],
     );
 
+    const responsibleRole = String(
+      metadata.preflow_phase === "review"
+        ? metadata.preflow_review_role
+        : metadata.preflow_commercial_role,
+    ).trim().toLowerCase();
+    const recipientRoles = [...new Set([
+      "jefe_comercial",
+      "acp_comercial",
+      "backoffice_comercial",
+      "gerencia",
+      responsibleRole,
+    ].filter(Boolean))];
+    const isTechnicalReview = metadata.preflow_phase === "review" && responsibleRole === "jefe_servicio";
+    const processKey = `business_case:${row.id}`;
+    const emailSubject = `Business Case ${row.id} - Seguimiento de prorroga`;
     const { rows: recipients } = await db.query(
       `SELECT id FROM users
         WHERE role = ANY($1)
           AND active = true`,
-      [["jefe_comercial", "acp_comercial", "backoffice_comercial", "gerencia"]],
+      [recipientRoles],
     );
 
     await Promise.all(
@@ -61,13 +82,29 @@ async function runOnce() {
         notificationManager.sendNotification({
           userId: recipient.id,
           customTitle: "Business Case preflujo vencido",
-          customMessage: `El BC ${row.id} (${row.client_name || 'Cliente'}) vencio su ventana de 48h sin completar secciones requeridas.`,
+          customMessage: isTechnicalReview
+            ? `El BC ${row.id} (${row.client_name || 'Cliente'}) vencio el SLA de Jefe de Servicio. La sincronizacion esta bloqueada; solicita una prorroga de 24 horas a Jefe Comercial.`
+            : `El BC ${row.id} (${row.client_name || 'Cliente'}) vencio su ventana de 48h sin completar secciones requeridas.`,
           type: "warning",
           source: "business_case.preflow.expiry",
           priority: 2,
           email: true,
           chat: false,
-          meta: { businessCaseId: row.id, deadline_at: deadlineRaw },
+          data: {
+            email_subject: emailSubject,
+            target_path: `/dashboard/business-case/workspace/${row.id}`,
+            cta_label: "Abrir Business Case",
+          },
+          meta: {
+            businessCaseId: row.id,
+            deadline_at: deadlineRaw,
+            responsible_role: responsibleRole,
+            extension_hours: isTechnicalReview ? 24 : null,
+            process_key: processKey,
+            email_subject: emailSubject,
+            target_path: `/dashboard/business-case/workspace/${row.id}`,
+            cta_label: "Abrir Business Case",
+          },
         }).catch(() => null),
       ),
     );

@@ -19,6 +19,8 @@ export const getCommercialSummary = async () => {
     };
 };
 
-export default {
+const dashboardApi = {
     getCommercialSummary,
 };
+
+export default dashboardApi;

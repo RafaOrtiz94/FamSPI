@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import QRCode from "qrcode";
 import {
   FiAlertTriangle,
   FiCheck,
@@ -27,6 +28,7 @@ import {
 } from "../../../core/api/signatureWorkflowsApi";
 import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
 import PdfSignerViewer from "../components/PdfSignerViewer";
+import SignatureWorkflowDetailWorkspace from "../components/SignatureWorkflowDetailWorkspace";
 
 const WORKFLOW_STATUS_META = {
   prepared: { label: "Preparado", className: "bg-slate-100 text-slate-700" },
@@ -76,6 +78,15 @@ function triggerBlobDownload(blob, filename) {
   window.URL.revokeObjectURL(blobUrl);
 }
 
+function triggerDataUrlDownload(dataUrl, filename) {
+  const link = document.createElement("a");
+  link.href = dataUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 function matchesCurrentUser(signer, user) {
   if (!signer || !user) return false;
   const userId = Number(user.id || 0);
@@ -106,6 +117,8 @@ const SignatureWorkflowDetailPage = () => {
   const [reassignReason, setReassignReason] = useState("");
   const [reassigning, setReassigning] = useState(false);
   const [error, setError] = useState("");
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [qrLoading, setQrLoading] = useState(false);
   const [consent, setConsent] = useState(false);
   const [consentText, setConsentText] = useState(
     "He revisado el documento y acepto firmarlo electrónicamente dentro de FamSPI."
@@ -152,8 +165,8 @@ const SignatureWorkflowDetailPage = () => {
     canvas.height = 110;
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.font = "italic 48px 'Brush Script MT', 'Segoe Script', cursive";
-    ctx.fillStyle = "rgba(18, 38, 72, 0.78)";
+    ctx.font = "700 38px 'Segoe UI', 'Trebuchet MS', Arial, sans-serif";
+    ctx.fillStyle = "#0B75BB";
     ctx.textBaseline = "middle";
     ctx.textAlign = "center";
     ctx.fillText(sigText, canvas.width / 2, canvas.height / 2);
@@ -166,27 +179,67 @@ const SignatureWorkflowDetailPage = () => {
     if (!data) return;
     const wf = data.workflow;
     const doc = data.documents?.[0];
-    const signers = data.signers || [];
-    const myS = signers.find((s) => matchesCurrentUser(s, user));
-    const isActionable = myS && ["available", "opened"].includes(String(myS.status || "").toLowerCase());
-    if (!isActionable || !doc || !wf) return;
+    if (!doc || !wf) return;
     setPdfLoading(true);
     getSignatureWorkflowSourcePdfBuffer(wf.id, doc.id)
       .then((buf) => setPdfBuffer(buf))
       .catch(() => {})
       .finally(() => setPdfLoading(false));
-  }, [data, user]);
+  }, [data]);
 
   const workflow = data?.workflow || null;
+  const signingUrl = useMemo(() => {
+    if (!workflow?.id) return "";
+    return `${window.location.origin}/dashboard/signatures/workflows/${workflow.id}`;
+  }, [workflow?.id]);
   const signers = useMemo(() => data?.signers || [], [data?.signers]);
   const mySigner = useMemo(
     () => signers.find((signer) => matchesCurrentUser(signer, user)),
     [signers, user]
   );
+  const isWorkflowOpenForSigning = ["sent", "in_progress", "partially_signed"].includes(
+    String(workflow?.status || "").toLowerCase()
+  );
   const actionableSigner =
-    mySigner && ["available", "opened"].includes(String(mySigner.status || "").toLowerCase())
+    isWorkflowOpenForSigning &&
+    mySigner &&
+    ["pending", "available", "opened"].includes(String(mySigner.status || "").toLowerCase())
       ? mySigner
       : null;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!signingUrl) {
+      setQrDataUrl("");
+      setQrLoading(false);
+      return undefined;
+    }
+
+    setQrLoading(true);
+    QRCode.toDataURL(signingUrl, {
+      errorCorrectionLevel: "M",
+      margin: 2,
+      width: 640,
+      color: {
+        dark: "#0F172A",
+        light: "#FFFFFF",
+      },
+    })
+      .then((dataUrl) => {
+        if (!cancelled) setQrDataUrl(dataUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setQrDataUrl("");
+      })
+      .finally(() => {
+        if (!cancelled) setQrLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [signingUrl]);
 
   const handleOpenStep = async () => {
     if (!actionableSigner) return;
@@ -326,6 +379,29 @@ const SignatureWorkflowDetailPage = () => {
     }
   };
 
+  const handleDownloadQr = async () => {
+    if (!signingUrl) {
+      showToast("Este workflow aun no tiene enlace de firma", "warning");
+      return;
+    }
+    try {
+      const downloadableQr =
+        qrDataUrl ||
+        (await QRCode.toDataURL(signingUrl, {
+          errorCorrectionLevel: "M",
+          margin: 2,
+          width: 900,
+          color: {
+            dark: "#0F172A",
+            light: "#FFFFFF",
+          },
+        }));
+      triggerDataUrlDownload(downloadableQr, `FAMSIGN_QR_FIRMA_${workflow.workflow_code || workflow.id}.png`);
+    } catch {
+      showToast("No se pudo generar el codigo QR", "error");
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
@@ -364,6 +440,61 @@ const SignatureWorkflowDetailPage = () => {
   const reassignableStatuses = ["pending", "available"];
   const reassignableWorkflowStatuses = ["prepared", "sent", "in_progress", "partially_signed"];
 
+  if (workflow?.id) {
+    return (
+      <SignatureWorkflowDetailWorkspace
+        workflow={workflow}
+        workflowMeta={workflowMeta}
+        currentDocument={currentDocument}
+        signers={signers}
+        user={user}
+        matchesCurrentUser={matchesCurrentUser}
+        getSignerStatusMeta={(status, fallback) => getStatusMeta(SIGNER_STATUS_META, status, fallback)}
+        formatDate={formatDate}
+        signingUrl={signingUrl}
+        qrDataUrl={qrDataUrl}
+        qrLoading={qrLoading}
+        pdfBuffer={pdfBuffer}
+        pdfLoading={pdfLoading}
+        actionableSigner={actionableSigner}
+        signatureB64={signatureB64}
+        placement={placement}
+        setPlacement={setPlacement}
+        consent={consent}
+        setConsent={setConsent}
+        consentText={consentText}
+        setConsentText={setConsentText}
+        rejectReason={rejectReason}
+        setRejectReason={setRejectReason}
+        acting={acting}
+        handleSign={handleSign}
+        handleReject={handleReject}
+        handleDownloadQr={handleDownloadQr}
+        handleDownloadSource={handleDownloadSource}
+        handleDownloadFinal={handleDownloadFinal}
+        handleDownloadValidationSheet={handleDownloadValidationSheet}
+        canManageWorkflow={canManageWorkflow}
+        reassignableStatuses={reassignableStatuses}
+        reassignableWorkflowStatuses={reassignableWorkflowStatuses}
+        reassignSignerId={reassignSignerId}
+        setReassignSignerId={setReassignSignerId}
+        reassignEmail={reassignEmail}
+        setReassignEmail={setReassignEmail}
+        reassignName={reassignName}
+        setReassignName={setReassignName}
+        reassignReason={reassignReason}
+        setReassignReason={setReassignReason}
+        reassigning={reassigning}
+        handleReassign={handleReassign}
+        showCancelConfirm={showCancelConfirm}
+        setShowCancelConfirm={setShowCancelConfirm}
+        cancelling={cancelling}
+        handleCancel={handleCancel}
+        navigate={navigate}
+      />
+    );
+  }
+
   return (
     <div className={`${WORKSPACE_PAGE_CLASS} gap-5`}>
       <div>
@@ -394,32 +525,47 @@ const SignatureWorkflowDetailPage = () => {
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
+              onClick={handleDownloadQr}
+              disabled={!signingUrl || qrLoading}
+              className="cursor-pointer inline-flex items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <FiDownload size={14} />
+              QR
+            </button>
+            <button
+              type="button"
               onClick={handleDownloadSource}
               className="cursor-pointer inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 active:scale-[0.97]"
             >
               <FiDownload size={14} />
               PDF base
             </button>
-            {String(workflow.status || "").toLowerCase() === "completed" && (
-              <>
-                <button
-                  type="button"
-                  onClick={handleDownloadFinal}
-                  className="cursor-pointer inline-flex items-center gap-2 rounded-2xl border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-700 transition-colors hover:bg-green-100 active:scale-[0.97]"
-                >
-                  <FiCheck size={14} />
-                  PDF firmado
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDownloadValidationSheet}
-                  className="cursor-pointer inline-flex items-center gap-2 rounded-2xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 transition-colors hover:bg-indigo-100 active:scale-[0.97]"
-                >
-                  <FiShield size={14} />
-                  Hoja de validación
-                </button>
-              </>
-            )}
+            {(() => {
+              const isCompleted = String(workflow.status || "").toLowerCase() === "completed";
+              return (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleDownloadFinal}
+                    title={isCompleted ? "Descargar el PDF firmado" : "Descargar el PDF con las firmas registradas hasta ahora; los espacios de quienes falten firmar quedan en blanco"}
+                    className="cursor-pointer inline-flex items-center gap-2 rounded-2xl border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-700 transition-colors hover:bg-green-100 active:scale-[0.97]"
+                  >
+                    <FiCheck size={14} />
+                    {isCompleted ? "PDF firmado" : "PDF firmado parcial"}
+                  </button>
+                  {isCompleted && (
+                    <button
+                      type="button"
+                      onClick={handleDownloadValidationSheet}
+                      className="cursor-pointer inline-flex items-center gap-2 rounded-2xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 transition-colors hover:bg-indigo-100 active:scale-[0.97]"
+                    >
+                      <FiShield size={14} />
+                      Hoja de validación
+                    </button>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -446,9 +592,164 @@ const SignatureWorkflowDetailPage = () => {
             )}
           </section>
 
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+          <section className="overflow-hidden rounded-3xl border border-blue-100 bg-white shadow-[0_18px_45px_rgba(37,99,235,0.10)]">
+            <div className="border-b border-blue-100 bg-gradient-to-r from-blue-50 via-white to-slate-50 px-5 py-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-500">Tu accion</p>
+                  <h2 className="mt-1 text-xl font-semibold text-slate-950">Firmar documento</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Revisa el PDF, ubica tu firma y confirma. FamSign abre el paso automaticamente.
+                  </p>
+                </div>
+                {actionableSigner ? (
+                  <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold text-white shadow-sm">
+                    Firma pendiente
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                    Sin accion pendiente
+                  </span>
+                )}
+              </div>
+            </div>
+            {!actionableSigner ? (
+              <div className="m-5 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-500">
+                No tienes una firma pendiente en este workflow. Si fuiste seleccionado y el workflow esta enviado, podras firmar sin espera.
+              </div>
+            ) : (
+              <div className="space-y-5 p-5">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {[
+                    ["1", "Revisa", "Confirma que el documento corresponde."],
+                    ["2", "Ubica", "Arrastra tu firma al lugar correcto."],
+                    ["3", "Firma", "Acepta y completa el workflow."],
+                  ].map(([step, title, copy]) => (
+                    <div key={step} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
+                        {step}
+                      </span>
+                      <p className="mt-2 text-sm font-semibold text-slate-900">{title}</p>
+                      <p className="mt-1 text-xs text-slate-500">{copy}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <label className="flex items-start gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                  <input
+                    type="checkbox"
+                    checked={consent}
+                    onChange={(event) => setConsent(event.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-blue-300 text-blue-600"
+                  />
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Acepto firmar este documento</p>
+                    <p className="mt-1 text-xs text-slate-600">
+                      La firma queda registrada como evidencia interna del workflow.
+                    </p>
+                  </div>
+                </label>
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-500">
+                    Texto de consentimiento
+                  </label>
+                  <textarea
+                    value={consentText}
+                    onChange={(event) => setConsentText(event.target.value)}
+                    rows={3}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <p className="mb-1.5 text-xs font-semibold text-slate-500">Tu firma</p>
+                    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      {signatureB64 ? (
+                        <img
+                          src={signatureB64}
+                          alt="Firma"
+                          className="max-h-[52px] select-none opacity-90"
+                          draggable={false}
+                        />
+                      ) : (
+                        <span className="text-xs text-slate-400">Generando firmaâ€¦</span>
+                      )}
+                      <p className="text-[11px] text-slate-400">
+                        Se incrustarÃ¡ donde la ubiques en el documento
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-xs font-semibold text-slate-500">
+                      Ubicar firma en el documento
+                    </p>
+                    {pdfLoading ? (
+                      <div className="flex h-32 items-center justify-center rounded-xl border border-slate-200 bg-slate-50">
+                        <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
+                      </div>
+                    ) : pdfBuffer ? (
+                      <PdfSignerViewer
+                        pdfArrayBuffer={pdfBuffer}
+                        signatureB64={signatureB64}
+                        placement={placement}
+                        onPlacement={setPlacement}
+                      />
+                    ) : (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+                        No se pudo cargar el documento para previsualizaciÃ³n.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid gap-3">
+                  <button
+                    type="button"
+                    onClick={handleSign}
+                    disabled={acting || !consent || !placement}
+                    className="cursor-pointer inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_26px_rgba(37,99,235,0.25)] transition-colors hover:bg-blue-700 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {acting ? <FiRefreshCw size={14} className="animate-spin" /> : <FiCheck size={14} />}
+                    Firmar y enviar al siguiente paso
+                  </button>
+                  {(!consent || !placement) && (
+                    <p className="text-center text-xs text-slate-500">
+                      Para firmar, acepta el consentimiento y ubica tu firma en el PDF.
+                    </p>
+                  )}
+
+                  <div className="rounded-2xl border border-red-100 bg-red-50/70 p-4">
+                    <p className="mb-3 text-sm font-semibold text-red-700">No estoy de acuerdo con firmar</p>
+                    <label className="mb-1 block text-xs font-semibold text-red-500">
+                      Motivo de rechazo
+                    </label>
+                    <textarea
+                      value={rejectReason}
+                      onChange={(event) => setRejectReason(event.target.value)}
+                      rows={3}
+                      className="w-full rounded-2xl border border-red-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-red-400 focus:ring-2 focus:ring-red-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleReject}
+                      disabled={acting || !rejectReason.trim()}
+                      className="mt-3 cursor-pointer inline-flex items-center gap-2 rounded-2xl border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <FiSlash size={14} />
+                      Rechazar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className="hidden">
             <div className="flex items-center gap-2">
-              <FiClock size={16} className="text-slate-400" />
+              <FiClock size={16} className="hidden text-slate-400" />
               <h2 className="text-lg font-semibold text-slate-900">Timeline</h2>
             </div>
             <div className="mt-4 space-y-3">
@@ -518,6 +819,60 @@ const SignatureWorkflowDetailPage = () => {
         </div>
 
         <div className="space-y-5">
+          <section className="rounded-3xl border border-blue-100 bg-gradient-to-br from-white via-blue-50/40 to-white p-5 shadow-[0_14px_32px_rgba(37,99,235,0.10)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-500">QR del workflow</p>
+                <h2 className="mt-1 text-lg font-semibold text-slate-950">Firma del workflow</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Comparte o descarga este QR para abrir el documento y firmar con sesion iniciada.
+                </p>
+              </div>
+              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-mono text-slate-500 shadow-sm">
+                {workflow.workflow_code || `#${workflow.id}`}
+              </span>
+            </div>
+
+            <div className="mt-4 flex flex-col items-center rounded-3xl border border-white bg-white p-4 shadow-inner">
+              {!signingUrl ? (
+                <div className="flex h-48 w-48 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-center text-xs text-slate-400">
+                  Sin enlace de firma
+                </div>
+              ) : qrLoading ? (
+                <div className="flex h-48 w-48 items-center justify-center rounded-2xl border border-slate-100 bg-slate-50">
+                  <FiRefreshCw size={22} className="animate-spin text-blue-500" />
+                </div>
+              ) : qrDataUrl ? (
+                <img
+                  src={qrDataUrl}
+                  alt={`QR de firma ${workflow.workflow_code || workflow.id}`}
+                  className="h-48 w-48 rounded-2xl border border-slate-100 bg-white p-2 shadow-sm"
+                />
+              ) : (
+                <div className="flex h-48 w-48 items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 text-center text-xs text-amber-700">
+                  No se pudo generar el QR
+                </div>
+              )}
+            </div>
+
+            {signingUrl && (
+              <div className="mt-4 space-y-3">
+                <p className="break-all rounded-2xl border border-blue-100 bg-white px-3 py-2 text-xs text-slate-500">
+                  {signingUrl}
+                </p>
+                <button
+                  type="button"
+                  onClick={handleDownloadQr}
+                  disabled={qrLoading}
+                  className="cursor-pointer inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white shadow-[0_12px_24px_rgba(37,99,235,0.22)] transition-colors hover:bg-blue-700 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <FiDownload size={14} />
+                  Descargar QR
+                </button>
+              </div>
+            )}
+          </section>
+
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
             <h2 className="text-lg font-semibold text-slate-900">Firmantes</h2>
             <div className="mt-4 space-y-3">
@@ -617,11 +972,11 @@ const SignatureWorkflowDetailPage = () => {
             </div>
           </section>
 
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+          <section className="hidden">
             <h2 className="text-lg font-semibold text-slate-900">Acción</h2>
             {!actionableSigner ? (
               <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-500">
-                No tienes un paso de firma disponible en este momento.
+                No tienes una firma pendiente en este workflow.
               </div>
             ) : (
               <div className="mt-4 space-y-4">

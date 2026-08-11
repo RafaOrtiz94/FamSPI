@@ -33,23 +33,21 @@ const TABLE_COLS_HT = [
   { label: "No.",               width: 22   },
   { label: "Herramienta",       width: 100  },
   { label: "Marca",             width: 72   },
-  { label: "Características",   width: 72   },
   { label: "N° de serie",       width: 62   },
   { label: "Condición (1-10)",  width: 40   },
-  { label: "Observaciones",     width: 61.4 },
+  { label: "Características",   width: 133.4 },
 ];
-// 22+100+72+72+62+40+61.4 = 429.4 ✓
+// 22+100+72+62+40+133.4 = 429.4 ✓
 
 // ─── Ropa columns (total width = 429.4 pt) ───────────────────────────────────
 const TABLE_COLS_ROPA = [
   { label: "No.",          width: 22   },
-  { label: "Prenda",       width: 140  },
-  { label: "Talla",        width: 50   },
-  { label: "Cantidad",     width: 50   },
-  { label: "Estado",       width: 50   },
-  { label: "Observaciones", width: 117.4 },
+  { label: "Prenda",       width: 170  },
+  { label: "Talla",        width: 60   },
+  { label: "Cantidad",     width: 60   },
+  { label: "Estado",       width: 117.4 },
 ];
-// 22+140+50+50+50+117.4 = 429.4 ✓
+// 22+170+60+60+117.4 = 429.4 ✓
 
 // ─── Table field geometry (measured from PDF inspection) ─────────────────────
 const TABLE_HT   = { x: 91.0, y: 371.2, width: 429.4, height: 153.6 };
@@ -300,10 +298,9 @@ async function generateActaHerramientaPdf({ actaCode = "", nombre, cedula, cargo
     item._rowValues = [
       String(item.name || ""),
       a.marca           ? String(a.marca)           : "N/A",
-      a.caracteristicas ? String(a.caracteristicas) : "N/A",
       item.serial_number ? String(item.serial_number) : "N/A",
       item.physical_condition != null ? `${item.physical_condition}/10` : "N/A",
-      item.observations ? String(item.observations) : "N/A",
+      a.caracteristicas ? String(a.caracteristicas) : "N/A",
     ];
     return item;
   });
@@ -318,7 +315,7 @@ async function generateActaHerramientaPdf({ actaCode = "", nombre, cedula, cargo
 
 /**
  * @param {Array} params.items — rows from collab_delivery_actas_items
- *   Each item: { name, attributes_summary: { talla, cantidad }, observations }
+ *   Each item: { name, attributes_summary: { talla, cantidad } }
  */
 async function generateActaRopaPdf({ actaCode = "", nombre, cedula, cargo, actaDay, actaMonth, actaYear, items = [] }) {
   const templateBytes = fs.readFileSync(TEMPLATE_ROPA);
@@ -350,7 +347,6 @@ async function generateActaRopaPdf({ actaCode = "", nombre, cedula, cargo, actaD
       a.talla    ? String(a.talla)    : "N/A",
       a.cantidad ? String(a.cantidad) : "N/A",
       item.is_new != null ? (item.is_new ? "Nuevo" : "Usado") : "N/A",
-      item.observations ? String(item.observations) : "N/A",
     ];
     return item;
   });

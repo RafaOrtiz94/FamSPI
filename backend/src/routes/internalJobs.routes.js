@@ -7,8 +7,10 @@ const { runOnce: processAttendanceOvertime } = require('../jobs/attendanceOverti
 const { runOnce: runContractReminderEmails } = require('../jobs/equipmentContractReminderEmails');
 const { runOnce: runNotificationDispatchQueue } = require('../jobs/processNotificationDispatchQueue');
 const { runOnce: runBusinessCasePreflowExpiry } = require('../jobs/businessCasePreflowExpiryScheduler');
+const { runOnce: runBusinessCaseWorkflowSla } = require('../jobs/businessCaseWorkflowSlaScheduler');
 const { runOnce: runBusinessCaseDeterminationsGateExpiry } = require('../jobs/businessCaseDeterminationsGateExpiryScheduler');
 const { runOnce: runBusinessCaseSheetQueue } = require('../jobs/businessCaseSheetGenerationQueueScheduler');
+const { runOnce: runBusinessCaseNotificationQueue } = require('../jobs/businessCaseNotificationQueueScheduler');
 const { runOnce: runDatabaseBackupToDrive } = require('../jobs/databaseBackupToDrive');
 const { runOnce: runPermisosPendingExpiry } = require('../jobs/permisosPendingExpiryScheduler');
 const { runOnce: runPermisosRecoveryCoordinationExpiry } = require('../jobs/permisosRecoveryCoordinationExpiryScheduler');
@@ -19,6 +21,8 @@ const { notifyUpcomingRenewals, createOffboardingTasksForUser } = require('../mo
 const { runOnce: runCollabActaPendingSignatureReminder } = require('../jobs/collabActaPendingSignatureReminder');
 const { runOnce: runSignatureWorkflowReminder } = require('../jobs/signatureWorkflowReminderScheduler');
 const { runOnce: runSignatureWorkflowExpiry } = require('../jobs/signatureWorkflowExpiryScheduler');
+const { runOnce: runTrainingSignatureReminder } = require('../jobs/trainingSignatureReminderScheduler');
+const { runOnce: runScheduleVisitCompletionReminder } = require('../jobs/scheduleVisitCompletionReminderScheduler');
 
 const jobsAuth = require('../middlewares/jobsAuth');
 
@@ -94,6 +98,23 @@ router.post('/notifications/dispatch', async (req, res) => {
     }
 });
 
+router.post('/business-case/notifications/dispatch', async (_req, res) => {
+    try {
+        const result = await runBusinessCaseNotificationQueue();
+        res.json({
+            success: true,
+            message: 'Cola de notificaciones de Business Case procesada',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error en job de cola de notificaciones BC:', error);
+        res.status(500).json({
+            error: 'FallÃ³ el procesamiento de cola de notificaciones BC',
+            details: error.message
+        });
+    }
+});
+
 router.post('/business-case/preflow/expiry', async (_req, res) => {
     try {
         const result = await runBusinessCasePreflowExpiry();
@@ -107,6 +128,23 @@ router.post('/business-case/preflow/expiry', async (_req, res) => {
         res.status(500).json({
             error: 'Fallo el procesamiento de expiracion preflujo BC',
             details: error.message
+        });
+    }
+});
+
+router.post('/business-case/workflow-sla/reminders', async (_req, res) => {
+    try {
+        const result = await runBusinessCaseWorkflowSla();
+        res.json({
+            success: true,
+            message: 'Recordatorios SLA de Business Case procesados',
+            data: result,
+        });
+    } catch (error) {
+        console.error('Error en job de recordatorios SLA BC:', error);
+        res.status(500).json({
+            error: 'Fallo el procesamiento de recordatorios SLA BC',
+            details: error.message,
         });
     }
 });
@@ -522,6 +560,28 @@ router.post('/collab-deliveries/offboarding/:userId', async (req, res) => {
     } catch (error) {
         console.error('Error creando tareas offboarding collab:', error);
         res.status(500).json({ error: 'Falló la creación de tareas', details: error.message });
+    }
+});
+
+// ── Job: recordatorios 3x/día de actas de capacitación pendientes de firma ────
+router.post('/trainings/signature-reminder', async (_req, res) => {
+    try {
+        const result = await runTrainingSignatureReminder();
+        res.json({ success: true, message: 'Recordatorios de capacitación procesados', data: result });
+    } catch (error) {
+        console.error('Error en job de recordatorios de capacitación:', error);
+        res.status(500).json({ error: 'Falló el job de recordatorios de capacitación', details: error.message });
+    }
+});
+
+// Job: recordatorio de clientes pendientes y agenda de recuperacion en ultima semana
+router.post('/schedules/visit-completion-reminder', async (_req, res) => {
+    try {
+        const result = await runScheduleVisitCompletionReminder();
+        res.json({ success: true, message: 'Recordatorios de cronogramas procesados', data: result });
+    } catch (error) {
+        console.error('Error en job de recordatorios de cronogramas:', error);
+        res.status(500).json({ error: 'Fallo el job de recordatorios de cronogramas', details: error.message });
     }
 });
 

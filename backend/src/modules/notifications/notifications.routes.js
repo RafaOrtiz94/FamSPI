@@ -24,6 +24,10 @@ const notificationsListLimiter = rateLimit({
 });
 
 router.get("/", notificationsListLimiter, ctrl.list);
+router.get("/push/config", ctrl.getPushConfig);
+router.get("/push/status", ctrl.getPushStatus);
+router.post("/push/subscribe", ctrl.subscribePush);
+router.post("/push/unsubscribe", ctrl.unsubscribePush);
 router.post("/", ctrl.create);
 router.patch("/read-all", ctrl.markAll);
 router.patch("/:id/read", ctrl.markRead);

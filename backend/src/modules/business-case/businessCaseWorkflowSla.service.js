@@ -2,7 +2,23 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const notificationManager = require("../notifications/notificationManager");
 
+// Misma cuenta que manda los correos (delegada de Gmail) -- si un usuario de
+// prueba tiene ese email con rol jefe_comercial/etc., no debe recibir sus
+// propias notificaciones de BC como si fuera un participante real.
+const { extractEmail } = require("../../utils/googleCredentials");
+const SYSTEM_NOTIFICATION_EMAIL = extractEmail(
+  process.env.SYSTEM_MAIL_ADDRESS ||
+  process.env.NOTIFICATION_MAIL_ADDRESS ||
+  process.env.GMAIL_SERVICE_ACCOUNT_SENDER ||
+  process.env.SMTP_FROM ||
+  "",
+).toLowerCase();
+
 const POST_STATISTICS_SLA_HOURS = 48;
+const POST_STATISTICS_SLA_CALCULATION = "weekdays_only_v1";
+const SLA_TIMEZONE_OFFSET_MINUTES = -5 * 60; // America/Guayaquil no usa DST.
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 const PARTICIPANT_ROLES = Object.freeze([
   "acp_comercial",
   "jefe_comercial",
@@ -35,20 +51,107 @@ function toValidDate(value) {
   return Number.isFinite(date.getTime()) ? date : null;
 }
 
+function toSlaLocalDate(date) {
+  return new Date(date.getTime() + SLA_TIMEZONE_OFFSET_MINUTES * 60 * 1000);
+}
+
+function fromSlaLocalDate(localDate) {
+  return new Date(localDate.getTime() - SLA_TIMEZONE_OFFSET_MINUTES * 60 * 1000);
+}
+
+function isWeekendForSla(date) {
+  const local = toSlaLocalDate(date);
+  const day = local.getUTCDay();
+  return day === 0 || day === 6;
+}
+
+function startOfNextSlaLocalDay(date) {
+  const local = toSlaLocalDate(date);
+  const nextLocalMidnight = new Date(Date.UTC(
+    local.getUTCFullYear(),
+    local.getUTCMonth(),
+    local.getUTCDate() + 1,
+    0,
+    0,
+    0,
+    0,
+  ));
+  return fromSlaLocalDate(nextLocalMidnight);
+}
+
+function moveToNextWeekday(date) {
+  let cursor = new Date(date);
+  while (isWeekendForSla(cursor)) {
+    cursor = startOfNextSlaLocalDay(cursor);
+  }
+  return cursor;
+}
+
+function addWeekdayHours(startDate, hours) {
+  let cursor = moveToNextWeekday(startDate);
+  let remainingMs = Math.max(0, Number(hours) || 0) * HOUR_MS;
+
+  while (remainingMs > 0) {
+    cursor = moveToNextWeekday(cursor);
+    const nextBoundary = startOfNextSlaLocalDay(cursor);
+    const availableMs = Math.max(0, nextBoundary.getTime() - cursor.getTime());
+    if (remainingMs <= availableMs) {
+      return new Date(cursor.getTime() + remainingMs);
+    }
+    remainingMs -= availableMs;
+    cursor = nextBoundary;
+  }
+
+  return cursor;
+}
+
+function countWeekdayHoursBetween(startDate, endDate) {
+  const start = toValidDate(startDate);
+  const end = toValidDate(endDate);
+  if (!start || !end || end.getTime() <= start.getTime()) return 0;
+
+  let cursor = new Date(start);
+  let countedMs = 0;
+  while (cursor.getTime() < end.getTime()) {
+    if (isWeekendForSla(cursor)) {
+      const nextWeekday = moveToNextWeekday(cursor);
+      cursor = nextWeekday.getTime() > cursor.getTime() ? nextWeekday : startOfNextSlaLocalDay(cursor);
+      continue;
+    }
+
+    const nextBoundary = startOfNextSlaLocalDay(cursor);
+    const chunkEnd = new Date(Math.min(nextBoundary.getTime(), end.getTime()));
+    countedMs += Math.max(0, chunkEnd.getTime() - cursor.getTime());
+    cursor = chunkEnd;
+  }
+
+  return countedMs / HOUR_MS;
+}
+
+function getWeekdaySlaDeadline(startDate, hours = POST_STATISTICS_SLA_HOURS) {
+  const start = toValidDate(startDate);
+  if (!start) return null;
+  return addWeekdayHours(start, hours);
+}
+
 function buildProcessKey(businessCaseId) {
   return `business_case:${businessCaseId}`;
 }
 
-function buildEmailSubject(businessCaseId) {
-  return `Business Case ${businessCaseId} - Seguimiento del proceso`;
+function buildEmailSubject(businessCaseId, clientName = null) {
+  return `Business Case ${clientName || businessCaseId} - Seguimiento del proceso`;
 }
 
-function getDocumentUploadedAt(metadata = {}, documentUploadedAt = null) {
+function getDeterminationsValidationAt(metadata = {}, explicitStartedAt = null) {
+  const gate = toObject(metadata?.determinations_gate);
+  const stored = toObject(metadata?.post_statistics_sla);
+  const storedTrigger = String(stored.trigger || "").trim().toLowerCase();
   return toValidDate(
-    documentUploadedAt ||
-      metadata?.post_statistics_sla?.started_at ||
-      metadata?.determinations_gate?.document?.uploaded_at ||
-      metadata?.determinations_gate?.enabled_at,
+    explicitStartedAt ||
+      gate?.completed_commercial_at ||
+      gate?.reactivos_validated_at ||
+      gate?.review_started_at ||
+      (storedTrigger === "determinations_validated_service_handoff" ? stored.started_at : null),
   );
 }
 
@@ -58,21 +161,26 @@ function getFeasibilityDecision(metadata = {}) {
   return decision.decided_at || feasibility.closed_at || null;
 }
 
-function getPostStatisticsSla(metadata = {}, documentUploadedAt = null) {
+function getPostStatisticsSla(metadata = {}, startedAt = null) {
   const stored = toObject(metadata.post_statistics_sla);
-  const startedAt = toValidDate(stored.started_at) || getDocumentUploadedAt(metadata, documentUploadedAt);
-  if (!startedAt) return null;
+  const storedTrigger = String(stored.trigger || "").trim().toLowerCase();
+  const canReuseStoredDeadline =
+    storedTrigger === "determinations_validated_service_handoff" &&
+    stored.calculation === POST_STATISTICS_SLA_CALCULATION;
+  const resolvedStartedAt = getDeterminationsValidationAt(metadata, startedAt);
+  if (!resolvedStartedAt) return null;
 
-  const deadlineAt = toValidDate(stored.deadline_at) ||
-    new Date(startedAt.getTime() + POST_STATISTICS_SLA_HOURS * 60 * 60 * 1000);
+  const deadlineAt = (canReuseStoredDeadline ? toValidDate(stored.deadline_at) : null) ||
+    getWeekdaySlaDeadline(resolvedStartedAt);
   const status = getFeasibilityDecision(metadata)
     ? "completed"
     : String(stored.status || (Date.now() > deadlineAt.getTime() ? "overdue" : "active"));
 
   return {
     ...stored,
-    started_at: startedAt.toISOString(),
+    started_at: resolvedStartedAt.toISOString(),
     deadline_at: deadlineAt.toISOString(),
+    calculation: POST_STATISTICS_SLA_CALCULATION,
     status,
     reminders: toObject(stored.reminders),
     notifications: toObject(stored.notifications),
@@ -116,7 +224,7 @@ async function getBusinessCaseRow(businessCaseId, client = db) {
   return rows[0] || null;
 }
 
-async function ensurePostStatisticsWindow({ businessCaseId, startedAt = null, documentUploadedAt = null }) {
+async function ensurePostStatisticsWindow({ businessCaseId, startedAt = null, force = false }) {
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
@@ -129,21 +237,27 @@ async function ensurePostStatisticsWindow({ businessCaseId, startedAt = null, do
     const metadata = toObject(businessCase.modern_bc_metadata);
     const existing = toObject(metadata.post_statistics_sla);
     const existingStarted = toValidDate(existing.started_at);
-    if (existingStarted) {
+    const existingTrigger = String(existing.trigger || "").trim().toLowerCase();
+    if (
+      existingStarted &&
+      existingTrigger === "determinations_validated_service_handoff" &&
+      existing.calculation === POST_STATISTICS_SLA_CALCULATION &&
+      !force
+    ) {
       await client.query("COMMIT");
       return {
         started: false,
-        sla: getPostStatisticsSla(metadata, documentUploadedAt),
+        sla: getPostStatisticsSla(metadata),
       };
     }
 
-    const start = toValidDate(startedAt) || getDocumentUploadedAt(metadata, documentUploadedAt);
+    const start = getDeterminationsValidationAt(metadata, startedAt);
     if (!start) {
       await client.query("COMMIT");
-      return { started: false, reason: "statistics_document_not_uploaded" };
+      return { started: false, reason: "determinations_validation_not_completed" };
     }
 
-    const deadline = new Date(start.getTime() + POST_STATISTICS_SLA_HOURS * 60 * 60 * 1000);
+    const deadline = getWeekdaySlaDeadline(start);
     const nowIso = new Date().toISOString();
     const postStatisticsSla = {
       ...existing,
@@ -152,13 +266,22 @@ async function ensurePostStatisticsWindow({ businessCaseId, startedAt = null, do
       status: getFeasibilityDecision(metadata) ? "completed" : "active",
       completed_at: existing.completed_at || null,
       completed_by_email: existing.completed_by_email || null,
+      trigger: "determinations_validated_service_handoff",
+      calculation: POST_STATISTICS_SLA_CALCULATION,
       reminders: toObject(existing.reminders),
       notifications: toObject(existing.notifications),
       updated_at: nowIso,
     };
 
-    const nextMetadata = {
-      ...metadata,
+    // Patch minimo + merge JSONB atomico (`||`) en vez de reemplazar todo
+    // modern_bc_metadata -- evita perder cambios concurrentes en otras
+    // claves top-level (mismo fix aplicado a updateBusinessCase /
+    // updateBusinessCaseMetadata tras el bug de la prorroga de SLA perdida).
+    // Tambien se dejaron de escribir determinations_gate.review_deadline_at /
+    // post_statistics_sla_started_at / post_statistics_sla_deadline_at:
+    // ningun lector los usa, eran copias muertas que solo podian
+    // desincronizarse de sus fuentes reales.
+    const metadataPatch = {
       post_statistics_sla: postStatisticsSla,
       // Keep the legacy preflow/readiness fields aligned with the single
       // post-statistics deadline so old UI gates do not show another window.
@@ -166,22 +289,19 @@ async function ensurePostStatisticsWindow({ businessCaseId, startedAt = null, do
       preflow_review_deadline_at: deadline.toISOString(),
       preflow_deadline_at: deadline.toISOString(),
       preflow_phase: "review",
-      preflow_status: getFeasibilityDecision(metadata) ? "completed" : "post_statistics_in_progress",
+      preflow_status: getFeasibilityDecision(metadata) ? "completed" : "determinations_validated_service_handoff_in_progress",
       determinations_gate: {
         ...toObject(metadata.determinations_gate),
         deadline_at: deadline.toISOString(),
-        review_deadline_at: deadline.toISOString(),
-        post_statistics_sla_started_at: start.toISOString(),
-        post_statistics_sla_deadline_at: deadline.toISOString(),
       },
     };
 
     await client.query(
       `UPDATE equipment_purchase_requests
-          SET modern_bc_metadata = $1::jsonb,
+          SET modern_bc_metadata = COALESCE(modern_bc_metadata, '{}'::jsonb) || $1::jsonb,
               updated_at = NOW()
         WHERE id = $2`,
-      [JSON.stringify(nextMetadata), businessCaseId],
+      [JSON.stringify(metadataPatch), businessCaseId],
     );
     await client.query("COMMIT");
     return { started: true, sla: postStatisticsSla };
@@ -301,8 +421,9 @@ async function getParticipants(businessCaseId) {
        FROM users
       WHERE active = true
         AND (role = ANY($1::text[]) OR id = $2)
+        AND ($3 = '' OR lower(email) <> $3)
       ORDER BY id`,
-    [PARTICIPANT_ROLES, businessCase.created_by || null],
+    [PARTICIPANT_ROLES, businessCase.created_by || null, SYSTEM_NOTIFICATION_EMAIL],
   );
   const unique = new Map();
   rows.forEach((user) => {
@@ -322,17 +443,6 @@ function normalizeConsumptionType(value) {
   if (raw === "control" || raw === "controles") return "controles";
   if (raw === "calibrador" || raw === "calibradores") return "calibradores";
   return "materiales";
-}
-
-function getInvestmentCartStatus(metadata = {}) {
-  const cart = toObject(metadata.investments_cart);
-  const legacyConfirmed = Boolean(cart.confirmed);
-  const legacyRole = normalizeRole(cart.confirmed_by_role);
-  const legacyServiceConfirmation = legacyConfirmed && legacyRole === "jefe_servicio";
-  return {
-    acpConfirmed: Boolean(cart.acp_confirmed ?? cart.acpConfirmed ?? (legacyConfirmed && !legacyServiceConfirmation)),
-    serviceConfirmed: Boolean(cart.service_confirmed ?? cart.serviceConfirmed ?? legacyServiceConfirmation),
-  };
 }
 
 function buildPersonalPendingTasks({ role, metadata = {}, consumptionItems = [], investments = [] }) {
@@ -373,16 +483,6 @@ function buildPersonalPendingTasks({ role, metadata = {}, consumptionItems = [],
         sheetRequired: true,
       });
     });
-
-    const cart = getInvestmentCartStatus(metadata);
-    if (cart.acpConfirmed && !cart.serviceConfirmed) {
-      tasks.push({
-        key: "service_investment_cart",
-        label: "Cerrar el carrito de inversiones de Servicio",
-        detail: "Revisa las inversiones propias y confirma el carrito de Servicio en el Business Case.",
-        sheetRequired: false,
-      });
-    }
   }
 
   if (normalizedRole === "acp_comercial" && locks.reactivos !== true) {
@@ -396,30 +496,28 @@ function buildPersonalPendingTasks({ role, metadata = {}, consumptionItems = [],
 
   const selectedInvestments = investments.filter((item) => item.selected !== false);
   if (normalizedRole === "jefe_financiero") {
-    const cart = getInvestmentCartStatus(metadata);
-    const missingValues = cart.acpConfirmed && selectedInvestments.some(
+    const missingValues = selectedInvestments.some(
       (item) => item.unit_price_financial === null || item.unit_price_financial === undefined,
     );
     if (missingValues) {
       tasks.push({
         key: "financial_investment_values",
         label: "Registrar valores financieros de las inversiones",
-        detail: "Completa los precios financieros de los items del carrito ACP.",
+        detail: "Completa los precios financieros de las inversiones seleccionadas.",
         sheetRequired: false,
       });
     }
   }
 
   if (normalizedRole === "jefe_operaciones") {
-    const cart = getInvestmentCartStatus(metadata);
-    const missingValues = cart.serviceConfirmed && selectedInvestments.some(
+    const missingValues = selectedInvestments.some(
       (item) => item.unit_price === null || item.unit_price === undefined,
     );
     if (missingValues) {
       tasks.push({
         key: "operational_investment_values",
         label: "Registrar valores operativos de las inversiones",
-        detail: "Completa los precios operativos de los items del carrito General.",
+        detail: "Completa los precios operativos de las inversiones seleccionadas.",
         sheetRequired: false,
       });
     }
@@ -432,7 +530,6 @@ function isParticipantStageComplete({ role, metadata = {}, investments = [] }) {
   const normalizedRole = normalizeRole(role);
   const gate = toObject(metadata.determinations_gate);
   const locks = toObject(gate.section_locks);
-  const cart = getInvestmentCartStatus(metadata);
   const selectedInvestments = investments.filter((item) => item.selected !== false);
 
   if (normalizedRole === "acp_comercial") {
@@ -440,18 +537,18 @@ function isParticipantStageComplete({ role, metadata = {}, investments = [] }) {
   }
 
   if (normalizedRole === "jefe_servicio") {
-    return cart.serviceConfirmed && ["controles", "calibradores", "materiales"]
+    return ["controles", "calibradores", "materiales"]
       .every((section) => locks[section] === true);
   }
 
   if (normalizedRole === "jefe_financiero") {
-    return cart.acpConfirmed && selectedInvestments.every(
+    return selectedInvestments.every(
       (item) => item.unit_price_financial !== null && item.unit_price_financial !== undefined,
     );
   }
 
   if (normalizedRole === "jefe_operaciones") {
-    return cart.serviceConfirmed && selectedInvestments.every(
+    return selectedInvestments.every(
       (item) => item.unit_price !== null && item.unit_price !== undefined,
     );
   }
@@ -489,8 +586,9 @@ async function getPersonalPendingTaskContext(businessCaseId) {
          FROM users
         WHERE active = true
           AND (role = ANY($1::text[]) OR id = $2)
+          AND ($3 = '' OR lower(email) <> $3)
         ORDER BY id`,
-      [PARTICIPANT_ROLES, businessCase.created_by || null],
+      [PARTICIPANT_ROLES, businessCase.created_by || null, SYSTEM_NOTIFICATION_EMAIL],
     ),
   ]);
 
@@ -519,7 +617,7 @@ async function notifyPersonalPendingTasks({
   const deadlineAt = sla?.deadline_at || null;
   const sheetUrl = toObject(metadata)?.bc_sheet_generation?.last?.sheet_url || null;
   const targetPath = `/dashboard/business-case/workspace/${businessCaseId}`;
-  const subject = buildEmailSubject(businessCaseId);
+  const subject = buildEmailSubject(businessCaseId, context.businessCase.client_name);
   const normalizedActor = normalizeRole(actorEmail);
   let sent = 0;
 
@@ -555,7 +653,7 @@ async function notifyPersonalPendingTasks({
     const taskText = tasks.map((task) => `${task.label}: ${task.detail}`).join(" ");
     const deadlineText = deadlineAt
       ? new Date(deadlineAt).toLocaleString("es-EC", { timeZone: process.env.APP_TIMEZONE || "America/Guayaquil" })
-      : "48 horas desde la carga del documento de estadistica";
+      : "48 horas desde la validacion de determinaciones";
     await notificationManager.sendNotification({
       userId: participant.id,
       template: "custom_html",
@@ -642,32 +740,67 @@ async function notifyParticipants({
   const deadlineAt = sla?.deadline_at || null;
   const sheetUrl = toObject(businessCase.modern_bc_metadata)?.bc_sheet_generation?.last?.sheet_url || null;
   const targetPath = `/dashboard/business-case/workspace/${businessCaseId}`;
-  const subject = buildEmailSubject(businessCaseId);
+  const subject = buildEmailSubject(businessCaseId, businessCase.client_name);
   const deadlineText = deadlineAt
     ? new Date(deadlineAt).toLocaleString("es-EC", { timeZone: process.env.APP_TIMEZONE || "America/Guayaquil" })
-    : "48 horas desde la carga del documento de estadistica";
+    : "48 horas desde la validacion de determinaciones";
 
   const taskContext = await getPersonalPendingTaskContext(businessCaseId);
+  const metadata = toObject(businessCase.modern_bc_metadata);
   const recipients = participants.filter((user) => {
     if (excludeActor && normalizedActor && String(user.email || "").trim().toLowerCase() === normalizedActor) {
       return false;
     }
     return !isParticipantStageComplete({
       role: user.role,
-      metadata: toObject(businessCase.modern_bc_metadata),
+      metadata,
       investments: taskContext.investments,
     });
   });
+  if (!recipients.length) return { sent: false, reason: "no_recipients" };
 
-  await Promise.all(recipients.map((user) => notificationManager.sendNotification({
-    userId: user.id,
+  // Un solo hilo de correo compartido por BC: to=creador (o el primero si el
+  // creador no quedo entre los recipients), cc=el resto. Antes se mandaba un
+  // correo 1:1 por persona (N hilos privados) -- mismo patron ya probado en
+  // resolveBusinessCaseMailingList (businessCase.controller.js).
+  const primary = recipients.find((u) => u.id === businessCase.created_by) || recipients[0];
+  const ccEmails = [...new Set(
+    recipients
+      .filter((u) => u.id !== primary.id)
+      .map((u) => String(u.email || "").trim().toLowerCase())
+      .filter(Boolean),
+  )];
+
+  // Tareas pendientes por persona, fusionadas en el mismo correo grupal (ya
+  // no un segundo correo privado via notifyPersonalPendingTasks) -- el
+  // equipo entero ve que le falta a cada quien.
+  let pendingSection = "";
+  if (notifyPersonal) {
+    const perPerson = recipients
+      .map((user) => {
+        const tasks = buildPersonalPendingTasks({
+          role: user.role,
+          metadata,
+          consumptionItems: taskContext.consumptionItems,
+          investments: taskContext.investments,
+        });
+        if (!tasks.length) return null;
+        const name = user.fullname || user.email || "Participante";
+        return `${name} (${normalizeRole(user.role) || "participante"}): ${tasks.map((t) => t.label).join("; ")}.`;
+      })
+      .filter(Boolean);
+    if (perPerson.length) {
+      pendingSection = ` Pendientes por persona: ${perPerson.join(" | ")}`;
+    }
+  }
+
+  const customMessage = `${message} El SLA completo vence el ${deadlineText}.${pendingSection}`;
+  const commonPayload = {
     template: "custom_html",
     customTitle: title,
-    customMessage: `${message} El SLA completo vence el ${deadlineText}.`,
+    customMessage,
     type,
     priority,
-    email: true,
-    chat: false,
     source: `business_case.workflow.${eventKey}`,
     data: {
       business_case_id: businessCaseId,
@@ -691,13 +824,31 @@ async function notifyParticipants({
       cta_label: "Abrir Business Case",
       email_subject: subject,
     },
-  })));
+  };
 
-  const personal = notifyPersonal
-    ? await notifyPersonalPendingTasks({ businessCaseId, eventKey, actorEmail, excludeActor })
-    : { sent: 0 };
+  await notificationManager.sendNotification({
+    ...commonPayload,
+    userId: primary.id,
+    email: true,
+    chat: false,
+    data: { ...commonPayload.data, email_to: primary.email, email_cc: ccEmails },
+    meta: { ...commonPayload.meta, email_to: primary.email, email_cc: ccEmails },
+  });
 
-  return { sent: true, recipientCount: recipients.length, personalRecipientCount: personal.sent, eventKey };
+  // El resto queda en cc del correo (ya lo recibio), pero igual necesita su
+  // propia fila en `notifications` para verlo en la campanita/historial.
+  await Promise.all(
+    recipients
+      .filter((user) => user.id !== primary.id)
+      .map((user) => notificationManager.sendNotification({
+        ...commonPayload,
+        userId: user.id,
+        email: false,
+        chat: false,
+      })),
+  );
+
+  return { sent: true, recipientCount: recipients.length, eventKey };
 }
 
 async function claimNotificationEvent({ businessCaseId, eventKey, actorEmail = null }) {
@@ -758,29 +909,24 @@ async function markCompleted({ businessCaseId, actorEmail = null }) {
 }
 
 function buildReminderMessage({ elapsedHours, deadlineAt }) {
-  const remainingHours = Math.max(0, (new Date(deadlineAt).getTime() - Date.now()) / 3600000);
+  const remainingHours = Math.max(0, countWeekdayHoursBetween(new Date(), deadlineAt));
   if (remainingHours > 0) {
-    return `Recordatorio: el Business Case aun tiene pasos pendientes. Quedan aproximadamente ${formatHours(remainingHours)} para completar el flujo y registrar la factibilidad.`;
+    return `Recordatorio: el Business Case aun tiene pasos pendientes. Quedan aproximadamente ${formatHours(remainingHours)} habiles para completar el flujo y registrar la factibilidad.`;
   }
-  return `El SLA de 48 horas del Business Case vencio hace aproximadamente ${formatHours(elapsedHours - POST_STATISTICS_SLA_HOURS)}. Completa el flujo de inmediato y registra la factibilidad.`;
+  return `El SLA de 48 horas habiles del Business Case vencio hace aproximadamente ${formatHours(elapsedHours - POST_STATISTICS_SLA_HOURS)} habiles. Completa el flujo de inmediato y registra la factibilidad.`;
 }
 
 async function runReminderSweep() {
   let rows;
   try {
     ({ rows } = await db.query(
-      `SELECT e.id, e.modern_bc_metadata, d.uploaded_at
+      `SELECT e.id, e.modern_bc_metadata
          FROM equipment_purchase_requests e
-         LEFT JOIN LATERAL (
-           SELECT uploaded_at
-             FROM bc_determinations_documents
-            WHERE business_case_id = e.id
-              AND is_current = true
-            ORDER BY uploaded_at DESC, id DESC
-            LIMIT 1
-         ) d ON true
         WHERE e.request_type = 'business_case'
-          AND (e.modern_bc_metadata ? 'post_statistics_sla' OR d.uploaded_at IS NOT NULL)`
+          AND (
+            e.modern_bc_metadata ? 'post_statistics_sla'
+            OR e.modern_bc_metadata->'determinations_gate'->>'completed_commercial_at' IS NOT NULL
+          )`
     ));
   } catch (error) {
     if (error?.code === "42P01") return { scanned: 0, sent: 0 };
@@ -791,7 +937,7 @@ async function runReminderSweep() {
   for (const row of rows || []) {
     try {
       const metadata = toObject(row.modern_bc_metadata);
-      const existingSla = getPostStatisticsSla(metadata, row.uploaded_at);
+      const existingSla = getPostStatisticsSla(metadata);
       if (!existingSla) continue;
 
       const deferredEvents = toObject(existingSla.deferred_workflow_events);
@@ -818,18 +964,19 @@ async function runReminderSweep() {
 
       const startedAt = new Date(existingSla.started_at);
       const deadlineAt = new Date(existingSla.deadline_at);
-      const elapsedHours = (Date.now() - startedAt.getTime()) / 3600000;
+      const now = new Date();
+      const elapsedHours = countWeekdayHoursBetween(startedAt, now);
       const reminderCode = getReminderCode(elapsedHours);
       if (!reminderCode) continue;
 
       const ensured = await ensurePostStatisticsWindow({
         businessCaseId: row.id,
-        documentUploadedAt: row.uploaded_at,
       });
       const currentSla = ensured.sla || existingSla;
       if (currentSla.completed_at || currentSla.status === "completed") continue;
 
-      const reminderTitle = elapsedHours >= POST_STATISTICS_SLA_HOURS
+      const isOverdue = now.getTime() >= new Date(currentSla.deadline_at).getTime();
+      const reminderTitle = isOverdue
         ? "SLA vencido: Business Case pendiente"
         : "Recordatorio de SLA: Business Case pendiente";
       const result = await notifyParticipants({
@@ -839,8 +986,8 @@ async function runReminderSweep() {
         message: buildReminderMessage({ elapsedHours, deadlineAt: currentSla.deadline_at }),
         actorEmail: null,
         excludeActor: false,
-        type: elapsedHours >= POST_STATISTICS_SLA_HOURS ? "warning" : "alert",
-        priority: elapsedHours >= POST_STATISTICS_SLA_HOURS ? 3 : 2,
+        type: isOverdue ? "warning" : "alert",
+        priority: isOverdue ? 3 : 2,
         notifyPersonal: false,
         extraData: {
           reminder_code: reminderCode,
@@ -854,7 +1001,7 @@ async function runReminderSweep() {
       });
       sent += personal.sent;
 
-      if (elapsedHours >= POST_STATISTICS_SLA_HOURS && currentSla.status !== "overdue") {
+      if (isOverdue && currentSla.status !== "overdue") {
         await db.query(
           `UPDATE equipment_purchase_requests
               SET modern_bc_metadata = jsonb_set(
@@ -882,6 +1029,8 @@ module.exports = {
   REMINDER_AFTER_DEADLINE_HOURS,
   buildProcessKey,
   buildEmailSubject,
+  addWeekdayHours,
+  countWeekdayHoursBetween,
   getPostStatisticsSla,
   getReminderCode,
   buildPersonalPendingTasks,

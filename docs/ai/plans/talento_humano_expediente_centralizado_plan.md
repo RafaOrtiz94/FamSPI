@@ -40,7 +40,7 @@ La fuente de verdad quedará centralizada en estructuras del dominio de Talento 
 - Certificado de votación
 - Servicio Básico Domicilio
 - Acta de matrimonio
-- Partida de nacimiento hijos
+- Partida de nacimiento/cedula hijos
 - Registro SENESCYT
 - Curriculum vitae
 - Títulos 3er nivel, múltiples

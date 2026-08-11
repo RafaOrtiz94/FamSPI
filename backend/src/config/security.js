@@ -74,6 +74,8 @@ const corsConfig = {
     "if-match",
     "x-jobs-key",
     "x-viaticos-flow",
+    "x-world-cup-participant-token",
+    "X-World-Cup-Participant-Token",
   ],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   exposedHeaders: ["X-SHA256", "Content-Disposition"],

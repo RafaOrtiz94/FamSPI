@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  FiAlertTriangle, FiBarChart2, FiCalendar, FiCheck, FiChevronDown,
-  FiChevronRight, FiChevronUp, FiCpu, FiDownload, FiEdit2, FiFileText,
+  FiAlertTriangle, FiBarChart2, FiCalendar, FiCheck,
+  FiChevronRight, FiChevronUp, FiCpu, FiDownload, FiEdit2, FiEye, FiFileText,
   FiInfo, FiPackage, FiPlus, FiRefreshCw, FiSearch, FiShield,
   FiUploadCloud, FiUser, FiUsers, FiX,
 } from "react-icons/fi";
@@ -17,16 +17,15 @@ import {
   getCollabActaRecipientInfo,
   createCollabTiSession, listCollabDeliveriesByUser, listCollabSessionsByUser,
   listCollabDeliveryDocsByUser, listCollabDeliveryDocs, uploadCollabDeliveryDoc,
-  getCollabFullReport, getCollabCollaboratorReport,
   getCollabActaSignatureWorkflow, startCollabActaSignatureWorkflow,
   downloadCollabFullReportPdf, downloadCollabCollaboratorReportPdf,
 } from "../../../core/api/collabDeliveriesApi";
 import {
   listTiAssets, createTiAsset,
-  getTiAssetAssignmentsHistory, listTiActas, listTiAllActas, getTiActa, updateTiActa,
+  getTiAssetAssignmentsHistory, listTiActas, listTiAllActas, getTiActa,
   getTiActaSignatureWorkflow,
-  listTiFinancialDocs, uploadTiFinancialDoc,
-  getTiActaPdf, downloadTiActa, downloadTiAssetReport, downloadTiCollaboratorReport,
+  listTiFinancialDocs, uploadTiFinancialDoc, uploadTiActaSigned,
+  getTiActaPdf, downloadTiAssetReport, downloadTiCollaboratorReport,
   downloadTiMaintenanceReport, startTiActaSignatureWorkflow,
 } from "../../../core/api/tiAssetsApi";
 import { downloadSignatureWorkflowFinalPdf, validateSignerProfiles } from "../../../core/api/signatureWorkflowsApi";
@@ -65,7 +64,7 @@ const CATEGORY_FIELDS = {
     { key: "modelo",          label: "Modelo",          type: "text" },
     { key: "caracteristicas", label: "Características", type: "text" },
     { key: "_serial",    label: "N° de serie",       type: "serial" },
-    { key: "_condition", label: "Condición (1-10)",  type: "condition" },
+    { key: "_condition", label: "Condición",         type: "new_used" },
     { key: "_renewal",   label: "Fecha de renovación",type: "renewal" },
   ],
   logistica: [
@@ -88,6 +87,8 @@ const ROLE_SESSION_PERMISSIONS = {
   jefe_tecnico:    { herramienta: ["entrega","retiro"] },
 };
 const FULL_ACCESS_ROLES = ["financiero","jefe_financiero"];
+const COLLAB_SIGNED_ACTA_UPLOAD_ROLES = ["financiero", "jefe_financiero"];
+const TI_SIGNED_ACTA_UPLOAD_ROLES = ["ti", "jefe_ti", "admin_ti", "gerencia"];
 
 function getRolePerms(role) {
   return ROLE_SESSION_PERMISSIONS[role] || ROLE_SESSION_PERMISSIONS["financiero"];
@@ -159,17 +160,17 @@ const TiStatusBadge = ({ status }) => (
 
 const SignatureWorkflowBadge = ({ status, isComplete }) => {
   const normalized = String(status || "").toLowerCase();
-  if (normalized) {
-    return (
-      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${SIGNATURE_WORKFLOW_STYLES[normalized] || "bg-slate-100 text-slate-700"}`}>
-        {normalized.replace(/_/g, " ")}
-      </span>
-    );
-  }
   if (isComplete) {
     return (
       <span className="flex items-center gap-0.5 rounded-full bg-green-50 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">
         <FiCheck size={9} /> Firmada
+      </span>
+    );
+  }
+  if (normalized) {
+    return (
+      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${SIGNATURE_WORKFLOW_STYLES[normalized] || "bg-slate-100 text-slate-700"}`}>
+        {normalized.replace(/_/g, " ")}
       </span>
     );
   }
@@ -468,10 +469,39 @@ function CollabWorkflowStartModal({ open, acta, session, users = [], submitting,
 
 // ── Modal crear sesión ────────────────────────────────────────────────────────
 
-const EMPTY_ITEM = { catalog_item_id: "", serial_number: "", physical_condition: "", observations: "", renewal_date: "", attributes: {} };
+const EMPTY_ITEM = { catalog_item_id: "", serial_number: "", physical_condition: "", is_new: true, renewal_date: "", attributes: {} };
 
 function createEmptySessionItem() {
   return { ...EMPTY_ITEM, attributes: {} };
+}
+
+// ponytail: borrador solo en localStorage (un slot, este navegador/dispositivo).
+// Si se necesita borrador multi-dispositivo, pasar a persistencia backend.
+const SESSION_DRAFT_KEY = "collab_delivery_session_draft_v1";
+
+function loadSessionDraft() {
+  try {
+    const raw = localStorage.getItem(SESSION_DRAFT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSessionDraft(draft) {
+  try {
+    localStorage.setItem(SESSION_DRAFT_KEY, JSON.stringify({ ...draft, savedAt: new Date().toISOString() }));
+  } catch {
+    /* localStorage no disponible — borrador no persiste, no bloquea el flujo */
+  }
+}
+
+function clearSessionDraft() {
+  try {
+    localStorage.removeItem(SESSION_DRAFT_KEY);
+  } catch {
+    /* noop */
+  }
 }
 
 function mapDeliveryToSessionItem(delivery) {
@@ -479,7 +509,7 @@ function mapDeliveryToSessionItem(delivery) {
     catalog_item_id: delivery?.catalog_item_id ? String(delivery.catalog_item_id) : "",
     serial_number: delivery?.serial_number || "",
     physical_condition: delivery?.physical_condition != null ? String(delivery.physical_condition) : "",
-    observations: delivery?.observations || "",
+    is_new: delivery?.is_new != null ? Boolean(delivery.is_new) : true,
     renewal_date: delivery?.renewal_date ? String(delivery.renewal_date).slice(0, 10) : "",
     attributes: delivery?.attributes && typeof delivery.attributes === "object" ? { ...delivery.attributes } : {},
   };
@@ -487,23 +517,39 @@ function mapDeliveryToSessionItem(delivery) {
 
 function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) {
   const { showToast } = useUI();
-  const [step, setStep]         = useState(1);
-  const [sessionType, setType]  = useState("");
-  const [userId, setUserId]     = useState("");
-  const [sessionDate, setDate]  = useState(new Date().toISOString().slice(0, 10));
-  const [tipo, setTipo]         = useState("entrega");
-  const [notes, setNotes]       = useState("");
-  const [items, setItems]       = useState([createEmptySessionItem()]);
-  const [tiSelected, setTiSel] = useState([]);
+  const [draft]                 = useState(() => loadSessionDraft());
+  const [step, setStep]         = useState(() => draft?.step || 1);
+  const [sessionType, setType]  = useState(() => draft?.sessionType || "");
+  const [userId, setUserId]     = useState(() => draft?.userId || "");
+  const [sessionDate, setDate]  = useState(() => draft?.sessionDate || new Date().toISOString().slice(0, 10));
+  const [tipo, setTipo]         = useState(() => draft?.tipo || "entrega");
+  const [personnelType, setPersonnelType] = useState(() => draft?.personnelType || "interno");
+  const [notes, setNotes]       = useState(() => draft?.notes || "");
+  const [items, setItems]       = useState(() => draft?.items?.length ? draft.items : [createEmptySessionItem()]);
+  const [tiSelected, setTiSel] = useState(() => draft?.tiSelected || []);
   const [tiSearch, setTiSearch] = useState("");
   const [saving, setSaving]     = useState(false);
 
   // Recipient info (ficha TH como fuente de verdad, editable si está incompleta)
-  const [recipientNombre, setRecipientNombre] = useState("");
-  const [recipientCedula, setRecipientCedula] = useState("");
-  const [recipientCargo,  setRecipientCargo]  = useState("");
-  const [recipientSource, setRecipientSource] = useState(null); // "profile" | "partial" | "empty"
+  const [recipientNombre, setRecipientNombre] = useState(() => draft?.recipientNombre || "");
+  const [recipientCedula, setRecipientCedula] = useState(() => draft?.recipientCedula || "");
+  const [recipientCargo,  setRecipientCargo]  = useState(() => draft?.recipientCargo || "");
+  const [, setRecipientSource] = useState(null); // "profile" | "partial" | "empty"
   const [recipientLoading, setRecipientLoading] = useState(false);
+
+  useEffect(() => {
+    if (draft) showToast(`Borrador recuperado (guardado ${new Date(draft.savedAt).toLocaleString("es-EC")})`, "info");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const hasContent = sessionType || userId || notes.trim() || items.some((it) => it.catalog_item_id) || tiSelected.length;
+    if (!hasContent) return;
+    saveSessionDraft({
+      step, sessionType, userId, sessionDate, tipo, personnelType, notes, items, tiSelected,
+      recipientNombre, recipientCedula, recipientCargo,
+    });
+  }, [step, sessionType, userId, sessionDate, tipo, personnelType, notes, items, tiSelected, recipientNombre, recipientCedula, recipientCargo]);
 
   const fetchRecipientInfo = async (uid) => {
     if (!uid) { setRecipientNombre(""); setRecipientCedula(""); setRecipientCargo(""); setRecipientSource(null); return; }
@@ -569,22 +615,42 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
       } else {
         result = await createCollabSession({
           user_id: Number(userId), category: sessionType, session_date: sessionDate, tipo, notes: notes || null,
+          personnel_type: sessionType === "herramienta" ? personnelType : null,
           ...recipientData,
           items: items.map((it) => ({
             catalog_item_id: Number(it.catalog_item_id),
             serial_number: it.serial_number || null,
             physical_condition: it.physical_condition ? Number(it.physical_condition) : null,
-            observations: it.observations || null,
+            is_new: sessionType === "herramienta" ? Boolean(it.is_new) : null,
             renewal_date: it.renewal_date || null,
             attributes: it.attributes || {},
           })),
         });
       }
       showToast("Sesión creada correctamente", "success");
+      clearSessionDraft();
       onSave(result);
     } catch (e) {
       showToast(e?.response?.data?.message || "Error al crear la sesión", "error");
     } finally { setSaving(false); }
+  };
+
+  const hasDraftContent = sessionType || userId || notes.trim() || items.some((it) => it.catalog_item_id) || tiSelected.length > 0;
+
+  const discardDraft = () => {
+    clearSessionDraft();
+    setStep(1);
+    setType("");
+    setUserId("");
+    setTipo("entrega");
+    setPersonnelType("interno");
+    setNotes("");
+    setItems([createEmptySessionItem()]);
+    setTiSel([]);
+    setRecipientNombre("");
+    setRecipientCedula("");
+    setRecipientCargo("");
+    showToast("Borrador descartado", "info");
   };
 
   return (
@@ -593,17 +659,25 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
           <div>
             <p className="text-base font-semibold text-slate-900">Nueva sesión de entrega</p>
-            <p className="text-xs text-slate-400 mt-0.5">Paso {step} de 3 — {step === 1 ? "Tipo de sesión" : step === 2 ? "Colaborador y fecha" : "Ítems a entregar"}</p>
+            <p className="text-xs text-slate-400 mt-0.5">Paso {step} de 4 — {step === 1 ? "Tipo de sesión" : step === 2 ? "Colaborador y fecha" : step === 3 ? (isTi ? "Activos a entregar" : "Ítems a entregar") : "Observaciones"}</p>
+            {hasDraftContent && <p className="text-[11px] text-emerald-600 mt-0.5">Borrador guardado automaticamente en este navegador</p>}
           </div>
-          <button type="button" onClick={onClose} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 transition-colors"><FiX size={16} /></button>
+          <div className="flex items-center gap-2">
+            {hasDraftContent && (
+              <button type="button" onClick={discardDraft} className="rounded-xl px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 transition-colors">
+                Descartar borrador
+              </button>
+            )}
+            <button type="button" onClick={onClose} className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 transition-colors"><FiX size={16} /></button>
+          </div>
         </div>
         <div className="flex px-6 pt-4 gap-2 shrink-0">
-          {[1,2,3].map((s) => (
+          {[1,2,3,4].map((s) => (
             <div key={s} className="flex items-center gap-2 flex-1">
               <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-colors ${step > s ? "bg-green-500 border-green-500 text-white" : step === s ? "border-blue-600 text-blue-600" : "border-slate-200 text-slate-400"}`}>
                 {step > s ? <FiCheck size={12} /> : s}
               </div>
-              {s < 3 && <div className={`flex-1 h-0.5 ${step > s ? "bg-green-400" : "bg-slate-200"}`} />}
+              {s < 4 && <div className={`flex-1 h-0.5 ${step > s ? "bg-green-400" : "bg-slate-200"}`} />}
             </div>
           ))}
         </div>
@@ -647,6 +721,20 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
                   ));
                 })()}
               </div>
+              {sessionType === "herramienta" && (
+                <div className="mt-2">
+                  <SectionLabel>Personal interno o externo</SectionLabel>
+                  <p className="text-xs text-slate-400 mt-0.5 mb-2">Define el formato del acta (F.ACTA-H-2026-INT / -EXT).</p>
+                  <div className="flex gap-3">
+                    {[{ key: "interno", label: "Interno" }, { key: "externo", label: "Externo" }].map(({ key, label }) => (
+                      <label key={key} className={`flex items-center gap-2 cursor-pointer rounded-xl border px-4 py-2 text-sm font-medium transition-colors ${personnelType === key ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}>
+                        <input type="radio" name="personnelType" value={key} checked={personnelType === key} onChange={() => setPersonnelType(key)} className="sr-only" />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
           {step === 2 && (
@@ -700,16 +788,15 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
                   <label className={labelCls}>Fecha de {tipo}</label>
                   <input type="date" value={sessionDate} onChange={(e) => setDate(e.target.value)} className={fieldCls} />
                 </div>
-                <div>
-                  <label className={labelCls}>Notas de sesión</label>
-                  <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Opcional..." className={fieldCls} />
-                </div>
               </div>
             </div>
           )}
           {step === 3 && !isTi && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              {/* sticky: antes quedaba arriba del todo y con muchos items el
+                  usuario tenia que scrollear hasta el tope para agregar uno
+                  nuevo -- se fija en la parte superior del area scrolleable. */}
+              <div className="sticky top-0 z-10 -mt-1 flex items-center justify-between border-b border-slate-100 bg-white py-3">
                 <SectionLabel>Ítems a incluir en la sesión</SectionLabel>
                 <button type="button" onClick={addItem} className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
                   <FiPlus size={12} /> Agregar ítem
@@ -741,9 +828,15 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
                           {catCatalog.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                       </div>
+                      {sessionType === "herramienta" && (
+                        <div>
+                          <label className={labelCls}>Cantidad</label>
+                          <input type="number" min="1" value={it.attributes?.cantidad ?? 1} onChange={(e) => setAttr(i, "cantidad", e.target.value)} className={fieldCls} />
+                        </div>
+                      )}
                       {activeFields.map(({ key, label, type }) => {
                         const stored = schema[key];
-                        const VALID = ["text","date","number","talla_select","unidad_select","serial","condition","renewal"];
+                        const VALID = ["text","date","number","talla_select","unidad_select","serial","condition","new_used","renewal"];
                         const fieldType = VALID.includes(stored) ? stored : type;
 
                         if (fieldType === "serial") return (
@@ -756,6 +849,23 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
                           <div key={key}>
                             <label className={labelCls}>Condición física (1-10)</label>
                             <input type="number" min="1" max="10" value={it.physical_condition} onChange={(e) => setItem(i, "physical_condition", e.target.value)} className={fieldCls} />
+                          </div>
+                        );
+                        if (fieldType === "new_used") return (
+                          <div key={key} className="sm:col-span-2">
+                            <label className={labelCls}>Condición</label>
+                            <div className="flex flex-wrap gap-3">
+                              {[{ v: true, l: "Nuevo" }, { v: false, l: "Usado" }].map(({ v, l }) => (
+                                <button
+                                  key={l}
+                                  type="button"
+                                  onClick={() => setItem(i, "is_new", v)}
+                                  className={`rounded-xl border px-4 py-2 text-sm font-medium transition-colors ${it.is_new === v ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                                >
+                                  {l}
+                                </button>
+                              ))}
+                            </div>
                           </div>
                         );
                         if (fieldType === "renewal") return (
@@ -796,10 +906,6 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
                           </div>
                         );
                       })}
-                      <div className={activeFields.length % 2 === 0 ? "sm:col-span-2" : ""}>
-                        <label className={labelCls}>Observaciones</label>
-                        <input type="text" value={it.observations} onChange={(e) => setItem(i, "observations", e.target.value)} placeholder="Opcional..." className={fieldCls} />
-                      </div>
                     </div>
                   </div>
                 );
@@ -842,13 +948,26 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
               </div>
             </div>
           )}
+          {step === 4 && (
+            <div className="space-y-3">
+              <SectionLabel>Observaciones</SectionLabel>
+              <p className="text-xs text-slate-400 -mt-1">Se incluyen en el acta generada para esta sesión.</p>
+              <textarea
+                rows={4}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Opcional..."
+                className={`${fieldCls} resize-none`}
+              />
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50 shrink-0">
           <button type="button" onClick={() => step > 1 ? setStep((s) => s - 1) : onClose()}
             className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors">
             {step === 1 ? "Cancelar" : "Atrás"}
           </button>
-          {step < 3 ? (
+          {step < 4 ? (
             <button type="button" onClick={() => {
               if (step === 1 && !sessionType) return showToast("Selecciona un tipo de sesión", "warning");
               if (step === 2 && !userId) return showToast("Selecciona un colaborador", "warning");
@@ -878,6 +997,7 @@ function EditCollabSessionModal({ open, session, catalog, onClose, onSaved }) {
   const [recipientCedula, setRecipientCedula] = useState("");
   const [recipientCargo, setRecipientCargo] = useState("");
   const [items, setItems] = useState([createEmptySessionItem()]);
+  const [personnelType, setPersonnelType] = useState("interno");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -888,6 +1008,7 @@ function EditCollabSessionModal({ open, session, catalog, onClose, onSaved }) {
     setRecipientNombre(primaryActa?.recipient_nombre || session.collaborator_name || "");
     setRecipientCedula(primaryActa?.recipient_cedula || "");
     setRecipientCargo(primaryActa?.recipient_cargo || "");
+    setPersonnelType(primaryActa?.personnel_type || "interno");
     setItems(session.deliveries?.length ? session.deliveries.map(mapDeliveryToSessionItem) : [createEmptySessionItem()]);
   }, [open, session]);
 
@@ -926,11 +1047,12 @@ function EditCollabSessionModal({ open, session, catalog, onClose, onSaved }) {
         recipient_nombre: recipientNombre.trim(),
         recipient_cedula: recipientCedula.trim(),
         recipient_cargo: recipientCargo.trim(),
+        personnel_type: category === "herramienta" ? personnelType : undefined,
         items: items.map((item) => ({
           catalog_item_id: Number(item.catalog_item_id),
           serial_number: item.serial_number?.trim() || null,
           physical_condition: item.physical_condition ? Number(item.physical_condition) : null,
-          observations: item.observations?.trim() || null,
+          is_new: category === "herramienta" ? Boolean(item.is_new) : null,
           renewal_date: item.renewal_date || null,
           attributes: item.attributes || {},
         })),
@@ -975,14 +1097,23 @@ function EditCollabSessionModal({ open, session, catalog, onClose, onSaved }) {
             <label className={labelCls}>Fecha de sesión</label>
             <input type="date" value={sessionDate} onChange={(event) => setSessionDate(event.target.value)} className={fieldCls} />
           </div>
-          <div>
-            <label className={labelCls}>Notas</label>
-            <input value={notes} onChange={(event) => setNotes(event.target.value)} className={fieldCls} placeholder="Opcional..." />
-          </div>
+          {category === "herramienta" && (
+            <div className="sm:col-span-2">
+              <label className={labelCls}>Personal interno o externo</label>
+              <div className="flex gap-3 mt-1">
+                {[{ key: "interno", label: "Interno" }, { key: "externo", label: "Externo" }].map(({ key, label }) => (
+                  <label key={key} className={`flex items-center gap-2 cursor-pointer rounded-xl border px-4 py-2 text-sm font-medium transition-colors ${personnelType === key ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}>
+                    <input type="radio" name="editPersonnelType" value={key} checked={personnelType === key} onChange={() => setPersonnelType(key)} className="sr-only" />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="sticky top-0 z-10 -mt-1 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-white py-3">
             <SectionLabel>Ítems de la sesión</SectionLabel>
             <button type="button" onClick={addItem} className="cursor-pointer rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 active:scale-[0.97]">
               <span className="inline-flex items-center gap-1">
@@ -1022,9 +1153,16 @@ function EditCollabSessionModal({ open, session, catalog, onClose, onSaved }) {
                     </select>
                   </div>
 
+                  {category === "herramienta" && (
+                    <div>
+                      <label className={labelCls}>Cantidad</label>
+                      <input type="number" min="1" value={item.attributes?.cantidad ?? 1} onChange={(event) => setAttr(index, "cantidad", event.target.value)} className={fieldCls} />
+                    </div>
+                  )}
+
                   {activeFields.map(({ key, label, type }) => {
                     const storedType = schema[key];
-                    const fieldType = ["text", "date", "number", "talla_select", "unidad_select", "serial", "condition", "renewal"].includes(storedType) ? storedType : type;
+                    const fieldType = ["text", "date", "number", "talla_select", "unidad_select", "serial", "condition", "new_used", "renewal"].includes(storedType) ? storedType : type;
 
                     if (fieldType === "serial") {
                       return (
@@ -1039,6 +1177,25 @@ function EditCollabSessionModal({ open, session, catalog, onClose, onSaved }) {
                         <div key={key}>
                           <label className={labelCls}>Condición física (1-10)</label>
                           <input type="number" min="1" max="10" value={item.physical_condition} onChange={(event) => setItem(index, "physical_condition", event.target.value)} className={fieldCls} />
+                        </div>
+                      );
+                    }
+                    if (fieldType === "new_used") {
+                      return (
+                        <div key={key} className="sm:col-span-2">
+                          <label className={labelCls}>Condición</label>
+                          <div className="flex flex-wrap gap-3">
+                            {[{ v: true, l: "Nuevo" }, { v: false, l: "Usado" }].map(({ v, l }) => (
+                              <button
+                                key={l}
+                                type="button"
+                                onClick={() => setItem(index, "is_new", v)}
+                                className={`rounded-xl border px-4 py-2 text-sm font-medium transition-colors ${item.is_new === v ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                              >
+                                {l}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       );
                     }
@@ -1087,14 +1244,22 @@ function EditCollabSessionModal({ open, session, catalog, onClose, onSaved }) {
                     );
                   })}
 
-                  <div className={activeFields.length % 2 === 0 ? "sm:col-span-2" : ""}>
-                    <label className={labelCls}>Observaciones</label>
-                    <input value={item.observations} onChange={(event) => setItem(index, "observations", event.target.value)} className={fieldCls} placeholder="Opcional..." />
-                  </div>
                 </div>
               </div>
             );
           })}
+        </div>
+
+        <div className="space-y-2">
+          <SectionLabel>Observaciones</SectionLabel>
+          <p className="-mt-1 text-xs text-slate-400">Se incluyen en el acta generada para esta sesión.</p>
+          <textarea
+            rows={3}
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder="Opcional..."
+            className={`${fieldCls} resize-none`}
+          />
         </div>
 
         <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
@@ -1115,6 +1280,7 @@ function SessionDetail({ sessionId, onClose, availableUsers = [], catalog = [], 
   const navigate = useNavigate();
   const { user: sessionUser } = useAuth();
   const canInitiateWorkflow = canCreateSessions(sessionUser?.role || "") || ["admin", "administrador"].includes(String(sessionUser?.role || "").toLowerCase());
+  const canUploadSignedActa = COLLAB_SIGNED_ACTA_UPLOAD_ROLES.includes(String(sessionUser?.role || "").toLowerCase());
   const canEditSessions = canInitiateWorkflow;
   const [data, setData]         = useState(null);
   const [loading, setLoading]   = useState(true);
@@ -1124,6 +1290,7 @@ function SessionDetail({ sessionId, onClose, availableUsers = [], catalog = [], 
   const [startingWorkflow, setStartingWorkflow] = useState(false);
   const [downloadingFinalPdf, setDownloadingFinalPdf] = useState(null);
   const [downloadingActaPdf, setDownloadingActaPdf] = useState(null);
+  const [regeneratingActaPdf, setRegeneratingActaPdf] = useState(null);
   const [editingSession, setEditingSession] = useState(false);
 
   useEffect(() => {
@@ -1150,6 +1317,18 @@ function SessionDetail({ sessionId, onClose, availableUsers = [], catalog = [], 
       showToast(e?.response?.data?.message || "No disponible", "info");
     } finally {
       setDownloadingActaPdf(null);
+    }
+  };
+
+  const handleRegenerate = async (actaId) => {
+    setRegeneratingActaPdf(actaId);
+    try {
+      await import("../../../core/api/collabDeliveriesApi").then((m) => m.regenerateCollabActaPdf(actaId));
+      showToast("PDF del acta regenerado", "success");
+    } catch (e) {
+      showToast(e?.response?.data?.message || "Error regenerando el PDF", "error");
+    } finally {
+      setRegeneratingActaPdf(null);
     }
   };
 
@@ -1348,6 +1527,18 @@ function SessionDetail({ sessionId, onClose, availableUsers = [], catalog = [], 
                       PDF Firmado
                     </button>
                   ) : null}
+                  {acta.signed_pdf_drive_url && (
+                    <a
+                      href={acta.signed_pdf_drive_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="Ver acta firmada"
+                      aria-label="Ver acta firmada"
+                      className="cursor-pointer inline-flex items-center justify-center rounded-lg border border-green-200 bg-green-50 p-1.5 text-green-700 hover:bg-green-100 transition-colors"
+                    >
+                      <FiEye size={12} />
+                    </a>
+                  )}
                   <button
                     type="button"
                     onClick={() => handleDownload(acta.id)}
@@ -1359,10 +1550,20 @@ function SessionDetail({ sessionId, onClose, availableUsers = [], catalog = [], 
                       : <FiDownload size={10} />}
                     PDF
                   </button>
-                  {!acta.is_complete && (
+                  <button
+                    type="button"
+                    onClick={() => handleRegenerate(acta.id)}
+                    disabled={regeneratingActaPdf === acta.id}
+                    title="Vuelve a generar el PDF desde la plantilla actual (por si cambio el diseno)"
+                    className="cursor-pointer flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50 transition-colors active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+                  >
+                    <FiRefreshCw size={10} className={regeneratingActaPdf === acta.id ? "animate-spin" : ""} />
+                    Regenerar
+                  </button>
+                  {canUploadSignedActa && (
                     <label className="cursor-pointer">
                       <span className={`flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] font-medium text-blue-700 hover:bg-blue-100 transition-colors ${uploading === acta.id ? "opacity-50" : ""}`}>
-                        {uploading === acta.id ? <FiRefreshCw size={10} className="animate-spin" /> : <FiUploadCloud size={10} />} Subir firmada
+                        {uploading === acta.id ? <FiRefreshCw size={10} className="animate-spin" /> : <FiUploadCloud size={10} />} {acta.is_complete ? "Reemplazar" : "Subir firmada"}
                       </span>
                       <input type="file" accept=".pdf" className="hidden" disabled={uploading !== null}
                         onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(acta.id, f); e.target.value = ""; }} />
@@ -1419,6 +1620,8 @@ const TI_EMPTY_FORM = {
 function TiAssetsTab({ tiAssets, users, onRefresh }) {
   const { showToast } = useUI();
   const navigate = useNavigate();
+  const { user: sessionUser } = useAuth();
+  const canUploadTiSignedActa = TI_SIGNED_ACTA_UPLOAD_ROLES.includes(String(sessionUser?.role || "").toLowerCase());
 
   const [search, setSearch]         = useState("");
   const [statusF, setStatusF]       = useState("");
@@ -1433,6 +1636,8 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
   const [actas, setActas]                 = useState([]);
   const [financialDocs, setFinancialDocs] = useState([]);
   const [uploadingDoc, setUploadingDoc]   = useState(null);
+  const [uploadingSignedActa, setUploadingSignedActa] = useState(null);
+  const [invoiceNumberDraft, setInvoiceNumberDraft] = useState("");
   const [showAssignModal, setShowAssign]  = useState(false);
   const [downloadingTiActaPdf, setDownloadingTiActaPdf] = useState(null);
   const [editingTiActa, setEditingTiActa] = useState(null);
@@ -1495,6 +1700,7 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
       setAssignHistory(Array.isArray(hist) ? hist : []);
       setActas(Array.isArray(actasRows) ? actasRows : []);
       setFinancialDocs(Array.isArray(finDocs) ? finDocs : []);
+      setInvoiceNumberDraft(finDocs?.find?.((doc) => doc.doc_type === "factura")?.invoice_number || "");
     } catch {
       setAssignHistory([]); setActas([]); setFinancialDocs([]);
     } finally { setDetailLoading(false); }
@@ -1534,14 +1740,31 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
 
   const handleFinancialDocUpload = async (docType, file) => {
     if (!selected || !file) return;
+    const invoiceNumber = String(invoiceNumberDraft || "").trim();
+    if (docType === "factura" && !invoiceNumber) {
+      showToast("Ingresa el número de factura antes de subirla", "warning");
+      return;
+    }
     setUploadingDoc(docType);
     try {
-      await uploadTiFinancialDoc(selected.id, docType, file);
+      await uploadTiFinancialDoc(selected.id, docType, file, { invoiceNumber });
       showToast(docType === "factura" ? "Factura subida correctamente" : "Letra de cambio subida correctamente", "success");
       const updated = await listTiFinancialDocs(selected.id);
       setFinancialDocs(Array.isArray(updated) ? updated : []);
     } catch (e) { showToast(e?.response?.data?.message || "No se pudo subir el documento", "error"); }
     finally { setUploadingDoc(null); }
+  };
+
+  const handleSignedActaUpload = async (actaId, file) => {
+    if (!file) return;
+    setUploadingSignedActa(actaId);
+    try {
+      await uploadTiActaSigned(actaId, file);
+      showToast("Acta firmada subida correctamente", "success");
+      const updated = await listTiActas(selected.id);
+      setActas(Array.isArray(updated) ? updated : []);
+    } catch (e) { showToast(e?.response?.data?.message || "No se pudo subir el acta firmada", "error"); }
+    finally { setUploadingSignedActa(null); }
   };
 
   return (
@@ -1809,11 +2032,21 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
                               <FiEdit2 size={10} /> Editar
                             </button>
                           )}
-                          {acta.is_complete && acta.signed_pdf_drive_url && (
-                            <a href={acta.signed_pdf_drive_url} target="_blank" rel="noreferrer"
-                              className="flex items-center gap-1 rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-xs text-green-700 hover:bg-green-100 transition-colors">
-                              <FiCheck size={10} /> Firmada
+                            {acta.is_complete && acta.signed_pdf_drive_url && (
+                            <a href={acta.signed_pdf_drive_url} target="_blank" rel="noreferrer" title="Ver acta firmada" aria-label="Ver acta firmada"
+                              className="flex items-center justify-center rounded-lg border border-green-200 bg-green-50 p-1.5 text-green-700 hover:bg-green-100 transition-colors">
+                              <FiEye size={12} />
                             </a>
+                          )}
+                          {canUploadTiSignedActa && (
+                            <label className="cursor-pointer">
+                              <span className="flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 transition-colors">
+                                {uploadingSignedActa === acta.id ? <FiRefreshCw size={10} className="animate-spin" /> : <FiUploadCloud size={10} />}
+                                {acta.is_complete ? "Reemplazar" : "Subir firmada"}
+                              </span>
+                              <input type="file" accept=".pdf" className="hidden" disabled={uploadingSignedActa !== null}
+                                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleSignedActaUpload(acta.id, f); e.target.value = ""; }} />
+                            </label>
                           )}
                         </div>
                       </div>
@@ -1838,6 +2071,14 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
                           <div className="min-w-0">
                             <p className="text-xs font-semibold text-slate-700">{label}</p>
                             <p className="text-[10px] text-slate-400 mt-0.5">{desc}</p>
+                            {type === "factura" && (
+                              <input
+                                value={invoiceNumberDraft}
+                                onChange={(e) => setInvoiceNumberDraft(e.target.value)}
+                                placeholder="Número de factura"
+                                className="mt-2 w-full max-w-[220px] rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs focus:border-blue-400 focus:outline-none"
+                              />
+                            )}
                             {doc ? (
                               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                 <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700"><FiCheck size={9} /> Subido</span>
@@ -1850,9 +2091,9 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
                             {doc?.drive_url && (
-                              <a href={doc.drive_url} target="_blank" rel="noreferrer"
-                                className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600 hover:border-slate-300 transition-colors">
-                                <FiDownload size={11} />
+                              <a href={doc.drive_url} target="_blank" rel="noreferrer" title={`Ver ${label.toLowerCase()}`} aria-label={`Ver ${label.toLowerCase()}`}
+                                className="flex items-center justify-center rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:border-slate-300 transition-colors">
+                                <FiEye size={12} />
                               </a>
                             )}
                             <label className="cursor-pointer">
@@ -2227,12 +2468,15 @@ function CatalogTab({ catalog, onRefresh, canEdit = true }) {
 
 function TiActaDetail({ acta: actaInitial, onClose, onUpdated, availableUsers = [] }) {
   const { showToast } = useUI();
+  const { user: sessionUser } = useAuth();
+  const canUploadTiSignedActa = TI_SIGNED_ACTA_UPLOAD_ROLES.includes(String(sessionUser?.role || "").toLowerCase());
   const [acta, setActa]               = useState(null);
   const [loading, setLoading]         = useState(true);
   const [editingActa, setEditingActa] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
   const [startingWorkflow, setStartingWorkflow]   = useState(false);
+  const [uploadingSignedActa, setUploadingSignedActa] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -2292,6 +2536,22 @@ function TiActaDetail({ acta: actaInitial, onClose, onUpdated, availableUsers = 
     }
   };
 
+  const handleUploadSignedActa = async (file) => {
+    if (!file) return;
+    setUploadingSignedActa(true);
+    try {
+      await uploadTiActaSigned(data.id, file);
+      showToast("Acta firmada subida correctamente", "success");
+      const updated = await getTiActa(actaInitial.id);
+      setActa(updated);
+      await onUpdated?.();
+    } catch (e) {
+      showToast(e?.response?.data?.message || "No se pudo subir el acta firmada", "error");
+    } finally {
+      setUploadingSignedActa(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
@@ -2348,11 +2608,22 @@ function TiActaDetail({ acta: actaInitial, onClose, onUpdated, availableUsers = 
             <FiRefreshCw size={12}/> Firma en proceso
           </span>
         )}
-        {data.is_complete && data.signed_pdf_drive_url && (
+        {data.signed_pdf_drive_url && (
           <a href={data.signed_pdf_drive_url} target="_blank" rel="noreferrer"
-            className="flex items-center gap-1.5 rounded-xl border border-green-200 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 transition-colors">
-            <FiCheck size={12}/> Ver acta firmada
+            title="Ver acta firmada" aria-label="Ver acta firmada"
+            className="flex items-center justify-center rounded-xl border border-green-200 bg-green-50 p-2 text-green-700 hover:bg-green-100 transition-colors">
+            <FiEye size={14}/>
           </a>
+        )}
+        {canUploadTiSignedActa && (
+          <label className="cursor-pointer">
+            <span className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors">
+              {uploadingSignedActa ? <FiRefreshCw size={12} className="animate-spin" /> : <FiUploadCloud size={12} />}
+              {isAlreadySigned ? "Reemplazar acta" : "Subir acta firmada"}
+            </span>
+            <input type="file" accept=".pdf" className="hidden" disabled={uploadingSignedActa}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadSignedActa(f); e.target.value = ""; }} />
+          </label>
         )}
       </div>
 
@@ -2375,7 +2646,6 @@ function TiActaDetail({ acta: actaInitial, onClose, onUpdated, availableUsers = 
                   {item.brand_model && <p className="text-xs text-slate-500">{item.brand_model}</p>}
                   {item.serial_imei && <p className="text-xs font-mono text-slate-400">{item.serial_imei}</p>}
                   {item.characteristics && <p className="text-[10px] text-slate-400 italic">{item.characteristics}</p>}
-                  {item.observations && <p className="text-[10px] text-slate-500 mt-0.5">{item.observations}</p>}
                 </div>
                 <div className="flex flex-col items-end gap-1 shrink-0 text-right">
                   <span className="text-[10px] font-medium text-slate-500 capitalize">{item.item_type || "equipo"}</span>
@@ -2421,11 +2691,15 @@ function TiActaDetail({ acta: actaInitial, onClose, onUpdated, availableUsers = 
 
 function TiAssetDetailModal({ asset, onClose }) {
   const { showToast } = useUI();
+  const { user: sessionUser } = useAuth();
+  const canUploadTiSignedActa = TI_SIGNED_ACTA_UPLOAD_ROLES.includes(String(sessionUser?.role || "").toLowerCase());
   const [hist, setHist]           = useState([]);
   const [actas, setActas]         = useState([]);
   const [docs, setDocs]           = useState([]);
   const [loading, setLoading]     = useState(true);
   const [uploadingDoc, setUpD]    = useState(null);
+  const [uploadingSignedActa, setUploadingSignedActa] = useState(null);
+  const [invoiceNumberDraft, setInvoiceNumberDraft] = useState("");
   const [downloadingPdf, setDownloadingPdf] = useState(null);
 
   useEffect(() => {
@@ -2438,6 +2712,7 @@ function TiAssetDetailModal({ asset, onClose }) {
       setHist(Array.isArray(h) ? h : []);
       setActas(Array.isArray(a) ? a : []);
       setDocs(Array.isArray(d) ? d : []);
+      setInvoiceNumberDraft(d?.find?.((doc) => doc.doc_type === "factura")?.invoice_number || "");
     }).catch(() => showToast("No se pudo cargar detalle", "error"))
       .finally(() => setLoading(false));
   }, [asset.id, showToast]);
@@ -2462,14 +2737,31 @@ function TiAssetDetailModal({ asset, onClose }) {
   };
 
   const handleDocUpload = async (docType, file) => {
+    const invoiceNumber = String(invoiceNumberDraft || "").trim();
+    if (docType === "factura" && !invoiceNumber) {
+      showToast("Ingresa el número de factura antes de subirla", "warning");
+      return;
+    }
     setUpD(docType);
     try {
-      await uploadTiFinancialDoc(asset.id, docType, file);
+      await uploadTiFinancialDoc(asset.id, docType, file, { invoiceNumber });
       showToast("Documento subido", "success");
       const updated = await listTiFinancialDocs(asset.id);
       setDocs(Array.isArray(updated) ? updated : []);
     } catch (e) { showToast(e?.response?.data?.message || "Error", "error"); }
     finally { setUpD(null); }
+  };
+
+  const handleSignedActaUpload = async (actaId, file) => {
+    if (!file) return;
+    setUploadingSignedActa(actaId);
+    try {
+      await uploadTiActaSigned(actaId, file);
+      showToast("Acta firmada subida correctamente", "success");
+      const updated = await listTiActas(asset.id);
+      setActas(Array.isArray(updated) ? updated : []);
+    } catch (e) { showToast(e?.response?.data?.message || "No se pudo subir el acta firmada", "error"); }
+    finally { setUploadingSignedActa(null); }
   };
 
   return (
@@ -2570,9 +2862,20 @@ function TiAssetDetailModal({ asset, onClose }) {
                         </button>
                         {a.is_complete && a.signed_pdf_drive_url && (
                           <a href={a.signed_pdf_drive_url} target="_blank" rel="noreferrer"
-                            className="flex items-center gap-1 rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-xs text-green-700 hover:bg-green-100 transition-colors">
-                            <FiCheck size={10}/> Firmada
+                            title="Ver acta firmada" aria-label="Ver acta firmada"
+                            className="flex items-center justify-center rounded-lg border border-green-200 bg-green-50 p-1.5 text-green-700 hover:bg-green-100 transition-colors">
+                            <FiEye size={12}/>
                           </a>
+                        )}
+                        {canUploadTiSignedActa && (
+                          <label className="cursor-pointer">
+                            <span className="flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 transition-colors">
+                              {uploadingSignedActa === a.id ? <FiRefreshCw size={10} className="animate-spin" /> : <FiUploadCloud size={10} />}
+                              {a.is_complete ? "Reemplazar" : "Subir firmada"}
+                            </span>
+                            <input type="file" accept=".pdf" className="hidden" disabled={uploadingSignedActa !== null}
+                              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleSignedActaUpload(a.id, f); e.target.value = ""; }} />
+                          </label>
                         )}
                       </div>
                     </div>
@@ -2593,7 +2896,15 @@ function TiAssetDetailModal({ asset, onClose }) {
                   return (
                     <div key={type} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
                       <div className="min-w-0">
-                        <p className="text-xs font-semibold text-slate-700">{label}</p>
+                            <p className="text-xs font-semibold text-slate-700">{label}</p>
+                            {type === "factura" && (
+                              <input
+                                value={invoiceNumberDraft}
+                                onChange={(e) => setInvoiceNumberDraft(e.target.value)}
+                                placeholder="Número de factura"
+                                className="mt-2 w-full max-w-[220px] rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs focus:border-blue-400 focus:outline-none"
+                              />
+                            )}
                         {doc ? (
                           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                             <span className="flex items-center gap-0.5 rounded-full bg-green-50 px-1.5 py-0.5 text-[10px] font-semibold text-green-700"><FiCheck size={9}/> Subido</span>
@@ -2608,8 +2919,9 @@ function TiAssetDetailModal({ asset, onClose }) {
                       <div className="flex items-center gap-1.5 shrink-0">
                         {doc?.drive_url && (
                           <a href={doc.drive_url} target="_blank" rel="noreferrer"
-                            className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600 hover:border-slate-300 transition-colors">
-                            <FiDownload size={11}/>
+                            title={`Ver ${label.toLowerCase()}`} aria-label={`Ver ${label.toLowerCase()}`}
+                            className="flex items-center justify-center rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:border-slate-300 transition-colors">
+                            <FiEye size={12}/>
                           </a>
                         )}
                         <label className="cursor-pointer">
@@ -2699,9 +3011,8 @@ function RopaDetailModal({ delivery, onClose }) {
                 ["N° de serie",   delivery.serial_number || "-"],
                 ["Condición",     delivery.condition  || "-"],
                 ["Fecha entrega", delivery.delivery_date ? new Date(delivery.delivery_date).toLocaleDateString("es-EC") : "-"],
-                ["Observaciones", delivery.observations || "-"],
               ].map(([label, value]) => (
-                <div key={label} className={label === "Observaciones" ? "col-span-2" : ""}>
+                <div key={label}>
                   <p className="text-xs text-slate-400">{label}</p>
                   <p className="text-sm font-medium text-slate-800 mt-0.5">{value}</p>
                 </div>
@@ -2738,9 +3049,9 @@ function RopaDetailModal({ delivery, onClose }) {
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {factura?.drive_url && (
-                    <a href={factura.drive_url} target="_blank" rel="noreferrer"
-                      className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600 hover:border-slate-300 transition-colors">
-                      <FiDownload size={11} />
+                    <a href={factura.drive_url} target="_blank" rel="noreferrer" title="Ver factura" aria-label="Ver factura"
+                      className="flex items-center justify-center rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:border-slate-300 transition-colors">
+                      <FiEye size={12} />
                     </a>
                   )}
                   <label className="cursor-pointer">
@@ -2823,9 +3134,8 @@ function HerramientaDetailModal({ delivery, onClose }) {
                 ["N° de serie",    delivery.serial_number || "-"],
                 ["Condición",      delivery.condition  || "-"],
                 ["Fecha entrega",  delivery.delivery_date ? new Date(delivery.delivery_date).toLocaleDateString("es-EC") : "-"],
-                ["Observaciones",  delivery.observations || "-"],
               ].map(([label, value]) => (
-                <div key={label} className={label === "Características" || label === "Observaciones" ? "col-span-2" : ""}>
+                <div key={label} className={label === "Características" ? "col-span-2" : ""}>
                   <p className="text-xs text-slate-400">{label}</p>
                   <p className="text-sm font-medium text-slate-800 mt-0.5">{value}</p>
                 </div>
@@ -2875,9 +3185,9 @@ function HerramientaDetailModal({ delivery, onClose }) {
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {factura?.drive_url && (
-                    <a href={factura.drive_url} target="_blank" rel="noreferrer"
-                      className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600 hover:border-slate-300 transition-colors">
-                      <FiDownload size={11} />
+                    <a href={factura.drive_url} target="_blank" rel="noreferrer" title="Ver factura" aria-label="Ver factura"
+                      className="flex items-center justify-center rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:border-slate-300 transition-colors">
+                      <FiEye size={12} />
                     </a>
                   )}
                   <label className="cursor-pointer">
@@ -2899,53 +3209,6 @@ function HerramientaDetailModal({ delivery, onClose }) {
 }
 
 // ── Modal de reportes ─────────────────────────────────────────────────────────
-
-const CAT_ES_REPORT = {
-  ropa: "Ropa de trabajo", epp: "EPP", herramienta: "Herramienta de trabajo",
-  logistica: "Logística", ti: "Herramientas TI", suministros: "Suministros",
-};
-const STATUS_ES_REPORT = { entregado: "Entregado", retirado: "Retirado", perdido: "Perdido", "dañado": "Dañado" };
-
-function _fmtDate(v) { return v ? new Date(v).toLocaleDateString("es-EC", { day: "2-digit", month: "2-digit", year: "numeric" }) : ""; }
-
-function _buildCSV(rows, titleLine) {
-  const headers = [
-    "Colaborador", "Email",
-    "Categoría", "Ítem", "Estado",
-    "Fecha entrega", "Fecha retiro", "Fecha renovación",
-    "Número de serie", "Condición física",
-    "Marca", "Características", "Banco", "Fecha expedición", "Fecha expiración",
-    "Código acta", "Tipo acta", "Fecha acta", "Acta firmada",
-    "Observaciones",
-  ];
-  const csvRows = [titleLine, headers.join(";")];
-  for (const r of rows) {
-    const attrs = r.attributes || {};
-    csvRows.push([
-      r.colaborador, r.email,
-      CAT_ES_REPORT[r.category] || r.category,
-      r.item_name,
-      STATUS_ES_REPORT[r.status] || r.status,
-      _fmtDate(r.delivery_date), _fmtDate(r.retiro_at), _fmtDate(r.renewal_date),
-      r.serial_number || "",
-      r.physical_condition || "",
-      attrs.marca || attrs.banco || "",
-      attrs.caracteristicas || attrs.descripcion || "",
-      attrs.banco || "",
-      _fmtDate(attrs.fecha_expedicion), _fmtDate(attrs.fecha_expiracion),
-      r.acta_code || "", r.acta_tipo || "", r.acta_fecha || "", _fmtDate(r.acta_firmada_at),
-      (r.observations || "").replace(/;/g, ","),
-    ].map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(";"));
-  }
-  return "﻿" + csvRows.join("\n");
-}
-
-function _downloadCSV(content, filename) {
-  const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-}
 
 function ReportesModal({ onClose, users }) {
   const { showToast } = useUI();
@@ -3285,9 +3548,8 @@ function LogisticaDetailModal({ delivery, onClose }) {
                 ["N° de serie / referencia", delivery.serial_number || "-"],
                 ["Condición", delivery.condition || "-"],
                 ["Fecha entrega", delivery.delivery_date ? new Date(delivery.delivery_date).toLocaleDateString("es-EC") : "-"],
-                ["Observaciones", delivery.observations || "-"],
               ].map(([label, value]) => (
-                <div key={label} className={label === "Observaciones" ? "col-span-2" : ""}>
+                <div key={label}>
                   <p className="text-xs text-slate-400">{label}</p>
                   <p className="text-sm font-medium text-slate-800 mt-0.5">{value}</p>
                 </div>
@@ -3350,21 +3612,6 @@ function LogisticaDetailModal({ delivery, onClose }) {
 
 // ── Tab Gestión por colaborador ───────────────────────────────────────────────
 
-const TH_FLAG_LABELS = {
-  // entregas
-  uniformes_entregados:              "Ropa de trabajo entregada",
-  epp_entregados:                    "EPP entregado",
-  herramientas_trabajo_entregadas:   "Herramientas de trabajo entregadas",
-  logistica_entregada:               "Logística entregada",
-  acta_entrega_equipos_comunicacion: "Herramientas de comunicación entregadas",
-  // retiros
-  ropa_retirada:                     "Ropa de trabajo retirada",
-  epp_retirado:                      "EPP retirado",
-  herramientas_trabajo_retiradas:    "Herramientas de trabajo retiradas",
-  logistica_retirada:                "Logística retirada",
-  ti_retirado:                       "Herramientas de comunicación retiradas",
-};
-
 function CollabGestionTab({ tiAssets, tiActas = [], users, catalog, onRefresh, actorRole }) {
   const { showToast } = useUI();
   const [selectedUser, setUser]       = useState("");
@@ -3410,15 +3657,6 @@ function CollabGestionTab({ tiAssets, tiActas = [], users, catalog, onRefresh, a
     }
     return groups;
   }, [deliveries]);
-
-  // Summary actas from sessions
-  const allActas = useMemo(() => {
-    const actas = [];
-    for (const s of sessions) {
-      if (s.actas) actas.push(...s.actas);
-    }
-    return actas;
-  }, [sessions]);
 
   // Onboarding flags inferred from deliveries + sessions + TI actas
   const inferredFlags = useMemo(() => {
@@ -3594,7 +3832,6 @@ function CollabGestionTab({ tiAssets, tiActas = [], users, catalog, onRefresh, a
                 ) : (
                   <div className="space-y-2">
                     {userTiAssets.map((a) => {
-                      const tiActasSess = sessions.filter((s) => s.category === "ti");
                       return (
                         <button key={a.id} type="button" onClick={() => setDetailAsset(a)}
                           className="w-full text-left rounded-xl border border-slate-100 bg-slate-50 px-3 py-3 hover:border-slate-200 hover:bg-white transition-colors active:scale-[0.98]">
@@ -3678,7 +3915,6 @@ function CollabGestionTab({ tiAssets, tiActas = [], users, catalog, onRefresh, a
                                       <RenewalBadge date={d.renewal_date} />
                                     </div>
                                   )}
-                                  {d.observations && <p className="text-[10px] text-slate-500 italic mt-0.5">{d.observations}</p>}
                                 </div>
                                 <div className="shrink-0 flex flex-col items-end gap-1">
                                   <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ${COLLAB_STATUS_COLORS[d.status]||"bg-slate-100 text-slate-600"}`}>{d.status}</span>
@@ -3938,6 +4174,7 @@ const CollabDeliveriesFinancieroPage = () => {
     } catch {
       showToast("No se pudo cargar la información", "error");
     } finally { setLoading(false); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showToast]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
@@ -3960,44 +4197,6 @@ const CollabDeliveriesFinancieroPage = () => {
   };
 
   const isFinanciero = FULL_ACCESS_ROLES.includes(actorRole);
-
-  const exportReportCSV = async () => {
-    try {
-      showToast("Generando reporte...", "info");
-      const rows = await getCollabFullReport();
-      if (!rows.length) { showToast("Sin datos para exportar", "warning"); return; }
-      const CAT_ES = { ropa: "Ropa de trabajo", epp: "EPP", herramienta: "Herramienta de trabajo", logistica: "Logística", ti: "Herramientas TI", suministros: "Suministros" };
-      const STATUS_ES = { entregado: "Entregado", retirado: "Retirado", perdido: "Perdido", dañado: "Dañado" };
-      const fmtDate = (v) => v ? new Date(v).toLocaleDateString("es-EC") : "";
-      const headers = [
-        "Colaborador","Email",
-        "Categoría","Ítem","Serie","Estado",
-        "Fecha entrega","Fecha retiro",
-        "Condición física","Renovación",
-        "Código acta","Tipo acta","Fecha acta","Acta firmada",
-        "Observaciones",
-      ];
-      const csvRows = [headers.join(";")];
-      for (const r of rows) {
-        csvRows.push([
-          r.colaborador, r.email,
-          CAT_ES[r.category] || r.category, r.item_name, r.serial_number || "",
-          STATUS_ES[r.status] || r.status,
-          fmtDate(r.delivery_date), fmtDate(r.retiro_at),
-          r.physical_condition || "", fmtDate(r.renewal_date),
-          r.acta_code || "", r.acta_tipo || "", r.acta_fecha || "", fmtDate(r.acta_firmada_at),
-          (r.observations || "").replace(/;/g, ","),
-        ].map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(";"));
-      }
-      const bom = "﻿";
-      const blob = new Blob([bom + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `reporte_entregas_${new Date().toISOString().slice(0,10)}.csv`;
-      a.click(); URL.revokeObjectURL(url);
-      showToast("Reporte exportado", "success");
-    } catch (e) { showToast("Error al generar reporte", "error"); }
-  };
 
   const TABS = [
     { key: "sesiones",     label: "Entregas/Retiros", icon: FiFileText },
@@ -4115,7 +4314,6 @@ const CollabDeliveriesFinancieroPage = () => {
                     // TI acta
                     const a = item;
                     const isActive = selectedTiActa?.id === a.id;
-                    const itemCount = a.item_count || 1;
                     return (
                       <button key={`ti-${a.id}`} type="button"
                         onClick={() => { setTiActa(isActive ? null : a); setSession(null); }}

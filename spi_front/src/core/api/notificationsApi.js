@@ -11,6 +11,14 @@ export const listNotifications = async (status) => {
  return { list: Array.isArray(list) ? list : [], unread };
 };
 
+export const listAllNotificationsWithHistory = async () => {
+ const { data } = await api.get("/notifications", {
+ params: { include_cleared: "true" },
+ });
+ const list = data?.data || data?.result || data?.rows || [];
+ return Array.isArray(list) ? list : [];
+};
+
 export const createNotification = async (payload) => {
  const { data } = await api.post("/notifications", payload);
  return data?.data || data;
@@ -33,5 +41,25 @@ export const deleteNotification = async (id) => {
 
 export const clearNotifications = async () => {
  const { data } = await api.delete("/notifications/clear");
+ return data?.data || data;
+};
+
+export const getPushNotificationsConfig = async () => {
+ const { data } = await api.get("/notifications/push/config");
+ return data?.data || data;
+};
+
+export const getPushNotificationsStatus = async () => {
+ const { data } = await api.get("/notifications/push/status");
+ return data?.data || data;
+};
+
+export const subscribePushNotifications = async (payload) => {
+ const { data } = await api.post("/notifications/push/subscribe", payload);
+ return data?.data || data;
+};
+
+export const unsubscribePushNotifications = async (payload) => {
+ const { data } = await api.post("/notifications/push/unsubscribe", payload);
  return data?.data || data;
 };

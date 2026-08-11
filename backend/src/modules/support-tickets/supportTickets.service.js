@@ -1,6 +1,7 @@
 const db = require("../../config/db");
 const notificationsService = require("../notifications/notifications.service");
 const notificationManager = require("../notifications/notificationManager");
+const { ensureFolderPath, uploadFileToDrive, downloadFileBuffer } = require("../../utils/drive");
 
 const TICKET_TYPES = new Set(["fallo", "implementacion", "requerimiento", "problema"]);
 const TICKET_PRIORITIES = new Set(["baja", "media", "alta", "critica"]);
@@ -11,16 +12,24 @@ const TI_ROLES = [
   "admin_ti",
   "jefe_de_ti",
   "tecnico",
+  "ing_servicio",
+  "esp_app",
   "jefe_tecnico",
+  "jefe_servicio",
   "servicio_tecnico",
   "jefe_servicio_tecnico",
 ];
+// Roles que reciben notificaciones de tickets — solo personal de TI directo
+const TI_NOTIFICATION_ROLES = ["ti", "jefe_ti"];
 const STATUS_ALIASES = {
   terminado: "resuelto",
 };
 
 const ALLOWED_LVL = new Set(["bajo", "medio", "alto"]);
 const COMMENT_VISIBILITY = new Set(["public", "internal"]);
+const EVIDENCE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const MAX_EVIDENCE_FILE_SIZE = 8 * 1024 * 1024;
+const MAX_EVIDENCE_FILES = 5;
 let supportSchemaReadyPromise = null;
 
 const SLA_HOURS_BY_PRIORITY = {
@@ -123,6 +132,20 @@ async function ensureSupportSchema() {
     `);
 
     await db.query(`
+      CREATE TABLE IF NOT EXISTS support_ticket_attachments (
+        id BIGSERIAL PRIMARY KEY,
+        ticket_id BIGINT NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+        drive_file_id TEXT,
+        drive_url TEXT,
+        file_name VARCHAR(255) NOT NULL,
+        mime_type VARCHAR(120) NOT NULL,
+        file_size_bytes INTEGER,
+        uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await db.query(`
       DO $$
       BEGIN
         ALTER TABLE support_tickets DROP CONSTRAINT IF EXISTS support_tickets_status_check;
@@ -144,6 +167,9 @@ async function ensureSupportSchema() {
       CREATE INDEX IF NOT EXISTS idx_support_tickets_resolution_due ON support_tickets(resolution_due_at);
       CREATE INDEX IF NOT EXISTS idx_support_ticket_events_ticket_id ON support_ticket_events(ticket_id);
       CREATE INDEX IF NOT EXISTS idx_support_ticket_comments_ticket ON support_ticket_comments(ticket_id, created_at DESC);
+      DROP INDEX IF EXISTS idx_support_ticket_attachments_ticket_unique;
+      CREATE INDEX IF NOT EXISTS idx_support_ticket_attachments_ticket ON support_ticket_attachments(ticket_id, created_at, id);
+      CREATE INDEX IF NOT EXISTS idx_support_ticket_attachments_uploaded_by ON support_ticket_attachments(uploaded_by);
     `);
   })().catch((error) => {
     supportSchemaReadyPromise = null;
@@ -178,7 +204,32 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const mapRow = (row) => ({
+const mapAttachment = (attachment) => attachment?.id ? ({
+  id: Number(attachment.id),
+  drive_file_id: attachment.drive_file_id || null,
+  drive_url: attachment.drive_url || null,
+  file_name: attachment.file_name || null,
+  mime_type: attachment.mime_type || null,
+  file_size_bytes: toNumber(attachment.file_size_bytes),
+  created_at: attachment.created_at || null,
+}) : null;
+
+const mapRow = (row) => {
+  const evidencePhotos = (Array.isArray(row.evidence_photos) ? row.evidence_photos : [])
+    .map(mapAttachment)
+    .filter(Boolean);
+  const legacyEvidence = mapAttachment(row.evidence_id ? {
+    id: row.evidence_id,
+    drive_file_id: row.evidence_drive_file_id,
+    drive_url: row.evidence_drive_url,
+    file_name: row.evidence_file_name,
+    mime_type: row.evidence_mime_type,
+    file_size_bytes: row.evidence_file_size_bytes,
+    created_at: row.evidence_created_at,
+  } : null);
+  const normalizedEvidencePhotos = evidencePhotos.length ? evidencePhotos : (legacyEvidence ? [legacyEvidence] : []);
+
+  return ({
   id: Number(row.id),
   code: row.code,
   ticket_type: row.ticket_type,
@@ -219,7 +270,10 @@ const mapRow = (row) => ({
   sla_response_overdue: Boolean(row.sla_response_overdue),
   sla_resolution_overdue: Boolean(row.sla_resolution_overdue),
   comments_count: toNumber(row.comments_count) || 0,
-});
+  evidence_photos: normalizedEvidencePhotos,
+  evidence_photo: normalizedEvidencePhotos[0] || null,
+  });
+};
 
 const mapEventRow = (row) => ({
   id: Number(row.id),
@@ -306,6 +360,87 @@ function validateCreatePayload(payload = {}) {
   };
 }
 
+function sanitizeFileToken(value, fallback = "archivo") {
+  const normalized = String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return normalized || fallback;
+}
+
+function validateEvidencePhoto(file) {
+  if (!file) return null;
+
+  if (!EVIDENCE_MIME_TYPES.has(String(file.mimetype || "").toLowerCase())) {
+    const err = new Error("La evidencia debe ser una imagen JPG, PNG o WEBP");
+    err.status = 400;
+    throw err;
+  }
+
+  if (Number(file.size || 0) > MAX_EVIDENCE_FILE_SIZE) {
+    const err = new Error("La evidencia no puede superar 8 MB");
+    err.status = 400;
+    throw err;
+  }
+
+  return file;
+}
+
+function validateEvidencePhotos(files = []) {
+  const normalizedFiles = Array.isArray(files) ? files.filter(Boolean) : [];
+  if (normalizedFiles.length > MAX_EVIDENCE_FILES) {
+    const err = new Error(`Puedes adjuntar hasta ${MAX_EVIDENCE_FILES} evidencias`);
+    err.status = 400;
+    throw err;
+  }
+  return normalizedFiles.map(validateEvidencePhoto);
+}
+
+async function resolveSupportTicketEvidenceFolder(ticketCode) {
+  const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_ID || null;
+  if (!rootFolderId) return null;
+
+  const folder = await ensureFolderPath(["Soporte TI", "Tickets", ticketCode], rootFolderId);
+  return folder?.id || null;
+}
+
+async function storeTicketEvidencePhoto({ client, ticketId, ticketCode, requester, file, sequence = 1 }) {
+  if (!file) return null;
+
+  const folderId = await resolveSupportTicketEvidenceFolder(ticketCode);
+  const extension = String(file.originalname || "").split(".").pop()?.toLowerCase();
+  const safeExtension = extension && extension.length <= 6 ? extension : (
+    file.mimetype === "image/png" ? "png" : file.mimetype === "image/webp" ? "webp" : "jpg"
+  );
+  const fileName = `${ticketCode}_${sanitizeFileToken(requester?.email || requester?.fullname || "solicitante", "solicitante")}_evidencia-${sequence}.${safeExtension}`;
+  const uploaded = await uploadFileToDrive(file, fileName, folderId || undefined);
+  const driveUrl = uploaded?.webContentLink || uploaded?.webViewLink || null;
+  const driveFileId = uploaded?.id || null;
+
+  const { rows } = await client.query(
+    `
+      INSERT INTO support_ticket_attachments (
+        ticket_id, drive_file_id, drive_url, file_name, mime_type, file_size_bytes, uploaded_by
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+    `,
+    [
+      ticketId,
+      driveFileId,
+      driveUrl,
+      String(file.originalname || fileName).slice(0, 255),
+      String(file.mimetype || "image/jpeg").slice(0, 120),
+      Number(file.size || 0) || null,
+      requester?.id || null,
+    ]
+  );
+
+  return rows[0] || null;
+}
+
 function assertTransition(fromStatus, toStatus) {
   const from = normalizeStatus(fromStatus);
   const to = normalizeStatus(toStatus);
@@ -335,9 +470,10 @@ async function getTIUsers(client) {
       SELECT id, email, fullname
       FROM users
       WHERE LOWER(COALESCE(role, '')) = ANY($1)
+        AND active = true
       ORDER BY id ASC
     `,
-    [TI_ROLES]
+    [TI_NOTIFICATION_ROLES]
   );
   return rows;
 }
@@ -411,6 +547,43 @@ async function getTicketForActor(ticketId, actorUser) {
   return { ticket, isOwner, isTi };
 }
 
+async function getTicketEvidenceFile({ attachmentId, actorUser }) {
+  await ensureSupportSchema();
+  const numericAttachmentId = Number(attachmentId);
+  if (!Number.isInteger(numericAttachmentId) || numericAttachmentId <= 0) {
+    const err = new Error("Evidencia invalida");
+    err.status = 400;
+    throw err;
+  }
+
+  const { rows } = await db.query(
+    `SELECT id, ticket_id, drive_file_id, file_name, mime_type
+       FROM support_ticket_attachments
+      WHERE id = $1
+      LIMIT 1`,
+    [numericAttachmentId]
+  );
+  const attachment = rows[0];
+  if (!attachment) {
+    const err = new Error("Evidencia no encontrada");
+    err.status = 404;
+    throw err;
+  }
+
+  await getTicketForActor(attachment.ticket_id, actorUser);
+  if (!attachment.drive_file_id) {
+    const err = new Error("La evidencia no tiene archivo asociado");
+    err.status = 404;
+    throw err;
+  }
+
+  return {
+    buffer: await downloadFileBuffer(attachment.drive_file_id),
+    filename: attachment.file_name || `evidencia-ticket-${attachment.ticket_id}.jpg`,
+    mimeType: attachment.mime_type || "image/jpeg",
+  };
+}
+
 async function recalcSlaFlags(client, ticketId) {
   await client.query(
     `
@@ -466,7 +639,15 @@ function workspaceBaseSelect(whereClause = "", extraOrder = "") {
       END AS delivery_minutes,
       (t.first_response_at IS NULL AND t.first_response_due_at IS NOT NULL AND NOW() > t.first_response_due_at) AS sla_response_overdue,
       (t.resolved_at IS NULL AND t.resolution_due_at IS NOT NULL AND NOW() > t.resolution_due_at) AS sla_resolution_overdue,
-      COALESCE(cm.comments_count, 0)::int AS comments_count
+      COALESCE(cm.comments_count, 0)::int AS comments_count,
+      att.id AS evidence_id,
+      att.drive_file_id AS evidence_drive_file_id,
+      att.drive_url AS evidence_drive_url,
+      att.file_name AS evidence_file_name,
+      att.mime_type AS evidence_mime_type,
+      att.file_size_bytes AS evidence_file_size_bytes,
+      att.created_at AS evidence_created_at,
+      att_list.evidence_photos
     FROM support_tickets t
     JOIN users rq ON rq.id = t.requester_id
     LEFT JOIN users ati ON ati.id = t.assigned_ti_user_id
@@ -483,6 +664,31 @@ function workspaceBaseSelect(whereClause = "", extraOrder = "") {
       FROM support_ticket_comments c
       WHERE c.ticket_id = t.id
     ) cm ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT a.id, a.drive_file_id, a.drive_url, a.file_name, a.mime_type, a.file_size_bytes, a.created_at
+      FROM support_ticket_attachments a
+      WHERE a.ticket_id = t.id
+      ORDER BY a.created_at DESC
+      LIMIT 1
+    ) att ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        jsonb_agg(
+          jsonb_build_object(
+            'id', a.id,
+            'drive_file_id', a.drive_file_id,
+            'drive_url', a.drive_url,
+            'file_name', a.file_name,
+            'mime_type', a.mime_type,
+            'file_size_bytes', a.file_size_bytes,
+            'created_at', a.created_at
+          ) ORDER BY a.created_at, a.id
+        ),
+        '[]'::jsonb
+      ) AS evidence_photos
+      FROM support_ticket_attachments a
+      WHERE a.ticket_id = t.id
+    ) att_list ON TRUE
     ${whereClause}
     ORDER BY
       CASE t.priority
@@ -522,9 +728,10 @@ function buildWorkspaceFilters({ status, ticket_type, q }) {
   };
 }
 
-async function createTicket({ requester, payload }) {
+async function createTicket({ requester, payload, evidencePhotos = [] }) {
   await ensureSupportSchema();
   const validated = validateCreatePayload(payload);
+  const validEvidencePhotos = validateEvidencePhotos(evidencePhotos);
   const sla = buildSla(validated.priority);
   const client = await db.getClient();
 
@@ -570,6 +777,17 @@ async function createTicket({ requester, payload }) {
       [created.id, ticketCode]
     );
 
+    for (const [index, evidencePhoto] of validEvidencePhotos.entries()) {
+      await storeTicketEvidencePhoto({
+        client,
+        ticketId: created.id,
+        ticketCode,
+        requester,
+        file: evidencePhoto,
+        sequence: index + 1,
+      });
+    }
+
     await createEvent(client, {
       ticketId: created.id,
       actorUserId: requester.id,
@@ -607,7 +825,12 @@ async function createTicket({ requester, payload }) {
       },
     });
 
-    return ticket;
+    const { rows: hydratedRows } = await db.query(
+      workspaceBaseSelect("WHERE t.id = $1", "LIMIT 1"),
+      [ticket.id]
+    );
+
+    return hydratedRows[0] ? mapRow(hydratedRows[0]) : ticket;
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -1171,7 +1394,9 @@ module.exports = {
   TICKET_STATUSES: Array.from(TICKET_STATUSES),
   TI_ROLES,
   isTIUser,
+  derivePriority,
   createTicket,
+  getTicketEvidenceFile,
   listMyTickets,
   listWorkspaceTickets,
   getWorkspaceKpis,

@@ -66,6 +66,7 @@ export default function PurchaseNoInvoiceForm({ onSubmit, loading = false, allow
         expense_mode: form.expense_mode,
         file_base64: reader.result.split(',')[1],
         file_name: form.file.name,
+        mime_type: form.file.type || null,
       });
       reset();
     };

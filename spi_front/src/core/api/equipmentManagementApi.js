@@ -30,6 +30,11 @@ export const changeEquipmentAssetStatus = async (id, payload) => {
   return response.data;
 };
 
+export const updateEquipmentAsset = async (id, payload) => {
+  const response = await api.patch(`/equipment-management/assets/${id}`, payload);
+  return response.data?.data || response.data;
+};
+
 export const reserveEquipmentAsset = async (id, payload) => {
   const response = await api.post(`/equipment-management/assets/${id}/reserve`, payload);
   return response.data;
@@ -43,6 +48,28 @@ export const installEquipmentAsset = async (id, payload) => {
 export const getEquipmentAssetTimeline = async (id) => {
   const response = await api.get(`/equipment-management/assets/${id}/timeline`);
   return response.data?.data || [];
+};
+
+export const getEquipmentAssetDocuments = async (id) => {
+  const response = await api.get(`/equipment-management/assets/${id}/documents`);
+  return response.data?.data || [];
+};
+
+export const uploadEquipmentAssetDocument = async (id, { file, docType = "otro", title = "", notes = "" }) => {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("doc_type", docType);
+  if (title) form.append("title", title);
+  if (notes) form.append("notes", notes);
+  const response = await api.post(`/equipment-management/assets/${id}/documents`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return response.data?.data || response.data;
+};
+
+export const deleteEquipmentAssetDocument = async (assetId, documentId) => {
+  const response = await api.delete(`/equipment-management/assets/${assetId}/documents/${documentId}`);
+  return response.data?.data || response.data;
 };
 
 export const getEquipmentMaintenanceSchedule = async (params = {}) => {

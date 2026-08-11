@@ -41,13 +41,8 @@ import { formatDateSafe } from "../../../shared/utils/dateUtils";
 const todayStr = new Date().toISOString().slice(0, 10);
 
 const ASSIGN_CLIENT_ROLES = new Set([
- "jefe_comercial",
- "jefe_de_comercial",
- "gerencia",
- "gerente",
- "admin",
- "administrador",
- "ti",
+ "jefe_operaciones",
+ "jefe_de_operaciones",
 ]);
 
 const FULL_ACCESS_ROLES = new Set([
@@ -60,6 +55,8 @@ const FULL_ACCESS_ROLES = new Set([
  "admin",
  "administrador",
  "ti",
+ "jefe_operaciones",
+ "jefe_de_operaciones",
 ]);
 const ADVISOR_ROLES = new Set([
  "comercial",
@@ -75,6 +72,8 @@ const CHECKIN_CARDS_HIDDEN_ROLES = new Set([
  "acp_comercial",
  "backoffice_comercial",
  "jefe_comercial",
+ "jefe_operaciones",
+ "jefe_de_operaciones",
 ]);
 const ASSIGNABLE_ADVISOR_ROLES = new Set([
  "comercial",
@@ -95,9 +94,25 @@ const normalizeRoleToken = (value) =>
 
 const normalizeStatus = (status) => {
  const value = (status || "").toLowerCase();
+ if (["visited_pending_followup", "visitada_pendiente_cierre"].includes(value)) return "visitada_pendiente_cierre";
  if (["visited", "visitado"].includes(value)) return "visitado";
  if (["en_visita", "in_visit", "in_progress"].includes(value)) return "en_visita";
  return "pendiente";
+};
+
+const getClientVisitStatus = (client) => {
+ const visitStatus = String(client?.visit_status || "").toLowerCase();
+ const followupStatus = String(client?.crm_followup_status || "").toLowerCase();
+ const activityStatus = String(client?.crm_activity_status || "").toLowerCase();
+ if (
+   ["visited", "visitado"].includes(visitStatus) &&
+   (activityStatus === "visited_pending_followup" ||
+    followupStatus === "pending_followup" ||
+    followupStatus === "incomplete_followup")
+ ) {
+   return "visitada_pendiente_cierre";
+ }
+ return client?.visit_status;
 };
 
 const STATUS_STYLES = {
@@ -116,6 +131,11 @@ const STATUS_STYLES = {
     chip: "bg-[#DCFCE7] text-[#16A34A]",
     led: "bg-[#16A34A]",
   },
+  visitada_pendiente_cierre: {
+    label: "Visitada, pendiente de cierre",
+    chip: "bg-[#FEF3C7] text-[#D97706]",
+    led: "bg-[#D97706]",
+  },
 };
 
 const ClientesPage = () => {
@@ -123,7 +143,7 @@ const ClientesPage = () => {
  const { role, user } = useAuth();
  const normalizedRole = normalizeRoleToken(role || user?.role || user?.role_name || user?.scope || "");
  const roleTokens = (normalizedRole || "")
- .split(/[,\|]+/)
+ .split(/[,|]+/)
  .map((token) => normalizeRoleToken(token))
  .filter(Boolean);
  const hasAnyRole = useCallback((allowedRoles) => roleTokens.some((token) => allowedRoles.has(token)), [roleTokens]);
@@ -176,10 +196,15 @@ const ClientesPage = () => {
  const [editSubmitting, setEditSubmitting] = useState(false);
  const [editForm, setEditForm] = useState({});
  const [editFiles, setEditFiles] = useState({});
- const [usersDirectoryByEmail, setUsersDirectoryByEmail] = useState({});
+ const [, setUsersDirectoryByEmail] = useState({});
  const clientsCacheRef = useRef(new Map());
 
- const getStatusMeta = (status) => STATUS_STYLES[normalizeStatus(status)] || STATUS_STYLES.pendiente;
+ const getStatusMeta = (statusOrClient) => {
+ const status = typeof statusOrClient === "object" && statusOrClient !== null
+ ? getClientVisitStatus(statusOrClient)
+ : statusOrClient;
+ return STATUS_STYLES[normalizeStatus(status)] || STATUS_STYLES.pendiente;
+ };
 
  const formatTime = (value) =>
  value ? new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
@@ -230,7 +255,7 @@ const getClientSourceMeta = (client) => {
   const isOdooSource = dataSource === "odoo" || createdBy === "odoo_sync@spi.local";
   if (isOdooSource) {
     return {
-      label: "Origen: Odoo",
+      label: "Origen: ERP",
       className: "border-[#DBEAFE] bg-[#DBEAFE] text-[#1D4ED8]",
     };
   }
@@ -284,15 +309,6 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  }
  }
  return [];
- };
-
- const isUserPassiveOrInactive = (userInfo) => {
- if (!userInfo) return false;
- const employmentStatus = String(
- userInfo.estatus_empleado || userInfo.employment_status || "",
- ).trim().toLowerCase();
- if (userInfo.active === false) return true;
- return PASSIVE_EMPLOYMENT_STATUSES.has(employmentStatus);
  };
 
  const getTemporaryAssignmentInfo = useCallback((client) => {
@@ -424,6 +440,7 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  date: selectedDate,
  include_schedule_info: true,
  filter_by_schedule: filterBySchedule,
+ schedule_window: "approved_period",
  });
 
  let loadedClients = [];
@@ -518,8 +535,10 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
 
  const commercialKpi = useMemo(() => {
  const base = Array.isArray(clientes) ? clientes.filter((c) => !c.is_prospect) : [];
- const plannedToday = Number(summary?.planned_today || 0);
+ const plannedPeriod = Number(summary?.planned_period ?? summary?.planned_today ?? 0);
  const effective = base.filter((c) => c.hora_entrada && c.hora_salida);
+ const checkIns = base.filter((c) => c.hora_entrada).length;
+ const checkOuts = base.filter((c) => c.hora_salida).length;
  const avgDuration =
  effective.length > 0
  ? Math.round(
@@ -529,10 +548,12 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  : 0;
 
  return {
- plannedToday,
+ plannedPeriod,
  visited: visitedCount,
  effectiveVisits: effective.length,
- compliance: plannedToday > 0 ? Math.round((visitedCount / plannedToday) * 100) : null,
+ checkIns,
+ checkOuts,
+ compliance: plannedPeriod > 0 ? Math.round((visitedCount / plannedPeriod) * 100) : null,
  avgDuration,
  };
  }, [clientes, summary, visitedCount]);
@@ -1050,8 +1071,8 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  };
 
  const renderCard = (cliente) => {
- const status = normalizeStatus(cliente.visit_status);
- const meta = getStatusMeta(status);
+ const status = normalizeStatus(getClientVisitStatus(cliente));
+ const meta = getStatusMeta(cliente);
  const duration = cliente.duracion_minutos ?? calculateDuration(cliente);
 const temporaryInfo = getTemporaryAssignmentInfo(cliente);
 const assignmentDetails = normalizeAssignmentDetails(cliente.assignment_details);
@@ -1626,33 +1647,33 @@ const renderAlbumCard = (cliente) => {
 
  {summary?.has_approved_schedule && (
                 <Card className="rounded-2xl border border-[#E5E7EB] bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
                       <h4 className="flex items-center gap-2 font-semibold text-[#1F2937]">
-                        <FiCalendar size={15} className="text-[#2563EB]" /> Planificación de hoy
+                        <FiCalendar size={15} className="text-[#2563EB]" /> Planificación mensual aprobada
                       </h4>
-                      <p className="mt-1 text-sm text-[#6B7280]">
+                      <p className="mt-1 break-words text-sm text-[#6B7280]">
                         {(summary.cities_today || []).join(", ") || "Ciudades"}
                       </p>
                     </div>
-                    <div className="shrink-0 text-right">
-                      <p className="font-mono text-2xl font-bold text-[#1F2937]">{summary.planned_today || 0}</p>
-                      <p className="text-xs text-[#6B7280]">clientes planificados</p>
+                    <div className="shrink-0 text-left sm:text-right">
+                      <p className="font-mono text-2xl font-bold text-[#1F2937]">{summary.planned_period ?? summary.planned_today ?? 0}</p>
+                      <p className="text-xs text-[#6B7280]">visitas planificadas del mes</p>
                     </div>
                   </div>
                   <div className="mt-3">
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-[#6B7280]">Progreso</span>
                       <span className="font-mono font-semibold text-[#1F2937]">
-                        {visitedCount} / {summary.planned_today || 0}
+                        {visitedCount} / {summary.planned_period ?? summary.planned_today ?? 0}
                       </span>
                     </div>
                     <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[#E5E7EB]">
                       <div
                         className="h-1.5 rounded-full bg-[#2563EB] transition-all duration-300"
                         style={{
-                          width: `${summary.planned_today
-                            ? Math.min(100, (visitedCount / summary.planned_today) * 100)
+                          width: `${(summary.planned_period ?? summary.planned_today)
+                            ? Math.min(100, (visitedCount / (summary.planned_period ?? summary.planned_today)) * 100)
                             : 0}%`,
                         }}
                       />
@@ -1662,7 +1683,7 @@ const renderAlbumCard = (cliente) => {
  )}
 
  <MyClientRequestsWidget
- total={summary?.planned_today ?? (Array.isArray(clientes) ? clientes.length : 0)}
+ total={summary?.planned_period ?? summary?.planned_today ?? (Array.isArray(clientes) ? clientes.length : 0)}
  visited={visitedCount}
  pending={pendingCount}
  onFilterChange={setStatusFilter}
@@ -1670,18 +1691,26 @@ const renderAlbumCard = (cliente) => {
 
  {isCommercialOnly && (
                 <Card className="rounded-2xl border border-[#E5E7EB] bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
-                  <div className="grid grid-cols-3 divide-x divide-[#E5E7EB]">
-                    <div className="px-4 first:pl-0 last:pr-0">
+                  <div className="grid grid-cols-1 divide-y divide-[#E5E7EB] sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-5">
+                    <div className="px-0 py-3 first:pt-0 last:pb-0 sm:px-4 sm:py-0 sm:first:pl-0 sm:last:pr-0">
                       <p className="text-xs font-medium text-[#6B7280]">Cumplimiento plan</p>
                       <p className="mt-1 font-mono text-xl font-bold text-[#1F2937]">
                         {commercialKpi.compliance === null ? "N/A" : `${commercialKpi.compliance}%`}
                       </p>
                     </div>
-                    <div className="px-4 first:pl-0 last:pr-0">
+                    <div className="px-0 py-3 sm:px-4 sm:py-0 sm:first:pl-0 sm:last:pr-0">
                       <p className="text-xs font-medium text-[#6B7280]">Visitas efectivas</p>
                       <p className="mt-1 font-mono text-xl font-bold text-[#1F2937]">{commercialKpi.effectiveVisits}</p>
                     </div>
-                    <div className="px-4 first:pl-0 last:pr-0">
+                    <div className="px-0 py-3 sm:px-4 sm:py-0 sm:first:pl-0 sm:last:pr-0">
+                      <p className="text-xs font-medium text-[#6B7280]">Check-ins</p>
+                      <p className="mt-1 font-mono text-xl font-bold text-[#1F2937]">{commercialKpi.checkIns}</p>
+                    </div>
+                    <div className="px-0 py-3 sm:px-4 sm:py-0 sm:first:pl-0 sm:last:pr-0">
+                      <p className="text-xs font-medium text-[#6B7280]">Check-outs</p>
+                      <p className="mt-1 font-mono text-xl font-bold text-[#1F2937]">{commercialKpi.checkOuts}</p>
+                    </div>
+                    <div className="px-0 py-3 last:pb-0 sm:px-4 sm:py-0 sm:first:pl-0 sm:last:pr-0">
                       <p className="text-xs font-medium text-[#6B7280]">Promedio en sitio</p>
                       <p className="mt-1 font-mono text-xl font-bold text-[#1F2937]">{formatDuration(commercialKpi.avgDuration)}</p>
                     </div>
@@ -1830,8 +1859,7 @@ const renderAlbumCard = (cliente) => {
                           const provincia = cliente.shipping_province || getProvinceFromAddress(cliente.shipping_address);
                           const clienteEmail = cliente.client_email || "Correo no disponible";
                           const clientTypeLabel = formatClientType(cliente.client_type);
-                          const status = normalizeStatus(cliente.visit_status);
-                          const meta = getStatusMeta(status);
+                          const meta = getStatusMeta(cliente);
                           const sourceMeta = getClientSourceMeta(cliente);
                           return (
                             <div
@@ -1942,7 +1970,7 @@ const renderAlbumCard = (cliente) => {
                           clientSourceFilter === "odoo" ? "bg-[#2563EB] text-white" : "bg-[#DBEAFE] text-[#1D4ED8]"
                         }`}
                       >
-                        Odoo ({sourceTotals.odoo})
+                        ERP ({sourceTotals.odoo})
                       </button>
                     </div>
                   )}

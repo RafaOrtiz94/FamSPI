@@ -9,16 +9,9 @@ import InstallationReceptionStepper from '../../servicio/components/Installation
 import { updatePublicPurchaseInstallationWorkflow } from '../../../core/api/equipmentPurchasesApi';
 import { useUI } from '../../../core/ui/useUI';
 import { useAuth } from '../../../core/auth/AuthContext';
-
-const EASE_OUT = [0.23, 1, 0.32, 1];
+import { normalizeRoles, isTechnical, isChiefTechnical, isLogistics as isLogisticsRole } from '../../shared/purchases-workspace/purchaseRoleGroups';
 
 const DELIVERY_STATUSES = new Set(['waiting_dispatch', 'dispatch_ready', 'completed']);
-
-const normalizeRoleList = (v) => {
-  if (Array.isArray(v)) return v.map((r) => String(r || '').toLowerCase()).filter(Boolean);
-  if (!v) return [];
-  return String(v).split(',').map((r) => r.trim().toLowerCase()).filter(Boolean);
-};
 
 /* ---- Shared input class (DESIGN.md) ---- */
 const INPUT_CLS = 'mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-ink-slate placeholder-warm-ash focus:outline-none focus:ring-2 focus:ring-sky-signal/40 focus:border-action-blue transition-colors duration-150';
@@ -57,10 +50,10 @@ const PublicPurchaseInstallationPanel = ({ request, onRefresh }) => {
   const { showToast } = useUI();
   const { user }      = useAuth();
 
-  const roles     = [...normalizeRoleList(user?.role), ...normalizeRoleList(user?.scope)];
-  const isLeadTech = roles.some((r) => r.includes('jefe_tecnico') || r.includes('jefe_servicio_tecnico'));
-  const isTech     = roles.some((r) => r.includes('tecnico'));
-  const isLogistics = roles.some((r) => r.includes('jefe_operaciones') || r.includes('jefe_logistica') || r.includes('jefe_tecnico') || r.includes('jefe_servicio_tecnico'));
+  const roles      = normalizeRoles(user);
+  const isLeadTech = isChiefTechnical(roles);
+  const isTech     = isTechnical(roles);
+  const isLogistics = isLogisticsRole(roles) || isLeadTech;
   const canTech    = isTech || isLeadTech;
 
   const [open, setOpen]               = useState(false);

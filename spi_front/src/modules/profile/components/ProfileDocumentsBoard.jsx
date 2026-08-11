@@ -12,11 +12,12 @@ const OPTIONAL_PROFILE_DOCUMENTS = new Set([
  "PASSPORT",
  "MARRIAGE_CERTIFICATE",
  "CHILD_BIRTH_CERTIFICATE",
- "SENESCYT_RECORD",
 ]);
 
 const PROFILE_DOCUMENT_DEFINITIONS = documentTypes.filter(
- (document) => String(document?.ownerArea || "").trim().toLowerCase() === "profile",
+ (document) =>
+  String(document?.ownerArea || "").trim().toLowerCase() === "profile" &&
+  String(document?.key || "").trim().toUpperCase() !== "SENESCYT_RECORD",
 ).map((document) => ({
  key: document.key,
  label: document.label,

@@ -76,6 +76,7 @@ export default function ManualNoteForm({ allowance, onSubmit, loading = false, d
         document_state: form.document_state,
         file_base64: reader.result.split(',')[1],
         file_name: form.file.name,
+        mime_type: form.file.type || null,
       });
       reset();
     };

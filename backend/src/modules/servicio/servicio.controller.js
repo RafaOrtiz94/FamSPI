@@ -56,6 +56,7 @@ const {
   listCorrectiveCaseEvidences,
   updateCorrectiveCaseAction,
 } = require("./correctiveCases.service");
+const { getTechnicalScheduleFeed } = require("./technicalSchedule.service");
 
 // ===============================================================
 // 🔐 CONFIGURACIÓN GOOGLE DRIVE / DOCS
@@ -598,6 +599,24 @@ const createActividadTecnica = async (req, res) => {
   } catch (err) {
     console.error("❌ Error creando actividad técnica:", err);
     res.status(500).json({ ok: false, error: "Error al crear actividad técnica" });
+  }
+};
+
+const getTechnicalScheduleFeedController = async (req, res) => {
+  try {
+    const data = await getTechnicalScheduleFeed({
+      user: req.user,
+      from: req.query?.from,
+      to: req.query?.to,
+      scope: req.query?.scope,
+    });
+    res.json(data);
+  } catch (err) {
+    console.error("❌ Error listando cronograma técnico consolidado:", err);
+    res.status(err?.status || 500).json({
+      ok: false,
+      error: err?.message || "Error al listar cronograma técnico consolidado",
+    });
   }
 };
 
@@ -1736,6 +1755,7 @@ module.exports = {
   updateDisponibilidadTecnico,
   listActividadesTecnicas,
   createActividadTecnica,
+  getTechnicalScheduleFeed: getTechnicalScheduleFeedController,
   getEquipos,
   createEquipo,
   getMantenimientos,

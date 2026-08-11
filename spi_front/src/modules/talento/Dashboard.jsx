@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { FiUsers, FiSettings, FiRefreshCw, FiClipboard, FiCalendar, FiAlertCircle, FiUserPlus } from "react-icons/fi";
+import { FiUsers, FiRefreshCw, FiClipboard, FiCalendar, FiAlertCircle, FiUserPlus, FiFileText } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 
@@ -7,14 +7,10 @@ import Card from "../../core/ui/components/Card";
 import Button from "../../core/ui/components/Button";
 import ActionCard from "../../core/ui/patterns/ActionCard";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
-import { getUsers } from "../../core/api/usersApi";
-import { getDepartments } from "../../core/api/departmentsApi";
 import { getCollaboratorStats } from "../../core/api/collaboratorsApi";
 import { getAttendanceNonCompliance, scheduleAttendanceFollowUpMeeting } from "../../core/api/attendanceApi";
 
 const TalentoDashboard = () => {
-  const [users, setUsers] = useState([]);
-  const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pendingReview, setPendingReview] = useState(0);
   const [nonComplianceRows, setNonComplianceRows] = useState([]);
@@ -32,13 +28,7 @@ const TalentoDashboard = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [u, d, stats] = await Promise.all([
-        getUsers(),
-        getDepartments({ include_inactive: true }),
-        getCollaboratorStats(),
-      ]);
-      setUsers(u);
-      setDepartments(d);
+      const stats = await getCollaboratorStats();
       setPendingReview(Number(stats?.pending_review || 0));
       await loadNonCompliance(nonComplianceDays);
     } catch (err) {
@@ -73,12 +63,14 @@ const TalentoDashboard = () => {
         start_time: selectedTime,
         duration_minutes: 30,
         reason: `Seguimiento por incumplimiento de horario: ${row.breach_label || "Incumplimiento"}`,
+        breach_date: row.date,
+        breach_type: row.breach_type,
       });
-      toast.success(res?.message || "Reunión agendada correctamente");
+      toast.success(res?.message || "Reunion agendada correctamente");
       await loadNonCompliance(nonComplianceDays);
     } catch (err) {
       console.error(err);
-      toast.error(err?.response?.data?.message || "No se pudo agendar la reunión");
+      toast.error(err?.response?.data?.message || "No se pudo agendar la reunion");
     } finally {
       setSchedulingUserId(null);
     }
@@ -92,17 +84,11 @@ const TalentoDashboard = () => {
     );
   }
 
-  const activosReales = users.filter((u) => u.active !== false).length;
-  const inactivosReales = users.filter((u) => u.active === false).length;
-  const departmentsActive = departments.filter((d) => String(d.status || "").toLowerCase() !== "inactive").length;
-  const departmentsInactive = departments.filter((d) => String(d.status || "").toLowerCase() === "inactive").length;
-  const pendientes = users.filter((u) => u.role === "pendiente").length;
-
   return (
     <DashboardLayout includeWidgets={false}>
       <DashboardHeader
         title="Panel de Talento Humano"
-        subtitle="Visión consolidada de usuarios, departamentos y solicitudes"
+        subtitle="Vision operativa de colaboradores, solicitudes y control de asistencia"
         actions={(
           <Button variant="secondary" icon={FiRefreshCw} onClick={loadData} disabled={loading}>
             Actualizar
@@ -110,46 +96,16 @@ const TalentoDashboard = () => {
         )}
       />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="flex flex-col items-center justify-center p-5 text-center">
-          <FiUsers className="mb-2 text-4xl text-blue-600" />
-          <p className="text-sm text-gray-500">Usuarios Registrados</p>
-          <p className="text-2xl font-semibold">{users.length}</p>
-        </Card>
-        <Card className="flex flex-col items-center justify-center p-5 text-center">
-          <FiSettings className="mb-2 text-4xl text-green-600" />
-          <p className="text-sm text-gray-500">Departamentos</p>
-          <p className="text-2xl font-semibold">{departments.length}</p>
-        </Card>
-        <Card className="flex flex-col items-center justify-center p-5 text-center">
-          <FiUsers className="mb-2 text-4xl text-yellow-600" />
-          <p className="text-sm text-gray-500">Usuarios Activos</p>
-          <p className="text-2xl font-semibold">{activosReales}</p>
-        </Card>
-        <Card className="flex flex-col items-center justify-center p-5 text-center">
-          <FiUsers className="mb-2 text-4xl text-red-600" />
-          <p className="text-sm text-gray-500">Usuarios Inactivos</p>
-          <p className="text-2xl font-semibold">{inactivosReales}</p>
-        </Card>
-        <Card className="flex flex-col items-center justify-center p-5 text-center">
-          <FiUsers className="mb-2 text-4xl text-indigo-600" />
-          <p className="text-sm text-gray-500">Pendientes de asignación</p>
-          <p className="text-2xl font-semibold">{pendientes}</p>
-        </Card>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Card className="flex flex-col items-center justify-center p-5 text-center">
           <FiAlertCircle className="mb-2 text-4xl text-amber-600" />
-          <p className="text-sm text-gray-500">Pendientes actualización anual</p>
+          <p className="text-sm text-gray-500">Pendientes actualizacion anual</p>
           <p className="text-2xl font-semibold">{pendingReview}</p>
         </Card>
         <Card className="flex flex-col items-center justify-center p-5 text-center">
-          <FiSettings className="mb-2 text-4xl text-slate-600" />
-          <p className="text-sm text-gray-500">Deptos Activos</p>
-          <p className="text-2xl font-semibold">{departmentsActive}</p>
-        </Card>
-        <Card className="flex flex-col items-center justify-center p-5 text-center">
-          <FiSettings className="mb-2 text-4xl text-slate-400" />
-          <p className="text-sm text-gray-500">Deptos Inactivos</p>
-          <p className="text-2xl font-semibold">{departmentsInactive}</p>
+          <FiUsers className="mb-2 text-4xl text-blue-600" />
+          <p className="text-sm text-gray-500">Accesos directos operativos</p>
+          <p className="text-2xl font-semibold">5</p>
         </Card>
       </div>
 
@@ -157,10 +113,10 @@ const TalentoDashboard = () => {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-base font-semibold text-slate-900">Incumplimientos de horario</h3>
-            <p className="text-sm text-slate-600">Llegada tarde sin justificación y almuerzo mayor a 60 minutos.</p>
+            <p className="text-sm text-slate-600">Llegada tarde sin justificacion y almuerzo mayor a 60 minutos.</p>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-sm text-slate-700">Últimos días</label>
+            <label className="text-sm text-slate-700">Ultimos dias</label>
             <select
               value={nonComplianceDays}
               onChange={(e) => setNonComplianceDays(Number(e.target.value))}
@@ -192,7 +148,7 @@ const TalentoDashboard = () => {
                   <th className="px-2 py-2">Incumplimiento</th>
                   <th className="px-2 py-2">Atraso</th>
                   <th className="px-2 py-2">Almuerzo</th>
-                  <th className="px-2 py-2">Reunión</th>
+                  <th className="px-2 py-2">Reunion</th>
                 </tr>
               </thead>
               <tbody>
@@ -208,28 +164,37 @@ const TalentoDashboard = () => {
                     <td className="px-2 py-2">{row.late_minutes ? `${row.late_minutes} min` : "-"}</td>
                     <td className="px-2 py-2">{row.lunch_minutes ? `${row.lunch_minutes} min` : "-"}</td>
                     <td className="px-2 py-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <input
-                          type="date"
-                          value={meetingDateByUser[row.user_id] || String(row.date || "").slice(0, 10)}
-                          onChange={(e) => setMeetingDateByUser((prev) => ({ ...prev, [row.user_id]: e.target.value }))}
-                          className="rounded border border-slate-300 px-2 py-1 text-xs"
-                        />
-                        <input
-                          type="time"
-                          value={meetingTimeByUser[row.user_id] || "09:30"}
-                          onChange={(e) => setMeetingTimeByUser((prev) => ({ ...prev, [row.user_id]: e.target.value }))}
-                          className="rounded border border-slate-300 px-2 py-1 text-xs"
-                        />
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={() => handleScheduleMeeting(row)}
-                          disabled={schedulingUserId === row.user_id}
-                        >
-                          {schedulingUserId === row.user_id ? "Agendando..." : "Agendar reunión"}
-                        </Button>
-                      </div>
+                      {row.follow_up_meeting ? (
+                        <div className="inline-flex flex-col rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-800">
+                          <span className="font-semibold">Reunion agendada</span>
+                          <span className="font-mono">
+                            {String(row.follow_up_meeting.meeting_date || "").slice(0, 10)} {row.follow_up_meeting.start_time || ""}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            type="date"
+                            value={meetingDateByUser[row.user_id] || String(row.date || "").slice(0, 10)}
+                            onChange={(e) => setMeetingDateByUser((prev) => ({ ...prev, [row.user_id]: e.target.value }))}
+                            className="rounded border border-slate-300 px-2 py-1 text-xs"
+                          />
+                          <input
+                            type="time"
+                            value={meetingTimeByUser[row.user_id] || "09:30"}
+                            onChange={(e) => setMeetingTimeByUser((prev) => ({ ...prev, [row.user_id]: e.target.value }))}
+                            className="rounded border border-slate-300 px-2 py-1 text-xs"
+                          />
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => handleScheduleMeeting(row)}
+                            disabled={schedulingUserId === row.user_id}
+                          >
+                            {schedulingUserId === row.user_id ? "Agendando..." : "Agendar reunion"}
+                          </Button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -240,13 +205,6 @@ const TalentoDashboard = () => {
       </Card>
 
       <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        <ActionCard
-          icon={FiSettings}
-          subtitle="Administración"
-          title="Usuarios y Departamentos"
-          color="blue"
-          onClick={() => navigate("/dashboard/talento-humano/gestion")}
-        />
         <ActionCard
           icon={FiClipboard}
           subtitle="Solicitudes"
@@ -264,7 +222,7 @@ const TalentoDashboard = () => {
         <ActionCard
           icon={FiUserPlus}
           subtitle="Personal"
-          title="Gestión de Personal"
+          title="Gestion de Personal"
           color="blue"
           onClick={() => navigate("/dashboard/talento-humano/workspace-personal")}
         >
@@ -289,17 +247,23 @@ const TalentoDashboard = () => {
                 navigate("/dashboard/talento-humano/colaboradores");
               }}
             >
-              Colaboradores (Actualización)
+              Colaboradores (Actualizacion)
             </Button>
           </div>
         </ActionCard>
-
         <ActionCard
           icon={FiRefreshCw}
           subtitle="Reportes"
           title="Asistencia Reportes"
           color="purple"
           onClick={() => navigate("/dashboard/talento-humano/asistencia-reportes")}
+        />
+        <ActionCard
+          icon={FiFileText}
+          subtitle="Reportes"
+          title="Reporte de Documentacion"
+          color="indigo"
+          onClick={() => navigate("/dashboard/talento-humano/reporte-documentacion")}
         />
       </div>
     </DashboardLayout>

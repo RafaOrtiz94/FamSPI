@@ -8,7 +8,12 @@ import api from "./index";
  * Crear solicitud de permiso o vacación
  */
 export const createSolicitud = async (data) => {
- const response = await api.post("/permisos", data);
+ const isMultipart = typeof FormData !== "undefined" && data instanceof FormData;
+ const response = await api.post("/permisos", data, isMultipart
+  ? {
+    headers: { "Content-Type": "multipart/form-data" },
+   }
+  : undefined);
  return response.data;
 };
 

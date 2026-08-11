@@ -4,7 +4,7 @@ const { processPendingOutboxBatch } = require("../modules/integrations/integrati
 
 const DEFAULT_INTERVAL_MS = Math.max(
   5000,
-  Number(process.env.CRM_SYNC_INTERVAL_MS || 60000),
+  Number(process.env.CRM_SYNC_INTERVAL_MS || 180000),
 );
 const DEFAULT_BATCH_LIMIT = Math.max(
   1,

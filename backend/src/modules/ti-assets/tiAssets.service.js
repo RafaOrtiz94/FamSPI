@@ -28,6 +28,10 @@ const ALLOWED_STATUSES = new Set([
 ]);
 
 const TI_ROLES = ["ti", "jefe_ti", "admin_ti", "gerencia"];
+const TI_LEGACY_ACTA_UPLOAD_ROLES = [
+  ...TI_ROLES,
+  "financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador",
+];
 const TI_CORPORATE_ASSIGN_ROLES = ["ti", "jefe_ti"];
 const TI_READ_ROLES = [
   "ti", "jefe_ti", "admin_ti", "gerencia", "gerencia_general",
@@ -39,8 +43,21 @@ const MS_PER_DAY = 86400000;
 const TI_ACTA_ENTREGA_TEMPLATE_ID = process.env.TI_ACTA_ENTREGA_TEMPLATE_ID || null;
 const TI_ACTA_RETIRO_TEMPLATE_ID = process.env.TI_ACTA_RETIRO_TEMPLATE_ID || null;
 
-// Schema managed via migration 202_ti_assets_v2.sql — run it once against the DB.
-async function ensureTiAssetsSchema() { /* no-op */ }
+// Schema managed via migration 202_ti_assets_v2.sql.
+// Runtime guard kept for additive columns that must exist in production.
+let tiAssetsSchemaPromise = null;
+async function ensureTiAssetsSchema() {
+  if (!tiAssetsSchemaPromise) {
+    tiAssetsSchemaPromise = (async () => {
+      await db.query(`ALTER TABLE public.ti_asset_financial_docs ADD COLUMN IF NOT EXISTS invoice_number TEXT`);
+      await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_asset_financial_docs_invoice_number ON public.ti_asset_financial_docs(invoice_number)`);
+    })().catch((error) => {
+      tiAssetsSchemaPromise = null;
+      throw error;
+    });
+  }
+  return tiAssetsSchemaPromise;
+}
 
 const normalizeAssetIdentifier = (value) => {
   const normalized = String(value || "").trim();
@@ -554,14 +571,33 @@ async function listAssets({ status, q }) {
   }
   if (q) {
     params.push(`%${String(q).toLowerCase()}%`);
-    where += ` AND (LOWER(a.name) LIKE $${params.length} OR LOWER(COALESCE(a.brand,'')) LIKE $${params.length} OR LOWER(COALESCE(a.model,'')) LIKE $${params.length} OR LOWER(COALESCE(a.serial_number,'')) LIKE $${params.length})`;
+    where += ` AND (
+      LOWER(a.name) LIKE $${params.length}
+      OR LOWER(COALESCE(a.brand,'')) LIKE $${params.length}
+      OR LOWER(COALESCE(a.model,'')) LIKE $${params.length}
+      OR LOWER(COALESCE(a.serial_number,'')) LIKE $${params.length}
+      OR LOWER(COALESCE(a.imei,'')) LIKE $${params.length}
+      OR LOWER(COALESCE(fd.invoice_number,'')) LIKE $${params.length}
+      OR LOWER(COALESCE(u.fullname, u.name, u.email, '')) LIKE $${params.length}
+      OR LOWER(COALESCE(u.email, '')) LIKE $${params.length}
+    )`;
   }
   const { rows } = await db.query(
     `SELECT a.*,
             u.email AS assigned_to_email,
-            COALESCE(u.fullname, u.name, u.email) AS assigned_to_name
+            COALESCE(u.fullname, u.name, u.email) AS assigned_to_name,
+            fd.invoice_number
        FROM public.ti_assets a
        LEFT JOIN public.users u ON u.id = a.assigned_to_user_id
+       LEFT JOIN LATERAL (
+         SELECT d.invoice_number
+           FROM public.ti_asset_financial_docs d
+          WHERE d.asset_id = a.id
+            AND d.doc_type = 'factura'
+            AND d.active = true
+          ORDER BY d.uploaded_at DESC, d.id DESC
+          LIMIT 1
+       ) fd ON true
        ${where}
        ORDER BY a.updated_at DESC`,
     params,
@@ -2018,6 +2054,9 @@ async function uploadSignedActa({ actaId, fileBuffer, originalFilename, userId }
     const err = new Error("actaId invalido"); err.status = 400; throw err;
   }
   const acta = await getActaWithItems(id);
+  const wasAlreadySigned = Boolean(
+    acta.is_complete || acta.signed_at || acta.signed_pdf_drive_file_id || acta.signed_pdf_sha256,
+  );
 
   const sha256    = computeSha256HexFromBuffer(fileBuffer);
   const tipo      = acta.tipo === "entrega" ? "ET" : "RT";
@@ -2087,7 +2126,118 @@ async function uploadSignedActa({ actaId, fileBuffer, originalFilename, userId }
     }
   } catch (_checklistErr) { /* No bloquea si falla la actualizacion del checklist */ }
 
-  return { ok: true, sha256, filename, drive_url: driveUrl };
+  return { ok: true, sha256, filename, drive_url: driveUrl, drive_file_id: driveFileId, replaced: wasAlreadySigned };
+}
+
+async function uploadLegacySignedActa({ assignmentId, fileBuffer, originalFilename, userId }) {
+  await ensureTiAssetsSchema();
+  const id = Number(assignmentId);
+  if (!Number.isFinite(id) || id <= 0) {
+    const err = new Error("assignmentId invalido"); err.status = 400; throw err;
+  }
+
+  const { rows } = await db.query(
+    `SELECT aa.id AS assignment_id, aa.asset_id, aa.assigned_to_user_id, aa.previous_user_id,
+            aa.created_by, aa.created_at,
+            a.name, a.brand, a.model, a.serial_number, a.imei,
+            u.fullname, cp.profile
+       FROM public.ti_asset_assignments aa
+       JOIN public.ti_assets a ON a.id = aa.asset_id
+       JOIN public.users u ON u.id = aa.assigned_to_user_id
+       LEFT JOIN public.collaborator_profiles cp ON cp.user_id = aa.assigned_to_user_id
+      WHERE aa.id = $1
+        AND aa.assigned_to_user_id IS NOT NULL
+        AND (
+          aa.sin_acta = true
+          OR NOT EXISTS (
+            SELECT 1 FROM public.ti_asset_actas ea
+             WHERE ea.active = true AND ea.tipo = 'entrega'
+               AND ea.asset_id = aa.asset_id
+               AND ea.recipient_user_id = aa.assigned_to_user_id
+          )
+        )
+      LIMIT 1`,
+    [id],
+  );
+  if (!rows.length) {
+    const err = new Error("La asignacion ya cuenta con un acta generada por el sistema");
+    err.status = 404;
+    throw err;
+  }
+  const assignment = rows[0];
+
+  const existing = await db.query(
+    `SELECT DISTINCT a.id
+       FROM public.ti_asset_actas a
+       LEFT JOIN public.ti_asset_actas_items ai ON ai.acta_id = a.id
+      WHERE a.active = true
+        AND a.tipo = 'entrega'
+        AND a.recipient_user_id = $2
+        AND (a.asset_id = $1 OR ai.asset_id = $1)
+      ORDER BY a.generated_at DESC
+      LIMIT 1`,
+    [assignment.asset_id, assignment.assigned_to_user_id],
+  );
+  let actaId = existing.rows[0]?.id || null;
+
+  if (!actaId) {
+    const profile = assignment.profile || {};
+    const personal = profile.personal || {};
+    const laboral = profile.laboral || {};
+    const accessories = await db.query(
+      `SELECT id, name, brand, model, serial_number, imei, is_new, physical_condition, observations
+         FROM public.ti_asset_accessories
+        WHERE asset_id = $1 AND active = true
+        ORDER BY created_at ASC`,
+      [assignment.asset_id],
+    );
+    const items = [
+      {
+        item_type: "equipo",
+        asset_id: assignment.asset_id,
+        name: assignment.name,
+        brand_model: [assignment.brand, assignment.model].filter(Boolean).join(" "),
+        serial_imei: [assignment.serial_number, assignment.imei].filter(Boolean).join(" / ") || null,
+      },
+      ...accessories.rows.map((accessory) => ({
+        item_type: "accesorio",
+        asset_id: assignment.asset_id,
+        accessory_id: accessory.id,
+        name: accessory.name,
+        brand_model: [accessory.brand, accessory.model].filter(Boolean).join(" "),
+        serial_imei: [accessory.serial_number, accessory.imei].filter(Boolean).join(" / ") || null,
+        is_new: accessory.is_new,
+        physical_condition: accessory.physical_condition,
+        observations: accessory.observations,
+      })),
+    ];
+    const acta = await createActa({
+      tipo: "entrega",
+      assetId: assignment.asset_id,
+      recipientUserId: assignment.assigned_to_user_id,
+      previousUserId: assignment.previous_user_id,
+      recipientNombre: assignment.fullname,
+      recipientCedula: personal.cedula || null,
+      recipientCargo: laboral.cargo || null,
+      generatedBy: userId,
+      notes: "Acta historica previa a SPI",
+      items,
+    });
+    actaId = acta.id;
+  }
+
+  const uploaded = await uploadSignedActa({
+    actaId,
+    fileBuffer,
+    originalFilename,
+    userId,
+  });
+  await db.query(
+    `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
+     VALUES ($1, 'legacy_acta_uploaded', $2::jsonb, $3, now())`,
+    [assignment.asset_id, JSON.stringify({ assignment_id: id, acta_id: actaId }), userId || null],
+  );
+  return { ...uploaded, acta_id: actaId, assignment_id: id, legacy: true };
 }
 
 const _SURNAME_PARTICLES = new Set(["de", "del", "la", "el", "los", "las", "van", "von", "le", "y"]);
@@ -2576,12 +2726,18 @@ async function listFinancialDocs(assetId) {
   return rows;
 }
 
-async function uploadFinancialDoc({ assetId, docType, fileBuffer, originalFilename, notes, userId }) {
+async function uploadFinancialDoc({ assetId, docType, fileBuffer, originalFilename, notes, invoiceNumber, userId }) {
   await ensureTiAssetsSchema();
 
   const type = String(docType || "").toLowerCase().trim();
   if (!VALID_FIN_DOC_TYPES.has(type)) {
     const err = new Error("Tipo de documento no válido. Use: factura | letra_de_cambio");
+    err.status = 400;
+    throw err;
+  }
+  const normalizedInvoiceNumber = String(invoiceNumber || "").trim() || null;
+  if (type === "factura" && !normalizedInvoiceNumber) {
+    const err = new Error("El número de factura es obligatorio para subir la factura");
     err.status = 400;
     throw err;
   }
@@ -2617,24 +2773,20 @@ async function uploadFinancialDoc({ assetId, docType, fileBuffer, originalFilena
     }
   } catch (_driveErr) { /* Drive opcional */ }
 
-  // Upsert: desactiva el anterior del mismo tipo y crea el nuevo
-  // Factura: upsert (desactiva anterior, crea nueva)
-  // Letra de cambio: append (crea nueva sin desactivar)
-  if (type === "factura") {
-    await db.query(
-      `UPDATE public.ti_asset_financial_docs
-          SET active = false
-        WHERE asset_id = $1 AND doc_type = $2 AND active = true`,
-      [assetId, type],
-    );
-  }
+  // Mantiene una sola version activa por tipo y conserva las anteriores para historial.
+  await db.query(
+    `UPDATE public.ti_asset_financial_docs
+        SET active = false
+      WHERE asset_id = $1 AND doc_type = $2 AND active = true`,
+    [assetId, type],
+  );
 
   const { rows } = await db.query(
     `INSERT INTO public.ti_asset_financial_docs
-       (asset_id, doc_type, assigned_user_id, filename, drive_file_id, drive_url, sha256, notes, uploaded_by, uploaded_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+       (asset_id, doc_type, assigned_user_id, filename, drive_file_id, drive_url, sha256, notes, invoice_number, uploaded_by, uploaded_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
      RETURNING *`,
-    [assetId, type, null, filename, driveFileId, driveUrl, sha256, notes || null, userId || null],
+    [assetId, type, null, filename, driveFileId, driveUrl, sha256, notes || null, normalizedInvoiceNumber, userId || null],
   );
 
   return rows[0];
@@ -2803,6 +2955,74 @@ async function getLiberationPhotos(assetId) {
     [assetId]
   );
   return rows;
+}
+
+async function getAssignmentEvidenceFile(assignmentId) {
+  await ensureTiAssetsSchema();
+  const { rows } = await db.query(
+    `SELECT id, evidence_drive_file_id
+       FROM public.ti_asset_assignments
+      WHERE id = $1
+      LIMIT 1`,
+    [assignmentId],
+  );
+
+  if (!rows.length) {
+    const error = new Error("Asignacion no encontrada");
+    error.status = 404;
+    throw error;
+  }
+
+  const driveFileId = rows[0]?.evidence_drive_file_id || null;
+  if (!driveFileId) {
+    const error = new Error("La asignacion no tiene evidencia adjunta");
+    error.status = 404;
+    throw error;
+  }
+
+  const { downloadFileBuffer, getFileMetadata } = require("../../utils/drive");
+  const metadata = await getFileMetadata(driveFileId, "id,name,mimeType");
+  const buffer = await downloadFileBuffer(driveFileId);
+
+  return {
+    buffer,
+    filename: metadata?.name || `evidencia-asignacion-${assignmentId}`,
+    mimeType: metadata?.mimeType || "application/octet-stream",
+  };
+}
+
+async function getLiberationPhotoFile(photoId) {
+  await ensureTiAssetsSchema();
+  const { rows } = await db.query(
+    `SELECT id, filename, drive_file_id
+       FROM public.ti_asset_liberation_photos
+      WHERE id = $1 AND active = true
+      LIMIT 1`,
+    [photoId],
+  );
+
+  if (!rows.length) {
+    const error = new Error("Foto de liberacion no encontrada");
+    error.status = 404;
+    throw error;
+  }
+
+  const driveFileId = rows[0]?.drive_file_id || null;
+  if (!driveFileId) {
+    const error = new Error("La foto de liberacion no tiene archivo en Drive");
+    error.status = 404;
+    throw error;
+  }
+
+  const { downloadFileBuffer, getFileMetadata } = require("../../utils/drive");
+  const metadata = await getFileMetadata(driveFileId, "id,name,mimeType");
+  const buffer = await downloadFileBuffer(driveFileId);
+
+  return {
+    buffer,
+    filename: metadata?.name || rows[0]?.filename || `liberacion-${photoId}.jpg`,
+    mimeType: metadata?.mimeType || "image/jpeg",
+  };
 }
 
 // ========== FASE 2: NÚMEROS CORPORATIVOS ==========
@@ -3116,7 +3336,9 @@ function isMobileAsset(asset = {}) {
 }
 
 module.exports = {
+  buildTiActaItemsBlock,
   TI_ROLES,
+  TI_LEGACY_ACTA_UPLOAD_ROLES,
   TI_READ_ROLES,
   TI_ASSET_CREATE_ROLES,
   ensureTiAssetsSchema,
@@ -3138,6 +3360,7 @@ module.exports = {
   TI_CORPORATE_ASSIGN_ROLES,
   listAssetAssignmentsHistory,
   uploadAssignmentEvidence,
+  getAssignmentEvidenceFile,
   generateAnnualMaintenance,
   generateFutureMaintenance,
   listMaintenance,
@@ -3162,6 +3385,7 @@ module.exports = {
   getActaPdfDownload,
   updateActa,
   uploadSignedActa,
+  uploadLegacySignedActa,
   buildActaPdfBuffer,
   startSignatureWorkflowForActa,
   getActaSignatureWorkflow,
@@ -3175,4 +3399,5 @@ module.exports = {
   // FASE 6: Liberation
   liberateAsset,
   getLiberationPhotos,
+  getLiberationPhotoFile,
 };

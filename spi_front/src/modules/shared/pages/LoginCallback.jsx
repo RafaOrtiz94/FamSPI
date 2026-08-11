@@ -15,7 +15,7 @@ import { useAuth } from "../../../core/auth/AuthContext";
  */
 const LoginCallback = () => {
  const navigate = useNavigate();
- const { refresh } = useAuth();
+ const { refresh, bootstrapSessionFromToken } = useAuth();
 
  useEffect(() => {
   let processed = false;
@@ -37,22 +37,15 @@ const LoginCallback = () => {
     console.log("✅ Tokens recibidos y guardados en localStorage.");
     console.log("🔑 Access:", accessToken.slice(0, 15) + "...");
 
-    // Refrescar el contexto (esto actualiza el 'user' global)
-    const ok = await refresh();
-    if (!ok) throw new Error("No se pudo sincronizar sesión.");
-
-    const stored = JSON.parse(localStorage.getItem("user") || "{}");
-    window.history.replaceState(null, "", window.location.pathname);
-
-    // Check if user has signature - redirect to signature page if not
-    if (!stored.has_signature) {
-     console.log("⚠️ Usuario sin firma registrada, redirigiendo a captura de firma");
-     navigate("/first-login-signature", { replace: true });
-     return;
+    const bootstrappedUser = bootstrapSessionFromToken?.(accessToken);
+    if (!bootstrappedUser) {
+     throw new Error("No se pudo hidratar la sesión inicial.");
     }
 
-    const role = (stored.role || "pendiente").toLowerCase();
-    const scope = (stored.scope || role).toLowerCase();
+    window.history.replaceState(null, "", window.location.pathname);
+
+    const role = (bootstrappedUser.role || "pendiente").toLowerCase();
+    const scope = (bootstrappedUser.scope || role).toLowerCase();
     const isPendingRole = !role || role === "pendiente" || role === "pending" || scope === "pendiente" || scope === "pending";
 
     const roleRoutes = {
@@ -86,9 +79,14 @@ const LoginCallback = () => {
 
     const target = sessionStorage.getItem("redirectTo") || (isPendingRole
      ? "/registro-en-proceso"
-     : stored.dashboard || roleRoutes[role] || roleRoutes[scope] || "/unauthorized");
+     : bootstrappedUser.dashboard || roleRoutes[role] || roleRoutes[scope] || "/unauthorized");
     sessionStorage.removeItem("redirectTo");
     console.log(`🚀 Redirigiendo a: ${target}`);
+
+    void refresh().catch((syncError) => {
+     console.warn("⚠️ La sincronización completa del perfil falló tras el login:", syncError);
+    });
+
     navigate(target, { replace: true });
    } catch (err) {
     console.error("❌ Error procesando callback:", err);

@@ -13,6 +13,7 @@ const FALLBACK_OPTIONS = [
  { value: "venta", label: "Compra directa" },
  { value: "alquiler", label: "Alquiler" },
  { value: "alquiler_transferencia_dominio", label: "Alquiler con transferencia de dominio" },
+ { value: "rechazado_falta_informacion", label: "Rechazado por falta de información" },
 ];
 
 const normalizeFallbackLabel = (value) => {
@@ -25,6 +26,7 @@ const normalizeFallbackLabel = (value) => {
  ) {
  return "Alquiler con transferencia de dominio";
  }
+ if (normalized === "rechazado_falta_informacion") return "Rechazado por falta de información";
  return "No definido";
 };
 
@@ -48,6 +50,7 @@ const FeasibilitySection = ({
  businessCase,
  permissions = {},
  ownership = {},
+ workflowState = {},
  onSave = () => {},
 }) => {
  const { id: businessCaseId } = useParams();
@@ -69,8 +72,10 @@ const FeasibilitySection = ({
  ? feasibility.decision
  : null;
 
- const hasExport = Boolean(feasibility?.export_excel?.at);
- const isClosed = Boolean(permissions.workspaceClosed || feasibility?.closed || decision?.decided_at);
+  const hasExport = Boolean(feasibility?.export_excel?.at);
+  const isClosed = Boolean(permissions.workspaceClosed || feasibility?.closed || decision?.decided_at);
+  const displayStage = workflowState?.currentStage || businessCase?.bc_stage || "draft";
+  const rawStage = workflowState?.rawStage || businessCase?.bc_stage || null;
  const canEdit = Boolean(
  permissions.canEdit !== false &&
  permissions.canDecideFeasibility &&
@@ -148,12 +153,16 @@ const FeasibilitySection = ({
 
  const handleSubmit = async () => {
  if (!businessCaseId) return;
- if (!hasExport) {
+ if (isFeasible && !hasExport) {
  showToast("Primero debes sincronizar el Sheet oficial para habilitar factibilidad", "warning");
  return;
  }
  if (!isFeasible && !fallbackOfferKind) {
- showToast("Selecciona la alternativa comercial cuando el BC no es factible", "warning");
+ showToast("Selecciona la alternativa o el motivo de cierre cuando el BC no es factible", "warning");
+ return;
+ }
+ if (!isFeasible && !notes.trim()) {
+ showToast("Registra el motivo para cerrar el Business Case como no factible", "warning");
  return;
  }
 
@@ -186,16 +195,22 @@ const FeasibilitySection = ({
  <div className="flex flex-col gap-2">
  <h2 className="text-xl font-bold text-gray-900">Factibilidad</h2>
  <p className="text-sm text-gray-600">
- Ultimo paso del Business Case. ACP Comercial o Jefe Comercial registran la decision final
- para cerrar el BC y continuar el flujo en compras.
+ Ultimo paso del Business Case. ACP Comercial o Jefe Comercial registran la decision final;
+ si existe informacion incorrecta o inconsistente pueden cerrarlo como no factible indicando el motivo.
  </p>
  <SectionEditorBadge ownership={ownership} />
  </div>
 
- {!hasExport && (
+ {!hasExport && isFeasible && (
  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
  Antes de decidir la factibilidad, el Sheet oficial debe estar sincronizado desde la seccion
  de Sincronizacion.
+ </div>
+ )}
+ {!hasExport && !isFeasible && (
+ <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+ Puedes cerrar como no factible sin Sheet sincronizado cuando la informacion no concuerda,
+ pero debes registrar el motivo de cierre.
  </div>
  )}
 
@@ -215,7 +230,7 @@ const FeasibilitySection = ({
  </p>
  {!decision.is_feasible && (
  <p className={`text-xs ${decision.is_feasible ? "text-emerald-800" : "text-rose-800"}`}>
- Alternativa definida: {normalizeFallbackLabel(decision.fallback_offer_kind)}
+ {decision.fallback_offer_kind === "rechazado_falta_informacion" ? "Motivo" : "Alternativa definida"}: {normalizeFallbackLabel(decision.fallback_offer_kind)}
  </p>
  )}
  {decision.notes ? (
@@ -393,7 +408,7 @@ const FeasibilitySection = ({
  <div className="min-w-0">
  <p className="text-sm font-semibold text-gray-900">No factible</p>
  <p className="mt-0.5 text-xs text-gray-500">
- Cierra el BC y deriva la alternativa comercial para seguir el flujo en compras.
+ Cierra el BC por informacion incorrecta, inconsistente o no viable.
  </p>
  </div>
  </div>
@@ -402,7 +417,7 @@ const FeasibilitySection = ({
 
  {!isFeasible && (
  <div className="mt-5 space-y-2">
- <label className="text-sm font-medium text-gray-700">Alternativa comercial</label>
+ <label className="text-sm font-medium text-gray-700">Alternativa o motivo de cierre</label>
  <select
  value={fallbackOfferKind}
  onChange={(event) => setFallbackOfferKind(event.target.value)}
@@ -425,7 +440,7 @@ const FeasibilitySection = ({
  value={notes}
  onChange={(event) => setNotes(event.target.value)}
  disabled={!canEdit}
- placeholder="Registra la conclusion comercial o financiera del Business Case"
+ placeholder={isFeasible ? "Registra la conclusion comercial o financiera del Business Case" : "Motivo obligatorio del cierre no factible"}
  className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
  />
  </div>
@@ -443,7 +458,7 @@ const FeasibilitySection = ({
  <button
  type="button"
  onClick={handleSubmit}
- disabled={saving || !hasExport}
+ disabled={saving || (isFeasible && !hasExport)}
  className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
  >
  <FiLock size={16} />
@@ -461,7 +476,10 @@ const FeasibilitySection = ({
  Sheet oficial: <span className="font-semibold text-gray-900">{hasExport ? "Sincronizado" : "Pendiente"}</span>
  </p>
  <p>
- Stage BC: <span className="font-semibold text-gray-900">{businessCase?.bc_stage || "draft"}</span>
+ Etapa actual: <span className="font-semibold text-gray-900">{displayStage}</span>
+ {rawStage && rawStage !== displayStage && (
+  <span className="ml-1 text-xs text-gray-400">(bc_stage: {rawStage})</span>
+ )}
  </p>
  <p>
  Decision registrada: <span className="font-semibold text-gray-900">{decision?.decided_at ? "Si" : "No"}</span>
@@ -472,11 +490,11 @@ const FeasibilitySection = ({
  <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Regla operativa</p>
  <ul className="mt-3 space-y-2 text-sm text-gray-700">
- <li>1. Sincronizacion debe generar el Sheet oficial.</li>
- <li>2. ACP Comercial o Jefe Comercial registran la decision de factibilidad.</li>
- <li>3. La decision cierra el Business Case.</li>
+ <li>1. Para aprobar como factible, el Sheet oficial debe estar sincronizado.</li>
+ <li>2. ACP Comercial o Jefe Comercial pueden cerrar como no factible si detectan inconsistencias.</li>
+ <li>3. Todo cierre no factible debe incluir motivo.</li>
  <li className="mt-1 text-xs text-emerald-700 font-medium">→ Si es factible: se habilita la seccion Cantidades Maximas para control operativo.</li>
- <li className="text-xs text-rose-700 font-medium">→ Si no es factible: se registra la alternativa comercial y el flujo continua en compras.</li>
+ <li className="text-xs text-rose-700 font-medium">→ Si no es factible: se registra la alternativa (o el rechazo por falta de información) y el flujo continua en compras.</li>
  </ul>
  </div>
  </div>

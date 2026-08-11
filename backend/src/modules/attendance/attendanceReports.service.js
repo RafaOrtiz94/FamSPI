@@ -51,6 +51,13 @@ const ATTENDANCE_STATUS_ALIASES = Object.freeze({
   cerrada: "completed",
 });
 
+const ATTENDANCE_STATUS_LABELS = Object.freeze({
+  no_entry: "Sin entrada",
+  working: "En jornada",
+  lunch_open: "Almuerzo abierto",
+  completed: "Jornada cerrada",
+});
+
 const normalizeAttendanceStateFilter = (value) => {
   const normalized = String(value || "")
     .trim()
@@ -61,9 +68,9 @@ const normalizeAttendanceStateFilter = (value) => {
 };
 
 const deriveAttendanceState = (record = {}) => {
-  if (!record?.entry_time) return "no_entry";
   if (record?.exit_time) return "completed";
   if (record?.lunch_start_time && !record?.lunch_end_time) return "lunch_open";
+  if (!record?.entry_time && !record?.lunch_start_time && !record?.lunch_end_time) return "no_entry";
   return "working";
 };
 
@@ -71,6 +78,16 @@ const normalizeCoordinateString = (value) =>
   String(value || "")
     .trim()
     .replace(/\s+/g, "");
+
+const normalizeDateKey = (value) => {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getUTCFullYear();
+    const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(value.getUTCDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+  return String(value || "").slice(0, 10);
+};
 
 const sanitizeHtmlText = (value) =>
   String(value ?? "")
@@ -97,6 +114,8 @@ const deriveHasGeo = (record = {}) => {
     record.lunch_start_location,
     record.lunch_end_location,
     record.exit_location,
+    record.op_lunch_start_location,
+    record.op_lunch_end_location,
     record.start_location,
     record.arrival_location,
     record.departure_location,
@@ -124,6 +143,8 @@ const ATTENDANCE_GEO_FIELDS = Object.freeze([
   { key: "lunch_start_location", type: "lunch_start", label: "Almuerzo salida", timeKey: "lunch_start_time" },
   { key: "lunch_end_location", type: "lunch_end", label: "Almuerzo regreso", timeKey: "lunch_end_time" },
   { key: "exit_location", type: "exit", label: "Salida", timeKey: "exit_time" },
+  { key: "op_lunch_start_location", type: "op_lunch_start", label: "Almuerzo operacional salida", timeKey: "op_lunch_start_time" },
+  { key: "op_lunch_end_location", type: "op_lunch_end", label: "Almuerzo operacional regreso", timeKey: "op_lunch_end_time" },
   { key: "start_location", type: "start", label: "Inicio", timeKey: "start_time" },
   { key: "arrival_location", type: "arrival", label: "Llegada", timeKey: "arrival_time" },
   { key: "departure_location", type: "departure", label: "Salida", timeKey: "departure_time" },
@@ -136,12 +157,25 @@ const ATTENDANCE_POLYLINE_ORDER = Object.freeze([
   "lunch_end",
   "exit",
 ]);
+const TIME_OFF_TYPE_LABELS = Object.freeze({
+  personal: "Permiso personal",
+  salud: "Permiso de salud",
+  estudios: "Permiso de estudios",
+  calamidad: "Calamidad domestica",
+  emergencia_medica_propia: "Emergencia medica propia",
+});
 const ACTA_TIMEZONE_OFFSET = "-05:00";
 const ACTA_ENTRY_START = process.env.ATTENDANCE_ACTA_ENTRY_START || "09:00";
 const ACTA_LUNCH_START = process.env.ATTENDANCE_ACTA_LUNCH_START || "14:00";
 const ACTA_LUNCH_END = process.env.ATTENDANCE_ACTA_LUNCH_END || "15:00";
 const ACTA_EXIT_END = process.env.ATTENDANCE_ACTA_EXIT_END || "18:00";
 const ATTENDANCE_STANDARD_WORK_HOURS = Number(process.env.ATTENDANCE_STANDARD_WORK_HOURS || 8);
+
+const normalizeToken = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
 
 const normalizeEventType = (value) =>
   String(value || "")
@@ -177,6 +211,44 @@ const computeWorkedHours = ({ entry, lunchStart, lunchEnd, exit }) => {
     if (boundedEnd > boundedStart) workedMs -= (boundedEnd - boundedStart);
   }
   return workedMs / (1000 * 60 * 60);
+};
+
+const computeWorkedMs = ({ entry, lunchStart, lunchEnd, exit }) => {
+  if (!(entry instanceof Date) || !(exit instanceof Date) || exit <= entry) return 0;
+  let workedMs = exit.getTime() - entry.getTime();
+  if (
+    lunchStart instanceof Date &&
+    lunchEnd instanceof Date &&
+    lunchEnd > lunchStart &&
+    lunchEnd > entry &&
+    lunchStart < exit
+  ) {
+    const boundedStart = Math.max(lunchStart.getTime(), entry.getTime());
+    const boundedEnd = Math.min(lunchEnd.getTime(), exit.getTime());
+    if (boundedEnd > boundedStart) workedMs -= (boundedEnd - boundedStart);
+  }
+  return Math.max(0, workedMs);
+};
+
+const computeRealWorkedMs = ({ entry, lunchStart, lunchEnd, exit }) => {
+  if (!(entry instanceof Date) || !(exit instanceof Date) || exit <= entry) return 0;
+  let workedMs = exit.getTime() - entry.getTime();
+  if (
+    lunchStart instanceof Date &&
+    lunchEnd instanceof Date &&
+    lunchEnd > lunchStart &&
+    lunchEnd > entry &&
+    lunchStart < exit
+  ) {
+    const boundedStart = Math.max(lunchStart.getTime(), entry.getTime());
+    const boundedEnd = Math.min(lunchEnd.getTime(), exit.getTime());
+    if (boundedEnd > boundedStart) {
+      const realLunchMs = boundedEnd - boundedStart;
+      const minimumLunchMs = 60 * 60 * 1000;
+      workedMs -= Math.max(realLunchMs, minimumLunchMs);
+    }
+  }
+  return Math.max(0, workedMs);
 };
 
 const getFieldIntervals = (record = {}) => {
@@ -223,22 +295,8 @@ const getFieldIntervals = (record = {}) => {
   return intervals;
 };
 
-const computeOutsideMinutes = (interval, policy) => {
-  const start = interval?.start;
-  const end = interval?.end;
-  if (!(start instanceof Date) || !(end instanceof Date) || end <= start) return 0;
-
-  const startBoundary = buildActaDateTime(policy?.dateKey, policy?.start || ACTA_ENTRY_START);
-  const endBoundary = buildActaDateTime(policy?.dateKey, policy?.end || ACTA_EXIT_END);
-  if (!(startBoundary instanceof Date) || !(endBoundary instanceof Date)) return 0;
-
-  const beforeWindowMs = Math.max(0, Math.min(end.getTime(), startBoundary.getTime()) - start.getTime());
-  const afterWindowMs = Math.max(0, end.getTime() - Math.max(start.getTime(), endBoundary.getTime()));
-  return (beforeWindowMs + afterWindowMs) / (1000 * 60);
-};
-
 const buildAttendanceRegularization = (record = {}) => {
-  const dateKey = String(record?.date || "").slice(0, 10);
+  const dateKey = normalizeDateKey(record?.date);
   if (!dateKey) {
     return {
       acta_entry_time: null,
@@ -248,6 +306,7 @@ const buildAttendanceRegularization = (record = {}) => {
       acta_total_hours: 0,
       acta_overtime_hours: 0,
       real_overtime_hours: 0,
+      real_overtime_seconds: 0,
       overtime_observation: null,
     };
   }
@@ -267,7 +326,9 @@ const buildAttendanceRegularization = (record = {}) => {
       String(record?.exception_type || "").trim().toLowerCase()
     );
 
-  const actaEntry = entry && entryFloor ? (entry > entryFloor ? entry : entryFloor) : entry;
+  // F.RH always shows standard times regardless of early/late marks.
+  // Real times are preserved in entry_time/exit_time for operational traceability.
+  const actaEntry = entry && entryFloor ? entryFloor : entry;
   const shouldAutoLunch = Boolean(
     hasOperationalFlow &&
     actaEntry &&
@@ -279,11 +340,11 @@ const buildAttendanceRegularization = (record = {}) => {
       String(record?.exception_status || "").trim().toUpperCase() !== ""
     )
   );
-  const actaLunchStart = lunchStart || (shouldAutoLunch ? lunchFloor : null);
-  const actaLunchEnd = lunchEnd || (shouldAutoLunch ? lunchCeil : null);
+  const actaLunchStart = (lunchStart || shouldAutoLunch) ? lunchFloor : null;
+  const actaLunchEnd = (lunchEnd || shouldAutoLunch) ? lunchCeil : null;
 
-  let actaExit = exit;
-  if (exit && exitCeil && exit > exitCeil) {
+  let actaExit = null;
+  if (exit && exitCeil) {
     actaExit = exitCeil;
   } else if (!exit && hasOperationalFlow && exitCeil) {
     actaExit = exitCeil;
@@ -310,20 +371,24 @@ const buildAttendanceRegularization = (record = {}) => {
     });
   }
 
-  const rawWorkedHours = Number(record?.total_hours || 0);
-  const outsideWindowHours = fieldIntervals.reduce(
-    (acc, interval) => acc + computeOutsideMinutes(interval, { dateKey, start: ACTA_ENTRY_START, end: ACTA_EXIT_END }),
-    0,
-  ) / 60;
   const actaOvertimeHours = actaTotalHours > standardWorkHours ? actaTotalHours - standardWorkHours : 0;
-  const rawExtraHours = rawWorkedHours > standardWorkHours ? rawWorkedHours - standardWorkHours : 0;
-  const realOvertimeHours = Math.max(rawExtraHours, outsideWindowHours);
+  const realWorkedMs = computeRealWorkedMs({
+    entry,
+    lunchStart,
+    lunchEnd,
+    exit,
+  });
+  const realOvertimeSeconds = Math.max(
+    0,
+    Math.round((realWorkedMs - standardWorkHours * 60 * 60 * 1000) / 1000)
+  );
+  const realOvertimeHours = realOvertimeSeconds / 3600;
 
   let overtimeObservation = null;
   if (realOvertimeHours > actaOvertimeHours) {
     overtimeObservation = hasOperationalFlow
-      ? `Gestion operativa regularizada en acta. Extra real detectada: ${realOvertimeHours.toFixed(2)}h.`
-      : `Jornada regularizada para acta. Extra real detectada: ${realOvertimeHours.toFixed(2)}h.`;
+      ? `Gestion operativa regularizada en acta. Extra real calculada solo con marcaciones reales.`
+      : `Jornada regularizada para acta. Extra real calculada solo con marcaciones reales.`;
   }
 
   return {
@@ -333,7 +398,8 @@ const buildAttendanceRegularization = (record = {}) => {
     acta_exit_time: actaExit ? actaExit.toISOString() : null,
     acta_total_hours: Number(actaTotalHours.toFixed(2)),
     acta_overtime_hours: Number(actaOvertimeHours.toFixed(2)),
-    real_overtime_hours: Number(realOvertimeHours.toFixed(2)),
+    real_overtime_hours: Number(realOvertimeHours.toFixed(6)),
+    real_overtime_seconds: realOvertimeSeconds,
     overtime_observation: overtimeObservation,
   };
 };
@@ -353,6 +419,63 @@ const buildGeoPoints = (record = {}) =>
     return points;
   }, []);
 
+const buildTimeOffDisplayLabel = (record = {}) => {
+  if (normalizeToken(record?.time_off_type) !== "permiso") return null;
+  if (Boolean(record?.time_off_is_emergency)) return "Permiso de emergencia";
+
+  const subtype = normalizeToken(record?.time_off_subtype);
+  if (!subtype) return "Permiso";
+  return TIME_OFF_TYPE_LABELS[subtype] || `Permiso ${subtype.replace(/_/g, " ")}`;
+};
+
+const buildPermissionDetails = (record = {}) => {
+  if (normalizeToken(record?.time_off_type) !== "permiso") {
+    return {
+      permission_exit_time: null,
+      permission_return_time: null,
+      permission_events: [],
+      permission_label: null,
+      permission_status: null,
+      permission_request_id: null,
+    };
+  }
+
+  const start = toDateOrNull(record?.time_off_start_at);
+  const end = toDateOrNull(record?.time_off_end_at);
+  const label = buildTimeOffDisplayLabel(record);
+  const requestId = Number.parseInt(record?.time_off_id, 10);
+  const hasWindow =
+    start instanceof Date &&
+    end instanceof Date &&
+    !Number.isNaN(start.getTime()) &&
+    !Number.isNaN(end.getTime()) &&
+    end > start;
+
+  const permissionEvents = hasWindow
+    ? [
+        {
+          key: "permission_exit",
+          label: "Salida a permiso",
+          time: start.toISOString(),
+        },
+        {
+          key: "permission_return",
+          label: "Entrada de permiso",
+          time: end.toISOString(),
+        },
+      ]
+    : [];
+
+  return {
+    permission_exit_time: hasWindow ? start.toISOString() : null,
+    permission_return_time: hasWindow ? end.toISOString() : null,
+    permission_events: permissionEvents,
+    permission_label: label,
+    permission_status: record?.time_off_status || null,
+    permission_request_id: Number.isInteger(requestId) ? requestId : null,
+  };
+};
+
 const buildPolylinePoints = (record = {}) => {
   const geoPointsByType = new Map(buildGeoPoints(record).map((point) => [point.type, point]));
   return ATTENDANCE_POLYLINE_ORDER
@@ -369,6 +492,8 @@ const filterAttendanceRowsByStatus = (rows = [], status) => {
 
 const enrichAttendanceRowGeo = (record = {}) => ({
   ...record,
+  attendance_status: deriveAttendanceState(record),
+  attendance_status_label: ATTENDANCE_STATUS_LABELS[deriveAttendanceState(record)] || "Sin estado",
   fullname: sanitizeHtmlText(record.fullname),
   email: sanitizeHtmlText(record.email),
   department_name: sanitizeHtmlText(record.department_name),
@@ -376,6 +501,7 @@ const enrichAttendanceRowGeo = (record = {}) => ({
   geo_points: buildGeoPoints(record),
   polyline_points: buildPolylinePoints(record),
   has_discrepancy: deriveHasDiscrepancy(record),
+  ...buildPermissionDetails(record),
   ...buildAttendanceRegularization(record),
 });
 
@@ -592,9 +718,12 @@ const buildAttendanceRangeQuery = async ({
         d.name AS department_name,
         ex.exception_id,
         ex.exception_type,
-        ex.exception_status,
-        ex.exception_description,
-        ex.start_time,
+         ex.exception_status,
+         ex.exception_description,
+         ex.operational_category,
+         ex.operational_destination_label,
+         ex.operational_destination_city,
+         ex.start_time,
         ex.start_location,
         ex.arrival_time,
         ex.arrival_location,
@@ -602,13 +731,31 @@ const buildAttendanceRangeQuery = async ({
         ex.departure_location,
         ex.return_time,
         ex.return_location,
+        ex.op_lunch_start_time,
+        ex.op_lunch_start_location,
+        ex.op_lunch_end_time,
+        ex.op_lunch_end_location,
+        ex.odometer_start_km,
+        ex.odometer_start_photo_drive_file_id,
+        ex.odometer_start_photo_drive_url,
+        ex.odometer_end_km,
+        ex.odometer_distance_km,
+        ex.odometer_end_photo_drive_file_id,
+        ex.odometer_end_photo_drive_url,
         ex.operational_span_days,
         ex.operational_start_date,
         ex.operational_end_date,
         ex.operational_elapsed_hours,
         COALESCE(field_ops.field_events, '[]'::json) AS field_events,
+        timeoff.id AS time_off_id,
         timeoff.tipo_solicitud AS time_off_type,
-        timeoff.tipo_permiso AS time_off_subtype
+        timeoff.tipo_permiso AS time_off_subtype,
+        timeoff.es_emergencia AS time_off_is_emergency,
+        timeoff.status AS time_off_status,
+        timeoff.fecha_inicio AS time_off_start_date,
+        timeoff.fecha_fin AS time_off_end_date,
+        timeoff.fecha_inicio_hora AS time_off_start_at,
+        timeoff.fecha_fin_hora AS time_off_end_at
       FROM user_attendance_records a
       JOIN users u ON a.user_id = u.id
       LEFT JOIN departments d ON u.department_id = d.id
@@ -616,9 +763,12 @@ const buildAttendanceRangeQuery = async ({
         SELECT
           e.id AS exception_id,
           e.type AS exception_type,
-          e.status AS exception_status,
-          e.description AS exception_description,
-          e.start_time,
+           e.status AS exception_status,
+           e.description AS exception_description,
+           e.operational_category,
+           e.operational_destination_label,
+           e.operational_destination_city,
+           e.start_time,
           e.start_location,
           e.arrival_time,
           e.arrival_location,
@@ -626,11 +776,22 @@ const buildAttendanceRangeQuery = async ({
           e.departure_location,
           e.return_time,
           e.return_location,
+          e.op_lunch_start_time,
+          e.op_lunch_start_location,
+          e.op_lunch_end_time,
+          e.op_lunch_end_location,
+          e.odometer_start_km,
+          e.odometer_start_photo_drive_file_id,
+          e.odometer_start_photo_drive_url,
+          e.odometer_end_km,
+          e.odometer_distance_km,
+          e.odometer_end_photo_drive_file_id,
+          e.odometer_end_photo_drive_url,
           CASE
             WHEN LOWER(COALESCE(e.type, '')) = ANY(ARRAY['operacion_campo', 'operacion_de_campo', 'salida_oficina', 'viaje', 'campo']::text[])
               THEN GREATEST(
                 1,
-                (COALESCE(e.return_time::date, a.date) - e.date) + 1
+                (COALESCE((e.return_time AT TIME ZONE 'America/Guayaquil')::date, a.date) - e.date) + 1
               )::int
             ELSE NULL
           END AS operational_span_days,
@@ -641,7 +802,7 @@ const buildAttendanceRangeQuery = async ({
           END AS operational_start_date,
           CASE
             WHEN LOWER(COALESCE(e.type, '')) = ANY(ARRAY['operacion_campo', 'operacion_de_campo', 'salida_oficina', 'viaje', 'campo']::text[])
-              THEN COALESCE(e.return_time::date, a.date)
+              THEN COALESCE((e.return_time AT TIME ZONE 'America/Guayaquil')::date, a.date)
             ELSE NULL
           END AS operational_end_date,
           CASE
@@ -660,7 +821,13 @@ const buildAttendanceRangeQuery = async ({
             e.date = a.date
             OR (
               LOWER(COALESCE(e.type, '')) = ANY(ARRAY['operacion_campo', 'operacion_de_campo', 'salida_oficina', 'viaje', 'campo']::text[])
-              AND a.date BETWEEN e.date AND COALESCE(e.return_time::date, e.date)
+              -- Fecha de negocio Ecuador (no UTC crudo): una operacion que termina
+              -- entre 00:00-05:00 UTC sigue siendo el mismo dia de negocio en
+              -- America/Guayaquil (offset -5). Sin esto, cualquier operacion que
+              -- retorna de noche (19:00-23:59 hora Ecuador) se "filtraba" como
+              -- multi-dia hacia el dia siguiente, pegando su op_lunch_location
+              -- (de un almuerzo operacional viejo) al reporte del dia real.
+              AND a.date BETWEEN e.date AND COALESCE((e.return_time AT TIME ZONE 'America/Guayaquil')::date, e.date)
             )
           )
         ORDER BY
@@ -692,8 +859,15 @@ ${fieldEventsQuery}
       ) field_ops ON true
       LEFT JOIN LATERAL (
         SELECT
+          p.id,
           LOWER(COALESCE(p.tipo_solicitud, '')) AS tipo_solicitud,
-          p.tipo_permiso
+          p.tipo_permiso,
+          p.es_emergencia,
+          p.status,
+          p.fecha_inicio,
+          p.fecha_fin,
+          p.fecha_inicio_hora,
+          p.fecha_fin_hora
         FROM permisos_vacaciones p
         WHERE LOWER(COALESCE(p.user_email, '')) = LOWER(COALESCE(u.email, ''))
           AND (

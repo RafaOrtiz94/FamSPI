@@ -15,6 +15,7 @@ import { profileSections } from "../collaboratorProfileDefinitions";
 const MASK_FORMATS = {
   cedula: "##########",
   ruc: "#############",
+  landline: "#########",
   phone: "### ### ####",
 };
 
@@ -51,6 +52,10 @@ const normalizeFieldInputValue = (field, value) => {
     return normalizeDateInputValue(raw);
   }
 
+  if (field?.digitOnly) {
+    return raw.replace(/\D/g, "");
+  }
+
   if (field?.mask) {
     return raw.replace(/\D/g, "");
   }
@@ -66,6 +71,12 @@ const isNAValue = (value) => {
     .toLowerCase();
   return normalized === "n/a" || normalized === "na" || normalized === "no aplica";
 };
+
+const isTextLike = (field) =>
+  !field.mask && field.type !== "email" && field.type !== "date" && field.type !== "number" && field.type !== "select";
+
+const toUpperIfText = (field, value) =>
+  isTextLike(field) ? String(value || "").toUpperCase() : value;
 
 const computeAgeFromBirthDate = (rawBirthDate) => {
   const normalizedDate = normalizeDateInputValue(rawBirthDate);
@@ -648,7 +659,8 @@ const PersonnelProfile = ({
 
       {sections.map((section, sectionIndex) => {
         const isOpen = openSections.has(section.key);
-        const sectionFields = section.fields;
+        const sectionFields =
+          extendedSectionPanels && section.key === "emergencia" ? [] : section.fields;
 
         return (
           <div
@@ -685,7 +697,7 @@ const PersonnelProfile = ({
                   {sectionFields.map((field, fieldIndex) => {
                     const fieldPath = `${section.key}.${field.key}`;
                     const hasError = Boolean(errors[fieldPath]);
-                    const inputClass = `min-h-11 w-full rounded-xl border px-3 py-2 text-sm text-slate-800 shadow-sm transition focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100 ${
+                    const inputClass = `min-h-11 w-full rounded-xl border px-3 py-2 text-sm text-slate-800 shadow-sm transition focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100 ${isTextLike(field) ? "uppercase" : ""} ${
                       hasError
                         ? "border-amber-300 bg-amber-50"
                         : "border-slate-200 bg-white"
@@ -732,7 +744,7 @@ const PersonnelProfile = ({
                             rows={field.rows || 3}
                             placeholder={field.placeholder}
                             value={fieldValue}
-                            onChange={(event) => handleChange(section.key, field.key, event.target.value)}
+                            onChange={(event) => handleChange(section.key, field.key, toUpperIfText(field, event.target.value))}
                             className={inputClass}
                             disabled={readOnly}
                             tabIndex={resolveFieldTabIndex(sectionIndex, fieldIndex)}
@@ -760,7 +772,15 @@ const PersonnelProfile = ({
                             maxLength={field.maxLength}
                             placeholder={field.placeholder}
                             value={fieldValue}
-                            onChange={(event) => handleChange(section.key, field.key, event.target.value)}
+                            onChange={(event) =>
+                              handleChange(
+                                section.key,
+                                field.key,
+                                field.digitOnly
+                                  ? event.target.value.replace(/\D/g, "")
+                                  : toUpperIfText(field, event.target.value),
+                              )
+                            }
                             className={inputClass}
                             disabled={readOnly}
                             tabIndex={resolveFieldTabIndex(sectionIndex, fieldIndex)}
@@ -770,6 +790,8 @@ const PersonnelProfile = ({
 
                         {hasError ? (
                           <p className="text-[10px] text-amber-700">{errors[fieldPath]}</p>
+                        ) : field.helperText ? (
+                          <p className="text-[10px] text-slate-500">{field.helperText}</p>
                         ) : null}
                       </div>
                     );
@@ -817,9 +839,9 @@ const PersonnelProfile = ({
                               value={child.nombre}
                               disabled={readOnly}
                               onChange={(event) =>
-                                handleChildChange(childIndex, "nombre", event.target.value)
+                                handleChildChange(childIndex, "nombre", event.target.value.toUpperCase())
                               }
-                              className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                              className="uppercase min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
                             />
                           </div>
                           <div className="space-y-1">
@@ -917,10 +939,10 @@ const PersonnelProfile = ({
                                 handleEmergencyContactChange(
                                   contactIndex,
                                   "nombre",
-                                  event.target.value,
+                                  event.target.value.toUpperCase(),
                                 )
                               }
-                              className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                              className="uppercase min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
                             />
                           </div>
                           <div className="space-y-1">
@@ -935,10 +957,10 @@ const PersonnelProfile = ({
                                 handleEmergencyContactChange(
                                   contactIndex,
                                   "parentesco",
-                                  event.target.value,
+                                  event.target.value.toUpperCase(),
                                 )
                               }
-                              className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                              className="uppercase min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
                             />
                           </div>
                           <div className="space-y-1">

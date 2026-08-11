@@ -10,6 +10,7 @@
     "lint": "eslint . --fix",
     "test": "jest",
     "test:integration-off": "node scripts/run-tests-integration-off.js",
+    "test:validation": "jest --json --outputFile=../docs/validation/evidence/jest-results.json",
     "integration:reconcile": "node scripts/integration-reconcile-report.js",
     "clients:backfill:odoo": "node scripts/backfill_odoo_clients.js",
     "clients:backfill:odoo:db": "node scripts/backfill_odoo_clients_from_db.js",
@@ -59,6 +60,7 @@
     "pino-pretty": "^13.1.2",
     "qrcode": "^1.5.4",
     "uuid": "^13.0.0",
+    "web-push": "^3.6.7",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0",
     "xlsx": "^0.18.5"

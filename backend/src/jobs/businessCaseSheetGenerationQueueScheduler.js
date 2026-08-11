@@ -1,7 +1,7 @@
 const logger = require("../config/logger");
 const sheetGenerationService = require("../modules/business-case/businessCaseSheetGeneration.service");
 
-const DEFAULT_INTERVAL_MS = Number(process.env.BC_SHEET_JOB_INTERVAL_MS || 15000);
+const DEFAULT_INTERVAL_MS = Number(process.env.BC_SHEET_JOB_INTERVAL_MS || 180000);
 const DEFAULT_BATCH_LIMIT = Number(process.env.BC_SHEET_JOB_BATCH_LIMIT || 10);
 const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
 
@@ -23,7 +23,7 @@ async function runOnce(options = {}) {
 
 function startBusinessCaseSheetGenerationQueueJob() {
   if (intervalRef) return;
-  const everyMs = Math.max(5000, Number(DEFAULT_INTERVAL_MS || 15000));
+  const everyMs = Math.max(5000, Number(DEFAULT_INTERVAL_MS || 180000));
 
   const tick = async () => {
     if (isRunning) {

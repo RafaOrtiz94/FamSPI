@@ -10,14 +10,6 @@ const LIGHT = [241, 245, 249];
 const GREEN = [22,  163, 74];
 const RED   = [220, 38,  38];
 
-function formatDate(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('es-EC', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
-}
-
 function statusLabel(status) {
   const map = {
     under_review: 'En revisión',
@@ -28,12 +20,6 @@ function statusLabel(status) {
     rejected:     'Rechazada',
   };
   return map[status] || status;
-}
-
-function wrapText(doc, text, x, y, maxWidth, lineHeight) {
-  const lines = doc.splitTextToSize(String(text || ''), maxWidth);
-  doc.text(lines, x, y);
-  return y + lines.length * lineHeight;
 }
 
 export function generateKickoffPDF({ eventName, stats, aportes, questions }) {

@@ -39,7 +39,25 @@ router.get("/legal-verification/:token", controller.verifyLegalToken);
 router.use(verifyToken);
 
 // Crear solicitud (permiso o vacación)
-router.post("/", createLimiter, controller.create);
+router.post("/", createLimiter, (req, res, next) => {
+  const contentType = String(req.headers["content-type"] || "").toLowerCase();
+  if (!contentType.includes("multipart/form-data")) {
+    return next();
+  }
+
+  controller.createUpload.any()(req, res, (err) => {
+    if (err) {
+      let message = err.message;
+      if (err.code === "LIMIT_FILE_SIZE") {
+        message = "El archivo supera el tamaño máximo permitido de 10 MB.";
+      } else if (err.code === "LIMIT_FILE_COUNT") {
+        message = "Superaste el número máximo de archivos permitidos (5).";
+      }
+      return res.status(400).json({ ok: false, message });
+    }
+    return next();
+  });
+}, controller.create);
 router.post("/estudios/matricula", (req, res, next) => {
   controller.upload.single("matricula")(req, res, (err) => {
     if (err) return res.status(400).json({ ok: false, message: err.message });

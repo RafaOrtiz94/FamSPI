@@ -6,6 +6,9 @@ import { useUI } from "../../../../../core/ui/UIContext";
 import { useAutoEditSection } from "../BusinessCaseWorkspaceContext";
 import SectionEditorBadge from "../SectionEditorBadge";
 
+// Mismos roles que ya autoriza el backend en POST /sections/:section/unlock.
+const LIS_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_de_comercial"]);
+
 // EMPTY SCHEMA - Initialize with no default values
 const EMPTY_SCHEMA = {
  requiresLis: false,
@@ -174,6 +177,23 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
  };
 
  const canEdit = permissions.canEdit !== false && ownership.canUserEdit !== false;
+
+ // Reabrir "lis" tras el auto-bloqueo al guardar comercial (ver
+ // saveLisIntegration en businessCase.controller.js).
+ const canReopenLis = ownership?.isLocked === true && LIS_REOPEN_ROLES.has(permissions?.userRole || "");
+ const handleReopenLis = async () => {
+ if (!bcId || saving) return;
+ setSaving(true);
+ try {
+  await api.post(`/business-case/${bcId}/sections/lis/unlock`);
+  if (onSave) onSave();
+  showToast("Sección reabierta para edición.", "success");
+ } catch (err) {
+  showToast("No se pudo reabrir la sección.", "error");
+ } finally {
+  setSaving(false);
+ }
+ };
 
  return (
  <div className="space-y-5">
@@ -494,6 +514,24 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
   >
   Editar
   </button>
+ )}
+ </div>
+ )}
+
+ {!canEdit && ownership?.isLocked && (
+ <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+ <span className="text-sm text-amber-800 font-medium">
+ Comercial ya guardó esta sección y quedó en solo lectura.
+ </span>
+ {canReopenLis && (
+ <button
+  type="button"
+  onClick={handleReopenLis}
+  disabled={saving}
+  className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 w-full sm:w-auto"
+ >
+  Reabrir para edición
+ </button>
  )}
  </div>
  )}

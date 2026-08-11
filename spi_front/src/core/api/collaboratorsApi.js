@@ -39,3 +39,15 @@ export const getCollaboratorStats = async () => {
   return data;
 };
 
+export const getDocumentsReport = async (params = {}) => {
+  const { data } = await api.get('/collaborators/documents/report', { params });
+  return data;
+};
+
+export const generateDocumentsConsolidated = async (payload = {}) => {
+  const response = await api.post('/collaborators/documents/report/consolidated-pdf', payload, {
+    responseType: 'blob',
+  });
+  return response;
+};
+

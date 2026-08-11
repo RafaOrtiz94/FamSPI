@@ -23,6 +23,7 @@ import {
   downloadTiMaintenanceReport,
   getTiAssetAssignmentsHistory,
   listTiActas,
+  uploadTiLegacyActaSigned,
   listTiAssets,
   listTiFinancialDocs,
   uploadTiFinancialDoc,
@@ -109,6 +110,8 @@ const TIAssetsFinancieroPage = () => {
   const [detailLoading, setDetailLoading]   = useState(false);
   const [financialDocs, setFinancialDocs]   = useState([]);
   const [uploadingDoc, setUploadingDoc]     = useState(null); // 'factura' | 'letra_de_cambio' | null
+  const [invoiceNumberDraft, setInvoiceNumberDraft] = useState("");
+  const [uploadingLegacyActa, setUploadingLegacyActa] = useState(false);
 
   // Reports panel
   const [reportCollab, setReportCollab] = useState("");
@@ -139,13 +142,17 @@ const TIAssetsFinancieroPage = () => {
         listTiActas(assetId),
         listTiFinancialDocs(assetId),
       ]);
+      const safeFinDocs = Array.isArray(finDocs) ? finDocs : [];
       setAssignHistory(Array.isArray(hist) ? hist : []);
       setActas(Array.isArray(actasRows) ? actasRows : []);
-      setFinancialDocs(Array.isArray(finDocs) ? finDocs : []);
+      setFinancialDocs(safeFinDocs);
+      const factura = safeFinDocs.find((doc) => doc.doc_type === "factura");
+      setInvoiceNumberDraft(String(factura?.invoice_number || ""));
     } catch {
       setAssignHistory([]);
       setActas([]);
       setFinancialDocs([]);
+      setInvoiceNumberDraft("");
     } finally {
       setDetailLoading(false);
     }
@@ -153,15 +160,26 @@ const TIAssetsFinancieroPage = () => {
 
   const handleFinancialDocUpload = async (docType, file) => {
     if (!selected || !file) return;
+    const normalizedInvoiceNumber = String(invoiceNumberDraft || "").trim();
+    if (docType === "factura" && !normalizedInvoiceNumber) {
+      showToast("Ingresa el número de factura antes de subir el documento.", "warning");
+      return;
+    }
     setUploadingDoc(docType);
     try {
-      await uploadTiFinancialDoc(selected.id, docType, file);
+      await uploadTiFinancialDoc(selected.id, docType, file, {
+        invoiceNumber: docType === "factura" ? normalizedInvoiceNumber : "",
+      });
       showToast(
         docType === "factura" ? "Factura subida correctamente" : "Letra de cambio subida correctamente",
         "success",
       );
       const updated = await listTiFinancialDocs(selected.id);
-      setFinancialDocs(Array.isArray(updated) ? updated : []);
+      const safeUpdated = Array.isArray(updated) ? updated : [];
+      setFinancialDocs(safeUpdated);
+      const factura = safeUpdated.find((doc) => doc.doc_type === "factura");
+      setInvoiceNumberDraft(String(factura?.invoice_number || normalizedInvoiceNumber || ""));
+      await loadAll();
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo subir el documento", "error");
     } finally {
@@ -174,9 +192,32 @@ const TIAssetsFinancieroPage = () => {
     [assets, selectedId],
   );
 
+  const legacyNoActaAssignment = useMemo(() => {
+    const current = assignHistory.find((assignment) => assignment.assigned_to_user_id);
+    if (!current) return null;
+    const hasSystemActa = actas.some(
+      (acta) => acta.tipo === "entrega" && String(acta.recipient_user_id) === String(current.assigned_to_user_id),
+    );
+    return hasSystemActa ? null : current;
+  }, [assignHistory, actas]);
+
   const handleSelect = (a) => {
     setSelectedId(a.id);
     loadDetail(a.id);
+  };
+
+  const handleLegacySignedActaUpload = async (file) => {
+    if (!legacyNoActaAssignment || !file) return;
+    setUploadingLegacyActa(true);
+    try {
+      await uploadTiLegacyActaSigned(legacyNoActaAssignment.id, file);
+      showToast("Acta histórica subida y vinculada al equipo", "success");
+      if (selected) await loadDetail(selected.id);
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo subir el acta histórica", "error");
+    } finally {
+      setUploadingLegacyActa(false);
+    }
   };
 
   // ── Filters ─────────────────────────────────────────────────────────────────
@@ -191,6 +232,8 @@ const TIAssetsFinancieroPage = () => {
         (a.brand || "").toLowerCase().includes(q) ||
         (a.model || "").toLowerCase().includes(q) ||
         (a.serial_number || "").toLowerCase().includes(q) ||
+        (a.imei || "").toLowerCase().includes(q) ||
+        (a.invoice_number || "").toLowerCase().includes(q) ||
         (a.assigned_to_name || "").toLowerCase().includes(q),
       );
     }
@@ -349,7 +392,7 @@ const TIAssetsFinancieroPage = () => {
               <FiSearch size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-8 pr-3 py-2 text-sm placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
-                placeholder="Buscar equipo, serie, colaborador..."
+                placeholder="Buscar equipo, serie, IMEI, factura o colaborador..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -527,9 +570,44 @@ const TIAssetsFinancieroPage = () => {
                 {detailLoading ? (
                   <p className="text-xs text-slate-400 py-3 text-center">Cargando...</p>
                 ) : actas.length === 0 ? (
-                  <p className="text-xs text-slate-400 py-3 text-center">Sin actas generadas</p>
+                  legacyNoActaAssignment ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
+                      <div className="flex items-start gap-2">
+                        <FiAlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-amber-800">Acta histórica previa a SPI</p>
+                          <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
+                            Esta entrega fue registrada antes de que SPI generara actas automáticamente. Carga aquí el PDF del acta firmada para vincularlo al equipo.
+                          </p>
+                          <label className="mt-2 inline-flex cursor-pointer">
+                            <span className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 transition-colors">
+                              {uploadingLegacyActa ? <FiRefreshCw size={11} className="animate-spin" /> : <FiUploadCloud size={11} />}
+                              Subir acta firmada histórica
+                            </span>
+                            <input type="file" accept=".pdf,application/pdf" className="hidden" disabled={uploadingLegacyActa}
+                              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleLegacySignedActaUpload(f); e.target.value = ""; }} />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400 py-3 text-center">Sin actas generadas</p>
+                  )
                 ) : (
                   <div className="space-y-2">
+                    {legacyNoActaAssignment && (
+                      <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+                        <p className="text-[11px] leading-relaxed text-amber-800">Acta histórica previa a SPI. Puedes reemplazar el PDF firmado si es necesario.</p>
+                        <label className="inline-flex shrink-0 cursor-pointer">
+                          <span className="flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 transition-colors">
+                            {uploadingLegacyActa ? <FiRefreshCw size={11} className="animate-spin" /> : <FiUploadCloud size={11} />}
+                            Reemplazar
+                          </span>
+                          <input type="file" accept=".pdf,application/pdf" className="hidden" disabled={uploadingLegacyActa}
+                            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleLegacySignedActaUpload(f); e.target.value = ""; }} />
+                        </label>
+                      </div>
+                    )}
                     {actas.map((acta) => (
                       <div key={acta.id} className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
                         <div className="min-w-0">
@@ -575,12 +653,27 @@ const TIAssetsFinancieroPage = () => {
                   ].map(({ type, label, desc }) => {
                     const doc        = financialDocs.find((d) => d.doc_type === type);
                     const uploading  = uploadingDoc === type;
+                    const isFactura  = type === "factura";
                     return (
                       <div key={type} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="text-xs font-semibold text-slate-700">{label}</p>
                             <p className="text-[10px] text-slate-400 mt-0.5">{desc}</p>
+                            {isFactura ? (
+                              <div className="mt-3 max-w-xs">
+                                <label className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                                  Número de factura
+                                </label>
+                                <input
+                                  type="text"
+                                  value={invoiceNumberDraft}
+                                  onChange={(e) => setInvoiceNumberDraft(e.target.value)}
+                                  placeholder="Ej: 001-001-000123456"
+                                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-400 focus:outline-none"
+                                />
+                              </div>
+                            ) : null}
                             {doc ? (
                               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                 <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700">
@@ -592,6 +685,11 @@ const TIAssetsFinancieroPage = () => {
                                 <span className="text-[10px] text-slate-400">
                                   {new Date(doc.uploaded_at).toLocaleDateString("es-EC")}
                                 </span>
+                                {isFactura && doc.invoice_number ? (
+                                  <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-mono text-slate-500 border border-slate-200">
+                                    Factura {doc.invoice_number}
+                                  </span>
+                                ) : null}
                               </div>
                             ) : (
                               <span className="inline-flex mt-1.5 items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">

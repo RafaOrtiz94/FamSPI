@@ -229,6 +229,56 @@ export const getAttendanceHelpHint = (rawAction) => {
   return (canonicalKey && ATTENDANCE_HELP_HINTS[canonicalKey]) || null;
 };
 
+// Fase 1.5 (Plan Maestro Asistencia): intenciones de alto nivel para atajos
+// moviles y deep-links. Evitan que la URL tenga que conocer por adelantado la
+// accion exacta del dia (ej. si hoy corresponde permiso, almuerzo o salida).
+export const ATTENDANCE_SHORTCUT_INTENTS = Object.freeze([
+  {
+    key: "iniciar-jornada",
+    title: "Iniciar jornada",
+    detail: "Entrada o inicio de permiso si ya esta activo",
+  },
+  {
+    key: "continuar-jornada",
+    title: "Continuar jornada",
+    detail: "Siguiente marcacion normal o de permiso",
+  },
+  {
+    key: "iniciar-salida-operacional",
+    title: "Iniciar salida operacional",
+    detail: "Abrir una salida o visita de trabajo",
+  },
+  {
+    key: "continuar-salida-operacional",
+    title: "Continuar salida operacional",
+    detail: "Seguir con la salida o visita que ya esta en curso",
+  },
+  {
+    key: "gestionar-permiso-activo",
+    title: "Gestionar permiso",
+    detail: "Entrada/salida del permiso aprobado de hoy",
+  },
+  {
+    key: "resolver-entrada-tardia",
+    title: "Resolver entrada tardia",
+    detail: "Marcar entrada o continuar con permiso",
+  },
+]);
+
+const ATTENDANCE_INTENT_TO_META = new Map(
+  ATTENDANCE_SHORTCUT_INTENTS.map((entry) => [entry.key, entry]),
+);
+
+export const resolveAttendanceIntentKey = (rawIntent) => {
+  const normalized = String(rawIntent || "").trim().toLowerCase();
+  return ATTENDANCE_INTENT_TO_META.has(normalized) ? normalized : null;
+};
+
+export const getAttendanceIntentMeta = (rawIntent) => {
+  const key = resolveAttendanceIntentKey(rawIntent);
+  return key ? ATTENDANCE_INTENT_TO_META.get(key) : null;
+};
+
 // Fase 1: resolver unico de flujo. Consume el envelope canonico que el backend
 // ya expone en getTodayAttendance()/getActiveException() como `data.canonical_flow`
 // (flow_kind, current_step, next_step, allowed_actions, context_flags).
@@ -267,6 +317,86 @@ export const resolveAttendanceFlowStep = (canonicalFlow) => {
   };
 };
 
+const pickFirstAllowedAction = (allowedActionKeys = [], preferredKeys = []) =>
+  preferredKeys.find((key) => allowedActionKeys.includes(key)) || null;
+
+export const resolveAttendanceShortcutIntent = ({ rawIntent, attendanceData = {} }) => {
+  const intentKey = resolveAttendanceIntentKey(rawIntent);
+  const flowStep = resolveAttendanceFlowStep(attendanceData?.canonical_flow || null);
+  const flags = flowStep.contextFlags || {};
+  const allowedActionKeys = Array.isArray(flowStep.allowedActionKeys) ? flowStep.allowedActionKeys : [];
+
+  if (!intentKey) {
+    return {
+      intentKey: null,
+      resolvedActionKey: null,
+      flowStep,
+      isAvailable: false,
+      reason: "Intento de atajo no reconocido.",
+    };
+  }
+
+  let resolvedActionKey = null;
+
+  switch (intentKey) {
+    case "iniciar-jornada":
+      resolvedActionKey =
+        pickFirstAllowedAction(allowedActionKeys, ["permission-entry-start", "entrada"]) ||
+        flowStep.nextActionKey;
+      break;
+    case "continuar-jornada":
+      resolvedActionKey =
+        pickFirstAllowedAction(allowedActionKeys, [
+          "permission-exit-finish",
+          "permission-entry-start",
+          "almuerzo-salida",
+          "almuerzo-entrada",
+          "salida",
+        ]) ||
+        flowStep.nextActionKey;
+      break;
+    case "iniciar-salida-operacional":
+      resolvedActionKey =
+        pickFirstAllowedAction(allowedActionKeys, ["salida-oficina"]) ||
+        (flags.has_active_operational ? flowStep.nextActionKey : null);
+      break;
+    case "continuar-salida-operacional":
+      resolvedActionKey = flags.has_active_operational
+        ? flowStep.nextActionKey
+        : pickFirstAllowedAction(allowedActionKeys, [
+          "salida-oficina",
+          "llegada-destino",
+          "cliente-entrada",
+          "cliente-salida",
+          "retorno-operacional",
+          "entrada-oficina",
+          "cierre-viaje",
+        ]);
+      break;
+    case "gestionar-permiso-activo":
+      resolvedActionKey =
+        pickFirstAllowedAction(allowedActionKeys, ["permission-entry-start", "permission-exit-finish"]) ||
+        ((flags.has_active_permission_exception || flags.has_active_time_off) ? flowStep.nextActionKey : null);
+      break;
+    case "resolver-entrada-tardia":
+      resolvedActionKey =
+        pickFirstAllowedAction(allowedActionKeys, ["permission-entry-start", "entrada"]) ||
+        flowStep.nextActionKey;
+      break;
+    default:
+      resolvedActionKey = null;
+      break;
+  }
+
+  return {
+    intentKey,
+    resolvedActionKey,
+    flowStep,
+    isAvailable: Boolean(resolvedActionKey),
+    reason: resolvedActionKey ? null : "No hay una accion disponible para este atajo en el estado actual.",
+  };
+};
+
 // Fase 4 (Plan Maestro Asistencia): bandeja de pendientes accionables, derivada
 // del mismo payload que ya devuelve getTodayAttendance() (canonical_flow,
 // active_time_off, active_field_visit, late_policy). No requiere un endpoint
@@ -287,12 +417,29 @@ export const resolveAttendancePendingActions = (attendanceData = {}, now = new D
   const pending = [];
 
   if (flowStep.contextFlags?.has_active_operational) {
+    const isTelework = isTeleworkCategory(activeException?.operational_category);
+    const teleworkRequiresLunch = Boolean(activeException?.canonical_flow?.context_flags?.telework_requires_lunch);
+    const teleworkLunchStarted = Boolean(attendanceData?.lunch_start_time);
+    const teleworkLunchCompleted = Boolean(attendanceData?.lunch_end_time);
+    const teleworkPendingLunch = teleworkRequiresLunch && !teleworkLunchCompleted;
     pending.push({
       id: "operational_open",
       severity: "warning",
-      label: "Salida operacional abierta",
-      detail: "Tienes una salida operacional sin cerrar.",
-      actionKey: flowStep.nextActionKey,
+      label: isTelework
+        ? (teleworkPendingLunch
+          ? (teleworkLunchStarted ? "Regreso de almuerzo pendiente" : "Salida a almuerzo pendiente")
+          : "Teletrabajo activo")
+        : "Salida operacional abierta",
+      detail: isTelework
+        ? (teleworkPendingLunch
+          ? (teleworkLunchStarted
+            ? "Debes registrar el regreso de almuerzo antes de finalizar el teletrabajo."
+            : "Debes registrar la salida y el regreso de almuerzo antes de finalizar el teletrabajo.")
+          : "Tienes una jornada remota sin finalizar.")
+        : "Tienes una salida operacional sin cerrar.",
+      actionKey: isTelework
+        ? (teleworkPendingLunch ? (teleworkLunchStarted ? "almuerzo-entrada" : "almuerzo-salida") : "entrada-oficina")
+        : flowStep.nextActionKey,
       linkTo: null,
     });
 
@@ -421,7 +568,46 @@ export const resolveAttendancePendingActions = (attendanceData = {}, now = new D
 
 export const validateOperationalCategoryStep = (category) => {
   if (!String(category || "").trim()) {
-    return { ok: false, error: "Selecciona la categoria de la salida operacional." };
+    return { ok: false, error: "Selecciona el tipo de salida." };
+  }
+  return { ok: true, error: null };
+};
+
+export const isOperationalExitCategory = (category) => {
+  const normalized = String(category || "").trim().toLowerCase();
+  // `cliente` remains valid for historical deep links and active records.
+  return normalized === "operacional" || normalized === "cliente";
+};
+
+export const isTeleworkCategory = (category) =>
+  String(category || "").trim().toLowerCase() === "teletrabajo";
+
+export const validateOperationalDestinationStep = ({
+  category,
+  visitType,
+  destinationLabel,
+  destinationCity,
+}) => {
+  const label = String(destinationLabel || "").trim();
+  const city = String(destinationCity || "").trim();
+
+  if (!isOperationalExitCategory(category)) {
+    return city
+      ? { ok: true, error: null }
+      : { ok: false, error: "Selecciona o busca la ciudad de la salida." };
+  }
+
+  if (visitType === "cronograma" && !label) {
+    return { ok: false, error: "Selecciona el cliente del cronograma." };
+  }
+  if (visitType === "prospecto" && !label) {
+    return { ok: false, error: "Ingresa el nombre del prospecto." };
+  }
+  if (visitType === "otra" && !label) {
+    return { ok: false, error: "Ingresa el destino de la salida operacional." };
+  }
+  if (!city) {
+    return { ok: false, error: "Selecciona o busca la ciudad de la salida." };
   }
   return { ok: true, error: null };
 };
@@ -465,13 +651,24 @@ export const buildOperationalStartPayload = ({
   usesPersonalVehicle,
   startKm,
   startPhoto,
-}) => ({
-  description: String(description || "").trim() || "Salida operacional de campo / oficina",
-  operational_category: category,
-  uses_personal_vehicle: Boolean(usesPersonalVehicle),
-  odometer_start_km: startKm,
-  start_odometer_photo: startPhoto,
-});
+  destinationLabel,
+  destinationCity,
+  teleworkRequestId,
+}) => {
+  const normalizedCategory = String(category || "").trim().toLowerCase();
+  return {
+    description: String(description || "").trim() || (
+      normalizedCategory === "teletrabajo" ? "Teletrabajo" : "Salida operacional de campo / oficina"
+    ),
+    operational_category: category,
+    uses_personal_vehicle: Boolean(usesPersonalVehicle),
+    odometer_start_km: startKm,
+    start_odometer_photo: startPhoto,
+    operational_destination_label: String(destinationLabel || "").trim(),
+    operational_destination_city: String(destinationCity || "").trim(),
+    ...(teleworkRequestId ? { telework_request_id: Number(teleworkRequestId) } : {}),
+  };
+};
 
 export const buildOperationalClosurePayload = ({ endKm, endPhoto }) => ({
   odometer_end_km: endKm,
@@ -483,4 +680,3 @@ export const buildOperationalTripClosePayload = ({ closureReason, endKm, endPhot
   odometer_end_km: endKm,
   end_odometer_photo: endPhoto,
 });
-

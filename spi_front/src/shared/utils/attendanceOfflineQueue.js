@@ -38,6 +38,12 @@ export const getQueuedMarks = () => readQueue();
 
 export const getQueueSize = () => readQueue().length;
 
+// Evita duplicar una marca: si el mismo endpoint ya tiene una entrada sin
+// enviar en la cola, no tiene sentido encolar otra (el usuario probablemente
+// volvio a tocar el mismo boton porque la UI no reflejo el primer intento).
+export const hasQueuedMarkForEndpoint = (endpoint) =>
+  readQueue().some((item) => item.endpoint === endpoint);
+
 export const enqueueOfflineMark = ({ endpoint, payload, label }) => {
   const items = readQueue();
   const entry = {

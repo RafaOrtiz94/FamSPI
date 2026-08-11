@@ -3,6 +3,7 @@ const db = require("../../config/db");
 const MODULE_CATALOG = [
   { key: "inicio",        label: "Inicio",          path_prefixes: ["/dashboard"] },
   { key: "kickoff_2026",  label: "Kick Off 2026",   path_prefixes: ["/dashboard/kickoff"] },
+  { key: "famdays",       label: "FamDays",         path_prefixes: ["/dashboard/famdays"] },
   { key: "ti_workspace", label: "TI Workspace", path_prefixes: ["/dashboard/ti/workspace"] },
   { key: "ti_dispositivos", label: "TI Dispositivos", path_prefixes: ["/dashboard/ti/dispositivos"] },
   { key: "ti_modulos", label: "TI Modulos por Usuario", path_prefixes: ["/dashboard/ti/modulos"] },
@@ -21,12 +22,17 @@ const MODULE_CATALOG = [
   { key: "comercial_maximos_saldos", label: "Comercial Maximos y Saldos", path_prefixes: ["/dashboard/comercial/delivery-ceilings"] },
   { key: "business_case", label: "Business Case", path_prefixes: ["/dashboard/business-case"] },
   { key: "workspace_compras", label: "Workspace Compras", path_prefixes: ["/dashboard/purchases/workspace"] },
+  { key: "work_management", label: "Work Management", path_prefixes: ["/dashboard/work-management"] },
+  { key: "servicio_cronograma", label: "Servicio Cronograma Tecnico", path_prefixes: ["/dashboard/servicio-tecnico/cronograma"] },
+  { key: "servicio_inspecciones", label: "Servicio Inspecciones de Ambiente", path_prefixes: ["/dashboard/servicio-tecnico/inspecciones"] },
+  { key: "servicio_correctivos", label: "Servicio Correctivos", path_prefixes: ["/dashboard/servicio-tecnico/correctivos"] },
   { key: "servicio_workspace", label: "Servicio Workspace Procedimiento", path_prefixes: ["/dashboard/servicio-tecnico/workspace-procedimiento"] },
+  { key: "servicio_retiros", label: "Servicio Retiros", path_prefixes: ["/dashboard/servicio-tecnico/retiros"] },
   { key: "servicio_mantenimientos", label: "Servicio Mantenimientos", path_prefixes: ["/dashboard/servicio-tecnico/mantenimientos"] },
   { key: "servicio_solicitudes", label: "Servicio Solicitudes", path_prefixes: ["/dashboard/servicio-tecnico/solicitudes"] },
   { key: "servicio_disponibilidad", label: "Servicio Disponibilidad", path_prefixes: ["/dashboard/servicio-tecnico/disponibilidad"] },
   { key: "servicio_capacitaciones", label: "Servicio Capacitaciones", path_prefixes: ["/dashboard/servicio-tecnico/capacitaciones"] },
-  { key: "servicio_equipos", label: "Servicio Equipos", path_prefixes: ["/dashboard/servicio-tecnico/equipos"] },
+  { key: "servicio_equipos", label: "Servicio Equipos", path_prefixes: ["/dashboard/servicio-tecnico/equipos", "/dashboard/equipos"] },
   { key: "servicio_aprobaciones", label: "Servicio Aprobaciones", path_prefixes: ["/dashboard/servicio-tecnico/aprobaciones"] },
   { key: "servicio_aplicaciones", label: "Servicio Aplicaciones", path_prefixes: ["/dashboard/servicio-tecnico/aplicaciones"] },
   { key: "servicio_desinfeccion", label: "Servicio Desinfeccion", path_prefixes: ["/dashboard/servicio-tecnico/desinfeccion"] },
@@ -38,8 +44,16 @@ const MODULE_CATALOG = [
   { key: "calidad", label: "Calidad", path_prefixes: ["/dashboard/calidad"] },
 ];
 
+let ensureSchemaPromise = null;
+let ensureGlobalStatusSchemaPromise = null;
+
 async function ensureSchema() {
-  await db.query(`
+  if (ensureSchemaPromise) {
+    return ensureSchemaPromise;
+  }
+
+  ensureSchemaPromise = (async () => {
+    await db.query(`
     CREATE TABLE IF NOT EXISTS public.user_module_access (
       id BIGSERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
@@ -54,6 +68,9 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_user_module_access_user_id
       ON public.user_module_access(user_id);
   `);
+  })();
+
+  return ensureSchemaPromise;
 }
 
 function sanitizeModuleKey(value) {
@@ -158,7 +175,12 @@ async function isModuleEnabledForUser({ userId, moduleKey }) {
 // ─── Global module status ─────────────────────────────────────────────────────
 
 async function ensureGlobalStatusSchema() {
-  await db.query(`
+  if (ensureGlobalStatusSchemaPromise) {
+    return ensureGlobalStatusSchemaPromise;
+  }
+
+  ensureGlobalStatusSchemaPromise = (async () => {
+    await db.query(`
     CREATE TABLE IF NOT EXISTS module_global_status (
       module_key        TEXT PRIMARY KEY,
       stage             TEXT NOT NULL DEFAULT 'production'
@@ -168,6 +190,9 @@ async function ensureGlobalStatusSchema() {
       updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+  })();
+
+  return ensureGlobalStatusSchemaPromise;
 }
 
 async function listGlobalModuleStatuses() {

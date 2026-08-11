@@ -495,6 +495,11 @@ async function generateAnnualScheduleForTi({
 
 
 module.exports = {
+  normalizeTipo,
+  toUTCDate,
+  dateToISO,
+  addMonthsUtc,
+  formatHumanDate,
   createMantenimiento,
   listMantenimientos,
   getDetail,

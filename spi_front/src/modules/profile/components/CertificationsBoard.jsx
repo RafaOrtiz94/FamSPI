@@ -8,6 +8,7 @@ import {
   FiPlus,
   FiShield,
   FiTrash2,
+  FiUploadCloud,
   FiX,
 } from "react-icons/fi";
 import {
@@ -16,9 +17,18 @@ import {
   downloadUserCertificationsPdf,
   listMyCertifications,
 } from "../../../core/api/userCertificationsApi";
+import {
+  listMyProfileDocuments,
+  uploadMyProfileDocument,
+} from "../../../core/api/userProfileApi";
 import { useAuth } from "../../../core/auth/AuthContext";
+import Modal from "../../../core/ui/components/Modal";
 import { useUI } from "../../../core/ui/UIContext";
 import { formatDateSafe, toDate } from "../../../shared/utils/dateUtils";
+
+const SENESCYT_ACCEPTED_MIME_TYPES = ".pdf,.jpg,.jpeg,.png,.webp";
+const resolveSenescytDocumentUrl = (document) =>
+  document?.drive_url || document?.file_url || document?.url || "";
 
 const QUALIFICATION_TYPE_OPTIONS = [
   {
@@ -235,12 +245,10 @@ const CreateCertificationModal = ({ onClose, onSuccess }) => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-
     if (!formData.title.trim()) {
       showToast("El titulo es obligatorio", "warning");
       return;
     }
-
     try {
       setSaving(true);
       showLoader();
@@ -258,196 +266,204 @@ const CreateCertificationModal = ({ onClose, onSuccess }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 p-4">
-      <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
-          <div>
-            <h3 className="text-xl font-semibold text-slate-900">
-              Nueva credencial profesional
-            </h3>
-            <p className="mt-1 text-sm text-slate-600">
-              Registra titulos o certificaciones en la fuente central del expediente.
-            </p>
+    <Modal open onClose={onClose} maxWidth="max-w-2xl" hideHeader>
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+        <div className="min-w-0">
+          <h3 className="text-base font-bold text-[#1E293B] sm:text-lg">Nueva credencial profesional</h3>
+          <p className="mt-0.5 text-xs text-slate-500">Registra titulos o certificaciones en el expediente central.</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="shrink-0 rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+          aria-label="Cerrar"
+        >
+          <FiX size={18} />
+        </button>
+      </div>
+
+      {/* Body — scrollable */}
+      <form id="cert-form" onSubmit={handleSubmit} className="space-y-5 px-4 py-5 sm:px-6">
+
+        {/* Category selector — chip row on mobile, cards on md+ */}
+        <div className="space-y-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Categoria</p>
+
+          {/* Mobile: compact chip strip */}
+          <div className="flex gap-2 sm:hidden">
+            {QUALIFICATION_TYPE_OPTIONS.map((option) => {
+              const Icon = option.icon;
+              const isActive = formData.qualificationType === option.value;
+              const accent = ACCENT_STYLES[option.accent];
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => updateField("qualificationType", option.value)}
+                  className={`flex flex-1 flex-col items-center gap-1.5 rounded-[16px] border px-2 py-3 text-center transition-all duration-150 active:scale-[0.97] ${
+                    isActive ? `${accent.border} ${accent.soft}` : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <Icon size={16} />
+                  <span className="text-[10px] font-semibold leading-tight">{option.shortLabel}</span>
+                </button>
+              );
+            })}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-2xl border border-slate-200 p-2 text-slate-500 transition-all duration-150 ease-out hover:bg-slate-50 active:scale-[0.97]"
-            aria-label="Cerrar modal de credenciales"
-          >
-            <FiX size={18} />
-          </button>
+
+          {/* Tablet+: full cards */}
+          <div className="hidden gap-3 sm:grid sm:grid-cols-3">
+            {QUALIFICATION_TYPE_OPTIONS.map((option) => {
+              const Icon = option.icon;
+              const isActive = formData.qualificationType === option.value;
+              const accent = ACCENT_STYLES[option.accent];
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => updateField("qualificationType", option.value)}
+                  className={`rounded-[16px] border p-4 text-left transition-all duration-150 active:scale-[0.97] ${
+                    isActive
+                      ? `${accent.border} ${accent.soft} shadow-[0_2px_10px_rgba(0,0,0,0.06)]`
+                      : "border-slate-200 bg-white hover:bg-slate-50"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`rounded-xl p-2 ${accent.icon}`}>
+                      <Icon size={16} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{option.label}</p>
+                      <p className="mt-0.5 text-[11px] text-slate-500">{option.shortLabel}</p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {activeTypeConfig.helper && (
+            <p className="text-xs text-slate-500">{activeTypeConfig.helper}</p>
+          )}
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5 p-5">
-          <div className="space-y-3">
-            <label className="block text-xs font-medium uppercase tracking-wide text-slate-500">
-              Categoria
+        {/* Fields */}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">
+              Titulo o nombre de la credencial <span className="text-[#DC2626]">*</span>
             </label>
-            <div className="grid gap-3 md:grid-cols-3">
-              {QUALIFICATION_TYPE_OPTIONS.map((option) => {
-                const Icon = option.icon;
-                const isActive = formData.qualificationType === option.value;
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => updateField("qualificationType", option.value)}
-                    className={`rounded-2xl border p-4 text-left transition-all duration-150 ease-out active:scale-[0.97] ${
-                      isActive
-                        ? "border-blue-200 bg-blue-50 shadow-[0_2px_10px_rgba(0,0,0,0.06)]"
-                        : "border-slate-200 bg-white hover:bg-slate-50"
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className={`rounded-2xl p-2 ${ACCENT_STYLES[option.accent].icon}`}>
-                        <Icon size={18} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">
-                          {option.label}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {option.shortLabel}
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            <p className="text-xs text-slate-500">{activeTypeConfig.helper}</p>
+            <input
+              type="text"
+              required
+              value={formData.title}
+              onChange={(e) => updateField("title", e.target.value)}
+              className={INPUT_CLASS}
+              placeholder={
+                formData.qualificationType === "certification"
+                  ? "Ej. Scrum Master, Curso de Power BI, Diplomado en Finanzas"
+                  : "Ej. Ingenieria Comercial, Maestria en Seguridad y Salud"
+              }
+            />
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="md:col-span-2">
-              <label className="mb-1 block text-sm font-medium text-slate-700">
-                Titulo o nombre de la credencial
-              </label>
-              <input
-                type="text"
-                value={formData.title}
-                onChange={(event) => updateField("title", event.target.value)}
-                className={INPUT_CLASS}
-                placeholder={
-                  formData.qualificationType === "certification"
-                    ? "Ej. Scrum Master, Curso de Power BI, Diplomado en Finanzas"
-                    : "Ej. Ingenieria Comercial, Maestria en Seguridad y Salud"
-                }
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
-                Institucion
-              </label>
-              <input
-                type="text"
-                value={formData.institution}
-                onChange={(event) => updateField("institution", event.target.value)}
-                className={INPUT_CLASS}
-                placeholder="Universidad, instituto o entidad emisora"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
-                Emisor visible
-              </label>
-              <input
-                type="text"
-                value={formData.issuer}
-                onChange={(event) => updateField("issuer", event.target.value)}
-                className={INPUT_CLASS}
-                placeholder="Opcional si coincide con la institucion"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
-                Fecha de emision
-              </label>
-              <input
-                type="date"
-                value={formData.issueDate}
-                onChange={(event) => updateField("issueDate", event.target.value)}
-                className={INPUT_CLASS}
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
-                Fecha de expiracion
-              </label>
-              <input
-                type="date"
-                value={formData.expiryDate}
-                onChange={(event) => updateField("expiryDate", event.target.value)}
-                className={INPUT_CLASS}
-              />
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="mb-1 block text-sm font-medium text-slate-700">
-                Numero de registro o folio
-              </label>
-              <input
-                type="text"
-                value={formData.registrationNumber}
-                onChange={(event) => updateField("registrationNumber", event.target.value)}
-                className={INPUT_CLASS}
-                placeholder="Opcional"
-              />
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="mb-1 block text-sm font-medium text-slate-700">
-                Observacion
-              </label>
-              <textarea
-                rows={3}
-                value={formData.description}
-                onChange={(event) => updateField("description", event.target.value)}
-                className={`${INPUT_CLASS} resize-none`}
-                placeholder="Detalle relevante para Talento Humano"
-              />
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="mb-1 block text-sm font-medium text-slate-700">
-                Archivo de respaldo
-              </label>
-              <input
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png,.webp"
-                onChange={(event) => setFile(event.target.files?.[0] || null)}
-                className="w-full text-sm text-slate-500 file:mr-4 file:rounded-2xl file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:font-medium file:text-blue-700 hover:file:bg-blue-100"
-              />
-              <p className="mt-2 text-xs text-slate-500">
-                Formatos permitidos: PDF, JPG, PNG, WEBP.
-              </p>
-            </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">Institucion</label>
+            <input
+              type="text"
+              value={formData.institution}
+              onChange={(e) => updateField("institution", e.target.value)}
+              className={INPUT_CLASS}
+              placeholder="Universidad, instituto o entidad emisora"
+            />
           </div>
 
-          <div className="flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-all duration-150 ease-out hover:bg-slate-50 active:scale-[0.97]"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-2xl bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition-all duration-150 ease-out hover:bg-blue-700 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {saving ? "Guardando..." : "Guardar credencial"}
-            </button>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">Emisor visible</label>
+            <input
+              type="text"
+              value={formData.issuer}
+              onChange={(e) => updateField("issuer", e.target.value)}
+              className={INPUT_CLASS}
+              placeholder="Opcional si coincide con la institucion"
+            />
           </div>
-        </form>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">Fecha de emision</label>
+            <input
+              type="date"
+              value={formData.issueDate}
+              onChange={(e) => updateField("issueDate", e.target.value)}
+              className={INPUT_CLASS}
+            />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">Fecha de expiracion</label>
+            <input
+              type="date"
+              value={formData.expiryDate}
+              onChange={(e) => updateField("expiryDate", e.target.value)}
+              className={INPUT_CLASS}
+            />
+          </div>
+
+          <div className="sm:col-span-2">
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">Numero de registro o folio</label>
+            <input
+              type="text"
+              value={formData.registrationNumber}
+              onChange={(e) => updateField("registrationNumber", e.target.value)}
+              className={INPUT_CLASS}
+              placeholder="Opcional"
+            />
+          </div>
+
+          <div className="sm:col-span-2">
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">Observacion</label>
+            <textarea
+              rows={3}
+              value={formData.description}
+              onChange={(e) => updateField("description", e.target.value)}
+              className={`${INPUT_CLASS} resize-none`}
+              placeholder="Detalle relevante para Talento Humano"
+            />
+          </div>
+
+          <div className="sm:col-span-2">
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">Archivo de respaldo</label>
+            <input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              className="w-full text-sm text-slate-500 file:mr-3 file:rounded-[16px] file:border-0 file:bg-[#2563EB]/10 file:px-4 file:py-2 file:text-xs file:font-semibold file:text-[#2563EB] hover:file:bg-[#2563EB]/20"
+            />
+            <p className="mt-1.5 text-xs text-slate-400">PDF, JPG, PNG o WEBP.</p>
+          </div>
+        </div>
+      </form>
+
+      {/* Footer — sticky */}
+      <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-white px-4 py-3.5 sm:flex-row sm:justify-end sm:px-6">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-[16px] border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 active:scale-[0.97]"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          form="cert-form"
+          disabled={saving}
+          className="rounded-[16px] bg-[#2563EB] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition-colors hover:bg-[#1D4ED8] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {saving ? "Guardando..." : "Guardar credencial"}
+        </button>
       </div>
-    </div>
+    </Modal>
   );
 };
 
@@ -461,96 +477,80 @@ const ViewCertificationModal = ({ certification, onClose, onDelete }) => {
   const documentUrl = resolveCertificationDocumentUrl(certification);
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 p-4">
-      <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
-          <div className="flex items-start gap-3">
-            <div className={`rounded-2xl p-3 ${accent.icon}`}>
-              <Icon size={20} />
-            </div>
-            <div>
-              <h3 className="text-xl font-semibold text-slate-900">
-                {certification?.title || "Credencial"}
-              </h3>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${accent.soft}`}>
-                  {config.label}
-                </span>
-                <span className={`rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold ${status.color}`}>
-                  {status.label}
-                </span>
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-2xl border border-slate-200 p-2 text-slate-500 transition-all duration-150 ease-out hover:bg-slate-50 active:scale-[0.97]"
-            aria-label="Cerrar detalle de credencial"
-          >
-            <FiX size={18} />
-          </button>
+    <Modal open onClose={onClose} maxWidth="max-w-xl" hideHeader>
+      {/* Header */}
+      <div className="flex items-start gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+        <div className={`shrink-0 rounded-xl p-2.5 ${accent.icon}`}>
+          <Icon size={18} />
         </div>
-
-        <div className="space-y-4 p-5">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <p className="text-xs text-slate-500">Institucion</p>
-              <p className="mt-1 text-sm font-medium text-slate-900">
-                {metadata?.institution || certification?.issuer || "No registrada"}
-              </p>
-            </div>
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <p className="text-xs text-slate-500">Registro / folio</p>
-              <p className="mt-1 text-sm font-medium text-slate-900">
-                {metadata?.registration_number || "No registrado"}
-              </p>
-            </div>
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <p className="text-xs text-slate-500">Fecha de emision</p>
-              <p className="mt-1 text-sm font-medium text-slate-900">
-                {formatDateSafe(certification?.issue_date) || "No registrada"}
-              </p>
-            </div>
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <p className="text-xs text-slate-500">Fecha de expiracion</p>
-              <p className="mt-1 text-sm font-medium text-slate-900">
-                {formatDateSafe(certification?.expiry_date) || "Sin caducidad"}
-              </p>
-            </div>
-          </div>
-
-          {certification?.description ? (
-            <div className="rounded-2xl border border-slate-200 bg-white p-4">
-              <p className="text-xs text-slate-500">Observacion</p>
-              <p className="mt-2 text-sm text-slate-700">{certification.description}</p>
-            </div>
-          ) : null}
-
-          <div className="flex flex-col gap-3 pt-2 sm:flex-row">
-            {documentUrl ? (
-              <a
-                href={documentUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-all duration-150 ease-out hover:bg-blue-700 active:scale-[0.97]"
-              >
-                <FiEye size={16} />
-                Ver respaldo
-              </a>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => onDelete(certification?.id)}
-              className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-600 transition-all duration-150 ease-out hover:bg-red-100 active:scale-[0.97]"
-            >
-              <FiTrash2 size={16} />
-              Eliminar
-            </button>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-base font-bold text-[#1E293B] sm:text-lg leading-snug">
+            {certification?.title || "Credencial"}
+          </h3>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${accent.soft}`}>
+              {config.label}
+            </span>
+            <span className={`rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold ${status.color}`}>
+              {status.label}
+            </span>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="shrink-0 rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+          aria-label="Cerrar"
+        >
+          <FiX size={18} />
+        </button>
       </div>
-    </div>
+
+      {/* Body */}
+      <div className="space-y-4 px-4 py-5 sm:px-6">
+        <div className="grid gap-2.5 sm:grid-cols-2">
+          {[
+            { label: "Institucion", value: metadata?.institution || certification?.issuer || "No registrada" },
+            { label: "Registro / folio", value: metadata?.registration_number || "No registrado" },
+            { label: "Emision", value: formatDateSafe(certification?.issue_date) || "No registrada" },
+            { label: "Expiracion", value: formatDateSafe(certification?.expiry_date) || "Sin caducidad" },
+          ].map(({ label, value }) => (
+            <div key={label} className="rounded-[16px] bg-slate-50 px-4 py-3">
+              <p className="text-[11px] uppercase tracking-wider text-slate-400">{label}</p>
+              <p className="mt-1 text-sm font-medium text-slate-900">{value}</p>
+            </div>
+          ))}
+        </div>
+
+        {certification?.description && (
+          <div className="rounded-[16px] border border-slate-200 bg-white px-4 py-3">
+            <p className="text-[11px] uppercase tracking-wider text-slate-400">Observacion</p>
+            <p className="mt-1 text-sm text-slate-700">{certification.description}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-white px-4 py-3.5 sm:flex-row sm:px-6">
+        <button
+          type="button"
+          onClick={() => onDelete(certification?.id)}
+          className="inline-flex flex-1 items-center justify-center gap-2 rounded-[16px] border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-[#DC2626] transition-colors hover:bg-red-100 active:scale-[0.97]"
+        >
+          <FiTrash2 size={14} /> Eliminar
+        </button>
+        {documentUrl && (
+          <a
+            href={documentUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-[16px] bg-[#2563EB] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1D4ED8] active:scale-[0.97]"
+          >
+            <FiEye size={14} /> Ver respaldo
+          </a>
+        )}
+      </div>
+    </Modal>
   );
 };
 
@@ -632,6 +632,119 @@ const CredentialCard = ({ certification, onOpen, onDelete }) => {
           Eliminar
         </button>
       </div>
+    </div>
+  );
+};
+
+const SenescytRecordCard = () => {
+  const { showToast, showLoader, hideLoader } = useUI();
+  const [senescytDoc, setSenescytDoc] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+
+  const loadDocument = async () => {
+    try {
+      setLoading(true);
+      const documents = await listMyProfileDocuments();
+      const found = (Array.isArray(documents) ? documents : []).find(
+        (doc) =>
+          String(doc?.canonical_doc_type || doc?.doc_type || "")
+            .trim()
+            .toUpperCase() === "SENESCYT_RECORD",
+      );
+      setSenescytDoc(found || null);
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudo cargar el registro SENESCYT", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDocument();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleUpload = async (file) => {
+    if (!file) return;
+    try {
+      setUploading(true);
+      showLoader();
+      const response = await uploadMyProfileDocument("SENESCYT_RECORD", file);
+      const documents = Array.isArray(response?.documents) ? response.documents : [];
+      const found = documents.find(
+        (doc) =>
+          String(doc?.canonical_doc_type || doc?.doc_type || "")
+            .trim()
+            .toUpperCase() === "SENESCYT_RECORD",
+      );
+      setSenescytDoc(found || null);
+      showToast("Registro SENESCYT cargado correctamente", "success");
+    } catch (error) {
+      console.error(error);
+      showToast(error?.message || "No se pudo subir el registro SENESCYT", "error");
+    } finally {
+      setUploading(false);
+      hideLoader();
+    }
+  };
+
+  const documentUrl = resolveSenescytDocumentUrl(senescytDoc);
+
+  return (
+    <div className={CARD_CLASS}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <div className="rounded-2xl bg-indigo-100 p-3 text-indigo-700">
+            <FiShield size={18} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-slate-900">Registro SENESCYT</p>
+            <p className="text-xs text-slate-500">Opcional</p>
+          </div>
+        </div>
+        <span
+          className={`rounded-full px-2 py-1 text-[10px] font-semibold ${
+            senescytDoc ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+          }`}
+        >
+          {loading ? "Cargando..." : senescytDoc ? "Cargado" : "Pendiente"}
+        </span>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition-all duration-150 ease-out hover:bg-blue-700 active:scale-[0.97]">
+          <FiUploadCloud size={16} />
+          {uploading ? "Subiendo..." : senescytDoc ? "Reemplazar" : "Subir"}
+          <input
+            type="file"
+            accept={SENESCYT_ACCEPTED_MIME_TYPES}
+            className="hidden"
+            disabled={uploading}
+            onChange={(event) => {
+              const nextFile = event.target.files?.[0];
+              if (nextFile) handleUpload(nextFile);
+              event.target.value = "";
+            }}
+          />
+        </label>
+
+        {documentUrl ? (
+          <a
+            href={documentUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-all duration-150 ease-out hover:bg-slate-50 active:scale-[0.97]"
+          >
+            <FiEye size={16} />
+            Ver
+          </a>
+        ) : null}
+      </div>
+
+      {senescytDoc?.file_name ? (
+        <p className="mt-3 truncate text-xs text-slate-500">{senescytDoc.file_name}</p>
+      ) : null}
     </div>
   );
 };
@@ -742,7 +855,7 @@ const CertificationsBoard = () => {
             </div>
             <div>
               <h3 className="text-lg font-semibold text-slate-900">
-                Credenciales profesionales
+                Títulos y certificaciones
               </h3>
               <p className="mt-1 text-sm text-slate-600">
                 Registra títulos y certificaciones en una estructura compatible con el
@@ -794,6 +907,8 @@ const CertificationsBoard = () => {
           </div>
         )}
       </div>
+
+      <SenescytRecordCard />
 
       {loading ? (
         <div className={`${CARD_CLASS} text-center text-sm text-slate-500`}>

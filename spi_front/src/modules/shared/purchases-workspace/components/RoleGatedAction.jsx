@@ -1,5 +1,3 @@
-import React from 'react';
-
 const normalizeRoles = (roles) => {
   const raw = Array.isArray(roles) ? roles : [roles];
   return raw

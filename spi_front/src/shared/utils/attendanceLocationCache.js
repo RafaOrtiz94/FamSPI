@@ -9,6 +9,12 @@ const QUICK_STAGE_TIMEOUT_MS = 2200;
 // Precise stage: single attempt capped at 5s (was 7.5s × 2 attempts + 900ms gap = up to 16s)
 const PRECISE_STAGE_TIMEOUT_MS = 5000;
 const STRATEGY_GUARD_TIMEOUT_MS = 12000;
+// Sin internet el celular no puede descargar el almanaque de satelites
+// (A-GPS), asi que un primer fix "en frio" puede tardar 30-60s+. Las demas
+// estrategias cortan a los 4-8s porque con A-GPS eso alcanza; sin el, no.
+// Este intento es el unico realmente largo y solo se alcanza si todo lo
+// demas (incluidos los caches) ya fallo -- no afecta el camino rapido normal.
+const COLD_GPS_TIMEOUT_MS = 45000;
 
 const PRECISE_OPTS = Object.freeze({
   desiredAccuracyMeters: 40,
@@ -179,14 +185,20 @@ export const getLocationForAction = async ({ forceRefresh = false } = {}) => {
     async () => getBrowserFallback({ highAccuracy: true, timeoutMs: 8000 }),
     async () => getBrowserFallback({ highAccuracy: false, timeoutMs: 7000 }),
 
-    // Strategy 5: extended cache (up to 10 min old) — last resort.
+    // Strategy 5: extended cache (up to 10 min old).
     async () => readCachedLocationExtended(),
+
+    // Strategy 6: cold GPS fix, sin asistencia de red — ultimo recurso real
+    // para cuando no hay internet y tampoco hay ningun cache utilizable.
+    { run: () => getBrowserLocation({ highAccuracy: true, timeoutMs: COLD_GPS_TIMEOUT_MS, maximumAgeMs: 0 }), guardMs: COLD_GPS_TIMEOUT_MS + 5000 },
   ];
 
   let lastError = null;
-  for (const strategy of strategies) {
+  for (const entry of strategies) {
+    const strategy = typeof entry === "function" ? entry : entry.run;
+    const guardMs = typeof entry === "function" ? STRATEGY_GUARD_TIMEOUT_MS : entry.guardMs;
     try {
-      const candidate = await withTimeout(strategy(), STRATEGY_GUARD_TIMEOUT_MS);
+      const candidate = await withTimeout(strategy(), guardMs);
       const lat = Number(candidate?.latitude);
       const lng = Number(candidate?.longitude);
       if (!candidate || !isValidCoord(lat, lng)) {

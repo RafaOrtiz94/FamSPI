@@ -40,6 +40,7 @@ function safe(text) {
     .replace(/[–—]/g, "-")   // em/en dash -> hyphen
     .replace(/[‘’]/g, "'")   // curly single quotes
     .replace(/[“”]/g, '"')   // curly double quotes
+    // eslint-disable-next-line no-control-regex
     .replace(/[^\x00-\xFF]/g, "?");    // cualquier otro fuera de Latin-1
 }
 

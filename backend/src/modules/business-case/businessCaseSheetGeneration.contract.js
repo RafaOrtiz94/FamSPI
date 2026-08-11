@@ -19,6 +19,8 @@ const generationRequestSchema = Joi.object({
         observaciones: Joi.string().allow("").optional(),
         cantidad: Joi.number().min(0).required(),
         precio: Joi.number().min(0).required(),
+        precio_operativo: Joi.alternatives().try(Joi.number().min(0).optional(), Joi.allow(null)),
+        precio_financiero: Joi.alternatives().try(Joi.number().min(0).optional(), Joi.allow(null)),
         descripcion: Joi.string().allow("").optional(),
       }).required(),
     )

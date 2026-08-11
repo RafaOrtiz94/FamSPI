@@ -17,7 +17,6 @@ const { sendAndArchive } = require("../../utils/emailArchive");
 const { renderProviderEmail } = require("../../utils/emailTemplate");
 const { generateDeliveryActPdf } = require("./privatePurchases.acta");
 const businessCaseService = require('../business-case/businessCase.service');
-const { enqueuePurchaseStatusChangedEvent } = require("../integrations/hooks");
 const {
   SITE_INSPECTION_RESULT,
   SITE_INSPECTION_STATUS,
@@ -48,6 +47,7 @@ const {
 const {
   createRequest: createServiceRequest,
   addDriveAttachment,
+  markRequestCompleted,
 } = require("../requests/requests.service");
 
 const driveLink = (fileId) => (fileId ? `https://drive.google.com/file/d/${fileId}/view` : null);
@@ -93,7 +93,7 @@ const PRIVATE_CHECKLIST_ITEM_LABELS = {
 const formatEquipmentList = (equipment = []) => {
   return equipment
     .map((item) => {
-      const typeLabel = item.type === "cu" ? " (CU)" : item.type === "new_import" ? " (Nuevo para importaciÃ³n)" : item.type === "installed_client" ? " (Instalado en cliente)" : " (Nuevo disponible)";
+      const typeLabel = item.type === "cu" ? " (CU)" : item.type === "new_import" ? " (Nuevo para importaciÃ³n)" : item.type === "installed_client" ? " (Instalado en cliente)" : " (Nuevo)";
       const name = item.name || item.sku || "Equipo";
       return `- ${name}${typeLabel}`;
     })
@@ -221,20 +221,20 @@ class PrivatePurchasesService {
     if (!Array.isArray(acceptedItems) || acceptedItems.length === 0) return;
 
     const folderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
+    const reservationClientName = purchase.client_snapshot?.commercial_name || purchase.client_snapshot?.name || "Cliente pendiente";
     const reservationHtml = renderProviderEmail({
       title: "Confirmación de reserva de equipos",
       bodyHtml: `
-        <p>Solicitamos reservar los equipos cotizados para la solicitud <strong>#${purchaseId}</strong>.</p>
+        <p>Solicitamos reservar los equipos cotizados para ${reservationClientName}.</p>
         <p>Confirmamos reserva para:</p>
         ${formatEquipmentList(acceptedItems)}
       `,
       user,
-      requestId: purchaseId,
     });
     const { fileId: reservationFileId, threadId, lastMessageId } = await sendAndArchive({
       user,
       to: purchase.provider_email,
-      subject: purchase.provider_email_thread_id ? `Re: Solicitud privada #${purchaseId}` : `Solicitud privada #${purchaseId}`,
+      subject: `${purchase.provider_email_thread_id ? "Re: " : ""}Solicitud de disponibilidad - ${reservationClientName}`,
       html: reservationHtml,
       folderId,
       prefix: 'reserva',
@@ -1125,11 +1125,18 @@ class PrivatePurchasesService {
         logger.error('[PRIVATE_PURCHASE] Error enviando notificacià¸£à¸“n de creacià¸£à¸“n:', error);
       }
 
-      // Notificar a backoffice (sÃ­ncrono para Cloud Run)
+      // Notificar a backoffice y jefe_comercial (cualquiera de los dos puede
+      // solicitar disponibilidad a ACP -- ver Paso 1 de PrivateFlowTab.jsx)
       try {
-        const recipients = await PrivatePurchaseStateMachine._getUsersByRole('backoffice_comercial');
+        const recipientGroups = await Promise.all(
+          ['backoffice_comercial', 'jefe_comercial', 'jefe_de_comercial'].map((role) =>
+            PrivatePurchaseStateMachine._getUsersByRole(role)),
+        );
+        const recipients = Array.from(
+          new Map(recipientGroups.flat().map((recipient) => [recipient.id, recipient])).values(),
+        );
         if (!recipients.length) {
-          logger.info({ purchaseId }, '[PRIVATE_PURCHASE] Sin destinatarios backoffice para notificaciÃ³n inicial');
+          logger.info({ purchaseId }, '[PRIVATE_PURCHASE] Sin destinatarios backoffice/jefe_comercial para notificaciÃ³n inicial');
         }
         const payload = {
           purchase_id: purchaseId,
@@ -1799,14 +1806,6 @@ class PrivatePurchasesService {
       user_email: user.email
     });
 
-    // REQ-SPI-013: no await externo en el request path.
-    enqueuePurchaseStatusChangedEvent({
-      purchaseType: "private_purchase",
-      id: purchaseId,
-      status: toState,
-      businessCaseId: null,
-    });
-
     return transitionResult;
   }
 
@@ -1954,21 +1953,8 @@ class PrivatePurchasesService {
       'Solicitar fechas de entrega'
     );
 
-    const purchase = rows[0];
-    if (purchase.created_by) {
-      await notificationManager.sendNotification({
-        userId: purchase.created_by,
-        template: 'private_purchase_delivery_date_requested',
-        data: {
-          client_name: purchase.client_snapshot?.commercial_name || purchase.client_snapshot?.name || 'Cliente',
-          purchase_id: purchaseId
-        },
-        source: 'private_purchase.delivery_date_requested',
-        email: true,
-        chat: false
-      });
-    }
-
+    // El creador ya recibe aviso de este cambio de estado via el
+    // private_purchase_state_transition generico que dispara transitionState.
     return { ok: true };
   }
 
@@ -2575,13 +2561,35 @@ class PrivatePurchasesService {
     return { forwarded: true };
   }
 
-  async startAvailabilityRequest(purchaseId, user, providerEmail, notes = '') {
+  // CC fija en todo correo de disponibilidad, sin importar quien lo envie.
+  static AVAILABILITY_FIXED_CC = 'pamela.altamirano@fam-project.com';
+
+  // Acepta string ("a@x.com, b@y.com") o array -- normaliza a array de
+  // correos unicos y validos (formato basico), sin depender del formato
+  // que use el caller (backend viejo mandaba un solo string).
+  _normalizeEmailList(value) {
+    const raw = Array.isArray(value) ? value : String(value || '').split(',');
+    const seen = new Set();
+    const out = [];
+    for (const item of raw) {
+      const email = String(item || '').trim();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue;
+      const key = email.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(email);
+    }
+    return out;
+  }
+
+  async startAvailabilityRequest(purchaseId, user, providerEmails, notes = '', ccEmails = []) {
+    const toEmails = this._normalizeEmailList(providerEmails);
     logger.debug('[FLOW_PRIVADA][BE][ACP][EMAIL][START]', {
       requestId: purchaseId,
       userId: user?.id,
-      providerEmail
+      toEmails
     });
-    if (!providerEmail) {
+    if (!toEmails.length) {
       const error = new Error('El correo del proveedor es obligatorio');
       error.status = 400;
       throw error;
@@ -2619,42 +2627,63 @@ class PrivatePurchasesService {
       throw error;
     }
 
-    const equipmentList = formatEquipmentList(equipment);
-    const html = renderProviderEmail({
-      title: "Solicitud de disponibilidad de equipos",
-      bodyHtml: `
-        <p>Nos gustaría confirmar la disponibilidad de los siguientes equipos para la solicitud <strong>#${purchaseId}</strong>:</p>
-        <p>${equipmentList}</p>
-        ${notes ? `<p><strong>Notas:</strong> ${notes}</p>` : purchase.notes ? `<p><strong>Notas:</strong> ${purchase.notes}</p>` : ""}
-      `,
-      user,
-      requestId: purchaseId,
-    });
+    // pamela.altamirano siempre va en copia, sin duplicar si ya la pusieron
+    // explicitamente y sin duplicar contra los destinatarios principales.
+    const ccList = this._normalizeEmailList([
+      ...this._normalizeEmailList(ccEmails),
+      PrivatePurchasesService.AVAILABILITY_FIXED_CC,
+    ]).filter((email) => !toEmails.some((to) => to.toLowerCase() === email.toLowerCase()));
 
-    const folderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
     const clientName =
       purchase.client_snapshot?.commercial_name ||
       purchase.client_snapshot?.name ||
       'Cliente';
+    const equipmentNames = equipment.map((item) => item.name || item.sku || 'Equipo');
+    const isPlural = equipment.length > 1;
+    const equipmentLines = equipment
+      .map((item) => {
+        const typeLabel = item.type === 'cu' ? 'CU' : item.type === 'new_import' ? 'Nuevo para importación' : item.type === 'installed_client' ? 'Instalado en cliente' : 'Nuevo';
+        const name = item.name || item.sku || 'Equipo';
+        return `<p>${name}&nbsp;&nbsp;&nbsp;${typeLabel}</p>`;
+      })
+      .join('');
+    const observation = notes || purchase.notes || '';
+
+    const html = renderProviderEmail({
+      title: `Disponibilidad de Equipo ${equipmentNames.join(', ')}`,
+      greeting: 'Estimados,',
+      bodyHtml: `
+        <p>Reciban un cordial saludo</p>
+        <p>Por medio de la presente solicito su gentil ayuda con la disponibilidad de${isPlural ? ' los equipos' : 'l equipo'}.</p>
+        ${equipmentLines}
+        ${observation ? `<p><strong>Observación</strong></p><p>${observation}</p>` : ''}
+        <p>Cualquier novedad me quedo al pendiente</p>
+      `,
+      user,
+    });
+
+    const folderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
 
     const { fileId: emailFileId, threadId, lastMessageId } = await sendAndArchive({
       user,
-      to: providerEmail,
-      subject: `Solicitud privada #${purchaseId}`,
+      to: toEmails,
+      cc: ccList,
+      subject: `Disponibilidad de Equipo ${equipmentNames.join(', ')}`,
       html,
       folderId,
       prefix: 'disponibilidad',
       request: {
         id: purchaseId,
         client_name: clientName,
-        provider_email: providerEmail,
+        provider_email: toEmails.join(', '),
         equipment,
         created_at: purchase.created_at,
-        notes: notes || purchase.notes
+        notes: observation
       },
       actionLabel: 'Informe de disponibilidad de equipos'
     });
 
+    const providerEmailValue = toEmails.join(', ');
     const { rows: updatedRows } = await db.query(
       `UPDATE private_purchase_requests
           SET provider_email = $1,
@@ -2666,12 +2695,13 @@ class PrivatePurchasesService {
               updated_at = NOW()
         WHERE id = $4
         RETURNING *`,
-      [providerEmail, notes || null, emailFileId, purchaseId, threadId, lastMessageId]
+      [providerEmailValue, notes || null, emailFileId, purchaseId, threadId, lastMessageId]
     );
 
     logger.debug('[FLOW_PRIVADA][BE][ACP][EMAIL][SUCCESS]', {
       requestId: purchaseId,
-      providerEmail
+      toEmails,
+      ccList
     });
     return updatedRows[0];
   }
@@ -3167,29 +3197,28 @@ class PrivatePurchasesService {
     const resolvedProviderEmail = providerEmail || purchase.provider_email || null;
 
     if (viaEmail) {
+      const clientName =
+        purchase.client_snapshot?.commercial_name ||
+        purchase.client_snapshot?.name ||
+        'Cliente';
       const equipmentList = formatEquipmentList(itemsForProforma);
       const html = renderProviderEmail({
         title: "Solicitud de proforma",
         bodyHtml: `
-          <p>Solicitamos por favor proforma para los siguientes equipos de la solicitud <strong>#${purchaseId}</strong>:</p>
+          <p>Solicitamos por favor proforma para los siguientes equipos de ${clientName}:</p>
           <p>${equipmentList}</p>
           ${notes ? `<p><strong>Notas:</strong> ${notes}</p>` : ''}
           <p>Quedamos atentos a su respuesta.</p>
         `,
         user,
-        requestId: purchaseId,
       });
 
       const folderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
-      const clientName =
-        purchase.client_snapshot?.commercial_name ||
-        purchase.client_snapshot?.name ||
-        'Cliente';
 
       const sendResult = await sendAndArchive({
         user,
         to: providerEmail,
-        subject: purchase.provider_email_thread_id ? `Re: Solicitud privada #${purchaseId}` : `Solicitud privada #${purchaseId}`,
+        subject: `${purchase.provider_email_thread_id ? "Re: " : ""}Solicitud de proforma - ${clientName}`,
         html,
         folderId,
         prefix: 'solicitud_proforma',
@@ -3783,8 +3812,15 @@ class PrivatePurchasesService {
       throw new Error('Solicitud no encontrada');
     }
 
-    // Transicion a fechas establecidas
-    await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.DELIVERY_DATES_SUBMITTED, user, 'Fechas de entrega establecidas');
+    // Transicion a fechas establecidas. El motivo queda con las fechas reales
+    // para que el aviso a jefe_logistica (generico, via transitionState) sea util.
+    const deliveryLabel = `${startDate?.toLocaleDateString('es-ES')} - ${endDate?.toLocaleDateString('es-ES')}`;
+    await this.transitionState(
+      purchaseId,
+      PRIVATE_PURCHASE_STATES.DELIVERY_DATES_SUBMITTED,
+      user,
+      `Fechas de entrega establecidas: ${deliveryLabel}`,
+    );
 
     // Crear evento en calendario
     const purchase = rows[0];
@@ -3827,29 +3863,6 @@ class PrivatePurchasesService {
 
     const result = rows[0];
     result.calendar = calendarStatus;
-
-    // Notificacion de fechas establecidas (sÃ­ncrona para Cloud Run)
-    try {
-      const logisticsUsers = await this._getUsersByRole('jefe_logistica');
-      const deliveryLabel = `${startDate?.toLocaleDateString('es-ES')} - ${endDate?.toLocaleDateString('es-ES')}`;
-
-      for (const recipient of logisticsUsers) {
-        await notificationManager.sendNotification({
-          userId: recipient.id,
-          template: 'private_purchase_delivery_date_set',
-          data: {
-            client_name: clientData.name || 'Cliente',
-            delivery_dates: deliveryLabel,
-            purchase_id: purchaseId
-          },
-          source: 'private_purchase.delivery_dates',
-          email: true,
-          chat: true
-        });
-      }
-    } catch (error) {
-      logger.warn('Error enviando notificacion de fechas entrega:', error);
-    }
 
     return result;
   }
@@ -3901,30 +3914,10 @@ class PrivatePurchasesService {
       throw new Error('Solicitud no encontrada');
     }
 
-    // Transicià¸£à¸“n a listo para entrega
+    // Transicion a listo para entrega. jefe_logistica ya recibe aviso via el
+    // private_purchase_state_transition generico que dispara DISPATCH_READY
+    // (antes se notificaba por error a quien ejecuta esta accion, no a logistica).
     await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.DISPATCH_READY, user, 'Listo para entrega final');
-
-    // Notificacià¸£à¸“n
-    const purchase = rows[0];
-    const clientData = purchase.client_snapshot || {};
-
-    setImmediate(async () => {
-      try {
-        await notificationManager.sendNotification({
-          userId: user.id,
-          template: 'private_purchase_ready_for_delivery',
-          data: {
-            client_name: clientData.name || 'Cliente',
-            purchase_id: purchaseId
-          },
-          source: 'private_purchase.ready_for_delivery',
-          email: true,
-          chat: true
-        });
-      } catch (error) {
-        logger.warn('Error enviando notificacià¸£à¸“n listo para entrega:', error);
-      }
-    });
 
     return rows[0];
   }
@@ -4742,6 +4735,11 @@ class PrivatePurchasesService {
       anotaciones:             accesorios || "Inspección de ambiente generada desde compra privada",
       accesorios,
       observaciones,
+      // Fijo por origen (no es eleccion del usuario), igual que en compra
+      // publica: la inspeccion de compras es operativa. "origen" permite a
+      // la bandeja "Independientes" de Solicitudes excluir esta fila.
+      tipo_inspeccion: "normal",
+      origen: "compras",
     };
   }
 
@@ -4952,7 +4950,7 @@ class PrivatePurchasesService {
       purchaseId,
       updatedRows[0],
       user,
-      "Se creÃ³ la inspecciÃ³n de ambiente. Comercial debe coordinar fecha con Jefe TÃ©cnico/TÃ©cnico.",
+      "Se creÃ³ la inspecciÃ³n de ambiente. Comercial debe coordinar fecha con Jefe de Servicio.",
     );
 
     return updatedRows[0];
@@ -5521,6 +5519,12 @@ class PrivatePurchasesService {
       });
     } else if (normalizedResult === SITE_INSPECTION_RESULT.COMPLIANT) {
       await this._closePrivateReinspectionTechnicalActivity(purchaseId);
+      if (updated?.inspection_request_id) {
+        markRequestCompleted(updated.inspection_request_id, {
+          actorUser: user,
+          resultMeta: { source: "private_purchase_site_inspection", result: normalizedResult },
+        }).catch((err) => logger.warn({ err }, "No se pudo completar la solicitud F.ST-20 (compra privada)"));
+      }
     }
 
     await trackFst07WorkflowDocument({

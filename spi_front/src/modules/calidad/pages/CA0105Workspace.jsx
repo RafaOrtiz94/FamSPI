@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { FiFolder, FiFile, FiLock, FiClock, FiLayers, FiEdit3, FiCheckCircle, FiShield } from "react-icons/fi";
+import { FiFolder, FiFile, FiLock, FiClock, FiLayers, FiEdit3, FiShield } from "react-icons/fi";
 import { useAuth } from "../../../core/auth/useAuth";
 import CA0105Stepper from "../components/CA0105Stepper";
 import Modal from "../../../core/ui/components/Modal";

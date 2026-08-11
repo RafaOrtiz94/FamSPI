@@ -23,6 +23,12 @@ function decodeBase64Pdf(base64Value) {
     throw error;
   }
 
+  if (!buffer.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
+    const error = new Error("document.pdf_base64 debe contener un PDF valido");
+    error.status = 400;
+    throw error;
+  }
+
   return { cleaned, buffer };
 }
 
@@ -72,6 +78,8 @@ function validateCreateWorkflowPayload(body = {}) {
   }
 
   const seenOrders = new Set();
+  const seenSignerEmails = new Set();
+  const seenSignerUserIds = new Set();
   const normalizedSigners = signers.map((signer, index) => {
     const sequenceOrder = Number(signer.sequence_order);
     if (!Number.isFinite(sequenceOrder) || sequenceOrder <= 0) {
@@ -99,8 +107,17 @@ function validateCreateWorkflowPayload(body = {}) {
       throw error;
     }
 
+    const userId = signer.user_id ? Number(signer.user_id) : null;
+    if (seenSignerEmails.has(email) || (userId && seenSignerUserIds.has(userId))) {
+      const error = new Error(`firmante duplicado: ${email}`);
+      error.status = 400;
+      throw error;
+    }
+    seenSignerEmails.add(email);
+    if (userId) seenSignerUserIds.add(userId);
+
     return {
-      user_id: signer.user_id ? Number(signer.user_id) : null,
+      user_id: userId,
       email,
       name,
       role: String(signer.role || "").trim().toLowerCase() || null,
@@ -153,7 +170,16 @@ function validateSignerActionPayload(body = {}, { requireConsent = false, requir
     const pg = Number(page_number);
     const xp = Number(x_pct);
     const yp = Number(y_pct);
-    if (Number.isFinite(pg) && pg >= 1 && Number.isFinite(xp) && Number.isFinite(yp)) {
+    if (
+      Number.isFinite(pg) &&
+      pg >= 1 &&
+      Number.isFinite(xp) &&
+      xp >= 0 &&
+      xp <= 100 &&
+      Number.isFinite(yp) &&
+      yp >= 0 &&
+      yp <= 100
+    ) {
       signaturePlacement = { page_number: pg, x_pct: xp, y_pct: yp };
     }
   }

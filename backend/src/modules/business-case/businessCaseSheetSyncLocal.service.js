@@ -5,9 +5,9 @@ const { drive, sheets, jwtClient } = require("../../config/google");
 const logger = require("../../config/logger");
 const { googleDelegatedUser } = require("../../utils/googleCredentials");
 
-const TEMPLATE_FILENAME = "FORMATO_BC.xlsx";
+const TEMPLATE_FILENAME = "TABLA BASE BC.xlsx";
 const MAPPING_FILENAME = "mapping_auto.json";
-const DYNAMIC_INVESTMENTS_START_ROW = 126;
+const DYNAMIC_INVESTMENTS_START_ROW = 131;
 const DYNAMIC_INVESTMENTS_CLEAR_ROWS = 75;
 const MAX_QUANTITIES_LOCK_DESCRIPTION = "SPI_LOCK_MAX_QUANTITIES_POST_FEASIBILITY";
 const ANNUAL_QUANTITIES_LOCK_DESCRIPTION = "SPI_LOCK_ANNUAL_QUANTITIES_VALIDATED";
@@ -17,6 +17,8 @@ const ANNUAL_QUANTITY_ITEM_TYPES = {
   calibradores: new Set(["calibrador"]),
   materiales: new Set(["consumible", "material"]),
 };
+const DELIVER_QUANTITY_HEADERS = ["PRODUCTO A ENTREGAR", "PRODUCTO A ENVIAR"];
+const ANNUAL_SERVICIO_HEADER = "PRODUCTO CALCULADO";
 // Columna de cantidad anual: en el bloque de reactivos de la plantilla se
 // llama "DET/AÑO PROCESO"; en los bloques de calibradores/controles/
 // materiales (mas abajo en la misma pestaña) ese header no existe -- ahi
@@ -34,7 +36,7 @@ const ANNUAL_QUANTITY_HEADERS = ["DET/AÑO PROCESO", "PRODUCTO CALCULADO"];
 // filas, aliases) ya que ambos comparten el mismo layout.
 const TEMPLATE_SPREADSHEET_ID =
   String(process.env.BC_SHEET_TEMPLATE_SPREADSHEET_ID || "").trim() ||
-  "1hKrjRq8cT3yVwlLHyKo-CTxZx_qO3uqKqLyI759-mRk";
+  "17tNJ3Ft5134kLum0YNyUKxsU2rpiBGzNu_bu5ETzG8k";
 
 function resolveTemplatePath() {
   const envPath = String(process.env.BC_SHEET_TEMPLATE_PATH || "").trim();
@@ -45,8 +47,8 @@ function resolveTemplatePath() {
   }
 
   // Common layouts:
-  // 1) monorepo root: /<repo>/Mapeador_Sheets/FORMATO_BC.xlsx
-  // 2) backend root:  /<repo>/backend/Mapeador_Sheets/FORMATO_BC.xlsx
+  // 1) monorepo root: /<repo>/Mapeador_Sheets/TABLA BASE BC.xlsx
+  // 2) backend root:  /<repo>/backend/Mapeador_Sheets/TABLA BASE BC.xlsx
   // 3) legacy fallback with one extra parent
   candidatePaths.push(path.resolve(__dirname, "../../../Mapeador_Sheets", TEMPLATE_FILENAME));
   candidatePaths.push(path.resolve(__dirname, "../../../../Mapeador_Sheets", TEMPLATE_FILENAME));
@@ -354,16 +356,33 @@ function parseBCDefinition(ws) {
   const range = decodeRange(ws);
   const fieldCells = {};
   const objectiveRows = new Map();
+  let inInvestmentBlock = false;
 
   for (let row = range.s.r + 1; row <= range.e.r + 1; row += 1) {
     const label = String(getCellValue(ws, `A${row}`) || "").trim();
     if (!label) continue;
     const normalizedLabel = normalizeText(label);
+    if (normalizedLabel.includes("inversiones adicionales")) {
+      inInvestmentBlock = true;
+      continue;
+    }
+    if (
+      inInvestmentBlock &&
+      (normalizedLabel === "sub total" ||
+        normalizedLabel === "total" ||
+        normalizedLabel.includes("porque es importante ganar este proceso"))
+    ) {
+      inInvestmentBlock = false;
+    }
+    if (normalizedLabel.includes("porque es importante ganar este proceso")) {
+      fieldCells.SmartObjective = pickWritableCell(ws, row, 2, 5);
+      continue;
+    }
     const fieldKey = BC_LABEL_FIELD_MAP.get(normalizedLabel);
     if (fieldKey) {
       fieldCells[fieldKey] = pickWritableCell(ws, row, 2, 5);
     }
-    if (row >= 58) {
+    if (inInvestmentBlock) {
       objectiveRows.set(normalizedLabel, row);
     }
   }
@@ -390,6 +409,7 @@ function parseEquipmentSheetDefinition(name, ws) {
   const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
   const headerRow = findHeaderRow(matrix);
   const headers = matrix[headerRow - 1] || [];
+  const itemTypeByRow = inferItemTypeByRow(ws, range);
 
   const idColumn = findColumnIndex(headers, (value) => value === "id" || value === "i d");
   const labelColumn = findColumnIndex(headers, (value) => value === "producto" || value === "reactivo" || value === "descripcion");
@@ -407,6 +427,7 @@ function parseEquipmentSheetDefinition(name, ws) {
       rowNumber: row,
       itemId: normalizedId,
       label: normalizedLabel,
+      itemType: itemTypeByRow.get(row) || "reactivo",
     });
   }
 
@@ -415,7 +436,12 @@ function parseEquipmentSheetDefinition(name, ws) {
     aliases: collectSheetAliases(ws, range, name),
     headerRow,
     columns: {
+      // Fallback heuristico (sin mapping_auto.json): no hay forma de
+      // distinguir estructuralmente comercial vs servicio, asi que la unica
+      // columna detectada sirve como mejor esfuerzo para ambas variantes.
       annual: annualColumn,
+      annualComercial: annualColumn,
+      annualServicio: annualColumn,
       deliver: deliverColumn,
     },
     rows,
@@ -427,6 +453,52 @@ function parseEquipmentSheetDefinition(name, ws) {
       projection: String(getCellValue(ws, "A5") || "").trim().toUpperCase().startsWith("PROYECCION") ? pickWritableCell(ws, 5, 2, 2) : null,
     },
   };
+}
+
+function inferItemTypeFromSectionLabel(value) {
+  const normalized = normalizeText(value);
+  if (!normalized) return null;
+  if (normalized.includes("calibrador")) return "calibrador";
+  if (normalized.includes("control")) return "control";
+  if (
+    normalized.includes("consumible") ||
+    normalized.includes("material") ||
+    normalized.includes("insumo")
+  ) {
+    return "material";
+  }
+  if (
+    normalized === "i d" ||
+    normalized === "id" ||
+    normalized.includes("det ano") ||
+    normalized.includes("det a o") ||
+    normalized.includes("determinacion")
+  ) {
+    return "reactivo";
+  }
+  return null;
+}
+
+function inferItemTypeByRow(ws, range) {
+  const result = new Map();
+  let currentType = "reactivo";
+
+  for (let row = range.s.r + 1; row <= range.e.r + 1; row += 1) {
+    const labelA = getCellValue(ws, `A${row}`);
+    const sectionType = inferItemTypeFromSectionLabel(labelA);
+    if (sectionType) {
+      currentType = sectionType;
+    }
+
+    const idValue = normalizeProductId(labelA);
+    const descriptionValue = normalizeText(getCellValue(ws, `B${row}`));
+    const nameValue = normalizeText(getCellValue(ws, `C${row}`));
+    if (idValue || descriptionValue || nameValue) {
+      result.set(row, currentType);
+    }
+  }
+
+  return result;
 }
 
 function loadMappingDefinition() {
@@ -459,46 +531,91 @@ function loadMappingDefinition() {
 // targetHeader acepta un string o un array de strings candidatos (ej. la
 // columna de cantidad anual se llama "DET/AÑO PROCESO" en el bloque de
 // reactivos y "PRODUCTO CALCULADO" en el bloque de calibradores/controles/
-// materiales de la misma pestaña -- cada bloque solo declara uno de los dos,
-// asi que buscar ambos a la vez resuelve el correcto sin ambiguedad).
-function _matchesAnyTargetHeader(entry, needles) {
+// materiales de la misma pestaña). Confirmado contra hojas reales que los
+// dos textos a veces coexisten en el MISMO bloque (DET/AÑO/PROCESO como
+// fuente manual autoritativa + PRODUCTO CALCULADO como espejo calculado):
+// por eso NO basta con juntar ambos en un solo pool y tomar "el mas cercano"
+// -- hay que resolver cada needle por separado y, en caso de empate de fila,
+// preferir el que aparece primero en la lista (DET/AÑO PROCESO antes que
+// PRODUCTO CALCULADO). Cuando estan en bloques distintos, gana el bloque
+// mas cercano (mayor fila), sin importar cual de los dos textos sea.
+function _matchesTargetHeader(entry, needle) {
   const normalizedTargetHeader = normalizeText(entry?.target_header);
   const normalizedHeaderText = normalizeText(entry?.header_text);
-  return needles.some((needle) => {
-    const targetIsDeliver = needle.includes("producto") && (needle.includes("entregar") || needle.includes("enviar"));
-    if (targetIsDeliver) {
-      return (
-        (normalizedTargetHeader.includes("producto") && (normalizedTargetHeader.includes("entregar") || normalizedTargetHeader.includes("enviar"))) ||
-        (normalizedHeaderText.includes("producto") && (normalizedHeaderText.includes("entregar") || normalizedHeaderText.includes("enviar")))
-      );
+  const targetIsDeliver = needle.includes("producto") && (needle.includes("entregar") || needle.includes("enviar"));
+  if (targetIsDeliver) {
+    return (
+      (normalizedTargetHeader.includes("producto") && (normalizedTargetHeader.includes("entregar") || normalizedTargetHeader.includes("enviar"))) ||
+      (normalizedHeaderText.includes("producto") && (normalizedHeaderText.includes("entregar") || normalizedHeaderText.includes("enviar")))
+    );
+  }
+  return normalizedTargetHeader.includes(needle) || normalizedHeaderText.includes(needle);
+}
+
+// "fillable_headers" solo registra columnas de LLENADO MANUAL -- una columna
+// calculada por formula como "PRODUCTO CALCULADO" nunca aparece ahi (se
+// confirmo en la pestaña real "b123": F8 = "PRODUCTO CALCULADO" existe en el
+// volcado completo `cells`, pero no en `fillable_headers`). Por eso los
+// candidatos de encabezado deben salir de AMBAS fuentes: fillable_headers
+// (para columnas editables como DET/AÑO PROCESO) y cells (para columnas
+// calculadas como PRODUCTO CALCULADO), no solo de la primera.
+function _collectHeaderEntries(mappingSheet) {
+  const fillable = Array.isArray(mappingSheet?.fillable_headers) ? mappingSheet.fillable_headers : [];
+  const rawCells = mappingSheet?.cells;
+  const cellEntries = [];
+  const pushCellEntry = (cell) => {
+    if (!cell || typeof cell.value !== "string" || !cell.value.trim()) return;
+    const row = Number(cell.row || 0);
+    const column = Number(cell.column_index || cell.column || 0);
+    if (!row || !column) return;
+    cellEntries.push({ row, column, target_header: cell.value, header_text: cell.value });
+  };
+  if (Array.isArray(rawCells)) {
+    rawCells.forEach(pushCellEntry);
+  } else if (rawCells && typeof rawCells === "object") {
+    Object.values(rawCells).forEach(pushCellEntry);
+  }
+  return [...fillable, ...cellEntries];
+}
+
+// Para cada needle (en orden de prioridad), busca la entrada cuya fila sea la
+// mas cercana (mayor) sin pasarse de maxRow. Devuelve la mejor entre todos
+// los needles: gana la de mayor fila; en empate, gana el needle que aparece
+// primero en la lista.
+function _bestHeaderEntry(headers, needles, maxRow = Infinity) {
+  let best = null;
+  needles.forEach((needle) => {
+    const candidates = headers
+      .filter((entry) => _matchesTargetHeader(entry, needle))
+      .filter((entry) => Number(entry?.row || 0) <= maxRow)
+      .sort((left, right) => Number(left.row || 0) - Number(right.row || 0));
+    const closest = candidates[candidates.length - 1];
+    if (closest && (!best || Number(closest.row || 0) > Number(best.row || 0))) {
+      best = closest;
     }
-    return normalizedTargetHeader.includes(needle) || normalizedHeaderText.includes(needle);
   });
+  return best;
 }
 
 function findColumnByTargetHeader(mappingSheet, targetHeader) {
-  const headers = Array.isArray(mappingSheet?.fillable_headers) ? mappingSheet.fillable_headers : [];
+  const headers = _collectHeaderEntries(mappingSheet);
   const needles = (Array.isArray(targetHeader) ? targetHeader : [targetHeader]).map(normalizeText);
-  const match = headers.find((entry) => _matchesAnyTargetHeader(entry, needles));
+  const match = _bestHeaderEntry(headers, needles);
   return Number(match?.column || 0) || null;
 }
 
 function findHeaderRowByTargetHeader(mappingSheet, targetHeader) {
-  const headers = Array.isArray(mappingSheet?.fillable_headers) ? mappingSheet.fillable_headers : [];
+  const headers = _collectHeaderEntries(mappingSheet);
   const needles = (Array.isArray(targetHeader) ? targetHeader : [targetHeader]).map(normalizeText);
-  const match = headers.find((entry) => _matchesAnyTargetHeader(entry, needles));
+  const match = _bestHeaderEntry(headers, needles);
   return Number(match?.row || 0) || null;
 }
 
 function findColumnForRowByTargetHeader(mappingSheet, targetHeader, rowNumber, fallbackColumn = null) {
-  const headers = Array.isArray(mappingSheet?.fillable_headers) ? mappingSheet.fillable_headers : [];
+  const headers = _collectHeaderEntries(mappingSheet);
   const needles = (Array.isArray(targetHeader) ? targetHeader : [targetHeader]).map(normalizeText);
-  const candidates = headers
-    .filter((entry) => _matchesAnyTargetHeader(entry, needles))
-    .filter((entry) => Number(entry?.row || 0) <= Number(rowNumber || 0))
-    .sort((left, right) => Number(left.row || 0) - Number(right.row || 0));
-
-  return Number(candidates[candidates.length - 1]?.column || 0) || fallbackColumn;
+  const match = _bestHeaderEntry(headers, needles, Number(rowNumber || 0));
+  return Number(match?.column || 0) || fallbackColumn;
 }
 
 function buildRowsFromMappingObjectiveTargets(mappingSheet, annualColumn, deliverColumn) {
@@ -529,15 +646,26 @@ function buildRowsFromMappingObjectiveTargets(mappingSheet, annualColumn, delive
       label: labelFromField || "",
       labelColumn,
       columns: {
-        annual: annualColumn,
+        annualComercial: annualColumn,
         deliver: deliverColumn,
       },
     };
 
     if (!existing.label && labelFromField) existing.label = labelFromField;
     if (!existing.labelColumn && labelColumn) existing.labelColumn = labelColumn;
-    if (isAnnual && Number(target?.column || 0) > 0) existing.columns.annual = Number(target.column);
-    if (isDeliver && Number(target?.column || 0) > 0) existing.columns.deliver = Number(target.column);
+    // "DET/AÑO PROCESO" es la columna que llena acp_comercial (reactivos).
+    // empty_fill_targets_objective solo detecta headers de LLENADO MANUAL,
+    // por lo que nunca produce una entrada para "PRODUCTO CALCULADO" (columna
+    // calculada por formula que llena jefe_servicio) -- esa se resuelve por
+    // separado en parseEquipmentSheetDefinitionWithMapping via _cells.
+    if (isAnnual && Number(target?.column || 0) > 0) {
+      existing.columns.annualComercial = Number(target.column);
+      existing.annualComercialPrecise = true;
+    }
+    if (isDeliver && Number(target?.column || 0) > 0) {
+      existing.columns.deliver = Number(target.column);
+      existing.deliverPrecise = true;
+    }
     byRow.set(rowNumber, existing);
   });
 
@@ -548,46 +676,61 @@ function buildRowsFromMappingObjectiveTargets(mappingSheet, annualColumn, delive
       itemId: entry.itemId || "",
       label: entry.label || "",
       labelColumn: entry.labelColumn || null,
+      itemType: entry.itemType || null,
       columns: entry.columns,
+      annualComercialPrecise: Boolean(entry.annualComercialPrecise),
+      deliverPrecise: Boolean(entry.deliverPrecise),
     }));
 
   return rows;
 }
 
+// La cantidad anual tiene DOS columnas posibles, con dueños distintos, y NO
+// se resuelven por proximidad de fila ni por "cual esta mas cerca": son
+// propiedad de un ROL cada una, confirmado con el negocio:
+//   - "DET/AÑO PROCESO": la llena acp_comercial. Aplica a reactivos.
+//   - "PRODUCTO CALCULADO": la llena jefe_servicio (columna calculada, nunca
+//     aparece en fillable_headers). Aplica a controles/calibradores/materiales.
+// Se resuelven de forma INDEPENDIENTE (nunca se mezclan ni se elige "la mas
+// cercana entre ambas"); la eleccion de cual usar para una fila puntual la
+// hace el llamador segun el item_type real (ver ANNUAL_QUANTITY_ITEM_TYPES).
 function parseEquipmentSheetDefinitionWithMapping(name, ws, mappingSheet) {
   const fallback = parseEquipmentSheetDefinition(name, ws);
   if (!mappingSheet) return fallback;
 
-  const annualColumn = findColumnByTargetHeader(mappingSheet, ANNUAL_QUANTITY_HEADERS) || fallback.columns.annual;
-  const deliverColumn = findColumnByTargetHeader(mappingSheet, "PRODUCTO A ENTREGAR") || fallback.columns.deliver;
-  const headerRow = findHeaderRowByTargetHeader(mappingSheet, ANNUAL_QUANTITY_HEADERS) || fallback.headerRow;
-  const mappedRows = buildRowsFromMappingObjectiveTargets(mappingSheet, annualColumn, deliverColumn);
+  const annualComercialColumn = findColumnByTargetHeader(mappingSheet, "DET/AÑO PROCESO") || fallback.columns.annual;
+  // "PRODUCTO CALCULADO" es el header esperado, pero algunas pestañas de
+  // equipo (confirmado en c303/c503) no lo tienen y registran la cantidad de
+  // controles/calibradores/materiales directamente en "PRODUCTO A ENTREGAR"/
+  // "PRODUCTO A ENVIAR" -- sin este fallback esas pestañas resuelven columna
+  // 0 y la cantidad anual queda en 0 para toda la subseccion.
+  const annualServicioColumn = findColumnByTargetHeader(mappingSheet, [ANNUAL_SERVICIO_HEADER, ...DELIVER_QUANTITY_HEADERS]) || fallback.columns.deliver;
+  const deliverColumn = findColumnByTargetHeader(mappingSheet, DELIVER_QUANTITY_HEADERS) || fallback.columns.deliver;
+  const headerRow = findHeaderRowByTargetHeader(mappingSheet, "DET/AÑO PROCESO") || fallback.headerRow;
+  const mappedRows = buildRowsFromMappingObjectiveTargets(mappingSheet, annualComercialColumn, deliverColumn);
   const fallbackByRow = new Map((fallback.rows || []).map((row) => [Number(row.rowNumber), row]));
 
+  const tabColumns = {
+    annualComercial: annualComercialColumn,
+    annualServicio: annualServicioColumn,
+    deliver: deliverColumn,
+  };
+
   if (!mappedRows.length) {
-    return {
-      ...fallback,
-      headerRow,
-      columns: {
-        annual: annualColumn,
-        deliver: deliverColumn,
-      },
-    };
+    return { ...fallback, headerRow, columns: tabColumns };
   }
 
   return {
     ...fallback,
     headerRow,
-    columns: {
-      annual: annualColumn,
-      deliver: deliverColumn,
-    },
+    columns: tabColumns,
     rows: Array.from(new Map([
       ...(fallback.rows || []).map((row) => [Number(row.rowNumber), {
         ...row,
         columns: {
-          annual: findColumnForRowByTargetHeader(mappingSheet, ANNUAL_QUANTITY_HEADERS, row.rowNumber, annualColumn),
-          deliver: findColumnForRowByTargetHeader(mappingSheet, "PRODUCTO A ENTREGAR", row.rowNumber, deliverColumn),
+          annualComercial: findColumnForRowByTargetHeader(mappingSheet, "DET/AÑO PROCESO", row.rowNumber, annualComercialColumn),
+          annualServicio: findColumnForRowByTargetHeader(mappingSheet, [ANNUAL_SERVICIO_HEADER, ...DELIVER_QUANTITY_HEADERS], row.rowNumber, annualServicioColumn),
+          deliver: findColumnForRowByTargetHeader(mappingSheet, DELIVER_QUANTITY_HEADERS, row.rowNumber, deliverColumn),
         },
       }]),
       ...mappedRows.map((row) => {
@@ -595,11 +738,19 @@ function parseEquipmentSheetDefinitionWithMapping(name, ws, mappingSheet) {
         return [Number(row.rowNumber), {
           ...fromFallback,
           ...row,
+          itemType: row.itemType || fromFallback?.itemType || null,
           itemId: row.itemId || fromFallback?.itemId || "",
           label: row.label || fromFallback?.label || "",
           columns: {
-            annual: findColumnForRowByTargetHeader(mappingSheet, ANNUAL_QUANTITY_HEADERS, row.rowNumber, row.columns?.annual || annualColumn),
-            deliver: findColumnForRowByTargetHeader(mappingSheet, "PRODUCTO A ENTREGAR", row.rowNumber, row.columns?.deliver || deliverColumn),
+            // Si empty_fill_targets_objective ya dio una columna precisa para
+            // ESTA fila especifica (DET/AÑO PROCESO), se respeta tal cual.
+            annualComercial: row.annualComercialPrecise
+              ? row.columns.annualComercial
+              : findColumnForRowByTargetHeader(mappingSheet, "DET/AÑO PROCESO", row.rowNumber, row.columns?.annualComercial || annualComercialColumn),
+            annualServicio: findColumnForRowByTargetHeader(mappingSheet, [ANNUAL_SERVICIO_HEADER, ...DELIVER_QUANTITY_HEADERS], row.rowNumber, annualServicioColumn),
+            deliver: row.deliverPrecise
+              ? row.columns.deliver
+              : findColumnForRowByTargetHeader(mappingSheet, DELIVER_QUANTITY_HEADERS, row.rowNumber, row.columns?.deliver || deliverColumn),
           },
         }];
       }),
@@ -630,40 +781,72 @@ function buildSheetItemLookup(items = []) {
   return { byId, byLabel };
 }
 
+// La columna de cantidad anual tiene DOS variantes con dueño distinto
+// (ver ANNUAL_QUANTITY_ITEM_TYPES / _annualColumnCategory): reactivos leen
+// de "annualComercial" (DET/AÑO PROCESO, la llena acp_comercial); controles/
+// calibradores/materiales leen de "annualServicio" (PRODUCTO CALCULADO, la
+// llena jefe_servicio). "deliver" (PRODUCTO A ENTREGAR) no tiene esta
+// distincion, es una unica columna para todos los tipos.
+function _annualColumnCategory(itemType) {
+  const normalized = String(itemType || "").trim().toLowerCase();
+  if (ANNUAL_QUANTITY_ITEM_TYPES.reactivos.has(normalized)) return "comercial";
+  if (
+    ANNUAL_QUANTITY_ITEM_TYPES.controles.has(normalized) ||
+    ANNUAL_QUANTITY_ITEM_TYPES.calibradores.has(normalized) ||
+    ANNUAL_QUANTITY_ITEM_TYPES.materiales.has(normalized)
+  ) {
+    return "servicio";
+  }
+  return null;
+}
+
 async function pullColumnQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = [], columnField, resultField }) {
   if (!jwtClient || !sheetId) return [];
   const template = loadTemplateDefinition();
   const normalizedTabs = Array.isArray(equipmentTabs) ? equipmentTabs : [];
   if (!normalizedTabs.length) return [];
 
+  const isAnnualField = columnField === "annual";
+  // Para "annual" se generan hasta 2 grupos de columna por pestaña (comercial
+  // y servicio); para cualquier otro campo (deliver) se mantiene una unica
+  // columna sin distincion de categoria.
+  const columnVariants = isAnnualField
+    ? [{ field: "annualComercial", category: "comercial" }, { field: "annualServicio", category: "servicio" }]
+    : [{ field: columnField, category: null }];
+
   const targets = [];
   for (const tab of normalizedTabs) {
     const definition = template.equipmentSheets.find((entry) => entry.name === tab.sheet_name);
-    if (!definition?.columns?.[columnField]) continue;
+    if (!definition) continue;
     const rows = Array.isArray(definition.rows) ? definition.rows : [];
     if (!rows.length) continue;
-    const rowsByColumn = new Map();
-    rows.forEach((row) => {
-      const columnIndex = Number(row?.columns?.[columnField] || definition.columns?.[columnField] || 0);
-      const rowNumber = Number(row?.rowNumber || 0);
-      if (!Number.isInteger(columnIndex) || columnIndex <= 0 || !Number.isInteger(rowNumber) || rowNumber <= 0) return;
-      if (!rowsByColumn.has(columnIndex)) rowsByColumn.set(columnIndex, []);
-      rowsByColumn.get(columnIndex).push(row);
-    });
 
-    rowsByColumn.forEach((columnRows, columnIndex) => {
-      const rowNumbers = columnRows.map((row) => Number(row.rowNumber));
-      const minRow = Math.min(...rowNumbers);
-      const maxRow = Math.max(...rowNumbers);
-      const column = columnLetter(columnIndex);
-      targets.push({
-        sheetName: definition.name,
-        range: `${definition.name}!${column}${minRow}:${column}${maxRow}`,
-        minRow,
-        rows: columnRows,
-        tabItems: Array.isArray(tab.items) ? tab.items : [],
+    for (const variant of columnVariants) {
+      if (!definition.columns?.[variant.field]) continue;
+      const rowsByColumn = new Map();
+      rows.forEach((row) => {
+        const columnIndex = Number(row?.columns?.[variant.field] || definition.columns?.[variant.field] || 0);
+        const rowNumber = Number(row?.rowNumber || 0);
+        if (!Number.isInteger(columnIndex) || columnIndex <= 0 || !Number.isInteger(rowNumber) || rowNumber <= 0) return;
+        if (!rowsByColumn.has(columnIndex)) rowsByColumn.set(columnIndex, []);
+        rowsByColumn.get(columnIndex).push(row);
       });
-    });
+
+      rowsByColumn.forEach((columnRows, columnIndex) => {
+        const rowNumbers = columnRows.map((row) => Number(row.rowNumber));
+        const minRow = Math.min(...rowNumbers);
+        const maxRow = Math.max(...rowNumbers);
+        const column = columnLetter(columnIndex);
+        targets.push({
+          sheetName: definition.name,
+          range: `${definition.name}!${column}${minRow}:${column}${maxRow}`,
+          minRow,
+          rows: columnRows,
+          category: variant.category,
+          tabItems: Array.isArray(tab.items) ? tab.items : [],
+        });
+      });
+    }
   }
 
   if (!targets.length) return [];
@@ -696,6 +879,15 @@ async function pullColumnQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = []
       const itemKey = String(matchedItem?.item_key || matchedItem?.itemKey || "").trim();
       if (!itemKey) continue;
 
+      // Si este grupo tiene categoria (solo aplica a "annual"), el valor solo
+      // es valido para items cuyo tipo real pertenezca a esa categoria --
+      // evita que un reactivo tome el valor de la columna de servicio o
+      // viceversa cuando ambas columnas existen en la misma pestaña.
+      if (target.category) {
+        const itemCategory = _annualColumnCategory(matchedItem?.item_type || matchedItem?.itemType);
+        if (itemCategory !== target.category) continue;
+      }
+
       updatesByItemKey.set(itemKey, {
         item_key: itemKey,
         [resultField]: parsedValue,
@@ -717,6 +909,32 @@ async function pullMaximumQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = [
 // del usuario (boton "Sincronizar cantidades desde Sheet").
 async function pullAnnualQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = [] }) {
   return pullColumnQuantitiesFromGoogleSheet({ sheetId, equipmentTabs, columnField: "annual", resultField: "annual_qty" });
+}
+
+// "Producto Calculado" para reactivos es solo de referencia visual (no se usa
+// en ningun calculo -- la cantidad real de reactivos sigue viniendo unicamente
+// de DET/AÑO PROCESO via pullAnnualQuantitiesFromGoogleSheet). Se lee la
+// columna "annualServicio" (PRODUCTO CALCULADO) pero solo para filas cuyo
+// item_type sea reactivo/determinacion, restringiendo cada pestaña a esos
+// items antes de delegar en pullColumnQuantitiesFromGoogleSheet con
+// columnField distinto de "annual" para que no aplique el filtro de
+// categoria (que rechazaria un reactivo leyendo la columna de servicio).
+async function pullReferenceQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = [] }) {
+  const reactivoTabs = (Array.isArray(equipmentTabs) ? equipmentTabs : [])
+    .map((tab) => ({
+      ...tab,
+      items: (Array.isArray(tab.items) ? tab.items : []).filter((item) => (
+        ANNUAL_QUANTITY_ITEM_TYPES.reactivos.has(String(item?.item_type || item?.itemType || item?.type || "").trim().toLowerCase())
+      )),
+    }))
+    .filter((tab) => tab.items.length);
+
+  return pullColumnQuantitiesFromGoogleSheet({
+    sheetId,
+    equipmentTabs: reactivoTabs,
+    columnField: "annualServicio",
+    resultField: "reference_qty",
+  });
 }
 
 function buildAnnualQuantityProtectionRanges({ template, equipmentTabs = [], businessCaseId, subsection }) {
@@ -741,7 +959,8 @@ function buildAnnualQuantityProtectionRanges({ template, equipmentTabs = [], bus
         : lookup.byLabel.get(normalizeText(row?.label));
       if (!item) return;
 
-      const columnIndex = Number(row?.columns?.annual || definition.columns?.annual || 0);
+      const annualField = normalizedSubsection === "reactivos" ? "annualComercial" : "deliver";
+      const columnIndex = Number(row?.columns?.[annualField] || definition.columns?.[annualField] || 0);
       const rowNumber = Number(row?.rowNumber || 0);
       if (!Number.isInteger(columnIndex) || columnIndex <= 0 || !Number.isInteger(rowNumber) || rowNumber <= 0) return;
       if (!rowsByColumn.has(columnIndex)) rowsByColumn.set(columnIndex, []);
@@ -789,7 +1008,7 @@ async function getProtectedRangesForSpreadsheet(sheetId) {
     includeGridData: false,
     fields: "sheets(properties(sheetId,title),protectedRanges(protectedRangeId,description))",
   });
-  return data;
+  return data || {};
 }
 
 async function protectAnnualQuantityCellsForSubsection({ sheetId, businessCaseId, subsection, equipmentTabs = [] }) {
@@ -806,13 +1025,14 @@ async function protectAnnualQuantityCellsForSubsection({ sheetId, businessCaseId
   });
   const normalizedSubsection = String(subsection || "").trim().toLowerCase();
   const descriptionPrefix = `${ANNUAL_QUANTITIES_LOCK_DESCRIPTION}:${businessCaseId || "unknown"}:${normalizedSubsection}`;
-  const { data } = await getProtectedRangesForSpreadsheet(sheetId);
+  const data = await getProtectedRangesForSpreadsheet(sheetId);
+  const sheetEntries = Array.isArray(data?.sheets) ? data.sheets : [];
   const sheetIdsByTitle = new Map(
-    (data.sheets || []).map((sheet) => [sheet?.properties?.title, sheet?.properties?.sheetId]),
+    sheetEntries.map((sheet) => [sheet?.properties?.title, sheet?.properties?.sheetId]),
   );
   const requests = [];
 
-  (data.sheets || []).forEach((sheet) => {
+  sheetEntries.forEach((sheet) => {
     (sheet.protectedRanges || []).forEach((range) => {
       if (!String(range?.description || "").startsWith(descriptionPrefix)) return;
       if (Number.isInteger(range?.protectedRangeId)) {
@@ -867,11 +1087,12 @@ async function unprotectAnnualQuantityCellsForSubsection({ sheetId, businessCase
 
   const normalizedSubsection = String(subsection || "").trim().toLowerCase();
   const descriptionPrefix = `${ANNUAL_QUANTITIES_LOCK_DESCRIPTION}:${businessCaseId || "unknown"}:${normalizedSubsection}`;
-  const { data } = await getProtectedRangesForSpreadsheet(sheetId);
+  const data = await getProtectedRangesForSpreadsheet(sheetId);
+  const sheetEntries = Array.isArray(data?.sheets) ? data.sheets : [];
   const requests = [];
   let deletedRanges = 0;
 
-  (data.sheets || []).forEach((sheet) => {
+  sheetEntries.forEach((sheet) => {
     (sheet.protectedRanges || []).forEach((range) => {
       if (!String(range?.description || "").startsWith(descriptionPrefix)) return;
       if (!Number.isInteger(range?.protectedRangeId)) return;
@@ -929,29 +1150,73 @@ function scoreAliases(recordAliases = [], sheetAliases = []) {
     for (const sheetAlias of sheetAliases) {
       if (!recordAlias || !sheetAlias) continue;
       if (recordAlias === sheetAlias) best = Math.max(best, 100);
-      else if (recordAlias.length >= 4 && sheetAlias.includes(recordAlias)) best = Math.max(best, 88);
-      else if (sheetAlias.length >= 4 && recordAlias.includes(sheetAlias)) best = Math.max(best, 85);
+      else if (recordAlias.length >= 3 && sheetAlias.includes(recordAlias)) best = Math.max(best, 88);
+      else if (sheetAlias.length >= 3 && recordAlias.includes(sheetAlias)) best = Math.max(best, 85);
     }
   }
   return best;
 }
 
+function buildNormalizedAliasVariants(value) {
+  const variants = new Set();
+  const raw = String(value || "").trim();
+  if (!raw) return variants;
+
+  const addNormalized = (input) => {
+    const normalizedText = normalizeText(input);
+    const normalizedCompact = normalizeCompact(input);
+    if (normalizedCompact) variants.add(normalizedCompact);
+
+    const tokens = normalizedText.split(/\s+/).filter(Boolean);
+    tokens.forEach((token) => {
+      if (token.length >= 2) variants.add(token);
+    });
+
+    if (tokens.length >= 2) {
+      variants.add(tokens.slice(0, 2).join(""));
+    }
+
+    const withoutDigits = normalizedCompact.replace(/\d+/g, "");
+    if (withoutDigits.length >= 2) variants.add(withoutDigits);
+
+    const withoutLetters = normalizedCompact.replace(/[a-z]+/g, "");
+    if (withoutLetters.length >= 2) variants.add(withoutLetters);
+  };
+
+  addNormalized(raw);
+  addNormalized(raw.replace(/\([^)]*\)/g, " "));
+  addNormalized(
+    raw.replace(
+      /\b(sin|con)\s+(licencia|licencias|license|licenses)\b/gi,
+      " ",
+    ),
+  );
+
+  return variants;
+}
+
 function buildRecordAliases(record = {}) {
   const aliases = new Set();
   [record.name, record.code, record.model, record.equipment_name, record.equipment_code].forEach((value) => {
-    const normalized = normalizeCompact(value);
-    if (normalized) aliases.add(normalized);
+    buildNormalizedAliasVariants(value).forEach((alias) => aliases.add(alias));
   });
   const id = String(record.id ?? "");
   if (id) {
     const extras = loadEquipmentAliases().get(id) || [];
-    extras.forEach((a) => aliases.add(a));
+    extras.forEach((value) => {
+      buildNormalizedAliasVariants(value).forEach((alias) => aliases.add(alias));
+    });
   }
   return Array.from(aliases);
 }
 
+function normalizeSheetWriteValue(value) {
+  if (typeof value !== "string") return value;
+  return value.toUpperCase();
+}
+
 function buildValueRange(range, values) {
-  return { range, values: [[values]] };
+  return { range, values: [[normalizeSheetWriteValue(values)]] };
 }
 
 async function createSpreadsheetFromTemplate({ outputFolderId, businessCaseName }) {
@@ -1069,12 +1334,21 @@ async function protectSpreadsheetAfterMaximumQuantitiesSync({ sheetId, businessC
   };
 }
 
-async function deleteFileIfExists(fileId) {
-  if (!fileId) return;
+async function preservePreviousSpreadsheet(fileId, reason = "recreate") {
+  if (!fileId) return { preserved: false, reason: "NO_FILE_ID" };
   try {
-    await drive.files.delete({ fileId, supportsAllDrives: true });
+    await drive.files.update({
+      fileId,
+      supportsAllDrives: true,
+      requestBody: {
+        name: `ARCHIVO ANTERIOR - ${reason} - ${new Date().toISOString()} - ${fileId}`,
+      },
+      fields: "id,name",
+    });
+    return { preserved: true, reason: null };
   } catch (error) {
-    logger.warn({ fileId, error: error.message }, "No se pudo eliminar el spreadsheet previo del BC");
+    logger.warn({ fileId, error: error.message }, "No se pudo renombrar spreadsheet previo; se conservara sin renombrar");
+    return { preserved: true, reason: "RENAME_FAILED" };
   }
 }
 
@@ -1096,12 +1370,15 @@ async function ensureSpreadsheet({ requiredSheetNames, existingSheetId, outputFo
         };
       }
 
-      await deleteFileIfExists(existingSheetId);
+      const preservation = await preservePreviousSpreadsheet(
+        existingSheetId,
+        forceRecreate ? "regeneracion-forzada" : "pestanas-faltantes",
+      );
       logger.warn(
-        { existingSheetId, missingSheetNames, forceRecreate },
+        { existingSheetId, missingSheetNames, forceRecreate, previousPreserved: preservation.preserved, preservationReason: preservation.reason },
         forceRecreate
-          ? "Regeneracion forzada solicitada. Se recreara desde plantilla."
-          : "Spreadsheet previo incompleto. Se recreara desde plantilla.",
+          ? "Regeneracion forzada solicitada. Se creara una nueva hoja y se conservara la anterior."
+          : "Spreadsheet previo incompleto. Se creara una nueva hoja y se conservara la anterior.",
       );
 
       const created = await createSpreadsheetFromTemplate({ outputFolderId, businessCaseName });
@@ -1114,6 +1391,8 @@ async function ensureSpreadsheet({ requiredSheetNames, existingSheetId, outputFo
         recreated: true,
         replacementReason: forceRecreate && hasAllSheets ? "forced_regenerate" : "missing_required_sheets",
         missingSheetNames,
+        previousPreserved: preservation.preserved,
+        previousPreservationReason: preservation.reason,
       };
     } catch (error) {
       logger.warn({ existingSheetId, error: error.message }, "Spreadsheet previo no utilizable. Se recreara desde plantilla.");
@@ -1182,6 +1461,7 @@ function buildBusinessCaseRanges(template, payload) {
   const updates = [];
   const clears = [];
   const fieldCells = template.bc.fieldCells || {};
+  const smartObjectiveCell = fieldCells.SmartObjective || "B129";
 
   Object.entries(fieldCells).forEach(([fieldKey, cell]) => {
     clears.push(`BC!${cell}`);
@@ -1274,6 +1554,11 @@ function buildBusinessCaseRanges(template, payload) {
     updates.push(buildValueRange(`BC!E${rowNumber}`, investment?.precio ?? ""));
   });
 
+  if (payload.fields?.SmartObjective !== undefined) {
+    clears.push(`BC!${smartObjectiveCell}`);
+    updates.push(buildValueRange(`BC!${smartObjectiveCell}`, payload.fields.SmartObjective || ""));
+  }
+
   if (fuzzyMatchedInvestments.length) {
     logger.info({ matches: fuzzyMatchedInvestments }, "[SheetGen] inversiones mapeadas con normalizacion tolerante");
   }
@@ -1304,9 +1589,18 @@ function buildEquipmentSheetRanges(template, sheetPayload = {}) {
   if (meta.plazo) updates.push(buildValueRange(`${definition.name}!${meta.plazo}`, sheetPayload.deadline_months ?? ""));
   if (meta.projection) updates.push(buildValueRange(`${definition.name}!${meta.projection}`, sheetPayload.projected_deadline_months ?? ""));
 
+  // Solo se limpia/escribe la columna "comercial" (DET/AÑO PROCESO): es la
+  // unica de llenado manual. "annualServicio" (PRODUCTO CALCULADO) es una
+  // columna calculada por formula en el Sheet -- escribir ahi destruiria el
+  // calculo, por eso SPI nunca escribe esa columna, solo la lee (sync inverso
+  // en pullColumnQuantitiesFromGoogleSheet). Los items de categoria servicio
+  // (controles/calibradores/materiales) se omiten aqui a proposito.
+  const lookup = buildSheetItemLookup(sheetPayload.items || []);
   const rowsByAnnualColumn = new Map();
   (definition.rows || []).forEach((row) => {
-    const columnIndex = Number(row?.columns?.annual || definition.columns?.annual || 0);
+    const item = row?.itemId ? lookup.byId.get(row.itemId) : lookup.byLabel.get(row.label);
+    if (!item || _annualColumnCategory(item.item_type || item.itemType) !== "comercial") return;
+    const columnIndex = Number(row?.columns?.annualComercial || definition.columns?.annualComercial || 0);
     const rowNumber = Number(row?.rowNumber || 0);
     if (!Number.isInteger(columnIndex) || columnIndex <= 0 || !Number.isInteger(rowNumber) || rowNumber <= 0) return;
     if (!rowsByAnnualColumn.has(columnIndex)) rowsByAnnualColumn.set(columnIndex, []);
@@ -1320,11 +1614,10 @@ function buildEquipmentSheetRanges(template, sheetPayload = {}) {
   // PRODUCTO A ENTREGAR is user-owned in the sheet.
   // Do not clear it during sync to avoid overwriting manually curated maximum quantities.
 
-  const lookup = buildSheetItemLookup(sheetPayload.items || []);
   definition.rows.forEach((row) => {
     const item = row.itemId ? lookup.byId.get(row.itemId) : lookup.byLabel.get(row.label);
-    if (!item) return;
-    const annualColumn = Number(row?.columns?.annual || definition.columns?.annual || 0);
+    if (!item || _annualColumnCategory(item.item_type || item.itemType) !== "comercial") return;
+    const annualColumn = Number(row?.columns?.annualComercial || definition.columns?.annualComercial || 0);
     if (annualColumn > 0) {
       updates.push(buildValueRange(`${definition.name}!${columnLetter(annualColumn)}${row.rowNumber}`, item.annual_qty ?? item.annualQty ?? ""));
     }
@@ -1351,13 +1644,40 @@ function buildSheetPayloads({ template, equipmentRecords = [], payload = {} }) {
     ...record,
     aliases: buildRecordAliases(record),
   }));
+  const bestSheetByRecordId = new Map();
 
   if (!equipmentRecords.length) {
     logger.warn("[SheetGen] buildSheetPayloads: no equipment records provided — equipment tabs will be empty");
   }
 
+  recordsWithAliases.forEach((record, index) => {
+    const recordKey = Number(record.id) || `idx:${index}`;
+    const candidates = template.equipmentSheets
+      .map((sheetDefinition) => {
+        const score = scoreAliases(record.aliases, sheetDefinition.aliases);
+        const sheetNameAlias = normalizeCompact(sheetDefinition.name);
+        return {
+          sheetDefinition,
+          score,
+          directNameMatch: record.aliases.some((alias) => alias === sheetNameAlias || alias.includes(sheetNameAlias)),
+        };
+      })
+      .filter((candidate) => candidate.score >= 85)
+      .sort((left, right) => {
+        if (right.score !== left.score) return right.score - left.score;
+        if (Number(right.directNameMatch) !== Number(left.directNameMatch)) {
+          return Number(right.directNameMatch) - Number(left.directNameMatch);
+        }
+        return String(left.sheetDefinition.name || "").localeCompare(String(right.sheetDefinition.name || ""), "es");
+      });
+    if (candidates[0]) bestSheetByRecordId.set(recordKey, candidates[0].sheetDefinition.name);
+  });
+
   template.equipmentSheets.forEach((sheetDefinition) => {
-    const matchedRecords = recordsWithAliases.filter((record) => scoreAliases(record.aliases, sheetDefinition.aliases) >= 85);
+    const matchedRecords = recordsWithAliases.filter((record, index) => {
+      const recordKey = Number(record.id) || `idx:${index}`;
+      return bestSheetByRecordId.get(recordKey) === sheetDefinition.name;
+    });
     if (!matchedRecords.length) {
       if (equipmentRecords.length) {
         const scores = recordsWithAliases.map((r) => ({ name: r.name, score: scoreAliases(r.aliases, sheetDefinition.aliases), recordAliases: r.aliases, sheetAliases: sheetDefinition.aliases }));
@@ -1431,6 +1751,12 @@ async function syncBusinessCaseToGoogleSheet({ businessCase, outputFolderId, pay
 
   await clearRanges(spreadsheet.spreadsheetId, clearRangesPayload);
   await writeRanges(spreadsheet.spreadsheetId, updatePayload);
+  if (payload.fields?.SmartObjective !== undefined) {
+    const smartObjectiveCell = template.bc.fieldCells?.SmartObjective || "B129";
+    await writeRanges(spreadsheet.spreadsheetId, [
+      buildValueRange(`BC!${smartObjectiveCell}`, payload.fields.SmartObjective || ""),
+    ]);
+  }
 
   return {
     sheetId: spreadsheet.spreadsheetId,
@@ -1443,6 +1769,8 @@ async function syncBusinessCaseToGoogleSheet({ businessCase, outputFolderId, pay
     replacement_reason: spreadsheet.replacementReason || null,
     missing_required_sheets: Array.isArray(spreadsheet.missingSheetNames) ? spreadsheet.missingSheetNames : [],
     previous_sheet_id: previousSheetId || null,
+    previous_sheet_preserved: spreadsheet.previousPreserved === true,
+    previous_sheet_preservation_reason: spreadsheet.previousPreservationReason || null,
   };
 }
 
@@ -1461,6 +1789,7 @@ module.exports = {
   buildSheetPayloads,
   pullMaximumQuantitiesFromGoogleSheet,
   pullAnnualQuantitiesFromGoogleSheet,
+  pullReferenceQuantitiesFromGoogleSheet,
   buildAnnualQuantityProtectionRanges,
   protectAnnualQuantityCellsForSubsection,
   unprotectAnnualQuantityCellsForSubsection,

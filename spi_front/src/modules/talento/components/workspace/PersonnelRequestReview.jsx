@@ -157,20 +157,9 @@ const PersonnelRequestReview = ({
  </div>
 
  <div>
- <h3 className="font-medium text-gray-900 mb-2">Condiciones laborales solicitadas</h3>
- <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-md text-sm text-gray-700">
- <div>
- <span className="font-medium">Horario:</span> {request.work_schedule || "N/A"}
- </div>
- <div>
- <span className="font-medium">Rango Salarial:</span> {request.salary_range || "N/A"}
- </div>
- <div>
- <span className="font-medium">Ubicación:</span> {request.work_location || "N/A"}
- </div>
- <div>
- <span className="font-medium">Beneficios:</span> {request.benefits || "N/A"}
- </div>
+ <h3 className="font-medium text-gray-900 mb-2">Sitio a laborar</h3>
+ <div className="bg-gray-50 p-4 rounded-md text-sm text-gray-700">
+ <span className="font-medium">Ciudad:</span> {request.work_location || "N/A"}
  </div>
  </div>
 

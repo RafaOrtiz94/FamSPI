@@ -31,6 +31,11 @@ const visitStatusLabel = (status) => {
  return labels[status] || "Sin estado";
 };
 
+const getVisitDisplayName = (visit) =>
+ visit?.client_name ||
+ visit?.prospect_name ||
+ (visit?.client_request_id ? `Cliente ${visit.client_request_id}` : "Visita sin nombre");
+
 const hasVisitDetails = (visit) =>
  Boolean(
  visit?.hora_entrada ||
@@ -133,7 +138,7 @@ const ScheduleDetailModal = ({
  <div className="flex items-center gap-2">
  <FiMapPin className="text-gray-400" />
  <div>
- <p className="font-semibold text-gray-900">{visit.client_name || `Cliente ${visit.client_request_id}`}</p>
+ <p className="font-semibold text-gray-900">{getVisitDisplayName(visit)}</p>
  <p className="text-xs text-gray-500">{visit.city || "Ciudad no especificada"}</p>
  </div>
  </div>
@@ -220,7 +225,7 @@ const ScheduleDetailModal = ({
  <div key={`client-${visit.id}`} className="rounded-lg border border-gray-100 p-3 text-xs text-gray-700">
  <div className="flex items-center justify-between">
  <p className="font-semibold text-gray-900">
- {visit.client_name || `Cliente ${visit.client_request_id}`}
+ {getVisitDisplayName(visit)}
  </p>
  <span className="text-[10px] text-gray-500">
  {visit.visit_date ? formatDateEC(visit.visit_date) : "Fecha no disponible"}

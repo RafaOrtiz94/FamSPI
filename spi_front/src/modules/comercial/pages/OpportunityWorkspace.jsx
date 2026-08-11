@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { FiAlertCircle, FiArrowLeft, FiX } from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
-import Button from "../../../core/ui/components/Button";
 import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
 import {
   createComment, createContact, deleteAction, deleteComment,

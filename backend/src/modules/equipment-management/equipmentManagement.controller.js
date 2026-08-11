@@ -39,6 +39,10 @@ exports.changeAssetStatus = asyncHandler(async (req, res) => {
   send(res, await service.changeAssetStatus(req.params.id, req.body, req.user?.id || null));
 });
 
+exports.updateAsset = asyncHandler(async (req, res) => {
+  send(res, await service.updateAsset(req.params.id, req.body || {}, req.user?.id || null));
+});
+
 exports.reserveAsset = asyncHandler(async (req, res) => {
   send(res, await service.reserveAsset(req.params.id, req.body || {}, req.user?.id || null), 201);
 });
@@ -52,6 +56,21 @@ exports.installAsset = asyncHandler(async (req, res) => {
 
 exports.listAssetTimeline = asyncHandler(async (req, res) => {
   send(res, await service.listAssetTimeline(req.params.id));
+});
+
+exports.listAssetDocuments = asyncHandler(async (req, res) => {
+  send(res, await service.listAssetDocuments(req.params.id));
+});
+
+exports.uploadAssetDocument = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ ok: false, message: "file es requerido" });
+  }
+  send(res, await service.uploadAssetDocument(req.params.id, req.file, req.body || {}, req.user?.id || null), 201);
+});
+
+exports.deleteAssetDocument = asyncHandler(async (req, res) => {
+  send(res, await service.deleteAssetDocument(req.params.id, req.params.documentId, req.user?.id || null));
 });
 
 exports.listSchedule = asyncHandler(async (req, res) => {

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiClock, FiEdit3, FiExternalLink, FiLoader, FiRefreshCw, FiX } from "react-icons/fi";
 import { listMyPendingSignatureWorkflows } from "../../api/signatureWorkflowsApi";
@@ -17,7 +17,7 @@ function normalizeRows(rows) {
   return Array.isArray(rows) ? rows : [];
 }
 
-export default function FamSignFab() {
+const FamSignFab = forwardRef(function FamSignFab({ onCountChange } = {}, ref) {
   const navigate = useNavigate();
   const containerRef = useRef(null);
   const [open, setOpen] = useState(false);
@@ -27,6 +27,12 @@ export default function FamSignFab() {
 
   const pendingCount = pendingRows.length;
   const previewRows = useMemo(() => pendingRows.slice(0, 5), [pendingRows]);
+
+  useImperativeHandle(ref, () => ({ open: () => setOpen(true) }));
+
+  useEffect(() => {
+    onCountChange?.(pendingCount);
+  }, [pendingCount, onCountChange]);
 
   const loadPending = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -93,10 +99,11 @@ export default function FamSignFab() {
 
   return (
     <div ref={containerRef} className="fixed bottom-36 left-3 z-[9997] sm:bottom-20 sm:left-4">
+      {/* Trigger button: only visible on desktop; mobile uses MobileFabDock */}
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="relative flex h-12 w-12 items-center justify-center rounded-full bg-slate-900 text-white shadow-[0_15px_35px_rgba(15,23,42,0.18)] transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
+        className="relative hidden sm:flex h-12 w-12 items-center justify-center rounded-full bg-slate-900 text-white shadow-[0_15px_35px_rgba(15,23,42,0.18)] transition hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
         title="Firmas pendientes"
         aria-label="Firmas pendientes"
       >
@@ -109,7 +116,7 @@ export default function FamSignFab() {
       </button>
 
       {open ? (
-        <div className="absolute bottom-[3.75rem] left-0 w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.1)]">
+        <div className="fixed left-3 right-3 bottom-24 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.1)] sm:absolute sm:left-0 sm:right-auto sm:bottom-[3.75rem] sm:w-[min(24rem,calc(100vw-1.5rem))]">
           <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
             <div>
               <p className="text-sm font-semibold text-slate-900">FamSign</p>
@@ -207,4 +214,6 @@ export default function FamSignFab() {
       ) : null}
     </div>
   );
-}
+});
+
+export default FamSignFab;

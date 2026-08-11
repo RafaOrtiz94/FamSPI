@@ -6,6 +6,7 @@ const integrationService = require("./businessCaseIntegration.service");
 const { PrivatePurchaseStateMachine } = require("../private-purchases/privatePurchaseStateMachine");
 const { PRIVATE_PURCHASE_STATES } = require("../private-purchases/privatePurchaseStates.constants");
 const { ensureBusinessCaseDriveFolder } = require("./businessCaseDriveFolder.service");
+const { filterEquipmentPairsForSheet } = require("./businessCaseSheetEquipment.helper");
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -112,10 +113,22 @@ function normalizeFallbackOfferKind(value) {
   ) {
     return "alquiler_transferencia_dominio";
   }
+  // No es una alternativa comercial: cierra el BC como rechazado sin ofrecer
+  // venta/alquiler, porque no hubo información suficiente para evaluarlo.
+  if (normalized === "rechazado_falta_informacion") return "rechazado_falta_informacion";
   return null;
 }
 
-const FEASIBILITY_ALLOWED_ROLES = new Set(["jefe_operaciones", "jefe_tecnico", "jefe_servicio"]);
+const FEASIBILITY_ALLOWED_ROLES = new Set([
+  "acp_comercial",
+  "jefe_comercial",
+  "jefe_de_comercial",
+  "jefe_operaciones",
+  "jefe_tecnico",
+  "jefe_servicio",
+  "gerencia",
+  "gerencia_general",
+]);
 
 function normalizeRoleToken(value) {
   return String(value || "")
@@ -143,7 +156,7 @@ function assertCanSaveFeasibilityDecision(user = {}) {
 
   if (isAllowed) return;
 
-  const error = new Error("No tienes permisos para aprobar factibilidad y bloquear inventario.");
+  const error = new Error("No tienes permisos para registrar la decision de factibilidad.");
   error.status = 403;
   error.code = "INSUFFICIENT_ROLE";
   throw error;
@@ -229,16 +242,23 @@ async function saveFeasibilityDecision(
     const feasibility = toObject(metadata.feasibility);
     const exportInfo = toObject(feasibility.export_excel);
 
-    if (!exportInfo.at) {
+    if (Boolean(is_feasible) && !exportInfo.at) {
       const error = new Error("Primero debe exportar los reactivos para iniciar calculos");
       error.status = 409;
       error.code = "EXPORT_REQUIRED";
       throw error;
     }
 
+    if (is_feasible === false && !String(notes || "").trim()) {
+      const error = new Error("Debe registrar el motivo para cerrar el Business Case como no factible");
+      error.status = 400;
+      error.code = "NON_FEASIBLE_REASON_REQUIRED";
+      throw error;
+    }
+
     if (is_feasible === false && !normalizedFallback) {
       const error = new Error(
-        "Debe seleccionar venta directa, alquiler o alquiler con transferencia de dominio cuando no es factible",
+        "Debe seleccionar venta directa, alquiler, alquiler con transferencia de dominio o rechazado por falta de informacion cuando no es factible",
       );
       error.status = 400;
       error.code = "FALLBACK_OFFER_KIND_REQUIRED";
@@ -761,12 +781,23 @@ async function updateBusinessCase(id, data) {
   const values = [];
 
   allowedFields.forEach((field) => {
-    if (data[field] !== undefined) {
-      values.push(field === "bc_progress" || field === "extra" || field === "modern_bc_metadata"
-        ? JSON.stringify(data[field])
-        : data[field]);
-      sets.push(`${field} = $${values.length}`);
+    if (data[field] === undefined) return;
+    if (field === "modern_bc_metadata") {
+      // Merge JSONB a nivel de Postgres (no reemplazo ciego) para cerrar una
+      // condicion de carrera real detectada en produccion: multiples
+      // endpoints leen todo el metadata al inicio del request, mutan UNA
+      // clave anidada (ej. determinations_gate) y reescriben el objeto
+      // completo al final. Si otro request (ej. aprobacion de prorroga SLA)
+      // commitea entre medio, un SET ciego pisa esa clave top-level entera
+      // con la copia vieja -- revirtiendo la aprobacion silenciosamente.
+      // El operador `||` de jsonb hace merge superficial (top-level) de
+      // forma atomica en la misma sentencia UPDATE, sin ventana de carrera.
+      values.push(JSON.stringify(data[field]));
+      sets.push(`modern_bc_metadata = COALESCE(modern_bc_metadata, '{}'::jsonb) || $${values.length}::jsonb`);
+      return;
     }
+    values.push(field === "bc_progress" || field === "extra" ? JSON.stringify(data[field]) : data[field]);
+    sets.push(`${field} = $${values.length}`);
   });
 
   if (!sets.length) {
@@ -815,10 +846,22 @@ async function updateBusinessCase(id, data) {
 async function loadConsumptionData(businessCaseId) {
   try {
     const { rows: items } = await db.query(
-      `SELECT item_key, item_id, name, item_type, source, catalog_id, annual_qty, equipment_id, equipment_name
-       FROM bc_consumption_items
-       WHERE business_case_id = $1
-       ORDER BY name`,
+      `SELECT
+         c.item_key, c.item_id, c.name, c.item_type, c.source, c.catalog_id,
+         c.annual_qty, c.reference_qty, c.equipment_id, c.equipment_name,
+         -- Producto a Enviar: si jefe_operaciones/comercial ya ajusto
+         -- manualmente el valor en el workspace de despacho
+         -- (commercial_updated_at), esa decision manual manda; si no, se usa
+         -- el valor recien sincronizado directo desde el Sheet en esta tabla.
+         CASE
+           WHEN d.commercial_updated_at IS NOT NULL THEN d.planned_qty
+           ELSE COALESCE(c.planned_qty, d.planned_qty)
+         END AS planned_qty
+       FROM bc_consumption_items c
+       LEFT JOIN bc_dispatch_items d
+         ON d.business_case_id = c.business_case_id AND d.item_key = c.item_key
+       WHERE c.business_case_id = $1
+       ORDER BY c.name`,
       [businessCaseId],
     );
     const { rows: excluded } = await db.query(
@@ -834,6 +877,8 @@ async function loadConsumptionData(businessCaseId) {
       source: row.source,
       catalogId: row.catalog_id,
       annualQty: row.annual_qty,
+      referenceQty: row.reference_qty === null || row.reference_qty === undefined ? null : Number(row.reference_qty),
+      plannedQty: row.planned_qty === null || row.planned_qty === undefined ? null : Number(row.planned_qty),
       equipmentId: row.equipment_id,
       equipmentName: row.equipment_name,
     }));
@@ -891,6 +936,10 @@ function normalizeConsumptionItemsForComparison(items = []) {
 
     const annualQtyRaw = item.annualQty ?? item.annualQuantity ?? item.annual_qty ?? 0;
     const annualQty = Number(annualQtyRaw);
+    const referenceQtyRaw = item.referenceQty ?? item.reference_qty ?? null;
+    const referenceQty = referenceQtyRaw === null || referenceQtyRaw === undefined ? null : Number(referenceQtyRaw);
+    const plannedQtyRaw = item.plannedQty ?? item.planned_qty ?? null;
+    const plannedQty = plannedQtyRaw === null || plannedQtyRaw === undefined ? null : Number(plannedQtyRaw);
 
     byKey.set(key, {
       key,
@@ -900,6 +949,13 @@ function normalizeConsumptionItemsForComparison(items = []) {
       source: String(item.source || "catalog").trim().toLowerCase(),
       catalogId: item.catalogId ?? item.catalog_id ?? null,
       annualQty: Number.isFinite(annualQty) ? annualQty : 0,
+      // Producto Calculado para reactivos: solo de referencia visual, nunca
+      // se usa en calculos (annualQty sigue viniendo unicamente de DET/AÑO
+      // PROCESO). null cuando no aplica (equipos no-reactivo o sin dato).
+      referenceQty: Number.isFinite(referenceQty) ? referenceQty : null,
+      // Producto a Enviar (PRODUCTO A ENTREGAR/ENVIAR): aplica a todos los
+      // tipos por igual, se sincroniza junto con annualQty.
+      plannedQty: Number.isFinite(plannedQty) ? plannedQty : null,
       equipmentId: item.equipmentId ?? item.equipment_id ?? null,
       equipmentName: item.equipmentName ?? item.equipment_name ?? null,
     });
@@ -987,6 +1043,83 @@ function matchesConsumptionItem(item = {}, candidate = {}) {
   return false;
 }
 
+function buildTemplateConsumptionSyncItems({ template, equipmentTabs = [], catalogItems = [] }) {
+  const catalogSignatures = new Set(
+    (Array.isArray(catalogItems) ? catalogItems : [])
+      .map((item) => {
+        const equipmentId = String(item?.equipment_id || item?.equipmentId || "").trim();
+        const itemId = String(item?.item_id || item?.itemId || "").trim();
+        const itemType = String(item?.item_type || item?.itemType || "").trim().toLowerCase();
+        const itemName = String(item?.item_name || item?.itemName || item?.name || "").trim().toLowerCase();
+        return [
+          itemId ? `${equipmentId}:id:${itemId}:${itemType}` : null,
+          itemName ? `${equipmentId}:name:${itemName}:${itemType}` : null,
+        ].filter(Boolean);
+      })
+      .flat(),
+  );
+
+  const templateItems = [];
+  (Array.isArray(equipmentTabs) ? equipmentTabs : []).forEach((tab) => {
+    const definition = template?.equipmentSheets?.find((entry) => entry.name === tab?.sheet_name);
+    if (!definition) return;
+    const equipmentId = Number(tab?.equipment_ids?.[0] || 0);
+    if (!Number.isInteger(equipmentId) || equipmentId <= 0) return;
+    const equipmentName = Array.isArray(tab?.equipment_names) ? tab.equipment_names[0] : null;
+
+    (Array.isArray(definition.rows) ? definition.rows : []).forEach((row) => {
+      const itemId = String(row?.itemId || "").trim();
+      const name = String(row?.label || "").trim();
+      const itemType = String(row?.itemType || "reactivo").trim().toLowerCase();
+      if (!itemId) return;
+
+      const byId = itemId ? `${equipmentId}:id:${itemId}:${itemType}` : null;
+      const byName = name ? `${equipmentId}:name:${name.toLowerCase()}:${itemType}` : null;
+      if ((byId && catalogSignatures.has(byId)) || (byName && catalogSignatures.has(byName))) return;
+
+      templateItems.push({
+        item_key: `sheet:${equipmentId}:${itemId || row.rowNumber}:${itemType}`,
+        item_id: itemId || null,
+        item_name: name || itemId || `Fila ${row.rowNumber}`,
+        item_type: itemType,
+        equipment_id: equipmentId,
+        equipment_name: equipmentName,
+        catalog_id: null,
+        source: "sheet_template",
+      });
+    });
+  });
+
+  return templateItems;
+}
+
+function isObsoleteTemplateFallbackItem(item = {}) {
+  const source = String(item?.source || "").trim().toLowerCase();
+  if (source !== "sheet_template") return false;
+  const itemId = String(item?.itemId || item?.item_id || "").trim();
+  if (!itemId) return true;
+  const name = String(item?.name || "").trim().toLowerCase();
+  return name === "total det" || name === "total" || name === "sub total" || name === "subtotal";
+}
+
+function resolveEquipmentIdsForConsumptionSync({ selectionRows = [], extra = {} }) {
+  const ids = new Set(
+    (Array.isArray(selectionRows) ? selectionRows : [])
+      .map((row) => Number(row?.equipment_id))
+      .filter((id) => Number.isInteger(id) && id > 0),
+  );
+
+  const equipmentPairs = Array.isArray(extra?.equipment_details) ? extra.equipment_details : [];
+  filterEquipmentPairsForSheet(equipmentPairs).forEach((pair) => {
+    [pair?.primary_id, pair?.backup_id]
+      .map((value) => Number(value))
+      .filter((id) => Number.isInteger(id) && id > 0)
+      .forEach((id) => ids.add(id));
+  });
+
+  return Array.from(ids);
+}
+
 function isSameConsumptionPayload(current = {}, nextItems = [], nextExcluded = []) {
   const currentItems = normalizeConsumptionItemsForComparison(current.items || []);
   const currentExcluded = normalizeExcludedKeysForComparison(current.excluded || []);
@@ -1028,8 +1161,20 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
     name: item.name || item.key,
     item_type: item.type || "consumible",
     source: item.source || "catalog",
-    catalog_id: Number.isFinite(Number(item.catalogId)) ? Number(item.catalogId) : null,
+    catalog_id: item.catalogId === null || item.catalogId === undefined
+      ? null
+      : (Number.isFinite(Number(item.catalogId)) ? Number(item.catalogId) : null),
     annual_qty: Math.max(0, Number(item.annualQty ?? item.annualQuantity ?? 0)),
+    // ojo: Number(null) es 0, no NaN -- hay que descartar null/undefined
+    // explicitamente antes de convertir, si no un item sin referencia/plan
+    // (ej. un control, que nunca tiene reference_qty) queda guardado como 0
+    // en vez de quedar NULL.
+    reference_qty: item.referenceQty === null || item.referenceQty === undefined
+      ? null
+      : (Number.isFinite(Number(item.referenceQty)) ? Number(item.referenceQty) : null),
+    planned_qty: item.plannedQty === null || item.plannedQty === undefined
+      ? null
+      : (Number.isFinite(Number(item.plannedQty)) ? Number(item.plannedQty) : null),
     equipment_id: Number.isFinite(Number(item.equipmentId)) ? Number(item.equipmentId) : null,
     equipment_name: item.equipmentName || null,
   }));
@@ -1063,7 +1208,9 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
             item_type text,
             source text,
             catalog_id integer,
-            annual_qty integer,
+            annual_qty numeric,
+            reference_qty numeric,
+            planned_qty numeric,
             equipment_id integer,
             equipment_name text
           )
@@ -1077,6 +1224,8 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
           source,
           catalog_id,
           annual_qty,
+          reference_qty,
+          planned_qty,
           equipment_id,
           equipment_name,
           created_at,
@@ -1091,6 +1240,8 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
           p.source,
           p.catalog_id,
           p.annual_qty,
+          p.reference_qty,
+          p.planned_qty,
           p.equipment_id,
           p.equipment_name,
           NOW(),
@@ -1104,6 +1255,8 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
           source = EXCLUDED.source,
           catalog_id = EXCLUDED.catalog_id,
           annual_qty = EXCLUDED.annual_qty,
+          reference_qty = EXCLUDED.reference_qty,
+          planned_qty = EXCLUDED.planned_qty,
           equipment_id = EXCLUDED.equipment_id,
           equipment_name = EXCLUDED.equipment_name,
           updated_at = NOW()
@@ -1270,11 +1423,12 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) 
   const annualQuantityProtectionSubsection = String(options?.protectAnnualQuantities || "").trim().toLowerCase();
 
   const { rows: bcRows } = await db.query(
-    `SELECT modern_bc_metadata FROM equipment_purchase_requests WHERE id = $1 LIMIT 1`,
+    `SELECT modern_bc_metadata, extra FROM equipment_purchase_requests WHERE id = $1 LIMIT 1`,
     [businessCaseId],
   );
   const bcRow = bcRows[0] || {};
   const metadata = bcRow.modern_bc_metadata && typeof bcRow.modern_bc_metadata === "object" ? bcRow.modern_bc_metadata : {};
+  const extra = bcRow.extra && typeof bcRow.extra === "object" ? bcRow.extra : {};
   const sheetId = metadata?.bc_sheet_generation?.last?.sheet_id || null;
 
   if (!sheetId) {
@@ -1290,9 +1444,7 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) 
     `SELECT equipment_id FROM bc_equipment_selection WHERE business_case_id = $1`,
     [businessCaseId],
   );
-  const equipmentIds = Array.from(new Set(
-    selectionRows.map((row) => Number(row.equipment_id)).filter((id) => Number.isInteger(id) && id > 0),
-  ));
+  const equipmentIds = resolveEquipmentIdsForConsumptionSync({ selectionRows, extra });
   if (!equipmentIds.length) {
     if (annualQuantityProtectionSubsection) {
       const error = new Error("No existen equipos seleccionados para localizar las celdas anuales del Sheet.");
@@ -1321,7 +1473,10 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) 
     loadTemplateDefinition,
     buildSheetPayloads,
     pullAnnualQuantitiesFromGoogleSheet,
+    pullReferenceQuantitiesFromGoogleSheet,
+    pullMaximumQuantitiesFromGoogleSheet,
   } = require("./businessCaseSheetSyncLocal.service");
+  const templateDefinition = loadTemplateDefinition();
 
   const equipmentRecords = equipmentIds.map((id) => ({
     id,
@@ -1345,11 +1500,37 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) 
     catalog_id: row.catalog_id,
   }));
 
-  const equipmentTabs = buildSheetPayloads({
-    template: loadTemplateDefinition(),
+  let equipmentTabs = buildSheetPayloads({
+    template: templateDefinition,
     equipmentRecords,
     payload: { fields: {}, sync_items: catalogItemsForSync, sheet_context: {} },
   });
+  const templateItemsForSync = buildTemplateConsumptionSyncItems({
+    template: templateDefinition,
+    equipmentTabs,
+    catalogItems: catalogItemsForSync,
+  }).filter((item) => (
+    requestedItemTypes?.size
+      ? requestedItemTypes.has(String(item?.item_type || "").trim().toLowerCase())
+      : true
+  ));
+  const mergedCatalogItemsForSync = [...catalogItemsForSync, ...templateItemsForSync];
+  if (templateItemsForSync.length) {
+    equipmentTabs = buildSheetPayloads({
+      template: templateDefinition,
+      equipmentRecords,
+      payload: { fields: {}, sync_items: mergedCatalogItemsForSync, sheet_context: {} },
+    });
+    logger.warn(
+      {
+        businessCaseId,
+        templateFallbackItems: templateItemsForSync.length,
+        selectedEquipmentIds: equipmentIds,
+        selectedSheets: equipmentTabs.map((tab) => tab.sheet_name),
+      },
+      "[BC_AUDIT][BE][SHEET_TEMPLATE_CONSUMPTION_FALLBACK]",
+    );
+  }
 
   let annualQuantityProtection = null;
   if (annualQuantityProtectionSubsection) {
@@ -1375,7 +1556,20 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) 
   }
 
   const sheetUpdatesFromSheet = await pullAnnualQuantitiesFromGoogleSheet({ sheetId, equipmentTabs });
-  const currentItems = Array.isArray(current?.items) ? current.items : [];
+  // Producto Calculado para reactivos: solo de referencia visual (ver
+  // pullReferenceQuantitiesFromGoogleSheet). Se combina por item_key con las
+  // actualizaciones de annual_qty, sin afectar la logica de creacion/edicion
+  // existente.
+  const referenceUpdatesFromSheet = await pullReferenceQuantitiesFromGoogleSheet({ sheetId, equipmentTabs });
+  // "Producto a Enviar" (PRODUCTO A ENTREGAR/ENVIAR en el Sheet): aplica por
+  // igual a reactivos, calibradores, controles y materiales, sin distincion
+  // de categoria (a diferencia de la cantidad anual). Se sincroniza aqui
+  // directo a bc_consumption_items para que la pantalla de Determinaciones
+  // no dependa de que se haya abierto antes el workspace de despacho.
+  const plannedUpdatesFromSheet = await pullMaximumQuantitiesFromGoogleSheet({ sheetId, equipmentTabs });
+  const currentItems = Array.isArray(current?.items)
+    ? current.items.filter((item) => !isObsoleteTemplateFallbackItem(item))
+    : [];
   const eligibleCurrentKeys = requestedItemTypes?.size
     ? new Set(
       currentItems
@@ -1384,49 +1578,90 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) 
         .filter(Boolean),
     )
     : null;
-  const eligibleCatalogKeys = new Set(catalogItemsForSync.map((item) => item.item_key));
-  const sheetUpdates = requestedItemTypes?.size
-    ? sheetUpdatesFromSheet.filter((entry) =>
-      eligibleCatalogKeys.has(String(entry?.item_key || "").trim()) ||
-      eligibleCurrentKeys.has(String(entry?.item_key || "").trim()),
-    )
-    : sheetUpdatesFromSheet;
-  if (!sheetUpdates.length) {
+  const eligibleCatalogKeys = new Set(mergedCatalogItemsForSync.map((item) => item.item_key));
+  const filterEligible = (entry) => (requestedItemTypes?.size
+    ? eligibleCatalogKeys.has(String(entry?.item_key || "").trim()) ||
+      eligibleCurrentKeys.has(String(entry?.item_key || "").trim())
+    : true);
+  const sheetUpdates = sheetUpdatesFromSheet.filter(filterEligible);
+  const referenceUpdates = referenceUpdatesFromSheet.filter(filterEligible);
+  const plannedUpdates = plannedUpdatesFromSheet.filter(filterEligible);
+  if (!sheetUpdates.length && !referenceUpdates.length && !plannedUpdates.length) {
     return { updated: 0, created: 0, items: current, annualQuantityProtection };
   }
 
-  const catalogByKey = new Map(catalogItemsForSync.map((row) => [row.item_key, row]));
+  const catalogByKey = new Map(mergedCatalogItemsForSync.map((row) => [row.item_key, row]));
   const currentByKey = new Map(currentItems.map((item) => [item.key, item]));
   const excludedSet = new Set(current?.excluded || []);
   const updatesByKey = new Map(sheetUpdates.map((entry) => [entry.item_key, entry.annual_qty]));
+  const referenceByKey = new Map(referenceUpdates.map((entry) => [entry.item_key, entry.reference_qty]));
+  const plannedByKey = new Map(plannedUpdates.map((entry) => [entry.item_key, entry.planned_qty]));
 
   let updatedCount = 0;
-  const nextItems = (current?.items || []).map((item) => {
-    if (!updatesByKey.has(item.key)) return item;
-    const nextQty = Math.max(0, Number(updatesByKey.get(item.key)) || 0);
-    if (Number(item.annualQty) === nextQty) return item;
+  const nextItems = currentItems.map((item) => {
+    const hasAnnualUpdate = updatesByKey.has(item.key);
+    const hasReferenceUpdate = referenceByKey.has(item.key);
+    const hasPlannedUpdate = plannedByKey.has(item.key);
+    if (!hasAnnualUpdate && !hasReferenceUpdate && !hasPlannedUpdate) return item;
+
+    const nextQty = hasAnnualUpdate ? Math.max(0, Number(updatesByKey.get(item.key)) || 0) : Number(item.annualQty);
+    const nextReferenceQty = hasReferenceUpdate
+      ? Math.max(0, Number(referenceByKey.get(item.key)) || 0)
+      : (item.referenceQty ?? null);
+    const nextPlannedQty = hasPlannedUpdate
+      ? Math.max(0, Number(plannedByKey.get(item.key)) || 0)
+      : (item.plannedQty ?? null);
+    if (
+      nextQty === Number(item.annualQty) &&
+      nextReferenceQty === (item.referenceQty ?? null) &&
+      nextPlannedQty === (item.plannedQty ?? null)
+    ) return item;
     updatedCount += 1;
-    return { ...item, annualQty: nextQty };
+    return { ...item, annualQty: nextQty, referenceQty: nextReferenceQty, plannedQty: nextPlannedQty };
   });
 
+  const creationKeys = new Set([
+    ...sheetUpdates.map((entry) => entry.item_key),
+    ...plannedUpdates.map((entry) => entry.item_key),
+  ]);
   let createdCount = 0;
-  for (const entry of sheetUpdates) {
-    if (currentByKey.has(entry.item_key)) continue; // ya actualizado arriba
-    if (excludedSet.has(entry.item_key)) continue; // el usuario lo excluyo a proposito
-    const catalogInfo = catalogByKey.get(entry.item_key);
+  for (const itemKey of creationKeys) {
+    if (currentByKey.has(itemKey)) continue; // ya actualizado arriba
+    if (excludedSet.has(itemKey)) continue; // el usuario lo excluyo a proposito
+    const catalogInfo = catalogByKey.get(itemKey);
     if (!catalogInfo) continue;
 
-    nextItems.push({
-      key: entry.item_key,
+    const candidate = {
+      key: itemKey,
       itemId: catalogInfo.item_id,
       name: catalogInfo.item_name,
       type: catalogInfo.item_type,
-      source: "catalog",
+      source: catalogInfo.source || "catalog",
       catalogId: catalogInfo.catalog_id,
-      annualQty: Math.max(0, Number(entry.annual_qty) || 0),
+      annualQty: updatesByKey.has(itemKey)
+        ? Math.max(0, Number(updatesByKey.get(itemKey)) || 0)
+        : 0,
+      referenceQty: referenceByKey.has(itemKey)
+        ? Math.max(0, Number(referenceByKey.get(itemKey)) || 0)
+        : null,
+      plannedQty: plannedByKey.has(itemKey)
+        ? Math.max(0, Number(plannedByKey.get(itemKey)) || 0)
+        : null,
       equipmentId: catalogInfo.equipment_id,
       equipmentName: catalogInfo.equipment_name,
-    });
+    };
+
+    const equivalentIndex = nextItems.findIndex((item) => matchesConsumptionItem(item, candidate));
+    if (equivalentIndex >= 0) {
+      nextItems[equivalentIndex] = {
+        ...nextItems[equivalentIndex],
+        ...candidate,
+      };
+      updatedCount += 1;
+      continue;
+    }
+
+    nextItems.push(candidate);
     createdCount += 1;
   }
 
@@ -1500,6 +1735,8 @@ async function patchConsumptionItem(businessCaseId, itemKey, patch = {}, options
         source: String(row.source || existingItem?.source || "custom").trim().toLowerCase(),
         catalogId: row.catalogId ?? existingItem?.catalogId ?? null,
         annualQty,
+        referenceQty: existingItem?.referenceQty ?? null,
+        plannedQty: existingItem?.plannedQty ?? null,
         equipmentId: row.equipmentId ?? existingItem?.equipmentId ?? null,
         equipmentName: row.equipmentName ?? existingItem?.equipmentName ?? null,
       }),

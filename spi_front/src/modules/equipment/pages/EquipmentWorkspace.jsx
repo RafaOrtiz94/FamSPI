@@ -5,23 +5,51 @@ import {
   FiCalendar,
   FiCheckCircle,
   FiCpu,
+  FiDollarSign,
+  FiEdit3,
+  FiExternalLink,
+  FiFileText,
   FiFilter,
+  FiMapPin,
   FiRefreshCw,
+  FiSave,
   FiSearch,
   FiTool,
+  FiTruck,
+  FiTrash2,
+  FiUpload,
+  FiUser,
+  FiX,
 } from "react-icons/fi";
 import {
+  deleteEquipmentAssetDocument,
+  getEquipmentAssetDocuments,
+  getEquipmentAssetTimeline,
   getEquipmentAssets,
   getEquipmentMaintenanceSchedule,
   getEquipmentModels,
   getEquipmentStatuses,
+  updateEquipmentAsset,
+  uploadEquipmentAssetDocument,
 } from "../../../core/api/equipmentManagementApi";
+import { fetchClients } from "../../../core/api/clientsApi";
+import { useAuth } from "../../../core/auth/AuthContext";
 
 const tabs = [
   { id: "assets", label: "Activos", icon: FiBox },
   { id: "models", label: "Modelos", icon: FiCpu },
   { id: "schedule", label: "Cronograma", icon: FiCalendar },
 ];
+
+const editableRoles = new Set([
+  "jefe_servicio",
+  "jefe_servicio_tecnico",
+  "jefe_tecnico",
+  "admin",
+  "administrador",
+  "admin_ti",
+  "ti",
+]);
 
 const colorClasses = {
   green: "bg-emerald-50 text-emerald-700 ring-emerald-200",
@@ -40,6 +68,24 @@ const formatDate = (value) => {
     month: "short",
     day: "2-digit",
   }).format(new Date(value));
+};
+
+const formatMoney = (value) => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "Sin precio";
+  return new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" }).format(number);
+};
+
+const getClientName = (client) =>
+  client?.razon_social || client?.nombre || client?.commercial_name || client?.nombre_comercial || `Cliente ${client?.id}`;
+
+const documentTypeLabels = {
+  proforma_puesta_marcha: "Proforma de puesta en marcha",
+  kit_arranque: "Kit de arranque",
+  acta_entrega: "Acta de entrega",
+  acta_retiro: "Acta de retiro",
+  mantenimiento: "Mantenimiento",
+  otro: "Otro documento",
 };
 
 const LoadingState = () => (
@@ -92,32 +138,65 @@ const Metric = ({ label, value, icon: Icon }) => (
   </div>
 );
 
+const Field = ({ icon: Icon, label, children }) => (
+  <label className="block min-w-0">
+    <span className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+      {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
+      {label}
+    </span>
+    {children}
+  </label>
+);
+
 const EquipmentWorkspace = () => {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("assets");
   const [assets, setAssets] = useState([]);
   const [models, setModels] = useState([]);
   const [statuses, setStatuses] = useState([]);
+  const [clients, setClients] = useState([]);
   const [schedule, setSchedule] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [availabilityFilter, setAvailabilityFilter] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [historyAsset, setHistoryAsset] = useState(null);
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [documentRows, setDocumentRows] = useState([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [documentForm, setDocumentForm] = useState({
+    docType: "proforma_puesta_marcha",
+    title: "",
+    notes: "",
+    file: null,
+  });
+
+  const userRole = String(user?.role || "").toLowerCase();
+  const canEditAssets = editableRoles.has(userRole);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const [statusRows, modelRows, assetRows, scheduleRows] = await Promise.all([
+      const [statusRows, modelRows, assetRows, scheduleRows, clientResponse] = await Promise.all([
         getEquipmentStatuses(),
         getEquipmentModels(),
         getEquipmentAssets(),
         getEquipmentMaintenanceSchedule(),
+        fetchClients({ limit: 300 }),
       ]);
       setStatuses(statusRows);
       setModels(modelRows);
       setAssets(assetRows);
       setSchedule(scheduleRows);
+      setClients(clientResponse?.clients || []);
     } catch (err) {
       setError(err?.response?.data?.message || err?.message || "Error inesperado al consultar el modulo.");
     } finally {
@@ -154,6 +233,7 @@ const EquipmentWorkspace = () => {
         asset.model,
         asset.category,
         asset.current_location,
+        asset.assigned_client_name,
         asset.status_label,
       ]
         .filter(Boolean)
@@ -195,6 +275,115 @@ const EquipmentWorkspace = () => {
     return { available, installed, service };
   }, [assets]);
 
+  const startEdit = (asset) => {
+    setNotice("");
+    setEditingId(asset.id);
+    setEditForm({
+      current_status: asset.current_status || "",
+      current_location: asset.current_location || "",
+      client_id: asset.client_id || "",
+      sale_price: asset.sale_price || "",
+      asset_condition: asset.asset_condition || "",
+      retired_at: asset.retired_at ? String(asset.retired_at).slice(0, 10) : "",
+      delivered_at: asset.delivered_at ? String(asset.delivered_at).slice(0, 10) : "",
+      notes: asset.notes || "",
+    });
+  };
+
+  const updateForm = (field, value) => {
+    setEditForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const saveAsset = async (assetId) => {
+    setSavingId(assetId);
+    setNotice("");
+    setError("");
+    try {
+      const updated = await updateEquipmentAsset(assetId, {
+        ...editForm,
+        client_id: editForm.client_id || null,
+        sale_price: editForm.sale_price || null,
+        retired_at: editForm.retired_at || null,
+        delivered_at: editForm.delivered_at || null,
+      });
+      const refreshed = await getEquipmentAssets();
+      setAssets(refreshed);
+      setEditingId(null);
+      setNotice(`Activo ${updated?.serial_number || assetId} actualizado correctamente.`);
+      if (historyAsset?.id === assetId) {
+        await openHistory({ ...historyAsset, ...updated });
+      }
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || "No se pudo actualizar el activo.");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const openHistory = async (asset) => {
+    setHistoryAsset(asset);
+    setHistoryLoading(true);
+    setDocumentsLoading(true);
+    try {
+      const [rows, docs] = await Promise.all([
+        getEquipmentAssetTimeline(asset.id),
+        getEquipmentAssetDocuments(asset.id),
+      ]);
+      setHistoryRows(rows);
+      setDocumentRows(docs);
+    } catch (err) {
+      setHistoryRows([]);
+      setDocumentRows([]);
+      setError(err?.response?.data?.message || err?.message || "No se pudo cargar el historial del activo.");
+    } finally {
+      setHistoryLoading(false);
+      setDocumentsLoading(false);
+    }
+  };
+
+  const updateDocumentForm = (field, value) => {
+    setDocumentForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const uploadDocument = async () => {
+    if (!historyAsset || !documentForm.file) {
+      setError("Selecciona un activo y un archivo para subir.");
+      return;
+    }
+    setUploadingDocument(true);
+    setError("");
+    try {
+      await uploadEquipmentAssetDocument(historyAsset.id, {
+        file: documentForm.file,
+        docType: documentForm.docType,
+        title: documentForm.title,
+        notes: documentForm.notes,
+      });
+      setDocumentForm({ docType: "proforma_puesta_marcha", title: "", notes: "", file: null });
+      setNotice("Documento del equipo cargado correctamente.");
+      await openHistory(historyAsset);
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || "No se pudo subir el documento.");
+    } finally {
+      setUploadingDocument(false);
+    }
+  };
+
+  const removeDocument = async (doc) => {
+    if (!historyAsset || !doc?.id) return;
+    setDocumentsLoading(true);
+    setError("");
+    try {
+      await deleteEquipmentAssetDocument(historyAsset.id, doc.id);
+      setNotice("Documento eliminado del equipo.");
+      await openHistory(historyAsset);
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || "No se pudo eliminar el documento.");
+    } finally {
+      setDocumentsLoading(false);
+    }
+  };
+
   const renderAssets = () => {
     if (!filteredAssets.length) {
       return (
@@ -207,46 +396,327 @@ const EquipmentWorkspace = () => {
     }
 
     return (
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold text-slate-700">Activo</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-700">Modelo</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-700">Estado</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-700">Ubicacion</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-700">Negociacion</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredAssets.map((asset) => {
-                const status = statusByCode[asset.current_status] || asset;
-                return (
-                  <tr key={asset.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3">
-                      <p className="font-semibold text-slate-950">{asset.serial_number || "Serial pendiente"}</p>
-                      <p className="text-xs text-slate-500">{asset.internal_code || asset.asset_tag || `ID ${asset.id}`}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-slate-800">{asset.model_name}</p>
-                      <p className="text-xs text-slate-500">{[asset.manufacturer, asset.model, asset.category].filter(Boolean).join(" / ")}</p>
-                    </td>
-                    <td className="px-4 py-3">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <section className="grid min-w-0 gap-4">
+          {filteredAssets.map((asset) => {
+            const status = statusByCode[asset.current_status] || asset;
+            const isEditing = editingId === asset.id;
+            return (
+              <article key={asset.id} className="rounded-[1.75rem] border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${statusClass(status.color_token)}`}>
                         {asset.status_label || status.label || asset.current_status}
                       </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">{asset.current_location || "Sin ubicacion"}</td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {asset.negotiated_by_module ? `${asset.negotiated_by_module} #${asset.negotiation_reference_id || ""}` : "Sin reserva"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      {asset.asset_condition ? (
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold uppercase text-slate-700">
+                          {asset.asset_condition === "cu" ? "CU" : "Nuevo"}
+                        </span>
+                      ) : null}
+                    </div>
+                    <h3 className="mt-3 text-lg font-semibold text-slate-950">{asset.serial_number || "Serial pendiente"}</h3>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {[asset.model_name, asset.manufacturer, asset.model].filter(Boolean).join(" / ")}
+                    </p>
+                    <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">{asset.category || "Sin categoria"}</p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {canEditAssets ? (
+                      <button
+                        type="button"
+                        onClick={() => (isEditing ? setEditingId(null) : startEdit(asset))}
+                        className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        {isEditing ? <FiX className="h-4 w-4" /> : <FiEdit3 className="h-4 w-4" />}
+                        {isEditing ? "Cancelar" : "Editar"}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => openHistory(asset)}
+                      className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                    >
+                      <FiFileText className="h-4 w-4" />
+                      Historial y documentos
+                    </button>
+                  </div>
+                </div>
+
+                {isEditing ? (
+                  <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <Field icon={FiCheckCircle} label="Estado">
+                      <select
+                        value={editForm.current_status}
+                        onChange={(event) => updateForm("current_status", event.target.value)}
+                        className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600"
+                      >
+                        {statuses.map((item) => (
+                          <option key={item.code} value={item.code}>{item.label}</option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field icon={FiMapPin} label="Ubicacion">
+                      <input
+                        value={editForm.current_location}
+                        onChange={(event) => updateForm("current_location", event.target.value)}
+                        className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600"
+                        placeholder="Bodega, cliente o ciudad"
+                      />
+                    </Field>
+                    <Field icon={FiDollarSign} label="Precio de venta">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={editForm.sale_price}
+                        onChange={(event) => updateForm("sale_price", event.target.value)}
+                        className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600"
+                        placeholder="0.00"
+                      />
+                    </Field>
+                    <Field icon={FiTool} label="Condicion">
+                      <select
+                        value={editForm.asset_condition}
+                        onChange={(event) => updateForm("asset_condition", event.target.value)}
+                        className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600"
+                      >
+                        <option value="">Sin definir</option>
+                        <option value="nuevo">Nuevo</option>
+                        <option value="cu">CU</option>
+                      </select>
+                    </Field>
+                    <Field icon={FiTruck} label="Fecha retiro">
+                      <input
+                        type="date"
+                        value={editForm.retired_at}
+                        onChange={(event) => updateForm("retired_at", event.target.value)}
+                        className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600"
+                      />
+                    </Field>
+                    <Field icon={FiCalendar} label="Fecha entrega">
+                      <input
+                        type="date"
+                        value={editForm.delivered_at}
+                        onChange={(event) => updateForm("delivered_at", event.target.value)}
+                        className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600"
+                      />
+                    </Field>
+                    <Field icon={FiUser} label="Cliente asignado">
+                      <select
+                        value={editForm.client_id}
+                        onChange={(event) => updateForm("client_id", event.target.value)}
+                        className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600"
+                      >
+                        <option value="">Sin cliente</option>
+                        {clients.map((client) => (
+                          <option key={client.id} value={client.id}>{getClientName(client)}</option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field icon={FiEdit3} label="Notas">
+                      <input
+                        value={editForm.notes}
+                        onChange={(event) => updateForm("notes", event.target.value)}
+                        className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600"
+                        placeholder="Observaciones del activo"
+                      />
+                    </Field>
+                    <div className="md:col-span-2 xl:col-span-4">
+                      <button
+                        type="button"
+                        onClick={() => saveAsset(asset.id)}
+                        disabled={savingId === asset.id}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70 md:w-auto"
+                      >
+                        <FiSave className="h-4 w-4" />
+                        {savingId === asset.id ? "Guardando" : "Guardar activo"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-2xl bg-slate-50 p-3">
+                      <p className="text-xs font-semibold uppercase text-slate-500">Ubicacion</p>
+                      <p className="mt-1 text-sm font-medium text-slate-900">{asset.current_location || "Sin ubicacion"}</p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 p-3">
+                      <p className="text-xs font-semibold uppercase text-slate-500">Cliente asignado</p>
+                      <p className="mt-1 text-sm font-medium text-slate-900">{asset.assigned_client_name || "Sin cliente"}</p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 p-3">
+                      <p className="text-xs font-semibold uppercase text-slate-500">Precio de venta</p>
+                      <p className="mt-1 text-sm font-medium text-slate-900">{formatMoney(asset.sale_price)}</p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 p-3">
+                      <p className="text-xs font-semibold uppercase text-slate-500">Retiro / entrega</p>
+                      <p className="mt-1 text-sm font-medium text-slate-900">
+                        {formatDate(asset.retired_at)} / {formatDate(asset.delivered_at)}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </section>
+
+        <aside className="min-w-0 rounded-[1.75rem] border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-auto">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Historial</p>
+              <h3 className="mt-1 text-lg font-semibold text-slate-950">
+                {historyAsset?.serial_number || "Selecciona un activo"}
+              </h3>
+            </div>
+            {historyAsset ? (
+              <button type="button" onClick={() => setHistoryAsset(null)} className="rounded-full p-2 text-slate-500 hover:bg-slate-100">
+                <FiX className="h-4 w-4" />
+              </button>
+            ) : null}
+          </div>
+
+          {!historyAsset ? (
+            <p className="mt-4 text-sm text-slate-500">
+              Abre un activo para ver movimientos, mantenimientos, actas y documentos como proformas de puesta en marcha o kit de arranque.
+            </p>
+          ) : null}
+          {historyAsset ? (
+            <section className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-950">Documentos del equipo</p>
+                  <p className="text-xs text-slate-500">Carga varios documentos por activo.</p>
+                </div>
+                <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
+                  {documentRows.length}
+                </span>
+              </div>
+
+              {canEditAssets ? (
+                <div className="mt-3 grid gap-2">
+                  <select
+                    value={documentForm.docType}
+                    onChange={(event) => updateDocumentForm("docType", event.target.value)}
+                    className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600"
+                  >
+                    {Object.entries(documentTypeLabels).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                  <input
+                    value={documentForm.title}
+                    onChange={(event) => updateDocumentForm("title", event.target.value)}
+                    className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600"
+                    placeholder="Titulo visible del documento"
+                  />
+                  <input
+                    value={documentForm.notes}
+                    onChange={(event) => updateDocumentForm("notes", event.target.value)}
+                    className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600"
+                    placeholder="Notas u observaciones"
+                  />
+                  <input
+                    type="file"
+                    onChange={(event) => updateDocumentForm("file", event.target.files?.[0] || null)}
+                    className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-white file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-700"
+                  />
+                  <button
+                    type="button"
+                    onClick={uploadDocument}
+                    disabled={uploadingDocument || !documentForm.file}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <FiUpload className="h-4 w-4" />
+                    {uploadingDocument ? "Subiendo" : "Subir documento"}
+                  </button>
+                </div>
+              ) : null}
+
+              {documentsLoading ? (
+                <div className="mt-4 flex items-center gap-2 text-sm text-slate-600">
+                  <FiRefreshCw className="h-4 w-4 animate-spin" />
+                  Cargando documentos
+                </div>
+              ) : null}
+              {!documentsLoading && !documentRows.length ? (
+                <p className="mt-4 rounded-2xl bg-white p-3 text-sm text-slate-500">Sin documentos cargados para este equipo.</p>
+              ) : null}
+              {!documentsLoading && documentRows.length ? (
+                <div className="mt-4 space-y-2">
+                  {documentRows.map((doc) => (
+                    <div key={doc.id} className="rounded-2xl bg-white p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-900">{doc.title || doc.filename}</p>
+                          <p className="mt-0.5 text-xs text-slate-500">{documentTypeLabels[doc.doc_type] || doc.doc_type}</p>
+                          <p className="mt-0.5 text-xs text-slate-400">{formatDate(doc.created_at)}</p>
+                        </div>
+                        <div className="flex shrink-0 gap-1">
+                          {doc.drive_link ? (
+                            <a
+                              href={doc.drive_link}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-full p-2 text-blue-700 hover:bg-blue-50"
+                              title="Abrir documento"
+                            >
+                              <FiExternalLink className="h-4 w-4" />
+                            </a>
+                          ) : null}
+                          {canEditAssets ? (
+                            <button
+                              type="button"
+                              onClick={() => removeDocument(doc)}
+                              className="rounded-full p-2 text-rose-700 hover:bg-rose-50"
+                              title="Eliminar documento"
+                            >
+                              <FiTrash2 className="h-4 w-4" />
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
+          {historyLoading ? (
+            <div className="mt-5 flex items-center gap-2 text-sm text-slate-600">
+              <FiRefreshCw className="h-4 w-4 animate-spin" />
+              Cargando historial
+            </div>
+          ) : null}
+          {historyAsset && !historyLoading && !historyRows.length ? (
+            <p className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">Sin movimientos registrados para este activo.</p>
+          ) : null}
+          {historyAsset && !historyLoading && historyRows.length ? (
+            <div className="mt-5 space-y-3">
+              {historyRows.map((event) => (
+                <div key={event.id} className="rounded-2xl border border-slate-200 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-slate-900">{event.event_type}</p>
+                    <span className="text-xs text-slate-500">{formatDate(event.created_at)}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {[event.from_status_label || event.from_status, event.to_status_label || event.to_status].filter(Boolean).join(" -> ") || "Movimiento registrado"}
+                  </p>
+                  {event.created_by_name ? <p className="mt-1 text-xs text-slate-500">Por {event.created_by_name}</p> : null}
+                  {event.payload?.next ? (
+                    <div className="mt-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+                      <p>Ubicacion: {event.payload.next.current_location || "Sin ubicacion"}</p>
+                      <p>Cliente ID: {event.payload.next.client_id || "Sin cliente"}</p>
+                      <p>Precio: {formatMoney(event.payload.next.sale_price)}</p>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </aside>
       </div>
     );
   };
@@ -339,7 +809,7 @@ const EquipmentWorkspace = () => {
           <p className="text-sm font-medium text-slate-500">Gestion integral</p>
           <h1 className="mt-1 text-2xl font-semibold text-slate-950 md:text-3xl">Equipos</h1>
           <p className="mt-2 max-w-3xl text-sm text-slate-600">
-            Modelos tecnicos, activos con serial, etiquetas de estado y cronograma automatico de mantenimiento.
+            Modelos tecnicos, activos con serial, estado operativo, cliente asignado e historial trazable por equipo.
           </p>
         </div>
         <button
@@ -390,7 +860,7 @@ const EquipmentWorkspace = () => {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 className="w-full rounded-2xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600"
-                placeholder="Buscar modelo, serial o ubicacion"
+                placeholder="Buscar modelo, serial, cliente o ubicacion"
               />
             </label>
 
@@ -426,6 +896,7 @@ const EquipmentWorkspace = () => {
         </div>
       </section>
 
+      {notice ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">{notice}</div> : null}
       {loading ? <LoadingState /> : null}
       {!loading && error ? <ErrorState message={error} onRetry={load} /> : null}
       {!loading && !error && activeTab === "assets" ? renderAssets() : null}

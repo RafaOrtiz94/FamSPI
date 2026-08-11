@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useSearchParams } from "react-router-dom";
-import { FiChevronLeft, FiChevronRight, FiCheckCircle, FiUpload, FiCamera } from "react-icons/fi";
+import { FiChevronLeft, FiChevronRight, FiCheckCircle, FiUpload } from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
 import { generateEquipmentVerificationPDF } from "../../../core/api/servicioApi";
@@ -154,6 +154,8 @@ const VerificacionStepper = () => {
  ) {
  return "Cuando F.ST-09 falla debes registrar notas de remediación";
  }
+ break;
+ default:
  break;
  }
  return null;

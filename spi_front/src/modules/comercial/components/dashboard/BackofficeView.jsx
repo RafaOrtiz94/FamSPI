@@ -79,7 +79,7 @@ const BackofficeView = ({ onRefresh }) => {
  title: "Solicitudes de compra",
  subtitle: "Handoff y seguimiento hacia ACP",
  icon: FiShoppingCart,
- route: "/dashboard/comercial/equipment-purchases",
+ route: "/dashboard/purchases/workspace?tab=public",
  },
  ];
  }, [isBackofficeCommercial]);

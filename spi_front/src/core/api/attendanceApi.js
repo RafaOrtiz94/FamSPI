@@ -1,6 +1,12 @@
 // src/core/api/attendanceApi.js
 import api from "./index";
-import { enqueueOfflineMark, flushOfflineQueue, getQueueSize, onOfflineQueueChanged } from "../../shared/utils/attendanceOfflineQueue";
+import {
+  enqueueOfflineMark,
+  flushOfflineQueue,
+  getQueueSize,
+  hasQueuedMarkForEndpoint,
+  onOfflineQueueChanged,
+} from "../../shared/utils/attendanceOfflineQueue";
 
 const normalizeLocation = (location) => {
   if (!location) return null;
@@ -84,9 +90,31 @@ const postAttendancePayload = async (endpoint, payload = {}) => {
 // memoria del componente.
 const isNetworkError = (err) => !err?.response;
 
+// `api` (src/core/api/index.js) no define timeout global -- con senal mala
+// (viva pero muy lenta/intermitente) una marcacion se quedaria esperando
+// indefinidamente sin lanzar error de red, asi que nunca se encolaria.
+// Este timeout acota ese caso al mismo camino de "sin conexion": si no hay
+// respuesta en MARK_TIMEOUT_MS, se trata como fallo de red y se encola.
+// Es seguro reintentarla despues aunque el POST original si haya llegado al
+// servidor: los endpoints de marcacion devuelven 409/400 en ese caso y
+// flushOfflineQueue/resolveAttendanceConflict ya descartan ese resultado sin
+// duplicar nada.
+const MARK_TIMEOUT_MS = 10000;
+
+const ALREADY_QUEUED_MESSAGE = "Ya se guardó esta marcación y está pendiente de enviar. No hace falta repetirla.";
+
+// Si el mismo endpoint ya tiene una marca sin enviar en la cola offline, no
+// se intenta de nuevo (ni siquiera contra la red): la UI no siempre refleja
+// de inmediato que la marca anterior quedo guardada, y sin este guard un
+// segundo toque del mismo boton generaria una segunda marca duplicada en
+// cuanto vuelva la conexion.
 const postQueueableMark = async (endpoint, payload = {}, label) => {
+  if (hasQueuedMarkForEndpoint(endpoint)) {
+    return { ok: true, queued: true, alreadyQueued: true, message: ALREADY_QUEUED_MESSAGE };
+  }
+
   try {
-    const { data } = await api.post(endpoint, payload);
+    const { data } = await api.post(endpoint, payload, { timeout: MARK_TIMEOUT_MS });
     return data;
   } catch (err) {
     if (!isNetworkError(err)) throw err;
@@ -298,6 +326,35 @@ export const marcarSalidaOficina = async (location = null, description = null, m
  return postAttendancePayload("/attendance/marcar/salida-oficina", payload);
 };
 
+export const createTeleworkRequest = async ({ city, location, locationAccuracy = null, reason = "", requestDate = "" } = {}) => {
+  const normalizedLocation = ensureLocationOrThrow(location);
+  const { data } = await api.post("/attendance/telework/requests", {
+    city: String(city || "").trim(),
+    ...(String(requestDate || "").trim() ? { request_date: String(requestDate).trim() } : {}),
+    location: normalizedLocation,
+    ...(locationAccuracy !== null && locationAccuracy !== undefined ? { location_accuracy: locationAccuracy } : {}),
+    ...(String(reason || "").trim() ? { reason: String(reason).trim() } : {}),
+  });
+  return data;
+};
+
+export const getTeleworkRequests = async (query = {}) => {
+  const params = new URLSearchParams();
+  if (query?.scope) params.set("scope", String(query.scope));
+  if (query?.mode) params.set("mode", String(query.mode));
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const { data } = await api.get(`/attendance/telework/requests${suffix}`);
+  return data;
+};
+
+export const decideTeleworkRequest = async (requestId, decision, reason = "") => {
+  const { data } = await api.post(`/attendance/telework/requests/${requestId}/decision`, {
+    decision,
+    ...(String(reason || "").trim() ? { reason: String(reason).trim() } : {}),
+  });
+  return data;
+};
+
 export const marcarEntradaOficina = async (location = null, payloadOrMarkMeta = {}, maybeMarkMeta = {}) => {
  const payload = normalizeOperationalEndPayload(location, payloadOrMarkMeta, maybeMarkMeta);
  return postAttendancePayload("/attendance/marcar/entrada-oficina", payload);
@@ -466,9 +523,19 @@ export const getActiveException = async () => {
  * Get Today's Attendance - For current user
  */
 export const getTodayAttendance = async () => {
- const { data } = await api.get("/attendance/today");
+  const { data } = await api.get("/attendance/today");
 
- return data;
+  return data;
+};
+
+export const getAttendanceLivePresence = async () => {
+  const { data } = await api.get("/attendance/live-presence");
+  return data;
+};
+
+export const getAttendancePunctualitySummary = async () => {
+  const { data } = await api.get("/attendance/punctuality/summary");
+  return data;
 };
 
 /**
@@ -614,17 +681,32 @@ export const getAttendanceWorkspaceBreaches = async (query = {}) => {
 };
 
 export const scheduleAttendanceFollowUpMeeting = async (userId, payload = {}) => {
-  const { data } = await api.post(`/attendance/non-compliance/${userId}/schedule-meeting`, payload);
+  const normalizedPayload = {
+    ...payload,
+    date: payload.date || payload.meeting_date,
+    start_time: payload.start_time || payload.meeting_time,
+    reason: payload.reason || payload.notes,
+  };
+  const { data } = await api.post(`/attendance/non-compliance/${userId}/schedule-meeting`, normalizedPayload);
   return data;
 };
 
-export const getCollaboratorJustificationsPanel = async (userId) => {
-  const { data } = await api.get(`/attendance/admin/collaborator/${userId}/justifications-panel`);
+export const getCollaboratorJustificationsPanel = async (userId, query = {}) => {
+  const params = new URLSearchParams();
+  if (query?.startDate || query?.start) params.set("start", query.startDate || query.start);
+  if (query?.endDate || query?.end) params.set("end", query.endDate || query.end);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const { data } = await api.get(`/attendance/admin/collaborator/${userId}/justifications-panel${suffix}`);
   return data;
 };
 
-export const updateLateJustification = async (id, { status, regularized_entry_time }) => {
-  const { data } = await api.put(`/attendance/admin/late-justification/${id}`, { status, regularized_entry_time });
+export const getAttendanceRegularizationsPanel = async (query = {}) => {
+  const params = new URLSearchParams();
+  if (query?.search) params.set("search", query.search);
+  if (query?.startDate || query?.start) params.set("start", query.startDate || query.start);
+  if (query?.endDate || query?.end) params.set("end", query.endDate || query.end);
+  if (query?.regularizationType) params.set("regularizationType", query.regularizationType);
+  const { data } = await api.get(`/attendance/admin/regularizations-panel?${params.toString()}`);
   return data;
 };
 
@@ -773,6 +855,42 @@ export const downloadAttendanceBulkPDF = async (query = {}) => {
   notice: response.headers?.["x-document-integrity-notice"] || null,
   fileName,
  };
+};
+
+/**
+ * Download the FamSPI-branded monthly attendance report (all collaborators,
+ * combines normal/operational exits, permisos, overtime and a visual flag
+ * for days where the acta (F.RH) time differs from the real clock time).
+ */
+export const downloadAttendanceMonthlyReport = async ({ start, end, search, departmentId, format = "pdf" } = {}) => {
+ const params = new URLSearchParams();
+ if (start) params.set("start", start);
+ if (end) params.set("end", end);
+ if (search) params.set("search", search);
+ if (departmentId) params.set("departmentId", String(departmentId));
+ params.set("format", format === "excel" ? "excel" : "pdf");
+
+ const response = await api.get(`/attendance/monthly-report?${params.toString()}`, {
+  responseType: "blob",
+ });
+
+ const fileExt = format === "excel" ? "xlsx" : "pdf";
+ const disposition = response.headers?.["content-disposition"] || "";
+ const match = disposition.match(/filename=([^;]+)/i);
+ const fileName = match
+  ? String(match[1]).replace(/"/g, "").trim()
+  : `asistencia-reporte-mensual-${start}-${end}.${fileExt}`;
+
+ const url = window.URL.createObjectURL(new Blob([response.data]));
+ const link = document.createElement("a");
+ link.href = url;
+ link.setAttribute("download", fileName);
+ document.body.appendChild(link);
+ link.click();
+ link.remove();
+ window.URL.revokeObjectURL(url);
+
+ return { ok: true, fileName };
 };
 
 /**

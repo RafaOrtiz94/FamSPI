@@ -37,52 +37,12 @@ const calculateFinancialDepreciation = (unitPrice, percentage, projectedMonths) 
 const getNaturalErrorMessage = (err, fallback) => {
  const status = Number(err?.response?.status || 0);
  const raw = String(err?.response?.data?.message || "").trim();
- const code = String(err?.response?.data?.code || "").trim();
- if (code === "INVESTMENT_ACP_CONFIRMATION_REQUIRED") {
- return "ACP Comercial debe confirmar el carrito inicial antes de cargar precios financieros.";
- }
- if (code === "INVESTMENT_SERVICE_CONFIRMATION_REQUIRED") {
- return "Jefe de Servicio debe confirmar el carrito de Servicio antes de cargar precios operativos.";
- }
   if (status === 403) return "No tienes permiso para editar esta sección.";
   if (status === 409) return "La información cambió mientras trabajabas. Recarga la sección e inténtalo nuevamente.";
   if (!raw) return fallback;
   if (/\b(4\d\d|5\d\d)\b/.test(raw) || /forbidden|conflict|unauthorized|status/i.test(raw)) return fallback;
   return raw;
 };
-
-function DeadlineBanner({ deadlineAt }) {
-  const now = Date.now();
-  const deadline = deadlineAt ? new Date(deadlineAt).getTime() : null;
-  if (!deadline) return null;
-
-  const diffMs = deadline - now;
-  const isExpired = diffMs <= 0;
-  const hoursLeft = Math.max(0, Math.floor(diffMs / 3600000));
-  const minutesLeft = Math.max(0, Math.floor((diffMs % 3600000) / 60000));
-
-  return (
-    <div
-      className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${
-        isExpired
-          ? "border-red-200 bg-red-50 text-red-800"
-          : hoursLeft < 6
-          ? "border-amber-200 bg-amber-50 text-amber-800"
-          : "border-blue-100 bg-blue-50 text-blue-800"
-      }`}
-    >
-      {isExpired ? <FiAlertCircle size={16} className="flex-shrink-0" /> : <FiClock size={16} className="flex-shrink-0" />}
-      {isExpired ? (
-        <span>El plazo de 48 horas ha vencido. Completa los valores lo antes posible.</span>
-      ) : (
-        <span>
-          Plazo: <strong>{hoursLeft}h {minutesLeft}m restantes</strong> —{" "}
-          {new Date(deadline).toLocaleString("es-EC", { timeZone: "America/Guayaquil" })}
-        </span>
-      )}
-    </div>
-  );
-}
 
 function PricingContextHeader({ context = {} }) {
   const primary = Array.isArray(context.primary_equipment_names) ? context.primary_equipment_names : [];
@@ -128,11 +88,8 @@ const InvestmentValuesSection = ({ investmentClass, permissions = {}, ownership 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [deadlineAt, setDeadlineAt] = useState(null);
   const [dirtyMap, setDirtyMap] = useState({});
   const [syncStatus, setSyncStatus] = useState(null);
-  const [cartStatus, setCartStatus] = useState(null);
-  const [cartSummary, setCartSummary] = useState(null);
   const [pricingContext, setPricingContext] = useState(null);
   const [assignees, setAssignees] = useState([]);
   const [assigneeDrafts, setAssigneeDrafts] = useState({});
@@ -141,10 +98,9 @@ const InvestmentValuesSection = ({ investmentClass, permissions = {}, ownership 
 
   const role = (user?.role || user?.scope || user?.role_name || "").toLowerCase();
   const isEditor = EDITOR_ROLES[investmentClass]?.has(role) ?? false;
-  const acpConfirmed = Boolean(cartStatus?.acpConfirmed ?? cartStatus?.acp_confirmed);
-  const serviceConfirmed = Boolean(cartStatus?.serviceConfirmed ?? cartStatus?.service_confirmed ?? cartStatus?.confirmed);
-  const confirmationReady = investmentClass === "financiera" ? acpConfirmed : serviceConfirmed;
-  const canEdit = isEditor && confirmationReady && permissions.canEdit !== false && ownership?.canUserEdit !== false;
+  // Precios en tiempo real, sin carrito ni cierre: solo bloquea si la
+  // seccion fue bloqueada por otra via generica.
+  const canEdit = isEditor && permissions.canEdit !== false && ownership?.canUserEdit !== false;
 
   const load = useCallback(async () => {
     if (!bcId) return;
@@ -158,10 +114,7 @@ const InvestmentValuesSection = ({ investmentClass, permissions = {}, ownership 
       ]);
       const payload = res?.data?.data || {};
       setItems(Array.isArray(payload.items) ? payload.items : []);
-      setDeadlineAt(payload.deadline_at || null);
       setSyncStatus(payload.sync_status || null);
-      setCartStatus(payload.cart || null);
-      setCartSummary(payload.cart_summary || null);
       setPricingContext(payload.pricing_context || null);
       setAssignees(Array.isArray(assigneesRes?.data?.data) ? assigneesRes.data.data : []);
       setAssigneeDrafts(Object.fromEntries(
@@ -292,14 +245,12 @@ const InvestmentValuesSection = ({ investmentClass, permissions = {}, ownership 
           row.depreciation_percentage,
           pricingContext?.projected_deadline_months,
         );
-        const price = investmentClass === "financiera" ? depreciation.net : basePrice;
+        const price = investmentClass === "financiera" ? depreciation.projected : basePrice;
         const qty = parseInt(row.quantity, 10) || 1;
         return sum + price * qty;
       }, 0),
     [items, investmentClass, pricingContext?.projected_deadline_months]
   );
-
-  const cartBucket = (scope) => cartSummary?.[scope] || { item_count: 0, quantity: 0 };
 
   if (loading) {
     return (
@@ -357,43 +308,7 @@ const InvestmentValuesSection = ({ investmentClass, permissions = {}, ownership 
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm">
-            <FiLayers size={17} />
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-slate-900">Precios del Carrito General</div>
-            <p className="mt-1 text-xs leading-5 text-slate-600">
-              Aquí se valoran todos los ítems confirmados. El precio se registra primero en SPI y luego se sincroniza al Sheet oficial. Esta sección no agrega ni elimina inversiones.
-            </p>
-          </div>
-        </div>
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {[
-            ["ACP", "acp", "indigo"],
-            ["Servicio", "service", "violet"],
-            ["General", "general", "emerald"],
-          ].map(([label, scope, tone]) => {
-            const bucket = cartBucket(scope);
-            const confirmed = scope === "acp" ? acpConfirmed : scope === "service" ? serviceConfirmed : serviceConfirmed;
-            return (
-              <div key={scope} className="rounded-xl border border-white bg-white px-3 py-3 shadow-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`text-xs font-bold uppercase tracking-wide ${tone === "indigo" ? "text-indigo-700" : tone === "violet" ? "text-violet-700" : "text-emerald-700"}`}>{label}</span>
-                  {confirmed ? <FiCheckCircle className="text-emerald-600" size={15} /> : <FiClock className="text-amber-500" size={15} />}
-                </div>
-                <div className="mt-2 text-lg font-bold text-slate-900">{bucket.item_count || 0} ítems</div>
-                <div className="text-xs text-slate-500">Cantidad total: {bucket.quantity || 0}</div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Deadline */}
       <PricingContextHeader context={pricingContext || {}} />
-      <DeadlineBanner deadlineAt={deadlineAt} />
       {syncStatus?.pending && (
         <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <FiAlertCircle size={16} className="flex-shrink-0" />
@@ -406,30 +321,11 @@ const InvestmentValuesSection = ({ investmentClass, permissions = {}, ownership 
           <span>{syncStatus?.message}</span>
         </div>
       )}
-      {cartStatus && !confirmationReady && (
-        <div className="flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-          <FiAlertCircle size={16} className="flex-shrink-0" />
-          <span>
-            {investmentClass === "financiera"
-              ? "ACP Comercial debe confirmar el carrito inicial para habilitar estos precios."
-              : "Jefe de Servicio debe confirmar el carrito de Servicio para habilitar estos precios."}
-          </span>
-        </div>
-      )}
-
-      {isEditor && !confirmationReady && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-sm text-amber-800">
-          {investmentClass === "financiera"
-            ? "La edición se habilitará cuando ACP Comercial confirme el carrito inicial."
-            : "La edición se habilitará cuando Jefe de Servicio confirme el carrito de Servicio."}
-        </div>
-      )}
-
       {/* Read-only notice for non-editors */}
       {!isEditor && (
         <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-700">
           Solo{" "}
-          {investmentClass === "operativa" ? "Jefe de Operaciones / Jefe de Logística" : "Jefe Financiero"} puede
+          {investmentClass === "operativa" ? "Jefe de Operaciones" : "Jefe Financiero"} puede
           ingresar los precios de esta sección.
         </div>
       )}
@@ -437,10 +333,10 @@ const InvestmentValuesSection = ({ investmentClass, permissions = {}, ownership 
       {/* No items */}
       {!items.length && (
         <div className="bg-white border border-gray-100 rounded-2xl p-8 text-center text-gray-500 text-sm">
-          No hay inversiones seleccionadas en el Carrito General de este BC.
+          No hay inversiones con cantidad asignada en este BC.
           <br />
           <span className="text-xs text-gray-400 mt-1 block">
-            Confirma primero el Carrito ACP y revisa la selección en «Inversiones Adicionales».
+            Asigna cantidades en «Inversiones Adicionales» para que aparezcan aquí.
           </span>
         </div>
       )}

@@ -28,8 +28,8 @@ const {
   createRequest: createServiceRequest,
   generateActa,
   addDriveAttachment,
+  markRequestCompleted,
 } = require("../requests/requests.service");
-const { enqueuePurchaseStatusChangedEvent } = require("../integrations/hooks");
 
 const DEFAULT_ROOT_ENV_KEYS = ["DRIVE_ROOT_FOLDER_ID", "DRIVE_FOLDER_ID"];
 const ROOT_FOLDER_NAME = process.env.EQUIPMENT_PURCHASE_ROOT_FOLDER || "Solicitudes de compra de equipos";
@@ -523,17 +523,17 @@ function assertNoStaleWrite(request, expectedUpdatedAt) {
   });
 }
 
-async function getSingleUserByRole(role) {
-  if (!role) return null;
+async function getUsersByRole(role) {
+  if (!role) return [];
   try {
     const { rows } = await db.query(
-      'SELECT id, email, fullname FROM users WHERE role = $1 AND active = true ORDER BY id ASC LIMIT 1',
+      'SELECT id, email, fullname FROM users WHERE role = $1 AND active = true ORDER BY id ASC',
       [role],
     );
-    return rows[0] || null;
+    return rows;
   } catch (error) {
-    logger.warn({ error, role }, 'No se pudo resolver usuario por rol');
-    return null;
+    logger.warn({ error, role }, 'No se pudo resolver usuarios por rol');
+    return [];
   }
 }
 
@@ -585,14 +585,6 @@ async function notifyDeliveryStage({ request, title, message, meta = {}, priorit
       "No se pudieron enviar notificaciones del flujo de entrega",
     );
   }
-
-  // REQ-SPI-013: no await externo en el request path.
-  enqueuePurchaseStatusChangedEvent({
-    purchaseType: "equipment_purchase",
-    id: request.id,
-    status: request.status,
-    businessCaseId: request?.business_case_id || null,
-  });
 }
 
 function driveLink(fileId) {
@@ -1681,6 +1673,12 @@ async function buildInspectionPayload({ request, clientInfo, inspection_min_date
     anotaciones,
     accesorios: "",
     observaciones: request.notes || "",
+    // La inspeccion disparada desde el workspace de compras es operativa
+    // (instalacion real), no es una eleccion del usuario -- es fija segun el
+    // origen del flujo. "origen" permite a la bandeja "Independientes" de
+    // Solicitudes excluir esta fila (ya se gestiona en la pestana "De Compras").
+    tipo_inspeccion: "normal",
+    origen: "compras",
   };
 }
 
@@ -2273,10 +2271,13 @@ async function getEquipmentCatalog() {
 async function listByUser(user) {
   await ensureTables();
   const params = [];
-  let query = `SELECT * FROM equipment_purchase_requests`;
+  // Los Business Cases viven en la misma tabla (request_type='business_case')
+  // -- sin este filtro, cualquier BC en borrador se listaba mezclado con los
+  // procesos de compra reales en el workspace de compras publicas.
+  let query = `SELECT * FROM equipment_purchase_requests WHERE COALESCE(request_type, 'purchase') <> 'business_case'`;
   if (!canManageAll(user) && canCoordinateInspection(user)) {
     // BUG-05 (CP-04): jefe_tecnico ve toda la cola de inspecciÃ³n
-    query += ` WHERE status = ANY($1::text[])
+    query += ` AND status = ANY($1::text[])
       AND (
         status = $2
         OR
@@ -2295,10 +2296,10 @@ async function listByUser(user) {
     params.push(STATUS.WAITING_SIGNED_PROFORMA);
   } else if (!canManageAll(user) && canViewInspectionQueue(user)) {
     // BUG-05 (CP-04): tecnico (base) SOLO ve los expedientes que tiene asignados
-    query += ` WHERE assigned_to = $1`;
+    query += ` AND assigned_to = $1`;
     params.push(user.id);
   } else if (!canManageAll(user)) {
-    query += ` WHERE created_by = $1 OR assigned_to = $1`;
+    query += ` AND (created_by = $1 OR assigned_to = $1)`;
     params.push(user.id);
   }
 
@@ -2713,7 +2714,7 @@ async function startAvailabilityRequest({ id, user, providerEmail, notes, expect
   const { fileId: emailFileId, threadId, lastMessageId } = await sendAndArchive({
     user,
     to: providerEmail,
-    subject: `Solicitud de equipos #${request.id}`,
+    subject: `Solicitud de equipos - ${request.client_name || "Cliente pendiente"} (#${String(request.id).slice(0, 8)})`,
     html,
     folderId: request.drive_folder_id,
     prefix: "disponibilidad",
@@ -3005,7 +3006,7 @@ async function requestProforma({ id, user, expected_updated_at }) {
   const { fileId: emailFileId, threadId, lastMessageId } = await sendAndArchive({
     user,
     to: request.provider_email,
-    subject: request.provider_email_thread_id ? `Re: Solicitud de equipos #${request.id}` : `Solicitud de equipos #${request.id}`,
+    subject: `${request.provider_email_thread_id ? "Re: " : ""}Solicitud de equipos - ${request.client_name || "Cliente pendiente"} (#${String(request.id).slice(0, 8)})`,
     html,
     folderId: request.drive_folder_id,
     prefix: "proforma",
@@ -3121,7 +3122,7 @@ async function reserveEquipment({ id, user, expected_updated_at }) {
   const { fileId: emailFileId, threadId, lastMessageId } = await sendAndArchive({
     user,
     to: request.provider_email,
-    subject: request.provider_email_thread_id ? `Re: Solicitud de equipos #${request.id}` : `Solicitud de equipos #${request.id}`,
+    subject: `${request.provider_email_thread_id ? "Re: " : ""}Solicitud de equipos - ${request.client_name || "Cliente pendiente"} (#${String(request.id).slice(0, 8)})`,
     html,
     folderId: request.drive_folder_id,
     prefix: "reserva",
@@ -3225,7 +3226,7 @@ async function uploadSignedProforma({
   const { fileId: arrivalFileId, threadId: arrivalThreadId, lastMessageId: arrivalLastMessageId } = await sendAndArchive({
     user,
     to: request.provider_email,
-    subject: request.provider_email_thread_id ? `Re: Solicitud de equipos #${request.id}` : `Solicitud de equipos #${request.id}`,
+    subject: `${request.provider_email_thread_id ? "Re: " : ""}Solicitud de equipos - ${request.client_name || "Cliente pendiente"} (#${String(request.id).slice(0, 8)})`,
     html: arrivalHtml,
     folderId: request.drive_folder_id,
     prefix: "tiempo-llegada",
@@ -3804,8 +3805,9 @@ async function coordinateInspectionDate({
   }
 
   try {
+    const recipientIds = [updated.created_by, updated.assigned_to, assignedTechnician?.id].filter(Boolean);
     await notifyUsers({
-      userIds: [updated.created_by, updated.assigned_to],
+      userIds: recipientIds,
       title: "Fecha de inspecciÃ³n coordinada",
       message: `Jefe TÃ©cnico coordinÃ³ inspecciÃ³n para ${updated.client_name || "cliente"} el ${normalizedInspectionDate}.`,
       type: "task",
@@ -4052,6 +4054,12 @@ async function registerSiteInspection({
     });
   } else if (normalizedResult === "compliant") {
     await closeReinspectionTechnicalActivity(id);
+    if (rows[0]?.inspection_request_id) {
+      markRequestCompleted(rows[0].inspection_request_id, {
+        actorUser: user,
+        resultMeta: { source: "public_purchase_site_inspection", result: normalizedResult },
+      }).catch((err) => logger.warn({ err }, "No se pudo completar la solicitud F.ST-20 (compra publica)"));
+    }
   }
 
   const updated = mapRequestRow(rows[0]);
@@ -4409,7 +4417,42 @@ async function upsertInstallationWorkflow({
       RETURNING *`,
     [JSON.stringify(mergedExtra), id],
   );
-  return mapRequestRow(rows[0]);
+  const updatedRequest = mapRequestRow(rows[0]);
+
+  // Ninguna de las 7 acciones del workflow de instalacion avisaba a nadie
+  // (solo quedaba el SSE generico para quien tuviera la pantalla abierta).
+  const INSTALLATION_ACTION_LABELS = {
+    dispatch_request: "Despacho solicitado formalmente",
+    logistics_validation: "Validacion logistica completada",
+    visual_inspection_fst14: "Recepcion visual F.ST-14 registrada",
+    verification_decision: nextWorkflow?.verification_decision?.applies
+      ? "Verificacion tecnica F.ST-09 requerida"
+      : "Verificacion tecnica no requerida",
+    verification_remediation_review: "Revision de remediacion registrada",
+    verification_attempt: "Intento de verificacion F.ST-09 registrado",
+    cu_provider_report: "Reporte de reparacion del proveedor (CU) registrado",
+  };
+  const actionTitle = INSTALLATION_ACTION_LABELS[normalizedAction];
+  if (actionTitle) {
+    try {
+      await notifyUsers({
+        userIds: [updatedRequest.created_by, updatedRequest.assigned_to],
+        title: actionTitle,
+        message: `${actionTitle} para ${updatedRequest.client_name || "cliente"}.`,
+        type: "task",
+        source: "equipment_purchases.installation_workflow",
+        priority: 1,
+        meta: { request_id: updatedRequest.id, installation_action: normalizedAction },
+      });
+    } catch (notifyError) {
+      logger.warn(
+        { notifyError, requestId: updatedRequest.id, action: normalizedAction },
+        "No se pudo notificar la accion del workflow de instalacion",
+      );
+    }
+  }
+
+  return updatedRequest;
 }
 
 async function reviewInspectionDateProposal({ id, user, decision, review_notes, expected_updated_at }) {
@@ -4465,7 +4508,21 @@ async function reviewInspectionDateProposal({ id, user, decision, review_notes, 
         RETURNING *`,
       [review_notes || null, user.id || null, user.email || null, id],
     );
-    return mapRequestRow(rows[0]);
+    const rejected = mapRequestRow(rows[0]);
+    try {
+      await notifyUsers({
+        userIds: [rejected.created_by, rejected.assigned_to],
+        title: "Fecha de inspeccion rechazada",
+        message: `Jefe Tecnico rechazo la fecha propuesta para ${rejected.client_name || "cliente"}.${review_notes ? ` Motivo: ${review_notes}` : ""}`,
+        type: "alert",
+        source: "equipment_purchases",
+        priority: 2,
+        meta: { request_id: rejected.id },
+      });
+    } catch (notifyError) {
+      logger.warn({ notifyError, requestId: rejected.id }, "No se pudo notificar el rechazo de fecha de inspeccion");
+    }
+    return rejected;
   }
 
   const conflictRows = await listTechnicalSchedule({
@@ -4811,13 +4868,6 @@ async function registerPublicPortalOutcome({ id, user, outcome, notes, expected_
     logger.warn({ notifyError, requestId: updated.id }, "No se pudieron enviar notificaciones de resultado portal");
   }
 
-  enqueuePurchaseStatusChangedEvent({
-    purchaseType: "equipment_purchase",
-    id: updated.id,
-    status: updated.status,
-    businessCaseId: updated?.business_case_id || null,
-  });
-
   return updated;
 }
 
@@ -4896,9 +4946,9 @@ async function uploadContract({ id, user, file, expected_updated_at }) {
   const completed = rows[0];
 
   try {
-    const gerencia = await getSingleUserByRole("gerencia_general");
+    const gerencia = await getUsersByRole("gerencia_general");
     await notifyUsers({
-      userIds: [completed.created_by, completed.assigned_to, gerencia?.id],
+      userIds: [completed.created_by, completed.assigned_to, ...gerencia.map((u) => u.id)],
       title: "Contrato subido",
       message: `Contrato subido para ${completed.client_name || "cliente"}. Solicita fechas de entrega para continuar.`,
       type: "info",
@@ -4910,48 +4960,10 @@ async function uploadContract({ id, user, file, expected_updated_at }) {
     logger.warn({ notifyError, requestId: completed.id }, "No se pudieron enviar notificaciones de contrato");
   }
 
-  // Enviar notificaciÃ³n automÃ¡tica de contrato disponible para entrega
-  setImmediate(async () => {
-    try {
-      const acceptedItems = getAcceptedItems(completed);
-      const equipmentNames = acceptedItems.map(item => item.name || item.sku || "Equipo").join(", ");
-
-      // Notificar al usuario que creÃ³ la solicitud
-      if (request.created_by) {
-        await notificationManager.sendNotification({
-          userId: request.created_by,
-          template: 'equipment_available',
-          data: {
-            equipment_name: equipmentNames,
-            request_id: id,
-            client_name: request.client_name,
-            completed_at: new Date().toISOString()
-          },
-          email: true,
-          source: 'equipment_purchase'
-        });
-      }
-
-      // Notificar al usuario asignado si es diferente
-      if (request.assigned_to && request.assigned_to !== request.created_by) {
-        await notificationManager.sendNotification({
-          userId: request.assigned_to,
-          template: 'equipment_available',
-          data: {
-            equipment_name: equipmentNames,
-            request_id: id,
-            client_name: request.client_name,
-            completed_at: new Date().toISOString()
-          },
-          email: true,
-          source: 'equipment_purchase'
-        });
-      }
-    } catch (error) {
-      logger.error('Error enviando notificaciÃ³n de equipo disponible:', error);
-      // No lanzamos error para no detener el flujo
-    }
-  });
+  // Nota: antes se enviaba aqui un segundo correo con el template
+  // "equipment_available" ("Equipo Disponible... listo para entrega"), pero el
+  // equipo aun no ha llegado fisicamente en este punto del flujo (eso ocurre en
+  // markEquipmentArrived) -- era contenido duplicado y enganoso, se elimino.
 
   return completed;
 }
@@ -5759,13 +5771,6 @@ async function registerParticipationDecision({ id, user, decision, notes, expect
     logger.warn({ notifyError, requestId: updated.id }, "No se pudo notificar decisiÃ³n de participar");
   }
 
-  enqueuePurchaseStatusChangedEvent({
-    purchaseType: "equipment_purchase",
-    id: updated.id,
-    status: updated.status,
-    businessCaseId: updated?.business_case_id || null,
-  });
-
   return updated;
 }
 
@@ -5885,13 +5890,6 @@ async function setPurchaseType({ id, user, purchaseType, expected_updated_at }) 
 
   const updated = mapRequestRow(rows[0]);
 
-  enqueuePurchaseStatusChangedEvent({
-    purchaseType: "equipment_purchase",
-    id: updated.id,
-    status: updated.status,
-    businessCaseId: updated?.business_case_id || null,
-  });
-
   return updated;
 }
 
@@ -5934,13 +5932,6 @@ async function setPrivateModality({ id, user, privateModality, expected_updated_
   );
 
   const updated = mapRequestRow(rows[0]);
-
-  enqueuePurchaseStatusChangedEvent({
-    purchaseType: "equipment_purchase",
-    id: updated.id,
-    status: updated.status,
-    businessCaseId: updated?.business_case_id || null,
-  });
 
   return updated;
 }
@@ -6010,13 +6001,6 @@ async function setAvailability({ id, user, availabilitySource, availabilityStatu
 
   const updated = mapRequestRow(rows[0]);
 
-  enqueuePurchaseStatusChangedEvent({
-    purchaseType: "equipment_purchase",
-    id: updated.id,
-    status: updated.status,
-    businessCaseId: updated?.business_case_id || null,
-  });
-
   return updated;
 }
 
@@ -6066,13 +6050,6 @@ async function activateSupplyControl({ id, user, supplyControlType, expected_upd
   );
 
   const updated = mapRequestRow(rows[0]);
-
-  enqueuePurchaseStatusChangedEvent({
-    purchaseType: "equipment_purchase",
-    id: updated.id,
-    status: updated.status,
-    businessCaseId: updated?.business_case_id || null,
-  });
 
   return updated;
 }

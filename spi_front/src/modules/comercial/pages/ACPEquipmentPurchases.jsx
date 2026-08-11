@@ -1,11 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
- FiClipboard,
  FiTrendingUp,
  FiCheckCircle,
  FiClock,
- FiAlertTriangle,
  FiList,
  FiBarChart2,
  FiShoppingCart,
@@ -15,7 +13,6 @@ import {
  FiActivity
 } from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
-import Button from "../../../core/ui/components/Button";
 import { getEquipmentPurchaseStats } from "../../../core/api/equipmentPurchasesApi";
 import EquipmentPurchaseWidget from "../components/EquipmentPurchaseWidget";
 import { useUI } from "../../../core/ui/useUI";
@@ -29,8 +26,6 @@ const STATUS_OVERVIEW = [
  { key: "pending_contract", label: "Pendiente contrato" },
  { key: "completed", label: "Completado" },
 ];
-
-const HERO_LINE_KEYS = STATUS_OVERVIEW;
 
 const ACPEquipmentPurchasesPage = () => {
  const { showToast } = useUI();
@@ -56,13 +51,6 @@ const ACPEquipmentPurchasesPage = () => {
  }, [loadStats]);
 
  const totalRequests = stats?.total ?? 0;
-
- const heroStatusLine = useMemo(() => {
- return HERO_LINE_KEYS.map((item) => {
- const count = stats?.[item.key] ?? 0;
- return `${count} ${item.label.toLowerCase()}`;
- }).join(" · ");
- }, [stats]);
 
  // Componentes de Tabs
  const tabs = [

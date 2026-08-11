@@ -6,6 +6,22 @@
 const db = require('../../config/db');
 const logger = require('../../config/logger');
 
+// Edicion en paralelo sin dueno por item: la unica proteccion contra
+// pisar el trabajo de otro es que la cantidad nunca puede bajar, solo
+// subir. Quitar/reducir una inversion queda fuera de este flujo.
+function assertQuantityCanOnlyIncrease(existingQuantity, incomingQuantity, catalogId) {
+    const existing = Number(existingQuantity ?? 0);
+    const incoming = Number(incomingQuantity ?? 0);
+    if (existing > 0 && incoming < existing) {
+        const error = new Error(
+            `La cantidad no puede disminuir (catalog_id=${catalogId}): actual ${existing}, enviado ${incoming}. Solo se puede aumentar.`,
+        );
+        error.status = 409;
+        error.code = "INVESTMENT_QUANTITY_CANNOT_DECREASE";
+        throw error;
+    }
+}
+
 function calculateFinancialDepreciation({ unitPrice, percentage, projectedMonths }) {
     const base = Number(unitPrice);
     const rate = Number(percentage);
@@ -157,10 +173,10 @@ async function deleteInvestment(id) {
 
 async function listInvestmentCatalog() {
     const { rows } = await db.query(
-        `SELECT id, code, name, category, is_active
+        `SELECT id, code, name, category, investment_class, display_order, is_active
          FROM bc_investment_catalog
          WHERE is_active = true
-         ORDER BY name`
+         ORDER BY display_order NULLS LAST, name`
     );
     return rows;
 }
@@ -172,41 +188,15 @@ async function createInvestmentCatalogItem(payload) {
         error.status = 400;
         throw error;
     }
-    const category = payload?.category ? String(payload.category).trim() : null;
-    const code = name
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9]+/g, '_')
-        .replace(/^_+|_+$/g, '');
-
-    const existing = await db.query(
-        `SELECT id, code, name, category, is_active
-         FROM bc_investment_catalog
-         WHERE lower(name) = lower($1)
-         LIMIT 1`,
-        [name]
-    );
-    if (existing.rows.length) {
-        return existing.rows[0];
-    }
-
-    const { rows } = await db.query(
-        `INSERT INTO bc_investment_catalog (code, name, category, is_active)
-         VALUES ($1, $2, $3, true)
-         ON CONFLICT (code) DO UPDATE
-         SET name = EXCLUDED.name,
-             category = COALESCE(EXCLUDED.category, bc_investment_catalog.category),
-             updated_at = now()
-         RETURNING id, code, name, category, is_active`,
-        [code || null, name, category || null]
-    );
-    return rows[0];
+    const error = new Error("El catalogo de inversiones es fijo. Usa el item Otros para inversiones no listadas.");
+    error.status = 400;
+    error.code = "INVESTMENT_CATALOG_FIXED";
+    throw error;
 }
 
 async function getInvestmentSelections(businessCaseId) {
     const { rows } = await db.query(
-        `SELECT catalog_id, selected, notes, quantity, characteristics, unit_price, updated_by_role, updated_by_email
+        `SELECT catalog_id, selected, notes, quantity, characteristics, unit_price, unit_price_financial, depreciation_percentage, updated_by_role, updated_by_email
          FROM bc_investment_selections
          WHERE business_case_id = $1`,
         [businessCaseId]
@@ -216,37 +206,30 @@ async function getInvestmentSelections(businessCaseId) {
 
 async function getCatalogWithSelections(businessCaseId) {
     const { rows } = await db.query(
-        `SELECT c.id, c.code, c.name, c.category, c.investment_class, c.is_active,
+        `SELECT c.id, c.code, c.name, c.category, c.investment_class, c.display_order, c.is_active,
                 COALESCE(s.selected, false) AS selected,
                 s.notes,
                 s.quantity,
                 s.characteristics,
                 s.unit_price,
+                s.unit_price_financial,
+                s.depreciation_percentage,
                 s.updated_by_role,
-                s.updated_by_email,
-                s.owner_email,
-                s.owner_role,
-                COALESCE(req.pending_requests_count, 0) AS pending_requests_count
+                s.updated_by_email
          FROM bc_investment_catalog c
          LEFT JOIN bc_investment_selections s
            ON s.catalog_id = c.id
           AND s.business_case_id = $1
-         LEFT JOIN (
-           SELECT catalog_id, COUNT(*)::int AS pending_requests_count
-           FROM bc_investment_selection_requests
-           WHERE business_case_id = $1
-             AND status = 'pending'
-           GROUP BY catalog_id
-         ) req ON req.catalog_id = c.id
          WHERE c.is_active = true
-         ORDER BY c.name`,
+            OR s.selected = true
+         ORDER BY c.display_order NULLS LAST, c.name`,
         [businessCaseId]
     );
     return rows;
 }
 
 async function upsertInvestmentSelection(businessCaseId, data, user) {
-    const { catalog_id, selected = true, notes = null, quantity = null, characteristics = null, unit_price = null } = data;
+    const { catalog_id, notes = null, quantity = null, characteristics = null, unit_price = null } = data;
     if (!catalog_id) {
         const error = new Error("catalog_id es requerido");
         error.status = 400;
@@ -254,7 +237,7 @@ async function upsertInvestmentSelection(businessCaseId, data, user) {
     }
 
     const { rows: existingRows } = await db.query(
-        `SELECT id, selected, quantity, owner_email, owner_role
+        `SELECT id, quantity
          FROM bc_investment_selections
          WHERE business_case_id = $1
            AND catalog_id = $2
@@ -262,27 +245,11 @@ async function upsertInvestmentSelection(businessCaseId, data, user) {
         [businessCaseId, catalog_id]
     );
     const existing = existingRows[0] || null;
-    const ownerEmail = String(existing?.owner_email || "").trim().toLowerCase();
-    const ownerRole = String(existing?.owner_role || "").trim().toLowerCase();
-    const actorEmail = String(user?.email || "").trim().toLowerCase();
-    const selectedChanged = existing ? Boolean(existing.selected) !== Boolean(selected) : false;
-    const quantityChanged = existing
-        ? Number(existing.quantity ?? 0) !== Number(quantity ?? 0)
-        : false;
-    const isServiceActor = String(user?.role || "").trim().toLowerCase() === "jefe_servicio";
-    const isForeignOwner = ownerEmail ? ownerEmail !== actorEmail : ownerRole && ownerRole !== "jefe_servicio";
-    if (existing?.selected && isServiceActor && isForeignOwner) {
-        const error = new Error("Los items confirmados por ACP son de solo lectura. Solicita un aumento si necesitas modificar una cantidad.");
-        error.status = 403;
-        error.code = "INVESTMENT_ACP_ITEM_READ_ONLY";
-        throw error;
-    }
-    if (existing && ownerEmail && actorEmail && ownerEmail !== actorEmail && (selectedChanged || quantityChanged)) {
-        const error = new Error("Solo el usuario propietario del carrito puede cambiar cantidad o quitar la inversion.");
-        error.status = 403;
-        error.code = "INVESTMENT_SELECTION_OWNER_REQUIRED";
-        throw error;
-    }
+    assertQuantityCanOnlyIncrease(existing?.quantity, quantity, catalog_id);
+    // Edicion en paralelo: sin carrito ni dueno por item -- cualquier rol
+    // habilitado puede tocar cualquier inversion. "Seleccionada" se deriva
+    // de la cantidad, no de un checkbox manual.
+    const selected = Number(quantity) > 0;
 
     const { rows } = await db.query(
         `INSERT INTO bc_investment_selections
@@ -330,9 +297,8 @@ async function upsertInvestmentSelectionsBatch(businessCaseId, selections = [], 
     try {
         await client.query("BEGIN");
         const out = [];
-        const actorEmail = String(user?.email || "").trim().toLowerCase();
         for (const item of selections) {
-            const { catalog_id, selected = true, notes = null, quantity = null, characteristics = null, unit_price = null } = item || {};
+            const { catalog_id, notes = null, quantity = null, characteristics = null, unit_price = null } = item || {};
             if (!catalog_id) {
                 const error = new Error("catalog_id es requerido en cada seleccion");
                 error.status = 400;
@@ -340,7 +306,7 @@ async function upsertInvestmentSelectionsBatch(businessCaseId, selections = [], 
             }
 
             const { rows: existingRows } = await client.query(
-                `SELECT id, selected, quantity, owner_email, owner_role
+                `SELECT id, quantity
                  FROM bc_investment_selections
                  WHERE business_case_id = $1
                    AND catalog_id = $2
@@ -348,26 +314,8 @@ async function upsertInvestmentSelectionsBatch(businessCaseId, selections = [], 
                 [businessCaseId, catalog_id]
             );
             const existing = existingRows[0] || null;
-            const ownerEmail = String(existing?.owner_email || "").trim().toLowerCase();
-            const ownerRole = String(existing?.owner_role || "").trim().toLowerCase();
-            const selectedChanged = existing ? Boolean(existing.selected) !== Boolean(selected) : false;
-            const quantityChanged = existing
-                ? Number(existing.quantity ?? 0) !== Number(quantity ?? 0)
-                : false;
-            const isServiceActor = String(user?.role || "").trim().toLowerCase() === "jefe_servicio";
-            const isForeignOwner = ownerEmail ? ownerEmail !== actorEmail : ownerRole && ownerRole !== "jefe_servicio";
-            if (existing?.selected && isServiceActor && isForeignOwner) {
-                const error = new Error(`El item ACP catalog_id=${catalog_id} es de solo lectura. Solicita un aumento si necesitas modificar una cantidad.`);
-                error.status = 403;
-                error.code = "INVESTMENT_ACP_ITEM_READ_ONLY";
-                throw error;
-            }
-            if (existing && ownerEmail && actorEmail && ownerEmail !== actorEmail && (selectedChanged || quantityChanged)) {
-                const error = new Error(`Solo el usuario propietario puede cambiar cantidad o quitar la inversion catalog_id=${catalog_id}.`);
-                error.status = 403;
-                error.code = "INVESTMENT_SELECTION_OWNER_REQUIRED";
-                throw error;
-            }
+            assertQuantityCanOnlyIncrease(existing?.quantity, quantity, catalog_id);
+            const selected = Number(quantity) > 0;
 
             const { rows } = await client.query(
                 `INSERT INTO bc_investment_selections
@@ -412,71 +360,6 @@ async function upsertInvestmentSelectionsBatch(businessCaseId, selections = [], 
     }
 }
 
-async function createIncreaseQuantityRequest(businessCaseId, payload, user) {
-    const catalogId = Number(payload?.catalog_id);
-    const requestedQuantity = payload?.requested_quantity == null ? null : Number(payload.requested_quantity);
-    const reason = String(payload?.reason || "").trim();
-    if (!catalogId) {
-        const error = new Error("catalog_id es requerido");
-        error.status = 400;
-        throw error;
-    }
-    if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
-        const error = new Error("requested_quantity debe ser mayor a 0");
-        error.status = 400;
-        throw error;
-    }
-    if (!reason) {
-        const error = new Error("reason es requerido");
-        error.status = 400;
-        throw error;
-    }
-
-    const { rows: ownerRows } = await db.query(
-        `SELECT owner_email, quantity, selected
-         FROM bc_investment_selections
-         WHERE business_case_id = $1
-           AND catalog_id = $2
-         LIMIT 1`,
-        [businessCaseId, catalogId]
-    );
-    const owner = ownerRows[0];
-    if (!owner || !owner.selected) {
-        const error = new Error("La inversion no esta en carrito.");
-        error.status = 409;
-        throw error;
-    }
-    const currentQty = Number(owner.quantity ?? 0);
-    if (requestedQuantity <= currentQty) {
-        const error = new Error("La solicitud debe ser para una cantidad mayor a la actual.");
-        error.status = 409;
-        throw error;
-    }
-    const ownerEmail = String(owner.owner_email || "").trim().toLowerCase();
-    const requesterEmail = String(user?.email || "").trim().toLowerCase();
-    if (ownerEmail && requesterEmail && ownerEmail === requesterEmail) {
-        const error = new Error("Eres propietario del item; modifica la cantidad directamente.");
-        error.status = 409;
-        throw error;
-    }
-
-    const { rows } = await db.query(
-        `INSERT INTO bc_investment_selection_requests
-           (business_case_id, catalog_id, request_type, requested_quantity, reason, status, requested_by_email, requested_by_role)
-         VALUES ($1, $2, 'increase_quantity', $3, $4, 'pending', $5, $6)
-         RETURNING *`,
-        [
-            businessCaseId,
-            catalogId,
-            requestedQuantity,
-            reason,
-            user?.email || null,
-            user?.role || null,
-        ]
-    );
-    return rows[0];
-}
-
 /**
  * Get selected investments with prices. Both value roles price the complete
  * selected cart; each role writes to its own price column.
@@ -497,6 +380,7 @@ async function getInvestmentValuesByClass(businessCaseId, investmentClass) {
            c.name,
            c.category,
            c.investment_class,
+           c.display_order,
            s.id AS selection_id,
            s.quantity,
            s.characteristics,
@@ -521,8 +405,9 @@ async function getInvestmentValuesByClass(businessCaseId, investmentClass) {
            ON s.catalog_id = c.id
           AND s.business_case_id = $1
           AND s.selected = true
-         WHERE c.is_active = true
-         ORDER BY c.name`,
+          WHERE c.is_active = true
+             OR s.selected = true
+         ORDER BY c.display_order NULLS LAST, c.name`,
         [businessCaseId]
     );
     if (investmentClass !== 'financiera') return rows;
@@ -821,50 +706,6 @@ async function requestInvestmentQuotation(businessCaseId, catalogId, user) {
     };
 }
 
-/**
- * Detect selection changes (new selected items or quantity changes) compared to pre-save state.
- * Returns true if the value managers should be notified.
- */
-function detectInvestmentSelectionChanges(prevSelectionsMap, incomingSelections) {
-    for (const item of incomingSelections) {
-        const prev = prevSelectionsMap.get(Number(item.catalog_id));
-        const isNewlySelected = item.selected && (!prev || !prev.selected);
-        const quantityChanged = item.selected && prev && item.quantity != null && prev.quantity !== item.quantity;
-        if (isNewlySelected || quantityChanged) return true;
-    }
-    return false;
-}
-
-/**
- * Update the invest_selections_changed_at and deadline columns on the BC record.
- */
-async function stampInvestmentDeadlines(
-    businessCaseId,
-    deadlineHours = 48,
-    { operational = true, financial = true } = {},
-) {
-    const now = new Date();
-    const deadline = new Date(now.getTime() + deadlineHours * 60 * 60 * 1000);
-    const assignments = ["invest_selections_changed_at = $1"];
-    const params = [now];
-    if (operational) {
-        params.push(deadline);
-        assignments.push(`invest_values_op_deadline_at = $${params.length}`);
-    }
-    if (financial) {
-        params.push(deadline);
-        assignments.push(`invest_values_fin_deadline_at = $${params.length}`);
-    }
-    params.push(businessCaseId);
-    await db.query(
-        `UPDATE equipment_purchase_requests
-         SET ${assignments.join(",\n             ")}
-         WHERE id = $${params.length}`,
-        params,
-    );
-    return { startedAt: now, deadlineAt: deadline };
-}
-
 module.exports = {
     addInvestment,
     getInvestments,
@@ -884,7 +725,4 @@ module.exports = {
     listInvestmentQuotationAssignees,
     assignInvestmentQuotation,
     requestInvestmentQuotation,
-    createIncreaseQuantityRequest,
-    detectInvestmentSelectionChanges,
-    stampInvestmentDeadlines,
 };

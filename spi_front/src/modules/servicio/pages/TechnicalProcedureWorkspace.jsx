@@ -6,6 +6,11 @@ import Button from "../../../core/ui/components/Button";
 import Modal from "../../../core/ui/components/Modal";
 import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 import { useAuth } from "../../../core/auth/AuthContext";
+import {
+ normalizeRoles,
+ isTechnical as isTechnicalRole,
+ isChiefTechnical as isChiefTechnicalRole,
+} from "../../shared/purchases-workspace/purchaseRoleGroups";
 import WorkflowDocumentsPanel from "../components/WorkflowDocumentsPanel";
 import WorkflowTimeline from "../components/WorkflowTimeline";
 import SiteInspectionStepper from "../components/SiteInspectionStepper";
@@ -103,29 +108,13 @@ const RELEVANT_PRIVATE_STATUSES = new Set([
  "delivery_act_generated",
 ]);
 
-const normalizeRoleList = (value) => {
- if (Array.isArray(value)) return value.map((item) => String(item || "").toLowerCase()).filter(Boolean);
- if (!value) return [];
- return String(value)
- .split(",")
- .map((item) => item.trim().toLowerCase())
- .filter(Boolean);
-};
-
 const getPrivateRoleParam = (user) => {
- const roles = Array.from(new Set([...normalizeRoleList(user?.role), ...normalizeRoleList(user?.scope)]));
- const isTechnical = roles.some(
- (role) => role.includes("tecnico") || role.includes("jefe_tecnico") || role.includes("jefe_servicio_tecnico"),
- );
- if (!isTechnical) return null;
- const isChief = roles.some((role) => role.includes("jefe_tecnico") || role.includes("jefe_servicio_tecnico"));
- return isChief ? "jefe_tecnico" : "tecnico";
+ const roles = normalizeRoles(user);
+ if (!isTechnicalRole(roles)) return null;
+ return isChiefTechnicalRole(roles) ? "jefe_tecnico" : "tecnico";
 };
 
-const isChiefTechnicalUser = (user) => {
- const roles = Array.from(new Set([...normalizeRoleList(user?.role), ...normalizeRoleList(user?.scope)]));
- return roles.some((role) => role.includes("jefe_tecnico") || role.includes("jefe_servicio_tecnico"));
-};
+const isChiefTechnicalUser = (user) => isChiefTechnicalRole(normalizeRoles(user));
 
 const createEmptyFst07Checklist = () => {
  const draft = {};

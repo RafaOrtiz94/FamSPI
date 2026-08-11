@@ -118,6 +118,7 @@ const PermisosPage = () => {
 
  useEffect(() => {
  loadSummary();
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [isGerenciaGeneral]);
 
  useScopedAutoUpdate(

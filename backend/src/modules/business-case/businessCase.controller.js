@@ -8,7 +8,6 @@ const determinationsService = require("./determinations.service");
 const investmentsService = require("./investments.service");
 const dispatchWorkspaceService = require("./bcDispatchWorkspace.service");
 const bcLabEnvironmentService = require("./bcLabEnvironment.service");
-const bcEquipmentDetailsService = require("./bcEquipmentDetails.service");
 const bcLisIntegrationService = require("./bcLisIntegration.service");
 const bcRequirementsService = require("./bcRequirements.service");
 const bcDeliveriesService = require("./bcDeliveries.service");
@@ -43,6 +42,11 @@ const {
 const { generateFst07PdfBuffer, buildFst07FileName } = require("../servicio/fst07Pdf.service");
 const { trackFst07WorkflowDocument } = require("../servicio/fst07.service");
 const XLSX = require("xlsx");
+
+// Guarda contra ids no-UUID (ej. "undefined" por un bundle de frontend viejo
+// en cache) para que fallen con 404 claro en vez de un 500 de Postgres
+// ("invalid input syntax for type uuid").
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const createSchema = Joi.object({
   client_name: Joi.string().required(),
@@ -154,6 +158,7 @@ const feasibilityDecisionSchema = Joi.object({
     "prestamo",
     "alquiler_transferencia_dominio",
     "alquiler_con_transferencia_de_dominio",
+    "rechazado_falta_informacion",
   ).optional(),
   quantities: Joi.object().optional(),
   prices: Joi.object().optional(),
@@ -219,18 +224,28 @@ const DETERMINATIONS_SHEET_ITEM_TYPES = {
   materiales: ["consumible", "material"],
 };
 const DETERMINATIONS_UNLOCK_DECIDER_ROLES = new Set(["jefe_comercial"]);
-const INVESTMENT_VALUES_DEADLINE_HOURS = 48;
 const INVESTMENT_VALUES_OP_ROLES = new Set([
   "jefe_operaciones",
   "jefe_de_operaciones",
 ]);
 const INVESTMENT_VALUES_FIN_ROLES = new Set(["jefe_financiero"]);
-const INVESTMENT_CART_ACP_CONFIRM_ROLES = new Set([
+// Edicion en paralelo de la lista de inversiones (sin carrito ni dueno por
+// item): estos son los unicos roles que pueden agregar items o cambiar
+// cantidades/caracteristicas.
+const INVESTMENT_EDIT_ROLES = new Set([
   "acp_comercial",
   "jefe_comercial",
   "jefe_de_comercial",
+  "jefe_operaciones",
+  "jefe_servicio",
+  "jefe_logistica",
 ]);
-const INVESTMENT_CART_SERVICE_CONFIRM_ROLES = new Set(["jefe_servicio"]);
+const INVESTMENT_COMPLETE_ROLES = new Set([
+  "acp_comercial",
+  "jefe_comercial",
+  "jefe_de_comercial",
+  ...INVESTMENT_VALUES_OP_ROLES,
+]);
 
 const AUTOSAVE_FLAG_ADMIN_ROLES = new Set([
   "admin",
@@ -405,105 +420,10 @@ function resolveRequestRole(req) {
   return String(req.user?.role || req.user?.scope || req.user?.role_name || "").trim().toLowerCase();
 }
 
-function getInvestmentCartStatus(businessCase = {}) {
-  const metadata = preflowService.toObject(businessCase?.modern_bc_metadata);
-  const cart = metadata?.investments_cart && typeof metadata.investments_cart === "object"
-    ? metadata.investments_cart
-    : {};
-  const legacyConfirmed = Boolean(cart.confirmed);
-  const legacyRole = String(cart.confirmed_by_role || "").trim().toLowerCase();
-  const legacyServiceConfirmation = legacyConfirmed && INVESTMENT_CART_SERVICE_CONFIRM_ROLES.has(legacyRole);
-  const acpConfirmed = Boolean(
-    cart.acp_confirmed ?? cart.acpConfirmed ?? (legacyConfirmed && !legacyServiceConfirmation),
-  );
-  const serviceConfirmed = Boolean(
-    cart.service_confirmed ?? cart.serviceConfirmed ?? legacyServiceConfirmation,
-  );
-
-  return {
-    // `confirmed` remains the compatibility flag for consumers that mean the
-    // final lock. It is no longer the first confirmation.
-    confirmed: serviceConfirmed,
-    acpConfirmed,
-    serviceConfirmed,
-    confirmedAt: cart.service_confirmed_at || cart.confirmed_at || null,
-    confirmedByEmail: cart.service_confirmed_by_email || cart.confirmed_by_email || null,
-    confirmedByRole: cart.service_confirmed_by_role || cart.confirmed_by_role || null,
-    acpConfirmedAt: cart.acp_confirmed_at || (acpConfirmed && !serviceConfirmed ? cart.confirmed_at : null),
-    acpConfirmedByEmail: cart.acp_confirmed_by_email || (acpConfirmed && !serviceConfirmed ? cart.confirmed_by_email : null),
-    acpConfirmedByRole: cart.acp_confirmed_by_role || (acpConfirmed && !serviceConfirmed ? cart.confirmed_by_role : null),
-    serviceConfirmedAt: cart.service_confirmed_at || null,
-    serviceConfirmedByEmail: cart.service_confirmed_by_email || null,
-    serviceConfirmedByRole: cart.service_confirmed_by_role || null,
-    acpCatalogIds: Array.isArray(cart.acp_catalog_ids)
-      ? cart.acp_catalog_ids.map((id) => Number(id)).filter(Number.isFinite)
-      : [],
-    serviceCatalogIds: Array.isArray(cart.service_catalog_ids)
-      ? cart.service_catalog_ids.map((id) => Number(id)).filter(Number.isFinite)
-      : [],
-  };
-}
-
-function getInvestmentCartScope(item = {}, cartStatus = {}) {
-  const catalogId = Number(item?.catalog_id ?? item?.id);
-  if (cartStatus.serviceCatalogIds.includes(catalogId)) return "service";
-  if (cartStatus.acpCatalogIds.includes(catalogId)) return "acp";
-
-  // Legacy carts have no snapshot. Owner role is the safe fallback for items
-  // added by Jefe de Servicio after the ACP confirmation.
-  const ownerRole = String(item?.owner_role || "").trim().toLowerCase();
-  if (cartStatus.acpConfirmed && ownerRole === "jefe_servicio") return "service";
-  return "acp";
-}
-
-function decorateInvestmentCartRows(rows = [], cartStatus = {}) {
-  return (Array.isArray(rows) ? rows : []).map((item) => ({
-    ...item,
-    cart_scope: item?.selected === false ? "available" : getInvestmentCartScope(item, cartStatus),
-  }));
-}
-
-function buildInvestmentCartSummary(rows = [], cartStatus = {}) {
-  const selected = decorateInvestmentCartRows(rows, cartStatus).filter((item) => item.selected !== false);
-  const buildBucket = (scope) => {
-    const bucket = scope === "general" ? selected : selected.filter((item) => item.cart_scope === scope);
-    return {
-      item_count: bucket.length,
-      quantity: bucket.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0),
-      items: bucket.map((item) => ({
-        catalog_id: item.catalog_id ?? item.id,
-        name: item.name,
-        quantity: item.quantity,
-        owner_email: item.owner_email || null,
-        owner_role: item.owner_role || null,
-        cart_scope: item.cart_scope,
-      })),
-    };
-  };
-
-  const acpBucket = buildBucket("acp");
-  const serviceBucket = buildBucket("service");
-  return {
-    acp: { ...acpBucket, confirmed: Boolean(cartStatus.acpConfirmed) },
-    service: {
-      ...serviceBucket,
-      // Servicio consulta el bloque ACP heredado en modo lectura para
-      // solicitar aumentos cuando corresponda.
-      visible_item_count: acpBucket.item_count + serviceBucket.item_count,
-      visible_quantity: acpBucket.quantity + serviceBucket.quantity,
-      confirmed: Boolean(cartStatus.serviceConfirmed),
-    },
-    general: buildBucket("general"),
-  };
-}
-
-function canRoleModifyInvestmentCart(cartStatus, role) {
-  if (cartStatus.serviceConfirmed) return false;
-  if (cartStatus.acpConfirmed) return INVESTMENT_CART_SERVICE_CONFIRM_ROLES.has(role);
-  return true;
-}
-
-async function buildInvestmentCartGate(businessCase, role = "unknown") {
+// Carrito eliminado: acp_comercial, jefe_comercial, jefe_de_comercial,
+// jefe_operaciones, jefe_servicio y jefe_logistica editan la lista de
+// inversiones en paralelo, sin dueno por item ni confirmacion que bloquee.
+async function assertInvestmentsEditable(businessCase, role = "unknown") {
   const currentDocument = businessCase?.id
     ? await determinationsGateService.getCurrentDocument(businessCase.id)
     : null;
@@ -512,73 +432,19 @@ async function buildInvestmentCartGate(businessCase, role = "unknown") {
     role,
     currentDocument,
   });
-  const cartStatus = getInvestmentCartStatus(businessCase);
-  return {
-    cartStatus,
-    documentUploaded: Boolean(determinationsGate?.documentUploaded),
-    canModifyCart: Boolean(determinationsGate?.documentUploaded && canRoleModifyInvestmentCart(cartStatus, role)),
-    determinationsGate,
-  };
-}
-
-async function assertInvestmentCartCanBeModified(businessCase, role = "unknown") {
-  const gate = await buildInvestmentCartGate(businessCase, role);
-  if (gate.cartStatus.confirmed) {
-    const error = new Error("El carrito de inversiones ya fue confirmado y esta bloqueado.");
-    error.status = 409;
-    error.code = "INVESTMENT_CART_CONFIRMED_LOCKED";
-    throw error;
-  }
-  if (gate.cartStatus.acpConfirmed && !INVESTMENT_CART_SERVICE_CONFIRM_ROLES.has(role)) {
-    const error = new Error("El carrito ACP ya fue confirmado. Solo Jefe de Servicio puede agregar nuevas inversiones o cerrar el carrito de Servicio.");
-    error.status = 409;
-    error.code = "INVESTMENT_ACP_CART_CONFIRMED_SERVICE_HANDOFF";
-    throw error;
-  }
-  if (!gate.documentUploaded) {
-    const error = new Error("Primero se debe cargar el documento de estadistica para habilitar el carrito de inversiones.");
-    error.status = 409;
-    error.code = "INVESTMENT_STAT_DOCUMENT_REQUIRED";
-    throw error;
-  }
-  return gate;
-}
-
-async function assertInvestmentCartCanReceiveIncreaseRequest(businessCase, role = "unknown") {
-  const currentDocument = businessCase?.id
-    ? await determinationsGateService.getCurrentDocument(businessCase.id)
-    : null;
-  const determinationsGate = determinationsGateService.buildGateInfo({
-    businessCase,
-    role,
-    currentDocument,
-  });
-  const cartStatus = getInvestmentCartStatus(businessCase);
   if (!determinationsGate?.documentUploaded) {
-    const error = new Error("Primero se debe cargar el documento de estadistica para solicitar un aumento.");
+    const error = new Error("Primero se debe cargar el documento de estadistica para habilitar las inversiones.");
     error.status = 409;
     error.code = "INVESTMENT_STAT_DOCUMENT_REQUIRED";
     throw error;
   }
-  if (!cartStatus.acpConfirmed) {
-    const error = new Error("La solicitud de aumento se habilita después de confirmar el carrito ACP.");
-    error.status = 409;
-    error.code = "INVESTMENT_ACP_CONFIRMATION_REQUIRED";
-    throw error;
-  }
-  if (cartStatus.serviceConfirmed) {
-    const error = new Error("El carrito de Servicio ya fue confirmado y no admite nuevas solicitudes.");
-    error.status = 409;
-    error.code = "INVESTMENT_SERVICE_CART_CONFIRMED_LOCKED";
-    throw error;
-  }
-  if (!INVESTMENT_CART_SERVICE_CONFIRM_ROLES.has(role)) {
-    const error = new Error("Solo Jefe de Servicio puede solicitar aumentos sobre el carrito ACP.");
+  if (!INVESTMENT_EDIT_ROLES.has(role)) {
+    const error = new Error("No tienes permisos para editar la lista de inversiones.");
     error.status = 403;
-    error.code = "INVESTMENT_SERVICE_ROLE_REQUIRED";
+    error.code = "INVESTMENT_ROLE_REQUIRED";
     throw error;
   }
-  return { cartStatus, determinationsGate };
+  return { documentUploaded: true, determinationsGate };
 }
 
 function normalizePurchaseTypeForGate(value = "") {
@@ -636,6 +502,98 @@ function resolveBusinessCaseGeneralMetadata(businessCase = {}) {
       generalData?.clientType ||
       metadata?.clientType ||
       "",
+  };
+}
+
+function resolveInvestmentCartStatus(businessCase = {}) {
+  const metadata = preflowService.toObject(businessCase?.modern_bc_metadata);
+  const investmentsMetadata = metadata?.investments && typeof metadata.investments === "object" && !Array.isArray(metadata.investments)
+    ? metadata.investments
+    : {};
+  const rawCart = [
+    metadata?.investment_cart_status,
+    metadata?.investments_cart,
+    metadata?.investment_cart,
+    investmentsMetadata?.cart_status,
+    investmentsMetadata?.cart,
+  ].find((value) => value && typeof value === "object" && !Array.isArray(value)) || {};
+
+  const acpCart = rawCart.acp && typeof rawCart.acp === "object" && !Array.isArray(rawCart.acp)
+    ? rawCart.acp
+    : {};
+  const serviceCart = rawCart.service && typeof rawCart.service === "object" && !Array.isArray(rawCart.service)
+    ? rawCart.service
+    : {};
+
+  const acpConfirmedAt =
+    rawCart.acp_confirmed_at ||
+    rawCart.acpConfirmedAt ||
+    acpCart.confirmed_at ||
+    acpCart.confirmedAt ||
+    null;
+  const serviceConfirmedAt =
+    rawCart.service_confirmed_at ||
+    rawCart.serviceConfirmedAt ||
+    serviceCart.confirmed_at ||
+    serviceCart.confirmedAt ||
+    null;
+  const legacyConfirmed = Boolean(rawCart.confirmed ?? rawCart.cart_confirmed);
+  const legacyConfirmedByRole = String(
+    rawCart.confirmed_by_role ||
+    rawCart.confirmedByRole ||
+    "",
+  ).trim().toLowerCase();
+  const legacyServiceConfirmation = legacyConfirmed && legacyConfirmedByRole === "jefe_servicio";
+
+  const acpConfirmed = Boolean(
+    rawCart.acp_confirmed ??
+    rawCart.acpConfirmed ??
+    acpCart.confirmed ??
+    acpConfirmedAt ??
+    (legacyConfirmed && !legacyServiceConfirmation),
+  );
+  const serviceConfirmed = Boolean(
+    rawCart.service_confirmed ??
+    rawCart.serviceConfirmed ??
+    serviceCart.confirmed ??
+    serviceConfirmedAt ??
+    legacyServiceConfirmation,
+  );
+
+  return {
+    confirmed: serviceConfirmed,
+    acpConfirmed,
+    serviceConfirmed,
+    acpConfirmedAt,
+    acpConfirmedByEmail:
+      rawCart.acp_confirmed_by_email ||
+      rawCart.acpConfirmedByEmail ||
+      acpCart.confirmed_by_email ||
+      acpCart.confirmedByEmail ||
+      (acpConfirmed && !serviceConfirmed ? rawCart.confirmed_by_email || rawCart.confirmedByEmail : null) ||
+      null,
+    acpConfirmedByRole:
+      rawCart.acp_confirmed_by_role ||
+      rawCart.acpConfirmedByRole ||
+      acpCart.confirmed_by_role ||
+      acpCart.confirmedByRole ||
+      (acpConfirmed && !serviceConfirmed ? rawCart.confirmed_by_role || rawCart.confirmedByRole : null) ||
+      null,
+    serviceConfirmedAt,
+    serviceConfirmedByEmail:
+      rawCart.service_confirmed_by_email ||
+      rawCart.serviceConfirmedByEmail ||
+      serviceCart.confirmed_by_email ||
+      serviceCart.confirmedByEmail ||
+      (serviceConfirmed ? rawCart.confirmed_by_email || rawCart.confirmedByEmail : null) ||
+      null,
+    serviceConfirmedByRole:
+      rawCart.service_confirmed_by_role ||
+      rawCart.serviceConfirmedByRole ||
+      serviceCart.confirmed_by_role ||
+      serviceCart.confirmedByRole ||
+      (serviceConfirmed ? rawCart.confirmed_by_role || rawCart.confirmedByRole : null) ||
+      null,
   };
 }
 
@@ -1162,12 +1120,14 @@ async function resolveBusinessCaseMailingList({ businessCase, roles = BUSINESS_C
 
 async function notifySectionReview({ businessCaseId, section, actor }) {
   const recipients = await getUsersByRoles(REVIEW_ROLES);
+  const bc = await businessCaseService.getBusinessCaseById(businessCaseId).catch(() => null);
+  const clientName = bc?.client_name || "Cliente pendiente";
   await Promise.all(
     recipients.map((user) =>
       notificationManager.sendNotification({
         userId: user.id,
         template: "bc_section_review_requested",
-        data: { business_case_id: businessCaseId, section_name: section },
+        data: { business_case_id: businessCaseId, section_name: section, client_name: clientName },
         email: true,
         chat: false,
         source: "business_case.section_review",
@@ -1184,12 +1144,14 @@ async function notifySectionReview({ businessCaseId, section, actor }) {
 
 async function notifyDeterminationsTechWindowStarted({ businessCaseId, actor }) {
   const recipients = await getUsersByRoles(DETERMINATIONS_TECH_WINDOW_NOTIFY_ROLES);
+  const bc = await businessCaseService.getBusinessCaseById(businessCaseId).catch(() => null);
+  const clientName = bc?.client_name || "Cliente pendiente";
   await Promise.all(
     recipients.map((user) =>
       notificationManager.sendNotification({
         userId: user.id,
         template: "bc_section_review_requested",
-        data: { business_case_id: businessCaseId, section_name: "determinations" },
+        data: { business_case_id: businessCaseId, section_name: "determinations", client_name: clientName },
         email: true,
         chat: false,
         source: "business_case.determinations_tech_window_started",
@@ -1203,6 +1165,22 @@ async function notifyDeterminationsTechWindowStarted({ businessCaseId, actor }) 
       }).catch(() => null)
     )
   );
+}
+
+async function notifyDeterminationsDocumentUploaded({ businessCaseId, actor }) {
+  return workflowSlaService.notifyParticipants({
+    businessCaseId,
+    eventKey: "stat_document_uploaded_pending_reactivos",
+    title: "Documento estadistico cargado: sincroniza y valida reactivos",
+    message:
+      `${actor || "El comercial"} cargo el documento estadistico. ` +
+      "Es turno de sincronizar las cantidades de reactivos desde el Sheet y validar la seccion para habilitar la revision tecnica.",
+    actorEmail: actor || null,
+    excludeActor: true,
+    extraData: {
+      section_name: "determinations",
+    },
+  });
 }
 
 async function notifyDeterminationsReactivosValidated({ businessCaseId, actor }) {
@@ -1228,6 +1206,20 @@ function subsectionFromConsumptionType(value) {
   if (type === "control") return "controles";
   if (type === "calibrador") return "calibradores";
   return "materiales";
+}
+
+function hasRequiredDeterminationsQuantity(item = {}, subsection = "") {
+  const annualQty = Number(item?.annualQty ?? item?.annualQuantity ?? 0);
+  if (subsection === "reactivos") return Number.isFinite(annualQty) && annualQty > 0;
+
+  // En el formato c303/c503 verificado en produccion, las filas tecnicas
+  // tienen PRODUCTO CALCULADO vacio y el valor operativo en PRODUCTO A
+  // ENTREGAR. plannedQty es esa columna sincronizada desde el Sheet.
+  const plannedQty = Number(item?.plannedQty ?? item?.planned_qty ?? 0);
+  return (
+    (Number.isFinite(annualQty) && annualQty > 0) ||
+    (Number.isFinite(plannedQty) && plannedQty > 0)
+  );
 }
 
 function normalizeSubsectionKey(value = "") {
@@ -1383,7 +1375,9 @@ async function applyDeterminationsCompletionTransition({ businessCase, role, use
       is_expired: false,
       review_role: reviewRole,
       review_started_at: now.toISOString(),
-      review_deadline_at: deadlineAt.toISOString(),
+      // review_deadline_at (nested) se quito: nunca se lee, la SLA real de
+      // fase review la maneja preflow_review_deadline_at (top-level, ver
+      // buildGateInfo/usesTechnicalPreflowSla).
       deadline_at: deadlineAt.toISOString(),
       completed_commercial_at: now.toISOString(),
       completed_commercial_by_role: role,
@@ -1395,16 +1389,25 @@ async function applyDeterminationsCompletionTransition({ businessCase, role, use
       },
       updated_at: now.toISOString(),
     };
-    metadata.preflow_phase = "review";
-    metadata.preflow_status = "reactivos_validated_technical_review_in_progress";
-    metadata.preflow_review_role = reviewRole;
-    metadata.preflow_review_started_at = now.toISOString();
-    metadata.preflow_review_deadline_at = deadlineAt.toISOString();
-    metadata.preflow_deadline_at = deadlineAt.toISOString();
-    metadata.preflow_handoff_at = now.toISOString();
-    metadata.preflow_handoff_by_email = user?.email || null;
-    metadata.preflow_handoff_by_role = role;
-    await businessCaseService.updateBusinessCase(businessCaseId, { modern_bc_metadata: metadata });
+    // Patch minimo (solo las claves que esta funcion realmente cambia), no el
+    // objeto "metadata" completo -- updateBusinessCase hace merge JSONB a
+    // nivel de Postgres, asi que mandar solo lo tocado evita pisar cambios
+    // concurrentes en OTRAS claves (ej. una prorroga de SLA aprobada casi al
+    // mismo tiempo por jefe_comercial) con una copia desactualizada.
+    await businessCaseService.updateBusinessCase(businessCaseId, {
+      modern_bc_metadata: {
+        determinations_gate: metadata.determinations_gate,
+        preflow_phase: "review",
+        preflow_status: "reactivos_validated_technical_review_in_progress",
+        preflow_review_role: reviewRole,
+        preflow_review_started_at: now.toISOString(),
+        preflow_review_deadline_at: deadlineAt.toISOString(),
+        preflow_deadline_at: deadlineAt.toISOString(),
+        preflow_handoff_at: now.toISOString(),
+        preflow_handoff_by_email: user?.email || null,
+        preflow_handoff_by_role: role,
+      },
+    });
     return;
   }
 
@@ -1435,7 +1438,11 @@ async function applyDeterminationsCompletionTransition({ businessCase, role, use
       completed_technical_by_email: user?.email || null,
       updated_at: now.toISOString(),
     };
-    await businessCaseService.updateBusinessCase(businessCaseId, { modern_bc_metadata: metadata });
+    // Patch minimo, solo determinations_gate (ver comentario equivalente en
+    // la rama "commercial" de esta misma funcion).
+    await businessCaseService.updateBusinessCase(businessCaseId, {
+      modern_bc_metadata: { determinations_gate: metadata.determinations_gate },
+    });
     await BusinessCaseDataOwnership.lockSection(
       businessCaseId,
       "determinations",
@@ -1456,50 +1463,6 @@ async function applyDeterminationsCompletionTransition({ businessCase, role, use
   }
 }
 
-async function notifyInvestmentValuesReady({ businessCaseId, actor, deadlineAt, classes = ["operativa", "financiera"] }) {
-  const shouldNotifyOperational = classes.includes("operativa");
-  const shouldNotifyFinancial = classes.includes("financiera");
-  const opRecipients = shouldNotifyOperational ? await getUsersByRoles([...INVESTMENT_VALUES_OP_ROLES]) : [];
-  const finRecipients = shouldNotifyFinancial ? await getUsersByRoles([...INVESTMENT_VALUES_FIN_ROLES]) : [];
-  const deadlineStr = deadlineAt ? new Date(deadlineAt).toLocaleString('es-EC', { timeZone: 'America/Guayaquil' }) : '48 horas';
-
-  await Promise.all([
-    ...opRecipients.map((user) =>
-      notificationManager.sendNotification({
-        userId: user.id,
-        template: "custom_html",
-        customTitle: "Inversiones adicionales actualizadas — se requieren valores operativos",
-        customBody: `Las inversiones adicionales del BC fueron actualizadas. Tienes hasta <strong>${deadlineStr}</strong> para llenar los valores operativos.`,
-        email: true,
-        chat: true,
-        source: "business_case.investment_values_op_ready",
-        meta: {
-          businessCaseId,
-          actor,
-          deadline_at: deadlineAt,
-          process_key: buildBusinessCaseProcessKey(businessCaseId),
-        },
-      }).catch(() => null)
-    ),
-    ...finRecipients.map((user) =>
-      notificationManager.sendNotification({
-        userId: user.id,
-        template: "custom_html",
-        customTitle: "Inversiones adicionales actualizadas — se requieren valores financieros",
-        customBody: `Las inversiones adicionales del BC fueron actualizadas. Tienes hasta <strong>${deadlineStr}</strong> para llenar los valores financieros.`,
-        email: true,
-        chat: true,
-        source: "business_case.investment_values_fin_ready",
-        meta: {
-          businessCaseId,
-          actor,
-          deadline_at: deadlineAt,
-          process_key: buildBusinessCaseProcessKey(businessCaseId),
-        },
-      }).catch(() => null)
-    ),
-  ]);
-}
 
 function resolveInvestmentQuotationItemName(selection = {}) {
   const normalize = (value) => String(value || "")
@@ -1637,7 +1600,11 @@ async function startDeterminationsTechWindowIfNeeded({ businessCase, role, actor
     expired_notified_at: null,
   };
 
-  await businessCaseService.updateBusinessCase(businessCase.id, { modern_bc_metadata: metadata });
+  // Patch minimo, solo determinations_gate (ver comentario en
+  // applyDeterminationsCompletionTransition).
+  await businessCaseService.updateBusinessCase(businessCase.id, {
+    modern_bc_metadata: { determinations_gate: metadata.determinations_gate },
+  });
   await notifyDeterminationsTechWindowStarted({
     businessCaseId: businessCase.id,
     actor: actorUser?.email || "system",
@@ -1647,12 +1614,14 @@ async function startDeterminationsTechWindowIfNeeded({ businessCase, role, actor
 
 async function notifySectionLocked({ businessCaseId, section, actor }) {
   const recipients = await getUsersByRoles(["acp_comercial", "backoffice_comercial", "jefe_comercial"]);
+  const bc = await businessCaseService.getBusinessCaseById(businessCaseId).catch(() => null);
+  const clientName = bc?.client_name || "Cliente pendiente";
   await Promise.all(
     recipients.map((user) =>
       notificationManager.sendNotification({
         userId: user.id,
         template: "bc_section_locked",
-        data: { business_case_id: businessCaseId, section_name: section },
+        data: { business_case_id: businessCaseId, section_name: section, client_name: clientName },
         email: true,
         chat: false,
         source: "business_case.section_locked",
@@ -1669,12 +1638,14 @@ async function notifySectionLocked({ businessCaseId, section, actor }) {
 
 async function notifyPhase1Completed({ businessCaseId, actor }) {
   const recipients = await getUsersByRoles(["acp_comercial", "backoffice_comercial", "jefe_comercial"]);
+  const bc = await businessCaseService.getBusinessCaseById(businessCaseId).catch(() => null);
+  const clientName = bc?.client_name || "Cliente pendiente";
   await Promise.all(
     recipients.map((user) =>
       notificationManager.sendNotification({
         userId: user.id,
         template: "bc_phase1_completed",
-        data: { business_case_id: businessCaseId },
+        data: { business_case_id: businessCaseId, client_name: clientName },
         email: true,
         chat: false,
         source: "business_case.phase1_completed",
@@ -1747,7 +1718,6 @@ function buildOwnershipCompletionRules(ownershipInfo = {}) {
 
 async function buildSectionReadinessForDeterminationsUpload(businessCaseId, businessCase) {
   const labEnvironment = await bcLabEnvironmentService.getLabEnvironment(businessCaseId);
-  const equipmentDetails = await bcEquipmentDetailsService.getEquipmentDetails(businessCaseId);
   const lisIntegration = await bcLisIntegrationService.getLisIntegration(businessCaseId);
   const requirementData = await bcRequirementsService.getRequirements(businessCaseId);
   const deliveryData = await bcDeliveriesService.getDeliveries(businessCaseId);
@@ -1755,7 +1725,7 @@ async function buildSectionReadinessForDeterminationsUpload(businessCaseId, busi
   const extraEquipment = Array.isArray(businessCase?.extra?.equipment_details)
     ? businessCase.extra.equipment_details
     : [];
-  const equipmentPairs = extraEquipment.length ? extraEquipment : (equipmentDetails || []);
+  const equipmentPairs = extraEquipment;
 
   const hasLabData =
     labEnvironment &&
@@ -1778,14 +1748,13 @@ async function buildSectionReadinessForDeterminationsUpload(businessCaseId, busi
       return hasValue(value);
     });
 
+  // El proveedor LIS no es obligatorio para considerar la seccion completa
+  // (confirmado con el negocio) -- basta con que comercial haya decidido
+  // explicitamente si el BC incluye LIS o no.
   const lisComplete =
     lisIntegration &&
     lisIntegration.includes_lis !== null &&
-    lisIntegration.includes_lis !== undefined &&
-    (
-      (lisIntegration.includes_lis === true && hasValue(lisIntegration.lis_provider)) ||
-      (lisIntegration.requires_interface === true && hasValue(lisIntegration.lis_provider))
-    );
+    lisIntegration.includes_lis !== undefined;
 
   const hasRequirementData =
     requirementData &&
@@ -1833,27 +1802,21 @@ const DETERMINATIONS_UPLOAD_SECTION_LABELS = {
 };
 
 async function buildDeterminationsUploadReadiness({ businessCaseId, businessCase, role }) {
-  const ownershipInfo = await BusinessCaseDataOwnership.getOwnershipInfo(businessCaseId);
-  const ownershipRules = buildOwnershipCompletionRules(ownershipInfo);
-  const preflowInfo = preflowService.buildPreflowInfo(businessCase, ownershipRules);
   const readiness = await buildSectionReadinessForDeterminationsUpload(businessCaseId, businessCase);
   const missingSectionKeys = DETERMINATIONS_UPLOAD_REQUIRED_SECTIONS.filter((sectionKey) => !readiness?.[sectionKey]);
   const roleAllowed = determinationsGateService.isUploadRole(role);
-  const preflowExpired = Boolean(preflowInfo?.isActive && preflowInfo?.isExpired);
 
   let message = null;
   if (!roleAllowed) {
     message = "Solo el usuario comercial responsable puede subir el documento estadistico.";
-  } else if (preflowExpired) {
-    message = "La ventana de 48 horas del comercial expiro. No se puede subir el documento de estadistica fuera del plazo.";
   } else if (missingSectionKeys.length) {
     message = `Debes completar las secciones previas hasta LIS antes de subir el documento estadistico. Pendientes: ${missingSectionKeys.join(", ")}.`;
   }
 
   return {
-    canUpload: roleAllowed && !preflowExpired && missingSectionKeys.length === 0,
+    canUpload: roleAllowed && missingSectionKeys.length === 0,
     roleAllowed,
-    preflowExpired,
+    preflowExpired: false,
     missingSectionKeys,
     missingSections: missingSectionKeys.map((key) => ({
       key,
@@ -1862,158 +1825,6 @@ async function buildDeterminationsUploadReadiness({ businessCaseId, businessCase
     readiness,
     message,
   };
-}
-
-function buildGroupedDeterminationsEmailPayload({ businessCase, gate, actorEmail }) {
-  const clientName = resolveBusinessCaseClientDisplayName(businessCase);
-  const processNumber = String(businessCase?.process_code || "").trim();
-  const isPublic = isPublicBusinessCase(businessCase?.bc_purchase_type);
-  if (isPublic && !processNumber) {
-    const error = new Error("Debe existir numero de proceso (process_code) para enviar notificaciones.");
-    error.status = 409;
-    throw error;
-  }
-  const processLabel = processNumber || "Sin codigo de proceso";
-  const deadlineText = gate?.deadlineAt
-    ? new Date(gate.deadlineAt).toLocaleString("es-EC", {
-      timeZone: process.env.APP_TIMEZONE || "America/Guayaquil",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    })
-    : "sin fecha";
-  const flowLabel = normalizeBusinessCaseFlowLabel(businessCase?.bc_purchase_type);
-  const actorLabel = actorEmail || "usuario comercial";
-
-  return {
-    subject: `${flowLabel} - ${clientName} - ${processLabel}`,
-    message:
-      `Flujo: ${flowLabel}. ` +
-      `${actorLabel} cargó el documento de estadística del Business Case ${businessCase?.id || businessCase?.business_case_id}. ` +
-      `Desde esta carga aplica la ventana obligatoria de 48 horas y vence el ${deadlineText}.`,
-    metadata: {
-      businessCaseId: businessCase?.id || businessCase?.business_case_id,
-      clientName,
-      processNumber: processNumber || null,
-      flowLabel,
-      actor: actorEmail || null,
-      deadlineAt: gate?.deadlineAt || null,
-    },
-  };
-}
-
-async function registerDeterminationsGroupedNotificationAudit({
-  businessCaseId,
-  actorUserId,
-  actorEmail,
-  flowType,
-  clientName,
-  processCode,
-  emailTo,
-  emailCc,
-  deadlineAt,
-  source = "business_case.determinations_gate_grouped_mail",
-}) {
-  try {
-    await db.query(
-      `
-      INSERT INTO bc_notification_legal_audit (
-        business_case_id,
-        actor_user_id,
-        actor_email,
-        flow_type,
-        client_name,
-        process_code,
-        source,
-        email_to,
-        email_cc,
-        payload,
-        created_at
-      ) VALUES (
-        $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::text[], $10::jsonb, NOW()
-      )
-      `,
-      [
-        businessCaseId,
-        actorUserId || null,
-        actorEmail || null,
-        flowType || null,
-        clientName || null,
-        processCode || null,
-        source,
-        emailTo || null,
-        Array.isArray(emailCc) ? emailCc : [],
-        JSON.stringify({
-          deadline_at: deadlineAt || null,
-          legal_traceability: true,
-        }),
-      ],
-    );
-  } catch (error) {
-    logger.warn(
-      {
-        error: error.message,
-        businessCaseId,
-        source,
-      },
-      "No se pudo registrar auditoria legal de notificacion agrupada",
-    );
-  }
-}
-
-async function notifyDeterminationsGroupedMail({ businessCase, gate, actorUser }) {
-  const mailingList = await resolveBusinessCaseMailingList({
-    businessCase,
-    roles: workflowSlaService.PARTICIPANT_ROLES,
-  });
-  const recipients = mailingList.recipients || [];
-  const primaryTo = mailingList.primaryTo;
-  const ccEmails = mailingList.ccEmails || [];
-  if (!primaryTo) return;
-
-  const payload = buildGroupedDeterminationsEmailPayload({
-    businessCase,
-    gate,
-    actorEmail: actorUser?.email || null,
-  });
-
-  await notificationManager.sendNotification({
-    userId: mailingList.creatorUserId || recipients?.[0]?.id,
-    template: "custom_html",
-    customTitle: payload.subject,
-    customMessage: payload.message,
-    type: "alert",
-    priority: 2,
-    source: "business_case.determinations_gate_grouped_mail",
-    email: true,
-    chat: false,
-    data: {
-      email_to: primaryTo,
-      email_cc: ccEmails,
-    },
-    meta: {
-      ...payload.metadata,
-      email_to: primaryTo,
-      email_cc: ccEmails,
-      notified_roles: workflowSlaService.PARTICIPANT_ROLES,
-      process_key: buildBusinessCaseProcessKey(payload.metadata.businessCaseId),
-    },
-  });
-
-  await registerDeterminationsGroupedNotificationAudit({
-    businessCaseId: payload.metadata.businessCaseId,
-    actorUserId: actorUser?.id || null,
-    actorEmail: actorUser?.email || null,
-    flowType: payload.metadata.flowLabel || null,
-    clientName: payload.metadata.clientName,
-    processCode: payload.metadata.processNumber,
-    emailTo: primaryTo,
-    emailCc: ccEmails,
-    deadlineAt: payload.metadata.deadlineAt || null,
-  });
 }
 
 async function notifyBusinessCaseFirstProcessEmail({ businessCaseId, actorUser }) {
@@ -2190,11 +2001,17 @@ async function update(req, res) {
     }
 
     const bc = await businessCaseService.updateBusinessCase(req.params.id, value);
-    if (preflowService.isPreflowCase(bc) && hasGeneralPayloadChanges(value)) {
-      const metadata = preflowService.toObject(bc?.modern_bc_metadata);
-      if (!metadata?.preflow_started_at) {
-        await preflowService.ensurePreflowStarted(req.params.id, PRE_BC_DURATION_HOURS);
-      }
+
+    // El rol comercial guarda una sola vez: la seccion "general" queda en
+    // solo lectura de inmediato (sin paso de confirmacion aparte). Roles
+    // superiores (acp_comercial/jefe_comercial/backoffice) pueden reabrirla
+    // con el endpoint generico /sections/general/unlock que ya existe --
+    // por eso este auto-lock solo aplica cuando quien guarda es "comercial"
+    // (rol base), nunca cuando un rol superior edita la seccion.
+    if (String(req.user?.role || "").toLowerCase() === "comercial") {
+      await BusinessCaseDataOwnership.lockSection(req.params.id, "general", req.user, currentState, {
+        source: "auto_lock_after_comercial_save",
+      });
     }
 
     const shouldNotifyFirstProcessByGeneralSave =
@@ -2394,6 +2211,47 @@ async function exportExcel(req, res) {
   }
 }
 
+// No factible: solo avisa a jefe_comercial/acp_comercial y a quien creo el
+// BC -- a nadie mas del resto de PARTICIPANT_ROLES (jefe_servicio,
+// jefe_operaciones, jefe_financiero, jefe_ti, contador quedan fuera).
+async function notifyNonFeasibleDecision({ businessCaseId, bc, reason, actorEmail }) {
+  try {
+    const { rows } = await db.query(
+      `SELECT id, email FROM users WHERE active = true AND lower(role) = ANY($1::text[])`,
+      [["jefe_comercial", "jefe_de_comercial", "acp_comercial"]],
+    );
+    const normalizedActor = String(actorEmail || "").trim().toLowerCase();
+    const recipientIds = new Set(
+      rows
+        .filter((row) => String(row.email || "").trim().toLowerCase() !== normalizedActor)
+        .map((row) => row.id),
+    );
+    if (bc?.created_by && String(bc?.created_by_email || "").trim().toLowerCase() !== normalizedActor) {
+      recipientIds.add(bc.created_by);
+    }
+
+    const clientName = bc?.client_name || `BC ${businessCaseId}`;
+    const message = `El Business Case ${clientName} (#${businessCaseId}) ha sido resuelto como no factible.${
+      reason ? ` Motivo: ${reason}` : ""
+    }`;
+
+    await Promise.all(Array.from(recipientIds).map((userId) => notificationManager.sendNotification({
+      userId,
+      customTitle: "Business Case resuelto: no factible",
+      customMessage: message,
+      type: "alert",
+      source: "business_case.feasibility.rejected",
+      priority: 2,
+      email: true,
+      chat: false,
+      data: { email_subject: `Business Case ${clientName} - Resuelto no factible` },
+      meta: { businessCaseId, reason: reason || null },
+    })));
+  } catch (err) {
+    logger.warn({ businessCaseId, err: err.message }, "No se pudo notificar decision de no factibilidad");
+  }
+}
+
 async function submitFeasibilityDecision(req, res) {
   try {
     const { error, value } = feasibilityDecisionSchema.validate(req.body || {}, { abortEarly: false });
@@ -2406,19 +2264,24 @@ async function submitFeasibilityDecision(req, res) {
       businessCaseId: req.params.id,
       actorEmail: req.user?.email || null,
     });
-    await workflowSlaService.notifyParticipants({
-      businessCaseId: req.params.id,
-      eventKey: "feasibility_completed",
-      title: value.is_feasible
-        ? "Factibilidad registrada: Business Case completado"
-        : "Factibilidad registrada: Business Case cerrado no factible",
-      message: value.is_feasible
-        ? "La factibilidad fue registrada como factible. El Business Case completo el flujo de evaluacion."
-        : "La factibilidad fue registrada como no factible. El Business Case completo el flujo de evaluacion.",
-      actorEmail: req.user?.email || null,
-      excludeActor: true,
-      extraData: { is_feasible: value.is_feasible },
-    });
+    if (value.is_feasible) {
+      await workflowSlaService.notifyParticipants({
+        businessCaseId: req.params.id,
+        eventKey: "feasibility_completed",
+        title: "Factibilidad registrada: Business Case completado",
+        message: "La factibilidad fue registrada como factible. El Business Case completo el flujo de evaluacion.",
+        actorEmail: req.user?.email || null,
+        excludeActor: true,
+        extraData: { is_feasible: true },
+      });
+    } else {
+      await notifyNonFeasibleDecision({
+        businessCaseId: req.params.id,
+        bc: updated,
+        reason: value.notes,
+        actorEmail: req.user?.email || null,
+      });
+    }
     res.json({ ok: true, data: updated });
   } catch (err) {
     logger.error(err);
@@ -2549,6 +2412,13 @@ async function saveLabEnvironment(req, res) {
     const result = await bcLabEnvironmentService.createLabEnvironment(id, payload);
     if ((req.user?.role || "").toLowerCase() === "comercial") {
       await notifySectionReview({ businessCaseId: id, section: "lab", actor: req.user?.email || "system" });
+      // Mismo auto-bloqueo que "general"/"equipment": comercial guarda una
+      // sola vez y la seccion queda en solo lectura de inmediato. Roles
+      // superiores pueden reabrirla con /sections/lab/unlock.
+      const currentState = await BusinessCaseStateMachine.getCurrentState(id);
+      await BusinessCaseDataOwnership.lockSection(id, "lab", req.user, currentState, {
+        source: "auto_lock_after_comercial_save",
+      });
     }
     const responseBody = { success: true, data: result };
     await completeIdempotentWrite(idempotencySession, responseBody, 200);
@@ -2571,61 +2441,12 @@ async function getLabEnvironment(req, res) {
   }
 }
 
-// Equipment Details
-async function saveEquipmentDetails(req, res) {
-  let idempotencySession = null;
-  try {
-    const { id } = req.params;
-    await businessCaseService.assertModernBusinessCase(id);
-    await assertSectionEditable(id, "equipment", req.user);
-    const payload = req.body || {};
-    idempotencySession = await startIdempotentWrite({
-      req,
-      operationScope: "bc.equipment.save",
-      businessCaseId: id,
-      payload,
-    });
-    if (idempotencySession.replay) {
-      applyResponseHeadersFromBody(res, idempotencySession.replayPayload);
-      return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
-    }
-
-    const result = await bcEquipmentDetailsService.createEquipmentDetails(id, payload);
-    if ((req.user?.role || "").toLowerCase() === "comercial") {
-      await notifySectionReview({ businessCaseId: id, section: "equipment", actor: req.user?.email || "system" });
-    }
-    const responseBody = { success: true, data: result };
-    await completeIdempotentWrite(idempotencySession, responseBody, 200);
-    res.json(responseBody);
-  } catch (error) {
-    await failIdempotentWrite(idempotencySession, error);
-    logger.error({ error: error.message }, 'Error saving equipment details');
-    res.status(error.status || 500).json({ success: false, message: error.message });
-  }
-}
-
-async function getEquipmentDetails(req, res) {
-  try {
-    const { id } = req.params;
-    const result = await bcEquipmentDetailsService.getEquipmentDetails(id);
-    res.json({ success: true, data: result });
-  } catch (error) {
-    logger.error({ error: error.message }, 'Error getting equipment details');
-    res.status(500).json({ success: false, message: error.message });
-  }
-}
-
 async function getInvestmentCatalog(req, res) {
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
-    const bc = await businessCaseService.getBusinessCaseById(id);
-    const cart = getInvestmentCartStatus(bc);
-    const rows = decorateInvestmentCartRows(
-      await investmentsService.getCatalogWithSelections(id),
-      cart,
-    );
-    res.json({ ok: true, data: { items: rows, cart, cart_summary: buildInvestmentCartSummary(rows, cart) } });
+    const rows = await investmentsService.getCatalogWithSelections(id);
+    res.json({ ok: true, data: { items: rows } });
   } catch (error) {
     logger.error({ error: error.message }, 'Error getting investment catalog');
     res.status(error.status || 500).json({ ok: false, message: error.message });
@@ -2639,7 +2460,7 @@ async function saveInvestmentSelection(req, res) {
     await businessCaseService.assertModernBusinessCase(id);
     const bc = await businessCaseService.getBusinessCaseById(id);
     const role = resolveRequestRole(req);
-    await assertInvestmentCartCanBeModified(bc, role);
+    await assertInvestmentsEditable(bc, role);
     const canEditPrice = ["jefe_operaciones", "jefe_de_operaciones"].includes(role);
     const isBatch = Array.isArray(req.body?.selections);
     const payload = isBatch
@@ -2690,12 +2511,111 @@ async function saveInvestmentSelection(req, res) {
   }
 }
 
+async function closeInvestmentsWithoutAdditionalItems(req, res) {
+  try {
+    const { id } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const bc = await businessCaseService.getBusinessCaseById(id);
+    if (!bc) return res.status(404).json({ ok: false, message: "Business Case no encontrado." });
+
+    const role = resolveRequestRole(req);
+    const allowedRoles = new Set([
+      ...INVESTMENT_EDIT_ROLES,
+      ...INVESTMENT_VALUES_OP_ROLES,
+      ...INVESTMENT_VALUES_FIN_ROLES,
+      "gerencia",
+      "gerencia_general",
+    ]);
+    if (!allowedRoles.has(role)) {
+      return res.status(403).json({
+        ok: false,
+        message: "No tienes permisos para cerrar inversiones sin items adicionales.",
+        code: "INVESTMENT_EMPTY_CLOSE_ROLE_REQUIRED",
+      });
+    }
+
+    const selected = await investmentsService.getInvestmentSelections(id);
+    const selectedItems = Array.isArray(selected) ? selected.filter((item) => item.selected !== false) : [];
+    if (selectedItems.length > 0) {
+      return res.status(409).json({
+        ok: false,
+        message: "Este Business Case ya tiene inversiones adicionales seleccionadas. Debes gestionar sus precios antes de cerrar.",
+        code: "INVESTMENT_EMPTY_CLOSE_HAS_SELECTED_ITEMS",
+        selected_count: selectedItems.length,
+      });
+    }
+
+    const currentState = String(bc?.canonical_state || bc?.bc_stage || "draft").toUpperCase();
+    const actorId = req.user?.id ?? req.user?.sub ?? req.user?.user_id ?? req.user?.uuid ?? null;
+    const nowIso = new Date().toISOString();
+    const sections = ["investments", "investment_values_op", "investment_values_fin"];
+    for (const section of sections) {
+      await BusinessCaseDataOwnership.recordSectionCompletion(
+        id,
+        section,
+        actorId,
+        role,
+        currentState,
+        {
+          source: "close_without_additional_investments",
+          actor_email: req.user?.email || null,
+          actor_id_raw: actorId,
+          completion_basis: "no_additional_investments_selected",
+          closed_without_investments_at: nowIso,
+        },
+      );
+    }
+
+    const existingInvestmentsMetadata = preflowService.toObject(bc?.modern_bc_metadata)?.investments || {};
+    await preflowService.updateBusinessCaseMetadata(id, {
+      investments: {
+        ...existingInvestmentsMetadata,
+        no_additional_investments: true,
+        closed_without_investments_at: nowIso,
+        closed_without_investments_by_email: req.user?.email || null,
+        closed_without_investments_by_role: role,
+        prices_closed_without_investments: true,
+      },
+    });
+
+    try {
+      await workflowSlaService.notifyParticipants({
+        businessCaseId: id,
+        eventKey: "investments_closed_without_items",
+        title: "Inversiones cerradas sin adicionales: revisar factibilidad",
+        message:
+          "El Business Case fue cerrado sin inversiones adicionales. Precios financieros y operativos quedaron cerrados automaticamente porque no aplican.",
+        actorEmail: req.user?.email || null,
+        excludeActor: true,
+      });
+    } catch (notificationError) {
+      logger.warn(
+        { error: notificationError?.message || String(notificationError), businessCaseId: id },
+        "No se pudo notificar cierre de inversiones sin adicionales",
+      );
+    }
+
+    res.json({
+      ok: true,
+      data: {
+        closed: true,
+        sections,
+        selected_count: 0,
+        closed_without_investments_at: nowIso,
+      },
+    });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error closing investments without additional items");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
 async function createInvestmentCatalogItem(req, res) {
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
     const bc = await businessCaseService.getBusinessCaseById(id);
-    await assertInvestmentCartCanBeModified(bc, resolveRequestRole(req));
+    await assertInvestmentsEditable(bc, resolveRequestRole(req));
     const catalog = await investmentsService.createInvestmentCatalogItem(req.body);
     let selection = null;
     if (req.body?.selected !== false) {
@@ -3345,6 +3265,13 @@ async function saveEquipmentDetailsV2(req, res) {
 
     if ((req.user?.role || "").toLowerCase() === "comercial") {
       await notifySectionReview({ businessCaseId: id, section: "equipment", actor: req.user?.email || "system" });
+      // Mismo auto-bloqueo que "general": comercial guarda una sola vez y la
+      // seccion queda en solo lectura de inmediato. Roles superiores pueden
+      // reabrirla con el endpoint generico /sections/equipment/unlock.
+      const currentState = await BusinessCaseStateMachine.getCurrentState(id);
+      await BusinessCaseDataOwnership.lockSection(id, "equipment", req.user, currentState, {
+        source: "auto_lock_after_comercial_save",
+      });
     }
     const responseBody = { success: true, data: payload };
     await completeIdempotentWrite(idempotencySession, responseBody, 200);
@@ -3382,6 +3309,13 @@ async function saveLisIntegration(req, res) {
     );
     if ((req.user?.role || "").toLowerCase() === "comercial") {
       await notifySectionReview({ businessCaseId: id, section: "lis", actor: req.user?.email || "system" });
+      // Mismo auto-bloqueo que "general"/"equipment"/"lab": comercial guarda
+      // una sola vez y la seccion queda en solo lectura de inmediato. Roles
+      // superiores pueden reabrirla con /sections/lis/unlock.
+      const currentState = await BusinessCaseStateMachine.getCurrentState(id);
+      await BusinessCaseDataOwnership.lockSection(id, "lis", req.user, currentState, {
+        source: "auto_lock_after_comercial_save",
+      });
     }
     const responseBody = {
       success: true,
@@ -3506,6 +3440,16 @@ async function saveDeliveries(req, res) {
     const result = await bcDeliveriesService.createDeliveries(id, payload);
     if ((req.user?.role || "").toLowerCase() === "comercial") {
       await notifySectionReview({ businessCaseId: id, section: "requirement", actor: req.user?.email || "system" });
+      // Mismo auto-bloqueo que las demas secciones. Se aplica aqui (no en
+      // saveRequirements) porque el frontend guarda requirements y luego
+      // deliveries en la MISMA accion de guardar (RequirementsSection.jsx) --
+      // bloquear en el primer POST rechazaria el segundo con "seccion
+      // bloqueada". Roles superiores pueden reabrirla con
+      // /sections/requirement/unlock.
+      const currentState = await BusinessCaseStateMachine.getCurrentState(id);
+      await BusinessCaseDataOwnership.lockSection(id, "requirement", req.user, currentState, {
+        source: "auto_lock_after_comercial_save",
+      });
     }
     const responseBody = { success: true, data: result };
     await completeIdempotentWrite(idempotencySession, responseBody, 200);
@@ -3534,7 +3478,6 @@ async function getComplete(req, res) {
     const { id } = req.params;
     const bc = await businessCaseService.getBusinessCaseById(id);
     const labEnvironment = await bcLabEnvironmentService.getLabEnvironment(id);
-    const equipmentDetails = await bcEquipmentDetailsService.getEquipmentDetails(id);
     const lisIntegration = await bcLisIntegrationService.getLisIntegration(id);
     const requirements = await bcRequirementsService.getRequirements(id);
     const deliveries = await bcDeliveriesService.getDeliveries(id);
@@ -3549,7 +3492,6 @@ async function getComplete(req, res) {
       data: {
         ...bc,
         labEnvironment,
-        equipmentDetails,
         lisIntegration: lisIntegration ? { ...lisIntegration, equipmentInterfaces: lisInterfaces } : null,
         requirements,
         deliveries
@@ -3765,13 +3707,12 @@ async function getUIGuidance(req, res) {
 
     // Load workspace data for completion checks
     const labEnvironment = await bcLabEnvironmentService.getLabEnvironment(id);
-    const equipmentDetails = await bcEquipmentDetailsService.getEquipmentDetails(id);
     const lisIntegration = await bcLisIntegrationService.getLisIntegration(id);
 
     const extraEquipment = Array.isArray(bc?.extra?.equipment_details)
       ? bc.extra.equipment_details
       : [];
-    const equipmentPairs = extraEquipment.length ? extraEquipment : (equipmentDetails || []);
+    const equipmentPairs = extraEquipment;
 
     const hasLabData =
       labEnvironment &&
@@ -3796,14 +3737,13 @@ async function getUIGuidance(req, res) {
         return isFilled(value);
       });
 
+    // El proveedor LIS no es obligatorio para considerar la seccion completa
+    // (confirmado con el negocio) -- basta con que comercial haya decidido
+    // explicitamente si el BC incluye LIS o no.
     const lisComplete =
       lisIntegration &&
       lisIntegration.includes_lis !== null &&
-      lisIntegration.includes_lis !== undefined &&
-      (
-        (lisIntegration.includes_lis === true && isFilled(lisIntegration.lis_provider)) ||
-        (lisIntegration.requires_interface === true && isFilled(lisIntegration.lis_provider))
-      );
+      lisIntegration.includes_lis !== undefined;
 
     const requirementData = await bcRequirementsService.getRequirements(id);
     const deliveryData = await bcDeliveriesService.getDeliveries(id);
@@ -3877,6 +3817,25 @@ async function getUIGuidance(req, res) {
 
     const investmentSelections = await investmentsService.getInvestmentSelections(id);
     const hasInvestmentsData = Array.isArray(investmentSelections) && investmentSelections.some((i) => i.selected);
+    const investmentsMetadata = preflowService.toObject(bc?.modern_bc_metadata)?.investments || {};
+    const closedWithoutInvestments = Boolean(investmentsMetadata?.no_additional_investments);
+    const investmentCartStatus = resolveInvestmentCartStatus(bc);
+    let financialInvestmentValues = [];
+    try {
+      financialInvestmentValues = await investmentsService.getInvestmentValuesByClass(id, "financiera");
+    } catch (financialValuesError) {
+      logger.warn(
+        { error: financialValuesError?.message || String(financialValuesError), businessCaseId: id },
+        "No se pudo cargar valores financieros de inversiones en ui-guidance",
+      );
+    }
+    const financialValuesComplete =
+      Array.isArray(financialInvestmentValues) &&
+      financialInvestmentValues.length > 0 &&
+      financialInvestmentValues.every((item) => {
+        const value = Number(item?.unit_price ?? item?.price ?? 0);
+        return Number.isFinite(value) && value > 0;
+      });
 
     const userRole = resolveRequestRole(req) || 'comercial';
     const feasibilityData =
@@ -3899,9 +3858,8 @@ async function getUIGuidance(req, res) {
       role: userRole,
       currentDocument: currentStatDocument,
     });
-    const investmentCartStatus = getInvestmentCartStatus(bc);
     const canEditInvestments = Boolean(
-      determinationsGate.documentUploaded && canRoleModifyInvestmentCart(investmentCartStatus, userRole),
+      determinationsGate.documentUploaded && INVESTMENT_EDIT_ROLES.has(userRole),
     );
     const canEditDeterminations = Boolean(determinationsGate.permissions.canEditDeterminations);
     const ownershipRules = {
@@ -3911,7 +3869,21 @@ async function getUIGuidance(req, res) {
       lis: completionRule(lisComplete, hasLisData, "lis"),
       determinations: completionRule(false, hasDeterminationsData, "determinations"),
       requirement: completionRule(requirementComplete, hasRequirementData || hasDeliveryData, "requirement"),
-      investments: completionRule(hasInvestmentsData, hasInvestmentsData, "investments"),
+      investments: completionRule(
+        hasInvestmentsData || closedWithoutInvestments,
+        hasInvestmentsData || closedWithoutInvestments,
+        "investments",
+      ),
+      investment_values_op: completionRule(
+        Boolean(getOwnershipEntry("investment_values_op")?.completedAt) || closedWithoutInvestments,
+        hasInvestmentsData || closedWithoutInvestments,
+        "investment_values_op",
+      ),
+      investment_values_fin: completionRule(
+        Boolean(getOwnershipEntry("investment_values_fin")?.completedAt) || financialValuesComplete || closedWithoutInvestments,
+        hasInvestmentsData || closedWithoutInvestments,
+        "investment_values_fin",
+      ),
       prices: completionRule(false, false, "prices"),
       calculations: completionRule(calculationsComplete, hasDispatchWorkspaceData, "calculations"),
       dispatch_workspace: completionRule(
@@ -4013,9 +3985,20 @@ async function getUIGuidance(req, res) {
       service_confirmed_at: investmentCartStatus.serviceConfirmedAt,
       service_confirmed_by_email: investmentCartStatus.serviceConfirmedByEmail,
       service_confirmed_by_role: investmentCartStatus.serviceConfirmedByRole,
+      no_additional_investments: closedWithoutInvestments,
+      closed_without_investments_at: investmentsMetadata?.closed_without_investments_at || null,
+      prices_closed_without_investments: Boolean(investmentsMetadata?.prices_closed_without_investments),
     };
 
-    const ruleEntries = Object.values(ownershipRules);
+    const ruleEntries = [
+      ...Object.entries(ownershipRules)
+        .filter(([key]) => !["investment_values_op", "investment_values_fin"].includes(key))
+        .map(([, rule]) => rule),
+      {
+        ...(ownershipRules.investment_values_fin || {}),
+        isCompleted: Boolean(ownershipRules.investment_values_fin?.isCompleted),
+      },
+    ];
     const completionSummary = {
       totalSections: ruleEntries.length,
       completedSections: ruleEntries.filter((r) => r.isCompleted).length,
@@ -4085,6 +4068,13 @@ async function getUIGuidance(req, res) {
     };
     const autosaveFlags = await featureFlagsService.getAutosaveFlagsForRole(userRole);
 
+    const rawCurrentStage = bc.bc_stage || bc.current_stage || "draft";
+    const visibleCurrentStage = hasFeasibilityDecision
+      ? (feasibilityDecision?.is_feasible ? "factible" : "cerrado_no_factible")
+      : hasFeasibilityExport
+        ? "factibilidad"
+        : rawCurrentStage;
+
     // Build UI guidance response
     const uiGuidance = {
       businessCase: bc,
@@ -4107,7 +4097,8 @@ async function getUIGuidance(req, res) {
       },
       observationData: null, // No observations for now
       workflowState: {
-        currentStage: bc.bc_stage || bc.current_stage || 'draft',
+        currentStage: visibleCurrentStage,
+        rawStage: rawCurrentStage,
         availableTransitions: ['promote', 'observe']
       },
       preflow,
@@ -4260,9 +4251,31 @@ const INSPECTION_REVIEW_ROLES = new Set([
   "jefe_servicio", "jefe_servicio_tecnico", "jefe_tecnico",
 ]);
 
+async function resolveBusinessCaseIdForInspectionReview(rawId) {
+  const candidate = String(rawId || "").trim();
+  if (UUID_REGEX.test(candidate)) return candidate;
+
+  if (/^\d+$/.test(candidate)) {
+    const { rows } = await db.query(
+      `SELECT business_case_id
+         FROM public.equipment_purchase_requests
+        WHERE modern_bc_metadata->'environment_inspection_request'->>'request_id' = $1
+        ORDER BY updated_at DESC NULLS LAST
+        LIMIT 1`,
+      [candidate],
+    );
+    if (rows[0]?.business_case_id) return rows[0].business_case_id;
+  }
+
+  return null;
+}
+
 async function reviewEnvironmentInspectionRequest(req, res) {
   try {
-    const { id } = req.params;
+    const id = await resolveBusinessCaseIdForInspectionReview(req.params.id);
+    if (!id) {
+      return res.status(404).json({ ok: false, message: "Business Case no encontrado." });
+    }
     const role = resolveRequestRole(req);
 
     if (!INSPECTION_REVIEW_ROLES.has(role)) {
@@ -4371,6 +4384,45 @@ async function reviewEnvironmentInspectionRequest(req, res) {
 
     await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
 
+    const clientName = bc.client_name || "Cliente pendiente";
+    const subjectLabel = `Business Case ${clientName} - Inspección de ambiente`;
+    try {
+      if (bc?.created_by) {
+        await notificationManager.sendNotification({
+          userId: bc.created_by,
+          customTitle: action === "approve" ? "Inspección de ambiente coordinada" : "Inspección de ambiente rechazada",
+          customMessage:
+            action === "approve"
+              ? `Se coordinó la inspección de ambiente del BC de ${clientName} con ${metadata.environment_inspection_request.assigned_user_name} el ${metadata.environment_inspection_request.inspection_date}.`
+              : `Se rechazó la inspección de ambiente del BC de ${clientName}. Motivo: ${metadata.environment_inspection_request.rejection_reason}.`,
+          type: action === "approve" ? "task" : "alert",
+          source: "business_case.inspection.reviewed",
+          priority: action === "approve" ? 1 : 2,
+          email: true,
+          data: {
+            email_subject: subjectLabel,
+            target_path: `/dashboard/business-case/workspace/${id}`,
+          },
+          meta: { businessCaseId: id, action },
+        });
+      }
+      if (action === "approve" && metadata.environment_inspection_request.assigned_user_id) {
+        await notificationManager.sendNotification({
+          userId: metadata.environment_inspection_request.assigned_user_id,
+          customTitle: "Inspección de ambiente asignada",
+          customMessage: `Tienes una inspección de ambiente para ${clientName} agendada el ${metadata.environment_inspection_request.inspection_date}.${metadata.environment_inspection_request.notes ? ` Notas: ${metadata.environment_inspection_request.notes}` : ""}`,
+          type: "task",
+          source: "business_case.inspection.assigned",
+          priority: 1,
+          email: true,
+          data: { email_subject: subjectLabel },
+          meta: { businessCaseId: id },
+        });
+      }
+    } catch (notifyError) {
+      logger.warn({ notifyError, businessCaseId: id }, "No se pudo notificar la revision de inspeccion del BC");
+    }
+
     return res.json({
       ok: true,
       action,
@@ -4391,7 +4443,10 @@ async function reviewEnvironmentInspectionRequest(req, res) {
 // (siteInspectionRules/fst07Pdf/fst07.service) para no duplicar la logica.
 async function registerEnvironmentInspectionResult(req, res) {
   try {
-    const { id } = req.params;
+    const id = await resolveBusinessCaseIdForInspectionReview(req.params.id);
+    if (!id) {
+      return res.status(404).json({ ok: false, message: "Business Case no encontrado." });
+    }
     const role = resolveRequestRole(req);
     if (!INSPECTION_REVIEW_ROLES.has(role)) {
       return res.status(403).json({
@@ -4551,188 +4606,6 @@ async function registerEnvironmentInspectionResult(req, res) {
   }
 }
 
-async function requestInvestmentQuantityIncrease(req, res) {
-  try {
-    const { id } = req.params;
-    await businessCaseService.assertModernBusinessCase(id);
-    const bc = await businessCaseService.getBusinessCaseById(id);
-    await assertInvestmentCartCanReceiveIncreaseRequest(bc, resolveRequestRole(req));
-    const requestRow = await investmentsService.createIncreaseQuantityRequest(id, req.body || {}, req.user);
-
-    try {
-      const { rows: ownerRows } = await db.query(
-        `SELECT owner_email
-         FROM bc_investment_selections
-         WHERE business_case_id = $1
-           AND catalog_id = $2
-         LIMIT 1`,
-        [id, requestRow.catalog_id],
-      );
-      const ownerEmail = String(ownerRows?.[0]?.owner_email || "").trim().toLowerCase();
-      if (ownerEmail) {
-        const { rows: users } = await db.query(
-          `SELECT id FROM users WHERE lower(email) = $1 AND active = true LIMIT 1`,
-          [ownerEmail],
-        );
-        const ownerUserId = users?.[0]?.id || null;
-        if (ownerUserId) {
-          await notificationManager.sendNotification({
-            userId: ownerUserId,
-            template: "custom_html",
-            customTitle: "Solicitud de aumento de cantidad",
-            customMessage: `${req.user?.email || "Usuario"} solicito aumentar cantidad para catalogo ${requestRow.catalog_id} a ${requestRow.requested_quantity}.`,
-            email: true,
-            chat: true,
-            source: "business_case.investment.quantity_increase_request",
-            meta: {
-              businessCaseId: id,
-              catalogId: requestRow.catalog_id,
-              requestId: requestRow.id,
-            },
-          }).catch(() => null);
-        }
-      }
-    } catch (_notifyErr) {}
-
-    res.json({ ok: true, data: requestRow });
-  } catch (error) {
-    logger.error({ error: error.message }, "Error requesting investment quantity increase");
-    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
-  }
-}
-
-async function confirmInvestmentCart(req, res) {
-  try {
-    const { id } = req.params;
-    await businessCaseService.assertModernBusinessCase(id);
-    const role = resolveRequestRole(req);
-    const isAcpConfirmation = INVESTMENT_CART_ACP_CONFIRM_ROLES.has(role);
-    const isServiceConfirmation = INVESTMENT_CART_SERVICE_CONFIRM_ROLES.has(role);
-    if (!isAcpConfirmation && !isServiceConfirmation) {
-      return res.status(403).json({ ok: false, message: "No tienes permisos para confirmar el carrito de inversiones." });
-    }
-
-    const bc = await businessCaseService.getBusinessCaseById(id);
-    const isPublicProcess = isPublicBusinessCase(bc?.bc_purchase_type || bc?.business_case_type);
-    if (isPublicProcess && ["jefe_comercial", "jefe_de_comercial"].includes(role)) {
-      return res.status(403).json({
-        ok: false,
-        message: "En procesos publicos la primera confirmacion del carrito corresponde a ACP Comercial.",
-        code: "INVESTMENT_ACP_ROLE_REQUIRED",
-      });
-    }
-    const cartStatus = getInvestmentCartStatus(bc);
-    if (cartStatus.serviceConfirmed) {
-      return res.status(409).json({ ok: false, message: "El carrito de Servicio ya fue confirmado.", code: "INVESTMENT_SERVICE_CART_ALREADY_CONFIRMED" });
-    }
-    if (isAcpConfirmation && cartStatus.acpConfirmed) {
-      return res.status(409).json({ ok: false, message: "El carrito ACP ya fue confirmado.", code: "INVESTMENT_ACP_CART_ALREADY_CONFIRMED" });
-    }
-    if (isServiceConfirmation && !cartStatus.acpConfirmed) {
-      return res.status(409).json({ ok: false, message: "Primero debe confirmarse el carrito ACP.", code: "INVESTMENT_ACP_CONFIRMATION_REQUIRED" });
-    }
-    await assertInvestmentCartCanBeModified(bc, role);
-
-    const selected = await investmentsService.getInvestmentValuesByClass(id, "operativa");
-    if (!Array.isArray(selected) || !selected.length) {
-      return res.status(409).json({ ok: false, message: "No hay inversiones seleccionadas para confirmar." });
-    }
-    const invalidQty = selected.some((row) => !Number.isFinite(Number(row?.quantity)) || Number(row.quantity) <= 0);
-    if (invalidQty) {
-      return res.status(409).json({ ok: false, message: "Todas las inversiones seleccionadas deben tener cantidad mayor a 0 antes de confirmar." });
-    }
-
-    const metadata = preflowService.toObject(bc?.modern_bc_metadata);
-    const now = new Date();
-    const deadline = new Date(now.getTime() + INVESTMENT_VALUES_DEADLINE_HOURS * 60 * 60 * 1000);
-    const currentCart = metadata.investments_cart && typeof metadata.investments_cart === "object"
-      ? metadata.investments_cart
-      : {};
-    const selectedCatalogIds = selected
-      .map((row) => Number(row?.catalog_id))
-      .filter(Number.isFinite);
-    const acpCatalogIds = isAcpConfirmation
-      ? selectedCatalogIds
-      : (cartStatus.acpCatalogIds.length ? cartStatus.acpCatalogIds : selected
-        .filter((row) => String(row?.owner_role || "").trim().toLowerCase() !== "jefe_servicio")
-        .map((row) => Number(row?.catalog_id))
-        .filter(Number.isFinite));
-    const serviceCatalogIds = isServiceConfirmation
-      ? selected
-        .filter((row) => acpCatalogIds.length
-          ? !acpCatalogIds.includes(Number(row?.catalog_id))
-          : String(row?.owner_role || "").trim().toLowerCase() === "jefe_servicio")
-        .map((row) => Number(row?.catalog_id))
-        .filter(Number.isFinite)
-      : (cartStatus.serviceCatalogIds || []);
-    metadata.investments_cart = isAcpConfirmation
-      ? {
-          ...currentCart,
-          confirmed: false,
-          acp_confirmed: true,
-          acp_catalog_ids: acpCatalogIds,
-          acp_confirmed_at: now.toISOString(),
-          acp_confirmed_by_email: req.user?.email || null,
-          acp_confirmed_by_role: role,
-          financial_deadline_at: deadline.toISOString(),
-        }
-      : {
-          ...currentCart,
-          confirmed: true,
-          service_confirmed: true,
-          acp_catalog_ids: acpCatalogIds,
-          service_catalog_ids: serviceCatalogIds,
-          service_confirmed_at: now.toISOString(),
-          service_confirmed_by_email: req.user?.email || null,
-          service_confirmed_by_role: role,
-          operational_deadline_at: deadline.toISOString(),
-          deadline_at: deadline.toISOString(),
-        };
-    await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
-    await investmentsService.stampInvestmentDeadlines(id, INVESTMENT_VALUES_DEADLINE_HOURS, {
-      financial: isAcpConfirmation,
-      operational: isServiceConfirmation,
-    });
-    await notifyInvestmentValuesReady({
-      businessCaseId: id,
-      actor: req.user?.email || req.user?.role || "sistema",
-      deadlineAt: deadline,
-      classes: isAcpConfirmation ? ["financiera"] : ["operativa"],
-    });
-    await workflowSlaService.notifyParticipants({
-      businessCaseId: id,
-      eventKey: isAcpConfirmation ? "acp_cart_confirmed" : "service_cart_confirmed",
-      title: isAcpConfirmation
-        ? "Carrito ACP confirmado: iniciar valores financieros"
-        : "Carrito de Servicio confirmado: continuar valores y factibilidad",
-      message: isAcpConfirmation
-        ? "ACP Comercial confirmo su carrito de inversiones. Jefe Financiero ya puede registrar los valores financieros del Business Case."
-        : "Jefe de Servicio confirmo su carrito de inversiones. El equipo financiero y operativo debe completar los valores pendientes para continuar hacia factibilidad.",
-      actorEmail: req.user?.email || null,
-      excludeActor: true,
-      extraData: {
-        cart_stage: isAcpConfirmation ? "acp" : "service",
-        confirmed_at: now.toISOString(),
-      },
-    });
-
-    res.json({
-      ok: true,
-      data: {
-        confirmed: isServiceConfirmation,
-        stage: isAcpConfirmation ? "acp" : "service",
-        acp_confirmed: isAcpConfirmation || cartStatus.acpConfirmed,
-        service_confirmed: isServiceConfirmation,
-        confirmed_at: now.toISOString(),
-        deadline_at: deadline.toISOString(),
-      },
-    });
-  } catch (error) {
-    logger.error({ error: error.message }, "Error confirming investment cart");
-    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
-  }
-}
-
 async function lockDeterminationsSubsection(req, res) {
   try {
     const { id } = req.params;
@@ -4755,39 +4628,50 @@ async function lockDeterminationsSubsection(req, res) {
     const currentConsumption = await businessCaseService.getConsumptionItems(id);
     const items = Array.isArray(currentConsumption?.items) ? currentConsumption.items : [];
     const scoped = items.filter((item) => subsectionFromConsumptionType(item?.type) === subsection);
-    if (!scoped.length) {
+    if (subsection === "reactivos" && !scoped.length) {
       return res.status(409).json({
         ok: false,
         message: `No existen items en la subseccion ${subsection} para bloquear.`,
       });
     }
-    const hasPositiveQuantity = scoped.some((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) > 0);
-    if (subsection === "reactivos" && !hasPositiveQuantity) {
-      return res.status(409).json({
-        ok: false,
-        message: "No hay reactivos sincronizados con cantidad mayor a 0 para validar.",
-      });
-    }
-    const hasPending = scoped.some((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) <= 0);
-    if (subsection !== "reactivos" && hasPending) {
-      return res.status(409).json({
-        ok: false,
-        message: `La subseccion ${subsection} tiene cantidades en 0. Completa todas antes de bloquear.`,
-      });
-    }
+    if (scoped.length) {
+      const hasPositiveQuantity = scoped.some((item) => hasRequiredDeterminationsQuantity(item, subsection));
+      if (subsection === "reactivos" && !hasPositiveQuantity) {
+        return res.status(409).json({
+          ok: false,
+          message: "No hay reactivos sincronizados con cantidad mayor a 0 para validar.",
+        });
+      }
+      const hasPending = scoped.some((item) => !hasRequiredDeterminationsQuantity(item, subsection));
+      if (subsection !== "reactivos" && hasPending) {
+        return res.status(409).json({
+          ok: false,
+          message: `La subseccion ${subsection} tiene items sin valor en PRODUCTO A ENTREGAR. Completa esos valores en el Sheet antes de bloquear.`,
+        });
+      }
 
-    const annualSync = await businessCaseService.syncConsumptionQuantitiesFromSheet(id, {
-      itemTypes: DETERMINATIONS_SHEET_ITEM_TYPES[subsection],
-      protectAnnualQuantities: subsection,
-    });
-    logger.info(
-      {
-        businessCaseId: id,
-        subsection,
-        protectedRanges: annualSync?.annualQuantityProtection?.protectedRanges || 0,
-      },
-      "[BC_SHEET] Cantidades anuales protegidas despues de validar subseccion",
-    );
+      // Sin items no hay nada que sincronizar ni celdas que proteger --
+      // proteger un rango vacio lanzaria "NO_ANNUAL_CELLS_FOUND" y bloquearia
+      // el cierre de una subseccion que, para este equipo/BC, simplemente no
+      // aplica (ej. b123 no tiene calibradores en su catalogo).
+      const annualSync = await businessCaseService.syncConsumptionQuantitiesFromSheet(id, {
+        itemTypes: DETERMINATIONS_SHEET_ITEM_TYPES[subsection],
+        protectAnnualQuantities: subsection,
+      });
+      logger.info(
+        {
+          businessCaseId: id,
+          subsection,
+          protectedRanges: annualSync?.annualQuantityProtection?.protectedRanges || 0,
+        },
+        "[BC_SHEET] Cantidades anuales protegidas despues de validar subseccion",
+      );
+    } else {
+      logger.info(
+        { businessCaseId: id, subsection },
+        "[BC_SHEET] Subseccion sin items para este BC, se marca como completada sin sincronizar",
+      );
+    }
 
     const metadata = preflowService.toObject(businessCase?.modern_bc_metadata);
     const currentGate = metadata?.determinations_gate && typeof metadata.determinations_gate === "object"
@@ -4821,7 +4705,12 @@ async function lockDeterminationsSubsection(req, res) {
       section_locks: locks,
       updated_at: now,
     };
-    await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
+    // Patch minimo, solo determinations_gate (evita pisar otras claves
+    // top-level -- ej. una prorroga de SLA aprobada concurrentemente -- con
+    // la copia de metadata leida al inicio de este request).
+    await businessCaseService.updateBusinessCase(id, {
+      modern_bc_metadata: { determinations_gate: metadata.determinations_gate },
+    });
     const allTechnicalSubsectionsLocked = ["reactivos", "controles", "calibradores", "materiales"]
       .every((key) => locks[key] === true);
     if (allTechnicalSubsectionsLocked) {
@@ -4844,6 +4733,130 @@ async function lockDeterminationsSubsection(req, res) {
     res.json({ ok: true, data: { subsection, locked: true, gate: updatedGate } });
   } catch (error) {
     logger.error({ error: error.message }, "Error locking determinations subsection");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+const DETERMINATIONS_TECHNICAL_SUBSECTIONS = ["controles", "calibradores", "materiales"];
+
+// Cierre en un solo paso de controles + calibradores + materiales para
+// jefe_servicio -- evita repetir 3 veces el mismo click de "validar" por
+// cada subseccion. Es todo-o-nada: si alguna subseccion tiene cantidades en
+// 0 pendientes, no se bloquea ninguna y se informa cuales faltan.
+async function lockAllDeterminationsTechnicalSubsections(req, res) {
+  try {
+    const { id } = req.params;
+    const role = resolveRequestRole(req);
+    const businessCase = await businessCaseService.getBusinessCaseById(id);
+    const currentDocument = await determinationsGateService.getCurrentDocument(id);
+    const gate = determinationsGateService.buildGateInfo({ businessCase, role, currentDocument });
+    determinationsGateService.assertCanEditDeterminationsOrThrow(gate);
+
+    const metadata = preflowService.toObject(businessCase?.modern_bc_metadata);
+    const currentGate = metadata?.determinations_gate && typeof metadata.determinations_gate === "object"
+      ? { ...metadata.determinations_gate }
+      : {};
+    const locks = resolveDeterminationsSectionLocks(currentGate);
+
+    const pendingSubsections = DETERMINATIONS_TECHNICAL_SUBSECTIONS.filter((key) => !locks[key]);
+    // Si las 3 ya estaban bloqueadas (ej. se cerraron una por una antes con
+    // el flujo viejo) no hay nada que volver a bloquear, pero igual se debe
+    // continuar mas abajo para cerrar la seccion "determinations" completa
+    // si todavia no se habia cerrado -- por eso no se corta aqui con error.
+    if (!pendingSubsections.length && Boolean(gate?.quantitiesLocked)) {
+      return res.status(409).json({ ok: false, message: "Determinaciones ya esta cerrada." });
+    }
+
+    // Primero se sincroniza cada subseccion pendiente y se valida que no
+    // tenga cantidades en 0 -- sin persistir nada todavia, para que el
+    // cierre sea todo-o-nada.
+    const blocking = [];
+    for (const subsection of pendingSubsections) {
+      await businessCaseService.syncConsumptionQuantitiesFromSheet(id, {
+        itemTypes: DETERMINATIONS_SHEET_ITEM_TYPES[subsection],
+      });
+      const currentConsumption = await businessCaseService.getConsumptionItems(id);
+      const items = Array.isArray(currentConsumption?.items) ? currentConsumption.items : [];
+      const scoped = items.filter((item) => subsectionFromConsumptionType(item?.type) === subsection);
+      const hasPending = scoped.some((item) => !hasRequiredDeterminationsQuantity(item, subsection));
+      if (scoped.length && hasPending) {
+        blocking.push(subsection);
+      }
+    }
+
+    if (blocking.length) {
+      return res.status(409).json({
+        ok: false,
+        message: `Las siguientes subsecciones tienen items sin valor en PRODUCTO A ENTREGAR: ${blocking.join(", ")}. Completa esos valores en el Sheet antes de cerrar.`,
+        details: { blocking },
+      });
+    }
+
+    // Todas listas: proteger celdas en el Sheet (subsecciones sin items se
+    // saltan, no hay nada que proteger) y marcar el lock.
+    for (const subsection of pendingSubsections) {
+      const currentConsumption = await businessCaseService.getConsumptionItems(id);
+      const items = Array.isArray(currentConsumption?.items) ? currentConsumption.items : [];
+      const scoped = items.filter((item) => subsectionFromConsumptionType(item?.type) === subsection);
+      if (scoped.length) {
+        const annualSync = await businessCaseService.syncConsumptionQuantitiesFromSheet(id, {
+          itemTypes: DETERMINATIONS_SHEET_ITEM_TYPES[subsection],
+          protectAnnualQuantities: subsection,
+        });
+        logger.info(
+          {
+            businessCaseId: id,
+            subsection,
+            protectedRanges: annualSync?.annualQuantityProtection?.protectedRanges || 0,
+          },
+          "[BC_SHEET] Cantidades anuales protegidas despues de cerrar todas las subsecciones tecnicas",
+        );
+      }
+      locks[subsection] = true;
+    }
+
+    const now = new Date().toISOString();
+    metadata.determinations_gate = {
+      ...currentGate,
+      section_locks: locks,
+      updated_at: now,
+    };
+    // Patch minimo, solo determinations_gate (ver comentario en
+    // lockDeterminationsSubsection).
+    await businessCaseService.updateBusinessCase(id, {
+      modern_bc_metadata: { determinations_gate: metadata.determinations_gate },
+    });
+
+    // NOTA: este endpoint solo bloquea controles + calibradores + materiales.
+    // El cierre real de la seccion "determinations" (que habilita avanzar a
+    // Inversiones) es una accion EXPLICITA y separada -- ver
+    // completeAllTechnicalDeterminations / boton "Cerrar Determinaciones" en
+    // el frontend -- nunca ocurre automaticamente como efecto secundario de
+    // bloquear la ultima subseccion, para que el cierre sea una decision
+    // deliberada del usuario, no un side-effect silencioso.
+    const allTechnicalSubsectionsLocked = ["reactivos", ...DETERMINATIONS_TECHNICAL_SUBSECTIONS]
+      .every((key) => locks[key] === true);
+    if (allTechnicalSubsectionsLocked) {
+      await workflowSlaService.notifyParticipants({
+        businessCaseId: id,
+        eventKey: "technical_determinations_completed",
+        title: "Determinaciones tecnicas completadas",
+        message:
+          "Controles, calibradores y materiales fueron completados y validados. El siguiente paso es cerrar la seccion de Determinaciones para continuar con Inversiones.",
+        actorEmail: req.user?.email || null,
+        excludeActor: true,
+      });
+    }
+
+    const refreshed = await businessCaseService.getBusinessCaseById(id);
+    const updatedGate = determinationsGateService.buildGateInfo({
+      businessCase: refreshed,
+      role,
+      currentDocument: await determinationsGateService.getCurrentDocument(id),
+    });
+    res.json({ ok: true, data: { subsections: pendingSubsections, locked: true, gate: updatedGate } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error cerrando todas las subsecciones tecnicas de determinaciones");
     res.status(error.status || 500).json({ ok: false, message: error.message });
   }
 }
@@ -4895,7 +4908,11 @@ async function requestDeterminationsSubsectionUnlock(req, res) {
       unlock_requests: [...requests, created],
       updated_at: new Date().toISOString(),
     };
-    await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
+    // Patch minimo, solo determinations_gate (ver comentario en
+    // applyDeterminationsCompletionTransition).
+    await businessCaseService.updateBusinessCase(id, {
+      modern_bc_metadata: { determinations_gate: metadata.determinations_gate },
+    });
 
     try {
       const targets = await getUsersByRoles(["jefe_comercial"]);
@@ -4906,10 +4923,11 @@ async function requestDeterminationsSubsectionUnlock(req, res) {
             template: "custom_html",
             customTitle: `Solicitud de desbloqueo: ${subsection}`,
             customMessage:
-              `${req.user?.email || "Usuario"} solicito desbloquear la subseccion ${subsection} del BC ${id}. Motivo: ${reason}`,
+              `${req.user?.email || "Usuario"} solicito desbloquear la subseccion ${subsection} del BC de ${businessCase?.client_name || "Cliente pendiente"}. Motivo: ${reason}`,
             email: true,
             chat: true,
             source: "business_case.determinations_unlock_request",
+            data: { email_subject: `Business Case ${businessCase?.client_name || "Cliente pendiente"} - Desbloqueo de ${subsection}` },
             meta: {
               businessCaseId: id,
               subsection,
@@ -4994,7 +5012,11 @@ async function resolveDeterminationsSubsectionUnlock(req, res) {
       phase: nextPhase,
       updated_at: now,
     };
-    await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
+    // Patch minimo, solo determinations_gate (ver comentario en
+    // applyDeterminationsCompletionTransition).
+    await businessCaseService.updateBusinessCase(id, {
+      modern_bc_metadata: { determinations_gate: metadata.determinations_gate },
+    });
 
     try {
       const targetEmail = requests[index].requested_by_email;
@@ -5008,10 +5030,11 @@ async function resolveDeterminationsSubsectionUnlock(req, res) {
             userId: target.id,
             template: "custom_html",
             customTitle: `Solicitud de desbloqueo ${approve ? "aprobada" : "rechazada"}`,
-            customMessage: `La solicitud para ${requests[index].subsection} fue ${approve ? "aprobada" : "rechazada"}.`,
+            customMessage: `La solicitud para ${requests[index].subsection} del BC de ${businessCase?.client_name || "Cliente pendiente"} fue ${approve ? "aprobada" : "rechazada"}.`,
             email: true,
             chat: true,
             source: "business_case.determinations_unlock_resolved",
+            data: { email_subject: `Business Case ${businessCase?.client_name || "Cliente pendiente"} - Desbloqueo ${approve ? "aprobado" : "rechazado"}` },
             meta: { businessCaseId: id, requestId, approved: approve },
           }).catch(() => null);
         }
@@ -5071,7 +5094,11 @@ async function reopenDeterminationsCommercial(req, res) {
       reopened_commercial_by_email: req.user?.email || null,
       updated_at: now,
     };
-    await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
+    // Patch minimo, solo determinations_gate (ver comentario en
+    // applyDeterminationsCompletionTransition).
+    await businessCaseService.updateBusinessCase(id, {
+      modern_bc_metadata: { determinations_gate: metadata.determinations_gate },
+    });
     const refreshed = await businessCaseService.getBusinessCaseById(id);
     const gate = determinationsGateService.buildGateInfo({
       businessCase: refreshed,
@@ -5081,6 +5108,68 @@ async function reopenDeterminationsCommercial(req, res) {
     return res.json({ ok: true, data: { gate } });
   } catch (error) {
     logger.error({ error: error.message }, "Error reopening commercial determinations phase");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+// La ventana comercial (48h desde subir el documento estadistico, para
+// sincronizar+validar reactivos) no tenia forma de renovarse si vencia antes
+// de validar -- reopenDeterminationsCommercial solo aplica DESPUES de
+// validar (fase technical_review). Sin esto el BC quedaba bloqueado para
+// siempre: canEditDeterminations en el gate exige !expired, asi que ni el
+// boton de validar ni el mensaje de "falta sincronizar" se mostraban.
+async function renewDeterminationsCommercialWindow(req, res) {
+  try {
+    const { id } = req.params;
+    const role = resolveRequestRole(req);
+    if (role !== "jefe_comercial" && role !== "jefe_de_comercial") {
+      return res.status(403).json({ ok: false, message: "Solo jefe_comercial puede renovar la ventana comercial de determinaciones." });
+    }
+    const businessCase = await businessCaseService.getBusinessCaseById(id);
+    const currentDocument = await determinationsGateService.getCurrentDocument(id);
+    const gate = determinationsGateService.buildGateInfo({ businessCase, role, currentDocument });
+    if (gate.phase !== "commercial_input") {
+      return res.status(409).json({
+        ok: false,
+        message: "Solo se puede renovar la ventana mientras la fase comercial esta activa (aun no se valida reactivos).",
+      });
+    }
+    if (!gate.isExpired) {
+      return res.status(409).json({ ok: false, message: "La ventana comercial aun no ha vencido." });
+    }
+
+    const metadata = preflowService.toObject(businessCase?.modern_bc_metadata);
+    const currentGate = metadata?.determinations_gate && typeof metadata.determinations_gate === "object"
+      ? { ...metadata.determinations_gate }
+      : {};
+    const now = new Date();
+    const deadlineAt = new Date(now.getTime() + determinationsGateService.DETERMINATIONS_DEADLINE_HOURS * 60 * 60 * 1000);
+    metadata.determinations_gate = {
+      ...currentGate,
+      deadline_at: deadlineAt.toISOString(),
+      is_expired: false,
+      expired_at: null,
+      expired_notified_at: null,
+      renewed_commercial_at: now.toISOString(),
+      renewed_commercial_by_role: role,
+      renewed_commercial_by_email: req.user?.email || null,
+      updated_at: now.toISOString(),
+    };
+    // Patch minimo, solo determinations_gate (ver comentario en
+    // applyDeterminationsCompletionTransition).
+    await businessCaseService.updateBusinessCase(id, {
+      modern_bc_metadata: { determinations_gate: metadata.determinations_gate },
+    });
+
+    const refreshed = await businessCaseService.getBusinessCaseById(id);
+    const updatedGate = determinationsGateService.buildGateInfo({
+      businessCase: refreshed,
+      role,
+      currentDocument,
+    });
+    return res.json({ ok: true, data: { gate: updatedGate } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error renewing commercial determinations window");
     res.status(error.status || 500).json({ ok: false, message: error.message });
   }
 }
@@ -5157,11 +5246,7 @@ async function uploadDeterminationsStatDocument(req, res) {
       });
     }
     let preflowProcessResult = null;
-    let preflowHandoffResult = null;
     try {
-      if (preflowService.isPreflowCase(bc)) {
-        await preflowService.ensurePreflowStarted(id, PRE_BC_DURATION_HOURS);
-      }
       preflowProcessResult = await preflowService.ensurePreflowWorkspaceProcess({
         businessCaseId: id,
         actorUser: req.user,
@@ -5188,35 +5273,6 @@ async function uploadDeterminationsStatDocument(req, res) {
     const currentDocument = await determinationsGateService.getCurrentDocument(id);
     const isSameCurrentHash = String(currentDocument?.document_hash_sha256 || "").toLowerCase() === String(fileHash || "").toLowerCase();
     if (isSameCurrentHash) {
-      try {
-        await workflowSlaService.ensurePostStatisticsWindow({
-          businessCaseId: id,
-          documentUploadedAt: currentDocument?.uploaded_at,
-        });
-      } catch (slaError) {
-        logger.warn(
-          { error: slaError.message, businessCaseId: id },
-          "No se pudo asegurar la ventana SLA posterior a estadistica en documento reutilizado",
-        );
-      }
-      try {
-        preflowHandoffResult = await preflowService.completeCommercialStageAndStartReview({
-          businessCaseId: id,
-          actorUser: req.user,
-          durationHours: PRE_BC_DURATION_HOURS,
-          reason: "stat_document_reused_same_hash",
-        });
-      } catch (handoffError) {
-        logger.warn(
-          { error: handoffError.message, businessCaseId: id },
-          "No se pudo cerrar etapa comercial al reutilizar documento de estadistica",
-        );
-        preflowHandoffResult = {
-          skipped: true,
-          reason: "handoff_failed",
-          message: handoffError.message,
-        };
-      }
       // Mismo intento de auto-avance que en el camino de subida nueva (ver
       // mas abajo) -- sin esto, reintentar con el mismo archivo (hash igual)
       // nunca dispara la transicion de estado.
@@ -5236,36 +5292,21 @@ async function uploadDeterminationsStatDocument(req, res) {
           "No se pudo avanzar automaticamente a DATOS_BASE_COMPLETOS (documento reutilizado)",
         );
       }
+      await notifyDeterminationsDocumentUploaded({
+        businessCaseId: id,
+        actor: req.user?.email || role,
+      }).catch((notifyError) => {
+        logger.warn(
+          { error: notifyError.message, businessCaseId: id },
+          "No se pudo notificar la reutilizacion del documento estadistico",
+        );
+      });
       const refreshedForNotification = await businessCaseService.getBusinessCaseById(id);
       const gate = determinationsGateService.buildGateInfo({
         businessCase: refreshedForNotification,
         role,
         currentDocument,
       });
-      try {
-        const eventClaim = await workflowSlaService.claimNotificationEvent({
-          businessCaseId: id,
-          eventKey: "statistics_uploaded",
-          actorEmail: req.user?.email || null,
-        });
-        if (eventClaim.claimed) {
-          await notifyDeterminationsGroupedMail({
-            businessCase: refreshedForNotification,
-            gate,
-            actorUser: req.user,
-          });
-          await workflowSlaService.notifyPersonalPendingTasks({
-            businessCaseId: id,
-            eventKey: "statistics_uploaded",
-            actorEmail: req.user?.email || null,
-          });
-        }
-      } catch (notificationError) {
-        logger.warn(
-          { error: notificationError.message, businessCaseId: id },
-          "No se pudo notificar el inicio del SLA posterior a estadistica",
-        );
-      }
       const responseBody = {
         ok: true,
         data: gate,
@@ -5273,7 +5314,7 @@ async function uploadDeterminationsStatDocument(req, res) {
           reused_existing_document: true,
           reason: "same_sha256_hash",
           process_result: preflowProcessResult,
-          preflow_handoff: preflowHandoffResult,
+          sla_trigger: "pending_determinations_validation",
         },
       };
       await completeIdempotentWrite(idempotencySession, responseBody, 200);
@@ -5340,20 +5381,11 @@ async function uploadDeterminationsStatDocument(req, res) {
       metadata: { source: "business_case_determinations_gate" },
     });
 
-    await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
-
-    try {
-      await workflowSlaService.ensurePostStatisticsWindow({
-        businessCaseId: id,
-        startedAt: now,
-        documentUploadedAt: now,
-      });
-    } catch (slaError) {
-      logger.warn(
-        { error: slaError.message, businessCaseId: id },
-        "El documento se cargo, pero no se pudo iniciar la ventana SLA posterior a estadistica",
-      );
-    }
+    // Patch minimo, solo determinations_gate (ver comentario en
+    // applyDeterminationsCompletionTransition).
+    await businessCaseService.updateBusinessCase(id, {
+      modern_bc_metadata: { determinations_gate: metadata.determinations_gate },
+    });
 
     // Subir el documento estadistico es la señal de que los datos base ya
     // estan completos -- avanzar automaticamente DRAFT_INICIAL ->
@@ -5381,24 +5413,16 @@ async function uploadDeterminationsStatDocument(req, res) {
       );
     }
 
-    try {
-      preflowHandoffResult = await preflowService.completeCommercialStageAndStartReview({
-        businessCaseId: id,
-        actorUser: req.user,
-        durationHours: PRE_BC_DURATION_HOURS,
-        reason: "stat_document_uploaded",
-      });
-    } catch (handoffError) {
+    await notifyDeterminationsDocumentUploaded({
+      businessCaseId: id,
+      actor: req.user?.email || role,
+    }).catch((notifyError) => {
       logger.warn(
-        { error: handoffError.message, businessCaseId: id },
-        "No se pudo cerrar etapa comercial tras carga del documento de estadistica",
+        { error: notifyError.message, businessCaseId: id },
+        "No se pudo notificar la carga del documento estadistico",
       );
-      preflowHandoffResult = {
-        skipped: true,
-        reason: "handoff_failed",
-        message: handoffError.message,
-      };
-    }
+    });
+
     const refreshed = await businessCaseService.getBusinessCaseById(id);
     const gate = determinationsGateService.buildGateInfo({
       businessCase: refreshed,
@@ -5406,37 +5430,12 @@ async function uploadDeterminationsStatDocument(req, res) {
       now,
       currentDocument: await determinationsGateService.getCurrentDocument(id),
     });
-    try {
-      const eventClaim = await workflowSlaService.claimNotificationEvent({
-        businessCaseId: id,
-        eventKey: "statistics_uploaded",
-        actorEmail: req.user?.email || null,
-      });
-      if (eventClaim.claimed) {
-        await notifyDeterminationsGroupedMail({
-          businessCase: refreshed,
-          gate,
-          actorUser: req.user,
-        });
-        await workflowSlaService.notifyPersonalPendingTasks({
-          businessCaseId: id,
-          eventKey: "statistics_uploaded",
-          actorEmail: req.user?.email || null,
-        });
-      }
-    } catch (notificationError) {
-      logger.warn(
-        { error: notificationError.message, businessCaseId: id },
-        "La carga del documento estadistico se completo, pero fallo la notificacion agrupada",
-      );
-    }
-
     const responseBody = {
       ok: true,
       data: gate,
       meta: {
         process_result: preflowProcessResult,
-        preflow_handoff: preflowHandoffResult,
+        sla_trigger: "pending_determinations_validation",
       },
     };
     await completeIdempotentWrite(idempotencySession, responseBody, 200);
@@ -5834,25 +5833,57 @@ async function ensureExpedientPausedReasonColumns() {
  * Pausa todos los expedientes vinculados al BC (private_purchase_requests + equipment_purchase_requests).
  * Llamado cuando se registra una apelación de factibilidad pendiente.
  */
+async function notifyLinkedExpedientOwners(rows, { title, message, type = "alert", priority = 2, source }) {
+  const ownerIds = new Set();
+  for (const row of rows) {
+    if (row.created_by) ownerIds.add(row.created_by);
+    if (row.assigned_to) ownerIds.add(row.assigned_to);
+  }
+  await Promise.all(
+    Array.from(ownerIds).map((userId) =>
+      notificationManager.sendNotification({
+        userId,
+        customTitle: title,
+        customMessage: message,
+        type,
+        priority,
+        source,
+        email: true,
+        chat: false,
+      }).catch(() => null),
+    ),
+  );
+}
+
 async function pauseLinkedExpedients(bcId) {
   try {
     await ensureExpedientPausedReasonColumns();
-    await db.query(
+    const { rows: pausedPrivate } = await db.query(
       `UPDATE private_purchase_requests
           SET paused_reason = 'feasibility_appeal_pending', updated_at = NOW()
         WHERE business_case_id = $1
           AND status NOT IN ('rejected', 'delivered_signed')
-          AND paused_reason IS NULL`,
+          AND paused_reason IS NULL
+        RETURNING id, created_by`,
       [bcId],
     );
-    await db.query(
+    const { rows: pausedPublic } = await db.query(
       `UPDATE equipment_purchase_requests
           SET paused_reason = 'feasibility_appeal_pending', updated_at = NOW()
         WHERE business_case_id = $1
-          AND paused_reason IS NULL`,
+          AND paused_reason IS NULL
+        RETURNING id, created_by, assigned_to`,
       [bcId],
     );
     logger.info({ bcId }, "[BC-17] Expedientes pausados por apelación de factibilidad");
+
+    // Nadie que gestiona esas compras se enteraba de que quedaron pausadas
+    // por una apelacion del BC padre -- solo quedaba en logs.
+    await notifyLinkedExpedientOwners([...pausedPrivate, ...pausedPublic], {
+      title: "Expediente pausado por apelación de factibilidad",
+      message: `Tu expediente de compra vinculado al Business Case ${bcId} quedó pausado mientras se resuelve una apelación de factibilidad.`,
+      source: "business_case.feasibility.appeal_paused_expedient",
+    });
   } catch (err) {
     logger.warn({ bcId, err }, "[BC-17] Error al pausar expedientes vinculados");
   }
@@ -5864,21 +5895,31 @@ async function pauseLinkedExpedients(bcId) {
  */
 async function unpauseLinkedExpedients(bcId) {
   try {
-    await db.query(
+    const { rows: resumedPrivate } = await db.query(
       `UPDATE private_purchase_requests
           SET paused_reason = NULL, updated_at = NOW()
         WHERE business_case_id = $1
-          AND paused_reason = 'feasibility_appeal_pending'`,
+          AND paused_reason = 'feasibility_appeal_pending'
+        RETURNING id, created_by`,
       [bcId],
     );
-    await db.query(
+    const { rows: resumedPublic } = await db.query(
       `UPDATE equipment_purchase_requests
           SET paused_reason = NULL, updated_at = NOW()
         WHERE business_case_id = $1
-          AND paused_reason = 'feasibility_appeal_pending'`,
+          AND paused_reason = 'feasibility_appeal_pending'
+        RETURNING id, created_by, assigned_to`,
       [bcId],
     );
     logger.info({ bcId }, "[BC-17] Expedientes despausados");
+
+    await notifyLinkedExpedientOwners([...resumedPrivate, ...resumedPublic], {
+      title: "Expediente reanudado",
+      message: `Tu expediente de compra vinculado al Business Case ${bcId} se reanudó tras resolverse la apelación de factibilidad.`,
+      type: "task",
+      priority: 1,
+      source: "business_case.feasibility.appeal_resumed_expedient",
+    });
   } catch (err) {
     logger.warn({ bcId, err }, "[BC-17] Error al desbloquear expedientes vinculados");
   }
@@ -5890,25 +5931,33 @@ async function unpauseLinkedExpedients(bcId) {
  */
 async function cancelLinkedExpedients(bcId) {
   try {
-    await db.query(
+    const { rows: cancelledPrivate } = await db.query(
       `UPDATE private_purchase_requests
           SET status = 'rejected',
               paused_reason = NULL,
               updated_at = NOW()
         WHERE business_case_id = $1
-          AND status NOT IN ('rejected', 'delivered_signed')`,
+          AND status NOT IN ('rejected', 'delivered_signed')
+        RETURNING id, created_by`,
       [bcId],
     );
-    await db.query(
+    const { rows: cancelledPublic } = await db.query(
       `UPDATE equipment_purchase_requests
           SET status = 'rejected',
               paused_reason = NULL,
               updated_at = NOW()
         WHERE business_case_id = $1
-          AND status NOT IN ('rejected', 'delivered', 'completed')`,
+          AND status NOT IN ('rejected', 'delivered', 'completed')
+        RETURNING id, created_by, assigned_to`,
       [bcId],
     );
     logger.info({ bcId }, "[BC-17] Expedientes cancelados por rechazo definitivo de factibilidad");
+
+    await notifyLinkedExpedientOwners([...cancelledPrivate, ...cancelledPublic], {
+      title: "Expediente cancelado",
+      message: `Tu expediente de compra vinculado al Business Case ${bcId} fue cancelado: la apelación de factibilidad fue rechazada definitivamente.`,
+      source: "business_case.feasibility.appeal_cancelled_expedient",
+    });
   } catch (err) {
     logger.warn({ bcId, err }, "[BC-17] Error al cancelar expedientes vinculados");
   }
@@ -5975,12 +6024,13 @@ async function requestFeasibilityAppeal(req, res) {
         notificationManager.sendNotification({
           userId: mgr.id,
           customTitle: "Solicitud de revisión de factibilidad",
-          customMessage: `${req.user?.email || "Un usuario"} solicita revisión del BC ${id} marcado como no factible. Motivo: ${normalizedReason}`,
+          customMessage: `${req.user?.email || "Un usuario"} solicita revisión del BC de ${bc.client_name || "Cliente pendiente"} marcado como no factible. Motivo: ${normalizedReason}`,
           type: "task",
           source: "business_case.feasibility.appeal_requested",
           priority: 2,
           email: true,
           chat: false,
+          data: { email_subject: `Business Case ${bc.client_name || "Cliente pendiente"} - Apelación de factibilidad` },
           meta: { businessCaseId: id, appeal },
         });
       }
@@ -6065,8 +6115,8 @@ async function resolveFeasibilityAppeal(req, res) {
           userId: requester.id,
           customTitle: Boolean(approved) ? "Revisión de factibilidad aprobada" : "Revisión de factibilidad rechazada",
           customMessage: Boolean(approved)
-            ? `${req.user?.email || "Jefe comercial"} abrió la revisión del BC ${id}. La factibilidad puede ser evaluada nuevamente.`
-            : `${req.user?.email || "Jefe comercial"} rechazó tu solicitud de revisión del BC ${id}.${resolvedAppeal.resolution_notes ? ` Motivo: ${resolvedAppeal.resolution_notes}` : ""}`,
+            ? `${req.user?.email || "Jefe comercial"} abrió la revisión del BC de ${bc.client_name || "Cliente pendiente"}. La factibilidad puede ser evaluada nuevamente.`
+            : `${req.user?.email || "Jefe comercial"} rechazó tu solicitud de revisión del BC de ${bc.client_name || "Cliente pendiente"}.${resolvedAppeal.resolution_notes ? ` Motivo: ${resolvedAppeal.resolution_notes}` : ""}`,
           type: Boolean(approved) ? "success" : "alert",
           source: Boolean(approved)
             ? "business_case.feasibility.appeal_approved"
@@ -6074,6 +6124,7 @@ async function resolveFeasibilityAppeal(req, res) {
           priority: 2,
           email: true,
           chat: false,
+          data: { email_subject: `Business Case ${bc.client_name || "Cliente pendiente"} - Apelación de factibilidad ${Boolean(approved) ? "aprobada" : "rechazada"}` },
           meta: { businessCaseId: id, appeal: resolvedAppeal },
         });
       }
@@ -6143,22 +6194,14 @@ async function recordSectionCompletion(req, res) {
     }
 
     if (canonicalSection === "investments") {
-      if (!INVESTMENT_VALUES_OP_ROLES.has(userRole)) {
+      if (!INVESTMENT_COMPLETE_ROLES.has(userRole)) {
         return res.status(403).json({
           ok: false,
-          message: "Solo jefe_operaciones puede cerrar la seccion de inversiones.",
+          message: "Solo ACP Comercial, Jefe Comercial o Jefe de Operaciones pueden cerrar la seccion de inversiones.",
           code: "INVESTMENTS_COMPLETE_ROLE_REQUIRED",
         });
       }
-      const cartStatus = getInvestmentCartStatus(businessCase);
-      if (!cartStatus.confirmed) {
-        return res.status(409).json({
-          ok: false,
-          message: "Primero debes confirmar el carrito de inversiones.",
-          code: "INVESTMENT_CART_NOT_CONFIRMED",
-        });
-      }
-      const selectedInvestments = await investmentsService.getInvestmentValuesByClass(id, "operativa");
+      const selectedInvestments = await investmentsService.getInvestmentValuesByClass(id, "financiera");
       const missingPrices = (selectedInvestments || []).filter((row) => {
         const price = Number(row?.unit_price ?? 0);
         return !Number.isFinite(price) || price <= 0;
@@ -6166,7 +6209,7 @@ async function recordSectionCompletion(req, res) {
       if (missingPrices.length > 0) {
         return res.status(409).json({
           ok: false,
-          message: `No se puede cerrar inversiones: faltan ${missingPrices.length} precio(s) en el carrito seleccionado.`,
+          message: `No se puede cerrar inversiones: faltan ${missingPrices.length} precio(s) financiero(s) en el carrito seleccionado.`,
           code: "INVESTMENTS_PRICES_REQUIRED",
         });
       }
@@ -6192,11 +6235,6 @@ async function recordSectionCompletion(req, res) {
         role: userRole,
         user,
       });
-    }
-
-    let metadataAfter = preflowService.toObject(businessCase?.modern_bc_metadata);
-    if (preflowService.isPreflowCase(businessCase) && canonicalSection === "general" && !metadataAfter.preflow_started_at) {
-      metadataAfter = await preflowService.ensurePreflowStarted(id, PRE_BC_DURATION_HOURS);
     }
 
     const processResult = await preflowService.ensurePreflowWorkspaceProcess({ businessCaseId: id, actorUser: user, durationHours: PRE_BC_DURATION_HOURS });
@@ -6365,47 +6403,24 @@ async function getInvestmentValues(req, res) {
     const rows = await investmentsService.getInvestmentValuesByClass(id, investmentClass);
     const pricingContext = await investmentsService.getInvestmentPricingContext(id);
 
-    // Include deadline info from BC record
-    const { rows: bcRows } = await db.query(
-      `SELECT invest_selections_changed_at, invest_values_op_deadline_at, invest_values_fin_deadline_at
-       FROM equipment_purchase_requests WHERE id = $1`,
-      [id]
-    );
-    const bc = bcRows[0] || {};
-    const fullBc = await businessCaseService.getBusinessCaseById(id);
-    const cartStatus = getInvestmentCartStatus(fullBc);
-    const decoratedRows = decorateInvestmentCartRows(rows, cartStatus);
-    const deadlineAt = investmentClass === 'operativa'
-      ? bc.invest_values_op_deadline_at
-      : bc.invest_values_fin_deadline_at;
-    const confirmationReady = investmentClass === 'operativa'
-      ? cartStatus.serviceConfirmed
-      : cartStatus.acpConfirmed;
-
-    const selectedCount = Array.isArray(decoratedRows) ? decoratedRows.length : 0;
-    const missingPriceCount = (decoratedRows || []).filter((row) => {
+    // Precios en tiempo real: sin deadline ni cierre, cualquier item con
+    // cantidad > 0 puede cotizarse apenas se agrega a la lista.
+    const selectedCount = Array.isArray(rows) ? rows.length : 0;
+    const missingPriceCount = (rows || []).filter((row) => {
       const price = Number(row?.unit_price ?? 0);
       return !Number.isFinite(price) || price <= 0;
     }).length;
-    const syncPending = !confirmationReady || missingPriceCount > 0;
+    const syncPending = missingPriceCount > 0;
     res.json({
       ok: true,
       data: {
-        items: decoratedRows,
-        cart_summary: buildInvestmentCartSummary(decoratedRows, cartStatus),
+        items: rows,
         pricing_context: pricingContext,
-        deadline_at: deadlineAt || null,
-        cart: cartStatus,
         sync_status: {
           pending: syncPending,
           selected_count: selectedCount,
           missing_price_count: missingPriceCount,
-          confirmation_ready: confirmationReady,
-          message: !confirmationReady
-            ? investmentClass === 'operativa'
-              ? "Pendiente: Jefe de Servicio debe confirmar el carrito de Servicio."
-              : "Pendiente: ACP Comercial debe confirmar el carrito inicial."
-            : syncPending
+          message: syncPending
             ? `Pendiente de sincronizacion: faltan ${missingPriceCount} precio(s) en inversiones seleccionadas.`
             : "Sincronizacion lista: todas las inversiones seleccionadas tienen precio.",
         },
@@ -6440,24 +6455,10 @@ async function assertInvestmentValuesEditorRole(investmentClass, role) {
   }
 }
 
-async function assertInvestmentValuesConfirmationReady(businessCaseId, investmentClass) {
-  const businessCase = await businessCaseService.getBusinessCaseById(businessCaseId);
-  const cartStatus = getInvestmentCartStatus(businessCase);
-  const ready = investmentClass === "operativa" ? cartStatus.serviceConfirmed : cartStatus.acpConfirmed;
-  if (!ready) {
-    const error = new Error(
-      investmentClass === "operativa"
-        ? "Jefe de Servicio debe confirmar el carrito de Servicio antes de gestionar cotizaciones operativas."
-        : "ACP Comercial debe confirmar el carrito inicial antes de gestionar cotizaciones financieras.",
-    );
-    error.status = 409;
-    error.code = investmentClass === "operativa"
-      ? "INVESTMENT_SERVICE_CONFIRMATION_REQUIRED"
-      : "INVESTMENT_ACP_CONFIRMATION_REQUIRED";
-    throw error;
-  }
-}
-
+// Financiero/Operaciones trabajan en tiempo real sobre lo que ACP/Servicio
+// van agregando a su carrito -- el BC debe llenarse en 48h maximo, no pueden
+// esperar a que el carrito se confirme para empezar a cotizar/poner precios.
+// Ya no se exige que el carrito correspondiente este confirmado.
 async function assignInvestmentQuotation(req, res) {
   try {
     const { id } = req.params;
@@ -6467,7 +6468,6 @@ async function assignInvestmentQuotation(req, res) {
     }
     await businessCaseService.assertModernBusinessCase(id);
     await assertInvestmentValuesEditorRole(investmentClass, resolveRequestRole(req));
-    await assertInvestmentValuesConfirmationReady(id, investmentClass);
     const result = await investmentsService.assignInvestmentQuotation(
       id,
       req.body?.catalog_id,
@@ -6490,7 +6490,6 @@ async function requestInvestmentQuotation(req, res) {
     }
     await businessCaseService.assertModernBusinessCase(id);
     await assertInvestmentValuesEditorRole(investmentClass, resolveRequestRole(req));
-    await assertInvestmentValuesConfirmationReady(id, investmentClass);
     const result = await investmentsService.requestInvestmentQuotation(id, req.body?.catalog_id, req.user);
     const notification = result.alreadyRequested
       ? { sent: false, reason: "already_requested" }
@@ -6526,20 +6525,15 @@ async function saveInvestmentValues(req, res) {
       return res.status(403).json({ ok: false, message: `Solo ${[...allowedForClass].join(' / ')} puede editar valores ${investmentClass}s` });
     }
 
-    const fullBc = await businessCaseService.getBusinessCaseById(id);
-    const cartStatus = getInvestmentCartStatus(fullBc);
-    const confirmationReady = investmentClass === 'operativa'
-      ? cartStatus.serviceConfirmed
-      : cartStatus.acpConfirmed;
-    if (!confirmationReady) {
+    // Precios en tiempo real, sin carrito ni cierre: solo se bloquea si la
+    // seccion fue bloqueada por otra via generica (lockSection).
+    const valuesSectionKey = investmentClass === "operativa" ? "investment_values_op" : "investment_values_fin";
+    const valuesLockMap = await BusinessCaseDataOwnership.getLockStatus(id);
+    if (valuesLockMap?.[valuesSectionKey]?.isLocked) {
       return res.status(409).json({
         ok: false,
-        message: investmentClass === 'operativa'
-          ? 'Jefe de Servicio debe confirmar el carrito de Servicio antes de cargar precios operativos.'
-          : 'ACP Comercial debe confirmar el carrito inicial antes de cargar precios financieros.',
-        code: investmentClass === 'operativa'
-          ? 'INVESTMENT_SERVICE_CONFIRMATION_REQUIRED'
-          : 'INVESTMENT_ACP_CONFIRMATION_REQUIRED',
+        message: "Ya cerraste este apartado de valores. Solicita reapertura si necesitas corregir algo.",
+        code: "INVESTMENT_VALUES_SECTION_LOCKED",
       });
     }
 
@@ -6629,25 +6623,51 @@ async function saveInvestmentValues(req, res) {
     }
 
     try {
-      const [operationalValues, financialValues] = await Promise.all([
-        investmentsService.getInvestmentValuesByClass(id, "operativa"),
-        investmentsService.getInvestmentValuesByClass(id, "financiera"),
-      ]);
-      const allSelectedValues = [
-        ...(Array.isArray(operationalValues) ? operationalValues : []),
-        ...(Array.isArray(financialValues) ? financialValues : []),
-      ];
-      const allValuesComplete = allSelectedValues.length > 0 && allSelectedValues.every((item) => {
+      const financialValues = await investmentsService.getInvestmentValuesByClass(id, "financiera");
+      const financialValuesComplete = Array.isArray(financialValues) && financialValues.length > 0 && financialValues.every((item) => {
         const value = Number(item?.unit_price ?? item?.price ?? 0);
         return Number.isFinite(value) && value > 0;
       });
-      if (allValuesComplete) {
+      let financialSectionJustCompleted = false;
+      if (investmentClass === "financiera" && financialValuesComplete) {
+        await db.query(
+          `UPDATE equipment_purchase_requests
+              SET bc_stage = 'factibilidad',
+                  updated_at = NOW()
+            WHERE id = $1
+              AND COALESCE(bc_stage, '') NOT IN ('factible', 'cerrado_no_factible')`,
+          [id],
+        );
+
+        const ownershipInfo = await BusinessCaseDataOwnership.getOwnershipInfo(id);
+        if (!ownershipInfo?.investment_values_fin?.completedAt) {
+          const latestBusinessCase = await businessCaseService.getBusinessCaseById(id);
+          const currentState = String(latestBusinessCase?.canonical_state || latestBusinessCase?.bc_stage || "draft").toUpperCase();
+          const actorId = req.user?.id ?? req.user?.sub ?? req.user?.user_id ?? req.user?.uuid ?? null;
+          await BusinessCaseDataOwnership.recordSectionCompletion(
+            id,
+            "investment_values_fin",
+            actorId,
+            role,
+            currentState,
+            {
+              source: "investment_values_save",
+              actor_email: req.user?.email || null,
+              actor_id_raw: actorId,
+              completion_basis: "all_financial_prices_completed",
+            },
+          );
+          financialSectionJustCompleted = true;
+        }
+      }
+
+      if (financialSectionJustCompleted) {
         await workflowSlaService.notifyParticipants({
           businessCaseId: id,
           eventKey: "investment_values_completed",
           title: "Valores de inversiones completados: revisar factibilidad",
           message:
-            "Los valores financieros y operativos de las inversiones seleccionadas ya fueron registrados. El siguiente paso es revisar y registrar la factibilidad del Business Case.",
+            "Los valores financieros obligatorios de las inversiones seleccionadas ya fueron registrados. El siguiente paso es revisar y registrar la factibilidad del Business Case.",
           actorEmail: req.user?.email || null,
           excludeActor: true,
         });
@@ -6696,9 +6716,8 @@ module.exports = {
   deleteInvestment,
   getInvestmentCatalog,
   createInvestmentCatalogItem,
-  confirmInvestmentCart,
-  requestInvestmentQuantityIncrease,
   saveInvestmentSelection,
+  closeInvestmentsWithoutAdditionalItems,
   getInvestmentValues,
   getInvestmentQuotationAssignees,
   assignInvestmentQuotation,
@@ -6723,9 +6742,11 @@ module.exports = {
   reviewEnvironmentInspectionRequest,
   registerEnvironmentInspectionResult,
   lockDeterminationsSubsection,
+  lockAllDeterminationsTechnicalSubsections,
   requestDeterminationsSubsectionUnlock,
   resolveDeterminationsSubsectionUnlock,
   reopenDeterminationsCommercial,
+  renewDeterminationsCommercialWindow,
   uploadDeterminationsStatDocument,
   parseDeterminationsQuantitiesFile,
   clearSheetTemplateCache,
@@ -6740,8 +6761,6 @@ module.exports = {
   // Manual BC Form endpoints
   saveLabEnvironment,
   getLabEnvironment,
-  saveEquipmentDetails,
-  getEquipmentDetails,
   saveEquipmentDetailsV2,
   saveLisIntegration,
   getLisIntegration,

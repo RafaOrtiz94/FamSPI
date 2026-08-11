@@ -3,7 +3,7 @@ const externalCaseSyncService = require("../modules/servicio/externalCaseSync.se
 
 const DEFAULT_INTERVAL_MS = Math.max(
   5000,
-  Number(process.env.EXTERNAL_CASE_SYNC_INTERVAL_MS || 30000),
+  Number(process.env.EXTERNAL_CASE_SYNC_INTERVAL_MS || 180000),
 );
 const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
 

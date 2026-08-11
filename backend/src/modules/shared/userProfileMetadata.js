@@ -1,27 +1,6 @@
-const HR_PROFILE_METADATA_PATHS = [
-  "personal.telefono_personal",
-  "personal.email_personal",
-  "personal.estado_civil",
-  "personal.genero",
-  "personal.tipo_sangre",
-  "personal.lugar_nacimiento",
-  "personal.fecha_nacimiento",
-  "domicilio.ciudad_domicilio",
-  "domicilio.direccion_domicilio",
-  "domicilio.telefono_fijo",
-  "emergencia.persona_contacto",
-  "emergencia.telefono_contacto",
-  "estudios.nivel_instruccion",
-  "estudios.titulo_tercer_nivel",
-  "estudios.universidad_tercer_nivel",
-  "estudios.titulo_cuarto_nivel",
-  "estudios.universidad_cuarto_nivel",
-  "laboral.fecha_ingreso",
-  "laboral.cargo",
-  "laboral.area",
-  "laboral.telefono_celular_famproject",
-  "laboral.email_famproject",
-];
+const { PROFILE_SYNC_KEYS } = require("./profileSync");
+
+const HR_PROFILE_METADATA_PATHS = PROFILE_SYNC_KEYS;
 
 const getNestedValue = (source, path) =>
   path.reduce(

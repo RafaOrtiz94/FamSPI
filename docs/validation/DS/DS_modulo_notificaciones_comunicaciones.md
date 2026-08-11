@@ -82,39 +82,11 @@ Notificaciones y Comunicaciones
 - Configuracion incorrecta de destinatarios puede producir alertas incompletas.
 
 ## Diagrama tecnico
-```mermaid
+`mermaid
 flowchart LR
-  subgraph Frontend
-    NTF_UI[Widgets de notificaciones\n en módulos de negocio]
-    API_C[notificationsApi.js]
-  end
-
-  subgraph Backend
-    RT[notifications.routes.js\n verifyToken + rateLimit 20/min]
-    CT[notifications.controller.js]
-    SV[notifications.service.js\n CRUD bandeja + ownership]
-    MGR[NotificationManager.js\n Coordinador de envío]
-    RCFG[notificationRecipientsConfig.service.js\n Resolución de destinatarios]
-    JOB[processNotificationDispatchQueue.js\n FOR UPDATE SKIP LOCKED]
-  end
-
-  subgraph Persistencia
-    DB[(PostgreSQL\n notifications\n notification_recipients_config\n notification_dispatch_queue\n notification_process_email_threads)]
-  end
-
-  subgraph Canales
-    EMAIL[SMTP / Gmail]
-    CHAT[Google Chat]
-  end
-
-  NTF_UI --> API_C
-  API_C -->|REST| RT
-  RT --> CT
-  CT --> SV
-  SV --> DB
-  MGR --> DB
-  MGR --> RCFG
-  JOB -->|poll cola| DB
-  JOB --> EMAIL
-  JOB --> CHAT
-```
+  UI[Frontend o consumidor] --> API[API NTF]
+  API --> CTRL[Controladores]
+  CTRL --> SVC[Servicios]
+  SVC --> DB[(Base de datos)]
+  SVC --> EXT[Dependencias externas o modulos transversales]
+`

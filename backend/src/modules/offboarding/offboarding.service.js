@@ -9,6 +9,7 @@ const { ensureFolder, copyTemplate, replaceTags, exportPdf } = require("../../ut
 const { resolveExternalDriveIntegrity } = require("../../utils/documentHash");
 const { computeOffboardingLiquidation } = require("../vacaciones/vacaciones.service");
 const notificationManager = require("../notifications/notificationManager");
+const { isPassiveEmploymentStatus } = require("../shared/profileSync");
 
 const OFFBOARDING_STAGES = {
   OPERATIONAL: "OPERATIONAL",
@@ -1257,13 +1258,22 @@ async function closeOffboarding({
         actor?.id || null,
         user.role || null,
         user.active !== false,
-        OFFBOARDING_PASSIVE_ROLE,
-        closedAtIso,
-        actor?.id || null,
-      ]
-    );
+OFFBOARDING_PASSIVE_ROLE,
+         closedAtIso,
+         actor?.id || null,
+       ]
+     );
 
     await client.query("COMMIT");
+
+    try {
+      await db.query(
+        "UPDATE users SET active = false, updated_at = NOW() WHERE id = $1 AND active = true",
+        [targetUserId]
+      );
+    } catch (syncError) {
+      logger.warn({ syncError, userId: targetUserId }, "No se pudo sincronizar users.active al cerrar offboarding");
+    }
 
     try {
       await logAction({
@@ -1310,6 +1320,7 @@ async function getWorkspace(userId) {
 }
 
 module.exports = {
+  buildOffboardingRequestCode,
   getWorkspace,
   updateTask,
   runLiquidation,

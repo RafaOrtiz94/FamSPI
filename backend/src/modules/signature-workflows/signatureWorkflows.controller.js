@@ -75,6 +75,11 @@ exports.listMyCompleted = asyncHandler(async (req, res) => {
   res.json({ ok: true, data });
 });
 
+exports.listSignerCandidates = asyncHandler(async (_req, res) => {
+  const data = await service.listSignerCandidates();
+  res.json({ ok: true, data });
+});
+
 exports.downloadSourcePdf = asyncHandler(async (req, res) => {
   const payload = await service.getDocumentPayload({
     workflowId: Number(req.params.id),

@@ -42,3 +42,7 @@ Módulo de gestión de perfiles de colaboradores. Provee vista extendida del per
 
 ## 9. Notas técnicas
 - Separación intencional entre `users` (autenticación/roles) y `collaborators` (perfil laboral)
+- **Fuente única de verdad para status**: `users.active` se sincroniza automáticamente con `profile->'laboral'->>'estatus_empleado'`
+- Valores pasivos sincronizados: `pasivo`, `desvinculado`, `inactivo`, `en_desvinculacion`
+- Cambiar `estatus_empleado` a valor pasivo marca `users.active = false`
+- Cambiar `users.active` a `false` actualiza `estatus_empleado = 'inactivo'`

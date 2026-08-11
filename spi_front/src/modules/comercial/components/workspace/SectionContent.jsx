@@ -5,7 +5,7 @@ import { useUI } from "../../../../core/ui/UIContext";
 import EquipmentSection from "./EquipmentSection";
 import DeterminationsSection from "./DeterminationsSection";
 import InvestmentsSection from "./InvestmentsSection";
-import InvestmentValuesSection from "./sections/InvestmentValuesSection";
+import InvestmentValuesUnifiedSection from "./sections/InvestmentValuesUnifiedSection";
 import ClientDataSection from "./ClientDataSection";
 import RequirementsSection from "./sections/RequirementsSection";
 import LabSection from "./sections/LabSection";
@@ -39,8 +39,10 @@ const SectionContent = ({
  const permissions = uiGuidance?.permissions || {};
  const sectionRule = uiGuidance?.sectionOwnership?.rules?.[selectedSection] || {};
  const isInvestments = selectedSection === "investments";
- const canLock = permissions.canBlockSections && !sectionRule.isLocked && !isInvestments;
- const canUnlock = permissions.canUnblockSections && sectionRule.isLocked && !isInvestments;
+ const isInvestmentValues = selectedSection === "investment_values";
+ const hasOwnPermissionModel = isInvestments || isInvestmentValues;
+ const canLock = permissions.canBlockSections && !sectionRule.isLocked && !hasOwnPermissionModel;
+ const canUnlock = permissions.canUnblockSections && sectionRule.isLocked && !hasOwnPermissionModel;
  const businessCaseId = businessCase?.id || uiGuidance?.businessCase?.id;
 
  // Each section passes its own id so save is always attributed correctly
@@ -82,7 +84,7 @@ const SectionContent = ({
 
  const isTerminalState = ['CANCELADO', 'RECHAZADO_POR_GERENCIA', 'CERRADO_PARA_APROBACION'].includes(canonicalState);
  const isStateLocked = sectionRule.isLocked;
- const isPermissionLocked = !permissions.canEdit && !isInvestments;
+ const isPermissionLocked = !permissions.canEdit && !hasOwnPermissionModel;
 
  const unlockAuthorizer = isPrivatePurchase ? 'Backoffice' : 'ACP Comercial o Jefe Comercial';
 
@@ -221,26 +223,14 @@ const SectionContent = ({
     </div>
    )}
 
-   {mountedSections.has("investment_values_op") && (
-    <div className={selectedSection === "investment_values_op" ? "" : "hidden"}>
-     <InvestmentValuesSection
-      investmentClass="operativa"
+   {mountedSections.has("investment_values") && (
+    <div className={selectedSection === "investment_values" ? "" : "hidden"}>
+     <InvestmentValuesUnifiedSection
       businessCase={businessCase}
       permissions={permissions}
-      ownership={uiGuidance?.sectionOwnership?.rules?.investment_values_op || {}}
-      onSave={makeForwardSave("investment_values_op")}
-     />
-    </div>
-   )}
-
-   {mountedSections.has("investment_values_fin") && (
-    <div className={selectedSection === "investment_values_fin" ? "" : "hidden"}>
-     <InvestmentValuesSection
-      investmentClass="financiera"
-      businessCase={businessCase}
-      permissions={permissions}
-      ownership={uiGuidance?.sectionOwnership?.rules?.investment_values_fin || {}}
-      onSave={makeForwardSave("investment_values_fin")}
+      operationalOwnership={uiGuidance?.sectionOwnership?.rules?.investment_values_op || {}}
+      financialOwnership={uiGuidance?.sectionOwnership?.rules?.investment_values_fin || {}}
+      onSave={makeForwardSave("investment_values")}
      />
     </div>
    )}
@@ -268,6 +258,7 @@ const SectionContent = ({
       businessCase={businessCase}
       permissions={permissions}
       ownership={uiGuidance?.sectionOwnership?.rules?.feasibility || {}}
+      workflowState={uiGuidance?.workflowState || {}}
       onSave={makeForwardSave("feasibility")}
      />
     </div>

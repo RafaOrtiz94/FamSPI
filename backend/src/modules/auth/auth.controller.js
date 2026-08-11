@@ -29,6 +29,7 @@ const { isOffHours } = require("../../utils/offHoursPolicy");
 const { getGeoLocation } = require("../../utils/geoip");
 const { notifyTIAboutOffHoursLogin } = require("../../modules/notifications/notifications.service");
 const { logAction } = require("../../utils/audit");
+const { findExistingUserByIdentity } = require("../../utils/userIdentity");
 const { ensureDailyClockIn } = require("../attendance/attendance.utils");
 const { listUserModuleAccess, getGlobalModuleStatusForUser } = require("../module-access/moduleAccess.service");
 // Use crypto.randomUUID() (Node.js 18+ native)
@@ -108,6 +109,14 @@ if (process.env.NODE_ENV !== 'production') {
 const isProd = process.env.NODE_ENV === "production";
 const ACCESS_TOKEN_EXPIRES_IN = String(process.env.ACCESS_TOKEN_EXPIRES_IN || "8h").trim();
 const REFRESH_TOKEN_EXPIRES_IN = String(process.env.REFRESH_TOKEN_EXPIRES_IN || "30d").trim();
+const buildAuthRequestMeta = (req = {}) => ({
+  method: req.method || null,
+  path: req.originalUrl || req.url || null,
+  appPath: req.headers?.["x-app-path"] || null,
+  ip: req.headers?.["x-forwarded-for"]?.split(",")[0] || req.socket?.remoteAddress || req.ip || null,
+  userAgent: req.headers?.["user-agent"] || null,
+  referer: req.headers?.referer || null,
+});
 
 /* ============================================================
    Helpers seguros para firmar tokens
@@ -176,6 +185,12 @@ const syncAttendanceDuringLogin = async (user) => {
   }
 };
 
+const runAsyncLoginTask = (promise, context = {}) => {
+  Promise.resolve(promise).catch((error) => {
+    logger.warn("Tarea asincrona post-login fallo: %s", error?.message, context);
+  });
+};
+
 /* ============================================================
    1️⃣ Redirigir a Google OAuth
 ============================================================ */
@@ -184,7 +199,7 @@ const googleAuthRedirect = (req, res) => {
     const url = oauth2Client.generateAuthUrl({
       access_type: "offline",
       scope: SCOPES,
-      prompt: "consent",
+      include_granted_scopes: true,
     });
     logger.info(`🌐 Redirigiendo a Google OAuth: ${url}`);
     res.redirect(url);
@@ -230,23 +245,27 @@ const googleCallback = async (req, res) => {
     }
 
     // Buscar o crear usuario (prioriza google_id para evitar duplicados)
-    const existingByGoogle = await db.query(
-      "SELECT id, email, fullname, role, department_id, lopdp_internal_status FROM users WHERE google_id = $1 LIMIT 1",
-      [googleId]
-    );
-    const existingByEmail = await db.query(
-      "SELECT id, email, fullname, role, department_id, lopdp_internal_status FROM users WHERE email = $1 LIMIT 1",
-      [email]
+    const existingUsers = await db.query(
+      `
+      SELECT id, email, fullname, role, department_id, lopdp_internal_status, google_id
+      FROM users
+      WHERE google_id = $1 OR email = $2
+      ORDER BY CASE WHEN google_id = $1 THEN 0 ELSE 1 END, id ASC
+      `,
+      [googleId, email]
     );
     let user;
 
-    if (existingByGoogle.rows.length > 0) {
+    const userByGoogle = existingUsers.rows.find((row) => row.google_id === googleId);
+    const userByEmail = existingUsers.rows.find((row) => row.email === email);
+
+    if (userByGoogle) {
       logger.info("Actualizando usuario por google_id: " + email);
       const upd = await db.query(
         `
         UPDATE users
         SET email = $1,
-            fullname = $2,
+            fullname = COALESCE(NULLIF(fullname, ''), $2),
             updated_at = NOW(),
             department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $4 LIMIT 1)),
             lopdp_internal_status = COALESCE(lopdp_internal_status, 'pending')
@@ -256,13 +275,13 @@ const googleCallback = async (req, res) => {
         [email, fullname, googleId, "ti"]
       );
       user = upd.rows[0];
-    } else if (existingByEmail.rows.length > 0) {
+    } else if (userByEmail) {
       logger.info("Actualizando usuario existente: " + email);
       const upd = await db.query(
         `
         UPDATE users
         SET google_id = $1,
-            fullname = $2,
+            fullname = COALESCE(NULLIF(fullname, ''), $2),
             updated_at = NOW(),
             department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $4 LIMIT 1)),
             lopdp_internal_status = COALESCE(lopdp_internal_status, 'pending')
@@ -273,24 +292,51 @@ const googleCallback = async (req, res) => {
       );
       user = upd.rows[0];
     } else {
-      logger.info("Creando nuevo usuario: " + email);
-      const ins = await db.query(
-        `
-        INSERT INTO users (
-          google_id,
-          email,
-          fullname,
-          name,
-          role,
-          department_id,
-          lopdp_internal_status
-        )
-        VALUES ($1, $2, $3, $4, $5, (SELECT id FROM departments WHERE code = $6 LIMIT 1), 'pending')
-        RETURNING id, email, fullname, role, department_id, lopdp_internal_status;
-        `,
-        [googleId, email, fullname, data.given_name || "Usuario", "pendiente", "comercial"]
-      );
-      user = ins.rows[0];
+      // Antes de crear una cuenta nueva, se busca si esta persona ya tiene
+      // una cuenta "huerfana" (por ejemplo, creada por hirePersonnelRequest
+      // con email placeholder mientras esperaba su correo corporativo real).
+      // Si existe, se vincula en vez de duplicar: este primer login con
+      // dominio corporativo aporta el correo real y verificado.
+      const existingByIdentity = await findExistingUserByIdentity(db, { fullname });
+      if (existingByIdentity) {
+        logger.info(
+          `Vinculando cuenta existente por nombre (id ${existingByIdentity.id}) en primer login: ${email}`
+        );
+        const upd = await db.query(
+          `
+          UPDATE users
+          SET google_id = $1,
+              email = $2,
+              fullname = COALESCE(NULLIF(fullname, ''), $3),
+              updated_at = NOW(),
+              department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $5 LIMIT 1)),
+              lopdp_internal_status = COALESCE(lopdp_internal_status, 'pending')
+          WHERE id = $4
+          RETURNING id, email, fullname, role, department_id, lopdp_internal_status;
+          `,
+          [googleId, email, fullname, existingByIdentity.id, "ti"]
+        );
+        user = upd.rows[0];
+      } else {
+        logger.info("Creando nuevo usuario: " + email);
+        const ins = await db.query(
+          `
+          INSERT INTO users (
+            google_id,
+            email,
+            fullname,
+            name,
+            role,
+            department_id,
+            lopdp_internal_status
+          )
+          VALUES ($1, $2, $3, $4, $5, (SELECT id FROM departments WHERE code = $6 LIMIT 1), 'pending')
+          RETURNING id, email, fullname, role, department_id, lopdp_internal_status;
+          `,
+          [googleId, email, fullname, data.given_name || "Usuario", "pendiente", "comercial"]
+        );
+        user = ins.rows[0];
+      }
     }
 
     const roleValue = user.role || "pendiente";
@@ -333,18 +379,18 @@ const googleCallback = async (req, res) => {
     // Registrar sesión
     const ip =
       req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || req.ip;
-    try {
-      await createSession({
+    runAsyncLoginTask(createSession({
         email,
         ip,
         userAgent: req.headers["user-agent"],
         refreshToken,
-      });
-    } catch (sessionErr) {
-      logger.warn("⚠️ No se pudo registrar la sesión en user_sessions: %s", sessionErr.message);
-    }
+      }), { userId: user.id, email, task: "createSession" });
 
-    await syncAttendanceDuringLogin(user);
+    runAsyncLoginTask(syncAttendanceDuringLogin(user), {
+      userId: user.id,
+      email,
+      task: "syncAttendanceDuringLogin",
+    });
 
     // 🔐 Seguridad: Verificar login fuera de horario
     let offHoursCheck = isOffHours(new Date());
@@ -371,26 +417,23 @@ const googleCallback = async (req, res) => {
       });
 
       // Notificar a TI sobre login fuera de horario
-      try {
-        await notifyTIAboutOffHoursLogin({
+      runAsyncLoginTask(notifyTIAboutOffHoursLogin({
           correlationId,
           user,
           offHoursCheck,
           ip,
           geo: geoInfo,
           userAgent: req.headers["user-agent"]
-        });
-      } catch (notifyError) {
-        logger.warn(`⚠️ Error notificando a TI sobre login fuera de horario, pero login continúa: ${notifyError.message}`, {
+        }), {
           correlationId,
           userId: user.id,
-          userEmail: user.email
+          userEmail: user.email,
+          task: "notifyTIAboutOffHoursLogin",
         });
-      }
     }
 
     // Registrar login exitoso en auditoría - usando datos_nuevos (no contexto)
-    await logAction({
+    runAsyncLoginTask(logAction({
       usuario_id: user.id,
       usuario_email: user.email,
       rol: user.role || "pendiente",
@@ -413,6 +456,11 @@ const googleCallback = async (req, res) => {
           login_time_guess_iso: new Date().toISOString()
         }
       }
+    }), {
+      correlationId,
+      userId: user.id,
+      userEmail: user.email,
+      task: "logAction",
     });
 
     // Redirigir al frontend con tokens
@@ -452,6 +500,7 @@ const me = async (req, res) => {
   try {
     res.set("Cache-Control", "no-store, no-cache, must-revalidate");
     const { email } = req.user || {};
+    const lite = ["1", "true", "yes"].includes(String(req.query?.lite || "").trim().toLowerCase());
     if (!email) return res.status(401).json({ error: "No autorizado" });
 
     const { rows } = await db.query(
@@ -490,17 +539,30 @@ const me = async (req, res) => {
       }
       return payload.avatar_url || null;
     })();
+    const baseUser = {
+      ...payload,
+      scope: meta.scope,
+      dashboard: meta.dashboard,
+      lopdp_internal_status: payload.lopdp_internal_status || "pending",
+      avatar_url: avatarUrl,
+      avatar_drive_id: payload.avatar_drive_id || null,
+      has_signature: !!payload.lopdp_internal_signature_file_id,
+    };
+
+    if (lite) {
+      return res.status(200).json({ user: baseUser });
+    }
+
+    const [moduleAccess, moduleGlobalStatus] = await Promise.all([
+      listUserModuleAccess(payload.id),
+      getGlobalModuleStatusForUser(payload.email),
+    ]);
+
     return res.status(200).json({
       user: {
-        ...payload,
-        scope: meta.scope,
-        dashboard: meta.dashboard,
-        module_access: await listUserModuleAccess(payload.id),
-        module_global_status: await getGlobalModuleStatusForUser(payload.email),
-        lopdp_internal_status: payload.lopdp_internal_status || "pending",
-        avatar_url: avatarUrl,
-        avatar_drive_id: payload.avatar_drive_id || null,
-        has_signature: !!payload.lopdp_internal_signature_file_id,
+        ...baseUser,
+        module_access: moduleAccess,
+        module_global_status: moduleGlobalStatus,
       },
     });
   } catch (err) {
@@ -515,8 +577,10 @@ const me = async (req, res) => {
 const refreshToken = async (req, res) => {
   try {
     const token = req.headers["x-refresh-token"] || req.body?.refreshToken;
-    if (!token)
+    if (!token) {
+      logger.warn({ ...buildAuthRequestMeta(req) }, "refreshToken rechazado: request sin refresh token");
       return res.status(401).json({ ok: false, message: "No hay refresh token." });
+    }
 
     const decoded = jwt.verify(token, process.env.REFRESH_SECRET_KEY);
 
@@ -554,8 +618,10 @@ const refreshToken = async (req, res) => {
 
     if (!updated) {
       logger.warn("refreshToken rechazado: no existe una sesion activa asociada al token entregado", {
+        ...buildAuthRequestMeta(req),
         userId: u.id,
         email: u.email,
+        refreshTokenFragment: token?.slice(0, 8),
       });
       return res.status(401).json({ ok: false, message: "Sesion no valida para refresco." });
     }

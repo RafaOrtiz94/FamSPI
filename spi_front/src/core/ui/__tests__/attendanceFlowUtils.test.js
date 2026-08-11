@@ -2,9 +2,14 @@ import {
   resolveAttendanceActionKey,
   getAttendanceActionLabel,
   getAttendanceNextStepHint,
+  resolveAttendanceIntentKey,
   resolveAttendanceFlowStep,
+  resolveAttendanceShortcutIntent,
   resolveAttendancePendingActions,
   validateOperationalCategoryStep,
+  isOperationalExitCategory,
+  isTeleworkCategory,
+  validateOperationalDestinationStep,
   validateOperationalVehicleStart,
   validateOperationalVehicleClosure,
   buildOperationalStartPayload,
@@ -30,6 +35,64 @@ describe("attendanceFlowUtils - action map", () => {
 
   test("returns generic hint for unknown action", () => {
     expect(getAttendanceNextStepHint("no-existe")).toBe("Continúa con la siguiente marcación de tu flujo.");
+  });
+});
+
+describe("attendanceFlowUtils - shortcut intents", () => {
+  test("resolves known intent keys", () => {
+    expect(resolveAttendanceIntentKey("iniciar-jornada")).toBe("iniciar-jornada");
+    expect(resolveAttendanceIntentKey("no-existe")).toBeNull();
+  });
+
+  test("maps iniciar-jornada to permission start when a permission is active at day start", () => {
+    const result = resolveAttendanceShortcutIntent({
+      rawIntent: "iniciar-jornada",
+      attendanceData: {
+        canonical_flow: {
+          flow_kind: "time_off",
+          current_step: "time_off_pending_departure",
+          next_step: "permission-entry-start",
+          allowed_actions: ["permission-entry-start", "entrada"],
+          context_flags: { has_active_time_off: true },
+        },
+      },
+    });
+    expect(result.isAvailable).toBe(true);
+    expect(result.resolvedActionKey).toBe("permission-entry-start");
+  });
+
+  test("maps continuar-jornada to lunch out on a normal morning", () => {
+    const result = resolveAttendanceShortcutIntent({
+      rawIntent: "continuar-jornada",
+      attendanceData: {
+        canonical_flow: {
+          flow_kind: "regular",
+          current_step: "working_morning",
+          next_step: "almuerzo-salida",
+          allowed_actions: ["almuerzo-salida", "salida-oficina", "salida"],
+          context_flags: { has_entry: true },
+        },
+      },
+    });
+    expect(result.isAvailable).toBe(true);
+    expect(result.resolvedActionKey).toBe("almuerzo-salida");
+  });
+
+  test("maps gestionar-permiso-activo to permission finish when a permission exception is in progress", () => {
+    const result = resolveAttendanceShortcutIntent({
+      rawIntent: "gestionar-permiso-activo",
+      attendanceData: {
+        canonical_flow: {
+          flow_kind: "permission",
+          current_step: "permission_in_progress",
+          next_step: "permission-exit-finish",
+          allowed_actions: ["permission-exit-finish"],
+          context_flags: { has_active_permission_exception: true },
+        },
+      },
+    });
+    expect(result.isAvailable).toBe(true);
+    expect(result.resolvedActionKey).toBe("permission-exit-finish");
   });
 });
 
@@ -70,6 +133,33 @@ describe("attendanceFlowUtils - resolveAttendancePendingActions", () => {
       now,
     );
     expect(pending.some((item) => item.id === "operational_open")).toBe(true);
+  });
+
+  test("uses the dedicated close action for active telework", () => {
+    const pending = resolveAttendancePendingActions(
+      { canonical_flow: { context_flags: { has_active_operational: true } } },
+      now,
+      { operational_category: "teletrabajo", uses_personal_vehicle: false },
+    );
+    const item = pending.find((entry) => entry.id === "operational_open");
+    expect(item.label).toBe("Teletrabajo activo");
+    expect(item.actionKey).toBe("entrada-oficina");
+  });
+
+  test("prioritizes regular lunch actions for telework started during work hours", () => {
+    const attendanceData = {
+      lunch_start_time: null,
+      lunch_end_time: null,
+      canonical_flow: { context_flags: { has_active_operational: true } },
+    };
+    const activeException = {
+      operational_category: "teletrabajo",
+      canonical_flow: { context_flags: { telework_requires_lunch: true } },
+    };
+    const pending = resolveAttendancePendingActions(attendanceData, now, activeException);
+    const item = pending.find((entry) => entry.id === "operational_open");
+    expect(item.label).toBe("Salida a almuerzo pendiente");
+    expect(item.actionKey).toBe("almuerzo-salida");
   });
 
   test("adds a viatico-expected notice only when the active exception used a personal vehicle", () => {
@@ -123,9 +213,32 @@ describe("attendanceFlowUtils - operational step validation (shared rule, D1 mit
   test("category is required to start an operational exit", () => {
     expect(validateOperationalCategoryStep("")).toEqual({
       ok: false,
-      error: "Selecciona la categoria de la salida operacional.",
+      error: "Selecciona el tipo de salida.",
     });
     expect(validateOperationalCategoryStep("cliente")).toEqual({ ok: true, error: null });
+    expect(validateOperationalCategoryStep("teletrabajo")).toEqual({ ok: true, error: null });
+    expect(isOperationalExitCategory("operacional")).toBe(true);
+    expect(isOperationalExitCategory("teletrabajo")).toBe(false);
+    expect(isTeleworkCategory("teletrabajo")).toBe(true);
+    expect(isTeleworkCategory("operacional")).toBe(false);
+  });
+
+  test("every operational exit requires a city and field exits also require a destination", () => {
+    expect(validateOperationalDestinationStep({ category: "teletrabajo" })).toEqual({
+      ok: false,
+      error: "Selecciona o busca la ciudad de la salida.",
+    });
+    expect(validateOperationalDestinationStep({ category: "teletrabajo", destinationCity: "Quito" })).toEqual({ ok: true, error: null });
+    expect(validateOperationalDestinationStep({ category: "operacional", visitType: "cronograma" })).toEqual({
+      ok: false,
+      error: "Selecciona el cliente del cronograma.",
+    });
+    expect(validateOperationalDestinationStep({
+      category: "operacional",
+      visitType: "prospecto",
+      destinationLabel: "Prospecto ABC",
+      destinationCity: "Quito",
+    })).toEqual({ ok: true, error: null });
   });
 
   test("vehicle start requires km and photo only when using a personal vehicle", () => {
@@ -168,6 +281,8 @@ describe("attendanceFlowUtils - operational payload builders (shared shape, D1 m
         usesPersonalVehicle: true,
         startKm: "100",
         startPhoto: "foto.jpg",
+        destinationLabel: "Cliente ABC",
+        destinationCity: "Quito",
       }),
     ).toEqual({
       description: "Salida operacional de campo / oficina",
@@ -175,6 +290,8 @@ describe("attendanceFlowUtils - operational payload builders (shared shape, D1 m
       uses_personal_vehicle: true,
       odometer_start_km: "100",
       start_odometer_photo: "foto.jpg",
+      operational_destination_label: "Cliente ABC",
+      operational_destination_city: "Quito",
     });
   });
 
@@ -186,6 +303,8 @@ describe("attendanceFlowUtils - operational payload builders (shared shape, D1 m
         usesPersonalVehicle: "si", // AttendanceAction guarda este campo como string "si"/"no"
         startKm: "",
         startPhoto: null,
+        destinationLabel: "Banco Pichincha",
+        destinationCity: "Guayaquil",
       }),
     ).toEqual({
       description: "Reunion con proveedor",
@@ -193,6 +312,25 @@ describe("attendanceFlowUtils - operational payload builders (shared shape, D1 m
       uses_personal_vehicle: true,
       odometer_start_km: "",
       start_odometer_photo: null,
+      operational_destination_label: "Banco Pichincha",
+      operational_destination_city: "Guayaquil",
+    });
+  });
+
+  test("telework payload uses a telework default description and no destination", () => {
+    expect(buildOperationalStartPayload({
+      category: "teletrabajo",
+      usesPersonalVehicle: false,
+      destinationLabel: "",
+      destinationCity: "",
+    })).toEqual({
+      description: "Teletrabajo",
+      operational_category: "teletrabajo",
+      uses_personal_vehicle: false,
+      odometer_start_km: undefined,
+      start_odometer_photo: undefined,
+      operational_destination_label: "",
+      operational_destination_city: "",
     });
   });
 

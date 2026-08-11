@@ -97,10 +97,6 @@ const ScheduleApprovalWidget = () => {
  const confirmApprove = async () => {
  if (!selectedSchedule) return;
  const notes = approveNotes.trim();
- if (!notes) {
- showToast("Debes incluir notes para aprobar", "warning");
- return;
- }
  const scheduleId = selectedSchedule.id;
  await runActionWithLoader(`approve-${scheduleId}`, "Aprobando cronograma...", async () => {
  try {
@@ -264,13 +260,13 @@ const ScheduleApprovalWidget = () => {
  title="Aprobar cronograma"
  >
  <div className="space-y-3">
- <p className="text-sm text-gray-600">Incluye notes obligatorias para aprobar y auditar la decision.</p>
+ <p className="text-sm text-gray-600">Confirma la aprobacion del cronograma. La observacion es opcional.</p>
  <textarea
  value={approveNotes}
  onChange={(event) => setApproveNotes(event.target.value)}
  rows={4}
  className="w-full border rounded-lg p-3"
- placeholder="Escribe notes de aprobacion..."
+ placeholder="Observacion de aprobacion (opcional)"
  />
  <div className="flex justify-end gap-2">
  <Button variant="ghost" onClick={() => setShowApproveModal(false)} disabled={Boolean(actionLoadingKey)}>
@@ -280,7 +276,7 @@ const ScheduleApprovalWidget = () => {
  variant="success"
  onClick={confirmApprove}
  loading={selectedSchedule ? actionLoadingKey === `approve-${selectedSchedule.id}` : false}
- disabled={Boolean(actionLoadingKey) || !approveNotes.trim()}
+ disabled={Boolean(actionLoadingKey)}
  >
  Guardar aprobacion
  </Button>

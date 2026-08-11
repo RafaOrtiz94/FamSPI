@@ -2,19 +2,29 @@ const clientsService = require("./clients.service");
 
 const listClients = async (req, res) => {
   try {
-    const { q, date, include_schedule_info, filter_by_schedule, include_all_for_business_case } = req.query;
-    const { clients, prospects, scheduleMeta } = await clientsService.listAccessibleClients({
+    const {
+      q,
+      date,
+      include_schedule_info,
+      filter_by_schedule,
+      include_all_for_business_case,
+      schedule_scope,
+      schedule_window,
+    } = req.query;
+    const { clients, prospects, leads, scheduleMeta } = await clientsService.listAccessibleClients({
       user: req.user,
       q: q || null,
       visitDate: date || null,
       includeScheduleInfo: include_schedule_info === "true", // keep backward compatible casing
       filterBySchedule: filter_by_schedule === "true",
       includeAllForBusinessCase: include_all_for_business_case === "true",
+      scheduleScope: schedule_scope || null,
+      scheduleWindow: schedule_window || null,
     });
 
     const summary = scheduleMeta || { total: clients.length, visited: 0, pending: clients.length };
 
-    return res.json({ ok: true, data: clients, prospects, summary });
+    return res.json({ ok: true, data: clients, prospects, leads, summary });
   } catch (error) {
     const status = error.status || 500;
     return res.status(status).json({

@@ -8,6 +8,7 @@ const logger = require('../../config/logger');
 const { logAction } = require('../../utils/audit');
 const { HASH_ALGORITHM, computeSha256HexFromBuffer, resolveExternalDriveIntegrity } = require('../../utils/documentHash');
 const { ensureFolder, uploadBase64File, drive } = require('../../utils/drive');
+const { findExistingUserByIdentity } = require('../../utils/userIdentity');
 const { ensureApplicantsTables, getApplicantById, listApplicants } = require('../applicants/applicants.service');
 const gmailService = require('../../services/gmail.service');
 const {
@@ -19,6 +20,42 @@ const {
 
 const DRIVE_ROOT_FOLDER_ID = process.env.DRIVE_ROOT_FOLDER_ID;
 const HR_NOTIFICATION_EMAILS = process.env.HR_NOTIFICATION_EMAILS?.split(',').map(e => e.trim()) || [];
+
+function normalizeApplicantPositionText(value = '') {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\btcis\b/g, 'tics')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function buildApplicantPositionTokens(value = '') {
+    const stopwords = new Set(['de', 'del', 'la', 'las', 'el', 'los', 'y', 'en', 'area']);
+    return normalizeApplicantPositionText(value)
+        .split(' ')
+        .filter((token) => token && !stopwords.has(token));
+}
+
+function matchesApplicantToRequestPosition(positionTitle = '', applicantCargo = '') {
+    const normalizedPosition = normalizeApplicantPositionText(positionTitle);
+    const normalizedCargo = normalizeApplicantPositionText(applicantCargo);
+
+    if (!normalizedPosition || !normalizedCargo) return false;
+    if (normalizedCargo.includes(normalizedPosition)) return true;
+
+    const positionTokens = buildApplicantPositionTokens(positionTitle);
+    const cargoTokens = new Set(buildApplicantPositionTokens(applicantCargo));
+    const matchedTokens = positionTokens.filter((token) => cargoTokens.has(token));
+    const requiredMatches = Math.min(
+        positionTokens.length,
+        Math.max(2, Math.ceil(positionTokens.length * 0.6))
+    );
+
+    return positionTokens.length > 0 && matchedTokens.length >= requiredMatches;
+}
 
 async function ensurePersonnelProfileTables() {
     await db.query(`
@@ -354,6 +391,27 @@ const PROFILE_REQUIRED_BY_STATUS = {
   completada: REQUIRED_PROFILE_FIELDS,
 };
 
+const PERSONNEL_REQUEST_PRIVILEGED_ROLES = new Set([
+    'talento_humano',
+    'jefe_talento_humano',
+    'gerencia',
+    'gerencia_general',
+    'admin',
+    'administrador',
+]);
+
+const PERSONNEL_REQUEST_ASSIGNABLE_REQUESTER_ROLES = new Set([
+    'jefe_comercial',
+    'jefe_servicio_tecnico',
+    'jefe_tecnico',
+    'jefe_operaciones',
+    'jefe_finanzas',
+    'jefe_calidad',
+    'jefe_talento_humano',
+    'gerencia',
+    'gerencia_general',
+]);
+
 const getProfileValue = (profile, path) => {
   return path.reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), profile);
 };
@@ -391,6 +449,22 @@ const getWorkflowStepMeta = (status) => {
     PERSONNEL_WORKFLOW_STEPS.find((step) => step.key === normalized) ||
     PERSONNEL_WORKFLOW_STEPS[0]
   );
+};
+
+const normalizeActorRole = (role = '') => String(role || '').trim().toLowerCase();
+
+const canAccessPersonnelRequest = (request = {}, actorUserId = null, actorRole = '') => {
+    const normalizedRole = normalizeActorRole(actorRole);
+    if (PERSONNEL_REQUEST_PRIVILEGED_ROLES.has(normalizedRole)) return true;
+    if (!actorUserId) return false;
+    return Number(request?.requester_id || 0) === Number(actorUserId);
+};
+
+const assertPersonnelRequestAccess = (request = {}, actorUserId = null, actorRole = '') => {
+    if (canAccessPersonnelRequest(request, actorUserId, actorRole)) return;
+    const error = new Error('No tienes permisos para acceder a este expediente de contratación');
+    error.statusCode = 403;
+    throw error;
 };
 
 const toDateValue = (value) => {
@@ -880,13 +954,8 @@ async function createPersonnelRequest(data, userId) {
     const requiredFields = [
         ['position_title', position_title],
         ['position_type', position_type],
-        ['education_level', education_level],
-        ['main_responsibilities', main_responsibilities],
-        ['justification', justification],
-        ['work_schedule', work_schedule],
-        ['salary_range', salary_range],
         ['work_location', work_location],
-        ['benefits', benefits],
+        ['justification', justification],
     ];
     const missingFields = requiredFields
         .filter(([, value]) => value === null || value === undefined || String(value).trim() === '')
@@ -1121,6 +1190,7 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
           OR LOWER(COALESCE(d.name, '')) LIKE $${paramIndex}
           OR LOWER(COALESCE(u.fullname, '')) LIKE $${paramIndex}
           OR LOWER(COALESCE(cu.fullname, '')) LIKE $${paramIndex}
+          OR LOWER(COALESCE(a.fullname, '')) LIKE $${paramIndex}
         )`);
         params.push(`%${normalizedSearch}%`);
         paramIndex += 1;
@@ -1154,12 +1224,16 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
       u.email as requester_email,
       cu.fullname as collaborator_name,
       cu.email as collaborator_email,
+      a.fullname as applicant_fullname,
+      a.email as applicant_email,
+      a.created_at as applicant_created_at,
       d.name as department_name,
       d.code as department_code,
       ${stageStartedAtExpression} as current_stage_started_at
     FROM personnel_requests pr
     LEFT JOIN users u ON pr.requester_id = u.id
     LEFT JOIN users cu ON pr.collaborator_user_id = cu.id
+    LEFT JOIN applicants a ON pr.applicant_id = a.id
     LEFT JOIN departments d ON pr.department_id = d.id
     WHERE ${whereConditions.join(' AND ')}
     ORDER BY ${orderBy}
@@ -1176,6 +1250,7 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
     FROM personnel_requests pr
     LEFT JOIN users u ON pr.requester_id = u.id
     LEFT JOIN users cu ON pr.collaborator_user_id = cu.id
+    LEFT JOIN applicants a ON pr.applicant_id = a.id
     LEFT JOIN departments d ON pr.department_id = d.id
     WHERE ${whereConditions.join(' AND ')}
   `;
@@ -1211,12 +1286,12 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
     };
 }
 
-async function getPersonnelRequestApplicants(requestId, filters = {}) {
+async function getPersonnelRequestApplicants(requestId, filters = {}, actorUserId = null, actorRole = null) {
     await ensurePersonnelProfileTables();
     await ensureApplicantsTables();
 
     const requestQuery = await db.query(
-        `SELECT id, position_title, applicant_id
+        `SELECT id, position_title, applicant_id, requester_id
          FROM personnel_requests
          WHERE id = $1`,
         [requestId]
@@ -1227,18 +1302,28 @@ async function getPersonnelRequestApplicants(requestId, filters = {}) {
     }
 
     const request = requestQuery.rows[0];
+    if (actorUserId || actorRole) {
+        assertPersonnelRequestAccess(request, actorUserId, actorRole);
+    }
     const search = filters?.search || '';
     const page = parseInt(filters?.page || 1, 10);
     const pageSize = parseInt(filters?.pageSize || 25, 10);
 
-    const applicantResult = await listApplicants({
-        cargo: request.position_title,
+    const applicantUniverse = await listApplicants({
         search,
-        page,
-        pageSize,
+        page: 1,
+        pageSize: 5000,
     });
 
-    let data = Array.isArray(applicantResult?.data) ? applicantResult.data : [];
+    const matchedApplicants = (Array.isArray(applicantUniverse?.data) ? applicantUniverse.data : []).filter((item) =>
+        String(item?.personnel_request_id || '') === String(request.id) ||
+        matchesApplicantToRequestPosition(
+            request.position_title,
+            item?.profile?.laboral?.cargo
+        )
+    );
+
+    let data = matchedApplicants;
     if (request.applicant_id && !data.some((item) => String(item.id) === String(request.applicant_id))) {
         const linkedApplicant = await getApplicantById(request.applicant_id);
         if (linkedApplicant) {
@@ -1246,16 +1331,28 @@ async function getPersonnelRequestApplicants(requestId, filters = {}) {
         }
     }
 
+    const dedupedData = [];
+    const seenApplicantIds = new Set();
+    for (const item of data) {
+        const applicantId = String(item?.id || '');
+        if (!applicantId || seenApplicantIds.has(applicantId)) continue;
+        seenApplicantIds.add(applicantId);
+        dedupedData.push(item);
+    }
+
+    const offset = Math.max(page - 1, 0) * pageSize;
+    const paginatedData = dedupedData.slice(offset, offset + pageSize);
+
     return {
         request_id: request.id,
         request_position_title: request.position_title,
         linked_applicant_id: request.applicant_id || null,
-        data,
-        pagination: applicantResult?.pagination || {
+        data: paginatedData,
+        pagination: {
             page,
             pageSize,
-            total: data.length,
-            totalPages: 1,
+            total: dedupedData.length,
+            totalPages: Math.max(1, Math.ceil(dedupedData.length / pageSize)),
         },
     };
 }
@@ -1263,7 +1360,7 @@ async function getPersonnelRequestApplicants(requestId, filters = {}) {
 /**
  * Obtener una solicitud específica por ID
  */
-async function getPersonnelRequestById(id) {
+async function getPersonnelRequestById(id, actorUserId = null, actorRole = null) {
     await ensurePersonnelProfileTables();
 
     const query = `
@@ -1295,6 +1392,9 @@ async function getPersonnelRequestById(id) {
     }
 
     const request = result.rows[0];
+    if (actorUserId || actorRole) {
+        assertPersonnelRequestAccess(request, actorUserId, actorRole);
+    }
     // Obtener historial
     const historyQuery = `
     SELECT 
@@ -1688,12 +1788,12 @@ async function getPersonnelProfile(requestId) {
     };
 }
 
-async function getPersonnelRequestWorkspace(requestId, filters = {}) {
+async function getPersonnelRequestWorkspace(requestId, filters = {}, actorUserId = null, actorRole = null) {
     await ensurePersonnelProfileTables();
     await ensureCollaboratorTables();
     await ensureApplicantsTables();
 
-    const request = await getPersonnelRequestById(requestId);
+    const request = await getPersonnelRequestById(requestId, actorUserId, actorRole);
     if (!request) {
         throw new Error('Solicitud no encontrada');
     }
@@ -1709,7 +1809,7 @@ async function getPersonnelRequestWorkspace(requestId, filters = {}) {
         profile
     );
     const documents = await listPersonnelRequestDocuments(requestId);
-    const applicants = await getPersonnelRequestApplicants(requestId, filters);
+    const applicants = await getPersonnelRequestApplicants(requestId, filters, actorUserId, actorRole);
     const documentTypes = documents.map((doc) => doc.doc_type).filter(Boolean);
 
     return {
@@ -1948,7 +2048,8 @@ async function addPersonnelDocument(requestId, docType, file, userId = null) {
 /**
  * Finaliza la contratacion en una transaccion atomica para evitar estados parciales.
  */
-async function hirePersonnelRequest(requestId, userId) {
+async function hirePersonnelRequest(requestId, userId, options = {}) {
+    const { fromPipeline = false } = options;
     await ensurePersonnelProfileTables();
     await ensureCollaboratorTables();
     await ensureApplicantsTables();
@@ -1979,10 +2080,19 @@ async function hirePersonnelRequest(requestId, userId) {
 
         if (previousStatus === 'completada' && request.collaborator_user_id) {
             await client.query('COMMIT');
-            return { collaborator_user_id: request.collaborator_user_id, email: null };
+            return {
+                collaborator_user_id: request.collaborator_user_id,
+                email: null,
+                collaborator_email: null,
+                matched_existing_user: true,
+                pending_corporate_email: null,
+            };
         }
 
-        if (!['aprobada', 'en_proceso'].includes(previousStatus)) {
+        const allowedStatuses = fromPipeline
+            ? ['aprobada', 'en_proceso', 'pendiente', 'revision', 'aprobada_gerencia']
+            : ['aprobada', 'en_proceso'];
+        if (!allowedStatuses.includes(previousStatus)) {
             throw new Error('La solicitud debe estar aprobada o en proceso para contratar');
         }
 
@@ -1992,36 +2102,43 @@ async function hirePersonnelRequest(requestId, userId) {
         );
 
         const profile = profileQuery.rows[0]?.profile || null;
-        if (!profile) {
+
+        if (!profile && !fromPipeline) {
             throw new Error('No hay perfil registrado para contratar');
         }
 
+        // En flujo de pipeline el perfil del postulante se construye al contratar;
+        // usamos objeto vacío para que buildCollaboratorProfileFromRequestProfile funcione.
+        const effectiveProfile = profile || {};
+
         const requestQualifications = sanitizeRequestQualifications(
             profileQuery.rows[0]?.qualifications,
-            profile
+            effectiveProfile
         );
 
-        ensureProfileValidationOrThrow(profile, 'en_proceso');
+        if (!fromPipeline) {
+            ensureProfileValidationOrThrow(effectiveProfile, 'en_proceso');
 
-        const docRows = await client.query(
-            'SELECT doc_type FROM personnel_request_documents WHERE personnel_request_id = $1',
-            [requestId]
-        );
-        const docTypes = docRows.rows.map((row) => row.doc_type).filter(Boolean);
+            const docRows = await client.query(
+                'SELECT doc_type FROM personnel_request_documents WHERE personnel_request_id = $1',
+                [requestId]
+            );
+            const docTypes = docRows.rows.map((row) => row.doc_type).filter(Boolean);
 
-        const profileCompletion = computeProfileCompletion(profile);
-        const documentsCompletion = computeDocumentsCompletion(docTypes);
-        if (!profileCompletion.complete || !documentsCompletion.complete) {
-            const error = new Error('Perfil o documentos incompletos para contratar');
-            error.details = {
-                profile_completion: profileCompletion,
-                documents_completion: documentsCompletion,
-            };
-            throw error;
+            const profileCompletion = computeProfileCompletion(effectiveProfile);
+            const documentsCompletion = computeDocumentsCompletion(docTypes);
+            if (!profileCompletion.complete || !documentsCompletion.complete) {
+                const error = new Error('Perfil o documentos incompletos para contratar');
+                error.details = {
+                    profile_completion: profileCompletion,
+                    documents_completion: documentsCompletion,
+                };
+                throw error;
+            }
         }
 
-        let email = (profile?.personal?.email_personal || '').toLowerCase().trim();
-        let fullname = `${profile?.personal?.nombres || ''} ${profile?.personal?.apellidos || ''}`.trim();
+        let email = (effectiveProfile?.personal?.email_personal || '').toLowerCase().trim();
+        let fullname = `${effectiveProfile?.personal?.nombres || ''} ${effectiveProfile?.personal?.apellidos || ''}`.trim();
 
         if (request.applicant_id) {
             const applicantQuery = await client.query(
@@ -2038,20 +2155,51 @@ async function hirePersonnelRequest(requestId, userId) {
             throw new Error('Email personal es obligatorio para contratar');
         }
 
-        const userUpsert = `
-          INSERT INTO users (email, fullname, name, role)
-          VALUES ($1, $2, $3, $4)
-          ON CONFLICT (email)
-          DO UPDATE SET fullname = EXCLUDED.fullname
-          RETURNING id, email, fullname
-        `;
-        const userResult = await client.query(userUpsert, [
-            email,
-            fullname || email,
-            profile?.personal?.nombres || 'Colaborador',
-            'colaborador',
-        ]);
-        const collaboratorUser = userResult.rows[0];
+        // El login (Google OAuth, ver auth.controller.js) exige que el correo
+        // coincida con ALLOWED_DOMAIN -- el email personal del aspirante nunca
+        // cumple eso, asi que jamas debe quedar como users.email definitivo.
+        // Antes de crear un usuario nuevo, se busca si la persona ya existe
+        // (por cedula del perfil, o por nombre completo como respaldo) para
+        // no duplicar una cuenta ya dada de alta. Misma logica que auth.controller.js
+        // (primer login) y users.controller.js (alta manual de TI) -- ver
+        // findExistingUserByIdentity en utils/userIdentity.js.
+        const existingUser = await findExistingUserByIdentity(client, {
+            cedula: effectiveProfile?.personal?.cedula,
+            fullname,
+        });
+
+        let collaboratorUser;
+        const matchedExistingUser = !!existingUser;
+        if (matchedExistingUser) {
+            // Ya existe (misma cedula o mismo nombre) -- se reusa la cuenta en
+            // vez de crear un duplicado. No se toca su email: si ya tiene uno
+            // corporativo asignado, se preserva tal cual.
+            collaboratorUser = existingUser;
+            await client.query(
+                `UPDATE users SET role = 'colaborador', active = TRUE, updated_at = NOW() WHERE id = $1`,
+                [collaboratorUser.id]
+            );
+        } else {
+            // Correo temporal, nunca pasa el filtro de dominio corporativo de
+            // auth.controller.js -- placeholder hasta que Talento Humano/TI
+            // asigne el correo corporativo real desde la edicion de usuario
+            // (el mismo flujo que ya dispara el correo "Nueva Contratacion"
+            // mas abajo). El correo personal se preserva en collaborator_profiles
+            // y en applicants, no se pierde -- solo no se usa para login.
+            const placeholderEmail = `pendiente.solicitud.${requestId}@sin-correo-corporativo.local`;
+            const userInsert = `
+              INSERT INTO users (email, fullname, name, role)
+              VALUES ($1, $2, $3, $4)
+              RETURNING id, email, fullname
+            `;
+            const userResult = await client.query(userInsert, [
+                placeholderEmail,
+                fullname || email,
+                effectiveProfile?.personal?.nombres || 'Colaborador',
+                'colaborador',
+            ]);
+            collaboratorUser = userResult.rows[0];
+        }
 
         await client.query(
             `
@@ -2082,13 +2230,14 @@ async function hirePersonnelRequest(requestId, userId) {
                 {
                     action: 'hire_applicant',
                     collaborator_user_id: collaboratorUser.id,
+                    matched_existing_user: matchedExistingUser,
                     applicant_id: request.applicant_id || null,
                     email,
                 },
             ]
         );
 
-        const collaboratorProfile = buildCollaboratorProfileFromRequestProfile(profile);
+        const collaboratorProfile = buildCollaboratorProfileFromRequestProfile(effectiveProfile);
 
         await client.query(
             `
@@ -2108,6 +2257,7 @@ async function hirePersonnelRequest(requestId, userId) {
             requestId,
         });
 
+        // Copia documentos con el doc_type original del proceso de contratación
         await client.query(
             `
             INSERT INTO collaborator_documents (
@@ -2127,6 +2277,90 @@ async function hirePersonnelRequest(requestId, userId) {
               AND NOT EXISTS (
                 SELECT 1 FROM collaborator_documents cd
                 WHERE cd.user_id = $1 AND cd.doc_type = personnel_request_documents.doc_type
+              )
+            `,
+            [collaboratorUser.id, userId, requestId]
+        );
+
+        // Copia documentos también con los doc_types que usa el checklist de ingreso de colaboradores,
+        // para que el checklist muestre el avance correcto desde el primer día.
+        await client.query(
+            `
+            INSERT INTO collaborator_documents (
+              user_id,
+              doc_type,
+              drive_file_id,
+              drive_url,
+              file_name,
+              mime_type,
+              content_hash_sha256,
+              hash_algorithm,
+              uploaded_by
+            )
+            SELECT
+              $1,
+              CASE prd.doc_type
+                WHEN 'CEDULA_COLOR'                  THEN 'IDENTITY_DOCUMENT'
+                WHEN 'PASAPORTE_NOTARIADO'            THEN 'PASSPORT'
+                WHEN 'CERTIFICADO_VOTACION_COLOR'     THEN 'VOTING_CERTIFICATE'
+                WHEN 'SERVICIO_BASICO'                THEN 'UTILITY_BILL'
+                WHEN 'ACTA_MATRIMONIO'                THEN 'MARRIAGE_CERTIFICATE'
+                WHEN 'CERTIFICADO_NACIMIENTO_HIJOS'   THEN 'CHILD_BIRTH_CERTIFICATE'
+                WHEN 'CERTIFICADO_TRABAJO_ANTERIOR'   THEN 'LABOR_CERTIFICATE'
+                WHEN 'CONTRATO_TRABAJO'               THEN 'CONTRACT_MDT'
+                WHEN 'CONTRACT_FAM'                   THEN 'CONTRACT_FAM'
+                WHEN 'CONVENIO_CONFIDENCIALIDAD'      THEN 'CONFIDENTIALITY_AGREEMENT'
+                WHEN 'ALCANCE_LOPDP'                  THEN 'LOPDP_CONSENT'
+                WHEN 'AUTORIZACION_DESCUENTOS'        THEN 'PAYROLL_DISCOUNT_AUTHORIZATION'
+                WHEN 'FORMATO_DECIMOS'                THEN 'TENTH_ACCUMULATION_FORM'
+                WHEN 'REGISTRO_FIRMAS'                THEN 'SIGNATURE_CONTROL'
+                WHEN 'CRONOGRAMA_INDUCCION'           THEN 'INDUCTION_REGISTRY'
+                WHEN 'TITULOS_CURSOS'                 THEN 'SENESCYT_RECORD'
+                WHEN 'HOJA_VIDA'                      THEN 'HR_RESUME'
+                WHEN 'CURRICULUM_VITAE'               THEN 'HR_RESUME'
+                WHEN 'HR_RESUME'                      THEN 'HR_RESUME'
+              END,
+              prd.drive_file_id,
+              prd.drive_url,
+              prd.file_name,
+              prd.mime_type,
+              prd.content_hash_sha256,
+              prd.hash_algorithm,
+              $2
+            FROM personnel_request_documents prd
+            WHERE prd.personnel_request_id = $3
+              AND prd.doc_type IN (
+                'CEDULA_COLOR', 'PASAPORTE_NOTARIADO', 'CERTIFICADO_VOTACION_COLOR',
+                'SERVICIO_BASICO', 'ACTA_MATRIMONIO', 'CERTIFICADO_NACIMIENTO_HIJOS',
+                'CERTIFICADO_TRABAJO_ANTERIOR', 'CONTRATO_TRABAJO', 'CONTRACT_FAM',
+                'CONVENIO_CONFIDENCIALIDAD', 'ALCANCE_LOPDP', 'AUTORIZACION_DESCUENTOS',
+                'FORMATO_DECIMOS', 'REGISTRO_FIRMAS', 'CRONOGRAMA_INDUCCION', 'TITULOS_CURSOS',
+                'HOJA_VIDA', 'CURRICULUM_VITAE', 'HR_RESUME'
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM collaborator_documents cd
+                WHERE cd.user_id = $1
+                  AND cd.doc_type = CASE prd.doc_type
+                    WHEN 'CEDULA_COLOR'                  THEN 'IDENTITY_DOCUMENT'
+                    WHEN 'PASAPORTE_NOTARIADO'            THEN 'PASSPORT'
+                    WHEN 'CERTIFICADO_VOTACION_COLOR'     THEN 'VOTING_CERTIFICATE'
+                    WHEN 'SERVICIO_BASICO'                THEN 'UTILITY_BILL'
+                    WHEN 'ACTA_MATRIMONIO'                THEN 'MARRIAGE_CERTIFICATE'
+                    WHEN 'CERTIFICADO_NACIMIENTO_HIJOS'   THEN 'CHILD_BIRTH_CERTIFICATE'
+                    WHEN 'CERTIFICADO_TRABAJO_ANTERIOR'   THEN 'LABOR_CERTIFICATE'
+                    WHEN 'CONTRATO_TRABAJO'               THEN 'CONTRACT_MDT'
+                    WHEN 'CONTRACT_FAM'                   THEN 'CONTRACT_FAM'
+                    WHEN 'CONVENIO_CONFIDENCIALIDAD'      THEN 'CONFIDENTIALITY_AGREEMENT'
+                    WHEN 'ALCANCE_LOPDP'                  THEN 'LOPDP_CONSENT'
+                    WHEN 'AUTORIZACION_DESCUENTOS'        THEN 'PAYROLL_DISCOUNT_AUTHORIZATION'
+                    WHEN 'FORMATO_DECIMOS'                THEN 'TENTH_ACCUMULATION_FORM'
+                    WHEN 'REGISTRO_FIRMAS'                THEN 'SIGNATURE_CONTROL'
+                    WHEN 'CRONOGRAMA_INDUCCION'           THEN 'INDUCTION_REGISTRY'
+                    WHEN 'TITULOS_CURSOS'                 THEN 'SENESCYT_RECORD'
+                    WHEN 'HOJA_VIDA'                      THEN 'HR_RESUME'
+                    WHEN 'CURRICULUM_VITAE'               THEN 'HR_RESUME'
+                    WHEN 'HR_RESUME'                      THEN 'HR_RESUME'
+                  END
               )
             `,
             [collaboratorUser.id, userId, requestId]
@@ -2153,6 +2387,9 @@ async function hirePersonnelRequest(requestId, userId) {
 
             if (tiRecipients.length > 0) {
                 const tiSubject = `🚀 Nueva Contratación: Creación de Credenciales - ${fullname}`;
+                const credentialsNote = matchedExistingUser
+                    ? `<p><strong>Nota:</strong> ya existe una cuenta para esta persona (misma cédula o nombre de un colaborador previo) -- se reutilizó, no se creó una cuenta nueva. Verifica que su correo corporativo y accesos sigan siendo correctos.</p>`
+                    : `<p><strong>Importante:</strong> la cuenta se creó con un correo temporal (no funcional para ingresar). Debes asignarle el correo corporativo real desde la edición de usuario para que pueda iniciar sesión.</p>`;
                 const tiHtml = `
                     <h2>Solicitud de Creación de Credenciales</h2>
                     <p>Se ha finalizado el proceso de contratación para el siguiente colaborador:</p>
@@ -2163,6 +2400,7 @@ async function hirePersonnelRequest(requestId, userId) {
                         <li><strong>Número de Solicitud:</strong> ${request.request_number || requestId}</li>
                         <li><strong>Fecha de Contratación:</strong> ${new Date().toLocaleDateString()}</li>
                     </ul>
+                    ${credentialsNote}
                     <p>Por favor, proceder con la creación de las credenciales de acceso corporativas (Email, SPI, etc.) y la configuración de los accesos correspondientes.</p>
                     <hr>
                     <p>Este es un mensaje automático del sistema SPI.</p>
@@ -2185,7 +2423,13 @@ async function hirePersonnelRequest(requestId, userId) {
             logger.warn({ requestId, error: notifError?.message }, 'No se pudo enviar notificación a TI tras contratación');
         }
 
-        resultPayload = { collaborator_user_id: collaboratorUser.id, email };
+        resultPayload = {
+            collaborator_user_id: collaboratorUser.id,
+            email,
+            collaborator_email: collaboratorUser.email,
+            matched_existing_user: matchedExistingUser,
+            pending_corporate_email: collaboratorUser.email.endsWith('@sin-correo-corporativo.local'),
+        };
         auditDetails = {
             request_number: request.request_number || null,
             position_title: request.position_title || null,
@@ -2253,6 +2497,80 @@ async function updatePersonnelRequestCollaborator(requestId, collaboratorUserId,
             action: 'link_collaborator',
             previous_collaborator_user_id: requestQuery.rows[0].collaborator_user_id || null,
             collaborator_user_id: collaboratorUserId,
+        },
+    });
+
+    return result.rows[0];
+}
+
+async function updatePersonnelRequestRequester(requestId, requesterUserId, actorUserId) {
+    const requestQuery = await db.query(
+        `SELECT id, status, requester_id
+           FROM personnel_requests
+          WHERE id = $1`,
+        [requestId]
+    );
+
+    if (requestQuery.rows.length === 0) {
+        throw new Error('Solicitud no encontrada');
+    }
+
+    const requesterId = Number(requesterUserId || 0);
+    if (!Number.isInteger(requesterId) || requesterId <= 0) {
+        throw new Error('Debes seleccionar un jefe de área válido');
+    }
+
+    const requesterResult = await db.query(
+        `SELECT id, email, fullname, role, active
+           FROM users
+          WHERE id = $1`,
+        [requesterId]
+    );
+
+    if (requesterResult.rows.length === 0) {
+        throw new Error('Usuario solicitante no encontrado');
+    }
+
+    const targetRequester = requesterResult.rows[0];
+    const targetRole = normalizeActorRole(targetRequester.role);
+    if (!PERSONNEL_REQUEST_ASSIGNABLE_REQUESTER_ROLES.has(targetRole)) {
+        throw new Error('El usuario seleccionado no corresponde a un jefe de área habilitado');
+    }
+    if (targetRequester.active === false) {
+        throw new Error('No puedes asignar un jefe de área inactivo');
+    }
+
+    const previousRequesterId = requestQuery.rows[0]?.requester_id || null;
+    const result = await db.query(
+        `UPDATE personnel_requests
+            SET requester_id = $1,
+                updated_at = NOW()
+          WHERE id = $2
+        RETURNING *`,
+        [requesterId, requestId]
+    );
+
+    await logAction({
+        user_id: actorUserId,
+        module: 'personnel_requests',
+        action: 'reassign_requester',
+        entity: 'personnel_requests',
+        entity_id: requestId,
+        details: {
+            previous_requester_id: previousRequesterId,
+            requester_id: requesterId,
+        }
+    });
+
+    await recordPersonnelRequestHistory(requestId, {
+        previousStatus: requestQuery.rows[0].status,
+        newStatus: requestQuery.rows[0].status,
+        changedBy: actorUserId,
+        notes: 'Jefe de área asignado al expediente',
+        metadata: {
+            action: 'reassign_requester',
+            previous_requester_id: previousRequesterId,
+            requester_id: requesterId,
         },
     });
 
@@ -2360,8 +2678,8 @@ module.exports = {
     addPersonnelDocument,
     hirePersonnelRequest,
     updatePersonnelRequestCollaborator,
+    updatePersonnelRequestRequester,
     linkApplicantToRequest
 };
-
 
 

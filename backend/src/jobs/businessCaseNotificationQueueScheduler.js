@@ -1,11 +1,12 @@
 /**
  * BC Notification Queue Scheduler
- * Processes pending notifications every 30 seconds.
+ * Processes pending notifications periodically.
  */
 
 const logger = require('../config/logger');
 const { processPendingNotifications } = require('../modules/business-case/businessCaseNotificationQueue.service');
 const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
+const INTERVAL_MS = Math.max(5000, Number(process.env.BC_NOTIFICATION_QUEUE_INTERVAL_MS || 120000));
 
 let running = false;
 
@@ -21,12 +22,16 @@ async function tick() {
   }
 }
 
+async function runOnce() {
+  return processPendingNotifications();
+}
+
 function start() {
-  logger.info('BC notification queue scheduler started (30s interval)');
-  setInterval(tick, 30_000);
+  logger.info({ interval_ms: INTERVAL_MS }, 'BC notification queue scheduler started');
+  setInterval(tick, INTERVAL_MS);
   if (SHOULD_RUN_ON_START) {
     tick();
   }
 }
 
-module.exports = { start };
+module.exports = { start, runOnce };

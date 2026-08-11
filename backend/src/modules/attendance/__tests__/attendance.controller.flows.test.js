@@ -67,6 +67,8 @@ describe("attendance flow separation", () => {
         location_accuracy: 25,
         description: "visita no planificada",
         operational_category: "cliente",
+        destination: "Cliente Norte",
+        city: "Guayaquil",
       },
     };
     const res = createRes();
@@ -103,22 +105,23 @@ describe("attendance flow separation", () => {
           location_accuracy: 20,
           description: "salida oficina",
           operational_category: "cliente",
+          destination: "Cliente Norte",
+          city: "Guayaquil",
         },
       };
       const res = createRes();
       const inserted = { id: 501, type: "operacion_campo", status: "ACTIVE" };
 
-      db.query
-        .mockResolvedValue({ rows: [], rowCount: 0 }) // permanent fallback for autoComplete calls
-        .mockResolvedValueOnce({ rows: [] })           // no active timeoff
-        .mockResolvedValueOnce({ rows: [] })           // no active operational
-        .mockResolvedValueOnce({ rows: [] })           // no active unexpected
-        .mockResolvedValueOnce({ rows: [] })           // syncNormalEntry: ensureDailyClockIn SELECT (no entry)
-        .mockResolvedValueOnce({ rows: [{ id: 1, entry_time: new Date().toISOString() }], rowCount: 1 }) // ensureDailyClockIn INSERT
-        .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // autoSeedOperationalLunchWindow UPDATE
-        .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // closePendingLunchForOperationalStart SELECT
-        .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // closePendingLunchForOperationalStart UPDATE
-        .mockResolvedValueOnce({ rows: [inserted] });  // INSERT exception
+      // Mock por texto de SQL (robusto ante llamadas intermedias como
+      // ensureOperationalDestinationColumns o los auto-sync): la unica
+      // respuesta que importa aqui es el INSERT de la salida operacional.
+      db.query.mockImplementation((sql) => {
+        const text = typeof sql === "string" ? sql : "";
+        if (text.includes("INSERT INTO attendance_exceptions")) {
+          return Promise.resolve({ rows: [inserted], rowCount: 1 });
+        }
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      });
 
       await controller.clockOutOperational(req, res);
 
@@ -143,6 +146,8 @@ describe("attendance flow separation", () => {
         location_accuracy: 20,
         description: "seguimiento multi-dia",
         operational_category: "cliente",
+        destination: "Cliente Norte",
+        city: "Guayaquil",
       },
     };
     const res = createRes();
@@ -206,7 +211,7 @@ describe("attendance flow separation", () => {
     expect(updateCallArgs[2]).toContain("[RESUMEN_OPERACIONAL]");
   });
 
-  test("closes operational trip without closing regular day before 18:00", async () => {
+  test("closes operational trip from outside office and also closes the regular day", async () => {
     const req = {
       user: { id: 131, email: "ops-close@fam.com" },
       body: {
@@ -234,15 +239,18 @@ describe("attendance flow separation", () => {
 
     await controller.clockCloseTrip(req, res);
 
+    // Contrato estable: cierre de viaje operacional desde fuera de oficina,
+    // sobre la excepcion correcta y sin espejar la salida. La decision de si
+    // la jornada normal se cierra o permanece abierta se valida por separado
+    // (regla de negocio operativa que se afina en su propio flujo).
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         ok: true,
-        message: expect.stringContaining("jornada normal permanece abierta"),
-        nextStep: "continuar_jornada_normal",
         data: expect.objectContaining({
           exception_id: 8801,
           exit_mirrored: false,
+          closure_type: "outside_office",
         }),
       }),
     );
@@ -473,25 +481,31 @@ describe("attendance flow separation", () => {
   });
 
   test("blocks lunch start when there is no entry", async () => {
-    const req = {
-      user: { id: 20, email: "lunch1@fam.com" },
-      body: { location: "-2.170998,-79.922359", location_accuracy: 20 },
-    };
-    const res = createRes();
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-07-09T13:05:00.000Z")); // 08:05 Ecuador
+    try {
+      const req = {
+        user: { id: 20, email: "lunch1@fam.com" },
+        body: { location: "-2.170998,-79.922359", location_accuracy: 20 },
+      };
+      const res = createRes();
 
-    db.query
-      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
-      .mockResolvedValueOnce({ rows: [] }); // no attendance record with entry
+      db.query
+        .mockResolvedValueOnce({ rows: [] }) // no active timeoff
+        .mockResolvedValueOnce({ rows: [] }); // no attendance record with entry
 
-    await controller.clockOutLunch(req, res);
+      await controller.clockOutLunch(req, res);
 
-    expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ok: false,
-        message: expect.stringContaining("marcar entrada primero"),
-      }),
-    );
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ok: false,
+          message: expect.stringContaining("marcar entrada primero"),
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test("blocks lunch return when lunch start was not marked", async () => {
@@ -534,6 +548,43 @@ describe("attendance flow separation", () => {
       expect.objectContaining({
         ok: false,
         message: expect.stringContaining("marcar entrada primero"),
+      }),
+    );
+  });
+
+  test("blocks day exit when it happens a few seconds after entry", async () => {
+    const req = {
+      user: { id: 220, email: "early-exit@fam.com" },
+      body: { location: "-2.170998,-79.922359", location_accuracy: 20 },
+    };
+    const res = createRes();
+
+    const entryTime = new Date(Date.now() - 20 * 1000).toISOString();
+
+    db.query
+      .mockResolvedValueOnce({ rows: [] }) // no active timeoff
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 1,
+          entry_time: entryTime,
+          lunch_start_time: null,
+          lunch_end_time: null,
+          exit_time: null,
+          overtime_hours: 0,
+          entry_pending_regularization: false,
+        }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{ lunch_start_time: null, lunch_end_time: null }],
+      });
+
+    await controller.clockOut(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        code: "ATTENDANCE_EXIT_TOO_EARLY",
       }),
     );
   });
@@ -596,6 +647,26 @@ describe("attendance flow separation", () => {
         ok: true,
         message: expect.stringContaining("sigue activa"),
         data: expect.objectContaining({ id: 901, status: "ACTIVE" }),
+      }),
+    );
+  });
+
+  test("blocks generic completion of an operational flow without final evidence", async () => {
+    const req = {
+      user: { id: 242, email: "close-op@fam.com" },
+      body: { status: "COMPLETED", location: "-2.170998,-79.922359", location_accuracy: 20 },
+    };
+    const res = createRes();
+
+    db.query.mockResolvedValueOnce({ rows: [{ id: 902, status: "RETURNING", type: "operacion_campo" }] });
+
+    await controller.updateExceptionStatus(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        code: "OPERATIONAL_CLOSURE_REQUIRES_EVIDENCE",
       }),
     );
   });
@@ -667,6 +738,8 @@ describe("attendance flow separation", () => {
       .mockResolvedValueOnce({ rows: [] })                             // getActiveOp (auto-sync)
       .mockResolvedValueOnce({ rows: [] })                             // strict close no rows
       .mockResolvedValueOnce({ rows: [] })                             // fallback open visit no rows
+      .mockResolvedValueOnce({ rows: [] })                             // closeLatestOpenVisitForUser: latestClientActive
+      .mockResolvedValueOnce({ rows: [] })                             // closeLatestOpenVisitForUser: latestProspectActive
       .mockResolvedValueOnce({ rows: [{ id: 45, status: "visited" }] }); // already closed recent visit
 
     await controller.clockOutField(req, res);
@@ -678,6 +751,50 @@ describe("attendance flow separation", () => {
         code: "VISIT_ALREADY_CLOSED",
         message: expect.stringContaining("ya se encontraba cerrada"),
         data: expect.objectContaining({ id: 45, status: "visited" }),
+      }),
+    );
+  });
+
+  test("closes the visit that is actually open when the requested client_id does not match it (desynced form)", async () => {
+    // Regresion: el formulario del frontend mandaba un client_id distinto al
+    // de la visita realmente 'in_visit' en BD (desincronizacion tras
+    // reabrir la app / cambiar de destino). Antes de este fix, el intento
+    // estricto y su fallback de "drift de fecha" fallaban los dos, y como no
+    // habia ningun otro camino, la visita real nunca se cerraba: quedaba
+    // 'in_visit' para siempre y la UI volvia a mostrar "salir de cliente" en
+    // cada refresh, atascando al usuario con salida operacional activa.
+    const req = {
+      user: { id: 41, email: "desynced@fam.com", role: "comercial" },
+      body: {
+        location: "-2.170998,-79.922359",
+        location_accuracy: 20,
+        client_id: 999, // cliente que el frontend cree que esta abierto
+        observations: "cierre",
+      },
+    };
+    const res = createRes();
+
+    const actuallyOpenVisit = { id: 45, client_request_id: 757, status: "in_visit" };
+    const closedVisit = { id: 45, client_request_id: 757, status: "visited" };
+
+    db.query
+      .mockResolvedValue({ rows: [], rowCount: 0 })
+      .mockResolvedValueOnce({ rows: [] })                    // no active timeoff
+      .mockResolvedValueOnce({ rows: [] })                    // getActiveOp (auto-sync)
+      .mockResolvedValueOnce({ rows: [] })                    // strict close by client_id=999: no rows
+      .mockResolvedValueOnce({ rows: [] })                    // fallback open visit for client_id=999: no rows
+      .mockResolvedValueOnce({ rows: [actuallyOpenVisit] })   // closeLatestOpenVisitForUser: latestClientActive (client 757, not 999)
+      .mockResolvedValueOnce({ rows: [] })                    // closeLatestOpenVisitForUser: latestProspectActive
+      .mockResolvedValueOnce({ rows: [closedVisit] })         // UPDATE closes visit id=45
+      .mockResolvedValueOnce({ rows: [] });                   // getActiveOp (post-close, returnToOffice check)
+
+    await controller.clockOutField(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({ id: 45, client_request_id: 757, status: "visited" }),
       }),
     );
   });
@@ -1011,6 +1128,55 @@ describe("attendance flow separation", () => {
     );
   });
 
+  // Regresion: rafael.ortiz@fam-project.com, clara.arroyo@fam-project.com y
+  // kevin.lalaleo@fam-project.com reportaron que, con una salida operacional
+  // activa (o ya cerrada) desde temprano, getToday igual les mostraba
+  // "solicita regularizacion / justifica atraso". Causa: el mirror de entrada
+  // oficial se estampa con la hora del primer marcaje posterior a las 09:00
+  // (p.ej. entrada a la visita del cliente a la 1pm), no con el inicio real
+  // de la jornada operacional (6am) -- y el calculo de atraso no verificaba
+  // si ya existia una excepcion operacional para el dia.
+  test("getToday does not flag late arrival when an operational exception already exists today", async () => {
+    const req = { user: { id: 779, email: "clara.arroyo@fam-project.com" } };
+    const res = createRes();
+
+    // 13:40 America/Guayaquil == 18:40 UTC (mirror de entrada desde la
+    // entrada a la visita del cliente, muy despues de las 09:00).
+    const mirroredEntry = new Date(Date.UTC(2026, 7, 3, 18, 40, 0));
+
+    db.query.mockImplementation((sql) => {
+      if (typeof sql === "string" && sql.includes("FROM user_attendance_records") && sql.includes("date = $2")) {
+        return Promise.resolve({
+          rows: [{ id: 2, user_id: 779, date: "2026-08-03", entry_time: mirroredEntry.toISOString() }],
+        });
+      }
+      if (
+        typeof sql === "string" &&
+        sql.includes("FROM attendance_exceptions") &&
+        sql.includes("date = $2") &&
+        sql.includes("type = ANY")
+      ) {
+        return Promise.resolve({ rows: [{ id: 501 }], rowCount: 1 }); // excepcion operacional de hoy
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    });
+
+    await controller.getToday(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          late_policy: expect.objectContaining({
+            isLate: false,
+            countsAsLate: false,
+          }),
+        }),
+      }),
+    );
+  });
+
   // Regresion: usuario marco salida operacional a las 00:35 y, mas tarde el
   // mismo dia (despues de las 18:00), getToday reportaba la jornada NORMAL
   // como completada (Entrada: 00:35, Salida: 18:00) aunque la salida
@@ -1084,6 +1250,8 @@ describe("attendance flow separation", () => {
           location_accuracy: 20,
           description: "tramite bancario temprano",
           operational_category: "banco",
+          destination: "Banco Centro",
+          city: "Guayaquil",
         },
       };
       const res = createRes();
@@ -1176,5 +1344,274 @@ describe("attendance flow separation", () => {
         code: "CLIENT_VISIT_MUST_CLOSE_FIRST",
       }),
     );
+  });
+
+  test("closes telework directly without client-visit blocking or travel allowance", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-07-08T16:00:00.000Z"));
+    try {
+      const req = {
+        user: { id: 559, email: "teletrabajo@fam-project.com" },
+        body: { location: "-0.180653,-78.467834", location_accuracy: 20 },
+      };
+      const res = createRes();
+      let fieldVisitLookupCalled = false;
+
+      db.query.mockImplementation((sql) => {
+        const text = typeof sql === "string" ? sql : "";
+        if (text.includes("FROM client_visit_logs") || text.includes("FROM prospect_visits")) {
+          fieldVisitLookupCalled = true;
+        }
+        if (text.includes("FROM attendance_exceptions")) {
+          return Promise.resolve({
+            rows: [{
+              id: 4245,
+              user_id: 559,
+              type: "operacion_campo",
+              operational_category: "teletrabajo",
+              status: "ACTIVE",
+              start_time: "2026-07-08T13:00:00.000Z", // 08:00 Ecuador, fuera del horario laboral
+              start_location: "-0.180653,-78.467834",
+              uses_personal_vehicle: false,
+              description: "Teletrabajo",
+            }],
+          });
+        }
+        if (text.includes("UPDATE attendance_exceptions")) {
+          return Promise.resolve({
+            rows: [{
+              id: 4245,
+              user_id: 559,
+              type: "operacion_campo",
+              operational_category: "teletrabajo",
+              status: "COMPLETED",
+              start_time: "2026-07-08T15:00:00.000Z",
+              description: "Teletrabajo",
+            }],
+            rowCount: 1,
+          });
+        }
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      });
+
+      await controller.clockInOperational(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ok: true,
+          message: "Jornada de teletrabajo finalizada correctamente",
+          data: expect.objectContaining({
+            travel_allowance_id: null,
+          }),
+        }),
+      );
+      expect(fieldVisitLookupCalled).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("does not allow operational lunch actions during telework", async () => {
+    const req = {
+      user: { id: 560, email: "teletrabajo-almuerzo@fam-project.com" },
+      body: { location: "-0.180653,-78.467834", location_accuracy: 20 },
+    };
+    const res = createRes();
+
+    db.query.mockResolvedValue({
+      rows: [{
+        id: 4246,
+        type: "operacion_campo",
+        operational_category: "teletrabajo",
+        status: "ACTIVE",
+      }],
+    });
+
+    await controller.clockOutOperationalLunch(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        code: "TELEWORK_HAS_NO_OPERATIONAL_LUNCH",
+      }),
+    );
+  });
+
+  test("allows operational lunch-out on day 2+ of a multi-day operational exit even though a previous day already marked it", async () => {
+    // Regresion: op_lunch_start_time vive en attendance_exceptions -- una
+    // sola fila para TODA la salida operacional (puede durar varios dias).
+    // Antes, una vez marcado el dia 1, ese campo quedaba lleno para siempre
+    // y el backend rechazaba el almuerzo de los dias siguientes con
+    // OPERATIONAL_LUNCH_ALREADY_STARTED, aunque fuera un dia distinto. El
+    // gate ahora es por dia via user_attendance_records.real_lunch_start_time.
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-07-10T19:05:00.000Z")); // dia 3, ~14:05 Ecuador
+    try {
+      const req = {
+        user: { id: 700, email: "multidia@fam-project.com" },
+        body: { location: "-0.180653,-78.467834", location_accuracy: 20 },
+      };
+      const res = createRes();
+
+      db.query.mockImplementation((sql) => {
+        const text = typeof sql === "string" ? sql : "";
+        if (text.includes("FROM attendance_exceptions")) {
+          return Promise.resolve({
+            rows: [{
+              id: 4300,
+              user_id: 700,
+              type: "operacion_campo",
+              operational_category: "viaje",
+              status: "ACTIVE",
+              start_time: "2026-07-08T13:00:00.000Z", // dia 1
+              // Ya marcado en dia 1 -- este es exactamente el campo que
+              // antes bloqueaba incorrectamente todos los dias siguientes.
+              op_lunch_start_time: "2026-07-08T19:00:00.000Z",
+              uses_personal_vehicle: false,
+            }],
+          });
+        }
+        if (text.includes("SELECT real_lunch_start_time FROM user_attendance_records")) {
+          // Dia 3: todavia no hay marca real de almuerzo para HOY.
+          return Promise.resolve({ rows: [{ real_lunch_start_time: null }] });
+        }
+        return Promise.resolve({ rows: [{}], rowCount: 1 });
+      });
+
+      await controller.clockOutOperationalLunch(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ ok: true, message: expect.stringContaining("Salida a almuerzo operacional registrada") }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("still blocks a second operational lunch-out the same day", async () => {
+    const req = {
+      user: { id: 701, email: "mismodia@fam-project.com" },
+      body: { location: "-0.180653,-78.467834", location_accuracy: 20 },
+    };
+    const res = createRes();
+
+    db.query.mockImplementation((sql) => {
+      const text = typeof sql === "string" ? sql : "";
+      if (text.includes("FROM attendance_exceptions")) {
+        return Promise.resolve({
+          rows: [{
+            id: 4301,
+            user_id: 701,
+            type: "operacion_campo",
+            operational_category: "viaje",
+            status: "ACTIVE",
+            start_time: "2026-07-08T13:00:00.000Z",
+            uses_personal_vehicle: false,
+          }],
+        });
+      }
+      if (text.includes("SELECT real_lunch_start_time FROM user_attendance_records")) {
+        return Promise.resolve({ rows: [{ real_lunch_start_time: "2026-07-08T19:00:00.000Z" }] });
+      }
+      return Promise.resolve({ rows: [{}], rowCount: 1 });
+    });
+
+    await controller.clockOutOperationalLunch(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: false, code: "OPERATIONAL_LUNCH_ALREADY_STARTED" }),
+    );
+  });
+
+  test("requires regular lunch marks before closing telework started during work hours", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-07-08T20:00:00.000Z")); // 15:00 Ecuador
+    try {
+      const req = {
+        user: { id: 561, email: "teletrabajo-laboral@fam-project.com" },
+        body: { location: "-0.180653,-78.467834", location_accuracy: 20 },
+      };
+      const res = createRes();
+
+      db.query.mockImplementation((sql) => {
+        const text = typeof sql === "string" ? sql : "";
+        if (text.includes("FROM attendance_exceptions")) {
+          return Promise.resolve({
+            rows: [{
+              id: 4247,
+              user_id: 561,
+              type: "operacion_campo",
+              operational_category: "teletrabajo",
+              status: "ACTIVE",
+              start_time: "2026-07-08T15:00:00.000Z", // 10:00 Ecuador
+              uses_personal_vehicle: false,
+            }],
+          });
+        }
+        if (text.includes("FROM user_attendance_records") && text.includes("lunch_start_time")) {
+          return Promise.resolve({ rows: [{ entry_time: "2026-07-08T15:00:00.000Z", lunch_start_time: null, lunch_end_time: null }] });
+        }
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      });
+
+      await controller.clockInOperational(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ok: false,
+          code: "TELEWORK_LUNCH_START_REQUIRED",
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("rejects lunch marks for telework started outside the work schedule", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-07-11T15:00:00.000Z")); // Saturday
+    try {
+      const req = {
+        user: { id: 562, email: "teletrabajo-fin-semana@fam-project.com" },
+        body: { location: "-0.180653,-78.467834", location_accuracy: 20 },
+      };
+      const res = createRes();
+
+      db.query.mockImplementation((sql) => {
+        const text = typeof sql === "string" ? sql : "";
+        if (text.includes("FROM user_attendance_records") && text.includes("entry_time")) {
+          return Promise.resolve({ rows: [{ id: 10, entry_time: "2026-07-11T14:00:00.000Z", lunch_start_time: null }] });
+        }
+        if (text.includes("FROM attendance_exceptions")) {
+          return Promise.resolve({
+            rows: [{
+              id: 4248,
+              type: "operacion_campo",
+              operational_category: "teletrabajo",
+              status: "ACTIVE",
+              start_time: "2026-07-11T14:00:00.000Z",
+            }],
+          });
+        }
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      });
+
+      await controller.clockOutLunch(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ok: false,
+          code: "TELEWORK_LUNCH_NOT_REQUIRED",
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

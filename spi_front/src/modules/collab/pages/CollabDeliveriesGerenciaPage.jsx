@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   FiAlertTriangle, FiCalendar, FiCheck,
-  FiPackage, FiRefreshCw, FiShield,
+  FiRefreshCw,
 } from "react-icons/fi";
 import { useUI } from "../../../core/ui/UIContext";
 import { getCollabSummary, listCollabRenewals } from "../../../core/api/collabDeliveriesApi";

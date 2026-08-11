@@ -5,6 +5,33 @@ Módulo de control de asistencia. Permite a colaboradores marcar entrada/salida,
 
 ## 2. Endpoints
 
+- **POST /api/v1/attendance/shortcut/run-smart-mark** (Siri Smart Attendance)
+  - Controller: `attendanceShortcut.controller.js → runSmartMark`
+  - Service: `attendanceShortcut.service.js`
+  - Middleware: `verifyToken`, `attendanceMarkLimiter`
+  - Body: `{ intent: "smart_attendance"|"operational_exit", spoken_input?, continuation_token?, location: "lat,lng" }`
+  - Resuelve la marcación correcta según `canonical_flow` de getToday y reusa los handlers existentes vía dispatch interno. Modos de respuesta: `completed` (acción ejecutada), `conversation` (Siri pregunta y reenvía `continuation_token`, JWT stateless TTL 10m ligado al usuario), `handoff` (`open_url` al paso exacto `/asistencia/marcar/:action`), `blocked` (mensaje hablable controlado). Siempre responde HTTP 200 en fallos de negocio para que Shortcuts lea `spoken_message`.
+
+- **POST /api/v1/attendance/shortcut/token**
+  - Controller: `attendanceShortcut.controller.js → issueToken`
+  - Middleware: `verifyToken`
+  - Emite JWT de larga duración (`SHORTCUT_TOKEN_EXPIRES_IN`, default 180d) con los mismos claims del access token (verifyToken lo acepta sin cambios). Queda registrado en `attendance_shortcut_tokens` (migración 246) para poder revocarlo individualmente.
+
+- **POST /api/v1/attendance/shortcut/admin/token/:userId** (TI)
+  - Controller: `attendanceShortcut.controller.js → adminIssueTokenForUser`
+  - Middleware: `verifyToken`, `requireRole(["ti"])` (incluye `jefe_ti`)
+  - TI/jefe_ti emite el token en nombre de otro usuario (no requiere que ese usuario tenga sesión activa). Mismo TTL y registro de revocación que el autoservicio.
+
+- **GET /api/v1/attendance/shortcut/admin/tokens/:userId** (TI)
+  - Controller: `attendanceShortcut.controller.js → listTokensForUser`
+  - Middleware: `verifyToken`, `requireRole(["ti"])`
+  - Lista los tokens emitidos para un usuario (`issued_at`, `expires_at`, `revoked_at`) sin exponer el JWT completo.
+
+- **POST /api/v1/attendance/shortcut/admin/tokens/:tokenId/revoke** (TI)
+  - Controller: `attendanceShortcut.controller.js → revokeToken`
+  - Middleware: `verifyToken`, `requireRole(["ti"])`
+  - Revoca un token puntual. `verifyToken` (middlewares/auth.js) consulta `attendance_shortcut_tokens` por `jti` solo cuando el token trae `token_kind: "shortcut"` — cero costo extra para el resto de la app.
+
 - **POST /api/v1/attendance/clock-in** | alias: `/marcar/entrada`
   - Controller: `attendance.controller.js → clockIn`
   - Service: `attendance.service.js`

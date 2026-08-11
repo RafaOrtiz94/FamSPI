@@ -6,7 +6,6 @@ const POLL_MS = 5000;
 
 function StarBar({ value }) {
   if (!value) return <span className="text-xs font-mono" style={{ color: C.line }}>sin votos</span>;
-  const full = Math.round(parseFloat(value));
   const pct  = (parseFloat(value) / 5) * 100;
   return (
     <div className="flex items-center gap-2">

@@ -12,6 +12,7 @@ import {
   hirePersonnelRequest,
   linkPersonnelRequestApplicant,
   linkPersonnelRequestCollaborator,
+  linkPersonnelRequestRequester,
   updatePersonnelRequestProfile,
   uploadPersonnelRequestDocument,
 } from "../../../core/api/personnelRequestsApi";
@@ -23,6 +24,7 @@ import {
   updateCollaboratorProfile,
   uploadCollaboratorDocument,
 } from "../../../core/api/collaboratorsApi";
+import { getUsers } from "../../../core/api/usersApi";
 import { startOffboardingProcess } from "../../../core/api/offboardingApi";
 import {
   applicantProfileSections as applicantProfileSectionsTemplate,
@@ -40,6 +42,17 @@ const WORKSPACE_VIEWS = new Set(["solicitudes", "aspirantes", "colaboradores", "
 const WORKSPACE_READY_STATUSES = new Set(["aprobada", "en_proceso", "completada"]);
 const REQUEST_LIST_VISIBLE_STATUSES = new Set(["pendiente", "en_revision", "aprobada", "en_proceso", "completada", "rechazada", "cancelada"]);
 const PASSIVE_EMPLOYMENT_STATUSES = new Set(["pasivo", "desvinculado", "inactivo"]);
+const REQUESTER_ASSIGNABLE_ROLES = new Set([
+  "jefe_comercial",
+  "jefe_servicio_tecnico",
+  "jefe_tecnico",
+  "jefe_operaciones",
+  "jefe_finanzas",
+  "jefe_calidad",
+  "jefe_talento_humano",
+  "gerencia",
+  "gerencia_general",
+]);
 const COMMAND_CENTER_SEGMENT = "command-center";
 const LEGACY_PERSONAL_SEGMENT = "workspace-personal";
 const LEGACY_COLLABORATORS_SEGMENT = "colaboradores";
@@ -76,6 +89,7 @@ const useDebouncedValue = (value, delay = 350) => {
 };
 
 const COMMAND_CENTER_STALE_TIME = 1000 * 60 * 5;
+const REQUEST_APPLICANTS_PAGE_SIZE = 500;
 
 const mergeUploadDocuments = (response, current = []) => {
   const nested = response?.data || {};
@@ -201,11 +215,12 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
   const { user } = useAuth();
   const role = (user?.role || user?.role_name || user?.rol || "").toLowerCase();
 
-  const canUnlockSections = ["talento_humano", "gerencia", "gerencia_general"].includes(role);
+  const canUnlockSections = ["talento_humano", "gerencia", "gerencia_general", "admin", "administrador"].includes(role);
   const canRequestPersonnel = ["talento_humano", "gerencia_general"].includes(role);
   const canApprovePersonnel = role === "gerencia_general";
   const canHireApplicant = ["talento_humano", "gerencia_general"].includes(role);
   const canReassignPersonnel = ["talento_humano", "gerencia_general", "admin"].includes(role);
+  const canReassignRequester = ["talento_humano", "gerencia", "gerencia_general", "admin"].includes(role);
 
   const [activeTab, setActiveTab] = useState("profile");
   const [searchQuery, setSearchQuery] = useState("");
@@ -216,6 +231,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
   const [selectedApplicant, setSelectedApplicant] = useState(null);
   const [selectedCollaboratorId, setSelectedCollaboratorId] = useState("");
   const [requestCollaboratorId, setRequestCollaboratorId] = useState("");
+  const [requestRequesterId, setRequestRequesterId] = useState("");
   const [workflowComment, setWorkflowComment] = useState("");
   const [workflowCommentInternal, setWorkflowCommentInternal] = useState(false);
   const [profileData, setProfileData] = useState(null);
@@ -275,7 +291,11 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     queryKey: ["talento", "requests", debouncedSearch],
     staleTime: COMMAND_CENTER_STALE_TIME,
     queryFn: async () => {
-      const response = await getPersonnelRequests({ pageSize: 80, q: debouncedSearch || undefined });
+      const response = await getPersonnelRequests({
+        pageSize: 80,
+        q: debouncedSearch || undefined,
+        my_requests: !canUnlockSections ? true : undefined,
+      });
       const list = response?.data || [];
       return list.filter((item) => REQUEST_LIST_VISIBLE_STATUSES.has(normalizeRequestStatus(item?.status)));
     },
@@ -286,7 +306,11 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     enabled: Boolean(id && shouldLoadAsRequest),
     staleTime: COMMAND_CENTER_STALE_TIME,
     queryFn: async () => {
-      const response = await getPersonnelRequestWorkspace(id, { q: debouncedSearch || undefined, page: 1, pageSize: 50 });
+      const response = await getPersonnelRequestWorkspace(id, {
+        q: debouncedSearch || undefined,
+        page: 1,
+        pageSize: REQUEST_APPLICANTS_PAGE_SIZE,
+      });
       return response?.data || null;
     },
   });
@@ -296,7 +320,11 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     enabled: Boolean(id && shouldLoadAsRequest),
     staleTime: COMMAND_CENTER_STALE_TIME,
     queryFn: async () => {
-      const response = await getPersonnelRequestApplicants(id, { q: debouncedSearch || undefined, page: 1, pageSize: 50 });
+      const response = await getPersonnelRequestApplicants(id, {
+        q: debouncedSearch || undefined,
+        page: 1,
+        pageSize: REQUEST_APPLICANTS_PAGE_SIZE,
+      });
       return response?.data || [];
     },
   });
@@ -326,13 +354,33 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     queryFn: async () => getCollaboratorProfile(resolvedCollaboratorId),
   });
 
+  const requesterCandidatesQuery = useQuery({
+    queryKey: ["talento", "personnel-requester-candidates"],
+    enabled: canReassignRequester,
+    staleTime: COMMAND_CENTER_STALE_TIME,
+    queryFn: async () => {
+      const response = await getUsers({ active: true });
+      const users = Array.isArray(response) ? response : [];
+      return users.filter((item) =>
+        REQUESTER_ASSIGNABLE_ROLES.has(String(item?.role || "").trim().toLowerCase()),
+      );
+    },
+  });
+
   const requests = useMemo(() => requestsQuery.data || [], [requestsQuery.data]);
   const selectedRequest = requestWorkspaceQuery.data?.request || null;
+  const isCurrentRequestOwner = Boolean(
+    selectedRequest?.requester_id && Number(selectedRequest.requester_id) === Number(user?.id || 0),
+  );
   const applicants = useMemo(() => {
     if (Array.isArray(requestWorkspaceQuery.data?.applicants?.data)) return requestWorkspaceQuery.data.applicants.data;
     return requestApplicantsQuery.data || [];
   }, [requestWorkspaceQuery.data?.applicants?.data, requestApplicantsQuery.data]);
   const allCollaborators = useMemo(() => collaboratorsQuery.data || [], [collaboratorsQuery.data]);
+  const requesterCandidates = useMemo(
+    () => requesterCandidatesQuery.data || [],
+    [requesterCandidatesQuery.data],
+  );
   const collaboratorBuckets = useMemo(() => {
     return allCollaborators.reduce(
       (acc, item) => {
@@ -368,9 +416,19 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
   useEffect(() => {
     if (!selectedRequest?.id) return;
     const linkedApplicantId = requestWorkspaceQuery.data?.summary?.linked_applicant_id || selectedRequest.applicant_id || "";
-    setSelectedApplicantId(linkedApplicantId ? String(linkedApplicantId) : "");
+    const storageKey = `talento:last-applicant:${selectedRequest.id}`;
+    const storedApplicantId =
+      typeof window !== "undefined" ? window.localStorage.getItem(storageKey) : "";
+    const resolvedApplicantId = linkedApplicantId || storedApplicantId || "";
+    setSelectedApplicantId(resolvedApplicantId ? String(resolvedApplicantId) : "");
     setRequestCollaboratorId(selectedRequest.collaborator_user_id ? String(selectedRequest.collaborator_user_id) : "");
-  }, [selectedRequest?.id, selectedRequest?.applicant_id, selectedRequest?.collaborator_user_id, requestWorkspaceQuery.data?.summary?.linked_applicant_id]);
+    setRequestRequesterId(selectedRequest.requester_id ? String(selectedRequest.requester_id) : "");
+  }, [selectedRequest?.id, selectedRequest?.applicant_id, selectedRequest?.collaborator_user_id, selectedRequest?.requester_id, requestWorkspaceQuery.data?.summary?.linked_applicant_id]);
+
+  useEffect(() => {
+    if (!selectedRequest?.id || !selectedApplicantId || typeof window === "undefined") return;
+    window.localStorage.setItem(`talento:last-applicant:${selectedRequest.id}`, String(selectedApplicantId));
+  }, [selectedApplicantId, selectedRequest?.id]);
 
   useEffect(() => {
     if (!selectedApplicantId) {
@@ -378,10 +436,19 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
       return;
     }
     const linkedApplicant = applicants.find((item) => String(item?.id) === String(selectedApplicantId));
-    if (linkedApplicant) {
-      setSelectedApplicant((prev) => (String(prev?.id || "") === String(linkedApplicant.id) ? prev : linkedApplicant));
-    }
-  }, [applicants, selectedApplicantId]);
+    if (!linkedApplicant) return;
+    // If already loaded with full detail (documents present), skip re-fetch
+    if (String(linkedApplicant.id) === String(selectedApplicant?.id) && Array.isArray(selectedApplicant?.documents)) return;
+    // Fetch full detail so documents (CV, carta) are available
+    getApplicantById(linkedApplicant.id)
+      .then((res) => {
+        const full = res?.data || res || linkedApplicant;
+        setSelectedApplicant((prev) => (String(prev?.id || "") === String(full.id) ? prev : full));
+      })
+      .catch(() => {
+        setSelectedApplicant((prev) => (String(prev?.id || "") === String(linkedApplicant.id) ? prev : linkedApplicant));
+      });
+  }, [applicants, selectedApplicantId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!selectedRequest?.id) return;
@@ -507,6 +574,16 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     },
   });
 
+  const assignRequesterMutation = useMutation({
+    mutationFn: async ({ requestId, requesterId }) =>
+      linkPersonnelRequestRequester(requestId, requesterId || null),
+    onSuccess: async (_, variables) => {
+      await queryClient.invalidateQueries({ queryKey: ["talento", "request-workspace", String(variables.requestId)] });
+      await queryClient.invalidateQueries({ queryKey: ["talento", "requests"] });
+      toast.success("Jefe de área actualizado");
+    },
+  });
+
   const linkApplicantMutation = useMutation({
     mutationFn: async ({ requestId, applicantId }) => linkPersonnelRequestApplicant(requestId, applicantId || null),
     onSuccess: async (_, variables) => {
@@ -517,8 +594,15 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
 
   const hireMutation = useMutation({
     mutationFn: async (requestId) => hirePersonnelRequest(requestId),
-    onSuccess: async () => {
-      toast.success("Postulante contratado correctamente");
+    onSuccess: async (response) => {
+      const result = response?.data || {};
+      if (result.matched_existing_user) {
+        toast.success("Postulante contratado: se vinculó a la cuenta corporativa que ya tenía (no se creó una cuenta duplicada).", { duration: 6000 });
+      } else if (result.pending_corporate_email) {
+        toast.success("Postulante contratado. Aún falta asignarle su correo corporativo desde Usuarios para que pueda iniciar sesión.", { duration: 7000 });
+      } else {
+        toast.success("Postulante contratado correctamente");
+      }
       navigate(getRouteForEntity("solicitudes"));
       await queryClient.invalidateQueries({ queryKey: ["talento", "requests"] });
     },
@@ -701,6 +785,15 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     await assignMutation.mutateAsync({ requestId: selectedRequest.id, collaboratorId: requestCollaboratorId || null });
   };
 
+  const handleAssignRequester = async (event) => {
+    event?.preventDefault?.();
+    if (!selectedRequest?.id) return;
+    await assignRequesterMutation.mutateAsync({
+      requestId: selectedRequest.id,
+      requesterId: requestRequesterId || null,
+    });
+  };
+
   const handleAddComment = async (event) => {
     event?.preventDefault?.();
     if (!selectedRequest?.id || !String(workflowComment || "").trim()) return;
@@ -794,12 +887,17 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     ((shouldLoadAsRequest && requestWorkspaceSyncing) ||
       (shouldLoadAsCollaborator && collaboratorProfileSyncing));
 
+  const refetchApplicants = useCallback(async () => {
+    await Promise.all([requestWorkspaceQuery.refetch(), requestApplicantsQuery.refetch()]);
+  }, [requestWorkspaceQuery, requestApplicantsQuery]);
+
   return {
     requests,
     loadingRequests: requestsInitialLoading || requestsSyncing,
     requestsInitialLoading,
     requestsSyncing,
     applicants,
+    refetchApplicants,
     applicantsLoading: applicantsInitialLoading || applicantsSyncing,
     applicantsInitialLoading,
     applicantsSyncing,
@@ -835,6 +933,10 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     workflowCommentSaving: commentMutation.isPending,
     requestCollaboratorId,
     setRequestCollaboratorId,
+    requestRequesterId,
+    setRequestRequesterId,
+    requesterCandidates,
+    requesterAssigning: assignRequesterMutation.isPending,
     createDrawerOpen,
     setCreateDrawerOpen,
     reviewRequestData,
@@ -845,8 +947,10 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     canApprovePersonnel,
     canHireApplicant,
     canReassignPersonnel,
+    canReassignRequester,
     canUnlockSections,
     currentUserRole: role,
+    isCurrentRequestOwner,
     isRequestContext,
     isApplicantContext,
     isCollaboratorContext,
@@ -880,6 +984,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     handleQualificationsChange,
     handleResolveQualificationPending,
     handleAssignCollaborator,
+    handleAssignRequester,
     handleAddComment,
     handleCreateRequest,
     handleCloseCreateRequest,

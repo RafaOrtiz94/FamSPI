@@ -3,7 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../core/auth/AuthContext";
 import { getMantenimientos } from "../../../core/api/mantenimientosApi";
 import { getRequests } from "../../../core/api/requestsApi";
-import { getTeamAvailability, updateAvailabilityStatus } from "../../../core/api/availabilityApi";
+import {
+  getTeamAvailability,
+  getTechnicalScheduleFeed,
+  updateAvailabilityStatus,
+} from "../../../core/api/availabilityApi";
 import { DashboardLayout } from "../../../core/ui/layouts/DashboardLayout";
 import { useApi } from "../../../core/hooks/useApi";
 import RequestsListModal from "../../shared/solicitudes/components/RequestsListModal";
@@ -13,6 +17,27 @@ import TecnicoView from "../components/dashboard/TecnicoView";
 const normalizeStatus = (value) => (value || "").toString().toLowerCase();
 const isRequestOpen = (status) =>
   !["cerrado", "cancelado", "finalizado"].includes(normalizeStatus(status));
+const LEAD_ROLES = new Set([
+  "jefe_tecnico",
+  "jefe_servicio",
+  "jefe_servicio_tecnico",
+  "gerencia",
+  "gerencia_general",
+  "director",
+]);
+
+const normalizeTokens = (value) => {
+  if (Array.isArray(value)) return value.map((item) => String(item || "").toLowerCase()).filter(Boolean);
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+};
+
+const canSeeTeamSchedule = (user) => {
+  const tokens = new Set([...(normalizeTokens(user?.role)), ...(normalizeTokens(user?.scope))]);
+  return Array.from(tokens).some((token) => LEAD_ROLES.has(token));
+};
 
 const ServicioDashboard = () => {
   const { user } = useAuth();
@@ -20,6 +45,7 @@ const ServicioDashboard = () => {
   const [mantenimientos, setMantenimientos] = useState([]);
   const [solicitudes, setSolicitudes] = useState([]);
   const [availability, setAvailability] = useState([]);
+  const [scheduleFeed, setScheduleFeed] = useState({ rows: [], backlog: [], summary: {}, scope: "mine" });
   const [requestsModalOpen, setRequestsModalOpen] = useState(false);
 
   const unwrapRows = useCallback((payload) => {
@@ -47,22 +73,43 @@ const ServicioDashboard = () => {
   const fetchRequestsForModal = useCallback(() => solicitudesRef.current(), []);
 
   const refreshSnapshots = useCallback(async () => {
+    const today = new Date();
+    const from = today.toISOString().slice(0, 10);
+    const toDate = new Date(today);
+    toDate.setDate(toDate.getDate() + 14);
+    const to = toDate.toISOString().slice(0, 10);
+    const scheduleScope = canSeeTeamSchedule(user) ? "team" : "mine";
+
     const tasks = [
       { label: "mantenimientos", fn: () => getMantenimientos({ pageSize: 200 }), setter: setMantenimientos },
       { label: "solicitudes", fn: () => solicitudesRef.current(), setter: setSolicitudes },
       { label: "availability", fn: getTeamAvailability, setter: setAvailability },
+      {
+        label: "technical_schedule",
+        fn: () => getTechnicalScheduleFeed({ from, to, scope: scheduleScope }),
+        setter: (value) =>
+          setScheduleFeed(
+            value && typeof value === "object"
+              ? value
+              : { rows: [], backlog: [], summary: {}, scope: scheduleScope },
+          ),
+      },
     ];
 
     for (const task of tasks) {
       try {
         const result = await task.fn();
-        task.setter(unwrapRows(result));
+        task.setter(task.label === "technical_schedule" ? result : unwrapRows(result));
       } catch (err) {
         console.warn(`ServicioDashboard snapshot error (${task.label}):`, err?.message || err);
-        task.setter([]);
+        if (task.label === "technical_schedule") {
+          setScheduleFeed({ rows: [], backlog: [], summary: {}, scope: scheduleScope });
+        } else {
+          task.setter([]);
+        }
       }
     }
-  }, [unwrapRows]);
+  }, [unwrapRows, user]);
 
   useEffect(() => {
     refreshSnapshots();
@@ -79,6 +126,14 @@ const ServicioDashboard = () => {
   const safeAvailability = useMemo(
     () => (Array.isArray(availability) ? availability : []),
     [availability]
+  );
+  const safeScheduleRows = useMemo(
+    () => (Array.isArray(scheduleFeed?.rows) ? scheduleFeed.rows : []),
+    [scheduleFeed]
+  );
+  const safeScheduleBacklog = useMemo(
+    () => (Array.isArray(scheduleFeed?.backlog) ? scheduleFeed.backlog : []),
+    [scheduleFeed]
   );
 
   const displayedSolicitudes = useMemo(() => {
@@ -107,11 +162,12 @@ const ServicioDashboard = () => {
     return {
       pendientes,
       tecnicosActivos,
-      alertas: 2,
-      cumplimiento: 95,
+      alertas: safeScheduleBacklog.length,
       myPending,
+      scheduledEvents: safeScheduleRows.length,
+      pendingCoordination: safeScheduleBacklog.length,
     };
-  }, [safeMantenimientos, safeAvailability, user]);
+  }, [safeMantenimientos, safeAvailability, safeScheduleBacklog, safeScheduleRows, user]);
 
   const myAvailability = useMemo(() => {
     if (!user) return null;
@@ -143,6 +199,8 @@ const ServicioDashboard = () => {
           stats={stats}
           maintenances={safeMantenimientos}
           availability={safeAvailability}
+          scheduleRows={safeScheduleRows}
+          scheduleBacklog={safeScheduleBacklog}
           onRefresh={refreshSnapshots}
           onOpenWithdrawals={() => navigate("/dashboard/servicio-tecnico/retiros")}
           displayedSolicitudes={displayedSolicitudes}
@@ -161,6 +219,8 @@ const ServicioDashboard = () => {
         myMaintenances={myMaintenances}
         availability={myAvailability}
         teamAvailability={safeAvailability}
+        scheduleRows={safeScheduleRows}
+        scheduleBacklog={safeScheduleBacklog}
         onAvailabilityChange={handleAvailabilityChange}
         onRefresh={refreshSnapshots}
         displayedSolicitudes={displayedSolicitudes}

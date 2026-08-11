@@ -136,6 +136,17 @@ async function downloadActaPdf(req, res) {
   }
 }
 
+async function regenerateActaPdf(req, res) {
+  try {
+    // Fuerza el regenerado (preferStored: false dentro de la funcion) y
+    // reemplaza el PDF guardado en Drive -- downloadActaPdf normal solo
+    // regenera si el acta nunca tuvo PDF, asi que una vez creado siempre
+    // sirve la copia vieja aunque cambie la plantilla/estilos.
+    const result = await svc.generateAndStoreActaPdf(req.params.actaId);
+    ok(res, result);
+  } catch (e) { err(res, e); }
+}
+
 async function uploadSignedActa(req, res) {
   try {
     if (!req.file) return res.status(400).json({ message: "Se requiere el archivo firmado" });
@@ -332,7 +343,7 @@ module.exports = {
   listCatalog, createCatalogItem, updateCatalogItem, deleteCatalogItem,
   listDeliveries, listDeliveriesByUser, getDelivery,
   createDelivery, updateDelivery, withdrawDelivery, listDeliveryEvents,
-  listActasByDelivery, getActa, generateActa, downloadActaPdf, uploadSignedActa,
+  listActasByDelivery, getActa, generateActa, downloadActaPdf, regenerateActaPdf, uploadSignedActa,
   startActaSignatureWorkflow, getActaSignatureWorkflow,
   listRenewals, completeRenewal,
   getSummary,

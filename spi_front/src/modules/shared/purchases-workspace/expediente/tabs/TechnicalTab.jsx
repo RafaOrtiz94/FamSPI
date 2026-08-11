@@ -27,6 +27,7 @@ import {
   FiTool,
   FiUserCheck,
   FiX,
+  FiExternalLink,
 } from 'react-icons/fi';
 import WorkflowStep from '../../components/WorkflowStep';
 import RoleGatedAction from '../../components/RoleGatedAction';
@@ -43,6 +44,9 @@ import {
   registerPrivatePurchaseSiteInspection,
   updatePrivatePurchaseInstallationWorkflow,
 } from '../../../../../core/api/privatePurchasesApi';
+import { PURCHASE_ROLE_GROUPS } from '../../purchaseRoleGroups';
+
+const driveLink = (id) => (id ? `https://drive.google.com/file/d/${id}/view` : null);
 
 /* ─────────────────────────────────────────── constantes ── */
 
@@ -67,6 +71,23 @@ const FST07_CHECKLIST = [
 
 const defaultFst07 = () =>
   FST07_CHECKLIST.reduce((acc, item) => { acc[item.key] = 'SI'; return acc; }, {});
+
+// Debe coincidir exactamente con DEFAULT_VISUAL_CHECKLIST en
+// backend/src/modules/servicio/installationWorkflow.service.js — antes esta
+// checklist no existia en la UI y el handler mandaba claves inventadas
+// (equipment_received/packaging_ok/accessories_complete) que el backend
+// siempre rechazaba con FST14_CHECKLIST_INCOMPLETE.
+const FST14_CHECKLIST = [
+  { key: 'guide_vs_proforma',   label: 'Guía de remisión coincide con la proforma' },
+  { key: 'packaging_integrity', label: 'Integridad del empaque' },
+  { key: 'tilt_indicator',      label: 'Indicador de inclinación (tilt) correcto' },
+  { key: 'handling_indicator',  label: 'Indicador de manipulación (handling) correcto' },
+  { key: 'serial_match',        label: 'Serial coincide con lo registrado' },
+  { key: 'accessories_match',   label: 'Accesorios completos según lo solicitado' },
+];
+
+const defaultFst14Checklist = () =>
+  FST14_CHECKLIST.reduce((acc, item) => { acc[item.key] = ''; return acc; }, {});
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const DAYS_ES   = ['Lu','Ma','Mi','Ju','Vi','Sa','Do'];
@@ -263,18 +284,18 @@ const PlanModal = ({ purchase, technicians: techniciansProp, onClose, onSave, sa
 
   const roleLabel = (role) => {
     if (!role) return '';
-    const map = { tecnico: 'Técnico', jefe_tecnico: 'Jefe Técnico', jefe_servicio_tecnico: 'Jefe Serv. Técnico' };
+    const map = { tecnico: 'Técnico', ing_servicio: 'Ing. Servicio', jefe_tecnico: 'Jefe Técnico', jefe_servicio: 'Jefe Servicio', jefe_servicio_tecnico: 'Jefe Serv. Técnico' };
     return map[role] || role;
   };
 
   const selectedTech = technicians.find(t => String(t.id) === String(techId));
   const canSave = date && techId;
 
-  /* Solo técnicos (role=tecnico) disponibles para ser asignados a la visita;
-     los jefes planifican pero normalmente no van solos a inspecciones.
-     Si no hay técnicos puros, muestra todos. */
+  /* Técnicos e ingenieros de servicio (tecnico/ing_servicio) disponibles para
+     ser asignados a la visita; los jefes planifican pero normalmente no van
+     solos a inspecciones. Si no hay técnicos puros, muestra todos. */
   const assignableTechs = technicians.filter(t =>
-    String(t.role || '').toLowerCase() === 'tecnico'
+    ['tecnico', 'ing_servicio'].includes(String(t.role || '').toLowerCase())
   );
   const listToShow = assignableTechs.length > 0 ? assignableTechs : technicians;
 
@@ -502,12 +523,19 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
   const [fst07Notes,        setFst07Notes]        = useState('');
 
   /* Paso 4 — F.ST-14 */
-  const [fst14Result, setFst14Result] = useState('pass');
-  const [fst14Notes,  setFst14Notes]  = useState('');
+  const [fst14Result,    setFst14Result]    = useState('pass');
+  const [fst14Notes,     setFst14Notes]     = useState('');
+  const [fst14Checklist, setFst14Checklist] = useState(defaultFst14Checklist);
 
   /* Paso 5 — F.ST-09 */
   const [fst09Applies, setFst09Applies] = useState('true');
   const [fst09Notes,   setFst09Notes]   = useState('');
+
+  /* Paso 5b — F.ST-09 intento de verificacion (solo si applies=true) */
+  const [verifResult,          setVerifResult]          = useState('passed');
+  const [verifCriteria,        setVerifCriteria]         = useState('');
+  const [verifAnalysis,        setVerifAnalysis]         = useState('');
+  const [verifNotes,           setVerifNotes]            = useState('');
 
   /* Técnicos */
   const [technicians, setTechnicians] = useState([]);
@@ -540,7 +568,17 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
     purchase?.site_inspection?.result
   );
   const step4Done = iw?.visual_reception?.result != null;
-  const step5Done = iw?.verification_decision?.applies != null;
+  // Bug: antes se marcaba "hecho" apenas se registraba la decision (applies
+  // true/false), ocultando el formulario -- pero si applies=true todavia falta
+  // completar el ciclo de verificacion (verification_cycle.status==='passed')
+  // antes de que el cierre de instalacion (acta final) deje de estar bloqueado.
+  const verificationApplies = iw?.verification_decision?.applies;
+  const verificationCycleStatus = iw?.verification_cycle?.status || null;
+  const step5Done = verificationApplies === false
+    ? true
+    : verificationApplies === true
+      ? verificationCycleStatus === 'passed'
+      : false;
 
   /* activos: el primero sin completar en la secuencia */
   // Paso 1 (planificar) activo cuando se solicitó inspección pero no se planificó
@@ -618,7 +656,7 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
   const handleFst14 = () => run('step4', () =>
     updateWf('visual_inspection_fst14', {
       result: fst14Result,
-      checklist: { equipment_received: true, packaging_ok: fst14Result === 'pass', accessories_complete: true },
+      checklist: fst14Checklist,
       notes: fst14Notes,
       corrective_actions: fst14Result === 'failed' ? fst14Notes : '',
       inspection_date: new Date().toISOString(),
@@ -635,8 +673,22 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
     })
   );
 
+  const handleVerificationAttempt = () => run('step5b', async () => {
+    await updateWf('verification_attempt', {
+      result: verifResult,
+      criteria_reference: verifCriteria,
+      analysis: verifAnalysis,
+      notes: verifNotes,
+    });
+    setVerifCriteria('');
+    setVerifAnalysis('');
+    setVerifNotes('');
+  });
+
   /* F.ST-07 — toggle checklist */
   const setChecklistItem = (key, val) => setFst07Checklist(prev => ({ ...prev, [key]: val }));
+  const setFst14ChecklistItem = (key, val) => setFst14Checklist(prev => ({ ...prev, [key]: val }));
+  const fst14ChecklistComplete = FST14_CHECKLIST.every((item) => Boolean(fst14Checklist[item.key]));
 
   /* Secciones del F.ST-07 agrupadas */
   const fst07Sections = useMemo(() => {
@@ -689,12 +741,12 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
         <WorkflowStep
             stepNumber={1}
             title="Planificar visita técnica"
-            actor="Jefe Técnico · Jefe Servicio Técnico"
-            status={roleStepStatus(step2Done, step2Active, ['jefe_tecnico','jefe_servicio_tecnico'])}
+            actor="Jefe Técnico · Jefe Servicio"
+            status={roleStepStatus(step2Done, step2Active, PURCHASE_ROLE_GROUPS.jefe_tecnico)}
             completedAt={purchase?.inspection_coordinated_at}
           >
             <RoleGatedAction
-              allowedRoles={['jefe_tecnico','jefe_servicio_tecnico']}
+              allowedRoles={PURCHASE_ROLE_GROUPS.jefe_tecnico}
               userRoles={userRoles}
             >
               {step2Done ? (
@@ -756,11 +808,11 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
             stepNumber={2}
             title="F.ST-07 · Inspección de sitio"
             actor="Técnico"
-            status={roleStepStatus(step3Done, step3Active, ['tecnico','jefe_tecnico','jefe_servicio_tecnico'])}
+            status={roleStepStatus(step3Done, step3Active, PURCHASE_ROLE_GROUPS.tecnico)}
             completedAt={purchase?.inspection_registered_at}
           >
             <RoleGatedAction
-              allowedRoles={['tecnico','jefe_tecnico','jefe_servicio_tecnico']}
+              allowedRoles={PURCHASE_ROLE_GROUPS.tecnico}
               userRoles={userRoles}
             >
               {step3Done ? (
@@ -777,6 +829,17 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
                       <p className="text-[11px] text-warm-ash mb-1">Observaciones</p>
                       <p className="text-sm text-ink-slate">{purchase.inspection_site_notes}</p>
                     </div>
+                  )}
+                  {(purchase?.site_inspection_report_link || purchase?.site_inspection_report_document_id) && (
+                    <a
+                      href={purchase.site_inspection_report_link || driveLink(purchase.site_inspection_report_document_id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="sm:col-span-3 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-soft-border text-sm font-semibold text-ink-slate hover:bg-paper-white transition-colors"
+                    >
+                      <FiExternalLink size={14} />
+                      Ver acta F.ST-07
+                    </a>
                   )}
                 </div>
               ) : (
@@ -890,11 +953,11 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
           stepNumber={3}
           title="F.ST-14 · Recepción visual"
           actor="Técnico"
-          status={roleStepStatus(step4Done, step4Active, ['tecnico','jefe_tecnico','jefe_servicio_tecnico'])}
+          status={roleStepStatus(step4Done, step4Active, PURCHASE_ROLE_GROUPS.tecnico)}
           completedAt={iw?.visual_reception?.inspection_date}
         >
           <RoleGatedAction
-            allowedRoles={['tecnico','jefe_tecnico','jefe_servicio_tecnico']}
+            allowedRoles={PURCHASE_ROLE_GROUPS.tecnico}
             userRoles={userRoles}
           >
             {step4Done ? (
@@ -926,6 +989,40 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
                     <option value="failed">No aprueba — requiere corrección</option>
                   </select>
                 </label>
+
+                <div>
+                  <p className="text-xs font-medium text-ink-slate mb-2">Checklist de recepción visual</p>
+                  <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+                    {FST14_CHECKLIST.map((item) => (
+                      <div key={item.key} className="flex items-center justify-between px-4 py-3 gap-3 hover:bg-slate-50/60 transition-colors">
+                        <span className="text-sm text-ink-slate flex-1">{item.label}</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {['OK', 'ISSUE', 'NA'].map((opt) => {
+                            const active = fst14Checklist[item.key] === opt;
+                            let cls = 'px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ';
+                            if (active) {
+                              cls += opt === 'OK' ? 'bg-operative-green text-white border-green-500' : opt === 'ISSUE' ? 'bg-red-500 text-white border-red-500' : 'bg-slate-400 text-white border-slate-400';
+                            } else {
+                              cls += 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50';
+                            }
+                            return (
+                              <button type="button" key={opt} className={cls} onClick={() => setFst14ChecklistItem(item.key, opt)}>
+                                {opt}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {!fst14ChecklistComplete && (
+                    <p className="mt-2 text-xs text-caution-amber flex items-center gap-1.5">
+                      <FiAlertTriangle size={12} />
+                      Completa todos los ítems del checklist antes de registrar.
+                    </p>
+                  )}
+                </div>
+
                 <label className="flex flex-col gap-1.5">
                   <span className="text-xs font-medium text-ink-slate">Notas{fst14Result === 'failed' ? ' / Acciones correctivas' : ''}</span>
                   <textarea
@@ -939,7 +1036,7 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
                 <button
                   type="button"
                   onClick={handleFst14}
-                  disabled={saving === 'step4'}
+                  disabled={saving === 'step4' || !fst14ChecklistComplete || (fst14Result === 'failed' && !fst14Notes.trim())}
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-action-blue text-white text-sm font-semibold disabled:opacity-40 hover:bg-blue-600 transition-colors active:scale-[0.97]"
                 >
                   <FiTool size={14} />
@@ -955,29 +1052,14 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
           stepNumber={4}
           title="F.ST-09 · Verificación de instalación"
           actor="Técnico"
-          status={roleStepStatus(step5Done, step5Active, ['tecnico','jefe_tecnico','jefe_servicio_tecnico'])}
+          status={roleStepStatus(step5Done, step5Active, PURCHASE_ROLE_GROUPS.tecnico)}
           completedAt={iw?.verification_decision?.decided_at}
         >
           <RoleGatedAction
-            allowedRoles={['tecnico','jefe_tecnico','jefe_servicio_tecnico']}
+            allowedRoles={PURCHASE_ROLE_GROUPS.tecnico}
             userRoles={userRoles}
           >
-            {step5Done ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="px-4 py-3 bg-paper-white rounded-xl border border-soft-border">
-                  <p className="text-[11px] text-warm-ash mb-1">¿Aplica verificación?</p>
-                  <p className={`text-sm font-semibold ${iw.verification_decision.applies ? 'text-ink-slate' : 'text-warm-ash'}`}>
-                    {iw.verification_decision.applies ? 'Sí aplica' : 'No aplica'}
-                  </p>
-                </div>
-                {iw.verification_decision.justification && (
-                  <div className="px-4 py-3 bg-paper-white rounded-xl border border-soft-border">
-                    <p className="text-[11px] text-warm-ash mb-1">Criterio</p>
-                    <p className="text-sm text-ink-slate">{iw.verification_decision.justification}</p>
-                  </div>
-                )}
-              </div>
-            ) : (
+            {verificationApplies == null ? (
               <div className="space-y-4">
                 <p className="text-xs text-warm-ash">Determina si este equipo requiere verificación de instalación según criterios técnicos.</p>
                 <label className="flex flex-col gap-1.5">
@@ -1011,6 +1093,110 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
                   {saving === 'step5' ? 'Guardando…' : 'Registrar F.ST-09'}
                 </button>
               </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="px-4 py-3 bg-paper-white rounded-xl border border-soft-border">
+                    <p className="text-[11px] text-warm-ash mb-1">¿Aplica verificación?</p>
+                    <p className={`text-sm font-semibold ${verificationApplies ? 'text-ink-slate' : 'text-warm-ash'}`}>
+                      {verificationApplies ? 'Sí aplica' : 'No aplica'}
+                    </p>
+                  </div>
+                  {iw.verification_decision.justification && (
+                    <div className="px-4 py-3 bg-paper-white rounded-xl border border-soft-border">
+                      <p className="text-[11px] text-warm-ash mb-1">Criterio</p>
+                      <p className="text-sm text-ink-slate">{iw.verification_decision.justification}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Ciclo de verificación: solo cuando applies=true. Antes esto no
+                    tenia UI en ningun lado -- la decision "si aplica" quedaba
+                    marcada como "hecho" sin forma de registrar el resultado real. */}
+                {verificationApplies && (
+                  <div>
+                    <p className="text-xs font-medium text-ink-slate mb-2">Ciclo de verificación (F.ST-09)</p>
+
+                    {Array.isArray(iw?.verification_cycle?.attempts) && iw.verification_cycle.attempts.length > 0 && (
+                      <div className="mb-3 space-y-1.5">
+                        {iw.verification_cycle.attempts.slice().reverse().map((attempt) => (
+                          <div key={attempt.attempt_number} className={`rounded-xl border px-3 py-2 text-xs ${
+                            attempt.result === 'passed' ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'
+                          }`}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className={`font-semibold ${attempt.result === 'passed' ? 'text-operative-green' : 'text-alert-red'}`}>
+                                Intento #{attempt.attempt_number} · {attempt.result === 'passed' ? 'Aprobado' : 'Rechazado'}
+                              </span>
+                              <span className="text-warm-ash">{attempt.generated_by_email}</span>
+                            </div>
+                            <p className="mt-1 text-ink-slate">{attempt.criteria_reference}</p>
+                            {attempt.analysis && <p className="mt-0.5 text-warm-ash">{attempt.analysis}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {verificationCycleStatus === 'passed' ? (
+                      <div className="flex items-center gap-2 text-sm text-operative-green bg-green-50 border border-green-200 rounded-xl px-4 py-3">
+                        <FiCheckCircle size={14} />
+                        Verificación aprobada — el ciclo F.ST-09 está completo.
+                      </div>
+                    ) : (
+                      <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-xs font-medium text-ink-slate">Resultado del intento</span>
+                          <select
+                            value={verifResult}
+                            onChange={(e) => setVerifResult(e.target.value)}
+                            className="min-h-10 rounded-xl border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-action-blue/20 focus:border-action-blue transition-colors"
+                          >
+                            <option value="passed">Aprobado</option>
+                            <option value="failed">Rechazado — requiere remediación</option>
+                          </select>
+                        </label>
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-xs font-medium text-ink-slate">Criterio técnico utilizado</span>
+                          <input
+                            value={verifCriteria}
+                            onChange={(e) => setVerifCriteria(e.target.value)}
+                            placeholder="Ej. Manual de verificación cobas c111, sección 4.2"
+                            className="min-h-10 rounded-xl border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-action-blue/20 focus:border-action-blue transition-colors"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-xs font-medium text-ink-slate">Análisis</span>
+                          <textarea
+                            value={verifAnalysis}
+                            onChange={(e) => setVerifAnalysis(e.target.value)}
+                            placeholder="Valores obtenidos, comparación con rangos esperados…"
+                            rows={2}
+                            className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-action-blue/20 focus:border-action-blue transition-colors"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-xs font-medium text-ink-slate">Notas{verifResult === 'failed' ? ' / Plan de remediación' : ''}</span>
+                          <textarea
+                            value={verifNotes}
+                            onChange={(e) => setVerifNotes(e.target.value)}
+                            placeholder={verifResult === 'failed' ? 'Que se debe corregir antes del proximo intento…' : 'Observaciones adicionales…'}
+                            rows={2}
+                            className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-action-blue/20 focus:border-action-blue transition-colors"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleVerificationAttempt}
+                          disabled={saving === 'step5b' || !verifCriteria.trim()}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-action-blue text-white text-sm font-semibold disabled:opacity-40 hover:bg-blue-600 transition-colors active:scale-[0.97]"
+                        >
+                          <FiCheckCircle size={14} />
+                          {saving === 'step5b' ? 'Guardando…' : 'Registrar intento de verificación'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </RoleGatedAction>
         </WorkflowStep>
@@ -1028,9 +1214,9 @@ const TechnicalTab = ({ purchase, type, userRoles, refresh }) => {
               <p className="font-semibold">
                 {iw.closure_gate.can_close ? 'Flujo técnico completado' : 'Flujo técnico en progreso'}
               </p>
-              {iw.closure_gate.blocking_reasons?.length > 0 && (
+              {iw.closure_gate.blocked_reasons?.length > 0 && (
                 <p className="text-xs mt-0.5 text-slate-500">
-                  Pendiente: {iw.closure_gate.blocking_reasons.join(' · ')}
+                  Pendiente: {iw.closure_gate.blocked_reasons.join(' · ')}
                 </p>
               )}
             </div>

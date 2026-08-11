@@ -615,6 +615,7 @@ export default function KickoffAwardsSection({ eventId, isAdmin }) {
     ? tiebreakerStatus.last_round.candidates?.find(c => c.aporte_id === tiebreakerStatus.last_round.winner_aporte_id)
     : null;
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const winner = tiebreakerWinner
     ? { ...tiebreakerWinner, aporte_text: tiebreakerWinner.aporte_text, collaborator_name: tiebreakerWinner.collaborator_name, avg_rating: null }
     : (!isTied ? (rankings.find(r => r.rating_count > 0) || rankings[0]) : null);

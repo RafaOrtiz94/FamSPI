@@ -245,12 +245,16 @@ exports.forwardToAcp = async (req, res, next) => {
  */
 exports.startAvailability = async (req, res, next) => {
   try {
-    const { provider_email, notes } = req.body || {};
+    // provider_email(s): acepta un solo correo (string, uso previo) o varios
+    // (array, o string separado por comas) -- el service normaliza cualquiera
+    // de las dos formas.
+    const { provider_email, provider_emails, notes, cc_emails } = req.body || {};
     const updated = await service.startAvailabilityRequest(
       req.params.id,
       req.user,
-      provider_email,
-      notes
+      provider_emails || provider_email,
+      notes,
+      cc_emails
     );
 
     res.json({ ok: true, data: updated });
@@ -313,6 +317,16 @@ exports.saveProviderResponse = async (req, res, next) => {
   }
 };
 
+exports.registerProviderDeliveryDate = async (req, res, next) => {
+  try {
+    const { date, notes } = req.body || {};
+    const result = await service.registerProviderDeliveryDate(req.params.id, { date, notes }, req.user);
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.renewReservation = async (req, res, next) => {
   try {
     const result = await service.renewReservation(req.params.id, req.user);
@@ -330,10 +344,11 @@ exports.renewReservation = async (req, res, next) => {
 exports.requestProformaFromProvider = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { provider_email, notes } = req.body || {};
+    const { provider_email, notes, via_email } = req.body || {};
     const result = await service.requestProformaFromProvider(id, req.user, {
       providerEmail: provider_email,
       notes,
+      viaEmail: via_email !== false,
     });
     res.json({ ok: true, data: result });
   } catch (error) {

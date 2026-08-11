@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
-  FiBriefcase, FiCheckCircle, FiGlobe, FiFileText,
+  FiCheckCircle, FiGlobe, FiFileText,
   FiPackage, FiTool, FiBookOpen, FiGrid, FiClock,
   FiRefreshCw, FiAlertCircle, FiTrendingUp, FiLock,
   FiZap, FiArrowRight, FiActivity,
@@ -11,7 +11,7 @@ import {
 import { useAuth } from '../../../../core/auth/AuthContext';
 import usePurchaseExpediente from '../hooks/usePurchaseExpediente';
 
-import CommercialTab        from './tabs/CommercialTab';
+import ExpedienteSummaryTab from './tabs/ExpedienteSummaryTab';
 import PrivateFlowTab       from './tabs/PrivateFlowTab';
 import AvailabilityTab      from './tabs/AvailabilityTab';
 import PublicAcpTab         from './tabs/PublicAcpTab';
@@ -19,9 +19,10 @@ import ContractTab          from './tabs/ContractTab';
 import EquipmentLogisticsTab from './tabs/EquipmentLogisticsTab';
 import TechnicalTab         from './tabs/TechnicalTab';
 import TrainingTab          from './tabs/TrainingTab';
-import SupplyControlTab     from './tabs/SupplyControlTab';
+import ConsumableFilesTab   from './tabs/ConsumableFilesTab';
 import ExpedienteTimelineTab from './tabs/ExpedienteTimelineTab';
 import ExpedienteAuditTab   from './tabs/ExpedienteAuditTab';
+import { hasRole, hasAnyRole, isManager as isManagerRole } from '../purchaseRoleGroups';
 
 const EASE_OUT = [0.23, 1, 0.32, 1];
 
@@ -42,19 +43,18 @@ function computePendingTabs(purchase, type, userRoles = []) {
   const pending = new Set();
   if (!purchase) return pending;
 
-  const roles    = new Set(userRoles);
   const status   = purchase.status || '';
   const serialSt = purchase.serial_status || '';
   const inspectionHandledByBc = purchaseInspectionHandledByBusinessCase(purchase, type);
 
   // ── Role helpers ────────────────────────────────────────────────────────
-  const isComercial  = roles.has('comercial') || roles.has('asesor_comercial') || roles.has('analista_comercial');
-  const isBackoffice = roles.has('backoffice') || roles.has('backoffice_comercial');
-  const isAcp        = roles.has('acp_comercial');
-  const isManager    = ['gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'].some(r => roles.has(r));
-  const isTecnico    = ['tecnico','jefe_tecnico','jefe_servicio_tecnico'].some(r => roles.has(r));
-  const isLogistica  = roles.has('logistica') || roles.has('jefe_logistica');
-  const isOps        = roles.has('operaciones') || roles.has('jefe_operaciones');
+  const isComercial  = hasRole(userRoles, 'comercial_advisor');
+  const isBackoffice = hasRole(userRoles, 'backoffice');
+  const isAcp        = hasRole(userRoles, 'acp_comercial');
+  const isManager    = hasAnyRole(userRoles, ['gerencia', 'jefe_comercial']);
+  const isTecnico    = hasRole(userRoles, 'tecnico');
+  const isLogistica  = hasRole(userRoles, 'logistica');
+  const isOps        = hasRole(userRoles, 'operaciones');
 
   // Composite helpers
   const isMgr = isManager;
@@ -257,20 +257,27 @@ function computeTabStates(purchase, type) {
       atOrPast('client_registration_requested')              // fallback: status avanzó más allá de disponibilidad
     ) done.add('disponibilidad');
 
-    // contrato: unlock from client_registration_requested; done when past contract_available
+    // contrato: unlock from client_registration_requested; contract_available ES el
+    // paso final del tab (contrato ya disponible/firmado), no algo que deba superarse.
     if (!atOrPast('client_registration_requested')) locked.add('contrato');
-    else if (strictlyPast('contract_available'))    done.add('contrato');
+    else if (atOrPast('contract_available'))        done.add('contrato');
 
-    // logistica: unlock from contract_available; done when installation stage starts
-    if (!atOrPast('contract_available'))         locked.add('logistica');
-    else if (atOrPast('installation_pending'))   done.add('logistica');
+    // logistica: unlock from contract_available; done cuando el paso final del tab
+    // (Completar entrega) transiciona el status a delivered_signed. Antes se usaba
+    // 'installation_pending', que NO existe en el enum de compra privada -- al estar
+    // igual en este array de referencia, cualquier status real posterior (ej.
+    // delivery_act_tech_assigned) ya contaba como "pasado ese punto" y marcaba el
+    // tab completado con varios pasos de Logística Equipo todavía pendientes.
+    if (!atOrPast('contract_available'))     locked.add('logistica');
+    else if (atOrPast('delivered_signed'))   done.add('logistica');
 
     // tecnica: unlock from client_registered so comercial can request the environment inspection.
     if (!atOrPast('client_registered'))          locked.add('tecnica');
     else if (atOrPast('delivery_act_generated')) done.add('tecnica');
 
-    // entrenamiento: unlock from installation_pending
-    if (!atOrPast('installation_pending')) locked.add('entrenamiento');
+    // entrenamiento: unlock once la entrega fue completada (mismo motivo que arriba,
+    // 'installation_pending' no es un status real de compra privada).
+    if (!atOrPast('delivered_signed')) locked.add('entrenamiento');
 
     // insumos: unlock from contract_available (supply control can start then)
     if (!atOrPast('contract_available')) locked.add('insumos');
@@ -316,9 +323,10 @@ function computeTabStates(purchase, type) {
     if (!atOrPast('waiting_proforma'))           locked.add('acp');
     else if (atOrPast('contract_available'))     done.add('acp');
 
-    // contrato: unlock from pending_contract; done when past contract_available
-    if (!atOrPast('pending_contract'))           locked.add('contrato');
-    else if (strictlyPast('contract_available')) done.add('contrato');
+    // contrato: unlock from pending_contract; contract_available ES el paso final
+    // del tab (contrato ya disponible/firmado), no algo que deba superarse.
+    if (!atOrPast('pending_contract'))       locked.add('contrato');
+    else if (atOrPast('contract_available')) done.add('contrato');
 
     // logistica: unlock from contract_available; done when inspection starts
     if (!atOrPast('contract_available'))       locked.add('logistica');
@@ -348,16 +356,15 @@ function computeNextAction(purchase, type, userRoles = []) {
   if (!purchase) return null;
 
   const status   = purchase?.status || '';
-  const roles    = new Set(userRoles);
   const inspectionHandledByBc = purchaseInspectionHandledByBusinessCase(purchase, type);
 
-  const isComercial  = roles.has('comercial') || roles.has('asesor_comercial') || roles.has('analista_comercial');
-  const isBackoffice = roles.has('backoffice') || roles.has('backoffice_comercial');
-  const isAcp        = roles.has('acp_comercial');
-  const isManager    = ['gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'].some(r => roles.has(r));
-  const isTecnico    = ['tecnico','jefe_tecnico','jefe_servicio_tecnico'].some(r => roles.has(r));
-  const isLogistica  = roles.has('logistica') || roles.has('jefe_logistica');
-  const isOps        = roles.has('operaciones') || roles.has('jefe_operaciones');
+  const isComercial  = hasRole(userRoles, 'comercial_advisor');
+  const isBackoffice = hasRole(userRoles, 'backoffice');
+  const isAcp        = hasRole(userRoles, 'acp_comercial');
+  const isManager    = hasAnyRole(userRoles, ['gerencia', 'jefe_comercial']);
+  const isTecnico    = hasRole(userRoles, 'tecnico');
+  const isLogistica  = hasRole(userRoles, 'logistica');
+  const isOps        = hasRole(userRoles, 'operaciones');
   const isDelivery   = isLogistica || isOps || isTecnico || isManager;
 
   // Terminal states — no action needed
@@ -368,7 +375,7 @@ function computeNextAction(purchase, type, userRoles = []) {
   const checks = type === 'private' ? [
 
     // ── Comercial inicial ───────────────────────────────────────────
-    { tabId: 'comercial',
+    { tabId: 'resumen',
       description: 'Completa los datos de la solicitud para iniciar el flujo comercial.',
       actor: 'Asesor Comercial',
       when: status === 'pending_commercial' && (isComercial || isManager) },
@@ -528,7 +535,7 @@ function computeNextAction(purchase, type, userRoles = []) {
   ] : [
     // ═══ COMPRA PÚBLICA ═══════════════════════════════════════════
 
-    { tabId: 'comercial',
+    { tabId: 'resumen',
       description: 'Completa los detalles del expediente para enviarlo a disponibilidad.',
       actor: 'Comercial / Backoffice',
       when: ['draft','pending_backoffice_review'].includes(status) && (isComercial || isBackoffice || isManager) },
@@ -605,16 +612,15 @@ function computeWaitingState(purchase, type, userRoles = []) {
   if (!purchase) return null;
 
   const status = purchase?.status || '';
-  const roles  = new Set(userRoles);
   const inspectionHandledByBc = purchaseInspectionHandledByBusinessCase(purchase, type);
 
-  const isComercial  = roles.has('comercial') || roles.has('asesor_comercial') || roles.has('analista_comercial');
-  const isBackoffice = roles.has('backoffice') || roles.has('backoffice_comercial');
-  const isAcp        = roles.has('acp_comercial');
-  const isManager    = ['gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'].some(r => roles.has(r));
-  const isTecnico    = ['tecnico','jefe_tecnico','jefe_servicio_tecnico'].some(r => roles.has(r));
-  const isLogistica  = roles.has('logistica') || roles.has('jefe_logistica');
-  const isOps        = roles.has('operaciones') || roles.has('jefe_operaciones');
+  const isComercial  = hasRole(userRoles, 'comercial_advisor');
+  const isBackoffice = hasRole(userRoles, 'backoffice');
+  const isAcp        = hasRole(userRoles, 'acp_comercial');
+  const isManager    = hasAnyRole(userRoles, ['gerencia', 'jefe_comercial']);
+  const isTecnico    = hasRole(userRoles, 'tecnico');
+  const isLogistica  = hasRole(userRoles, 'logistica');
+  const isOps        = hasRole(userRoles, 'operaciones');
   const isDelivery   = isLogistica || isOps || isTecnico;
 
   // Managers always see a next action — never in a pure waiting state
@@ -786,7 +792,7 @@ const AVAIL_STATUS_LABELS = {
 };
 
 const TABS_PUBLIC = [
-  { id: 'comercial',      label: 'Comercial',          icon: FiBriefcase   },
+  { id: 'resumen',        label: 'Resumen',            icon: FiActivity    },
   { id: 'disponibilidad', label: 'Disponibilidad',     icon: FiCheckCircle },
   { id: 'acp',            label: 'ACP / Portal',        icon: FiGlobe       },
   { id: 'contrato',       label: 'Contrato',            icon: FiFileText    },
@@ -800,7 +806,7 @@ const TABS_PUBLIC = [
 
 /* Compra privada: Flujo Comercial en lugar de ACP/Portal (no aplica en privadas) */
 const TABS_PRIVATE = [
-  { id: 'comercial',      label: 'Comercial',          icon: FiBriefcase   },
+  { id: 'resumen',        label: 'Resumen',            icon: FiActivity    },
   { id: 'flujo_comercial',label: 'Flujo Comercial',    icon: FiTrendingUp  },
   { id: 'disponibilidad', label: 'Disponibilidad',     icon: FiCheckCircle },
   { id: 'contrato',       label: 'Contrato',            icon: FiFileText    },
@@ -811,6 +817,28 @@ const TABS_PRIVATE = [
   { id: 'timeline',       label: 'Timeline',            icon: FiClock       },
   { id: 'auditoria',      label: 'Auditoria',           icon: FiShield      },
 ];
+
+/* Etiqueta de responsable por tab, usada en el listado de Resumen.
+   Todas las etapas son visibles para todos los roles (ver
+   filterTabsByParticipation); esto solo indica quién actúa en cada una. */
+const TAB_ROLE_LABELS = {
+  comercial:       'Asesor / Backoffice Comercial',
+  flujo_comercial: 'Asesor / Backoffice Comercial',
+  disponibilidad:  'ACP Comercial',
+  acp:             'ACP Comercial',
+  contrato:        'Backoffice / ACP Comercial',
+  logistica:       'Logística / Operaciones',
+  tecnica:         'Servicio Técnico',
+  entrenamiento:   'Servicio Técnico / Comercial',
+  insumos:         'ACP Comercial / Operaciones',
+};
+
+// ponytail: todas las etapas son visibles para todos los roles (informacion
+// de cliente/equipo es transversal); el bloqueo real es por stage/status en
+// computeTabStates, y las acciones dentro de cada tab siguen gateadas por rol.
+function filterTabsByParticipation(base) {
+  return base;
+}
 
 function SkeletonBlock({ className = '' }) {
   return <div className={`bg-slate-200 rounded-xl animate-pulse ${className}`} />;
@@ -859,13 +887,15 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
   const { purchase, timeline, loading, error, refresh } = usePurchaseExpediente(id, type);
   const prefersReducedMotion = useReducedMotion();
 
-  const [activeTab, setActiveTab] = useState('comercial');
+  const [activeTab, setActiveTab] = useState('resumen');
 
   const canViewAudit = hasRole('jefe_ti') || hasRole('gerencia_general');
+  const isManager = useMemo(() => isManagerRole(userRoles), [userRoles]);
   const tabs = useMemo(() => {
     const base = type === 'public' ? TABS_PUBLIC : TABS_PRIVATE;
-    return canViewAudit ? base : base.filter((t) => t.id !== 'auditoria');
-  }, [type, canViewAudit]);
+    const filtered = filterTabsByParticipation(base, userRoles, isManager);
+    return canViewAudit ? filtered : filtered.filter((t) => t.id !== 'auditoria');
+  }, [type, canViewAudit, userRoles, isManager]);
   const pendingTabs = useMemo(() => computePendingTabs(purchase, type, userRoles), [purchase, type, userRoles]);
   const { locked: lockedTabs, done: doneTabs } = useMemo(
     () => computeTabStates(purchase, type),
@@ -874,12 +904,18 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
   const nextAction    = useMemo(() => computeNextAction(purchase, type, userRoles),    [purchase, type, userRoles]);
   const waitingState  = useMemo(() => computeWaitingState(purchase, type, userRoles),  [purchase, type, userRoles]);
 
-  // If the active tab is locked (stage not reached yet), fall back to 'comercial'
+  // If the active tab is locked (stage not reached yet) or not visible for this
+  // role, fall back to 'resumen' — always visible regardless of participation.
   useEffect(() => {
-    if (lockedTabs.has(activeTab) || !tabs.some((t) => t.id === activeTab)) setActiveTab('comercial');
+    if (lockedTabs.has(activeTab) || !tabs.some((t) => t.id === activeTab)) setActiveTab('resumen');
   }, [lockedTabs, activeTab, tabs]);
 
   const tabProps = { purchase, type, userRoles, hasRole, refresh };
+  const summaryProps = {
+    purchase, tabs, lockedTabs, doneTabs, pendingTabs, nextAction,
+    tabRoleLabels: TAB_ROLE_LABELS,
+    onJumpToTab: setActiveTab,
+  };
 
   if (loading && !purchase) return <LoadingSkeleton />;
   if (error)                 return <ErrorState message={error} onRetry={refresh} />;
@@ -1139,7 +1175,7 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
             transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.16, ease: EASE_OUT }}
             className="p-5"
           >
-            {activeTab === 'comercial'      && <CommercialTab         {...tabProps} />}
+            {activeTab === 'resumen'        && <ExpedienteSummaryTab  {...summaryProps} {...tabProps} />}
             {activeTab === 'flujo_comercial'&& <PrivateFlowTab        {...tabProps} />}
             {activeTab === 'disponibilidad' && <AvailabilityTab       {...tabProps} />}
             {activeTab === 'acp'            && <PublicAcpTab          {...tabProps} />}
@@ -1147,7 +1183,7 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
             {activeTab === 'logistica'     && <EquipmentLogisticsTab  {...tabProps} />}
             {activeTab === 'tecnica'       && <TechnicalTab           {...tabProps} />}
             {activeTab === 'entrenamiento' && <TrainingTab            {...tabProps} />}
-            {activeTab === 'insumos'       && <SupplyControlTab       {...tabProps} />}
+            {activeTab === 'insumos'       && <ConsumableFilesTab     {...tabProps} />}
             {activeTab === 'timeline'      && <ExpedienteTimelineTab  {...tabProps} timeline={timeline} />}
             {activeTab === 'auditoria'     && canViewAudit && <ExpedienteAuditTab {...tabProps} timeline={timeline} />}
           </motion.div>

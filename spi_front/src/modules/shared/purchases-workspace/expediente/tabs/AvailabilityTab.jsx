@@ -41,6 +41,7 @@ import {
 import {
   transitionPrivatePurchaseState,
   savePrivatePurchaseProviderResponse,
+  registerPrivatePurchaseProviderDeliveryDate,
   startPrivatePurchaseAvailability,
   confirmPrivateCuAvailability,
   confirmPrivateImportApproval,
@@ -65,7 +66,7 @@ const fileToBase64 = (file) =>
 /* ─── Tipos solicitados por el cliente (en creación) ──────────────────── */
 const REQUESTED_TYPE_CFG = {
   new:        { label: 'Nuevo',              cls: 'bg-green-soft text-operative-green border-green-200' },
-  cu:         { label: 'Condición de uso',   cls: 'bg-amber-soft text-caution-amber border-amber-200'  },
+  cu:         { label: 'CU',                 cls: 'bg-amber-soft text-caution-amber border-amber-200'  },
   import_new: { label: 'Nuevo vía importación', cls: 'bg-red-50 text-alert-red border-red-200'         },
 };
 
@@ -144,9 +145,19 @@ const PRIVATE_PRE_AVAILABILITY_STATES = new Set([
 
 function getPrivateAvailabilityStatus(purchase) {
   const s = purchase?.status;
+  // Direct mapping for availability states (current status IS an availability state)
+  if (s && PRIVATE_AVAIL_STATE_MAP[s]) return PRIVATE_AVAIL_STATE_MAP[s];
+  // Bug fix: el estado de compra privada es un solo campo secuencial. Cuando
+  // disponibilidad se resuelve ANTES de enviar la oferta (pending_backoffice ->
+  // acp_availability_requested -> acp_availability_confirmed -> offer_sent ->
+  // offer_signed), al llegar a offer_signed el status ya no es uno de
+  // disponibilidad y PRIVATE_PRE_AVAILABILITY_STATES lo trata como "todavia no
+  // consultado", perdiendo el hecho de que ACP ya confirmo. provider_response_at
+  // es un campo persistente (se setea una vez y no se vuelve a limpiar), asi que
+  // es la fuente confiable de "disponibilidad ya fue consultada", sin importar
+  // que tan lejos haya avanzado el status despues.
+  if (purchase?.provider_response_at) return 'availability_confirmed';
   if (!s) return null;
-  // Direct mapping for availability states
-  if (PRIVATE_AVAIL_STATE_MAP[s]) return PRIVATE_AVAIL_STATE_MAP[s];
   // Any post-availability state (not pre-availability, not generic rejected)
   if (!PRIVATE_PRE_AVAILABILITY_STATES.has(s) && s !== 'rejected') {
     return 'availability_confirmed';
@@ -182,6 +193,11 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
   const [responseOutcome,  setResponseOutcome]  = useState('new');
   const [responseNotes,    setResponseNotes]    = useState('');
   const [error,            setError]            = useState(null);
+
+  /* ── Fecha tentativa de entrega del proveedor (privado) ───────── */
+  const [providerDeliveryDateDraft,  setProviderDeliveryDateDraft]  = useState('');
+  const [providerDeliveryNotesDraft, setProviderDeliveryNotesDraft] = useState('');
+  const [providerDeliveryLoading,    setProviderDeliveryLoading]    = useState(false);
 
   /* ── Paso solicitar proforma al proveedor ─────────────────── */
   const [proformaRequestNotes,  setProformaRequestNotes]  = useState('');
@@ -220,9 +236,17 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
 
   const statusInfo  = AVAILABILITY_STATUSES[currentStatus] || AVAILABILITY_STATUSES.not_checked;
   const isInternal  = purchase?.availability_source === 'internal';
+  // Historial de fechas tentativas de entrega dadas por el proveedor (privado).
+  const providerDeliveryHistory = Array.isArray(purchase?.provider_delivery_dates_history)
+    ? purchase.provider_delivery_dates_history
+    : [];
+  const latestProviderDeliveryDate = providerDeliveryHistory.length
+    ? providerDeliveryHistory[providerDeliveryHistory.length - 1]
+    : null;
   // isSupplier: public uses availability_source; private infers from state machine
   const isSupplier  = purchase?.availability_source === 'supplier' ||
-    (isPrivate && !PRIVATE_PRE_AVAILABILITY_STATES.has(purchase?.status) && purchase?.status !== 'rejected');
+    (isPrivate && (Boolean(purchase?.provider_response_at) ||
+      (!PRIVATE_PRE_AVAILABILITY_STATES.has(purchase?.status) && purchase?.status !== 'rejected')));
   // CU pending: public uses availability_status, private uses purchase.status
   const isCuPending =
     (!isPrivate && currentStatus === 'cu_available_pending_approval') ||
@@ -446,6 +470,29 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
     }
   };
 
+  /* ── Fecha tentativa de entrega del proveedor (privado) ───────── */
+  const handleRegisterProviderDeliveryDate = async () => {
+    if (!isPrivate || !providerDeliveryDateDraft) return;
+    setProviderDeliveryLoading(true);
+    setError(null);
+    try {
+      await registerPrivatePurchaseProviderDeliveryDate(purchase.id, {
+        date: providerDeliveryDateDraft,
+        notes: providerDeliveryNotesDraft,
+      });
+      setProviderDeliveryDateDraft('');
+      setProviderDeliveryNotesDraft('');
+      await refresh();
+    } catch (err) {
+      const message = typeof err === 'string'
+        ? err
+        : err?.response?.data?.message || err?.response?.data?.error || err?.message || 'No se pudo registrar la fecha tentativa de entrega';
+      setError(message);
+    } finally {
+      setProviderDeliveryLoading(false);
+    }
+  };
+
   /* ── Import awareness — public (ACP confirms client secured) ── */
   const handleAcpImportConfirm = async () => {
     setImportLoading('acp_confirm');
@@ -482,10 +529,10 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
     }
   };
 
-  /* ── Solicitar proforma al proveedor (envía email) ─────────── */
-  const handleRequestProforma = async () => {
+  /* ── Solicitar proforma al proveedor (envía email por SPI o solo registra) ── */
+  const handleRequestProforma = async (viaEmail = true) => {
     if (!isPrivate) return;
-    if (!providerEmail.trim()) {
+    if (viaEmail && !providerEmail.trim()) {
       setError('Ingresa el correo del proveedor');
       return;
     }
@@ -495,6 +542,7 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
       await requestPrivatePurchaseProforma(purchase.id, {
         providerEmail: providerEmail.trim(),
         notes: proformaRequestNotes.trim(),
+        viaEmail,
       });
       setProformaRequestNotes('');
       await refresh();
@@ -1240,18 +1288,21 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                     </div>
                   )}
 
-                  {/* Campo de correo con datalist */}
+                  {/* Campo de correo con datalist -- "multiple" habilita varios
+                      destinatarios separados por coma (soporte nativo del
+                      input type=email, sin JS extra) */}
                   <label className="block">
-                    <span className="text-xs font-medium text-slate-600">Correo proveedor</span>
+                    <span className="text-xs font-medium text-slate-600">Correo(s) proveedor</span>
                     <div className="mt-1 flex gap-2">
                       <input
                         type="email"
+                        multiple
                         id="provider-email-input"
                         list="saved-emails-list"
                         value={providerEmail}
                         onChange={(e) => setProviderEmail(e.target.value)}
                         className="flex-1 min-h-10 rounded-xl border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-action-blue"
-                        placeholder="proveedor@empresa.com"
+                        placeholder="proveedor1@empresa.com, proveedor2@empresa.com"
                         autoComplete="off"
                       />
                       <datalist id="saved-emails-list">
@@ -1634,7 +1685,7 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                 ) : (
                   <>
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-                      Se enviará un correo al proveedor solicitando la proforma para los equipos confirmados. Una vez recibida, se subirá en el siguiente paso para activar la reserva.
+                      Puedes enviar el correo de solicitud por SPI, o si ya la solicitaste respondiendo directamente el hilo de Gmail con el proveedor, solo registra el paso como hecho.
                     </div>
                     <label className="block">
                       <span className="text-xs font-medium text-slate-600">Correo del proveedor</span>
@@ -1655,20 +1706,36 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                         placeholder="Plazo, condiciones, referencias, etc."
                       />
                     </label>
-                    <button
-                      type="button"
-                      onClick={handleRequestProforma}
-                      disabled={
-                        proformaRequestLoading ||
-                        !canUploadProforma ||
-                        !providerEmail.trim() ||
-                        purchase?.status !== 'acp_availability_confirmed'
-                      }
-                      className="min-h-10 inline-flex items-center justify-center gap-2 px-4 rounded-xl bg-action-blue text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97] transition"
-                    >
-                      {proformaRequestLoading ? <FiLoader className="animate-spin" size={14} /> : <FiMail size={14} />}
-                      Enviar solicitud de proforma
-                    </button>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleRequestProforma(true)}
+                        disabled={
+                          proformaRequestLoading ||
+                          !canUploadProforma ||
+                          !providerEmail.trim() ||
+                          purchase?.status !== 'acp_availability_confirmed'
+                        }
+                        className="min-h-10 inline-flex items-center justify-center gap-2 px-4 rounded-xl bg-action-blue text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97] transition"
+                      >
+                        {proformaRequestLoading ? <FiLoader className="animate-spin" size={14} /> : <FiMail size={14} />}
+                        Enviar solicitud por SPI
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRequestProforma(false)}
+                        disabled={
+                          proformaRequestLoading ||
+                          !canUploadProforma ||
+                          purchase?.status !== 'acp_availability_confirmed'
+                        }
+                        className="min-h-10 inline-flex items-center justify-center gap-2 px-4 rounded-xl border border-slate-300 bg-white text-ink-slate text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97] transition"
+                        title="Usa esta opción si ya solicitaste la proforma respondiendo el correo directamente en Gmail"
+                      >
+                        {proformaRequestLoading ? <FiLoader className="animate-spin" size={14} /> : <FiCheckCircle size={14} />}
+                        Ya la solicité por Gmail — solo registrar
+                      </button>
+                    </div>
                   </>
                 )}
               </div>
@@ -1976,6 +2043,81 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                 <FiLock size={14} className="shrink-0 text-slate-400" />
                 <span>La reserva de este expediente aparecera aqui cuando ACP la registre.</span>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Fecha tentativa de entrega del proveedor — al final del tab: no es
+             un paso bloqueante, puede actualizarse varias veces durante el
+             proceso, por eso vive fuera de la secuencia numerada de WorkflowStep. ── */}
+        {isPrivate && (
+          <div className="bg-white rounded-xl border border-soft-border p-5 shadow-ambient">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-sm font-semibold text-ink-slate flex items-center gap-2">
+                  <FiClock className="text-action-blue" size={15} />
+                  Fecha tentativa de entrega del proveedor
+                </h3>
+                <p className="text-xs text-warm-ash mt-0.5">
+                  Registrada por ACP Comercial. Puede actualizarse si el proveedor da una nueva fecha — cada cambio queda en el historial.
+                </p>
+              </div>
+              {latestProviderDeliveryDate && (
+                <TabBadge variant="active" label={`Vigente: ${formatDate(latestProviderDeliveryDate.date)}`} />
+              )}
+            </div>
+
+            <RoleGatedAction
+              allowedRoles={['acp_comercial', 'jefe_operaciones', 'jefe_comercial', 'jefe_de_comercial', 'gerencia', 'gerencia_general']}
+              userRoles={userRoles}
+            >
+              <div className="flex flex-col sm:flex-row gap-2 mb-4">
+                <input
+                  type="date"
+                  value={providerDeliveryDateDraft}
+                  onChange={(e) => setProviderDeliveryDateDraft(e.target.value)}
+                  className="min-h-10 rounded-xl border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-action-blue/20 focus:border-action-blue"
+                />
+                <input
+                  type="text"
+                  value={providerDeliveryNotesDraft}
+                  onChange={(e) => setProviderDeliveryNotesDraft(e.target.value)}
+                  placeholder="Notas (opcional)"
+                  className="flex-1 min-h-10 rounded-xl border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-action-blue/20 focus:border-action-blue"
+                />
+                <button
+                  type="button"
+                  onClick={handleRegisterProviderDeliveryDate}
+                  disabled={!providerDeliveryDateDraft || providerDeliveryLoading}
+                  className="min-h-10 inline-flex items-center justify-center gap-2 px-4 rounded-xl bg-action-blue text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition"
+                >
+                  {providerDeliveryLoading ? <FiLoader className="animate-spin" size={14} /> : <FiClock size={14} />}
+                  {latestProviderDeliveryDate ? 'Registrar nueva fecha' : 'Registrar fecha'}
+                </button>
+              </div>
+            </RoleGatedAction>
+
+            {providerDeliveryHistory.length ? (
+              <div className="space-y-2">
+                {providerDeliveryHistory.slice().reverse().map((entry, i) => (
+                  <div
+                    key={`${entry.registered_at}-${i}`}
+                    className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 rounded-lg border px-3 py-2 text-xs ${
+                      i === 0 ? 'border-action-blue/30 bg-action-blue/5' : 'border-slate-100 bg-slate-50'
+                    }`}
+                  >
+                    <div>
+                      <span className="font-mono font-semibold text-ink-slate">{formatDate(entry.date)}</span>
+                      {entry.notes && <span className="text-warm-ash ml-2">{entry.notes}</span>}
+                    </div>
+                    <span className="text-warm-ash">
+                      {entry.registered_by_email || 'ACP'} · {formatDate(entry.registered_at)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-warm-ash">Aún no se ha registrado una fecha tentativa del proveedor.</p>
             )}
           </div>
         )}

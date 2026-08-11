@@ -355,7 +355,10 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                       }
                     </p>
                   </div>
-                  <RoleGatedAction allowedRoles={['comercial', 'backoffice_comercial']} userRoles={userRoles}>
+                  <RoleGatedAction
+                    allowedRoles={['comercial', 'backoffice', 'backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']}
+                    userRoles={userRoles}
+                  >
                     <button
                       type="button"
                       onClick={() => setShowRegModal(true)}
@@ -390,9 +393,47 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             </div>
           </div>
 
-          {/* ── Paso 1: Oferta sin firmar ──────────────────────────────── */}
+          {/* ── Paso 1: Solicitar disponibilidad a ACP ─────────────────── */}
           <WorkflowStep
             stepNumber={1}
+            title="Solicitar disponibilidad a ACP"
+            actor="Backoffice Comercial"
+            status={roleStepStatus(
+              Boolean(purchase?.forwarded_to_acp_at),
+              status === 'pending_backoffice',
+              ['backoffice_comercial','acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
+            )}
+            completedAt={purchase?.forwarded_to_acp_at}
+          >
+            {purchase?.forwarded_to_acp_at ? (
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-green-50 border border-green-200">
+                <FiCheckCircle className="text-operative-green shrink-0" size={18} />
+                <div>
+                  <p className="text-sm font-semibold text-operative-green">Disponibilidad solicitada a ACP</p>
+                  <p className="text-xs text-warm-ash mt-0.5">ACP Comercial confirmará disponibilidad para continuar con la oferta.</p>
+                </div>
+              </div>
+            ) : (
+              <RoleGatedAction
+                allowedRoles={['backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']}
+                userRoles={userRoles}
+              >
+                <button
+                  type="button"
+                  onClick={handleForwardToAcp}
+                  disabled={action === 'forward_acp' || status !== 'pending_backoffice'}
+                  className="min-h-11 inline-flex items-center gap-2 px-4 rounded-xl bg-action-blue text-white text-sm font-medium hover:bg-action-blue/90 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97] transition cursor-pointer"
+                >
+                  {action === 'forward_acp' ? <FiLoader className="animate-spin" size={15} /> : <FiSend size={15} />}
+                  Solicitar disponibilidad ACP
+                </button>
+              </RoleGatedAction>
+            )}
+          </WorkflowStep>
+
+          {/* ── Paso 2: Oferta sin firmar ──────────────────────────────── */}
+          <WorkflowStep
+            stepNumber={2}
             title="Oferta enviada al cliente"
             actor="Backoffice Comercial"
             status={roleStepStatus(
@@ -416,7 +457,10 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                 uploadedLabel="Oferta enviada al cliente"
               />
             ) : (
-              <RoleGatedAction allowedRoles={['backoffice_comercial']} userRoles={userRoles}>
+              <RoleGatedAction
+                allowedRoles={['backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']}
+                userRoles={userRoles}
+              >
                 <FileUploadZone
                   id="offer-file"
                   accept=".pdf,.doc,.docx"
@@ -437,10 +481,10 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             )}
           </WorkflowStep>
 
-          {/* ── Paso 2: Oferta firmada por cliente ─────────────────────── */}
+          {/* ── Paso 3: Respuesta del cliente a la oferta ────────────────── */}
           <WorkflowStep
-            stepNumber={2}
-            title="Oferta firmada por el cliente"
+            stepNumber={3}
+            title="Respuesta del cliente a la oferta"
             actor="Asesor Comercial"
             status={roleStepStatus(
               Boolean(purchase?.offer_signed_document_id),
@@ -464,25 +508,85 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                 uploadedLabel="Oferta firmada por cliente"
               />
             ) : (
-              <RoleGatedAction allowedRoles={['comercial']} userRoles={userRoles}>
-                <FileUploadZone
-                  id="signed-offer-file"
-                  accept=".pdf,.doc,.docx"
-                  label="Subir oferta firmada por cliente"
-                  description="PDF, Word — máx. 20 MB"
-                  file={signedFile}
-                  onFileChange={setSignedFile}
-                  onUpload={handleUploadSignedOffer}
-                  uploading={action === 'signed_offer'}
-                  disabled={!OFFER_SIGN_STATES.includes(status)}
-                />
-              </RoleGatedAction>
+              <div className="space-y-3">
+                <RoleGatedAction allowedRoles={['comercial']} userRoles={userRoles}>
+                  <FileUploadZone
+                    id="signed-offer-file"
+                    accept=".pdf,.doc,.docx"
+                    label="Subir oferta firmada por cliente"
+                    description="PDF, Word — máx. 20 MB"
+                    file={signedFile}
+                    onFileChange={setSignedFile}
+                    onUpload={handleUploadSignedOffer}
+                    uploading={action === 'signed_offer'}
+                    disabled={!OFFER_SIGN_STATES.includes(status)}
+                  />
+                </RoleGatedAction>
+                <div className="flex items-center gap-2 text-xs text-warm-ash">
+                  <span className="flex-1 border-t border-slate-100" />
+                  o
+                  <span className="flex-1 border-t border-slate-100" />
+                </div>
+                <RoleGatedAction allowedRoles={['comercial']} userRoles={userRoles}>
+                  <button
+                    type="button"
+                    onClick={handleRejectOffer}
+                    disabled={action === 'reject_offer' || !OFFER_SIGN_STATES.includes(status)}
+                    className="w-full min-h-11 inline-flex items-center justify-center gap-2 px-4 rounded-xl border border-red-200 bg-red-50 text-sm font-medium text-red-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97] transition cursor-pointer"
+                  >
+                    {action === 'reject_offer' ? <FiLoader className="animate-spin" size={15} /> : <FiXCircle size={15} />}
+                    Rechazar oferta
+                  </button>
+                </RoleGatedAction>
+              </div>
             )}
           </WorkflowStep>
 
-          {/* ── Paso 3: Registro del cliente ───────────────────────────── */}
+          {/* ── Resolución de rechazo (solo cuando el cliente rechazó) ──── */}
+          {PRICE_IMPROVE_STATES.includes(status) && (
+            <div className="bg-white rounded-xl border border-red-200 shadow-ambient overflow-hidden">
+              <div className="flex items-center gap-3 px-5 py-3.5 bg-red-50">
+                <div className="w-7 h-7 rounded-full bg-alert-red text-white flex items-center justify-center shrink-0">
+                  <FiXCircle size={14} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-red-800">Oferta rechazada por el cliente</p>
+                  <p className="text-xs text-red-600 mt-0.5">Jefe Comercial</p>
+                </div>
+              </div>
+              <div className="px-5 py-4">
+                <p className="text-xs text-warm-ash mb-3">
+                  El cliente rechazó la oferta. Solicitá una mejora de precio para reenviar una nueva oferta, o aceptá el rechazo para cerrar la solicitud.
+                </p>
+                <RoleGatedAction allowedRoles={['jefe_comercial', 'jefe_de_comercial']} userRoles={userRoles}>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleRequestImprovement}
+                      disabled={action === 'price_improvement'}
+                      className="min-h-11 inline-flex items-center gap-2 px-4 rounded-xl bg-action-blue text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97] transition cursor-pointer"
+                    >
+                      {action === 'price_improvement' ? <FiLoader className="animate-spin" size={14} /> : null}
+                      Solicitar mejora de precio
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAcceptReject}
+                      disabled={action === 'accept_reject'}
+                      className="min-h-11 inline-flex items-center gap-2 px-4 rounded-xl border border-red-200 bg-white text-sm font-medium text-red-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97] transition cursor-pointer"
+                    >
+                      {action === 'accept_reject' ? <FiLoader className="animate-spin" size={14} /> : <FiXCircle size={15} />}
+                      Aceptar rechazo
+                    </button>
+                  </div>
+                </RoleGatedAction>
+              </div>
+            </div>
+          )}
+
+          {/* ── Paso 4: Registro del cliente ───────────────────────────── */}
           <WorkflowStep
-            stepNumber={3}
+            stepNumber={4}
             title="Registro del cliente en el sistema"
             actor="Asesor Comercial / Backoffice"
             status={roleStepStatus(
@@ -510,7 +614,10 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                     <p>Solicitud de registro ya enviada al backoffice comercial. En espera de confirmación.</p>
                   </div>
                 )}
-                <RoleGatedAction allowedRoles={['comercial', 'backoffice_comercial']} userRoles={userRoles}>
+                <RoleGatedAction
+                  allowedRoles={['comercial', 'backoffice', 'backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']}
+                  userRoles={userRoles}
+                >
                   <button
                     type="button"
                     onClick={() => setShowRegModal(true)}
@@ -525,9 +632,9 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             )}
           </WorkflowStep>
 
-          {/* ── Paso 4: Solicitar inspección operativa de compra ─────────── */}
+          {/* ── Paso 5: Solicitar inspección operativa de compra ─────────── */}
           <WorkflowStep
-            stepNumber={4}
+            stepNumber={5}
             title="Solicitar inspección operativa de compra"
             actor="Asesor Comercial / Backoffice"
             status={roleStepStatus(
@@ -655,65 +762,6 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             </RoleGatedAction>
           </WorkflowStep>
 
-          {/* ── Acciones del flujo (condicionales, sin número de paso) ─── */}
-          <div className="bg-white rounded-xl border border-soft-border p-5 shadow-ambient">
-            <h3 className="text-sm font-semibold text-ink-slate mb-4">Acciones del flujo</h3>
-            <div className="flex flex-wrap gap-2">
-
-              {/* backoffice_comercial → reenviar a ACP */}
-              <RoleGatedAction allowedRoles={['backoffice_comercial']} userRoles={userRoles}>
-                <button
-                  type="button"
-                  onClick={handleForwardToAcp}
-                  disabled={action === 'forward_acp' || status !== 'pending_backoffice'}
-                  className="min-h-11 inline-flex items-center gap-2 px-4 rounded-xl border border-slate-200 bg-white text-sm font-medium text-ink-slate hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97] transition cursor-pointer"
-                >
-                  {action === 'forward_acp' ? <FiLoader className="animate-spin" size={15} /> : <FiSend size={15} />}
-                  Solicitar disponibilidad ACP
-                </button>
-              </RoleGatedAction>
-
-              {/* comercial → rechazar oferta */}
-              <RoleGatedAction allowedRoles={['comercial']} userRoles={userRoles}>
-                <button
-                  type="button"
-                  onClick={handleRejectOffer}
-                  disabled={action === 'reject_offer' || !OFFER_SIGN_STATES.includes(status)}
-                  className="min-h-11 inline-flex items-center gap-2 px-4 rounded-xl border border-red-200 bg-red-50 text-sm font-medium text-red-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97] transition cursor-pointer"
-                >
-                  <FiXCircle size={15} />
-                  Rechazar oferta
-                </button>
-              </RoleGatedAction>
-
-              {/* jefe_comercial + jefe_de_comercial → aceptar rechazo */}
-              <RoleGatedAction allowedRoles={['jefe_comercial', 'jefe_de_comercial']} userRoles={userRoles}>
-                <button
-                  type="button"
-                  onClick={handleAcceptReject}
-                  disabled={action === 'accept_reject' || !PRICE_IMPROVE_STATES.includes(status)}
-                  className="min-h-11 inline-flex items-center gap-2 px-4 rounded-xl border border-red-200 bg-white text-sm font-medium text-red-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97] transition cursor-pointer"
-                >
-                  {action === 'accept_reject' ? <FiLoader className="animate-spin" size={14} /> : <FiXCircle size={15} />}
-                  Aceptar rechazo
-                </button>
-              </RoleGatedAction>
-
-              {/* jefe_comercial + jefe_de_comercial → solicitar mejora */}
-              <RoleGatedAction allowedRoles={['jefe_comercial', 'jefe_de_comercial']} userRoles={userRoles}>
-                <button
-                  type="button"
-                  onClick={handleRequestImprovement}
-                  disabled={action === 'price_improvement' || !PRICE_IMPROVE_STATES.includes(status)}
-                  className="min-h-11 inline-flex items-center gap-2 px-4 rounded-xl border border-amber-200 bg-amber-50 text-sm font-medium text-amber-800 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.97] transition cursor-pointer"
-                >
-                  {action === 'price_improvement' ? <FiLoader className="animate-spin" size={14} /> : null}
-                  Solicitar mejora de precio
-                </button>
-              </RoleGatedAction>
-
-            </div>
-          </div>
         </div>
       </div>
 

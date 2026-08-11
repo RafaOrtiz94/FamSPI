@@ -365,3 +365,8 @@ export const runCorrectiveCaseAction = async (caseId, payload = {}) => {
  const { data } = await api.post(`/servicio/corrective-cases/${caseId}/actions`, payload);
  return data?.case || null;
 };
+
+export const getServicioCronogramaFeed = async ({ from, to, scope = "team" } = {}) => {
+ const { data } = await api.get("/servicio/cronograma/feed", { params: { from, to, scope } });
+ return data;
+};

@@ -244,21 +244,21 @@ function resolveReviewRoleForBusinessCase(businessCase) {
   return REVIEW_ROLE_BY_TYPE[type] || null;
 }
 
+// Merge JSONB atomico a nivel de Postgres (no SELECT + spread en JS +
+// reemplazo total) -- evita perder cambios concurrentes en otras claves
+// top-level de modern_bc_metadata (ej. una aprobacion de prorroga de SLA que
+// commitea entre el SELECT y el UPDATE de otro request). Mismo patron que
+// businessCaseService.updateBusinessCase.
 async function updateBusinessCaseMetadata(businessCaseId, metadataPatch = {}) {
   const { rows } = await db.query(
-    `SELECT modern_bc_metadata FROM equipment_purchase_requests WHERE id = $1 LIMIT 1`,
-    [businessCaseId],
-  );
-  const current = toObject(rows?.[0]?.modern_bc_metadata);
-  const next = { ...current, ...metadataPatch };
-  await db.query(
     `UPDATE equipment_purchase_requests
-        SET modern_bc_metadata = $1::jsonb,
+        SET modern_bc_metadata = COALESCE(modern_bc_metadata, '{}'::jsonb) || $1::jsonb,
             updated_at = now()
-      WHERE id = $2`,
-    [JSON.stringify(next), businessCaseId],
+      WHERE id = $2
+      RETURNING modern_bc_metadata`,
+    [JSON.stringify(metadataPatch), businessCaseId],
   );
-  return next;
+  return toObject(rows?.[0]?.modern_bc_metadata);
 }
 
 function mapBusinessCaseEquipmentToRequestList(businessCase) {
@@ -734,14 +734,14 @@ async function requestPreflowReopen({
           userId: recipient.id,
           customTitle: "Solicitud de reapertura Business Case",
           customMessage:
-            `${actorUser?.email || "Un usuario"} solicito una prorroga de 24 horas para la etapa ${phaseToLabel(preflowInfo.activePhase)} del BC ${businessCaseId}. Justificacion: ${normalizedReason}`,
+            `${actorUser?.email || "Un usuario"} solicito una prorroga de 24 horas para la etapa ${phaseToLabel(preflowInfo.activePhase)} del BC de ${bc?.client_name || "Cliente pendiente"}. Justificacion: ${normalizedReason}`,
           type: "task",
           source: "business_case.preflow.reopen_request",
           priority: 2,
           email: true,
           chat: false,
           data: {
-            email_subject: `Business Case ${businessCaseId} - Seguimiento de prorroga`,
+            email_subject: `Business Case ${bc?.client_name || "Cliente pendiente"} - Seguimiento de prorroga`,
             target_path: `/dashboard/business-case/workspace/${businessCaseId}`,
             cta_label: "Revisar Business Case",
           },
@@ -751,7 +751,7 @@ async function requestPreflowReopen({
             role: preflowInfo.activeRole,
             requestedBy: actorUser?.email || null,
             process_key: `business_case:${businessCaseId}`,
-            email_subject: `Business Case ${businessCaseId} - Seguimiento de prorroga`,
+            email_subject: `Business Case ${bc?.client_name || "Cliente pendiente"} - Seguimiento de prorroga`,
             target_path: `/dashboard/business-case/workspace/${businessCaseId}`,
             cta_label: "Revisar Business Case",
           },
@@ -851,11 +851,16 @@ async function resolvePreflowReopen({
       }
 
       if (technicalReviewExtension) {
+        // Nota: la SLA de fase "review" se rige por preflow_review_deadline_at
+        // (ver buildGateInfo en businessCaseDeterminationsGate.service.js,
+        // usesTechnicalPreflowSla) -- determinations_gate.deadline_at solo se
+        // mantiene por compatibilidad con lecturas en fase commercial_input.
+        // review_deadline_at (nested) nunca se lee en ningun lado, se quito
+        // para no mantener una copia muerta que se puede desincronizar.
         const currentGate = toObject(metadata?.determinations_gate);
         nextMetadataPatch.determinations_gate = {
           ...currentGate,
           deadline_at: nextDeadlineAt,
-          review_deadline_at: nextDeadlineAt,
           is_expired: false,
           expired_at: null,
           expired_notified_at: null,
@@ -992,15 +997,15 @@ async function resolvePreflowReopen({
           userId: requesterId,
           customTitle: approved ? "Reapertura aprobada" : "Reapertura rechazada",
           customMessage: approved
-            ? `Se aprobo tu solicitud de prorroga del BC ${businessCaseId} con ${technicalReviewExtension ? TECHNICAL_REVIEW_EXTENSION_HOURS : Number(additionalHours)}h adicionales. Justificacion enviada: ${pendingRequest.reason || "No registrada"}. Respuesta de Jefe Comercial: ${normalizedNotes || "Sin comentarios adicionales"}.`
-            : `Se rechazo tu solicitud de prorroga del BC ${businessCaseId}. Justificacion enviada: ${pendingRequest.reason || "No registrada"}. Respuesta de Jefe Comercial: ${normalizedNotes || "Sin comentarios adicionales"}.`,
+            ? `Se aprobo tu solicitud de prorroga del BC de ${bc?.client_name || "Cliente pendiente"} con ${technicalReviewExtension ? TECHNICAL_REVIEW_EXTENSION_HOURS : Number(additionalHours)}h adicionales. Justificacion enviada: ${pendingRequest.reason || "No registrada"}. Respuesta de Jefe Comercial: ${normalizedNotes || "Sin comentarios adicionales"}.`
+            : `Se rechazo tu solicitud de prorroga del BC de ${bc?.client_name || "Cliente pendiente"}. Justificacion enviada: ${pendingRequest.reason || "No registrada"}. Respuesta de Jefe Comercial: ${normalizedNotes || "Sin comentarios adicionales"}.`,
           type: approved ? "success" : "alert",
           source: approved ? "business_case.preflow.reopen_approved" : "business_case.preflow.reopen_rejected",
           priority: 2,
           email: true,
           chat: false,
           data: {
-            email_subject: `Business Case ${businessCaseId} - Seguimiento de prorroga`,
+            email_subject: `Business Case ${bc?.client_name || "Cliente pendiente"} - Seguimiento de prorroga`,
             target_path: `/dashboard/business-case/workspace/${businessCaseId}`,
             cta_label: "Abrir Business Case",
           },
@@ -1011,7 +1016,7 @@ async function resolvePreflowReopen({
             approved,
             additionalHours: approved ? (technicalReviewExtension ? TECHNICAL_REVIEW_EXTENSION_HOURS : Number(additionalHours)) : null,
             process_key: `business_case:${businessCaseId}`,
-            email_subject: `Business Case ${businessCaseId} - Seguimiento de prorroga`,
+            email_subject: `Business Case ${bc?.client_name || "Cliente pendiente"} - Seguimiento de prorroga`,
             target_path: `/dashboard/business-case/workspace/${businessCaseId}`,
             cta_label: "Abrir Business Case",
           },

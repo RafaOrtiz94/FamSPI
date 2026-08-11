@@ -9,6 +9,7 @@ const logger = require("../../config/logger");
 const audit = require("../../utils/audit");
 const { sendMail } = require("../../utils/mailer");
 const requestsService = require("../requests/requests.service");
+const notificationManager = require("../notifications/notificationManager");
 
 const MAIL_ENABLED = process.env.DISABLE_MAIL !== "true";
 const REQUEST_TYPE_LABELS = {
@@ -114,7 +115,7 @@ async function listPending(page = 1, pageSize = 10, actor = {}) {
  * ✅ Aprobar solicitud
  * Actualiza estado, registra auditoría y envía notificación.
  */
-async function approve(request_id, approver_id) {
+async function approve(request_id, approver_id, coordination = {}) {
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
@@ -125,6 +126,7 @@ async function approve(request_id, approver_id) {
     } = await client.query(
       `SELECT r.id,
               r.requester_id,
+              r.payload,
               u.email   AS requester_email,
               u.fullname AS requester_name,
               rt.title  AS request_title,
@@ -151,6 +153,62 @@ async function approve(request_id, approver_id) {
       logger.warn({ approverLookupErr }, "No se pudo obtener datos del aprobador");
     }
 
+    const requestPayload =
+      typeof requestInfo?.payload === "string" ? JSON.parse(requestInfo.payload) : requestInfo?.payload || {};
+    const clientName = requestPayload?.nombre_cliente || null;
+    let assignedTechnician = null;
+
+    // F.ST-20 (inspección de ambiente): la aprobación exige asignar técnico y
+    // fecha exacta dentro de la ventana min/max solicitada, para que la
+    // actividad quede registrada en el cronograma de ese colaborador.
+    if (requestInfo?.request_code === "F.ST-20") {
+      const assignedUserId = Number.isFinite(Number(coordination?.assigned_user_id))
+        ? Number(coordination.assigned_user_id)
+        : null;
+      const inspectionDate = String(coordination?.inspection_date || "").slice(0, 10);
+      const notes = String(coordination?.notes || "").trim() || null;
+
+      if (!assignedUserId || !inspectionDate) {
+        throw Object.assign(new Error("Debes asignar un técnico y una fecha dentro de la ventana solicitada."), {
+          status: 400,
+        });
+      }
+
+      const minDate = String(requestPayload?.fecha_instalacion || "").slice(0, 10);
+      const maxDate = String(requestPayload?.fecha_tope_instalacion || minDate || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(inspectionDate) || (minDate && (inspectionDate < minDate || inspectionDate > (maxDate || minDate)))) {
+        throw Object.assign(new Error("La fecha de inspección debe estar dentro de la ventana solicitada."), {
+          status: 409,
+        });
+      }
+
+      const {
+        rows: [assignedUser],
+      } = await client.query(
+        `SELECT id, email, COALESCE(fullname, name, email) AS display_name FROM public.users WHERE id = $1`,
+        [assignedUserId]
+      );
+      if (!assignedUser) {
+        throw Object.assign(new Error("El usuario asignado no existe."), { status: 400 });
+      }
+      assignedTechnician = { ...assignedUser, inspectionDate, notes };
+
+      await client.query(
+        `INSERT INTO servicio.cronograma_actividades_tecnicas
+          (user_id, activity_date, title, notes, status, source_type, source_id, created_by, created_by_email)
+         VALUES ($1, $2::date, $3, $4, 'programado', 'solicitud_inspeccion', $5, $6, $7)`,
+        [
+          assignedUserId,
+          inspectionDate,
+          `Inspección de ambiente – ${clientName || `Solicitud #${request_id}`}`,
+          notes,
+          String(request_id),
+          approver_id,
+          approverEmail,
+        ]
+      );
+    }
+
     // Cambiar estado base a aprobado (independientemente de acta)
     await requestsService.updateRequestStatus(request_id, "aprobado", client);
 
@@ -175,31 +233,25 @@ async function approve(request_id, approver_id) {
 
     await client.query("COMMIT");
 
-    // Notificación (no bloqueante)
-    if (MAIL_ENABLED) {
+    // Notificación al solicitante (no bloqueante)
+    const requestTitle = getRequestLabel(requestInfo?.request_code, requestInfo?.request_title);
+    const requesterName = requestInfo?.requester_name || requestInfo?.requester_email || "Solicitante";
+    const subjectLabel = `${requestInfo?.request_code ? `${requestInfo.request_code} - ` : ""}${clientName || requestTitle}`;
+
+    if (MAIL_ENABLED && requestInfo?.requester_email) {
       setImmediate(() => {
-        const recipients = [
-          requestInfo?.requester_email,
-          approverEmail,
-        ].filter(Boolean);
         const detailLink = `${FRONTEND_URL}/dashboard/servicio-tecnico?request=${request_id}`;
-        const requestTitle = getRequestLabel(
-          requestInfo?.request_code,
-          requestInfo?.request_title
-        );
-        const requesterName =
-          requestInfo?.requester_name || requestInfo?.requester_email || "Solicitante";
         const scheduleHint =
-          requestInfo?.request_code === "F.ST-20"
-            ? "<p><strong>Siguiente paso:</strong> agenda la visita de inspección y asigna técnico para coordinar con el cliente.</p>"
+          requestInfo?.request_code === "F.ST-20" && assignedTechnician
+            ? `<p><strong>Visita agendada:</strong> ${assignedTechnician.display_name} el ${assignedTechnician.inspectionDate}.</p>`
             : "";
 
         sendMail({
-          to: recipients.length ? recipients : process.env.SMTP_FROM,
-          subject: `Solicitud #${request_id} aprobada`,
+          to: requestInfo.requester_email,
+          subject: `Solicitud aprobada ${subjectLabel}`,
           html: `
             <h2>Solicitud aprobada</h2>
-            <p><b>${requestTitle}</b> (#${request_id}) fue aprobada por <b>${approverName || approverEmail || "Aprobador"}</b>.</p>
+            <p><b>${requestTitle}</b> para <b>${clientName || "N/A"}</b> fue aprobada por <b>${approverName || approverEmail || "Aprobador"}</b>.</p>
             <p>Solicitante: <b>${requesterName}</b></p>
             ${scheduleHint}
             <p>Revisa el detalle en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
@@ -213,8 +265,29 @@ async function approve(request_id, approver_id) {
           logger.warn({ mailErr }, "No se pudo enviar notificación de aprobación");
         });
       });
-    } else {
+    } else if (!MAIL_ENABLED) {
       logger.info("📧 DISABLE_MAIL=true → se omite envío de notificación de aprobación");
+    }
+
+    // Notificación al técnico asignado a la inspección (nadie lo avisaba antes)
+    if (assignedTechnician?.id) {
+      notificationManager
+        .sendNotification({
+          userId: assignedTechnician.id,
+          customTitle: "Inspección de ambiente asignada",
+          customMessage: `Tienes una inspección de ambiente para ${clientName || "cliente"} agendada el ${assignedTechnician.inspectionDate}.${assignedTechnician.notes ? ` Notas: ${assignedTechnician.notes}` : ""}`,
+          type: "task",
+          source: "approvals.inspection_assigned",
+          priority: 1,
+          email: true,
+          data: {
+            email_subject: `F.ST-20 - ${clientName || "Cliente pendiente"} - Inspección asignada`,
+          },
+          meta: { request_id, inspection_date: assignedTechnician.inspectionDate },
+        })
+        .catch((notifyErr) => {
+          logger.warn({ notifyErr, request_id }, "No se pudo notificar al tecnico asignado");
+        });
     }
 
     return { status: "approved", request_id };
@@ -224,6 +297,9 @@ async function approve(request_id, approver_id) {
       { err, request_id, approver_id },
       "❌ Error aprobando solicitud"
     );
+    if (err?.status && err.status < 500) {
+      throw err;
+    }
     throw Object.assign(new Error("No se pudo aprobar la solicitud"), {
       status: 500,
       cause: err,
@@ -247,6 +323,7 @@ async function reject(request_id, approver_id, note = null) {
     } = await client.query(
       `SELECT r.id,
               r.requester_id,
+              r.payload,
               u.email   AS requester_email,
               u.fullname AS requester_name,
               rt.title  AS request_title,
@@ -258,6 +335,10 @@ async function reject(request_id, approver_id, note = null) {
         LIMIT 1`,
       [request_id]
     );
+
+    const requestPayload =
+      typeof requestInfo?.payload === "string" ? JSON.parse(requestInfo.payload) : requestInfo?.payload || {};
+    const clientName = requestPayload?.nombre_cliente || null;
 
     let approverEmail = null;
     let approverName = null;
@@ -295,12 +376,8 @@ async function reject(request_id, approver_id, note = null) {
 
     await client.query("COMMIT");
 
-    if (MAIL_ENABLED) {
+    if (MAIL_ENABLED && requestInfo?.requester_email) {
       setImmediate(() => {
-        const recipients = [
-          requestInfo?.requester_email,
-          approverEmail,
-        ].filter(Boolean);
         const detailLink = `${FRONTEND_URL}/dashboard/servicio-tecnico?request=${request_id}`;
         const requestTitle = getRequestLabel(
           requestInfo?.request_code,
@@ -308,13 +385,14 @@ async function reject(request_id, approver_id, note = null) {
         );
         const requesterName =
           requestInfo?.requester_name || requestInfo?.requester_email || "Solicitante";
+        const subjectLabel = `${requestInfo?.request_code ? `${requestInfo.request_code} - ` : ""}${clientName || requestTitle}`;
 
         sendMail({
-          to: recipients.length ? recipients : process.env.SMTP_FROM,
-          subject: `Solicitud #${request_id} rechazada`,
+          to: requestInfo.requester_email,
+          subject: `Solicitud rechazada ${subjectLabel}`,
           html: `
             <h2>Solicitud rechazada</h2>
-            <p><b>${requestTitle}</b> (#${request_id}) fue rechazada por <b>${approverName || approverEmail || "Aprobador"}</b>.</p>
+            <p><b>${requestTitle}</b> para <b>${clientName || "N/A"}</b> fue rechazada por <b>${approverName || approverEmail || "Aprobador"}</b>.</p>
             <p>Solicitante: <b>${requesterName}</b></p>
             <p>Motivo: ${note || "sin especificar"}</p>
             <p>Revisa el detalle en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
@@ -328,7 +406,7 @@ async function reject(request_id, approver_id, note = null) {
           logger.warn({ mailErr }, "No se pudo enviar notificación de rechazo");
         });
       });
-    } else {
+    } else if (!MAIL_ENABLED) {
       logger.info("📧 DISABLE_MAIL=true → se omite envío de notificación de rechazo");
     }
 

@@ -86,6 +86,11 @@ export const getCollabActaPdf = async (actaId) => {
   };
 };
 
+export const regenerateCollabActaPdf = async (actaId) => {
+  const { data } = await api.post(`${base}/actas/${actaId}/pdf/regenerate`);
+  return data?.data ?? data;
+};
+
 export const uploadCollabSignedActa = async (actaId, file) => {
   const form = new FormData();
   form.append("file", file);

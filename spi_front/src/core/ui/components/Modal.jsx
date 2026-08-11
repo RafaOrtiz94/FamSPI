@@ -9,7 +9,7 @@ const Modal = ({
   children,
   maxWidth = "max-w-lg",
   disableClose = false,
-  closeOnBackdrop = true,
+  closeOnBackdrop = false,
   hideHeader = false,
 }) => {
   const visible = typeof open !== "undefined" ? open : isOpen;

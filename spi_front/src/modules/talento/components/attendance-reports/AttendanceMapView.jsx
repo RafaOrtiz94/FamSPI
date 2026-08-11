@@ -19,8 +19,8 @@ const EVENT_CATEGORY_BY_TYPE = Object.freeze({
   exit: "Normal",
   lunch_start: "Normal",
   lunch_end: "Normal",
-  start: "Inesperada",
-  return: "Inesperada",
+  op_lunch_start: "Campo",
+  op_lunch_end: "Campo",
   office_exit: "Campo",
   office_entry: "Campo",
   client_entry: "Cliente",
@@ -34,8 +34,8 @@ const EVENT_LABEL_BY_TYPE = Object.freeze({
   exit: "Salida normal",
   lunch_start: "Salida almuerzo",
   lunch_end: "Entrada almuerzo",
-  start: "Salida inesperada",
-  return: "Entrada inesperada",
+  op_lunch_start: "Salida almuerzo operacional",
+  op_lunch_end: "Entrada almuerzo operacional",
   office_exit: "Salida oficina/viaje",
   office_entry: "Entrada oficina/viaje",
   client_entry: "Entrada cliente",
@@ -46,7 +46,6 @@ const EVENT_LABEL_BY_TYPE = Object.freeze({
 
 const MAP_LEGEND_ITEMS = [
   { key: "normal", label: "Normal E/S", type: "entry" },
-  { key: "unexpected", label: "Inesperada E/S", type: "start" },
   { key: "field", label: "Campo E/S", type: "office_exit" },
   { key: "client", label: "Cliente E/S", type: "client_entry" },
 ];
@@ -56,8 +55,8 @@ const EVENT_SHORT_BY_TYPE = Object.freeze({
   exit: "SA",
   lunch_start: "AL-S",
   lunch_end: "AL-E",
-  start: "I-S",
-  return: "I-E",
+  op_lunch_start: "OP-A-S",
+  op_lunch_end: "OP-A-E",
   office_exit: "C-S",
   office_entry: "C-E",
   client_entry: "CL-E",
@@ -89,7 +88,7 @@ const AttendanceMapView = ({
    const { isLoaded, loadError } = useGoogleMaps();
 
   const markers = useMemo(() => {
-    return transformToMarkers(rows, getGeoPoints);
+    return transformToMarkers(rows, getGeoPoints).filter((marker) => !["start", "return"].includes(String(marker?.type || "").toLowerCase()));
   }, [rows, getGeoPoints]);
 
   const center = useMemo(() => {
@@ -105,7 +104,6 @@ const AttendanceMapView = ({
   const categoryCounts = useMemo(() => {
     const totals = {
       normal: 0,
-      unexpected: 0,
       field: 0,
       client: 0,
     };
@@ -113,7 +111,6 @@ const AttendanceMapView = ({
     markers.forEach((marker) => {
       const type = String(marker?.type || "").toLowerCase();
       if (type === "entry" || type === "exit" || type === "lunch_start" || type === "lunch_end") totals.normal += 1;
-      if (type === "start" || type === "return") totals.unexpected += 1;
       if (type === "office_exit" || type === "office_entry") totals.field += 1;
       if (type === "client_entry" || type === "client_exit" || type === "arrival" || type === "departure") totals.client += 1;
     });
@@ -387,7 +384,7 @@ const AttendanceMapView = ({
                 <span className="text-slate-700">{item.label}</span>
               </div>
               <span className="font-semibold text-slate-900">
-                {item.key === "normal" ? categoryCounts.normal : item.key === "unexpected" ? categoryCounts.unexpected : item.key === "field" ? categoryCounts.field : categoryCounts.client}
+                {item.key === "normal" ? categoryCounts.normal : item.key === "field" ? categoryCounts.field : categoryCounts.client}
               </span>
             </div>
           ))}

@@ -57,6 +57,7 @@ export const PRIVATE_PURCHASE_ENDPOINTS = {
  CONTRACT_GERENCIA_DECISION: '/private-purchases/:id/contract/gerencia-decision',
  CONTRACT_ACP_SIGNED: '/private-purchases/:id/contract/acp-signed',
  CONTRACT_RESTART_REJECTION: '/private-purchases/:id/contract/restart-rejection',
+ PROVIDER_DELIVERY_DATE: '/private-purchases/:id/provider-delivery-date',
 };
 
 export const PRIVATE_PURCHASE_STATES = {
@@ -252,7 +253,7 @@ export const getMyPrivatePurchases = async () => {
  * @param {string} role - Rol del usuario
  * @returns {Promise<Array>} Lista de solicitudes filtradas por rol
  */
-export const getPrivatePurchasesByRole = async (role) => {
+export const getPrivatePurchasesByRole = async (role, options = {}) => {
  try {
  const response = await api.get(`${PRIVATE_PURCHASE_ENDPOINTS.BY_ROLE}/${role}`);
 
@@ -262,7 +263,9 @@ export const getPrivatePurchasesByRole = async (role) => {
 
  return response.data.data || [];
  } catch (error) {
+ if (!options?.silent) {
  console.error(`[PrivatePurchasesAPI] Error obteniendo solicitudes por rol ${role}:`, error);
+ }
  throw error.response?.data?.message || error.message || 'Error desconocido';
  }
 };
@@ -867,6 +870,36 @@ export const savePrivatePurchaseProviderResponse = async (id, payload) => {
 };
 
 /**
+ * Registrar fecha tentativa de entrega del proveedor (se acumula como historial)
+ * @param {string} id - ID de la solicitud
+ * @param {Object} payload
+ * @param {string} payload.date - Fecha tentativa (ISO)
+ * @param {string} [payload.notes]
+ * @returns {Promise<Object>} Solicitud actualizada
+ */
+export const registerPrivatePurchaseProviderDeliveryDate = async (id, payload) => {
+ try {
+ const response = await api.post(
+ PRIVATE_PURCHASE_ENDPOINTS.PROVIDER_DELIVERY_DATE.replace(':id', id),
+ payload
+ );
+
+ if (!response.data?.ok) {
+ throw new Error(response.data?.message || 'Error registrando fecha tentativa de entrega');
+ }
+
+ return response.data.data;
+ } catch (error) {
+ const apiMessage = error.response?.data?.error || error.response?.data?.message;
+ if (apiMessage) {
+ error.message = apiMessage;
+ }
+ console.error(`[PrivatePurchasesAPI] Error registrando fecha tentativa de entrega ${id}:`, error);
+ throw error;
+ }
+};
+
+/**
  * Comercial registra la decisión del cliente sobre disponibilidad en CU.
  */
 export const confirmPrivateCuAvailability = async (id, { decision } = {}) => {
@@ -1418,12 +1451,14 @@ export const uploadPrivatePurchaseProforma = async (id, { proformaBase64, fileNa
  * @param {Object} data
  * @param {string} data.providerEmail
  * @param {string} [data.notes]
+ * @param {boolean} [data.viaEmail] - false si ya se solicitó por fuera de SPI (respondiendo el hilo de Gmail) y solo se registra el paso
  */
-export const requestPrivatePurchaseProforma = async (id, { providerEmail, notes = '' } = {}) => {
+export const requestPrivatePurchaseProforma = async (id, { providerEmail, notes = '', viaEmail = true } = {}) => {
   try {
     const response = await api.post(`${PRIVATE_PURCHASE_ENDPOINTS.BASE}/${id}/request-proforma`, {
       provider_email: providerEmail,
       notes,
+      via_email: viaEmail,
     });
     if (!response.data?.ok) throw new Error(response.data?.message || 'Error solicitando proforma');
     return response.data.data;
@@ -1584,7 +1619,7 @@ export const getPrivatePurchaseActiveReservations = async () => {
   }
 };
 
-export default {
+const privatePurchasesApi = {
  createPrivatePurchaseRequest,
  createPrivatePurchase,
  getPrivatePurchaseById,
@@ -1624,6 +1659,7 @@ uploadPrivatePurchaseDeliveryGuides,
  forwardPrivatePurchaseToAcp,
  startPrivatePurchaseAvailability,
  savePrivatePurchaseProviderResponse,
+ registerPrivatePurchaseProviderDeliveryDate,
  confirmPrivateCuAvailability,
  confirmPrivateImportApproval,
  getPrivatePurchaseDocuments,
@@ -1646,3 +1682,5 @@ uploadPrivatePurchaseDeliveryGuides,
  PRIVATE_PURCHASE_STATES,
  FLOW_TYPES
 };
+
+export default privatePurchasesApi;

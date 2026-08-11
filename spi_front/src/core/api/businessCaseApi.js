@@ -45,11 +45,12 @@ export const normalizeUIGuidanceResponse = (response) => {
  },
  preflow: data.preflow || null,
  observationData: data.observationData || null,
- workflowState: {
- currentStage: data.workflowState?.currentStage || 'draft',
- currentState: data.workflowState?.currentState || data.workflowState?.canonicalState || data.workflowState?.state || null,
- availableTransitions: data.workflowState?.availableTransitions || []
- }
+  workflowState: {
+  currentStage: data.workflowState?.currentStage || 'draft',
+  rawStage: data.workflowState?.rawStage || null,
+  currentState: data.workflowState?.currentState || data.workflowState?.canonicalState || data.workflowState?.state || null,
+  availableTransitions: data.workflowState?.availableTransitions || []
+  }
  };
  } catch (error) {
  console.error('Error normalizing UI guidance response:', error);
@@ -70,8 +71,8 @@ export const normalizeUIGuidanceResponse = (response) => {
  },
  featureFlags: { autosave: {} },
  observationData: null,
- workflowState: { currentStage: 'draft', availableTransitions: [] }
- };
+  workflowState: { currentStage: 'draft', rawStage: null, availableTransitions: [] }
+  };
  }
 };
 
@@ -514,6 +515,11 @@ export const getBusinessCaseDispatchWorkspace = async (businessCaseId) => {
  return data.data || data;
 };
 
+export const getBusinessCaseSheetPreview = async (businessCaseId) => {
+ const { data } = await api.get(`/business-case/${businessCaseId}/sheets/preview`);
+ return data.data || data;
+};
+
 export const saveBusinessCaseCommercialDispatchPlan = async (businessCaseId, items = []) => {
  const { data } = await api.put(`/business-case/${businessCaseId}/dispatch-workspace/commercial-plan`, {
  items,
@@ -608,5 +614,10 @@ export const getBusinessCaseDocumentVersions = async (businessCaseId, limit = 20
 
 export const reviewBcInspectionRequest = async (businessCaseId, payload = {}) => {
  const { data } = await api.post(`/business-case/${businessCaseId}/inspection-request/review`, payload);
+ return data;
+};
+
+export const registerBcInspectionResult = async (businessCaseId, payload = {}) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/inspection-request/result`, payload);
  return data;
 };

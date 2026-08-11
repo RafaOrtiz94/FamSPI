@@ -3,8 +3,14 @@ const db = require("../../config/db");
 const { appendSignatureBlock } = require("./signatureWorkflows.pdf");
 const { uploadBase64File, ensureFolder } = require("../../utils/drive");
 const logger = require("../../config/logger");
+const notificationManager = require("../notifications/notificationManager");
+const { sendMail } = require("../../utils/mailer");
 
-const FRONTEND_BASE_URL = process.env.FRONTEND_URL || process.env.APP_BASE_URL || "";
+const FRONTEND_BASE_URL =
+  process.env.APP_FRONTEND_URL ||
+  process.env.FRONTEND_URL ||
+  process.env.APP_BASE_URL ||
+  "https://fam-spi-front.web.app";
 const FAMSIGN_DRIVE_ROOT = process.env.DRIVE_FAMSIGN_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_ID || null;
 
 const WORKFLOW_STATUS = {
@@ -24,6 +30,21 @@ const SIGNER_STATUS = {
   SIGNED: "signed",
   REJECTED: "rejected",
 };
+
+const ACTIVE_SIGNING_WORKFLOW_STATUSES = new Set([
+  WORKFLOW_STATUS.SENT,
+  WORKFLOW_STATUS.IN_PROGRESS,
+  WORKFLOW_STATUS.PARTIALLY_SIGNED,
+]);
+
+function isSignerActionableInParallel({ workflow, signer }) {
+  const signerStatus = String(signer?.status || "").toLowerCase();
+  const workflowStatus = String(workflow?.status || "").toLowerCase();
+  return (
+    [SIGNER_STATUS.PENDING, SIGNER_STATUS.AVAILABLE, SIGNER_STATUS.OPENED].includes(signerStatus) &&
+    ACTIVE_SIGNING_WORKFLOW_STATUSES.has(workflowStatus)
+  );
+}
 
 const normalizeRoleName = (value = "") =>
   String(value || "")
@@ -54,6 +75,127 @@ const buildWorkflowCode = () =>
   `FSW-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
 
 const buildToken = () => crypto.randomBytes(24).toString("hex");
+
+function getWorkflowSigningPath(workflowId) {
+  return `/dashboard/signatures/workflows/${workflowId}`;
+}
+
+function getWorkflowSigningUrl(workflowId) {
+  return `${String(FRONTEND_BASE_URL || "").replace(/\/$/, "")}${getWorkflowSigningPath(workflowId)}`;
+}
+
+function escapeHtml(value = "") {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function summarizeWorkflowDocuments(documents = []) {
+  const filenames = documents
+    .map((document) => String(document?.filename || "").trim())
+    .filter(Boolean);
+  if (!filenames.length) return "Documento de firma";
+  if (filenames.length <= 3) return filenames.join(", ");
+  return `${filenames.slice(0, 3).join(", ")} y ${filenames.length - 3} mas`;
+}
+
+async function notifyWorkflowSignersAvailable({ workflow, signers = [], documents = [], actorUser = {} } = {}) {
+  if (!workflow?.id || !Array.isArray(signers) || !signers.length) return;
+
+  const signingPath = getWorkflowSigningPath(workflow.id);
+  const signingUrl = getWorkflowSigningUrl(workflow.id);
+  const workflowTitle = String(workflow.title || workflow.workflow_code || "Workflow de firma").trim();
+  const documentSummary = summarizeWorkflowDocuments(documents);
+  const actorLabel = actorUser?.fullname || actorUser?.name || actorUser?.email || "FamSign";
+  const subject = `Firma requerida: ${workflowTitle}`;
+  const message =
+    `${actorLabel} solicito tu firma en FamSign para "${workflowTitle}". ` +
+    `Documentos: ${documentSummary}. Ingresa al workflow para revisar y firmar.`;
+  const processKey = `signature_workflow:${workflow.id}`;
+
+  const notifySigner = async (signer) => {
+    const email = String(signer?.email_snapshot || "").trim().toLowerCase();
+    const signerName = signer?.name_snapshot || "Firmante";
+    const userId = Number(signer?.user_id || 0);
+    if (userId > 0) {
+      return notificationManager.sendNotificationSafe({
+        userId,
+        template: "custom_signature_workflow_requested",
+        customTitle: subject,
+        customMessage: message,
+        type: "task",
+        priority: 2,
+        email: true,
+        chat: false,
+        source: "signature_workflows",
+        meta: {
+          process_key: processKey,
+          workflow_id: workflow.id,
+          workflow_code: workflow.workflow_code || null,
+          target_path: signingPath,
+          cta_label: "Abrir workflow de firma",
+          email_subject: subject,
+          signer_id: signer.id || null,
+        },
+        data: {
+          process_key: processKey,
+          workflow_id: workflow.id,
+          workflow_code: workflow.workflow_code || null,
+          target_path: signingPath,
+          cta_label: "Abrir workflow de firma",
+          email_subject: subject,
+          document_summary: documentSummary,
+        },
+      });
+    }
+
+    if (!email) return null;
+
+    const schedule = typeof notificationManager.getEmailScheduleState === "function"
+      ? notificationManager.getEmailScheduleState()
+      : { allowed: true };
+    if (!schedule.allowed) {
+      logger.info(
+        {
+          workflowId: workflow.id,
+          signerEmail: email,
+          nextAllowedAt: schedule.nextAllowedAt?.toISOString?.() || null,
+        },
+        "[FAMSIGN] No se genera correo a firmante externo fuera de horario laborable",
+      );
+      return null;
+    }
+
+    return sendMail({
+      to: email,
+      subject,
+      html: `
+        <p>Hola ${escapeHtml(signerName)},</p>
+        <p>${escapeHtml(message)}</p>
+        <p><a href="${escapeHtml(signingUrl)}">${escapeHtml(signingUrl)}</a></p>
+        <p>Este mensaje fue generado automaticamente por Famproject Cia. Ltda.</p>
+      `,
+      source: "signature_workflows",
+    });
+  };
+
+  const results = await Promise.allSettled(signers.map(notifySigner));
+  const rejected = results.filter((result) => result.status === "rejected");
+  if (rejected.length) {
+    logger.warn(
+      {
+        workflowId: workflow.id,
+        failedNotifications: rejected.length,
+        totalSigners: signers.length,
+        errors: rejected.map((result) => result.reason?.message || String(result.reason)).slice(0, 5),
+      },
+      "[FAMSIGN] Algunos firmantes no pudieron ser notificados",
+    );
+  }
+}
 
 /**
  * Resuelve los datos de un firmante desde collaborator_profiles (ficha TH).
@@ -244,6 +386,89 @@ async function syncSourceRecord(client, workflow, currentDocument = null, signer
     return;
   }
 
+  // ── Trainings: workflow principal de asistentes ──────────────────────────
+  if (workflow.source_module === "trainings" && workflow.source_entity === "acta") {
+    const { rowCount } = await client.query(
+      `UPDATE trainings
+          SET signature_workflow_id     = $2,
+              signature_workflow_status = $3,
+              final_verification_token  = $4,
+              final_pdf_generated_at    = CASE WHEN $5 THEN NOW() ELSE final_pdf_generated_at END,
+              updated_at                = NOW()
+        WHERE id = $1`,
+      [
+        workflow.source_entity_id,
+        workflow.id,
+        workflowStatus,
+        workflow.verification_token || null,
+        isCompleted,
+      ]
+    );
+    if (!rowCount) {
+      console.warn(`[syncSourceRecord] trainings/acta: no training updated for id=${workflow.source_entity_id}`);
+    }
+    // Sync estado de firma por asistente
+    for (const s of signers.filter((x) => x.signed_at || x.status === "rejected")) {
+      if (s.user_id) {
+        await client.query(
+          `UPDATE training_attendees
+              SET signature_status = $1, signed_at = $2
+            WHERE training_id = $3 AND user_id = $4`,
+          [s.status, s.signed_at || null, workflow.source_entity_id, s.user_id]
+        );
+      } else {
+        await client.query(
+          `UPDATE training_attendees
+              SET signature_status = $1, signed_at = $2
+            WHERE training_id = $3 AND email_snapshot = $4`,
+          [s.status, s.signed_at || null, workflow.source_entity_id, s.email_snapshot]
+        );
+      }
+    }
+    return;
+  }
+
+  // ── Trainings: workflow de inasistentes ───────────────────────────────────
+  if (workflow.source_module === "trainings" && workflow.source_entity === "acta_inasistentes") {
+    const { rowCount } = await client.query(
+      `UPDATE trainings
+          SET absent_workflow_id            = $2,
+              absent_workflow_status        = $3,
+              absent_verification_token     = $4,
+              absent_final_pdf_generated_at = CASE WHEN $5 THEN NOW() ELSE absent_final_pdf_generated_at END,
+              updated_at                    = NOW()
+        WHERE id = $1`,
+      [
+        workflow.source_entity_id,
+        workflow.id,
+        workflowStatus,
+        workflow.verification_token || null,
+        isCompleted,
+      ]
+    );
+    if (!rowCount) {
+      console.warn(`[syncSourceRecord] trainings/acta_inasistentes: no training updated for id=${workflow.source_entity_id}`);
+    }
+    for (const s of signers.filter((x) => x.signed_at || x.status === "rejected")) {
+      if (s.user_id) {
+        await client.query(
+          `UPDATE training_attendees
+              SET absent_signature_status = $1, absent_signed_at = $2
+            WHERE training_id = $3 AND user_id = $4`,
+          [s.status, s.signed_at || null, workflow.source_entity_id, s.user_id]
+        );
+      } else {
+        await client.query(
+          `UPDATE training_attendees
+              SET absent_signature_status = $1, absent_signed_at = $2
+            WHERE training_id = $3 AND email_snapshot = $4`,
+          [s.status, s.signed_at || null, workflow.source_entity_id, s.email_snapshot]
+        );
+      }
+    }
+    return;
+  }
+
   console.warn(`[syncSourceRecord] Unknown source_module="${workflow.source_module}" or source_entity="${workflow.source_entity}" for workflowId=${workflow.id} — source record not updated`);
 }
 
@@ -419,6 +644,12 @@ async function createWorkflow({ payload, user }) {
     const workflow = workflowRows[0];
 
     const qrToken = buildToken();
+    // Calculate SHA256 from pdf_base64 if source_sha256 is not provided
+    let sourceSha256 = payload.document.source_sha256;
+    if (!sourceSha256 && payload.document.pdf_base64) {
+      const pdfBuffer = Buffer.from(payload.document.pdf_base64, 'base64');
+      sourceSha256 = crypto.createHash('sha256').update(pdfBuffer).digest('hex');
+    }
     const { rows: documentRows } = await client.query(
       `INSERT INTO signature_workflow_documents (
         workflow_id, version_num, filename, mime_type, source_sha256,
@@ -428,7 +659,7 @@ async function createWorkflow({ payload, user }) {
       [
         workflow.id,
         payload.document.filename,
-        payload.document.source_sha256,
+        sourceSha256,
         payload.document.pdf_base64,
         qrToken,
       ]
@@ -441,21 +672,32 @@ async function createWorkflow({ payload, user }) {
       const profileSnap = signer.user_id
         ? await resolveSignerSnapshot(signer.user_id, client)
         : null;
-      const resolvedName   = profileSnap?.name   || signer.name;
-      const resolvedRole   = profileSnap?.role   || signer.role;
+      
+      // Determine signer kind and get email
+      const isExternal = !signer.user_id;
+      let emailSnapshot = isExternal ? signer.email : (profileSnap?.email || signer.email);
+      let signerKind = isExternal ? 'external_user' : 'internal_user';
+      
+      // Ensure email snapshot is not null
+      if (!emailSnapshot) {
+        throw new Error('Email is required for all signers');
+      }
+      
+      const resolvedName = profileSnap?.name || signer.name || 'Invitado';
+      const resolvedRole = profileSnap?.role || signer.role || 'invitado';
       const resolvedCedula = profileSnap?.cedula || signer.cedula || null;
 
       const { rows } = await client.query(
         `INSERT INTO signature_workflow_signers (
           workflow_id, document_id, user_id, email_snapshot, name_snapshot, role_snapshot,
           cedula_snapshot, sequence_order, is_required, status, access_token, signer_kind
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'internal_user')
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
         RETURNING *`,
         [
           workflow.id,
           document.id,
-          signer.user_id,
-          signer.email,
+          signer.user_id || null,
+          emailSnapshot,
           resolvedName,
           resolvedRole,
           resolvedCedula,
@@ -463,6 +705,7 @@ async function createWorkflow({ payload, user }) {
           signer.is_required,
           SIGNER_STATUS.PENDING,
           buildToken(),
+          signerKind,
         ]
       );
       signers.push(rows[0]);
@@ -547,9 +790,11 @@ async function getWorkflow(workflowId, user) {
 
 async function sendWorkflow(workflowId, user) {
   const client = await db.getClient();
+  let notificationPayload = null;
   try {
     await client.query("BEGIN");
-    const data = await getWorkflowRows(workflowId);
+    await client.query(`SELECT id FROM signature_workflows WHERE id = $1 FOR UPDATE`, [workflowId]);
+    const data = await getWorkflowRowsForClient(client, workflowId);
     ensureCanManageWorkflow(data, user);
 
     if (![WORKFLOW_STATUS.PREPARED].includes(String(data.workflow.status || "").toLowerCase())) {
@@ -558,23 +803,21 @@ async function sendWorkflow(workflowId, user) {
       throw error;
     }
 
-    const firstOrder = Math.min(...data.signers.map((signer) => Number(signer.sequence_order || 0)).filter(Boolean));
     await client.query(
       `UPDATE signature_workflows
           SET status = $2,
               sent_at = NOW(),
-              current_step = $3
+              current_step = NULL
         WHERE id = $1`,
-      [workflowId, WORKFLOW_STATUS.SENT, firstOrder]
+      [workflowId, WORKFLOW_STATUS.SENT]
     );
     await client.query(
       `UPDATE signature_workflow_signers
           SET status = $2,
               available_at = NOW()
         WHERE workflow_id = $1
-          AND sequence_order = $3
-          AND status = $4`,
-      [workflowId, SIGNER_STATUS.AVAILABLE, firstOrder, SIGNER_STATUS.PENDING]
+          AND status = $3`,
+      [workflowId, SIGNER_STATUS.AVAILABLE, SIGNER_STATUS.PENDING]
     );
 
     await appendEvent(client, {
@@ -582,28 +825,37 @@ async function sendWorkflow(workflowId, user) {
       documentId: data.documents[0]?.id || null,
       eventType: "workflow_sent",
       eventDescription: "Workflow enviado a firma",
-      eventData: { first_step: firstOrder },
+      eventData: { signing_mode: "parallel", signers_available: data.signers.length },
       createdBy: user.id,
     });
 
     const refreshed = await getWorkflowRowsForClient(client, workflowId);
     await syncSourceRecord(client, refreshed.workflow, refreshed.documents[0] || null, refreshed.signers);
+    notificationPayload = {
+      workflow: refreshed.workflow,
+      documents: refreshed.documents,
+      signers: refreshed.signers.filter((signer) => String(signer.status || "").toLowerCase() === SIGNER_STATUS.AVAILABLE),
+      actorUser: user,
+    };
 
     await client.query("COMMIT");
-    return hydrateWorkflow(workflowId, user);
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
   }
+
+  await notifyWorkflowSignersAvailable(notificationPayload);
+  return hydrateWorkflow(workflowId, user);
 }
 
 async function openSignerStep({ workflowId, signerId, user }) {
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
-    const data = await getWorkflowRows(workflowId);
+    await client.query(`SELECT id FROM signature_workflows WHERE id = $1 FOR UPDATE`, [workflowId]);
+    const data = await getWorkflowRowsForClient(client, workflowId);
     ensureCanViewWorkflow(data, user);
     const signer = data.signers.find((item) => Number(item.id) === Number(signerId));
     if (!signer) {
@@ -613,7 +865,7 @@ async function openSignerStep({ workflowId, signerId, user }) {
     }
     ensureSignerOwnership(signer, user);
 
-    if (![SIGNER_STATUS.AVAILABLE, SIGNER_STATUS.OPENED].includes(String(signer.status || "").toLowerCase())) {
+    if (!isSignerActionableInParallel({ workflow: data.workflow, signer })) {
       const error = new Error("Este paso de firma no esta disponible para apertura");
       error.status = 400;
       throw error;
@@ -621,11 +873,11 @@ async function openSignerStep({ workflowId, signerId, user }) {
 
     await client.query(
       `UPDATE signature_workflow_signers
-          SET status = CASE WHEN status = $3 THEN $4 ELSE status END,
+          SET status = CASE WHEN status IN ($3, $4) THEN $5 ELSE status END,
               opened_at = COALESCE(opened_at, NOW())
         WHERE id = $1
           AND workflow_id = $2`,
-      [signerId, workflowId, SIGNER_STATUS.AVAILABLE, SIGNER_STATUS.OPENED]
+      [signerId, workflowId, SIGNER_STATUS.PENDING, SIGNER_STATUS.AVAILABLE, SIGNER_STATUS.OPENED]
     );
     await client.query(
       `UPDATE signature_workflows
@@ -658,7 +910,8 @@ async function signStep({ workflowId, signerId, user, action }) {
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
-    const data = await getWorkflowRows(workflowId);
+    await client.query(`SELECT id FROM signature_workflows WHERE id = $1 FOR UPDATE`, [workflowId]);
+    const data = await getWorkflowRowsForClient(client, workflowId);
     ensureCanViewWorkflow(data, user);
     const signer = data.signers.find((item) => Number(item.id) === Number(signerId));
     if (!signer) {
@@ -667,7 +920,7 @@ async function signStep({ workflowId, signerId, user, action }) {
       throw error;
     }
     ensureSignerOwnership(signer, user);
-    if (![SIGNER_STATUS.AVAILABLE, SIGNER_STATUS.OPENED].includes(String(signer.status || "").toLowerCase())) {
+    if (!isSignerActionableInParallel({ workflow: data.workflow, signer })) {
       const error = new Error("Este paso de firma no esta disponible para firmar");
       error.status = 400;
       throw error;
@@ -677,7 +930,11 @@ async function signStep({ workflowId, signerId, user, action }) {
     const signedAt = new Date().toISOString();
     const previousSignatureHash = data.signers
       .filter((item) => item.signature_hash_sha256)
-      .sort((a, b) => Number(a.sequence_order) - Number(b.sequence_order))
+      .sort((a, b) => {
+        const bySignedAt = new Date(a.signed_at || 0).getTime() - new Date(b.signed_at || 0).getTime();
+        if (bySignedAt !== 0) return bySignedAt;
+        return Number(a.id || 0) - Number(b.id || 0);
+      })
       .slice(-1)[0]?.signature_hash_sha256 || null;
     const payloadHash = crypto
       .createHash("sha256")
@@ -843,22 +1100,12 @@ async function signStep({ workflowId, signerId, user, action }) {
         createdBy: user.id,
       });
     } else {
-      const nextOrder = Math.min(...remainingPending.map((item) => Number(item.sequence_order || 0)).filter(Boolean));
       await client.query(
         `UPDATE signature_workflows
             SET status = $2,
-                current_step = $3
+                current_step = NULL
           WHERE id = $1`,
-        [workflowId, WORKFLOW_STATUS.PARTIALLY_SIGNED, nextOrder]
-      );
-      await client.query(
-        `UPDATE signature_workflow_signers
-            SET status = $2,
-                available_at = COALESCE(available_at, NOW())
-          WHERE workflow_id = $1
-            AND sequence_order = $3
-            AND status = $4`,
-        [workflowId, SIGNER_STATUS.AVAILABLE, nextOrder, SIGNER_STATUS.PENDING]
+        [workflowId, WORKFLOW_STATUS.PARTIALLY_SIGNED]
       );
     }
 
@@ -879,7 +1126,8 @@ async function rejectStep({ workflowId, signerId, user, action }) {
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
-    const data = await getWorkflowRows(workflowId);
+    await client.query(`SELECT id FROM signature_workflows WHERE id = $1 FOR UPDATE`, [workflowId]);
+    const data = await getWorkflowRowsForClient(client, workflowId);
     ensureCanViewWorkflow(data, user);
     const signer = data.signers.find((item) => Number(item.id) === Number(signerId));
     if (!signer) {
@@ -888,7 +1136,7 @@ async function rejectStep({ workflowId, signerId, user, action }) {
       throw error;
     }
     ensureSignerOwnership(signer, user);
-    if (![SIGNER_STATUS.AVAILABLE, SIGNER_STATUS.OPENED].includes(String(signer.status || "").toLowerCase())) {
+    if (!isSignerActionableInParallel({ workflow: data.workflow, signer })) {
       const error = new Error("Este paso de firma no esta disponible para rechazo");
       error.status = 400;
       throw error;
@@ -944,7 +1192,8 @@ async function listMyPending(user) {
      FROM signature_workflow_signers s
      JOIN signature_workflows sw ON sw.id = s.workflow_id
      WHERE s.user_id = $1
-       AND s.status IN ('available', 'opened')
+       AND s.status IN ('pending', 'available', 'opened')
+       AND sw.status IN ('sent', 'in_progress', 'partially_signed')
        AND sw.active = true
      ORDER BY sw.created_at DESC`,
     [user.id]
@@ -971,6 +1220,29 @@ async function listMyCompleted(user) {
   return rows;
 }
 
+async function listSignerCandidates() {
+  const passiveStatuses = ["pasivo", "desvinculado", "inactivo", "en_desvinculacion"];
+  const { rows } = await db.query(
+    `SELECT
+        u.id,
+        u.email,
+        COALESCE(NULLIF(u.fullname, ''), CONCAT('Usuario #', u.id)) AS fullname,
+        u.role,
+        d.name AS department_name
+       FROM users u
+       LEFT JOIN departments d ON d.id = u.department_id
+      LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
+      LEFT JOIN offboarding_processes op ON op.user_id = u.id
+     WHERE COALESCE(u.active, true) = true
+        AND COALESCE(op.is_closed, false) = false
+        AND LOWER(TRIM(COALESCE(cp.profile->'onboarding'->>'offboarding_requested', 'false'))) NOT IN ('true', '1', 'yes', 'si', 'sí')
+        AND LOWER(TRIM(COALESCE(cp.profile->'laboral'->>'estatus_empleado', 'activo'))) <> ALL($1::text[])
+      ORDER BY fullname ASC`,
+    [passiveStatuses]
+  );
+  return rows;
+}
+
 async function getDocumentPayload({ workflowId, documentId, final = false, user = null }) {
   const data = await getWorkflowRows(workflowId);
   if (user) ensureCanViewWorkflow(data, user);
@@ -980,6 +1252,26 @@ async function getDocumentPayload({ workflowId, documentId, final = false, user 
     error.status = 404;
     throw error;
   }
+
+  if (final && !document.final_pdf_base64 && document.source_pdf_base64) {
+    // Workflow aun no completado (el sellado definitivo solo pasa en signStep):
+    // se genera un PDF con las firmas que YA existen bajo demanda, sin
+    // persistirlo como final_pdf_base64 -- appendSignatureBlock ya deja en
+    // blanco el espacio de quienes no tienen signature_visual_base64/placement.
+    try {
+      const partialPdfBase64 = await appendSignatureBlock({
+        sourcePdfBase64: document.source_pdf_base64,
+        workflow: data.workflow,
+        signers: data.signers,
+        document,
+        verificationBaseUrl: FRONTEND_BASE_URL,
+      });
+      return { filename: `parcial-${document.filename}`, base64: partialPdfBase64 };
+    } catch (pdfErr) {
+      logger.warn({ err: pdfErr, workflowId, documentId }, "[getDocumentPayload] No se pudo generar PDF parcial, se sirve el original");
+    }
+  }
+
   const base64Value = final ? document.final_pdf_base64 || document.source_pdf_base64 : document.source_pdf_base64;
   if (!base64Value) {
     const error = new Error("El documento aun no tiene payload disponible");
@@ -1019,7 +1311,8 @@ async function reassignSigner(workflowId, signerId, newUserData, user) {
   let workflowCode = null;
   try {
     await client.query("BEGIN");
-    const data = await getWorkflowRows(workflowId);
+    await client.query(`SELECT id FROM signature_workflows WHERE id = $1 FOR UPDATE`, [workflowId]);
+    const data = await getWorkflowRowsForClient(client, workflowId);
     if (!data.workflow) {
       const error = new Error("Workflow no encontrado");
       error.status = 404;
@@ -1104,8 +1397,7 @@ async function reassignSigner(workflowId, signerId, newUserData, user) {
   // Send email notification to the new signer after COMMIT (best effort)
   if (newToken && newUserData.email) {
     try {
-      const { sendMail } = require("../../utils/mailer");
-      const signLink = `${FRONTEND_BASE_URL}/firmar/${newToken}`;
+      const signLink = getWorkflowSigningUrl(workflowId);
       await sendMail({
         to: newUserData.email,
         subject: "Has sido asignado como firmante en FamSign",
@@ -1128,7 +1420,8 @@ async function cancelWorkflow(workflowId, user) {
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
-    const data = await getWorkflowRows(workflowId);
+    await client.query(`SELECT id FROM signature_workflows WHERE id = $1 FOR UPDATE`, [workflowId]);
+    const data = await getWorkflowRowsForClient(client, workflowId);
     if (!data.workflow) {
       const error = new Error("Workflow no encontrado");
       error.status = 404;
@@ -1211,6 +1504,7 @@ module.exports = {
   rejectStep,
   listMyPending,
   listMyCompleted,
+  listSignerCandidates,
   getDocumentPayload,
   verifyByToken,
   cancelWorkflow,

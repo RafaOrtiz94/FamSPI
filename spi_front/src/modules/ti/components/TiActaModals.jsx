@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { FiAlertTriangle, FiPlus, FiShield, FiRefreshCw, FiX } from "react-icons/fi";
+import React, { useEffect, useState } from "react";
+import { FiAlertTriangle, FiShield, FiRefreshCw } from "react-icons/fi";
 import Modal from "../../../core/ui/components/Modal";
 import { useUI } from "../../../core/ui/UIContext";
 import { updateTiActa } from "../../../core/api/tiAssetsApi";

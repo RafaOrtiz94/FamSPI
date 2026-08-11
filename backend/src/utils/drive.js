@@ -224,6 +224,79 @@ async function replaceTags(documentId, replacements = {}) {
   }
 }
 
+function collectTextRanges(content = [], literalText, ranges = []) {
+  if (!Array.isArray(content) || !literalText) return ranges;
+
+  for (const element of content) {
+    if (element?.paragraph?.elements) {
+      for (const paragraphElement of element.paragraph.elements) {
+        const textRun = paragraphElement?.textRun;
+        const raw = String(textRun?.content || "");
+        if (!raw) continue;
+
+        let searchIndex = 0;
+        while (true) {
+          const foundIndex = raw.indexOf(literalText, searchIndex);
+          if (foundIndex === -1) break;
+          const startIndex = Number(paragraphElement.startIndex || 0) + foundIndex;
+          const endIndex = startIndex + literalText.length;
+          if (endIndex > startIndex) {
+            ranges.push({ startIndex, endIndex });
+          }
+          searchIndex = foundIndex + literalText.length;
+        }
+      }
+    }
+
+    if (element?.table?.tableRows) {
+      for (const row of element.table.tableRows) {
+        for (const cell of row.tableCells || []) {
+          collectTextRanges(cell.content || [], literalText, ranges);
+        }
+      }
+    }
+
+    if (element?.tableOfContents?.content) {
+      collectTextRanges(element.tableOfContents.content || [], literalText, ranges);
+    }
+  }
+
+  return ranges;
+}
+
+async function updateDocsTextStyleByLiteral(documentId, literalText, textStyle = {}, fields = "") {
+  try {
+    const normalizedText = String(literalText || "").trim();
+    if (!documentId || !normalizedText) return 0;
+
+    const { data: doc } = await docs.documents.get({ documentId });
+    const ranges = collectTextRanges(doc?.body?.content || [], normalizedText, []);
+    if (!ranges.length) return 0;
+
+    const normalizedFields = String(fields || "").trim()
+      || Object.keys(textStyle || {}).join(",");
+    if (!normalizedFields) return 0;
+
+    const requests = ranges.map((range) => ({
+      updateTextStyle: {
+        range,
+        textStyle,
+        fields: normalizedFields,
+      },
+    }));
+
+    await docs.documents.batchUpdate({
+      documentId,
+      requestBody: { requests },
+    });
+
+    return ranges.length;
+  } catch (err) {
+    logger.error({ err, documentId, literalText }, "❌ updateDocsTextStyleByLiteral");
+    throw err;
+  }
+}
+
 /**
  * Insert dynamic item rows into a Google Docs table and fill cell values.
  *
@@ -236,8 +309,10 @@ async function replaceTags(documentId, replacements = {}) {
  * @param {number}   tableIndex     0-based index among top-level tables in body
  * @param {Array}    items          array of data items
  * @param {Function} getCellValues  (item, rowIndex) => string[]
+ * @param {Object}   options        Optional settings
+ * @param {boolean}  options.allowEmpty  If true, leave empty values as is instead of "N/A"
  */
-async function insertDocsTableRows(documentId, tableIndex = 0, items, getCellValues) {
+async function insertDocsTableRows(documentId, tableIndex = 0, items, getCellValues, options = {}) {
   if (!items || !items.length) return false;
 
   // Step 1: read doc to find the target table
@@ -252,7 +327,7 @@ async function insertDocsTableRows(documentId, tableIndex = 0, items, getCellVal
   const tableStartIndex = tableElem.startIndex;
   const currentRowCount = tableElem.table.tableRows.length;
 
-  // Step 2: insert N rows below the last existing row (sequential, indices shift correctly)
+  // Step 2: insert all rows first (they will inherit header style initially)
   const insertRequests = items.map((_, i) => ({
     insertTableRow: {
       tableCellLocation: {
@@ -278,8 +353,12 @@ async function insertDocsTableRows(documentId, tableIndex = 0, items, getCellVal
   // New rows are appended after the original rows
   const newDataRows = tableAfter.table.tableRows.slice(currentRowCount);
 
-  // Step 4: build insertText requests for each cell (descending index to avoid shifts)
-  const fillRequests = [];
+  // Step 4: build requests to fill cells. El estilo (quitar bold) NO se
+  // puede calcular aqui todavia -- las celdas nuevas siempre estan vacias en
+  // este punto (cellEnd-1 > cellStart es falso), asi que cualquier rango
+  // calculado ahora seria vacio. Se recalcula despues de insertar el texto,
+  // mas abajo.
+  const requests = [];
   for (let rowIdx = 0; rowIdx < items.length; rowIdx++) {
     const row = newDataRows[rowIdx];
     if (!row) continue;
@@ -287,21 +366,70 @@ async function insertDocsTableRows(documentId, tableIndex = 0, items, getCellVal
     for (let colIdx = 0; colIdx < cellValues.length; colIdx++) {
       const cell = row.tableCells?.[colIdx];
       if (!cell) continue;
-      const val = String(cellValues[colIdx] ?? "").trim() || "N/A";
+      const val = options.allowEmpty
+        ? String(cellValues[colIdx] ?? "").trim()
+        : String(cellValues[colIdx] ?? "").trim() || "N/A";
       const cellStart = cell.content?.[0]?.startIndex;
       if (cellStart == null) continue;
-      fillRequests.push({ insertText: { location: { index: cellStart }, text: val } });
+
+      // Insert the text only if it's not empty
+      if (val.length > 0) {
+        requests.push({ insertText: { location: { index: cellStart }, text: val } });
+      }
     }
   }
 
-  // Process from last to first index to avoid cumulative offset shifts
-  fillRequests.sort((a, b) => b.insertText.location.index - a.insertText.location.index);
+  // Process insertText first in reverse order
+  const insertReqs = requests.filter(r => r.insertText).sort((a, b) => b.insertText.location.index - a.insertText.location.index);
 
-  if (fillRequests.length) {
+  if (insertReqs.length) {
     await docs.documents.batchUpdate({
       documentId,
-      requestBody: { requests: fillRequests },
+      requestBody: { requests: insertReqs },
     });
+  }
+
+  // Bug real: styleReqs se calculaba ANTES de insertar texto, cuando las
+  // celdas nuevas siempre estan vacias (cellEnd-1 > cellStart es falso para
+  // una celda vacia) -- asi que styleReqs.length siempre daba 0 y este
+  // bloque (el unico que de verdad recalcula rangos DESPUES de insertar
+  // texto y quita el bold) nunca se ejecutaba. Las filas nuevas se quedaban
+  // con el formato heredado de la fila de al lado (el header, en negrita).
+  // La condicion correcta es "se inserto texto", no "el pase vacio encontro algo".
+  if (insertReqs.length) {
+    // Re-read doc again to get updated indices after inserting text
+    const { data: docAfterInsert } = await docs.documents.get({ documentId });
+    const tablesAfterInsert = (docAfterInsert.body.content || []).filter(e => e.table);
+    const tableAfterInsert = tablesAfterInsert[tableIndex];
+    if (tableAfterInsert) {
+      const newDataRowsAfterInsert = tableAfterInsert.table.tableRows.slice(currentRowCount);
+      const styleRequestsAfterInsert = [];
+      for (let rowIdx = 0; rowIdx < items.length; rowIdx++) {
+        const row = newDataRowsAfterInsert[rowIdx];
+        if (!row) continue;
+        for (let colIdx = 0; colIdx < row.tableCells?.length; colIdx++) {
+          const cell = row.tableCells[colIdx];
+          if (!cell) continue;
+          const cellStart = cell.content?.[0]?.startIndex;
+          const cellEnd = cell.endIndex;
+          if (cellStart == null || cellEnd == null || cellEnd - 1 <= cellStart) continue;
+          styleRequestsAfterInsert.push({
+            updateTextStyle: {
+              range: { startIndex: cellStart, endIndex: cellEnd - 1 },
+              textStyle: options.textStyle || { bold: false },
+              fields: options.textStyleFields || "bold",
+            },
+          });
+        }
+      }
+      styleRequestsAfterInsert.sort((a, b) => b.updateTextStyle.range.startIndex - a.updateTextStyle.range.startIndex);
+      if (styleRequestsAfterInsert.length) {
+        await docs.documents.batchUpdate({
+          documentId,
+          requestBody: { requests: styleRequestsAfterInsert },
+        });
+      }
+    }
   }
 
   return true;
@@ -333,8 +461,26 @@ async function exportPdfBuffer(docId) {
   }
 }
 
+async function makeFileAnyoneReadable(fileId) {
+  if (!fileId) return false;
+  try {
+    await drive.permissions.create({
+      fileId,
+      supportsAllDrives: true,
+      requestBody: {
+        role: "reader",
+        type: "anyone",
+      },
+    });
+    return true;
+  } catch (err) {
+    logger.warn({ err, fileId }, "No se pudo dar permiso anyone-reader al archivo de Drive");
+    return false;
+  }
+}
+
 /** 📤 Subir archivo o firma PNG */
-async function uploadBase64File(name, base64, mimeType = "image/png", parentId) {
+async function uploadBase64File(name, base64, mimeType = "image/png", parentId, options = {}) {
   try {
     const buffer = Buffer.from(base64, "base64");
     const contentHash = computeSha256HexFromBuffer(buffer);
@@ -353,6 +499,10 @@ async function uploadBase64File(name, base64, mimeType = "image/png", parentId) 
       md5_drive: data.md5Checksum,
     };
 
+    if (options?.makeAnyoneReader) {
+      await makeFileAnyoneReadable(data.id);
+    }
+
     // Registrar en la tabla central de integridad
     await registerIntegrity(data.id, {
       hash: contentHash,
@@ -368,11 +518,11 @@ async function uploadBase64File(name, base64, mimeType = "image/png", parentId) 
 }
 
 /** 📤 Subir archivo desde multer (file.buffer) */
-async function uploadFileToDrive(file, path, parentId) {
+async function uploadFileToDrive(file, path, parentId, options = {}) {
   try {
     const filename = path.split("/").pop();
     const base64 = file.buffer.toString("base64");
-    return await uploadBase64File(filename, base64, file.mimetype, parentId);
+    return await uploadBase64File(filename, base64, file.mimetype, parentId, options);
   } catch (err) {
     logger.error({ err }, "❌ uploadFileToDrive");
     throw err;
@@ -431,9 +581,11 @@ module.exports = {
   deleteFile,
   copyTemplate,
   replaceTags,
+  updateDocsTextStyleByLiteral,
   insertDocsTableRows,
   downloadFileBuffer,
   exportPdfBuffer,
+  makeFileAnyoneReadable,
   uploadBase64File,
   uploadFileToDrive,
   exportPdf,

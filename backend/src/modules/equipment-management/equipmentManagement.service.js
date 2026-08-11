@@ -1,4 +1,5 @@
 const db = require("../../config/db");
+const { deleteFile: deleteDriveFile, ensureFolderPath, uploadFileToDrive } = require("../../utils/drive");
 
 const DEFAULT_STATUS = "in_storage";
 const INSTALLED_STATUS = "installed_client";
@@ -14,6 +15,46 @@ const toTextOrNull = (value) => {
   const text = String(value).trim();
   return text ? text : null;
 };
+
+const toNumberOrNull = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const toDateOrNull = (value) => {
+  const text = toTextOrNull(value);
+  if (!text) return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+};
+
+const normalizeCondition = (value) => {
+  const text = toTextOrNull(value);
+  if (!text) return null;
+  const normalized = text.toLowerCase();
+  if (normalized === "nuevo") return "nuevo";
+  if (["cu", "c.u.", "c/u", "usado"].includes(normalized)) return "cu";
+  return null;
+};
+
+const sanitizeFolderName = (value) => {
+  const text = toTextOrNull(value) || "sin-dato";
+  return text.replace(/[<>:"/\\|?*\x00-\x1F]/g, "-").replace(/\s+/g, " ").trim().slice(0, 120);
+};
+
+const normalizeDocumentType = (value) => {
+  const text = toTextOrNull(value);
+  if (!text) return "otro";
+  const normalized = text.toLowerCase();
+  const allowed = new Set(["proforma_puesta_marcha", "kit_arranque", "acta_entrega", "acta_retiro", "mantenimiento", "otro"]);
+  return allowed.has(normalized) ? normalized : "otro";
+};
+
+const getDriveRootFolderId = () =>
+  process.env.DRIVE_EQUIPMENT_FOLDER_ID ||
+  process.env.DRIVE_ATTACHMENTS_FOLDER_ID ||
+  process.env.DRIVE_DOCS_FOLDER_ID ||
+  process.env.DRIVE_FOLDER_ID;
 
 async function listStatuses() {
   const { rows } = await db.query(
@@ -124,7 +165,8 @@ async function getModelDetail(modelId) {
     db.query(
       `SELECT ea.id, ea.serial_number, ea.internal_code, ea.asset_tag, ea.current_status,
               sc.label AS status_label, sc.color_token, ea.current_location, ea.client_id,
-              ea.installed_at, ea.updated_at
+              ea.installed_at, ea.sale_price, ea.asset_condition, ea.retired_at,
+              ea.delivered_at, ea.updated_at
          FROM public.equipment_assets ea
          JOIN public.equipment_asset_status_catalog sc ON sc.code = ea.current_status
         WHERE ea.equipment_model_id = $1
@@ -188,10 +230,16 @@ async function listAssets({ search = null, status = null, model_id = null, avail
         ea.client_id,
         ea.client_location_id,
         ea.current_location,
+        COALESCE(NULLIF(c.razon_social, ''), NULLIF(cr.commercial_name, '')) AS assigned_client_name,
+        COALESCE(NULLIF(c.ruc, ''), NULLIF(cr.ruc_cedula, '')) AS assigned_client_identifier,
         ea.negotiated_by_module,
         ea.negotiation_reference_id,
         ea.installed_at,
         ea.warranty_until,
+        ea.sale_price,
+        ea.asset_condition,
+        ea.retired_at,
+        ea.delivered_at,
         ea.notes,
         ea.updated_at,
         em.name AS model_name,
@@ -201,6 +249,8 @@ async function listAssets({ search = null, status = null, model_id = null, avail
        FROM public.equipment_assets ea
        JOIN public.equipment_models em ON em.id = ea.equipment_model_id
        JOIN public.equipment_asset_status_catalog sc ON sc.code = ea.current_status
+       LEFT JOIN public.clients c ON c.id = ea.client_id
+       LEFT JOIN public.client_requests cr ON cr.id = ea.client_id
        ${whereClause}
       ORDER BY ea.updated_at DESC, ea.id DESC`,
     params,
@@ -263,6 +313,116 @@ async function createAsset(payload, userId = null) {
       error.status = 409;
       error.message = "El serial ya existe en otro activo";
     }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function updateAsset(assetId, payload, userId = null) {
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    const currentResult = await client.query("SELECT * FROM public.equipment_assets WHERE id = $1 FOR UPDATE", [
+      toIntOrNull(assetId),
+    ]);
+    if (!currentResult.rows.length) {
+      const error = new Error("Activo no encontrado");
+      error.status = 404;
+      throw error;
+    }
+
+    const current = currentResult.rows[0];
+    const nextStatus = toTextOrNull(payload.current_status || payload.status) || current.current_status;
+    const statusRow = await client.query("SELECT code FROM public.equipment_asset_status_catalog WHERE code = $1", [
+      nextStatus,
+    ]);
+    if (!statusRow.rows.length) {
+      const error = new Error("Estado de activo no valido");
+      error.status = 400;
+      throw error;
+    }
+
+    const condition = Object.prototype.hasOwnProperty.call(payload, "asset_condition")
+      ? normalizeCondition(payload.asset_condition)
+      : current.asset_condition;
+    if (payload.asset_condition && !condition) {
+      const error = new Error("Condicion de activo no valida");
+      error.status = 400;
+      throw error;
+    }
+
+    const nextValues = {
+      current_status: nextStatus,
+      current_location: Object.prototype.hasOwnProperty.call(payload, "current_location")
+        ? toTextOrNull(payload.current_location)
+        : current.current_location,
+      client_id: Object.prototype.hasOwnProperty.call(payload, "client_id") ? toIntOrNull(payload.client_id) : current.client_id,
+      sale_price: Object.prototype.hasOwnProperty.call(payload, "sale_price")
+        ? toNumberOrNull(payload.sale_price)
+        : current.sale_price,
+      asset_condition: condition,
+      retired_at: Object.prototype.hasOwnProperty.call(payload, "retired_at") ? toDateOrNull(payload.retired_at) : current.retired_at,
+      delivered_at: Object.prototype.hasOwnProperty.call(payload, "delivered_at")
+        ? toDateOrNull(payload.delivered_at)
+        : current.delivered_at,
+      notes: Object.prototype.hasOwnProperty.call(payload, "notes") ? toTextOrNull(payload.notes) : current.notes,
+    };
+
+    const { rows } = await client.query(
+      `UPDATE public.equipment_assets
+          SET current_status = $1,
+              current_location = $2,
+              client_id = $3,
+              sale_price = $4,
+              asset_condition = $5,
+              retired_at = $6,
+              delivered_at = $7,
+              notes = $8,
+              updated_by = $9,
+              updated_at = now()
+        WHERE id = $10
+        RETURNING *`,
+      [
+        nextValues.current_status,
+        nextValues.current_location,
+        nextValues.client_id,
+        nextValues.sale_price,
+        nextValues.asset_condition,
+        nextValues.retired_at,
+        nextValues.delivered_at,
+        nextValues.notes,
+        userId,
+        toIntOrNull(assetId),
+      ],
+    );
+
+    await client.query(
+      `INSERT INTO public.equipment_asset_events (asset_id, event_type, from_status, to_status, payload, created_by)
+       VALUES ($1, 'asset_updated', $2, $3, $4::jsonb, $5)`,
+      [
+        toIntOrNull(assetId),
+        current.current_status,
+        nextValues.current_status,
+        JSON.stringify({
+          previous: {
+            current_location: current.current_location,
+            client_id: current.client_id,
+            sale_price: current.sale_price,
+            asset_condition: current.asset_condition,
+            retired_at: current.retired_at,
+            delivered_at: current.delivered_at,
+          },
+          next: nextValues,
+        }),
+        userId,
+      ],
+    );
+
+    await client.query("COMMIT");
+    return rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
@@ -493,13 +653,191 @@ async function installAsset(assetId, payload, userId = null) {
 
 async function listAssetTimeline(assetId) {
   const { rows } = await db.query(
-    `SELECT id, event_type, from_status, to_status, payload, created_by, created_at
-       FROM public.equipment_asset_events
-      WHERE asset_id = $1
-      ORDER BY created_at DESC, id DESC`,
+    `SELECT
+        e.id,
+        e.event_type,
+        e.from_status,
+        from_sc.label AS from_status_label,
+        e.to_status,
+        to_sc.label AS to_status_label,
+        e.payload,
+        e.created_by,
+        COALESCE(u.fullname, u.name, u.email) AS created_by_name,
+        e.created_at
+       FROM public.equipment_asset_events e
+       LEFT JOIN public.equipment_asset_status_catalog from_sc ON from_sc.code = e.from_status
+       LEFT JOIN public.equipment_asset_status_catalog to_sc ON to_sc.code = e.to_status
+       LEFT JOIN public.users u ON u.id = e.created_by
+      WHERE e.asset_id = $1
+      ORDER BY e.created_at DESC, e.id DESC`,
     [assetId],
   );
   return rows;
+}
+
+async function getAssetForDocuments(client, assetId) {
+  const { rows } = await client.query(
+    `SELECT ea.id, ea.serial_number, em.name AS model_name
+       FROM public.equipment_assets ea
+       JOIN public.equipment_models em ON em.id = ea.equipment_model_id
+      WHERE ea.id = $1`,
+    [toIntOrNull(assetId)],
+  );
+  const asset = rows[0];
+  if (!asset) {
+    const error = new Error("Activo no encontrado");
+    error.status = 404;
+    throw error;
+  }
+  return asset;
+}
+
+async function listAssetDocuments(assetId) {
+  const { rows } = await db.query(
+    `SELECT
+        d.id,
+        d.asset_id,
+        d.doc_type,
+        d.title,
+        d.filename,
+        d.mime_type,
+        d.size_bytes,
+        d.drive_file_id,
+        d.drive_link,
+        d.notes,
+        d.uploaded_by,
+        COALESCE(u.fullname, u.name, u.email) AS uploaded_by_name,
+        d.created_at,
+        d.updated_at
+       FROM public.equipment_asset_documents d
+       LEFT JOIN public.users u ON u.id = d.uploaded_by
+      WHERE d.asset_id = $1
+      ORDER BY d.created_at DESC, d.id DESC`,
+    [toIntOrNull(assetId)],
+  );
+  return rows;
+}
+
+async function uploadAssetDocument(assetId, file, payload = {}, userId = null) {
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    const asset = await getAssetForDocuments(client, assetId);
+    const rootFolderId = getDriveRootFolderId();
+    if (!rootFolderId) {
+      const error = new Error("No se ha configurado una carpeta destino para documentos de equipos");
+      error.status = 500;
+      throw error;
+    }
+
+    const assetFolder = await ensureFolderPath(
+      [
+        "Equipos",
+        `${sanitizeFolderName(asset.model_name)} - ${sanitizeFolderName(asset.serial_number || `ID ${asset.id}`)}`,
+      ],
+      rootFolderId,
+    );
+    const stored = await uploadFileToDrive(file, file.originalname || `equipo-${asset.id}-${Date.now()}`, assetFolder.id);
+    const docType = normalizeDocumentType(payload.doc_type);
+    const title = toTextOrNull(payload.title) || file.originalname || stored.name;
+    const notes = toTextOrNull(payload.notes);
+    const driveLink = stored.webViewLink || stored.webContentLink || `https://drive.google.com/file/d/${stored.id}/view`;
+
+    const { rows } = await client.query(
+      `INSERT INTO public.equipment_asset_documents (
+          asset_id, doc_type, title, filename, mime_type, size_bytes,
+          drive_file_id, drive_link, notes, uploaded_by
+        )
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING *`,
+      [
+        asset.id,
+        docType,
+        title,
+        file.originalname || stored.name,
+        stored.mimeType || file.mimetype || null,
+        Number(file.size || 0) || null,
+        stored.id,
+        driveLink,
+        notes,
+        userId,
+      ],
+    );
+
+    await client.query(
+      `INSERT INTO public.equipment_asset_events (asset_id, event_type, payload, created_by)
+       VALUES ($1, 'document_uploaded', $2::jsonb, $3)`,
+      [
+        asset.id,
+        JSON.stringify({
+          document_id: rows[0].id,
+          doc_type: docType,
+          title,
+          filename: rows[0].filename,
+          drive_file_id: rows[0].drive_file_id,
+        }),
+        userId,
+      ],
+    );
+
+    await client.query("COMMIT");
+    return rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function deleteAssetDocument(assetId, documentId, userId = null) {
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    await getAssetForDocuments(client, assetId);
+    const { rows } = await client.query(
+      `DELETE FROM public.equipment_asset_documents
+        WHERE id = $1 AND asset_id = $2
+        RETURNING *`,
+      [toIntOrNull(documentId), toIntOrNull(assetId)],
+    );
+    const deleted = rows[0];
+    if (!deleted) {
+      const error = new Error("Documento no encontrado");
+      error.status = 404;
+      throw error;
+    }
+
+    await client.query(
+      `INSERT INTO public.equipment_asset_events (asset_id, event_type, payload, created_by)
+       VALUES ($1, 'document_deleted', $2::jsonb, $3)`,
+      [
+        toIntOrNull(assetId),
+        JSON.stringify({
+          document_id: deleted.id,
+          doc_type: deleted.doc_type,
+          title: deleted.title,
+          filename: deleted.filename,
+          drive_file_id: deleted.drive_file_id,
+        }),
+        userId,
+      ],
+    );
+    await client.query("COMMIT");
+
+    try {
+      await deleteDriveFile(deleted.drive_file_id);
+    } catch (_err) {
+      // El registro queda auditado aunque Drive no permita borrar el archivo.
+    }
+
+    return { deleted: true, document_id: deleted.id };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function listSchedule({ status = null, from = null, to = null } = {}) {
@@ -603,15 +941,25 @@ async function attachPartToProcedure(procedureId, payload) {
 }
 
 module.exports = {
+  toIntOrNull,
+  toTextOrNull,
+  toNumberOrNull,
+  toDateOrNull,
+  normalizeCondition,
+  normalizeDocumentType,
   listStatuses,
   listModels,
   getModelDetail,
   listAssets,
   createAsset,
+  updateAsset,
   changeAssetStatus,
   reserveAsset,
   installAsset,
   listAssetTimeline,
+  listAssetDocuments,
+  uploadAssetDocument,
+  deleteAssetDocument,
   listSchedule,
   createProcedure,
   createPart,

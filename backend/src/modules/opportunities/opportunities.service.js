@@ -927,6 +927,7 @@ const getManagerDashboard = async (actorUser) => {
 };
 
 module.exports = {
+  normalizeNumber,
   listAccounts,
   createAccount,
   listContacts,

@@ -1,6 +1,7 @@
 const db     = require('../../config/db');
 const crypto = require('crypto');
 const logger = require('../../config/logger');
+const DEFAULT_EVENT_TYPE = 'kickoff';
 
 // ─── FSM transition tables ────────────────────────────────────────────────────
 
@@ -27,6 +28,7 @@ const PRESENTATION_TRANSITIONS = {
 
 const mapEvent = (r) => ({
   id:                r.id,
+  event_type:        r.event_type || DEFAULT_EVENT_TYPE,
   name:              r.name,
   description:       r.description,
   event_date:        r.event_date,
@@ -113,9 +115,10 @@ async function listAllEvents() {
            COUNT(kp.id)::int AS presentation_count
     FROM kickoff_events ke
     LEFT JOIN kickoff_presentations kp ON kp.event_id = ke.id
+    WHERE COALESCE(ke.event_type, $1) = $1
     GROUP BY ke.id
     ORDER BY ke.event_date DESC, ke.created_at DESC
-  `);
+  `, [DEFAULT_EVENT_TYPE]);
   return rows.map(r => ({ ...mapEvent(r), presentation_count: r.presentation_count }));
 }
 
@@ -123,9 +126,10 @@ async function getCurrentEvent() {
   const { rows } = await db.query(`
     SELECT * FROM kickoff_events
     WHERE status IN ('scheduled','active','paused')
+      AND COALESCE(event_type, $1) = $1
     ORDER BY event_date ASC
     LIMIT 1
-  `);
+  `, [DEFAULT_EVENT_TYPE]);
   return rows[0] ? mapEvent(rows[0]) : null;
 }
 
@@ -134,9 +138,10 @@ async function getAdminCurrentEvent() {
   const { rows } = await db.query(`
     SELECT * FROM kickoff_events
     WHERE status NOT IN ('finished','cancelled')
+      AND COALESCE(event_type, $1) = $1
     ORDER BY created_at DESC
     LIMIT 1
-  `);
+  `, [DEFAULT_EVENT_TYPE]);
   return rows[0] ? mapEvent(rows[0]) : null;
 }
 
@@ -149,13 +154,13 @@ async function getEventById(eventId) {
 }
 
 async function createEvent(payload, userId) {
-  const { name, description, event_date, status = 'draft', moderation_active = true } = payload;
+  const { name, description, event_date, status = 'draft', moderation_active = true, event_type = DEFAULT_EVENT_TYPE } = payload;
   if (!name || !event_date) throw Object.assign(new Error('name y event_date son requeridos'), { status: 400 });
 
   const { rows } = await db.query(
-    `INSERT INTO kickoff_events (name, description, event_date, status, moderation_active, created_by, updated_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $6) RETURNING *`,
-    [name, description || null, event_date, status, moderation_active, userId]
+    `INSERT INTO kickoff_events (name, description, event_date, status, moderation_active, event_type, created_by, updated_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $7) RETURNING *`,
+    [name, description || null, event_date, status, moderation_active, event_type || DEFAULT_EVENT_TYPE, userId]
   );
   return mapEvent(rows[0]);
 }

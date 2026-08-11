@@ -47,7 +47,8 @@ export const WORKSPACE_PAGE_CLASS = "flex min-w-0 flex-col";
  *   </div>
  */
 export const WORKSPACE_3COL_CLASS =
-  "flex min-w-0 flex-col sm:-mx-6 sm:-mb-6 sm:-mt-6 lg:grid lg:grid-cols-12 lg:h-[calc(100dvh-11rem)] lg:overflow-hidden";
+  // DashboardLayout es fluido; no reintroducir sm:-mx-* en estos helpers.
+  "flex min-w-0 flex-col lg:grid lg:grid-cols-12 lg:h-[calc(100dvh-11rem)] lg:overflow-hidden";
 
 /** Sidebar izquierdo del workspace de 3 columnas */
 export const WORKSPACE_SIDEBAR_CLASS =
@@ -70,7 +71,8 @@ export const WORKSPACE_CONTEXT_CLASS =
  *   main    → col-span-12 lg:col-span-8
  */
 export const WORKSPACE_2COL_CLASS =
-  "flex min-w-0 flex-col sm:-mx-6 sm:-mb-6 sm:-mt-6 lg:grid lg:grid-cols-12 lg:h-[calc(100dvh-11rem)] lg:overflow-hidden";
+  // DashboardLayout es fluido; no reintroducir sm:-mx-* en estos helpers.
+  "flex min-w-0 flex-col lg:grid lg:grid-cols-12 lg:h-[calc(100dvh-11rem)] lg:overflow-hidden";
 
 /**
  * Padding interno estándar para paneles de workspace.

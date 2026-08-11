@@ -41,7 +41,24 @@ export const API_BASE_URL = normalizeApiBase(
 const api = axios.create({
  baseURL: API_BASE_URL,
  withCredentials: false, // ❌ Sin cookies
+ timeout: 15000,
 });
+
+export const isTransientApiError = (error) => {
+ const status = Number(error?.response?.status || 0);
+ const code = String(error?.code || "").toUpperCase();
+ const message = String(error?.message || "").toLowerCase();
+
+ if (!error?.response) return true;
+ if (code === "ECONNABORTED") return true;
+ if ([408, 425, 429, 500, 502, 503, 504].includes(status)) return true;
+
+ return (
+  message.includes("timeout") ||
+  message.includes("network error") ||
+  message.includes("failed to fetch")
+ );
+};
 
 // ==========================================================
 // 🔑 Manejo de tokens

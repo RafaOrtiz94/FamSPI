@@ -29,6 +29,7 @@ const ROLE_OPTIONS = [
   { label: "Comercial", value: "comercial" },
   { label: "Servicio Técnico", value: "servicio_tecnico" },
   { label: "Técnico", value: "tecnico" },
+  { label: "Responsable Técnico", value: "responsable_tecnico" },
   { label: "Finanzas", value: "finanzas" },
   { label: "Talento Humano", value: "talento_humano" },
   { label: "TI", value: "ti" },
@@ -273,7 +274,11 @@ const Usuarios = () => {
       await loadUsers();
     } catch (error) {
       console.error("Error guardando usuario:", error);
-      toast.error(error?.response?.data?.message || "No se pudo guardar el usuario");
+      const message = error?.response?.data?.message || "No se pudo guardar el usuario";
+      // ponytail: mensajes de conflicto de identidad (409) son largos y accionables
+      // (traen id/correo de la cuenta existente) -- necesitan mas tiempo en pantalla
+      // que un error corto generico.
+      toast.error(message, error?.response?.status === 409 ? { duration: 9000 } : undefined);
     } finally {
       setSaving(false);
     }

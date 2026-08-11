@@ -15,19 +15,6 @@ import {
   restartPrivatePurchaseContractAfterRejection,
 } from '../../../../../core/api/privatePurchasesApi';
 
-// Estados en que el tab de contrato está habilitado para compras privadas.
-// Se incluyen los estados de preparación del contrato (inspection y client_registered)
-// además de los estados propios del flujo de firmas.
-const PRIVATE_CONTRACT_STATES = [
-  'client_registered',                   // BC-comodato: contrato preparado tras registro
-  'inspection_requested',                // camino normal: backoffice prepara draft mientras técnico inspecciona
-  'inspection_coordinated',              // técnico coordinó, backoffice puede subir draft
-  'pending_contract_approval',
-  'pending_contract_client_signature',
-  'contract_available',
-  'contract_rejected',
-];
-
 const fileToBase64Payload = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onload = () => {
@@ -61,7 +48,11 @@ const ContractTab = ({ purchase, type, userRoles, refresh }) => {
   const isPurchasePrivate = purchase?.purchase_type === 'private' || type === 'private';
   const hasRole = (token) => userRoles.some((role) => role === token || role.includes(token));
 
-  const canBackofficeDraft = hasRole('backoffice_comercial');
+  // Alineado con RoleGatedAction del paso 1 (linea ~328) y con lo que el
+  // backend uploadContract realmente acepta: backoffice o comercial/jefes/gerencia.
+  const canUploadDraftRole = userRoles.some((r) =>
+    ['backoffice_comercial', 'jefe_comercial', 'jefe_de_comercial', 'gerencia', 'gerencia_general'].includes(r)
+  );
   const canCommercialClientSign = hasRole('comercial');
   const linkedBusinessCaseId = purchase?.extra?.auto_business_case_id || purchase?.business_case_id || null;
   const privateInspectionHandledByBusinessCase =
@@ -74,26 +65,28 @@ const ContractTab = ({ purchase, type, userRoles, refresh }) => {
   const canUploadPrivateDraft =
     isPurchasePrivate &&
     signedProformaUploaded &&
-    (purchase?.status === 'inspection_requested' || (privateInspectionHandledByBusinessCase && purchase?.status === 'client_registered')) &&
-    canBackofficeDraft &&
+    (['inspection_requested', 'inspection_coordinated'].includes(purchase?.status) ||
+      (privateInspectionHandledByBusinessCase && purchase?.status === 'client_registered')) &&
+    canUploadDraftRole &&
     !purchase?.contract_document_id;
 
   // Gerencia — solo puede aprobar/rechazar (sin subir archivo)
   const canGerenciaDecide  = userRoles.some((r) =>
     ['gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial'].includes(r)
   );
-  // ACP — sube el contrato firmado tras la aprobación de gerencia
-  const canAcpUploadSigned = userRoles.some((r) =>
-    ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial'].includes(r)
-  );
-
   // Decisión de gerencia sobre el contrato
   const gerenciaDecision = purchase?.manager_contract_decision || null; // 'approved' | 'rejected' | null
 
-  // El tab se habilita para todos los estados en PRIVATE_CONTRACT_STATES (ya incluye client_registered, inspection_*)
+  // Bug: PRIVATE_CONTRACT_STATES es una lista fija de estados "de contrato" --
+  // una vez el status avanza a logistica/entrega (delivery_dates_requested,
+  // dispatch_ready, delivered_signed, etc.) ya no esta en esa lista y el tab se
+  // mostraba bloqueado aunque el contrato ya se hubiera completado hace rato.
+  // client_registered_at es un hecho persistente (se setea una vez, nunca se
+  // limpia) y el contrato siempre ocurre despues de el, asi que es la senal
+  // confiable de "el tab de contrato ya deberia estar habilitado".
   const isEnabled = isPurchasePublic
     ? purchase?.public_portal_outcome === 'won'
-    : PRIVATE_CONTRACT_STATES.includes(purchase?.status);
+    : Boolean(purchase?.client_registered_at);
 
   const contractLink = purchase?.contract_file_link || driveLink(purchase?.contract_document_id);
   const clientContractLink = driveLink(purchase?.contract_client_signed_document_id);
@@ -110,7 +103,7 @@ const ContractTab = ({ purchase, type, userRoles, refresh }) => {
     if (isPurchasePublic && purchase?.public_portal_outcome !== 'won') {
       return 'El contrato se habilita cuando el proceso público está ganado.';
     }
-    if (isPurchasePrivate && !PRIVATE_CONTRACT_STATES.includes(purchase?.status)) {
+    if (isPurchasePrivate && !purchase?.client_registered_at) {
       // Estado previo al registro de cliente — aún no corresponde gestionar el contrato
       return 'El contrato se habilita una vez que el cliente esté registrado en el sistema y la proforma firmada.';
     }

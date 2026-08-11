@@ -5,7 +5,29 @@
       "Bash(grep -E \"\\\\.\\(jsx?\\)$\")",
       "Bash(python -c ' *)",
       "Bash(1[0-2][0-9]\" | head -40)",
-      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\Departamento de TI\\\\Desktop\\\\PROYECTOS\\\\FamSPI\\\\backend\\\\src\\\\db\\\\migrations\\\\\" | Where-Object { $_.Name -match \"^0\\(9[5-9]|[0-9]{2}[0-9]\\)_|^1\\(0[0-9]|1[0-9]|2[0-9]\\)_\" } | Select-Object Name | Sort-Object Name)"
+      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\Departamento de TI\\\\Desktop\\\\PROYECTOS\\\\FamSPI\\\\backend\\\\src\\\\db\\\\migrations\\\\\" | Where-Object { $_.Name -match \"^0\\(9[5-9]|[0-9]{2}[0-9]\\)_|^1\\(0[0-9]|1[0-9]|2[0-9]\\)_\" } | Select-Object Name | Sort-Object Name)",
+      "Bash(DB_HOST=ep-wispy-moon-aqszgsal-pooler.c-8.us-east-1.aws.neon.tech DB_SSL=true DB_PASSWORD=$\\(gcloud secrets versions access latest --secret=DB_PASSWORD --project=famspi-sbox\\) node scripts/backfill_users_fullname_from_profile.js --dry-run)",
+      "Bash(DB_HOST=ep-wispy-moon-aqszgsal-pooler.c-8.us-east-1.aws.neon.tech DB_SSL=true DB_PASSWORD=$\\(gcloud secrets versions access latest --secret=DB_PASSWORD --project=famspi-sbox\\) node scripts/backfill_users_fullname_from_profile.js)",
+      "Bash(cd \"c:/Users/Departamento de TI/Desktop/PROYECTOS/FamSPI/spi_front\" && npm run build 2>&1 > /tmp/build_output.txt; cat /tmp/build_output.txt | grep -B1 \"no-unused-vars\\\\|exhaustive-deps\\\\|no-control-regex\" | grep -v \"^--$\")",
+      "Read(//tmp/**)",
+      "Bash(tee build_output.txt)",
+      "Bash(awk '/^\\\\[eslint\\\\]/{flag=1} flag{print} /^Search for the keywords/{exit}' build_output.txt)",
+      "Bash(sed -n '2,87p' eslint_warnings.txt)",
+      "Bash(sed -n '88,208p' eslint_warnings.txt)",
+      "Bash(sed -n '209,297p' eslint_warnings.txt)",
+      "Bash(sed -n '298,379p' eslint_warnings.txt)",
+      "Bash(node -c src/modules/schedules/schedules.service.js)",
+      "Bash(gcloud secrets *)",
+      "Bash(PW=__CMDSUB_OUTPUT__ node -e ' *)",
+      "Bash(git commit -m ' *)",
+      "PowerShell(& \"c:\\\\Users\\\\Departamento de TI\\\\Desktop\\\\PROYECTOS\\\\FamSPI\\\\scripts\\\\deploy_backend_cloudrun.ps1\")",
+      "Bash(npx eslint *)",
+      "Bash(node -c src/modules/crm-fam/crm.service.js)",
+      "Bash(grep -n \"const { client_id, prospect_name, observations } = req.body;\\\\|else if \\(prospect_name\\)\\\\|prospectInsertParams\\\\|ON CONFLICT \\(user_email, prospect_name, visit_date\\)\" src/modules/attendance/attendance.controller.js)",
+      "Bash(grep -n \"const clockOutField\\\\|Actualizar cronograma a completado\\\\|} else if \\(normalizedProspectName\\) {\\\\|const { client_id, prospect_name, observations } = req.body;\" src/modules/attendance/attendance.controller.js)",
+      "Bash(node -c src/modules/attendance/attendance.controller.js)",
+      "Bash(node -c src/modules/clients/clients.service.js)",
+      "Bash(node -c src/modules/clients/clients.controller.js)"
     ]
   }
 }

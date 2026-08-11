@@ -31,6 +31,7 @@ import {
   assignTiAsset,
   assignTiCorporateNumber,
   assignMultipleTiAssets,
+  getTiAssignmentEvidenceFile,
   uploadAssignmentEvidence,
   changeTiCorporateNumber,
   clearTiMaintenance,
@@ -40,8 +41,6 @@ import {
   createTiCorporateNumber,
   createTiMaintenance,
   deleteTiAccessory,
-  downloadTiActa,
-  getTiActa,
   getTiActaPdf,
   getTiActaRecipientInfo,
   listTiAllActas,
@@ -54,6 +53,7 @@ import {
   getTiAssetHistory,
   listTiAccessories,
   listTiActas,
+  uploadTiLegacyActaSigned,
   listTiAssets,
   listTiCorporateNumbers,
   listTiMaintenance,
@@ -67,6 +67,7 @@ import {
   updateTiAssetStatus,
   liberateTiAsset,
   getTiLiberationPhotos,
+  getTiLiberationPhotoFile,
 } from "../../../core/api/tiAssetsApi";
 
 const STATUS_LABELS = {
@@ -382,6 +383,28 @@ const SectionTitle = ({ icon: Icon, children }) => (
   </div>
 );
 
+const revokeObjectUrls = (urls = []) => {
+  urls.filter(Boolean).forEach((url) => {
+    try {
+      URL.revokeObjectURL(url);
+    } catch (_error) {
+      // no-op
+    }
+  });
+};
+
+const openBlobInNewTab = (blob) => {
+  const objectUrl = URL.createObjectURL(blob);
+  window.open(objectUrl, "_blank", "noopener,noreferrer");
+  window.setTimeout(() => {
+    try {
+      URL.revokeObjectURL(objectUrl);
+    } catch (_error) {
+      // no-op
+    }
+  }, 60000);
+};
+
 const TI_WRITE_ROLES = ["ti", "jefe_ti", "admin_ti", "gerencia"];
 const TI_CREATE_ROLES = [...TI_WRITE_ROLES, "financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador"];
 const TI_CORPORATE_MANAGE_ROLES = ["ti", "jefe_ti"];
@@ -417,6 +440,7 @@ const TIDeviceManagementPage = () => {
   const canCreate = TI_CREATE_ROLES.includes(userRole);
   const canWrite  = TI_WRITE_ROLES.includes(userRole);
   const canManageCorporateNumber = TI_CORPORATE_MANAGE_ROLES.includes(userRole);
+  const canUploadLegacyActa = ["financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador", "ti", "jefe_ti", "admin_ti", "gerencia"].includes(userRole);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [assets, setAssets] = useState([]);
@@ -432,7 +456,7 @@ const TIDeviceManagementPage = () => {
   const [form, setForm] = useState(EMPTY_FORM);
   const [editFields, setEditFields] = useState({});
   const [newStatus, setNewStatus] = useState("unassigned");
-  const [coordinationDates, setCoordinationDates] = useState({});
+  const [, setCoordinationDates] = useState({});
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   // Lock/unlock edición de info del equipo
   const [isEditing, setIsEditing] = useState(false);
@@ -466,6 +490,7 @@ const TIDeviceManagementPage = () => {
   const [liberatingAssetId, setLiberatingAssetId] = useState(null);
   const [liberationPhotos, setLiberationPhotos] = useState([]);
   const [liberationPhotosLoading, setLiberationPhotosLoading] = useState(false);
+  const [liberationPhotoPreviewUrls, setLiberationPhotoPreviewUrls] = useState({});
   const [corporateNumbers, setCorporateNumbers] = useState([]);
   const [corporateNumbersLoading, setCorporateNumbersLoading] = useState(false);
   const [selectedCorporateNumberId, setSelectedCorporateNumberId] = useState("");
@@ -556,6 +581,15 @@ const TIDeviceManagementPage = () => {
     [corporateNumbers]
   );
 
+  const legacyNoActaAssignment = useMemo(() => {
+    const current = assignmentsHistory.find((assignment) => assignment.assigned_to_user_id);
+    if (!current) return null;
+    const hasSystemActa = actas.some(
+      (acta) => acta.tipo === "entrega" && String(acta.recipient_user_id) === String(current.assigned_to_user_id),
+    );
+    return hasSystemActa ? null : current;
+  }, [assignmentsHistory, actas]);
+
   const filteredCorporateNumbers = useMemo(() => {
     return corporateNumbers.filter((item) => {
       const matchesStatus =
@@ -589,6 +623,8 @@ const TIDeviceManagementPage = () => {
         (a.brand || "").toLowerCase().includes(q) ||
         (a.model || "").toLowerCase().includes(q) ||
         (a.serial_number || "").toLowerCase().includes(q) ||
+        (a.imei || "").toLowerCase().includes(q) ||
+        (a.invoice_number || "").toLowerCase().includes(q) ||
         (a.assigned_to_name || "").toLowerCase().includes(q)
     );
   }, [assets, search]);
@@ -991,7 +1027,7 @@ const TIDeviceManagementPage = () => {
     }
     setSaving(true);
     try {
-      const result = await liberateTiAsset(liberatingAssetId, liberateForm.photoFiles, liberateForm.notes || "");
+      await liberateTiAsset(liberatingAssetId, liberateForm.photoFiles, liberateForm.notes || "");
       showToast(`Equipo liberado · Acta de retiro generada`, "success");
       setShowLiberateModal(false);
       setLiberateForm({ notes: "", photoFiles: [], photoPreviews: [] });
@@ -1010,13 +1046,61 @@ const TIDeviceManagementPage = () => {
     setLiberationPhotosLoading(true);
     try {
       const photos = await getTiLiberationPhotos(assetId);
-      setLiberationPhotos(Array.isArray(photos) ? photos : []);
+      const normalizedPhotos = Array.isArray(photos) ? photos : [];
+      const nextPreviewEntries = await Promise.all(
+        normalizedPhotos.map(async (photo) => {
+          if (!photo?.id) return [String(photo?.id || ""), ""];
+          try {
+            const file = await getTiLiberationPhotoFile(photo.id);
+            return [String(photo.id), URL.createObjectURL(file.blob)];
+          } catch (_error) {
+            return [String(photo.id), ""];
+          }
+        }),
+      );
+
+      setLiberationPhotoPreviewUrls((current) => {
+        revokeObjectUrls(Object.values(current));
+        return Object.fromEntries(nextPreviewEntries.filter(([key]) => key));
+      });
+      setLiberationPhotos(normalizedPhotos);
     } catch (error) {
       console.error("Error loading liberation photos:", error);
+      setLiberationPhotoPreviewUrls((current) => {
+        revokeObjectUrls(Object.values(current));
+        return {};
+      });
+      setLiberationPhotos([]);
     } finally {
       setLiberationPhotosLoading(false);
     }
   };
+
+  const openAssignmentEvidence = async (assignment) => {
+    if (!assignment?.id) return;
+    try {
+      const file = await getTiAssignmentEvidenceFile(assignment.id);
+      openBlobInNewTab(file.blob);
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo abrir la evidencia", "error");
+    }
+  };
+
+  const openLiberationPhoto = async (photoId) => {
+    if (!photoId) return;
+    try {
+      const file = await getTiLiberationPhotoFile(photoId);
+      openBlobInNewTab(file.blob);
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo abrir la foto de liberacion", "error");
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      revokeObjectUrls(Object.values(liberationPhotoPreviewUrls));
+    };
+  }, [liberationPhotoPreviewUrls]);
 
   // Shared helper: fetch profile and update modal recipient fields
   const fetchAndFillRecipient = async (userId, baseNombre = "") => {
@@ -1171,6 +1255,22 @@ const TIDeviceManagementPage = () => {
       if (selected) loadActas(selected.id);
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo subir el acta firmada", "error");
+    } finally {
+      setUploadingActaId(null);
+    }
+  };
+
+  const handleLegacySignedActaUpload = async (assignmentId, file) => {
+    if (!file) return;
+    setUploadingActaId(`legacy-${assignmentId}`);
+    try {
+      await uploadTiLegacyActaSigned(assignmentId, file);
+      showToast("Acta histórica subida y vinculada al equipo", "success");
+      if (selected) {
+        await Promise.all([loadActas(selected.id), loadHistory(selected.id)]);
+      }
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo subir el acta histórica", "error");
     } finally {
       setUploadingActaId(null);
     }
@@ -1660,7 +1760,7 @@ const TIDeviceManagementPage = () => {
               />
               <input
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-8 pr-3 py-2 text-sm placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
-                placeholder="Buscar por nombre, serie o usuario..."
+                placeholder="Buscar por nombre, serie, IMEI, factura o usuario..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -1981,6 +2081,7 @@ const TIDeviceManagementPage = () => {
                           title={selected.status !== 'assigned' ? `No se puede liberar: equipo no está asignado` : undefined}
                           onClick={() => {
                             setLiberatingAssetId(selected.id);
+                            loadLiberationPhotos(selected.id);
                             setShowLiberateModal(true);
                           }}
                         >
@@ -2188,15 +2289,14 @@ const TIDeviceManagementPage = () => {
                           </div>
                           {a.sin_acta && (
                             <div className="shrink-0">
-                              {a.evidence_file_url ? (
-                                <a
-                                  href={a.evidence_file_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
+                              {a.evidence_drive_file_id || a.evidence_file_url ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openAssignmentEvidence(a)}
                                   className="flex items-center gap-1 rounded-lg bg-green-50 px-2 py-1 text-[10px] font-medium text-green-700 hover:bg-green-100 transition-colors"
                                 >
                                   <FiCheck size={9} /> Evidencia
-                                </a>
+                                </button>
                               ) : (
                                 <button
                                   type="button"
@@ -2221,9 +2321,52 @@ const TIDeviceManagementPage = () => {
                 {actasLoading ? (
                   <p className="text-xs text-slate-400 text-center py-3">Cargando actas...</p>
                 ) : actas.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-3">Sin actas generadas para este equipo</p>
+                  legacyNoActaAssignment ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
+                      <div className="flex items-start gap-2">
+                        <FiAlertCircle size={15} className="mt-0.5 shrink-0 text-amber-600" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-amber-800">Acta histórica previa a SPI</p>
+                          <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
+                            Esta entrega fue registrada antes de que el sistema generara actas automáticamente. Finanzas debe cargar aquí el PDF del acta firmada para dejarlo vinculado al equipo.
+                          </p>
+                          {canUploadLegacyActa && (
+                            <label className="mt-2 inline-flex cursor-pointer">
+                              <span className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 transition-colors">
+                                {uploadingActaId === `legacy-${legacyNoActaAssignment.id}`
+                                  ? <FiRefreshCw size={11} className="animate-spin" />
+                                  : <FiDownload size={11} className="rotate-180" />}
+                                Subir acta firmada histórica
+                              </span>
+                              <input type="file" accept=".pdf,application/pdf" className="hidden"
+                                disabled={uploadingActaId !== null}
+                                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleLegacySignedActaUpload(legacyNoActaAssignment.id, f); e.target.value = ""; }} />
+                            </label>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400 text-center py-3">Sin actas generadas para este equipo</p>
+                  )
                 ) : (
                   <div className="space-y-2">
+                    {legacyNoActaAssignment && (
+                      <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+                        <p className="text-[11px] leading-relaxed text-amber-800">Acta histórica previa a SPI. Puedes reemplazar el PDF firmado si es necesario.</p>
+                        <label className="inline-flex shrink-0 cursor-pointer">
+                          <span className="flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 transition-colors">
+                            {uploadingActaId === `legacy-${legacyNoActaAssignment.id}`
+                              ? <FiRefreshCw size={11} className="animate-spin" />
+                              : <FiDownload size={11} className="rotate-180" />}
+                            Reemplazar
+                          </span>
+                          <input type="file" accept=".pdf,application/pdf" className="hidden"
+                            disabled={uploadingActaId !== null}
+                            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleLegacySignedActaUpload(legacyNoActaAssignment.id, f); e.target.value = ""; }} />
+                        </label>
+                      </div>
+                    )}
                     {actas.map((acta) => (
                       <div key={acta.id} className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
                         <div className="flex items-start justify-between gap-2">
@@ -2980,6 +3123,12 @@ const TIDeviceManagementPage = () => {
           </div>
 
           {/* Liberation photos history */}
+          {liberationPhotosLoading ? (
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-xs text-slate-400">Cargando evidencias de liberaciones anteriores...</p>
+            </div>
+          ) : null}
+
           {liberationPhotos.length > 0 && (
             <div className="border-t border-slate-100 pt-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
@@ -2987,18 +3136,17 @@ const TIDeviceManagementPage = () => {
               </p>
               <div className="grid grid-cols-3 gap-2">
                 {liberationPhotos.map((photo) => (
-                  <a
+                  <button
+                    type="button"
                     key={photo.id}
-                    href={photo.drive_url}
-                    target="_blank"
-                    rel="noreferrer"
+                    onClick={() => openLiberationPhoto(photo.id)}
                     title={`${new Date(photo.liberated_at).toLocaleDateString("es-EC")} · ${photo.liberated_by_name || ""}`}
-                    className="rounded-lg overflow-hidden border border-slate-200 hover:border-blue-400 transition block"
+                    className="block overflow-hidden rounded-lg border border-slate-200 transition hover:border-blue-400"
                   >
-                    {photo.drive_url ? (
+                    {liberationPhotoPreviewUrls[String(photo.id)] ? (
                       <img
-                        src={photo.drive_url}
-                        alt="Liberation photo"
+                        src={liberationPhotoPreviewUrls[String(photo.id)]}
+                        alt="Evidencia de liberacion"
                         className="w-full h-20 object-cover"
                         onError={(e) => { e.target.style.display = "none"; }}
                       />
@@ -3010,7 +3158,7 @@ const TIDeviceManagementPage = () => {
                     <p className="text-[9px] text-slate-500 px-1.5 py-1 truncate">
                       {new Date(photo.liberated_at).toLocaleDateString("es-EC")}
                     </p>
-                  </a>
+                  </button>
                 ))}
               </div>
             </div>

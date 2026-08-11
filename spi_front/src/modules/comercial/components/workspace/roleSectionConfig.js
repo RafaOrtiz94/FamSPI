@@ -15,8 +15,7 @@
  *   - Secciones con 📩 (permiso requerido) están en canEdit pero el sistema de propiedad
  *     de ítems controla quién puede modificar qué dentro de la sección.
  *   - La sección "prices" SOLO la edita jefe_operaciones (regla absoluta, no configurable aquí).
- *   - investment_values_op: solo jefe_operaciones guarda; jefe_comercial y gerencia leen.
- *   - investment_values_fin: solo jefe_financiero guarda; jefe_comercial y gerencia leen.
+ *   - investment_values: una sola vista; jefe_operaciones edita precio operativo y jefe_financiero precio financiero.
  *
  * CORRECCIONES APLICADAS (v3 — 2026-05-23):
  *   BC-02: analista_comercial mismo nivel que comercial
@@ -42,8 +41,7 @@ export const ALL_SECTIONS = [
   "lis",
   "determinations",
   "investments",
-  "investment_values_op",
-  "investment_values_fin",
+  "investment_values",
   "consumption_export",
   "feasibility",
   "dispatch_workspace",
@@ -145,8 +143,7 @@ export const ROLE_SECTION_CONFIG = {
     visible: [
       "general", "lab", "equipment", "lis", "determinations",
       "requirement", "investments",
-      "investment_values_op",   // BC-12: ve pero no guarda
-      "investment_values_fin",  // BC-12: ve pero no guarda
+      "investment_values",   // BC-12: ve pero no guarda
       "consumption_export", "dispatch_workspace", "feasibility",
     ],
     canEdit: [
@@ -162,8 +159,7 @@ export const ROLE_SECTION_CONFIG = {
     visible: [
       "general", "lab", "equipment", "lis", "determinations",
       "requirement", "investments",
-      "investment_values_op",
-      "investment_values_fin",
+      "investment_values",
       "consumption_export", "dispatch_workspace", "feasibility",
     ],
     canEdit: [
@@ -181,8 +177,7 @@ export const ROLE_SECTION_CONFIG = {
     visible: [
       "general", "lab", "equipment", "lis", "determinations",
       "requirement", "investments",
-      "investment_values_op",
-      "investment_values_fin",
+      "investment_values",
       "consumption_export", "dispatch_workspace", "feasibility",
     ],
     canEdit: ["feasibility"],
@@ -193,8 +188,7 @@ export const ROLE_SECTION_CONFIG = {
     visible: [
       "general", "lab", "equipment", "lis", "determinations",
       "requirement", "investments",
-      "investment_values_op",
-      "investment_values_fin",
+      "investment_values",
       "consumption_export", "dispatch_workspace", "feasibility",
     ],
     canEdit: ["feasibility"],
@@ -218,20 +212,20 @@ export const ROLE_SECTION_CONFIG = {
       // BC-03: ve el BC desde BORRADOR — acceso a secciones relevantes
       "general", "lab", "equipment", "lis", "determinations",
       "requirement", "investments",
-      "investment_values_op",  // BC-12: edita valores operativos
+      "investment_values",  // BC-12: edita valores operativos
       "dispatch_workspace", "feasibility",
     ],
     canEdit: [
       // BC-06: equipment → solo lectura (antes era editable)
       // BC-07: determinations → solo lectura (antes era editable)
       "investments",
-      "investment_values_op",
+      "investment_values",
       "dispatch_workspace",
     ],
   },
 
   // ─────────────────────────────────────────────────────────────────
-  // FINANCIERO — Edita investment_values_fin y puede agregar al carrito.
+  // FINANCIERO — Edita precio financiero en investment_values y puede agregar al carrito.
   // BC-14: ve el resultado de feasibility.
   // ─────────────────────────────────────────────────────────────────
   jefe_financiero: {
@@ -239,12 +233,12 @@ export const ROLE_SECTION_CONFIG = {
       // BC-03: ve el BC desde BORRADOR
       "general", "lab", "equipment", "lis", "determinations",
       "investments",
-      "investment_values_fin",  // BC-12: edita valores financieros
+      "investment_values",  // BC-12: edita valores financieros
       "feasibility",             // BC-14: ve resultado de viabilidad
     ],
     canEdit: [
       "investments",             // puede agregar ítems al carrito
-      "investment_values_fin",
+      "investment_values",
     ],
   },
 

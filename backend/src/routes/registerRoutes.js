@@ -27,7 +27,9 @@ const privatePurchasesRoutes = require("../modules/private-purchases/privatePurc
 const deliveryRequestsRoutes = require("../modules/delivery-requests/deliveryRequests.routes");
 const deliveryCeilingsRoutes = require("../modules/delivery-ceilings/deliveryCeilings.routes");
 const publicDeliveryPlansRoutes = require("../modules/public-delivery-plans/publicDeliveryPlans.routes");
+const consumableFilesRoutes = require("../modules/consumable-files/consumableFiles.routes");
 const applicantsRoutes = require("../modules/applicants/applicants.routes");
+const worldCup2026Routes = require("../modules/world-cup-2026/worldCup2026.routes");
 const {
   businessCaseRoutes,
   equipmentCatalogRoutes,
@@ -70,11 +72,17 @@ const tiAssetsRoutes = require("../modules/ti-assets/tiAssets.routes");
 const collabDeliveriesRoutes = require("../modules/collab-deliveries/collabDeliveries.routes");
 const moduleAccessRoutes = require("../modules/module-access/moduleAccess.routes");
 const kickoffRoutes = require("../modules/kickoff/kickoff.routes");
+const famdaysRoutes = require("../modules/famdays/famdays.routes");
 const opportunitiesRoutes = require("../modules/opportunities/opportunities.routes");
+const hiringPipelineRoutes = require("../modules/hiring-pipeline/hiring-pipeline.routes");
+const trainingsRoutes = require("../modules/trainings/trainings.routes");
+const crmFamRoutes = require("../modules/crm-fam/crm.routes");
+const workManagementRoutes = require("../modules/work-management/workManagement.routes");
 
 function mountPublicRoutes(app) {
   app.use("/api/v1/auth", authRoutes);
   app.use("/api/applicants", applicantsRoutes);
+  app.use("/api/v1/world-cup-2026", worldCup2026Routes);
   // Webhook público de EspoCRM — sin JWT, validado por X-Hook-Secret
   app.use("/api/v1/integrations/crm/webhook", crmWebhookRoutes);
 }
@@ -131,6 +139,7 @@ app.use("/api/v1/calidad/capa", calidadCapaRoutes);
   app.use("/api/v1/delivery-ceilings", deliveryCeilingsRoutes);
   app.use("/api/v1/delivery-requests", deliveryRequestsRoutes);
   app.use("/api/v1/public-delivery-plans", publicDeliveryPlansRoutes);
+  app.use("/api/v1/consumable-files", consumableFilesRoutes);
   app.use("/api/v1/personnel-requests", personnelRequestsRoutes);
   app.use("/api/v1/permisos", permisosRoutes);
   app.use("/api/v1/vacaciones", vacacionesRoutes);
@@ -143,8 +152,13 @@ app.use("/api/v1/calidad/capa", calidadCapaRoutes);
   app.use("/api/v1/collab-deliveries", collabDeliveriesRoutes);
   app.use("/api/v1/module-access", moduleAccessRoutes);
   app.use("/api/v1/kickoff", kickoffRoutes);
+  app.use("/api/v1/famdays", famdaysRoutes);
   app.use("/api/v1/famsheets", opportunitiesRoutes);
   app.use("/api/v1/opportunities", opportunitiesRoutes);
+  app.use("/api/v1/hiring-pipeline", hiringPipelineRoutes);
+  app.use("/api/v1/trainings", trainingsRoutes);
+  app.use("/api/v1/crm-fam", crmFamRoutes);
+  app.use("/api/v1/work-management", workManagementRoutes);
   app.use("/api/v1/viaticos", viaticosRoutes);
   app.use("/internal/jobs", internalJobsRouter);
   app.use("/api/v1/users/me/profile", userProfileRoutes);

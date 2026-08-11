@@ -16,22 +16,39 @@ const ROLE_GROUPS = {
     "acp_comercial",
     "backoffice",
   ],
+  // Familia técnica interna — incluye roles nuevos y aliases legacy
   tecnico: [
-    "tecnico",
+    "tecnico",          // legacy → migrado a ing_servicio
+    "ing_servicio",
+    "esp_app",
     "servicio_tecnico",
+    "responsable_tecnico",
     "jefe_servicio_tecnico",
     "jefe_de_servicio_tecnico",
-    "jefe_tecnico",
+    "jefe_tecnico",     // legacy → migrado a jefe_serSvicio
+    "jefe_servicio",
     "jefe_de_tecnico",
   ],
   servicio_tecnico: [
     "servicio_tecnico",
     "tecnico",
+    "ing_servicio",
+    "esp_app",
+    "responsable_tecnico",
     "jefe_servicio_tecnico",
     "jefe_de_servicio_tecnico",
     "jefe_tecnico",
+    "jefe_servicio",
     "jefe_de_tecnico",
   ],
+  // Grupos individuales — roles internos nuevos
+  ing_servicio: ["ing_servicio", "tecnico"],
+  jefe_servicio: ["jefe_servicio", "jefe_tecnico", "jefe_de_tecnico", "jefe_servicio_tecnico", "jefe_de_servicio_tecnico"],
+  esp_app: ["esp_app"],
+  // Roles externos — acceso limitado: FamSign, Capacitaciones, Permisos, Vacaciones
+  ing_servicio_ext: ["ing_servicio_ext"],
+  esp_app_ext: ["esp_app_ext"],
+  ext_users: ["ing_servicio_ext", "esp_app_ext"],
   gerencia: ["gerencia", "gerencia_general", "gerente_general", "director", "gerente"],
   operaciones: [
     "operaciones",
@@ -55,7 +72,7 @@ const ROLE_GROUPS = {
   finanzas: ["finanzas", "financiero", "jefe_finanzas", "jefe_de_finanzas", "contador", "jefe_financiero"],
   jefe_comercial: ["jefe_comercial", "jefe_de_comercial"],
   jefe_servicio_tecnico: ["jefe_servicio_tecnico", "jefe_de_servicio_tecnico"],
-  jefe_tecnico: ["jefe_tecnico", "jefe_de_tecnico"],
+  jefe_tecnico: ["jefe_tecnico", "jefe_de_tecnico", "jefe_servicio", "jefe_servicio_tecnico", "jefe_de_servicio_tecnico"],
   jefe_operaciones: ["jefe_operaciones", "jefe_de_operaciones"],
   jefe_calidad: ["jefe_calidad", "jefe_de_calidad"],
   jefe_ti: ["jefe_ti", "jefe_de_ti"],

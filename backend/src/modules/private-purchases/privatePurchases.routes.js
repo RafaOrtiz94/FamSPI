@@ -33,9 +33,13 @@ const viewerRoles = Array.from(new Set([
   'backoffice',
   'backoffice_comercial',
   'jefe_tecnico',
+  'jefe_servicio',
   'jefe_servicio_tecnico',
   'tecnico',
+  'ing_servicio',
+  'esp_app',
   'jefe_operaciones',
+  'operaciones',
   'jefe_logistica',
   'logistica',
 ]));
@@ -47,8 +51,10 @@ const deliveryRoles = Array.from(new Set([
   'jefe_logistica',
   'logistica',
   'jefe_tecnico',
+  'jefe_servicio',
   'jefe_servicio_tecnico',
   'tecnico',
+  'ing_servicio',
 ]));
 
 const inspectionRequestRoles = [
@@ -90,7 +96,7 @@ router.get('/', requireRole(viewerRoles), controller.list);
 router.get('/mine', requireRole(viewerRoles), controller.listMine);
 router.get('/by-role/:role', requireRole(viewerRoles), controller.listByRole);
 // Carga de técnicos por fecha — debe ir ANTES de /:id
-router.get('/technician-schedule', requireRole(['jefe_tecnico', 'jefe_servicio_tecnico', 'comercial', 'backoffice', 'backoffice_comercial', ...managerRoles]), controller.getTechnicianSchedule);
+router.get('/technician-schedule', requireRole(['jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico', 'comercial', 'backoffice', 'backoffice_comercial', ...managerRoles]), controller.getTechnicianSchedule);
 // Reservas activas — debe ir ANTES de /:id
 router.get('/active-reservations', requireRole(['acp_comercial', ...managerRoles]), controller.getActiveReservations);
 router.get('/:id', requireRole(viewerRoles), controller.getOne);
@@ -133,22 +139,24 @@ router.post('/:id/contract/restart-rejection', requireRole(comercialAndBackoffic
 router.post('/:id/provider-contract/received', requireRole(['acp_comercial', ...managerRoles]), controller.markProviderContractReceived);
 router.post('/:id/provider-contract/upload', requireRole(['acp_comercial', ...managerRoles]), controller.uploadProviderContract);
 router.post('/:id/inspection-request', requireRole(inspectionRequestRoles), controller.saveInspectionRequest);
-router.patch('/:id/coordinate-inspection-date', requireRole(['jefe_tecnico', 'jefe_servicio_tecnico']), controller.coordinateInspectionDate);
+router.patch('/:id/coordinate-inspection-date', requireRole(['jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico']), controller.coordinateInspectionDate);
 router.patch(
   '/:id/review-inspection-date',
-  requireRole(['jefe_tecnico', 'jefe_servicio_tecnico']),
+  requireRole(['jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico']),
   controller.reviewInspectionDate
 );
 router.patch(
   '/:id/site-inspection',
-  requireRole(['tecnico', 'jefe_tecnico', 'jefe_servicio_tecnico']),
+  requireRole(['tecnico', 'ing_servicio', 'jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico']),
   controller.registerSiteInspection,
 );
 router.patch(
   '/:id/installation-workflow',
   requireRole([
     'tecnico',
+    'ing_servicio',
     'jefe_tecnico',
+    'jefe_servicio',
     'jefe_servicio_tecnico',
     'jefe_operaciones',
     'jefe_logistica',
@@ -159,9 +167,17 @@ router.patch(
   controller.updateInstallationWorkflow,
 );
 router.post('/:id/delivery-guides', requireRole(deliveryRoles), controller.uploadDeliveryGuides);
-router.post('/:id/request-delivery-dates', requireRole([...creatorRoles, 'backoffice_comercial']), controller.requestDeliveryDates);
+// Bug: antes solo dejaba pasar comercial/backoffice/managers, pero el service
+// exige rol operaciones -- nadie podia ejecutar esta accion (403 garantizado).
+router.post('/:id/request-delivery-dates', requireRole(deliveryRoles), controller.requestDeliveryDates);
 router.post('/:id/submit-delivery-dates', requireRole(deliveryRoles), controller.submitDeliveryDates);
 router.post('/:id/renew-reservation', requireRole(managerRoles), controller.renewReservation);
+// Fecha tentativa de entrega del proveedor: acp_comercial registra/actualiza, jefe_operaciones tambien puede
+router.post(
+  '/:id/provider-delivery-date',
+  requireRole(['acp_comercial', 'jefe_operaciones', ...managerRoles]),
+  controller.registerProviderDeliveryDate,
+);
 router.get('/:id/documents', requireRole(viewerRoles), controller.getDocuments);
 // NUEVO-05: backoffice y backoffice_comercial también pueden gestionar registro de clientes en compras privadas
 router.post('/:id/request-client-registration', requireRole(['comercial', 'backoffice', 'backoffice_comercial', ...managerRoles]), controller.requestClientRegistration);
@@ -175,8 +191,8 @@ router.post('/:id/cancel', requireRole(managerRoles), controller.cancel);
 router.post('/:id/operations-details', requireRole(deliveryRoles), controller.updateOperationsDetails);
 router.post('/:id/mark-equipment-arrived', requireRole(deliveryRoles), controller.markEquipmentArrived);
 router.post('/:id/delivery-act', requireRole(deliveryRoles), controller.uploadDeliveryAct);
-router.post('/:id/delivery-act/assign', requireRole(['jefe_tecnico', 'jefe_servicio_tecnico']), controller.assignDeliveryActTechnician);
-router.post('/:id/delivery-act/finalize', requireRole(['jefe_tecnico', 'jefe_servicio_tecnico']), controller.finalizeDeliveryAct);
+router.post('/:id/delivery-act/assign', requireRole(['jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico']), controller.assignDeliveryActTechnician);
+router.post('/:id/delivery-act/finalize', requireRole(['jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico']), controller.finalizeDeliveryAct);
 router.post('/:id/dispatch-details', requireRole(deliveryRoles), controller.updateDispatchDetails);
 
 // Estadísticas

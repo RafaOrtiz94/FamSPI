@@ -176,8 +176,6 @@ Todas las rutas de inversión registran auditoría vía `auditSection()`.
 | GET | `/:id/complete` | `getComplete` | businessCaseRoles |
 | POST | `/:id/lab-environment` | `saveLabEnvironment` | businessCaseRoles |
 | GET | `/:id/lab-environment` | `getLabEnvironment` | businessCaseRoles |
-| POST | `/:id/equipment-details` | `saveEquipmentDetails` | businessCaseRoles |
-| GET | `/:id/equipment-details` | `getEquipmentDetails` | businessCaseRoles |
 | POST | `/:id/equipment-details-v2` | `saveEquipmentDetailsV2` | businessCaseRoles |
 | POST | `/:id/lis-integration` | `saveLisIntegration` | businessCaseRoles |
 | GET | `/:id/lis-integration` | `getLisIntegration` | businessCaseRoles |
@@ -304,7 +302,6 @@ solo compartía el prefijo de URL):
 | `investments.service.js` | — | Carrito de inversiones |
 | `bcRequirements.service.js` | — | Sección de requerimientos |
 | `bcLabEnvironment.service.js` | — | Entorno de laboratorio |
-| `bcEquipmentDetails.service.js` | — | Detalles de equipo operacional |
 | `bcLisIntegration.service.js` | — | Integración LIS |
 | `bcDeliveries.service.js` | — | Entregas comprometidas |
 | `bcDispatchWorkspace.service.js` | — | Workspace de despacho |

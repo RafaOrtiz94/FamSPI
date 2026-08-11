@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FiAlertTriangle,
-  FiCheckCircle,
   FiChevronDown,
   FiChevronUp,
   FiClock,
@@ -195,7 +194,6 @@ function LineProgress({ line }) {
 
 function RequestRow({ req, canOpsApprove, canLogisticsConfirm, onAction }) {
   const [busy, setBusy] = useState(false);
-  const cfg = REQUEST_STATUS[req.status] || REQUEST_STATUS.pending;
 
   const act = async (fn, label) => {
     setBusy(true);
@@ -376,8 +374,6 @@ function CeilingCard({ ceiling, canCommercial, canOpsApprove, canLogisticsConfir
   const [requests, setRequests] = useState([]);
   const [loadingReq, setLoadingReq] = useState(false);
   const loadedRef = useRef(false);
-
-  const ceilCfg = CEILING_STATUS[ceiling.status] || CEILING_STATUS.draft;
 
   const loadRequests = useCallback(async () => {
     setLoadingReq(true);

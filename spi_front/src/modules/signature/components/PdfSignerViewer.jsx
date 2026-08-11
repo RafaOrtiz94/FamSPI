@@ -7,7 +7,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 
 const SCALE = 1.4;
 
-export default function PdfSignerViewer({ pdfArrayBuffer, signatureB64, placement, onPlacement }) {
+export default function PdfSignerViewer({ pdfArrayBuffer, signatureB64, placement, onPlacement, readOnly = false }) {
   const [pdf, setPdf] = useState(null);
   const [totalPages, setTotalPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -54,6 +54,7 @@ export default function PdfSignerViewer({ pdfArrayBuffer, signatureB64, placemen
   useEffect(() => { renderPage(currentPage); }, [pdf, currentPage, renderPage]);
 
   const handleCanvasClick = (e) => {
+    if (readOnly || typeof onPlacement !== "function") return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -65,8 +66,8 @@ export default function PdfSignerViewer({ pdfArrayBuffer, signatureB64, placemen
   const isPlacedOnThisPage = placement && placement.page_number === currentPage;
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
+    <div className="min-w-0 space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
           <button
             type="button"
@@ -88,14 +89,17 @@ export default function PdfSignerViewer({ pdfArrayBuffer, signatureB64, placemen
             <FiChevronRight size={13} />
           </button>
         </div>
-        <span className="text-[11px] text-slate-400 italic">
-          {isPlacedOnThisPage
-            ? "Firma ubicada — haz clic para mover"
-            : "Haz clic en el documento para ubicar tu firma"}
+        <span className="min-w-0 text-right text-[11px] text-slate-400 italic">
+          {readOnly ? "Vista del documento" : (
+            isPlacedOnThisPage ? "Firma ubicada - haz clic para mover" : "Haz clic en el documento para ubicar tu firma"
+          )}
         </span>
       </div>
 
-      <div className="relative overflow-auto rounded-xl border border-slate-200 bg-slate-100 shadow-inner" style={{ maxHeight: 560, cursor: "crosshair" }}>
+      <div
+        className="relative max-w-full overflow-auto rounded-xl border border-slate-200 bg-slate-100 shadow-inner"
+        style={{ maxHeight: "min(62vh, 620px)", cursor: readOnly ? "default" : "crosshair" }}
+      >
         {rendering && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/50">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
@@ -135,7 +139,7 @@ export default function PdfSignerViewer({ pdfArrayBuffer, signatureB64, placemen
         </div>
       </div>
 
-      {isPlacedOnThisPage ? (
+      {!readOnly && (isPlacedOnThisPage ? (
         <p className="text-[11px] font-medium text-green-700">
           Firma posicionada en página {placement.page_number}
         </p>
@@ -147,7 +151,7 @@ export default function PdfSignerViewer({ pdfArrayBuffer, signatureB64, placemen
         <p className="text-[11px] text-amber-600 font-medium">
           Debes ubicar tu firma antes de firmar
         </p>
-      )}
+      ))}
     </div>
   );
 }

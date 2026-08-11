@@ -362,12 +362,23 @@ async function createManualNote(req, res) {
     let driveFileId = req.body?.drive_file_id || null;
     let driveLink = req.body?.drive_link || null;
 
-    // Si se proporciona file_base64, simplemente almacenarlo como referencia
-    // (en una implementación real, esto guardaría en storage y obtendría un ID)
+    // El respaldo se sube a Drive igual que el de una factura SRI
+    // (createAllowanceDocument) -- antes esto guardaba un data-URI truncado
+    // e inutilizable como "link", el archivo nunca llegaba a ningun lado.
     if (file_base64 && file_name) {
-      // Por ahora, solo guardamos el nombre del archivo como referencia
-      // Un true implementation guardaría en Google Drive o storage
-      driveLink = `data:application/octet-stream;base64,${file_base64.substring(0, 50)}...`;
+      const doc = await service.createAllowanceDocument({
+        allowanceId,
+        actorUser: req.user,
+        payload: {
+          doc_type: "support",
+          file_base64,
+          file_name,
+          mime_type: req.body?.mime_type || null,
+          notes: `Respaldo nota de venta manual: ${req.body?.supplier_name || req.body?.expense_description || ""}`,
+        },
+      });
+      driveFileId = doc?.drive_file_id || null;
+      driveLink = doc?.drive_link || null;
     }
 
     const data = await service.createManualNote({
@@ -455,12 +466,27 @@ async function createPurchaseNoInvoice(req, res) {
     const allowanceId = Number(req.params.id);
     const { file_base64, file_name } = req.body || {};
 
+    // driveFileId aqui es en realidad el id de travel_allowance_documents
+    // (columna travel_allowance_purchases_no_invoice.file_id -> FK a esa
+    // tabla), no el id de Drive -- nombre heredado del payload original.
     let driveFileId = req.body?.drive_file_id || null;
 
-    // Si se proporciona file_base64, simplemente almacenarlo como referencia
+    // El justificante se subia a Drive antes -- el archivo llegaba
+    // obligatorio desde el formulario (PurchaseNoInvoiceForm) pero se
+    // descartaba silenciosamente aqui sin guardarse en ningun lado.
     if (file_base64 && file_name) {
-      // Nota: En una implementación real, esto guardaría en Google Drive o storage
-      // Por ahora solo aceptamos el archivo sin guardarlo
+      const doc = await service.createAllowanceDocument({
+        allowanceId,
+        actorUser: req.user,
+        payload: {
+          doc_type: "support",
+          file_base64,
+          file_name,
+          mime_type: req.body?.mime_type || null,
+          notes: `Justificante compra sin factura: ${req.body?.description || ""}`,
+        },
+      });
+      driveFileId = doc?.id || null;
     }
 
     const data = await service.createPurchaseNoInvoice({
@@ -521,12 +547,202 @@ async function submitForReview(req, res) {
   }
 }
 
+async function getPolicy(req, res) {
+  try {
+    const data = await service.getPolicyPublic();
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo obtener la politica de viaticos");
+  }
+}
+
+async function requestAnticipo(req, res) {
+  try {
+    const allowanceId = Number(req.params.id);
+    const data = await service.requestAnticipo({
+      allowanceId,
+      amount: req.body?.amount,
+      purpose: req.body?.purpose,
+      notes: req.body?.notes,
+      actorUser: req.user,
+    });
+    return res.status(201).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo registrar el anticipo");
+  }
+}
+
+async function listAnticipos(req, res) {
+  try {
+    const allowanceId = Number(req.params.id);
+    const data = await service.listAnticipos({ allowanceId, actorUser: req.user });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudieron cargar los anticipos");
+  }
+}
+
+async function updateAnticipo(req, res) {
+  try {
+    const anticipoId = Number(req.params.anticipoId);
+    const data = await service.updateAnticipo({
+      anticipoId,
+      patch: req.body || {},
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo actualizar el anticipo");
+  }
+}
+
+async function requestCorrection(req, res) {
+  try {
+    const allowanceId = Number(req.params.id);
+    const data = await service.requestCorrection({
+      allowanceId,
+      observation: req.body?.observation,
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo solicitar la correccion");
+  }
+}
+
+async function reviewerNoteInvoice(req, res) {
+  try {
+    const invoiceId = Number(req.params.invoiceId);
+    const data = await service.addReviewerNoteToInvoice({
+      invoiceId,
+      note: req.body?.note,
+      action: req.body?.action,
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo agregar la nota a la factura");
+  }
+}
+
+async function submitMonth(req, res) {
+  try {
+    const data = await service.submitMonthAllowances({
+      allowanceIds: req.body?.allowance_ids,
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo enviar el mes a revision");
+  }
+}
+
+async function batchReceipt(req, res) {
+  try {
+    const data = await service.batchUploadReceipt({
+      allowanceIds: req.body?.allowance_ids,
+      fileBase64: req.body?.file_base64,
+      fileName: req.body?.file_name,
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo subir el comprobante de pago");
+  }
+}
+
+async function getReceipt(req, res) {
+  try {
+    const data = await service.getAllowanceReceipt({
+      allowanceId: Number(req.params.id),
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo obtener el comprobante");
+  }
+}
+
+async function listReviewTalento(req, res) {
+  try {
+    const data = await service.listReviewAllowances({
+      actorUser: req.user,
+      startDate: req.query.start_date,
+      endDate: req.query.end_date,
+      segment: "talento",
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo cargar la cola de revision de talento");
+  }
+}
+
+async function listReviewFinance(req, res) {
+  try {
+    const data = await service.listReviewAllowances({
+      actorUser: req.user,
+      startDate: req.query.start_date,
+      endDate: req.query.end_date,
+      segment: "finance",
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo cargar la cola de revision de finanzas");
+  }
+}
+
+async function exportReport(req, res) {
+  try {
+    const data = await service.exportAllowancesReport({
+      actorUser: req.user,
+      startDate: req.query.start_date,
+      endDate: req.query.end_date,
+      requesterEmail: req.query.requester_email,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo exportar el reporte de viaticos");
+  }
+}
+
+async function batchPay(req, res) {
+  try {
+    const data = await service.batchPayAllowances({
+      allowanceIds: req.body?.allowance_ids,
+      paymentReference: req.body?.payment_reference,
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo registrar el pago batch del mes");
+  }
+}
+
+async function exportMonthPdf(req, res) {
+  try {
+    const { buffer, fileName } = await service.exportExpedienteMonthPdf({
+      allowanceIds: req.body?.allowance_ids,
+      actorUser: req.user,
+    });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.send(buffer);
+  } catch (error) {
+    return handleError(res, error, "No se pudo generar el PDF del expediente");
+  }
+}
+
 module.exports = {
    listCandidates,
    list,
    upsert,
    updateStatus,
    approveSegment,
+   batchPay,
+   exportMonthPdf,
+   submitMonth,
+   requestCorrection,
+   reviewerNoteInvoice,
    updateWorkflowOperational,
    listDocuments,
    addDocument,
@@ -542,6 +758,7 @@ module.exports = {
    upsertFixedProfile,
    listFixedProfiles,
    updatePolicy,
+   getPolicy,
    reportSummary,
    atsXml,
    report,
@@ -553,4 +770,12 @@ module.exports = {
    listPurchasesNoInvoice,
    approvePurchaseNoInvoice,
    submitForReview,
+   requestAnticipo,
+   listAnticipos,
+   updateAnticipo,
+   listReviewTalento,
+   listReviewFinance,
+   exportReport,
+   batchReceipt,
+   getReceipt,
  };

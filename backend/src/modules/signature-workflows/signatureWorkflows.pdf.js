@@ -112,7 +112,7 @@ async function appendSignatureBlock({
     const { bold, reg } = await loadTimesNewRoman(pdfDoc);
 
     // 3. Add evidence page
-    const page = pdfDoc.addPage([PW, PH]);
+    let page = pdfDoc.addPage([PW, PH]);
 
     // ── QR Code ───────────────────────────────────────────────────────────────
     const verificationToken = workflow.verification_token || null;
@@ -206,8 +206,20 @@ async function appendSignatureBlock({
 
     const sorted = [...signers].sort((a, b) => Number(a.sequence_order || 0) - Number(b.sequence_order || 0));
 
+    // Un firmante puede ocupar hasta ~106pt (nombre+badge, cargo, fecha, imagen
+    // de firma, hash, separador). Antes, si no cabia en la pagina, el loop
+    // simplemente hacia `break` y los firmantes restantes desaparecian de la
+    // hoja de validacion. Ahora se agrega una pagina de continuacion.
+    const addContinuationPage = () => {
+      page = pdfDoc.addPage([PW, PH]);
+      draw(page, "FIRMANTES (continuacion)", { x: M, y: PH - M, font: bold, size: FS_BODY, color: C_NAVY });
+      return PH - M - 20;
+    };
+
     for (const signer of sorted) {
-      if (y < 150) break;
+      if (y < 150) {
+        y = addContinuationPage();
+      }
 
       const isSigned = String(signer.status || "").toLowerCase() === "signed";
       const badgeText = isSigned ? "[FIRMADO]" : "[PENDIENTE]";
@@ -257,7 +269,8 @@ async function appendSignatureBlock({
     }
 
     // ── Integridad del documento ───────────────────────────────────────────────
-    if (sourceDoc && y > 170) {
+    if (sourceDoc) {
+      if (y < 170) y = addContinuationPage();
       y -= 4;
       draw(page, "INTEGRIDAD DEL DOCUMENTO", { x: M, y, font: bold, size: FS_BODY, color: C_NAVY });
       y -= 15;

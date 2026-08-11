@@ -224,6 +224,16 @@ const PermisosConsolidadoView = () => {
                       ))}
                     </div>
                   )}
+                  {Array.isArray(item.external_coordination_urls) && item.external_coordination_urls.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {item.external_coordination_urls.map((url, idx) => (
+                        <a key={`${item.id}-coord-${idx}`} href={url} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-50">
+                          <FiEye size={11} /> Coordinación {idx + 1}
+                        </a>
+                      ))}
+                    </div>
+                  )}
                   <TraceLine item={item} />
                 </div>
               ))}

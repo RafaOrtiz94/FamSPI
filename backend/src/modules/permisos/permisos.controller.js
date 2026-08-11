@@ -29,6 +29,14 @@ const upload = multer({
   },
 });
 
+const createUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    files: 5,
+  },
+});
+
 const normalizeDateOnly = (value) => {
   if (!value) return null;
   if (typeof value === "string") {
@@ -71,7 +79,12 @@ const getRequestMeta = (req) => ({
 
 async function create(req, res) {
   try {
-    const result = await permisosService.createSolicitud({ body: req.body, user: req.user, meta: getRequestMeta(req) });
+    const result = await permisosService.createSolicitud({
+      body: req.body,
+      user: req.user,
+      files: req.files || [],
+      meta: getRequestMeta(req),
+    });
     res.status(201).json({ ok: true, data: result });
   } catch (error) {
     console.error("Error creando solicitud:", error);
@@ -541,4 +554,5 @@ module.exports = {
   resolverRegularizacion,
   convertirAVacaciones,
   upload,
+  createUpload,
 };

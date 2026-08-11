@@ -12,6 +12,32 @@ const DRIVE_ROOT_FOLDER_ID = process.env.DRIVE_ROOT_FOLDER_ID;
 const ANNUAL_ALLOWANCE = 15;
 const MAX_ANNUAL_ALLOWANCE = 30;
 const HOURS_PER_VACATION_DAY = 8;
+const SPECIAL_VACATION_OPENING_BALANCES = {
+  "aura.jimenez@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 23,
+  },
+  "kevin.loor@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 15,
+  },
+  "daniel.fiallos@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 25,
+  },
+  "luisao.escobar@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 23,
+  },
+  "lizbeth.rivadeneira@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 15,
+  },
+  "ilsy.ramirez@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 14,
+  },
+};
 const TEMPLATE_PATH = path.join(__dirname, "../../data/plantillas/Vacation_Format.docx");
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -66,9 +92,16 @@ const ROLE_APPROVER = {
   finanzas: "jefe_financiero",
   tecnico: "jefe_tecnico",
   tecnico_servicio: "jefe_tecnico",
+  ing_servicio: "jefe_servicio",
+  esp_app: "jefe_servicio",
+  ing_servicio_ext: "jefe_servicio",
+  esp_app_ext: "jefe_servicio",
   logistica: "jefe_logistica",
   operaciones: "jefe_operaciones",
   calidad: "jefe_calidad",
+  talento_humano: "gerencia_general",
+  rrhh: "gerencia_general",
+  rh: "gerencia_general",
 };
 
 const HR_ROLES = ["talento-humano", "talento_humano", "talento humano", "rh", "rrhh"];
@@ -294,6 +327,34 @@ const computeVacationAllowance = (hireDateValue, asOfValue = new Date()) => {
     missingHireDate: false,
   };
 };
+
+function getSpecialVacationOpeningProfile(userEmail, asOfValue = new Date()) {
+  const normalizedEmail = String(userEmail || "").trim().toLowerCase();
+  const profile = SPECIAL_VACATION_OPENING_BALANCES[normalizedEmail];
+  if (!profile) return null;
+  const effectiveDate = normalizeDateOnly(profile.effectiveDate);
+  const asOfDate = normalizeDateOnly(asOfValue);
+  if (!effectiveDate || !asOfDate || asOfDate < effectiveDate) return null;
+  return profile;
+}
+
+function computeSpecialVacationAccrualFromOpening(hireDateValue, effectiveDateValue, asOfValue = new Date()) {
+  const hireDate = normalizeDate(hireDateValue);
+  const effectiveDate = normalizeDate(effectiveDateValue);
+  const asOfDate = normalizeDate(asOfValue) || new Date();
+  if (!hireDate || !effectiveDate || !asOfDate || asOfDate <= effectiveDate) return 0;
+
+  let accrued = 0;
+  for (let year = effectiveDate.getFullYear(); year <= asOfDate.getFullYear(); year += 1) {
+    const anniversary = new Date(hireDate.getTime());
+    anniversary.setFullYear(year);
+    if (anniversary > effectiveDate && anniversary <= asOfDate) {
+      accrued += computeVacationAllowance(hireDateValue, anniversary).allowance;
+    }
+  }
+
+  return roundToTwo(accrued);
+}
 
 async function getHistoricVacationBalance({ userId, userEmail, year }, executor = db) {
   const queryExecutor = resolveDbExecutor(executor);
@@ -568,13 +629,33 @@ async function computeVacationBalanceValidation({
   const normalizedStartDate = normalizeDateOnly(startDate);
   const year = new Date(`${normalizedStartDate}T00:00:00.000Z`).getUTCFullYear();
   const allowanceInfo = computeVacationAllowance(hireDateValue, normalizedStartDate);
-  const taken = await computeTakenDays(userId, year, { excludeRequestId });
+  const specialOpeningProfile = getSpecialVacationOpeningProfile(userEmail, normalizedStartDate);
+  let taken = await computeTakenDays(userId, year, { excludeRequestId });
   const historicalBalance = await getHistoricVacationBalance({
     userId,
     userEmail: userEmail || null,
     year,
   });
-  const totalAllowance = allowanceInfo.allowance + historicalBalance;
+  let totalAllowance = allowanceInfo.allowance + historicalBalance;
+  let carryOver = historicalBalance;
+  if (specialOpeningProfile) {
+    const usageSinceOpening = await computeVacationUsageSinceDate({
+      userId,
+      userEmail,
+      startDate: specialOpeningProfile.effectiveDate,
+      excludeVacationRequestId: excludeRequestId,
+    });
+    taken = usageSinceOpening.approved;
+    totalAllowance = roundToTwo(
+      Number(specialOpeningProfile.openingRemainingDays || 0) +
+      computeSpecialVacationAccrualFromOpening(
+        hireDateValue,
+        specialOpeningProfile.effectiveDate,
+        normalizedStartDate
+      )
+    );
+    carryOver = roundToTwo(totalAllowance - allowanceInfo.allowance);
+  }
   const remaining = totalAllowance - taken; // Puede ser negativo
   const requested = Number(requestedDays || 0);
   const projectedRemaining = remaining - requested;
@@ -596,7 +677,7 @@ async function computeVacationBalanceValidation({
     requested_days: requested,
     allowance: totalAllowance,
     allowance_base: allowanceInfo.allowance,
-    carry_over: historicalBalance,
+    carry_over: carryOver,
     taken,
     remaining,
     projected_remaining: projectedRemaining,
@@ -611,29 +692,37 @@ async function computeVacationBalanceValidation({
 }
 
 async function computeChargedVacationDays(
-  { userId, userEmail, year, statuses = [], upToDate = null },
+  { userId, userEmail, year, statuses = [], upToDate = null, startDate = null },
   executor = db
 ) {
   const queryExecutor = resolveDbExecutor(executor);
   const yearValue = Number(year);
-  if (!Number.isFinite(yearValue)) return 0;
+  if (!Number.isFinite(yearValue) && !startDate) return 0;
 
   let query = `
     SELECT charged_vacation_days, charged_vacation_hours, duracion_horas, duracion_dias
       FROM permisos_vacaciones
      WHERE charged_to_vacation = true
-       AND EXTRACT(YEAR FROM fecha_inicio) = $1
   `;
-  const values = [yearValue];
+  const values = [];
+  if (Number.isFinite(yearValue)) {
+    query += ` AND EXTRACT(YEAR FROM fecha_inicio) = $1`;
+    values.push(yearValue);
+  }
 
   if (Array.isArray(statuses) && statuses.length > 0) {
-    query += ` AND LOWER(COALESCE(status, '')) = ANY($2)`;
+    query += ` AND LOWER(COALESCE(status, '')) = ANY($${values.length + 1})`;
     values.push(statuses.map((status) => String(status || "").trim().toLowerCase()));
   }
 
   if (upToDate) {
     query += ` AND fecha_inicio <= $${values.length + 1}`;
     values.push(normalizeDateOnly(upToDate));
+  }
+
+  if (startDate) {
+    query += ` AND fecha_inicio >= $${values.length + 1}`;
+    values.push(normalizeDateOnly(startDate));
   }
 
   if (userId) {
@@ -660,6 +749,69 @@ async function computeChargedVacationDays(
       return acc;
     }, 0)
   );
+}
+
+async function computeVacationUsageSinceDate(
+  { userId, userEmail, startDate, excludeVacationRequestId = null },
+  executor = db
+) {
+  const queryExecutor = resolveDbExecutor(executor);
+  const normalizedStartDate = normalizeDateOnly(startDate);
+  if (!normalizedStartDate) {
+    return { approved: 0, pending: 0 };
+  }
+
+  const vacationValues = [userId, normalizedStartDate];
+  let vacationExcludeClause = "";
+  if (excludeVacationRequestId) {
+    vacationValues.push(excludeVacationRequestId);
+    vacationExcludeClause = ` AND id <> $${vacationValues.length}`;
+  }
+
+  const { rows: vacationRows } = await queryExecutor.query(
+    `SELECT
+        COALESCE(SUM(CASE WHEN LOWER(status) IN ('aprobado','approved') THEN COALESCE(effective_days, days) ELSE 0 END), 0) AS approved,
+        COALESCE(SUM(CASE WHEN LOWER(status) IN ('pendiente','pending') THEN COALESCE(effective_days, days) ELSE 0 END), 0) AS pending
+       FROM vacaciones_solicitudes
+      WHERE requester_id = $1
+        AND start_date >= $2
+        ${vacationExcludeClause}`,
+    vacationValues
+  );
+
+  const { rows: legacyVacationRows } = await queryExecutor.query(
+    `SELECT
+        COALESCE(SUM(CASE WHEN LOWER(status) IN ('aprobado','approved') THEN COALESCE(duracion_dias, 0) ELSE 0 END), 0) AS approved,
+        COALESCE(SUM(CASE WHEN LOWER(status) IN ('pendiente','pending','pending_final','partially_approved') THEN COALESCE(duracion_dias, 0) ELSE 0 END), 0) AS pending
+       FROM permisos_vacaciones
+      WHERE user_id = $1
+        AND LOWER(COALESCE(tipo_solicitud, '')) = 'vacaciones'
+        AND fecha_inicio >= $2`,
+    [userId, normalizedStartDate]
+  );
+
+  const chargedApproved = await computeChargedVacationDays(
+    {
+      userId,
+      userEmail,
+      year: null,
+      statuses: ["approved", "aprobado"],
+      startDate: normalizedStartDate,
+    },
+    queryExecutor
+  );
+
+  return {
+    approved: roundToTwo(
+      Number(vacationRows[0]?.approved || 0) +
+      Number(legacyVacationRows[0]?.approved || 0) +
+      Number(chargedApproved || 0)
+    ),
+    pending: roundToTwo(
+      Number(vacationRows[0]?.pending || 0) +
+      Number(legacyVacationRows[0]?.pending || 0)
+    ),
+  };
 }
 
 async function ensureDrivePath(user) {
@@ -1566,8 +1718,27 @@ async function summary(user, includeAll = false) {
       year,
       statuses: ["approved", "aprobado"],
     });
-    const totalAllowance = allowanceInfo.allowance + historicalBalance;
-    const remaining = totalAllowance - taken - pending;
+    const specialOpeningProfile = getSpecialVacationOpeningProfile(user.email, new Date());
+    let totalAllowance = allowanceInfo.allowance + historicalBalance;
+    let remaining = totalAllowance - taken - pending;
+    let carryOver = historicalBalance;
+    if (specialOpeningProfile) {
+      const usageSinceOpening = await computeVacationUsageSinceDate({
+        userId: user.id,
+        userEmail: user.email,
+        startDate: specialOpeningProfile.effectiveDate,
+      });
+      totalAllowance = roundToTwo(
+        Number(specialOpeningProfile.openingRemainingDays || 0) +
+        computeSpecialVacationAccrualFromOpening(
+          hireDateValue,
+          specialOpeningProfile.effectiveDate,
+          new Date()
+        )
+      );
+      carryOver = roundToTwo(totalAllowance - allowanceInfo.allowance);
+      remaining = totalAllowance - usageSinceOpening.approved - usageSinceOpening.pending;
+    }
     let deficitDays = 0;
     let deficitHours = 0;
     if (remaining < 0) {
@@ -1579,7 +1750,7 @@ async function summary(user, includeAll = false) {
       year,
       allowance: totalAllowance,
       allowance_base: allowanceInfo.allowance,
-      carry_over: historicalBalance,
+      carry_over: carryOver,
       tenure_years: allowanceInfo.tenureYears,
       eligible: allowanceInfo.eligible,
       eligible_from: allowanceInfo.eligibleFrom,
@@ -1645,11 +1816,30 @@ async function summary(user, includeAll = false) {
       year: new Date().getFullYear(),
       statuses: ["approved", "aprobado"],
     });
-    const totalAllowance = allowanceInfo.allowance + historicalBalance;
+    const specialOpeningProfile = getSpecialVacationOpeningProfile(r.email, new Date());
+    let totalAllowance = allowanceInfo.allowance + historicalBalance;
     const approved = Number(r.approved || 0);
     const taken = approved + chargedFromPermisos;
     const pending = Number(r.pending || 0);
-    const remaining = totalAllowance - taken - pending;
+    let remaining = totalAllowance - taken - pending;
+    let carryOver = historicalBalance;
+    if (specialOpeningProfile) {
+      const usageSinceOpening = await computeVacationUsageSinceDate({
+        userId: r.user_id,
+        userEmail: r.email,
+        startDate: specialOpeningProfile.effectiveDate,
+      });
+      totalAllowance = roundToTwo(
+        Number(specialOpeningProfile.openingRemainingDays || 0) +
+        computeSpecialVacationAccrualFromOpening(
+          r.fecha_ingreso,
+          specialOpeningProfile.effectiveDate,
+          new Date()
+        )
+      );
+      carryOver = roundToTwo(totalAllowance - allowanceInfo.allowance);
+      remaining = totalAllowance - usageSinceOpening.approved - usageSinceOpening.pending;
+    }
 
     let deficitDays = 0;
     let deficitHours = 0;
@@ -1664,7 +1854,7 @@ async function summary(user, includeAll = false) {
       ...allowanceInfo,
       allowance: totalAllowance,
       allowance_base: allowanceInfo.allowance,
-      carry_over: historicalBalance,
+      carry_over: carryOver,
       charged_from_permisos: chargedFromPermisos,
       approved,
       taken,

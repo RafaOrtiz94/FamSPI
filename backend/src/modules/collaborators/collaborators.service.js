@@ -3,7 +3,7 @@ const logger = require('../../config/logger');
 const { logAction } = require('../../utils/audit');
 const { HASH_ALGORITHM, computeSha256HexFromBuffer, resolveExternalDriveIntegrity } = require('../../utils/documentHash');
 const { ensureFolder, uploadBase64File, drive } = require('../../utils/drive');
-const { PROFILE_SYNC_KEYS, collectNestedFields } = require('../shared/profileSync');
+const { PROFILE_SYNC_KEYS, collectNestedFields, shouldSyncUserActiveStatus } = require('../shared/profileSync');
 const {
   getCollaboratorDocumentDefinition,
   getRequiredCollaboratorDocumentCodes,
@@ -11,9 +11,16 @@ const {
 } = require('../shared/collaboratorDocumentCatalog');
 const {
   buildEmptySummary,
+  hasCollaboratorQualificationsTable,
   listQualificationsByUserId,
+  resolveQualificationTypeFromLegacy,
   summarizeQualificationsByUserIds,
 } = require('../shared/collaboratorQualifications');
+const {
+  getAssignedCorporatePhoneByUserId,
+  injectCorporatePhoneIntoProfile,
+  stripCorporatePhoneFromProfile,
+} = require('../shared/corporatePhone');
 
 const REQUIRED_PROFILE_FIELDS = [
   'personal.nombres',
@@ -136,6 +143,67 @@ const normalizeDocumentOwnerAreaForDb = (ownerArea) => {
 const normalizeDocumentSourceChannelForDb = (sourceChannel) => {
   const normalized = String(sourceChannel || '').trim().toLowerCase();
   return DOCUMENT_SOURCE_CHANNEL_DB_MAP[normalized] || null;
+};
+
+const normalizeRawDocumentType = (docType) =>
+  String(docType || '').trim().toUpperCase();
+
+const resolveDocumentStorageMetadata = (docType) => {
+  const definition = getCollaboratorDocumentDefinition(docType);
+  return {
+    owner_area: normalizeDocumentOwnerAreaForDb(definition?.ownerArea),
+    source_channel: normalizeDocumentSourceChannelForDb(definition?.sourceChannel),
+  };
+};
+
+const reportDocumentScore = (document = {}, canonicalDocType) => {
+  const definition = getCollaboratorDocumentDefinition(canonicalDocType);
+  const rawDocType = normalizeRawDocumentType(document.raw_doc_type || document.doc_type);
+  const expectedOwnerArea = normalizeDocumentOwnerAreaForDb(definition?.ownerArea);
+  const expectedSourceChannel = normalizeDocumentSourceChannelForDb(definition?.sourceChannel);
+  let score = 0;
+
+  // Critical: HR_RESUME and CURRICULUM_VITAE are different documents.
+  // Aliases such as legacy HOJA_VIDA must not override an exact HR_RESUME upload.
+  if (rawDocType === canonicalDocType) score += 1000;
+  if (expectedOwnerArea && document.owner_area === expectedOwnerArea) score += 100;
+  if (expectedSourceChannel && document.source_channel === expectedSourceChannel) score += 100;
+  if (document.drive_file_id || document.drive_url) score += 10;
+  return score;
+};
+
+const shouldUseReportDocument = (existing, candidate, canonicalDocType) => {
+  if (!existing) return true;
+  const candidateScore = reportDocumentScore(candidate, canonicalDocType);
+  const existingScore = reportDocumentScore(existing, canonicalDocType);
+  if (candidateScore !== existingScore) return candidateScore > existingScore;
+  return new Date(candidate.created_at || 0).getTime() > new Date(existing.created_at || 0).getTime();
+};
+
+const buildReportDocumentsByUser = (docs = []) => {
+  const docsByUser = {};
+  docs.forEach((doc) => {
+    const canonical = normalizeCollaboratorDocumentType(doc.doc_type)
+      || normalizeRawDocumentType(doc.doc_type);
+    if (!canonical) return;
+    if (!docsByUser[doc.user_id]) docsByUser[doc.user_id] = {};
+    if (!shouldUseReportDocument(docsByUser[doc.user_id][canonical], doc, canonical)) {
+      return;
+    }
+    docsByUser[doc.user_id][canonical] = {
+      doc_type: canonical,
+      raw_doc_type: doc.doc_type || null,
+      drive_file_id: doc.drive_file_id || null,
+      drive_url: doc.drive_url || null,
+      file_name: doc.file_name || null,
+      mime_type: doc.mime_type || null,
+      owner_area: doc.owner_area || null,
+      source_channel: doc.source_channel || null,
+      uploaded_by: doc.uploaded_by || null,
+      created_at: doc.created_at || null,
+    };
+  });
+  return docsByUser;
 };
 
 const enrichCollaboratorDocument = (document = {}) => {
@@ -660,6 +728,11 @@ const mergeProfiles = (base = {}, incoming = {}) => {
   return merged;
 };
 
+const normalizeCollaboratorProfile = async (userId, profile = {}) => {
+  const assignedCorporatePhone = await getAssignedCorporatePhoneByUserId(userId);
+  return injectCorporatePhoneIntoProfile(profile, assignedCorporatePhone);
+};
+
 const isReviewPending = (lastReviewedAt) => {
   if (!lastReviewedAt) return true;
   const date = new Date(lastReviewedAt);
@@ -704,7 +777,9 @@ const ensureCollaboratorTables = async () => {
   await db.query(`
     ALTER TABLE collaborator_documents
     ADD COLUMN IF NOT EXISTS content_hash_sha256 VARCHAR(64),
-    ADD COLUMN IF NOT EXISTS hash_algorithm VARCHAR(20) DEFAULT 'SHA-256';
+    ADD COLUMN IF NOT EXISTS hash_algorithm VARCHAR(20) DEFAULT 'SHA-256',
+    ADD COLUMN IF NOT EXISTS owner_area VARCHAR(80),
+    ADD COLUMN IF NOT EXISTS source_channel VARCHAR(80);
   `);
 
   await db.query(`
@@ -930,7 +1005,10 @@ const getCollaboratorProfile = async (userId) => {
   });
 
   const docTypes = mergedDocuments.map((doc) => doc.doc_type).filter(Boolean);
-  const profile = profileQuery.rows[0]?.profile || {};
+  const profile = await normalizeCollaboratorProfile(
+    userId,
+    profileQuery.rows[0]?.profile || {},
+  );
 
   return {
     user: userQuery.rows[0],
@@ -968,8 +1046,15 @@ const upsertCollaboratorProfile = async (userId, profilePayload = {}, actorId = 
     'SELECT profile FROM collaborator_profiles WHERE user_id = $1',
     [userId]
   );
-  const existingProfile = existingQuery.rows[0]?.profile || {};
-  const mergedProfile = mergeProfiles(existingProfile, profilePayload || {});
+  const existingProfile = await normalizeCollaboratorProfile(
+    userId,
+    existingQuery.rows[0]?.profile || {},
+  );
+  const sanitizedIncomingProfile = stripCorporatePhoneFromProfile(profilePayload || {});
+  const mergedProfile = await normalizeCollaboratorProfile(
+    userId,
+    mergeProfiles(existingProfile, sanitizedIncomingProfile),
+  );
 
   const query = `
     INSERT INTO collaborator_profiles (user_id, profile, updated_by)
@@ -980,6 +1065,30 @@ const upsertCollaboratorProfile = async (userId, profilePayload = {}, actorId = 
   `;
 
   const result = await db.query(query, [userId, mergedProfile, actorId]);
+
+  const pApellidos = String(mergedProfile?.personal?.apellidos || "").trim().toUpperCase();
+  const pNombres = String(mergedProfile?.personal?.nombres || "").trim().toUpperCase();
+  if (pApellidos || pNombres) {
+    const newFullname = [pApellidos, pNombres].filter(Boolean).join(" ");
+    await db.query("UPDATE users SET fullname = $1, updated_at = NOW() WHERE id = $2", [newFullname, userId]);
+  }
+
+  const newEmploymentStatus = mergedProfile?.laboral?.estatus_empleado;
+  const previousStatus = existingProfile?.laboral?.estatus_empleado;
+  
+  if (newEmploymentStatus && newEmploymentStatus !== previousStatus) {
+    const shouldDeactivate = isPassiveEmploymentStatus(newEmploymentStatus);
+    const shouldReactivate = isPassiveEmploymentStatus(previousStatus);
+    
+    const targetActiveStatus = shouldDeactivate ? false : (shouldReactivate ? true : null);
+    
+    if (targetActiveStatus !== null) {
+      await db.query(
+        'UPDATE users SET active = $1, updated_at = NOW() WHERE id = $2',
+        [targetActiveStatus, userId]
+      );
+    }
+  }
 
   await logAction({
     user_id: actorId,
@@ -1021,6 +1130,7 @@ const addCollaboratorDocument = async (userId, docType, file, actorId = null) =>
     logger.warn('No se pudo resolver carpeta Drive para colaborador, se guarda sin Drive');
   }
 
+  const storageMetadata = resolveDocumentStorageMetadata(docType);
   const insertQuery = `
     INSERT INTO collaborator_documents (
       user_id,
@@ -1031,8 +1141,10 @@ const addCollaboratorDocument = async (userId, docType, file, actorId = null) =>
       mime_type,
       content_hash_sha256,
       hash_algorithm,
-      uploaded_by
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      uploaded_by,
+      owner_area,
+      source_channel
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     RETURNING *
   `;
 
@@ -1046,6 +1158,8 @@ const addCollaboratorDocument = async (userId, docType, file, actorId = null) =>
     contentHashSha256,
     HASH_ALGORITHM,
     actorId,
+    storageMetadata.owner_area,
+    storageMetadata.source_channel,
   ]);
 
   const newDoc = insertResult.rows[0];
@@ -1181,11 +1295,187 @@ const getCollaboratorStats = async () => {
     };
   };
 
+const getDocumentsReport = async (filters = {}) => {
+  await ensureCollaboratorTables();
+
+  const { doc_type = null, search = null } = filters;
+  const canonicalDocType = doc_type
+    ? normalizeCollaboratorDocumentType(doc_type) || String(doc_type).trim().toUpperCase()
+    : null;
+
+  // Query 1: collaborators (search only, no doc_type param here)
+  const collaboratorParams = [];
+  const searchCondition = search
+    ? `AND (LOWER(u.fullname) LIKE $1 OR LOWER(u.email) LIKE $1)`
+    : '';
+  if (search) collaboratorParams.push(`%${String(search).toLowerCase()}%`);
+
+  const { rows: collaborators } = await db.query(
+    `SELECT
+       u.id AS user_id,
+       u.fullname,
+       u.email,
+       cp.profile->'laboral'->>'cargo' AS cargo,
+       cp.profile->'laboral'->>'area' AS area,
+       cp.profile->'laboral'->>'estatus_empleado' AS estatus_empleado
+     FROM users u
+     LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
+     WHERE u.active = true
+       AND (COALESCE(cp.profile->'extra'->>'applicant_source','') <> 'google_forms'
+            AND COALESCE((cp.profile->'extra' ? 'preguntas_adicionales'), false) = false)
+       ${searchCondition}
+     ORDER BY u.fullname`,
+    collaboratorParams,
+  );
+
+  if (!collaborators.length) return [];
+
+  // Query 2: all documents for those users — normalize aliases in JS, but
+  // prefer exact document types so HR_RESUME never resolves to a CV alias.
+  const { rows: docs } = await db.query(
+    `SELECT
+       id,
+       user_id,
+       doc_type,
+       drive_file_id,
+       drive_url,
+       file_name,
+       mime_type,
+       owner_area,
+       source_channel,
+       uploaded_by,
+       created_at
+     FROM collaborator_documents
+     WHERE user_id = ANY($1::int[])
+       AND COALESCE(is_active, true) = true
+     ORDER BY user_id, created_at DESC, id DESC`,
+    [collaborators.map((c) => c.user_id)],
+  );
+
+  const qualificationsByUser = {};
+  const collaboratorIds = collaborators.map((c) => c.user_id);
+  let qualifications = [];
+  const qualificationTableExists = await hasCollaboratorQualificationsTable();
+  if (qualificationTableExists) {
+    const result = await db.query(
+      `SELECT
+         id,
+         user_id,
+         qualification_type,
+         title,
+         institution,
+         issuer,
+         issue_date,
+         expiry_date,
+         registration_number,
+         drive_file_id,
+         drive_url,
+         file_name,
+         mime_type,
+         created_at
+       FROM collaborator_qualifications
+       WHERE user_id = ANY($1::int[])
+         AND is_active = true
+       ORDER BY created_at DESC, id DESC`,
+      [collaboratorIds],
+    );
+    qualifications = result.rows;
+  }
+
+  const legacyTableResult = await db.query(
+    `SELECT to_regclass('public.user_certifications') AS table_name`,
+  );
+  if (legacyTableResult.rows[0]?.table_name) {
+    const legacyMigrationCondition = qualificationTableExists
+      ? `AND NOT EXISTS (
+           SELECT 1
+           FROM collaborator_qualifications cq
+           WHERE cq.metadata->'legacy'->>'legacy_id' = uc.id::text
+         )`
+      : '';
+    const legacyResult = await db.query(
+      `SELECT
+         uc.id,
+         uc.user_id,
+         uc.title,
+         uc.issuer,
+         uc.issue_date,
+         uc.expiry_date,
+         uc.credential_type,
+         uc.description,
+         uc.metadata,
+         uc.drive_file_id,
+         uc.file_url,
+         uc.created_at
+       FROM user_certifications uc
+       WHERE uc.user_id = ANY($1::int[])
+         AND uc.is_active = true
+         ${legacyMigrationCondition}
+       ORDER BY uc.created_at DESC, uc.id DESC`,
+      [collaboratorIds],
+    );
+
+    qualifications = qualifications.concat(
+      legacyResult.rows.map((qualification) => ({
+        id: `legacy-${qualification.id}`,
+        user_id: qualification.user_id,
+        qualification_type: resolveQualificationTypeFromLegacy(
+          qualification.credential_type,
+          qualification.metadata || {},
+        ),
+        title: qualification.title,
+        institution: qualification.metadata?.institution || qualification.issuer || null,
+        issuer: qualification.issuer || null,
+        issue_date: qualification.issue_date,
+        expiry_date: qualification.expiry_date,
+        registration_number: qualification.metadata?.registration_number || null,
+        drive_file_id: qualification.drive_file_id || null,
+        drive_url: qualification.file_url || null,
+        file_name: null,
+        mime_type: null,
+        created_at: qualification.created_at,
+        source: 'user_certifications',
+        pending_classification: true,
+        description: qualification.description || null,
+      })),
+    );
+  }
+
+  qualifications.forEach((qualification) => {
+    if (!qualificationsByUser[qualification.user_id]) {
+      qualificationsByUser[qualification.user_id] = [];
+    }
+    qualificationsByUser[qualification.user_id].push(qualification);
+  });
+
+  const docsByUser = buildReportDocumentsByUser(docs);
+
+  return collaborators.map((c) => {
+    const allDocs = docsByUser[c.user_id] || {};
+    const documents = canonicalDocType
+      ? { [canonicalDocType]: allDocs[canonicalDocType] || null }
+      : allDocs;
+    return {
+      user_id: c.user_id,
+      fullname: c.fullname,
+      email: c.email,
+      cargo: c.cargo || null,
+      area: c.area || null,
+      estatus_empleado: c.estatus_empleado || null,
+      documents,
+      qualifications: qualificationsByUser[c.user_id] || [],
+    };
+  });
+};
+
 module.exports = {
+  computeProfileCompletion,
   listCollaborators,
   getCollaboratorProfile,
   upsertCollaboratorProfile,
   addCollaboratorDocument,
   resolvePendingLegacyQualification,
   getCollaboratorStats,
+  getDocumentsReport,
+  _buildReportDocumentsByUser: buildReportDocumentsByUser,
 };

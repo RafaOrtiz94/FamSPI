@@ -43,3 +43,4 @@ Roles requeridos en todo el módulo: `talento_humano`, `jefe_talento_humano`, `j
 
 ## 9. Notas técnicas
 - `runLiquidation` sugiere integración con cálculos de finanzas para liquidación laboral
+- Al cerrar (`/close`), se sincroniza automáticamente `users.active = false` cuando `estatus_empleado = 'pasivo'`

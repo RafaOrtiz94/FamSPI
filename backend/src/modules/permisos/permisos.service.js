@@ -7,12 +7,38 @@ const notificationManager = require("../notifications/notificationManager");
 const logger = require("../../config/logger");
 const { createTimeOffEvent, cancelTimeOffEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
-const { uploadStudyEnrollmentDocument } = require("./permisos.drive");
+const { uploadStudyEnrollmentDocument, uploadJustificante } = require("./permisos.drive");
 
 const ANNUAL_ALLOWANCE = 15;
 const MAX_ANNUAL_ALLOWANCE = 30;
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 const HOURS_PER_VACATION_DAY = 8;
+const SPECIAL_VACATION_OPENING_BALANCES = {
+  "aura.jimenez@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 23,
+  },
+  "kevin.loor@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 15,
+  },
+  "daniel.fiallos@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 25,
+  },
+  "luisao.escobar@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 23,
+  },
+  "lizbeth.rivadeneira@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 15,
+  },
+  "ilsy.ramirez@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 14,
+  },
+};
 const RECOVERY_COORDINATION_TIMEOUT_DAYS = 3;
 const MAX_NEGATIVE_VACATION_DAYS = 15;
 const VACATION_CONVERSION_CONSENT_TEXT =
@@ -52,6 +78,10 @@ const ROLE_APPROVER = {
   finanzas: "jefe_financiero",
   contador: "jefe_financiero",
   tecnico: "jefe_tecnico",
+  ing_servicio: "jefe_servicio",
+  esp_app: "jefe_servicio",
+  ing_servicio_ext: "jefe_servicio",
+  esp_app_ext: "jefe_servicio",
   servicio_tecnico: "jefe_tecnico",
   tecnico_servicio: "jefe_tecnico",
   operaciones: "jefe_operaciones",
@@ -62,7 +92,7 @@ const ROLE_APPROVER = {
   admin_ti: "jefe_ti",
   desarrollador: "jefe_ti",
   soporte: "jefe_ti",
-  talento_humano: "jefe_talento_humano",
+  talento_humano: "gerencia_general",
   rrhh: "jefe_talento_humano",
   rh: "jefe_talento_humano",
 };
@@ -71,6 +101,7 @@ const ROLE_CANONICAL_ALIASES = {
   jefe_de_ti: "jefe_ti",
   jefe_finanzas: "jefe_financiero",
   jefe_de_finanzas: "jefe_financiero",
+  jefe_servicio: "jefe_tecnico",
   jefe_servicio_tecnico: "jefe_tecnico",
   jefe_de_servicio_tecnico: "jefe_tecnico",
   jefe_de_tecnico: "jefe_tecnico",
@@ -85,7 +116,7 @@ const ROLE_CANONICAL_ALIASES = {
 const APPROVER_ROLE_ALIASES = {
   gerencia_general: ["gerencia_general", "gerente_general", "gerencia", "gerente", "director"],
   jefe_ti: ["jefe_ti", "jefe_de_ti"],
-  jefe_tecnico: ["jefe_tecnico", "jefe_de_tecnico", "jefe_servicio_tecnico", "jefe_de_servicio_tecnico"],
+  jefe_tecnico: ["jefe_tecnico", "jefe_servicio", "jefe_de_tecnico", "jefe_servicio_tecnico", "jefe_de_servicio_tecnico"],
   jefe_operaciones: ["jefe_operaciones", "jefe_de_operaciones"],
   jefe_calidad: ["jefe_calidad", "jefe_de_calidad"],
   jefe_financiero: ["jefe_financiero", "jefe_finanzas", "jefe_de_finanzas"],
@@ -107,6 +138,9 @@ const PREFERRED_APPROVER_EMAILS = String(process.env.PREFERRED_APPROVER_EMAILS |
   .filter(Boolean);
 const PASSIVE_EMPLOYMENT_STATUSES = new Set(["pasivo", "desvinculado", "inactivo"]);
 const PASSIVE_EMPLOYMENT_STATUS_VALUES = Array.from(PASSIVE_EMPLOYMENT_STATUSES);
+const GENERAL_UNAVAILABILITY_EMERGENCY_APPROVAL_WINDOW_HOURS = 4;
+const EXTERNAL_COORDINATION_ROLES = new Set(["ing_servicio_ext", "esp_app_ext"]);
+const EXTERNAL_COORDINATION_APPROVER_LABEL = "Coordinación externa";
 
 function normalizeRoleName(value = "") {
   return String(value || "")
@@ -143,6 +177,10 @@ function getActorRoleCandidates(actor = {}) {
     .filter(Boolean)
     .forEach((role) => roles.add(role));
   return Array.from(roles);
+}
+
+function usesExternalCoordinationFlow(actor = {}) {
+  return getActorRoleCandidates(actor).some((role) => EXTERNAL_COORDINATION_ROLES.has(role));
 }
 
 function buildPreferredApproverRoles(actor = {}) {
@@ -660,6 +698,30 @@ function normalizeDateTime(value) {
   return date.toISOString();
 }
 
+function shouldSkipGeneralUnavailabilityMailForLateEmergencyApproval(solicitud = {}) {
+  const isEmergencyOrUrgent =
+    isEmergencySolicitud(solicitud) || normalizeBooleanFlag(solicitud?.is_urgent);
+  if (!isEmergencyOrUrgent) return false;
+
+  const finalApprovalAt = normalizeDateTime(solicitud?.aprobacion_final_at);
+  if (!finalApprovalAt) return false;
+
+  const effectiveStartAt =
+    normalizeDateTime(solicitud?.fecha_inicio_hora) ||
+    normalizeDateTime(solicitud?.created_at) ||
+    null;
+  if (!effectiveStartAt) return false;
+
+  const startMs = new Date(effectiveStartAt).getTime();
+  const approvalMs = new Date(finalApprovalAt).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(approvalMs) || approvalMs < startMs) {
+    return false;
+  }
+
+  const diffHours = (approvalMs - startMs) / (1000 * 60 * 60);
+  return diffHours > GENERAL_UNAVAILABILITY_EMERGENCY_APPROVAL_WINDOW_HOURS;
+}
+
 function calculateDurationHours(startValue, endValue) {
   const start = new Date(startValue);
   const end = new Date(endValue);
@@ -824,12 +886,17 @@ function buildGeneralUnavailabilityMailContent(solicitud = {}) {
 
 async function sendGeneralUnavailabilityNotification(solicitud = {}) {
   if (!GENERAL_UNAVAILABILITY_EMAILS.length) return;
-  // Skip legacy emergency requests UNLESS they are part of the new urgent flow
-  // (urgent requests explicitly want general visibility)
-  if (isEmergencySolicitud(solicitud) && !normalizeBooleanFlag(solicitud?.is_urgent)) {
+  if (shouldSkipGeneralUnavailabilityMailForLateEmergencyApproval(solicitud)) {
     logger.info(
-      { solicitudId: solicitud?.id, userEmail: solicitud?.user_email },
-      "Se omite aviso general de no disponibilidad por tratarse de una solicitud de emergencia no urgente"
+      {
+        solicitudId: solicitud?.id,
+        userEmail: solicitud?.user_email,
+        fecha_inicio_hora: solicitud?.fecha_inicio_hora || null,
+        created_at: solicitud?.created_at || null,
+        aprobacion_final_at: solicitud?.aprobacion_final_at || null,
+        maxWindowHours: GENERAL_UNAVAILABILITY_EMERGENCY_APPROVAL_WINDOW_HOURS,
+      },
+      "Se omite aviso general de no disponibilidad porque la emergencia fue aprobada fuera de la ventana operativa util"
     );
     return;
   }
@@ -2038,6 +2105,10 @@ async function ensureTable() {
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS justificante_review_observations TEXT");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS justificante_reviewed_at TIMESTAMPTZ");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS justificante_reviewed_by_user_id INTEGER");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS external_coordination_urls TEXT[]");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS external_coordination_uploaded_at TIMESTAMPTZ");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS external_coordination_required BOOLEAN NOT NULL DEFAULT false");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS external_coordination_auto_approved BOOLEAN NOT NULL DEFAULT false");
     await db.query("ALTER TABLE permisos_vacaciones DROP CONSTRAINT IF EXISTS permisos_vacaciones_justificante_status_check");
     await db.query(
       "ALTER TABLE permisos_vacaciones ADD CONSTRAINT permisos_vacaciones_justificante_status_check CHECK (justificante_status IN ('not_required','pendiente','entregado','en_revision','observado','aceptado','rechazado','vencido'))"
@@ -2386,7 +2457,159 @@ async function reviewStudyEnrollment({ id, approver, decision, reason }) {
   return updated;
 }
 
-async function createSolicitud({ body, user, meta }) {
+function pickExternalCoordinationFile(files = []) {
+  if (!Array.isArray(files) || files.length === 0) return null;
+  return (
+    files.find((file) => String(file?.fieldname || "").toLowerCase() === "external_coordination_evidence") ||
+    files[0] ||
+    null
+  );
+}
+
+async function uploadExternalCoordinationEvidence({ user, fechaInicio, file, existingFolderId = null }) {
+  if (!file) return null;
+  const fileBuffer = file?.buffer || null;
+  if (!fileBuffer) {
+    const err = new Error("No se pudo leer el archivo de coordinación externa.");
+    err.status = 400;
+    throw err;
+  }
+
+  return uploadJustificante({
+    user,
+    solicitudId: null,
+    fecha_inicio: fechaInicio || new Date().toISOString().slice(0, 10),
+    fileBuffer,
+    fileName: file.originalname || `coordinacion_externa_${Date.now()}`,
+    mimeType: file.mimetype || "application/octet-stream",
+    existingFolderId,
+  });
+}
+
+async function finalizeExternalCoordinationApproval({
+  solicitud,
+  requesterIdentity,
+  meta,
+  consentText,
+}) {
+  const approvalLabel = EXTERNAL_COORDINATION_APPROVER_LABEL;
+  const updatedAt = new Date().toISOString();
+  const { rows } = await db.query(
+    `UPDATE permisos_vacaciones
+        SET status = 'approved',
+            aprobacion_final_at = COALESCE(aprobacion_final_at, NOW()),
+            aprobacion_final_por = COALESCE(aprobacion_final_por, $2),
+            updated_at = NOW()
+      WHERE id = $1
+      RETURNING *`,
+    [solicitud.id, approvalLabel]
+  );
+  const approvedRow = rows[0] || solicitud;
+
+  try {
+    const signaturesBySolicitud = await getSignaturesBySolicitudIds([approvedRow.id]);
+    const existingSignatures = signaturesBySolicitud.get(String(approvedRow.id)) || [];
+    const hasRequesterSignature = existingSignatures.some(
+      (item) => item.stage === WORKFLOW_SIGNATURE_STAGES.SOLICITUD
+    );
+    if (!hasRequesterSignature && approvedRow?.user_id) {
+      await recordWorkflowSignature({
+        solicitud: approvedRow,
+        stage: WORKFLOW_SIGNATURE_STAGES.SOLICITUD,
+        actor: {
+          id: approvedRow.user_id,
+          email: approvedRow.user_email,
+          fullname: requesterIdentity?.fullname || approvedRow.user_fullname || approvedRow.user_email,
+          role: "solicitante",
+        },
+        meta,
+        consentText,
+      });
+    }
+  } catch (signatureError) {
+    logger.warn({ signatureError, solicitudId: approvedRow?.id }, "No se pudo registrar firma de solicitante en autoaprobación externa");
+  }
+
+  let verificationToken = approvedRow?.legal_verification_token || null;
+  if (!verificationToken) {
+    verificationToken = generateLegalVerificationToken();
+    await db.query(
+      `UPDATE permisos_vacaciones
+          SET legal_verification_token = $2,
+              legal_verification_created_at = COALESCE(legal_verification_created_at, NOW()),
+              updated_at = NOW()
+        WHERE id = $1`,
+      [approvedRow.id, verificationToken]
+    );
+    approvedRow.legal_verification_token = verificationToken;
+  }
+
+  let pdfUrl = null;
+  let legalPdfUrl = null;
+  try {
+    const signaturesBySolicitud = await getSignaturesBySolicitudIds([approvedRow.id]);
+    const signatures = signaturesBySolicitud.get(String(approvedRow.id)) || [];
+    const solicitudSignature =
+      signatures.find((item) => item.stage === WORKFLOW_SIGNATURE_STAGES.SOLICITUD) || null;
+    const workflowSummary = buildWorkflowSignatureSummary(signatures);
+
+    pdfUrl = await generateFRH10({
+      ...approvedRow,
+      user_fullname: requesterIdentity?.fullname || approvedRow.user_fullname || approvedRow.user_email,
+      user_document_id: requesterIdentity?.cedula || "",
+      approver_fullname: approvalLabel,
+      approver_document_id: "",
+      aprobacion_final_por: approvalLabel,
+      aprobacion_final_at: approvedRow.aprobacion_final_at || updatedAt,
+      firma_solicitante_texto: buildPdfSignatureText(
+        solicitudSignature,
+        requesterIdentity?.fullname || approvedRow.user_fullname || approvedRow.user_email
+      ),
+      firma_aprobador_texto: approvalLabel,
+      firma_workflow_estado: workflowSummary?.estado || "pendiente",
+      firma_solicitante_at: solicitudSignature?.signed_at || null,
+      firma_aprobador_at: approvedRow.aprobacion_final_at || updatedAt,
+      firma_solicitante_hash: solicitudSignature?.signature_hash_sha256 || null,
+      firma_aprobador_hash: null,
+      firma_aprobador_prev_hash: null,
+      legal_verification_token: verificationToken,
+      legal_verification_url: buildLegalVerificationUrl(verificationToken),
+      workflow_signature_summary: workflowSummary,
+    });
+
+    legalPdfUrl = await generateFirmaLegalValidationPdf({
+      solicitud: {
+        ...approvedRow,
+        user_fullname: requesterIdentity?.fullname || approvedRow.user_fullname || approvedRow.user_email,
+        approver_fullname: approvalLabel,
+      },
+      signatures,
+      verification: {
+        token: verificationToken,
+        url: buildLegalVerificationUrl(verificationToken),
+      },
+    });
+  } catch (pdfError) {
+    logger.warn({ pdfError, solicitudId: approvedRow?.id }, "No se pudo generar PDF legal para autoaprobación externa");
+  }
+
+  if (pdfUrl || legalPdfUrl) {
+    const { rows: refreshedRows } = await db.query(
+      `UPDATE permisos_vacaciones
+          SET pdf_generado_url = COALESCE($2, pdf_generado_url),
+              pdf_validacion_legal_url = COALESCE($3, pdf_validacion_legal_url),
+              updated_at = NOW()
+        WHERE id = $1
+      RETURNING *`,
+      [approvedRow.id, pdfUrl, legalPdfUrl]
+    );
+    return refreshedRows[0] || approvedRow;
+  }
+
+  return approvedRow;
+}
+
+async function createSolicitud({ body, user, files = [], meta }) {
   await ensureTable();
   let requesterIdentity = null;
   const requesterUserId = resolveActorId(user);
@@ -2413,32 +2636,48 @@ async function createSolicitud({ body, user, meta }) {
   const famSignConsentText =
     consentTextFromUi ||
     `Acepto el uso de FamSign para firma y validacion del workflow de esta solicitud (${consentVersion}).`;
-  const preferredApproverRoles = buildPreferredApproverRoles(user);
-  const approverResolution = await resolveApproverWithFallback(preferredApproverRoles);
-  payload.approver_role = approverResolution.approverRole;
-  const approverUser = approverResolution.approverUser;
-  payload.approver_user_id = approverUser?.id || null;
-  payload.approver_email = approverUser?.email || null;
-  logger.info(
-    {
-      requesterRoles: getActorRoleCandidates(user),
-      preferredApproverRoles,
-      resolvedApproverRole: payload.approver_role,
-      resolvedApproverEmail: payload.approver_email,
-      fallbackApplied: approverResolution.fallbackApplied,
-    },
-    "Resolucion de aprobador para solicitud de permiso/vacaciones"
-  );
-  if (!payload.approver_user_id) {
-    const err = new Error(
-      "No se encontró un aprobador activo para tu solicitud (jefe inmediato o gerencia general)."
+  const externalCoordinationFlow = usesExternalCoordinationFlow(user);
+  const externalCoordinationFile = pickExternalCoordinationFile(files);
+  let approverResolution = null;
+  let approverUser = null;
+
+  if (!externalCoordinationFlow) {
+    const preferredApproverRoles = buildPreferredApproverRoles(user);
+    approverResolution = await resolveApproverWithFallback(preferredApproverRoles);
+    payload.approver_role = approverResolution.approverRole;
+    approverUser = approverResolution.approverUser;
+    payload.approver_user_id = approverUser?.id || null;
+    payload.approver_email = approverUser?.email || null;
+    logger.info(
+      {
+        requesterRoles: getActorRoleCandidates(user),
+        preferredApproverRoles,
+        resolvedApproverRole: payload.approver_role,
+        resolvedApproverEmail: payload.approver_email,
+        fallbackApplied: approverResolution.fallbackApplied,
+      },
+      "Resolucion de aprobador para solicitud de permiso/vacaciones"
     );
-    err.status = 400;
-    throw err;
+    if (!payload.approver_user_id) {
+      const err = new Error(
+        "No se encontró un aprobador activo para tu solicitud (jefe inmediato o gerencia general)."
+      );
+      err.status = 400;
+      throw err;
+    }
+  } else {
+    payload.approver_role = null;
+    payload.approver_user_id = null;
+    payload.approver_email = null;
+    if (!externalCoordinationFile) {
+      const err = new Error("Debes adjuntar la evidencia de coordinación externa para continuar.");
+      err.status = 400;
+      throw err;
+    }
   }
 
   // Prevención de autoaprobación: el solicitante no puede ser su propio aprobador
-  if (requesterUserId && payload.approver_user_id && Number(payload.approver_user_id) === Number(requesterUserId)) {
+  if (!externalCoordinationFlow && requesterUserId && payload.approver_user_id && Number(payload.approver_user_id) === Number(requesterUserId)) {
     logger.warn(
       { requesterUserId, approverUserId: payload.approver_user_id, approverRole: payload.approver_role },
       "Autoaprobacion detectada - buscando aprobador alternativo en gerencia_general"
@@ -2564,7 +2803,7 @@ async function createSolicitud({ body, user, meta }) {
       payload.subtipo_salud = null;
     }
     let validation = null;
-    if (isEstudios) {
+    if (isEstudios && !externalCoordinationFlow) {
       const enrollmentId = Number(payload.study_enrollment_id || 0);
       if (!enrollmentId) {
         const err = new Error("Debes seleccionar una matrícula activa para solicitar permiso por estudios.");
@@ -2595,6 +2834,10 @@ async function createSolicitud({ body, user, meta }) {
       }
       payload.study_enrollment_id = enrollmentId;
       validation = await validatePermisoRequest(payload);
+    } else if (isEstudios && externalCoordinationFlow) {
+      payload.study_enrollment_id = null;
+      validation = await validatePermisoRequest(payload);
+      validation.justificantes_requeridos = [];
     } else if (isPersonal) {
       validation = await validatePermisoRequest(payload);
       validation.justificantes_requeridos = [];
@@ -2603,6 +2846,10 @@ async function createSolicitud({ body, user, meta }) {
     }
     justificacionRequerida = validation.justificantes_requeridos || [];
     esRecuperable = Boolean(validation.es_recuperable);
+
+    if (externalCoordinationFlow) {
+      justificacionRequerida = [];
+    }
 
     if (payload.recovery_plan !== undefined && payload.recovery_plan !== null && payload.recovery_plan !== "") {
       const err = new Error("La coordinación de tramos solo se habilita después de la aprobación definitiva.");
@@ -2716,6 +2963,22 @@ async function createSolicitud({ body, user, meta }) {
     }
   }
 
+  let externalCoordinationUploads = [];
+  if (externalCoordinationFlow && externalCoordinationFile) {
+    const uploadedEvidence = await uploadExternalCoordinationEvidence({
+      user,
+      fechaInicio: payload.fecha_inicio,
+      file: externalCoordinationFile,
+      existingFolderId: driveMeta.folderId || null,
+    });
+    if (uploadedEvidence?.webViewLink) {
+      externalCoordinationUploads = [uploadedEvidence.webViewLink];
+    }
+    if (!driveMeta.folderId && uploadedEvidence?.folderId) {
+      driveMeta.folderId = uploadedEvidence.folderId;
+    }
+  }
+
   // Urgency auto-detection: explicit flag, es_emergencia, or start date already reached
   const todayStr = new Date().toISOString().split("T")[0];
   const isUrgent =
@@ -2747,6 +3010,9 @@ async function createSolicitud({ body, user, meta }) {
     payload.tipo_permiso === "calamidad" ? String(payload.calamidad_parentesco || "").trim() || null : null;
   const calamidadGradoConsanguinidad =
     payload.tipo_permiso === "calamidad" ? String(payload.calamidad_grado_consanguinidad || "").trim() || null : null;
+  const initialStatus = externalCoordinationFlow ? "approved" : "pending";
+  const initialJustificanteStatus =
+    externalCoordinationFlow ? "not_required" : (justificacionRequerida.length > 0 ? "pendiente" : "not_required");
 
   let rows;
   try {
@@ -2761,8 +3027,9 @@ async function createSolicitud({ body, user, meta }) {
       allow_negative, projected_remaining_days, recovery_date, monetary_debt, es_emergencia,
       is_urgent, vacation_conversion_consent, vacation_conversion_consent_at, vacation_conversion_consent_text,
       calamidad_parentesco, calamidad_grado_consanguinidad,
-      status, justificante_status
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,'pending',$44) RETURNING *`,
+      status, justificante_status,
+      external_coordination_urls, external_coordination_uploaded_at, external_coordination_required, external_coordination_auto_approved
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49) RETURNING *`,
     [
       payload.user_email,
       payload.user_fullname,
@@ -2807,7 +3074,12 @@ async function createSolicitud({ body, user, meta }) {
       conversionConsentText,
       calamidadParentesco,
       calamidadGradoConsanguinidad,
-      justificacionRequerida.length > 0 ? "pendiente" : "not_required",
+      initialStatus,
+      initialJustificanteStatus,
+      externalCoordinationUploads.length > 0 ? externalCoordinationUploads : null,
+      externalCoordinationUploads.length > 0 ? new Date().toISOString() : null,
+      externalCoordinationFlow,
+      externalCoordinationFlow,
     ]
   );
   rows = result.rows;
@@ -2820,6 +3092,22 @@ async function createSolicitud({ body, user, meta }) {
 
   await logAction({ usuario_email: user?.email, modulo: "permisos", accion: "crear" });
 
+  if (externalCoordinationFlow) {
+    rows[0] = await finalizeExternalCoordinationApproval({
+      solicitud: rows[0],
+      requesterIdentity,
+      meta,
+      consentText: famSignConsentText,
+    });
+
+    await createSolicitudCalendarEvent(
+      rows[0],
+      rows[0]?.tipo_solicitud === "vacaciones"
+        ? "No se pudo crear evento de calendario para vacaciones autoaprobadas por coordinación externa"
+        : "No se pudo crear evento de calendario para permiso autoaprobado por coordinación externa"
+    );
+  }
+
   const approverLabel = GERENCIA_GENERAL_ROLES.has(String(payload.approver_role || "").toLowerCase())
     ? "gerencia general"
     : "jefe inmediato";
@@ -2828,9 +3116,11 @@ async function createSolicitud({ body, user, meta }) {
     if (payload.user_id) {
       await notificationManager.sendNotification({
         userId: payload.user_id,
-        customTitle: "Solicitud enviada",
-        customMessage: `Tu solicitud de ${payload.tipo_solicitud} fue enviada para aprobacion de ${approverLabel}.`,
-        type: "info",
+        customTitle: externalCoordinationFlow ? "Solicitud aprobada y registrada" : "Solicitud enviada",
+        customMessage: externalCoordinationFlow
+          ? `Tu solicitud de ${payload.tipo_solicitud}${payload.tipo_permiso ? ` (${payload.tipo_permiso})` : ""} fue aprobada automáticamente por coordinación externa y ya quedó registrada.`
+          : `Tu solicitud de ${payload.tipo_solicitud} fue enviada para aprobacion de ${approverLabel}.`,
+        type: externalCoordinationFlow ? "success" : "info",
         source: "permisos_vacaciones",
         priority: 1,
         email: true,
@@ -2844,7 +3134,7 @@ async function createSolicitud({ body, user, meta }) {
         },
       });
     }
-    if (payload.approver_user_id && payload.approver_user_id !== payload.user_id) {
+    if (!externalCoordinationFlow && payload.approver_user_id && payload.approver_user_id !== payload.user_id) {
       const urgentPrefix = isUrgent ? "[URGENTE] " : "";
       const urgentSuffix = isUrgent
         ? " Esta solicitud es urgente y requiere autorización provisional inmediata."
@@ -2868,7 +3158,7 @@ async function createSolicitud({ body, user, meta }) {
     }
 
     // For urgent requests, also notify the general list so someone can act immediately
-    if (isUrgent && GENERAL_UNAVAILABILITY_EMAILS.length > 0) {
+    if (!externalCoordinationFlow && isUrgent && GENERAL_UNAVAILABILITY_EMAILS.length > 0) {
       try {
         for (const email of GENERAL_UNAVAILABILITY_EMAILS) {
           await notificationManager.sendNotification({
@@ -2905,8 +3195,10 @@ async function createSolicitud({ body, user, meta }) {
       if (Number(thUser.id) === Number(payload.approver_user_id)) continue;
       await notificationManager.sendNotification({
         userId: thUser.id,
-        customTitle: "Nueva solicitud registrada",
-        customMessage: `${payload.user_fullname || payload.user_email} envió una solicitud de ${payload.tipo_solicitud}${payload.tipo_permiso ? ` (${payload.tipo_permiso})` : ""}.`,
+        customTitle: externalCoordinationFlow ? "Solicitud autoaprobada registrada" : "Nueva solicitud registrada",
+        customMessage: externalCoordinationFlow
+          ? `${payload.user_fullname || payload.user_email} registró una solicitud de ${payload.tipo_solicitud}${payload.tipo_permiso ? ` (${payload.tipo_permiso})` : ""} aprobada por coordinación externa.`
+          : `${payload.user_fullname || payload.user_email} envió una solicitud de ${payload.tipo_solicitud}${payload.tipo_permiso ? ` (${payload.tipo_permiso})` : ""}.`,
         type: "info",
         source: "permisos_vacaciones",
         priority: 0,
@@ -2924,16 +3216,18 @@ async function createSolicitud({ body, user, meta }) {
     logger.warn({ thNotifyError, solicitudId: rows[0]?.id }, "No se pudo notificar a Talento Humano sobre nueva solicitud");
   }
 
-  try {
-    await recordWorkflowSignature({
-      solicitud: rows[0],
-      stage: WORKFLOW_SIGNATURE_STAGES.SOLICITUD,
-      actor: user,
-      meta,
-      consentText: famSignConsentText,
-    });
-  } catch (signatureError) {
-    logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar FamSign en solicitud");
+  if (!externalCoordinationFlow) {
+    try {
+      await recordWorkflowSignature({
+        solicitud: rows[0],
+        stage: WORKFLOW_SIGNATURE_STAGES.SOLICITUD,
+        actor: user,
+        meta,
+        consentText: famSignConsentText,
+      });
+    } catch (signatureError) {
+      logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar FamSign en solicitud");
+    }
   }
 
   const enriched = await attachWorkflowSignatures([rows[0]]);
@@ -4936,7 +5230,20 @@ async function listarPorUsuario({ user }) {
     userEmail: email,
     year: currentYear,
   });
-  const totalAllowance = allowanceInfo.allowance + historicalBalance;
+  const specialOpeningProfile = getSpecialVacationOpeningProfile(email, new Date());
+  let totalAllowance = allowanceInfo.allowance + historicalBalance;
+  let carryOver = historicalBalance;
+  if (specialOpeningProfile) {
+    totalAllowance = roundToTwo(
+      Number(specialOpeningProfile.openingRemainingDays || 0) +
+      computeSpecialVacationAccrualFromOpening(
+        hireDate,
+        specialOpeningProfile.effectiveDate,
+        new Date()
+      )
+    );
+    carryOver = roundToTwo(totalAllowance - allowanceInfo.allowance);
+  }
   const remainingRaw = totalAllowance - approvedVacationDays - pendingVacationDays;
   const remaining = remainingRaw;
 
@@ -4944,7 +5251,7 @@ async function listarPorUsuario({ user }) {
     year: currentYear,
     allowance: totalAllowance,
     allowance_base: allowanceInfo.allowance,
-    carry_over: historicalBalance,
+    carry_over: carryOver,
     tenure_years: allowanceInfo.tenureYears,
     eligible: allowanceInfo.eligible,
     eligible_from: allowanceInfo.eligibleFrom,
@@ -5070,6 +5377,34 @@ const computeVacationAllowance = (hireDateValue, asOfValue = new Date()) => {
   };
 };
 
+function getSpecialVacationOpeningProfile(userEmail, asOfValue = new Date()) {
+  const normalizedEmail = String(userEmail || "").trim().toLowerCase();
+  const profile = SPECIAL_VACATION_OPENING_BALANCES[normalizedEmail];
+  if (!profile) return null;
+  const effectiveDate = normalizeDateOnly(profile.effectiveDate);
+  const asOfDate = normalizeDateOnly(asOfValue);
+  if (!effectiveDate || !asOfDate || asOfDate < effectiveDate) return null;
+  return profile;
+}
+
+function computeSpecialVacationAccrualFromOpening(hireDateValue, effectiveDateValue, asOfValue = new Date()) {
+  const hireDate = normalizeDate(hireDateValue);
+  const effectiveDate = normalizeDate(effectiveDateValue);
+  const asOfDate = normalizeDate(asOfValue) || new Date();
+  if (!hireDate || !effectiveDate || !asOfDate || asOfDate <= effectiveDate) return 0;
+
+  let accrued = 0;
+  for (let year = effectiveDate.getFullYear(); year <= asOfDate.getFullYear(); year += 1) {
+    const anniversary = new Date(hireDate.getTime());
+    anniversary.setFullYear(year);
+    if (anniversary > effectiveDate && anniversary <= asOfDate) {
+      accrued += computeVacationAllowance(hireDateValue, anniversary).allowance;
+    }
+  }
+
+  return roundToTwo(accrued);
+}
+
 async function listarResumenColaboradores({ departmentId = null, year = null } = {}) {
   await ensureTable();
   await processExpiredPendingSolicitudes();
@@ -5105,6 +5440,9 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
         p.charged_vacation_days,
         p.justificacion_requerida,
         p.justificantes_urls,
+        p.external_coordination_urls,
+        p.external_coordination_required,
+        p.external_coordination_auto_approved,
         p.justificante_status,
         p.escalation_status,
         p.recovery_coordination_status,
@@ -5185,6 +5523,7 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
       user_id: userId,
       user_email: userEmail,
       user_fullname: userFullname || userEmail || `Usuario #${userId || "sin-correo"}`,
+      hire_date: null,
       department_id: departmentId,
       department_name: departmentName || null,
       permisos: {
@@ -5226,11 +5565,25 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
       userEmail,
       year,
     });
-    const totalAllowance = allowanceInfo.allowance + historicalBalance;
+    const specialOpeningProfile = getSpecialVacationOpeningProfile(userEmail, new Date());
+    let totalAllowance = allowanceInfo.allowance + historicalBalance;
+    let carryOver = historicalBalance;
+    if (specialOpeningProfile) {
+      totalAllowance = roundToTwo(
+        Number(specialOpeningProfile.openingRemainingDays || 0) +
+        computeSpecialVacationAccrualFromOpening(
+          user.fecha_ingreso,
+          specialOpeningProfile.effectiveDate,
+          new Date()
+        )
+      );
+      carryOver = roundToTwo(totalAllowance - allowanceInfo.allowance);
+    }
     collaborators.set(key, {
       user_id: user.id,
       user_email: userEmail,
       user_fullname: user.fullname || user.name || userEmail || `Usuario #${user.id}`,
+      hire_date: user.fecha_ingreso || null,
       department_id: user.department_id || null,
       department_name: user.department_name || null,
       permisos: {
@@ -5247,7 +5600,7 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
         dias_disponibles: totalAllowance,
         dias_restantes: totalAllowance,
         dias_base: allowanceInfo.allowance,
-        dias_arrastre: historicalBalance,
+        dias_arrastre: carryOver,
         missing_hire_date: allowanceInfo.missingHireDate,
         eligible: allowanceInfo.eligible,
         eligible_from: allowanceInfo.eligibleFrom,
@@ -5382,6 +5735,19 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
   });
 
   return Array.from(collaborators.values()).map((record) => {
+    const specialOpeningProfile = getSpecialVacationOpeningProfile(record.user_email, new Date());
+    if (specialOpeningProfile) {
+      const totalAllowance = roundToTwo(
+        Number(specialOpeningProfile.openingRemainingDays || 0) +
+        computeSpecialVacationAccrualFromOpening(
+          record.hire_date,
+          specialOpeningProfile.effectiveDate,
+          new Date()
+        )
+      );
+      record.vacaciones.dias_disponibles = totalAllowance;
+      record.vacaciones.dias_arrastre = roundToTwo(totalAllowance - Number(record.vacaciones.dias_base || 0));
+    }
     const saldo = record.vacaciones.dias_disponibles -
       record.vacaciones.dias_aprobados -
       record.vacaciones.dias_pendientes;

@@ -1,1881 +1,3053 @@
-import React, { useCallback, useEffect, useMemo, useState, lazy, Suspense } from "react";
-import { FiChevronDown, FiChevronUp, FiClock, FiDownload, FiFilter, FiMapPin, FiPieChart, FiTarget, FiX } from "react-icons/fi";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FiAlertCircle,
+  FiArrowLeft,
+  FiCalendar,
+  FiCamera,
+  FiCheck,
+  FiClock,
+  FiDownload,
+  FiEdit2,
+  FiExternalLink,
+  FiGift,
+  FiMapPin,
+  FiMaximize2,
+  FiPrinter,
+  FiRefreshCw,
+  FiSearch,
+  FiSlash,
+  FiUpload,
+  FiUser,
+  FiUsers,
+  FiX,
+} from "react-icons/fi";
+import QRCode from "qrcode";
 import toast from "react-hot-toast";
-import { AnimatePresence, motion } from "framer-motion";
-
-import Card from "../../../core/ui/components/Card";
-import Button from "../../../core/ui/components/Button";
-import Select from "../../../core/ui/components/Select";
-import { DashboardLayout, DashboardHeader } from "../../../core/ui/layouts/DashboardLayout";
-import { getUsers } from "../../../core/api/usersApi";
-import { downloadAttendancePDF } from "../../../core/api/attendanceApi";
-import AttendanceReportsSummaryCards from "../components/attendance-reports/AttendanceReportsSummaryCards";
-import AttendanceOvertimeSummary from "../components/attendance-reports/AttendanceOvertimeSummary";
-import AttendanceReportsEmptyState from "../components/attendance-reports/AttendanceReportsEmptyState";
-import AttendanceReportsTableView from "../components/attendance-reports/AttendanceReportsTableView";
-import AttendanceReportsLoadingState from "../components/attendance-reports/AttendanceReportsLoadingState";
-import AttendanceReportsToolbar from "../components/attendance-reports/AttendanceReportsToolbar";
-import useAttendanceFilters, { ATTENDANCE_REPORT_MODES, ATTENDANCE_REPORT_VIEWS } from "../hooks/useAttendanceFilters";
-import useAttendanceReportsQuery from "../hooks/useAttendanceReportsQuery";
-import { formatDateSafe, formatTimeSafe } from "../../../shared/utils/dateUtils";
 import { useAuth } from "../../../core/auth/AuthContext";
 
-const AttendanceMapView = lazy(() =>
-  import("../components/attendance-reports/AttendanceMapView").catch(() => ({
-    default: () => <div className="p-4 text-red-500">Error loading map</div>,
-  }))
+import {
+  applyEntryRegularization,
+  downloadAttendanceBulkPDF,
+  downloadAttendanceMonthlyReport,
+  downloadAttendancePDF,
+  generateCollaboratorBirthdayBenefitQr,
+  getAttendanceRegularizationsPanel,
+  getCollaboratorBirthdayBenefit,
+  getAttendanceWorkspaceCollaborator,
+  getAttendanceWorkspaceOverview,
+  getCollaboratorJustificationsPanel,
+  scheduleAttendanceFollowUpMeeting,
+  transitionAttendanceRegularization,
+  getTeleworkRequests,
+  decideTeleworkRequest,
+} from "../../../core/api/attendanceApi";
+import Modal from "../../../core/ui/components/Modal";
+import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
+import AttendanceMapView from "../components/attendance-reports/AttendanceMapView";
+import { parseCoordinatePair } from "../utils/attendanceGeo";
+import famLogo from "../../../assets/famproject_logo.png";
+
+// ─── Period modes ─────────────────────────────────────────────────────────────
+
+const PM = Object.freeze({ DAY: "day", MONTH: "month", YEAR: "year" });
+
+const TABS = Object.freeze({
+  MARKS: "marks",
+  PERMISSIONS: "permissions",
+  BREACHES: "breaches",
+  OVERTIME: "overtime",
+  EXITS: "exits",
+  MAP: "map",
+  GESTION: "gestion",
+});
+
+// ─── Date helpers ─────────────────────────────────────────────────────────────
+
+const toIso = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
+const todayIso = () => toIso(new Date());
+const currentMonth = () => todayIso().slice(0, 7);
+const currentYear = () => String(new Date().getFullYear());
+
+const buildRange = (mode, day, month, year) => {
+  if (mode === PM.DAY) return day ? { startDate: day, endDate: day } : null;
+  if (mode === PM.MONTH) {
+    const match = String(month || "").match(/^(\d{4})-(\d{2})$/);
+    if (!match) return null;
+    const first = new Date(+match[1], +match[2] - 1, 1);
+    const last = new Date(+match[1], +match[2], 0);
+    return { startDate: toIso(first), endDate: toIso(last) };
+  }
+  if (mode === PM.YEAR) {
+    const y = Number(year);
+    if (!Number.isInteger(y) || y < 2000 || y > 2100) return null;
+    return { startDate: `${y}-01-01`, endDate: `${y}-12-31` };
+  }
+  return null;
+};
+
+const getNextWorkday = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  if (d.getDay() === 6) d.setDate(d.getDate() + 2);
+  if (d.getDay() === 0) d.setDate(d.getDate() + 1);
+  return toIso(d);
+};
+
+// ─── Formatters ───────────────────────────────────────────────────────────────
+
+const fmtDate = (v) => {
+  if (!v) return "--";
+  const d = new Date(`${String(v).slice(0, 10)}T00:00:00`);
+  return isNaN(d) ? String(v) : d.toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" });
+};
+
+const fmtTime = (v) => {
+  if (!v) return "--";
+  const d = new Date(v);
+  return isNaN(d) ? "--" : d.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit", hour12: false });
+};
+
+const fmtHours = (v) => {
+  const n = Number(v || 0);
+  return n > 0 ? `${n.toFixed(2)}h` : "--";
+};
+
+const fmtDuration = ({ seconds, hours } = {}) => {
+  const rawSeconds = Number.isFinite(Number(seconds))
+    ? Number(seconds)
+    : Number(hours || 0) * 3600;
+  const totalSeconds = Math.max(0, Math.round(rawSeconds));
+  if (!totalSeconds) return "--";
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+};
+
+const fmtOvertime = (rowOrHours) => {
+  if (rowOrHours && typeof rowOrHours === "object") {
+    return fmtDuration({
+      seconds: rowOrHours.real_overtime_seconds,
+      hours: rowOrHours.real_overtime_hours,
+    });
+  }
+  return fmtDuration({ hours: rowOrHours });
+};
+
+const PERMISSION_TYPE_LABELS = Object.freeze({
+  personal: "Permiso personal",
+  salud: "Permiso de salud",
+  estudios: "Permiso de estudios",
+  calamidad: "Calamidad domestica",
+  emergencia_medica_propia: "Emergencia medica propia",
+});
+
+const normalizeToken = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+const resolvePermissionTypeLabel = (item = {}) => {
+  if (item?.es_emergencia || item?.time_off_is_emergency) return "Permiso de emergencia";
+  const subtype = normalizeToken(item?.tipo_permiso || item?.time_off_subtype);
+  if (!subtype) return "Permiso";
+  return PERMISSION_TYPE_LABELS[subtype] || `Permiso ${subtype.replace(/_/g, " ")}`;
+};
+
+const resolvePoint = ({ location, time, type, label }) => {
+  const coord = parseCoordinatePair(location);
+  if (!coord || !time) return null;
+  return {
+    type,
+    label,
+    time,
+    lat: coord.lat,
+    lng: coord.lng,
+  };
+};
+
+const buildRegularizedMarks = (row = {}) => ([
+  {
+    key: "entry",
+    time: row.acta_entry_time || row.entry_time || null,
+    point: resolvePoint({
+      location: row.entry_location,
+      time: row.acta_entry_time || row.entry_time || null,
+      type: "entry",
+      label: "Entrada regularizada",
+    }),
+  },
+  {
+    key: "lunch_start",
+    time: row.acta_lunch_start_time || row.lunch_start_time || null,
+    point: resolvePoint({
+      location: row.op_lunch_start_location || row.lunch_start_location,
+      time: row.acta_lunch_start_time || row.lunch_start_time || null,
+      type: "lunch_start",
+      label: "Salida a almuerzo regularizada",
+    }),
+  },
+  {
+    key: "lunch_end",
+    time: row.acta_lunch_end_time || row.lunch_end_time || null,
+    point: resolvePoint({
+      location: row.op_lunch_end_location || row.lunch_end_location,
+      time: row.acta_lunch_end_time || row.lunch_end_time || null,
+      type: "lunch_end",
+      label: "Regreso de almuerzo regularizado",
+    }),
+  },
+  {
+    key: "exit",
+    time: row.acta_exit_time || row.exit_time || null,
+    point: resolvePoint({
+      location: row.return_location || row.exit_location,
+      time: row.acta_exit_time || row.exit_time || null,
+      type: "exit",
+      label: "Salida regularizada",
+    }),
+  },
+]);
+
+const buildRealMarks = (row = {}) => ([
+  {
+    key: "entry",
+    time: row.real_entry_time || row.entry_time || null,
+    point: resolvePoint({
+      location: row.entry_location,
+      time: row.real_entry_time || row.entry_time || null,
+      type: "entry",
+      label: "Entrada real",
+    }),
+  },
+  {
+    key: "lunch_start",
+    time: row.op_lunch_start_time || row.real_lunch_start_time || row.lunch_start_time || null,
+    point: resolvePoint({
+      location: row.op_lunch_start_location || row.lunch_start_location,
+      time: row.op_lunch_start_time || row.real_lunch_start_time || row.lunch_start_time || null,
+      type: "lunch_start",
+      label: "Salida a almuerzo real",
+    }),
+  },
+  {
+    key: "lunch_end",
+    time: row.op_lunch_end_time || row.real_lunch_end_time || row.lunch_end_time || null,
+    point: resolvePoint({
+      location: row.op_lunch_end_location || row.lunch_end_location,
+      time: row.op_lunch_end_time || row.real_lunch_end_time || row.lunch_end_time || null,
+      type: "lunch_end",
+      label: "Regreso de almuerzo real",
+    }),
+  },
+  {
+    key: "exit",
+    time: row.return_time || row.exit_time || null,
+    point: resolvePoint({
+      location: row.return_location || row.exit_location,
+      time: row.return_time || row.exit_time || null,
+      type: "exit",
+      label: "Salida real",
+    }),
+  },
+]);
+
+const buildPermissionMarks = (row = {}) => ([
+  {
+    key: "permission_exit",
+    time: row.permission_exit_time || null,
+  },
+  {
+    key: "permission_return",
+    time: row.permission_return_time || null,
+  },
+]);
+
+const buildTeleworkMarks = (row = {}) => {
+  const isTelework = normalizeToken(row.operational_category) === "teletrabajo";
+  if (!isTelework) {
+    return [
+      { key: "telework_start", time: null, point: null },
+      { key: "telework_lunch_start", time: null, point: null },
+      { key: "telework_lunch_end", time: null, point: null },
+      { key: "telework_end", time: null, point: null },
+    ];
+  }
+
+  return [
+    {
+      key: "telework_start",
+      time: row.start_time || row.entry_time || null,
+      point: resolvePoint({
+        location: row.start_location || row.entry_location,
+        time: row.start_time || row.entry_time || null,
+        type: "telework_start",
+        label: "Inicio de teletrabajo",
+      }),
+    },
+    {
+      key: "telework_lunch_start",
+      time: row.lunch_start_time || null,
+      point: resolvePoint({
+        location: row.lunch_start_location,
+        time: row.lunch_start_time || null,
+        type: "telework_lunch_start",
+        label: "Salida a almuerzo teletrabajo",
+      }),
+    },
+    {
+      key: "telework_lunch_end",
+      time: row.lunch_end_time || null,
+      point: resolvePoint({
+        location: row.lunch_end_location,
+        time: row.lunch_end_time || null,
+        type: "telework_lunch_end",
+        label: "Regreso de almuerzo teletrabajo",
+      }),
+    },
+    {
+      key: "telework_end",
+      time: row.return_time || row.exit_time || null,
+      point: resolvePoint({
+        location: row.return_location || row.exit_location,
+        time: row.return_time || row.exit_time || null,
+        type: "telework_end",
+        label: "Cierre de teletrabajo",
+      }),
+    },
+  ];
+};
+
+const getInitials = (name = "") => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "NA";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+};
+
+const buildPeriodLabel = (mode, range) => {
+  if (!range) return "Sin rango seleccionado";
+  if (range.startDate === range.endDate) return fmtDate(range.startDate);
+  const names = { day: "Hoy", month: "Mensual", year: "Anual" };
+  return `${names[mode] || ""}: ${fmtDate(range.startDate)} al ${fmtDate(range.endDate)}`;
+};
+
+// ─── CSV export ───────────────────────────────────────────────────────────────
+
+const exportCsv = (rows, fileName) => {
+  const headers = ["Colaborador", "Cedula", "Fecha", "Tipo", "Detalle", "Entrada", "Salida alm.", "Entrada alm.", "Salida", "Min. atraso", "Extra real", "Horas oper.", "Estado"];
+  const lines = [
+    headers.join(";"),
+    ...rows.map((r) =>
+      [
+        r.fullname || "", r.cedula || "", fmtDate(r.date), r.breach_label || r.breach_type || "",
+        r.detail || "", fmtTime(r.entry_time), fmtTime(r.lunch_start_time), fmtTime(r.lunch_end_time),
+        fmtTime(r.exit_time), r.late_minutes ?? "", fmtOvertime(r),
+        Number(r.operational_hours || 0).toFixed(2), r.attendance_status || "",
+      ].map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(";")
+    ),
+  ];
+  const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+};
+
+// ─── UI atoms ─────────────────────────────────────────────────────────────────
+
+const BADGE_TONE = {
+  neutral: "bg-[#F3F4F6] text-[#1F2937]",
+  red:     "bg-[#FEE2E2] text-[#DC2626]",
+  amber:   "bg-[#FEF3C7] text-[#D97706]",
+  green:   "bg-[#DCFCE7] text-[#16A34A]",
+  blue:    "bg-[#DBEAFE] text-[#1D4ED8]",
+};
+
+const Badge = ({ tone = "neutral", children }) => (
+  <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${BADGE_TONE[tone] || BADGE_TONE.neutral}`}>
+    {children}
+  </span>
 );
 
-const STATUS_OPTIONS = [
- { label: "Todos los estados", value: "" },
- { label: "Sin entrada", value: "no_entry" },
- { label: "Jornada abierta", value: "working" },
- { label: "Almuerzo abierto", value: "lunch_open" },
- { label: "Jornada cerrada", value: "completed" },
-];
+const EmptySection = ({ icon: Icon = FiAlertCircle, title, description }) => (
+  <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+    <Icon size={22} className="text-[#D1D5DB]" />
+    <p className="text-sm font-medium text-[#1F2937]">{title}</p>
+    {description && <p className="max-w-xs text-xs leading-relaxed text-[#6B7280]">{description}</p>}
+  </div>
+);
 
-const OFFICIAL_PDF_PERIOD_OPTIONS = [
- { label: "Mensual", value: "monthly" },
- { label: "Anual (12 meses)", value: "annual" },
-];
+const SelectedMarkPanel = ({ selectedMark, onClose }) => {
+  if (!selectedMark?.point) return null;
 
-const getEcuadorDateParts = (baseDate = new Date()) => {
- const parts = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "America/Guayaquil",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
- }).formatToParts(baseDate);
-
- const map = parts.reduce((acc, part) => {
-  if (part.type !== "literal") acc[part.type] = part.value;
-  return acc;
- }, {});
-
- return {
-  year: map.year,
-  month: map.month,
-  day: map.day,
- };
-};
-
-const getTodayInputDate = () => {
- const { year, month, day } = getEcuadorDateParts();
- return `${year}-${month}-${day}`;
-};
-
-const getMonthStartInputDate = () => {
- const { year, month } = getEcuadorDateParts();
- return `${year}-${month}-01`;
-};
-
-const getIsoWeekInputValue = (baseDate = new Date()) => {
- const utcDate = new Date(Date.UTC(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate()));
- const day = utcDate.getUTCDay() || 7;
- utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
- const yearStart = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1));
- const weekNo = Math.ceil((((utcDate - yearStart) / 86400000) + 1) / 7);
- return `${utcDate.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
-};
-
-const toIsoFromUtcDate = (date) => {
- const year = date.getUTCFullYear();
- const month = String(date.getUTCMonth() + 1).padStart(2, "0");
- const day = String(date.getUTCDate()).padStart(2, "0");
- return `${year}-${month}-${day}`;
-};
-
-const getWeekRangeFromInput = (weekValue) => {
- const match = String(weekValue || "").match(/^(\d{4})-W(\d{2})$/);
- if (!match) return null;
- const year = Number(match[1]);
- const week = Number(match[2]);
- if (!Number.isInteger(year) || !Number.isInteger(week) || week < 1 || week > 53) return null;
-
- const simple = new Date(Date.UTC(year, 0, 1 + (week - 1) * 7));
- const dow = simple.getUTCDay();
- const monday = new Date(simple);
- if (dow <= 4) {
-  monday.setUTCDate(simple.getUTCDate() - dow + 1);
- } else {
-  monday.setUTCDate(simple.getUTCDate() + 8 - dow);
- }
- const sunday = new Date(monday);
- sunday.setUTCDate(monday.getUTCDate() + 6);
-
- return {
-  startDate: toIsoFromUtcDate(monday),
-  endDate: toIsoFromUtcDate(sunday),
- };
-};
-
-const getMonthRangeFromInput = (monthValue) => {
- const match = String(monthValue || "").match(/^(\d{4})-(\d{2})$/);
- if (!match) return null;
- const year = Number(match[1]);
- const month = Number(match[2]);
- if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
-
- const first = new Date(Date.UTC(year, month - 1, 1));
- const last = new Date(Date.UTC(year, month, 0));
- return {
-  startDate: toIsoFromUtcDate(first),
-  endDate: toIsoFromUtcDate(last),
- };
-};
-
-const getYearRangeFromInput = (yearValue) => {
- const year = Number(yearValue);
- if (!Number.isInteger(year) || year < 2000 || year > 2100) return null;
- return {
-  startDate: `${year}-01-01`,
-  endDate: `${year}-12-31`,
- };
-};
-
-const ATTENDANCE_STATUS_LABELS = {
- no_entry: "Sin entrada",
- working: "Jornada abierta",
- lunch_open: "Almuerzo abierto",
- completed: "Jornada cerrada",
-};
-
-const PROFILE_TIMELINE_CONFIG = [
- { key: "entry", label: "Entrada", timeKey: "entry_time", locationKey: "entry_location" },
- { key: "lunch_start", label: "Inicio almuerzo", timeKey: "lunch_start_time", locationKey: "lunch_start_location" },
- { key: "lunch_end", label: "Fin almuerzo", timeKey: "lunch_end_time", locationKey: "lunch_end_location" },
- { key: "exit", label: "Salida", timeKey: "exit_time", locationKey: "exit_location" },
-];
-const FIELD_EVENT_LABELS = Object.freeze({
- field_out: "Salida de campo",
- office_entry: "Entrada a oficina o viaje",
- office_exit: "Salida de oficina o viaje",
- client_entry: "Entrada cliente",
- client_exit: "Salida cliente",
-});
-
-const WEEKDAY_SHORT_ES = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
-const PUNCTUALITY_BASE_MINUTES = 9 * 60;
-const PUNCTUALITY_TOLERANCE_MINUTES = 5;
-const RANKING_SCOPE = Object.freeze({
- WEEK: "week",
- RANGE: "range",
-});
-
-const getInitials = (value) => {
- const full = String(value || "").trim();
- if (!full) return "??";
- const parts = full.split(/\s+/);
- if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
- return `${parts[0][0] || ""}${parts[parts.length - 1][0] || ""}`.toUpperCase();
-};
-
-const parseCoord = (value) => {
- if (!value || typeof value !== "string") return null;
- const [latRaw, lngRaw] = value.split(",");
- const lat = Number(latRaw?.trim());
- const lng = Number(lngRaw?.trim());
- if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
- if (Math.abs(lat) <= 0.0005 && Math.abs(lng) <= 0.0005) return null;
- if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
- return { lat, lng };
-};
-
-const toISODate = (value) => String(value || "").slice(0, 10);
-
-const getWeekStartMonday = (value) => {
- const base = new Date(value);
- if (Number.isNaN(base.getTime())) return null;
- const copy = new Date(base);
- copy.setHours(0, 0, 0, 0);
- const day = copy.getDay();
- const diffToMonday = day === 0 ? -6 : 1 - day;
- copy.setDate(copy.getDate() + diffToMonday);
- return copy;
-};
-
-const addDays = (date, days) => {
- const copy = new Date(date);
- copy.setDate(copy.getDate() + days);
- return copy;
-};
-
-const formatIsoDay = (date) => {
- const year = date.getFullYear();
- const month = String(date.getMonth() + 1).padStart(2, "0");
- const day = String(date.getDate()).padStart(2, "0");
- return `${year}-${month}-${day}`;
-};
-
-const isWeekendDay = (value) => {
- const date = value instanceof Date ? value : new Date(`${toISODate(value)}T00:00:00`);
- if (Number.isNaN(date.getTime())) return false;
- const day = date.getDay();
- return day === 0 || day === 6;
-};
-
-const parseTimeMinutes = (value) => {
- if (!value) return null;
- const date = new Date(value);
- if (Number.isNaN(date.getTime())) return null;
- return date.getHours() * 60 + date.getMinutes();
-};
-
-const parseFieldEventType = (value) =>
- String(value || "")
-  .trim()
-  .toLowerCase()
-  .replace(/[\s-]+/g, "_");
-
-const isValidGpsCoordinate = (lat, lng) => {
- if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
- if (Math.abs(lat) <= 0.0005 && Math.abs(lng) <= 0.0005) return false;
- return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
-};
-
-const buildMapGeoPoints = (row = {}) => {
- const basePoints = Array.isArray(row?.geo_points) ? row.geo_points : [];
-  const normalizedBase = basePoints
-   .map((point = {}) => {
-    const lat = Number(point?.lat);
-    const lng = Number(point?.lng);
-    if (!isValidGpsCoordinate(lat, lng)) return null;
-    return {
-     type: point?.type || "entry",
-     label: point?.label || point?.type || "Marca",
-    time: point?.time || point?.timestamp || null,
-    lat,
-    lng,
-   };
-  })
-  .filter(Boolean);
-
- const fieldEvents = Array.isArray(row?.field_events) ? row.field_events : [];
-  const normalizedField = fieldEvents
-   .map((event = {}) => {
-    const lat = Number(event?.lat);
-    const lng = Number(event?.lng);
-    if (!isValidGpsCoordinate(lat, lng)) return null;
-
-    const type = parseFieldEventType(event?.type || event?.event_type);
-    return {
-    type,
-    label: FIELD_EVENT_LABELS[type] || "Evento de campo",
-    time: event?.time || event?.timestamp || event?.occurred_at || null,
-    lat,
-    lng,
-   };
-  })
-  .filter(Boolean);
-
- const merged = [...normalizedBase, ...normalizedField];
- const seen = new Set();
- return merged.filter((point) => {
-  const uniqueKey = `${point.type}|${point.time || ""}|${point.lat.toFixed(6)}|${point.lng.toFixed(6)}`;
-  if (seen.has(uniqueKey)) return false;
-  seen.add(uniqueKey);
-  return true;
- });
-};
-
-const toDateOrNull = (value) => {
- const parsed = new Date(value);
- return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
-
-const buildFieldOpsEvents = (row = {}) => {
-  const normalizeEvent = (event = {}, index = 0) => {
-  const type = parseFieldEventType(event.type || event.event_type || event.kind);
-  const label = FIELD_EVENT_LABELS[type];
-  if (!label) return null;
-
-  const rawTime = event.time || event.timestamp || event.occurred_at || event.at;
-  const parsedDate = toDateOrNull(rawTime);
-   const eventLat = Number(event.lat);
-   const eventLng = Number(event.lng);
-   const coord = isValidGpsCoordinate(eventLat, eventLng)
-    ? { lat: eventLat, lng: eventLng }
-    : parseCoord(event.coord || event.location);
-
-  return {
-   key: `${type}-${rawTime || "no-time"}-${index}`,
-   type,
-   label,
-   rawTime: rawTime || null,
-   parsedDate,
-   timeLabel: rawTime ? formatTimeSafe(rawTime) : "--",
-   coord,
-   source: event.source || event.origin || null,
+  const mapRow = {
+    id: `${selectedMark.rowKey}-${selectedMark.key}`,
+    user_id: selectedMark.userId,
+    fullname: selectedMark.fullname,
+    date: selectedMark.date,
+    geo_points: [selectedMark.point],
   };
- };
 
- const explicitEvents = [
-  ...(Array.isArray(row.field_events) ? row.field_events : []),
-  ...(Array.isArray(row.client_visit_events) ? row.client_visit_events : []),
-  ...(Array.isArray(row.mobility_events) ? row.mobility_events : []),
- ]
-  .map((event, index) => normalizeEvent(event, index))
-  .filter(Boolean);
-
- if (explicitEvents.length > 0) {
-  return explicitEvents.sort((a, b) => {
-   if (!a.parsedDate && !b.parsedDate) return 0;
-   if (!a.parsedDate) return 1;
-   if (!b.parsedDate) return -1;
-   return a.parsedDate.getTime() - b.parsedDate.getTime();
-  });
- }
-
- const fallbackEvents = [
-  { type: "office_exit", time: row.start_time, location: row.start_location },
-  { type: "client_entry", time: row.arrival_time, location: row.arrival_location },
-  { type: "client_exit", time: row.departure_time, location: row.departure_location },
-  { type: "office_entry", time: row.return_time, location: row.return_location },
- ]
-  .map((event, index) =>
-   normalizeEvent(
-    {
-     event_type: event.type,
-     time: event.time,
-     location: event.location,
-    },
-    index
-   )
-  )
-  .filter(Boolean);
-
- return fallbackEvents;
-};
-
-const classifyPunctuality = (entryTime) => {
- const entryMinutes = parseTimeMinutes(entryTime);
- if (entryMinutes === null) {
-  return { status: "no_entry", lateMinutes: null };
- }
-
- const delta = entryMinutes - PUNCTUALITY_BASE_MINUTES;
- if (delta <= PUNCTUALITY_TOLERANCE_MINUTES) {
-  return { status: "on_time", lateMinutes: 0 };
- }
-
- return { status: "late", lateMinutes: delta };
-};
-
-const getRewardTier = (score) => {
- if (score >= 90) return { key: "platinum", label: "Elite Platino", color: "text-indigo-700 bg-indigo-50 border-indigo-200" };
- if (score >= 75) return { key: "gold", label: "Oro", color: "text-amber-700 bg-amber-50 border-amber-200" };
- if (score >= 60) return { key: "silver", label: "Plata", color: "text-slate-700 bg-slate-100 border-slate-300" };
- return { key: "bronze", label: "Bronce", color: "text-orange-700 bg-orange-50 border-orange-200" };
-};
-
-const extractRowGeoPoints = (row = {}) => {
- const points = Array.isArray(row.geo_points) ? row.geo_points : [];
- const fromGeoPoints = points
-  .map((point) => {
-   if (Number.isFinite(Number(point?.lat)) && Number.isFinite(Number(point?.lng))) {
-    return { lat: Number(point.lat), lng: Number(point.lng) };
-   }
-   if (typeof point?.coord === "string") {
-    return parseCoord(point.coord);
-   }
-   return null;
-  })
-  .filter(Boolean);
-
- if (fromGeoPoints.length > 0) {
-  return fromGeoPoints;
- }
-
- return [
-  parseCoord(row.entry_location),
-  parseCoord(row.lunch_start_location),
-  parseCoord(row.lunch_end_location),
-  parseCoord(row.exit_location),
- ].filter(Boolean);
-};
-
-const TalentoAsistenciaReportes = () => {
-const { user } = useAuth();
-const normalizedRole = String(user?.role || user?.role_name || user?.scope || "").toLowerCase().replace(/[\s-]+/g, "_");
-const canViewTeamAttendance = normalizedRole.includes("jefe");
-const {
-   startDate,
-   endDate,
-   mode,
-   view,
-   status: selectedStatus,
-   userIds,
-   quickRange,
-   onlyDiscrepancies,
-   onlyWithGeo,
-   departmentId,
-   departmentOptions,
-   setStartDate,
-   setEndDate,
-   setMode,
-   setView,
-   setStatus: setSelectedStatus,
-   setOnlyDiscrepancies,
-   setOnlyWithGeo,
-   setDepartmentId,
-  clearFilters,
-  } = useAttendanceFilters({
-  mode: ATTENDANCE_REPORT_MODES.OFFICIAL,
-  view: "table",
- });
- const isTeamMode = mode === ATTENDANCE_REPORT_MODES.TEAM;
- const isAdminLikeMode = mode === ATTENDANCE_REPORT_MODES.ADMIN || isTeamMode;
- const [loadingPdf, setLoadingPdf] = useState(false);
- const [selectedUserId, setSelectedUserId] = useState("");
- const [officialPdfPeriod, setOfficialPdfPeriod] = useState("monthly");
- const [annualYear, setAnnualYear] = useState(String(new Date().getFullYear()));
- const [userOptions, setUserOptions] = useState([]);
- const [reportRows, setReportRows] = useState([]);
- const [reportSummary, setReportSummary] = useState(null);
- const [reportMeta, setReportMeta] = useState(null);
- const [adminDayFilter, setAdminDayFilter] = useState("");
- const [adminPeriodMode, setAdminPeriodMode] = useState("month");
- const [adminDayValue, setAdminDayValue] = useState(getTodayInputDate());
- const [adminWeekValue, setAdminWeekValue] = useState(getIsoWeekInputValue(new Date()));
- const [adminMonthValue, setAdminMonthValue] = useState(getTodayInputDate().slice(0, 7));
- const [adminYearValue, setAdminYearValue] = useState(String(new Date().getFullYear()));
- const [mapDayFilter, setMapDayFilter] = useState("");
- const [isMapDayFilterEnabled, setIsMapDayFilterEnabled] = useState(false);
- const [selectedDailyProfile, setSelectedDailyProfile] = useState(null);
- const [rankingScope, setRankingScope] = useState(RANKING_SCOPE.WEEK);
- const [isFieldOpsExpanded, setIsFieldOpsExpanded] = useState(false);
- const reportQueryFilters = useMemo(
-  () => ({
-   startDate,
-   endDate,
-   userId: isTeamMode ? "" : (selectedUserId === "all" ? "all" : selectedUserId),
-   userIds,
-   departmentId,
-   status: selectedStatus || "",
-   quickRange,
-   onlyDiscrepancies,
-   onlyWithGeo,
-   mode,
-   view,
-  }),
-  [departmentId, endDate, isTeamMode, mode, onlyDiscrepancies, onlyWithGeo, quickRange, selectedStatus, selectedUserId, startDate, userIds, view]
- );
-const { refetch: refetchAttendanceReports, isFetching: loadingQuery, isInitialLoading, isRefetching } = useAttendanceReportsQuery({
-   filters: reportQueryFilters,
-   enabled: false,
-  });
-
- const loadUsers = useCallback(async () => {
- try {
- const rows = await getUsers();
- setUserOptions(
- (Array.isArray(rows) ? rows : []).map((user) => ({
- id: user.id,
- nombre: user.fullname || user.email || `Usuario #${user.id}`,
- })),
- );
- } catch (err) {
- console.error("Error cargando usuarios:", err);
- toast.error("Error cargando usuarios");
- }
- }, []);
-
- useEffect(() => {
- loadUsers();
- setStartDate(getMonthStartInputDate());
- setEndDate(getTodayInputDate());
- }, [loadUsers, setStartDate, setEndDate]);
-
- useEffect(() => {
- if (mode === ATTENDANCE_REPORT_MODES.ADMIN && !selectedUserId) {
- setSelectedUserId("all");
- }
- if ((mode === ATTENDANCE_REPORT_MODES.OFFICIAL || isTeamMode) && selectedUserId === "all") {
- setSelectedUserId("");
- }
- }, [isTeamMode, mode, selectedUserId]);
-
- const userSelectOptions = useMemo(() => {
- const baseOptions = userOptions.map((u) => ({ label: u.nombre, value: String(u.id) }));
- if (mode === ATTENDANCE_REPORT_MODES.ADMIN) {
- return [{ label: "Todos los usuarios", value: "all" }, ...baseOptions];
- }
- return [{ label: "Selecciona un usuario", value: "" }, ...baseOptions];
- }, [mode, userOptions]);
-
- const statusSelectOptions = useMemo(() => STATUS_OPTIONS, []);
-
- const applyAdminPeriod = useCallback(() => {
-  if (!isAdminLikeMode) return;
-
-  if (adminPeriodMode === "day") {
-   if (!adminDayValue) return;
-   setStartDate(adminDayValue);
-   setEndDate(adminDayValue);
-   setAdminDayFilter(adminDayValue);
-   setMapDayFilter(adminDayValue);
-   setIsMapDayFilterEnabled(true);
-   return;
-  }
-
-  let range = null;
-  if (adminPeriodMode === "week") {
-   range = getWeekRangeFromInput(adminWeekValue);
-  } else if (adminPeriodMode === "month") {
-   range = getMonthRangeFromInput(adminMonthValue);
-  } else if (adminPeriodMode === "year") {
-   range = getYearRangeFromInput(adminYearValue);
-  }
-
-  if (!range) return;
-  setStartDate(range.startDate);
-  setEndDate(range.endDate);
-  setAdminDayFilter("");
-  setIsMapDayFilterEnabled(false);
-  setMapDayFilter("");
- }, [
-  adminDayValue,
-  adminMonthValue,
-  adminPeriodMode,
-  adminWeekValue,
-  adminYearValue,
-  isAdminLikeMode,
-  setEndDate,
-  setStartDate,
- ]);
-
-const selectedStatusLabel = useMemo(() => {
- if (!selectedStatus) return "Todos los estados";
- return ATTENDANCE_STATUS_LABELS[selectedStatus] || "Estado personalizado";
- }, [selectedStatus]);
-
- const rangeWarningText = useMemo(() => {
-  if (!reportSummary?.meta?.exceedsRecommendedRange) return "";
-  return "El rango supera 31 dias. La consulta puede tardar mas de lo normal.";
- }, [reportSummary]);
-
- useEffect(() => {
-  applyAdminPeriod();
- }, [applyAdminPeriod]);
-
- const handleDownloadPDF = useCallback(async () => {
-  if (officialPdfPeriod === "monthly" && (!startDate || !endDate)) {
-  return toast.error("Selecciona un rango de fechas.");
-  }
-
-  if (!selectedUserId || selectedUserId === "all") {
-  return toast.error("Selecciona un usuario especifico.");
-  }
-
-  if (officialPdfPeriod === "annual") {
-  const parsedYear = Number.parseInt(annualYear, 10);
-  if (!Number.isInteger(parsedYear) || parsedYear < 2000 || parsedYear > 2100) {
-  return toast.error("Ingresa un anio valido para el reporte anual.");
-  }
-  }
-
-  setLoadingPdf(true);
-  try {
-  const result = await downloadAttendancePDF(selectedUserId, startDate, endDate, {
-  periodType: officialPdfPeriod,
-  year: annualYear,
-  });
-  if (result?.hash) {
-  toast.success(`PDF generado. Hash SHA-256: ${result.hash.slice(0, 16)}...`);
-  } else {
-  toast.success("PDF generado correctamente");
-  }
-  } catch (err) {
-  console.error("Error descargando PDF:", err);
-  toast.error("No se pudo generar el PDF.");
-  } finally {
-  setLoadingPdf(false);
-  }
- }, [selectedUserId, startDate, endDate, officialPdfPeriod, annualYear]);
-
- const handleConsultRange = useCallback(async ({ silent = false } = {}) => {
- if (!startDate || !endDate) {
- if (!silent) toast.error("Selecciona un rango de fechas.");
- return;
- }
-
- if (!isTeamMode && !selectedUserId) {
- if (!silent) toast.error("Selecciona un usuario especifico.");
- return;
- }
-
- try {
- const response = await refetchAttendanceReports();
- if (response?.error) {
-  throw response.error;
- }
- const res = response?.data || null;
- const rows = Array.isArray(res?.data) ? res.data : [];
- setReportRows(rows);
- setReportSummary(res?.summary || null);
- setReportMeta(res?.meta || null);
- if (!silent) {
-  toast.success(`Consulta cargada: ${rows.length} registros`);
- }
- } catch (err) {
- console.error("Error consultando asistencia:", err);
- if (!silent) {
-  toast.error(err.response?.data?.message || "No se pudo consultar el rango.");
- }
- }
- }, [endDate, isTeamMode, refetchAttendanceReports, selectedUserId, startDate]);
-
- useEffect(() => {
-  if (!isAdminLikeMode) return;
-  if ((!isTeamMode && !selectedUserId) || !startDate || !endDate) return;
-
-  const timeoutId = window.setTimeout(() => {
-   handleConsultRange({ silent: true });
-  }, 180);
-
-  return () => window.clearTimeout(timeoutId);
- }, [
-  departmentId,
-  endDate,
-  handleConsultRange,
-  isAdminLikeMode,
-  isTeamMode,
-  onlyDiscrepancies,
-  onlyWithGeo,
-  selectedStatus,
-  selectedUserId,
-  startDate,
- ]);
-
- useEffect(() => {
-  if (view !== ATTENDANCE_REPORT_VIEWS.MAP) return;
-  if (!isMapDayFilterEnabled) return;
-  if (mapDayFilter) return;
-  if (adminDayFilter) {
-   setMapDayFilter(adminDayFilter);
-   return;
-  }
-  if (!endDate) return;
-  setMapDayFilter(endDate);
- }, [adminDayFilter, endDate, isMapDayFilterEnabled, mapDayFilter, view]);
-
- const adminFilteredRows = useMemo(() => {
-  if (mode !== ATTENDANCE_REPORT_MODES.ADMIN) return reportRows;
-  if (!adminDayFilter) return reportRows;
-  return reportRows.filter((row) => toISODate(row?.date) === adminDayFilter);
- }, [adminDayFilter, mode, reportRows]);
-
- const mapRows = useMemo(() => {
-  if (view !== ATTENDANCE_REPORT_VIEWS.MAP) return adminFilteredRows;
-  if (!isMapDayFilterEnabled || !mapDayFilter) return adminFilteredRows;
-
-  return adminFilteredRows.filter((row) => String(row?.date || "").slice(0, 10) === mapDayFilter);
- }, [adminFilteredRows, isMapDayFilterEnabled, mapDayFilter, view]);
-
- const mapRowsWithGeo = useMemo(
-  () =>
-   mapRows
-    .map((row) => ({
-     ...row,
-     map_geo_points: buildMapGeoPoints(row),
-    }))
-    .filter((row) => row.map_geo_points.length > 0),
-  [mapRows]
- );
-
-const statusCounters = useMemo(() => {
-  const byStatus = reportSummary?.byStatus || {};
-  return [
-   { label: "Registros", value: reportSummary?.total ?? reportRows.length },
-   { label: "Coincidencias", value: adminFilteredRows.length },
-   { label: "Sin entrada", value: byStatus.no_entry ?? 0 },
-   { label: "Jornada abierta", value: byStatus.working ?? 0 },
-   { label: "Almuerzo abierto", value: byStatus.lunch_open ?? 0 },
-   { label: "Jornada cerrada", value: byStatus.completed ?? 0 },
- ];
-}, [adminFilteredRows.length, reportRows.length, reportSummary]);
-
- const modalProfile = useMemo(() => selectedDailyProfile || null, [selectedDailyProfile]);
-
- const dailyTimeline = useMemo(() => {
-  if (!modalProfile) return [];
-  return PROFILE_TIMELINE_CONFIG.map((item) => {
-   const rawLocation = modalProfile?.[item.locationKey];
-   const coord = parseCoord(rawLocation);
-   const time = modalProfile?.[item.timeKey];
-   return {
-    ...item,
-    time,
-    timeLabel: time ? formatTimeSafe(time) : "--",
-    location: rawLocation,
-    coord,
-   };
-  });
- }, [modalProfile]);
-
- const fieldOpsEvents = useMemo(() => buildFieldOpsEvents(modalProfile || {}), [modalProfile]);
-
- useEffect(() => {
-  setIsFieldOpsExpanded(fieldOpsEvents.length > 0);
- }, [fieldOpsEvents.length, selectedDailyProfile]);
-
- const dailyProfileScore = useMemo(() => {
-  if (!modalProfile) return 0;
-  const hasEntry = Boolean(modalProfile.entry_time);
-  const hasLunchStart = Boolean(modalProfile.lunch_start_time);
-  const hasLunchEnd = Boolean(modalProfile.lunch_end_time);
-  const hasExit = Boolean(modalProfile.exit_time);
-  const hasAnyGeo = dailyTimeline.some((item) => Boolean(item.coord));
-
-  const score =
-   (hasEntry ? 30 : 0) +
-   (hasLunchStart ? 15 : 0) +
-   (hasLunchEnd ? 15 : 0) +
-   (hasExit ? 30 : 0) +
-   (hasAnyGeo ? 10 : 0);
-
-  return Math.min(100, score);
- }, [dailyTimeline, modalProfile]);
-
- const dailyProfileScoreLabel = useMemo(() => {
-  if (dailyProfileScore >= 85) return "Excelente trazabilidad";
-  if (dailyProfileScore >= 60) return "Seguimiento parcial";
-  return "Jornada con vacios";
- }, [dailyProfileScore]);
-
- const weeklyComparative = useMemo(() => {
-  const weekAnchorDate = modalProfile?.date || selectedDailyProfile?.date;
-  if (!weekAnchorDate) return null;
-
-  const weekStart = getWeekStartMonday(weekAnchorDate);
-  if (!weekStart) return null;
-  const weekDays = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
-  const weekKeys = weekDays.map((day) => formatIsoDay(day));
-
-  const ownerId = String(modalProfile?.user_id || selectedDailyProfile?.user_id || "");
-  if (!ownerId) return null;
-
-  const currentUserRows = reportRows.filter(
-   (row) => String(row?.user_id) === ownerId
-  );
-  const rowsByDay = new Map(currentUserRows.map((row) => [toISODate(row.date), row]));
-
-  const punctualityDaily = weekDays.map((day, index) => {
-   const dayKey = weekKeys[index];
-   const row = rowsByDay.get(dayKey) || null;
-   const isWeekend = isWeekendDay(day);
-   const punctuality = classifyPunctuality(row?.entry_time);
-   const status = isWeekend ? "weekend" : punctuality.status;
-
-   return {
-    key: dayKey,
-    weekday: WEEKDAY_SHORT_ES[index],
-    dateLabel: formatDateSafe(day, "dd/MM"),
-    row,
-    status,
-    isWeekend,
-    lateMinutes: punctuality.lateMinutes,
-    entryLabel: row?.entry_time ? formatTimeSafe(row.entry_time) : "--",
-   };
-  });
-
-  const businessDays = punctualityDaily.filter((item) => !item.isWeekend);
-  const onTimeCount = businessDays.filter((item) => item.status === "on_time").length;
-  const lateCount = businessDays.filter((item) => item.status === "late").length;
-  const noEntryCount = businessDays.filter((item) => item.status === "no_entry").length;
-  const lateMinutesValues = punctualityDaily
-   .map((item) => item.lateMinutes)
-   .filter((value) => Number.isFinite(value) && value > 0);
-  const avgLateMinutes = lateMinutesValues.length
-   ? Math.round(lateMinutesValues.reduce((acc, value) => acc + value, 0) / lateMinutesValues.length)
-   : 0;
-
-  const geoCellCounter = new Map();
-  weekKeys.forEach((dayKey) => {
-   const row = rowsByDay.get(dayKey);
-   if (!row) return;
-   const coords = extractRowGeoPoints(row);
-   coords.forEach((coord) => {
-    const latCell = Number(coord.lat).toFixed(3);
-    const lngCell = Number(coord.lng).toFixed(3);
-    const cellKey = `${latCell},${lngCell}`;
-    const current = geoCellCounter.get(cellKey) || {
-     key: cellKey,
-     lat: Number(latCell),
-     lng: Number(lngCell),
-     count: 0,
-    };
-    current.count += 1;
-    geoCellCounter.set(cellKey, current);
-   });
-  });
-
-  const geoHeatmap = [...geoCellCounter.values()]
-   .sort((a, b) => b.count - a.count)
-   .slice(0, 8);
-  const maxGeoCount = geoHeatmap[0]?.count || 1;
-
-  return {
-   weekStartKey: weekKeys[0],
-   weekEndKey: weekKeys[6],
-   punctualityDaily,
-   punctualitySummary: {
-    onTimeCount,
-    lateCount,
-    noEntryCount,
-    avgLateMinutes,
-   },
-   geoHeatmap,
-   maxGeoCount,
-  };
- }, [modalProfile, reportRows, selectedDailyProfile]);
-
- const punctualityRanking = useMemo(() => {
-  if (!selectedDailyProfile) return null;
-
-  const rowsSource =
-   rankingScope === RANKING_SCOPE.WEEK && weeklyComparative
-    ? reportRows.filter((row) => {
-       const dayKey = toISODate(row?.date);
-       return dayKey >= weeklyComparative.weekStartKey && dayKey <= weeklyComparative.weekEndKey;
-      })
-    : reportRows;
-
-  const byUser = new Map();
-
-  rowsSource.forEach((row) => {
-   const userId = String(row?.user_id || "");
-   if (!userId) return;
-
-   if (!byUser.has(userId)) {
-    byUser.set(userId, {
-     userId,
-     fullname: row?.fullname || row?.email || `Usuario ${userId}`,
-     onTime: 0,
-     late: 0,
-     noEntry: 0,
-     total: 0,
-     lateMinutesTotal: 0,
-     streak: 0,
-     bestStreak: 0,
-     points: 0,
-     days: [],
-    });
-   }
-
-   const current = byUser.get(userId);
-    if (isWeekendDay(row?.date)) return;
-    const punctuality = classifyPunctuality(row?.entry_time);
-
-   current.total += 1;
-   if (punctuality.status === "on_time") {
-    current.onTime += 1;
-    current.points += 3;
-   } else if (punctuality.status === "late") {
-    current.late += 1;
-    current.points += 1;
-    current.lateMinutesTotal += punctuality.lateMinutes || 0;
-   } else {
-    current.noEntry += 1;
-   }
-
-   if (row?.has_geo) {
-    current.points += 0.5;
-   }
-
-   current.days.push({
-    date: toISODate(row?.date),
-    status: punctuality.status,
-   });
-  });
-
-  const ranking = [...byUser.values()].map((entry) => {
-   const sortedDays = [...entry.days].sort((a, b) => (a.date > b.date ? 1 : -1));
-   let runningStreak = 0;
-   sortedDays.forEach((day) => {
-    if (day.status === "on_time") {
-     runningStreak += 1;
-     entry.bestStreak = Math.max(entry.bestStreak, runningStreak);
-    } else {
-     runningStreak = 0;
-    }
-   });
-
-   const effectiveDays = entry.onTime + entry.late;
-   const punctualityRate = effectiveDays > 0 ? Math.round((entry.onTime / effectiveDays) * 100) : 0;
-   const avgLateMinutes = entry.late > 0 ? Math.round(entry.lateMinutesTotal / entry.late) : 0;
-   const score = Math.min(
-    100,
-    Math.round(
-     punctualityRate * 0.7 +
-      Math.min(entry.bestStreak, 5) * 4 +
-      Math.min(entry.points, 30) * 0.6
-    )
-   );
-
-   return {
-    ...entry,
-    avgLateMinutes,
-    punctualityRate,
-    score,
-    rewardTier: getRewardTier(score),
-   };
-  });
-
-  ranking.sort((a, b) => {
-   if (b.score !== a.score) return b.score - a.score;
-   if (b.onTime !== a.onTime) return b.onTime - a.onTime;
-   return a.avgLateMinutes - b.avgLateMinutes;
-  });
-
-  const ranked = ranking.map((item, index) => ({ ...item, rank: index + 1 }));
-  const rankingOwnerId = String(modalProfile?.user_id || selectedDailyProfile?.user_id || "");
-  const selectedUser = ranked.find(
-   (item) => String(item.userId) === rankingOwnerId
-  ) || null;
-
-  return {
-   scope: rankingScope,
-   totalParticipants: ranked.length,
-   top: ranked.slice(0, 8),
-   selectedUser,
-   maxScore: ranked[0]?.score || 100,
-  };
- }, [modalProfile, rankingScope, reportRows, selectedDailyProfile, weeklyComparative]);
-
- const openDailyProfile = useCallback((row) => {
-  if (!row) return;
-  setSelectedDailyProfile(row);
- }, []);
-
- const closeDailyProfile = useCallback(() => {
-  setSelectedDailyProfile(null);
- }, []);
-
- const openProfileFromMarker = useCallback(
-  (marker) => {
-   if (!marker) return;
-   const row = reportRows.find(
-    (item) =>
-     String(item?.user_id) === String(marker.userId) &&
-     toISODate(item?.date) === toISODate(marker.date)
-   );
-   if (row) {
-    setSelectedDailyProfile(row);
-   }
-  },
-  [reportRows]
- );
-
- const focusDailyMap = useCallback(() => {
-  if (!modalProfile) return;
-  setView(ATTENDANCE_REPORT_VIEWS.MAP);
-  setIsMapDayFilterEnabled(true);
-  setMapDayFilter(toISODate(modalProfile.date));
-  setSelectedUserId(String(modalProfile.user_id || ""));
- }, [modalProfile, setView]);
-
- return (
- <DashboardLayout includeWidgets={false}>
- <DashboardHeader
- title="Reportes de Asistencia"
- subtitle="Reporte oficial RH-09, consulta administrativa y consulta por equipo"
- />
-
- <Card className="space-y-6 p-6">
- <div className="border-b border-slate-200 pb-4">
- <h2 className="text-xl font-semibold text-slate-950">
- Reportes de asistencia
- </h2>
- <p className="mt-1 text-sm text-slate-600">
- El modo oficial descarga el RH-09 por usuario. El modo administrativo y de equipo consultan rangos y estados operativos.
- </p>
- </div>
-
-<div className={`grid grid-cols-1 gap-3 ${canViewTeamAttendance ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
-  <button
-  type="button"
-  onClick={() => setMode(ATTENDANCE_REPORT_MODES.OFFICIAL)}
-  className={`flex items-center gap-3 rounded-2xl border px-4 py-4 text-left transition ${
-   mode === ATTENDANCE_REPORT_MODES.OFFICIAL
-   ? "border-blue-200 bg-blue-50 text-blue-900"
-   : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-  }`}
-  >
-  <FiDownload className="text-xl" />
-  <div>
-  <div className="text-sm font-semibold">Reporte oficial RH-09</div>
-  <div className="text-xs opacity-75">PDF por usuario y rango especifico.</div>
-  </div>
-  </button>
-
-  <button
-  type="button"
-  onClick={() => setMode(ATTENDANCE_REPORT_MODES.ADMIN)}
-  className={`flex items-center gap-3 rounded-2xl border px-4 py-4 text-left transition ${
-   mode === ATTENDANCE_REPORT_MODES.ADMIN
-   ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-   : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-  }`}
-  >
-  <FiPieChart className="text-xl" />
-  <div>
-  <div className="text-sm font-semibold">Consulta administrativa</div>
-  <div className="text-xs opacity-75">Usuario, rango y estado derivado de jornada.</div>
-  </div>
-  </button>
-
-  {canViewTeamAttendance ? (
-    <button
-    type="button"
-    onClick={() => setMode(ATTENDANCE_REPORT_MODES.TEAM)}
-    className={`flex items-center gap-3 rounded-2xl border px-4 py-4 text-left transition ${
-     mode === ATTENDANCE_REPORT_MODES.TEAM
-      ? "border-amber-200 bg-amber-50 text-amber-900"
-      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-    }`}
-    >
-    <FiTarget className="text-xl" />
-    <div>
-    <div className="text-sm font-semibold">Consulta de mi equipo</div>
-    <div className="text-xs opacity-75">Solo colaboradores de tu área (sin horas extra).</div>
-    </div>
-    </button>
-  ) : null}
- </div>
-
- {mode === ATTENDANCE_REPORT_MODES.OFFICIAL ? (
- <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
- <div>
- <label className="mb-2 block text-sm font-medium text-slate-700">
- Fecha inicio
- </label>
- <input
- type="date"
- value={startDate}
- onChange={(e) => setStartDate(e.target.value)}
- className="w-full rounded-lg border-2 border-slate-200 bg-white px-3 py-2 text-sm transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
- />
- </div>
-
- <div>
- <label className="mb-2 block text-sm font-medium text-slate-700">
- Fecha fin
- </label>
- <input
- type="date"
- value={endDate}
- onChange={(e) => setEndDate(e.target.value)}
- className="w-full rounded-lg border-2 border-slate-200 bg-white px-3 py-2 text-sm transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
- />
- </div>
-
- <div>
- <label className="mb-2 block text-sm font-medium text-slate-700">
- Usuario
- </label>
- <Select
- value={selectedUserId}
- options={userSelectOptions}
- onChange={(e) => setSelectedUserId(e.target.value)}
- className="w-full"
- />
- </div>
-
- <div className="flex items-end">
- <Button
- variant="primary"
- icon={FiDownload}
- onClick={handleDownloadPDF}
- disabled={loadingPdf}
- className="w-full py-2.5"
- >
- {loadingPdf ? "Generando..." : "Descargar PDF"}
- </Button>
- </div>
- </div>
- ) : null}
-
- {isAdminLikeMode ? (
- <div className="space-y-4 rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-cyan-50 p-4 md:p-5">
- <div className="flex flex-wrap items-center justify-between gap-3">
- <div>
- <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-800">Filtro unificado de consulta</p>
- <p className="mt-1 text-sm text-emerald-900/85">
-  {isTeamMode
-   ? "Consulta por periodo para colaboradores de tu área. El alcance se aplica automáticamente por rol."
-   : "Selecciona colaborador y periodo (dia, semana, mes o anio) desde un solo panel."}
- </p>
- </div>
- <div className="inline-flex rounded-xl border border-emerald-300 bg-white p-1 text-xs font-semibold">
- {[
-  { key: "day", label: "Dia" },
-  { key: "week", label: "Semana" },
-  { key: "month", label: "Mes" },
-  { key: "year", label: "Anio" },
- ].map((item) => (
-  <button
-   key={item.key}
-   type="button"
-   onClick={() => setAdminPeriodMode(item.key)}
-   className={`rounded-lg px-3 py-1.5 transition ${
-    adminPeriodMode === item.key
-     ? "bg-emerald-600 text-white"
-     : "text-slate-600 hover:text-slate-900"
-   }`}
-  >
-   {item.label}
-  </button>
- ))}
- </div>
- </div>
-
- <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
- {!isTeamMode ? (
- <div className="md:col-span-2">
- <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Colaborador</label>
- <Select
- value={selectedUserId}
- options={userSelectOptions}
- onChange={(e) => setSelectedUserId(e.target.value)}
- className="w-full"
- />
- </div>
- ) : null}
- {!isTeamMode ? (
- <div>
- <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Departamento</label>
- <select
-  value={departmentId}
-  onChange={(event) => setDepartmentId(event.target.value)}
-  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
- >
-  <option value="">Todos los departamentos</option>
-  {departmentOptions.map((option) => (
-   <option key={option.value} value={option.value}>
-    {option.label}
-   </option>
-  ))}
- </select>
- </div>
- ) : null}
- <div>
- <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Estado</label>
- <Select
-  value={selectedStatus}
-  options={statusSelectOptions}
-  onChange={(e) => setSelectedStatus(e.target.value)}
-  className="w-full"
- />
- </div>
- </div>
-
- <div className="grid grid-cols-1 gap-3 md:grid-cols-[240px,auto] md:items-end">
- <label className="block">
- <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-  Calendario visual
- </span>
- {adminPeriodMode === "day" ? (
-  <input
-   type="date"
-   value={adminDayValue}
-   onChange={(event) => setAdminDayValue(event.target.value)}
-   className="w-full rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm text-slate-800"
-  />
- ) : null}
- {adminPeriodMode === "week" ? (
-  <input
-   type="week"
-   value={adminWeekValue}
-   onChange={(event) => setAdminWeekValue(event.target.value)}
-   className="w-full rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm text-slate-800"
-  />
- ) : null}
- {adminPeriodMode === "month" ? (
-  <input
-   type="month"
-   value={adminMonthValue}
-   onChange={(event) => setAdminMonthValue(event.target.value)}
-   className="w-full rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm text-slate-800"
-  />
- ) : null}
- {adminPeriodMode === "year" ? (
-  <input
-   type="number"
-   min="2000"
-   max="2100"
-   value={adminYearValue}
-   onChange={(event) => setAdminYearValue(event.target.value)}
-   className="w-full rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm text-slate-800"
-  />
- ) : null}
- </label>
-
- <div className="flex flex-wrap items-center gap-2">
- <button
-  type="button"
-  onClick={() => {
-   const today = getTodayInputDate();
-   setAdminPeriodMode("day");
-   setAdminDayValue(today);
-  }}
-  className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
- >
-  Hoy
- </button>
- <button
-  type="button"
-  onClick={() => setAdminPeriodMode("week")}
-  className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
- >
-  Esta semana
- </button>
- <button
-  type="button"
-  onClick={() => setAdminPeriodMode("month")}
-  className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
- >
-  Este mes
- </button>
- <button
-  type="button"
-  onClick={() => setAdminPeriodMode("year")}
-  className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
- >
-  Este anio
- </button>
- <button
-  type="button"
-  onClick={() => setAdminDayFilter("")}
-  className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
- >
-  Limpiar dia adicional
- </button>
- <button
-  type="button"
-  onClick={() => setOnlyDiscrepancies(!onlyDiscrepancies)}
-  className={`rounded-full border px-3 py-2 text-xs font-semibold ${
-   onlyDiscrepancies
-    ? "border-emerald-300 bg-emerald-100 text-emerald-900"
-    : "border-slate-300 bg-white text-slate-600"
-  }`}
- >
-  Solo discrepancias
- </button>
- <button
-  type="button"
-  onClick={() => setOnlyWithGeo(!onlyWithGeo)}
-  className={`rounded-full border px-3 py-2 text-xs font-semibold ${
-   onlyWithGeo
-    ? "border-cyan-300 bg-cyan-100 text-cyan-900"
-    : "border-slate-300 bg-white text-slate-600"
-  }`}
- >
-  Solo geolocalizacion
- </button>
- </div>
- </div>
-
- <p className="text-sm text-emerald-900/80">
-  {adminDayFilter
-   ? `Mostrando dia puntual ${adminDayFilter} dentro del periodo seleccionado.`
-   : `Periodo activo: ${startDate || "--"} a ${endDate || "--"}.`}
- </p>
- </div>
- ) : null}
-
- {false ? (
- <div className="grid grid-cols-1 gap-3 rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3 md:grid-cols-[260px,auto] md:items-end">
- <label className="block">
- <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.16em] text-emerald-800">
- Filtro diario adicional
- </span>
- <input
- type="date"
- value={adminDayFilter}
- min={startDate || undefined}
- max={endDate || undefined}
- onChange={(event) => setAdminDayFilter(event.target.value)}
- className="w-full rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm text-slate-800"
- />
- </label>
- <div className="flex flex-wrap items-center gap-2 text-sm text-emerald-900">
- <button
- type="button"
- onClick={() => {
-  const today = getTodayInputDate();
-  setAdminDayFilter(today);
-  setMapDayFilter(today);
-  setIsMapDayFilterEnabled(true);
- }}
- className="rounded-lg border border-emerald-300 bg-white px-3 py-2 font-medium hover:bg-emerald-100"
- >
- Ver hoy
- </button>
- <button
- type="button"
- onClick={() => setAdminDayFilter("")}
- className="rounded-lg border border-emerald-300 bg-white px-3 py-2 font-medium hover:bg-emerald-100"
- >
- Limpiar día
- </button>
- <span>
- {adminDayFilter
-  ? `Mostrando asistencias del ${adminDayFilter} para el colaborador/filtro seleccionado.`
-  : "Sin filtro diario adicional (se muestra todo el rango)."}
- </span>
- </div>
- </div>
- ) : null}
-
- {mode === ATTENDANCE_REPORT_MODES.OFFICIAL ? (
- <div className="grid grid-cols-1 gap-4 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4 md:grid-cols-2">
- <div>
- <label className="mb-2 block text-sm font-medium text-blue-900">
- Tipo de reporte oficial
- </label>
- <Select
- value={officialPdfPeriod}
- options={OFFICIAL_PDF_PERIOD_OPTIONS}
- onChange={(e) => setOfficialPdfPeriod(e.target.value)}
- className="w-full"
- />
- </div>
- <div>
- <label className="mb-2 block text-sm font-medium text-blue-900">
- Anio (solo anual)
- </label>
- <input
- type="number"
- min="2000"
- max="2100"
- value={annualYear}
- onChange={(e) => setAnnualYear(e.target.value)}
- disabled={officialPdfPeriod !== "annual"}
- className="w-full rounded-lg border-2 border-blue-200 bg-white px-3 py-2 text-sm transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
- />
- <p className="mt-1 text-xs text-blue-800">
- En anual se genera un acta con 12 meses para el colaborador.
- </p>
- </div>
- </div>
- ) : null}
-
- <AttendanceReportsSummaryCards items={statusCounters} />
- {mode === ATTENDANCE_REPORT_MODES.ADMIN ? (
-  <AttendanceOvertimeSummary rows={adminFilteredRows} meta={reportMeta} />
- ) : null}
-
- <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
- <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700">
- <FiFilter className="text-slate-500" />
- <span className="font-semibold">Filtro activo:</span>
- <span>{isAdminLikeMode ? selectedStatusLabel : "PDF oficial por usuario"}</span>
- <span className="text-slate-400">|</span>
- <span>
- {mode === ATTENDANCE_REPORT_MODES.OFFICIAL && officialPdfPeriod === "annual"
- ? `Periodo anual: ${annualYear || "anio"}`
- : `Periodo: ${startDate || "fecha inicio"} a ${endDate || "fecha fin"}`}
- </span>
- <span className="text-slate-400">|</span>
- <span>Hora visible: Ecuador (UTC-5, 24h)</span>
- </div>
- </div>
-
-{isAdminLikeMode ? (
-   <AttendanceReportsToolbar
-    onAction={() => handleConsultRange({ silent: false })}
-   disabled={loadingQuery}
-   actionLabel={loadingQuery ? "Consultando..." : "Consultar rango"}
-  onClear={() => {
-   clearFilters();
-   setAdminDayFilter("");
-   setAdminPeriodMode("month");
-   setAdminDayValue(getTodayInputDate());
-   setAdminWeekValue(getIsoWeekInputValue(new Date()));
-   setAdminMonthValue(getTodayInputDate().slice(0, 7));
-   setAdminYearValue(String(new Date().getFullYear()));
-   setSelectedUserId("all");
-   setIsMapDayFilterEnabled(false);
-   setMapDayFilter("");
-   setReportMeta(null);
-  }}
-   clearDisabled={loadingQuery}
-    warningText={rangeWarningText}
-    view={view}
-    onViewChange={setView}
-  >
-  <AttendanceReportsLoadingState
-    isLoading={loadingQuery}
-    isInitialLoading={isInitialLoading}
-    isRefetching={isRefetching}
-  />
-  {view === ATTENDANCE_REPORT_VIEWS.MAP && (
-   <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-    <div className="mb-3 flex flex-wrap items-center gap-2">
-     <button
-      type="button"
-      onClick={() => {
-       setIsMapDayFilterEnabled(false);
-       setMapDayFilter("");
-      }}
-      className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
-       !isMapDayFilterEnabled
-        ? "border-emerald-300 bg-emerald-100 text-emerald-900"
-        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-      }`}
-     >
-      Rango completo
-     </button>
-     <button
-      type="button"
-      onClick={() => setIsMapDayFilterEnabled(true)}
-      className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
-       isMapDayFilterEnabled
-        ? "border-blue-300 bg-blue-100 text-blue-900"
-        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-      }`}
-     >
-      Filtrar por dia
-     </button>
-    </div>
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-[220px,auto,auto] md:items-end">
-     {isMapDayFilterEnabled ? (
-      <label className="block">
-       <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-        Calendario (mapa por dia)
-       </span>
-       <input
-        type="date"
-        value={mapDayFilter}
-        min={startDate || undefined}
-        max={endDate || undefined}
-        onChange={(event) => setMapDayFilter(event.target.value)}
-        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
-       />
-      </label>
-     ) : (
-      <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm text-slate-500">
-       Calendario deshabilitado para analizar todo el rango.
-      </div>
-     )}
-     <p className="text-sm text-slate-600">
-      {isMapDayFilterEnabled && mapDayFilter
-       ? `Mostrando ${mapRows.length} registros del ${mapDayFilter}.`
-       : `Mostrando ${mapRows.length} registros del rango.`}
-     </p>
-     <div className="flex justify-start md:justify-end">
-      <button
-       type="button"
-       onClick={() => {
-        setIsMapDayFilterEnabled(false);
-        setMapDayFilter("");
-       }}
-       className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-      >
-       Deshabilitar calendario
-      </button>
-     </div>
-    </div>
-   </div>
-  )}
-  {(view === ATTENDANCE_REPORT_VIEWS.MAP ? mapRows.length > 0 : adminFilteredRows.length > 0) ? (
-    view === ATTENDANCE_REPORT_VIEWS.MAP ? (
-      <Suspense fallback={<div className="flex h-[400px] items-center justify-center bg-slate-100">Cargando mapa...</div>}>
-        <AttendanceMapView
-          rows={mapRowsWithGeo}
-          getGeoPoints={(row) => row.map_geo_points || row.geo_points || []}
-          onProfileClick={openProfileFromMarker}
-        />
-      </Suspense>
-    ) : (
-      <AttendanceReportsTableView rows={adminFilteredRows} onProfileClick={openDailyProfile} />
-    )
-  ) : (
-  <AttendanceReportsEmptyState onConsult={() => handleConsultRange({ silent: false })} />
-  )}
-  </AttendanceReportsToolbar>
- ) : (
-  <div className="space-y-4">
-  <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4">
-  <h3 className="text-sm font-semibold text-blue-900">Reporte oficial RH-09</h3>
-  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-blue-800">
-  <li>Genera un PDF por colaborador en formato mensual o anual.</li>
-  <li>En anual se emiten 12 meses y, si aplica, se marca desde fecha de ingreso.</li>
-  <li>El acta se descarga bloqueada (campos no editables) y con hash SHA-256.</li>
-  <li>La consulta administrativa usa el mismo rango, pero no sustituye el PDF oficial.</li>
-  </ul>
-  </div>
-
-  <div className="flex justify-end">
-  <Button
-  variant="primary"
-  icon={FiDownload}
-  onClick={handleDownloadPDF}
-  disabled={loadingPdf}
-  className="w-full md:w-auto"
-  >
-  {loadingPdf ? "Generando..." : "Descargar PDF oficial"}
-  </Button>
-  </div>
-  </div>
- )}
- </Card>
-
- {selectedDailyProfile ? (
-  <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/55 p-3 md:p-6">
-   <div className="flex min-h-full items-start justify-center md:items-center">
-   <div className="flex w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl max-h-[calc(100vh-1.5rem)] md:max-h-[calc(100vh-3rem)]">
-    <div className="sticky top-0 z-10 flex shrink-0 items-start justify-between border-b border-slate-200 bg-gradient-to-r from-slate-900 to-slate-700 px-4 py-4 text-white md:px-6 md:py-5">
-     <div className="flex items-start gap-3">
-      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-sm font-semibold tracking-wide">
-       {getInitials(modalProfile?.fullname || modalProfile?.email)}
-      </div>
-      <div>
-       <h3 className="text-lg font-semibold">
-        Perfil diario de asistencia
-       </h3>
-       <p className="text-sm text-slate-200">
-        {modalProfile?.fullname || modalProfile?.email || "Usuario"} · {formatDateSafe(modalProfile?.date || selectedDailyProfile?.date, "dd/MM/yyyy")}
-       </p>
-      </div>
-     </div>
-     <button
-      type="button"
-      onClick={closeDailyProfile}
-      className="rounded-lg border border-white/20 bg-white/10 p-2 text-white hover:bg-white/20"
-      aria-label="Cerrar perfil diario"
-     >
-      <FiX />
-     </button>
-    </div>
-
-    <div className="overflow-y-auto p-4 md:p-6">
-    <div className="grid gap-5 md:grid-cols-3">
-     <div className="md:col-span-1">
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Radar operativo</p>
-       <div className="mt-3 flex items-end gap-3">
-        <span className="text-3xl font-bold text-slate-900">{dailyProfileScore}</span>
-        <span className="pb-1 text-sm text-slate-500">/100</span>
-       </div>
-       <p className="mt-2 text-sm font-medium text-slate-700">{dailyProfileScoreLabel}</p>
-       <div className="mt-3 h-2 rounded-full bg-slate-200">
-        <div
-         className={`h-2 rounded-full transition-all ${dailyProfileScore >= 85 ? "bg-emerald-500" : dailyProfileScore >= 60 ? "bg-amber-500" : "bg-rose-500"}`}
-         style={{ width: `${dailyProfileScore}%` }}
-        />
-       </div>
-       <div className="mt-4 space-y-2 text-sm text-slate-600">
-        <p><span className="font-medium text-slate-800">Estado:</span> {modalProfile?.attendance_status_label || "Sin estado"}</p>
-        <p><span className="font-medium text-slate-800">Departamento:</span> {modalProfile?.department_name || "-"}</p>
-        <p><span className="font-medium text-slate-800">Horas registradas:</span> {modalProfile?.total_hours ? `${Number(modalProfile.total_hours).toFixed(1)}h` : "--"}</p>
-       </div>
-      </div>
-
-      <div className="mt-4 flex flex-col gap-2">
-       <button
-        type="button"
-        onClick={focusDailyMap}
-        disabled={!modalProfile}
-        className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-       >
-        <FiTarget className="text-base" />
-        Enfocar en mapa diario
-       </button>
-       <a
-        href={`/dashboard/talento-humano/asistencia?userId=${modalProfile?.user_id || selectedDailyProfile?.user_id || ""}&date=${toISODate(modalProfile?.date || selectedDailyProfile?.date)}`}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-       >
-        <FiDownload className="text-base" />
-        Abrir detalle completo
-       </a>
-      </div>
-     </div>
-
-     <div className="md:col-span-2">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Timeline de jornada</p>
-      <div className="mt-3 space-y-3">
-       {dailyTimeline.map((item) => (
-        <div key={item.key} className="rounded-xl border border-slate-200 bg-white p-4">
-         <div className="flex flex-wrap items-center justify-between gap-3">
+  return (
+    <div className="border-b border-[#F3F4F6] bg-[#FAFBFC] p-4">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
-           <FiClock className={item.time ? "text-emerald-600" : "text-slate-400"} />
-           <p className="text-sm font-semibold text-slate-900">{item.label}</p>
+            <FiMapPin size={14} className="text-[#2563EB]" />
+            <p className="text-sm font-semibold text-[#1F2937]">{selectedMark.label}</p>
           </div>
-          <p className={`text-sm font-medium ${item.time ? "text-slate-800" : "text-slate-400"}`}>
-           {item.timeLabel}
+          <p className="mt-1 text-xs text-[#6B7280]">
+            {selectedMark.fullname} · {fmtDate(selectedMark.date)} · {fmtTime(selectedMark.time)}
           </p>
-         </div>
-         <div className="mt-2">
-          {item.coord ? (
-           <a
-            href={`https://www.google.com/maps?q=${item.coord.lat},${item.coord.lng}`}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="cursor-pointer self-start rounded-[12px] border border-[#E5E7EB] px-3 py-1.5 text-xs font-medium text-[#6B7280] hover:bg-white"
+        >
+          Cerrar mapa
+        </button>
+      </div>
+      <AttendanceMapView rows={[mapRow]} getGeoPoints={(row) => row.geo_points || []} selectedUserId={selectedMark.userId} />
+    </div>
+  );
+};
+
+const TabBtn = ({ active, children, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`cursor-pointer whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-semibold transition active:scale-[0.97] ${
+      active ? "bg-[#1E293B] text-white" : "text-[#6B7280] hover:bg-[#F3F4F6] hover:text-[#1F2937]"
+    }`}
+  >
+    {children}
+  </button>
+);
+
+const formatKilometers = (value) => {
+  if (value === null || value === undefined || value === "") return "--";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "--";
+  return `${number.toLocaleString("es-EC", { maximumFractionDigits: 2 })} km`;
+};
+
+const resolveDrivePhotoUrl = (url, fileId) => {
+  if (url) return url;
+  if (fileId) return `https://drive.google.com/file/d/${fileId}/view`;
+  return "";
+};
+
+const hasMileageValue = (value) => value !== null && value !== undefined && value !== "";
+
+const MileagePhoto = ({ label, url }) => {
+  const [previewError, setPreviewError] = useState(false);
+
+  return (
+    <div className="rounded-[14px] border border-[#E5E7EB] bg-[#FAFBFC] p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <FiCamera size={14} className="flex-shrink-0 text-[#2563EB]" />
+          <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">{label}</span>
+        </div>
+        {url && (
+          <a
+            href={url}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline"
-           >
-            <FiMapPin />
-            Ver punto GPS ({item.coord.lat.toFixed(5)}, {item.coord.lng.toFixed(5)})
-           </a>
-          ) : (
-           <p className="text-sm text-slate-400">Sin coordenada para este evento.</p>
-          )}
-        </div>
-       </div>
-      ))}
+            className="inline-flex flex-shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold text-[#2563EB] hover:bg-[#EFF6FF]"
+          >
+            Abrir <FiExternalLink size={11} />
+          </a>
+        )}
       </div>
-
-      <div className="mt-6 rounded-xl border border-slate-200 bg-white">
-       <button
-        type="button"
-        onClick={() => setIsFieldOpsExpanded((prev) => !prev)}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-slate-50"
-       >
-        <div>
-         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-          Marcaciones de campo
-         </p>
-         <p className="mt-1 text-sm text-slate-700">
-          Entrada/salida de oficina o viaje y cliente (multi-ciclo en el dia)
-         </p>
+      {url && !previewError ? (
+        <img
+          src={url}
+          alt={`${label} del kilometraje`}
+          className="h-32 w-full rounded-[10px] border border-[#E5E7EB] bg-white object-contain"
+          onError={() => setPreviewError(true)}
+        />
+      ) : url ? (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="flex h-32 items-center justify-center rounded-[10px] border border-dashed border-[#BFDBFE] bg-[#EFF6FF] text-center text-xs font-semibold text-[#1D4ED8]"
+        >
+          La vista previa no esta disponible. Abrir fotografia
+        </a>
+      ) : (
+        <div className="flex h-32 items-center justify-center rounded-[10px] border border-dashed border-[#E5E7EB] bg-white text-center text-xs text-[#9CA3AF]">
+          Sin fotografia registrada
         </div>
-        <span className="inline-flex items-center gap-2 text-sm font-medium text-slate-600">
-         {fieldOpsEvents.length} eventos
-         {isFieldOpsExpanded ? <FiChevronUp /> : <FiChevronDown />}
-        </span>
-       </button>
-
-       {isFieldOpsExpanded ? (
-        <div className="border-t border-slate-200 px-4 py-3">
-         {fieldOpsEvents.length > 0 ? (
-          <div className="space-y-2">
-           {fieldOpsEvents.map((event) => (
-            <div key={event.key} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-slate-900">{event.label}</p>
-              <p className="text-sm font-medium text-slate-700">{event.timeLabel}</p>
-             </div>
-             <div className="mt-1 flex flex-wrap items-center gap-3">
-              {event.coord ? (
-               <a
-                href={`https://www.google.com/maps?q=${event.coord.lat},${event.coord.lng}`}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
-               >
-                <FiMapPin />
-                {event.coord.lat.toFixed(5)}, {event.coord.lng.toFixed(5)}
-               </a>
-              ) : (
-               <p className="text-xs text-slate-500">Sin coordenada</p>
-              )}
-              {event.source ? <p className="text-xs text-slate-500">Fuente: {String(event.source)}</p> : null}
-             </div>
-            </div>
-           ))}
-          </div>
-         ) : (
-          <p className="text-sm text-slate-500">
-           Aun no hay marcaciones de campo para este dia.
-          </p>
-         )}
-        </div>
-       ) : null}
-      </div>
-
-      {weeklyComparative ? (
-       <div className="mt-6 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-          Comparativo semanal
-         </p>
-         <p className="text-xs text-slate-500">
-          {weeklyComparative.weekStartKey} al {weeklyComparative.weekEndKey}
-         </p>
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-         <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
-           <p className="text-xs text-emerald-700">A tiempo</p>
-           <p className="text-xl font-semibold text-emerald-900">{weeklyComparative.punctualitySummary.onTimeCount}</p>
-          </div>
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-           <p className="text-xs text-amber-700">Tarde</p>
-           <p className="text-xl font-semibold text-amber-900">{weeklyComparative.punctualitySummary.lateCount}</p>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-           <p className="text-xs text-slate-600">Sin entrada</p>
-           <p className="text-xl font-semibold text-slate-900">{weeklyComparative.punctualitySummary.noEntryCount}</p>
-          </div>
-          <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
-           <p className="text-xs text-rose-700">Prom. atraso</p>
-           <p className="text-xl font-semibold text-rose-900">{weeklyComparative.punctualitySummary.avgLateMinutes}m</p>
-          </div>
-         </div>
-
-         <div className="mt-4 grid grid-cols-7 gap-2">
-          {weeklyComparative.punctualityDaily.map((item) => {
-           const toneClass =
-            item.status === "on_time"
-             ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-             : item.status === "late"
-              ? "border-amber-200 bg-amber-50 text-amber-800"
-              : "border-slate-200 bg-white text-slate-500";
-
-           const barPercent =
-            item.status === "late"
-             ? Math.min(100, Math.max(12, ((item.lateMinutes || 0) / 60) * 100))
-             : item.status === "on_time"
-              ? 100
-              : 10;
-
-           return (
-            <div key={item.key} className={`rounded-lg border px-2 py-2 ${toneClass}`}>
-             <p className="text-[11px] font-semibold">{item.weekday}</p>
-             <p className="text-[10px] opacity-80">{item.dateLabel}</p>
-             <div className="mt-2 h-1.5 rounded-full bg-black/10">
-              <div className="h-1.5 rounded-full bg-current" style={{ width: `${barPercent}%` }} />
-             </div>
-             <p className="mt-2 text-[11px] font-medium">{item.entryLabel}</p>
-            </div>
-           );
-          })}
-         </div>
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-         <div className="mb-3 flex items-center justify-between">
-          <p className="text-sm font-semibold text-slate-900">Heatmap de geolocalización (semana)</p>
-          <p className="text-xs text-slate-500">Celdas aprox. 100m</p>
-         </div>
-         {weeklyComparative.geoHeatmap.length > 0 ? (
-          <div className="space-y-2">
-           {weeklyComparative.geoHeatmap.map((spot) => {
-            const width = Math.round((spot.count / weeklyComparative.maxGeoCount) * 100);
-            return (
-             <div key={spot.key} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-               <a
-                href={`https://www.google.com/maps?q=${spot.lat},${spot.lng}`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-sm font-medium text-blue-600 hover:underline"
-               >
-                {spot.lat.toFixed(3)}, {spot.lng.toFixed(3)}
-               </a>
-               <span className="text-xs font-semibold text-slate-600">{spot.count} marcas</span>
-              </div>
-              <div className="mt-2 h-2 rounded-full bg-slate-200">
-               <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${width}%` }} />
-              </div>
-             </div>
-            );
-           })}
-          </div>
-         ) : (
-         <p className="text-sm text-slate-500">No hay puntos GPS suficientes en esta semana para construir heatmap.</p>
-         )}
-        </div>
-
-        {punctualityRanking ? (
-         <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-           <p className="text-sm font-semibold text-slate-900">Liga de puntualidad</p>
-           <div className="inline-flex rounded-lg border border-slate-300 bg-slate-50 p-1 text-xs">
-            <button
-             type="button"
-             onClick={() => setRankingScope(RANKING_SCOPE.WEEK)}
-             className={`rounded-md px-3 py-1.5 font-medium transition ${rankingScope === RANKING_SCOPE.WEEK ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-800"}`}
-            >
-             Semana
-            </button>
-            <button
-             type="button"
-             onClick={() => setRankingScope(RANKING_SCOPE.RANGE)}
-             className={`rounded-md px-3 py-1.5 font-medium transition ${rankingScope === RANKING_SCOPE.RANGE ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-800"}`}
-            >
-             Rango
-            </button>
-           </div>
-          </div>
-
-          {punctualityRanking.selectedUser ? (
-           <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-             <p className="text-sm font-semibold text-blue-900">
-              Posición #{punctualityRanking.selectedUser.rank} de {punctualityRanking.totalParticipants}
-             </p>
-             <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${punctualityRanking.selectedUser.rewardTier.color}`}>
-              {punctualityRanking.selectedUser.rewardTier.label}
-             </span>
-            </div>
-            <p className="mt-1 text-xs text-blue-800">
-             Score {punctualityRanking.selectedUser.score}/100 · Puntualidad {punctualityRanking.selectedUser.punctualityRate}% · Racha {punctualityRanking.selectedUser.bestStreak} dias
-            </p>
-           </div>
-          ) : null}
-
-          <div className="mt-4 space-y-2">
-           <AnimatePresence mode="wait">
-            <motion.div
-             key={punctualityRanking.scope}
-             initial={{ opacity: 0, y: 8 }}
-             animate={{ opacity: 1, y: 0 }}
-             exit={{ opacity: 0, y: -8 }}
-             transition={{ duration: 0.22 }}
-             className="space-y-2"
-            >
-             {punctualityRanking.top.map((entry, index) => {
-              const width = Math.max(
-               8,
-               Math.round((entry.score / (punctualityRanking.maxScore || 100)) * 100)
-              );
-              const medal =
-               index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : `#${entry.rank}`;
-
-              return (
-               <div key={`${entry.userId}-${punctualityRanking.scope}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                <div className="flex items-center justify-between gap-3">
-                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="text-sm">{medal}</span>
-                  <span className="truncate text-sm font-medium text-slate-900">{entry.fullname}</span>
-                 </div>
-                 <span className="text-xs font-semibold text-slate-700">{entry.score}/100</span>
-                </div>
-                <div className="mt-2 h-2 rounded-full bg-slate-200">
-                 <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${width}%` }}
-                  transition={{ duration: 0.45, ease: "easeOut" }}
-                  className={`h-2 rounded-full ${index === 0 ? "bg-indigo-500" : index === 1 ? "bg-emerald-500" : "bg-blue-500"}`}
-                 />
-                </div>
-                <p className="mt-1 text-[11px] text-slate-600">
-                 A tiempo: {entry.onTime} · Tarde: {entry.late} · Prom atraso: {entry.avgLateMinutes}m · Racha: {entry.bestStreak}
-                </p>
-               </div>
-              );
-             })}
-            </motion.div>
-           </AnimatePresence>
-          </div>
-         </div>
-        ) : null}
-       </div>
-      ) : null}
-     </div>
+      )}
     </div>
-	    </div>
-	   </div>
-	  </div>
-	 </div>
-	 ) : null}
-</DashboardLayout>
- );
+  );
 };
 
-export default TalentoAsistenciaReportes;
+const MileageTab = ({ rows }) => {
+  const mileageRows = (Array.isArray(rows) ? rows : []).filter((row) => (
+    hasMileageValue(row?.odometer_start_km)
+    || hasMileageValue(row?.odometer_end_km)
+    || hasMileageValue(row?.odometer_distance_km)
+    || Boolean(row?.odometer_start_photo_drive_url)
+    || Boolean(row?.odometer_start_photo_drive_file_id)
+    || Boolean(row?.odometer_end_photo_drive_url)
+    || Boolean(row?.odometer_end_photo_drive_file_id)
+  ));
+
+  if (!mileageRows.length) {
+    return (
+      <div className="p-4">
+        <EmptySection
+          icon={FiCamera}
+          title="Sin registros de kilometraje"
+          description="No hay marcaciones de entrada o salida con kilometraje y fotografias en el periodo seleccionado."
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 p-4">
+      {mileageRows.map((row, index) => {
+        const startPhotoUrl = resolveDrivePhotoUrl(
+          row.odometer_start_photo_drive_url,
+          row.odometer_start_photo_drive_file_id,
+        );
+        const endPhotoUrl = resolveDrivePhotoUrl(
+          row.odometer_end_photo_drive_url,
+          row.odometer_end_photo_drive_file_id,
+        );
+
+        return (
+          <article
+            key={`${row.user_id || "user"}-${row.date || "date"}-${row.exception_id || index}`}
+            className="rounded-[16px] border border-[#E5E7EB] bg-white p-4"
+          >
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <FiMapPin size={14} className="text-[#2563EB]" />
+                  <h3 className="text-sm font-semibold text-[#1F2937]">{fmtDate(row.date)}</h3>
+                  <Badge tone="blue">Kilometraje</Badge>
+                </div>
+                <p className="mt-1 text-xs text-[#6B7280]">
+                  {row.exception_description || "Salida operacional"}
+                </p>
+              </div>
+              <span className="rounded-full bg-[#F3F4F6] px-2.5 py-1 font-mono text-xs font-semibold text-[#4B5563]">
+                Distancia: {formatKilometers(row.odometer_distance_km)}
+              </span>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <section className="rounded-[14px] border border-[#BFDBFE] bg-[#F8FBFF] p-3">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#1D4ED8]">Entrada</span>
+                  <span className="font-mono text-sm font-bold text-[#1E40AF]">{formatKilometers(row.odometer_start_km)}</span>
+                </div>
+                <MileagePhoto label="Fotografia de entrada" url={startPhotoUrl} />
+              </section>
+              <section className="rounded-[14px] border border-[#BBF7D0] bg-[#F7FEF9] p-3">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#15803D]">Salida</span>
+                  <span className="font-mono text-sm font-bold text-[#166534]">{formatKilometers(row.odometer_end_km)}</span>
+                </div>
+                <MileagePhoto label="Fotografia de salida" url={endPhotoUrl} />
+              </section>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+};
+
+const SectionDivider = ({ label, count }) => (
+  <div className="flex items-center gap-2 pt-4 pb-2">
+    <span className="text-[10px] font-semibold uppercase tracking-widest text-[#6B7280]">{label}</span>
+    {count !== undefined && (
+      <span className="rounded-full bg-[#F3F4F6] px-2 py-0.5 text-[10px] font-semibold text-[#6B7280]">{count}</span>
+    )}
+    <div className="h-px flex-1 bg-[#F3F4F6]" />
+  </div>
+);
+
+// ─── Marks table ──────────────────────────────────────────────────────────────
+
+const BIRTHDAY_STATUS_LABEL = {
+  not_generated: "Sin generar",
+  qr_generated: "QR generado",
+  evidence_uploaded: "Evidencia cargada",
+  redeemed: "Canjeado",
+  expired: "Vencido",
+  cancelled: "Cancelado",
+};
+
+const BIRTHDAY_STATUS_TONE = {
+  not_generated: "neutral",
+  qr_generated: "blue",
+  evidence_uploaded: "amber",
+  redeemed: "green",
+  expired: "red",
+  cancelled: "red",
+};
+
+const BirthdayBenefitQrModal = ({ benefit, onClose }) => {
+  const canvasRef = useRef(null);
+  const logoUrlRef = useRef(null);
+
+  useEffect(() => {
+    if (!benefit?.qr_url || !canvasRef.current) return;
+    QRCode.toCanvas(canvasRef.current, benefit.qr_url, {
+      width: 260,
+      margin: 1,
+      color: { dark: "#0F172A", light: "#FFFFFF" },
+    }).catch(() => {});
+  }, [benefit]);
+
+  useEffect(() => {
+    logoUrlRef.current = famLogo;
+  }, []);
+
+  const handlePrint = () => {
+    if (!benefit?.qr_url || !canvasRef.current) return;
+    const qrDataUrl = canvasRef.current.toDataURL("image/png");
+    const printWindow = window.open("", "_blank", "width=860,height=720");
+    if (!printWindow) return;
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Tarjeta de cumpleaños</title>
+          <style>
+            body { font-family: Geist, Arial, sans-serif; margin: 0; padding: 32px; color: #1F2937; background: linear-gradient(180deg, #F8FAFC 0%, #FFF7ED 100%); }
+            .card { max-width: 780px; margin: 0 auto; background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 28px; padding: 0; box-shadow: 0 18px 40px rgba(15,23,42,0.10); overflow: hidden; }
+            .hero { position: relative; padding: 28px 32px; background:
+              radial-gradient(circle at top left, rgba(14,165,233,0.18), transparent 30%),
+              radial-gradient(circle at top right, rgba(249,115,22,0.16), transparent 34%),
+              linear-gradient(135deg, #0F172A 0%, #1E293B 62%, #334155 100%);
+              color: #FFFFFF; }
+            .confetti-a, .confetti-b, .confetti-c { position: absolute; border-radius: 999px; opacity: 0.95; }
+            .confetti-a { width: 14px; height: 14px; background: #FDBA74; top: 22px; right: 118px; }
+            .confetti-b { width: 10px; height: 10px; background: #7DD3FC; top: 58px; right: 72px; }
+            .confetti-c { width: 18px; height: 18px; background: #FDE68A; top: 90px; right: 142px; }
+            .hero-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+            .brand { display: flex; align-items: center; gap: 14px; }
+            .brand img { width: 56px; height: 56px; border-radius: 16px; background: #FFFFFF; padding: 8px; }
+            .eyebrow { color: #BAE6FD; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+            h1 { margin: 10px 0 6px; font-size: 30px; line-height: 1.05; }
+            .hero p { margin: 0; line-height: 1.6; color: rgba(255,255,255,0.82); max-width: 520px; }
+            .body { padding: 32px; }
+            .grid { display: grid; grid-template-columns: 280px 1fr; gap: 28px; align-items: center; }
+            .meta { display: grid; gap: 12px; }
+            .qr-shell { padding: 18px; border-radius: 24px; background: linear-gradient(180deg, #FFF7ED 0%, #FFFFFF 100%); border: 1px solid #FED7AA; }
+            .qr-shell img { width: 100%; height: auto; display: block; border-radius: 18px; border: 1px solid #E5E7EB; background: #FFFFFF; }
+            .pill { display: inline-flex; padding: 6px 12px; border-radius: 999px; background: #DBEAFE; color: #1D4ED8; font-size: 12px; font-weight: 700; }
+            .headline { font-size: 18px; font-weight: 700; color: #1F2937; }
+            .sub { color: #6B7280; line-height: 1.6; }
+            .meta-card { border: 1px solid #E5E7EB; border-radius: 18px; padding: 16px; background: #F9FAFB; }
+            .link { margin-top: 10px; font-size: 12px; word-break: break-all; color: #334155; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="hero">
+              <span class="confetti-a"></span>
+              <span class="confetti-b"></span>
+              <span class="confetti-c"></span>
+              <div class="hero-row">
+                <div class="brand">
+                  <img src="${logoUrlRef.current || famLogo}" alt="Logo FAM" />
+                  <div>
+                    <div class="eyebrow">FamSPI · Beneficio interno</div>
+                    <h1>Tu día libre de cumpleaños</h1>
+                    <p>Una tarjeta pensada para coordinar tu canje con orden, trazabilidad y un mensaje más humano para esta fecha especial.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="body">
+              <div class="grid">
+                <div class="qr-shell">
+                  <img src="${qrDataUrl}" alt="QR cumpleaños" />
+                </div>
+                <div class="meta">
+                  <span class="pill">${benefit.user_fullname || benefit.user_email || "Colaborador"}</span>
+                  <div class="headline">Feliz cumpleaños de parte de FAM</div>
+                  <div class="sub">Escanea esta tarjeta, sube tu evidencia de coordinación y elige el día en que vas a disfrutar tu beneficio.</div>
+                  <div class="meta-card"><strong>Vigencia</strong><br />${fmtDate(benefit.cycle_start)} al ${fmtDate(benefit.cycle_end)}</div>
+                  <div class="meta-card"><strong>Estado actual</strong><br />${BIRTHDAY_STATUS_LABEL[benefit.status] || benefit.status}</div>
+                  <div class="meta-card">
+                    <strong>Enlace directo</strong>
+                    <div class="link">${benefit.qr_url || ""}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Tarjeta imprimible de cumpleaños" maxWidth="max-w-3xl">
+      <div className="overflow-hidden rounded-[24px] border border-[#E5E7EB] bg-white shadow-[0_15px_35px_rgba(15,23,42,0.08)]">
+        <div className="relative overflow-hidden bg-[linear-gradient(135deg,#0F172A_0%,#1E293B_62%,#334155_100%)] px-6 py-6 text-white">
+          <div className="absolute right-8 top-6 h-4 w-4 rounded-full bg-[#FDBA74]" />
+          <div className="absolute right-16 top-16 h-3 w-3 rounded-full bg-[#7DD3FC]" />
+          <div className="absolute right-28 top-10 h-5 w-5 rounded-full bg-[#FDE68A]" />
+          <div className="flex items-start gap-4">
+            <div className="rounded-[16px] bg-white/95 p-2 shadow-[0_4px_16px_rgba(15,23,42,0.18)]">
+              <img src={famLogo} alt="Logo FAM" className="h-12 w-12 object-contain" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#BAE6FD]">FamSPI · Beneficio interno</p>
+              <h3 className="mt-2 text-[28px] font-semibold leading-none tracking-[-0.02em] text-white">Tu día libre de cumpleaños</h3>
+              <p className="mt-3 max-w-[560px] text-sm leading-relaxed text-white/80">
+                Una tarjeta especial para coordinar el canje de tu beneficio, mantener la trazabilidad y celebrar esta fecha con una experiencia más cuidada.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="grid gap-6 p-6 lg:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="rounded-[24px] border border-[#FED7AA] bg-[linear-gradient(180deg,#FFF7ED_0%,#FFFFFF_100%)] p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+            <canvas ref={canvasRef} className="mx-auto h-auto w-full max-w-[260px] rounded-[18px] bg-white" />
+          </div>
+          <div className="space-y-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#2563EB]">Canje por cumpleaños</p>
+              <h3 className="mt-1 text-xl font-semibold text-[#1F2937]">{benefit?.user_fullname || benefit?.user_email || "Colaborador"}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[#6B7280]">
+                Feliz cumpleaños de parte de FAM. Escanea esta tarjeta para subir la coordinación y registrar el día en que vas a usar tu beneficio.
+              </p>
+            </div>
+            <div className="grid gap-3 rounded-[18px] border border-[#E5E7EB] bg-[#F9FAFB] p-4 text-sm text-[#1F2937]">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[#6B7280]">Estado</span>
+                <Badge tone={BIRTHDAY_STATUS_TONE[benefit?.status] || "neutral"}>{BIRTHDAY_STATUS_LABEL[benefit?.status] || benefit?.status}</Badge>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[#6B7280]">Vigencia</span>
+                <span className="font-mono text-xs">{fmtDate(benefit?.cycle_start)} - {fmtDate(benefit?.cycle_end)}</span>
+              </div>
+              <div className="rounded-[14px] bg-white px-3 py-2">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6B7280]">Enlace directo</span>
+                <div className="mt-1 break-all text-[12px] text-[#334155]">{benefit?.qr_url || "QR no disponible"}</div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={handlePrint} className="cursor-pointer rounded-[16px] bg-[#2563EB] px-4 py-2.5 text-sm font-semibold text-white transition active:scale-[0.97]">
+                <FiPrinter className="mr-2 inline" size={15} />
+                Imprimir tarjeta
+              </button>
+              <button
+                type="button"
+                onClick={() => window.open(benefit?.qr_url, "_blank", "noopener,noreferrer")}
+                className="cursor-pointer rounded-[16px] border border-[#E5E7EB] px-4 py-2.5 text-sm font-semibold text-[#1F2937] transition hover:bg-[#F9FAFB] active:scale-[0.97]"
+              >
+                <FiMaximize2 className="mr-2 inline" size={14} />
+                Abrir enlace
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+const BirthdayBenefitPanel = ({ userId }) => {
+  const [benefit, setBenefit] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [qrModalOpen, setQrModalOpen] = useState(false);
+
+  const loadBenefit = useCallback(async () => {
+    if (!userId) return;
+    setLoading(true);
+    try {
+      const res = await getCollaboratorBirthdayBenefit(userId);
+      setBenefit(res?.data || null);
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "No se pudo cargar el beneficio de cumpleaños.");
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    loadBenefit();
+  }, [loadBenefit]);
+
+  const handleGenerateQr = async () => {
+    setBusy(true);
+    try {
+      const res = await generateCollaboratorBirthdayBenefitQr(userId);
+      setBenefit(res?.data || null);
+      setQrModalOpen(true);
+      toast.success("Tarjeta QR generada correctamente.");
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "No se pudo generar la tarjeta QR.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading && !benefit) {
+    return (
+      <div className="flex h-40 items-center justify-center">
+        <FiRefreshCw className="animate-spin text-[#D1D5DB]" size={20} />
+      </div>
+    );
+  }
+
+  const status = benefit?.status || "not_generated";
+
+  return (
+    <div className="space-y-4 p-4">
+      <div className="rounded-[20px] border border-[#E5E7EB] bg-white p-5 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#DBEAFE] text-[#1D4ED8]">
+                <FiGift size={18} />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-[#1F2937]">Día libre por cumpleaños</h3>
+                <p className="text-sm text-[#6B7280]">Tarjeta imprimible con QR para que el colaborador gestione su canje.</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone={BIRTHDAY_STATUS_TONE[status] || "neutral"}>{BIRTHDAY_STATUS_LABEL[status] || status}</Badge>
+              {benefit?.birth_date ? <span className="font-mono text-xs text-[#6B7280]">Cumpleaños: {fmtDate(benefit.birth_date)}</span> : null}
+              {benefit?.cycle_start && benefit?.cycle_end ? <span className="font-mono text-xs text-[#6B7280]">Vigencia: {fmtDate(benefit.cycle_start)} - {fmtDate(benefit.cycle_end)}</span> : null}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={loadBenefit} className="cursor-pointer rounded-[16px] border border-[#E5E7EB] px-3.5 py-2 text-sm font-semibold text-[#6B7280] transition hover:bg-[#F9FAFB] active:scale-[0.97]">
+              <FiRefreshCw className="mr-2 inline" size={14} />
+              Actualizar
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={handleGenerateQr}
+              className="cursor-pointer rounded-[16px] bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {busy ? <FiRefreshCw className="mr-2 inline animate-spin" size={14} /> : <FiGift className="mr-2 inline" size={14} />}
+              {benefit?.qr_token ? "Regenerar tarjeta" : "Generar tarjeta"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {!benefit || status === "not_generated" ? (
+        <EmptySection icon={FiGift} title="Sin tarjeta generada" description="Genera el QR para que el colaborador cargue la coordinación y seleccione la fecha de su día libre." />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="rounded-[20px] border border-[#E5E7EB] bg-white p-5 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">Estado</p>
+                <p className="mt-2 text-sm font-semibold text-[#1F2937]">{BIRTHDAY_STATUS_LABEL[status] || status}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">Fecha canjeada</p>
+                <p className="mt-2 text-sm font-semibold text-[#1F2937]">{benefit?.redeem_date ? fmtDate(benefit.redeem_date) : "--"}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">Evidencia cargada</p>
+                <p className="mt-2 text-sm font-semibold text-[#1F2937]">{benefit?.coordination_uploaded_at ? fmtDate(benefit.coordination_uploaded_at) : "--"}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">Regularización F-RH-09</p>
+                <p className="mt-2 text-sm font-semibold text-[#1F2937]">{benefit?.attendance_regularized_at ? "Aplicada" : "Pendiente"}</p>
+              </div>
+            </div>
+            {!!benefit?.coordination_evidence_urls?.length && (
+              <>
+                <SectionDivider label="Evidencias" count={benefit.coordination_evidence_urls.length} />
+                <div className="flex flex-wrap gap-2">
+                  {benefit.coordination_evidence_urls.map((url, index) => (
+                    <a
+                      key={`${url}-${index}`}
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex cursor-pointer items-center rounded-full border border-[#E5E7EB] px-3 py-1.5 text-xs font-semibold text-[#1F2937] transition hover:bg-[#F9FAFB]"
+                    >
+                      <FiUpload className="mr-2" size={12} />
+                      Evidencia {index + 1}
+                    </a>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="rounded-[20px] border border-[#E5E7EB] bg-[#F9FAFB] p-5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6B7280]">Acceso del colaborador</p>
+            <div className="mt-3 break-all rounded-[16px] bg-white px-4 py-3 text-xs leading-relaxed text-[#334155]">
+              {benefit?.qr_url || "Sin enlace generado"}
+            </div>
+            <button
+              type="button"
+              onClick={() => setQrModalOpen(true)}
+              className="mt-4 w-full cursor-pointer rounded-[16px] border border-[#E5E7EB] px-4 py-2.5 text-sm font-semibold text-[#1F2937] transition hover:bg-white active:scale-[0.97]"
+            >
+              <FiPrinter className="mr-2 inline" size={14} />
+              Ver tarjeta imprimible
+            </button>
+          </div>
+        </div>
+      )}
+
+      {qrModalOpen && benefit?.qr_token ? <BirthdayBenefitQrModal benefit={benefit} onClose={() => setQrModalOpen(false)} /> : null}
+    </div>
+  );
+};
+
+const STATUS_MAP = {
+  completed:  { tone: "green", label: "Jornada cerrada" },
+  working:    { tone: "blue",  label: "En jornada" },
+  lunch_open: { tone: "amber", label: "Almuerzo abierto" },
+};
+
+const MarksTable = ({ rows = [], variant = "regularized", onMarkClick = null }) => {
+  if (!rows.length)
+    return <EmptySection icon={FiClock} title="Sin marcaciones en este periodo" description="El colaborador no registra asistencia en el rango filtrado." />;
+
+  const isRegularized = variant === "regularized";
+  const headers = isRegularized
+    ? ["Fecha", "Estado", "Entrada", "Alm. S", "Alm. E", "Salida", "Perm. S", "Perm. E", "Extra", "Oper.", "Modalidad", "TT Inicio", "TT Alm. S", "TT Alm. E", "TT Cierre", "Ciudad", "Ubicacion", "Excepcion"]
+    : ["Fecha", "Estado", "Entrada", "Alm. S", "Alm. E", "Salida", "Extra", "Oper.", "Modalidad", "TT Inicio", "TT Alm. S", "TT Alm. E", "TT Cierre", "Ciudad", "Ubicacion", "Excepcion"];
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm">
+        <thead>
+          <tr className="border-b border-[#F3F4F6]">
+            {headers.map((h) => (
+              <th key={h} className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#F9FAFB]">
+          {rows.map((row) => {
+            const { tone, label } = STATUS_MAP[row.attendance_status] || { tone: "neutral", label: row.attendance_status || "Sin entrada" };
+            const marks = variant === "real" ? buildRealMarks(row) : buildRegularizedMarks(row);
+            const permissionMarks = buildPermissionMarks(row);
+            const isTelework = normalizeToken(row.operational_category) === "teletrabajo";
+            const teleworkMarks = buildTeleworkMarks(row);
+            const location = row.start_location || row.entry_location || row.return_location || row.exit_location;
+            const point = parseCoordinatePair(location);
+            const renderMarkCell = (mark, muted = false) => {
+              if (!mark?.time) {
+                return <span className="text-[#D1D5DB]">--</span>;
+              }
+              if (!mark.point || !onMarkClick) {
+                return <span>{fmtTime(mark.time)}</span>;
+              }
+              return (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onMarkClick({
+                      ...mark,
+                      rowKey: `${row.user_id}-${row.date}`,
+                      userId: row.user_id,
+                      fullname: row.fullname,
+                      date: row.date,
+                    })
+                  }
+                  className={`cursor-pointer rounded-md px-1.5 py-0.5 underline decoration-dotted underline-offset-2 transition hover:bg-[#EFF6FF] ${muted ? "text-[#6B7280]" : "text-[#1F2937]"}`}
+                >
+                  {fmtTime(mark.time)}
+                </button>
+              );
+            };
+            return (
+              <tr key={`${row.user_id}-${row.date}`} className="hover:bg-[#F9FAFB]">
+                <td className="px-3 py-2 font-mono text-xs font-medium text-[#1F2937]">{fmtDate(row.date)}</td>
+                <td className="px-3 py-2"><Badge tone={tone}>{label}</Badge></td>
+                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{renderMarkCell(marks[0], false)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(marks[1], true)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(marks[2], true)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{renderMarkCell(marks[3], false)}</td>
+                {isRegularized ? (
+                  <>
+                    <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(permissionMarks[0], true)}</td>
+                    <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(permissionMarks[1], true)}</td>
+                  </>
+                ) : null}
+                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{fmtOvertime(row)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{fmtHours(row.operational_elapsed_hours)}</td>
+                <td className="px-3 py-2"><Badge tone={isTelework ? "blue" : "neutral"}>{isTelework ? "Teletrabajo" : "Presencial / campo"}</Badge></td>
+                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{renderMarkCell(teleworkMarks[0], false)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(teleworkMarks[1], true)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(teleworkMarks[2], true)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{renderMarkCell(teleworkMarks[3], false)}</td>
+                <td className="max-w-[150px] px-3 py-2 text-xs text-[#1F2937]">{row.operational_destination_city || "--"}</td>
+                <td className="px-3 py-2 font-mono text-[11px] text-[#6B7280]">{point ? `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` : "--"}</td>
+                <td className="px-3 py-2">
+                  {row.exception_type ? (
+                    <div className="space-y-0.5">
+                      <Badge tone="neutral">{String(row.exception_type).replace(/_/g, " ")}</Badge>
+                      {row.exception_description && (
+                        <p className="text-[11px] leading-tight text-[#6B7280]">{row.exception_description}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-[#D1D5DB]">--</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const resolvePermissionMarksForReport = (permission = {}, rows = []) => {
+  const requestId = Number(permission?.id || 0);
+  const permissionDate = String(
+    permission?.fecha_inicio ||
+    permission?.fecha_inicio_hora ||
+    "",
+  ).slice(0, 10);
+
+  const matchedRow = (Array.isArray(rows) ? rows : []).find((row) => {
+    if (requestId > 0 && Number(row?.permission_request_id || 0) === requestId) {
+      return true;
+    }
+    if (!permissionDate) return false;
+    return (
+      String(row?.date || "").slice(0, 10) === permissionDate &&
+      normalizeToken(row?.time_off_type) === "permiso" &&
+      normalizeToken(row?.time_off_subtype) === normalizeToken(permission?.tipo_permiso)
+    );
+  });
+
+  return {
+    exitTime:
+      matchedRow?.permission_exit_time ||
+      permission?.fecha_inicio_hora ||
+      null,
+    returnTime:
+      matchedRow?.permission_return_time ||
+      permission?.fecha_fin_hora ||
+      null,
+  };
+};
+
+const PermissionsTab = ({ permissions = [], rows = [] }) => {
+  if (!permissions.length) {
+    return (
+      <EmptySection
+        icon={FiCheck}
+        title="Sin permisos aprobados en este periodo"
+        description="No se encontraron permisos o emergencias aprobadas para el rango seleccionado."
+      />
+    );
+  }
+
+  return (
+    <div className="p-4">
+      <div className="overflow-x-auto rounded-[12px] border border-[#F3F4F6]">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="border-b border-[#F3F4F6]">
+              {["Fecha", "Tipo", "Modalidad", "Salida permiso", "Entrada permiso", "Duracion", "Estado"].map((h) => (
+                <th key={h} className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#F9FAFB]">
+            {permissions.map((item) => {
+              const isHourly = Boolean(item?.fecha_inicio_hora && item?.fecha_fin_hora);
+              const marks = resolvePermissionMarksForReport(item, rows);
+              return (
+                <tr key={item.id} className="hover:bg-[#F9FAFB]">
+                  <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{fmtDate(item.fecha_inicio || item.fecha_inicio_hora)}</td>
+                  <td className="px-3 py-2 text-xs font-medium text-[#1F2937]">{resolvePermissionTypeLabel(item)}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      <Badge tone={item.es_emergencia ? "red" : "blue"}>
+                        {item.es_emergencia ? "Emergencia" : isHourly ? "Por horas" : "Dia completo"}
+                      </Badge>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{fmtTime(marks.exitTime)}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{fmtTime(marks.returnTime)}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">
+                    {isHourly ? fmtHours(item.duracion_horas) : item.duracion_dias ? `${Number(item.duracion_dias)} dia(s)` : "Dia completo"}
+                  </td>
+                  <td className="px-3 py-2">
+                    <Badge tone="green">{String(item.status || "approved").replace(/_/g, " ")}</Badge>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+// ─── Breach row (with schedule meeting button) ────────────────────────────────
+
+const BreachRow = ({ breach, onSchedule }) => {
+  const isOT = String(breach.breach_type || "").toLowerCase().includes("overtime") ||
+    String(breach.breach_type || "").toLowerCase().includes("extra");
+  const meeting = breach.follow_up_meeting || null;
+  return (
+    <div className="flex items-start gap-3 rounded-[12px] border border-[#F3F4F6] bg-white px-4 py-3 transition hover:border-[#E5E7EB] hover:shadow-[0_2px_10px_rgba(0,0,0,0.04)]">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-xs font-semibold text-[#1F2937]">{fmtDate(breach.date)}</span>
+          <Badge tone={isOT ? "amber" : "red"}>{breach.breach_label || breach.breach_type || "Incumplimiento"}</Badge>
+        </div>
+        <p className="mt-1 text-xs text-[#6B7280]">{breach.detail || "Sin detalle adicional"}</p>
+        <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 font-mono text-[11px] text-[#6B7280]">
+          <span>Entrada: {fmtTime(breach.entry_time)}</span>
+          <span>Alm.: {fmtTime(breach.lunch_start_time)} / {fmtTime(breach.lunch_end_time)}</span>
+          <span>Salida: {fmtTime(breach.exit_time)}</span>
+          {Number(breach.late_minutes || 0) > 0 && (
+            <span className="font-semibold text-[#DC2626]">Atraso: {breach.late_minutes} min</span>
+          )}
+          {Number(breach.real_overtime_hours || 0) > 0 && (
+            <span>Extra: {fmtOvertime(breach)}</span>
+          )}
+        </div>
+        {meeting ? (
+          <div className="mt-2 inline-flex flex-wrap items-center gap-1.5 rounded-[10px] border border-[#BBF7D0] bg-[#F0FDF4] px-2.5 py-1 text-[11px] font-semibold text-[#15803D]">
+            <FiCalendar size={12} />
+            Reunion agendada
+            <span className="font-mono font-medium text-[#166534]">
+              {fmtDate(meeting.meeting_date)} {meeting.start_time || ""}
+            </span>
+          </div>
+        ) : null}
+      </div>
+      {meeting ? (
+        <button
+          type="button"
+          disabled
+          className="flex-shrink-0 rounded-[10px] border border-[#BBF7D0] bg-[#F0FDF4] px-3 py-1.5 text-xs font-semibold text-[#15803D]"
+        >
+          Reunion agendada
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onSchedule(breach)}
+          className="cursor-pointer flex-shrink-0 rounded-[10px] bg-[#2563EB] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#1D4ED8] active:scale-[0.97]"
+        >
+          Agendar reunion
+        </button>
+      )}
+    </div>
+  );
+};
+
+// ─── Overtime tab ─────────────────────────────────────────────────────────────
+
+const OvertimeTab = ({ rows, incidents }) => {
+  const unauthorizedDates = useMemo(
+    () => new Set(incidents.filter((i) => Number(i.real_overtime_hours || 0) > 0).map((i) => i.date)),
+    [incidents]
+  );
+
+  const authorized = useMemo(
+    () => rows.filter((r) => Number(r.real_overtime_hours || 0) > 0 && !unauthorizedDates.has(r.date)),
+    [rows, unauthorizedDates]
+  );
+
+  const unauthorized = useMemo(
+    () => incidents.filter((i) => Number(i.real_overtime_hours || 0) > 0),
+    [incidents]
+  );
+
+  return (
+    <div className="p-4 space-y-0">
+      <SectionDivider label="Con permiso" count={authorized.length} />
+      {authorized.length ? (
+        <div className="overflow-x-auto rounded-[12px] border border-[#F3F4F6]">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-[#F3F4F6]">
+                {["Fecha", "Horas extra", "Entrada", "Salida", "Tipo excepcion"].map((h) => (
+                  <th key={h} className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#F9FAFB]">
+              {authorized.map((r) => (
+                <tr key={r.date} className="hover:bg-[#F9FAFB]">
+                  <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{fmtDate(r.date)}</td>
+                  <td className="px-3 py-2 font-mono text-xs font-semibold text-[#16A34A]">{fmtOvertime(r)}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{fmtTime(r.entry_time)}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{fmtTime(r.exit_time)}</td>
+                  <td className="px-3 py-2 text-xs text-[#6B7280]">{r.exception_type ? String(r.exception_type).replace(/_/g, " ") : "--"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptySection icon={FiCheck} title="Sin horas extra con permiso" description="No se detectaron horas extra autorizadas en este periodo." />
+      )}
+
+      <SectionDivider label="Sin permiso (detectadas por el sistema)" count={unauthorized.length} />
+      {unauthorized.length ? (
+        <div className="overflow-x-auto rounded-[12px] border border-[#F3F4F6]">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-[#F3F4F6]">
+                {["Fecha", "Horas extra", "Entrada", "Salida", "Novedad"].map((h) => (
+                  <th key={h} className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#F9FAFB]">
+              {unauthorized.map((i, idx) => (
+                <tr key={`${i.date}-${idx}`} className="hover:bg-[#F9FAFB]">
+                  <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{fmtDate(i.date)}</td>
+                  <td className="px-3 py-2 font-mono text-xs font-semibold text-[#DC2626]">{fmtOvertime(i)}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{fmtTime(i.entry_time)}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{fmtTime(i.exit_time)}</td>
+                  <td className="px-3 py-2 text-xs text-[#6B7280]">{i.breach_label || "--"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptySection icon={FiCheck} title="Sin horas extra no autorizadas" description="El sistema no detecto horas extra sin permiso en este periodo." />
+      )}
+    </div>
+  );
+};
+
+// ─── Marcaciones operacionales tab ───────────────────────────────────────────
+
+const OPERATIONAL_MARK_LABELS = Object.freeze({
+  start: "Salida operacional",
+  arrival: "Llegada a destino",
+  op_lunch_start: "Almuerzo op. salida",
+  op_lunch_end: "Almuerzo op. regreso",
+  departure: "Salida del destino",
+  return: "Retorno / cierre",
+});
+
+const FIELD_EVENT_LABELS = Object.freeze({
+  client_entry: "Entrada a cliente",
+  client_exit: "Salida de cliente",
+  office_exit: "Salida de oficina",
+  office_entry: "Retorno a oficina",
+});
+
+// geo_points (backend) trae las marcas operacionales con lat/lng; field_events
+// trae entradas/salidas de cliente con nombre de prospecto. Se unen y ordenan
+// cronológicamente para listar el recorrido completo del día.
+const buildOperationalMarks = (row = {}) => {
+  const geoMarks = (Array.isArray(row.geo_points) ? row.geo_points : [])
+    .filter((p) => OPERATIONAL_MARK_LABELS[p.type])
+    .map((p, idx) => ({
+      key: `${p.type}-${idx}`,
+      label: OPERATIONAL_MARK_LABELS[p.type],
+      time: p.time,
+      point: Number.isFinite(p.lat) && Number.isFinite(p.lng)
+        ? { type: p.type, label: OPERATIONAL_MARK_LABELS[p.type], time: p.time, lat: p.lat, lng: p.lng }
+        : null,
+    }));
+
+  const fieldMarks = (Array.isArray(row.field_events) ? row.field_events : []).map((e, idx) => {
+    const base = FIELD_EVENT_LABELS[e.type] || String(e.type || "Evento").replace(/_/g, " ");
+    const label = e.prospect_name ? `${base} — ${e.prospect_name}` : base;
+    const lat = Number(e.lat);
+    const lng = Number(e.lng);
+    return {
+      key: `event-${idx}`,
+      label,
+      time: e.time,
+      point: Number.isFinite(lat) && Number.isFinite(lng) ? { type: e.type, label, time: e.time, lat, lng } : null,
+    };
+  });
+
+  return [...geoMarks, ...fieldMarks]
+    .filter((m) => m.time || m.point)
+    .sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
+};
+
+const ExitsTab = ({ rows, onMarkClick = null }) => {
+  const operationalDays = useMemo(
+    () =>
+      rows
+        .map((r) => ({ row: r, marks: buildOperationalMarks(r) }))
+        .filter(({ row, marks }) => marks.length > 0 || Number(row.operational_elapsed_hours || 0) > 0),
+    [rows]
+  );
+
+  return (
+    <div className="p-4 space-y-0">
+      <SectionDivider label="Marcaciones operacionales" count={operationalDays.length} />
+      {operationalDays.length ? (
+        <div className="overflow-x-auto rounded-[12px] border border-[#F3F4F6]">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-[#F3F4F6]">
+                {["Fecha", "Marcacion", "Modalidad", "Ciudad", "Hora", "Ubicacion"].map((h) => (
+                  <th key={h} className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">{h}</th>
+                ))}
+              </tr>
+              <tr className="hidden border-b border-[#F3F4F6]">
+                {["Fecha", "Marcación", "Hora", "Ubicación"].map((h) => (
+                  <th key={h} className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#F9FAFB]">
+              {operationalDays.map(({ row, marks }) => (
+                <React.Fragment key={`${row.user_id}-${row.date}`}>
+                  <tr className="bg-[#F9FAFB]">
+                    <td colSpan={6} className="px-3 py-1.5 text-[11px] font-semibold text-[#1F2937]">
+                      {fmtDate(row.date)}
+                      {row.fullname ? <span className="ml-2 font-normal text-[#6B7280]">{row.fullname}</span> : null}
+                      {Number(row.operational_elapsed_hours || 0) > 0 ? (
+                        <span className="ml-2 font-mono text-[#2563EB]">{fmtHours(row.operational_elapsed_hours)} oper.</span>
+                      ) : null}
+                    </td>
+                  </tr>
+                  {marks.map((mark) => (
+                    <tr key={`${row.user_id}-${row.date}-${mark.key}`} className="hover:bg-[#F9FAFB]">
+                      <td className="px-3 py-2" />
+                      <td className="px-3 py-2 text-xs text-[#1F2937]">{mark.label}</td>
+                      <td className="px-3 py-2"><Badge tone={normalizeToken(row.operational_category) === "teletrabajo" ? "blue" : "neutral"}>{normalizeToken(row.operational_category) === "teletrabajo" ? "Teletrabajo" : "Presencial / campo"}</Badge></td>
+                      <td className="px-3 py-2 text-xs text-[#1F2937]">{row.operational_destination_city || "--"}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{fmtTime(mark.time)}</td>
+                      <td className="px-3 py-2">
+                        {mark.point && onMarkClick ? (
+                          <div className="space-y-0.5">
+                            <p className="font-mono text-[11px] text-[#6B7280]">{mark.point.lat.toFixed(5)}, {mark.point.lng.toFixed(5)}</p>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onMarkClick({
+                                  ...mark,
+                                  rowKey: `${row.user_id}-${row.date}`,
+                                  userId: row.user_id,
+                                  fullname: row.fullname,
+                                  date: row.date,
+                                })
+                              }
+                              className="inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-[#2563EB] underline decoration-dotted underline-offset-2 hover:bg-[#EFF6FF]"
+                            >
+                              <FiMapPin size={11} />
+                              Ver en mapa
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-[#D1D5DB]">--</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {!marks.length ? (
+                    <tr>
+                      <td className="px-3 py-2" />
+                      <td colSpan={5} className="px-3 py-2 text-xs text-[#9CA3AF]">Sin marcas georreferenciadas para este día.</td>
+                    </tr>
+                  ) : null}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptySection icon={FiCalendar} title="Sin marcaciones operacionales" description="No se registraron salidas operacionales en el periodo." />
+      )}
+    </div>
+  );
+};
+
+// ─── Meeting modal ────────────────────────────────────────────────────────────
+
+const MeetingModal = ({ target, onClose, onScheduled }) => {
+  const [date, setDate] = useState(getNextWorkday());
+  const [time, setTime] = useState("10:00");
+  const [type, setType] = useState("presencial");
+  const [notes, setNotes] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!date || !time) {
+      toast.error("Completa la fecha y hora de la reunion.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await scheduleAttendanceFollowUpMeeting(target.userId, {
+        date,
+        start_time: time,
+        meeting_type: type,
+        reason: notes.trim() || undefined,
+        breach_date: target.breach?.date,
+        breach_type: target.breach?.breach_type,
+      });
+      toast.success("Reunion agendada correctamente.");
+      await onScheduled?.();
+      onClose();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "No se pudo agendar la reunion.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[30] flex items-center justify-center bg-[#0F172A]/60 p-4"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="z-[40] w-full max-w-md rounded-[16px] border border-[#E5E7EB] bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
+        <div className="flex items-start justify-between border-b border-[#F3F4F6] px-5 py-4">
+          <div>
+            <p className="text-sm font-semibold text-[#1F2937]">Agendar reunion de seguimiento</p>
+            <p className="mt-0.5 text-xs text-[#6B7280]">
+              {target.fullname}{target.breach ? ` · ${fmtDate(target.breach.date)}` : ""}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="cursor-pointer rounded-[8px] p-1.5 text-[#6B7280] hover:bg-[#F3F4F6] active:scale-[0.97]"
+          >
+            <FiX size={15} />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-5 py-4">
+          {target.breach && (
+            <div className="rounded-[10px] bg-[#FEF3C7] px-3 py-2">
+              <p className="text-xs text-[#D97706]">
+                <span className="font-semibold">Motivo:</span>{" "}
+                {target.breach.breach_label || target.breach.breach_type || "Incumplimiento"} — {fmtDate(target.breach.date)}
+              </p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-semibold text-[#1F2937]">Fecha</span>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="h-10 rounded-[12px] border border-[#D1D5DB] px-3 text-sm text-[#1F2937] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-semibold text-[#1F2937]">Hora</span>
+              <input
+                type="time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                className="h-10 rounded-[12px] border border-[#D1D5DB] px-3 text-sm text-[#1F2937] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
+              />
+            </label>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold text-[#1F2937]">Modalidad</span>
+            <div className="flex gap-4">
+              {["presencial", "virtual"].map((opt) => (
+                <label key={opt} className="flex cursor-pointer items-center gap-2 text-sm text-[#1F2937]">
+                  <input
+                    type="radio"
+                    name="meeting-type"
+                    value={opt}
+                    checked={type === opt}
+                    onChange={() => setType(opt)}
+                    className="accent-[#2563EB]"
+                  />
+                  <span className="capitalize">{opt}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold text-[#1F2937]">Notas (opcional)</span>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              placeholder="Contexto adicional para la reunion..."
+              className="resize-none rounded-[12px] border border-[#D1D5DB] px-3 py-2.5 text-sm text-[#1F2937] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20 placeholder:text-[#D1D5DB]"
+            />
+          </label>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-[#F3F4F6] px-5 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="cursor-pointer rounded-[12px] px-4 py-2 text-sm font-medium text-[#6B7280] hover:bg-[#F3F4F6] active:scale-[0.97]"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={loading}
+            className="cursor-pointer inline-flex items-center gap-2 rounded-[12px] bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1D4ED8] active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+          >
+            {loading && <FiRefreshCw size={13} className="animate-spin" />}
+            Agendar reunion
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Gestión tab (justificaciones + regularizaciones) ────────────────────────
+
+const JUST_STATUS_TONE = { approved: "green", rejected: "red", overridden: "amber" };
+const JUST_STATUS_LABEL = { approved: "Aprobada", rejected: "Rechazada", overridden: "Modificada" };
+const REG_STATUS_TONE = { pending: "amber", approved: "green", rejected: "red", applied: "blue", cancelled: "neutral" };
+const REG_STATUS_LABEL = { pending: "Pendiente", approved: "Aprobada", rejected: "Rechazada", applied: "Aplicada", cancelled: "Cancelada" };
+const REG_TYPE_LABEL = {
+  missing_clock_in: "Entrada faltante",
+  late_arrival: "Atraso",
+  early_departure: "Salida anticipada",
+  missing_lunch_out: "Salida almuerzo faltante",
+  missing_lunch_in: "Retorno almuerzo faltante",
+  missing_clock_out: "Salida faltante",
+  wrong_location: "Ubicacion incorrecta",
+  field_operation_adjustment: "Ajuste operacion campo",
+  client_visit_adjustment: "Ajuste visita cliente",
+  offline_sync_adjustment: "Ajuste sincronizacion offline",
+};
+
+const normalizeAttendanceDateValue = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s].*)?$/);
+  return match?.[1] || raw;
+};
+
+const GENERAL_REGULARIZATION_TYPE_OPTIONS = [
+  { value: "", label: "Todos los tipos" },
+  { value: "late_arrival", label: "Atraso" },
+  { value: "early_departure", label: "Salida anticipada" },
+  { value: "missing_clock_in", label: "Entrada faltante" },
+  { value: "missing_lunch_out", label: "Salida almuerzo faltante" },
+  { value: "missing_lunch_in", label: "Retorno almuerzo faltante" },
+  { value: "missing_clock_out", label: "Salida faltante" },
+  { value: "wrong_location", label: "Ubicacion incorrecta" },
+  { value: "field_operation_adjustment", label: "Ajuste operacion campo" },
+  { value: "client_visit_adjustment", label: "Ajuste visita cliente" },
+  { value: "offline_sync_adjustment", label: "Ajuste sincronizacion offline" },
+];
+
+const hasExactTalentHumanRole = (user = {}) => [
+  user.role,
+  user.scope,
+  user.role_name,
+  user.rol,
+  ...(Array.isArray(user.roles) ? user.roles : []),
+  ...(Array.isArray(user.scopes) ? user.scopes : []),
+].map(normalizeToken).includes("talento_humano");
+
+const TeleworkRequestsPanel = () => {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(null);
+  const [rejectingId, setRejectingId] = useState(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await getTeleworkRequests();
+      setRequests((response?.data?.requests || []).filter((request) => String(request?.status || "").toUpperCase() === "PENDING"));
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "No se pudieron cargar las solicitudes de teletrabajo.");
+      setRequests([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleDecision = async (requestId, decision) => {
+    if (decision === "reject" && !String(rejectionReason || "").trim()) {
+      toast.error("Escribe el motivo del rechazo.");
+      return;
+    }
+    setBusy(requestId);
+    try {
+      await decideTeleworkRequest(requestId, decision, rejectionReason);
+      toast.success(decision === "approve" ? "Teletrabajo aprobado." : "Teletrabajo rechazado.");
+      setRejectingId(null);
+      setRejectionReason("");
+      await load();
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "No se pudo actualizar la solicitud.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4 p-4">
+      <div className="flex flex-col gap-3 rounded-[16px] border border-[#D1FAE5] bg-[#F0FDF4] p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-[#14532D]">Solicitudes de teletrabajo</h3>
+          <p className="mt-1 text-xs leading-5 text-[#166534]">
+            Revisa la fecha, ciudad y motivo antes de aprobar. La aprobación solo habilita la marcación en la fecha solicitada.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={load}
+          disabled={loading}
+          className="inline-flex min-h-[38px] items-center justify-center gap-1.5 rounded-[10px] border border-[#BBF7D0] bg-white px-3 py-2 text-xs font-semibold text-[#166534] transition hover:bg-[#F0FDF4] disabled:opacity-60"
+        >
+          <FiRefreshCw size={12} className={loading ? "animate-spin" : ""} /> Actualizar
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex h-40 items-center justify-center"><FiRefreshCw className="animate-spin text-[#D1D5DB]" size={20} /></div>
+      ) : !requests.length ? (
+        <EmptySection icon={FiCheck} title="Sin solicitudes pendientes" description="Las nuevas solicitudes de teletrabajo aparecerán aquí para su revisión." />
+      ) : (
+        <div className="space-y-3">
+          {requests.map((request) => (
+            <div key={request.id} className="rounded-[16px] border border-[#E5E7EB] bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.04)]">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-[#1F2937]">{request.user_name || request.user_email}</p>
+                    <span className="rounded-full bg-[#FEF3C7] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#92400E]">Pendiente</span>
+                  </div>
+                  <p className="mt-1 text-xs text-[#6B7280]">{request.user_email || "Sin correo"}</p>
+                </div>
+                <div className="rounded-[10px] bg-[#F8FAFC] px-3 py-2 text-left sm:text-right">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">Fecha solicitada</p>
+                  <p className="mt-0.5 text-sm font-semibold text-[#1F2937]">{fmtDate(request.request_date)}</p>
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <div className="rounded-[10px] border border-[#F3F4F6] bg-[#FAFBFC] px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">Ciudad</p>
+                  <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-[#1F2937]"><FiMapPin size={12} className="text-[#2563EB]" />{request.city}</p>
+                </div>
+                <div className="rounded-[10px] border border-[#F3F4F6] bg-[#FAFBFC] px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">Solicitud registrada</p>
+                  <p className="mt-1 text-xs text-[#374151]">{fmtTime(request.created_at)}</p>
+                </div>
+              </div>
+              {request.reason ? <p className="mt-3 rounded-[10px] bg-[#F8FBFF] px-3 py-2 text-xs leading-5 text-[#374151]"><strong>Motivo:</strong> {request.reason}</p> : null}
+
+              {rejectingId === request.id ? (
+                <div className="mt-3 space-y-2 border-t border-[#F3F4F6] pt-3">
+                  <textarea
+                    rows="2"
+                    value={rejectionReason}
+                    onChange={(event) => setRejectionReason(event.target.value)}
+                    placeholder="Motivo del rechazo"
+                    className="w-full resize-none rounded-[10px] border border-[#D1D5DB] px-3 py-2 text-xs text-[#1F2937] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" disabled={busy === request.id} onClick={() => handleDecision(request.id, "reject")} className="rounded-[10px] bg-[#DC2626] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#B91C1C] disabled:opacity-60">Confirmar rechazo</button>
+                    <button type="button" onClick={() => { setRejectingId(null); setRejectionReason(""); }} className="rounded-[10px] px-3 py-2 text-xs font-semibold text-[#6B7280] hover:bg-[#F3F4F6]">Cancelar</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 flex flex-wrap gap-2 border-t border-[#F3F4F6] pt-3">
+                  <button type="button" disabled={busy === request.id} onClick={() => handleDecision(request.id, "approve")} className="inline-flex min-h-[38px] items-center gap-1.5 rounded-[10px] border border-[#BBF7D0] px-3 py-2 text-xs font-semibold text-[#15803D] transition hover:bg-[#F0FDF4] disabled:opacity-60"><FiCheck size={12} />Aprobar</button>
+                  <button type="button" disabled={busy === request.id} onClick={() => setRejectingId(request.id)} className="inline-flex min-h-[38px] items-center gap-1.5 rounded-[10px] border border-[#FECACA] px-3 py-2 text-xs font-semibold text-[#B91C1C] transition hover:bg-[#FEF2F2] disabled:opacity-60"><FiSlash size={12} />Rechazar</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const GestionTab = ({ userId, rows, range, canManageTelework = false }) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [subTab, setSubTab] = useState("atrasos");
+  const [busy, setBusy] = useState(null); // id of row being actioned
+  const [applyModal, setApplyModal] = useState(null); // { date, entryTime }
+
+  const load = useCallback(async () => {
+    if (!userId) return;
+    setLoading(true);
+    try {
+      const res = await getCollaboratorJustificationsPanel(userId, {
+        startDate: range?.startDate,
+        endDate: range?.endDate,
+      });
+      setData(res?.data || null);
+    } catch {
+      toast.error("No se pudo cargar el panel de gestión.");
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, range?.startDate, range?.endDate]);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!canManageTelework && subTab === "teletrabajo") setSubTab("atrasos");
+  }, [canManageTelework, subTab]);
+
+  const handleApplyEntry = async () => {
+    if (!applyModal?.date || !applyModal?.entryTime) return;
+    setBusy(`entry-${applyModal.date}`);
+    let ok = false;
+    try {
+      await applyEntryRegularization({
+        userId,
+        date: normalizeAttendanceDateValue(applyModal.date),
+        entryTime: applyModal.entryTime,
+      });
+      ok = true;
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Error al aplicar entrada.");
+    } finally {
+      setBusy(null);
+      setApplyModal(null);
+    }
+    if (ok) toast.success("Entrada regularizada correctamente.");
+    await load();
+  };
+
+  const handleTransition = async (id, status) => {
+    setBusy(id);
+    let ok = false;
+    try {
+      await transitionAttendanceRegularization(id, { status });
+      ok = true;
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Error al procesar regularizacion.");
+    } finally {
+      setBusy(null);
+    }
+    if (ok) toast.success(`Regularizacion ${REG_STATUS_LABEL[status]?.toLowerCase() || status}.`);
+    await load();
+  };
+
+  if (loading) {
+    return (
+      <div className="flex h-40 items-center justify-center">
+        <FiRefreshCw className="animate-spin text-[#D1D5DB]" size={20} />
+      </div>
+    );
+  }
+
+  const lateJustifications = data?.late_justifications || [];
+  const pendingEntries = data?.pending_entry_regularizations || [];
+  const formalRegs = data?.formal_regularizations || [];
+  const pendingCount = pendingEntries.length + formalRegs.filter(r => r.status === "pending").length;
+
+  return (
+    <div className="flex flex-col">
+      {/* Sub-tab bar */}
+      <div className="flex items-center gap-1 border-b border-[#F3F4F6] px-4 py-2.5">
+        {canManageTelework && (
+          <TabBtn active={subTab === "teletrabajo"} onClick={() => setSubTab("teletrabajo")}>
+            Teletrabajo
+          </TabBtn>
+        )}
+        <TabBtn active={subTab === "atrasos"} onClick={() => setSubTab("atrasos")}>
+          Atrasos {lateJustifications.length > 0 ? `(${lateJustifications.length})` : ""}
+        </TabBtn>
+        <TabBtn active={subTab === "regularizaciones"} onClick={() => setSubTab("regularizaciones")}>
+          Regularizaciones {pendingCount > 0 ? `(${pendingCount})` : ""}
+        </TabBtn>
+        <TabBtn active={subTab === "kilometraje"} onClick={() => setSubTab("kilometraje")}>
+          Kilometraje
+        </TabBtn>
+        <TabBtn active={subTab === "cumpleanos"} onClick={() => setSubTab("cumpleanos")}>
+          Cumpleaños
+        </TabBtn>
+        <button
+          type="button"
+          onClick={load}
+          className="ml-auto cursor-pointer rounded-full p-1.5 text-[#D1D5DB] transition hover:text-[#6B7280]"
+        >
+          <FiRefreshCw size={12} />
+        </button>
+      </div>
+
+      {/* ── Atrasos sub-tab ── */}
+      {subTab === "atrasos" && (
+        <div className="p-4">
+          {!lateJustifications.length ? (
+            <EmptySection icon={FiCheck} title="Sin justificaciones de atraso" description="El colaborador no registra justificaciones de atraso en el sistema." />
+          ) : (
+            <div className="space-y-2">
+              {lateJustifications.map((lj) => {
+                const tone = JUST_STATUS_TONE[lj.status] || "neutral";
+                return (
+                  <div key={lj.id} className="rounded-[12px] border border-[#F3F4F6] bg-white px-4 py-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs font-semibold text-[#1F2937]">{fmtDate(lj.attendance_date)}</span>
+                          {Number(lj.late_minutes) > 0 && (
+                            <span className="rounded-full bg-[#FEE2E2] px-2 py-0.5 text-[11px] font-semibold text-[#DC2626]">
+                              +{lj.late_minutes} min
+                            </span>
+                          )}
+                          <Badge tone={tone}>{JUST_STATUS_LABEL[lj.status] || lj.status}</Badge>
+                        </div>
+                        <p className="text-xs text-[#6B7280]">{lj.reason || "Sin motivo registrado"}</p>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                          <div className="rounded-[10px] border border-[#F3F4F6] bg-[#FAFBFC] px-3 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#9CA3AF]">Hora real</p>
+                            <p className="mt-0.5 font-mono text-xs font-semibold text-[#1F2937]">
+                              {lj.actual_entry_time ? fmtTime(lj.actual_entry_time) : "--"}
+                            </p>
+                          </div>
+                          <div className="rounded-[10px] border border-[#F3F4F6] bg-[#FAFBFC] px-3 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#9CA3AF]">Hora regularizada</p>
+                            <p className="mt-0.5 font-mono text-xs font-semibold text-[#1F2937]">
+                              {lj.regularized_entry_time ? String(lj.regularized_entry_time).slice(0, 5) : "--"}
+                            </p>
+                          </div>
+                          <div className="rounded-[10px] border border-[#F3F4F6] bg-[#FAFBFC] px-3 py-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#9CA3AF]">Registro</p>
+                            <p className="mt-0.5 font-mono text-xs font-semibold text-[#1F2937]">
+                              {lj.created_at ? fmtDate(lj.created_at) : "--"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {subTab === "cumpleanos" && <BirthdayBenefitPanel userId={userId} />}
+
+      {subTab === "kilometraje" && <MileageTab rows={rows} />}
+      {subTab === "teletrabajo" && canManageTelework && <TeleworkRequestsPanel />}
+
+      {/* ── Regularizaciones sub-tab ── */}
+      {subTab === "regularizaciones" && (
+        <div className="p-4 space-y-4">
+
+          {/* Pendientes de entrada (entry_pending_regularization = TRUE) */}
+          {pendingEntries.length > 0 && (
+            <div>
+              <SectionDivider label="Regularizacion de entrada pendiente" count={pendingEntries.length} />
+              <div className="space-y-2">
+                {pendingEntries.map((pe) => (
+                  <div key={pe.date} className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-[#FEF3C7] bg-[#FFFBEB] px-4 py-3">
+                    <div>
+                      <span className="font-mono text-xs font-semibold text-[#1F2937]">{fmtDate(pe.date)}</span>
+                      <p className="mt-0.5 text-[11px] text-[#92400E]">
+                        El colaborador solicito regularizacion de entrada — entrada no marcada
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy === `entry-${pe.date}`}
+                      onClick={() => setApplyModal({ date: pe.date, entryTime: "09:00" })}
+                      className="cursor-pointer rounded-[10px] bg-[#2563EB] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-[#1D4ED8] active:scale-[0.97] disabled:opacity-50"
+                    >
+                      Aplicar entrada
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Regularizaciones formales */}
+          {formalRegs.length > 0 ? (
+            <div>
+              <SectionDivider label="Solicitudes formales" count={formalRegs.length} />
+              <div className="space-y-2">
+                {formalRegs.map((reg) => {
+                  const tone = REG_STATUS_TONE[reg.status] || "neutral";
+                  const isPending = reg.status === "pending";
+                  return (
+                    <div key={reg.id} className="rounded-[12px] border border-[#F3F4F6] bg-white px-4 py-3">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-xs font-semibold text-[#1F2937]">{fmtDate(reg.attendance_date)}</span>
+                            <Badge tone={tone}>{REG_STATUS_LABEL[reg.status] || reg.status}</Badge>
+                            <span className="rounded-full bg-[#F3F4F6] px-2 py-0.5 text-[10px] font-medium text-[#6B7280]">
+                              {REG_TYPE_LABEL[reg.regularization_type] || reg.regularization_type}
+                            </span>
+                          </div>
+                          <p className="text-xs text-[#6B7280]">{reg.reason || "Sin motivo"}</p>
+                          {reg.approver_comment && (
+                            <p className="text-[11px] text-[#9CA3AF]">Comentario TH: {reg.approver_comment}</p>
+                          )}
+                          <div className="flex flex-wrap gap-x-4 font-mono text-[11px] text-[#9CA3AF]">
+                            {reg.requested_timestamp && <span>Solicitado: {fmtTime(reg.requested_timestamp)}</span>}
+                            {reg.requester_name && <span>Por: {reg.requester_name}</span>}
+                          </div>
+                        </div>
+                        {isPending && (
+                          <div className="flex flex-shrink-0 gap-1.5">
+                            <button
+                              type="button"
+                              disabled={busy === reg.id}
+                              onClick={() => handleTransition(reg.id, "approved")}
+                              className="cursor-pointer rounded-[10px] border border-[#DCFCE7] px-2.5 py-1.5 text-[11px] font-semibold text-[#16A34A] transition hover:bg-[#DCFCE7] active:scale-[0.97] disabled:opacity-50"
+                            >
+                              <FiCheck size={11} className="inline mr-1" />Aprobar
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy === reg.id}
+                              onClick={() => handleTransition(reg.id, "rejected")}
+                              className="cursor-pointer rounded-[10px] border border-[#FEE2E2] px-2.5 py-1.5 text-[11px] font-semibold text-[#DC2626] transition hover:bg-[#FEE2E2] active:scale-[0.97] disabled:opacity-50"
+                            >
+                              <FiSlash size={11} className="inline mr-1" />Rechazar
+                            </button>
+                            {reg.regularization_type === "missing_clock_in" && (
+                              <button
+                                type="button"
+                                disabled={busy === reg.id}
+                                onClick={() => setApplyModal({ date: reg.attendance_date, entryTime: reg.requested_timestamp ? fmtTime(reg.requested_timestamp) : "09:00" })}
+                                className="cursor-pointer rounded-[10px] bg-[#2563EB] px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:bg-[#1D4ED8] active:scale-[0.97] disabled:opacity-50"
+                              >
+                                Aplicar entrada
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            !pendingEntries.length && (
+              <EmptySection icon={FiCheck} title="Sin regularizaciones" description="El colaborador no tiene solicitudes de regularizacion registradas." />
+            )
+          )}
+        </div>
+      )}
+
+      {/* Modal: aplicar entrada */}
+      {applyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="w-full max-w-sm rounded-[20px] bg-white p-6 shadow-xl">
+            <h3 className="mb-1 text-base font-semibold text-[#1F2937]">Aplicar entrada regularizada</h3>
+            <p className="mb-4 text-xs text-[#6B7280]">
+              Fecha: <strong>{fmtDate(applyModal.date)}</strong> · Ingresa la hora de entrada a registrar
+            </p>
+            <div className="mb-5 flex flex-col gap-1.5">
+              <label className="text-[11px] font-semibold text-[#6B7280]">Hora de entrada</label>
+              <input
+                type="time"
+                value={applyModal.entryTime}
+                onChange={(e) => setApplyModal((prev) => ({ ...prev, entryTime: e.target.value }))}
+                className="rounded-[12px] border border-[#D1D5DB] px-3 py-2.5 font-mono text-sm text-[#1F2937] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setApplyModal(null)}
+                className="cursor-pointer rounded-[12px] px-4 py-2 text-sm font-medium text-[#6B7280] hover:bg-[#F3F4F6]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={!!busy}
+                onClick={handleApplyEntry}
+                className="cursor-pointer rounded-[12px] bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1D4ED8] active:scale-[0.97] disabled:opacity-50"
+              >
+                Aplicar entrada
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── Expediente panel ─────────────────────────────────────────────────────────
+
+const GeneralRegularizationsModal = ({ open, onClose }) => {
+  const [filters, setFilters] = useState({
+    search: "",
+    startDate: "",
+    endDate: "",
+    regularizationType: "",
+  });
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [selectedEntries, setSelectedEntries] = useState({});
+  const [selectedFormal, setSelectedFormal] = useState({});
+  const [entryTimes, setEntryTimes] = useState({});
+
+  const load = useCallback(async () => {
+    if (!open) return;
+    setLoading(true);
+    try {
+      const res = await getAttendanceRegularizationsPanel(filters);
+      setData(res?.data || null);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "No se pudo cargar la regularizacion general.");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [filters, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    void load();
+  }, [open, load]);
+
+  useEffect(() => {
+    if (!open) return;
+    const rows = Array.isArray(data?.pending_entry_regularizations)
+      ? data.pending_entry_regularizations
+      : [];
+    const nextTimes = {};
+    rows.forEach((row) => {
+      const key = `${row.user_id}:${normalizeAttendanceDateValue(row.date)}`;
+      nextTimes[key] = row.entry_time ? fmtTime(row.entry_time) : "09:00";
+    });
+    setEntryTimes(nextTimes);
+    setSelectedEntries({});
+    setSelectedFormal({});
+  }, [data, open]);
+
+  const pendingEntries = Array.isArray(data?.pending_entry_regularizations)
+    ? data.pending_entry_regularizations
+    : [];
+  const formalRegs = Array.isArray(data?.formal_regularizations)
+    ? data.formal_regularizations
+    : [];
+  const summary = data?.summary || {};
+
+  const selectedEntryRows = pendingEntries.filter((row) => {
+    const key = `${row.user_id}:${normalizeAttendanceDateValue(row.date)}`;
+    return selectedEntries[key];
+  });
+  const selectedFormalRows = formalRegs.filter((row) => selectedFormal[row.id]);
+
+  const handleToggleAllEntries = () => {
+    const shouldSelectAll = selectedEntryRows.length !== pendingEntries.length;
+    setSelectedEntries(
+      shouldSelectAll
+        ? pendingEntries.reduce((acc, row) => {
+            acc[`${row.user_id}:${normalizeAttendanceDateValue(row.date)}`] = true;
+            return acc;
+          }, {})
+        : {}
+    );
+  };
+
+  const handleToggleAllFormal = () => {
+    const shouldSelectAll = selectedFormalRows.length !== formalRegs.length;
+    setSelectedFormal(
+      shouldSelectAll
+        ? formalRegs.reduce((acc, row) => {
+            acc[row.id] = true;
+            return acc;
+          }, {})
+        : {}
+    );
+  };
+
+  const handleBatchApplyEntries = async () => {
+    if (!selectedEntryRows.length) return;
+    setSubmitting(true);
+    let okCount = 0;
+    let failCount = 0;
+    for (const row of selectedEntryRows) {
+      const date = normalizeAttendanceDateValue(row.date);
+      const key = `${row.user_id}:${date}`;
+      try {
+        await applyEntryRegularization({
+          userId: row.user_id,
+          date,
+          entryTime: entryTimes[key] || "09:00",
+        });
+        okCount += 1;
+      } catch {
+        failCount += 1;
+      }
+    }
+    setSubmitting(false);
+    if (okCount) toast.success(`${okCount} entrada(s) regularizada(s).`);
+    if (failCount) toast.error(`${failCount} regularizacion(es) no se pudieron aplicar.`);
+    await load();
+  };
+
+  const handleBatchTransition = async (status) => {
+    if (!selectedFormalRows.length) return;
+    setSubmitting(true);
+    let okCount = 0;
+    let failCount = 0;
+    for (const row of selectedFormalRows) {
+      try {
+        await transitionAttendanceRegularization(row.id, { status });
+        okCount += 1;
+      } catch {
+        failCount += 1;
+      }
+    }
+    setSubmitting(false);
+    if (okCount) {
+      toast.success(
+        `${okCount} solicitud(es) ${status === "approved" ? "aprobada(s)" : "rechazada(s)"}`
+      );
+    }
+    if (failCount) toast.error(`${failCount} solicitud(es) no se pudieron actualizar.`);
+    await load();
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={() => !submitting && onClose?.()}
+      title="Regularizacion general"
+      maxWidth="max-w-6xl"
+    >
+      <div className="space-y-5">
+        <div className="grid gap-3 md:grid-cols-4">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">
+              Buscar colaborador
+            </span>
+            <div className="flex h-11 items-center gap-2 rounded-[14px] border border-[#D1D5DB] px-3 focus-within:border-[#2563EB] focus-within:ring-2 focus-within:ring-[#0EA5E9]/20">
+              <FiSearch size={14} className="text-[#9CA3AF]" />
+              <input
+                type="text"
+                value={filters.search}
+                onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
+                placeholder="Nombre, correo, cargo o cedula"
+                className="w-full bg-transparent text-sm text-[#1F2937] outline-none placeholder:text-[#9CA3AF]"
+              />
+            </div>
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">
+              Desde
+            </span>
+            <input
+              type="date"
+              value={filters.startDate}
+              onChange={(e) => setFilters((prev) => ({ ...prev, startDate: e.target.value }))}
+              className="h-11 rounded-[14px] border border-[#D1D5DB] px-3 text-sm text-[#1F2937] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">
+              Hasta
+            </span>
+            <input
+              type="date"
+              value={filters.endDate}
+              onChange={(e) => setFilters((prev) => ({ ...prev, endDate: e.target.value }))}
+              className="h-11 rounded-[14px] border border-[#D1D5DB] px-3 text-sm text-[#1F2937] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">
+              Tipo formal
+            </span>
+            <select
+              value={filters.regularizationType}
+              onChange={(e) => setFilters((prev) => ({ ...prev, regularizationType: e.target.value }))}
+              className="h-11 rounded-[14px] border border-[#D1D5DB] px-3 text-sm text-[#1F2937] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
+            >
+              {GENERAL_REGULARIZATION_TYPE_OPTIONS.map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 rounded-[16px] border border-[#E5E7EB] bg-[#F9FAFB] p-3">
+          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#1F2937] shadow-sm">
+            Total: {summary.total ?? 0}
+          </span>
+          <span className="rounded-full bg-[#FFFBEB] px-3 py-1 text-xs font-semibold text-[#B45309]">
+            Entradas pendientes: {summary.pending_entries ?? 0}
+          </span>
+          <span className="rounded-full bg-[#EFF6FF] px-3 py-1 text-xs font-semibold text-[#1D4ED8]">
+            Solicitudes formales de regularizacion: {summary.formal_pending ?? 0}
+          </span>
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading || submitting}
+            className="ml-auto inline-flex cursor-pointer items-center gap-1.5 rounded-[12px] border border-[#E5E7EB] bg-white px-3.5 py-2 text-xs font-semibold text-[#1F2937] transition hover:bg-[#F3F4F6] disabled:cursor-wait disabled:opacity-60"
+          >
+            <FiRefreshCw className={loading ? "animate-spin" : ""} size={12} />
+            Actualizar listado
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex h-56 items-center justify-center">
+            <FiRefreshCw className="animate-spin text-[#D1D5DB]" size={22} />
+          </div>
+        ) : (
+          <div className="grid gap-5 xl:grid-cols-[1.05fr_1fr]">
+            <section className="overflow-hidden rounded-[20px] border border-[#FDE68A] bg-[#FFFBEB]">
+              <div className="flex flex-wrap items-center gap-2 border-b border-[#FDE68A] px-4 py-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-[#92400E]">Entradas pendientes</h3>
+                  <p className="text-xs text-[#B45309]">
+                    Solicitudes directas con incumplimiento de entrada faltante.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleToggleAllEntries}
+                  disabled={!pendingEntries.length || submitting}
+                  className="ml-auto cursor-pointer rounded-[10px] border border-[#FCD34D] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#92400E] transition hover:bg-[#FEF3C7] disabled:opacity-50"
+                >
+                  {selectedEntryRows.length === pendingEntries.length && pendingEntries.length
+                    ? "Quitar seleccion"
+                    : "Seleccionar todas"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBatchApplyEntries}
+                  disabled={!selectedEntryRows.length || submitting}
+                  className="cursor-pointer rounded-[10px] bg-[#2563EB] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-[#1D4ED8] disabled:opacity-50"
+                >
+                  Aplicar seleccionadas ({selectedEntryRows.length})
+                </button>
+              </div>
+              <div className="max-h-[62dvh] space-y-2 overflow-y-auto p-3">
+                {!pendingEntries.length ? (
+                  <EmptySection
+                    icon={FiCheck}
+                    title="Sin entradas pendientes"
+                    description="No hay entradas faltantes pendientes con los filtros actuales."
+                  />
+                ) : (
+                  pendingEntries.map((row) => {
+                    const key = `${row.user_id}:${normalizeAttendanceDateValue(row.date)}`;
+                    return (
+                      <label
+                        key={key}
+                        className="flex flex-col gap-3 rounded-[16px] border border-[#FDE68A] bg-white p-4"
+                      >
+                        <div className="flex flex-wrap items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(selectedEntries[key])}
+                            onChange={(e) =>
+                              setSelectedEntries((prev) => ({ ...prev, [key]: e.target.checked }))
+                            }
+                            className="mt-1 h-4 w-4 rounded border-[#D1D5DB] text-[#2563EB] focus:ring-[#0EA5E9]"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-semibold text-[#1F2937]">{row.fullname}</span>
+                              <span className="rounded-full bg-[#FFFBEB] px-2 py-0.5 text-[10px] font-semibold text-[#B45309]">
+                                {fmtDate(row.date)}
+                              </span>
+                            </div>
+                            <p className="text-xs text-[#6B7280]">
+                              {row.cargo || "Sin cargo"}
+                              {row.department_name ? ` · ${row.department_name}` : ""}
+                            </p>
+                            <p className="text-[11px] font-semibold text-[#B45309]">
+                              Incumplimiento: Entrada faltante
+                            </p>
+                            <p className="font-mono text-[11px] text-[#9CA3AF]">
+                              {row.email || "--"}
+                              {row.cedula ? ` · CI ${row.cedula}` : ""}
+                            </p>
+                            {row.reason ? (
+                              <div className="rounded-[12px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2 text-xs text-[#92400E]">
+                                <span className="font-semibold">Observacion:</span> {row.reason}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-end gap-3">
+                          <label className="flex min-w-[180px] flex-col gap-1">
+                            <span className="text-[11px] font-semibold text-[#6B7280]">Hora de entrada</span>
+                            <input
+                              type="time"
+                              value={entryTimes[key] || "09:00"}
+                              onChange={(e) =>
+                                setEntryTimes((prev) => ({ ...prev, [key]: e.target.value }))
+                              }
+                              className="h-10 rounded-[12px] border border-[#D1D5DB] px-3 font-mono text-sm text-[#1F2937] outline-none focus:border-[#2563EB]"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            disabled={submitting}
+                            onClick={async () => {
+                              setSubmitting(true);
+                              try {
+                                await applyEntryRegularization({
+                                  userId: row.user_id,
+                                  date: normalizeAttendanceDateValue(row.date),
+                                  entryTime: entryTimes[key] || "09:00",
+                                });
+                                toast.success("Entrada regularizada correctamente.");
+                                await load();
+                              } catch (err) {
+                                toast.error(err?.response?.data?.message || "Error al aplicar entrada.");
+                              } finally {
+                                setSubmitting(false);
+                              }
+                            }}
+                            className="cursor-pointer rounded-[12px] border border-[#BFDBFE] bg-[#EFF6FF] px-3 py-2 text-xs font-semibold text-[#1D4ED8] transition hover:bg-[#DBEAFE] disabled:opacity-50"
+                          >
+                            Aplicar ahora
+                          </button>
+                        </div>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+
+            <section className="overflow-hidden rounded-[20px] border border-[#DBEAFE] bg-[#F8FBFF]">
+              <div className="flex flex-wrap items-center gap-2 border-b border-[#DBEAFE] px-4 py-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-[#1D4ED8]">Solicitudes formales de regularizacion</h3>
+                  <p className="text-xs text-[#4B5563]">
+                    Aprobacion o rechazo masivo de solicitudes formales pendientes.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleToggleAllFormal}
+                  disabled={!formalRegs.length || submitting}
+                  className="ml-auto cursor-pointer rounded-[10px] border border-[#BFDBFE] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#1D4ED8] transition hover:bg-[#EFF6FF] disabled:opacity-50"
+                >
+                  {selectedFormalRows.length === formalRegs.length && formalRegs.length
+                    ? "Quitar seleccion"
+                    : "Seleccionar todas"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBatchTransition("approved")}
+                  disabled={!selectedFormalRows.length || submitting}
+                  className="cursor-pointer rounded-[10px] border border-[#DCFCE7] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#16A34A] transition hover:bg-[#DCFCE7] disabled:opacity-50"
+                >
+                  Aprobar ({selectedFormalRows.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBatchTransition("rejected")}
+                  disabled={!selectedFormalRows.length || submitting}
+                  className="cursor-pointer rounded-[10px] border border-[#FEE2E2] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#DC2626] transition hover:bg-[#FEE2E2] disabled:opacity-50"
+                >
+                  Rechazar ({selectedFormalRows.length})
+                </button>
+              </div>
+              <div className="max-h-[62dvh] space-y-2 overflow-y-auto p-3">
+                {!formalRegs.length ? (
+                  <EmptySection
+                    icon={FiCheck}
+                    title="Sin solicitudes formales"
+                    description="No hay solicitudes formales pendientes con los filtros actuales."
+                  />
+                ) : (
+                  formalRegs.map((row) => (
+                    <label
+                      key={row.id}
+                      className="flex flex-col gap-3 rounded-[16px] border border-[#DBEAFE] bg-white p-4"
+                    >
+                      <div className="flex flex-wrap items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(selectedFormal[row.id])}
+                          onChange={(e) =>
+                            setSelectedFormal((prev) => ({ ...prev, [row.id]: e.target.checked }))
+                          }
+                          className="mt-1 h-4 w-4 rounded border-[#D1D5DB] text-[#2563EB] focus:ring-[#0EA5E9]"
+                        />
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-semibold text-[#1F2937]">{row.affected_name}</span>
+                            <span className="rounded-full bg-[#EFF6FF] px-2 py-0.5 text-[10px] font-semibold text-[#1D4ED8]">
+                              {REG_TYPE_LABEL[row.regularization_type] || row.regularization_type}
+                            </span>
+                            <span className="rounded-full bg-[#F3F4F6] px-2 py-0.5 text-[10px] font-semibold text-[#6B7280]">
+                              {fmtDate(row.attendance_date)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-[#6B7280]">
+                            {row.cargo || "Sin cargo"}
+                            {row.department_name ? ` · ${row.department_name}` : ""}
+                          </p>
+                          <p className="text-[11px] font-semibold text-[#1D4ED8]">
+                            Incumplimiento: {REG_TYPE_LABEL[row.regularization_type] || row.regularization_type}
+                          </p>
+                          <p className="font-mono text-[11px] text-[#9CA3AF]">
+                            {row.affected_email || "--"}
+                            {row.cedula ? ` · CI ${row.cedula}` : ""}
+                          </p>
+                          {row.reason ? (
+                            <div className="rounded-[12px] border border-[#DBEAFE] bg-[#F8FBFF] px-3 py-2 text-xs text-[#374151]">
+                              <span className="font-semibold text-[#1D4ED8]">Observacion:</span> {row.reason}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </label>
+                  ))
+                )}
+              </div>
+            </section>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+};
+
+const ExpedientePanel = ({ detail, loading, onScheduleMeeting, onDownloadRh, pLabel, range, canManageTelework = false }) => {
+  const [activeTab, setActiveTab] = useState(TABS.MARKS);
+  const [selectedMark, setSelectedMark] = useState(null);
+
+  useEffect(() => { setActiveTab(TABS.MARKS); }, [detail]);
+  useEffect(() => { setSelectedMark(null); }, [activeTab, detail]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-1 items-center justify-center py-20">
+        <FiRefreshCw className="animate-spin text-[#D1D5DB]" size={22} />
+      </div>
+    );
+  }
+
+  const collaborator = detail?.data?.collaborator;
+
+  if (!collaborator) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16">
+        <FiUser size={26} className="text-[#D1D5DB]" />
+        <p className="text-sm font-semibold text-[#1F2937]">Selecciona un expediente</p>
+        <p className="max-w-64 text-center text-xs text-[#6B7280]">
+          Elige un colaborador en la lista para ver su reporte detallado de asistencia.
+        </p>
+      </div>
+    );
+  }
+
+  const summary = detail.data.summary || {};
+  const rows = Array.isArray(detail.data.rows) ? detail.data.rows : [];
+  const incidents = Array.isArray(detail.data.incidents) ? detail.data.incidents : [];
+  const permissions = Array.isArray(detail.data.permissions) ? detail.data.permissions : [];
+  const breachCount = Number(summary.breaches_total || 0);
+
+  const STATS = [
+    { label: "Marcaciones",     value: summary.attendance_days ?? "--",  tone: "default" },
+    { label: "Cerradas",        value: summary.completed_days ?? "--",   tone: "green" },
+    { label: "Incumplimientos", value: breachCount,                       tone: breachCount > 0 ? "red" : "green" },
+    { label: "Extra real",      value: fmtOvertime(summary), tone: "default" },
+    { label: "Horas oper.",     value: fmtHours(summary.operational_hours),   tone: "default" },
+  ];
+
+  const VAL_COLOR = { red: "text-[#DC2626]", green: "text-[#16A34A]", amber: "text-[#D97706]", default: "text-[#1F2937]" };
+
+  return (
+    <div className="flex flex-col overflow-hidden">
+      {/* Collaborator header */}
+      <div className="flex flex-col gap-3 border-b border-[#F3F4F6] px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[#1E293B] text-sm font-semibold text-white">
+            {getInitials(collaborator.fullname)}
+          </div>
+          <div>
+            <h2 className="text-base font-semibold text-[#1F2937]">{collaborator.fullname}</h2>
+            <p className="text-xs text-[#6B7280]">
+              {collaborator.cargo || "Sin cargo"}
+              {collaborator.department_name ? ` · ${collaborator.department_name}` : ""}
+            </p>
+            <p className="font-mono text-[11px] text-[#D1D5DB]">
+              CI: {collaborator.cedula || "--"} · {collaborator.email || "--"}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onDownloadRh}
+          className="cursor-pointer inline-flex items-center gap-1.5 self-start rounded-[12px] border border-[#E5E7EB] bg-white px-3.5 py-2 text-xs font-semibold text-[#1F2937] shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition hover:bg-[#F9FAFB] active:scale-[0.97]"
+        >
+          <FiDownload size={12} />
+          Descargar F-RH
+        </button>
+      </div>
+
+      {/* Mini stats */}
+      <div className="flex divide-x divide-[#F3F4F6] overflow-x-auto border-b border-[#F3F4F6]">
+        {STATS.map((s) => (
+          <div key={s.label} className="flex min-w-[90px] flex-col gap-0.5 px-4 py-3">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">{s.label}</span>
+            <span className={`font-mono text-base font-semibold ${VAL_COLOR[s.tone]}`}>{s.value}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-[#F3F4F6] px-4 py-2.5">
+        {[
+          { key: TABS.MARKS,    label: "Marcaciones" },
+          { key: TABS.PERMISSIONS, label: permissions.length > 0 ? `Permisos (${permissions.length})` : "Permisos" },
+          { key: TABS.BREACHES, label: breachCount > 0 ? `Incumplimientos (${breachCount})` : "Incumplimientos" },
+          { key: TABS.OVERTIME, label: "Horas extra" },
+          { key: TABS.EXITS,    label: "Marcaciones operacionales" },
+          { key: TABS.MAP,      label: "Mapa" },
+          { key: TABS.GESTION,  label: "Gestión" },
+        ].map((tab) => (
+          <TabBtn key={tab.key} active={activeTab === tab.key} onClick={() => setActiveTab(tab.key)}>
+            {tab.label}
+          </TabBtn>
+        ))}
+        {activeTab === TABS.BREACHES && incidents.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              exportCsv(
+                incidents,
+                `incumplimientos_${String(collaborator.fullname || "colaborador").replace(/\s+/g, "_")}.csv`
+              );
+              toast.success("Exportado.");
+            }}
+            className="cursor-pointer ml-auto flex items-center gap-1.5 rounded-[12px] border border-[#E5E7EB] px-3 py-1.5 text-xs font-medium text-[#6B7280] hover:bg-[#F9FAFB] active:scale-[0.97]"
+          >
+            <FiDownload size={12} />
+            Exportar
+          </button>
+        )}
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-y-auto">
+        {(activeTab === TABS.MARKS || activeTab === TABS.EXITS) && selectedMark?.point ? (
+          <SelectedMarkPanel selectedMark={selectedMark} onClose={() => setSelectedMark(null)} />
+        ) : null}
+
+        {activeTab === TABS.MARKS && (
+          <div className="p-4">
+            <MarksTable rows={rows} variant="regularized" onMarkClick={setSelectedMark} />
+          </div>
+        )}
+
+        {activeTab === TABS.PERMISSIONS && <PermissionsTab permissions={permissions} rows={rows} />}
+
+        {activeTab === TABS.BREACHES && (
+          <div className="space-y-2 p-4">
+            {incidents.length ? (
+              incidents.map((breach, idx) => (
+                <BreachRow
+                  key={`${breach.date}-${breach.breach_type}-${idx}`}
+                  breach={breach}
+                  onSchedule={(b) =>
+                    onScheduleMeeting({ userId: collaborator.user_id, fullname: collaborator.fullname, breach: b })
+                  }
+                />
+              ))
+            ) : (
+              <EmptySection
+                icon={FiCheck}
+                title="Sin incumplimientos"
+                description="El colaborador no registra novedades de asistencia en este periodo."
+              />
+            )}
+          </div>
+        )}
+
+        {activeTab === TABS.OVERTIME && <OvertimeTab rows={rows} incidents={incidents} />}
+
+        {activeTab === TABS.EXITS && <ExitsTab rows={rows} onMarkClick={setSelectedMark} />}
+
+        {activeTab === TABS.MAP && (
+          <div className="p-4">
+            <AttendanceMapView
+              rows={rows}
+              getGeoPoints={(row) => row.geo_points || []}
+              selectedUserId={collaborator.user_id}
+            />
+          </div>
+        )}
+
+        {activeTab === TABS.GESTION && (
+          <GestionTab userId={collaborator.user_id} rows={rows} range={range} canManageTelework={canManageTelework} />
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+const AsistenciaReportes = () => {
+  const { user } = useAuth();
+  const canManageTelework = hasExactTalentHumanRole(user);
+  const [periodMode, setPeriodMode] = useState(PM.MONTH);
+  const [dayValue, setDayValue] = useState(todayIso());
+  const [monthValue, setMonthValue] = useState(currentMonth());
+  const [yearValue, setYearValue] = useState(currentYear());
+  const [search, setSearch] = useState("");
+
+  const [overview, setOverview] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [loadingOverview, setLoadingOverview] = useState(false);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [downloadingBulkRh, setDownloadingBulkRh] = useState(false);
+  const [downloadingMonthlyReport, setDownloadingMonthlyReport] = useState(false);
+
+  const [selectedId, setSelectedId] = useState(null);
+  const [meetingTarget, setMeetingTarget] = useState(null);
+  const [showDetail, setShowDetail] = useState(false);
+  const [generalRegularizationsOpen, setGeneralRegularizationsOpen] = useState(false);
+
+  const range = useMemo(
+    () => buildRange(periodMode, dayValue, monthValue, yearValue),
+    [periodMode, dayValue, monthValue, yearValue]
+  );
+
+  const pLabel = useMemo(() => buildPeriodLabel(periodMode, range), [periodMode, range]);
+
+  const loadOverview = useCallback(async () => {
+    if (!range?.startDate || !range?.endDate) return;
+    setLoadingOverview(true);
+    try {
+      const res = await getAttendanceWorkspaceOverview({
+        startDate: range.startDate,
+        endDate: range.endDate,
+        search,
+      });
+      setOverview(res);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "No se pudo cargar la reporteria de asistencia.");
+      setOverview(null);
+    } finally {
+      setLoadingOverview(false);
+    }
+  }, [range?.startDate, range?.endDate, search]);
+
+  const loadDetail = useCallback(async () => {
+    if (!selectedId || !range?.startDate || !range?.endDate) {
+      setDetail(null);
+      return;
+    }
+    setLoadingDetail(true);
+    try {
+      const res = await getAttendanceWorkspaceCollaborator(selectedId, {
+        startDate: range.startDate,
+        endDate: range.endDate,
+      });
+      setDetail(res);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "No se pudo cargar el expediente.");
+      setDetail(null);
+    } finally {
+      setLoadingDetail(false);
+    }
+  }, [selectedId, range?.startDate, range?.endDate]);
+
+  useEffect(() => { loadOverview(); }, [loadOverview]);
+  useEffect(() => { loadDetail(); }, [loadDetail]);
+
+  useEffect(() => {
+    if (!overview?.data?.length) return;
+    const ids = new Set(overview.data.map((c) => Number(c.user_id)));
+    if (selectedId && !ids.has(Number(selectedId))) {
+      setSelectedId(null);
+      setDetail(null);
+    }
+  }, [overview, selectedId]);
+
+  const collaborators = useMemo(() => {
+    const list = Array.isArray(overview?.data) ? overview.data : [];
+    return [...list].sort(
+      (a, b) => Number(b.metrics?.breaches_total || 0) - Number(a.metrics?.breaches_total || 0)
+    );
+  }, [overview]);
+
+  const handleSelectCollaborator = (id) => {
+    setSelectedId(Number(id));
+    setShowDetail(true);
+  };
+
+  const handleDownloadRh = async () => {
+    if (!selectedId || !range?.startDate || !range?.endDate) return;
+    try {
+      await downloadAttendancePDF(selectedId, range.startDate, range.endDate, {
+        periodType: periodMode === PM.YEAR ? "annual" : "monthly",
+        year: periodMode === PM.YEAR ? Number(yearValue) : undefined,
+      });
+      toast.success("Formato F-RH descargado.");
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "No se pudo descargar el formato F-RH.");
+    }
+  };
+
+  const handleDownloadBulkRh = async () => {
+    if (!range?.startDate || !range?.endDate || downloadingBulkRh) return;
+    setDownloadingBulkRh(true);
+    try {
+      await downloadAttendanceBulkPDF({
+        startDate: range.startDate,
+        endDate: range.endDate,
+        periodType: periodMode === PM.YEAR ? "annual" : "monthly",
+        year: periodMode === PM.YEAR ? Number(yearValue) : undefined,
+        search,
+      });
+      toast.success("Formato F-RH general descargado.");
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "No se pudo descargar el F-RH general.");
+    } finally {
+      setDownloadingBulkRh(false);
+    }
+  };
+
+  const handleDownloadMonthlyReport = async (format = "pdf") => {
+    if (!range?.startDate || !range?.endDate || downloadingMonthlyReport) return;
+    setDownloadingMonthlyReport(true);
+    try {
+      await downloadAttendanceMonthlyReport({
+        start: range.startDate,
+        end: range.endDate,
+        search,
+        format,
+      });
+      toast.success(format === "excel" ? "Reporte Excel descargado." : "Reporte PDF descargado.");
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "No se pudo generar el reporte mensual.");
+    } finally {
+      setDownloadingMonthlyReport(false);
+    }
+  };
+
+  const s = overview?.summary || {};
+  const OVERVIEW_STATS = [
+    { label: "Expedientes",      value: s.collaborators_total ?? "--",        tone: "default" },
+    { label: "Con incumpl.",     value: s.collaborators_with_breaches ?? "--", tone: Number(s.collaborators_with_breaches || 0) > 0 ? "amber" : "default" },
+    { label: "Incumplimientos",  value: s.breaches_total ?? "--",              tone: Number(s.breaches_total || 0) > 0 ? "red" : "default" },
+    { label: "Extra real",       value: fmtOvertime(s),       tone: "default" },
+    { label: "Horas oper.",      value: fmtHours(s.operational_hours),         tone: "default" },
+  ];
+  const STAT_COLOR = { red: "text-[#DC2626]", amber: "text-[#D97706]", default: "text-[#1F2937]" };
+
+  return (
+    <div className={`${WORKSPACE_PAGE_CLASS} gap-4`}>
+      {/* Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="mb-1.5 inline-flex items-center rounded-full bg-[#F3F4F6] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">
+            Talento Humano
+          </div>
+          <h1 className="text-xl font-semibold tracking-tight text-[#1F2937]">Asistencia por expediente</h1>
+          <p className="text-xs text-[#6B7280]">{pLabel}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setGeneralRegularizationsOpen(true)}
+            className="cursor-pointer inline-flex items-center gap-1.5 rounded-[12px] border border-[#E5E7EB] bg-white px-3.5 py-2 text-xs font-semibold text-[#1F2937] shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition hover:bg-[#F9FAFB] active:scale-[0.97]"
+          >
+            <FiEdit2 size={12} />
+            Regularizacion general
+          </button>
+          <button
+            type="button"
+            onClick={loadOverview}
+            disabled={loadingOverview}
+            className="cursor-pointer inline-flex items-center gap-1.5 rounded-[12px] border border-[#E5E7EB] bg-white px-3.5 py-2 text-xs font-semibold text-[#6B7280] shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition hover:bg-[#F9FAFB] active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+          >
+            <FiRefreshCw className={loadingOverview ? "animate-spin" : ""} size={12} />
+            Actualizar
+          </button>
+          <button
+            type="button"
+            onClick={handleDownloadBulkRh}
+            disabled={downloadingBulkRh}
+            className="cursor-pointer inline-flex items-center gap-1.5 rounded-[12px] border border-[#E5E7EB] bg-white px-3.5 py-2 text-xs font-semibold text-[#1F2937] shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition hover:bg-[#F9FAFB] active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+          >
+            <FiDownload className={downloadingBulkRh ? "animate-spin" : ""} size={12} />
+            {downloadingBulkRh ? "Generando..." : "F-RH general"}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDownloadMonthlyReport("pdf")}
+            disabled={downloadingMonthlyReport}
+            className="cursor-pointer inline-flex items-center gap-1.5 rounded-[12px] border border-[#E5E7EB] bg-white px-3.5 py-2 text-xs font-semibold text-[#1F2937] shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition hover:bg-[#F9FAFB] active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+          >
+            <FiDownload className={downloadingMonthlyReport ? "animate-spin" : ""} size={12} />
+            {downloadingMonthlyReport ? "Generando..." : "Reporte PDF"}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDownloadMonthlyReport("excel")}
+            disabled={downloadingMonthlyReport}
+            className="cursor-pointer inline-flex items-center gap-1.5 rounded-[12px] border border-[#D9E8C8] bg-[#F6FBEF] px-3.5 py-2 text-xs font-semibold text-[#3F6212] shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition hover:bg-[#EEF8DE] active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+          >
+            <FiDownload className={downloadingMonthlyReport ? "animate-spin" : ""} size={12} />
+            {downloadingMonthlyReport ? "Generando..." : "Reporte Excel"}
+          </button>
+        </div>
+      </div>
+
+      {/* Toolbar: period + search */}
+      <div className="rounded-[16px] border border-[#E5E7EB] bg-white px-4 py-3 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Period pills */}
+          <div className="flex items-center gap-0.5 rounded-full bg-[#F3F4F6] p-1">
+            {[{ key: PM.DAY, label: "Hoy" }, { key: PM.MONTH, label: "Mes" }, { key: PM.YEAR, label: "Año" }].map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setPeriodMode(opt.key)}
+                className={`cursor-pointer rounded-full px-3 py-1 text-xs font-semibold transition active:scale-[0.97] ${
+                  periodMode === opt.key
+                    ? "bg-white text-[#1F2937] shadow-[0_1px_4px_rgba(0,0,0,0.08)]"
+                    : "text-[#6B7280] hover:text-[#1F2937]"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Date picker */}
+          {periodMode === PM.DAY && (
+            <input type="date" value={dayValue} onChange={(e) => setDayValue(e.target.value)}
+              className="h-9 rounded-[12px] border border-[#D1D5DB] px-3 text-sm text-[#1F2937] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
+            />
+          )}
+          {periodMode === PM.MONTH && (
+            <input type="month" value={monthValue} onChange={(e) => setMonthValue(e.target.value)}
+              className="h-9 rounded-[12px] border border-[#D1D5DB] px-3 text-sm text-[#1F2937] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
+            />
+          )}
+          {periodMode === PM.YEAR && (
+            <input type="number" min="2020" max="2100" value={yearValue} onChange={(e) => setYearValue(e.target.value)}
+              className="h-9 w-24 rounded-[12px] border border-[#D1D5DB] px-3 text-sm text-[#1F2937] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
+            />
+          )}
+
+          {/* Search */}
+          <div className="flex h-9 min-w-[180px] flex-1 items-center gap-2 rounded-[12px] border border-[#D1D5DB] px-3 focus-within:border-[#2563EB] focus-within:ring-2 focus-within:ring-[#0EA5E9]/20">
+            <FiSearch size={13} className="shrink-0 text-[#D1D5DB]" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Nombre, cedula o cargo"
+              className="w-full bg-transparent text-sm text-[#1F2937] outline-none placeholder:text-[#D1D5DB]"
+            />
+            {search && (
+              <button type="button" onClick={() => setSearch("")} className="cursor-pointer text-[#D1D5DB] hover:text-[#6B7280]">
+                <FiX size={12} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {overview?.meta?.warnings?.length ? (
+          <div className="mt-2.5 rounded-[10px] bg-[#FEF3C7] px-3 py-2 text-xs text-[#D97706]">
+            {overview.meta.warnings[0]}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Summary stats strip */}
+      <div className="flex flex-wrap divide-x divide-[#F3F4F6] overflow-hidden rounded-[16px] border border-[#E5E7EB] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+        {OVERVIEW_STATS.map((stat) => (
+          <div key={stat.label} className="flex min-w-[100px] flex-1 flex-col gap-0.5 px-4 py-3">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">{stat.label}</span>
+            <span className={`font-mono text-xl font-semibold ${STAT_COLOR[stat.tone] || STAT_COLOR.default}`}>
+              {stat.value}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Main grid */}
+      <div className="grid gap-4 lg:grid-cols-[300px_1fr]">
+        {/* Collaborator list */}
+        <div
+          className={`flex flex-col rounded-[16px] border border-[#E5E7EB] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)] ${
+            showDetail ? "hidden lg:flex" : "flex"
+          }`}
+        >
+          <div className="flex items-center justify-between border-b border-[#F3F4F6] px-4 py-3">
+            <span className="text-sm font-semibold text-[#1F2937]">Expedientes</span>
+            <span className="rounded-full bg-[#F3F4F6] px-2.5 py-0.5 text-xs font-semibold text-[#6B7280]">
+              {collaborators.length}
+            </span>
+          </div>
+
+          <div className="max-h-[72vh] overflow-y-auto p-2">
+            {loadingOverview ? (
+              <div className="flex h-40 items-center justify-center">
+                <FiRefreshCw className="animate-spin text-[#D1D5DB]" size={20} />
+              </div>
+            ) : collaborators.length ? (
+              <div className="space-y-0.5">
+                {collaborators.map((collab) => {
+                  const breaches = Number(collab.metrics?.breaches_total || 0);
+                  const isActive = Number(selectedId) === Number(collab.user_id);
+                  return (
+                    <button
+                      key={collab.user_id}
+                      type="button"
+                      onClick={() => handleSelectCollaborator(collab.user_id)}
+                      className={`group w-full cursor-pointer rounded-[12px] px-3 py-2.5 text-left transition active:scale-[0.98] ${
+                        isActive ? "bg-[#1E293B]" : "hover:bg-[#F9FAFB]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                          isActive ? "bg-white/10 text-white" : "bg-[#F3F4F6] text-[#6B7280]"
+                        }`}>
+                          {getInitials(collab.fullname)}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className={`truncate text-xs font-semibold ${isActive ? "text-white" : "text-[#1F2937]"}`}>
+                            {collab.fullname}
+                          </p>
+                          <p className={`truncate text-[11px] ${isActive ? "text-white/50" : "text-[#6B7280]"}`}>
+                            {collab.cargo || "Sin cargo"}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-0.5">
+                          {breaches > 0 ? (
+                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                              isActive ? "bg-[#DC2626]/20 text-[#FCA5A5]" : "bg-[#FEE2E2] text-[#DC2626]"
+                            }`}>
+                              {breaches}
+                            </span>
+                          ) : (
+                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                              isActive ? "bg-white/10 text-white/60" : "bg-[#DCFCE7] text-[#16A34A]"
+                            }`}>
+                              OK
+                            </span>
+                          )}
+                          {Number(collab.metrics?.real_overtime_hours || 0) > 0 && (
+                            <span className={`font-mono text-[10px] ${isActive ? "text-white/40" : "text-[#6B7280]"}`}>
+                              +{fmtOvertime(collab.metrics)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <EmptySection
+                icon={FiUsers}
+                title="Sin expedientes"
+                description="Ajusta el periodo o el buscador para cargar colaboradores."
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Expediente detail panel */}
+        <div
+          className={`flex flex-col overflow-hidden rounded-[16px] border border-[#E5E7EB] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)] ${
+            showDetail ? "flex" : "hidden lg:flex"
+          }`}
+        >
+          {/* Mobile back */}
+          {showDetail && (
+            <div className="flex items-center border-b border-[#F3F4F6] px-4 py-3 lg:hidden">
+              <button
+                type="button"
+                onClick={() => setShowDetail(false)}
+                className="cursor-pointer flex items-center gap-1.5 text-xs font-semibold text-[#2563EB] active:scale-[0.97]"
+              >
+                <FiArrowLeft size={13} />
+                Volver a la lista
+              </button>
+            </div>
+          )}
+
+          <ExpedientePanel
+            detail={detail}
+            loading={loadingDetail}
+            pLabel={pLabel}
+            range={range}
+            onScheduleMeeting={setMeetingTarget}
+            onDownloadRh={handleDownloadRh}
+            canManageTelework={canManageTelework}
+          />
+        </div>
+      </div>
+
+      {meetingTarget && (
+        <MeetingModal
+          target={meetingTarget}
+          onClose={() => setMeetingTarget(null)}
+          onScheduled={async () => {
+            await Promise.all([loadOverview(), loadDetail()]);
+          }}
+        />
+      )}
+      <GeneralRegularizationsModal
+        open={generalRegularizationsOpen}
+        onClose={() => setGeneralRegularizationsOpen(false)}
+      />
+    </div>
+  );
+};
+
+export default AsistenciaReportes;

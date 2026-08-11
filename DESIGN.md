@@ -442,7 +442,7 @@ Fondo Surface White, borde Soft Border, sombra Ambient, radio 16px.
 
 ### Workspace Layout
 
-Páginas de módulo usan `WORKSPACE_PAGE_CLASS` (`"flex min-w-0 flex-col"`) como root. Las páginas de 3 columnas usan `WORKSPACE_3COL_CLASS`. El DashboardLayout provee el fondo de página y el max-width. Las páginas no declaran `min-h-screen`, `bg-gray-50`, ni `max-w-*` propios — eso rompe el scroll compartido.
+Páginas de módulo usan `WORKSPACE_PAGE_CLASS` (`"flex min-w-0 flex-col"`) como root. Las páginas de 3 columnas usan `WORKSPACE_3COL_CLASS`. El DashboardLayout provee el fondo de página, el scroll compartido y padding responsive mínimo. No provee `max-width`, `mx-auto`, tarjeta global, borde global ni sombra global. Las páginas no declaran `min-h-screen`, `bg-gray-50`, `mx-auto` ni `max-w-*` propios salvo contenido de lectura estrecha.
 
 ### Signature: AttendanceWidget
 
@@ -766,3 +766,21 @@ Antes de marcar un componente o página como listo:
 - **Don't** inventar valores de z-index fuera de la escala definida (10/20/30/40/50).
 - **Don't** mostrar mensajes de error genéricos. Cada error necesita contexto y siguiente paso.
 - **Don't** usar colores de estado (verde/rojo/ámbar) como decoración de sección o marca visual.
+
+---
+
+## 16. Layout Global Fluido
+
+Esta seccion reemplaza cualquier regla anterior que indique que `DashboardLayout` debe entregar `max-width` o una tarjeta global centrada.
+
+**Regla vigente.** `DashboardLayout` provee fondo, scroll compartido y padding responsive minimo. No provee `max-width`, `mx-auto`, tarjeta blanca global, borde global, sombra global ni radio global.
+
+**Regla del margen lateral cero.** Ningun modulo operativo debe vivir dentro de una tarjeta centrada `max-w-6xl`, `mx-auto` o equivalente. Ese patron roba espacio lateral en desktop y fuerza scroll interno en tablas, kanban, bandejas, expedientes, reportes y dashboards.
+
+**Superficies visuales.** Las cards, bordes, sombras y radios pertenecen a cada modulo o componente. El contenedor raiz del dashboard es solo un lienzo fluido: `w-full min-w-0`.
+
+**Padding global permitido.** Usar padding progresivo, no margen lateral estructural: `px-2 py-2` en mobile, `sm:px-4 sm:py-4`, `lg:px-6 lg:py-6`, `2xl:px-8`. No usar padding que reduzca el area operativa de forma permanente.
+
+**Uso permitido de `max-w-*`.** Solo para contenido de lectura o captura lineal: documentos, formularios simples, perfil, ayuda y modales. Prohibido en kanban, reportes, tablas, bandejas, expedientes, dashboards operativos y vistas con columnas.
+
+**Helpers de workspace.** `WORKSPACE_2COL_CLASS` y `WORKSPACE_3COL_CLASS` no deben usar `sm:-mx-*` ni margenes negativos. El layout global ya es fluido; los margenes negativos reintroducen overflow y rompen mobile.

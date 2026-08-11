@@ -133,6 +133,14 @@ exports.uploadAssignmentEvidence = asyncHandler(async (req, res) => {
   res.status(200).json({ ok: true, data });
 });
 
+exports.downloadAssignmentEvidenceFile = asyncHandler(async (req, res) => {
+  const { buffer, filename, mimeType } = await svc.getAssignmentEvidenceFile(req.params.assignmentId);
+  res.setHeader("Content-Type", mimeType || "application/octet-stream");
+  res.setHeader("Content-Disposition", `inline; filename="${filename || `evidencia-asignacion-${req.params.assignmentId}`}"`);
+  res.setHeader("Cache-Control", "private, max-age=300");
+  res.send(buffer);
+});
+
 exports.generateAnnualMaintenance = asyncHandler(async (req, res) => {
   const payload = req.body || {};
   const data = await svc.generateAnnualMaintenance({
@@ -399,6 +407,19 @@ exports.uploadSignedActa = asyncHandler(async (req, res) => {
   res.status(200).json({ ok: true, data });
 });
 
+exports.uploadLegacySignedActa = asyncHandler(async (req, res) => {
+  if (!req.file?.buffer) {
+    return res.status(400).json({ ok: false, message: "Se requiere un archivo PDF" });
+  }
+  const data = await svc.uploadLegacySignedActa({
+    assignmentId: req.params.assignmentId,
+    fileBuffer: req.file.buffer,
+    originalFilename: req.file.originalname || "acta-historica-firmada.pdf",
+    userId: req.user?.id || null,
+  });
+  res.status(200).json({ ok: true, data });
+});
+
 // ─── Reports (on-demand PDF) ──────────────────────────────────────────────────
 
 exports.downloadAssetReport = asyncHandler(async (req, res) => {
@@ -485,6 +506,7 @@ exports.uploadFinancialDoc = asyncHandler(async (req, res) => {
     fileBuffer:       req.file.buffer,
     originalFilename: req.file.originalname || "documento.pdf",
     notes:            req.body?.notes || null,
+    invoiceNumber:    req.body?.invoice_number || null,
     userId:           req.user?.id || null,
   });
   res.status(201).json({ ok: true, data });
@@ -514,6 +536,14 @@ exports.liberateAsset = asyncHandler(async (req, res) => {
 exports.getLiberationPhotos = asyncHandler(async (req, res) => {
   const data = await svc.getLiberationPhotos(req.params.id);
   res.json({ ok: true, total: data.length, data });
+});
+
+exports.downloadLiberationPhotoFile = asyncHandler(async (req, res) => {
+  const { buffer, filename, mimeType } = await svc.getLiberationPhotoFile(req.params.photoId);
+  res.setHeader("Content-Type", mimeType || "image/jpeg");
+  res.setHeader("Content-Disposition", `inline; filename="${filename || `liberacion-${req.params.photoId}.jpg`}"`);
+  res.setHeader("Cache-Control", "private, max-age=300");
+  res.send(buffer);
 });
 
 // ─── FASE 2: Corporate Numbers ─────────────────────────────────────────────

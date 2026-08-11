@@ -1,6 +1,5 @@
-import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Dialog, Transition } from "@headlessui/react";
-import { FiCheckCircle, FiDownload, FiPlus, FiTool, FiX } from "react-icons/fi";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FiCheckCircle, FiDownload, FiPlus, FiTool } from "react-icons/fi";
 import { useApi } from "../../../core/hooks/useApi";
 import { useUI } from "../../../core/ui/useUI";
 import api from "../../../core/api";
@@ -34,7 +33,9 @@ import PreventiveEquipmentSchedulePanel from "../components/PreventiveEquipmentS
 import CorrectiveCaseWorkspace from "../components/CorrectiveCaseWorkspace";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
+import Modal from "../../../core/ui/components/Modal";
 import { formatDateOnlyEs, formatDateTimeEs, getStatusBadgeClass, toStatusLabel } from "../../../core/utils/workflowUi";
+import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
 
 const badge = (s) => {
  return getStatusBadgeClass(s, {
@@ -62,9 +63,14 @@ const normalizeEquipoId = (eq) => eq?.id ?? eq?.id_equipo ?? eq?.equipo_id ?? nu
 const TAB_PREVENTIVE = "preventive";
 const TAB_CORRECTIVE = "corrective";
 
-const Mantenimientos = ({ initialRows = null, onRefresh }) => {
+const Mantenimientos = ({ initialRows = null, onRefresh, initialTab = TAB_PREVENTIVE }) => {
  const { showToast, confirm } = useUI();
- const [tab, setTab] = useState(TAB_PREVENTIVE);
+ const resolvedInitialTab = initialTab === TAB_CORRECTIVE ? TAB_CORRECTIVE : TAB_PREVENTIVE;
+ const [tab, setTab] = useState(resolvedInitialTab);
+
+ useEffect(() => {
+ setTab(initialTab === TAB_CORRECTIVE ? TAB_CORRECTIVE : TAB_PREVENTIVE);
+ }, [initialTab]);
 
  // ---------------------------------------------------------------------------
  // Legacy / correctivo rápido (compatibilidad)
@@ -298,15 +304,17 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
  // UI render
  // ---------------------------------------------------------------------------
  return (
- <div className="space-y-4">
+ <div className={`${WORKSPACE_PAGE_CLASS} gap-4`}>
  <Card className="p-4">
  <div className="flex flex-wrap items-center justify-between gap-3">
  <div>
  <h2 className="flex items-center gap-2 text-xl font-bold text-slate-900">
- <FiTool /> Mantenimientos
+ <FiTool /> {tab === TAB_CORRECTIVE ? "Correctivos y mantenimientos" : "Mantenimientos"}
  </h2>
  <p className="text-sm text-slate-600">
- ST-01-02 preventivo con flujo estructurado empresarial y vista separada de correctivos.
+ {tab === TAB_CORRECTIVE
+  ? "Espacio operativo para correctivos y compatibilidad del flujo legado."
+  : "ST-01-02 preventivo con flujo estructurado empresarial y vista separada de correctivos."}
  </p>
  </div>
  <div className="flex flex-wrap gap-2">
@@ -635,44 +643,11 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
  )}
 
  {/* Modal correctivo rápido */}
- <Transition.Root show={open} as={Fragment}>
- <Dialog as="div" className="relative z-50" onClose={() => setOpen(false)}>
- <Transition.Child
- as={Fragment}
- enter="ease-out duration-200"
- enterFrom="opacity-0"
- enterTo="opacity-100"
- leave="ease-in duration-150"
- leaveFrom="opacity-100"
- leaveTo="opacity-0"
- >
- <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" />
- </Transition.Child>
- <div className="fixed inset-0 overflow-y-auto">
- <div className="flex min-h-full items-start justify-center p-4 sm:p-6">
- <Transition.Child
- as={Fragment}
- enter="ease-out duration-200"
- enterFrom="opacity-0 scale-95"
- enterTo="opacity-100 scale-100"
- leave="ease-in duration-150"
- leaveFrom="opacity-100 scale-100"
- leaveTo="opacity-0 scale-95"
- >
- <Dialog.Panel className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-xl">
- <div className="mb-3 flex items-center justify-between">
- <Dialog.Title className="text-lg font-bold text-gray-900">
- Nuevo mantenimiento correctivo
- </Dialog.Title>
- <Button size="sm" variant="ghost" onClick={() => setOpen(false)} aria-label="Cerrar modal">
- <FiX />
- </Button>
- </div>
-
+ <Modal open={open} onClose={() => setOpen(false)} title="Nuevo mantenimiento correctivo" maxWidth="max-w-3xl">
  <form onSubmit={submitLegacy} className="space-y-4">
- <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
- <div>
- <label className="text-sm text-gray-600">Equipo</label>
+  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+  <div>
+  <label className="text-sm text-gray-600">Equipo</label>
  <select
  value={form.id_equipo}
  onChange={(event) => setField("id_equipo", event.target.value)}
@@ -769,16 +744,11 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
  variant="primary"
  loading={saving}
  >
- {saving ? "Guardando..." : "Guardar correctivo"}
- </Button>
- </div>
- </form>
- </Dialog.Panel>
- </Transition.Child>
- </div>
- </div>
- </Dialog>
- </Transition.Root>
+  {saving ? "Guardando..." : "Guardar correctivo"}
+  </Button>
+  </div>
+  </form>
+ </Modal>
  </div>
  );
 };

@@ -21,6 +21,7 @@ import {
   STATUS_META,
   formatDateShort,
   hasJustificantes,
+  hasExternalCoordinationEvidence,
   PROVISIONAL_STATUS_META,
 } from "../utils/solicitudesHelpers";
 import { formatVacationDaysHours } from "../utils/vacationDisplay";
@@ -1065,6 +1066,26 @@ const AprobacionPermisosView = ({ compact = false }) => {
           </div>
         )}
 
+        {hasExternalCoordinationEvidence(solicitud) && (
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 mt-2">
+            <p className="text-[11px] font-semibold text-slate-900 mb-1.5">Evidencia de coordinación externa:</p>
+            <div className="flex flex-wrap gap-1.5">
+              {solicitud.external_coordination_urls.map((url, idx) => (
+                <a
+                  key={`${solicitud.id}-coord-${idx}`}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-slate-300 rounded text-[10px] font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+                >
+                  <FiEye className="w-3 h-3" />
+                  Evidencia {idx + 1}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
         {solicitud.pdf_generado_url && (
           <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2 mt-2">
             <p className="text-[11px] font-semibold text-emerald-900 mb-1.5">Formulario PDF generado:</p>
@@ -1417,14 +1438,6 @@ const AprobacionPermisosView = ({ compact = false }) => {
     rose: "bg-rose-600",
   };
   const selectedCancellationStatus = String(selectedSolicitud?.cancellation_status || "").toLowerCase();
-  const selectedStatus = String(selectedSolicitud?.status || "").toLowerCase();
-  const selectedIsRequester =
-    Boolean(selectedSolicitud) &&
-    ((userId && selectedSolicitud?.user_id && Number(userId) === Number(selectedSolicitud.user_id)) ||
-      isSameEmail(userEmail, selectedSolicitud?.user_email));
-  const selectedIsApprover =
-    Boolean(selectedSolicitud) &&
-    canCurrentUserActAsAssignedApprover(selectedSolicitud);
   const selectedRequiresCancellationRequestFlow = false;
 
   const renderContent = () => {

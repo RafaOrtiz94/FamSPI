@@ -111,7 +111,7 @@ export const downloadUserCertificationsPdf = async (userId) => {
   return response.data;
 };
 
-export default {
+const userCertificationsApi = {
   listMyCertifications,
   createMyCertification,
   createBulkCertifications,
@@ -119,3 +119,5 @@ export default {
   getUserCertifications,
   downloadUserCertificationsPdf
 };
+
+export default userCertificationsApi;

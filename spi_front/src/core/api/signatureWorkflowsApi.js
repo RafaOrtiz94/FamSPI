@@ -32,6 +32,11 @@ export const listMyCompletedSignatureWorkflows = async () => {
   return Array.isArray(data) ? data : data?.data ?? [];
 };
 
+export const listSignatureWorkflowSignerCandidates = async () => {
+  const { data } = await api.get(`${base}/signer-candidates`);
+  return Array.isArray(data) ? data : data?.data ?? [];
+};
+
 export const openSignatureWorkflowStep = async (workflowId, signerId) => {
   const { data } = await api.post(`${base}/${workflowId}/signers/${signerId}/open`);
   return data?.data ?? data;

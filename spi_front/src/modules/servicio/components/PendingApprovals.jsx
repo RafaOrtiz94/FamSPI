@@ -57,7 +57,7 @@ const formatDate = (value) => {
 const PendingApprovals = ({ onActionComplete }) => {
  const { role } = useAuth();
  const normalizedRole = (role || "").toLowerCase().replace(/[\s-]+/g, "_");
- const canManageApprovals = ["jefe_servicio_tecnico", "jefe_tecnico"].includes(
+ const canManageApprovals = ["jefe_servicio_tecnico", "jefe_servicio", "jefe_tecnico"].includes(
  normalizedRole
  );
  const { showToast, showLoader, hideLoader, askConfirm } = useUI();
@@ -105,7 +105,7 @@ const PendingApprovals = ({ onActionComplete }) => {
 
  const handleApprove = (req) => {
  if (!canManageApprovals) {
- showToast("Solo el jefe técnico puede aprobar solicitudes", "warning");
+ showToast("Solo las jefaturas técnicas pueden aprobar solicitudes", "warning");
  return;
  }
  askConfirm(`¿Aprobar la solicitud #${req.id}?`, async () => {
@@ -125,7 +125,7 @@ const PendingApprovals = ({ onActionComplete }) => {
 
  const handleReject = (req) => {
  if (!canManageApprovals) {
- showToast("Solo el jefe técnico puede rechazar solicitudes", "warning");
+ showToast("Solo las jefaturas técnicas pueden rechazar solicitudes", "warning");
  return;
  }
  const note = window.prompt(
@@ -180,7 +180,7 @@ const PendingApprovals = ({ onActionComplete }) => {
  Aprobaciones pendientes
  </p>
  <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
- Solicitudes en espera del jefe técnico
+ Solicitudes en espera de jefatura técnica
  </h3>
  <p className="text-sm text-gray-600 dark:text-gray-400 max-w-2xl">
  Desde aquí puedes revisar la documentación, aprobar o rechazar cada
@@ -188,7 +188,7 @@ const PendingApprovals = ({ onActionComplete }) => {
  </p>
  {!canManageApprovals && (
  <p className="mt-2 text-xs text-amber-600 dark:text-amber-400 font-medium">
- Estás en modo lectura: solo el jefe de servicio técnico puede aprobar o rechazar.
+ Estás en modo lectura: solo las jefaturas técnicas pueden aprobar o rechazar.
  </p>
  )}
  </div>
@@ -261,7 +261,7 @@ const PendingApprovals = ({ onActionComplete }) => {
  </>
  ) : (
  <div className="flex-1 min-w-[180px] px-3 py-2 rounded-lg border border-dashed border-amber-400 text-amber-600 text-xs text-center bg-amber-50 dark:bg-amber-900/30">
- Solo el jefe técnico puede aprobar o rechazar
+ Solo las jefaturas técnicas pueden aprobar o rechazar
  </div>
  )}
  </div>

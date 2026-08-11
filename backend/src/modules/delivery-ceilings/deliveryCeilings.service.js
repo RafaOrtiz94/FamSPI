@@ -218,6 +218,7 @@ const listDeliveryCeilings = async ({
 };
 
 module.exports = {
+  toRounded,
   DELIVERY_CEILING_STATUSES,
   DELIVERY_CEILING_PURCHASE_TYPES,
   OPEN_REQUEST_STATUSES,

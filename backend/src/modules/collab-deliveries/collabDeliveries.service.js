@@ -7,6 +7,7 @@ const {
   uploadBase64File,
   copyTemplate,
   replaceTags,
+  updateDocsTextStyleByLiteral,
   insertDocsTableRows,
   exportPdfBuffer,
   downloadFileBuffer,
@@ -18,7 +19,7 @@ const { validateCreateWorkflowPayload } = require("../signature-workflows/signat
 
 // ── Roles ────────────────────────────────────────────────────────────────────
 const COLLAB_WRITE_ROLES = ["financiero", "jefe_financiero"];
-const COLLAB_SESSION_ROLES = [...COLLAB_WRITE_ROLES, "talento_humano", "jefe_tecnico"];
+const COLLAB_SESSION_ROLES = [...COLLAB_WRITE_ROLES, "talento_humano", "jefe_tecnico", "jefe_servicio"];
 const COLLAB_READ_ROLES  = [
   ...COLLAB_SESSION_ROLES,
   "gerencia_general", "gerencia",
@@ -29,7 +30,7 @@ const COLLAB_READ_ROLES  = [
 const CATEGORY_TIPO_ROLES = {
   ropa:        { entrega: ["talento_humano"], retiro: ["talento_humano"] },
   epp:         { entrega: ["talento_humano"], retiro: ["talento_humano"] },
-  herramienta: { entrega: ["talento_humano","jefe_tecnico"], retiro: ["talento_humano","jefe_tecnico"] },
+  herramienta: { entrega: ["talento_humano","jefe_tecnico","jefe_servicio"], retiro: ["talento_humano","jefe_tecnico","jefe_servicio"] },
   logistica:   { entrega: ["financiero","jefe_financiero"], retiro: ["financiero","jefe_financiero"] },
   suministros: { entrega: ["financiero","jefe_financiero","talento_humano"], retiro: ["financiero","jefe_financiero","talento_humano"] },
 };
@@ -37,11 +38,26 @@ const CATEGORY_TIPO_ROLES = {
 const ALLOWED_STATUSES = new Set(["entregado", "retirado", "perdido", "dañado"]);
 const ALLOWED_CATEGORIES = new Set(["ropa", "epp", "herramienta", "logistica", "suministros"]);
 const COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID = process.env.COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID || null;
+// Herramientas tiene dos plantillas (mismas variables, distinto formato) --
+// personal interno vs externo. Si las variantes no estan configuradas cae al
+// template generico de herramienta para no romper actas ya en uso.
+const COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID = process.env.COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID || COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID;
+const COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID = process.env.COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID || COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID;
 const COLLAB_ACTA_ROPA_TEMPLATE_ID        = process.env.COLLAB_ACTA_ROPA_TEMPLATE_ID        || null;
+const COLLAB_ACTA_EPP_TEMPLATE_ID         = process.env.COLLAB_ACTA_EPP_TEMPLATE_ID         || null;
+const ACTA_CODE_PREFIX_BY_CATEGORY = {
+  herramienta: "ACTA-COL",
+  ropa: "ACTA-ROPA",
+  epp: "ACTA-EPP",
+  logistica: "ACTA-LOG",
+  suministros: "ACTA-SUM",
+  ti: "ACTA-TI",
+};
 
 // Verificación de arranque: muestra en log si los template IDs están configurados
 logger.info({
-  COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID: COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID ? "✓ configurado" : "✗ NO configurado",
+  COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID: COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID ? "✓ configurado" : "✗ NO configurado",
+  COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID: COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID ? "✓ configurado" : "✗ NO configurado",
   COLLAB_ACTA_ROPA_TEMPLATE_ID:        COLLAB_ACTA_ROPA_TEMPLATE_ID        ? "✓ configurado" : "✗ NO configurado",
 }, "collab-deliveries: estado de plantillas Google Docs");
 
@@ -80,6 +96,25 @@ const humanizeAttributeKey = (key) => String(key || "")
   .trim()
   .replace(/\b\w/g, (char) => char.toUpperCase());
 
+// pg devuelve columnas DATE como objetos Date de JS a medianoche UTC -- leer
+// con getDate()/getMonth() (hora local del servidor) puede correr el dia si
+// el servidor esta en un huso horario negativo (America/Guayaquil = UTC-5).
+// Acepta tanto un Date como un string "YYYY-MM-DD".
+const _dateKeyParts = (value, fallback = new Date()) => {
+  if (!value) {
+    return { day: fallback.getUTCDate(), month: fallback.getUTCMonth() + 1, year: fallback.getUTCFullYear() };
+  }
+  if (typeof value === "string") {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) return { day: Number(match[3]), month: Number(match[2]), year: Number(match[1]) };
+  }
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    return { day: fallback.getUTCDate(), month: fallback.getUTCMonth() + 1, year: fallback.getUTCFullYear() };
+  }
+  return { day: d.getUTCDate(), month: d.getUTCMonth() + 1, year: d.getUTCFullYear() };
+};
+
 const formatAttributesSummary = (rawValue) => {
   const attrs = parseJsonObject(rawValue);
   return Object.entries(attrs)
@@ -89,20 +124,22 @@ const formatAttributesSummary = (rawValue) => {
 };
 
 // ─── Google Docs table cell builders ─────────────────────────────────────────
-// Columns: No. | Herramienta | Marca | Características | N° de serie | Condición (1-10)
-const _collabHerramientaCellValues = (item, i) => {
+// Columns: Cant | Herramienta | Marca | N° de serie | Condición (Nuevo/Usado) | Características
+// "Cant" reemplazo al numero de fila (No.) -- si se entrega mas de 1 unidad
+// del mismo item no hace falta agregarlo varias veces, solo subir la cantidad.
+const _collabHerramientaCellValues = (item) => {
   const a = parseJsonObject(item.attributes_summary);
   return [
-    String(i + 1),
+    a.cantidad != null && String(a.cantidad).trim() !== "" ? String(a.cantidad) : "1",
     item.name || "",
     a.marca || "",
-    a.caracteristicas || "",
     item.serial_number || "",
-    item.physical_condition != null ? `${item.physical_condition}/10` : "",
+    item.is_new === true ? "Nuevo" : item.is_new === false ? "Usado" : "",
+    a.caracteristicas || "",
   ];
 };
 
-// Columns: No. | Prenda | Talla | Cantidad | Estado | Observaciones
+// Columns: No. | Prenda | Talla | Cantidad | Estado
 const _collabRopaCellValues = (item, i) => {
   const a = parseJsonObject(item.attributes_summary);
   return [
@@ -111,7 +148,21 @@ const _collabRopaCellValues = (item, i) => {
     a.talla || "",
     a.cantidad != null ? String(a.cantidad) : "",
     item.is_new === true ? "Nuevo" : item.is_new === false ? "Usado" : "",
-    item.observations || "",
+  ];
+};
+
+// Columns: No. | EPP | Marca | Referencia/Modelo | Talla | Norma/Certificacion | Serie | Condicion
+const _collabEppCellValues = (item, i) => {
+  const a = parseJsonObject(item.attributes_summary);
+  return [
+    String(i + 1),
+    item.name || "",
+    a.marca || "",
+    a.referencia || "",
+    a.talla || "",
+    a.norma_certificacion || "",
+    item.serial_number || "",
+    item.physical_condition != null ? `${item.physical_condition}/10` : "",
   ];
 };
 
@@ -121,7 +172,6 @@ const buildActaItemsBlock = (items = []) => items.map((item, index) => {
   if (attrs) lines.push(`   Detalle: ${attrs}`);
   if (item.serial_number) lines.push(`   Serie: ${item.serial_number}`);
   if (item.physical_condition != null) lines.push(`   Condición: ${item.physical_condition}/10`);
-  if (item.observations) lines.push(`   Observaciones: ${item.observations}`);
   return lines.join("\n");
 }).join("\n\n");
 
@@ -164,6 +214,7 @@ function _buildActaTemplateReplacements(acta) {
     ACTA_ANIO: String(actaYear),
     ACTA_FECHA_LARGA: `${String(actaDay).padStart(2, "0")} de ${getMonthNameEs(actaMonth)} de ${actaYear}`,
     NOTES: acta.notes || "",
+    OBSERVACIONES: acta.notes || "",
     ITEMS_COUNT: String(Array.isArray(acta.items) ? acta.items.length : 0),
     ITEMS_BLOCK: buildActaItemsBlock(acta.items || []),
   };
@@ -230,7 +281,9 @@ async function _insertSessionDeliveries({
       ],
     );
 
-    deliveries.push({ ...delivery, item_name: cat.name });
+    // is_new no vive en collab_deliveries (solo en collab_delivery_actas_items),
+    // se pasa en memoria para el insert del acta que sigue mas abajo.
+    deliveries.push({ ...delivery, item_name: cat.name, is_new: item.is_new });
 
     await client.query(
       `INSERT INTO collab_delivery_events (delivery_id, event_type, payload, created_by)
@@ -545,8 +598,12 @@ async function _buildDriveTemplateActaPdfBuffer(acta) {
     acta.resolved_category || acta.category || acta.items?.[0]?.item_category || acta.items?.[0]?.category,
   );
 
-  const templateId = category === "herramienta" ? COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID
+  const templateId = category === "herramienta"
+    ? (String(acta.personnel_type || "").toLowerCase() === "externo"
+        ? COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID
+        : COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID)
     : category === "ropa"        ? COLLAB_ACTA_ROPA_TEMPLATE_ID
+    : category === "epp"         ? COLLAB_ACTA_EPP_TEMPLATE_ID
     : null;
   if (!templateId) {
     const err = new Error(`No hay plantilla Google Docs configurada para la categoría "${category}"`);
@@ -554,19 +611,43 @@ async function _buildDriveTemplateActaPdfBuffer(acta) {
     throw err;
   }
 
-  const getCellValues = category === "ropa" ? _collabRopaCellValues : _collabHerramientaCellValues;
+  const getCellValues = category === "ropa"
+    ? _collabRopaCellValues
+    : category === "epp"
+      ? _collabEppCellValues
+      : _collabHerramientaCellValues;
 
   const filename = acta.acta_code ? `${acta.acta_code}.pdf` : `ACTA-${String(acta.id).padStart(6, "0")}.pdf`;
   const folderId = await _resolveCollabActaFolderId();
   const sourceName = filename.replace(/\.pdf$/i, "");
   let doc = null;
+  const actaCodeText = (String(acta.acta_code || "").match(/(\d+)$/) || [])[1] || acta.acta_code || "";
 
   try {
     doc = await copyTemplate(templateId, sourceName, folderId || undefined);
-    const usedTable = await insertDocsTableRows(doc.id, 0, acta.items || [], getCellValues);
+    const usedTable = await insertDocsTableRows(doc.id, 0, acta.items || [], getCellValues, {
+      textStyle: {
+        bold: false,
+        weightedFontFamily: { fontFamily: "Times New Roman" },
+        fontSize: { magnitude: 10, unit: "PT" },
+      },
+      textStyleFields: "bold,weightedFontFamily,fontSize",
+    });
     const replacements = _buildActaTemplateReplacements(acta);
     if (usedTable) delete replacements.ITEMS_BLOCK;
     await replaceTags(doc.id, replacements);
+    if (actaCodeText) {
+      await updateDocsTextStyleByLiteral(
+        doc.id,
+        actaCodeText,
+        {
+          bold: false,
+          weightedFontFamily: { fontFamily: "Times New Roman" },
+          fontSize: { magnitude: 10, unit: "PT" },
+        },
+        "bold,weightedFontFamily,fontSize"
+      );
+    }
     return {
       category,
       pdfBuffer: await exportPdfBuffer(doc.id),
@@ -924,7 +1005,7 @@ async function generateActa(deliveryId, { tipo, notes }, actorId) {
 
   const recipientInfo = await _getRecipientInfo(delivery.user_id);
   const now = new Date();
-  const acta_code = await _nextActaCode();
+  const acta_code = await _nextActaCode(delivery.category, now.getFullYear());
 
   const { rows } = await db.query(
     `INSERT INTO collab_delivery_actas
@@ -952,7 +1033,7 @@ async function generateActa(deliveryId, { tipo, notes }, actorId) {
       delivery.serial_number || null,
       tipo === "entrega",
       delivery.physical_condition || null,
-      delivery.observations || null,
+      null,
     ],
   );
 
@@ -964,7 +1045,9 @@ async function generateActa(deliveryId, { tipo, notes }, actorId) {
 
 async function uploadSignedActa(actaId, fileBuffer, originalName, actorId) {
   const acta = await getActa(actaId);
-  if (acta.is_complete) throw Object.assign(new Error("Esta acta ya tiene versión firmada"), { status: 400 });
+  const wasAlreadySigned = Boolean(
+    acta.is_complete || acta.signed_at || acta.signed_pdf_drive_file_id || acta.signed_pdf_sha256,
+  );
 
   const sha256 = computeSha256HexFromBuffer(fileBuffer);
   const b64 = fileBuffer.toString("base64");
@@ -982,10 +1065,21 @@ async function uploadSignedActa(actaId, fileBuffer, originalName, actorId) {
   );
 
   if (acta.delivery_id) {
-    await _logEvent(acta.delivery_id, "acta_signed", { acta_id: actaId, sha256 }, actorId);
+    await _logEvent(
+      acta.delivery_id,
+      wasAlreadySigned ? "acta_signed_replaced" : "acta_signed",
+      { acta_id: actaId, sha256, filename: originalName, replaced: wasAlreadySigned },
+      actorId,
+    );
   }
 
-  return { sha256, drive_url: webViewLink };
+  return {
+    sha256,
+    filename: originalName,
+    drive_url: webViewLink,
+    drive_file_id: fileId,
+    replaced: wasAlreadySigned,
+  };
 }
 
 // ── Renovaciones ─────────────────────────────────────────────────────────────
@@ -1041,11 +1135,29 @@ async function _getRecipientInfo(userId, dbOrClient = db) {
   return resolveRecipientOrThrow(userId, dbOrClient);
 }
 
-async function _nextActaCode() {
-  const { rows } = await db.query(`SELECT nextval('collab_acta_seq') AS seq`);
-  const seq = String(rows[0].seq).padStart(6, "0");
-  const year = new Date().getFullYear();
-  return `ACTA-COL-${year}-${seq}`;
+function _actaCodePrefixForCategory(category) {
+  const normalized = normalizeActaCategory(category);
+  return ACTA_CODE_PREFIX_BY_CATEGORY[normalized] || "ACTA-COL";
+}
+
+async function _nextActaCode(category, year = new Date().getFullYear(), dbOrClient = db) {
+  const normalizedCategory = normalizeActaCategory(category);
+  if (!ALLOWED_CATEGORIES.has(normalizedCategory)) {
+    throw Object.assign(new Error("Categoria invalida para generar codigo de acta"), { status: 400 });
+  }
+  const actaYear = Number(year) || new Date().getFullYear();
+  const { rows } = await dbOrClient.query(
+    `INSERT INTO public.collab_acta_category_counters (category, acta_year, last_number)
+     VALUES ($1, $2, 1)
+     ON CONFLICT (category, acta_year)
+     DO UPDATE SET
+       last_number = public.collab_acta_category_counters.last_number + 1,
+       updated_at = now()
+     RETURNING last_number`,
+    [normalizedCategory, actaYear],
+  );
+  const seq = String(rows[0].last_number).padStart(6, "0");
+  return `${_actaCodePrefixForCategory(normalizedCategory)}-${actaYear}-${seq}`;
 }
 
 async function _checkAndCompleteOffboardingTask(userId, category, actorId) {
@@ -1114,8 +1226,12 @@ async function createCollabSession({
   user_id, category, session_date, tipo = "entrega", notes,
   items = [], // [{catalog_item_id, serial_number, physical_condition, attributes, renewal_date, observations}]
   recipient_nombre, recipient_cedula, recipient_cargo,
+  personnel_type = null, // 'interno' | 'externo' -- solo aplica a category 'herramienta', decide la plantilla del acta
 }, actorId, actorRole) {
   if (!ALLOWED_CATEGORIES.has(category)) throw Object.assign(new Error("Categoría inválida"), { status: 400 });
+  if (personnel_type && !["interno", "externo"].includes(personnel_type)) {
+    throw Object.assign(new Error("personnel_type debe ser 'interno' o 'externo'"), { status: 400 });
+  }
   validateSessionRole(category, tipo, actorRole);
   if (!items.length) throw Object.assign(new Error("La sesión debe incluir al menos un ítem"), { status: 400 });
 
@@ -1151,19 +1267,23 @@ async function createCollabSession({
         ? { nombre: recipient_nombre, cedula: recipient_cedula, cargo: recipient_cargo }
         : await resolveRecipientOrThrow(user_id, client);
 
-      const acta_code = await _nextActaCode();
-      const now = new Date();
+      // La fecha impresa en el acta es la fecha de entrega elegida en el
+      // paso 2 (session.session_date), no la fecha en que se genera el PDF.
+      const { day: actaDay, month: actaMonth, year: actaYear } = _dateKeyParts(session.session_date);
+      const acta_code = await _nextActaCode(category, actaYear, client);
 
       _step = "insert_acta";
       const { rows: [newActa] } = await client.query(
         `INSERT INTO collab_delivery_actas
           (acta_code, tipo, category, delivery_id, session_id, recipient_user_id,
            recipient_nombre, recipient_cedula, recipient_cargo,
-           acta_day, acta_month, acta_year, generated_by)
-         VALUES ($1,$2,$3,NULL,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+           acta_day, acta_month, acta_year, generated_by, personnel_type, notes)
+         VALUES ($1,$2,$3,NULL,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
         [acta_code, tipo, category, session.id, user_id,
          recipientInfo.nombre, recipientInfo.cedula, recipientInfo.cargo,
-         now.getDate(), now.getMonth() + 1, now.getFullYear(), actorId],
+         actaDay, actaMonth, actaYear, actorId,
+         category === "herramienta" ? personnel_type : null,
+         session.notes || null],
       );
       acta = newActa;
 
@@ -1176,7 +1296,8 @@ async function createCollabSession({
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
           [acta.id, i + 1, d.id, d.item_name,
            JSON.stringify(d.attributes || {}), d.serial_number || null,
-           tipo === "entrega", d.physical_condition || null, d.observations || null, category],
+           d.is_new != null ? Boolean(d.is_new) : tipo === "entrega",
+           d.physical_condition || null, null, category],
         );
       }
     }
@@ -1208,10 +1329,14 @@ async function updateCollabSession(sessionId, {
   recipient_nombre,
   recipient_cedula,
   recipient_cargo,
+  personnel_type,
 }, actorId, actorRole) {
   const normalizedSessionId = Number(sessionId);
   if (!Number.isInteger(normalizedSessionId) || normalizedSessionId <= 0) {
     throw Object.assign(new Error("sessionId inválido"), { status: 400 });
+  }
+  if (personnel_type && !["interno", "externo"].includes(personnel_type)) {
+    throw Object.assign(new Error("personnel_type debe ser 'interno' o 'externo'"), { status: 400 });
   }
 
   const client = await db.getClient();
@@ -1315,7 +1440,9 @@ async function updateCollabSession(sessionId, {
         recipientInfo.cargo = recipientInfo.cargo || resolved.cargo;
       }
 
-      const now = new Date();
+      // Igual que en createCollabSession: la fecha del acta es la fecha de
+      // entrega (session_date), no la fecha en que se edita/regenera.
+      const { day: actaDay, month: actaMonth, year: actaYear } = _dateKeyParts(updatedSession.session_date);
       if (acta) {
         step = "update_acta";
         const { rows: updatedActaRows } = await client.query(
@@ -1326,6 +1453,8 @@ async function updateCollabSession(sessionId, {
                   acta_day = $5,
                   acta_month = $6,
                   acta_year = $7,
+                  personnel_type = CASE WHEN category = 'herramienta' THEN COALESCE($8, personnel_type) ELSE personnel_type END,
+                  notes = $9,
                   pdf_drive_file_id = NULL,
                   pdf_sha256 = NULL,
                   pdf_filename = NULL,
@@ -1337,24 +1466,25 @@ async function updateCollabSession(sessionId, {
             recipientInfo.nombre,
             recipientInfo.cedula,
             recipientInfo.cargo,
-            now.getDate(),
-            now.getMonth() + 1,
-            now.getFullYear(),
+            actaDay,
+            actaMonth,
+            actaYear,
+            personnel_type || null,
+            updatedSession.notes || null,
           ],
         );
         acta = updatedActaRows[0];
       } else {
         step = "insert_acta";
-        const actaCode = await _nextActaCode();
         const { rows: createdActaRows } = await client.query(
           `INSERT INTO collab_delivery_actas
             (acta_code, tipo, category, delivery_id, session_id, recipient_user_id,
              recipient_nombre, recipient_cedula, recipient_cargo,
-             acta_day, acta_month, acta_year, generated_by)
-           VALUES ($1,$2,$3,NULL,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-           RETURNING *`,
+             acta_day, acta_month, acta_year, generated_by, personnel_type, notes)
+           VALUES ($1,$2,$3,NULL,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          RETURNING *`,
           [
-            actaCode,
+            await _nextActaCode(session.category, actaYear, client),
             session.tipo,
             session.category,
             normalizedSessionId,
@@ -1362,10 +1492,12 @@ async function updateCollabSession(sessionId, {
             recipientInfo.nombre,
             recipientInfo.cedula,
             recipientInfo.cargo,
-            now.getDate(),
-            now.getMonth() + 1,
-            now.getFullYear(),
+            actaDay,
+            actaMonth,
+            actaYear,
             actorId,
+            session.category === "herramienta" ? (personnel_type || null) : null,
+            updatedSession.notes || null,
           ],
         );
         acta = createdActaRows[0];
@@ -1385,9 +1517,9 @@ async function updateCollabSession(sessionId, {
             delivery.item_name,
             JSON.stringify(delivery.attributes || {}),
             delivery.serial_number || null,
-            session.tipo === "entrega",
+            delivery.is_new != null ? Boolean(delivery.is_new) : session.tipo === "entrega",
             delivery.physical_condition || null,
-            delivery.observations || null,
+            null,
             session.category,
           ],
         );
@@ -1761,6 +1893,7 @@ async function getCollaboratorReport(userId) {
 }
 
 module.exports = {
+  normalizeActaCategory,
   COLLAB_WRITE_ROLES,
   COLLAB_SESSION_ROLES,
   COLLAB_READ_ROLES,

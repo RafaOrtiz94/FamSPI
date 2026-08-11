@@ -1,9 +1,21 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { FiAlertCircle, FiAward, FiCamera, FiSave } from "react-icons/fi";
+import {
+  FiAlertCircle,
+  FiAward,
+  FiCamera,
+  FiFileText,
+  FiSave,
+} from "react-icons/fi";
+import { getAttendancePunctualitySummary } from "../../core/api/attendanceApi";
 import { fetchMyProfile, upsertMyProfile } from "../../core/api/userProfileApi";
-import { useUI } from "../../core/ui/UIContext";
-import Modal from "../../core/ui/components/Modal";
+import { isTransientApiError } from "../../core/api/index";
 import { useAuth } from "../../core/auth/AuthContext";
+import { readCachedResource, writeCachedResource } from "../../core/pwa/localCache";
+import { usePwaStatus } from "../../core/pwa/PwaStatusContext";
+import Modal from "../../core/ui/components/Modal";
+import PunctualityWinnerBadge from "../../core/ui/components/PunctualityWinnerBadge";
+import { useUI } from "../../core/ui/UIContext";
+import { WORKSPACE_PAGE_CLASS } from "../../core/ui/workspaceLayout";
 import CertificationsBoard from "./components/CertificationsBoard";
 import ProfileDocumentsBoard from "./components/ProfileDocumentsBoard";
 import PersonnelProfile from "../talento/components/workspace/PersonnelProfile";
@@ -14,11 +26,7 @@ import {
 } from "../talento/components/collaboratorProfileDefinitions";
 
 const emptyMetadata = {
-  job_title: "",
   phone: "",
-  extension: "",
-  location: "",
-  about: "",
   personal: {
     ...talentProfileDefaults.personal,
   },
@@ -41,7 +49,6 @@ const emptyPreferences = {
 };
 
 const PHONE_REGEX = /^[0-9+()\-\s]{7,20}$/;
-const EXTENSION_REGEX = /^\d{1,10}$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const reviewSections = [
@@ -49,9 +56,16 @@ const reviewSections = [
     key: "personal",
     title: "Contacto personal",
     fields: [
-      { key: "telefono_personal", label: "Teléfono personal", required: true },
+      { key: "telefono_personal", label: "Telefono personal", required: true },
       { key: "email_personal", label: "Email personal", required: true },
-      { key: "estado_civil", label: "Estado civil", required: false, type: "select", options: MARITAL_STATUS_OPTIONS, placeholder: "Selecciona estado civil" },
+      {
+        key: "estado_civil",
+        label: "Estado civil",
+        required: false,
+        type: "select",
+        options: MARITAL_STATUS_OPTIONS,
+        placeholder: "Selecciona estado civil",
+      },
     ],
   },
   {
@@ -59,18 +73,37 @@ const reviewSections = [
     title: "Domicilio",
     fields: [
       { key: "ciudad_domicilio", label: "Ciudad", required: true },
-      { key: "direccion_domicilio", label: "Dirección", required: true },
-      { key: "telefono_fijo", label: "Teléfono fijo", required: false },
+      {
+        key: "movilizacion",
+        label: "Movilizacion",
+        required: false,
+        type: "select",
+        options: talentProfileSections
+          .find((section) => section.key === "domicilio")
+          ?.fields?.find((field) => field.key === "movilizacion")?.options || [],
+        placeholder: "Selecciona tipo de movilizacion",
+      },
+      { key: "direccion_domicilio", label: "Direccion", required: true },
+      { key: "telefono_fijo", label: "Telefono fijo", required: false },
     ],
   },
   {
     key: "emergencia",
     title: "Contacto de emergencia",
     fields: [
-      { key: "persona_contacto", label: "Persona de contacto", required: true },
+      {
+        key: "persona_contacto",
+        label: "Persona de contacto",
+        required: true,
+      },
+      {
+        key: "parentesco_contacto",
+        label: "Parentesco",
+        required: true,
+      },
       {
         key: "telefono_contacto",
-        label: "Teléfono de contacto",
+        label: "Telefono de contacto",
         required: true,
       },
     ],
@@ -87,36 +120,39 @@ const MY_PROFILE_SYNC_FIELD_MAP = {
     "telefono_personal",
     "email_personal",
   ]),
-  laboral: new Set([
-    "fecha_ingreso",
-    "cargo",
-    "area",
-    "telefono_celular_famproject",
-    "email_famproject",
-  ]),
   domicilio: new Set([
     "ciudad_domicilio",
+    "movilizacion",
     "direccion_domicilio",
     "telefono_fijo",
   ]),
   emergencia: new Set([
     "persona_contacto",
+    "parentesco_contacto",
     "telefono_contacto",
   ]),
-  estudios: new Set([
-    "nivel_instruccion",
-  ]),
+  estudios: new Set(["nivel_instruccion"]),
 };
 
 const MY_PROFILE_UPDATE_SECTIONS = talentProfileSections
   .filter((section) => MY_PROFILE_SYNC_FIELD_MAP[section.key])
   .map((section) => ({
     ...section,
-    fields: (section.fields || []).filter((field) =>
-      MY_PROFILE_SYNC_FIELD_MAP[section.key].has(field.key),
-    ),
+    fields: (section.fields || [])
+      .filter((field) => MY_PROFILE_SYNC_FIELD_MAP[section.key].has(field.key))
+      .map((field) =>
+        section.key === "laboral" && field.key === "telefono_celular_famproject"
+          ? { ...field, readOnly: true }
+          : field,
+      ),
   }))
   .filter((section) => section.fields.length > 0);
+
+const tabOptions = [
+  { id: "documents", label: "Documentos", icon: FiFileText },
+  { id: "credentials", label: "Títulos y Certificaciones", icon: FiAward },
+];
+const MY_PROFILE_CACHE_KEY = "my_profile_snapshot";
 
 const mergeMetadata = (rawMetadata = {}) => ({
   ...emptyMetadata,
@@ -174,16 +210,12 @@ const sanitizeEmail = (value) =>
     .toLowerCase()
     .slice(0, 120);
 
-const sanitizeExtension = (value) =>
-  String(value || "")
-    .replace(/\D/g, "")
-    .slice(0, 10);
-
 const getReviewFieldType = (sectionKey, fieldKey) => {
   if (fieldKey.includes("telefono")) return "phone";
   if (fieldKey.includes("email")) return "email";
-  if (sectionKey === "domicilio" && fieldKey === "direccion_domicilio")
+  if (sectionKey === "domicilio" && fieldKey === "direccion_domicilio") {
     return "address";
+  }
   if (fieldKey.includes("ciudad")) return "city";
   if (fieldKey.includes("persona_contacto")) return "name";
   return "text";
@@ -220,24 +252,6 @@ const getMissingReviewFields = (source = {}) => {
   return missing;
 };
 
-const validateMainProfile = (source = {}) => {
-  const errors = [];
-  const corporatePhone = String(source?.phone || "").trim();
-  const extension = String(source?.extension || "").trim();
-
-  if (corporatePhone && !PHONE_REGEX.test(corporatePhone)) {
-    errors.push(
-      "El teléfono corporativo debe contener entre 7 y 20 caracteres válidos.",
-    );
-  }
-
-  if (extension && !EXTENSION_REGEX.test(extension)) {
-    errors.push("La extensión solo puede contener hasta 10 dígitos.");
-  }
-
-  return errors;
-};
-
 const validateReviewProfile = (source = {}) => {
   const errors = [];
   const email = String(source?.personal?.email_personal || "").trim();
@@ -250,53 +264,94 @@ const validateReviewProfile = (source = {}) => {
   ).trim();
 
   if (email && !EMAIL_REGEX.test(email)) {
-    errors.push("Ingresa un email personal válido.");
+    errors.push("Ingresa un email personal valido.");
   }
-
   if (personalPhone && !PHONE_REGEX.test(personalPhone)) {
     errors.push(
-      "El teléfono personal debe contener entre 7 y 20 caracteres válidos.",
+      "El telefono personal debe contener entre 7 y 20 caracteres validos.",
     );
   }
-
   if (landline && !PHONE_REGEX.test(landline)) {
     errors.push(
-      "El teléfono fijo debe contener entre 7 y 20 caracteres válidos.",
+      "El telefono fijo debe contener entre 7 y 20 caracteres validos.",
     );
   }
-
   if (emergencyPhone && !PHONE_REGEX.test(emergencyPhone)) {
     errors.push(
-      "El teléfono de contacto debe contener entre 7 y 20 caracteres válidos.",
+      "El telefono de contacto debe contener entre 7 y 20 caracteres validos.",
     );
   }
 
   return errors;
 };
 
+const SummaryMetric = ({ label, value, tone = "slate" }) => {
+  const toneClass =
+    tone === "amber"
+      ? "bg-amber-50 text-amber-800 border-amber-200"
+      : tone === "emerald"
+        ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+        : "bg-white text-slate-800 border-slate-200";
+
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${toneClass}`}>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+        {label}
+      </p>
+      <p className="mt-2 break-words text-sm font-semibold">{value}</p>
+    </div>
+  );
+};
+
 const MyProfilePage = ({ embedded = false }) => {
   const { showToast, showLoader, hideLoader, theme, setTheme } = useUI();
   const { user, reloadProfile } = useAuth();
+  const { isOnline } = usePwaStatus();
 
   const [profile, setProfile] = useState(null);
   const [metadata, setMetadata] = useState(emptyMetadata);
   const [preferences, setPreferences] = useState(emptyPreferences);
   const [avatarPreview, setAvatarPreview] = useState(null);
   const [avatarFile, setAvatarFile] = useState(null);
+  const [isPunctualityLeader, setIsPunctualityLeader] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [showExpedienteModal, setShowExpedienteModal] = useState(false);
   const [reviewData, setReviewData] = useState({});
   const [saving, setSaving] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [usingCachedProfile, setUsingCachedProfile] = useState(false);
+  const [activeTab, setActiveTab] = useState("documents");
   const [baselineProfile, setBaselineProfile] = useState({
     metadata: emptyMetadata,
     preferences: emptyPreferences,
   });
   const [lastSavedAt, setLastSavedAt] = useState(null);
 
-  const identity = useMemo(
-    () => profile?.identity || user,
-    [profile?.identity, user],
-  );
+  const identity = useMemo(() => profile?.identity || user, [profile, user]);
+
+  useEffect(() => {
+    if (!identity?.id) {
+      setIsPunctualityLeader(false);
+      return;
+    }
+
+    let cancelled = false;
+    const loadPunctuality = async () => {
+      try {
+        const response = await getAttendancePunctualitySummary();
+        if (!cancelled) {
+          setIsPunctualityLeader(Boolean(response?.data?.currentUser?.isWinner));
+        }
+      } catch (_error) {
+        if (!cancelled) setIsPunctualityLeader(false);
+      }
+    };
+
+    loadPunctuality();
+    return () => {
+      cancelled = true;
+    };
+  }, [identity?.id]);
 
   const reviewMissingFields = useMemo(
     () => getMissingReviewFields(metadata),
@@ -317,7 +372,7 @@ const MyProfilePage = ({ embedded = false }) => {
   const reviewSummary = useMemo(() => {
     if (!hasCompleteReviewData) {
       return {
-        label: "Revisión incompleta",
+        label: "Revision incompleta",
         tone: "amber",
         nextDue: `${reviewMissingFields.length} campo(s) clave pendiente(s)`,
       };
@@ -326,18 +381,18 @@ const MyProfilePage = ({ embedded = false }) => {
     const last = metadata?.profile_last_reviewed_at;
     if (!last) {
       return {
-        label: "Sin revisión registrada",
+        label: "Sin revision registrada",
         tone: "amber",
-        nextDue: "Actualizar ahora",
+        nextDue: "Actualiza tu informacion",
       };
     }
 
     const lastDate = new Date(last);
     if (Number.isNaN(lastDate.getTime())) {
       return {
-        label: "Revisión no válida",
+        label: "Revision no valida",
         tone: "amber",
-        nextDue: "Actualizar ahora",
+        nextDue: "Actualiza tu informacion",
       };
     }
 
@@ -345,16 +400,16 @@ const MyProfilePage = ({ embedded = false }) => {
     const remaining = Math.max(0, 365 - Math.floor(diffDays));
     if (diffDays >= 365) {
       return {
-        label: "Revisión vencida",
-        tone: "red",
+        label: "Revision vencida",
+        tone: "amber",
         nextDue: "Debe actualizarse",
       };
     }
 
     return {
-      label: `Última revisión: ${lastDate.toLocaleDateString()}`,
+      label: `Ultima revision: ${lastDate.toLocaleDateString("es-EC")}`,
       tone: "emerald",
-      nextDue: `Próxima revisión en ${remaining} días`,
+      nextDue: `Proxima revision en ${remaining} dias`,
     };
   }, [
     hasCompleteReviewData,
@@ -366,6 +421,7 @@ const MyProfilePage = ({ embedded = false }) => {
     () => getMissingReviewFields(reviewData),
     [reviewData],
   );
+
   const hasPendingChanges = useMemo(
     () =>
       JSON.stringify(metadata) !== JSON.stringify(baselineProfile.metadata) ||
@@ -381,25 +437,11 @@ const MyProfilePage = ({ embedded = false }) => {
     ],
   );
 
-  const openReviewModal = () => {
-    setReviewData(buildReviewData(metadata || {}));
-    setShowReviewModal(true);
-  };
-
-  const handleExpedienteFieldChange = (section, key, value) => {
-    setMetadata((prev) => ({
-      ...(prev || {}),
-      [section]: {
-        ...(prev?.[section] || {}),
-        [key]: value,
-      },
-    }));
-  };
-
   useEffect(() => {
     const load = async () => {
       try {
         setLoadFailed(false);
+        setUsingCachedProfile(false);
         showLoader();
         const data = await fetchMyProfile();
         setProfile(data);
@@ -419,18 +461,47 @@ const MyProfilePage = ({ embedded = false }) => {
         setLastSavedAt(
           data?.profile?.updated_at || data?.profile?.created_at || null,
         );
+        writeCachedResource(MY_PROFILE_CACHE_KEY, data);
 
         if (data?.profile?.avatar_url) {
           setAvatarPreview(data.profile.avatar_url);
         }
-
         if (incomingPrefs.theme && incomingPrefs.theme !== theme) {
           setTheme(incomingPrefs.theme);
         }
       } catch (err) {
         console.error(err);
-        setLoadFailed(true);
-        showToast("No se pudo cargar tu perfil", "error");
+        const cached = readCachedResource(MY_PROFILE_CACHE_KEY, {
+          maxAgeMs: 1000 * 60 * 60 * 24 * 7,
+        });
+
+        if (cached?.data && isTransientApiError(err)) {
+          const data = cached.data;
+          const incomingMetadata = mergeMetadata(data?.profile?.metadata || {});
+          const incomingPrefs = {
+            ...emptyPreferences,
+            ...(data?.profile?.preferences || {}),
+          };
+
+          setProfile(data);
+          setMetadata(incomingMetadata);
+          setPreferences(incomingPrefs);
+          setBaselineProfile({
+            metadata: incomingMetadata,
+            preferences: incomingPrefs,
+          });
+          setLastSavedAt(
+            data?.profile?.updated_at || data?.profile?.created_at || cached.cachedAt || null,
+          );
+          setUsingCachedProfile(true);
+          if (data?.profile?.avatar_url) {
+            setAvatarPreview(data.profile.avatar_url);
+          }
+          showToast("Mostrando la última copia local de tu perfil", "warning");
+        } else {
+          setLoadFailed(true);
+          showToast("No se pudo cargar tu perfil", "error");
+        }
       } finally {
         hideLoader();
       }
@@ -439,17 +510,22 @@ const MyProfilePage = ({ embedded = false }) => {
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const openReviewModal = () => {
+    setReviewData(buildReviewData(metadata || {}));
+    setShowReviewModal(true);
+  };
+
   const handleAvatarChange = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     const allowed = ["image/png", "image/jpeg", "image/webp"];
     if (!allowed.includes(file.type)) {
-      showToast("Formato no permitido. Usa PNG/JPEG/WEBP", "warning");
+      showToast("Formato no permitido. Usa PNG, JPEG o WEBP.", "warning");
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
-      showToast("La imagen debe pesar máximo 2 MB", "warning");
+      showToast("La imagen debe pesar maximo 2 MB.", "warning");
       return;
     }
 
@@ -465,15 +541,8 @@ const MyProfilePage = ({ embedded = false }) => {
       );
       return;
     }
-
     if (!hasPendingChanges) {
-      showToast("No hay cambios para guardar", "info");
-      return;
-    }
-
-    const validationErrors = validateMainProfile(metadata);
-    if (validationErrors.length > 0) {
-      showToast(validationErrors[0], "warning");
+      showToast("No hay cambios para guardar.", "info");
       return;
     }
 
@@ -491,20 +560,25 @@ const MyProfilePage = ({ embedded = false }) => {
       setProfile((prev) => ({ ...prev, profile: data }));
       setMetadata(nextMetadata);
       setPreferences(nextPreferences);
-      if (nextPreferences.theme) {
-        setTheme(nextPreferences.theme);
-      }
       setBaselineProfile({
         metadata: nextMetadata,
         preferences: nextPreferences,
       });
       setLastSavedAt(new Date().toISOString());
-      await reloadProfile?.();
+      if (nextPreferences.theme) {
+        setTheme(nextPreferences.theme);
+      }
       if (data?.avatar_url) {
         setAvatarPreview(data.avatar_url);
       }
-      showToast("Perfil actualizado correctamente", "success");
       setAvatarFile(null);
+      writeCachedResource(MY_PROFILE_CACHE_KEY, {
+        ...(profile || {}),
+        profile: data,
+      });
+      setUsingCachedProfile(false);
+      await reloadProfile?.();
+      showToast("Perfil actualizado correctamente.", "success");
     } catch (err) {
       console.error(err);
       showToast(getErrorMessage(err, "Error al actualizar el perfil"), "error");
@@ -517,7 +591,7 @@ const MyProfilePage = ({ embedded = false }) => {
   const handleSaveAnnualReview = async () => {
     if (reviewDraftMissingFields.length > 0) {
       showToast(
-        "Completa los campos clave antes de cerrar la revisión anual",
+        "Completa los campos clave antes de cerrar la revision anual.",
         "warning",
       );
       return;
@@ -532,16 +606,19 @@ const MyProfilePage = ({ embedded = false }) => {
     try {
       setSaving(true);
       showLoader();
+
       const nextMetadata = {
         ...metadata,
         ...reviewData,
         profile_last_reviewed_at: new Date().toISOString(),
       };
+
       const data = await upsertMyProfile({
         metadata: nextMetadata,
         preferences,
         avatarFile: null,
       });
+
       const persistedMetadata = mergeMetadata(data?.metadata || nextMetadata);
       const persistedPreferences = {
         ...emptyPreferences,
@@ -556,9 +633,14 @@ const MyProfilePage = ({ embedded = false }) => {
         preferences: persistedPreferences,
       });
       setLastSavedAt(new Date().toISOString());
+      writeCachedResource(MY_PROFILE_CACHE_KEY, {
+        ...(profile || {}),
+        profile: data,
+      });
+      setUsingCachedProfile(false);
       setShowReviewModal(false);
       await reloadProfile?.();
-      showToast("Datos actualizados correctamente", "success");
+      showToast("Datos actualizados correctamente.", "success");
     } catch (err) {
       console.error(err);
       showToast(getErrorMessage(err, "Error al actualizar"), "error");
@@ -568,423 +650,275 @@ const MyProfilePage = ({ embedded = false }) => {
     }
   };
 
-  const labelClass = "text-sm font-semibold text-slate-700 dark:text-slate-200";
-  const inputClass =
-    "mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
+  const handleExpedienteFieldChange = (section, key, value) => {
+    setMetadata((prev) => ({
+      ...(prev || {}),
+      [section]: {
+        ...(prev?.[section] || {}),
+        [key]: value,
+      },
+    }));
+  };
+
+  const rootClass = embedded
+    ? "flex min-w-0 flex-col gap-5"
+    : `${WORKSPACE_PAGE_CLASS} gap-5`;
 
   return (
-    <div className={embedded ? "space-y-8" : "space-y-8"}>
-      <header className="flex flex-col gap-4 border-b border-slate-200 pb-4 dark:border-slate-800 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            Seguridad
-          </p>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-            Mi Perfil
-          </h1>
-          <p className="text-sm text-slate-600 dark:text-slate-300">
-            Administra tu información interna sin afectar los datos del IdP.
-          </p>
-        </div>
-        <div className="space-y-1">
-          <button
-            onClick={handleSave}
-            disabled={saving || !hasPendingChanges || loadFailed}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:bg-slate-400 sm:w-auto"
-          >
-            <FiSave />
-            {saving
-              ? "Guardando..."
-              : hasPendingChanges
-                ? "Guardar cambios"
-                : "Sin cambios"}
-          </button>
-          <p className="text-right text-xs text-slate-500 dark:text-slate-400">
-            {saving
-              ? "Guardando cambios..."
-              : loadFailed
-                ? "No se pudo cargar el perfil. Reintenta."
-                : hasPendingChanges
-                  ? "Tienes cambios pendientes por guardar."
-                  : lastSavedAt
-                    ? `Último guardado: ${new Date(lastSavedAt).toLocaleString("es-EC")}`
-                    : "Sin cambios pendientes."}
-          </p>
-        </div>
-      </header>
+    <>
+      <div className={rootClass}>
+        <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex min-w-0 items-start gap-4">
+              <div className="relative shrink-0">
+                <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-slate-100 text-2xl font-bold text-slate-600 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+                  {avatarPreview ? (
+                    <img
+                      src={avatarPreview}
+                      alt="Foto de perfil"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    (identity?.fullname || identity?.email || "?").charAt(0).toUpperCase()
+                  )}
+                </div>
+                <PunctualityWinnerBadge visible={isPunctualityLeader} size="lg" />
+                <label className="absolute bottom-0 right-0 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-primary text-white shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition hover:bg-primary-dark active:scale-[0.97]">
+                  <FiCamera size={16} />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleAvatarChange}
+                  />
+                </label>
+              </div>
 
-      {loadFailed && (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 shadow-sm">
-          No se pudo cargar el perfil desde el servidor. Reintenta la carga
-          antes de guardar cambios.
-        </div>
-      )}
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            Revisión anual
-          </p>
-          <p
-            className={`mt-1 font-semibold ${reviewSummary.tone === "red" ? "text-red-600" : reviewSummary.tone === "amber" ? "text-amber-600" : "text-emerald-600"}`}
-          >
-            {reviewSummary.label}
-          </p>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {reviewSummary.nextDue}
-          </p>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            Estado
-          </p>
-          <p
-            className={`mt-1 font-semibold ${needsReview ? "text-amber-600" : "text-emerald-600"}`}
-          >
-            {needsReview ? "Pendiente de actualización" : "Datos vigentes"}
-          </p>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {needsReview
-              ? "Completa la revisión para mantener la trazabilidad"
-              : "Sin acciones pendientes"}
-          </p>
-        </div>
-      </div>
-
-      {needsReview && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-2">
-              <FiAlertCircle className="mt-0.5 shrink-0" />
-              <div>
-                <p className="font-semibold">Actualización anual de datos</p>
-                <p className="text-xs text-amber-800">
-                  Debes confirmar tus datos personales. Esto ayuda a mantener
-                  vacaciones, permisos y contactos actualizados.
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                  Mi perfil
                 </p>
-                {!hasCompleteReviewData && (
-                  <p className="mt-2 text-xs font-medium text-amber-900">
-                    Campos pendientes:{" "}
-                    {reviewMissingFields.map((field) => field.label).join(", ")}
-                    .
-                  </p>
-                )}
+                <h1 className="mt-1 text-2xl font-bold text-slate-900">
+                  {identity?.fullname || "Nombre no disponible"}
+                </h1>
+                <p className="mt-1 break-all text-sm text-slate-500">
+                  {identity?.email}
+                </p>
+                <p className="mt-1 text-sm text-slate-500">
+                  {metadata?.laboral?.cargo || "Cargo no registrado"}
+                  {" · "}
+                  {metadata?.laboral?.telefono_celular_famproject ||
+                    metadata?.phone ||
+                    "Sin numero asignado por TI"}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                    {identity?.role || "Sin rol"}
+                  </span>
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                      needsReview
+                        ? "bg-amber-50 text-amber-700"
+                        : "bg-emerald-50 text-emerald-700"
+                    }`}
+                  >
+                    {needsReview ? "Revision pendiente" : "Datos vigentes"}
+                  </span>
+                </div>
               </div>
             </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row lg:flex-col">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving || !hasPendingChanges || loadFailed}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-dark active:scale-[0.97] disabled:cursor-not-allowed disabled:bg-slate-400"
+              >
+                <FiSave size={16} />
+                {saving ? "Guardando..." : "Guardar cambios"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowExpedienteModal(true)}
+                className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 active:scale-[0.97]"
+              >
+                Abrir expediente
+              </button>
+              <button
+                type="button"
+                onClick={openReviewModal}
+                className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 active:scale-[0.97]"
+              >
+                Revision anual
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            <SummaryMetric
+              label="Revision anual"
+              value={reviewSummary.label}
+              tone={reviewSummary.tone}
+            />
+            <SummaryMetric label="Siguiente paso" value={reviewSummary.nextDue} />
+            <SummaryMetric
+              label="Ultimo guardado"
+              value={
+                lastSavedAt
+                  ? new Date(lastSavedAt).toLocaleString("es-EC")
+                  : "Sin cambios guardados"
+              }
+            />
+          </div>
+        </header>
+
+        {loadFailed ? (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+            No se pudo cargar el perfil desde el servidor. Reintenta antes de guardar cambios.
+          </div>
+        ) : null}
+
+        {usingCachedProfile ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+            Estás viendo una copia local del perfil. {isOnline ? "Cuando el backend responda, recarga la pantalla para sincronizar." : "Mientras sigas offline, el contenido será solo de consulta."}
+          </div>
+        ) : null}
+
+        {needsReview ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex min-w-0 items-start gap-3">
+                <FiAlertCircle className="mt-0.5 shrink-0 text-amber-700" size={18} />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-amber-900">
+                    Debes confirmar tus datos personales.
+                  </p>
+                  <p className="mt-1 text-sm text-amber-800">
+                    La revision anual se gestiona desde un modal para no interrumpir el resto de la pantalla.
+                  </p>
+                  {!hasCompleteReviewData ? (
+                    <p className="mt-2 text-xs font-medium text-amber-900">
+                      Campos pendientes: {reviewMissingFields.map((field) => field.label).join(", ")}.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={openReviewModal}
+                className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 active:scale-[0.97]"
+              >
+                Actualizar ahora
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <nav className="flex flex-wrap gap-2">
+          {tabOptions.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-semibold transition active:scale-[0.97] ${
+                  isActive
+                    ? "border-blue-200 bg-blue-50 text-blue-700"
+                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                <Icon size={16} />
+                {tab.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        {activeTab === "documents" ? <ProfileDocumentsBoard /> : null}
+        {activeTab === "credentials" ? <CertificationsBoard /> : null}
+      </div>
+
+      <Modal
+        isOpen={showExpedienteModal}
+        onClose={() => setShowExpedienteModal(false)}
+        title="Expediente central"
+        maxWidth="max-w-6xl"
+      >
+        <div className="space-y-4">
+          <PersonnelProfile
+            profileData={metadata}
+            onProfileFieldChange={handleExpedienteFieldChange}
+            loading={saving}
+            saving={saving}
+            readOnly={loadFailed}
+            sections={MY_PROFILE_UPDATE_SECTIONS}
+            draftKey={`my-profile:${identity?.id || user?.id || "me"}`}
+            workflowStage="mi_perfil"
+            showDraftTools={false}
+            showSaveBar={false}
+            extendedSectionPanels={false}
+            panelTitle="Ficha sincronizada"
+            panelDescription="Aqui solo se muestran los datos personales que el colaborador puede mantener actualizados desde Mi Perfil."
+          />
+
+          <div className="sticky bottom-0 z-10 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white/95 px-4 py-4 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-600">
+              Guarda desde aqui sin salir del expediente central.
+            </p>
             <button
-              onClick={openReviewModal}
-              className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700"
+              type="button"
+              onClick={handleSave}
+              disabled={saving || !hasPendingChanges || loadFailed}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-dark active:scale-[0.97] disabled:cursor-not-allowed disabled:bg-slate-400"
             >
-              Actualizar ahora
+              <FiSave size={16} />
+              {saving ? "Guardando..." : "Guardar expediente"}
             </button>
           </div>
         </div>
-      )}
-
-      {!needsReview && (
-        <div className="flex justify-end">
-          <button
-            onClick={openReviewModal}
-            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-          >
-            Revisar datos personales
-          </button>
-        </div>
-      )}
-
-      <div className="grid gap-8 lg:grid-cols-[280px,1fr]">
-        <div className="space-y-6 rounded-2xl border border-slate-200 bg-slate-50/70 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/50">
-          <div className="flex flex-col items-center gap-4 text-center">
-            <div className="relative h-32 w-32 overflow-hidden rounded-full border-4 border-white shadow-lg dark:border-slate-800">
-              {avatarPreview ? (
-                <img
-                  src={avatarPreview}
-                  alt="Foto de perfil"
-                  className="h-full w-full object-cover"
-                  onError={(event) => {
-                    console.warn(
-                      "Error cargando imagen de perfil:",
-                      avatarPreview,
-                    );
-                    event.target.style.display = "none";
-                    if (event.target.nextElementSibling) {
-                      event.target.nextElementSibling.style.display = "flex";
-                    }
-                  }}
-                />
-              ) : null}
-              <div
-                className={`flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-200 to-slate-300 text-3xl font-bold text-slate-600 dark:from-slate-800 dark:to-slate-700 dark:text-slate-200 ${avatarPreview ? "hidden" : ""}`}
-              >
-                {(identity?.fullname || identity?.email || "?")
-                  .charAt(0)
-                  .toUpperCase()}
-              </div>
-              <label className="absolute bottom-2 right-2 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary-dark">
-                <FiCamera />
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleAvatarChange}
-                />
-              </label>
-            </div>
-            <div>
-              <p className="text-lg font-semibold text-slate-900 dark:text-white">
-                {identity?.fullname || "Nombre no disponible"}
-              </p>
-              <p className="text-sm text-slate-500 dark:text-slate-300 break-all">
-                {identity?.email}
-              </p>
-              <p className="text-xs uppercase text-slate-400 dark:text-slate-500">
-                {identity?.role}
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-2 text-left">
-            <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Preferencias activas
-            </p>
-            <div className="flex flex-col gap-3">
-              <label className={labelClass}>
-                Tema
-                <select
-                  value={preferences.theme}
-                  onChange={(e) => {
-                    const nextTheme = e.target.value;
-                    setPreferences((prev) => ({ ...prev, theme: nextTheme }));
-                    setTheme(nextTheme);
-                  }}
-                  className={inputClass}
-                >
-                  <option value="light">Claro</option>
-                  <option value="dark">Oscuro</option>
-                </select>
-              </label>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Solo se muestran preferencias que hoy sí tienen efecto real en la
-              aplicación.
-            </p>
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
-              Datos internos
-            </h2>
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              Estos campos son internos y no modifican la información del
-              proveedor de identidad.
-            </p>
-
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <label className={labelClass}>
-                Cargo interno
-                <input
-                  type="text"
-                  value={metadata.job_title}
-                  onChange={(e) =>
-                    setMetadata((prev) => ({
-                      ...prev,
-                      job_title: sanitizeText(e.target.value, 120),
-                    }))
-                  }
-                  className={inputClass}
-                  placeholder="Ej. Coordinador de proyectos"
-                />
-              </label>
-              <label className={labelClass}>
-                Teléfono corporativo
-                <input
-                  type="tel"
-                  value={metadata.phone}
-                  onChange={(e) =>
-                    setMetadata((prev) => ({
-                      ...prev,
-                      phone: sanitizePhone(e.target.value),
-                    }))
-                  }
-                  className={inputClass}
-                  placeholder="Número interno"
-                />
-              </label>
-              <label className={labelClass}>
-                Extensión
-                <input
-                  type="text"
-                  value={metadata.extension}
-                  onChange={(e) =>
-                    setMetadata((prev) => ({
-                      ...prev,
-                      extension: sanitizeExtension(e.target.value),
-                    }))
-                  }
-                  className={inputClass}
-                  placeholder="0000"
-                />
-              </label>
-              <label className={labelClass}>
-                Ubicación / Oficina
-                <input
-                  type="text"
-                  value={metadata.location}
-                  onChange={(e) =>
-                    setMetadata((prev) => ({
-                      ...prev,
-                      location: sanitizeText(e.target.value, 120),
-                    }))
-                  }
-                  className={inputClass}
-                  placeholder="Edificio / Piso"
-                />
-              </label>
-            </div>
-
-            <label className={`${labelClass} mt-4 block`}>
-              Nota interna
-              <textarea
-                rows={4}
-                value={metadata.about}
-                onChange={(e) =>
-                  setMetadata((prev) => ({
-                    ...prev,
-                    about: sanitizeText(e.target.value, 500),
-                  }))
-                }
-                className={`${inputClass} min-h-[120px]`}
-                placeholder="Información relevante para el equipo (no visible al IdP)"
-              />
-            </label>
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
-            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
-                  Expediente central
-                </p>
-                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
-                  Actualizacion de datos
-                </h2>
-                <p className="text-sm text-slate-600 dark:text-slate-300">
-                  Este bloque replica la estructura de la ficha de Talento Humano para que actualices
-                  tus datos sincronizados desde una sola fuente de verdad.
-                </p>
-              </div>
-              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-200">
-                Sincronizado con ficha TH
-              </span>
-            </div>
-
-            <PersonnelProfile
-              profileData={metadata}
-              onProfileFieldChange={handleExpedienteFieldChange}
-              loading={saving}
-              saving={saving}
-              readOnly={loadFailed}
-              sections={MY_PROFILE_UPDATE_SECTIONS}
-              draftKey={`my-profile:${identity?.id || user?.id || "me"}`}
-              workflowStage="mi_perfil"
-              showDraftTools={false}
-              showSaveBar={false}
-              extendedSectionPanels={false}
-              panelTitle="Ficha sincronizada"
-              panelDescription="Los campos visibles aqui comparten la misma estructura operativa del workspace de Talento Humano."
-            />
-          </section>
-
-          <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-5 shadow-sm dark:border-amber-800 dark:bg-amber-900/40">
-            <div className="mb-4 flex items-start gap-3">
-              <FiAward
-                className="mt-1 shrink-0 text-amber-600 dark:text-amber-400"
-                size={24}
-              />
-              <div>
-                <h3 className="text-lg font-semibold text-amber-900 dark:text-amber-100">
-                  Mis Credenciales
-                </h3>
-                <p className="text-sm text-amber-700 dark:text-amber-300">
-                  Gestiona tus certificaciones, cursos y títulos profesionales.
-                </p>
-              </div>
-            </div>
-            <CertificationsBoard />
-          </section>
-
-          <ProfileDocumentsBoard />
-
-          <section className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5 shadow-sm dark:border-emerald-800 dark:bg-emerald-900/40">
-            <h3 className="text-lg font-semibold text-emerald-900 dark:text-emerald-100">
-              Recordatorios de seguridad
-            </h3>
-            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-emerald-900/90 dark:text-emerald-100/90">
-              <li>
-                El email y nombre completo siguen siendo gestionados por el
-                proveedor de identidad.
-              </li>
-              <li>
-                Las preferencias se aplican solo dentro de la aplicación y no
-                afectan OAuth.
-              </li>
-              <li>
-                Las actualizaciones quedan registradas en la bitácora de
-                auditoría.
-              </li>
-            </ul>
-          </section>
-        </div>
-      </div>
+      </Modal>
 
       <Modal
         isOpen={showReviewModal}
         onClose={() => setShowReviewModal(false)}
-        title="Actualización anual de datos"
+        title="Actualizacion anual de datos"
         maxWidth="max-w-3xl"
       >
         <div className="space-y-4">
           <p className="text-sm text-slate-600">
-            Actualiza tus datos personales. Los campos marcados como
-            obligatorios deben completarse para cerrar la revisión anual.
+            Actualiza tus datos personales. Los campos marcados como obligatorios deben completarse para cerrar la revision anual.
           </p>
 
-          {reviewDraftMissingFields.length > 0 && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {reviewDraftMissingFields.length > 0 ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <p className="font-semibold">Campos clave pendientes</p>
               <p className="mt-1 text-xs text-amber-800">
-                {reviewDraftMissingFields
-                  .map((field) => field.label)
-                  .join(", ")}
-                .
+                {reviewDraftMissingFields.map((field) => field.label).join(", ")}.
               </p>
             </div>
-          )}
+          ) : null}
 
-          <div className="grid gap-4">
+          <div className="space-y-4">
             {reviewSections.map((section) => (
               <div
                 key={section.key}
-                className="rounded-xl border border-slate-200 p-4"
+                className="rounded-2xl border border-slate-200 bg-white p-4"
               >
-                <h3 className="mb-3 text-sm font-semibold text-slate-800">
+                <h3 className="text-sm font-semibold text-slate-900">
                   {section.title}
                 </h3>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   {section.fields.map((field) => {
-                    const fieldValue =
-                      reviewData?.[section.key]?.[field.key] || "";
-                    const hasError =
-                      field.required && !String(fieldValue).trim();
-                    const fieldType = getReviewFieldType(
-                      section.key,
-                      field.key,
-                    );
+                    const fieldValue = reviewData?.[section.key]?.[field.key] || "";
+                    const hasError = field.required && !String(fieldValue).trim();
+                    const fieldType = getReviewFieldType(section.key, field.key);
+
                     return (
                       <label key={field.key} className="text-xs text-slate-600">
-                        <span className="font-medium uppercase">
+                        <span className="font-medium uppercase tracking-[0.08em]">
                           {field.label}
                           {field.required ? " *" : ""}
                         </span>
@@ -1000,11 +934,19 @@ const MyProfilePage = ({ embedded = false }) => {
                                 },
                               }))
                             }
-                            className={`mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 ${hasError ? "border-amber-400 ring-1 ring-amber-200" : "border-slate-200"}`}
+                            className={`mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm text-slate-800 ${
+                              hasError
+                                ? "border-amber-400 ring-1 ring-amber-200"
+                                : "border-slate-200"
+                            }`}
                           >
-                            <option value="">{field.placeholder || "Selecciona una opcion"}</option>
-                            {(field.options || []).map((opt) => (
-                              <option key={opt} value={opt}>{opt}</option>
+                            <option value="">
+                              {field.placeholder || "Selecciona una opcion"}
+                            </option>
+                            {(field.options || []).map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
                             ))}
                           </select>
                         ) : (
@@ -1030,7 +972,11 @@ const MyProfilePage = ({ embedded = false }) => {
                                 },
                               }))
                             }
-                            className={`mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 ${hasError ? "border-amber-400 ring-1 ring-amber-200" : "border-slate-200"}`}
+                            className={`mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm text-slate-800 ${
+                              hasError
+                                ? "border-amber-400 ring-1 ring-amber-200"
+                                : "border-slate-200"
+                            }`}
                           />
                         )}
                       </label>
@@ -1040,11 +986,12 @@ const MyProfilePage = ({ embedded = false }) => {
               </div>
             ))}
           </div>
+
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={() => setShowReviewModal(false)}
-              className="rounded-xl border border-slate-200 px-4 py-2 text-sm"
+              className="min-h-11 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 active:scale-[0.97]"
             >
               Cancelar
             </button>
@@ -1052,14 +999,14 @@ const MyProfilePage = ({ embedded = false }) => {
               type="button"
               onClick={handleSaveAnnualReview}
               disabled={saving}
-              className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark disabled:cursor-not-allowed disabled:bg-slate-400"
+              className="min-h-11 rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-dark active:scale-[0.97] disabled:cursor-not-allowed disabled:bg-slate-400"
             >
-              {saving ? "Guardando..." : "Guardar actualización"}
+              {saving ? "Guardando..." : "Guardar actualizacion"}
             </button>
           </div>
         </div>
       </Modal>
-    </div>
+    </>
   );
 };
 

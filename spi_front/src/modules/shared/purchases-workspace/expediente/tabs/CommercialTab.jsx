@@ -47,10 +47,10 @@ const OFFER_KIND_LABELS = {
 /* Badges para el tipo de disponibilidad del equipo */
 const EQUIP_TYPE_CONFIG = {
   new:              { label: 'Nuevo',                    cls: 'bg-green-soft text-operative-green border-green-200' },
-  cu:               { label: 'Condición de uso',          cls: 'bg-amber-soft text-caution-amber border-amber-200'  },
+  cu:               { label: 'CU',                        cls: 'bg-amber-soft text-caution-amber border-amber-200'  },
   import_new:       { label: 'Nuevo vía importación',    cls: 'bg-red-50 text-alert-red border-red-200'            },
   new_available:    { label: 'Nuevo disponible',          cls: 'bg-green-soft text-operative-green border-green-200' },
-  cu_available:     { label: 'Condición de uso',          cls: 'bg-amber-soft text-caution-amber border-amber-200'  },
+  cu_available:     { label: 'CU',                        cls: 'bg-amber-soft text-caution-amber border-amber-200'  },
   import_available: { label: 'Importación',               cls: 'bg-red-50 text-alert-red border-red-200'            },
   not_available:    { label: 'No disponible',             cls: 'bg-slate-100 text-slate-500 border-slate-200'       },
 };

@@ -6,10 +6,6 @@ const textField = z.union([z.string(), z.null(), z.undefined()]).transform((valu
 });
 
 const normalizeDigits = (value = "") => String(value || "").replace(/\D/g, "");
-const normalizeStage = (value = "") =>
-  String(value || "")
-    .trim()
-    .toLowerCase();
 
 const computeMod10Verifier = (digits) => {
   const coefficients = [2, 1, 2, 1, 2, 1, 2, 1, 2];
@@ -52,6 +48,19 @@ const isValidCedula = (value) => {
   return verifier === Number(cedula[9]);
 };
 
+const isValidPeruvianDni = (value) => {
+  const dni = normalizeDigits(value);
+  return dni.length === 8;
+};
+
+const isValidIdentityDocument = (value) => {
+  const digits = normalizeDigits(value);
+  if (!digits) return true;
+  if (digits.length === 8) return isValidPeruvianDni(digits);
+  if (digits.length === 10) return isValidCedula(digits);
+  return false;
+};
+
 const isValidRuc = (value) => {
   const ruc = normalizeDigits(value);
   if (ruc.length !== 13) return false;
@@ -76,37 +85,6 @@ const isValidRuc = (value) => {
   }
 
   return false;
-};
-
-const profileFieldRequirements = {
-  base: [
-    { path: ["personal", "nombres"], label: "Nombres" },
-    { path: ["personal", "apellidos"], label: "Apellidos" },
-    { path: ["personal", "email_personal"], label: "Correo personal" },
-    { path: ["laboral", "cargo"], label: "Cargo" },
-    { path: ["laboral", "area"], label: "Area" },
-  ],
-  aprobada: [
-    { path: ["personal", "cedula"], label: "Cedula" },
-    { path: ["personal", "telefono_personal"], label: "Telefono personal" },
-  ],
-  en_proceso: [
-    { path: ["personal", "cedula"], label: "Cedula" },
-    { path: ["personal", "telefono_personal"], label: "Telefono personal" },
-    { path: ["laboral", "fecha_ingreso"], label: "Fecha de ingreso" },
-    { path: ["laboral", "tipo_contrato"], label: "Tipo de contrato" },
-  ],
-  completada: [
-    { path: ["personal", "cedula"], label: "Cedula" },
-    { path: ["personal", "telefono_personal"], label: "Telefono personal" },
-    { path: ["laboral", "fecha_ingreso"], label: "Fecha de ingreso" },
-    { path: ["laboral", "tipo_contrato"], label: "Tipo de contrato" },
-    { path: ["laboral", "email_famproject"], label: "Correo corporativo" },
-    {
-      path: ["laboral", "telefono_celular_famproject"],
-      label: "Telefono corporativo",
-    },
-  ],
 };
 
 const personalSchema = z
@@ -138,23 +116,9 @@ const onboardingSchema = z
   .passthrough()
   .optional();
 
-const resolveRequiredFieldsByStage = (rawStage) => {
-  const stage = normalizeStage(rawStage);
-  if (stage === "completada") {
-    return profileFieldRequirements.completada;
-  }
-  if (stage === "en_proceso") {
-    return profileFieldRequirements.en_proceso;
-  }
-  if (stage === "aprobada") {
-    return profileFieldRequirements.aprobada;
-  }
-  return profileFieldRequirements.base;
-};
-
 /**
  * Esquema de validacion para perfiles JSONB del command center.
- * Aplica reglas por etapa de flujo y validaciones fuertes de identificacion.
+ * Solo valida formato de cedula/ruc si son llenados, no requiere campos obligatorios.
  */
 export const commandCenterProfileSchema = z
   .object({
@@ -164,26 +128,12 @@ export const commandCenterProfileSchema = z
   })
   .passthrough()
   .superRefine((value, ctx) => {
-    const workflowStage = value?.onboarding?.workflow_stage;
-    const requiredFields = resolveRequiredFieldsByStage(workflowStage);
-
-    requiredFields.forEach((field) => {
-      const resolved = field.path.reduce((acc, part) => acc?.[part], value);
-      if (!String(resolved || "").trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: field.path,
-          message: `${field.label} es obligatorio`,
-        });
-      }
-    });
-
     const cedula = normalizeDigits(value?.personal?.cedula);
-    if (cedula && !isValidCedula(cedula)) {
+    if (cedula && !isValidIdentityDocument(cedula)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["personal", "cedula"],
-        message: "Cedula invalida. Verifica el numero ingresado.",
+        message: "Documento invalido. Ingresa una cedula ecuatoriana de 10 digitos o un DNI peruano de 8 digitos.",
       });
     }
 

@@ -93,10 +93,11 @@ try {
   Invoke-GcloudChecked -Args @("config", "set", "project", $ProjectId)
 
   if (-not $SkipBuild) {
-    Write-Step "Construyendo imagen $image" 20
+    Write-Step "Construyendo imagen $image (con cache de capas)" 20
     Invoke-GcloudChecked -Args @(
       "builds", "submit",
-      "--tag", $image,
+      "--config", "cloudbuild.yaml",
+      "--substitutions", "_TAG=$ImageTag",
       "--project", $ProjectId
     )
   }
@@ -123,10 +124,10 @@ try {
     "--set-env-vars", "DB_SSL=true",
     "--set-env-vars", "FRONTEND_URL=https://fam-spi-front.web.app",
     "--set-env-vars", "GOOGLE_REDIRECT_URI=https://spi-backend-983537733948.us-central1.run.app/api/v1/auth/google/callback",
-    "--set-env-vars", "DB_HOST=ep-wispy-moon-aqszgsal-pooler.c-8.us-east-1.aws.neon.tech",  # FAILOVER 2026-05-28 — base backup (primaria agotó cuota mensual)
+    "--set-env-vars", "DB_HOST=ep-wispy-moon-aqszgsal.c-8.us-east-1.aws.neon.tech",  # MIGRACION 2026-08-11 — muddy-sun agoto cuota de compute, failover a wispy-moon. Endpoint DIRECTO (SIN -pooler): el pooler de Neon no aisla bien el search_path entre conexiones (ver .agents/skills/neon-compute-quota-failover-skill.md)
     "--set-env-vars", "DB_PORT=5432",
     "--set-env-vars", "DB_USER=neondb_owner",
-    "--set-env-vars", "DB_NAME=FamSPI",
+    "--set-env-vars", "DB_NAME=neondb",  # base restaurada del backup 2026-08-10 (NO la base "FamSPI" del mismo servidor, que quedo congelada en 20-jul)
     "--set-env-vars", "GOOGLE_CLIENT_ID=18376271129-1v6irnav4n49298sspaij02qjnigeln3.apps.googleusercontent.com",
     "--set-env-vars", "DRIVE_ROOT_FOLDER_ID=0AILKwXtcdfRFUk9PVA",
     "--set-env-vars", "GMAIL_SERVICE_ACCOUNT_CLIENT_EMAIL=spi-cuenta-servicio@dashboard-spi.iam.gserviceaccount.com",
@@ -135,12 +136,14 @@ try {
     "--set-env-vars", "GSA_KEY_PATH=/secrets/gsa-key.json",
     "--set-env-vars", "EMAIL_NOTIFICATIONS_ENABLED=true",
     "--set-env-vars", "NOTIFICATIONS_EMAIL_ENABLED=true",
+    "--set-env-vars", "NOTIFICATIONS_PUSH_ENABLED=true",
     "--set-env-vars", "DISABLE_MAIL=false",
-    "--set-env-vars", "NOTIFICATION_ASYNC_DISPATCH_ENABLED=false",
+    "--set-env-vars", "NOTIFICATION_ASYNC_DISPATCH_ENABLED=true",
     "--set-env-vars", "EMAIL_SUPPRESS_SOURCES=",
     "--set-env-vars", "NOTIFICATION_TIMEZONE=America/Guayaquil",
     "--set-env-vars", "APP_TIMEZONE=America/Guayaquil",
     "--set-env-vars", "TZ=America/Guayaquil",
+    "--set-env-vars", "APP_FRONTEND_URL=https://fam-spi-front.web.app",
     "--set-env-vars", "ACCESS_TOKEN_EXPIRES_IN=8h",
     "--set-env-vars", "REFRESH_TOKEN_EXPIRES_IN=30d",
     "--set-env-vars", "DB_BACKUP_FOLDER_NAME=Backup Base",
@@ -156,6 +159,9 @@ try {
     "--set-secrets", "DOC_TEMPLATE_SOLICITUD_2=DOC_TEMPLATE_SOLICITUD_2:latest",
     "--set-secrets", "DOC_TEMPLATE_SOLICITUD_3=DOC_TEMPLATE_SOLICITUD_3:latest",
     "--set-secrets", "COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID=COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID:latest",
+    "--set-secrets", "COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID=COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID:latest",
+    "--set-secrets", "COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID=COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID:latest",
+    "--set-env-vars", "COLLAB_ACTA_EPP_TEMPLATE_ID=17hZiqsespzG-EdoyhHFDL-nLs81LR2T3NHIRitOZVRM",
     "--set-secrets", "TI_ACTA_ENTREGA_TEMPLATE_ID=TI_ACTA_ENTREGA_TEMPLATE_ID:latest",
     "--set-secrets", "TI_ACTA_RETIRO_TEMPLATE_ID=TI_ACTA_RETIRO_TEMPLATE_ID:latest",
     "--set-secrets", "DB_PASSWORD=DB_PASSWORD:latest",
@@ -163,8 +169,12 @@ try {
     "--set-secrets", "REFRESH_SECRET_KEY=REFRESH_SECRET_KEY:latest",
     "--set-secrets", "GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest",
     "--set-secrets", "GOOGLE_MAPS_SERVER_API_KEY=GOOGLE_MAPS_SERVER_API_KEY:latest",
+    "--set-secrets", "WEB_PUSH_PUBLIC_KEY=WEB_PUSH_PUBLIC_KEY:latest",
+    "--set-secrets", "WEB_PUSH_PRIVATE_KEY=WEB_PUSH_PRIVATE_KEY:latest",
+    "--set-secrets", "WEB_PUSH_SUBJECT=WEB_PUSH_SUBJECT:latest",
     "--set-secrets", "SMTP_PASS=SMTP_PASS:latest",
     "--set-secrets", "JOBS_KEY=JOBS_KEY:latest",
+    "--set-secrets", "GCHAT_WEBHOOK_URL_TH=GCHAT_WEBHOOK_URL_TH:latest",  # webhook del Space privado de Talento Humano (alertas de asistencia/regularizacion/teletrabajo van solo por chat)
     "--set-secrets", "/secrets/gsa-key.json=GSA_KEY_JSON:latest"
   )
 

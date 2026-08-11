@@ -32,6 +32,10 @@ router.patch("/renewals/:id", requireRole(COLLAB_WRITE_ROLES), ctrl.completeRene
 // ── Actas globales (ANTES de /:id) ───────────────────────────────────────────
 router.get("/actas/:actaId",             requireRole(COLLAB_READ_ROLES),  ctrl.getActa);
 router.get("/actas/:actaId/pdf",         requireRole(COLLAB_READ_ROLES),  ctrl.downloadActaPdf);
+// Roles de sesion (no solo financiero) -- regenerar el PDF no es destructivo
+// (no borra nada, solo re-renderiza desde la plantilla), asi que se abre al
+// mismo grupo que ya puede gestionar actas de la sesion.
+router.post("/actas/:actaId/pdf/regenerate", requireRole(COLLAB_SESSION_ROLES), ctrl.regenerateActaPdf);
 router.get("/actas/:actaId/signature-workflow", requireRole(COLLAB_READ_ROLES), ctrl.getActaSignatureWorkflow);
 router.post("/actas/:actaId/start-signature-workflow", requireRole(COLLAB_SESSION_ROLES), ctrl.startActaSignatureWorkflow);
 router.post("/actas/:actaId/upload-signed",

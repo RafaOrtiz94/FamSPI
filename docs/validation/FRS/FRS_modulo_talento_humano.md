@@ -9,7 +9,7 @@ Administra procesos internos de personal: expedientes de colaboradores, permisos
 ## Logica funcional observada
 - Registro y mantenimiento de personal (`employees`).
 - Gestion de permisos y vacaciones con flujo de aprobacion.
-- Gestion de matrículas de estudios y validaciones asociadas.
+- Gestion de matrÃ­culas de estudios y validaciones asociadas.
 - Solicitudes de personal con ciclo de seleccion/contratacion.
 - Gestion de perfiles y documentos de colaboradores.
 - Control de asistencia, excepciones y horas extra.
@@ -35,7 +35,7 @@ Administra procesos internos de personal: expedientes de colaboradores, permisos
 **Salida:** Resultado funcional del proceso, cambio de estado o respuesta consultiva del modulo.
 
 ### FRS-TH-003
-**Descripcion:** Gestion de matrículas de estudios y validaciones asociadas.
+**Descripcion:** Gestion de matrÃ­culas de estudios y validaciones asociadas.
 
 **Entradas:** Solicitud API o accion de usuario autenticado, parametros del proceso y datos del modulo.
 

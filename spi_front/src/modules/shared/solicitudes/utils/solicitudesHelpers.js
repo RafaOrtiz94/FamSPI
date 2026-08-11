@@ -78,6 +78,9 @@ export const getTipoLabel = (solicitud = {}) => {
 export const hasJustificantes = (solicitud = {}) =>
   Array.isArray(solicitud.justificantes_urls) && solicitud.justificantes_urls.length > 0;
 
+export const hasExternalCoordinationEvidence = (solicitud = {}) =>
+  Array.isArray(solicitud.external_coordination_urls) && solicitud.external_coordination_urls.length > 0;
+
 export const JUSTIFICANTE_STATUS_META = {
   pendiente: {
     label: "Justificante pendiente de revisión",

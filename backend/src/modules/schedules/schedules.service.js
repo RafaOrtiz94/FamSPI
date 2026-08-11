@@ -6,19 +6,28 @@ const axios = require("axios");
 const { createEvents } = require("ics");
 const { Readable } = require("stream");
 const { createOrUpdateSharedAllDayEvent } = require("../../utils/calendar");
+const notificationManager = require("../notifications/notificationManager");
 
 const GOOGLE_DIRECTIONS_URL = "https://maps.googleapis.com/maps/api/directions/json";
 const metadataCache = new Map();
 
 const MANAGER_ROLES = new Set([
   "jefe_comercial",
+  "jefe_de_comercial",
   "gerencia",
   "gerencia_general",
   "admin",
   "administrador",
 ]);
 
-const ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice", "backoffice_comercial"]);
+const ADVISOR_ROLES = new Set([
+  "comercial",
+  "asesor_comercial",
+  "analista_comercial",
+  "acp_comercial",
+  "backoffice",
+  "backoffice_comercial",
+]);
 
 function isManager(user) {
   return MANAGER_ROLES.has((user?.role || "").toLowerCase());
@@ -472,6 +481,23 @@ async function findScheduleOrThrow(id) {
   return rows[0];
 }
 
+let holidaySetCache = null;
+function getHolidaySet() {
+  if (holidaySetCache) return holidaySetCache;
+  const source = HOLIDAYS_EC && typeof HOLIDAYS_EC === "object" ? HOLIDAYS_EC : {};
+  const flatDates = Object.values(source)
+    .flatMap((value) => (Array.isArray(value) ? value : []))
+    .filter(Boolean);
+  holidaySetCache = new Set(flatDates);
+  return holidaySetCache;
+}
+
+// Las semanas del cronograma comercial son de 5 dias habiles (lun-vie) -- los
+// fines de semana no cuentan como semana y los feriados reducen los dias
+// disponibles de esa semana, pero no se planifican visitas en ellos. Antes
+// esta funcion solo validaba mes/anio: no habia ningun chequeo de dia habil,
+// por eso cronogramas aprobados (ej. karen.barberan agosto 2026) terminaron
+// con visitas en sabado/domingo.
 function validateVisitDateWithinSchedule(plannedDate, schedule) {
   if (!plannedDate) {
     const error = new Error("La fecha planificada es obligatoria");
@@ -491,6 +517,20 @@ function validateVisitDateWithinSchedule(plannedDate, schedule) {
 
   if (visitMonth !== Number(schedule.month) || visitYear !== Number(schedule.year)) {
     const error = new Error("La fecha de visita debe estar dentro del mes del cronograma");
+    error.status = 400;
+    throw error;
+  }
+
+  const weekday = parsed.getUTCDay(); // 0 = domingo, 6 = sabado
+  if (weekday === 0 || weekday === 6) {
+    const error = new Error("No se pueden planificar visitas en fin de semana. Elige un dia habil (lunes a viernes).");
+    error.status = 400;
+    throw error;
+  }
+
+  const dateOnly = toDateOnlyString(plannedDate);
+  if (dateOnly && getHolidaySet().has(dateOnly)) {
+    const error = new Error("La fecha seleccionada es feriado en Ecuador. Elige otro dia habil.");
     error.status = 400;
     throw error;
   }
@@ -591,6 +631,22 @@ async function listAccessibleClientsByCity({ city, user }) {
   return rows;
 }
 
+async function listAccessibleLeadsByCity({ city, user }) {
+  const ownerUserId = await getOwnerUserIdByEmail(user?.email);
+  if (!ownerUserId) return [];
+  const { rows } = await db.query(
+    `SELECT l.id, l.full_name, l.company_name, l.city
+       FROM crm.crm_leads l
+      WHERE l.owner_user_id = $1
+        AND l.deleted_at IS NULL
+        AND l.status NOT IN ('converted', 'disqualified', 'unqualified')
+        AND LOWER(TRIM(COALESCE(l.city, ''))) = LOWER(TRIM($2))
+      ORDER BY COALESCE(NULLIF(TRIM(l.full_name), ''), NULLIF(TRIM(l.company_name), ''), ('Lead #' || l.id::text)) ASC`,
+    [ownerUserId, city || ""],
+  );
+  return rows;
+}
+
 function resolveCity({ city, client }) {
   return (
     city ||
@@ -625,6 +681,217 @@ async function getOwnerUserIdByEmail(email) {
     [normalizedEmail],
   );
   return rows[0]?.id || null;
+}
+
+async function getScheduleOwner(schedule) {
+  const normalizedEmail = String(schedule?.user_email || "").trim().toLowerCase();
+  if (!normalizedEmail) return null;
+  const { rows } = await db.query(
+    `SELECT id, email, COALESCE(fullname, name, email) AS fullname
+       FROM public.users
+      WHERE LOWER(COALESCE(email, '')) = LOWER($1)
+        AND active IS DISTINCT FROM FALSE
+      LIMIT 1`,
+    [normalizedEmail],
+  );
+  return rows[0] || null;
+}
+
+async function listScheduleManagers() {
+  const roles = [...MANAGER_ROLES];
+  const { rows } = await db.query(
+    `SELECT id, email, COALESCE(fullname, name, email) AS fullname, role
+       FROM public.users
+      WHERE active IS DISTINCT FROM FALSE
+        AND LOWER(REPLACE(REPLACE(COALESCE(role, ''), ' ', '_'), '-', '_')) = ANY($1::text[])
+      ORDER BY COALESCE(fullname, name, email) ASC`,
+    [roles],
+  );
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = String(row.email || row.id).trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function getScheduleNotificationSummary(scheduleId) {
+  const { rows } = await db.query(
+    `SELECT
+       COUNT(*)::int AS total_visits,
+       COALESCE(
+         json_agg(DISTINCT city ORDER BY city)
+           FILTER (WHERE NULLIF(TRIM(COALESCE(city, '')), '') IS NOT NULL),
+         '[]'::json
+       ) AS cities
+       FROM scheduled_visits
+      WHERE schedule_id = $1`,
+    [scheduleId],
+  );
+  const row = rows[0] || {};
+  const cities = Array.isArray(row.cities) ? row.cities : [];
+  return {
+    totalVisits: Number(row.total_visits || 0),
+    cities,
+    citiesLabel: cities.length ? cities.join(", ") : "Sin ciudades registradas",
+  };
+}
+
+function formatSchedulePeriod(schedule) {
+  return `${String(schedule?.month || "").padStart(2, "0")}/${schedule?.year || ""}`;
+}
+
+async function notifyScheduleSubmitted(schedule, actorUser) {
+  const managers = await listScheduleManagers();
+  if (!managers.length) return { sent: 0, reason: "no_managers" };
+
+  const owner = await getScheduleOwner(schedule);
+  const summary = await getScheduleNotificationSummary(schedule.id);
+  const period = formatSchedulePeriod(schedule);
+  const processKey = `schedule:${schedule.id}`;
+  const subject = `Cronograma ${period} - revision de planificacion`;
+  const message =
+    `${owner?.fullname || schedule.user_email} envio el cronograma ${period} para aprobacion. ` +
+    `Incluye ${summary.totalVisits} visita(s). Ciudades: ${summary.citiesLabel}.`;
+
+  await Promise.all(
+    managers.map((manager) => notificationManager.sendNotification({
+      userId: manager.id,
+      template: "schedule_submitted",
+      customTitle: "Cronograma pendiente de aprobacion",
+      customMessage: message,
+      type: "task",
+      priority: 2,
+      source: "schedules.submit_for_approval",
+      email: true,
+      data: {
+        email_subject: subject,
+        target_path: "/dashboard/comercial/aprobaciones-planificacion",
+        cta_label: "Revisar cronograma",
+        schedule_id: schedule.id,
+        advisor_email: schedule.user_email,
+        advisor_name: owner?.fullname || schedule.user_email,
+        period,
+        total_visits: summary.totalVisits,
+        cities: summary.citiesLabel,
+      },
+      meta: {
+        process_key: processKey,
+        schedule_id: schedule.id,
+        actor_email: actorUser?.email || null,
+        advisor_email: schedule.user_email,
+        email_subject: subject,
+        target_path: "/dashboard/comercial/aprobaciones-planificacion",
+        cta_label: "Revisar cronograma",
+      },
+    })),
+  );
+
+  return { sent: managers.length };
+}
+
+async function notifyScheduleReviewed(schedule, { approved, notes, actorUser }) {
+  const owner = await getScheduleOwner(schedule);
+  if (!owner?.id) return { sent: 0, reason: "owner_not_found" };
+
+  const summary = await getScheduleNotificationSummary(schedule.id);
+  const period = formatSchedulePeriod(schedule);
+  const processKey = `schedule:${schedule.id}`;
+  const subject = `Cronograma ${period} - resultado de revision`;
+  const title = approved ? "Cronograma aprobado" : "Cronograma rechazado";
+  const message = approved
+    ? `Tu cronograma ${period} fue aprobado por ${actorUser?.fullname || actorUser?.name || actorUser?.email || "jefatura"}. ${notes ? `Comentario: ${notes}` : ""}`
+    : `Tu cronograma ${period} fue rechazado por ${actorUser?.fullname || actorUser?.name || actorUser?.email || "jefatura"}. Motivo: ${notes || "Sin detalle"}`;
+
+  await notificationManager.sendNotification({
+    userId: owner.id,
+    template: approved ? "schedule_approved" : "schedule_rejected",
+    customTitle: title,
+    customMessage: message,
+    type: approved ? "task" : "alert",
+    priority: approved ? 1 : 2,
+    source: approved ? "schedules.approved" : "schedules.rejected",
+    email: true,
+    data: {
+      email_subject: subject,
+      target_path: "/dashboard/comercial/planificacion",
+      cta_label: "Abrir planificacion",
+      schedule_id: schedule.id,
+      period,
+      total_visits: summary.totalVisits,
+      cities: summary.citiesLabel,
+      review_notes: notes || "",
+    },
+    meta: {
+      process_key: processKey,
+      schedule_id: schedule.id,
+      actor_email: actorUser?.email || null,
+      advisor_email: schedule.user_email,
+      email_subject: subject,
+      target_path: "/dashboard/comercial/planificacion",
+      cta_label: "Abrir planificacion",
+    },
+  });
+
+  return { sent: 1 };
+}
+
+async function notifyScheduleReapprovalRequired(schedule, actorUser) {
+  const managers = await listScheduleManagers();
+  if (!managers.length) return { sent: 0, reason: "no_managers" };
+
+  const owner = await getScheduleOwner(schedule);
+  const summary = await getScheduleNotificationSummary(schedule.id);
+  const period = formatSchedulePeriod(schedule);
+  const subject = `Cronograma ${period} - cambios requieren nueva revision`;
+  const message =
+    `${owner?.fullname || schedule.user_email} modifico el cronograma ${period}; ` +
+    `requiere nueva aprobacion. Visitas: ${summary.totalVisits}. Ciudades: ${summary.citiesLabel}.`;
+
+  await Promise.all(
+    managers.map((manager) => notificationManager.sendNotification({
+      userId: manager.id,
+      template: "schedule_reapproval_required",
+      customTitle: "Cronograma requiere nueva revision",
+      customMessage: message,
+      type: "alert",
+      priority: 2,
+      source: "schedules.reapproval_required",
+      email: true,
+      data: {
+        email_subject: subject,
+        target_path: "/dashboard/comercial/aprobaciones-planificacion",
+        cta_label: "Revisar cambios",
+        schedule_id: schedule.id,
+        advisor_email: schedule.user_email,
+        advisor_name: owner?.fullname || schedule.user_email,
+        period,
+        total_visits: summary.totalVisits,
+        cities: summary.citiesLabel,
+      },
+      meta: {
+        process_key: `schedule:${schedule.id}`,
+        schedule_id: schedule.id,
+        actor_email: actorUser?.email || null,
+        advisor_email: schedule.user_email,
+        email_subject: subject,
+        target_path: "/dashboard/comercial/aprobaciones-planificacion",
+        cta_label: "Revisar cambios",
+      },
+    })),
+  );
+
+  return { sent: managers.length };
+}
+
+async function notifyReapprovalIfTransitioned(previousSchedule, currentSchedule, actorUser) {
+  const previousStatus = String(previousSchedule?.status || "");
+  const currentStatus = String(currentSchedule?.status || "");
+  if (!["approved", "rejected"].includes(previousStatus) || currentStatus !== "pending_approval") {
+    return { sent: 0, reason: "no_reapproval_transition" };
+  }
+  return notifyScheduleReapprovalRequired(currentSchedule, actorUser);
 }
 
 function toDateOnlyString(value) {
@@ -664,7 +931,10 @@ async function upsertCrmFamActivityForScheduledVisit({ schedule, visit, ownerUse
               description = $3,
               scheduled_at = $4,
               owner_user_id = $5,
-              status = 'scheduled',
+              status = CASE
+                WHEN status IN ('visited_pending_followup', 'completed', 'cancelled') THEN status
+                ELSE 'scheduled'
+              END,
               updated_by = $5,
               updated_at = NOW()
         WHERE id = $1
@@ -767,7 +1037,8 @@ async function listPendingApproval(user) {
      LEFT JOIN client_visit_logs vl
        ON vl.client_request_id = sv.client_request_id
       AND vl.user_email = vs.user_email
-      AND vl.visit_date = sv.planned_date
+      AND EXTRACT(MONTH FROM vl.visit_date) = vs.month
+      AND EXTRACT(YEAR FROM vl.visit_date) = vs.year
      LEFT JOIN users u ON u.email = vs.user_email
      WHERE vs.status = 'pending_approval'
      GROUP BY vs.id, u.fullname, u.name
@@ -827,7 +1098,6 @@ async function listTeamSchedules(user) {
              FROM scheduled_visits sv2
              WHERE sv2.schedule_id = vs.id
                AND sv2.client_request_id = cvl.client_request_id
-               AND sv2.planned_date = cvl.visit_date
            )
        ) AS unexpected_client_visits
      FROM visit_schedules vs
@@ -835,7 +1105,8 @@ async function listTeamSchedules(user) {
      LEFT JOIN client_visit_logs vl
        ON vl.client_request_id = sv.client_request_id
       AND vl.user_email = vs.user_email
-      AND vl.visit_date = sv.planned_date
+      AND EXTRACT(MONTH FROM vl.visit_date) = vs.month
+      AND EXTRACT(YEAR FROM vl.visit_date) = vs.year
      LEFT JOIN users u ON u.email = vs.user_email
      WHERE COALESCE(LOWER(u.role), '') IN ('comercial','acp_comercial','backoffice','backoffice_comercial','asesor_comercial')
      GROUP BY vs.id, u.fullname, u.name
@@ -875,6 +1146,7 @@ async function getScheduleDetail({ id, user }) {
        sv.id,
        sv.schedule_id,
        sv.client_request_id,
+       sv.lead_id,
        sv.prospect_name,
        COALESCE(sv.city, cr.shipping_city, cr.shipping_province, cr.shipping_address) AS city,
        sv.planned_date,
@@ -887,24 +1159,31 @@ async function getScheduleDetail({ id, user }) {
        cr.shipping_city AS client_city,
        cr.shipping_province AS client_province,
        cr.shipping_address AS client_address,
-       vl.status AS visit_status,
-       vl.hora_entrada,
-       vl.hora_salida,
-       vl.lat_entrada,
-       vl.lng_entrada,
-       vl.lat_salida,
-       vl.lng_salida,
-       vl.observaciones,
+       COALESCE(vl.status, pv.status) AS visit_status,
+       COALESCE(vl.hora_entrada, pv.check_in_time) AS hora_entrada,
+       COALESCE(vl.hora_salida, pv.check_out_time) AS hora_salida,
+       COALESCE(vl.lat_entrada, pv.check_in_lat) AS lat_entrada,
+       COALESCE(vl.lng_entrada, pv.check_in_lng) AS lng_entrada,
+       COALESCE(vl.lat_salida, pv.check_out_lat) AS lat_salida,
+       COALESCE(vl.lng_salida, pv.check_out_lng) AS lng_salida,
+       COALESCE(vl.observaciones, pv.observations) AS observaciones,
        vl.duracion_minutos
      FROM scheduled_visits sv
      LEFT JOIN client_requests cr ON cr.id = sv.client_request_id
      LEFT JOIN client_visit_logs vl
        ON vl.client_request_id = sv.client_request_id
       AND vl.user_email = $2
-      AND vl.visit_date = sv.planned_date
+      AND EXTRACT(MONTH FROM vl.visit_date) = $3
+      AND EXTRACT(YEAR FROM vl.visit_date) = $4
+     LEFT JOIN prospect_visits pv
+       ON pv.lead_id = sv.lead_id
+      AND sv.lead_id IS NOT NULL
+      AND LOWER(COALESCE(pv.user_email, '')) = LOWER($2)
+      AND EXTRACT(MONTH FROM pv.visit_date) = $3
+      AND EXTRACT(YEAR FROM pv.visit_date) = $4
      WHERE sv.schedule_id = $1
      ORDER BY sv.planned_date ASC, sv.priority ASC`,
-    [id, schedule.user_email],
+    [id, schedule.user_email, Number(schedule.month), Number(schedule.year)],
   );
   const startDate = new Date(Number(schedule.year), Number(schedule.month) - 1, 1);
   const endDate = new Date(Number(schedule.year), Number(schedule.month), 1);
@@ -954,7 +1233,6 @@ async function getScheduleDetail({ id, user }) {
          FROM scheduled_visits sv
          WHERE sv.schedule_id = $4
            AND sv.client_request_id = vl.client_request_id
-           AND sv.planned_date = vl.visit_date
        )
      ORDER BY vl.visit_date DESC, vl.hora_entrada DESC NULLS LAST`,
     [
@@ -1132,7 +1410,12 @@ async function updateSchedule({ id, notes, user }) {
     [notes || null, id, needsReapproval],
   );
 
-  return { ...rows[0], needs_reapproval: needsReapproval };
+  const updatedSchedule = rows[0];
+  const notifications = needsReapproval
+    ? await notifyReapprovalIfTransitioned(schedule, updatedSchedule, user)
+    : { sent: 0 };
+
+  return { ...updatedSchedule, needs_reapproval: needsReapproval, notifications };
 }
 
 async function deleteSchedule({ id, user }) {
@@ -1178,7 +1461,9 @@ async function submitForApproval({ id, user }) {
      RETURNING *`,
     [id],
   );
-  return rows[0];
+  const submittedSchedule = rows[0];
+  submittedSchedule.notifications = await notifyScheduleSubmitted(submittedSchedule, user);
+  return submittedSchedule;
 }
 
 async function addVisit({ scheduleId, clientRequestId, prospectName, plannedDate, city, priority, notes, user }) {
@@ -1226,6 +1511,7 @@ async function addVisit({ scheduleId, clientRequestId, prospectName, plannedDate
       [existingRows[0].id, targetCity, priority || 1, notes || null],
     );
     const updatedSchedule = await triggerReapprovalIfNeeded(schedule);
+    await notifyReapprovalIfTransitioned(schedule, updatedSchedule, user);
     return { ...rows[0], schedule_status: updatedSchedule.status };
   }
   const { rows } = await db.query(
@@ -1244,6 +1530,7 @@ async function addVisit({ scheduleId, clientRequestId, prospectName, plannedDate
   );
 
   const updatedSchedule = await triggerReapprovalIfNeeded(schedule);
+  await notifyReapprovalIfTransitioned(schedule, updatedSchedule, user);
 
   return { ...rows[0], schedule_status: updatedSchedule.status };
 }
@@ -1270,8 +1557,19 @@ async function syncWeekCity({ scheduleId, city, dates, user }) {
 
   normalizedDates.forEach((plannedDate) => validateVisitDateWithinSchedule(plannedDate, schedule));
 
-  const clients = await listAccessibleClientsByCity({ city: normalizedCity, user });
-  if (!clients.length) {
+  const [clients, leads] = await Promise.all([
+    listAccessibleClientsByCity({ city: normalizedCity, user }),
+    listAccessibleLeadsByCity({ city: normalizedCity, user }),
+  ]);
+  const targets = [
+    ...clients.map((c) => ({ client_request_id: c.id, lead_id: null, prospect_name: null })),
+    ...leads.map((l) => ({
+      client_request_id: null,
+      lead_id: l.id,
+      prospect_name: l.full_name || l.company_name || `Lead #${l.id}`,
+    })),
+  ];
+  if (!targets.length) {
     return {
       schedule_id: scheduleId,
       city: normalizedCity,
@@ -1284,28 +1582,33 @@ async function syncWeekCity({ scheduleId, city, dates, user }) {
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
+    // Solo se borran las visitas de ESTA ciudad en la semana (permite re-sincronizar
+    // para refrescar) -- antes borraba TODA la semana, asi que cargar una segunda
+    // ciudad eliminaba las visitas de la primera. Una semana puede tener varias ciudades.
     await client.query(
       `DELETE FROM scheduled_visits
         WHERE schedule_id = $1
-          AND planned_date = ANY($2::date[])`,
-      [scheduleId, normalizedDates],
+          AND planned_date = ANY($2::date[])
+          AND city = $3`,
+      [scheduleId, normalizedDates, normalizedCity],
     );
 
     const insertedVisits = [];
-    for (let index = 0; index < clients.length; index += 1) {
-      const scheduledClient = clients[index];
+    for (let index = 0; index < targets.length; index += 1) {
+      const target = targets[index];
       const plannedDate = normalizedDates[index % normalizedDates.length];
       const { rows } = await client.query(
-        `INSERT INTO scheduled_visits (schedule_id, client_request_id, planned_date, city, priority, notes)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO scheduled_visits (schedule_id, client_request_id, lead_id, prospect_name, planned_date, city, priority, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING *`,
-        [scheduleId, scheduledClient.id, plannedDate, normalizedCity, 1, null],
+        [scheduleId, target.client_request_id, target.lead_id, target.prospect_name, plannedDate, normalizedCity, 1, null],
       );
       insertedVisits.push(rows[0]);
     }
 
     await client.query("COMMIT");
     const updatedSchedule = await triggerReapprovalIfNeeded(schedule);
+    await notifyReapprovalIfTransitioned(schedule, updatedSchedule, user);
     return {
       schedule_id: scheduleId,
       city: normalizedCity,
@@ -1322,7 +1625,18 @@ async function syncWeekCity({ scheduleId, city, dates, user }) {
   }
 }
 
-async function updateVisit({ scheduleId, visitId, clientRequestId, prospectName, city, plannedDate, priority, notes, user }) {
+async function updateVisit({
+  scheduleId,
+  visitId,
+  clientRequestId,
+  prospectName,
+  city,
+  plannedDate,
+  priority,
+  notes,
+  preserveApprovedStatus = false,
+  user,
+}) {
   assertAdvisor(user);
   const schedule = await findScheduleOrThrow(scheduleId);
   ensureOwner(schedule, user);
@@ -1370,7 +1684,21 @@ async function updateVisit({ scheduleId, visitId, clientRequestId, prospectName,
     ],
   );
 
-  const updatedSchedule = await triggerReapprovalIfNeeded(schedule);
+  const preserveApprovedReorder =
+    Boolean(preserveApprovedStatus) &&
+    schedule.status === "approved" &&
+    targetClientRequestId === (visit.client_request_id || null) &&
+    (targetProspectName || null) === (visit.prospect_name || null) &&
+    targetCity === (visit.city || null) &&
+    Number(priority || visit.priority) === Number(visit.priority) &&
+    (notes !== undefined ? notes : visit.notes) === visit.notes;
+
+  const updatedSchedule = preserveApprovedReorder
+    ? schedule
+    : await triggerReapprovalIfNeeded(schedule);
+  if (!preserveApprovedReorder) {
+    await notifyReapprovalIfTransitioned(schedule, updatedSchedule, user);
+  }
 
   return { ...updated[0], schedule_status: updatedSchedule.status };
 }
@@ -1380,7 +1708,8 @@ async function deleteVisit({ scheduleId, visitId, user }) {
   const schedule = await findScheduleOrThrow(scheduleId);
   ensureOwner(schedule, user);
   await db.query("DELETE FROM scheduled_visits WHERE id = $1 AND schedule_id = $2", [visitId, scheduleId]);
-  await triggerReapprovalIfNeeded(schedule);
+  const updatedSchedule = await triggerReapprovalIfNeeded(schedule);
+  await notifyReapprovalIfTransitioned(schedule, updatedSchedule, user);
   return { deleted: true };
 }
 
@@ -1451,6 +1780,11 @@ async function approveSchedule({ id, notes, user }) {
     );
     const approvedSchedule = rows[0];
     approvedSchedule.external_sync = await syncApprovedScheduleArtifacts(approvedSchedule);
+    approvedSchedule.notifications = await notifyScheduleReviewed(approvedSchedule, {
+      approved: true,
+      notes: reviewNotes,
+      actorUser: user,
+    });
     return approvedSchedule;
   }
 
@@ -1473,6 +1807,11 @@ async function approveSchedule({ id, notes, user }) {
   );
   const approvedSchedule = rows[0];
   approvedSchedule.external_sync = await syncApprovedScheduleArtifacts(approvedSchedule);
+  approvedSchedule.notifications = await notifyScheduleReviewed(approvedSchedule, {
+    approved: true,
+    notes: reviewNotes,
+    actorUser: user,
+  });
   return approvedSchedule;
 }
 
@@ -1506,7 +1845,13 @@ async function rejectSchedule({ id, reason, notes, user }) {
        RETURNING *`,
       [user.email, reviewNotes, id],
     );
-    return rows[0];
+    const rejectedSchedule = rows[0];
+    rejectedSchedule.notifications = await notifyScheduleReviewed(rejectedSchedule, {
+      approved: false,
+      notes: reviewNotes,
+      actorUser: user,
+    });
+    return rejectedSchedule;
   }
 
   const auditNote = buildAuditNote({ action: "reject", notes: reviewNotes, user });
@@ -1525,7 +1870,13 @@ async function rejectSchedule({ id, reason, notes, user }) {
      RETURNING *`,
     [user.email, reviewNotes, auditNote, id],
   );
-  return rows[0];
+  const rejectedSchedule = rows[0];
+  rejectedSchedule.notifications = await notifyScheduleReviewed(rejectedSchedule, {
+    approved: false,
+    notes: reviewNotes,
+    actorUser: user,
+  });
+  return rejectedSchedule;
 }
 
 async function findApprovedScheduleForMonth({ userEmail, month, year, allowPendingReapproval = false }) {
@@ -1939,7 +2290,66 @@ async function getAnalytics(user) {
   return { byStatus, topCities: visits };
 }
 
+async function findTodayScheduledVisit({ userEmail, clientRequestId, leadId, date }) {
+  if (!clientRequestId && !leadId) return null;
+  // `date` puede llegar como objeto Date (p.ej. desde un RETURNING de Postgres
+  // en attendance.controller.js) o como string "YYYY-MM-DD" (desde clients.service.js).
+  // String(dateObj) da formato "Thu Jul 30 2026 ..." -- .slice(0,10) rompía el
+  // cast ::date mas abajo y el sync silenciosamente nunca corria para ningun
+  // cierre de visita hecho desde Asistencia.
+  const normalizedDate = date instanceof Date
+    ? date.toISOString().slice(0, 10)
+    : String(date || "").slice(0, 10);
+  const month = Number(normalizedDate.slice(5, 7));
+  const year = Number(normalizedDate.slice(0, 4));
+  const params = [String(userEmail || "").toLowerCase(), normalizedDate, month, year];
+  const conditions = [
+    "LOWER(COALESCE(vs.user_email, '')) = $1",
+    "vs.status = 'approved'",
+    "(sv.planned_date = $2::date OR (vs.month = $3 AND vs.year = $4))",
+  ];
+  if (clientRequestId) {
+    params.push(clientRequestId);
+    conditions.push(`sv.client_request_id = $${params.length}`);
+  } else {
+    params.push(leadId);
+    conditions.push(`sv.lead_id = $${params.length}`);
+  }
+  const { rows } = await db.query(
+    `SELECT sv.id, sv.crm_activity_id
+       FROM scheduled_visits sv
+       JOIN visit_schedules vs ON vs.id = sv.schedule_id
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY CASE WHEN sv.planned_date = $2::date THEN 0 ELSE 1 END, sv.planned_date ASC, sv.id ASC
+      LIMIT 1`,
+    params,
+  );
+  return rows[0] || null;
+}
+
+async function markCrmActivityCompleted(crmActivityId, userId, { visitLogId = null } = {}) {
+  if (!crmActivityId) return;
+  await db.query(
+    `UPDATE crm.crm_activities
+        SET status = CASE
+              WHEN activity_type = 'visita' THEN 'visited_pending_followup'
+              ELSE 'completed'
+            END,
+            completed_at = CASE
+              WHEN activity_type = 'visita' THEN completed_at
+              ELSE NOW()
+            END,
+            visit_log_id = COALESCE($3, visit_log_id),
+            updated_by = $2,
+            updated_at = NOW()
+      WHERE id = $1
+        AND status NOT IN ('completed', 'cancelled')`,
+    [crmActivityId, userId || null, visitLogId],
+  );
+}
+
 module.exports = {
+  buildGoogleMapsDeepLink,
   listMySchedules,
   getHolidays,
   listPendingApproval,
@@ -1961,4 +2371,6 @@ module.exports = {
   getApprovedScheduleCurrent,
   findApprovedScheduleForMonth,
   getMyCalendarIcsStream,
+  findTodayScheduledVisit,
+  markCrmActivityCompleted,
 };

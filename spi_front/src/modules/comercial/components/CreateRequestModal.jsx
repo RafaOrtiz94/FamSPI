@@ -342,6 +342,10 @@ const CreateRequestModal = ({
  const [registerLoading, setRegisterLoading] = useState(false);
  const [registerError, setRegisterError] = useState("");
  const [returnToType, setReturnToType] = useState(null);
+ // Paso previo solo para inspección de ambiente: el usuario elige "normal" o
+ // "por costos" antes de ver el formulario. No cambia ningún campo del
+ // formulario, solo etiqueta la solicitud (payload.tipo_inspeccion).
+ const [inspectionMode, setInspectionMode] = useState(null);
  const { showToast } = useUI();
 
  const todayDateString = useMemo(() => TODAY, []);
@@ -382,6 +386,7 @@ const CreateRequestModal = ({
  setRegisterSerial("");
  setRegisterError("");
  setReturnToType(null);
+ setInspectionMode(null);
  return;
  }
 
@@ -402,8 +407,12 @@ const CreateRequestModal = ({
  if (initialClientId) {
  setSelectedClientId(String(initialClientId));
  }
+ // Al editar una solicitud existente, ya se eligió el modo antes -- no
+ // repetir el paso previo.
+ setInspectionMode(initialData?.tipo_inspeccion || "normal");
  } else {
  setType(presetType || "inspection");
+ setInspectionMode(null);
  }
 
  if (!isEditing) {
@@ -737,6 +746,11 @@ const CreateRequestModal = ({
  }
  };
 
+ const handleSelectInspectionMode = (mode) => {
+ setInspectionMode(mode);
+ setFormData((prev) => ({ ...prev, tipo_inspeccion: mode }));
+ };
+
  const handleNewClientSuccess = () => {
  showToast("Cliente registrado. Puedes seleccionarlo en el listado.", "success");
  const nextType = returnToType && returnToType !== "cliente" ? returnToType : "inspection";
@@ -856,9 +870,50 @@ const CreateRequestModal = ({
  </button>
  </div>
 
+ {/* Paso previo: inspección de ambiente pide elegir normal/por costos antes del formulario */}
+ {type === "inspection" && !inspectionMode && (
+ <div className="space-y-3">
+ <p className="text-sm text-gray-600 dark:text-gray-300">
+ ¿Esta solicitud de inspección es normal o por costos?
+ </p>
+ <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+ <button
+ type="button"
+ onClick={() => handleSelectInspectionMode("normal")}
+ className="rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 p-4 text-left hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-gray-600 transition-colors"
+ >
+ <p className="font-semibold text-gray-900 dark:text-white">Normal</p>
+ <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Inspección de ambiente estándar.</p>
+ </button>
+ <button
+ type="button"
+ onClick={() => handleSelectInspectionMode("costos")}
+ className="rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 p-4 text-left hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-gray-600 transition-colors"
+ >
+ <p className="font-semibold text-gray-900 dark:text-white">Por costos</p>
+ <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Inspección de ambiente por costos.</p>
+ </button>
+ </div>
+ </div>
+ )}
+
  {/* Siempre abrimos con un tipo por defecto para evitar pasos extra */}
- {type && type !== "cliente" && (
+ {type && type !== "cliente" && (type !== "inspection" || inspectionMode) && (
  <form onSubmit={handleSubmit} className="space-y-3">
+ {type === "inspection" && (
+ <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-gray-600 dark:bg-gray-700">
+ <span className="text-xs font-medium text-slate-600 dark:text-gray-300">
+ Tipo de inspección: <strong>{inspectionMode === "costos" ? "Por costos" : "Normal"}</strong>
+ </span>
+ <button
+ type="button"
+ onClick={() => setInspectionMode(null)}
+ className="text-xs font-semibold text-blue-600 hover:text-blue-800 dark:text-blue-400"
+ >
+ Cambiar
+ </button>
+ </div>
+ )}
  {clientSelectionRequired && (
  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900 text-sm dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
  <p className="font-semibold">Selecciona primero un cliente registrado.</p>

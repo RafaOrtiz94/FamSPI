@@ -331,7 +331,7 @@ const CaseHeader = ({ uiGuidance, onRefresh, onOpenReopenRequest, onOpenReopenDe
   extensionRequest?.status === "pending",
  );
  const activeWindowLabel = hasActivePostStatisticsSla
-  ? "SLA general post-estadistica"
+  ? "SLA general post-validacion"
   : preflow?.phaseLabel || "Etapa activa";
  const technicalSlaExpired = Boolean(
   preflow?.isActive &&
@@ -523,7 +523,7 @@ const CaseHeader = ({ uiGuidance, onRefresh, onOpenReopenRequest, onOpenReopenDe
  <>
  <div className="hidden sm:block w-px self-stretch bg-black/10 mx-3" aria-hidden="true" />
  <span className="text-slate-600 flex-shrink-0">
-  {hasActivePostStatisticsSla ? "Tiempo hasta estadistica registrado" : "Tiempo comercial registrado"}: {commercialElapsedLabel}
+  {hasActivePostStatisticsSla ? "Tiempo hasta validacion registrado" : "Tiempo comercial registrado"}: {commercialElapsedLabel}
  </span>
  </>
  )}

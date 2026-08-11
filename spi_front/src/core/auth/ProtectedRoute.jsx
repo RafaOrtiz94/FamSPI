@@ -39,7 +39,6 @@ export const ProtectedRoute = ({ allowedRoles = [], strictRoles = false }) => {
  const normalizedUserRoles = userRolesList.map((r) => r.toLowerCase());
  const normalizedScopes = scopesList.map((s) => s.toLowerCase());
  const userRole = normalizedUserRoles[0] || "";
- const userScope = normalizedScopes[0] || userRole;
  const hasPendingRole =
  normalizedUserRoles.some((r) => r.includes("pending") || r.includes("pendiente")) ||
  normalizedScopes.some((s) => s.includes("pending") || s.includes("pendiente")) ||
@@ -173,8 +172,13 @@ export const RoleRedirect = () => {
  servicio_tecnico: "/dashboard/servicio-tecnico",
  "servicio-tecnico": "/dashboard/servicio-tecnico",
  jefe_tecnico: "/dashboard/servicio-tecnico",
+ jefe_servicio: "/dashboard/servicio-tecnico",
  jefe_servicio_tecnico: "/dashboard/servicio-tecnico",
  tecnico: "/dashboard/servicio-tecnico",
+ ing_servicio: "/dashboard/servicio-tecnico",
+ esp_app: "/dashboard/servicio-tecnico",
+ ing_servicio_ext: "/dashboard/ext",
+ esp_app_ext: "/dashboard/ext",
  talento_humano: "/dashboard/talento-humano",
  "talento-humano": "/dashboard/talento-humano",
  jefe_talento_humano: "/dashboard/talento-humano",

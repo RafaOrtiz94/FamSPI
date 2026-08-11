@@ -41,7 +41,7 @@ const COLLABORATOR_DOCUMENT_CATALOG = [
   },
   {
     code: "CHILD_BIRTH_CERTIFICATE",
-    label: "Partida de nacimiento (hijos)",
+    label: "Partida de nacimiento/cedula hijos",
     ownerArea: "profile",
     sourceChannel: "profile",
     required: false,

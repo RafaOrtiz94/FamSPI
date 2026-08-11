@@ -23,6 +23,7 @@ const logger = require("./config/logger");
 const { startReminderScheduler } = require("./modules/mantenimientos/mantenimiento.scheduler");
 const { startExpiredReservationsJob } = require("./jobs/checkExpiredReservations");
 const { startBusinessCasePreflowExpiryJob } = require("./jobs/businessCasePreflowExpiryScheduler");
+const { startBusinessCaseWorkflowSlaJob } = require("./jobs/businessCaseWorkflowSlaScheduler");
 const { startBusinessCaseDeterminationsGateExpiryJob } = require("./jobs/businessCaseDeterminationsGateExpiryScheduler");
 const { startBusinessCaseSheetGenerationQueueJob } = require("./jobs/businessCaseSheetGenerationQueueScheduler");
 const { start: startBcNotificationQueueJob } = require("./jobs/businessCaseNotificationQueueScheduler");
@@ -36,6 +37,8 @@ const { startExternalCaseSyncJob } = require("./jobs/externalCaseSyncScheduler")
 const { startCrmSyncJob } = require("./jobs/crmSyncScheduler");
 const { startSignatureWorkflowReminderJob } = require("./jobs/signatureWorkflowReminderScheduler");
 const { startSignatureWorkflowExpiryJob } = require("./jobs/signatureWorkflowExpiryScheduler");
+const { startTrainingSignatureReminderJob } = require("./jobs/trainingSignatureReminderScheduler");
+const { startScheduleVisitCompletionReminderJob } = require("./jobs/scheduleVisitCompletionReminderScheduler");
 
 const PORT = Number(process.env.PORT) || 8080;
 const ENV = process.env.NODE_ENV || "development";
@@ -57,6 +60,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
       { name: "mantenimiento_reminder", fn: startReminderScheduler },
       { name: "expired_reservations", fn: startExpiredReservationsJob },
       { name: "bc_preflow_expiry", fn: startBusinessCasePreflowExpiryJob },
+      { name: "bc_workflow_sla", fn: startBusinessCaseWorkflowSlaJob },
       { name: "bc_determinations_gate_expiry", fn: startBusinessCaseDeterminationsGateExpiryJob },
       { name: "bc_sheet_generation_queue", fn: startBusinessCaseSheetGenerationQueueJob },
       { name: "bc_notification_queue", fn: startBcNotificationQueueJob },
@@ -70,6 +74,8 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
       { name: "crm_sync", fn: startCrmSyncJob },
       { name: "signature_workflow_reminder", fn: startSignatureWorkflowReminderJob },
       { name: "signature_workflow_expiry", fn: startSignatureWorkflowExpiryJob },
+      { name: "training_signature_reminder", fn: startTrainingSignatureReminderJob },
+      { name: "schedule_visit_completion_reminder", fn: startScheduleVisitCompletionReminderJob },
     ];
 
     jobs.forEach((job, index) => {

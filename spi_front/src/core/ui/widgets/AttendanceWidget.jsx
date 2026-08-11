@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FiClock, FiCoffee, FiSun, FiMoon, FiTrendingUp, FiCheckCircle } from "react-icons/fi";
+import { FiClock, FiCoffee, FiSun, FiMoon, FiHome, FiTrendingUp, FiCheckCircle, FiMapPin, FiChevronLeft, FiChevronRight, FiUsers } from "react-icons/fi";
 import confetti from "canvas-confetti";
 
 import Button, { actionBtnClass, actionBtnNeutralClass } from "../components/Button";
@@ -17,6 +17,9 @@ import {
   buildOperationalStartPayload,
   buildOperationalClosurePayload,
   buildOperationalTripClosePayload,
+  isOperationalExitCategory,
+  isTeleworkCategory,
+  validateOperationalDestinationStep,
 } from "../attendanceFlowUtils";
 
 import {
@@ -32,7 +35,6 @@ import {
   marcarAlmuerzoEntradaOperacional,
   marcarLlegadaDestino,
   marcarCierreViaje,
-  markOvertime,
   justifyLateArrival,
   requestEntryRegularization,
   registerException,
@@ -41,6 +43,9 @@ import {
   updateExceptionStatus,
   getActiveException,
   getTodayAttendance,
+  createTeleworkRequest,
+  getTeleworkRequests,
+  getAttendanceLivePresence,
   getAttendanceRange,
   syncAttendanceLocation,
   flushAttendanceOfflineQueue,
@@ -49,6 +54,7 @@ import {
 } from "../../api/attendanceApi";
 import { useAutoUpdate } from "../../api/index";
 import { fetchClients } from "../../api/clientsApi";
+import ECUADOR_LOCATIONS from "../../../data/ecuadorGeography";
 import { formatDateSafe, formatTimeSafe, toDate } from "../../../shared/utils/dateUtils";
 import { useAuth } from "../../auth/useAuth";
 import {
@@ -58,6 +64,8 @@ import {
 } from "../../../shared/utils/attendanceLocationCache";
 
 const RECENT_HISTORY_DAYS = 5;
+const LIVE_PRESENCE_CITY_PAGE_SIZE = 4;
+const LIVE_PRESENCE_CARD_PAGE_SIZE = 4;
 const PUNCTUALITY_BASE_MINUTES = 9 * 60;
 const PUNCTUALITY_TOLERANCE_MINUTES = 6;
 const ENTRY_MARK_CUTOFF_MINUTES = 9 * 60 + 20; // 09:20 — after this, entry is blocked
@@ -77,16 +85,11 @@ const EXCEPTION_LOCATION_FIELDS = Object.freeze({
 const FIELD_VISIT_TYPE_OPTIONS = Object.freeze([
   { value: "cronograma", label: "Cliente de cronograma", helper: "Visita planificada del dia" },
   { value: "prospecto", label: "Prospecto", helper: "Gestion comercial nueva" },
-  { value: "emergencia", label: "Emergencia", helper: "Atencion urgente en cliente" },
+  { value: "otra", label: "Otra gestion", helper: "Banco, ministerio, proveedor u otro destino" },
 ]);
 const OPERATIONAL_CATEGORY_OPTIONS = Object.freeze([
-  { value: "cliente", label: "Visita a cliente", helper: "Cliente, prospecto o atencion tecnica" },
-  { value: "reunion", label: "Reunion externa", helper: "Reunion de trabajo fuera de oficina" },
-  { value: "banco", label: "Gestion bancaria", helper: "Depositos, tramites o diligencias" },
-  { value: "ministerio", label: "Entidad publica", helper: "Ministerio u otra institucion" },
-  { value: "proveedor", label: "Visita a proveedor", helper: "Compras, entregas o coordinacion" },
-  { value: "gestion_oficina", label: "Gestion operativa", helper: "Diligencia administrativa externa" },
-  { value: "otro", label: "Otra salida", helper: "Cualquier otra gestion laboral" },
+  { value: "operacional", label: "Salida operacional", helper: "Gestion laboral fuera de la oficina" },
+  { value: "teletrabajo", label: "Teletrabajo", helper: "Jornada laboral desde ubicacion remota" },
 ]);
 const COMMERCIAL_SCHEDULE_ROLES = new Set([
   "comercial",
@@ -105,6 +108,14 @@ const TECHNICAL_SCHEDULE_ROLES = new Set([
   "jefe_servicio",
   "jefe_servicio_tecnico",
 ]);
+const hasExactTalentHumanRole = (user = {}) => [
+  user.role,
+  user.scope,
+  user.role_name,
+  user.rol,
+  ...(Array.isArray(user.roles) ? user.roles : []),
+  ...(Array.isArray(user.scopes) ? user.scopes : []),
+].map((value) => String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_")).includes("talento_humano");
 const CONTROL_INPUT_CLASS =
   "h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm transition placeholder:text-slate-400 focus-visible:border-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200";
 const CONTROL_INPUT_SUBTLE_CLASS =
@@ -377,10 +388,10 @@ const AttendanceWidget = () => {
   const [, setCachedLocationAccuracy] = useState(null);
   const [, setLocationTimestamp] = useState(null);
   const [widgetModalOpen, setWidgetModalOpen] = useState(false);
-  const [recentHistory, setRecentHistory] = useState([]);
-  const [overtimePrompt, setOvertimePrompt] = useState(null);
-  const [overtimeReason, setOvertimeReason] = useState("");
-  const [overtimeSubmitting, setOvertimeSubmitting] = useState(false);
+  const [livePresence, setLivePresence] = useState([]);
+  const [presenceCityPage, setPresenceCityPage] = useState(0);
+  const [selectedPresenceCity, setSelectedPresenceCity] = useState("");
+  const [selectedPresencePage, setSelectedPresencePage] = useState(0);
   const [lateJustificationModalOpen, setLateJustificationModalOpen] = useState(false);
   const [lateJustificationReason, setLateJustificationReason] = useState("");
   const [lateJustificationSubmitting, setLateJustificationSubmitting] = useState(false);
@@ -412,11 +423,17 @@ const AttendanceWidget = () => {
   const [operationalModalError, setOperationalModalError] = useState("");
   const [operationalCategory, setOperationalCategory] = useState("");
   const [operationalDetail, setOperationalDetail] = useState("");
+  const [teleworkRequestDate, setTeleworkRequestDate] = useState(() => getLocalDateKey());
+  const [operationalDestinationCity, setOperationalDestinationCity] = useState("");
+  const [operationalCitySuggestionsOpen, setOperationalCitySuggestionsOpen] = useState(false);
+  const [operationalDestination, setOperationalDestination] = useState("");
   const [operationalVehicleMode, setOperationalVehicleMode] = useState("company");
   const [operationalStartKm, setOperationalStartKm] = useState("");
   const [operationalEndKm, setOperationalEndKm] = useState("");
   const [operationalStartPhoto, setOperationalStartPhoto] = useState(null);
   const [operationalEndPhoto, setOperationalEndPhoto] = useState(null);
+  const [teleworkRequests, setTeleworkRequests] = useState([]);
+  const [teleworkRequestsLoading, setTeleworkRequestsLoading] = useState(false);
   const [offlineQueueSize, setOfflineQueueSize] = useState(() => getAttendanceOfflineQueueSize());
   const initializedRef = useRef(false);
   const openLateJustificationFlow = useCallback(() => {
@@ -532,37 +549,32 @@ const AttendanceWidget = () => {
     }
   };
 
-  const loadRecentHistory = async () => {
-    if (!user?.id) {
-      setRecentHistory([]);
-      return;
-    }
-
+  const loadTeleworkRequests = async () => {
+    if (!user?.id) return;
+    setTeleworkRequestsLoading(true);
     try {
-      const end = new Date();
-      const start = new Date();
-      start.setDate(end.getDate() - (RECENT_HISTORY_DAYS - 1));
+      const response = await getTeleworkRequests();
+      setTeleworkRequests(Array.isArray(response?.data?.requests) ? response.data.requests : []);
+    } catch (error) {
+      const status = Number(error?.response?.status || 0);
+      if (status !== 403 && status !== 404) console.error("Error loading telework requests:", error);
+      setTeleworkRequests([]);
+    } finally {
+      setTeleworkRequestsLoading(false);
+    }
+  };
 
-      const res = await getAttendanceRange(
-        start.toISOString().slice(0, 10),
-        end.toISOString().slice(0, 10),
-        user.id,
-      );
-
-      const rows = Array.isArray(res?.data) ? res.data : [];
-      setRecentHistory(rows.slice(0, RECENT_HISTORY_DAYS));
+  const loadLivePresence = async () => {
+    try {
+      const res = await getAttendanceLivePresence();
+      setLivePresence(Array.isArray(res?.data) ? res.data : []);
     } catch (err) {
-      console.error("Error loading attendance history:", err);
-      setRecentHistory([]);
+      console.error("Error loading live presence:", err);
+      setLivePresence([]);
     }
   };
 
   const loadScheduledClientsForToday = async () => {
-    if (!canUseFieldOperations) {
-      setPlannedVisitAgenda([]);
-      return;
-    }
-
     setScheduledClientsLoading(true);
     try {
       const dateKey = attendance?.date || getLocalDateKey(new Date());
@@ -570,6 +582,7 @@ const AttendanceWidget = () => {
         date: dateKey,
         include_schedule_info: true,
         schedule_scope: "mine",
+        schedule_window: "approved_period",
       });
       const clients = Array.isArray(result?.clients) ? result.clients : [];
       const agenda = clients
@@ -580,7 +593,11 @@ const AttendanceWidget = () => {
           const isTechnical = Boolean(scheduleInfo?.is_planned_technical);
           const roleMatches =
             (canSeeCommercialScheduleAgenda && isCommercial) ||
-            (canSeeTechnicalScheduleAgenda && isTechnical);
+            (canSeeTechnicalScheduleAgenda && isTechnical) ||
+            // La agenda se consulta para el usuario autenticado. Los roles
+            // sin agenda comercial/tecnica propia tambien deben poder usarla
+            // al registrar una salida operacional para visitar a un cliente.
+            (!canSeeCommercialScheduleAgenda && !canSeeTechnicalScheduleAgenda && (isCommercial || isTechnical));
 
           if (!roleMatches) return null;
 
@@ -620,13 +637,11 @@ const AttendanceWidget = () => {
 
       const leadsToday = Array.isArray(result?.leads) ? result.leads : [];
       setScheduledLeadsToday(
-        canSeeCommercialScheduleAgenda
-          ? leadsToday.map((lead) => ({
-              id: lead.lead_id,
-              name: String(lead.full_name || lead.company_name || `Lead ${lead.lead_id}`).trim(),
-              city: String(lead.city || "").trim() || "Sin ciudad",
-            }))
-          : [],
+        leadsToday.map((lead) => ({
+          id: lead.lead_id,
+          name: String(lead.full_name || lead.company_name || `Lead ${lead.lead_id}`).trim(),
+          city: String(lead.city || "").trim() || "Sin ciudad",
+        })),
       );
     } catch (_error) {
       setPlannedVisitAgenda([]);
@@ -637,11 +652,6 @@ const AttendanceWidget = () => {
   };
 
   const loadAccessibleClientsForEmergency = async () => {
-    if (!canUseFieldOperations) {
-      setEmergencyClients([]);
-      return;
-    }
-
     setEmergencyClientsLoading(true);
     try {
       const result = await fetchClients();
@@ -666,9 +676,10 @@ const AttendanceWidget = () => {
     await Promise.allSettled([
       loadAttendance(),
       fetchException(),
-      loadRecentHistory(),
+      loadLivePresence(),
       loadScheduledClientsForToday(),
       loadAccessibleClientsForEmergency(),
+      loadTeleworkRequests(),
     ]);
   };
 
@@ -940,28 +951,6 @@ const AttendanceWidget = () => {
     }
   };
 
-  const canUseFieldOperations = useMemo(() => {
-    const role = String(user?.role || "").toLowerCase();
-    return [
-      "comercial",
-      "acp_comercial",
-      "jefe_comercial",
-      "asesor_comercial",
-      "backoffice_comercial",
-      "backoffice",
-      "tecnico",
-      "ing_servicio",
-      "esp_app",
-      "servicio_tecnico",
-      "jefe_tecnico",
-      "jefe_servicio",
-      "jefe_servicio_tecnico",
-      "ti",
-      "jefe_ti",
-      "logistica",
-      "jefe_logistica",
-    ].includes(role);
-  }, [user?.role]);
   const normalizedUserRole = useMemo(
     () => String(user?.role || "").trim().toLowerCase(),
     [user?.role],
@@ -1008,9 +997,166 @@ const AttendanceWidget = () => {
     });
   }, [emergencyClients, fieldEmergencyClientSearch]);
 
+  const selectedAgendaClient = useMemo(
+    () => plannedVisitAgenda.find((client) => String(client.id) === String(fieldClientId)) || null,
+    [fieldClientId, plannedVisitAgenda],
+  );
+  const selectedLeadDestination = useMemo(
+    () => scheduledLeadsToday.find((lead) => String(lead.id) === String(fieldLeadId)) || null,
+    [fieldLeadId, scheduledLeadsToday],
+  );
+  const operationalCityOptions = useMemo(() => {
+    const cities = [
+      ...ECUADOR_LOCATIONS.map((location) => location?.canton),
+      ...plannedVisitAgenda.map((item) => item?.city),
+      ...scheduledLeadsToday.map((lead) => lead?.city),
+      ...emergencyClients.map((client) => client?.city),
+    ]
+      .map((city) => String(city || "").trim())
+      .filter((city) => city && normalizeClientSearchValue(city) !== "sin ciudad");
+
+    return [...new Map(cities.map((city) => [normalizeClientSearchValue(city), city])).values()]
+      .sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+  }, [emergencyClients, plannedVisitAgenda, scheduledLeadsToday]);
+  const resolvedOperationalDestination = useMemo(() => {
+    if (isOperationalExitCategory(operationalCategory)) {
+      if (fieldVisitType === "cronograma" && selectedAgendaClient) {
+        return {
+          label: String(selectedAgendaClient.name || "").trim(),
+          city: String(operationalDestinationCity || activeException?.operational_destination_city || selectedAgendaClient.city || "").trim(),
+        };
+      }
+      if (fieldVisitType === "prospecto") {
+        return {
+          label: String(fieldProspectName || "").trim(),
+          city: String(operationalDestinationCity || activeException?.operational_destination_city || selectedLeadDestination?.city || "").trim(),
+        };
+      }
+      if (fieldVisitType === "otra") {
+        return {
+          label: String(operationalDestination || "").trim(),
+          city: String(operationalDestinationCity || activeException?.operational_destination_city || "").trim(),
+        };
+      }
+      return { label: "", city: "" };
+    }
+
+    if (String(operationalCategory || "").trim().toLowerCase() === "teletrabajo") {
+      return {
+        label: "",
+        city: String(operationalDestinationCity || activeException?.operational_destination_city || "").trim(),
+      };
+    }
+
+    return {
+      label: String(operationalDestination || "").trim(),
+      city: "",
+    };
+  }, [
+    fieldProspectName,
+    fieldVisitType,
+    operationalCategory,
+    operationalDestination,
+    operationalDestinationCity,
+    activeException?.operational_destination_city,
+    selectedAgendaClient,
+    selectedLeadDestination,
+  ]);
+
+  const renderOperationalCityPicker = ({ value, onChange } = {}) => {
+    const normalizedValue = normalizeClientSearchValue(value);
+    const suggestions = operationalCityOptions
+      .filter((city) => !normalizedValue || normalizeClientSearchValue(city).includes(normalizedValue))
+      .slice(0, 8);
+
+    return (
+      <label className="flex flex-col gap-2">
+        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Ciudad</span>
+        <div className="relative">
+          <input
+            type="text"
+            value={value || ""}
+            onFocus={() => setOperationalCitySuggestionsOpen(true)}
+            onBlur={() => setOperationalCitySuggestionsOpen(false)}
+            onChange={(event) => {
+              setOperationalCitySuggestionsOpen(true);
+              onChange(event.target.value);
+            }}
+            placeholder="Escribe para buscar una ciudad"
+            className={CONTROL_INPUT_SUBTLE_CLASS}
+            aria-label="Ciudad de la salida"
+            autoComplete="off"
+          />
+          {operationalCitySuggestionsOpen && normalizedValue && suggestions.length > 0 ? (
+            <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-lg" role="listbox" aria-label="Ciudades sugeridas">
+              {suggestions.map((city) => (
+                <button
+                  key={city}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    onChange(city);
+                    setOperationalCitySuggestionsOpen(false);
+                  }}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-900"
+                  role="option"
+                  aria-selected={value === city}
+                >
+                  {city}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </label>
+    );
+  };
+
+  const renderRegisteredVisitSummary = ({ title = "Destino y visita a cliente", stepLabel = "Registrado" } = {}) => {
+    const destinationLabel = String(
+      activeException?.operational_destination_label
+      || selectedAgendaClient?.name
+      || fieldProspectName
+      || operationalDestination
+      || "Destino registrado"
+    ).trim();
+    const destinationCity = String(
+      activeException?.operational_destination_city
+      || selectedAgendaClient?.city
+      || operationalDestinationCity
+      || "Sin ciudad"
+    ).trim();
+    const visitTypeLabel = fieldVisitType === "cronograma"
+      ? "Cliente de cronograma"
+      : fieldVisitType === "prospecto"
+        ? "Prospecto"
+        : "Otra gestion";
+
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-700">{title}</p>
+          <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-700">{stepLabel}</span>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">Tipo de visita</p>
+          <p className="mt-1 text-sm font-semibold text-slate-800">{visitTypeLabel}</p>
+          <p className="mt-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">Destino registrado</p>
+          <p className="mt-1 text-sm font-semibold text-slate-800">{destinationLabel}</p>
+          <p className="mt-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">Ciudad registrada</p>
+          <p className="mt-1 text-sm font-semibold text-slate-800">{destinationCity}</p>
+        </div>
+      </div>
+    );
+  };
+
   const renderClientPickerSection = ({
     title = "Tipo de gestion",
     stepLabel = "Paso 1",
+    allowCitySelection = true,
+    allowDestinationEditing = true,
+    showObservations = true,
+    allowCronogramCitySelection = false,
   } = {}) => (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -1048,7 +1194,8 @@ const AttendanceWidget = () => {
           // planificados para hoy), se elige de una lista cerrada -- no se
           // permite escribir un nombre libre. Tarjetas tocables en vez de un
           // <select> nativo para que sea mas visual/interactivo en movil.
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <>
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             {plannedVisitAgenda.map((item) => {
               const active = String(fieldClientId) === String(item.id);
               const visitMeta = getPlannedVisitTypeMeta({
@@ -1061,7 +1208,7 @@ const AttendanceWidget = () => {
                   type="button"
                   onClick={() => setFieldClientId(String(item.id))}
                   aria-pressed={active}
-                  className={`rounded-xl border px-3 py-2.5 text-left transition ${
+                  className={`min-h-[104px] rounded-xl border px-3 py-3 text-left transition sm:min-h-[112px] ${
                     active
                       ? "border-sky-500 bg-sky-50 shadow-sm"
                       : item.isVisitedToday
@@ -1070,12 +1217,8 @@ const AttendanceWidget = () => {
                   }`}
                   style={{ touchAction: "manipulation" }}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-800">{item.name}</p>
-                      <p className="mt-0.5 text-xs text-slate-500">{item.city}</p>
-                    </div>
-                    <div className="flex flex-shrink-0 flex-col items-end gap-1">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-1">
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${visitMeta.badgeClass}`}>
                         {visitMeta.label}
                       </span>
@@ -1084,6 +1227,21 @@ const AttendanceWidget = () => {
                           Visitado
                         </span>
                       ) : null}
+                    </div>
+                    <div className="min-w-0">
+                      <p
+                        className="text-sm font-semibold leading-5 text-slate-800 sm:text-[15px]"
+                        title={item.name}
+                        style={{
+                          display: "-webkit-box",
+                          WebkitBoxOrient: "vertical",
+                          WebkitLineClamp: 3,
+                          overflow: "hidden",
+                        }}
+                      >
+                        {item.name}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">{item.city}</p>
                     </div>
                   </div>
                   {item.notes ? (
@@ -1096,28 +1254,62 @@ const AttendanceWidget = () => {
               );
             })}
           </div>
+          {allowCronogramCitySelection ? (
+            <div className="mt-3 space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Ciudad de la nueva visita</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setOperationalDestinationCity(String(activeException?.operational_destination_city || "").trim())}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:border-sky-300 hover:bg-sky-50"
+                >
+                  Continuar en la ciudad actual
+                  <span className="mt-1 block font-normal text-slate-500">{activeException?.operational_destination_city || "Sin ciudad registrada"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOperationalDestinationCity(String(selectedAgendaClient?.city || "").trim())}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:border-sky-300 hover:bg-sky-50"
+                >
+                  Usar ciudad del cliente
+                  <span className="mt-1 block font-normal text-slate-500">{selectedAgendaClient?.city || "Sin ciudad registrada"}</span>
+                </button>
+              </div>
+              {renderOperationalCityPicker({
+                value: operationalDestinationCity || activeException?.operational_destination_city || selectedAgendaClient?.city || "",
+                onChange: setOperationalDestinationCity,
+              })}
+            </div>
+          ) : null}
+          </>
         ) : (
           <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-700">
-            No tienes clientes en tu cronograma aprobado para hoy. Si la visita no estaba planificada, usa "Prospecto" o "Emergencia".
+            No tienes clientes disponibles en tu cronograma aprobado. Si la visita no estaba planificada, usa "Prospecto" u "Otra gestion".
           </p>
         )
       ) : null}
 
       {fieldVisitType === "prospecto" ? (
         <>
-          <input
-            type="text"
-            value={fieldProspectName}
-            list="attendance-scheduled-leads-list"
-            onChange={(e) => {
-              const value = e.target.value;
-              setFieldProspectName(value);
-              setFieldLeadId(resolveLeadIdFromInput(value, scheduledLeadsToday) || "");
-            }}
-            placeholder="Nombre del prospecto o lead del cronograma"
-            className={CONTROL_INPUT_SUBTLE_CLASS}
-            aria-label="Nombre del prospecto"
-          />
+          {allowDestinationEditing ? (
+            <input
+              type="text"
+              value={fieldProspectName}
+              list="attendance-scheduled-leads-list"
+              onChange={(e) => {
+                const value = e.target.value;
+                setFieldProspectName(value);
+                setFieldLeadId(resolveLeadIdFromInput(value, scheduledLeadsToday) || "");
+              }}
+              placeholder="Nombre del prospecto o lead del cronograma"
+              className={CONTROL_INPUT_SUBTLE_CLASS}
+              aria-label="Nombre del prospecto"
+            />
+          ) : (
+            <p className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-sm font-medium text-slate-700">
+              Prospecto registrado: {activeException?.operational_destination_label || fieldProspectName || "Sin nombre"}
+            </p>
+          )}
           <datalist id="attendance-scheduled-leads-list">
             {scheduledLeadsToday.map((lead) => (
               <option key={lead.id} value={getClientDisplayLabel(lead)}>{getClientDisplayLabel(lead)}</option>
@@ -1128,7 +1320,42 @@ const AttendanceWidget = () => {
               Lead del cronograma: {getClientDisplayLabel(scheduledLeadsToday.find((l) => String(l.id) === String(fieldLeadId)))}
             </p>
           ) : null}
+          {allowCitySelection ? renderOperationalCityPicker({
+            value: operationalDestinationCity || activeException?.operational_destination_city || selectedLeadDestination?.city || "",
+            onChange: setOperationalDestinationCity,
+          }) : (
+            <p className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-600">
+              Ciudad registrada: {activeException?.operational_destination_city || operationalDestinationCity || "Sin ciudad"}
+            </p>
+          )}
         </>
+      ) : null}
+
+      {fieldVisitType === "otra" ? (
+        <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3">
+          {allowDestinationEditing ? (
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Destino</span>
+              <input
+                type="text"
+                value={operationalDestination}
+                onChange={(event) => setOperationalDestination(event.target.value)}
+                placeholder="Banco Pichincha matriz, Ministerio de Trabajo o Proveedor ABC"
+                className={CONTROL_INPUT_CLASS}
+                aria-label="Destino de la salida operacional"
+              />
+            </label>
+          ) : (
+            <p className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-sm font-medium text-slate-700">
+              Destino registrado: {activeException?.operational_destination_label || operationalDestination || "Sin destino"}
+            </p>
+          )}
+          {allowCitySelection ? renderOperationalCityPicker({ value: operationalDestinationCity || activeException?.operational_destination_city || "", onChange: setOperationalDestinationCity }) : (
+            <p className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-600">
+              Ciudad registrada: {activeException?.operational_destination_city || operationalDestinationCity || "Sin ciudad"}
+            </p>
+          )}
+        </div>
       ) : null}
 
       {fieldVisitType === "emergencia" ? (
@@ -1171,14 +1398,16 @@ const AttendanceWidget = () => {
         </>
       ) : null}
 
-      <textarea
-        rows={2}
-        value={fieldVisitNotes}
-        onChange={(e) => setFieldVisitNotes(e.target.value)}
-        placeholder="Observaciones (opcional)"
-        className={CONTROL_TEXTAREA_CLASS}
-        aria-label="Observaciones opcionales de la gestion"
-      />
+      {showObservations ? (
+        <textarea
+          rows={2}
+          value={fieldVisitNotes}
+          onChange={(e) => setFieldVisitNotes(e.target.value)}
+          placeholder="Observaciones (opcional)"
+          className={CONTROL_TEXTAREA_CLASS}
+          aria-label="Observaciones opcionales de la gestion"
+        />
+      ) : null}
     </div>
   );
 
@@ -1312,6 +1541,10 @@ const AttendanceWidget = () => {
     setOperationalModalError("");
     setOperationalCategory("");
     setOperationalDetail("");
+    setTeleworkRequestDate(getLocalDateKey());
+    setOperationalDestination("");
+    setOperationalDestinationCity("");
+    setOperationalCitySuggestionsOpen(false);
     setOperationalVehicleMode("company");
     setOperationalStartKm("");
     setOperationalEndKm("");
@@ -1347,7 +1580,7 @@ const AttendanceWidget = () => {
 
   const submitOperationalModal = async () => {
     const requiresVehicleClosure = operationalModalPhase !== "start" && Boolean(activeException?.uses_personal_vehicle);
-    const isClientVisitDraft = canUseFieldOperations && String(operationalCategory || "").trim().toLowerCase() === "cliente";
+    const isClientVisitDraft = isOperationalExitCategory(operationalCategory);
 
     if (operationalModalPhase === "start") {
       // Mitigacion D1: regla compartida con AttendanceAction.handleManualClientSubmit
@@ -1367,16 +1600,22 @@ const AttendanceWidget = () => {
         setOperationalModalError("Ingresa el nombre del prospecto que vas a visitar.");
         return;
       }
-      if (fieldVisitType === "emergencia") {
-        if (!fieldEmergencyClientId) {
-          setOperationalModalError("Selecciona el cliente relacionado con la atencion urgente.");
-          return;
-        }
-        if (!String(fieldEmergencyReason || "").trim()) {
-          setOperationalModalError("Ingresa el motivo de la atencion urgente.");
-          return;
-        }
+      if (fieldVisitType === "otra" && !String(operationalDestination || "").trim()) {
+        setOperationalModalError("Ingresa el destino de la salida operacional.");
+        return;
       }
+    }
+    const destinationCheck = validateOperationalDestinationStep({
+      category: operationalCategory,
+      visitType: fieldVisitType,
+      destinationLabel: resolvedOperationalDestination.label,
+      destinationCity: resolvedOperationalDestination.city,
+    });
+    if (operationalModalPhase === "start" && !destinationCheck.ok) {
+      setOperationalModalError(
+        destinationCheck.error
+      );
+      return;
     }
     if (operationalModalPhase === "start") {
       const vehicleStartCheck = validateOperationalVehicleStart({
@@ -1405,12 +1644,48 @@ const AttendanceWidget = () => {
     try {
       actionLocation = await getLocationForAction();
       if (operationalModalPhase === "start") {
+        let teleworkRequestId = null;
+        if (isTeleworkCategory(operationalCategory)) {
+          const selectedRequestDate = String(teleworkRequestDate || "").slice(0, 10);
+          let request = teleworkRequests.find((item) =>
+            String(item?.request_date || "").slice(0, 10) === selectedRequestDate
+            && String(item?.status || "").toUpperCase() === "APPROVED"
+          ) || null;
+          if (!request) {
+            const requestResponse = await createTeleworkRequest({
+              city: resolvedOperationalDestination.city,
+              location: actionLocation,
+              locationAccuracy: actionLocation?.accuracy,
+              reason: operationalDetail,
+              requestDate: teleworkRequestDate,
+            });
+            request = requestResponse?.data || null;
+          }
+          const requestIsForToday = String(request?.request_date || "").slice(0, 10) === getLocalDateKey();
+          if (String(request?.status || "").toUpperCase() !== "APPROVED" || !requestIsForToday) {
+            await loadTeleworkRequests();
+            setOperationalModalOpen(false);
+            showToast(
+              request?.status === "REJECTED"
+                ? "La solicitud anterior fue rechazada. Puedes enviar una nueva solicitud."
+                : requestIsForToday
+                  ? "Solicitud enviada a Talento Humano. Podras marcar cuando sea aprobada."
+                  : `Solicitud registrada para el ${request?.request_date}. Marca teletrabajo ese dia cuando este aprobada.`,
+              request?.status === "REJECTED" ? "warning" : "info",
+            );
+            return;
+          }
+          teleworkRequestId = request.id;
+        }
         const res = await marcarSalidaOficina(actionLocation, buildOperationalStartPayload({
           description: operationalDetail,
           category: operationalCategory,
           usesPersonalVehicle: operationalVehicleMode === "personal",
           startKm: operationalStartKm,
           startPhoto: operationalStartPhoto,
+          destinationLabel: resolvedOperationalDestination.label,
+          destinationCity: resolvedOperationalDestination.city,
+          teleworkRequestId,
         }));
         if (res?.ok) {
           await ensureSyncExceptionTargetLocation("start", actionLocation);
@@ -1431,6 +1706,13 @@ const AttendanceWidget = () => {
           endPhoto: operationalEndPhoto,
         }));
         if (res?.ok) {
+          const persistedEndKm = res?.data?.odometer_end_km;
+          const persistedEndPhoto = res?.data?.odometer_end_photo_drive_url || res?.data?.odometer_end_photo_drive_file_id;
+          if (requiresVehicleClosure && (persistedEndKm === null || persistedEndKm === undefined || !persistedEndPhoto)) {
+            showToast("La salida fue cerrada, pero no se confirmo el kilometraje o la fotografia final. Contacta a Talento Humano.", "error");
+            await refreshAll();
+            return;
+          }
           await ensureSyncExceptionTargetLocation("return", actionLocation);
           const allowanceId = res?.data?.travel_allowance_id;
           showToast(
@@ -1455,6 +1737,13 @@ const AttendanceWidget = () => {
         endPhoto: operationalEndPhoto,
       }));
       if (res?.ok) {
+        const persistedEndKm = res?.data?.odometer_end_km;
+        const persistedEndPhoto = res?.data?.odometer_end_photo_drive_url || res?.data?.odometer_end_photo_drive_file_id;
+        if (requiresVehicleClosure && (persistedEndKm === null || persistedEndKm === undefined || !persistedEndPhoto)) {
+          showToast("El cierre no confirmo el kilometraje o la fotografia final. Intenta nuevamente.", "error");
+          await refreshAll();
+          return;
+        }
         const allowanceId = res?.data?.travel_allowance_id;
         showToast(
           allowanceId
@@ -1533,6 +1822,39 @@ const AttendanceWidget = () => {
     }
 
     openOperationalModal("end");
+  };
+
+  const handleTeleworkClose = async () => {
+    if (!isTeleworkFlow) {
+      showToast("No tienes una jornada de teletrabajo activa.", "warning");
+      return;
+    }
+    if (teleworkRequiresLunch && !teleworkLunchCompleted) {
+      showToast(
+        teleworkLunchStarted
+          ? "Registra el regreso de almuerzo antes de finalizar el teletrabajo."
+          : "Registra la salida y el regreso de almuerzo antes de finalizar el teletrabajo.",
+        "warning",
+      );
+      return;
+    }
+
+    setFieldVisitSubmitting(true);
+    try {
+      const actionLocation = await getLocationForAction();
+      const res = await marcarEntradaOficina(actionLocation, {});
+      if (res?.ok) {
+        showToast("Jornada de teletrabajo finalizada.", "success");
+        await refreshAll();
+        return;
+      }
+      showToast(res?.message || "No se pudo finalizar el teletrabajo.", "error");
+    } catch (err) {
+      const info = getAttendanceErrorInfo(err, "Error finalizando teletrabajo", "error");
+      showToast(info.message, info.type);
+    } finally {
+      setFieldVisitSubmitting(false);
+    }
   };
 
   const handleLlegadaDestino = async () => {
@@ -1699,37 +2021,6 @@ const AttendanceWidget = () => {
     }
   };
 
-  const handleOvertimeSubmit = async () => {
-    if (!overtimePrompt?.hours) {
-      setOvertimePrompt(null);
-      return;
-    }
-
-    const normalizedReason = String(overtimeReason || "").trim();
-    if (!normalizedReason) {
-      showToast("Debes registrar la razon de las horas extra.", "warning");
-      return;
-    }
-
-    setOvertimeSubmitting(true);
-    try {
-      const res = await markOvertime(overtimePrompt.hours, normalizedReason, await getLocationForAction());
-      if (res?.ok) {
-        showToast("Horas extra registradas correctamente.", "success");
-        setOvertimePrompt(null);
-        setOvertimeReason("");
-      } else {
-        showToast("No se pudo registrar el overtime.", "error");
-      }
-    } catch (err) {
-      console.error("Overtime registration error:", err);
-      const info = getAttendanceErrorInfo(err, "Error registrando overtime", "error");
-      showToast(info.message, info.type);
-    } finally {
-      setOvertimeSubmitting(false);
-    }
-  };
-
   const handleLateJustificationSubmit = async () => {
     const normalizedReason = String(lateJustificationReason || "").trim();
     if (normalizedReason.length < 8) {
@@ -1823,6 +2114,7 @@ const AttendanceWidget = () => {
   const progress = calculateProgress();
   const latePolicy = attendance?.late_policy || null;
   const shouldPromptLateJustification = Boolean(latePolicy?.justification?.canJustify);
+  const recentHistory = useMemo(() => [], []);
   const punctualityInsights = useMemo(() => {
     const historyRows = Array.isArray(recentHistory) ? recentHistory : [];
     const todayKey = attendance?.date || getLocalDateKey(new Date());
@@ -1895,10 +2187,65 @@ const AttendanceWidget = () => {
     };
   }, [attendance?.date, attendance?.entry_time, attendance?.total_hours, recentHistory]);
 
+  const livePresenceGroups = useMemo(() => {
+    const grouped = new Map();
+    (Array.isArray(livePresence) ? livePresence : []).forEach((entry) => {
+      const city = String(entry?.city_label || "Sin ciudad").trim() || "Sin ciudad";
+      if (!grouped.has(city)) {
+        grouped.set(city, { city, entries: [] });
+      }
+      grouped.get(city).entries.push(entry);
+    });
+    return [...grouped.values()]
+      .map((group) => ({
+        ...group,
+        entries: group.entries.sort((a, b) => String(a?.display_name || "").localeCompare(String(b?.display_name || ""), "es", { sensitivity: "base" })),
+        count: group.entries.length,
+      }))
+      .sort((a, b) => b.count - a.count || a.city.localeCompare(b.city, "es", { sensitivity: "base" }));
+  }, [livePresence]);
+  const visiblePresenceCities = useMemo(() => {
+    const start = presenceCityPage * LIVE_PRESENCE_CITY_PAGE_SIZE;
+    return livePresenceGroups.slice(start, start + LIVE_PRESENCE_CITY_PAGE_SIZE);
+  }, [livePresenceGroups, presenceCityPage]);
+  const selectedPresenceGroup = useMemo(
+    () => livePresenceGroups.find((group) => group.city === selectedPresenceCity) || livePresenceGroups[0] || null,
+    [livePresenceGroups, selectedPresenceCity],
+  );
+  const selectedPresenceEntries = useMemo(() => {
+    if (!selectedPresenceGroup) return [];
+    const start = selectedPresencePage * LIVE_PRESENCE_CARD_PAGE_SIZE;
+    return selectedPresenceGroup.entries.slice(start, start + LIVE_PRESENCE_CARD_PAGE_SIZE);
+  }, [selectedPresenceGroup, selectedPresencePage]);
+  const totalPresenceCityPages = Math.max(1, Math.ceil(livePresenceGroups.length / LIVE_PRESENCE_CITY_PAGE_SIZE));
+  const totalSelectedPresencePages = Math.max(1, Math.ceil((selectedPresenceGroup?.entries?.length || 0) / LIVE_PRESENCE_CARD_PAGE_SIZE));
+
+  useEffect(() => {
+    if (!livePresenceGroups.length) {
+      setSelectedPresenceCity("");
+      setPresenceCityPage(0);
+      setSelectedPresencePage(0);
+      return;
+    }
+    if (!livePresenceGroups.some((group) => group.city === selectedPresenceCity)) {
+      setSelectedPresenceCity(livePresenceGroups[0].city);
+      setSelectedPresencePage(0);
+    }
+    if (presenceCityPage > totalPresenceCityPages - 1) {
+      setPresenceCityPage(Math.max(0, totalPresenceCityPages - 1));
+    }
+  }, [livePresenceGroups, presenceCityPage, selectedPresenceCity, totalPresenceCityPages]);
+
+  useEffect(() => {
+    if (selectedPresencePage > totalSelectedPresencePages - 1) {
+      setSelectedPresencePage(Math.max(0, totalSelectedPresencePages - 1));
+    }
+  }, [selectedPresencePage, totalSelectedPresencePages]);
+
   useEffect(() => {
     const dateKey = attendance?.date || getLocalDateKey(new Date());
     if (!dateKey) return;
-    const hasBlockingModalOpen = widgetModalOpen || Boolean(overtimePrompt);
+    const hasBlockingModalOpen = widgetModalOpen;
 
     if (shouldPromptLateJustification && attendance?.entry_time) {
       const promptKey = `late-justif-prompt:${dateKey}`;
@@ -1931,7 +2278,6 @@ const AttendanceWidget = () => {
     attendance?.date,
     latePolicy?.countsAsLate,
     latePolicy?.justification?.remainingMonthly,
-    overtimePrompt,
     shouldPromptLateJustification,
     showToast,
     widgetModalOpen,
@@ -1940,8 +2286,42 @@ const AttendanceWidget = () => {
   const exceptionStatus = activeException?.status || "NONE";
   const hasOpenFieldVisit = String(attendance?.active_field_visit?.status || "").trim().toLowerCase() === "in_visit";
   const activeOperationalCategory = String(activeException?.operational_category || "").trim().toLowerCase();
-  const activeOperationRequiresClientVisitFlow = canUseFieldOperations && activeOperationalCategory === "cliente";
-  const draftOperationRequiresClientVisitFlow = canUseFieldOperations && String(operationalCategory || "").trim().toLowerCase() === "cliente";
+  const isTeleworkFlow = isFieldOperationFlow && isTeleworkCategory(activeOperationalCategory);
+  const teleworkRequiresLunch = Boolean(activeException?.canonical_flow?.context_flags?.telework_requires_lunch);
+  const teleworkLunchStarted = Boolean(attendance?.lunch_start_time);
+  const teleworkLunchCompleted = Boolean(attendance?.lunch_end_time);
+  const activeOperationRequiresClientVisitFlow = isOperationalExitCategory(activeOperationalCategory);
+  const draftOperationRequiresClientVisitFlow = isOperationalExitCategory(operationalCategory);
+
+  useEffect(() => {
+    if (!activeOperationRequiresClientVisitFlow) return;
+    // Solo recuperar el destino inicial. Despues de salir del primer cliente
+    // el formulario representa una nueva visita y sus datos deben ser editables.
+    if (activeException?.arrival_time || activeException?.departure_time) return;
+    const registeredDestination = String(activeException?.operational_destination_label || "").trim();
+    if (!registeredDestination) return;
+
+    const matchingAgendaClient = plannedVisitAgenda.find(
+      (client) => normalizeClientSearchValue(client?.name) === normalizeClientSearchValue(registeredDestination),
+    );
+    if (matchingAgendaClient) {
+      if (fieldVisitType !== "cronograma") setFieldVisitType("cronograma");
+      if (String(fieldClientId) !== String(matchingAgendaClient.id)) setFieldClientId(String(matchingAgendaClient.id));
+      return;
+    }
+
+    if (fieldVisitType !== "prospecto") setFieldVisitType("prospecto");
+    if (String(fieldProspectName || "").trim() !== registeredDestination) setFieldProspectName(registeredDestination);
+  }, [
+    activeException?.arrival_time,
+    activeException?.departure_time,
+    activeException?.operational_destination_label,
+    activeOperationRequiresClientVisitFlow,
+    fieldClientId,
+    fieldProspectName,
+    fieldVisitType,
+    plannedVisitAgenda,
+  ]);
 
   useEffect(() => {
     if (isFieldOperationFlow) {
@@ -2023,10 +2403,17 @@ const AttendanceWidget = () => {
     exceptionStatus,
   ]);
 
+  // Una salida operacional puede durar varios dias, pero activeException.op_lunch_*
+  // es un solo par de campos para TODA la excepcion (no tiene dimension de
+  // dia) -- una vez marcado el dia 1 quedaba "Completo" para siempre y ya no
+  // dejaba marcar (ni mostraba) el almuerzo de los dias siguientes. El
+  // estado real y por-dia vive en attendance.real_lunch_start_time /
+  // real_lunch_end_time (mirror de HOY en user_attendance_records, el mismo
+  // campo que ahora usa el backend como gate -- ver clockOutOperationalLunch).
   const operationalLunchState = useMemo(() => {
-    if (!isFieldOperationFlow) return { visible: false, next: null, completed: false };
-    const hasLunchOut = Boolean(activeException?.op_lunch_start_time);
-    const hasLunchIn = Boolean(activeException?.op_lunch_end_time);
+    if (!isFieldOperationFlow || isTeleworkFlow) return { visible: false, next: null, completed: false };
+    const hasLunchOut = Boolean(attendance?.real_lunch_start_time);
+    const hasLunchIn = Boolean(attendance?.real_lunch_end_time);
     return {
       visible: true,
       hasLunchOut,
@@ -2034,7 +2421,7 @@ const AttendanceWidget = () => {
       completed: hasLunchOut && hasLunchIn,
       next: !hasLunchOut ? "out" : !hasLunchIn ? "in" : null,
     };
-  }, [activeException?.op_lunch_end_time, activeException?.op_lunch_start_time, isFieldOperationFlow]);
+  }, [attendance?.real_lunch_end_time, attendance?.real_lunch_start_time, isFieldOperationFlow, isTeleworkFlow]);
 
   const renderOperationalLunchCard = () => {
     if (!operationalLunchState.visible) return null;
@@ -2049,10 +2436,10 @@ const AttendanceWidget = () => {
             </p>
             <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-amber-900">
               <span className="rounded-full bg-white/80 px-2 py-1">
-                Salida: {activeException?.op_lunch_start_time ? formatTimeSafe(activeException.op_lunch_start_time) : "--"}
+                Salida: {attendance?.real_lunch_start_time ? formatTimeSafe(attendance.real_lunch_start_time) : "--"}
               </span>
               <span className="rounded-full bg-white/80 px-2 py-1">
-                Regreso: {activeException?.op_lunch_end_time ? formatTimeSafe(activeException.op_lunch_end_time) : "--"}
+                Regreso: {attendance?.real_lunch_end_time ? formatTimeSafe(attendance.real_lunch_end_time) : "--"}
               </span>
             </div>
           </div>
@@ -2092,6 +2479,24 @@ const AttendanceWidget = () => {
   // por error en los chequeos de entrada/almuerzo/salida, que no aplican
   // mientras hay una salida imprevista sin cerrar).
   const primaryStepInfo = useMemo(() => {
+    if (isTeleworkFlow) {
+      const teleworkLunchAction = !teleworkLunchStarted
+        ? "Registrar salida a almuerzo"
+        : !teleworkLunchCompleted
+          ? "Registrar regreso de almuerzo"
+          : "Finalizar teletrabajo";
+      return {
+        icon: <FiHome className="text-emerald-500" />,
+        badgeText: "Teletrabajo",
+        statusText: teleworkLunchAction === "Finalizar teletrabajo"
+          ? "Teletrabajo: listo para finalizar"
+          : "Teletrabajo: jornada activa",
+        actionLabel: teleworkRequiresLunch ? teleworkLunchAction : "Finalizar teletrabajo",
+        actionDetail: teleworkRequiresLunch
+          ? "Por iniciar en horario laboral, completa la marcacion de almuerzo antes del cierre."
+          : "Fuera de horario laboral solo se registra el inicio y el cierre.",
+      };
+    }
     if (isFieldOperationFlow) {
       const icon = <FiTrendingUp className="text-amber-500" />;
       if (exceptionStatus === "RETURNING") {
@@ -2223,6 +2628,10 @@ const AttendanceWidget = () => {
     hasActiveException,
     isPermissionFlowActive,
     isFieldOperationFlow,
+    isTeleworkFlow,
+    teleworkLunchCompleted,
+    teleworkLunchStarted,
+    teleworkRequiresLunch,
     permissionNeedsEntryStart,
     permissionNeedsExitClose,
     activeTimeOffPreset?.actionLabel,
@@ -2281,7 +2690,51 @@ const AttendanceWidget = () => {
   const renderFieldOperationsControls = () => {
     const tripTypeLabel = String(activeException?.type || "operacion_campo").replace(/_/g, " ").trim();
     const elapsedHours = Number(activeException?.operational_elapsed_hours || 0);
-    const canUseAdvancedFieldFlow = canUseFieldOperations;
+    const canUseAdvancedFieldFlow = true;
+
+    const renderTeleworkRequestsPanel = () => {
+      if (hasExactTalentHumanRole(user)) return null;
+      const today = getLocalDateKey(new Date());
+      const ownRequests = teleworkRequests
+        .filter((request) => String(request?.request_date || "").slice(0, 10) >= today)
+        .slice(0, 3);
+
+      if (!ownRequests.length) return null;
+
+      const statusLabel = {
+        PENDING: "Pendiente de aprobación",
+        APPROVED: "Aprobada: ya puedes marcar",
+        REJECTED: "Rechazada",
+        CONSUMED: "Utilizada en la marcación de hoy",
+      };
+
+      return (
+        <div className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-emerald-950">Solicitudes de teletrabajo</p>
+              <p className="mt-1 text-xs leading-5 text-emerald-800">
+                La marcación se habilita únicamente después de la aprobación de Talento Humano.
+              </p>
+            </div>
+            {teleworkRequestsLoading ? <span className="text-xs text-emerald-700">Actualizando...</span> : null}
+          </div>
+
+          {ownRequests.map((request) => (
+            <div key={request.id} className="rounded-xl border border-emerald-200 bg-white p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-slate-800">{request.request_date} · {request.city}</p>
+                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+                  {statusLabel[String(request.status || "").toUpperCase()] || request.status}
+                </span>
+              </div>
+              {request.reason ? <p className="mt-2 text-xs leading-5 text-slate-600">{request.reason}</p> : null}
+              {request.review_reason ? <p className="mt-2 text-xs leading-5 text-rose-700">Motivo: {request.review_reason}</p> : null}
+            </div>
+          ))}
+        </div>
+      );
+    };
 
     const renderAgendaPanel = () => {
       if (!plannedVisitAgenda.length) return null;
@@ -2323,6 +2776,85 @@ const AttendanceWidget = () => {
         </div>
       );
     };
+
+    if (isTeleworkFlow) {
+      const city = String(activeException?.operational_destination_city || "").trim() || "Ciudad no registrada";
+      const teleworkLunchAction = !teleworkLunchStarted
+        ? {
+            label: "Registrar salida a almuerzo",
+            detail: "La jornada remota se inicio en horario laboral.",
+            action: () => handle(clockOutLunch, "Salida a almuerzo registrada.", false, { syncTarget: "lunch_start" }),
+          }
+        : !teleworkLunchCompleted
+          ? {
+              label: "Registrar regreso de almuerzo",
+              detail: "Completa la pausa para habilitar el cierre.",
+              action: () => handle(clockInLunch, "Regreso de almuerzo registrado.", false, { syncTarget: "lunch_end" }),
+            }
+          : null;
+      return (
+        <div className="overflow-hidden rounded-3xl border border-emerald-200 bg-white shadow-sm">
+          <div className="bg-gradient-to-r from-emerald-50 via-white to-sky-50 px-5 py-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
+                  <FiHome size={20} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-700">Jornada remota</p>
+                  <h3 className="mt-1 text-lg font-black text-slate-900">Teletrabajo activo</h3>
+                  <p className="mt-1 text-sm leading-5 text-slate-600">Tu jornada se registra desde una ubicacion remota.</p>
+                </div>
+              </div>
+              <span className="flex-shrink-0 rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+                En curso
+              </span>
+            </div>
+          </div>
+          <div className="space-y-4 p-5">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Ciudad registrada</p>
+                <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-slate-800">
+                  <FiMapPin size={14} className="text-emerald-600" />
+                  <span className="truncate">{city}</span>
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Inicio</p>
+                <p className="mt-1 text-sm font-bold text-slate-800">{formatTimeSafe(activeException?.start_time, "HH:mm")}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm leading-5 text-sky-800">
+              No requiere destino, visita a cliente, llegada intermedia ni vehiculo personal.
+              {teleworkRequiresLunch
+                ? " Como inicio en horario laboral, tambien debe registrar el almuerzo."
+                : " Fuera de horario laboral solo requiere inicio y cierre."}
+            </div>
+            {teleworkRequiresLunch && teleworkLunchAction ? (
+              <Button
+                variant="primary"
+                onClick={teleworkLunchAction.action}
+                disabled={fieldVisitSubmitting || loading}
+                className={ACTION_BTN_BASE_CLASS}
+              >
+                {fieldVisitSubmitting || loading ? "Registrando..." : teleworkLunchAction.label}
+              </Button>
+            ) : (
+              <Button
+                variant="success"
+                onClick={handleTeleworkClose}
+                disabled={fieldVisitSubmitting || loading}
+                className={ACTION_BTN_BASE_CLASS}
+              >
+                {fieldVisitSubmitting ? "Finalizando..." : "Finalizar teletrabajo"}
+              </Button>
+            )}
+            {teleworkLunchAction ? <p className="text-xs text-slate-500">{teleworkLunchAction.detail}</p> : null}
+          </div>
+        </div>
+      );
+    }
 
     if (!isFieldOperationFlow && hasActiveException) {
       const normalizedUnexpectedStatus = String(activeException?.status || "ACTIVE").trim().toUpperCase();
@@ -2415,6 +2947,7 @@ const AttendanceWidget = () => {
     if (!isFieldOperationFlow) {
       return (
         <div className="space-y-4">
+          {renderTeleworkRequestsPanel()}
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center gap-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
@@ -2424,13 +2957,13 @@ const AttendanceWidget = () => {
                 <p className="text-sm font-bold text-slate-800">Salida operacional</p>
                 <p className="text-xs text-slate-500">
                   {canUseAdvancedFieldFlow
-                    ? "Personal de campo autorizado puede vincular la salida con visitas, clientes y cronograma."
+                    ? "Vincula la salida con una visita a cliente, un prospecto o el cronograma."
                     : "Inicia el flujo general: salida operacional, llegada a destino, salida del destino y cierre de la operación."}
                 </p>
               </div>
             </div>
           </div>
-          {canUseAdvancedFieldFlow ? renderAgendaPanel() : null}
+          {renderAgendaPanel()}
           <Button
             variant="primary"
             onClick={handleOfficeDepartureQuick}
@@ -2444,10 +2977,18 @@ const AttendanceWidget = () => {
     }
 
     if (exceptionStatus === "ACTIVE") {
+      const currentVisitCity = String(
+        operationalDestinationCity
+        || activeException?.operational_destination_city
+        || selectedAgendaClient?.city
+        || selectedLeadDestination?.city
+        || ""
+      ).trim();
       const clientEntryDisabled =
         fieldVisitSubmitting ||
         (fieldVisitType === "cronograma" && !fieldClientId) ||
         (fieldVisitType === "prospecto" && !fieldProspectName.trim()) ||
+        !currentVisitCity ||
         (fieldVisitType === "emergencia" && (!fieldEmergencyClientId || !String(fieldEmergencyReason || "").trim()));
 
       return (
@@ -2475,7 +3016,7 @@ const AttendanceWidget = () => {
                   </p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-                  {renderClientPickerSection({ title: "Destino y visita a cliente", stepLabel: "Paso 1" })}
+                  {renderRegisteredVisitSummary({ title: "Destino y visita a cliente", stepLabel: "Registrado" })}
                 </div>
                 <Button
                   variant="success"
@@ -2508,10 +3049,18 @@ const AttendanceWidget = () => {
     }
 
     if (exceptionStatus === "ON_SITE") {
+      const currentVisitCity = String(
+        operationalDestinationCity
+        || activeException?.operational_destination_city
+        || selectedAgendaClient?.city
+        || selectedLeadDestination?.city
+        || ""
+      ).trim();
       const clientEntryDisabled =
         fieldVisitSubmitting ||
         (fieldVisitType === "cronograma" && !fieldClientId) ||
         (fieldVisitType === "prospecto" && !fieldProspectName.trim()) ||
+        !currentVisitCity ||
         (fieldVisitType === "emergencia" && (!fieldEmergencyClientId || !String(fieldEmergencyReason || "").trim()));
 
       return (
@@ -2595,7 +3144,7 @@ const AttendanceWidget = () => {
                   {destinationExitMode === "continue_operation" ? (
                     <>
                       <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-                        {renderClientPickerSection({ title: "Tipo de visita a cliente", stepLabel: "Paso 1" })}
+                        {renderClientPickerSection({ title: "Tipo de visita a cliente", stepLabel: "Paso 1", allowCronogramCitySelection: true, showObservations: false })}
                       </div>
                       <Button
                         variant="primary"
@@ -2807,12 +3356,25 @@ const AttendanceWidget = () => {
                 ? "Registrar entrada"
                 : "Salida al almuerzo";
 
+    const formatOvertimeDuration = (overtime = {}) => {
+      const totalSeconds = Math.max(
+        0,
+        Math.round(Number.isFinite(Number(overtime.seconds)) ? Number(overtime.seconds) : Number(overtime.hours || 0) * 3600)
+      );
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      return `${hours}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
+    };
+
     doClockOutRef.current = () => handle(clockOut, "Buen trabajo!", true, {
       syncTarget: "exit",
       onSuccess: async (res) => {
         if (Number(res?.overtime?.hours || 0) > 0) {
-          setOvertimePrompt({ hours: Number(res.overtime.hours) });
-          setOvertimeReason("");
+          showToast(
+            `Se detectaron ${formatOvertimeDuration(res.overtime)} horas extra al cerrar la jornada.`,
+            "info"
+          );
         }
       },
     });
@@ -2830,6 +3392,47 @@ const AttendanceWidget = () => {
           : !hasEntry
             ? () => handle(clockIn, "Entrada registrada", false, { syncTarget: "entry" })
             : () => handle(clockOutLunch, "Buen provecho", false, { syncTarget: "lunch_start" });
+
+    const renderVisibleTeleworkStatus = () => {
+      if (hasExactTalentHumanRole(user)) return null;
+      const today = getLocalDateKey(new Date());
+      const ownRequests = teleworkRequests
+        .filter((request) => String(request?.request_date || "").slice(0, 10) >= today)
+        .slice(0, 3);
+      if (!ownRequests.length) return null;
+
+      const statusLabel = {
+        PENDING: "Pendiente de aprobacion",
+        APPROVED: "Aprobada: puedes marcar",
+        REJECTED: "Rechazada",
+        CONSUMED: "Marcacion realizada",
+      };
+
+      return (
+        <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-widest text-emerald-700">Teletrabajo</div>
+              <div className="mt-0.5 text-sm font-semibold text-emerald-950">Estado de tus solicitudes</div>
+            </div>
+            {teleworkRequestsLoading ? <span className="text-[11px] text-emerald-700">Actualizando...</span> : null}
+          </div>
+          <div className="mt-2 space-y-2">
+            {ownRequests.map((request) => (
+              <div key={request.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-100 bg-white px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-slate-800">{request.request_date} · {request.city}</p>
+                  {request.review_reason ? <p className="mt-0.5 text-[11px] text-rose-700">{request.review_reason}</p> : null}
+                </div>
+                <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+                  {statusLabel[String(request.status || "").toUpperCase()] || request.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
 
     return (
       <div>
@@ -2916,6 +3519,7 @@ const AttendanceWidget = () => {
 
         {/* ACTION ZONE */}
         <div className="px-4 py-4 sm:px-5">
+          {hasActiveException ? renderVisibleTeleworkStatus() : null}
           {latePolicy?.isLate && (
             <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
               <div className="text-[10px] font-semibold uppercase tracking-widest text-rose-700">Atraso registrado</div>
@@ -3028,8 +3632,181 @@ const AttendanceWidget = () => {
           {renderFieldOperationsControls()}
         </div>
 
-        {/* PUNTUALIDAD + HISTORIAL */}
+        {/* PRESENCIA OPERATIVA */}
         <div className="border-t border-slate-100 px-4 pb-6 pt-4 sm:px-5">
+          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-[linear-gradient(135deg,#f8fafc_0%,#eff6ff_58%,#ffffff_100%)] p-4 shadow-[0_16px_36px_rgba(15,23,42,0.08)]">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Cobertura en ruta</div>
+                <div className="mt-1 text-sm font-black text-slate-900">Personal disponible por ciudad</div>
+                <div className="mt-1 max-w-[260px] text-xs leading-5 text-slate-600">
+                  Visualiza en tiempo real qui&eacute;n est&aacute; fuera de oficina, en qu&eacute; destino est&aacute; y desde qu&eacute; ciudad puede apoyar.
+                </div>
+              </div>
+              <div className="rounded-2xl border border-white/80 bg-white/85 px-3 py-2 text-right shadow-sm">
+                <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Activos</div>
+                <div className="mt-1 flex items-center justify-end gap-1.5 font-mono text-2xl font-black text-slate-900">
+                  <FiUsers size={16} className="text-slate-400" />
+                  {livePresence.length}
+                </div>
+              </div>
+            </div>
+
+            {livePresenceGroups.length ? (
+              <div className="mt-4 space-y-3">
+                <div className="rounded-2xl border border-slate-200 bg-white/88 p-3">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Ciudades activas</div>
+                      <div className="mt-1 text-xs text-slate-500">Cambia de ciudad sin abrir una lista larga.</div>
+                    </div>
+                    {totalPresenceCityPages > 1 ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setPresenceCityPage((current) => Math.max(0, current - 1))}
+                          disabled={presenceCityPage <= 0}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <FiChevronLeft size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPresenceCityPage((current) => Math.min(totalPresenceCityPages - 1, current + 1))}
+                          disabled={presenceCityPage >= totalPresenceCityPages - 1}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <FiChevronRight size={16} />
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {visiblePresenceCities.map((group) => {
+                      const isActive = group.city === selectedPresenceCity;
+                      return (
+                        <button
+                          key={`presence-city-${group.city}`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedPresenceCity(group.city);
+                            setSelectedPresencePage(0);
+                          }}
+                          className={`rounded-2xl border px-3 py-2 text-left transition ${
+                            isActive
+                              ? "border-blue-200 bg-blue-50 text-blue-700 shadow-sm"
+                              : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                          }`}
+                        >
+                          <div className="truncate text-xs font-semibold">{group.city}</div>
+                          <div className="mt-1 text-[11px] text-slate-500">{group.entries.length} colaborador{group.entries.length !== 1 ? "es" : ""}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white/92 p-3">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Ciudad seleccionada</div>
+                      <div className="mt-1 flex items-center gap-1.5 truncate text-sm font-bold text-slate-900">
+                        <FiMapPin size={14} className="flex-shrink-0 text-blue-600" />
+                        <span className="truncate">{selectedPresenceGroup?.city || "Sin ciudad"}</span>
+                      </div>
+                    </div>
+                    {totalSelectedPresencePages > 1 ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPresencePage((current) => Math.max(0, current - 1))}
+                          disabled={selectedPresencePage <= 0}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <FiChevronLeft size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPresencePage((current) => Math.min(totalSelectedPresencePages - 1, current + 1))}
+                          disabled={selectedPresencePage >= totalSelectedPresencePages - 1}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <FiChevronRight size={16} />
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    {selectedPresenceEntries.map((entry) => {
+                      const initials = String(entry?.display_name || entry?.email || "C")
+                        .trim()
+                        .split(/\s+/)
+                        .slice(0, 2)
+                        .map((part) => part.charAt(0).toUpperCase())
+                        .join("") || "C";
+                      const statusTone = entry.status_key === "client_visit" || entry.status_key === "prospect_visit"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : entry.status_key === "returning" || entry.status_key === "returning_client" || entry.status_key === "returning_prospect"
+                          ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+                        : entry.status_key === "operational_lunch"
+                          ? "border-amber-200 bg-amber-50 text-amber-700"
+                          : entry.status_key === "on_site"
+                            ? "border-cyan-200 bg-cyan-50 text-cyan-700"
+                            : entry.status_key === "active_client_route" || entry.status_key === "active_prospect_route"
+                              ? "border-blue-200 bg-blue-50 text-blue-700"
+                            : "border-sky-200 bg-sky-50 text-sky-700";
+
+                      return (
+                        <div
+                          key={`presence-entry-${entry.user_id}-${entry.activity_at || entry.destination_label}`}
+                          className="rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-2.5 shadow-sm"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-white text-[11px] font-bold uppercase text-slate-700">
+                              {entry.avatar_url ? (
+                                <img src={entry.avatar_url} alt="" className="h-full w-full object-cover" />
+                              ) : (
+                                initials
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate text-sm font-semibold text-slate-900">{entry.display_name || entry.email}</div>
+                                  <div className="mt-0.5 truncate text-xs font-medium text-slate-600">{entry.destination_label || "Gestion externa"}</div>
+                                </div>
+                                <span className="hidden flex-shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 sm:inline-flex">
+                                  {entry.city_label || selectedPresenceGroup?.city || "Sin ciudad"}
+                                </span>
+                              </div>
+                              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusTone}`}>
+                                  {entry.status_label || "En ruta"}
+                                </span>
+                                <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                                  {entry.operational_category_label || "Gestion externa"}
+                                </span>
+                                <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 sm:hidden">
+                                  {entry.city_label || selectedPresenceGroup?.city || "Sin ciudad"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white/80 px-4 py-5 text-sm text-slate-500">
+                No hay colaboradores con salidas operativas activas en este momento.
+              </div>
+            )}
+          </div>
+          {false && (
+          <>
           <div className="mb-4 flex items-center justify-between py-3">
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Puntualidad</div>
@@ -3082,6 +3859,7 @@ const AttendanceWidget = () => {
               )}
             </div>
           </div>
+          </>)}
         </div>
 
         <AnimatePresence>
@@ -3135,7 +3913,9 @@ const AttendanceWidget = () => {
           if (fieldVisitSubmitting) return;
           setOperationalModalOpen(false);
         }}
-        title={operationalModalPhase === "start" ? "Registrar salida o visita" : "Cerrar salida o visita"}
+        title={operationalModalPhase === "start"
+          ? (isTeleworkCategory(operationalCategory) ? "Registrar teletrabajo" : "Registrar salida o visita")
+          : (isTeleworkCategory(activeException?.operational_category) ? "Finalizar teletrabajo" : "Cerrar salida o visita")}
         maxWidth="max-w-2xl"
       >
         <div className="space-y-5">
@@ -3158,7 +3938,10 @@ const AttendanceWidget = () => {
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setOperationalCategory(option.value)}
+                      onClick={() => {
+                        setOperationalCategory(option.value);
+                        if (option.value === "teletrabajo") setOperationalVehicleMode("company");
+                      }}
                       aria-pressed={operationalCategory === option.value}
                       className={`min-h-[64px] rounded-2xl border px-3 py-2.5 text-left transition active:scale-[0.97] ${operationalCategory === option.value ? "border-[#2563EB] bg-[#DBEAFE] text-[#1D4ED8]" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"}`}
                     >
@@ -3171,23 +3954,50 @@ const AttendanceWidget = () => {
 
               {draftOperationRequiresClientVisitFlow ? (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                  {renderClientPickerSection({ title: "Tipo de visita a cliente", stepLabel: "Paso 2" })}
+                  {renderClientPickerSection({ title: "Tipo de visita a cliente", stepLabel: "Paso 2", showObservations: false })}
                 </div>
               ) : null}
 
-              <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
-                  Detalle
-                </label>
-                <textarea
-                  value={operationalDetail}
-                  onChange={(e) => setOperationalDetail(e.target.value)}
-                  rows="3"
-                  placeholder="Ejemplo: salida al banco, reunion o gestion ministerial"
-                  className={CONTROL_TEXTAREA_CLASS}
-                />
-              </div>
+              {operationalCategory === "teletrabajo" ? (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4">
+                  <p className="mb-1 text-sm font-semibold text-emerald-900">Jornada remota</p>
+                  <p className="mb-4 text-xs leading-5 text-emerald-800">
+                    {teleworkRequests.some((request) =>
+                      String(request?.request_date || "").slice(0, 10) === String(teleworkRequestDate || "").slice(0, 10)
+                      && String(request?.status || "").toUpperCase() === "APPROVED"
+                    )
+                      ? "Tu solicitud ya fue aprobada. Puedes registrar la marcacion directamente."
+                      : "Primero se enviara la solicitud a Talento Humano. Cuando sea aprobada, este mismo boton habilitara la marcacion."}
+                    {" "}No se registra destino, visita, kilometraje ni vehiculo personal.
+                  </p>
+                  <label className="mb-4 block">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.08em] text-emerald-800">Fecha del teletrabajo</span>
+                    <input
+                      type="date"
+                      min={getLocalDateKey()}
+                      value={teleworkRequestDate}
+                      onChange={(event) => setTeleworkRequestDate(event.target.value)}
+                      className={CONTROL_INPUT_CLASS}
+                    />
+                  </label>
+                  {renderOperationalCityPicker({ value: operationalDestinationCity, onChange: setOperationalDestinationCity })}
+                  <div className="mt-4">
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.08em] text-emerald-800">
+                      Motivo de la solicitud <span className="font-normal normal-case">(opcional)</span>
+                    </label>
+                    <textarea
+                      value={operationalDetail}
+                      onChange={(event) => setOperationalDetail(event.target.value)}
+                      rows="2"
+                      className={CONTROL_TEXTAREA_CLASS}
+                      placeholder="Indica el motivo de la jornada remota"
+                    />
+                  </div>
+                </div>
+              ) : null}
 
+              {operationalCategory !== "teletrabajo" ? (
+                <>
               <div className="grid gap-3 sm:grid-cols-2">
                 <button
                   type="button"
@@ -3229,6 +4039,8 @@ const AttendanceWidget = () => {
                     fileNamePrefix="odometro_inicio"
                   />
                 </div>
+              ) : null}
+                </>
               ) : null}
             </>
           ) : (
@@ -3291,61 +4103,14 @@ const AttendanceWidget = () => {
               disabled={fieldVisitSubmitting}
               className={ACTION_BTN_MODAL_PRIMARY_CLASS}
             >
-              {fieldVisitSubmitting ? "Guardando..." : "Registrar marcacion"}
-            </Button>
-          </div>
-        </div>
-      </Modal>
-      <Modal
-        isOpen={Boolean(overtimePrompt)}
-        onClose={() => {
-          if (overtimeSubmitting) return;
-          setOvertimePrompt(null);
-          setOvertimeReason("");
-        }}
-        title="Registrar horas extra"
-        maxWidth="max-w-md"
-      >
-        <div className="space-y-4">
-          <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-3">
-            <p className="text-sm text-indigo-900">
-              Se detectaron {Number(overtimePrompt?.hours || 0).toFixed(1)} horas extra al cerrar la jornada.
-            </p>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-gray-800">
-              Motivo de las horas extra
-            </label>
-            <textarea
-              className={CONTROL_TEXTAREA_CLASS}
-              rows="3"
-              placeholder="Describe el motivo operativo del tiempo adicional..."
-              value={overtimeReason}
-              onChange={(e) => setOvertimeReason(e.target.value)}
-              aria-label="Motivo de horas extra"
-            />
-          </div>
-
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                setOvertimePrompt(null);
-                setOvertimeReason("");
-              }}
-              className={ACTION_BTN_MODAL_SECONDARY_CLASS}
-              disabled={overtimeSubmitting}
-            >
-              Omitir
-            </button>
-            <Button
-              variant="primary"
-              onClick={handleOvertimeSubmit}
-              disabled={overtimeSubmitting}
-              className={ACTION_BTN_MODAL_PRIMARY_CLASS}
-            >
-              {overtimeSubmitting ? "Guardando..." : "Guardar horas extra"}
+              {fieldVisitSubmitting
+                ? "Guardando..."
+                : operationalModalPhase === "start" && isTeleworkCategory(operationalCategory)
+                  ? (teleworkRequests.some((request) =>
+                      String(request?.request_date || "").slice(0, 10) === String(teleworkRequestDate || "").slice(0, 10)
+                      && String(request?.status || "").toUpperCase() === "APPROVED"
+                    ) ? "Registrar marcacion" : "Solicitar teletrabajo")
+                  : "Registrar marcacion"}
             </Button>
           </div>
         </div>

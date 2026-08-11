@@ -15,8 +15,11 @@ router.use(
     "backoffice_comercial",
     "servicio_tecnico",
     "tecnico",
+    "ing_servicio",
+    "esp_app",
     "jefe_comercial",
     "jefe_tecnico",
+    "jefe_servicio",
     "jefe_servicio_tecnico",
     "jefe_operaciones",
     "ti",
@@ -26,12 +29,15 @@ router.use(
     "admin",
     "administrador",
     "gerencia_general",
+    "ing_servicio_ext",
+    "esp_app_ext",
   ])
 );
 
 router.get("/candidates", controller.listCandidates);
 router.get("/reports/summary", requireRole(FINANCE_REVIEWER_ROLES), controller.reportSummary);
 router.get("/ats/xml", requireRole(FINANCE_REVIEWER_ROLES), controller.atsXml);
+router.get("/config/policy", controller.getPolicy);
 router.get("/", controller.list);
 router.post("/", controller.upsert);
 router.patch("/:id/status", requireRole(FINANCE_REVIEWER_ROLES), controller.updateStatus);
@@ -64,7 +70,39 @@ router.post("/:id/purchases-no-invoice", controller.createPurchaseNoInvoice);
 router.get("/:id/purchases-no-invoice", controller.listPurchasesNoInvoice);
 router.patch("/purchases/:id/approve", requireRole([...FINANCE_REVIEWER_ROLES, "talento_humano", "jefe_talento_humano"]), controller.approvePurchaseNoInvoice);
 
+// Pago batch del mes completo (atomico, solo finanzas)
+router.post("/batch-pay", requireRole(FINANCE_REVIEWER_ROLES), controller.batchPay);
+
+// Envio del mes completo a revision (operacional, multi-salida)
+router.post("/submit-month", controller.submitMonth);
+
+// Correcciones de revisor
+const REVIEWER_ROLES = [...FINANCE_REVIEWER_ROLES, "talento_humano", "jefe_talento_humano"];
+router.patch("/invoices/:invoiceId/reviewer-note", requireRole(REVIEWER_ROLES), controller.reviewerNoteInvoice);
+router.patch("/:id/request-correction", requireRole(REVIEWER_ROLES), controller.requestCorrection);
+
+// PDF del expediente consolidado del mes (facturas + notas + compras sin factura)
+router.post("/month-report/pdf", requireRole([...REVIEWER_ROLES, "admin", "administrador"]), controller.exportMonthPdf);
+
 // Envio a revision por el propio solicitante
 router.post("/:id/submit-review", controller.submitForReview);
+
+// Comprobante de pago (cierre del expediente)
+const RECEIPT_ROLES = ["talento_humano", "jefe_talento_humano", ...FINANCE_REVIEWER_ROLES, "admin", "administrador"];
+router.post("/batch-receipt", requireRole(["talento_humano", "jefe_talento_humano", "admin", "administrador"]), controller.batchReceipt);
+router.get("/:id/receipt", requireRole(RECEIPT_ROLES), controller.getReceipt);
+
+// Colas de revision por segmento
+const TALENTO_REVIEWER_ROLES = ["talento_humano", "jefe_talento_humano"];
+router.get("/review/talento", requireRole([...TALENTO_REVIEWER_ROLES, ...FINANCE_REVIEWER_ROLES, "admin", "administrador"]), controller.listReviewTalento);
+router.get("/review/finance", requireRole([...FINANCE_REVIEWER_ROLES, "admin", "administrador"]), controller.listReviewFinance);
+
+// Exportar reporte de viaticos (CSV data)
+router.get("/reports/user-export", requireRole([...FINANCE_REVIEWER_ROLES, ...TALENTO_REVIEWER_ROLES, "admin", "administrador"]), controller.exportReport);
+
+// Anticipos
+router.post("/:id/anticipos", controller.requestAnticipo);
+router.get("/:id/anticipos", controller.listAnticipos);
+router.patch("/anticipos/:anticipoId", controller.updateAnticipo);
 
 module.exports = router;

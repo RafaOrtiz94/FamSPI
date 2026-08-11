@@ -6,6 +6,10 @@ const { requireRole } = require("../../middlewares/roles");
 const allowedRoles = [
   "servicio_tecnico",
   "tecnico",
+  "ing_servicio",
+  "esp_app",
+  "jefe_servicio",
+  "jefe_tecnico",
   "jefe_servicio_tecnico",
   "gerencia",
   "administrador",

@@ -1,8 +1,6 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import kickoffApi from '../api/kickoffApi';
 import { toast } from 'react-toastify';
-
-const POLL_MS = 3000;
 
 const C = {
   navy:  '#0a1628',

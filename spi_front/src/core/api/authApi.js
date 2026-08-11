@@ -87,12 +87,14 @@ export const logout = async () => {
 /* ==========================================================
  🧭 Perfil actual (/auth/me)
  ========================================================== */
-export const getProfile = async () => {
+export const getProfile = async (options = {}) => {
  const token = getAccessToken();
  if (!token) throw new Error("No hay token activo");
+ const params = options?.lite ? { lite: "1" } : undefined;
 
  const { data } = await api.get("/auth/me", {
  headers: { Authorization: `Bearer ${token}` },
+ params,
  });
 
  if (!data?.user) throw new Error("Usuario no encontrado");

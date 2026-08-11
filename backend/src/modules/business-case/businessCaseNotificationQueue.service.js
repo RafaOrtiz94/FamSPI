@@ -141,7 +141,7 @@ async function processPendingNotifications() {
   for (const item of rows) {
     try {
       const notificationManager = require('../notifications/notificationManager');
-      await notificationManager.sendNotification({
+      const notification = await notificationManager.sendNotification({
         userId: item.user_id,
         template: item.template,
         data: item.payload,
@@ -151,6 +151,9 @@ async function processPendingNotifications() {
         source: item.source,
         meta: { queueId: item.id, businessCaseId: item.business_case_id }
       });
+      if (!notification) {
+        throw new Error(`No se pudo crear/despachar notificacion BC (${item.template})`);
+      }
 
       await db.query(
         `UPDATE bc_notification_queue

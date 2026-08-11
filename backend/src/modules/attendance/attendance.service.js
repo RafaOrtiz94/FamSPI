@@ -94,6 +94,29 @@ const parseRecordDate = (rawValue) => {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0);
 };
 
+const normalizeRecordDateKey = (rawValue) => {
+  if (rawValue instanceof Date && !Number.isNaN(rawValue.getTime())) {
+    const year = rawValue.getUTCFullYear();
+    const month = String(rawValue.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(rawValue.getUTCDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+  const parsed = parseRecordDate(rawValue);
+  if (parsed) return formatDateOnly(parsed);
+  return String(rawValue || "").slice(0, 10);
+};
+
+const enrichAttendanceRecordForActa = (row = {}) => {
+  const normalizedRow = {
+    ...row,
+    date: normalizeRecordDateKey(row.date),
+  };
+  return {
+    ...normalizedRow,
+    ...buildAttendanceRegularization(normalizedRow),
+  };
+};
+
 const isSameMonth = (a, b) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
 
@@ -455,7 +478,7 @@ const fetchAttendanceRecords = async (userId, startDate, endDate) => {
       `,
       [userId, startDate, endDate]
     );
-    return query.rows.map((row) => ({ ...row, ...buildAttendanceRegularization(row) }));
+    return query.rows.map(enrichAttendanceRecordForActa);
   } catch (err) {
     if (err?.code !== "42P01") throw err;
     const query = await db.query(
@@ -467,7 +490,7 @@ const fetchAttendanceRecords = async (userId, startDate, endDate) => {
       `,
       [userId, startDate, endDate]
     );
-    return query.rows.map((row) => ({ ...row, ...buildAttendanceRegularization(row) }));
+    return query.rows.map(enrichAttendanceRecordForActa);
   }
 };
 
@@ -1031,6 +1054,7 @@ module.exports = {
     VACATION_LABEL,
     WEEKEND_LABEL,
     buildDayTextFieldLookup,
+    enrichAttendanceRecordForActa,
     resolveDayOverrideLabel,
     resolveHourlySlotValue,
   },

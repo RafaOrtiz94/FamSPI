@@ -7,6 +7,8 @@ const resolveCurrentState = ({ attendance = null, activeException = null, active
   const hasLunchIn = Boolean(attendance?.lunch_end_time);
   const hasExit = Boolean(attendance?.exit_time);
   const hasOpenLunch = hasLunchOut && !hasLunchIn;
+  const entryPendingRegularization = Boolean(attendance?.entry_pending_regularization);
+  const hasAttendanceFlow = hasEntry || hasLunchOut || hasLunchIn || entryPendingRegularization;
 
   const exceptionStatus = String(activeException?.status || "").trim().toUpperCase();
   const hasActiveException = Boolean(activeException) && exceptionStatus !== "COMPLETED";
@@ -19,6 +21,8 @@ const resolveCurrentState = ({ attendance = null, activeException = null, active
     hasLunchIn,
     hasExit,
     hasOpenLunch,
+    entryPendingRegularization,
+    hasAttendanceFlow,
     hasActiveException,
     hasActiveOperational,
     hasActiveVisit,
@@ -29,8 +33,8 @@ const resolveCurrentState = ({ attendance = null, activeException = null, active
 const ACTION_RULES = {
   "clock-in": (s) => !s.hasEntry && !s.hasExit,
   "clock-out-lunch": (s) => s.hasEntry && !s.hasLunchOut && !s.hasExit && !s.hasActiveOperational && !s.hasActiveVisit,
-  "clock-in-lunch": (s) => s.hasEntry && s.hasLunchOut && !s.hasLunchIn && !s.hasExit,
-  "clock-out": (s) => s.hasEntry && !s.hasExit && !s.hasOpenLunch && !s.hasActiveOperational && !s.hasActiveVisit,
+  "clock-in-lunch": (s) => s.hasLunchOut && !s.hasLunchIn && !s.hasExit,
+  "clock-out": (s) => s.hasAttendanceFlow && !s.hasExit && !s.hasOpenLunch && !s.hasActiveOperational && !s.hasActiveVisit,
 };
 
 const ACTION_ERRORS = {
@@ -58,8 +62,8 @@ const resolveNextAllowedActions = (state) => {
   if (state.hasEntry && !state.hasLunchOut && !state.hasExit && !state.hasActiveOperational && !state.hasActiveVisit) {
     actions.push("clock-out-lunch");
   }
-  if (state.hasEntry && state.hasLunchOut && !state.hasLunchIn && !state.hasExit) actions.push("clock-in-lunch");
-  if (state.hasEntry && !state.hasExit && !state.hasOpenLunch && !state.hasActiveOperational && !state.hasActiveVisit) {
+  if (state.hasLunchOut && !state.hasLunchIn && !state.hasExit) actions.push("clock-in-lunch");
+  if (state.hasAttendanceFlow && !state.hasExit && !state.hasOpenLunch && !state.hasActiveOperational && !state.hasActiveVisit) {
     actions.push("clock-out");
   }
   return actions;

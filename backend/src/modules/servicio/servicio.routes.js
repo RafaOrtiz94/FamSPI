@@ -4,7 +4,22 @@ const controller = require("./servicio.controller");
 const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
 
+const serviceTechnicalCoreRoles = [
+  "servicio_tecnico",
+  "tecnico",
+  "ing_servicio",
+  "esp_app",
+  "jefe_tecnico",
+  "jefe_servicio",
+  "jefe_servicio_tecnico",
+  "gerencia",
+  "gerencia_general",
+];
+
 const workflowReadRoles = [
+  "ing_servicio",
+  "esp_app",
+  "jefe_servicio",
   "tecnico",
   "jefe_tecnico",
   "jefe_servicio_tecnico",
@@ -19,6 +34,9 @@ const workflowReadRoles = [
   "jefe_logistica",
 ];
 const withdrawalWriteRoles = [
+  "ing_servicio",
+  "esp_app",
+  "jefe_servicio",
   "tecnico",
   "jefe_tecnico",
   "jefe_servicio_tecnico",
@@ -31,6 +49,9 @@ const withdrawalWriteRoles = [
   "gerencia_general",
 ];
 const correctiveReadRoles = [
+  "ing_servicio",
+  "esp_app",
+  "jefe_servicio",
   "tecnico",
   "servicio_tecnico",
   "jefe_tecnico",
@@ -46,6 +67,9 @@ const correctiveReadRoles = [
   "gerencia_general",
 ];
 const correctiveWriteRoles = [
+  "ing_servicio",
+  "esp_app",
+  "jefe_servicio",
   "tecnico",
   "servicio_tecnico",
   "jefe_tecnico",
@@ -69,25 +93,25 @@ const correctiveWriteRoles = [
 router.get(
   "/capacitaciones",
   verifyToken,
-  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.getCapacitaciones
 );
 router.post(
   "/capacitaciones",
   verifyToken,
-  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.createCapacitacion
 );
 router.put(
   "/capacitaciones/:id",
   verifyToken,
-  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.updateCapacitacion
 );
 router.delete(
   "/capacitaciones/:id",
   verifyToken,
-  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.deleteCapacitacion
 );
 
@@ -97,26 +121,32 @@ router.delete(
 router.get(
   "/disponibilidad",
   verifyToken,
-  requireRole(["servicio_tecnico", "tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.getDisponibilidadTecnicos
 );
 router.post(
   "/disponibilidad",
   verifyToken,
-  requireRole(["servicio_tecnico", "tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.updateDisponibilidadTecnico
 );
 router.get(
   "/actividades",
   verifyToken,
-  requireRole(["servicio_tecnico", "tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia", "comercial", "acp_comercial", "jefe_comercial"]),
+  requireRole([...serviceTechnicalCoreRoles, "comercial", "acp_comercial", "jefe_comercial"]),
   controller.listActividadesTecnicas
 );
 router.post(
   "/actividades",
   verifyToken,
-  requireRole(["servicio_tecnico", "tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.createActividadTecnica
+);
+router.get(
+  "/cronograma/feed",
+  verifyToken,
+  requireRole(serviceTechnicalCoreRoles),
+  controller.getTechnicalScheduleFeed
 );
 
 // ======================================================
@@ -125,13 +155,13 @@ router.post(
 router.get(
   "/equipos",
   verifyToken,
-  requireRole(["tecnico", "gerencia", "jefe_tecnico", "jefe_servicio_tecnico", "ti", "jefe_ti", "admin_ti"]),
+  requireRole([...serviceTechnicalCoreRoles, "ti", "jefe_ti", "admin_ti"]),
   controller.getEquipos
 );
 router.post(
   "/equipos",
   verifyToken,
-  requireRole(["tecnico", "gerencia", "jefe_tecnico", "jefe_servicio_tecnico"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.createEquipo
 );
 
@@ -141,7 +171,7 @@ router.post(
 router.get(
   "/mantenimientos",
   verifyToken,
-  requireRole(["tecnico", "gerencia", "jefe_tecnico", "jefe_servicio_tecnico"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.getMantenimientos
 );
 
@@ -151,13 +181,13 @@ router.get(
 router.get(
   "/mantenimientos-anuales",
   verifyToken,
-  requireRole(["tecnico", "gerencia", "jefe_tecnico", "jefe_servicio_tecnico"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.getMantenimientosAnuales
 );
 router.post(
   "/mantenimientos-anuales",
   verifyToken,
-  requireRole(["gerencia", "tecnico", "jefe_tecnico", "jefe_servicio_tecnico"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.createMantenimientoAnual
 );
 
@@ -167,7 +197,7 @@ router.post(
 router.post(
   "/desinfeccion/pdf",
   verifyToken,
-  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.generateDisinfectionPDF
 );
 
@@ -177,7 +207,7 @@ router.post(
 router.post(
   "/entrenamiento/pdf",
   verifyToken,
-  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.generateTrainingCoordinationPDF
 );
 
@@ -187,7 +217,7 @@ router.post(
 router.post(
   "/entrenamiento/asistencia/pdf",
   verifyToken,
-  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.generateAttendanceListPDF
 );
 
@@ -200,37 +230,37 @@ router.get(
 router.post(
   "/entrenamiento/workflow",
   verifyToken,
-  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.postTrainingWorkflowAction
 );
 router.post(
   "/entrenamiento/evaluacion/pdf",
   verifyToken,
-  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.generateTrainingEvaluationPDF
 );
 router.post(
   "/entrenamiento/evaluacion-especialista/pdf",
   verifyToken,
-  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.generateTrainingSpecialistEvaluationPDF
 );
 router.post(
   "/entrenamiento/conformidad/pdf",
   verifyToken,
-  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.generateTrainingConformityPDF
 );
 router.post(
   "/entrenamiento/certificado/emitir",
   verifyToken,
-  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.issueTrainingCertificate
 );
 router.post(
   "/entrenamiento/certificado/entregar",
   verifyToken,
-  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  requireRole(serviceTechnicalCoreRoles),
   controller.deliverTrainingCertificate
 );
 

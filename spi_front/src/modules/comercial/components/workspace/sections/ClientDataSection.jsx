@@ -27,6 +27,11 @@ const SECTION_FIELDS = {
 
 const SECTION_ORDER = ["general"];
 
+// Mismos roles que ya autoriza el backend en POST /sections/:section/unlock
+// (businessCase.routes.js) -- unico camino para reabrir "general" una vez
+// que comercial guardo y quedo bloqueada automaticamente.
+const GENERAL_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_de_comercial"]);
+
 const normalizeText = (value) => String(value || "").trim().toLowerCase();
 
 const getClientLabel = (client) =>
@@ -677,6 +682,26 @@ const watchProvinceCity = watch("provinceCity");
  return hasRoleAccess && permissions?.canEdit !== false && ownership?.canUserEdit !== false;
  };
 
+ // Reabrir "general" tras el auto-bloqueo al guardar comercial (ver
+ // update() en businessCase.controller.js). Reutiliza el endpoint generico
+ // de bloqueo/desbloqueo por seccion, ya restringido a estos mismos roles
+ // en el backend -- no hace falta flujo de "solicitar desbloqueo".
+ const canReopenGeneral = ownership?.isLocked === true && GENERAL_REOPEN_ROLES.has(permissions?.userRole || "");
+
+ const handleReopenGeneral = async () => {
+ if (!bcId || saving) return;
+ setSaving(true);
+ try {
+  await api.post(`/business-case/${bcId}/sections/general/unlock`);
+  onSave();
+  showToast("Sección reabierta para edición.", "success");
+ } catch (err) {
+  showToast(err?.response?.data?.message || "No se pudo reabrir la sección.", "error");
+ } finally {
+  setSaving(false);
+ }
+ };
+
  if (loading) {
  return (
  <div className="space-y-4">
@@ -717,12 +742,22 @@ const watchProvinceCity = watch("provinceCity");
 
  {/* Permission warning */}
  {!canEdit() && (
- <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 shadow-sm">
- <div className="flex items-center gap-2 text-amber-800 font-medium">
- <span className="text-sm">
- No tienes permisos para editar datos del cliente en el estado actual.
+ <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+ <span className="text-sm text-amber-800 font-medium">
+ {ownership?.isLocked
+ ? "Comercial ya guardó esta sección y quedó en solo lectura."
+ : "No tienes permisos para editar datos del cliente en el estado actual."}
  </span>
- </div>
+ {canReopenGeneral && (
+ <button
+  type="button"
+  onClick={handleReopenGeneral}
+  disabled={saving}
+  className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 w-full sm:w-auto"
+ >
+  Reabrir para edición
+ </button>
+ )}
  </div>
  )}
 

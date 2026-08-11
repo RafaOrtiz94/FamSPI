@@ -33,11 +33,14 @@ const businessCaseRoles = [
   "esp_app",              // solo visualización en BC
   "jefe_financiero",      // BC-02: ve el BC desde BORRADOR
   "jefe_ti",              // BC-10: puede ver y agregar ítems al carrito
+  "jefe_logistica",       // edita la lista de inversiones en paralelo (sin carrito)
   "gerencia",
   "gerencia_general",
 ];
-// Carrito de inversiones: todos los participantes del BC pueden aportar items
-// cuando el documento estadistico ya fue cargado; el controller valida ese gate.
+// Lista de inversiones (sin carrito): todos los participantes del BC pueden
+// verla; solo acp_comercial/jefe_comercial/jefe_de_comercial/jefe_operaciones/
+// jefe_servicio/jefe_logistica pueden editarla en paralelo — el controller
+// valida ese gate (INVESTMENT_EDIT_ROLES) ademas del documento estadistico.
 const investmentRoles = businessCaseRoles;
 // BC-12: Solo jefe_operaciones y jefe_financiero GUARDAN valores
 // jefe_comercial y gerencia solo VER — la separación GET/POST se hace aquí
@@ -147,10 +150,12 @@ router.post("/:id/equipment", verifyToken, requireRole(businessCaseRoles), ctrl.
 router.get("/:id/determinations", verifyToken, requireRole(businessCaseRoles), ctrl.getDeterminations);
 router.get("/:id/determinations/stat-document", verifyToken, requireRole(businessCaseRoles), ctrl.getDeterminationsGateInfo);
 router.post("/:id/determinations/lock-subsection", verifyToken, requireRole(businessCaseRoles), ctrl.lockDeterminationsSubsection);
+router.post("/:id/determinations/lock-all-technical-subsections", verifyToken, requireRole(businessCaseRoles), ctrl.lockAllDeterminationsTechnicalSubsections);
 router.post("/:id/determinations/request-unlock-subsection", verifyToken, requireRole(businessCaseRoles), ctrl.requestDeterminationsSubsectionUnlock);
 // NUEVO-08: jefe_de_comercial = mismo nivel que jefe_comercial para aprobar desbloqueo de sub-secciones
 router.post("/:id/determinations/resolve-unlock-subsection", verifyToken, requireRole(["jefe_comercial", "jefe_de_comercial"]), ctrl.resolveDeterminationsSubsectionUnlock);
 router.post("/:id/determinations/reopen-commercial", verifyToken, requireRole(["jefe_comercial", "jefe_de_comercial"]), ctrl.reopenDeterminationsCommercial);
+router.post("/:id/determinations/renew-commercial-window", verifyToken, requireRole(["jefe_comercial", "jefe_de_comercial"]), ctrl.renewDeterminationsCommercialWindow);
 router.post(
   "/:id/determinations/parse-quantities-file",
   verifyToken,
@@ -265,8 +270,12 @@ router.delete("/:id/investments/:invId", verifyToken, requireRole(businessCaseRo
 router.get("/:id/investments/catalog", verifyToken, requireRole(investmentRoles), ctrl.getInvestmentCatalog);
 router.post("/:id/investments/catalog", verifyToken, requireRole(investmentRoles), ctrl.createInvestmentCatalogItem);
 router.post("/:id/investments/selections", verifyToken, requireRole(investmentRoles), ctrl.saveInvestmentSelection);
-router.post("/:id/investments/selections/request-increase", verifyToken, requireRole(investmentRoles), ctrl.requestInvestmentQuantityIncrease);
-router.post("/:id/investments/confirm-cart", verifyToken, requireRole(investmentRoles), ctrl.confirmInvestmentCart);
+router.post(
+  "/:id/investments/close-without-items",
+  verifyToken,
+  requireRole([...new Set([...investmentRoles, ...investmentValuesRoles])]),
+  ctrl.closeInvestmentsWithoutAdditionalItems,
+);
 router.get("/:id/investments/values", verifyToken, requireRole(investmentValuesRoles), ctrl.getInvestmentValues);
 router.post("/:id/investments/values", verifyToken, requireRole(investmentValuesRoles), ctrl.saveInvestmentValues);
 router.get("/:id/investments/values/assignees", verifyToken, requireRole(investmentValuesRoles), ctrl.getInvestmentQuotationAssignees);
@@ -296,8 +305,6 @@ router.put(
 router.get("/:id/complete", verifyToken, requireRole(businessCaseRoles), ctrl.getComplete);
 router.post("/:id/lab-environment", verifyToken, requireRole(businessCaseRoles), ctrl.saveLabEnvironment);
 router.get("/:id/lab-environment", verifyToken, requireRole(businessCaseRoles), ctrl.getLabEnvironment);
-router.post("/:id/equipment-details", verifyToken, requireRole(businessCaseRoles), ctrl.saveEquipmentDetails);
-router.get("/:id/equipment-details", verifyToken, requireRole(businessCaseRoles), ctrl.getEquipmentDetails);
 router.post("/:id/equipment-details-v2", verifyToken, requireRole(businessCaseRoles), ctrl.saveEquipmentDetailsV2);
 router.post("/:id/lis-integration", verifyToken, requireRole(businessCaseRoles), ctrl.saveLisIntegration);
 router.get("/:id/lis-integration", verifyToken, requireRole(businessCaseRoles), ctrl.getLisIntegration);

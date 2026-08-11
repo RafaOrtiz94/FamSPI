@@ -16,26 +16,33 @@ const mapNotificationRow = (row) => ({
   meta: row.meta || {},
   created_at: row.created_at,
   read_at: row.read_at,
+  cleared_at: row.cleared_at || null,
 });
 
 // Límite de notificaciones por request: evita respuestas masivas y reduce transferencia hacia Neon.
 // El frontend solo muestra las 6 más recientes; 50 es más que suficiente como tope operativo.
 const NOTIFICATIONS_PAGE_LIMIT = 50;
 
-const listNotifications = async (userId, { status, limit } = {}) => {
+const listNotifications = async (userId, { status, limit, includeCleared = false } = {}) => {
   const params = [userId];
   let query = `
-    SELECT id, user_id, title, message, type, source, status, priority, meta, created_at, read_at
+    SELECT id, user_id, title, message, type, source, status, priority, meta, created_at, read_at, cleared_at
     FROM notifications
     WHERE user_id = $1
   `;
 
-  if (status) {
-    query += " AND status = $2";
-    params.push(status);
+  if (!includeCleared) {
+    query += " AND cleared_at IS NULL";
   }
 
-  const effectiveLimit = Math.min(Number(limit) || NOTIFICATIONS_PAGE_LIMIT, NOTIFICATIONS_PAGE_LIMIT);
+  if (status) {
+    params.push(status);
+    query += ` AND status = $${params.length}`;
+  }
+
+  const effectiveLimit = includeCleared
+    ? Math.min(Number(limit) || 200, 500)
+    : Math.min(Number(limit) || NOTIFICATIONS_PAGE_LIMIT, NOTIFICATIONS_PAGE_LIMIT);
   query += ` ORDER BY priority DESC, created_at DESC LIMIT ${effectiveLimit}`;
 
   const { rows } = await db.query(query, params);
@@ -88,8 +95,8 @@ const markAllAsRead = async (userId) => {
     `
     UPDATE notifications
     SET status = 'read', read_at = COALESCE(read_at, NOW())
-    WHERE user_id = $1 AND status <> 'read'
-    RETURNING id, user_id, title, message, type, source, status, priority, meta, created_at, read_at
+    WHERE user_id = $1 AND status <> 'read' AND cleared_at IS NULL
+    RETURNING id, user_id, title, message, type, source, status, priority, meta, created_at, read_at, cleared_at
     `,
     [userId]
   );
@@ -100,9 +107,10 @@ const markAllAsRead = async (userId) => {
 const deleteNotification = async (userId, notificationId) => {
   const { rows } = await db.query(
     `
-    DELETE FROM notifications
-    WHERE id = $1 AND user_id = $2
-    RETURNING id, user_id, title, message, type, source, status, priority, meta, created_at, read_at
+    UPDATE notifications
+    SET cleared_at = NOW()
+    WHERE id = $1 AND user_id = $2 AND cleared_at IS NULL
+    RETURNING id, user_id, title, message, type, source, status, priority, meta, created_at, read_at, cleared_at
     `,
     [notificationId, userId]
   );
@@ -114,9 +122,10 @@ const deleteNotification = async (userId, notificationId) => {
 const clearNotifications = async (userId) => {
   const result = await db.query(
     `
-    DELETE FROM notifications
-    WHERE user_id = $1
-    RETURNING id, user_id, title, message, type, source, status, priority, meta, created_at, read_at
+    UPDATE notifications
+    SET cleared_at = NOW()
+    WHERE user_id = $1 AND cleared_at IS NULL
+    RETURNING id, user_id, title, message, type, source, status, priority, meta, created_at, read_at, cleared_at
     `,
     [userId]
   );
@@ -126,7 +135,7 @@ const clearNotifications = async (userId) => {
 
 const getUnreadCount = async (userId) => {
   const { rows } = await db.query(
-    `SELECT COUNT(*) AS total FROM notifications WHERE user_id = $1 AND status = 'unread'`,
+    `SELECT COUNT(*) AS total FROM notifications WHERE user_id = $1 AND status = 'unread' AND cleared_at IS NULL`,
     [userId]
   );
 
@@ -291,6 +300,7 @@ Correlation ID: ${correlationId}
 };
 
 module.exports = {
+  mapNotificationRow,
   listNotifications,
   createNotification,
   markAsRead,

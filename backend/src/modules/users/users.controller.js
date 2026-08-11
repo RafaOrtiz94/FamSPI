@@ -1,6 +1,8 @@
-﻿  // src/modules/users/users.controller.js
-  const db = require("../../config/db");
-  const logger = require("../../config/logger");
+﻿// src/modules/users/users.controller.js
+   const db = require("../../config/db");
+   const logger = require("../../config/logger");
+   const { isPassiveEmploymentStatus } = require("../shared/profileSync");
+   const { findExistingUserByIdentity } = require("../../utils/userIdentity");
 
 const ADMIN_VIEW_ROLES = new Set([
     "talento_humano",
@@ -30,6 +32,7 @@ const ALLOWED_USER_ROLES = new Set([
   "jefe_comercial",
   "servicio_tecnico",
   "tecnico",
+  "responsable_tecnico",
   "jefe_servicio_tecnico",
   "jefe_tecnico",
   "finanzas",
@@ -204,7 +207,10 @@ const getUsers = async (req, res) => {
       filters.push(
         `LOWER(TRIM(COALESCE(cp.profile->'laboral'->>'estatus_empleado', 'activo'))) <> ALL($${values.length}::text[])`
       );
-      filters.push("op.user_id IS NULL");
+      filters.push("COALESCE(op.is_closed, false) = false");
+      filters.push(
+        "LOWER(TRIM(COALESCE(cp.profile->'onboarding'->>'offboarding_requested', 'false'))) NOT IN ('true', '1', 'yes', 'si', 'sí')"
+      );
     }
 
     const { rows } = await db.query(`
@@ -301,6 +307,19 @@ const createUser = async (req, res) => {
     await ensureDepartmentExists(departmentId, { requireActive: true });
     await ensureUniqueUserIdentity({ email, googleId });
 
+    // Alta manual (ej. TI pre-provisionando una cuenta corporativa antes del
+    // primer dia): ensureUniqueUserIdentity solo cubre email/google_id, que
+    // nunca coinciden con una cuenta creada antes por otro flujo (ej. hire
+    // con email placeholder). Se bloquea por nombre para que TI decida a
+    // mano si es la misma persona en vez de duplicar.
+    const existingByIdentity = await findExistingUserByIdentity(db, { fullname });
+    if (existingByIdentity) {
+      return res.status(409).json({
+        ok: false,
+        message: `Ya existe un usuario con el mismo nombre: "${existingByIdentity.fullname}" (id ${existingByIdentity.id}, ${existingByIdentity.email}). Si es la misma persona, edita esa cuenta en vez de crear una nueva.`,
+      });
+    }
+
       const { rows } = await db.query(
         `
         INSERT INTO users (google_id, email, fullname, role, department_id, active, created_at)
@@ -320,7 +339,7 @@ const createUser = async (req, res) => {
   /**
    *  Actualizar rol o departamento de un usuario
    */
-  const updateUser = async (req, res) => {
+const updateUser = async (req, res) => {
     try {
       const { id } = req.params;
       const userId = Number(id);
@@ -355,14 +374,18 @@ const createUser = async (req, res) => {
       await ensureUniqueUserIdentity({ email, googleId, excludeId: userId });
 
       const previousResult = await db.query(
-        `SELECT id, email, fullname, role, department_id, active
-           FROM users
-          WHERE id = $1
+        `SELECT id, email, fullname, role, department_id, active, 
+                cp.profile->'laboral'->>'estatus_empleado' AS estatus_empleado
+           FROM users u
+           LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
+          WHERE u.id = $1
           LIMIT 1`,
         [userId]
       );
 
-      // Construir SET dinámicamente para permitir limpiar campos nullable
+      const prevEmploymentStatus = String(previousResult.rows[0]?.estatus_empleado || "").trim().toLowerCase();
+      const prevActive = previousResult.rows[0]?.active !== false;
+
       const sets = [];
       const values = [];
       let paramIndex = 1;
@@ -407,7 +430,38 @@ const createUser = async (req, res) => {
       if (rows.length === 0)
         return res.status(404).json({ ok: false, message: "Usuario no encontrado" });
 
-      res.status(200).json({ ok: true, data: rows[0] });
+      const updatedUser = rows[0];
+      const newActive = active !== undefined ? active : prevActive;
+
+      if (active !== undefined && !newActive && !isPassiveEmploymentStatus(prevEmploymentStatus)) {
+        await db.query(
+          `UPDATE collaborator_profiles 
+           SET profile = jsonb_set(
+             COALESCE(profile, '{}'::jsonb),
+             ARRAY['laboral', 'estatus_empleado'],
+             to_jsonb('inactivo'::text),
+             true
+           ),
+           updated_at = NOW()
+           WHERE user_id = $1`,
+          [userId]
+        );
+      } else if (active !== undefined && newActive && isPassiveEmploymentStatus(prevEmploymentStatus)) {
+        await db.query(
+          `UPDATE collaborator_profiles 
+           SET profile = jsonb_set(
+             COALESCE(profile, '{}'::jsonb),
+             ARRAY['laboral', 'estatus_empleado'],
+             to_jsonb('activo'::text),
+             true
+           ),
+           updated_at = NOW()
+           WHERE user_id = $1`,
+          [userId]
+        );
+      }
+
+      res.status(200).json({ ok: true, data: updatedUser });
     } catch (err) {
       logger.error({ err }, "Error actualizando usuario");
       res.status(err.status || 500).json({ ok: false, message: err.message || "Error actualizando usuario" });
@@ -506,5 +560,11 @@ const createUser = async (req, res) => {
     createUser,
     updateUser,
     deleteUser,
+    // Helpers puros expuestos para pruebas de verificacion.
+    normalizeRole,
+    normalizeText,
+    normalizeEmail,
+    isValidEmail,
+    parseBoolean,
   };
 
