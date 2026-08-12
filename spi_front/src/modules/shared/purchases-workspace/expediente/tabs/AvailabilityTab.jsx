@@ -14,8 +14,6 @@ import {
   FiXCircle,
   FiAlertTriangle,
   FiShield,
-  FiStar,
-  FiX,
   FiArrowRight,
   FiInfo,
   FiFileText,
@@ -29,6 +27,8 @@ import WorkflowStep from '../../components/WorkflowStep';
 import FileUploadZone from '../../../../../core/ui/components/FileUploadZone';
 import { promptDialog } from '../../../../../core/ui/utils/promptDialog';
 import { useProviderEmails } from '../../hooks/useProviderEmails';
+import { useProviderEmailGroups } from '../../hooks/useProviderEmailGroups';
+import ProviderEmailChipsInput from '../../components/ProviderEmailChipsInput';
 import {
   saveProviderResponse,
   setAvailability,
@@ -216,8 +216,8 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
   const [reservationsModalOpen, setReservationsModalOpen] = useState(false);
 
   /* ── provider email registry ─────────────────────────────── */
-  const { emails: savedEmails, save: saveEmail, remove: removeEmail, isNew: isNewEmail } = useProviderEmails();
-  const [saveEmailLabel,   setSaveEmailLabel]   = useState('');
+  const { emails: savedEmails, save: saveEmail } = useProviderEmails();
+  const { groups: emailGroups, save: saveEmailGroup, remove: removeEmailGroup } = useProviderEmailGroups();
 
   /* ── internal inventory state ───────────────────────────────── */
   const [invLoading,     setInvLoading]     = useState(false);
@@ -1252,96 +1252,23 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
 
                 <div className="space-y-3">
                   {/* Contactos guardados */}
-                  {savedEmails.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-slate-500 mb-1.5 flex items-center gap-1">
-                        <FiStar size={11} className="text-caution-amber" />
-                        Proveedores frecuentes
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {savedEmails.map((entry) => (
-                          <button
-                            key={entry.email}
-                            type="button"
-                            onClick={() => setProviderEmail(entry.email)}
-                            className={`group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs transition-all ${
-                              providerEmail === entry.email
-                                ? 'bg-action-blue text-white border-action-blue'
-                                : 'bg-white text-slate-600 border-slate-200 hover:border-action-blue hover:text-action-blue'
-                            }`}
-                          >
-                            <span className="font-medium">{entry.label}</span>
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              onClick={(ev) => { ev.stopPropagation(); removeEmail(entry.email); }}
-                              onKeyDown={(ev) => ev.key === 'Enter' && (ev.stopPropagation(), removeEmail(entry.email))}
-                              className={`rounded-full p-0.5 hover:bg-red-100 hover:text-alert-red transition-colors ${
-                                providerEmail === entry.email ? 'text-white hover:bg-white/20' : 'text-slate-400'
-                              }`}
-                            >
-                              <FiX size={9} />
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Campo de correo con datalist -- "multiple" habilita varios
-                      destinatarios separados por coma (soporte nativo del
-                      input type=email, sin JS extra) */}
+                  {/* Destinatarios: chips (varios correos a la vez), correos
+                      individuales guardados y grupos de correos guardados
+                      para aplicar de una sola vez. */}
                   <label className="block">
                     <span className="text-xs font-medium text-slate-600">Correo(s) proveedor</span>
-                    <div className="mt-1 flex gap-2">
-                      <input
-                        type="email"
-                        multiple
-                        id="provider-email-input"
-                        list="saved-emails-list"
+                    <div className="mt-1">
+                      <ProviderEmailChipsInput
                         value={providerEmail}
-                        onChange={(e) => setProviderEmail(e.target.value)}
-                        className="flex-1 min-h-10 rounded-xl border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-action-blue"
-                        placeholder="proveedor1@empresa.com, proveedor2@empresa.com"
-                        autoComplete="off"
+                        onChange={setProviderEmail}
+                        savedEmails={savedEmails}
+                        onSaveEmail={(email) => saveEmail(email, email)}
+                        groups={emailGroups}
+                        onSaveGroup={saveEmailGroup}
+                        onRemoveGroup={removeEmailGroup}
                       />
-                      <datalist id="saved-emails-list">
-                        {savedEmails.map((e) => (
-                          <option key={e.email} value={e.email} label={e.label} />
-                        ))}
-                      </datalist>
-                      {providerEmail.trim() && isNewEmail(providerEmail) && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            saveEmail(providerEmail.trim(), saveEmailLabel || providerEmail.trim());
-                            setSaveEmailLabel('');
-                          }}
-                          title="Guardar este correo para uso frecuente"
-                          className="shrink-0 min-h-10 px-3 rounded-xl border border-caution-amber text-caution-amber text-xs font-medium hover:bg-amber-50 transition-colors flex items-center gap-1"
-                        >
-                          <FiStar size={12} />
-                          Guardar
-                        </button>
-                      )}
                     </div>
                   </label>
-
-                  {/* Alias para el contacto (solo visible si está por guardar) */}
-                  {providerEmail.trim() && isNewEmail(providerEmail) && (
-                    <label className="block">
-                      <span className="text-xs font-medium text-slate-500">
-                        Nombre para este proveedor <span className="font-normal text-slate-400">(opcional)</span>
-                      </span>
-                      <input
-                        type="text"
-                        value={saveEmailLabel}
-                        onChange={(e) => setSaveEmailLabel(e.target.value)}
-                        className="mt-1 w-full min-h-9 rounded-xl border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-action-blue"
-                        placeholder="Ej: Roche Ecuador, Medicaltech"
-                      />
-                    </label>
-                  )}
 
                   <label className="block">
                     <span className="text-xs font-medium text-slate-600">Notas</span>
