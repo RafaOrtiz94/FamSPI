@@ -11,7 +11,7 @@
  *
  * Solo se monta en compras privadas (el tab ni aparece en públicas).
  */
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -34,6 +34,10 @@ import FileUploadZone from '../../../../../core/ui/components/FileUploadZone';
 import NewClientRequestForm from '../../../../comercial/components/NewClientRequestForm';
 import {
   forwardPrivatePurchaseToAcp,
+  createPrivatePurchaseOfferDraft,
+  getPrivatePurchaseOfferWorkspace,
+  publishPrivatePurchaseOfferVersion,
+  regeneratePrivatePurchaseOfferVersion,
   requestClientRegistration,
   savePrivatePurchaseInspectionRequest,
   sendPrivatePurchaseOffer,
@@ -43,7 +47,7 @@ import {
 import { promptDialog } from '../../../../../core/ui/utils/promptDialog';
 
 /* ─── estados en que cada acción está habilitada ─────────────────────── */
-const OFFER_SEND_STATES    = ['acp_availability_confirmed', 'price_improvement_requested'];
+const OFFER_SEND_STATES    = ['acp_availability_confirmed', 'price_improvement_requested', 'business_case_feasibility_approved'];
 const OFFER_SIGN_STATES    = ['offer_sent', 'pending_client_signature'];
 const CLIENT_REG_STATES    = ['offer_signed', 'client_registration_requested'];
 const PRICE_IMPROVE_STATES = ['offer_rejected_by_commercial'];
@@ -62,6 +66,10 @@ const REQUIRES_CLIENT_REG  = new Set([
 /* ─── label de etapa ─────────────────────────────────────────────────── */
 function getStageLabel(status) {
   if (['pending_backoffice', 'acp_availability_requested', 'acp_availability_confirmed'].includes(status))
+    return 'Backoffice Comercial';
+  if (['business_case_in_progress', 'business_case_under_review'].includes(status))
+    return 'Business Case';
+  if (status === 'business_case_feasibility_approved')
     return 'Backoffice Comercial';
   if (['offer_sent', 'pending_client_signature', 'offer_signed', 'client_registration_requested'].includes(status))
     return 'Comercial';
@@ -101,6 +109,169 @@ function snapshotToInitialData(snapshot = {}) {
  * al motion.div y no al viewport. createPortal monta el modal en
  * document.body directamente, garantizando cobertura total.
 ────────────────────────────────────────────────────────────────────── */
+const offerStatusLabel = {
+  draft: 'Borrador',
+  sent: 'Enviada',
+  accepted: 'Aceptada',
+  rejected: 'Rechazada',
+};
+
+const PrivateOfferWorkspacePanel = ({ purchase, userRoles, enabled, refresh }) => {
+  const [workspace, setWorkspace] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [pending, setPending] = useState(null);
+  const [error, setError] = useState(null);
+
+  const canManage = userRoles.some((role) => [
+    'backoffice',
+    'backoffice_comercial',
+    'acp_comercial',
+    'jefe_comercial',
+    'jefe_de_comercial',
+    'gerencia',
+    'gerencia_general',
+  ].includes(role));
+
+  const loadWorkspace = useCallback(async () => {
+    if (!purchase?.id) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getPrivatePurchaseOfferWorkspace(purchase.id);
+      setWorkspace(data);
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || 'No se pudo cargar el generador de oferta');
+    } finally {
+      setLoading(false);
+    }
+  }, [purchase?.id]);
+
+  useEffect(() => {
+    loadWorkspace();
+  }, [loadWorkspace, purchase?.offer_document_id, purchase?.status]);
+
+  const run = async (name, handler) => {
+    setPending(name);
+    setError(null);
+    try {
+      await handler();
+      await loadWorkspace();
+      await refresh();
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || 'No se pudo completar la accion');
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const latestOffer = workspace?.latest_offer || null;
+  const permissions = workspace?.permissions || {};
+  const canCreateDraft = canManage && enabled && (permissions.canCreateDraft || permissions.canCreateVersion);
+  const canPublish = canManage && enabled && permissions.canPublish && latestOffer?.id;
+  const canRegenerate = canManage && enabled && permissions.canRegenerate && latestOffer?.id;
+
+  if (loading && !workspace) {
+    return (
+      <div className="rounded-xl bg-slate-50 p-4">
+        <div className="flex items-center gap-3 text-sm text-warm-ash">
+          <FiLoader className="animate-spin text-action-blue" size={16} />
+          Cargando generador de oferta
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl bg-slate-50 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-ink-slate">Generador de oferta</p>
+          <p className="mt-1 text-xs leading-relaxed text-warm-ash">
+            Crea una hoja editable, completa precios y publica el PDF en este expediente.
+          </p>
+        </div>
+        <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+          {latestOffer ? offerStatusLabel[latestOffer.status] || latestOffer.status : 'Sin borrador'}
+        </span>
+      </div>
+
+      {error && (
+        <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <FiAlertCircle className="mt-0.5 shrink-0" size={14} />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {latestOffer ? (
+        <div className="mt-4 flex flex-col gap-3">
+          <div className="grid gap-2 text-xs text-warm-ash sm:grid-cols-3">
+            <span>Version <span className="font-mono text-ink-slate">V{latestOffer.version_number}</span></span>
+            <span>Creada <span className="font-mono text-ink-slate">{latestOffer.created_at ? new Date(latestOffer.created_at).toLocaleDateString('es-EC') : 'N/D'}</span></span>
+            <span>Filas con precio <span className="font-mono text-ink-slate">{latestOffer.pricing_payload?.summary?.priced_rows ?? 0}/{latestOffer.pricing_payload?.summary?.total_rows ?? 0}</span></span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {latestOffer.sheet_url && (
+              <a
+                href={latestOffer.sheet_url}
+                target="_blank"
+                rel="noreferrer"
+                className="min-h-11 inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50 active:scale-[0.97] cursor-pointer"
+              >
+                <FiExternalLink size={15} />
+                Abrir hoja
+              </a>
+            )}
+            {latestOffer.pdf_file_id && (
+              <a
+                href={`https://drive.google.com/file/d/${latestOffer.pdf_file_id}/view`}
+                target="_blank"
+                rel="noreferrer"
+                className="min-h-11 inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50 active:scale-[0.97] cursor-pointer"
+              >
+                <FiExternalLink size={15} />
+                Ver PDF
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => run('regenerate_offer', () => regeneratePrivatePurchaseOfferVersion(purchase.id, latestOffer.id))}
+              disabled={!canRegenerate || pending === 'regenerate_offer'}
+              className="min-h-11 inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.97] cursor-pointer"
+            >
+              {pending === 'regenerate_offer' ? <FiLoader className="animate-spin" size={15} /> : <FiCalendar size={15} />}
+              Regenerar
+            </button>
+            <button
+              type="button"
+              onClick={() => run('publish_offer', () => publishPrivatePurchaseOfferVersion(purchase.id, latestOffer.id))}
+              disabled={!canPublish || pending === 'publish_offer'}
+              className="min-h-11 inline-flex items-center justify-center gap-2 rounded-2xl bg-action-blue px-4 text-sm font-medium text-white transition hover:bg-action-blue/90 disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.97] cursor-pointer"
+            >
+              {pending === 'publish_offer' ? <FiLoader className="animate-spin" size={15} /> : <FiSend size={15} />}
+              Publicar PDF
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-4 flex flex-col gap-3 rounded-xl bg-white px-4 py-3">
+          <p className="text-xs text-slate-600">
+            Cuando ACP confirme disponibilidad se puede crear la hoja editable para completar precios.
+          </p>
+          <button
+            type="button"
+            onClick={() => run('create_offer_draft', () => createPrivatePurchaseOfferDraft(purchase.id))}
+            disabled={!canCreateDraft || pending === 'create_offer_draft'}
+            className="w-fit min-h-11 inline-flex items-center justify-center gap-2 rounded-2xl bg-action-blue px-4 text-sm font-medium text-white transition hover:bg-action-blue/90 disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.97] cursor-pointer"
+          >
+            {pending === 'create_offer_draft' ? <FiLoader className="animate-spin" size={15} /> : <FiSend size={15} />}
+            Crear hoja de oferta
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ClientRegistrationModal = ({ purchase, onClose, onSuccess }) => {
   const initialData = snapshotToInitialData(purchase?.client_snapshot);
 
@@ -209,6 +380,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
   const linkedBcId  = purchase?.extra?.auto_business_case_id || purchase?.business_case_id || null;
   const hasLinkedBc = Boolean(linkedBcId);
   const inspDone    = Boolean(purchase?.inspection_request_id);
+  const isBusinessCaseState = ['business_case_in_progress', 'business_case_under_review', 'business_case_feasibility_approved'].includes(status);
 
   /** roleStepStatus — estado del paso según el rol del usuario */
   const roleStepStatus = (done, active, ownerRoles) => {
@@ -393,6 +565,32 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             </div>
           </div>
 
+          {hasLinkedBc && (
+            <div className={`rounded-xl border px-4 py-3 ${isBusinessCaseState ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-slate-50'}`}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className={`text-sm font-semibold ${isBusinessCaseState ? 'text-blue-900' : 'text-slate-800'}`}>
+                    Business Case vinculado
+                  </p>
+                  <p className={`mt-1 text-xs ${isBusinessCaseState ? 'text-blue-800' : 'text-slate-600'}`}>
+                    {isBusinessCaseState
+                      ? status === 'business_case_feasibility_approved'
+                        ? 'La factibilidad ya fue aprobada. Este expediente puede continuar con la oferta y el resto del flujo comercial.'
+                        : 'Este expediente depende todavía de la resolución del Business Case.'
+                      : 'Puedes abrir el Business Case relacionado para revisar antecedentes, cálculos y documentos.'}
+                  </p>
+                </div>
+                <a
+                  href={`/dashboard/business-case/workspace/${linkedBcId}`}
+                  className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium transition ${isBusinessCaseState ? 'bg-blue-600 text-white hover:bg-blue-700' : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100'}`}
+                >
+                  <FiExternalLink size={14} />
+                  Abrir Business Case
+                </a>
+              </div>
+            </div>
+          )}
+
           {/* ── Paso 1: Solicitar disponibilidad a ACP ─────────────────── */}
           <WorkflowStep
             stepNumber={1}
@@ -442,6 +640,23 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
               ['backoffice_comercial','acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
             )}
           >
+            {!hasLinkedBc && (
+              <div className="mb-4">
+                <PrivateOfferWorkspacePanel
+                  purchase={purchase}
+                  userRoles={userRoles}
+                  enabled={OFFER_SEND_STATES.includes(status)}
+                  refresh={refresh}
+                />
+              </div>
+            )}
+            {!hasLinkedBc && !purchase?.offer_document_id && (
+              <div className="mb-4 flex items-center gap-2 text-xs text-warm-ash">
+                <span className="flex-1 border-t border-slate-100" />
+                o cargar archivo manualmente
+                <span className="flex-1 border-t border-slate-100" />
+              </div>
+            )}
             {purchase?.offer_document_id ? (
               <FileUploadZone
                 id="offer-file"
@@ -473,7 +688,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                   disabled={!OFFER_SEND_STATES.includes(status)}
                   errorMessage={
                     !OFFER_SEND_STATES.includes(status)
-                      ? 'Disponible cuando ACP confirma disponibilidad o se solicita mejora de precio.'
+                      ? 'Disponible cuando ACP confirma disponibilidad, cuando el BC queda factible o cuando se solicita mejora de precio.'
                       : undefined
                   }
                 />

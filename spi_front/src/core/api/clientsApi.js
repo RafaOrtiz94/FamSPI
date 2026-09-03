@@ -2,7 +2,7 @@ import api from "./index";
 
 export const searchApprovedClients = async (q = "") => {
   if (!q || q.trim().length < 2) return [];
-  const { data } = await api.get("/clients", { params: { q: q.trim() } });
+  const { data } = await api.get("/clients", { params: { q: q.trim(), limit: 20 } });
   return data?.data || [];
 };
 
@@ -12,6 +12,7 @@ export const fetchClients = async (params = {}) => {
  clients: data.data || [],
  prospects: data.prospects || [],
  summary: data.summary || {},
+ pagination: data.pagination || {},
  };
 };
 

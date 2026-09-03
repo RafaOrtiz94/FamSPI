@@ -452,6 +452,7 @@ export const startAutoUpdates = () => {
  if (updateIntervalId) return; // Ya está ejecutándose
 
  updateIntervalId = setInterval(() => {
+ if (document.hidden) return;
  // Emitir evento de polling para componentes que necesiten actualizarse
  eventEmitter.emit('auto-update', { timestamp: Date.now() });
  }, UPDATE_INTERVAL);

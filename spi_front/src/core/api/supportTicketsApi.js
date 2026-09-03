@@ -1,4 +1,10 @@
-import api from "./index";
+import api, { isTransientApiError } from "./index";
+import { readCachedResource, writeCachedResource } from "../pwa/localCache";
+
+const MY_SUPPORT_TICKETS_CACHE_KEY = "support_tickets_my_snapshot";
+const SUPPORT_TICKET_COMMENTS_CACHE_PREFIX = "support_ticket_comments_";
+const MY_SUPPORT_TICKETS_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24;
+const SUPPORT_TICKET_COMMENTS_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 12;
 
 export const createSupportTicket = async (payload) => {
  const evidencePhotos = Array.isArray(payload?.evidence_photos)
@@ -22,8 +28,20 @@ export const createSupportTicket = async (payload) => {
 };
 
 export const listMySupportTickets = async () => {
- const { data } = await api.get("/support-tickets/my");
- return data?.data || [];
+ try {
+  const { data } = await api.get("/support-tickets/my");
+  const payload = data?.data || [];
+  writeCachedResource(MY_SUPPORT_TICKETS_CACHE_KEY, payload);
+  return payload;
+ } catch (error) {
+  const cached = readCachedResource(MY_SUPPORT_TICKETS_CACHE_KEY, {
+   maxAgeMs: MY_SUPPORT_TICKETS_CACHE_MAX_AGE_MS,
+  });
+  if (cached?.data && isTransientApiError(error)) {
+   return cached.data;
+  }
+  throw error;
+ }
 };
 
 export const getSupportTicketEvidenceFile = async (attachmentId) => {
@@ -55,8 +73,21 @@ export const listSupportTicketEvents = async (ticketId) => {
 };
 
 export const listSupportTicketComments = async (ticketId) => {
- const { data } = await api.get(`/support-tickets/${ticketId}/comments`);
- return data?.data || [];
+ const cacheKey = `${SUPPORT_TICKET_COMMENTS_CACHE_PREFIX}${ticketId}`;
+ try {
+  const { data } = await api.get(`/support-tickets/${ticketId}/comments`);
+  const payload = data?.data || [];
+  writeCachedResource(cacheKey, payload);
+  return payload;
+ } catch (error) {
+  const cached = readCachedResource(cacheKey, {
+   maxAgeMs: SUPPORT_TICKET_COMMENTS_CACHE_MAX_AGE_MS,
+  });
+  if (cached?.data && isTransientApiError(error)) {
+   return cached.data;
+  }
+  throw error;
+ }
 };
 
 export const addSupportTicketComment = async (ticketId, payload) => {

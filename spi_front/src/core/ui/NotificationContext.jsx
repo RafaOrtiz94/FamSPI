@@ -273,10 +273,13 @@ export const NotificationProvider = ({ children }) => {
  clearInterval(refreshTimerRef.current);
  }
 
- // 5 minutos entre polls — suficiente para notificaciones no críticas
+ // 10 min: > timeout de autosuspend de Neon (~5min), para dejar huecos
+ // donde el compute pueda dormir de verdad si nadie interactua.
+ // Se omite el tick si la pestaña esta oculta (nadie la esta viendo).
  refreshTimerRef.current = setInterval(() => {
+ if (document.hidden) return;
  refreshRef.current();
- }, 5 * 60 * 1000);
+ }, 10 * 60 * 1000);
 
  return () => {
  if (refreshTimerRef.current) {

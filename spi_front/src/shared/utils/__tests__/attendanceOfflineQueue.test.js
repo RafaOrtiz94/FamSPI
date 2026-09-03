@@ -2,6 +2,7 @@ import {
   enqueueOfflineMark,
   getQueuedMarks,
   getQueueSize,
+  getOfflineQueueSyncStatus,
   removeQueuedMark,
   clearOfflineQueue,
   flushOfflineQueue,
@@ -37,6 +38,21 @@ describe("attendanceOfflineQueue", () => {
     removeQueuedMark(first.id);
     expect(getQueueSize()).toBe(1);
     expect(getQueuedMarks()[0].endpoint).toBe("/attendance/marcar/salida");
+  });
+
+  test("mantiene sincronizado el estado visible de la cola al encolar y limpiar", () => {
+    enqueueOfflineMark({ endpoint: "/attendance/marcar/entrada", payload: {} });
+    enqueueOfflineMark({ endpoint: "/attendance/marcar/salida", payload: {} });
+
+    let status = getOfflineQueueSyncStatus();
+    expect(status.pendingCount).toBe(2);
+    expect(status.syncing).toBe(false);
+
+    clearOfflineQueue();
+
+    status = getOfflineQueueSyncStatus();
+    expect(status.pendingCount).toBe(0);
+    expect(status.syncing).toBe(false);
   });
 
   test("flushOfflineQueue replays every entry in order and clears the queue on full success", async () => {
@@ -98,5 +114,37 @@ describe("attendanceOfflineQueue", () => {
     const result = await flushOfflineQueue({ post });
     expect(post).not.toHaveBeenCalled();
     expect(result).toEqual({ flushed: [], failed: [], stillQueued: 0 });
+  });
+
+  test("expone estado de sincronizacion exitoso de la cola", async () => {
+    enqueueOfflineMark({ endpoint: "/attendance/marcar/entrada", payload: { a: 1 } });
+
+    await flushOfflineQueue({
+      post: jest.fn().mockResolvedValue({ ok: true }),
+    });
+
+    const status = getOfflineQueueSyncStatus();
+    expect(status.pendingCount).toBe(0);
+    expect(status.syncing).toBe(false);
+    expect(status.lastResult).toBe("success");
+    expect(status.flushedCount).toBe(1);
+    expect(status.lastFlushAt).toBeTruthy();
+    expect(status.lastSuccessAt).toBeTruthy();
+  });
+
+  test("expone estado diferido cuando la red sigue caida y quedan pendientes", async () => {
+    enqueueOfflineMark({ endpoint: "/attendance/marcar/entrada", payload: { a: 1 } });
+    const networkError = new Error("Network Error");
+
+    await flushOfflineQueue({
+      post: jest.fn().mockRejectedValue(networkError),
+    });
+
+    const status = getOfflineQueueSyncStatus();
+    expect(status.pendingCount).toBe(1);
+    expect(status.syncing).toBe(false);
+    expect(status.lastResult).toBe("deferred");
+    expect(status.failedCount).toBe(0);
+    expect(status.lastFailureAt).toBeTruthy();
   });
 });

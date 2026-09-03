@@ -53,6 +53,29 @@ const OFFER_KIND_LABELS = { venta: "Venta", alquiler: "Alquiler", alquiler_trans
 const purchaseStatusLabel = (status) =>
   PURCHASE_STATUS_LABELS[status] || String(status || "").replaceAll("_", " ");
 
+// ponytail: mismo par bg/text que ya usan HEALTH_COLORS/OPP_STATUS mas abajo,
+// agrupado por semantica (pendiente=ambar, aprobado/enviado=verde/azul, rechazado=rojo).
+const PURCHASE_STATUS_COLORS = {
+  pending_commercial: { bg: "#FEF3C7", text: "#B45309" },
+  pending_backoffice: { bg: "#FEF3C7", text: "#B45309" },
+  offer_sent: { bg: "#DBEAFE", text: "#1D4ED8" },
+  pending_manager_signature: { bg: "#FEF3C7", text: "#B45309" },
+  pending_client_signature: { bg: "#FEF3C7", text: "#B45309" },
+  offer_signed: { bg: "#DCFCE7", text: "#16A34A" },
+  offer_rejected_by_commercial: { bg: "#FEE2E2", text: "#DC2626" },
+  price_improvement_requested: { bg: "#FEF3C7", text: "#B45309" },
+  client_registration_requested: { bg: "#FEF3C7", text: "#B45309" },
+  client_registered: { bg: "#DCFCE7", text: "#16A34A" },
+  inspection_requested: { bg: "#FEF3C7", text: "#B45309" },
+  business_case_in_progress: { bg: "#DBEAFE", text: "#1D4ED8" },
+  business_case_under_review: { bg: "#FEF3C7", text: "#B45309" },
+  business_case_feasibility_approved: { bg: "#DCFCE7", text: "#16A34A" },
+  business_case_rejected: { bg: "#FEE2E2", text: "#DC2626" },
+  delivered_signed: { bg: "#DCFCE7", text: "#16A34A" },
+  rejected: { bg: "#FEE2E2", text: "#DC2626" },
+};
+const purchaseStatusColor = (status) => PURCHASE_STATUS_COLORS[status] || { bg: "#F3F4F6", text: "#6B7280" };
+
 // ponytail: tel:/sms:/mailto: los resuelve el sistema operativo (app nativa en iOS/Android,
 // Phone Link / cliente de correo en Windows); wa.me rutea solo a app o WhatsApp Web.
 const contactHref = {
@@ -187,7 +210,7 @@ function PurchaseStatusBadge({ opportunityId, navigate }) {
     <div className="mt-1.5 flex flex-col gap-1">
       <div className="flex items-center gap-1.5 flex-wrap">
         <Badge bg="#EFF6FF" text="#1D4ED8" label={isPublic ? "Compra pública" : (OFFER_KIND_LABELS[purchase.offer_kind] || "Compra privada")} />
-        <Badge bg="#F3F4F6" text="#6B7280" label={purchaseStatusLabel(purchase.status)} />
+        <Badge {...purchaseStatusColor(purchase.status)} label={purchaseStatusLabel(purchase.status)} />
       </div>
       <button
         onClick={(e) => { e.stopPropagation(); navigate(`/dashboard/purchases/workspace?tab=${isPublic ? "public" : "private"}`); }}

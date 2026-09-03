@@ -80,6 +80,10 @@ async function ensureTable() {
   await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS balance_exceeded BOOLEAN NOT NULL DEFAULT false");
   await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS balance_deficit_days DECIMAL(8,2)");
   await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS date_overlap_warning TEXT");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS source_module TEXT");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS source_request_id INTEGER");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS source_reason TEXT");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ");
   _vacacionesTableReady = true;
 }
 
@@ -107,6 +111,10 @@ const ROLE_APPROVER = {
 const HR_ROLES = ["talento-humano", "talento_humano", "talento humano", "rh", "rrhh"];
 const MGMT_ROLES = ["gerencia_general", "gerente_general"];
 const GERENCIA_GENERAL_ROLES = new Set(["gerencia_general", "gerente_general"]);
+const SPECIAL_JEFE_APPROVERS = {
+  jefe_operaciones: "jefe_financiero",
+  jefe_logistica: "jefe_financiero",
+};
 const PREFERRED_APPROVER_EMAILS = String(process.env.PREFERRED_APPROVER_EMAILS || "")
   .split(",")
   .map((value) => String(value || "").trim().toLowerCase())
@@ -130,6 +138,7 @@ function normalizeRole(role) {
 
 function resolveApproverRole(requesterRole = "") {
   const normalized = normalizeRole(requesterRole);
+  if (SPECIAL_JEFE_APPROVERS[normalized]) return SPECIAL_JEFE_APPROVERS[normalized];
   const isJefe = normalized.startsWith("jefe_") || normalized.startsWith("jefe");
   if (isJefe) return "gerencia_general";
   return ROLE_APPROVER[normalized] || "gerencia_general";
@@ -480,16 +489,7 @@ async function computeTakenDays(userId, year, options = {}, executor = db) {
     legacyValues
   );
   const legacyVacationDays = Number(legacyRows[0]?.total || 0);
-  const chargedDays = await computeChargedVacationDays(
-    {
-      userId,
-      year,
-      statuses: ["approved", "aprobado"],
-      upToDate: options?.upToDate || null,
-    },
-    queryExecutor
-  );
-  return roundToTwo(vacationDays + legacyVacationDays + chargedDays);
+  return roundToTwo(vacationDays + legacyVacationDays);
 }
 
 function buildAnniversaryDate(year, month, day) {
@@ -691,66 +691,6 @@ async function computeVacationBalanceValidation({
   };
 }
 
-async function computeChargedVacationDays(
-  { userId, userEmail, year, statuses = [], upToDate = null, startDate = null },
-  executor = db
-) {
-  const queryExecutor = resolveDbExecutor(executor);
-  const yearValue = Number(year);
-  if (!Number.isFinite(yearValue) && !startDate) return 0;
-
-  let query = `
-    SELECT charged_vacation_days, charged_vacation_hours, duracion_horas, duracion_dias
-      FROM permisos_vacaciones
-     WHERE charged_to_vacation = true
-  `;
-  const values = [];
-  if (Number.isFinite(yearValue)) {
-    query += ` AND EXTRACT(YEAR FROM fecha_inicio) = $1`;
-    values.push(yearValue);
-  }
-
-  if (Array.isArray(statuses) && statuses.length > 0) {
-    query += ` AND LOWER(COALESCE(status, '')) = ANY($${values.length + 1})`;
-    values.push(statuses.map((status) => String(status || "").trim().toLowerCase()));
-  }
-
-  if (upToDate) {
-    query += ` AND fecha_inicio <= $${values.length + 1}`;
-    values.push(normalizeDateOnly(upToDate));
-  }
-
-  if (startDate) {
-    query += ` AND fecha_inicio >= $${values.length + 1}`;
-    values.push(normalizeDateOnly(startDate));
-  }
-
-  if (userId) {
-    query += ` AND user_id = $${values.length + 1}`;
-    values.push(userId);
-  } else if (userEmail) {
-    query += ` AND LOWER(user_email) = LOWER($${values.length + 1})`;
-    values.push(userEmail);
-  } else {
-    return 0;
-  }
-
-  const { rows } = await queryExecutor.query(query, values);
-  return roundToTwo(
-    rows.reduce((acc, row) => {
-      const explicitDays = Number(row?.charged_vacation_days || 0);
-      if (Number.isFinite(explicitDays) && explicitDays > 0) return acc + explicitDays;
-      const explicitHours = Number(row?.charged_vacation_hours || row?.duracion_horas || 0);
-      if (Number.isFinite(explicitHours) && explicitHours > 0) {
-        return acc + explicitHours / HOURS_PER_VACATION_DAY;
-      }
-      const explicitRequestDays = Number(row?.duracion_dias || 0);
-      if (Number.isFinite(explicitRequestDays) && explicitRequestDays > 0) return acc + explicitRequestDays;
-      return acc;
-    }, 0)
-  );
-}
-
 async function computeVacationUsageSinceDate(
   { userId, userEmail, startDate, excludeVacationRequestId = null },
   executor = db
@@ -790,22 +730,10 @@ async function computeVacationUsageSinceDate(
     [userId, normalizedStartDate]
   );
 
-  const chargedApproved = await computeChargedVacationDays(
-    {
-      userId,
-      userEmail,
-      year: null,
-      statuses: ["approved", "aprobado"],
-      startDate: normalizedStartDate,
-    },
-    queryExecutor
-  );
-
   return {
     approved: roundToTwo(
       Number(vacationRows[0]?.approved || 0) +
-      Number(legacyVacationRows[0]?.approved || 0) +
-      Number(chargedApproved || 0)
+      Number(legacyVacationRows[0]?.approved || 0)
     ),
     pending: roundToTwo(
       Number(vacationRows[0]?.pending || 0) +
@@ -1681,13 +1609,13 @@ async function summary(user, includeAll = false) {
       userEmail: user.email,
       year,
     });
-    const { rows: summaryRows } = await db.query(
+  const { rows: summaryRows } = await db.query(
       `SELECT
-         COALESCE(SUM(CASE WHEN LOWER(status) IN ('aprobado','approved') THEN days ELSE 0 END),0) AS approved,
-         COALESCE(SUM(CASE WHEN LOWER(status) IN ('pendiente','pending') THEN days ELSE 0 END),0) AS pending,
-         COALESCE(SUM(CASE WHEN LOWER(status) IN ('rechazado','rejected') THEN days ELSE 0 END),0) AS rejected,
-         COALESCE(SUM(CASE WHEN LOWER(status) IN ('cancelado','cancelled') THEN days ELSE 0 END),0) AS cancelled,
-         COALESCE(SUM(days),0) AS requested
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('aprobado','approved') THEN COALESCE(effective_days, days) ELSE 0 END),0) AS approved,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('pendiente','pending') THEN COALESCE(effective_days, days) ELSE 0 END),0) AS pending,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('rechazado','rejected') THEN COALESCE(effective_days, days) ELSE 0 END),0) AS rejected,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('cancelado','cancelled') THEN COALESCE(effective_days, days) ELSE 0 END),0) AS cancelled,
+         COALESCE(SUM(COALESCE(effective_days, days)),0) AS requested
        FROM vacaciones_solicitudes
       WHERE requester_id=$1 AND EXTRACT(YEAR FROM start_date)=$2`,
       [user.id, year]
@@ -1712,12 +1640,6 @@ async function summary(user, includeAll = false) {
     const rejected = Number(summaryRow.rejected || 0) + Number(legacySummaryRow.rejected || 0);
     const cancelled = Number(summaryRow.cancelled || 0) + Number(legacySummaryRow.cancelled || 0);
     const requested = Number(summaryRow.requested || 0) + Number(legacySummaryRow.requested || 0);
-    const chargedFromPermisos = await computeChargedVacationDays({
-      userId: user.id,
-      userEmail: user.email,
-      year,
-      statuses: ["approved", "aprobado"],
-    });
     const specialOpeningProfile = getSpecialVacationOpeningProfile(user.email, new Date());
     let totalAllowance = allowanceInfo.allowance + historicalBalance;
     let remaining = totalAllowance - taken - pending;
@@ -1762,7 +1684,7 @@ async function summary(user, includeAll = false) {
       rejected,
       cancelled,
       requested,
-      charged_from_permisos: chargedFromPermisos,
+      charged_from_permisos: 0,
       remaining,
       recovery_date: null,
       deficit_days: deficitDays,
@@ -1772,17 +1694,17 @@ async function summary(user, includeAll = false) {
 
   const { rows } = await db.query(
     `SELECT u.id as user_id, u.fullname, u.email, d.name as department_name,
-             cp.profile->'laboral'->>'fecha_ingreso' as fecha_ingreso,
-             cp.profile->'laboral'->>'sueldo' as salary,
-            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('aprobado','approved') THEN v.days ELSE 0 END),0)
+            cp.profile->'laboral'->>'fecha_ingreso' as fecha_ingreso,
+            cp.profile->'laboral'->>'sueldo' as salary,
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('aprobado','approved') THEN COALESCE(v.effective_days, v.days) ELSE 0 END),0)
               + COALESCE(MAX(legacy.approved), 0) as approved,
-            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('pendiente','pending') THEN v.days ELSE 0 END),0)
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('pendiente','pending') THEN COALESCE(v.effective_days, v.days) ELSE 0 END),0)
               + COALESCE(MAX(legacy.pending), 0) as pending,
-            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('rechazado','rejected') THEN v.days ELSE 0 END),0)
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('rechazado','rejected') THEN COALESCE(v.effective_days, v.days) ELSE 0 END),0)
               + COALESCE(MAX(legacy.rejected), 0) as rejected,
-            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('cancelado','cancelled') THEN v.days ELSE 0 END),0)
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('cancelado','cancelled') THEN COALESCE(v.effective_days, v.days) ELSE 0 END),0)
               + COALESCE(MAX(legacy.cancelled), 0) as cancelled,
-            COALESCE(SUM(v.days),0) + COALESCE(MAX(legacy.requested), 0) as requested
+            COALESCE(SUM(COALESCE(v.effective_days, v.days)),0) + COALESCE(MAX(legacy.requested), 0) as requested
        FROM users u
        LEFT JOIN vacaciones_solicitudes v ON v.requester_id = u.id
        LEFT JOIN (
@@ -1810,16 +1732,10 @@ async function summary(user, includeAll = false) {
       userEmail: r.email,
       year: new Date().getFullYear(),
     });
-    const chargedFromPermisos = await computeChargedVacationDays({
-      userId: r.user_id,
-      userEmail: r.email,
-      year: new Date().getFullYear(),
-      statuses: ["approved", "aprobado"],
-    });
     const specialOpeningProfile = getSpecialVacationOpeningProfile(r.email, new Date());
     let totalAllowance = allowanceInfo.allowance + historicalBalance;
     const approved = Number(r.approved || 0);
-    const taken = approved + chargedFromPermisos;
+    const taken = approved;
     const pending = Number(r.pending || 0);
     let remaining = totalAllowance - taken - pending;
     let carryOver = historicalBalance;
@@ -1855,7 +1771,7 @@ async function summary(user, includeAll = false) {
       allowance: totalAllowance,
       allowance_base: allowanceInfo.allowance,
       carry_over: carryOver,
-      charged_from_permisos: chargedFromPermisos,
+      charged_from_permisos: 0,
       approved,
       taken,
       pending,
@@ -1889,6 +1805,7 @@ async function getVacationSummary(userId) {
 }
 
 module.exports = {
+  ensureTable,
   createVacationRequest,
   listVacationRequests,
   updateVacationStatus,
@@ -1902,5 +1819,81 @@ module.exports = {
   computeVacationDaysWithWeekendRule,
   computeWeekendsConsumedThisYear,
   checkVacationDateOverlap,
+  resolveApproverRole,
   summary,
 };
+
+async function createVacationMirrorFromPermiso(row) {
+  const effectiveDays = resolveMirrorEffectiveDays(row);
+  const startDate = normalizeDateOnly(row?.fecha_inicio || row?.fecha_inicio_hora);
+  const endDate = normalizeDateOnly(row?.fecha_fin || row?.fecha_fin_hora || startDate);
+  if (!row?.user_id || !startDate || !endDate || !(effectiveDays > 0)) return null;
+
+  const returnDate = normalizeDateOnly(row?.fecha_regreso) || addDaysToDateOnly(endDate, 1) || endDate;
+  const sourceReason = row?.charged_to_vacation_reason || "permiso_charge";
+  const periodYear = Number(String(startDate).slice(0, 4));
+  const projectedRemaining = Number(row?.projected_remaining_days);
+  const balanceExceeded = Number.isFinite(projectedRemaining) && projectedRemaining < 0;
+  const approvedAt = row?.charged_to_vacation_at || row?.aprobacion_final_at || row?.updated_at || row?.created_at || new Date().toISOString();
+  const approverRole = row?.approver_role || "talento_humano";
+  const approverId = row?.approver_user_id || null;
+  const roundedCalendarDays = Math.max(1, Math.ceil(effectiveDays));
+
+  const existing = await db.query(
+    `SELECT id
+       FROM vacaciones_solicitudes
+      WHERE source_module = 'permisos_vacaciones'
+        AND source_request_id = $1
+      LIMIT 1`,
+    [row.id]
+  );
+  if (existing.rows[0]?.id) return existing.rows[0];
+
+  const { rows } = await db.query(
+    `INSERT INTO vacaciones_solicitudes (
+      requester_id, approver_id, approver_role, department_id, start_date, end_date, return_date, period, days, status,
+      advance_request, advance_eligible_from, allow_negative, projected_remaining_days, recovery_date, monetary_debt,
+      effective_days, weekends_consumed, balance_exceeded, balance_deficit_days, date_overlap_warning,
+      source_module, source_request_id, source_reason, approved_at
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,'aprobado',
+      false,NULL,true,$10,NULL,NULL,
+      $11,0,$12,$13,$14,
+      'permisos_vacaciones',$15,$16,$17
+    )
+    RETURNING id`,
+    [
+      row.user_id,
+      approverId,
+      approverRole,
+      row.department_id || null,
+      startDate,
+      endDate,
+      returnDate,
+      String(periodYear),
+      roundedCalendarDays,
+      Number.isFinite(projectedRemaining) ? projectedRemaining : null,
+      effectiveDays,
+      balanceExceeded,
+      balanceExceeded ? roundToTwo(Math.abs(projectedRemaining)) : null,
+      `Generada automaticamente desde permiso #${row.id}.`,
+      row.id,
+      sourceReason,
+      approvedAt,
+    ]
+  );
+
+  return rows[0] || null;
+}
+
+function resolveMirrorEffectiveDays(row = {}) {
+  const explicitDays = Number(row?.charged_vacation_days || 0);
+  if (Number.isFinite(explicitDays) && explicitDays > 0) return roundToTwo(explicitDays);
+  const explicitHours = Number(row?.charged_vacation_hours || row?.duracion_horas || 0);
+  if (Number.isFinite(explicitHours) && explicitHours > 0) {
+    return roundToTwo(explicitHours / HOURS_PER_VACATION_DAY);
+  }
+  const requestDays = Number(row?.duracion_dias || 0);
+  if (Number.isFinite(requestDays) && requestDays > 0) return roundToTwo(requestDays);
+  return 0;
+}

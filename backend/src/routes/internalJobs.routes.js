@@ -14,7 +14,9 @@ const { runOnce: runBusinessCaseNotificationQueue } = require('../jobs/businessC
 const { runOnce: runDatabaseBackupToDrive } = require('../jobs/databaseBackupToDrive');
 const { runOnce: runPermisosPendingExpiry } = require('../jobs/permisosPendingExpiryScheduler');
 const { runOnce: runPermisosRecoveryCoordinationExpiry } = require('../jobs/permisosRecoveryCoordinationExpiryScheduler');
+const { runOnce: runPermisosApprovalEscalation } = require('../jobs/permisosApprovalEscalationScheduler');
 const { runOnce: runExternalCaseSyncQueue } = require('../jobs/externalCaseSyncScheduler');
+const { runOnce: runPasanteAccountExpiry } = require('../jobs/pasanteAccountExpiryScheduler');
 const permisosService = require('../modules/permisos/permisos.service');
 const { generateAndStoreMaintenanceReport } = require('../modules/ti-assets/tiAssets.report');
 const { notifyUpcomingRenewals, createOffboardingTasksForUser } = require('../modules/collab-deliveries/collabDeliveries.service');
@@ -23,6 +25,7 @@ const { runOnce: runSignatureWorkflowReminder } = require('../jobs/signatureWork
 const { runOnce: runSignatureWorkflowExpiry } = require('../jobs/signatureWorkflowExpiryScheduler');
 const { runOnce: runTrainingSignatureReminder } = require('../jobs/trainingSignatureReminderScheduler');
 const { runOnce: runScheduleVisitCompletionReminder } = require('../jobs/scheduleVisitCompletionReminderScheduler');
+const { runOnce: runKickoffAutoStartOverdue } = require('../modules/kickoff/kickoff.scheduler');
 
 const jobsAuth = require('../middlewares/jobsAuth');
 
@@ -354,6 +357,23 @@ router.post('/permisos/pending/expiry', async (_req, res) => {
     }
 });
 
+router.post('/permisos/approval/escalation', async (_req, res) => {
+    try {
+        const result = await runPermisosApprovalEscalation();
+        res.json({
+            success: true,
+            message: 'Recordatorios y escalamiento a talento_humano procesados',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error en job de escalamiento de aprobacion de permisos:', error);
+        res.status(500).json({
+            error: 'Fallo el procesamiento de escalamiento de aprobacion de permisos',
+            details: error.message
+        });
+    }
+});
+
 router.post('/permisos/calendar/recreate', async (req, res) => {
     try {
         const rawSolicitudId =
@@ -582,6 +602,29 @@ router.post('/schedules/visit-completion-reminder', async (_req, res) => {
     } catch (error) {
         console.error('Error en job de recordatorios de cronogramas:', error);
         res.status(500).json({ error: 'Fallo el job de recordatorios de cronogramas', details: error.message });
+    }
+});
+
+// Job: auto-iniciar presentaciones vencidas (kickoff/famdays comparten el mismo motor)
+router.post('/kickoff/autostart-overdue', async (_req, res) => {
+    try {
+        await runKickoffAutoStartOverdue();
+        res.json({ success: true, message: 'Presentaciones vencidas revisadas' });
+    } catch (error) {
+        console.error('Error en job de auto-inicio de presentaciones:', error);
+        res.status(500).json({ error: 'Falló la revisión de presentaciones vencidas', details: error.message });
+    }
+});
+
+// Job: desactivar cuentas de pasante (auth_provider=local) vencidas hace mas
+// de PASANTE_EXPIRY_GRACE_DAYS dias. Ver docs/plans/pasantes-access-plan.md.
+router.post('/pasantes/account-expiry', async (_req, res) => {
+    try {
+        const result = await runPasanteAccountExpiry();
+        res.json({ success: true, ...result });
+    } catch (error) {
+        console.error('Error en job de expiracion de cuentas de pasante:', error);
+        res.status(500).json({ error: 'Fallo la expiracion de cuentas de pasante', details: error.message });
     }
 });
 

@@ -54,7 +54,7 @@ export default function Header() {
  }, [user?.id]);
 
  return (
- <header className="sticky top-0 z-40 bg-primary/95 text-white shadow-md backdrop-blur-md border-b border-primary-light transition-all duration-300">
+ <header className="sticky top-0 z-10 bg-primary/95 text-white shadow-md backdrop-blur-md border-b border-primary-light transition-all duration-300">
  <div className="flex h-16 items-center justify-between gap-2 px-3 sm:px-6">
  {/* =======================================================
  🔹 IZQUIERDA: Logo + Nombre

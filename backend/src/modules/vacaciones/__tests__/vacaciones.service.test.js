@@ -5,7 +5,7 @@
 jest.mock("../../../config/db", () => ({ query: jest.fn(), getClient: jest.fn() }));
 jest.mock("../../../config/logger", () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));
 
-const { computeVacationDaysWithWeekendRule } = require("../vacaciones.service");
+const { computeVacationDaysWithWeekendRule, resolveApproverRole } = require("../vacaciones.service");
 
 describe("computeVacationDaysWithWeekendRule", () => {
   it("devuelve 0 dias cuando la fecha fin es anterior al inicio", () => {
@@ -29,5 +29,19 @@ describe("computeVacationDaysWithWeekendRule", () => {
   it("no extiende cuando ya se consumieron los 2 fines de semana del cupo", () => {
     const out = computeVacationDaysWithWeekendRule("2026-07-10", "2026-07-10", 2);
     expect(out).toEqual({ effectiveDays: 1, weekendsConsumedByRequest: 0 });
+  });
+});
+
+describe("resolveApproverRole", () => {
+  it("redirige jefe_operaciones a jefe_financiero", () => {
+    expect(resolveApproverRole("jefe_operaciones")).toBe("jefe_financiero");
+  });
+
+  it("redirige jefe_logistica a jefe_financiero", () => {
+    expect(resolveApproverRole("jefe_logistica")).toBe("jefe_financiero");
+  });
+
+  it("mantiene otras jefaturas en gerencia general", () => {
+    expect(resolveApproverRole("jefe_calidad")).toBe("gerencia_general");
   });
 });

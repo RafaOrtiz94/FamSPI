@@ -110,7 +110,7 @@ export const ESCALATION_STATUS_META = {
     badge: "bg-orange-100 text-orange-800 border-orange-200",
   },
   escalated: {
-    label: "Escalado a gerencia general",
+    label: "Escalado a Talento Humano",
     badge: "bg-rose-100 text-rose-800 border-rose-200",
   },
 };

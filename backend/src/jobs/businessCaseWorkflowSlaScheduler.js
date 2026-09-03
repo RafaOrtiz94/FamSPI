@@ -1,9 +1,12 @@
 const logger = require("../config/logger");
 const { runReminderSweep } = require("../modules/business-case/businessCaseWorkflowSla.service");
+const { isOffHours } = require("../utils/offHoursPolicy");
+const { registerOffHoursJob } = require("./offHoursCoordinator");
 
+// 6min: > timeout de autosuspend de Neon (~5min), deja huecos reales en horario laboral.
 const DEFAULT_INTERVAL_MINUTES = Math.max(
   1,
-  Number(process.env.BC_WORKFLOW_SLA_INTERVAL_MINUTES || 5),
+  Number(process.env.BC_WORKFLOW_SLA_INTERVAL_MINUTES || 6),
 );
 const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
 
@@ -31,8 +34,15 @@ function startBusinessCaseWorkflowSlaJob() {
     runOnce().catch((error) => logger.error({ error }, "Error inicial en recordatorios SLA de Business Case"));
   }
   interval = setInterval(() => {
+    if (isOffHours(new Date()).isOffHours) return; // manejado por offHoursCoordinator
     runOnce().catch((error) => logger.error({ error }, "Error en recordatorios SLA de Business Case"));
   }, everyMs);
+  registerOffHoursJob({
+    name: "bc_workflow_sla",
+    runOnce,
+    offHoursIntervalMs: everyMs * 6,
+    onError: (error) => logger.error({ error: error?.message || String(error) }, "Error en recordatorios SLA de Business Case (fuera de horario)"),
+  });
 }
 
 module.exports = {

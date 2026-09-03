@@ -1432,11 +1432,22 @@ const WorkManagementPage = () => {
     navigate(`/dashboard/work-management/projects/${selectedProjectId}`, { replace: true });
   }, [loadProjectData, navigate, selectedProjectId]);
 
+  // Bug real (reportado por Karen Barberan): al cambiar de proyecto,
+  // itemForm.group_id se quedaba con el grupo del proyecto ANTERIOR porque
+  // este efecto solo llenaba group_id si estaba vacio -- una vez seteado,
+  // nunca se volvia a validar contra los grupos del proyecto actualmente
+  // visible. Resultado: se creaban items reales en el proyecto equivocado
+  // sin que el usuario lo notara (el selector mostraba el proyecto correcto,
+  // pero el item se guardaba bajo el group_id viejo de otro proyecto).
   useEffect(() => {
-    if (!availableGroups.length) return;
-    setItemForm((current) =>
-      current.group_id ? current : { ...current, group_id: availableGroups[0].id }
-    );
+    if (!availableGroups.length) {
+      setItemForm((current) => (current.group_id ? { ...current, group_id: "" } : current));
+      return;
+    }
+    setItemForm((current) => {
+      const stillValid = availableGroups.some((group) => group.id === current.group_id);
+      return stillValid ? current : { ...current, group_id: availableGroups[0].id };
+    });
   }, [availableGroups]);
 
   const resetWorkspaceForm = () => setWorkspaceForm(EMPTY_WORKSPACE_FORM);
@@ -1593,6 +1604,11 @@ const WorkManagementPage = () => {
         priority: itemForm.priority,
         status: itemForm.status,
         assignee_user_ids: itemForm.assign_to_me && userId ? [userId] : [],
+        // El backend valida que este grupo realmente pertenezca a este
+        // proyecto antes de crear -- si un bug de estado futuro deja un
+        // group_id de otro proyecto, el guardado se rechaza en vez de
+        // guardarse en silencio bajo el proyecto equivocado.
+        expected_project_id: selectedProjectId,
       });
       await loadProjectData(selectedProjectId);
       await loadOverview();

@@ -1,5 +1,12 @@
 # CONTEXT.md — world-cup-2026
 
+## ⚠️ LEGACY (2026-08-12): módulo desactivado
+El Mundial 2026 terminó. Las rutas están comentadas en `backend/src/routes/registerRoutes.js`
+y `spi_front/src/routes/AppRoutes.jsx` — el módulo ya no es alcanzable (ni el portal público,
+ni el SSE). Código intacto por si se reutiliza para un evento similar en el futuro.
+Para reactivar: descomentar el require + `app.use` en `registerRoutes.js` y el import +
+`<Route>` en `AppRoutes.jsx`.
+
 ## 1. Descripción
 Portal promocional de Famproject Cia. Ltda. para participantes que registran una sola vez sus predicciones del Mundial de Fútbol 2026. Usa la misma base del ecosistema actual, pero aislado en el schema `external_world_cup_2026`.
 

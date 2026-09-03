@@ -36,7 +36,7 @@ const ANNUAL_QUANTITY_HEADERS = ["DET/AÑO PROCESO", "PRODUCTO CALCULADO"];
 // filas, aliases) ya que ambos comparten el mismo layout.
 const TEMPLATE_SPREADSHEET_ID =
   String(process.env.BC_SHEET_TEMPLATE_SPREADSHEET_ID || "").trim() ||
-  "17tNJ3Ft5134kLum0YNyUKxsU2rpiBGzNu_bu5ETzG8k";
+  "1FfB2ycMqvXAa2hLYQXFn_D1UZwfSnM_Rd77SWbtKo08";
 
 function resolveTemplatePath() {
   const envPath = String(process.env.BC_SHEET_TEMPLATE_PATH || "").trim();
@@ -409,12 +409,44 @@ function parseEquipmentSheetDefinition(name, ws) {
   const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
   const headerRow = findHeaderRow(matrix);
   const headers = matrix[headerRow - 1] || [];
-  const itemTypeByRow = inferItemTypeByRow(ws, range);
+  const itemTypeByRow = inferItemTypeByRow(ws, range, name);
+  const offerSectionByRow = inferOfferSectionByRow(ws, range);
 
-  const idColumn = findColumnIndex(headers, (value) => value === "id" || value === "i d");
-  const labelColumn = findColumnIndex(headers, (value) => value === "producto" || value === "reactivo" || value === "descripcion");
+  let idColumn = findColumnIndex(headers, (value) => value === "id" || value === "i d");
+  let labelColumn = findColumnIndex(headers, (value) => value === "producto" || value === "reactivo" || value === "descripcion");
+  // Bug real confirmado en la pestana " e402 e801": su fila de encabezado
+  // trae "DESCRIPCION" e "I.D" en el orden de columna invertido respecto a
+  // los datos reales de abajo (columna A = codigo numerico, columna B =
+  // texto -- pero el header dice lo contrario), lo que hacia que TODO
+  // renglon de esa pestana quedara con id/label mezclados y nunca matcheara
+  // contra bc_consumption_items. Se valida contra una muestra de filas
+  // reales: si la columna que el header llama "ID" en realidad contiene
+  // texto (y la de "DESCRIPCION" contiene codigos numericos), se
+  // intercambian.
+  if (idColumn && labelColumn && idColumn !== labelColumn) {
+    let idNumericSamples = 0;
+    let labelNumericSamples = 0;
+    let sampleCount = 0;
+    for (let row = headerRow + 1; row <= Math.min(headerRow + 15, range.e.r + 1); row += 1) {
+      const idSample = String(getCellValue(ws, `${columnLetter(idColumn)}${row}`) || "").trim();
+      const labelSample = String(getCellValue(ws, `${columnLetter(labelColumn)}${row}`) || "").trim();
+      if (!idSample && !labelSample) continue;
+      sampleCount += 1;
+      if (/^[0-9][0-9.\-]*$/.test(idSample)) idNumericSamples += 1;
+      if (/^[0-9][0-9.\-]*$/.test(labelSample)) labelNumericSamples += 1;
+    }
+    if (sampleCount >= 3 && labelNumericSamples > idNumericSamples) {
+      [idColumn, labelColumn] = [labelColumn, idColumn];
+    }
+  }
   const annualColumn = findColumnIndex(headers, (value) => value.includes("det ano proceso") || value.includes("cantidad proceso ano") || value.includes("producto calculado"));
   const deliverColumn = findColumnIndex(headers, (value) => value.includes("producto a entregar") || value.includes("producto a enviar"));
+  // "DET/KIT" es un valor FIJO de catalogo (rendimiento del kit, ej. 400
+  // determinaciones), no una cantidad -- nunca confundir con "DET/AÑO
+  // PROCESO" (annualColumn, cantidad que llena comercial) ni con "PRODUCTO
+  // CALCULADO". Bug real: la oferta mostraba ahi la cantidad anual/calculada
+  // en vez de este valor de catalogo porque nadie lo leia del sheet.
+  const detKitColumn = findColumnIndex(headers, (value) => value === "det kit" || value === "det/kit");
 
   const rows = [];
   for (let row = headerRow + 1; row <= range.e.r + 1; row += 1) {
@@ -423,18 +455,43 @@ function parseEquipmentSheetDefinition(name, ws) {
     const normalizedId = normalizeProductId(idValue);
     const normalizedLabel = normalizeText(labelValue);
     if (!normalizedId && !normalizedLabel) continue;
+    const detKitValue = detKitColumn ? getCellValue(ws, `${columnLetter(detKitColumn)}${row}`) : "";
+    const parsedDetKit = parseNumberFromSheetValue(detKitValue);
     rows.push({
       rowNumber: row,
       itemId: normalizedId,
       label: normalizedLabel,
       itemType: itemTypeByRow.get(row) || "reactivo",
+      offerSection: offerSectionByRow.get(row) || null,
+      detKit: parsedDetKit === null ? null : parsedDetKit,
     });
+  }
+
+  // Fila "EQUIPO" (ej. fila 6: A="EQUIPO", B="COBAS PURE c303", D="COBAS PRO
+  // c503") solo existe en las pestanas combo -- nombra los 2 submodelos
+  // reales que comparten esa pestana. No hay marca por renglon de a cual
+  // submodelo pertenece cada reactivo (es un listado compartido), pero esta
+  // fila si permite mostrar el nombre real de cada submodelo al separar la
+  // oferta de un equipo combo (ver expandComboOfferTarget en
+  // businessCaseOffer.service.js).
+  let subEquipmentNames = [];
+  for (let row = 1; row <= Math.min(headerRow, 10); row += 1) {
+    if (String(getCellValue(ws, `A${row}`) || "").trim().toUpperCase() === "EQUIPO") {
+      const values = [];
+      for (let col = 2; col <= 12; col += 1) {
+        const value = String(getCellValue(ws, `${columnLetter(col)}${row}`) || "").trim();
+        if (value) values.push(value);
+      }
+      subEquipmentNames = values;
+      break;
+    }
   }
 
   return {
     name,
     aliases: collectSheetAliases(ws, range, name),
     headerRow,
+    subEquipmentNames,
     columns: {
       // Fallback heuristico (sin mapping_auto.json): no hay forma de
       // distinguir estructuralmente comercial vs servicio, asi que la unica
@@ -479,23 +536,76 @@ function inferItemTypeFromSectionLabel(value) {
   return null;
 }
 
-function inferItemTypeByRow(ws, range) {
+function inferItemTypeByRow(ws, range, sheetName = "") {
   const result = new Map();
   let currentType = "reactivo";
+  // true solo mientras estamos dentro de un encabezado que menciona AMBOS
+  // "control" y "calibrador" a la vez (ej. "CONTROLES Y CALIBRADORES",
+  // confirmado en cobas Pure c303/c503). Secciones limpias como "CONTROLES"
+  // o "CALIBRADORES" por separado (ej. e411) no activan esto.
+  let currentSectionAmbiguous = false;
 
   for (let row = range.s.r + 1; row <= range.e.r + 1; row += 1) {
     const labelA = getCellValue(ws, `A${row}`);
     const sectionType = inferItemTypeFromSectionLabel(labelA);
     if (sectionType) {
       currentType = sectionType;
+      const normalizedLabel = normalizeText(labelA);
+      const wasAmbiguous = currentSectionAmbiguous;
+      currentSectionAmbiguous = normalizedLabel.includes("control") && normalizedLabel.includes("calibrador");
+      // Alerta permanente: si aparece un encabezado control+calibrador
+      // fusionado en un equipo nuevo (o editan la plantilla), esto lo hace
+      // visible en logs en vez de fallar en silencio como paso con
+      // c303/c503 (ver businessCaseSheetSyncLocal.mapping.test.js, test
+      // "encabezados fusionados control/calibrador" -- ese test tambien
+      // audita toda la plantilla real).
+      if (currentSectionAmbiguous && !wasAmbiguous) {
+        logger.warn(
+          { sheetName, row, label: labelA },
+          "BC sheet sync: encabezado de seccion ambiguo (control+calibrador fusionados) -- desambiguando por nombre de fila",
+        );
+      }
     }
 
     const idValue = normalizeProductId(labelA);
     const descriptionValue = normalizeText(getCellValue(ws, `B${row}`));
     const nameValue = normalizeText(getCellValue(ws, `C${row}`));
     if (idValue || descriptionValue || nameValue) {
-      result.set(row, currentType);
+      let rowType = currentType;
+      // Dentro del bloque fusionado, inferItemTypeFromSectionLabel siempre
+      // resuelve "calibrador" primero (ver esa funcion) y todo el bloque
+      // queda mal clasificado. El nombre propio de cada fila es mas
+      // confiable ahi: la mayoria de controles reales trae "control" en su
+      // nombre (ej. "precicontrol", "d dimer gen 2 control i ii", "rf
+      // control set"), y "precinorm"/"precipath" son las lineas de control
+      // Roche que NO llevan la palabra "control" (confirmado contra BC real
+      // 54762e41-74c9-45fb-80e0-454b9bf040a8: "precinorm puc"/"precipath puc"
+      // son controles, no calibradores). Los calibradores reales no matchean
+      // ninguno de estos.
+      if (currentSectionAmbiguous) {
+        const rowLabel = `${descriptionValue} ${nameValue}`;
+        const isControl = rowLabel.includes("control") || rowLabel.includes("precinorm") || rowLabel.includes("precipath");
+        rowType = isControl ? "control" : "calibrador";
+      }
+      result.set(row, rowType);
     }
+  }
+
+  return result;
+}
+
+function inferOfferSectionByRow(ws, range) {
+  const result = new Map();
+  let currentSection = null;
+
+  for (let row = range.s.r + 1; row <= range.e.r + 1; row += 1) {
+    const label = normalizeText(getCellValue(ws, `A${row}`));
+    if (label.includes("sistema para electrolitos") || label === "electrolitos") {
+      currentSection = "electrolito";
+    } else if (label === "consumibles" || label === "materiales") {
+      currentSection = "consumible";
+    }
+    if (currentSection) result.set(row, currentSection);
   }
 
   return result;
@@ -735,12 +845,25 @@ function parseEquipmentSheetDefinitionWithMapping(name, ws, mappingSheet) {
       }]),
       ...mappedRows.map((row) => {
         const fromFallback = fallbackByRow.get(Number(row.rowNumber));
+        // mapping_auto.json es un snapshot generado una vez y puede quedar
+        // desfasado si alguien inserta/borra filas en el xlsx despues (visto
+        // en produccion: una fila de calibrador nueva en la pestaña "c111"
+        // desalineo el mapping en 1 fila para todo lo que venia despues,
+        // pegando el itemId correcto -- re-leido en vivo por fallback -- con
+        // el label VIEJO de otra fila/producto). itemId/itemType de
+        // buildRowsFromMappingObjectiveTargets siempre vienen vacios (nunca
+        // se asignan ahi), asi que en la practica solo "label" puede venir
+        // de la fuente stale. Por eso label debe priorizar SIEMPRE el valor
+        // re-leido en vivo (fromFallback) sobre el del mapping -- el mapping
+        // solo rellena cuando el parser base no pudo leer nada (celdas
+        // combinadas u otro caso raro), nunca para "corregir" un label que
+        // ya se leyo bien.
         return [Number(row.rowNumber), {
           ...fromFallback,
           ...row,
-          itemType: row.itemType || fromFallback?.itemType || null,
-          itemId: row.itemId || fromFallback?.itemId || "",
-          label: row.label || fromFallback?.label || "",
+          itemType: fromFallback?.itemType || row.itemType || null,
+          itemId: fromFallback?.itemId || row.itemId || "",
+          label: fromFallback?.label || row.label || "",
           columns: {
             // Si empty_fill_targets_objective ya dio una columna precisa para
             // ESTA fila especifica (DET/AÑO PROCESO), se respeta tal cual.
@@ -851,17 +974,39 @@ async function pullColumnQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = []
 
   if (!targets.length) return [];
 
+  // Un BC integrado puede conservar referencias de una pestaña opcional que
+  // no existe en su Sheet ya generado. No debe impedir leer ni depurar las
+  // pestañas que si existen.
+  const { data: spreadsheet } = await sheets.spreadsheets.get({
+    spreadsheetId: sheetId,
+    includeGridData: false,
+    fields: "sheets(properties(title))",
+  });
+  const availableSheetNames = new Set(
+    (spreadsheet?.sheets || []).map((sheet) => String(sheet?.properties?.title || "").trim()).filter(Boolean),
+  );
+  const validTargets = targets.filter((target) => availableSheetNames.has(target.sheetName));
+  const missingSheetNames = [...new Set(
+    targets
+      .filter((target) => !availableSheetNames.has(target.sheetName))
+      .map((target) => target.sheetName),
+  )];
+  if (missingSheetNames.length) {
+    logger.warn({ sheetId, missingSheetNames }, "BC sheet sync: se omitieron pestañas inexistentes");
+  }
+  if (!validTargets.length) return [];
+
   const { data } = await sheets.spreadsheets.values.batchGet({
     spreadsheetId: sheetId,
-    ranges: targets.map((target) => target.range),
+    ranges: validTargets.map((target) => target.range),
     majorDimension: "ROWS",
   });
 
   const valueRanges = Array.isArray(data?.valueRanges) ? data.valueRanges : [];
   const updatesByItemKey = new Map();
 
-  for (let i = 0; i < targets.length; i += 1) {
-    const target = targets[i];
+  for (let i = 0; i < validTargets.length; i += 1) {
+    const target = validTargets[i];
     const valueRange = valueRanges[i] || {};
     const values = Array.isArray(valueRange.values) ? valueRange.values : [];
     const lookup = buildSheetItemLookup(target.tabItems);
@@ -1208,6 +1353,28 @@ function buildRecordAliases(record = {}) {
     });
   }
   return Array.from(aliases);
+}
+
+function extractNumericAliasTokens(values = []) {
+  const tokens = new Set();
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    const normalized = normalizeText(value);
+    const matches = normalized.match(/\d{3,4}/g) || [];
+    matches.forEach((match) => tokens.add(match));
+  });
+  return Array.from(tokens);
+}
+
+function extractModelFamilyAliases(values = []) {
+  const tokens = new Set();
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    const normalized = normalizeCompact(value);
+    // Keep the letter prefix with the model number: e411 and t411 are
+    // different analyzers even though they share the numeric token 411.
+    const matches = normalized.match(/[a-z]\d{3,4}/g) || [];
+    matches.forEach((match) => tokens.add(match));
+  });
+  return Array.from(tokens);
 }
 
 function normalizeSheetWriteValue(value) {
@@ -1643,8 +1810,10 @@ function buildSheetPayloads({ template, equipmentRecords = [], payload = {} }) {
   const recordsWithAliases = equipmentRecords.map((record) => ({
     ...record,
     aliases: buildRecordAliases(record),
+    numericAliases: extractNumericAliasTokens(buildRecordAliases(record)),
+    modelAliases: extractModelFamilyAliases(buildRecordAliases(record)),
   }));
-  const bestSheetByRecordId = new Map();
+  const matchedSheetsByRecordId = new Map();
 
   if (!equipmentRecords.length) {
     logger.warn("[SheetGen] buildSheetPayloads: no equipment records provided — equipment tabs will be empty");
@@ -1656,9 +1825,17 @@ function buildSheetPayloads({ template, equipmentRecords = [], payload = {} }) {
       .map((sheetDefinition) => {
         const score = scoreAliases(record.aliases, sheetDefinition.aliases);
         const sheetNameAlias = normalizeCompact(sheetDefinition.name);
+        const sheetNumericAliases = extractNumericAliasTokens(sheetDefinition.aliases);
+        const sheetModelAliases = extractModelFamilyAliases(sheetDefinition.aliases);
         return {
           sheetDefinition,
           score,
+          sharedNumericAliases: sheetNumericAliases.filter((token) => record.numericAliases.includes(token)),
+          sharedModelAliases: sheetModelAliases.filter((token) => record.modelAliases.includes(token)),
+          hasModelFamilyConflict:
+            record.modelAliases.length > 0 &&
+            sheetModelAliases.length > 0 &&
+            !sheetModelAliases.some((token) => record.modelAliases.includes(token)),
           directNameMatch: record.aliases.some((alias) => alias === sheetNameAlias || alias.includes(sheetNameAlias)),
         };
       })
@@ -1670,13 +1847,53 @@ function buildSheetPayloads({ template, equipmentRecords = [], payload = {} }) {
         }
         return String(left.sheetDefinition.name || "").localeCompare(String(right.sheetDefinition.name || ""), "es");
       });
-    if (candidates[0]) bestSheetByRecordId.set(recordKey, candidates[0].sheetDefinition.name);
+    if (!candidates.length) return;
+
+    // Bug real: cuando exactamente UNA pestana comparte el numero de modelo
+    // (ej. "503" para "cobas Pro <503> ISE"), antes solo se usaba ese match
+    // numerico si habia 2+ candidatas (caso combo). Con una sola, caia al
+    // scoring por substring generico de abajo, que puede empatar entre 2
+    // pestanas (ambas contienen "cobaspro..." porque ambas tienen un submodelo
+    // "Pro") y el desempate final es alfabetico -- " e402 e801" con espacio
+    // inicial ordena antes que "c303 c503" sin relacion alguna con cual
+    // pestana es la correcta. El numero de modelo es una senal mucho mas
+    // confiable que el desempate alfabetico y debe ganar siempre que sea
+    // inequivoco (exactamente una pestana con numero compartido).
+    const numericMatchedCandidates = candidates.filter((candidate) => {
+      if (!candidate.sharedNumericAliases.length) return false;
+      // A single-model record such as e411 must not match t411 merely by
+      // sharing 411. Combo records intentionally carry multiple model
+      // numbers (for example 303 + 402), so each matching model tab remains
+      // eligible even though their family prefixes differ.
+      const isSingleModelRecord = record.numericAliases.length === 1;
+      return !isSingleModelRecord || !candidate.hasModelFamilyConflict;
+    });
+    if (numericMatchedCandidates.length > 1) {
+      matchedSheetsByRecordId.set(recordKey, numericMatchedCandidates.map((candidate) => candidate.sheetDefinition.name));
+      return;
+    }
+    if (numericMatchedCandidates.length === 1) {
+      matchedSheetsByRecordId.set(recordKey, [numericMatchedCandidates[0].sheetDefinition.name]);
+      return;
+    }
+
+    const exactMatches = candidates
+      .filter((candidate) => candidate.score === 100)
+      .map((candidate) => candidate.sheetDefinition.name);
+
+    if (exactMatches.length > 1) {
+      matchedSheetsByRecordId.set(recordKey, exactMatches);
+      return;
+    }
+
+    matchedSheetsByRecordId.set(recordKey, [candidates[0].sheetDefinition.name]);
   });
 
   template.equipmentSheets.forEach((sheetDefinition) => {
     const matchedRecords = recordsWithAliases.filter((record, index) => {
       const recordKey = Number(record.id) || `idx:${index}`;
-      return bestSheetByRecordId.get(recordKey) === sheetDefinition.name;
+      const matchedSheets = matchedSheetsByRecordId.get(recordKey) || [];
+      return matchedSheets.includes(sheetDefinition.name);
     });
     if (!matchedRecords.length) {
       if (equipmentRecords.length) {

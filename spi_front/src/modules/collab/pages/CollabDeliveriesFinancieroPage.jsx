@@ -33,19 +33,25 @@ import { TiActaEditModal, TiWorkflowStartModal } from "../../ti/components/TiAct
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 
-const COLLAB_CATEGORIES = ["ropa", "epp", "herramienta", "logistica", "suministros"];
+const COLLAB_CATEGORIES = ["ropa", "epp", "herramienta", "logistica", "suministros", "poliza"];
 
 const TALLAS = ["XS","S","M","L","XL","XXL","XXXL","28","30","32","34","36","38","40","42","44","46"];
 const UNIDADES = ["unidad","par","juego","caja","resma","paquete","rollo"];
+const TIPOS_SEGURO = ["Salud", "Vida", "Salud y Vida"];
+
+// Categorias que generan acta y pueden iniciar workflow de firma FamSign en
+// una entrega (todas menos "suministros", que no genera acta).
+const WORKFLOW_ELIGIBLE_CATEGORIES = new Set(["herramienta", "ropa", "epp", "logistica", "poliza"]);
 
 // Campos estandarizados por categoría — fuente de verdad para catálogo y sesiones.
 // Tipos especiales: "serial" → serial_number, "condition" → physical_condition, "renewal" → renewal_date.
 // Tipos de atributo: "text", "date", "number", "talla_select", "unidad_select".
 const CATEGORY_FIELDS = {
   ropa: [
+    { key: "cantidad", label: "Cantidad",            type: "number" },
+    { key: "marca",    label: "Marca / Modelo",      type: "text" },
     { key: "talla",    label: "Talla",               type: "talla_select" },
     { key: "color",    label: "Color",               type: "text" },
-    { key: "cantidad", label: "Cantidad",            type: "number" },
     { key: "_renewal", label: "Fecha de renovación", type: "renewal" },
   ],
   epp: [
@@ -77,17 +83,24 @@ const CATEGORY_FIELDS = {
     { key: "cantidad", label: "Cantidad", type: "number" },
     { key: "unidad",   label: "Unidad",   type: "unidad_select" },
   ],
+  poliza: [
+    { key: "tipo_seguro", label: "Tipo de seguro", type: "seguro_select" },
+    { key: "aseguradora", label: "Aseguradora", type: "text" },
+    { key: "numero_poliza", label: "Numero de poliza", type: "text" },
+    { key: "vigencia", label: "Vigencia", type: "text" },
+    { key: "monto_asegurado", label: "Monto asegurado", type: "text" },
+  ],
 };
 
 // Permisos por rol: qué categorías y tipos puede gestionar cada rol
 const ROLE_SESSION_PERMISSIONS = {
   financiero:      { logistica: ["entrega","retiro"], suministros: ["entrega","retiro"] },
   jefe_financiero: { logistica: ["entrega","retiro"], suministros: ["entrega","retiro"] },
-  talento_humano:  { ropa: ["entrega","retiro"], epp: ["entrega","retiro"], herramienta: ["entrega","retiro"], suministros: ["entrega","retiro"] },
+  talento_humano:  { ropa: ["entrega","retiro"], epp: ["entrega","retiro"], herramienta: ["entrega","retiro"], suministros: ["entrega","retiro"], poliza: ["entrega"] },
   jefe_tecnico:    { herramienta: ["entrega","retiro"] },
 };
 const FULL_ACCESS_ROLES = ["financiero","jefe_financiero"];
-const COLLAB_SIGNED_ACTA_UPLOAD_ROLES = ["financiero", "jefe_financiero"];
+const COLLAB_SIGNED_ACTA_UPLOAD_ROLES = ["financiero", "jefe_financiero", "talento_humano"];
 const TI_SIGNED_ACTA_UPLOAD_ROLES = ["ti", "jefe_ti", "admin_ti", "gerencia"];
 
 function getRolePerms(role) {
@@ -100,6 +113,7 @@ const CATEGORY_LABELS = {
   ropa: "Ropa de trabajo", epp: "EPP", herramienta: "Herramientas de trabajo",
   logistica: "Logística", ti: "Herramientas de comunicación",
   suministros: "Suministros de oficina",
+  poliza: "Poliza de salud y vida",
 };
 const CATEGORY_COLORS = {
   ropa:        "bg-slate-100 text-slate-600 border-slate-200",
@@ -108,6 +122,7 @@ const CATEGORY_COLORS = {
   logistica:   "bg-blue-100 text-blue-700 border-blue-200",
   ti:          "bg-violet-50 text-violet-700 border-violet-200",
   suministros: "bg-green-50 text-green-700 border-green-200",
+  poliza: "bg-cyan-50 text-cyan-700 border-cyan-200",
 };
 const COLLAB_STATUS_COLORS = {
   entregado: "bg-green-50 text-green-700",
@@ -597,6 +612,11 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
         const schema = cat?.attribute_schema || {};
         const needsSerial = "_serial" in schema || cat?.requires_serial;
         if (needsSerial && !it.serial_number.trim()) return showToast(`Ítem ${i + 1} (${cat?.name}): requiere número de serie`, "warning");
+        if (sessionType === "poliza") {
+          const missing = ["tipo_seguro", "aseguradora", "numero_poliza", "vigencia", "monto_asegurado"]
+            .filter((key) => !String(it.attributes?.[key] || "").trim());
+          if (missing.length) return showToast(`Ítem ${i + 1}: completa los datos de la póliza`, "warning");
+        }
       }
     }
     if (!recipientNombre.trim()) return showToast("Ingresa el nombre completo del colaborador", "warning");
@@ -615,7 +635,7 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
       } else {
         result = await createCollabSession({
           user_id: Number(userId), category: sessionType, session_date: sessionDate, tipo, notes: notes || null,
-          personnel_type: sessionType === "herramienta" ? personnelType : null,
+          personnel_type: (sessionType === "herramienta" || sessionType === "ropa" || sessionType === "poliza") ? personnelType : null,
           ...recipientData,
           items: items.map((it) => ({
             catalog_item_id: Number(it.catalog_item_id),
@@ -692,6 +712,7 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
                   { key: "herramienta", icon: FiPackage, desc: "Herramientas manuales y eléctricas" },
                   { key: "logistica",   icon: FiPackage, desc: "Mochilas, candados, accesorios" },
                   { key: "suministros", icon: FiPackage, desc: "Papelería, útiles de oficina — sin acta" },
+                  { key: "poliza",      icon: FiShield,  desc: "Beneficio corporativo de salud y vida — genera acta" },
                   { key: "ti",          icon: FiCpu,     desc: "Celulares, laptops, tablets, equipos TI" },
                 ].filter(({ key }) => key === "ti" ? isFullAccess : key in rolePerms)
                 .map(({ key, icon: Icon, desc }) => (
@@ -721,10 +742,10 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
                   ));
                 })()}
               </div>
-              {sessionType === "herramienta" && (
+              {(sessionType === "herramienta" || sessionType === "ropa" || sessionType === "poliza") && (
                 <div className="mt-2">
                   <SectionLabel>Personal interno o externo</SectionLabel>
-                  <p className="text-xs text-slate-400 mt-0.5 mb-2">Define el formato del acta (F.ACTA-H-2026-INT / -EXT).</p>
+                  <p className="text-xs text-slate-400 mt-0.5 mb-2">Define el formato del acta (interno / externo).</p>
                   <div className="flex gap-3">
                     {[{ key: "interno", label: "Interno" }, { key: "externo", label: "Externo" }].map(({ key, label }) => (
                       <label key={key} className={`flex items-center gap-2 cursor-pointer rounded-xl border px-4 py-2 text-sm font-medium transition-colors ${personnelType === key ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}>
@@ -810,7 +831,7 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
                 const activeFields = catFields.filter(({ key }) => {
                   if (key === "_serial")    return "_serial" in schema || sel?.requires_serial;
                   if (key === "_condition") return "_condition" in schema || sel?.requires_condition;
-                  return key in schema;
+                  return sessionType === "poliza" || key in schema;
                 });
                 return (
                   <div key={i} className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
@@ -836,7 +857,7 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
                       )}
                       {activeFields.map(({ key, label, type }) => {
                         const stored = schema[key];
-                        const VALID = ["text","date","number","talla_select","unidad_select","serial","condition","new_used","renewal"];
+                        const VALID = ["text","date","number","talla_select","unidad_select","seguro_select","serial","condition","new_used","renewal"];
                         const fieldType = VALID.includes(stored) ? stored : type;
 
                         if (fieldType === "serial") return (
@@ -889,6 +910,15 @@ function SessionModal({ catalog, users, tiAssets, onSave, onClose, actorRole }) 
                             <select value={it.attributes[key] || ""} onChange={(e) => setAttr(i, key, e.target.value)} className={fieldCls}>
                               <option value="">Selecciona...</option>
                               {UNIDADES.map((u) => <option key={u} value={u}>{u}</option>)}
+                            </select>
+                          </div>
+                        );
+                        if (fieldType === "seguro_select") return (
+                          <div key={key}>
+                            <label className={labelCls}>{label}</label>
+                            <select value={it.attributes[key] || ""} onChange={(e) => setAttr(i, key, e.target.value)} className={fieldCls}>
+                              <option value="">Selecciona el tipo de seguro...</option>
+                              {TIPOS_SEGURO.map((tipoSeguro) => <option key={tipoSeguro} value={tipoSeguro}>{tipoSeguro}</option>)}
                             </select>
                           </div>
                         );
@@ -1037,6 +1067,11 @@ function EditCollabSessionModal({ open, session, catalog, onClose, onSaved }) {
       if (requiresSerial && !String(item.serial_number || "").trim()) {
         return showToast(`Ítem ${index + 1} (${selectedCatalog?.name || "catálogo"}): requiere número de serie`, "warning");
       }
+      if (category === "poliza") {
+        const missing = ["tipo_seguro", "aseguradora", "numero_poliza", "vigencia", "monto_asegurado"]
+          .filter((key) => !String(item.attributes?.[key] || "").trim());
+        if (missing.length) return showToast(`Ítem ${index + 1}: completa los datos de la póliza`, "warning");
+      }
     }
 
     setSaving(true);
@@ -1047,7 +1082,7 @@ function EditCollabSessionModal({ open, session, catalog, onClose, onSaved }) {
         recipient_nombre: recipientNombre.trim(),
         recipient_cedula: recipientCedula.trim(),
         recipient_cargo: recipientCargo.trim(),
-        personnel_type: category === "herramienta" ? personnelType : undefined,
+        personnel_type: (category === "herramienta" || category === "ropa" || category === "poliza") ? personnelType : undefined,
         items: items.map((item) => ({
           catalog_item_id: Number(item.catalog_item_id),
           serial_number: item.serial_number?.trim() || null,
@@ -1097,7 +1132,7 @@ function EditCollabSessionModal({ open, session, catalog, onClose, onSaved }) {
             <label className={labelCls}>Fecha de sesión</label>
             <input type="date" value={sessionDate} onChange={(event) => setSessionDate(event.target.value)} className={fieldCls} />
           </div>
-          {category === "herramienta" && (
+          {(category === "herramienta" || category === "ropa" || category === "poliza") && (
             <div className="sm:col-span-2">
               <label className={labelCls}>Personal interno o externo</label>
               <div className="flex gap-3 mt-1">
@@ -1130,7 +1165,7 @@ function EditCollabSessionModal({ open, session, catalog, onClose, onSaved }) {
             const activeFields = categoryFields.filter(({ key }) => {
               if (key === "_serial") return "_serial" in schema || selectedCatalog?.requires_serial;
               if (key === "_condition") return "_condition" in schema || selectedCatalog?.requires_condition;
-              return key in schema;
+              return category === "poliza" || key in schema;
             });
 
             return (
@@ -1162,7 +1197,7 @@ function EditCollabSessionModal({ open, session, catalog, onClose, onSaved }) {
 
                   {activeFields.map(({ key, label, type }) => {
                     const storedType = schema[key];
-                    const fieldType = ["text", "date", "number", "talla_select", "unidad_select", "serial", "condition", "new_used", "renewal"].includes(storedType) ? storedType : type;
+                    const fieldType = ["text", "date", "number", "talla_select", "unidad_select", "seguro_select", "serial", "condition", "new_used", "renewal"].includes(storedType) ? storedType : type;
 
                     if (fieldType === "serial") {
                       return (
@@ -1225,6 +1260,17 @@ function EditCollabSessionModal({ open, session, catalog, onClose, onSaved }) {
                           <select value={item.attributes[key] || ""} onChange={(event) => setAttr(index, key, event.target.value)} className={fieldCls}>
                             <option value="">Selecciona...</option>
                             {UNIDADES.map((unidad) => <option key={unidad} value={unidad}>{unidad}</option>)}
+                          </select>
+                        </div>
+                      );
+                    }
+                    if (fieldType === "seguro_select") {
+                      return (
+                        <div key={key}>
+                          <label className={labelCls}>{label}</label>
+                          <select value={item.attributes[key] || ""} onChange={(event) => setAttr(index, key, event.target.value)} className={fieldCls}>
+                            <option value="">Selecciona el tipo de seguro...</option>
+                            {TIPOS_SEGURO.map((tipoSeguro) => <option key={tipoSeguro} value={tipoSeguro}>{tipoSeguro}</option>)}
                           </select>
                         </div>
                       );
@@ -1504,7 +1550,7 @@ function SessionDetail({ sessionId, onClose, availableUsers = [], catalog = [], 
                       {workflowLoading === acta.id ? <FiRefreshCw size={10} className="animate-spin" /> : <FiFileText size={10} />}
                       Workflow
                     </button>
-                  ) : (data.category === "herramienta" && acta.tipo === "entrega" && canInitiateWorkflow) ? (
+                  ) : (WORKFLOW_ELIGIBLE_CATEGORIES.has(data.category) && acta.tipo === "entrega" && canInitiateWorkflow) ? (
                     <button
                       type="button"
                       onClick={() => setWorkflowStartActa(acta)}
@@ -3651,7 +3697,7 @@ function CollabGestionTab({ tiAssets, tiActas = [], users, catalog, onRefresh, a
   }, [tiActas, selectedUser]);
 
   const groupedDeliveries = useMemo(() => {
-    const groups = { ropa: [], epp: [], herramienta: [], logistica: [], suministros: [] };
+    const groups = { ropa: [], epp: [], herramienta: [], logistica: [], suministros: [], poliza: [] };
     for (const d of deliveries) {
       if (groups[d.category]) groups[d.category].push(d);
     }
@@ -4197,6 +4243,7 @@ const CollabDeliveriesFinancieroPage = () => {
   };
 
   const isFinanciero = FULL_ACCESS_ROLES.includes(actorRole);
+  const canEditCatalog = isFinanciero || actorRole === "talento_humano";
 
   const TABS = [
     { key: "sesiones",     label: "Entregas/Retiros", icon: FiFileText },
@@ -4401,7 +4448,7 @@ const CollabDeliveriesFinancieroPage = () => {
 
       {/* ── Tab: Catálogo */}
       {activeTab === "catalogo" && (
-        <CatalogTab catalog={catalog} onRefresh={loadAll} canEdit={isFinanciero} />
+        <CatalogTab catalog={catalog} onRefresh={loadAll} canEdit={canEditCatalog} />
       )}
 
       {/* Modal nueva sesión */}

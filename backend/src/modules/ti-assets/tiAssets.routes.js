@@ -3,7 +3,14 @@ const multer  = require("multer");
 const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
 const ctrl = require("./tiAssets.controller");
-const { TI_ROLES, TI_READ_ROLES, TI_ASSET_CREATE_ROLES, TI_CORPORATE_ASSIGN_ROLES, TI_LEGACY_ACTA_UPLOAD_ROLES } = require("./tiAssets.service");
+const {
+  TI_ROLES,
+  TI_READ_ROLES,
+  TI_LABEL_PRINT_ROLES,
+  TI_ASSET_CREATE_ROLES,
+  TI_CORPORATE_ASSIGN_ROLES,
+  TI_LEGACY_ACTA_UPLOAD_ROLES,
+} = require("./tiAssets.service");
 
 const router   = express.Router();
 const upload   = multer({ storage: multer.memoryStorage() });
@@ -22,6 +29,8 @@ router.post("/corporate-numbers/:currentId/change", requireRole(TI_CORPORATE_ASS
 
 // ── Read-only routes (TI + Financiero) ───────────────────────────────────────
 router.get("/",                          requireRole(TI_READ_ROLES), ctrl.listAssets);
+router.get("/custody/summary",           requireRole(TI_READ_ROLES), ctrl.listCustodySummary);
+router.get("/custody/clients",           requireRole(TI_READ_ROLES), ctrl.listAssetClients);
 
 // Maintenance and actas (MUST BE BEFORE /:id routes)
 router.get("/maintenance/list",          requireRole(TI_READ_ROLES), ctrl.listMaintenance);
@@ -40,8 +49,10 @@ router.get("/liberation-photos/:photoId/file", requireRole(TI_READ_ROLES), ctrl.
 
 // Dynamic ID routes (MUST BE AFTER all specific routes)
 router.get("/:id/history",              requireRole(TI_READ_ROLES), ctrl.listHistory);
+router.get("/:id/custody-history",      requireRole(TI_READ_ROLES), ctrl.listCustodyHistory);
 router.get("/:id/assignments-history",  requireRole(TI_READ_ROLES), ctrl.listAssignmentsHistory);
 router.post("/assignments/:assignmentId/evidence", requireRole(TI_ROLES), upload.single("evidence"), ctrl.uploadAssignmentEvidence);
+router.get("/:id/label",                requireRole(TI_LABEL_PRINT_ROLES), ctrl.downloadAssetLabel);
 router.get("/:id/accessories",          requireRole(TI_READ_ROLES), ctrl.listAccessories);
 router.get("/:id/actas",                requireRole(TI_READ_ROLES), ctrl.listActas);
 router.get("/:id/financial-docs",       requireRole(TI_READ_ROLES), ctrl.listFinancialDocs);
@@ -50,9 +61,11 @@ router.get("/:id/liberation-photos",    requireRole(TI_READ_ROLES), ctrl.getLibe
 router.post("/:id/financial-docs",      requireRole(TI_READ_ROLES), upload.single("file"), ctrl.uploadFinancialDoc);
 
 // ── Write routes (TI only) ────────────────────────────────────────────────────
-router.post("/",                         requireRole(TI_ASSET_CREATE_ROLES), ctrl.createAsset);
+router.post("/",                         requireRole(TI_ASSET_CREATE_ROLES), upload.array("condition_photos", 2), ctrl.createAsset);
+router.post("/:id/condition-photos",     requireRole(TI_ASSET_CREATE_ROLES), upload.array("condition_photos", 2), ctrl.uploadInitialConditionPhotos);
 router.post("/batch/assign",             requireRole(TI_ROLES), upload.single("evidence"), ctrl.assignMultipleAssets);
 router.patch("/:id",                     requireRole(TI_ROLES), ctrl.updateAsset);
+router.post("/:id/custody",              requireRole(TI_ROLES), ctrl.moveAssetCustody);
 router.post("/:id/assign",               requireRole(TI_ROLES), upload.single("evidence"), ctrl.assignAsset);
 router.post("/:id/status",               requireRole(TI_ROLES), ctrl.updateStatus);
 router.post("/:id/accessories",          requireRole(TI_ROLES), ctrl.createAccessory);

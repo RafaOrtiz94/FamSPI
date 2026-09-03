@@ -6,6 +6,7 @@
 
 const service = require('./privatePurchases.service');
 const { PrivatePurchaseStateMachine } = require('./privatePurchaseStateMachine');
+const offerWorkspaceService = require('../business-case/businessCaseOffer.service');
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 
@@ -188,6 +189,44 @@ exports.sendOffer = async (req, res, next) => {
       req.user
     );
 
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getOfferWorkspace = async (req, res, next) => {
+  try {
+    const result = await offerWorkspaceService.getPrivatePurchaseOfferWorkspace(req.params.id, req.user);
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.createOfferDraft = async (req, res, next) => {
+  try {
+    const result = await offerWorkspaceService.createPrivatePurchaseOfferDraft(req.params.id, req.user);
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.publishOfferVersion = async (req, res, next) => {
+  try {
+    const offerId = Number(req.params.offerId);
+    const result = await offerWorkspaceService.publishPrivatePurchaseOfferVersion(req.params.id, offerId, req.user);
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.regenerateOfferVersion = async (req, res, next) => {
+  try {
+    const offerId = Number(req.params.offerId);
+    const result = await offerWorkspaceService.regeneratePrivatePurchaseOfferVersionInPlace(req.params.id, offerId, req.user);
     res.json({ ok: true, data: result });
   } catch (error) {
     next(error);

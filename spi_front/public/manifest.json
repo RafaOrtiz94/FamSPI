@@ -1,6 +1,8 @@
 {
+  "id": "/",
   "short_name": "SPI FAM",
-  "name": "SPI FAM",
+  "name": "SPI FAM Platform",
+  "description": "Plataforma integral de gestion empresarial de FamProject con acceso rapido, instalacion y continuidad basica sin red.",
   "icons": [
     {
       "src": "favicon.ico",
@@ -10,16 +12,35 @@
     {
       "src": "logo192.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "any maskable"
     },
     {
       "src": "logo512.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "any maskable"
     }
   ],
-  "start_url": ".",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "theme_color": "#000000",
-  "background_color": "#ffffff"
+  "orientation": "portrait-primary",
+  "theme_color": "#1E293B",
+  "background_color": "#F9FAFB",
+  "categories": ["business", "productivity", "utilities"],
+  "lang": "es-EC",
+  "dir": "ltr",
+  "shortcuts": [
+    {
+      "name": "Mi perfil",
+      "short_name": "Perfil",
+      "url": "/dashboard/mi-perfil"
+    },
+    {
+      "name": "Notificaciones",
+      "short_name": "Avisos",
+      "url": "/dashboard/notificaciones"
+    }
+  ]
 }

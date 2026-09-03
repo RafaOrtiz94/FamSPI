@@ -1197,25 +1197,19 @@ const listApplicants = async ({
   const where = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
   const dataQuery = `
-    SELECT 
+    SELECT
       a.id, a.email, a.fullname, a.profile, a.personnel_request_id, a.created_at, a.updated_at,
-      p.cedula, p.telefono, p.lugar_residencia
+      p.cedula, p.telefono, p.lugar_residencia,
+      COUNT(*) OVER()::int AS total_count
     FROM applicants a
     LEFT JOIN applicant_personal_data p ON a.id = p.applicant_id
     ${where}
     ORDER BY a.updated_at DESC
     LIMIT $${params.length + 1} OFFSET $${params.length + 2}
   `;
-  const { rows } = await db.query(dataQuery, [...params, pageSize, offset]);
-
-  const countQuery = `
-    SELECT COUNT(*)::int AS total
-    FROM applicants a
-    LEFT JOIN applicant_personal_data p ON a.id = p.applicant_id
-    ${where}
-  `;
-  const countResult = await db.query(countQuery, params);
-  const total = countResult.rows[0]?.total || 0;
+  const { rows: rawRows } = await db.query(dataQuery, [...params, pageSize, offset]);
+  const total = rawRows.length > 0 ? rawRows[0].total_count : 0;
+  const rows = rawRows.map(({ total_count, ...row }) => row);
 
   return {
     data: rows,

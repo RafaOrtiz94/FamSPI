@@ -729,12 +729,26 @@ async function getScheduleNotificationSummary(scheduleId) {
       WHERE schedule_id = $1`,
     [scheduleId],
   );
+  const { rows: visits } = await db.query(
+    `SELECT
+       sv.id,
+       sv.client_request_id,
+       sv.prospect_name,
+       sv.planned_date,
+       cr.commercial_name AS client_name
+     FROM scheduled_visits sv
+     LEFT JOIN client_requests cr ON cr.id = sv.client_request_id
+     WHERE sv.schedule_id = $1
+     ORDER BY sv.planned_date ASC, sv.id ASC`,
+    [scheduleId],
+  );
   const row = rows[0] || {};
   const cities = Array.isArray(row.cities) ? row.cities : [];
   return {
     totalVisits: Number(row.total_visits || 0),
     cities,
     citiesLabel: cities.length ? cities.join(", ") : "Sin ciudades registradas",
+    visits,
   };
 }
 
@@ -800,8 +814,11 @@ async function notifyScheduleReviewed(schedule, { approved, notes, actorUser }) 
   const processKey = `schedule:${schedule.id}`;
   const subject = `Cronograma ${period} - resultado de revision`;
   const title = approved ? "Cronograma aprobado" : "Cronograma rechazado";
+  const approvedVisits = summary.visits
+    .map((visit) => `${getVisitDisplayName(visit)} (${toDateOnlyString(visit.planned_date) || "fecha pendiente"})`)
+    .join("; ");
   const message = approved
-    ? `Tu cronograma ${period} fue aprobado por ${actorUser?.fullname || actorUser?.name || actorUser?.email || "jefatura"}. ${notes ? `Comentario: ${notes}` : ""}`
+    ? `Tu cronograma ${period} fue aprobado por ${actorUser?.fullname || actorUser?.name || actorUser?.email || "jefatura"}. Clientes aprobados: ${approvedVisits || "sin visitas registradas"}. ${notes ? `Comentario: ${notes}` : ""}`
     : `Tu cronograma ${period} fue rechazado por ${actorUser?.fullname || actorUser?.name || actorUser?.email || "jefatura"}. Motivo: ${notes || "Sin detalle"}`;
 
   await notificationManager.sendNotification({
@@ -821,6 +838,7 @@ async function notifyScheduleReviewed(schedule, { approved, notes, actorUser }) 
       period,
       total_visits: summary.totalVisits,
       cities: summary.citiesLabel,
+      approved_visits: summary.visits,
       review_notes: notes || "",
     },
     meta: {
@@ -1294,7 +1312,6 @@ function buildScheduleVisitCalendarPayload({ schedule, visit }) {
     summary,
     description,
     date: toDateOnlyString(visit.planned_date),
-    attendees: schedule.user_email ? [schedule.user_email] : [],
   };
 }
 
@@ -1338,6 +1355,8 @@ async function syncApprovedScheduleArtifacts(schedule) {
       const calendarEvent = await createOrUpdateSharedAllDayEvent({
         eventId: visit.calendar_event_id || null,
         ...buildScheduleVisitCalendarPayload({ schedule, visit }),
+        // Las visitas quedan en el calendario compartido sin generar una invitacion por cliente.
+        sendUpdates: "none",
       });
       if (hasSyncColumns && calendarEvent?.id) {
         await db.query(
@@ -1555,7 +1574,37 @@ async function syncWeekCity({ scheduleId, city, dates, user }) {
     throw error;
   }
 
-  normalizedDates.forEach((plannedDate) => validateVisitDateWithinSchedule(plannedDate, schedule));
+  // Bug real (urgente, cronograma de octubre 2026): buildFourWeekBlocks en el
+  // frontend arma "semanas" como bloques fijos de dias-del-mes (1-7, 8-14,
+  // 15-21, 22-fin), no semanas lunes-viernes reales -- asi que casi siempre
+  // incluye sabados/domingos (ej. dias 1-7 de octubre 2026 = jue a mie,
+  // incluye sab 3 y dom 4). validateVisitDateWithinSchedule tira 400 ante
+  // CUALQUIER fecha invalida (fin de semana, feriado, fuera del mes -- este
+  // ultimo caso tambien posible si alguna vez se envia una semana real que
+  // cruza el limite del mes), y antes se aplicaba a las 7 fechas del bloque
+  // completo, tumbando la sincronizacion de la ciudad para toda la semana
+  // por un solo sabado/domingo. Ahora se descartan en silencio las fechas
+  // que no son dias habiles del mes del cronograma (fin de semana, feriado,
+  // fuera de mes) y solo se sincronizan las que si son validas.
+  const validDates = normalizedDates.filter((plannedDate) => {
+    const parsed = new Date(plannedDate);
+    if (Number.isNaN(parsed.getTime())) return false;
+    if (
+      parsed.getUTCMonth() + 1 !== Number(schedule.month)
+      || parsed.getUTCFullYear() !== Number(schedule.year)
+    ) return false;
+    const weekday = parsed.getUTCDay();
+    if (weekday === 0 || weekday === 6) return false;
+    const dateOnly = toDateOnlyString(plannedDate);
+    if (dateOnly && getHolidaySet().has(dateOnly)) return false;
+    return true;
+  });
+
+  if (!validDates.length) {
+    const error = new Error("Ninguna fecha de esta semana es un dia habil dentro del mes del cronograma");
+    error.status = 400;
+    throw error;
+  }
 
   const [clients, leads] = await Promise.all([
     listAccessibleClientsByCity({ city: normalizedCity, user }),
@@ -1574,7 +1623,7 @@ async function syncWeekCity({ scheduleId, city, dates, user }) {
       schedule_id: scheduleId,
       city: normalizedCity,
       inserted: 0,
-      dates: normalizedDates,
+      dates: validDates,
       visits: [],
     };
   }
@@ -1590,13 +1639,13 @@ async function syncWeekCity({ scheduleId, city, dates, user }) {
         WHERE schedule_id = $1
           AND planned_date = ANY($2::date[])
           AND city = $3`,
-      [scheduleId, normalizedDates, normalizedCity],
+      [scheduleId, validDates, normalizedCity],
     );
 
     const insertedVisits = [];
     for (let index = 0; index < targets.length; index += 1) {
       const target = targets[index];
-      const plannedDate = normalizedDates[index % normalizedDates.length];
+      const plannedDate = validDates[index % validDates.length];
       const { rows } = await client.query(
         `INSERT INTO scheduled_visits (schedule_id, client_request_id, lead_id, prospect_name, planned_date, city, priority, notes)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -1613,7 +1662,7 @@ async function syncWeekCity({ scheduleId, city, dates, user }) {
       schedule_id: scheduleId,
       city: normalizedCity,
       inserted: insertedVisits.length,
-      dates: normalizedDates,
+      dates: validDates,
       schedule_status: updatedSchedule.status,
       visits: insertedVisits,
     };

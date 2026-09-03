@@ -1,9 +1,24 @@
-import api from "./index";
+import api, { isTransientApiError } from "./index";
+import { readCachedResource, writeCachedResource } from "../pwa/localCache";
+
+const MY_PROFILE_API_CACHE_KEY = "my_profile_api_snapshot";
+const MY_PROFILE_API_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7;
 
 export const fetchMyProfile = async () => {
- const { data } = await api.get("/users/me/profile");
- if (!data?.ok) throw new Error(data?.message || "No se pudo obtener el perfil");
- return data.data;
+ try {
+  const { data } = await api.get("/users/me/profile");
+  if (!data?.ok) throw new Error(data?.message || "No se pudo obtener el perfil");
+  writeCachedResource(MY_PROFILE_API_CACHE_KEY, data.data);
+  return data.data;
+ } catch (error) {
+  const cached = readCachedResource(MY_PROFILE_API_CACHE_KEY, {
+   maxAgeMs: MY_PROFILE_API_CACHE_MAX_AGE_MS,
+  });
+  if (cached?.data && isTransientApiError(error)) {
+   return cached.data;
+  }
+  throw error;
+ }
 };
 
 export const upsertMyProfile = async ({ metadata = {}, preferences = {}, avatarFile = null }) => {

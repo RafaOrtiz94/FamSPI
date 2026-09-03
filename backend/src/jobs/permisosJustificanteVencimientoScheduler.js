@@ -1,5 +1,7 @@
 const logger = require("../config/logger");
 const { processJustificanteVencimientos } = require("../modules/permisos/permisos.service");
+const { isOffHours } = require("../utils/offHoursPolicy");
+const { registerOffHoursJob } = require("./offHoursCoordinator");
 
 const DEFAULT_INTERVAL_MINUTES = Math.min(Number(process.env.PERMISOS_JUSTIFICANTE_EXPIRY_INTERVAL_MINUTES || 60), 240);
 const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
@@ -22,8 +24,14 @@ function startPermisosJustificanteVencimientoJob() {
     runOnce().catch((error) => logger.error({ error }, "Error inicial permisos justificante vencimiento job"));
   }
   interval = setInterval(() => {
+    if (isOffHours(new Date()).isOffHours) return; // manejado por offHoursCoordinator
     runOnce().catch((error) => logger.error({ error }, "Error permisos justificante vencimiento job"));
   }, everyMs);
+  registerOffHoursJob({
+    name: "permisos_justificante_vencimiento",
+    runOnce,
+    offHoursIntervalMs: everyMs * 6,
+  });
 }
 
 module.exports = {

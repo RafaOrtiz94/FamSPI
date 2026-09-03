@@ -129,6 +129,15 @@ router.put(
   ctrl.upsertAutosaveFeatureFlags,
 );
 
+// Vista de solo-lectura para jefe_calidad y lorena.loaiza@fam-project.com --
+// requireRole ya mira extra_roles (ver middlewares/roles.js), asi que
+// lorena.loaiza recibe acceso via extra_roles=["bc_quality_summary"] (ver
+// migrations/276_users_extra_roles.sql) sin tocar businessCaseRoles, que da
+// acceso de edicion al workspace completo -- mucho mas de lo pedido ("solo
+// podran ver el resumen").
+router.get("/quality-summary", verifyToken, requireRole(["jefe_calidad", "bc_quality_summary"]), ctrl.getQualitySummaryList);
+router.get("/:id/quality-summary/items", verifyToken, requireRole(["jefe_calidad", "bc_quality_summary"]), ctrl.getQualitySummaryItems);
+
 router.get("/", verifyToken, requireRole(businessCaseRoles), ctrl.list);
 // BC-01: BC puede ser creado por comercial, asesor_comercial, analista_comercial,
 //        acp_comercial, jefe_comercial, backoffice y backoffice_comercial
@@ -234,6 +243,42 @@ router.post("/sheets/clear-template-cache", verifyToken, requireRole(adminRoles)
 
 // UI Guidance routes (Workspace)
 router.get("/:id/ui-guidance", verifyToken, requireRole(businessCaseRoles), ctrl.getUIGuidance);
+router.get(
+  "/:id/offer-workspace",
+  verifyToken,
+  requireRole(["comercial", "asesor_comercial", "analista_comercial", "acp_comercial", "jefe_comercial", "jefe_de_comercial"]),
+  ctrl.getOfferWorkspace,
+);
+router.post(
+  "/:id/offer-workspace/draft",
+  verifyToken,
+  requireRole(["acp_comercial", "jefe_comercial", "jefe_de_comercial"]),
+  ctrl.createOfferDraft,
+);
+router.post(
+  "/:id/offer-workspace/:offerId/publish",
+  verifyToken,
+  requireRole(["acp_comercial", "jefe_comercial", "jefe_de_comercial"]),
+  ctrl.publishOfferVersion,
+);
+router.post(
+  "/:id/offer-workspace/:offerId/regenerate",
+  verifyToken,
+  requireRole(["acp_comercial", "jefe_comercial", "jefe_de_comercial"]),
+  ctrl.regenerateOfferVersion,
+);
+router.post(
+  "/:id/offer-workspace/:offerId/sync-pricing",
+  verifyToken,
+  requireRole(["acp_comercial", "jefe_comercial", "jefe_de_comercial"]),
+  ctrl.syncOfferPricingAndPdf,
+);
+router.post(
+  "/:id/offer-workspace/:offerId/decision",
+  verifyToken,
+  requireRole(["comercial", "asesor_comercial", "analista_comercial"]),
+  ctrl.decideOfferVersion,
+);
 router.get("/:id/ownership", verifyToken, requireRole(businessCaseRoles), ctrl.getDataOwnership);
 router.post("/:id/ownership/complete", verifyToken, requireRole(businessCaseRoles), ctrl.recordSectionCompletion);
 // BC-20: Bloqueo/desbloqueo de secciones — solo acp_comercial, jefe_comercial (públicas) y backoffice (privadas)

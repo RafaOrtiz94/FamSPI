@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   FiAlertCircle,
   FiCalendar,
+  FiCamera,
   FiCheck,
   FiChevronDown,
   FiChevronUp,
@@ -10,9 +12,11 @@ import {
   FiDownload,
   FiEdit2,
   FiFileText,
+  FiImage,
   FiLock,
   FiPackage,
   FiPlus,
+  FiPrinter,
   FiRefreshCw,
   FiSearch,
   FiShield,
@@ -50,11 +54,15 @@ import {
   generateTiMaintenanceFuture,
   generateTiMaintenanceReport,
   getTiAssetAssignmentsHistory,
+  listTiAssetCustodyHistory as getTiAssetCustodyHistory,
   getTiAssetHistory,
   listTiAccessories,
   listTiActas,
   uploadTiLegacyActaSigned,
   listTiAssets,
+  listTiAssetClients,
+  moveTiAssetCustody,
+  printTiAssetLabel,
   listTiCorporateNumbers,
   listTiMaintenance,
   listTiMaintenanceReports,
@@ -65,6 +73,7 @@ import {
   updateTiAsset,
   updateTiCorporateNumber,
   updateTiAssetStatus,
+  uploadTiAssetInitialConditionPhotos,
   liberateTiAsset,
   getTiLiberationPhotos,
   getTiLiberationPhotoFile,
@@ -78,6 +87,69 @@ const STATUS_LABELS = {
   retired: "Dado de baja",
   available: "Disponible",
 };
+
+const CUSTODY_LABELS = {
+  warehouse: "Bodega",
+  collaborator: "Colaborador",
+  client: "Cliente",
+  vendor: "Proveedor",
+  unknown: "Sin definir",
+};
+
+const CUSTODY_ORDER = ["warehouse", "collaborator", "client", "vendor", "unknown"];
+
+const CUSTODY_META = {
+  warehouse: {
+    title: "Custodia en bodega",
+    description: "Equipos disponibles o resguardados internamente.",
+    tone: "border-slate-200 bg-slate-50 text-slate-700",
+  },
+  collaborator: {
+    title: "Custodia de colaboradores",
+    description: "Equipos asignados a usuarios internos.",
+    tone: "border-blue-200 bg-blue-50 text-blue-700",
+  },
+  client: {
+    title: "Custodia de clientes",
+    description: "Equipos ubicados o prestados en sitios de cliente.",
+    tone: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  },
+  vendor: {
+    title: "Custodia de proveedor",
+    description: "Equipos bajo resguardo externo.",
+    tone: "border-amber-200 bg-amber-50 text-amber-700",
+  },
+  unknown: {
+    title: "Custodia sin definir",
+    description: "Registros que necesitan regularizacion.",
+    tone: "border-rose-200 bg-rose-50 text-rose-700",
+  },
+};
+
+function resolveAssetCustodyType(asset = {}) {
+  const type = String(asset?.custody_type || "").trim().toLowerCase();
+  if (CUSTODY_LABELS[type]) return type;
+  if (asset?.client_id || asset?.custody_client_name) return "client";
+  if (asset?.custodian_user_id || asset?.assigned_to_user_id) return "collaborator";
+  if (asset?.warehouse_code || ["available", "unassigned"].includes(String(asset?.status || "").toLowerCase())) return "warehouse";
+  return "unknown";
+}
+
+function getAssetCustodyOwner(asset = {}) {
+  const type = resolveAssetCustodyType(asset);
+  if (type === "client") return asset.custody_client_name || "Cliente sin nombre";
+  if (type === "collaborator") return asset.custodian_user_name || asset.assigned_to_name || "Colaborador sin nombre";
+  if (type === "warehouse") return asset.warehouse_code || "BODEGA_TI_MAIN";
+  if (type === "vendor") return asset.location_label || "Proveedor sin detalle";
+  return "Custodia pendiente";
+}
+
+function getAssetCustodyLocation(asset = {}) {
+  const type = resolveAssetCustodyType(asset);
+  if (type === "client") return asset.client_location_label || asset.location_label || "";
+  if (type === "warehouse") return asset.location_label || "";
+  return asset.location_label || asset.client_location_label || "";
+}
 
 // Subcomponent: Todas las actas
 function TIActasView() {
@@ -161,8 +233,9 @@ function TIActasView() {
       <div className="space-y-3">
         {allActas.map((acta) => {
           const isSigned = acta.is_complete || acta.signed_at || acta.signed_pdf_drive_file_id || acta.signed_pdf_sha256;
+          const isAnnulled = Boolean(acta.is_annulled);
           return (
-            <div key={acta.id} className="rounded-xl border border-slate-200 bg-white p-4 flex items-start justify-between gap-3">
+            <div key={acta.id} className={`rounded-xl border p-4 flex items-start justify-between gap-3 ${isAnnulled ? "border-red-100 bg-red-50/40" : "border-slate-200 bg-white"}`}>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap mb-1">
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
@@ -171,7 +244,11 @@ function TIActasView() {
                     {acta.tipo}
                   </span>
                   <span className="text-xs font-mono font-semibold text-slate-600">{acta.acta_code || `#${String(acta.id).padStart(6, "0")}`}</span>
-                  {isSigned ? (
+                  {isAnnulled ? (
+                    <span className="flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">
+                      <FiAlertCircle size={9} /> Anulada
+                    </span>
+                  ) : isSigned ? (
                     <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700">
                       <FiCheck size={9} /> Firmada
                     </span>
@@ -198,7 +275,7 @@ function TIActasView() {
                 >
                   {downloadingPdf === acta.id ? <FiRefreshCw size={12} className="animate-spin" /> : <FiDownload size={12} />} PDF
                 </button>
-                {!isSigned && (
+                {!isAnnulled && !isSigned && (
                   <button
                     type="button"
                     onClick={() => setEditingActa(acta)}
@@ -207,7 +284,7 @@ function TIActasView() {
                     <FiEdit2 size={12} /> Editar
                   </button>
                 )}
-                {!isSigned && !acta.signature_workflow_id && (
+                {!isAnnulled && !isSigned && !acta.signature_workflow_id && (
                   <button
                     type="button"
                     onClick={() => setWorkflowActa(acta)}
@@ -275,6 +352,10 @@ const EMPTY_FORM = {
   characteristics: "",
   maintenance_frequency_months: 12,
   purchase_value: "", // FASE 3: Depreciación
+  physical_condition_score: "",
+  functional_condition_score: "",
+  condition_photos: [],
+  condition_photo_previews: [],
 };
 
 // Funciones de depreciación (FASE 3)
@@ -434,6 +515,8 @@ const isMobileTiAsset = (asset) => {
 };
 
 const TIDeviceManagementPage = () => {
+  const [searchParams] = useSearchParams();
+  const qrAssetCode = String(searchParams.get("asset_code") || "").trim();
   const { showToast } = useUI();
   const { user } = useAuth();
   const userRole = (user?.role || "").toLowerCase();
@@ -449,11 +532,30 @@ const TIDeviceManagementPage = () => {
   const [selectedId, setSelectedId] = useState(null);
   const [history, setHistory] = useState([]);
   const [assignmentsHistory, setAssignmentsHistory] = useState([]);
+  const [custodyHistory, setCustodyHistory] = useState([]);
+  const [custodyClients, setCustodyClients] = useState([]);
+  const [custodyClientSearch, setCustodyClientSearch] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
   const [year] = useState(new Date().getFullYear());
   const [search, setSearch] = useState("");
+  const [custodyFilter, setCustodyFilter] = useState("all");
+  const [custodyForm, setCustodyForm] = useState({
+    custody_type: "warehouse",
+    to_user_id: "",
+    warehouse_code: "BODEGA_TI_MAIN",
+    warehouse_address: "",
+    warehouse_section: "",
+    warehouse_shelf: "",
+    client_id: "",
+    client_location_label: "",
+    location_label: "",
+    usage_context: "internal",
+    reason: "",
+  });
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [conditionBackfill, setConditionBackfill] = useState({ photos: [], previews: [] });
+  const [savingConditionPhotos, setSavingConditionPhotos] = useState(false);
   const [editFields, setEditFields] = useState({});
   const [newStatus, setNewStatus] = useState("unassigned");
   const [, setCoordinationDates] = useState({});
@@ -503,6 +605,7 @@ const TIDeviceManagementPage = () => {
   const [editingActa, setEditingActa] = useState(null);
   const [workflowActa, setWorkflowActa] = useState(null);
   const [startingWorkflow, setStartingWorkflow] = useState(false);
+  const [downloadingLabelAssetId, setDownloadingLabelAssetId] = useState(null);
 
   // Tabs: 'dispositivos' | 'numeros-corporativos' | 'todas-actas'
   const [activeTab, setActiveTab] = useState('dispositivos');
@@ -534,13 +637,15 @@ const TIDeviceManagementPage = () => {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [assetsRows, usersRows, maintRows] = await Promise.all([
-        listTiAssets(),
+      const [assetsRows, usersRows, maintRows, clientRows] = await Promise.all([
+        listTiAssets(custodyFilter === "all" ? {} : { custody_type: custodyFilter }),
         getUsers(),
         listTiMaintenance({ year }),
+        listTiAssetClients({ limit: 100 }),
       ]);
       setAssets(Array.isArray(assetsRows) ? assetsRows : []);
       setUsers(Array.isArray(usersRows) ? usersRows : []);
+      setCustodyClients(Array.isArray(clientRows) ? clientRows : []);
       const safeMaintenance = Array.isArray(maintRows) ? maintRows : [];
       setMaintenance(safeMaintenance);
       setCoordinationDates(
@@ -556,11 +661,40 @@ const TIDeviceManagementPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [showToast, year]);
+  }, [custodyFilter, showToast, year]);
 
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    if (qrAssetCode && custodyFilter !== "all") {
+      setCustodyFilter("all");
+    }
+  }, [custodyFilter, qrAssetCode]);
+
+  useEffect(() => {
+    if (!qrAssetCode || !assets.length) return;
+    const found = assets.find(
+      (asset) => String(asset.asset_code || "").toLowerCase() === qrAssetCode.toLowerCase(),
+    );
+    if (!found) return;
+    setSelectedId(found.id);
+    setSearch(found.asset_code || qrAssetCode);
+  }, [assets, qrAssetCode]);
+
+  useEffect(() => {
+    if (custodyForm.custody_type !== "client") return undefined;
+    const timer = window.setTimeout(async () => {
+      try {
+        const rows = await listTiAssetClients({ q: custodyClientSearch, limit: 100 });
+        setCustodyClients(Array.isArray(rows) ? rows : []);
+      } catch (_e) {
+        setCustodyClients([]);
+      }
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [custodyClientSearch, custodyForm.custody_type]);
 
   const selected = useMemo(
     () => assets.find((a) => String(a.id) === String(selectedId || "")) || null,
@@ -615,18 +749,31 @@ const TIDeviceManagementPage = () => {
   }, [corporateNumbers, corporateFilterStatus, corporateSearch]);
 
   const filteredAssets = useMemo(() => {
-    if (!search.trim()) return assets;
+    const sortByCustody = (rows) => [...rows].sort((a, b) => {
+      const custodyDiff = CUSTODY_ORDER.indexOf(resolveAssetCustodyType(a)) - CUSTODY_ORDER.indexOf(resolveAssetCustodyType(b));
+      if (custodyDiff !== 0) return custodyDiff;
+      const ownerDiff = getAssetCustodyOwner(a).localeCompare(getAssetCustodyOwner(b), "es");
+      if (ownerDiff !== 0) return ownerDiff;
+      return String(a.name || "").localeCompare(String(b.name || ""), "es");
+    });
+    if (!search.trim()) return sortByCustody(assets);
     const q = search.toLowerCase();
-    return assets.filter(
+    return sortByCustody(assets.filter(
       (a) =>
         (a.name || "").toLowerCase().includes(q) ||
+        (a.asset_code || "").toLowerCase().includes(q) ||
         (a.brand || "").toLowerCase().includes(q) ||
         (a.model || "").toLowerCase().includes(q) ||
         (a.serial_number || "").toLowerCase().includes(q) ||
         (a.imei || "").toLowerCase().includes(q) ||
         (a.invoice_number || "").toLowerCase().includes(q) ||
-        (a.assigned_to_name || "").toLowerCase().includes(q)
-    );
+        (a.assigned_to_name || "").toLowerCase().includes(q) ||
+        (a.custodian_user_name || "").toLowerCase().includes(q) ||
+        (a.custody_client_name || "").toLowerCase().includes(q) ||
+        (a.warehouse_code || "").toLowerCase().includes(q) ||
+        (a.location_label || "").toLowerCase().includes(q) ||
+        (a.client_location_label || "").toLowerCase().includes(q)
+    ));
   }, [assets, search]);
 
   const loadHistory = async (assetId) => {
@@ -643,6 +790,15 @@ const TIDeviceManagementPage = () => {
       setAssignmentsHistory([]);
     } finally {
       setHistoryLoading(false);
+    }
+  };
+
+  const loadCustodyHistory = async (assetId) => {
+    try {
+      const rows = await getTiAssetCustodyHistory(assetId);
+      setCustodyHistory(Array.isArray(rows) ? rows : []);
+    } catch (_e) {
+      setCustodyHistory([]);
     }
   };
 
@@ -692,6 +848,20 @@ const TIDeviceManagementPage = () => {
     setSelectedId(a.id);
     setIsEditing(false);
     setNewStatus(a.status || "unassigned");
+    setCustodyForm({
+      custody_type: a.custody_type || (a.assigned_to_user_id ? "collaborator" : "warehouse"),
+      to_user_id: a.assigned_to_user_id || "",
+      warehouse_code: a.warehouse_code || "BODEGA_TI_MAIN",
+      warehouse_address: a.warehouse_address || "",
+      warehouse_section: a.warehouse_section || "",
+      warehouse_shelf: a.warehouse_shelf || "",
+      client_id: a.client_id || "",
+      client_location_label: a.client_location_label || "",
+      location_label: a.location_label || "",
+      usage_context: a.usage_context || "internal",
+      reason: "",
+    });
+    setCustodyClientSearch("");
     setEditFields({
       name: a.name || "",
       brand: a.brand || "",
@@ -707,12 +877,118 @@ const TIDeviceManagementPage = () => {
     setSelectedCorporateNumberId("");
     setCorporateChangeReason("");
     loadHistory(a.id);
+    loadCustodyHistory(a.id);
     loadAccessories(a.id);
     loadActas(a.id);
     if (isMobileTiAsset(a)) {
       loadCorporateNumbers();
     } else {
       setCorporateNumbers([]);
+    }
+  };
+
+  const moveCustody = async () => {
+    if (!selected) return;
+    if (custodyForm.custody_type === "client" && !custodyForm.client_id) {
+      return showToast("Selecciona el cliente custodio", "warning");
+    }
+    if (custodyForm.custody_type === "warehouse" && !custodyForm.warehouse_code.trim()) {
+      return showToast("Ingresa la bodega destino", "warning");
+    }
+    setSaving(true);
+    try {
+      const updated = await moveTiAssetCustody(selected.id, {
+        ...custodyForm,
+        client_id: custodyForm.custody_type === "client" ? Number(custodyForm.client_id) : null,
+        to_user_id: custodyForm.custody_type === "collaborator" ? Number(custodyForm.to_user_id || 0) || null : null,
+      });
+      showToast("Custodia actualizada y movimiento registrado", "success");
+      await loadAll();
+      handleSelectAsset({ ...selected, ...updated });
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo actualizar la custodia", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const printAssetLabel = async () => {
+    if (!selected?.id) return;
+    setDownloadingLabelAssetId(selected.id);
+    try {
+      await printTiAssetLabel(selected.id, selected.asset_code || "");
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo imprimir la etiqueta del activo", "error");
+    } finally {
+      setDownloadingLabelAssetId(null);
+    }
+  };
+
+  const handleConditionPhotoFiles = (files, { append = true } = {}) => {
+    const incoming = Array.from(files || []).filter((file) => file && (!file.type || file.type.startsWith("image/")));
+    if (!incoming.length) return;
+    setForm((current) => {
+      const nextFiles = append
+        ? [...current.condition_photos, ...incoming].slice(0, 2)
+        : incoming.slice(0, 2);
+      return {
+        ...current,
+        condition_photos: nextFiles,
+        condition_photo_previews: nextFiles.map((file) => URL.createObjectURL(file)),
+      };
+    });
+  };
+
+  const removeConditionPhoto = (indexToRemove) => {
+    setForm((current) => {
+      const nextFiles = current.condition_photos.filter((_, index) => index !== indexToRemove);
+      return {
+        ...current,
+        condition_photos: nextFiles,
+        condition_photo_previews: nextFiles.map((file) => URL.createObjectURL(file)),
+      };
+    });
+  };
+
+  const handleBackfillConditionPhotoFiles = (files, { append = true } = {}) => {
+    const incoming = Array.from(files || []).filter((file) => file && (!file.type || file.type.startsWith("image/")));
+    if (!incoming.length) return;
+    setConditionBackfill((current) => {
+      const nextFiles = append
+        ? [...current.photos, ...incoming].slice(0, 2)
+        : incoming.slice(0, 2);
+      return {
+        photos: nextFiles,
+        previews: nextFiles.map((file) => URL.createObjectURL(file)),
+      };
+    });
+  };
+
+  const removeBackfillConditionPhoto = (indexToRemove) => {
+    setConditionBackfill((current) => {
+      const nextFiles = current.photos.filter((_, index) => index !== indexToRemove);
+      return {
+        photos: nextFiles,
+        previews: nextFiles.map((file) => URL.createObjectURL(file)),
+      };
+    });
+  };
+
+  const saveBackfillConditionPhotos = async () => {
+    if (!selected?.id) return;
+    if (conditionBackfill.photos.length !== 2) {
+      return showToast("Debes adjuntar exactamente 2 fotos del estado inicial", "warning");
+    }
+    setSavingConditionPhotos(true);
+    try {
+      await uploadTiAssetInitialConditionPhotos(selected.id, conditionBackfill.photos);
+      showToast("Fotos de registro cargadas correctamente", "success");
+      setConditionBackfill({ photos: [], previews: [] });
+      await loadAll();
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudieron cargar las fotos de registro", "error");
+    } finally {
+      setSavingConditionPhotos(false);
     }
   };
 
@@ -724,13 +1000,21 @@ const TIDeviceManagementPage = () => {
 
   const createAsset = async () => {
     if (!form.name.trim()) return showToast("El nombre es requerido", "warning");
-    if (!form.serial_number.trim())
-      return showToast("El número de serie es requerido", "warning");
-    if (!form.purchase_date)
-      return showToast("La fecha de compra es requerida", "warning");
+    const physicalScore = Number(form.physical_condition_score);
+    const functionalScore = Number(form.functional_condition_score);
+    if (!Number.isInteger(physicalScore) || physicalScore < 1 || physicalScore > 10) {
+      return showToast("El estado físico debe ser una calificación del 1 al 10", "warning");
+    }
+    if (!Number.isInteger(functionalScore) || functionalScore < 1 || functionalScore > 10) {
+      return showToast("El estado funcional debe ser una calificación del 1 al 10", "warning");
+    }
+    if (form.condition_photos.length !== 2) {
+      return showToast("Debes adjuntar exactamente 2 fotos del estado inicial", "warning");
+    }
     setSaving(true);
     try {
-      await createTiAsset(form);
+      const { condition_photo_previews: _previews, ...payload } = form;
+      await createTiAsset(payload);
       showToast("Activo creado correctamente", "success");
       setForm(EMPTY_FORM);
       setShowCreate(false);
@@ -1536,10 +1820,10 @@ const TIDeviceManagementPage = () => {
             <Button
               type="button"
               variant="primary"
-              icon={showCreate ? FiChevronUp : FiPlus}
-              onClick={() => setShowCreate((v) => !v)}
+              icon={FiPlus}
+              onClick={() => setShowCreate(true)}
             >
-              {showCreate ? "Cancelar" : "Nuevo equipo"}
+              Nuevo equipo
             </Button>
           )}
         </div>
@@ -1624,10 +1908,36 @@ const TIDeviceManagementPage = () => {
         );
       })()}
 
+      {!loading && assets.length > 0 && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {CUSTODY_ORDER.map((type) => {
+            const meta = CUSTODY_META[type];
+            const count = filteredAssets.filter((asset) => resolveAssetCustodyType(asset) === type).length;
+            if (custodyFilter !== "all" && custodyFilter !== type) return null;
+            return (
+              <div key={type} className={`rounded-2xl border px-4 py-3 ${meta.tone}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em]">{CUSTODY_LABELS[type]}</p>
+                    <p className="mt-1 text-[11px] leading-snug opacity-80">{meta.description}</p>
+                  </div>
+                  <span className="rounded-full bg-white/80 px-2.5 py-1 text-sm font-semibold">{count}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Create Form */}
-      {showCreate && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-semibold text-slate-800 mb-4">Registrar nuevo equipo</p>
+      <Modal
+        open={showCreate}
+        title="Registrar nuevo equipo"
+        maxWidth="max-w-5xl"
+        onClose={() => setShowCreate(false)}
+        disableClose={saving}
+      >
+        <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <FieldInput
               label="Nombre del equipo"
@@ -1650,8 +1960,7 @@ const TIDeviceManagementPage = () => {
             />
             <FieldInput
               label="Número de serie"
-              required
-              placeholder="Ej: SN-123456789"
+              placeholder="Opcional, no debe repetirse"
               value={form.serial_number}
               onChange={setField("serial_number")}
             />
@@ -1662,7 +1971,7 @@ const TIDeviceManagementPage = () => {
               onChange={setField("imei")}
             />
             <div>
-              <Label required>Fecha de compra</Label>
+              <Label>Fecha de compra</Label>
               <input
                 type="date"
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
@@ -1678,6 +1987,79 @@ const TIDeviceManagementPage = () => {
               value={form.purchase_value}
               onChange={setField("purchase_value")}
             />
+            <FieldInput
+              label="Estado físico (1-10)"
+              required
+              type="number"
+              min={1}
+              max={10}
+              placeholder="Ej: 9"
+              value={form.physical_condition_score}
+              onChange={setField("physical_condition_score")}
+            />
+            <FieldInput
+              label="Estado funcional (1-10)"
+              required
+              type="number"
+              min={1}
+              max={10}
+              placeholder="Ej: 10"
+              value={form.functional_condition_score}
+              onChange={setField("functional_condition_score")}
+            />
+            <div className="sm:col-span-2 lg:col-span-3">
+              <Label required>Fotos del estado inicial ({form.condition_photos.length}/2)</Label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-900 bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800">
+                  <FiCamera size={15} />
+                  Tomar foto
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={(event) => {
+                      handleConditionPhotoFiles(event.target.files, { append: true });
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100">
+                  <FiDownload size={15} />
+                  Seleccionar archivo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      handleConditionPhotoFiles(event.target.files, { append: false });
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">Toma 2 fotos desde la cÃ¡mara. La selecciÃ³n de archivo queda como respaldo.</p>
+              {form.condition_photo_previews.length > 0 && (
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  {form.condition_photo_previews.map((src, index) => (
+                    <div key={src} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white">
+                      <img src={src} alt={`Estado inicial ${index + 1}`} className="h-28 w-full object-cover" />
+                      <span className="absolute left-2 top-2 rounded-full bg-slate-950/80 px-2 py-0.5 text-[10px] font-semibold text-white">
+                        Foto {index + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeConditionPhoto(index)}
+                        className="absolute right-2 top-2 rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-sm hover:bg-white"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="sm:col-span-2 lg:col-span-2">
               <Label>Características</Label>
               <input
@@ -1746,7 +2128,7 @@ const TIDeviceManagementPage = () => {
             </Button>
           </div>
         </div>
-      )}
+      </Modal>
 
       {/* Main Panel */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
@@ -1765,6 +2147,16 @@ const TIDeviceManagementPage = () => {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
+            <select
+              value={custodyFilter}
+              onChange={(e) => { setCustodyFilter(e.target.value); setSelectedId(null); }}
+              className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:border-slate-400 focus:bg-white focus:outline-none"
+            >
+              <option value="all">Todas las custodias</option>
+              {Object.entries(CUSTODY_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
             {selectedAssets.size > 0 && canWrite && (
               <Button
                 type="button"
@@ -1790,9 +2182,30 @@ const TIDeviceManagementPage = () => {
                 </p>
               </div>
             ) : (
-              filteredAssets.map((a) => (
+              filteredAssets.map((a, index) => {
+                const custodyType = resolveAssetCustodyType(a);
+                const previousCustodyType = index > 0 ? resolveAssetCustodyType(filteredAssets[index - 1]) : null;
+                const showCustodyHeader = custodyType !== previousCustodyType;
+                return (
+                <React.Fragment key={a.id}>
+                {showCustodyHeader && (
+                  <div className={`rounded-xl border px-3 py-2 ${CUSTODY_META[custodyType]?.tone || CUSTODY_META.unknown.tone}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em]">
+                          {CUSTODY_META[custodyType]?.title || CUSTODY_META.unknown.title}
+                        </p>
+                        <p className="mt-0.5 text-[11px] opacity-80">
+                          {CUSTODY_META[custodyType]?.description || CUSTODY_META.unknown.description}
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs font-semibold">
+                        {filteredAssets.filter((asset) => resolveAssetCustodyType(asset) === custodyType).length}
+                      </span>
+                    </div>
+                  </div>
+                )}
                 <div
-                  key={a.id}
                   className={`w-full rounded-xl border px-3 py-2.5 transition-colors flex items-center gap-2 ${
                     String(selectedId) === String(a.id)
                       ? "border-slate-300 bg-slate-50 shadow-sm"
@@ -1835,10 +2248,20 @@ const TIDeviceManagementPage = () => {
                         </p>
                       )}
                       <p className="text-xs text-slate-500 mt-1">
-                        {a.assigned_to_name || "Sin asignación"}
+                        {getAssetCustodyOwner(a)}
                       </p>
+                      {getAssetCustodyLocation(a) && (
+                        <p className="text-[11px] text-slate-400 truncate">
+                          {getAssetCustodyLocation(a)}
+                        </p>
+                      )}
                     </div>
-                    <StatusBadge status={a.status} />
+                    <div className="flex flex-col items-end gap-1">
+                      <StatusBadge status={a.status} />
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                        {CUSTODY_LABELS[resolveAssetCustodyType(a)] || "Sin definir"}
+                      </span>
+                    </div>
                   </div>
                   {a.depreciation_pct !== null && a.depreciation_pct !== undefined && (
                     <div className="mt-2 h-1 rounded-full bg-slate-100 overflow-hidden">
@@ -1856,7 +2279,9 @@ const TIDeviceManagementPage = () => {
                   )}
                   </button>
                 </div>
-              ))
+                </React.Fragment>
+                );
+              })
             )}
           </div>
         </div>
@@ -1883,7 +2308,18 @@ const TIDeviceManagementPage = () => {
                       "Sin especificar"}
                   </p>
                 </div>
-                <StatusBadge status={selected.status} />
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <StatusBadge status={selected.status} />
+                  <button
+                    type="button"
+                    onClick={printAssetLabel}
+                    disabled={downloadingLabelAssetId === selected.id}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-60"
+                  >
+                    {downloadingLabelAssetId === selected.id ? <FiRefreshCw size={12} className="animate-spin" /> : <FiPrinter size={12} />}
+                    Imprimir etiqueta
+                  </button>
+                </div>
               </div>
 
               {/* Depreciation */}
@@ -1918,7 +2354,7 @@ const TIDeviceManagementPage = () => {
                     <FieldInput label="Nombre" required value={editFields.name || ""} onChange={setEditField("name")} />
                     <FieldInput label="Marca" value={editFields.brand || ""} onChange={setEditField("brand")} />
                     <FieldInput label="Modelo" value={editFields.model || ""} onChange={setEditField("model")} />
-                    <FieldInput label="Número de serie" required value={editFields.serial_number || ""} onChange={setEditField("serial_number")} />
+                    <FieldInput label="Número de serie" placeholder="Opcional, no debe repetirse" value={editFields.serial_number || ""} onChange={setEditField("serial_number")} />
                     <FieldInput label="IMEI (opcional)" value={editFields.imei || ""} onChange={setEditField("imei")} />
                     <div>
                       <Label>Fecha de compra</Label>
@@ -1945,6 +2381,8 @@ const TIDeviceManagementPage = () => {
                       ["Modelo", selected.model || "-"],
                       ["N° de serie", selected.serial_number || "-"],
                       ["IMEI", selected.imei || "-"],
+                      ["Estado físico", selected.physical_condition_score ? `${selected.physical_condition_score}/10` : "-"],
+                      ["Estado funcional", selected.functional_condition_score ? `${selected.functional_condition_score}/10` : "-"],
                       ["Fecha de compra", selected.purchase_date ? String(selected.purchase_date).slice(0, 10) : "-"],
                       ["Características", safeChars(selected.characteristics) || "-"],
                       ["Frec. mantenimiento", `${selected.maintenance_frequency_months || 12} meses`],
@@ -1960,6 +2398,102 @@ const TIDeviceManagementPage = () => {
                   </div>
                 )}
               </div>
+
+              {selected.initial_condition_photos?.length > 0 && (
+                <div className="border-t border-slate-100 pt-5">
+                  <SectionTitle icon={FiImage}>Fotos de registro</SectionTitle>
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {selected.initial_condition_photos.map((photo) => (
+                      <a
+                        key={photo.index}
+                        href={photo.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="group overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+                      >
+                        <img
+                          src={photo.url}
+                          alt={`Foto de registro ${photo.index}`}
+                          className="h-36 w-full object-cover transition-transform group-hover:scale-[1.02]"
+                          loading="lazy"
+                        />
+                        <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-500">
+                          <span className="font-semibold">Foto {photo.index}</span>
+                          <span>Ver</span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {canWrite && !selected.initial_condition_photos?.length && (
+                <div className="border-t border-slate-100 pt-5">
+                  <SectionTitle icon={FiCamera}>Regularizar fotos de registro</SectionTitle>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Este activo fue registrado sin evidencia fotogrÃ¡fica inicial. Carga exactamente 2 fotos para completar la trazabilidad.
+                  </p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-900 bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800">
+                      <FiCamera size={15} />
+                      Tomar foto
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={(event) => {
+                          handleBackfillConditionPhotoFiles(event.target.files, { append: true });
+                          event.target.value = "";
+                        }}
+                      />
+                    </label>
+                    <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100">
+                      <FiDownload size={15} />
+                      Seleccionar archivo
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={(event) => {
+                          handleBackfillConditionPhotoFiles(event.target.files, { append: false });
+                          event.target.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {conditionBackfill.previews.length > 0 && (
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {conditionBackfill.previews.map((src, index) => (
+                        <div key={src} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white">
+                          <img src={src} alt={`Foto de regularizaciÃ³n ${index + 1}`} className="h-36 w-full object-cover" />
+                          <span className="absolute left-2 top-2 rounded-full bg-slate-950/80 px-2 py-0.5 text-[10px] font-semibold text-white">
+                            Foto {index + 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeBackfillConditionPhoto(index)}
+                            className="absolute right-2 top-2 rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-sm hover:bg-white"
+                          >
+                            Quitar
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-3 flex justify-end">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      icon={savingConditionPhotos ? FiRefreshCw : FiCamera}
+                      disabled={savingConditionPhotos || conditionBackfill.photos.length !== 2}
+                      onClick={saveBackfillConditionPhotos}
+                    >
+                      {savingConditionPhotos ? "Cargando fotos..." : "Guardar fotos"}
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {/* Accessories */}
               <div className="border-t border-slate-100 pt-5">
@@ -2050,6 +2584,61 @@ const TIDeviceManagementPage = () => {
                     </table>
                   </div>
                 )}
+              </div>
+
+              <div className="border-t border-slate-100 pt-5">
+                <div className="flex items-center justify-between mb-3">
+                  <SectionTitle icon={FiTruck}>Custodia y ubicación</SectionTitle>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                    {CUSTODY_LABELS[selected.custody_type] || "Sin definir"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label required>Destino</Label>
+                    <select value={custodyForm.custody_type} onChange={(e) => setCustodyForm((p) => ({ ...p, custody_type: e.target.value }))} disabled={!canWrite} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none disabled:opacity-60">
+                      {Object.entries(CUSTODY_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </div>
+                  {custodyForm.custody_type === "warehouse" && (
+                    <>
+                      <FieldInput label="Código de bodega" value={custodyForm.warehouse_code} onChange={(e) => setCustodyForm((p) => ({ ...p, warehouse_code: e.target.value }))} />
+                      <FieldInput label="Dirección de bodega" value={custodyForm.warehouse_address} onChange={(e) => setCustodyForm((p) => ({ ...p, warehouse_address: e.target.value }))} />
+                      <FieldInput label="Sección" value={custodyForm.warehouse_section} onChange={(e) => setCustodyForm((p) => ({ ...p, warehouse_section: e.target.value }))} />
+                      <FieldInput label="Percha" value={custodyForm.warehouse_shelf} onChange={(e) => setCustodyForm((p) => ({ ...p, warehouse_shelf: e.target.value }))} />
+                    </>
+                  )}
+                  {custodyForm.custody_type === "collaborator" && (
+                    <div>
+                      <Label required>Colaborador custodio</Label>
+                      <select value={custodyForm.to_user_id} onChange={(e) => setCustodyForm((p) => ({ ...p, to_user_id: e.target.value }))} disabled={!canWrite} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none disabled:opacity-60">
+                        <option value="">Selecciona un colaborador</option>
+                        {users.filter((u) => u.active !== false).map((u) => <option key={u.id} value={u.id}>{u.fullname || u.name || u.email}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {custodyForm.custody_type === "client" && (
+                    <div>
+                      <Label required>Cliente custodio</Label>
+                      <input value={custodyClientSearch} onChange={(e) => setCustodyClientSearch(e.target.value)} placeholder="Buscar por razón social, nombre o RUC" className="mb-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none" />
+                      <select value={custodyForm.client_id} onChange={(e) => setCustodyForm((p) => ({ ...p, client_id: e.target.value }))} disabled={!canWrite} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none disabled:opacity-60">
+                        <option value="">Selecciona un cliente</option>
+                        {custodyClients.map((c) => <option key={c.id} value={c.id}>{c.razon_social || c.nombre_comercial} {c.ruc ? `(${c.ruc})` : ""}</option>)}
+                      </select>
+                      {!custodyClients.length && <p className="mt-1 text-[11px] text-amber-600">No hay clientes activos que coincidan con la búsqueda.</p>}
+                    </div>
+                  )}
+                  <FieldInput label="Ubicación / sede" value={custodyForm.custody_type === "client" ? custodyForm.client_location_label : custodyForm.location_label} onChange={(e) => setCustodyForm((p) => custodyForm.custody_type === "client" ? ({ ...p, client_location_label: e.target.value }) : ({ ...p, location_label: e.target.value }))} />
+                  <div>
+                    <Label>Contexto de uso</Label>
+                    <select value={custodyForm.usage_context} onChange={(e) => setCustodyForm((p) => ({ ...p, usage_context: e.target.value }))} disabled={!canWrite} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none disabled:opacity-60">
+                      <option value="internal">Interno</option><option value="customer_site">Sitio del cliente</option><option value="loan">Préstamo</option><option value="spare">Repuesto</option><option value="demo">Demo</option>
+                    </select>
+                  </div>
+                  <FieldInput label="Motivo del movimiento" value={custodyForm.reason} onChange={(e) => setCustodyForm((p) => ({ ...p, reason: e.target.value }))} />
+                </div>
+                {canWrite && <div className="mt-3 flex justify-end"><Button type="button" variant="primary" icon={FiTruck} disabled={saving} onClick={moveCustody}>Registrar movimiento</Button></div>}
+                {custodyHistory.length > 0 && <p className="mt-2 text-[11px] text-slate-400">{custodyHistory.length} movimiento{custodyHistory.length !== 1 ? "s" : ""} registrado{custodyHistory.length !== 1 ? "s" : ""}.</p>}
               </div>
 
               {/* Assignment */}
@@ -2367,8 +2956,10 @@ const TIDeviceManagementPage = () => {
                         </label>
                       </div>
                     )}
-                    {actas.map((acta) => (
-                      <div key={acta.id} className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+                    {actas.map((acta) => {
+                      const isAnnulled = Boolean(acta.is_annulled);
+                      return (
+                      <div key={acta.id} className={`rounded-xl border p-3 space-y-2 ${isAnnulled ? "border-red-100 bg-red-50/40" : "border-slate-200 bg-white"}`}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
@@ -2376,7 +2967,11 @@ const TIDeviceManagementPage = () => {
                                 {acta.tipo}
                               </span>
                               <span className="text-xs font-medium text-slate-700">{acta.acta_code || `#${String(acta.id).padStart(6, "0")}`}</span>
-                              {acta.is_complete ? (
+                              {isAnnulled ? (
+                                <span className="flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">
+                                  <FiAlertCircle size={9} /> Anulada
+                                </span>
+                              ) : acta.is_complete ? (
                                 <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700">
                                   <FiCheck size={9} /> Firmada
                                 </span>
@@ -2398,7 +2993,7 @@ const TIDeviceManagementPage = () => {
                             >
                               {downloadingActaPdf === acta.id ? <FiRefreshCw size={10} className="animate-spin" /> : <FiDownload size={10} />} PDF
                             </button>
-                            {!acta.is_complete && !acta.signed_at && !acta.signed_pdf_drive_file_id && !acta.signed_pdf_sha256 && (
+                            {!isAnnulled && !acta.is_complete && !acta.signed_at && !acta.signed_pdf_drive_file_id && !acta.signed_pdf_sha256 && (
                               <button
                                 type="button"
                                 onClick={() => setEditingActa(acta)}
@@ -2407,7 +3002,7 @@ const TIDeviceManagementPage = () => {
                                 <FiEdit2 size={10} /> Editar
                               </button>
                             )}
-                            {!acta.is_complete && !acta.signed_at && !acta.signed_pdf_drive_file_id && !acta.signed_pdf_sha256 && !acta.signature_workflow_id && (
+                            {!isAnnulled && !acta.is_complete && !acta.signed_at && !acta.signed_pdf_drive_file_id && !acta.signed_pdf_sha256 && !acta.signature_workflow_id && (
                               <button
                                 type="button"
                                 onClick={() => setWorkflowActa(acta)}
@@ -2416,7 +3011,7 @@ const TIDeviceManagementPage = () => {
                                 <FiShield size={10} /> Firma
                               </button>
                             )}
-                            {acta.signature_workflow_id && !acta.is_complete && (
+                            {!isAnnulled && acta.signature_workflow_id && !acta.is_complete && (
                               <span className="flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700 whitespace-nowrap">
                                 <FiRefreshCw size={10} /> En firma
                               </span>
@@ -2424,7 +3019,7 @@ const TIDeviceManagementPage = () => {
                           </div>
                         </div>
                         {/* Upload firmada */}
-                        {!acta.is_complete ? (
+                        {!isAnnulled && !acta.is_complete ? (
                           <label className="flex items-center gap-2 cursor-pointer">
                             <span className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors">
                               {uploadingActaId === acta.id ? (
@@ -2447,7 +3042,8 @@ const TIDeviceManagementPage = () => {
                           )
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

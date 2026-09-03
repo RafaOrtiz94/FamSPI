@@ -125,6 +125,13 @@ const APPROVER_ROLE_ALIASES = {
 };
 
 const GERENCIA_GENERAL_ROLES = new Set(["gerencia_general", "gerente_general", "gerencia", "gerente", "director"]);
+const SPECIAL_JEFE_APPROVERS = {
+  jefe_operaciones: "jefe_financiero",
+  jefe_logistica: "jefe_financiero",
+};
+const APPROVAL_ESCALATION_REMINDER_AFTER_HOURS = 2;
+const APPROVAL_ESCALATION_ASSIGN_AFTER_REMINDER_HOURS = 2;
+const APPROVAL_ESCALATION_TARGET_ROLE = "talento_humano";
 const AUTO_FINAL_PERMISO_TYPES = new Set(["estudios", "personal"]);
 const GENERAL_UNAVAILABILITY_EMAILS = String(
   process.env.TIMEOFF_GENERAL_NOTIFY_EMAILS || "general@fam-project.com"
@@ -141,6 +148,10 @@ const PASSIVE_EMPLOYMENT_STATUS_VALUES = Array.from(PASSIVE_EMPLOYMENT_STATUSES)
 const GENERAL_UNAVAILABILITY_EMERGENCY_APPROVAL_WINDOW_HOURS = 4;
 const EXTERNAL_COORDINATION_ROLES = new Set(["ing_servicio_ext", "esp_app_ext"]);
 const EXTERNAL_COORDINATION_APPROVER_LABEL = "Coordinación externa";
+const APP_TIMEZONE = process.env.APP_TIMEZONE || process.env.TZ || "America/Guayaquil";
+const ESCALATION_WORK_DAYS = new Set([1, 2, 3, 4, 5]);
+const ESCALATION_WORK_START_HHMM = process.env.ATTENDANCE_WORKING_DAY_START || "09:00";
+const ESCALATION_WORK_END_HHMM = process.env.ATTENDANCE_WORKING_DAY_END || "18:00";
 
 function normalizeRoleName(value = "") {
   return String(value || "")
@@ -159,6 +170,7 @@ function resolveApproverRole(requesterRole = "") {
   const normalized = canonicalizeRole(requesterRole);
   if (!normalized) return "gerencia_general";
   if (GERENCIA_GENERAL_ROLES.has(normalized)) return "gerencia_general";
+  if (SPECIAL_JEFE_APPROVERS[normalized]) return SPECIAL_JEFE_APPROVERS[normalized];
 
   const isJefe = normalized.startsWith("jefe_") || normalized.startsWith("jefe");
   if (isJefe) return "gerencia_general";
@@ -224,6 +236,118 @@ function expandApproverLookupRoles(role) {
   }
 
   return Array.from(roles).filter(Boolean);
+}
+
+function parseClockHHMM(value) {
+  const match = String(value || "").trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!match) return null;
+  return (Number(match[1]) * 60) + Number(match[2]);
+}
+
+function getTimeZoneClockParts(dateValue = new Date(), timeZone = APP_TIMEZONE) {
+  const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const map = parts.reduce((acc, part) => {
+    if (part.type !== "literal") acc[part.type] = part.value;
+    return acc;
+  }, {});
+
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour),
+    minute: Number(map.minute),
+    second: Number(map.second),
+    dateKey: `${map.year}-${map.month}-${map.day}`,
+  };
+}
+
+function addDaysToDateKey(dateKey, days = 0) {
+  const [year, month, day] = String(dateKey || "").split("-").map(Number);
+  if (![year, month, day].every(Number.isFinite)) return null;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  return [
+    String(date.getUTCFullYear()).padStart(4, "0"),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function getWeekdayFromDateKey(dateKey) {
+  const [year, month, day] = String(dateKey || "").split("-").map(Number);
+  if (![year, month, day].every(Number.isFinite)) return null;
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+}
+
+function computeBusinessMinutesElapsed(startValue, endValue = new Date(), options = {}) {
+  const startParts = getTimeZoneClockParts(startValue, options.timeZone || APP_TIMEZONE);
+  const endParts = getTimeZoneClockParts(endValue, options.timeZone || APP_TIMEZONE);
+  if (!startParts || !endParts) return 0;
+
+  const startLocalMs = Date.UTC(
+    startParts.year,
+    startParts.month - 1,
+    startParts.day,
+    startParts.hour,
+    startParts.minute,
+    startParts.second || 0
+  );
+  const endLocalMs = Date.UTC(
+    endParts.year,
+    endParts.month - 1,
+    endParts.day,
+    endParts.hour,
+    endParts.minute,
+    endParts.second || 0
+  );
+  if (!Number.isFinite(startLocalMs) || !Number.isFinite(endLocalMs) || endLocalMs <= startLocalMs) return 0;
+
+  const workDays = options.workDays || ESCALATION_WORK_DAYS;
+  const workStartMinutes = Number.isFinite(options.workStartMinutes)
+    ? options.workStartMinutes
+    : (parseClockHHMM(ESCALATION_WORK_START_HHMM) ?? (9 * 60));
+  const workEndMinutes = Number.isFinite(options.workEndMinutes)
+    ? options.workEndMinutes
+    : (parseClockHHMM(ESCALATION_WORK_END_HHMM) ?? (18 * 60));
+  if (workEndMinutes <= workStartMinutes) return 0;
+
+  let totalMinutes = 0;
+  let cursorDateKey = startParts.dateKey;
+  while (cursorDateKey) {
+    const weekday = getWeekdayFromDateKey(cursorDateKey);
+    if (workDays.has(weekday)) {
+      const dayStartMinutes = cursorDateKey === startParts.dateKey
+        ? (startParts.hour * 60) + startParts.minute
+        : 0;
+      const dayEndMinutes = cursorDateKey === endParts.dateKey
+        ? (endParts.hour * 60) + endParts.minute
+        : (24 * 60);
+      const overlapStart = Math.max(dayStartMinutes, workStartMinutes);
+      const overlapEnd = Math.min(dayEndMinutes, workEndMinutes);
+      if (overlapEnd > overlapStart) totalMinutes += overlapEnd - overlapStart;
+    }
+
+    if (cursorDateKey === endParts.dateKey) break;
+    cursorDateKey = addDaysToDateKey(cursorDateKey, 1);
+  }
+
+  return totalMinutes;
 }
 
 async function findApproverByRole(role, excludeUserId = null) {
@@ -537,10 +661,6 @@ async function getVacationConsumption({ userId, userEmail, year }) {
       if (isApproved) approved += days;
       if (isPending) pending += days;
       return;
-    }
-
-    if (row?.charged_to_vacation && isApproved) {
-      approved += getChargedVacationDays(row);
     }
   });
 
@@ -1494,7 +1614,7 @@ async function processExpiredPendingSolicitudes({ solicitudIds = null } = {}) {
 
   // Regla adicional:
   // Si la solicitud quedó parcialmente aprobada o pendiente final y no se cargaron justificantes
-  // hasta el fin del permiso, se rechaza automáticamente y se carga a vacaciones.
+  // hasta el fin del permiso, se rechaza automáticamente sin descontar vacaciones.
   const staleJustificationQuery = `
     SELECT *
       FROM permisos_vacaciones
@@ -1503,13 +1623,12 @@ async function processExpiredPendingSolicitudes({ solicitudIds = null } = {}) {
        AND COALESCE(charged_to_vacation, false) = false
   `;
   const staleRowsResult = await db.query(staleJustificationQuery);
-  let autoChargedByMissingJustification = 0;
+  let autoRejectedByMissingJustification = 0;
   for (const row of staleRowsResult.rows || []) {
     if (!isExpiredWithoutJustificationAfterPartialApproval(row)) continue;
-    const charge = buildVacationCharge(row);
     const autoObs = [
       ...(Array.isArray(row?.observaciones) ? row.observaciones : []),
-      "Rechazo automático: no se cargaron justificantes en el plazo del permiso. Se carga a vacaciones.",
+      "Rechazo automático: no se cargaron justificantes en el plazo del permiso.",
     ];
 
     const { rows: updatedRows } = await db.query(
@@ -1518,35 +1637,26 @@ async function processExpiredPendingSolicitudes({ solicitudIds = null } = {}) {
               observaciones = $2,
               aprobacion_final_por = COALESCE(aprobacion_final_por, 'system_auto_no_justification'),
               aprobacion_final_at = COALESCE(aprobacion_final_at, NOW()),
-              charged_to_vacation = true,
-              charged_vacation_hours = COALESCE(charged_vacation_hours, $3),
-              charged_vacation_days = COALESCE(charged_vacation_days, $4),
-              charged_to_vacation_at = COALESCE(charged_to_vacation_at, NOW()),
-              charged_to_vacation_reason = COALESCE(charged_to_vacation_reason, 'missing_justification'),
               updated_at = NOW()
         WHERE id = $1
           AND LOWER(COALESCE(status, '')) IN ('partially_approved', 'pending_final')
-          AND COALESCE(charged_to_vacation, false) = false
         RETURNING *`,
-      [row.id, autoObs, charge.hours, charge.days],
+      [row.id, autoObs],
     );
     const updated = updatedRows[0];
     if (!updated) continue;
 
-    autoChargedByMissingJustification += 1;
+    autoRejectedByMissingJustification += 1;
     try {
       await logAction({
         usuario_id: null,
         usuario_email: "system_auto_no_justification",
         modulo: "permisos",
         accion: "rechazo_automatico_sin_justificantes",
-        descripcion: "Solicitud rechazada automáticamente por falta de justificantes y cargada a vacaciones.",
+        descripcion: "Solicitud rechazada automáticamente por falta de justificantes.",
         datos_nuevos: {
           solicitud_id: updated.id,
-          charged_to_vacation: true,
-          charged_vacation_hours: updated.charged_vacation_hours,
-          charged_vacation_days: updated.charged_vacation_days,
-          charged_to_vacation_reason: updated.charged_to_vacation_reason,
+          status: updated.status,
         },
         contexto: { auto: true },
       });
@@ -1558,7 +1668,7 @@ async function processExpiredPendingSolicitudes({ solicitudIds = null } = {}) {
   return {
     scanned: rows.length,
     cancelled,
-    auto_charged_missing_justification: autoChargedByMissingJustification,
+    auto_rejected_missing_justification: autoRejectedByMissingJustification,
   };
 }
 
@@ -1573,22 +1683,16 @@ async function settleExpiredRecoveryCoordination(row = {}) {
   const today = getCurrentDateInAppTimezone();
   if (!deadlineDate || !today || today <= deadlineDate) return row;
 
-  const vacationCharge = buildVacationCharge(row);
   const { rows } = await db.query(
     `UPDATE permisos_vacaciones
         SET recovery_coordination_status = 'finalized_by_approver',
-            charged_to_vacation = true,
-            charged_vacation_hours = COALESCE(charged_vacation_hours, $2),
-            charged_vacation_days = COALESCE(charged_vacation_days, $3),
-            charged_to_vacation_at = COALESCE(charged_to_vacation_at, NOW()),
-            charged_to_vacation_reason = COALESCE(charged_to_vacation_reason, 'no_recovery_agreement'),
             updated_at = NOW()
       WHERE id = $1
         AND COALESCE(es_recuperable, false) = true
         AND LOWER(COALESCE(status, '')) IN ('approved', 'aprobado')
         AND LOWER(COALESCE(recovery_coordination_status, '')) IN ('pending_approver_proposal', 'pending_requester_acceptance')
       RETURNING *`,
-    [row.id, vacationCharge.hours, vacationCharge.days]
+    [row.id]
   );
   const settled = rows[0] || row;
   if (rows[0]) {
@@ -1597,15 +1701,11 @@ async function settleExpiredRecoveryCoordination(row = {}) {
         usuario_id: row?.approver_user_id || null,
         usuario_email: row?.approver_email || "system",
         modulo: "permisos",
-        accion: "descuento_vacaciones_sin_coordinacion",
-        descripcion: "Se cerró coordinación de recuperación por vencimiento y se aplicó descuento a vacaciones.",
+        accion: "cierre_sin_coordinacion",
+        descripcion: "Se cerró coordinación de recuperación por vencimiento sin descontar vacaciones.",
         datos_nuevos: {
           solicitud_id: settled.id,
           recovery_coordination_status: settled.recovery_coordination_status,
-          charged_to_vacation: Boolean(settled.charged_to_vacation),
-          charged_vacation_hours: settled.charged_vacation_hours,
-          charged_vacation_days: settled.charged_vacation_days,
-          charged_to_vacation_reason: settled.charged_to_vacation_reason || "no_recovery_agreement",
         },
         contexto: { auto: true },
       });
@@ -1640,7 +1740,7 @@ async function processExpiredRecoveryCoordinations() {
 
   const settledRows = await settleExpiredRecoveryCoordinationRows(rows);
   const settledCount = settledRows.reduce((acc, row) => {
-    return acc + (normalizeRecoveryCoordinationStatus(row?.recovery_coordination_status) === "finalized_by_approver" && row?.charged_to_vacation ? 1 : 0);
+    return acc + (normalizeRecoveryCoordinationStatus(row?.recovery_coordination_status) === "finalized_by_approver" ? 1 : 0);
   }, 0);
 
   return {
@@ -2098,6 +2198,24 @@ async function ensureTable() {
     await db.query("ALTER TABLE permisos_vacaciones DROP CONSTRAINT IF EXISTS permisos_vacaciones_escalation_status_check");
     await db.query(
       "ALTER TABLE permisos_vacaciones ADD CONSTRAINT permisos_vacaciones_escalation_status_check CHECK (escalation_status IN ('none','reminder_sent','escalated'))"
+    );
+    // Escalamiento de la etapa final (pending_final) — bug real: el
+    // escalamiento de arriba solo cubria status IN ('pending','pendiente'),
+    // asi que una solicitud que ya recibio aprobacion parcial y subio
+    // justificantes (status='pending_final') quedaba excluida para siempre
+    // de recordatorio/escalamiento, sin importar cuanto tiempo pasara
+    // esperando al aprobador final. Se usan columnas separadas (no se
+    // reutiliza escalation_status) porque una misma solicitud pasa por
+    // ambas etapas y cada una necesita su propio ciclo de recordatorio.
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS pending_final_at TIMESTAMPTZ");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS escalation_final_status TEXT NOT NULL DEFAULT 'none'");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS escalation_final_reminder_sent_at TIMESTAMPTZ");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS escalation_final_escalated_at TIMESTAMPTZ");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS escalation_final_escalated_to_user_id INTEGER");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS escalation_final_escalated_to_email TEXT");
+    await db.query("ALTER TABLE permisos_vacaciones DROP CONSTRAINT IF EXISTS permisos_vacaciones_escalation_final_status_check");
+    await db.query(
+      "ALTER TABLE permisos_vacaciones ADD CONSTRAINT permisos_vacaciones_escalation_final_status_check CHECK (escalation_final_status IN ('none','reminder_sent','escalated'))"
     );
 
     // Estado formal de justificante — Bloque 2
@@ -3600,6 +3718,12 @@ async function subirJustificantes({ id, urls, user }) {
               status = 'pending_final',
               justificante_status = 'entregado',
               auto_cancelled_justification_submitted_at = NOW(),
+              pending_final_at = NOW(),
+              escalation_final_status = 'none',
+              escalation_final_reminder_sent_at = NULL,
+              escalation_final_escalated_at = NULL,
+              escalation_final_escalated_to_user_id = NULL,
+              escalation_final_escalated_to_email = NULL,
               updated_at = now()
         WHERE id = $1
       RETURNING *`,
@@ -3638,6 +3762,12 @@ async function subirJustificantes({ id, urls, user }) {
             status = 'pending_final',
             justificante_status = 'entregado',
             justificante_resubmitted_at = CASE WHEN $3 THEN NOW() ELSE justificante_resubmitted_at END,
+            pending_final_at = NOW(),
+            escalation_final_status = 'none',
+            escalation_final_reminder_sent_at = NULL,
+            escalation_final_escalated_at = NULL,
+            escalation_final_escalated_to_user_id = NULL,
+            escalation_final_escalated_to_email = NULL,
             updated_at = now()
       WHERE id = $1
     RETURNING *`,
@@ -3964,6 +4094,24 @@ async function aprobarFinal({ id, approver, meta }) {
     normalizeBooleanFlag(solicitud.is_urgent) &&
     ["procedente", "aceptado_por_excepcion"].includes(currentProvisionalStatus);
 
+  // Mensaje especifico para el caso confuso mas comun: TH intenta aprobar una
+  // solicitud urgente cuyo justificante (ej. certificado medico) ya se subio
+  // pero aun no se revisa -- sin este chequeo, cae al 403 generico de abajo
+  // ("No autorizado") aunque TH si es el actor correcto, solo le falta un paso.
+  const currentJustificanteStatus = String(solicitud.justificante_status || "").toLowerCase();
+  if (
+    isActorTH &&
+    normalizeBooleanFlag(solicitud.is_urgent) &&
+    !isUrgentTHApproval &&
+    ["entregado", "en_revision", "observado"].includes(currentJustificanteStatus)
+  ) {
+    const err = new Error(
+      "Debes revisar el justificante (ej. certificado médico) antes de emitir la aprobación final de esta solicitud urgente."
+    );
+    err.status = 409;
+    throw err;
+  }
+
   if (!isUrgentTHApproval && !canApprove({ approverRole: solicitud.approver_role, approverUserId: solicitud.approver_user_id, approver })) {
     const err = new Error("No autorizado para aprobar esta solicitud");
     err.status = 403;
@@ -4255,11 +4403,6 @@ async function rechazar({ id, approver, observaciones, meta }) {
     throw err;
   }
   const approverName = getDisplayName(approver);
-  const status = normalizeStatusText(solicitud?.status);
-  const shouldChargeToVacationOnReject =
-    String(solicitud?.tipo_solicitud || "").toLowerCase() !== "vacaciones" &&
-    ["partially_approved", "pending_final"].includes(status);
-  const vacationCharge = shouldChargeToVacationOnReject ? buildVacationCharge(solicitud) : { hours: 0, days: 0 };
   const { rows } = await db.query(
     `UPDATE permisos_vacaciones
         SET status = 'rejected',
@@ -4267,17 +4410,12 @@ async function rechazar({ id, approver, observaciones, meta }) {
             updated_at = now(),
             aprobacion_final_por = $3,
             aprobacion_final_at = now(),
-            charged_to_vacation = CASE WHEN $4 THEN true ELSE COALESCE(charged_to_vacation, false) END,
-            charged_vacation_hours = CASE WHEN $4 THEN COALESCE(charged_vacation_hours, $5) ELSE charged_vacation_hours END,
-            charged_vacation_days = CASE WHEN $4 THEN COALESCE(charged_vacation_days, $6) ELSE charged_vacation_days END,
-            charged_to_vacation_at = CASE WHEN $4 THEN COALESCE(charged_to_vacation_at, NOW()) ELSE charged_to_vacation_at END,
-            charged_to_vacation_reason = CASE WHEN $4 THEN COALESCE(charged_to_vacation_reason, 'justification_rejected') ELSE charged_to_vacation_reason END,
             pdf_validacion_legal_url = NULL,
             legal_verification_token = NULL,
             legal_verification_created_at = NULL
       WHERE id = $1
     RETURNING *`,
-    [id, obsArray, approverName, shouldChargeToVacationOnReject, vacationCharge.hours, vacationCharge.days]
+    [id, obsArray, approverName]
   );
   await logAction({ usuario_email: approver?.email, modulo: "permisos", accion: "rechazar" });
   try {
@@ -4285,9 +4423,7 @@ async function rechazar({ id, approver, observaciones, meta }) {
       await notificationManager.sendNotification({
         userId: rows[0].user_id,
         customTitle: "Solicitud rechazada",
-        customMessage: shouldChargeToVacationOnReject
-          ? "Tu solicitud fue rechazada. Al no validar la justificación, el tiempo se cargó a vacaciones. Revisa las observaciones."
-          : "Tu solicitud fue rechazada. Revisa las observaciones.",
+        customMessage: "Tu solicitud fue rechazada. Revisa las observaciones.",
         type: "warning",
         source: "permisos_vacaciones",
         priority: 1,
@@ -4894,7 +5030,7 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
     const executed = Number(solicitud.recovery_executed_hours || 0);
     if (totalPlanned > 0 && executed < totalPlanned - 0.01) {
       const err = new Error(
-        `No se puede cerrar: faltan ${roundToTwo(totalPlanned - executed)}h por recuperar (${executed}h de ${totalPlanned}h completadas). Usa 'finalize' para cerrar con cargo a vacaciones.`
+        `No se puede cerrar: faltan ${roundToTwo(totalPlanned - executed)}h por recuperar (${executed}h de ${totalPlanned}h completadas). Usa 'finalize' para cerrar el plan sin descuento a vacaciones.`
       );
       err.status = 409;
       throw err;
@@ -4925,7 +5061,7 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
         await notificationManager.sendNotification({
           userId: updated.user_id,
           customTitle: "Recuperación verificada y cerrada",
-          customMessage: `El jefe verificó y cerró exitosamente tu plan de recuperación de la solicitud #${updated.id}. No se aplicó cargo a vacaciones.`,
+          customMessage: `El jefe verificó y cerró exitosamente tu plan de recuperación de la solicitud #${updated.id}.`,
           type: "info",
           source: "permisos_vacaciones",
           priority: 1,
@@ -5007,11 +5143,6 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
             recovery_plan_updated_by_user_id = $4,
             recovery_coordination_status = $5,
             recovery_coordination_round = $6,
-            charged_to_vacation = CASE WHEN $7 THEN true ELSE COALESCE(charged_to_vacation, false) END,
-            charged_vacation_hours = CASE WHEN $7 THEN $8 ELSE charged_vacation_hours END,
-            charged_vacation_days = CASE WHEN $7 THEN $9 ELSE charged_vacation_days END,
-            charged_to_vacation_at = CASE WHEN $7 THEN NOW() ELSE charged_to_vacation_at END,
-            charged_to_vacation_reason = CASE WHEN $7 THEN 'no_recovery_agreement' ELSE charged_to_vacation_reason END,
             updated_at = NOW()
       WHERE id = $1
       RETURNING *`,
@@ -5022,9 +5153,6 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
       actorId,
       nextCoordinationStatus,
       nextRound,
-      Boolean(vacationCharge),
-      vacationCharge?.hours || null,
-      vacationCharge?.days || null,
     ]
   );
   const updated = updatedRows[0];
@@ -5040,8 +5168,7 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
           : "proponer_plan_recuperacion",
     datos_nuevos: recoveryAction === "finalize" ? {
       solicitud_id: id,
-      vacation_charge_hours: vacationCharge?.hours ?? 0,
-      vacation_charge_days: vacationCharge?.days ?? 0,
+      unfinished_recovery_hours: vacationCharge?.hours ?? 0,
       recovery_executed_hours: Number(solicitud.recovery_executed_hours || 0),
     } : undefined,
   });
@@ -5054,7 +5181,7 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
           ? "La propuesta de recuperación fue aprobada. El colaborador puede comenzar a registrar avances."
           : recoveryAction === "finalize"
             ? vacationCharge
-              ? `No hubo recuperación completa y se cargaron ${vacationCharge.hours}h a vacaciones (${vacationCharge.days} día(s)).`
+              ? `El plan fue cerrado por el jefe inmediato con ${vacationCharge.hours}h pendientes de recuperación, sin descuento a vacaciones.`
               : "El plan fue cerrado por el jefe inmediato. Las horas ya habían sido recuperadas."
             : isApprover
               ? "El jefe inmediato propuso tramos de recuperación para revisión del solicitante."
@@ -5072,9 +5199,7 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
           recovery_plan_total_hours: updated.recovery_plan_total_hours,
           recovery_coordination_status: updated.recovery_coordination_status,
           recovery_action: recoveryAction,
-          charged_to_vacation: Boolean(updated?.charged_to_vacation),
-          charged_vacation_hours: updated?.charged_vacation_hours || null,
-          charged_vacation_days: updated?.charged_vacation_days || null,
+          unfinished_recovery_hours: vacationCharge?.hours || 0,
           target_path: `/dashboard/talento-humano/permisos?tab=approve&solicitudId=${updated.id}&openRecovery=true`,
         },
       });
@@ -5262,9 +5387,7 @@ async function listarPorUsuario({ user }) {
     approved_days: approvedVacationDays,
     pending_days: pendingVacationDays,
     rejected_days: rejectedVacationDays,
-    charged_from_permisos_days: roundToTwo(
-      chargedPermissionRows.reduce((acc, row) => acc + getChargedVacationDays(row), 0)
-    ),
+    charged_from_permisos_days: 0,
     requested_count: vacationRows.length,
     approved_count: vacationRows.filter((row) => ["approved", "aprobado"].includes(String(row.status || "").toLowerCase())).length,
     pending_count: vacationRows.filter((row) =>
@@ -5435,6 +5558,10 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
         p.status,
         p.duracion_dias,
         p.duracion_horas,
+        p.fecha_inicio_hora,
+        p.fecha_fin_hora,
+        p.pdf_generado_url,
+        p.pdf_validacion_legal_url,
         p.charged_to_vacation,
         p.charged_vacation_hours,
         p.charged_vacation_days,
@@ -5480,6 +5607,8 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
         v.created_at,
         v.approver_id,
         v.approver_role,
+        v.drive_pdf_link,
+        v.pdf_validacion_legal_url,
         COALESCE(au.fullname, au.name, au.email) AS approver_name
       FROM vacaciones_solicitudes v
       LEFT JOIN users u ON u.id = v.requester_id
@@ -5490,6 +5619,29 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
       ORDER BY v.created_at DESC`,
     [filterDeptId, filterYear]
   );
+
+  // ponytail: un solo round trip para el saldo historico de todos los
+  // colaboradores en vez de una query por usuario (N+1). Mismo filtro
+  // user_id OR email que getHistoricVacationBalance, aplicado en memoria.
+  const balanceYear = new Date().getFullYear();
+  const historicalRows = await db
+    .query(`SELECT user_id, user_email, dias FROM vacaciones_saldos_historicos WHERE anio = $1`, [balanceYear])
+    .then((result) => result.rows || [])
+    .catch((error) => {
+      if (error?.code === "42P01") return [];
+      throw error;
+    });
+  const sumHistoricalBalance = ({ userId, userEmail }) => {
+    const email = String(userEmail || "").trim().toLowerCase();
+    let total = 0;
+    for (const row of historicalRows) {
+      const rowEmail = String(row.user_email || "").trim().toLowerCase();
+      if ((userId && row.user_id === userId) || (email && rowEmail === email)) {
+        total += Number(row.dias) || 0;
+      }
+    }
+    return total;
+  };
 
   const collaborators = new Map();
   const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
@@ -5559,12 +5711,7 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
     const key = buildKey({ userEmail, userId: user.id });
     if (collaborators.has(key)) continue;
     const allowanceInfo = computeVacationAllowance(user.fecha_ingreso, new Date());
-    const year = new Date().getFullYear();
-    const historicalBalance = await getHistoricVacationBalance({
-      userId: user.id,
-      userEmail,
-      year,
-    });
+    const historicalBalance = sumHistoricalBalance({ userId: user.id, userEmail });
     const specialOpeningProfile = getSpecialVacationOpeningProfile(userEmail, new Date());
     let totalAllowance = allowanceInfo.allowance + historicalBalance;
     let carryOver = historicalBalance;
@@ -5652,6 +5799,8 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
           row.cancellation_reviewed_by_email ||
           row.cancellation_requested_by_email ||
           null,
+        documento_url: row.pdf_generado_url || null,
+        pdf_validacion_legal_url: row.pdf_validacion_legal_url || null,
       });
       return;
     }
@@ -5660,9 +5809,6 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
     if (status === "approved" || status === "aprobado") {
       record.permisos.aprobacion_completa += 1;
       record.permisos.aprobados += 1;
-      if (row.charged_to_vacation) {
-        record.vacaciones.dias_aprobados += getChargedVacationDays(row);
-      }
     } else if (status === "partially_approved") {
       record.permisos.aprobacion_parcial += 1;
     } else if (status === "pending" || status === "pending_final" || status === "pendiente") {
@@ -5675,6 +5821,8 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
       tipo_permiso: row.tipo_permiso,
       fecha_inicio: row.fecha_inicio,
       fecha_fin: row.fecha_fin,
+      fecha_inicio_hora: row.fecha_inicio_hora,
+      fecha_fin_hora: row.fecha_fin_hora,
       duracion_horas: row.duracion_horas,
       duracion_dias: row.duracion_dias,
       charged_to_vacation: row.charged_to_vacation,
@@ -5695,6 +5843,8 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
         row.cancellation_reviewed_by_email ||
         row.cancellation_requested_by_email ||
         null,
+      documento_url: row.pdf_generado_url || null,
+      pdf_validacion_legal_url: row.pdf_validacion_legal_url || null,
     });
   });
 
@@ -5731,6 +5881,8 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
       source: "vacaciones_solicitudes",
       solicitante: row.requester_name || row.requester_email || null,
       aprobacion_final_por: row.approver_name || row.approver_role || null,
+      documento_url: row.drive_pdf_link || null,
+      pdf_validacion_legal_url: row.pdf_validacion_legal_url || null,
     });
   });
 
@@ -5752,6 +5904,25 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
       record.vacaciones.dias_aprobados -
       record.vacaciones.dias_pendientes;
     record.vacaciones.dias_restantes = saldo;
+
+    // Saldo tipo estado de cuenta: cada solicitud de vacaciones muestra el
+    // saldo antes y despues de esa transaccion especifica, en el mismo orden
+    // cronologico en que se fueron consumiendo los dias. Rechazadas/canceladas
+    // no descuentan (nunca llegaron a consumir el saldo).
+    const sortedVacationItems = [...record.vacaciones.items].sort(
+      (a, b) => new Date(a.fecha_inicio || a.created_at || 0) - new Date(b.fecha_inicio || b.created_at || 0),
+    );
+    let runningBalance = record.vacaciones.dias_disponibles;
+    sortedVacationItems.forEach((item) => {
+      const status = String(item.status || "").toLowerCase();
+      const consumesBalance = !["rejected", "rechazado", "cancelled", "cancelado"].includes(status);
+      item.saldo_antes = roundToTwo(runningBalance);
+      if (consumesBalance) {
+        runningBalance -= Number(item.duracion_dias || 0);
+      }
+      item.saldo_despues = roundToTwo(runningBalance);
+    });
+
     return {
       ...record,
       fullname: record.user_fullname || null,
@@ -5828,88 +5999,7 @@ async function processAutoCancelledJustificationDeductions() {
        AND LOWER(COALESCE(status, '')) = 'cancelled'
        AND COALESCE(charged_to_vacation, false) = false
   `);
-
-  if (!rows.length) return { scanned: 0, deducted: 0 };
-
-  let deducted = 0;
-  for (const row of rows) {
-    try {
-      const vacationCharge = buildVacationCharge(row);
-      const { rows: updated } = await db.query(
-        `UPDATE permisos_vacaciones
-            SET charged_to_vacation = true,
-                charged_vacation_hours = COALESCE(charged_vacation_hours, $2),
-                charged_vacation_days = COALESCE(charged_vacation_days, $3),
-                charged_to_vacation_at = COALESCE(charged_to_vacation_at, NOW()),
-                charged_to_vacation_reason = COALESCE(charged_to_vacation_reason, 'auto_cancelled_no_justification'),
-                updated_at = NOW()
-          WHERE id = $1
-            AND COALESCE(charged_to_vacation, false) = false
-          RETURNING *`,
-        [row.id, vacationCharge.hours, vacationCharge.days]
-      );
-
-      if (!updated[0]) continue;
-
-      try {
-        await logAction({
-          usuario_id: null,
-          usuario_email: "system_auto_expiry",
-          modulo: "permisos",
-          accion: "descuento_vacaciones_sin_justificacion",
-          descripcion: "Dias descontados de vacaciones por solicitud cancelada automaticamente sin justificacion dentro del plazo.",
-          datos_nuevos: {
-            solicitud_id: row.id,
-            charged_vacation_hours: vacationCharge.hours,
-            charged_vacation_days: vacationCharge.days,
-            charged_to_vacation_reason: "auto_cancelled_no_justification",
-          },
-          contexto: { auto: true },
-        });
-      } catch (auditErr) {
-        logger.warn({ auditErr, solicitudId: row.id }, "No se pudo registrar auditoria de descuento automatico");
-      }
-
-      if (row.user_id) {
-        await notificationManager.sendNotification({
-          userId: row.user_id,
-          customTitle: "Dias descontados de vacaciones",
-          customMessage: `La solicitud #${row.id} no fue justificada dentro del plazo de 30 dias. Se han descontado ${vacationCharge.days} dia(s) de tus vacaciones disponibles.`,
-          type: "alert",
-          source: "permisos_vacaciones",
-          priority: 2,
-          email: true,
-          meta: {
-            solicitud_id: row.id,
-            charged_vacation_days: vacationCharge.days,
-            target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${row.id}`,
-          },
-        });
-      }
-
-      if (row.approver_user_id) {
-        await notificationManager.sendNotification({
-          userId: row.approver_user_id,
-          customTitle: "Descuento automatico de vacaciones aplicado",
-          customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} no fue justificada. Se descontaron ${vacationCharge.days} dia(s) de sus vacaciones.`,
-          type: "info",
-          source: "permisos_vacaciones",
-          priority: 1,
-          email: false,
-          meta: {
-            solicitud_id: row.id,
-            charged_vacation_days: vacationCharge.days,
-          },
-        });
-      }
-
-      deducted += 1;
-    } catch (err) {
-      logger.warn({ err, solicitudId: row.id }, "Error aplicando descuento automatico de vacaciones");
-    }
-  }
-
-  return { scanned: rows.length, deducted };
+  return { scanned: rows.length, deducted: 0, disabled: true };
 }
 
 // ─── Reportes para Talento Humano — Bloque 9 ─────────────────────────────────
@@ -5989,7 +6079,7 @@ async function getReportePeriodo({ startDate, endDate, departmentId = null, tipo
         NULL AS subtipo_calamidad,
         NULL AS subtipo_salud,
         v.status,
-        v.days AS duracion_dias,
+        COALESCE(v.effective_days, v.days) AS duracion_dias,
         NULL AS duracion_horas,
         false AS es_emergencia,
         false AS es_recuperable,
@@ -6066,7 +6156,7 @@ async function getKpiDashboard({ year = null, departmentId = null } = {}) {
         EXTRACT(MONTH FROM COALESCE(v.start_date, v.created_at)) AS mes,
         'vacaciones' AS tipo_solicitud,
         v.status,
-        v.days AS duracion_dias,
+        COALESCE(v.effective_days, v.days) AS duracion_dias,
         v.created_at,
         v.approved_at AS aprobacion_final_at
       FROM vacaciones_solicitudes v
@@ -6265,18 +6355,20 @@ async function processJustificanteVencimientos() {
 async function processApprovalEscalationReminders() {
   await ensureTable();
 
-  // Fase 1: Recordatorio al jefe — 48 h antes y aún sin acción de escalamiento
-  const { rows: reminderRows } = await db.query(`
+  // Fase 1: Recordatorio al aprobador real — 2 h sin respuesta desde la creación
+  const { rows: reminderCandidateRows } = await db.query(`
     SELECT *
       FROM permisos_vacaciones
      WHERE LOWER(COALESCE(status, '')) IN ('pending', 'pendiente')
        AND escalation_status = 'none'
-       AND fecha_inicio IS NOT NULL
-       AND fecha_inicio > NOW()
-       AND fecha_inicio - NOW() <= INTERVAL '48 hours'
+       AND created_at IS NOT NULL
+       AND created_at <= NOW() - ($1::integer * INTERVAL '1 hour')
        AND aprobacion_parcial_at IS NULL
        AND aprobacion_final_at IS NULL
-  `);
+  `, [APPROVAL_ESCALATION_REMINDER_AFTER_HOURS]);
+  const reminderRows = reminderCandidateRows.filter((row) =>
+    computeBusinessMinutesElapsed(row.created_at, new Date()) >= (APPROVAL_ESCALATION_REMINDER_AFTER_HOURS * 60)
+  );
 
   let reminded = 0;
   for (const row of reminderRows) {
@@ -6295,7 +6387,7 @@ async function processApprovalEscalationReminders() {
         await notificationManager.sendNotification({
           userId: row.approver_user_id,
           customTitle: "Solicitud pendiente de aprobacion",
-          customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} inicia en menos de 48 horas y aun no ha sido aprobada. Por favor, revisa y aprueba o rechaza a la brevedad.`,
+          customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} sigue pendiente despues de ${APPROVAL_ESCALATION_REMINDER_AFTER_HOURS} horas. Por favor, revisa y aprueba o rechaza a la brevedad.`,
           type: "alert",
           source: "permisos_vacaciones",
           priority: 2,
@@ -6315,7 +6407,7 @@ async function processApprovalEscalationReminders() {
           usuario_email: "system_escalation",
           modulo: "permisos",
           accion: "escalation_reminder_sent",
-          descripcion: "Recordatorio automatico enviado al aprobador por solicitud sin respuesta a 48 h del inicio.",
+          descripcion: `Recordatorio automatico enviado al aprobador por solicitud sin respuesta tras ${APPROVAL_ESCALATION_REMINDER_AFTER_HOURS} horas desde su creacion.`,
           datos_nuevos: { solicitud_id: row.id, approver_user_id: row.approver_user_id },
           contexto: { auto: true },
         });
@@ -6327,25 +6419,28 @@ async function processApprovalEscalationReminders() {
     }
   }
 
-  // Fase 2: Escalamiento a gerencia_general — 24 h antes y recordatorio ya enviado
-  const { rows: escalationRows } = await db.query(`
+  // Fase 2: Escalamiento a talento_humano — 4 h sin respuesta desde el primer recordatorio
+  const { rows: escalationCandidateRows } = await db.query(`
     SELECT *
       FROM permisos_vacaciones
      WHERE LOWER(COALESCE(status, '')) IN ('pending', 'pendiente')
        AND escalation_status = 'reminder_sent'
-       AND fecha_inicio IS NOT NULL
-       AND fecha_inicio > NOW()
-       AND fecha_inicio - NOW() <= INTERVAL '24 hours'
+       AND escalation_reminder_sent_at IS NOT NULL
+       AND escalation_reminder_sent_at <= NOW() - ($1::integer * INTERVAL '1 hour')
        AND aprobacion_parcial_at IS NULL
        AND aprobacion_final_at IS NULL
-  `);
+  `, [APPROVAL_ESCALATION_ASSIGN_AFTER_REMINDER_HOURS]);
+  const escalationRows = escalationCandidateRows.filter((row) =>
+    computeBusinessMinutesElapsed(row.escalation_reminder_sent_at, new Date()) >=
+      (APPROVAL_ESCALATION_ASSIGN_AFTER_REMINDER_HOURS * 60)
+  );
 
   let escalated = 0;
   for (const row of escalationRows) {
     try {
-      const gerente = await findApproverByRole("gerencia_general", row.approver_user_id || null);
-      if (!gerente?.id) {
-        logger.warn({ solicitudId: row.id }, "No se encontro gerente_general para escalar solicitud");
+      const talentoHumano = await findApproverByRole(APPROVAL_ESCALATION_TARGET_ROLE, row.approver_user_id || null);
+      if (!talentoHumano?.id) {
+        logger.warn({ solicitudId: row.id }, "No se encontro talento_humano para escalar solicitud");
         continue;
       }
 
@@ -6357,18 +6452,18 @@ async function processApprovalEscalationReminders() {
                 escalation_escalated_to_email = $3,
                 approver_user_id = $2,
                 approver_email = $3,
-                approver_role = 'gerencia_general',
+                approver_role = $4,
                 updated_at = NOW()
           WHERE id = $1
             AND escalation_status = 'reminder_sent'`,
-        [row.id, gerente.id, gerente.email]
+        [row.id, talentoHumano.id, talentoHumano.email, APPROVAL_ESCALATION_TARGET_ROLE]
       );
 
-      // Notificar al nuevo aprobador (gerencia_general)
+      // Notificar al nuevo aprobador (talento_humano)
       await notificationManager.sendNotification({
-        userId: gerente.id,
+        userId: talentoHumano.id,
         customTitle: "Solicitud escalada para tu aprobacion urgente",
-        customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} inicia en menos de 24 horas. El aprobador original no respondio; ahora requiere tu aprobacion.`,
+        customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} sigue sin respuesta despues de ${APPROVAL_ESCALATION_ASSIGN_AFTER_REMINDER_HOURS} horas desde el primer recordatorio. Ahora requiere tu aprobacion desde Talento Humano.`,
         type: "alert",
         source: "permisos_vacaciones",
         priority: 3,
@@ -6386,8 +6481,8 @@ async function processApprovalEscalationReminders() {
       if (row.approver_user_id) {
         await notificationManager.sendNotification({
           userId: row.approver_user_id,
-          customTitle: "Solicitud escalada a gerencia",
-          customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} fue escalada a gerencia general por falta de respuesta. Ya no requiere tu accion.`,
+          customTitle: "Solicitud escalada a Talento Humano",
+          customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} fue escalada a Talento Humano por falta de respuesta. Ya no requiere tu accion.`,
           type: "info",
           source: "permisos_vacaciones",
           priority: 1,
@@ -6400,8 +6495,8 @@ async function processApprovalEscalationReminders() {
       if (row.user_id) {
         await notificationManager.sendNotification({
           userId: row.user_id,
-          customTitle: "Tu solicitud fue escalada a gerencia",
-          customMessage: `Tu solicitud #${row.id} fue escalada a gerencia general para aprobacion urgente debido a falta de respuesta del aprobador asignado.`,
+          customTitle: "Tu solicitud fue escalada a Talento Humano",
+          customMessage: `Tu solicitud #${row.id} fue escalada a Talento Humano para aprobacion urgente debido a falta de respuesta del aprobador asignado.`,
           type: "info",
           source: "permisos_vacaciones",
           priority: 1,
@@ -6418,13 +6513,13 @@ async function processApprovalEscalationReminders() {
           usuario_id: null,
           usuario_email: "system_escalation",
           modulo: "permisos",
-          accion: "escalation_to_gerencia_general",
-          descripcion: "Solicitud escalada automaticamente a gerencia_general por falta de respuesta a 24 h del inicio.",
+          accion: "escalation_to_talento_humano",
+          descripcion: `Solicitud escalada automaticamente a talento_humano por falta de respuesta tras ${APPROVAL_ESCALATION_ASSIGN_AFTER_REMINDER_HOURS} horas desde el primer recordatorio.`,
           datos_nuevos: {
             solicitud_id: row.id,
             original_approver_user_id: row.approver_user_id,
-            new_approver_user_id: gerente.id,
-            new_approver_email: gerente.email,
+            new_approver_user_id: talentoHumano.id,
+            new_approver_email: talentoHumano.email,
           },
           contexto: { auto: true },
         });
@@ -6432,14 +6527,190 @@ async function processApprovalEscalationReminders() {
 
       escalated += 1;
     } catch (err) {
-      logger.warn({ err, solicitudId: row.id }, "Error escalando solicitud a gerencia_general");
+      logger.warn({ err, solicitudId: row.id }, "Error escalando solicitud a talento_humano");
+    }
+  }
+
+  // Fase 3: Recordatorio al aprobador final (etapa pending_final) — 2 h sin
+  // respuesta desde que la solicitud entro a esta etapa. Espejo de la Fase 1,
+  // pero anclada en pending_final_at (no created_at) y con sus propias
+  // columnas de seguimiento (escalation_final_*), ver comentario en
+  // ensureTable sobre por que no se reutiliza escalation_status.
+  const { rows: finalReminderCandidateRows } = await db.query(`
+    SELECT *
+      FROM permisos_vacaciones
+     WHERE LOWER(COALESCE(status, '')) = 'pending_final'
+       AND escalation_final_status = 'none'
+       AND pending_final_at IS NOT NULL
+       AND pending_final_at <= NOW() - ($1::integer * INTERVAL '1 hour')
+       AND aprobacion_final_at IS NULL
+  `, [APPROVAL_ESCALATION_REMINDER_AFTER_HOURS]);
+  const finalReminderRows = finalReminderCandidateRows.filter((row) =>
+    computeBusinessMinutesElapsed(row.pending_final_at, new Date()) >= (APPROVAL_ESCALATION_REMINDER_AFTER_HOURS * 60)
+  );
+
+  let remindedFinal = 0;
+  for (const row of finalReminderRows) {
+    try {
+      await db.query(
+        `UPDATE permisos_vacaciones
+            SET escalation_final_status = 'reminder_sent',
+                escalation_final_reminder_sent_at = NOW(),
+                updated_at = NOW()
+          WHERE id = $1
+            AND escalation_final_status = 'none'`,
+        [row.id]
+      );
+
+      if (row.approver_user_id) {
+        await notificationManager.sendNotification({
+          userId: row.approver_user_id,
+          customTitle: "Solicitud pendiente de aprobacion final",
+          customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} sigue pendiente de aprobacion final despues de ${APPROVAL_ESCALATION_REMINDER_AFTER_HOURS} horas. Por favor, revisa y aprueba o rechaza a la brevedad.`,
+          type: "alert",
+          source: "permisos_vacaciones",
+          priority: 2,
+          email: true,
+          meta: {
+            solicitud_id: row.id,
+            tipo_solicitud: row.tipo_solicitud || null,
+            fecha_inicio: row.fecha_inicio,
+            target_path: `/dashboard/talento-humano/permisos?tab=pending&solicitudId=${row.id}`,
+          },
+        });
+      }
+
+      try {
+        await logAction({
+          usuario_id: null,
+          usuario_email: "system_escalation",
+          modulo: "permisos",
+          accion: "escalation_final_reminder_sent",
+          descripcion: `Recordatorio automatico enviado al aprobador final por solicitud sin respuesta tras ${APPROVAL_ESCALATION_REMINDER_AFTER_HOURS} horas en etapa pending_final.`,
+          datos_nuevos: { solicitud_id: row.id, approver_user_id: row.approver_user_id },
+          contexto: { auto: true },
+        });
+      } catch (_) { /* audit non-blocking */ }
+
+      remindedFinal += 1;
+    } catch (err) {
+      logger.warn({ err, solicitudId: row.id }, "Error enviando recordatorio de aprobacion final");
+    }
+  }
+
+  // Fase 4: Escalamiento a talento_humano de la etapa pending_final — 2 h sin
+  // respuesta desde el recordatorio de la Fase 3. Espejo de la Fase 2.
+  const { rows: finalEscalationCandidateRows } = await db.query(`
+    SELECT *
+      FROM permisos_vacaciones
+     WHERE LOWER(COALESCE(status, '')) = 'pending_final'
+       AND escalation_final_status = 'reminder_sent'
+       AND escalation_final_reminder_sent_at IS NOT NULL
+       AND escalation_final_reminder_sent_at <= NOW() - ($1::integer * INTERVAL '1 hour')
+       AND aprobacion_final_at IS NULL
+  `, [APPROVAL_ESCALATION_ASSIGN_AFTER_REMINDER_HOURS]);
+  const finalEscalationRows = finalEscalationCandidateRows.filter((row) =>
+    computeBusinessMinutesElapsed(row.escalation_final_reminder_sent_at, new Date()) >=
+      (APPROVAL_ESCALATION_ASSIGN_AFTER_REMINDER_HOURS * 60)
+  );
+
+  let escalatedFinal = 0;
+  for (const row of finalEscalationRows) {
+    try {
+      const talentoHumano = await findApproverByRole(APPROVAL_ESCALATION_TARGET_ROLE, row.approver_user_id || null);
+      if (!talentoHumano?.id) {
+        logger.warn({ solicitudId: row.id }, "No se encontro talento_humano para escalar solicitud (etapa final)");
+        continue;
+      }
+
+      await db.query(
+        `UPDATE permisos_vacaciones
+            SET escalation_final_status = 'escalated',
+                escalation_final_escalated_at = NOW(),
+                escalation_final_escalated_to_user_id = $2,
+                escalation_final_escalated_to_email = $3,
+                approver_user_id = $2,
+                approver_email = $3,
+                approver_role = $4,
+                updated_at = NOW()
+          WHERE id = $1
+            AND escalation_final_status = 'reminder_sent'`,
+        [row.id, talentoHumano.id, talentoHumano.email, APPROVAL_ESCALATION_TARGET_ROLE]
+      );
+
+      await notificationManager.sendNotification({
+        userId: talentoHumano.id,
+        customTitle: "Solicitud escalada para tu aprobacion final urgente",
+        customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} sigue sin respuesta del aprobador final despues de ${APPROVAL_ESCALATION_ASSIGN_AFTER_REMINDER_HOURS} horas desde el recordatorio. Ahora requiere tu aprobacion final desde Talento Humano.`,
+        type: "alert",
+        source: "permisos_vacaciones",
+        priority: 3,
+        email: true,
+        meta: {
+          solicitud_id: row.id,
+          tipo_solicitud: row.tipo_solicitud || null,
+          fecha_inicio: row.fecha_inicio,
+          original_approver_user_id: row.approver_user_id,
+          target_path: `/dashboard/talento-humano/permisos?tab=pending&solicitudId=${row.id}`,
+        },
+      });
+
+      if (row.approver_user_id) {
+        await notificationManager.sendNotification({
+          userId: row.approver_user_id,
+          customTitle: "Solicitud escalada a Talento Humano",
+          customMessage: `La solicitud #${row.id} de ${row.user_fullname || row.user_email} fue escalada a Talento Humano por falta de respuesta en la aprobacion final. Ya no requiere tu accion.`,
+          type: "info",
+          source: "permisos_vacaciones",
+          priority: 1,
+          email: false,
+          meta: { solicitud_id: row.id },
+        });
+      }
+
+      if (row.user_id) {
+        await notificationManager.sendNotification({
+          userId: row.user_id,
+          customTitle: "Tu solicitud fue escalada a Talento Humano",
+          customMessage: `Tu solicitud #${row.id} fue escalada a Talento Humano para aprobacion final urgente debido a falta de respuesta del aprobador asignado.`,
+          type: "info",
+          source: "permisos_vacaciones",
+          priority: 1,
+          email: false,
+          meta: {
+            solicitud_id: row.id,
+            target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${row.id}`,
+          },
+        });
+      }
+
+      try {
+        await logAction({
+          usuario_id: null,
+          usuario_email: "system_escalation",
+          modulo: "permisos",
+          accion: "escalation_final_to_talento_humano",
+          descripcion: `Solicitud escalada automaticamente a talento_humano (etapa pending_final) por falta de respuesta tras ${APPROVAL_ESCALATION_ASSIGN_AFTER_REMINDER_HOURS} horas desde el recordatorio final.`,
+          datos_nuevos: {
+            solicitud_id: row.id,
+            original_approver_user_id: row.approver_user_id,
+            new_approver_user_id: talentoHumano.id,
+            new_approver_email: talentoHumano.email,
+          },
+          contexto: { auto: true },
+        });
+      } catch (_) { /* audit non-blocking */ }
+
+      escalatedFinal += 1;
+    } catch (err) {
+      logger.warn({ err, solicitudId: row.id }, "Error escalando solicitud a talento_humano (etapa final)");
     }
   }
 
   return {
-    scanned: reminderRows.length + escalationRows.length,
-    reminded,
-    escalated,
+    scanned: reminderRows.length + escalationRows.length + finalReminderRows.length + finalEscalationRows.length,
+    reminded: reminded + remindedFinal,
+    escalated: escalated + escalatedFinal,
   };
 }
 
@@ -6493,7 +6764,7 @@ async function resolverRegularizacion({ id, action, reason, actor }) {
 
   if (normalizedAction === "convertir_vacaciones") {
     const err = new Error(
-      "Para convertir a vacaciones usa el endpoint POST /:id/regularizar/convertir-vacaciones."
+      "La conversión de permisos a vacaciones está deshabilitada. Usa rechazar_formalmente o aceptar_excepcion."
     );
     err.status = 400;
     throw err;
@@ -6647,169 +6918,9 @@ async function resolverRegularizacion({ id, action, reason, actor }) {
 
 async function convertirAVacaciones({ id, actor }) {
   await ensureTable();
-
-  if (!isTalentoHumanoOrAdmin(actor)) {
-    const err = new Error("No autorizado. Solo Talento Humano o administración puede convertir ausencias a vacaciones.");
-    err.status = 403;
-    throw err;
-  }
-
-  const { rows: existingRows } = await db.query(
-    `SELECT * FROM permisos_vacaciones WHERE id = $1 LIMIT 1`,
-    [id]
-  );
-  const solicitud = existingRows[0];
-  if (!solicitud) {
-    const err = new Error("Solicitud no encontrada");
-    err.status = 404;
-    throw err;
-  }
-
-  const currentProvisional = String(solicitud.provisional_status || "").trim().toLowerCase();
-  if (currentProvisional !== "pendiente_regularizacion") {
-    const err = new Error(
-      `La solicitud no está en estado pendiente_regularizacion. Estado actual: ${currentProvisional || "(sin estado provisional)"}`
-    );
-    err.status = 409;
-    throw err;
-  }
-
-  // Consent is mandatory — employee must have agreed at request creation time
-  if (!normalizeBooleanFlag(solicitud.vacation_conversion_consent)) {
-    const err = new Error(
-      "No es posible convertir a vacaciones: el colaborador no otorgó consentimiento previo para conversión al crear la solicitud."
-    );
-    err.status = 409;
-    throw err;
-  }
-
-  // Compute current vacation balance
-  const requestYear = solicitud.fecha_inicio
-    ? new Date(solicitud.fecha_inicio).getFullYear()
-    : new Date().getFullYear();
-  const hireDate = await getHireDate(solicitud.user_id);
-  const allowanceInfo = computeVacationAllowance(hireDate, new Date());
-  const consumption = await getVacationConsumption({
-    userId: solicitud.user_id,
-    userEmail: solicitud.user_email,
-    year: requestYear,
-  });
-  const historicalBalance = await getHistoricVacationBalance({
-    userId: solicitud.user_id,
-    userEmail: solicitud.user_email,
-    year: requestYear,
-  });
-  const remaining = allowanceInfo.allowance + historicalBalance - consumption.approved - consumption.pending;
-
-  const charge = buildVacationCharge(solicitud);
-  const projectedRemaining = roundToTwo(remaining - charge.days);
-  const balanceDeficit = projectedRemaining < 0;
-
-  const actorName = getDisplayName(actor);
-
-  const { rows } = await db.query(
-    `UPDATE permisos_vacaciones
-        SET status = 'approved',
-            provisional_status = 'convertido_a_vacaciones',
-            charged_to_vacation = true,
-            charged_vacation_hours = $2,
-            charged_vacation_days = $3,
-            charged_to_vacation_at = NOW(),
-            charged_to_vacation_reason = 'urgent_provisional_conversion',
-            aprobacion_final_por = $4,
-            aprobacion_final_at = NOW(),
-            projected_remaining_days = $5,
-            updated_at = NOW()
-      WHERE id = $1
-    RETURNING *`,
-    [id, charge.hours, charge.days, actorName, projectedRemaining]
-  );
-
-  await logAction({
-    usuario_email: actor?.email,
-    modulo: "permisos",
-    accion: "regularizacion_convertida_a_vacaciones",
-    datos_nuevos: {
-      solicitud_id: id,
-      provisional_status: "convertido_a_vacaciones",
-      charged_vacation_days: charge.days,
-      charged_vacation_hours: charge.hours,
-      projected_remaining_days: projectedRemaining,
-      balance_deficit: balanceDeficit,
-      actor_email: actor?.email,
-      vacation_conversion_consent_text: solicitud.vacation_conversion_consent_text || null,
-    },
-  });
-
-  // Notify employee
-  try {
-    if (rows[0]?.user_id) {
-      const deficitNote = balanceDeficit
-        ? ` Tu saldo quedará en déficit de ${Math.abs(projectedRemaining)} día(s).`
-        : ` Tu saldo restante será de ${projectedRemaining} día(s).`;
-      await notificationManager.sendNotification({
-        userId: rows[0].user_id,
-        customTitle: "Ausencia urgente regularizada — cargada a vacaciones",
-        customMessage:
-          `Tu ausencia urgente (solicitud #${id}) fue regularizada con cargo a tu saldo de vacaciones ` +
-          `(${charge.days} día(s) / ${charge.hours} hora(s)).${deficitNote}`,
-        type: balanceDeficit ? "warning" : "info",
-        source: "permisos_vacaciones",
-        priority: balanceDeficit ? 2 : 1,
-        email: true,
-        meta: {
-          solicitud_id: id,
-          provisional_status: "convertido_a_vacaciones",
-          charged_vacation_days: charge.days,
-          projected_remaining_days: projectedRemaining,
-          balance_deficit: balanceDeficit,
-          target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${id}`,
-        },
-      });
-    }
-  } catch (notifyError) {
-    logger.warn({ notifyError, solicitudId: id }, "No se pudo notificar conversión a vacaciones");
-  }
-
-  // Warn TH if the conversion leaves the employee in deficit
-  if (balanceDeficit) {
-    try {
-      const thUsers = await findTalentoHumanoUsers();
-      for (const thUser of thUsers) {
-        if (Number(thUser.id) === Number(rows[0]?.user_id)) continue;
-        await notificationManager.sendNotification({
-          userId: thUser.id,
-          customTitle: "⚠ Conversión a vacaciones con déficit",
-          customMessage: `La conversión de la ausencia urgente de ${rows[0]?.user_fullname || rows[0]?.user_email} dejó su saldo en déficit de ${Math.abs(projectedRemaining)} día(s). Requiere seguimiento.`,
-          type: "warning",
-          source: "permisos_vacaciones",
-          priority: 2,
-          email: false,
-          meta: {
-            solicitud_id: id,
-            projected_remaining_days: projectedRemaining,
-            balance_deficit: true,
-            target_path: `/dashboard/talento-humano/permisos?tab=all&solicitudId=${id}`,
-          },
-        });
-      }
-    } catch (thNotifyError) {
-      logger.warn({ thNotifyError, solicitudId: id }, "No se pudo notificar a TH sobre déficit en conversión a vacaciones");
-    }
-  }
-
-  const enriched = await attachWorkflowSignatures([rows[0]]);
-  return {
-    ...(enriched[0] || rows[0]),
-    conversion_summary: {
-      charged_days: charge.days,
-      charged_hours: charge.hours,
-      remaining_before: remaining,
-      projected_remaining: projectedRemaining,
-      balance_deficit: balanceDeficit,
-      consent_text: solicitud.vacation_conversion_consent_text || null,
-    },
-  };
+  const err = new Error("La conversión de permisos a vacaciones está deshabilitada. Ningún permiso debe cargarse a vacaciones.");
+  err.status = 409;
+  throw err;
 }
 
 module.exports = {
@@ -6845,4 +6956,5 @@ module.exports = {
   getKpiDashboard,
   resolverRegularizacion,
   convertirAVacaciones,
+  computeBusinessMinutesElapsed,
 };

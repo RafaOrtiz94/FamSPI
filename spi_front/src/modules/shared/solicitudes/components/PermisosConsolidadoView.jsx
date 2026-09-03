@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FiAlertCircle,
+  FiArrowRight,
   FiCalendar,
   FiChevronDown,
   FiDownload,
@@ -8,6 +9,7 @@ import {
   FiFileText,
   FiRefreshCw,
   FiSearch,
+  FiShield,
 } from "react-icons/fi";
 import toast from "react-hot-toast";
 import jsPDF from "jspdf";
@@ -20,6 +22,7 @@ import { getResumenColaboradores } from "../../../../core/api/permisosApi";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { formatVacationDaysHours } from "../utils/vacationDisplay";
+import { generatePermisosCollaboratorReportPdf } from "../utils/permisosReportPdf";
 
 // ── Accessors (tolerantes a distintas formas del payload) ────────────────────
 const getName = (r = {}) => r.user_fullname || r.fullname || r.user_email || r.email || "Usuario";
@@ -33,6 +36,54 @@ const getPendingVacation = (r = {}) => Number(r?.vacaciones?.summary?.pending ??
 const getRemainingVacation = (r = {}) => Number(r?.vacaciones?.summary?.remaining ?? r?.vacaciones?.dias_restantes ?? getVacationAllowance(r));
 
 const num = (v) => formatVacationDaysHours(Number(v) || 0).shortText;
+
+// Formatea fecha (+ hora si aplica, solo permisos) en un solo renglon compacto.
+function formatItemDateRange(item = {}) {
+  const formatDate = (value) => {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat("es-EC", { day: "2-digit", month: "short" }).format(date);
+  };
+  const start = formatDate(item.fecha_inicio);
+  const end = formatDate(item.fecha_fin);
+  if (!start && !end) return "Sin fecha";
+  const startHora = item.fecha_inicio_hora ? ` ${String(item.fecha_inicio_hora).slice(0, 5)}` : "";
+  const endHora = item.fecha_fin_hora ? ` ${String(item.fecha_fin_hora).slice(0, 5)}` : "";
+  if (start === end || !end) return `${start}${startHora}`;
+  return `${start}${startHora} → ${end}${endHora}`;
+}
+
+// Barra compacta de acciones (documento FRH generado / verificar firma) --
+// cada icono solo aparece si el dato correspondiente existe para ese item,
+// en vez de dejar un hueco o un texto largo tipo "Documento 1/2".
+const ItemActionIcons = ({ item }) => {
+  const actions = [];
+  if (item?.documento_url) {
+    actions.push({ key: "doc", href: item.documento_url, icon: FiFileText, label: "Ver documento (FRH)" });
+  }
+  if (item?.pdf_validacion_legal_url) {
+    actions.push({ key: "legal", href: item.pdf_validacion_legal_url, icon: FiShield, label: "Verificar firma" });
+  }
+  if (!actions.length) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {actions.map(({ key, href, icon: Icon, label }) => (
+        <a
+          key={key}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={label}
+          aria-label={label}
+          className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+        >
+          <Icon size={12} />
+        </a>
+      ))}
+    </div>
+  );
+};
 
 // Traza de aprobación: solicitante → aprobación parcial → aprobación/rechazo final
 const TraceLine = ({ item }) => {
@@ -71,21 +122,39 @@ const TraceLine = ({ item }) => {
   );
 };
 
+// Estilo por estado, compartido entre el badge y el acento lateral de cada tarjeta.
+function resolveStatusStyle(status) {
+  const s = String(status || "").toLowerCase();
+  if (["approved", "aprobado", "aprobacion_completa"].includes(s)) return { bg: "#DCFCE7", color: "#166534", accent: "#22C55E", label: "Aprobado" };
+  if (["rejected", "rechazado"].includes(s)) return { bg: "#FEE2E2", color: "#DC2626", accent: "#EF4444", label: "Rechazado" };
+  if (["pending", "pendiente", "aprobacion_parcial", "pending_final"].includes(s)) return { bg: "#FEF3C7", color: "#D97706", accent: "#F59E0B", label: "Pendiente" };
+  if (["cancelled", "cancelado"].includes(s)) return { bg: "#F3F4F6", color: "#6B7280", accent: "#9CA3AF", label: "Cancelado" };
+  return { bg: "#F3F4F6", color: "#6B7280", accent: "#9CA3AF", label: status || "—" };
+}
+
 // Badge de estado de una solicitud individual
 const RequestStatusBadge = ({ status }) => {
-  const s = String(status || "").toLowerCase();
-  let style = { bg: "#F3F4F6", color: "#6B7280" };
-  let label = status || "—";
-  if (["approved", "aprobado", "aprobacion_completa"].includes(s)) { style = { bg: "#DCFCE7", color: "#166534" }; label = "Aprobado"; }
-  else if (["rejected", "rechazado"].includes(s)) { style = { bg: "#FEE2E2", color: "#DC2626" }; label = "Rechazado"; }
-  else if (["pending", "pendiente", "aprobacion_parcial"].includes(s)) { style = { bg: "#FEF3C7", color: "#D97706" }; label = "Pendiente"; }
-  else if (["cancelled", "cancelado"].includes(s)) { style = { bg: "#F3F4F6", color: "#6B7280" }; label = "Cancelado"; }
+  const style = resolveStatusStyle(status);
   return (
     <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: style.bg, color: style.color }}>
-      {label}
+      {style.label}
     </span>
   );
 };
+
+// "hace 3 dias" / "hace 2 meses" -- da contexto de antiguedad sin ocupar espacio.
+function formatRelativeTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const diffDays = Math.floor((Date.now() - date.getTime()) / 86400000);
+  if (diffDays <= 0) return "hoy";
+  if (diffDays === 1) return "ayer";
+  if (diffDays < 30) return `hace ${diffDays} días`;
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths < 12) return `hace ${diffMonths} mes${diffMonths > 1 ? "es" : ""}`;
+  return `hace ${Math.floor(diffMonths / 12)} año(s)`;
+}
 
 const PermisosConsolidadoView = () => {
   const { showLoader, hideLoader, showToast } = useUI();
@@ -205,15 +274,29 @@ const PermisosConsolidadoView = () => {
           </p>
           {permisos.length ? (
             <div className="space-y-2">
-              {permisos.map((item) => (
-                <div key={`p-${item.id}`} className="rounded-xl border border-slate-200 bg-white p-3">
+              {permisos.map((item) => {
+                const relTime = formatRelativeTime(item.created_at);
+                return (
+                <div
+                  key={`p-${item.id}`}
+                  className="rounded-xl border border-slate-200 bg-white p-3 pl-3.5"
+                  style={{ borderLeft: `3px solid ${resolveStatusStyle(item.status).accent}` }}
+                >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium text-slate-800">{item.tipo_permiso || "Permiso"}</span>
                     <RequestStatusBadge status={item.status} />
                   </div>
-                  <p className="mt-1 font-mono text-xs text-slate-500">
-                    {item.fecha_inicio || "Sin fecha"} — {item.fecha_fin || "Sin fecha"}
+                  <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-slate-500">
+                    <FiCalendar size={11} className="text-slate-400" />
+                    {formatItemDateRange(item)}
+                    {(item.duracion_horas || item.duracion_dias) && (
+                      <span className="font-medium text-slate-600">
+                        · {item.duracion_horas ? `${item.duracion_horas}h` : `${item.duracion_dias} día(s)`}
+                      </span>
+                    )}
+                    {relTime && <span className="text-slate-400">· solicitado {relTime}</span>}
                   </p>
+                  <ItemActionIcons item={item} />
                   {Array.isArray(item.justificantes_urls) && item.justificantes_urls.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {item.justificantes_urls.map((url, idx) => (
@@ -236,7 +319,8 @@ const PermisosConsolidadoView = () => {
                   )}
                   <TraceLine item={item} />
                 </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <p className="text-xs text-slate-400">No registra permisos.</p>
@@ -251,14 +335,28 @@ const PermisosConsolidadoView = () => {
           {vacaciones.length ? (
             <div className="space-y-2">
               {vacaciones.map((item) => (
-                <div key={`v-${item.id}`} className="rounded-xl border border-slate-200 bg-white p-3">
+                <div
+                  key={`v-${item.id}`}
+                  className="rounded-xl border border-slate-200 bg-white p-3 pl-3.5"
+                  style={{ borderLeft: `3px solid ${resolveStatusStyle(item.status).accent}` }}
+                >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium text-slate-800">{item.duracion_dias} día(s)</span>
                     <RequestStatusBadge status={item.status} />
                   </div>
-                  <p className="mt-1 font-mono text-xs text-slate-500">
-                    {item.fecha_inicio || "Sin fecha"} — {item.fecha_fin || "Sin fecha"}
+                  <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+                    <FiCalendar size={11} className="text-slate-400" />
+                    {formatItemDateRange(item)}
                   </p>
+                  {(item.saldo_antes !== undefined && item.saldo_despues !== undefined) && (
+                    <div className="mt-1.5 flex items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1 text-[11px]">
+                      <span className="font-mono font-semibold text-slate-600">{num(item.saldo_antes)}d</span>
+                      <FiArrowRight size={10} className="text-slate-400" />
+                      <span className="font-mono font-semibold text-slate-800">{num(item.saldo_despues)}d</span>
+                      <span className="ml-auto text-slate-400">saldo</span>
+                    </div>
+                  )}
+                  <ItemActionIcons item={item} />
                   <TraceLine item={item} />
                 </div>
               ))}
@@ -399,7 +497,18 @@ const PermisosConsolidadoView = () => {
                           <td className="px-4 py-3.5 text-center font-semibold text-slate-700">{num(getTakenVacation(row))}</td>
                           <td className="px-4 py-3.5 text-center font-semibold text-slate-700">{num(getPendingVacation(row))}</td>
                           <td className="px-4 py-3.5 text-right">
-                            <FiChevronDown size={16} className="inline text-slate-400 transition-transform" style={{ transform: isOpen ? "rotate(180deg)" : "none" }} />
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); generatePermisosCollaboratorReportPdf(row); }}
+                                title="Descargar reporte PDF del colaborador"
+                                aria-label="Descargar reporte PDF del colaborador"
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                              >
+                                <FiDownload size={13} />
+                              </button>
+                              <FiChevronDown size={16} className="text-slate-400 transition-transform" style={{ transform: isOpen ? "rotate(180deg)" : "none" }} />
+                            </div>
                           </td>
                         </tr>
                         {isOpen && (
@@ -421,8 +530,13 @@ const PermisosConsolidadoView = () => {
                 const isOpen = expanded === key;
                 return (
                   <div key={key}>
-                    <button type="button" onClick={() => setExpanded(isOpen ? null : key)}
-                      className="flex w-full items-center justify-between gap-3 px-5 py-3.5 text-left">
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setExpanded(isOpen ? null : key)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpanded(isOpen ? null : key); }}
+                      className="flex w-full cursor-pointer items-center justify-between gap-3 px-5 py-3.5 text-left"
+                    >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-slate-900">{getName(row)}</p>
                         <p className="truncate text-[11px] text-slate-500">{getDepartment(row)}</p>
@@ -431,8 +545,19 @@ const PermisosConsolidadoView = () => {
                           <span className="rounded-full bg-slate-100 px-2 py-0.5">Vac: {num(getRemainingVacation(row))}</span>
                         </div>
                       </div>
-                      <FiChevronDown size={16} className="flex-shrink-0 text-slate-400 transition-transform" style={{ transform: isOpen ? "rotate(180deg)" : "none" }} />
-                    </button>
+                      <span className="flex flex-shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); generatePermisosCollaboratorReportPdf(row); }}
+                          title="Descargar reporte PDF del colaborador"
+                          aria-label="Descargar reporte PDF del colaborador"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                        >
+                          <FiDownload size={13} />
+                        </button>
+                        <FiChevronDown size={16} className="text-slate-400 transition-transform" style={{ transform: isOpen ? "rotate(180deg)" : "none" }} />
+                      </span>
+                    </div>
                     {isOpen && renderDetail(row)}
                   </div>
                 );

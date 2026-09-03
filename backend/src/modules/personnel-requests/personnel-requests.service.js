@@ -1229,7 +1229,8 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
       a.created_at as applicant_created_at,
       d.name as department_name,
       d.code as department_code,
-      ${stageStartedAtExpression} as current_stage_started_at
+      ${stageStartedAtExpression} as current_stage_started_at,
+      COUNT(*) OVER() as total_count
     FROM personnel_requests pr
     LEFT JOIN users u ON pr.requester_id = u.id
     LEFT JOIN users cu ON pr.collaborator_user_id = cu.id
@@ -1243,22 +1244,10 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
     params.push(safePageSize, offset);
 
     const result = await db.query(query, params);
-
-    // Contar total
-    const countQuery = `
-    SELECT COUNT(*) as total
-    FROM personnel_requests pr
-    LEFT JOIN users u ON pr.requester_id = u.id
-    LEFT JOIN users cu ON pr.collaborator_user_id = cu.id
-    LEFT JOIN applicants a ON pr.applicant_id = a.id
-    LEFT JOIN departments d ON pr.department_id = d.id
-    WHERE ${whereConditions.join(' AND ')}
-  `;
-    const countResult = await db.query(countQuery, params.slice(0, -2));
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = result.rows.length > 0 ? parseInt(result.rows[0].total_count, 10) : 0;
 
     return {
-        data: result.rows.map((row) => {
+        data: result.rows.map(({ total_count, ...row }) => {
             const workflow = buildWorkflowSummary(row, [], row.collaborator_name || row.collaborator_email ? {
                 fullname: row.collaborator_name || null,
                 email: row.collaborator_email || null,

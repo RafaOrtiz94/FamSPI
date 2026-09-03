@@ -13,6 +13,7 @@ import LISSection from "./sections/LISSection";
 import ConsumptionExportSection from "./sections/ConsumptionExportSection";
 import DispatchWorkspaceSection from "./sections/DispatchWorkspaceSection";
 import FeasibilitySection from "./sections/FeasibilitySection";
+import OfferWorkspaceSection from "./sections/OfferWorkspaceSection";
 
 const SectionContent = ({
  selectedSection,
@@ -40,7 +41,8 @@ const SectionContent = ({
  const sectionRule = uiGuidance?.sectionOwnership?.rules?.[selectedSection] || {};
  const isInvestments = selectedSection === "investments";
  const isInvestmentValues = selectedSection === "investment_values";
- const hasOwnPermissionModel = isInvestments || isInvestmentValues;
+ const isOfferWorkspace = selectedSection === "offer_workspace";
+ const hasOwnPermissionModel = isInvestments || isInvestmentValues || isOfferWorkspace;
  const canLock = permissions.canBlockSections && !sectionRule.isLocked && !hasOwnPermissionModel;
  const canUnlock = permissions.canUnblockSections && sectionRule.isLocked && !hasOwnPermissionModel;
  const businessCaseId = businessCase?.id || uiGuidance?.businessCase?.id;
@@ -260,6 +262,17 @@ const SectionContent = ({
       ownership={uiGuidance?.sectionOwnership?.rules?.feasibility || {}}
       workflowState={uiGuidance?.workflowState || {}}
       onSave={makeForwardSave("feasibility")}
+     />
+    </div>
+   )}
+
+   {mountedSections.has("offer_workspace") && (
+    <div className={selectedSection === "offer_workspace" ? "" : "hidden"}>
+     <OfferWorkspaceSection
+      businessCase={businessCase}
+      permissions={permissions}
+      ownership={uiGuidance?.sectionOwnership?.rules?.offer_workspace || {}}
+      onSave={makeForwardSave("offer_workspace")}
      />
     </div>
    )}

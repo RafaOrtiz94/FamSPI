@@ -1,22 +1,47 @@
-import api from "./index";
+import api, { isTransientApiError } from "./index";
+import { readCachedResource, writeCachedResource } from "../pwa/localCache";
+
+const buildNotificationsCacheKey = (suffix) => `notifications_api_${suffix}`;
+const NOTIFICATIONS_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24;
 
 export const listNotifications = async (status) => {
- const { data } = await api.get("/notifications", {
- params: status ? { status } : {},
- });
+ const cacheKey = buildNotificationsCacheKey(`status_${String(status || "all")}`);
+ try {
+  const { data } = await api.get("/notifications", {
+   params: status ? { status } : {},
+  });
 
- const list = data?.data || data?.result || data?.rows || [];
- const unread = Number(data?.unread || 0);
-
- return { list: Array.isArray(list) ? list : [], unread };
+  const list = data?.data || data?.result || data?.rows || [];
+  const unread = Number(data?.unread || 0);
+  const payload = { list: Array.isArray(list) ? list : [], unread };
+  writeCachedResource(cacheKey, payload);
+  return payload;
+ } catch (error) {
+  const cached = readCachedResource(cacheKey, { maxAgeMs: NOTIFICATIONS_CACHE_MAX_AGE_MS });
+  if (cached?.data && isTransientApiError(error)) {
+   return cached.data;
+  }
+  throw error;
+ }
 };
 
 export const listAllNotificationsWithHistory = async () => {
- const { data } = await api.get("/notifications", {
- params: { include_cleared: "true" },
- });
- const list = data?.data || data?.result || data?.rows || [];
- return Array.isArray(list) ? list : [];
+ const cacheKey = buildNotificationsCacheKey("history");
+ try {
+  const { data } = await api.get("/notifications", {
+   params: { include_cleared: "true" },
+  });
+  const list = data?.data || data?.result || data?.rows || [];
+  const payload = Array.isArray(list) ? list : [];
+  writeCachedResource(cacheKey, payload);
+  return payload;
+ } catch (error) {
+  const cached = readCachedResource(cacheKey, { maxAgeMs: NOTIFICATIONS_CACHE_MAX_AGE_MS });
+  if (cached?.data && isTransientApiError(error)) {
+   return cached.data;
+  }
+  throw error;
+ }
 };
 
 export const createNotification = async (payload) => {

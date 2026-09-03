@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   FiCalendar,
   FiClipboard,
@@ -19,56 +20,41 @@ import { createRequest } from "../../../core/api/requestsApi";
 import { hasAnyRole, normalizeRoles } from "../../shared/purchases-workspace/purchaseRoleGroups";
 import RetiroEquipos from "./RetiroEquipos";
 import InspectionRequestsWorkspace from "../components/solicitudes/InspectionRequestsWorkspace";
+import "../design/tokens.css";
 
 const MAIN_TABS = [
   { id: "inspeccion", label: "Inspección de Ambiente", icon: FiClipboard },
   { id: "retiro", label: "Retiro de Equipos", icon: FiPackage },
 ];
 
-const SUB_TABS = {
-  inspeccion: [
-    { id: "independientes", label: "Independientes" },
-    { id: "bc", label: "Business Case" },
-    { id: "compras", label: "De Compras" },
-  ],
-  retiro: [
-    { id: "compras", label: "De Compras" },
-    { id: "independientes", label: "Independientes" },
-  ],
-};
-
-const RetiroIndependientesEmpty = () => (
-  <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
-    <div className="flex min-h-64 flex-col items-center justify-center rounded-[16px] border border-dashed border-slate-200 bg-white px-6 py-12 text-center">
-      <div className="rounded-full border border-slate-200 bg-slate-50 p-3.5">
-        <FiPackage size={22} className="text-slate-300" />
-      </div>
-      <p className="mt-4 text-sm font-medium text-slate-700">Sin solicitudes de retiro independientes</p>
-      <p className="mt-1 max-w-xs text-xs text-slate-400">
-        Las solicitudes de retiro creadas directamente aparecerán aquí.
-      </p>
-    </div>
-  </div>
-);
+// Antes "De Compras"/"Business Case"/"Independientes" eran pestañas que
+// obligaban a recorrer 3 bandejas para saber que necesitaba decision.
+// InspectionRequestsWorkspace ahora carga las 3 fuentes en una sola lista
+// ordenada por urgencia; la fuente pasa a ser un filtro secundario dentro de
+// esa bandeja (ver SOURCE_FILTERS ahi). Retiro nunca tuvo mas de una fuente
+// real (todo F.ST-21 cuelga de la misma tabla `requests`), asi que no hay
+// nada que colapsar ahi.
 
 const RequestCreationPanel = ({ canCreateGeneralRequests, creationCards, onCreateAction }) => (
-  <section className="border-t border-slate-200 bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFC_100%)]">
-    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+  <section className="st-scope" style={{ borderTop: "1px solid var(--st-border)", background: "linear-gradient(180deg, var(--st-surface) 0%, var(--st-bg) 100%)" }}>
+    {/* Sin mx-auto max-w-7xl: DESIGN.md §16 lo prohibe para bandejas
+        operativas, roba ancho lateral en desktop sin motivo. */}
+    <div className="px-2 py-4 sm:px-4 lg:px-6">
+      <div className="rounded-[var(--st-radius-lg)] border p-5 sm:p-6" style={{ borderColor: "var(--st-border)", background: "var(--st-surface)" }}>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: "var(--st-text-faint)" }}>
               Nueva solicitud
             </p>
-            <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
+            <h2 className="mt-2 text-xl font-semibold tracking-tight" style={{ color: "var(--st-text)", fontFamily: "var(--st-font-display)" }}>
               Crea solicitudes en un bloque separado
             </h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+            <p className="mt-2 max-w-3xl text-sm leading-6" style={{ color: "var(--st-text-muted)" }}>
               La bandeja de gestión queda enfocada en expedientes activos y la creación se mantiene aparte para evitar cruces visuales.
             </p>
           </div>
           {!canCreateGeneralRequests ? (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <div className="rounded-[var(--st-radius-md)] border px-4 py-3 text-sm" style={{ borderColor: "var(--st-warning)", background: "var(--st-warning-soft)", color: "var(--st-warning)" }}>
               Las solicitudes F.ST-20 y F.ST-21 se muestran solo para roles con permiso real de creación.
             </div>
           ) : null}
@@ -80,13 +66,14 @@ const RequestCreationPanel = ({ canCreateGeneralRequests, creationCards, onCreat
               key={card.id}
               type="button"
               onClick={() => onCreateAction(card.id)}
-              className="group min-w-0 rounded-[22px] border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-[0_14px_30px_rgba(15,23,42,0.08)]"
+              className="group min-w-0 rounded-[var(--st-radius-lg)] border p-4 text-left transition hover:-translate-y-0.5"
+              style={{ borderColor: "var(--st-border)", background: "var(--st-surface-sunken)" }}
             >
-              <div className={`inline-flex rounded-2xl border px-3 py-2 ${card.accent}`}>
+              <div className="inline-flex rounded-[var(--st-radius-md)] border p-2" style={{ borderColor: "var(--st-accent-soft)", background: "var(--st-accent-soft)", color: "var(--st-accent-strong)" }}>
                 <card.Icon size={18} />
               </div>
-              <p className="mt-4 break-words text-sm font-semibold text-slate-900">{card.label}</p>
-              <p className="mt-1 text-xs leading-5 text-slate-500">{card.helper}</p>
+              <p className="mt-4 break-words text-sm font-semibold" style={{ color: "var(--st-text)" }}>{card.label}</p>
+              <p className="mt-1 text-xs leading-5" style={{ color: "var(--st-text-muted)" }}>{card.helper}</p>
             </button>
           ))}
         </div>
@@ -108,29 +95,28 @@ const SolicitudesWorkspace = () => {
     [userRoles],
   );
 
-  const [mainTab, setMainTab] = useState("inspeccion");
-  const [subTabs, setSubTabs] = useState({ inspeccion: "bc", retiro: "compras" });
-  const [mounted, setMounted] = useState(() => new Set(["inspeccion:bc"]));
+  // Deep-link desde el cronograma tecnico y la cola de acciones de Inicio
+  // (technicalSchedule.service.js SOURCE_CONFIG / actionQueue.service.js):
+  // ?tab=inspeccion&subtab=independientes ya no selecciona una pestaña de
+  // fuente (esas se colapsaron en InspectionRequestsWorkspace) -- ahora fija
+  // el filtro de fuente inicial dentro de esa bandeja unica.
+  const [searchParams] = useSearchParams();
+  const initialMainTab = MAIN_TABS.some((t) => t.id === searchParams.get("tab"))
+    ? searchParams.get("tab")
+    : "inspeccion";
+  const initialSourceFilter = searchParams.get("subtab") || "all";
+
+  const [mainTab, setMainTab] = useState(initialMainTab);
+  const [mounted, setMounted] = useState(() => new Set([initialMainTab]));
   const [newClientModalOpen, setNewClientModalOpen] = useState(false);
   const [permisosModalOpen, setPermisosModalOpen] = useState(false);
   const [personnelModalOpen, setPersonnelModalOpen] = useState(false);
   const [inspectionModalOpen, setInspectionModalOpen] = useState(false);
   const [retiroModalOpen, setRetiroModalOpen] = useState(false);
 
-  const activeSubTab = subTabs[mainTab];
-  const tabKey = `${mainTab}:${activeSubTab}`;
-
-  const mount = (key) =>
-    setMounted((prev) => (prev.has(key) ? prev : new Set([...prev, key])));
-
   const switchMain = (id) => {
     setMainTab(id);
-    mount(`${id}:${subTabs[id]}`);
-  };
-
-  const switchSub = (id) => {
-    setSubTabs((prev) => ({ ...prev, [mainTab]: id }));
-    mount(`${mainTab}:${id}`);
+    setMounted((prev) => (prev.has(id) ? prev : new Set([...prev, id])));
   };
 
   const creationCards = useMemo(
@@ -141,14 +127,12 @@ const SolicitudesWorkspace = () => {
           label: "Creación de cliente",
           helper: "Registro completo con consentimiento y documentos.",
           Icon: FiUserPlus,
-          accent: "border-emerald-200 bg-emerald-50 text-emerald-700",
         },
         {
           id: "permisos",
           label: "Permisos y vacaciones",
           helper: "Solicitud laboral con el flujo vigente de Talento Humano.",
           Icon: FiCalendar,
-          accent: "border-orange-200 bg-orange-50 text-orange-700",
         },
         canCreatePersonnelRequest
           ? {
@@ -156,7 +140,6 @@ const SolicitudesWorkspace = () => {
               label: "Solicitud de personal",
               helper: "Disponible para jefaturas técnicas con el flujo oficial.",
               Icon: FiUsers,
-              accent: "border-teal-200 bg-teal-50 text-teal-700",
             }
           : null,
         canCreateGeneralRequests
@@ -165,7 +148,6 @@ const SolicitudesWorkspace = () => {
               label: "Inspección de ambiente",
               helper: "Genera una F.ST-20 desde esta misma bandeja.",
               Icon: FiClipboard,
-              accent: "border-blue-200 bg-blue-50 text-blue-700",
             }
           : null,
         canCreateGeneralRequests
@@ -174,7 +156,6 @@ const SolicitudesWorkspace = () => {
               label: "Retiro de equipo",
               helper: "Genera una F.ST-21 sin salir del módulo técnico.",
               Icon: FiTruck,
-              accent: "border-amber-200 bg-amber-50 text-amber-700",
             }
           : null,
       ].filter(Boolean),
@@ -224,31 +205,30 @@ const SolicitudesWorkspace = () => {
   };
 
   return (
-    <main className={`${WORKSPACE_PAGE_CLASS} bg-slate-50`}>
-      {/* Naval Slate header */}
-      <header className="border-b border-slate-200 bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFC_100%)]">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <main className={`${WORKSPACE_PAGE_CLASS} st-scope`} style={{ background: "var(--st-bg)" }}>
+      <header style={{ borderBottom: "1px solid var(--st-border)", background: "linear-gradient(180deg, var(--st-surface) 0%, var(--st-bg) 100%)" }}>
+        <div className="px-2 sm:px-4 lg:px-6">
           <div className="pt-5">
-            <h1 className="text-xl font-semibold text-slate-900" style={{ letterSpacing: "-0.01em" }}>
+            <h1 className="text-xl font-semibold" style={{ color: "var(--st-text)", fontFamily: "var(--st-font-display)", letterSpacing: "-0.01em" }}>
               Solicitudes
             </h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm" style={{ color: "var(--st-text-muted)" }}>
               Inspecciones de ambiente y retiros de equipos
             </p>
           </div>
 
-          {/* Main tabs — flush to header bottom */}
           <div className="mt-5 flex gap-1 overflow-x-auto pb-1">
             {MAIN_TABS.map((tab) => (
               <button
                 key={tab.id}
                 type="button"
                 onClick={() => switchMain(tab.id)}
-                className={`inline-flex items-center gap-2 rounded-t-[12px] px-4 py-2.5 text-sm font-medium transition-colors duration-150 active:scale-[0.97] ${
+                className="inline-flex items-center gap-2 rounded-t-[12px] px-4 py-2.5 text-sm font-medium transition-colors duration-150 active:scale-[0.97]"
+                style={
                   mainTab === tab.id
-                    ? "border border-b-0 border-slate-200 bg-slate-50 text-slate-900"
-                    : "text-slate-500 hover:bg-white hover:text-slate-900"
-                }`}
+                    ? { borderBottom: "1px solid var(--st-bg)", border: "1px solid var(--st-border)", background: "var(--st-bg)", color: "var(--st-text)" }
+                    : { color: "var(--st-text-faint)" }
+                }
               >
                 <tab.icon size={15} aria-hidden="true" />
                 {tab.label}
@@ -258,100 +238,16 @@ const SolicitudesWorkspace = () => {
         </div>
       </header>
 
-      {/* Sub-tab strip */}
-      <div className="border-b border-slate-200 bg-white">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex overflow-x-auto">
-            {SUB_TABS[mainTab].map((sub) => (
-              <button
-                key={sub.id}
-                type="button"
-                onClick={() => switchSub(sub.id)}
-                className={`border-b-2 px-4 py-3 text-sm font-medium transition-colors duration-150 ${
-                  activeSubTab === sub.id
-                    ? "border-[#2563EB] text-[#2563EB]"
-                    : "border-transparent text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                {sub.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <section className="hidden">
-        <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
-          <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                  Creación de solicitudes
-                </p>
-                <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
-                  Registra nuevas solicitudes sin salir del workspace
-                </h2>
-                <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-                  Aquí puedes iniciar los formularios que sí tienen flujo real en el sistema y mantener la misma
-                  coherencia visual del módulo de servicio.
-                </p>
-              </div>
-              {!canCreateGeneralRequests ? (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  Las solicitudes F.ST-20 y F.ST-21 se muestran solo para roles con permiso real de creación.
-                </div>
-              ) : null}
-            </div>
-
-            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-              {creationCards.map((card) => (
-                <button
-                  key={card.id}
-                  type="button"
-                  onClick={() => handleCreateAction(card.id)}
-                  className="group rounded-[22px] border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white hover:shadow-[0_14px_30px_rgba(15,23,42,0.08)]"
-                >
-                  <div className={`inline-flex rounded-2xl border px-3 py-2 ${card.accent}`}>
-                    <card.Icon size={18} />
-                  </div>
-                  <p className="mt-4 text-sm font-semibold text-slate-900">{card.label}</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-500">{card.helper}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Content */}
       <div className="flex flex-1 flex-col">
-        {mounted.has("inspeccion:bc") && (
-          <div className={tabKey === "inspeccion:bc" ? "flex flex-1 flex-col" : "hidden"}>
-            <InspectionRequestsWorkspace source="bc" />
+        {mounted.has("inspeccion") && (
+          <div className={mainTab === "inspeccion" ? "flex flex-1 flex-col" : "hidden"}>
+            <InspectionRequestsWorkspace initialSourceFilter={initialSourceFilter} />
           </div>
         )}
 
-        {mounted.has("inspeccion:compras") && (
-          <div className={tabKey === "inspeccion:compras" ? "flex flex-1 flex-col" : "hidden"}>
-            <InspectionRequestsWorkspace source="compras" />
-          </div>
-        )}
-
-        {mounted.has("inspeccion:independientes") && (
-          <div className={tabKey === "inspeccion:independientes" ? "flex flex-1 flex-col" : "hidden"}>
-            <InspectionRequestsWorkspace source="independientes" />
-          </div>
-        )}
-
-        {mounted.has("retiro:compras") && (
-          <div className={tabKey === "retiro:compras" ? "mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8" : "hidden"}>
+        {mounted.has("retiro") && (
+          <div className={mainTab === "retiro" ? "mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8" : "hidden"}>
             <RetiroEquipos />
-          </div>
-        )}
-
-        {mounted.has("retiro:independientes") && (
-          <div className={tabKey === "retiro:independientes" ? "" : "hidden"}>
-            <RetiroIndependientesEmpty />
           </div>
         )}
       </div>

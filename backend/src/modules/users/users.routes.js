@@ -39,6 +39,7 @@ const ALLOWED_USER_ROLES = new Set([
   "usuario",
   "admin",
   "administrador",
+  "pasante",
 ]);
 
 const USER_ADMIN_ROLES = [

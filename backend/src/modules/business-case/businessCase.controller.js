@@ -2,6 +2,7 @@ const Joi = require("joi");
 const crypto = require("crypto");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
+const { ROLE_GROUPS } = require("../../middlewares/roles");
 const businessCaseService = require("./businessCase.service");
 const equipmentSelectionService = require("./equipmentSelection.service");
 const determinationsService = require("./determinations.service");
@@ -28,11 +29,13 @@ const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 const determinationsGateService = require("./businessCaseDeterminationsGate.service");
 const { ensureBusinessCaseDriveFolder, ensureBusinessCaseDriveFolderById } = require("./businessCaseDriveFolder.service");
 const sheetGenerationService = require("./businessCaseSheetGeneration.service");
+const businessCaseOfferService = require("./businessCaseOffer.service");
 const {
   clearSheetCaches,
   unprotectAnnualQuantityCellsForSubsection,
 } = require("./businessCaseSheetSyncLocal.service");
 const { createRequest: createServiceRequest, addDriveAttachment, markRequestCompleted } = require("../requests/requests.service");
+const crmPurchaseSyncService = require("../crm-fam/crmPurchaseSync.service");
 const {
   normalizeInspectionResult,
   normalizeFst07Checklist,
@@ -165,6 +168,11 @@ const feasibilityDecisionSchema = Joi.object({
   calculations: Joi.object().optional(),
 });
 
+const offerDecisionSchema = Joi.object({
+  decision: Joi.string().trim().valid("accepted", "rejected").required(),
+  reason: Joi.string().allow("").max(2000).optional(),
+});
+
 const SECTION_ALIASES = {
   general: "general",
   lab: "laboratory_environment",
@@ -176,6 +184,7 @@ const SECTION_ALIASES = {
   prices: "prices",
   dispatch_workspace: "dispatch_workspace",
   feasibility: "feasibility",
+  offer_workspace: "offer_workspace",
 };
 
 const REVIEW_ROLES = ["acp_comercial", "backoffice_comercial"];
@@ -1931,6 +1940,43 @@ async function assertSectionEditable(businessCaseId, section, user) {
 
 
 
+// Vista de solo-lectura para jefe_calidad y lorena.loaiza@fam-project.com
+// (ver qualitySummaryGate en businessCase.routes.js): resumen liviano, no el
+// workspace completo. Reutiliza listBusinessCases/getConsumptionItems ya
+// existentes, sin logica nueva.
+async function getQualitySummaryList(req, res) {
+  try {
+    const result = await businessCaseService.listBusinessCases({ pageSize: 500 });
+    res.json({
+      ok: true,
+      items: (result.items || []).map((bc) => ({
+        id: bc.id,
+        client_name: bc.client_name,
+        bc_stage: bc.bc_stage,
+        status: bc.status,
+      })),
+    });
+  } catch (error) {
+    logger.error(error);
+    res.status(500).json({ ok: false, message: "Error listando Business Cases" });
+  }
+}
+
+async function getQualitySummaryItems(req, res) {
+  try {
+    const data = await businessCaseService.getConsumptionItems(req.params.id);
+    const items = (data?.items || []).map((item) => ({
+      item_id: item.itemId,
+      name: item.name,
+      type: item.type,
+    }));
+    res.json({ ok: true, items });
+  } catch (error) {
+    logger.error(error);
+    res.status(error.status || 500).json({ ok: false, message: error.message || "Error obteniendo resumen" });
+  }
+}
+
 async function list(req, res) {
   try {
     logConsumptionDebug({ versionTag: 'TOISO_V1', ts: new Date().toISOString() }, '[WORKSPACE_DEBUG] business-case list handler hit');
@@ -2033,6 +2079,16 @@ async function update(req, res) {
     }
 
     const refreshed = await businessCaseService.getBusinessCaseById(req.params.id);
+    if (hasGeneralSavePayload(value)) {
+      try {
+        await crmPurchaseSyncService.syncBusinessCaseGeneralData(req.params.id, req.user);
+      } catch (crmSyncError) {
+        logger.warn(
+          { crmSyncError, businessCaseId: req.params.id },
+          "No se pudo sincronizar datos generales del business case con CRM",
+        );
+      }
+    }
     res.json({ ok: true, data: refreshed });
   } catch (err) {
     logger.error(err);
@@ -2274,6 +2330,14 @@ async function submitFeasibilityDecision(req, res) {
         excludeActor: true,
         extraData: { is_feasible: true },
       });
+      try {
+        await crmPurchaseSyncService.syncBusinessCaseFeasible(req.params.id, req.user);
+      } catch (crmSyncError) {
+        logger.warn(
+          { crmSyncError, businessCaseId: req.params.id },
+          "No se pudo sincronizar factibilidad del business case con CRM",
+        );
+      }
     } else {
       await notifyNonFeasibleDecision({
         businessCaseId: req.params.id,
@@ -3818,7 +3882,12 @@ async function getUIGuidance(req, res) {
     const investmentSelections = await investmentsService.getInvestmentSelections(id);
     const hasInvestmentsData = Array.isArray(investmentSelections) && investmentSelections.some((i) => i.selected);
     const investmentsMetadata = preflowService.toObject(bc?.modern_bc_metadata)?.investments || {};
-    const closedWithoutInvestments = Boolean(investmentsMetadata?.no_additional_investments);
+    // Inversiones adicionales no aplica a BC privados -- se marca cerrada
+    // desde el inicio en vez de esperar a que alguien la cierre a mano con
+    // el boton "sin inversiones adicionales" (mismo flag que ya usa ese
+    // cierre manual, ver closeInvestmentsWithoutAdditionalItems mas abajo).
+    const closedWithoutInvestments =
+      Boolean(investmentsMetadata?.no_additional_investments) || !isPublicBusinessCaseFlow;
     const investmentCartStatus = resolveInvestmentCartStatus(bc);
     let financialInvestmentValues = [];
     try {
@@ -3851,6 +3920,18 @@ async function getUIGuidance(req, res) {
     const hasFeasibilityExport = Boolean(feasibilityData?.export_excel?.at);
     const hasFeasibilityDecision = Boolean(feasibilityDecision?.decided_at);
     const workspaceClosedByFeasibility = Boolean(feasibilityData?.closed || hasFeasibilityDecision);
+    const isFeasibleDecision = Boolean(feasibilityDecision?.is_feasible);
+    let offerWorkspace = null;
+    try {
+      offerWorkspace = await businessCaseOfferService.getOfferWorkspace(id, req.user);
+    } catch (offerError) {
+      if (offerError?.status !== 403) {
+        logger.warn(
+          { error: offerError?.message || String(offerError), businessCaseId: id },
+          "No se pudo cargar workspace de oferta en ui-guidance",
+        );
+      }
+    }
     const lockMap = await BusinessCaseDataOwnership.getLockStatus(id);
     const currentStatDocument = await determinationsGateService.getCurrentDocument(id);
     const determinationsGate = determinationsGateService.buildGateInfo({
@@ -3859,9 +3940,24 @@ async function getUIGuidance(req, res) {
       currentDocument: currentStatDocument,
     });
     const canEditInvestments = Boolean(
-      determinationsGate.documentUploaded && INVESTMENT_EDIT_ROLES.has(userRole),
+      determinationsGate.documentUploaded && INVESTMENT_EDIT_ROLES.has(userRole) && isPublicBusinessCaseFlow,
     );
     const canEditDeterminations = Boolean(determinationsGate.permissions.canEditDeterminations);
+    const offerGroups = Array.isArray(offerWorkspace?.offer_groups) ? offerWorkspace.offer_groups : [];
+    const isMultiOfferWorkspace = offerWorkspace?.is_multi_equipment_offer === true && offerGroups.length > 1;
+    const offerGroupStatuses = offerGroups
+      .map((group) => String(group?.latest_offer?.status || "").trim().toLowerCase())
+      .filter(Boolean);
+    const hasOfferWorkspaceData = isMultiOfferWorkspace
+      ? offerGroups.every((group) => Boolean(group?.latest_offer))
+      : Boolean(offerWorkspace?.latest_offer);
+    const offerWorkspaceCompleted = isMultiOfferWorkspace
+      ? offerGroups.length > 0
+        && offerGroups.every((group) => ["accepted", "rejected"].includes(String(group?.latest_offer?.status || "").trim().toLowerCase()))
+      : Boolean(offerWorkspace?.latest_offer && ["accepted", "rejected"].includes(String(offerWorkspace.latest_offer.status || "").toLowerCase()));
+    const hasSentOfferPendingDecision = isMultiOfferWorkspace
+      ? offerGroupStatuses.includes("sent")
+      : offerWorkspace?.latest_offer?.status === "sent";
     const ownershipRules = {
       general: completionRule(generalComplete, hasGeneralData, "general"),
       lab: completionRule(hasLabData, hasLabData, "lab"),
@@ -3895,6 +3991,11 @@ async function getUIGuidance(req, res) {
         hasFeasibilityDecision,
         hasFeasibilityExport || hasFeasibilityDecision,
         "feasibility",
+      ),
+      offer_workspace: completionRule(
+        offerWorkspaceCompleted,
+        hasOfferWorkspaceData,
+        "offer_workspace",
       ),
       rentability: completionRule(false, false, "rentability"),
     };
@@ -3938,8 +4039,6 @@ async function getUIGuidance(req, res) {
       stat_document_expired: determinationsGate.isExpired,
       determinations_editor_roles: determinationsGate.editors,
     };
-    const isFeasibleDecision = Boolean(feasibilityDecision?.is_feasible);
-
     ownershipRules.feasibility.canUserEdit = !workspaceClosedByFeasibility;
     ownershipRules.feasibility.metadata = {
       ...(ownershipRules.feasibility.metadata || {}),
@@ -3969,6 +4068,29 @@ async function getUIGuidance(req, res) {
       requires_feasibility: true,
       is_feasible: isFeasibleDecision,
       feasibility_decided: hasFeasibilityDecision,
+    };
+
+    ownershipRules.offer_workspace.canUserEdit = Boolean(offerWorkspace?.permissions?.canManage);
+    ownershipRules.offer_workspace.canUserComplete = Boolean(
+      offerWorkspace?.permissions?.canManage || offerWorkspace?.permissions?.canDecide,
+    );
+    ownershipRules.offer_workspace.currentOwner = hasSentOfferPendingDecision
+      ? (offerWorkspace?.created_by_email || "comercial")
+      : offerWorkspace?.permissions?.canManage
+        ? "acp_comercial / jefe_comercial"
+        : null;
+    ownershipRules.offer_workspace.metadata = {
+      ...(ownershipRules.offer_workspace.metadata || {}),
+      requires_feasibility: true,
+      is_feasible: isFeasibleDecision,
+      has_offer: hasOfferWorkspaceData,
+      is_multi_equipment_offer: isMultiOfferWorkspace,
+      expected_offer_count: offerWorkspace?.expected_offer_count || null,
+      latest_status: offerWorkspace?.latest_offer?.status || null,
+      latest_version_number: offerWorkspace?.latest_offer?.version_number || null,
+      latest_rejection_reason: offerWorkspace?.latest_offer?.rejection_reason || null,
+      can_manage: Boolean(offerWorkspace?.permissions?.canManage),
+      can_decide: Boolean(offerWorkspace?.permissions?.canDecide),
     };
 
     ownershipRules.investments.canUserEdit = canEditInvestments;
@@ -4055,7 +4177,14 @@ async function getUIGuidance(req, res) {
       canAddObservations: true,
       canBlockSections: !workspaceClosedByFeasibility && LOCK_ROLES.includes(userRole),
       canUnblockSections: !workspaceClosedByFeasibility && LOCK_ROLES.includes(userRole),
-      canRequestPreflowReopen: !workspaceClosedByFeasibility && canRequestPreflowReopen,
+      // No se condiciona a !workspaceClosedByFeasibility: la revision tecnica
+      // (controles/calibradores/materiales) es independiente de la decision
+      // economica de factibilidad. Si factibilidad se cierra antes de que
+      // jefe_servicio termine su ventana SLA, debe poder seguir pidiendo la
+      // prorroga de 24h -- si no, queda sin ninguna via de recuperacion (ver
+      // caso 54762e41-74c9-45fb-80e0-454b9bf040a8, SLA vencida + workspace
+      // cerrado por factibilidad = deadlock total).
+      canRequestPreflowReopen,
       canResolvePreflowReopen,
       canDecideFeasibility: canDecideFeasibility && !workspaceClosedByFeasibility,
       canAppealFeasibilityRejection,              // BC-16: comercial* puede apelar cuando is_feasible=false
@@ -4065,6 +4194,9 @@ async function getUIGuidance(req, res) {
       workspaceClosed: workspaceClosedByFeasibility,
       canEditInvestments,
       canEditDeterminations,
+      canViewOfferWorkspace: Boolean(offerWorkspace?.permissions?.canView),
+      canManageOfferWorkspace: Boolean(offerWorkspace?.permissions?.canManage),
+      canDecideOfferWorkspace: Boolean(offerWorkspace?.permissions?.canDecide),
     };
     const autosaveFlags = await featureFlagsService.getAutosaveFlagsForRole(userRole);
 
@@ -4094,6 +4226,7 @@ async function getUIGuidance(req, res) {
           hasDecision: hasFeasibilityDecision,
           closed: workspaceClosedByFeasibility,
         },
+        offer_workspace: offerWorkspace,
       },
       observationData: null, // No observations for now
       workflowState: {
@@ -4111,6 +4244,75 @@ async function getUIGuidance(req, res) {
       ok: false,
       message: error.message || "Error obteniendo datos de UI guidance"
     });
+  }
+}
+
+async function getOfferWorkspace(req, res) {
+  try {
+    const data = await businessCaseOfferService.getOfferWorkspace(req.params.id, req.user);
+    res.json({ ok: true, data });
+  } catch (error) {
+    logger.error({ error: error.message, businessCaseId: req.params.id }, "Error getting BC offer workspace");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+async function createOfferDraft(req, res) {
+  try {
+    const data = await businessCaseOfferService.createOfferDraft(req.params.id, req.user);
+    res.status(201).json({ ok: true, data });
+  } catch (error) {
+    logger.error({ error: error.message, businessCaseId: req.params.id }, "Error creating BC offer draft");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+async function publishOfferVersion(req, res) {
+  try {
+    const offerId = Number(req.params.offerId);
+    const data = await businessCaseOfferService.publishOfferVersion(req.params.id, offerId, req.user);
+    res.json({ ok: true, data });
+  } catch (error) {
+    logger.error({ error: error.message, businessCaseId: req.params.id, offerId: req.params.offerId }, "Error publishing BC offer version");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+async function regenerateOfferVersion(req, res) {
+  try {
+    const offerId = Number(req.params.offerId);
+    const data = await businessCaseOfferService.regenerateOfferVersionInPlace(req.params.id, offerId, req.user);
+    res.json({ ok: true, data });
+  } catch (error) {
+    logger.error({ error: error.message, businessCaseId: req.params.id, offerId: req.params.offerId }, "Error regenerating BC offer version");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+async function syncOfferPricingAndPdf(req, res) {
+  try {
+    const offerId = Number(req.params.offerId);
+    const data = await businessCaseOfferService.syncOfferPricingAndPdfInPlace(req.params.id, offerId, req.user);
+    res.json({ ok: true, data });
+  } catch (error) {
+    logger.error({ error: error.message, businessCaseId: req.params.id, offerId: req.params.offerId }, "Error syncing BC offer pricing and PDF");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null, details: error.details || null });
+  }
+}
+
+async function decideOfferVersion(req, res) {
+  try {
+    const { error, value } = offerDecisionSchema.validate(req.body || {}, { abortEarly: false });
+    if (error) {
+      return res.status(400).json({ ok: false, message: error.details.map((detail) => detail.message).join(", ") });
+    }
+
+    const offerId = Number(req.params.offerId);
+    const data = await businessCaseOfferService.decideOfferVersion(req.params.id, offerId, value, req.user);
+    res.json({ ok: true, data });
+  } catch (error) {
+    logger.error({ error: error.message, businessCaseId: req.params.id, offerId: req.params.offerId }, "Error deciding BC offer version");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
   }
 }
 
@@ -4339,20 +4541,31 @@ async function reviewEnvironmentInspectionRequest(req, res) {
       }
       const windowMinDate = String(inspectionReq.inspection_min_date || "").slice(0, 10);
       const windowMaxDate = String(inspectionReq.inspection_max_date || windowMinDate || "").slice(0, 10);
-      if (windowMinDate && (inspectionDate < windowMinDate || inspectionDate > windowMaxDate)) {
+      // sin min: puede adelantar la inspeccion, solo se bloquea pasarse del max
+      if (windowMaxDate && inspectionDate > windowMaxDate) {
         return res.status(409).json({
           ok: false,
-          message: `La fecha de inspeccion debe estar entre ${windowMinDate} y ${windowMaxDate}.`,
+          message: `La fecha de inspeccion no puede ser posterior a ${windowMaxDate}.`,
           code: "BC_INSPECTION_DATE_OUT_OF_WINDOW",
         });
       }
 
       const { rows: [assignedUser] } = await db.query(
-        `SELECT id, COALESCE(fullname, name, email) AS display_name FROM public.users WHERE id = $1`,
+        `SELECT id, role, COALESCE(fullname, name, email) AS display_name FROM public.users WHERE id = $1`,
         [assignedUserId],
       );
       if (!assignedUser) {
         return res.status(400).json({ ok: false, message: "El usuario asignado no existe." });
+      }
+      // Mismo chequeo que approvals.service.js/withdrawalWorkflow.service.js
+      // (plan servicio-tecnico, Fase C): antes cualquier user_id pasaba sin
+      // validar rol.
+      const assignedRole = String(assignedUser.role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+      if (!ROLE_GROUPS.tecnico.includes(assignedRole)) {
+        return res.status(409).json({
+          ok: false,
+          message: "El usuario asignado debe ser ingeniero de servicio, especialista de aplicaciones o jefe de servicio.",
+        });
       }
 
       await db.query(
@@ -6694,6 +6907,8 @@ async function saveInvestmentValues(req, res) {
 }
 
 module.exports = {
+  getQualitySummaryList,
+  getQualitySummaryItems,
   list,
   create,
   getById,
@@ -6737,6 +6952,12 @@ module.exports = {
   upsertAutosaveFeatureFlags,
   // UI Guidance endpoints (Workspace)
   getUIGuidance,
+  getOfferWorkspace,
+  createOfferDraft,
+  publishOfferVersion,
+  regenerateOfferVersion,
+  syncOfferPricingAndPdf,
+  decideOfferVersion,
   getDeterminationsGateInfo,
   requestEnvironmentInspection,
   reviewEnvironmentInspectionRequest,

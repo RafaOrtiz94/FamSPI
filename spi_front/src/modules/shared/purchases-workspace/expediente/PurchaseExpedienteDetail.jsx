@@ -79,6 +79,12 @@ function computePendingTabs(purchase, type, userRoles = []) {
     // ── Tab: FLUJO_COMERCIAL ────────────────────────────────────────────
     // backoffice reviews and sends to ACP (the "solicitar disponibilidad a ACP" action)
     mark('flujo_comercial', status === 'pending_backoffice'          && isBkOrMgr);
+    // El expediente de comodato queda suspendido en BC hasta resolver factibilidad.
+    mark(
+      'flujo_comercial',
+      ['business_case_in_progress', 'business_case_under_review', 'business_case_feasibility_approved'].includes(status) &&
+      isComBkOrMgr,
+    );
     // ACP confirmed availability → backoffice prepares offer
     mark('flujo_comercial', status === 'acp_availability_confirmed'  && isBkOrMgr);
     // backoffice/manager handles offer rejection or price improvement request

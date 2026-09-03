@@ -871,7 +871,8 @@ const listCollaborators = async (filters = {}) => {
         SELECT ARRAY_AGG(cd.doc_type)
         FROM collaborator_documents cd
         WHERE cd.user_id = u.id
-      ) AS doc_types
+      ) AS doc_types,
+      COUNT(*) OVER() AS total_count
     FROM users u
     LEFT JOIN departments d ON u.department_id = d.id
     LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
@@ -883,19 +884,12 @@ const listCollaborators = async (filters = {}) => {
 
   params.push(pageSize, offset);
 
-  const { rows } = await db.query(query, params);
+  const { rows: rawRows } = await db.query(query, params);
+  const total = rawRows.length > 0 ? parseInt(rawRows[0].total_count, 10) : 0;
+  const rows = rawRows.map(({ total_count, ...row }) => row);
   const qualificationSummaries = await summarizeQualificationsByUserIds(
     rows.map((row) => row.id)
   );
-
-  const countQuery = `
-    SELECT COUNT(*) AS total
-    FROM users u
-    LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
-    ${whereClause}
-  `;
-  const countResult = await db.query(countQuery, params.slice(0, params.length - 2));
-  const total = parseInt(countResult.rows[0]?.total || 0, 10);
 
   const data = rows.map((row) => {
       const profileCompletion = computeProfileCompletion(row.profile || {});

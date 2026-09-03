@@ -148,6 +148,12 @@ router.get(
   requireRole(serviceTechnicalCoreRoles),
   controller.getTechnicalScheduleFeed
 );
+router.get(
+  "/action-queue",
+  verifyToken,
+  requireRole(serviceTechnicalCoreRoles),
+  controller.getActionQueue
+);
 
 // ======================================================
 // ⚙️ EQUIPOS

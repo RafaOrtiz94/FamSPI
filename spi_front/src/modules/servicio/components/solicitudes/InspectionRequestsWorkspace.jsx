@@ -29,53 +29,81 @@ import { approveRequest, rejectRequest } from "../../../../core/api/approvalsApi
 import { getTechnicalScheduleFeed } from "../../../../core/api/availabilityApi";
 import { normalizeRoles, isChiefTechnical as isChiefTechnicalRole, isTechnical as isTechnicalRole } from "../../../shared/purchases-workspace/purchaseRoleGroups";
 import Fst07ResultPanel from "./Fst07ResultPanel";
+import AssignInspectionPanel from "./AssignInspectionPanel";
+import ServicioWorkspaceShell from "../../design/ServicioWorkspaceShell";
+import ServicioRailItem from "../../design/ServicioRailItem";
+import ServicioBadge from "../../design/ServicioBadge";
+import ServicioCard from "../../design/ServicioCard";
+import ServicioEmptyState from "../../design/ServicioEmptyState";
 
 const SOURCE_COPY = {
   bc: {
     title: "Inspecciones desde Business Case",
-    helper: "Gestiona solicitudes F.ST-20 originadas en business case con una bandeja única y respuesta consistente.",
+    helper: "Solicitudes F.ST-20 originadas en business case.",
     empty: "No hay solicitudes de inspección originadas desde business case.",
-    accent: "border-blue-200 bg-blue-50 text-blue-700",
     Icon: FiBriefcase,
     sourceLabel: "Business Case",
   },
   compras: {
     title: "Inspecciones desde Compras",
-    helper: "Centraliza solicitudes públicas y privadas bajo el mismo expediente operativo para responderlas con coherencia.",
+    helper: "Solicitudes públicas y privadas originadas en compras.",
     empty: "No hay solicitudes de inspección pendientes desde compras.",
-    accent: "border-emerald-200 bg-emerald-50 text-emerald-700",
     Icon: FiClipboard,
     sourceLabel: "Compras",
   },
   independientes: {
     title: "Inspecciones Independientes",
-    helper: "Revisa solicitudes F.ST-20 creadas de forma directa con el mismo contexto visual del resto del módulo.",
+    helper: "Solicitudes F.ST-20 creadas de forma directa.",
     empty: "No hay solicitudes independientes registradas.",
-    accent: "border-amber-200 bg-amber-50 text-amber-700",
     Icon: FiUsers,
     sourceLabel: "Independiente",
   },
 };
 
+const SOURCE_FILTERS = [
+  { id: "all", label: "Todas" },
+  { id: "bc", label: "Business Case" },
+  { id: "compras", label: "Compras" },
+  { id: "independientes", label: "Independientes" },
+];
+
+// Una solicitud pendiente hace mas de 3 dias sin decision es la misma señal
+// de urgencia que usa la cola de Inicio (actionQueue.service.js) para
+// backlog viejo -- mismo criterio, aplicado aqui a nivel de fila individual
+// en vez de a nivel de cola agregada.
+const PENDING_STATUS_KEYS = ["pending", "pendiente", "pending_review", "pending_approval"];
+const isPendingStatus = (status) => PENDING_STATUS_KEYS.includes(String(status || "").toLowerCase());
+
+const computeUrgency = (item) => {
+  const status = String(item.status || "").toLowerCase();
+  if (status === "non_compliant_reinspection_pending") return "urgent";
+  if (!isPendingStatus(status)) return "resolved";
+  const requestedAt = item.requestedAt ? new Date(item.requestedAt).getTime() : null;
+  const daysOld = requestedAt ? Math.floor((Date.now() - requestedAt) / 86400000) : 0;
+  return daysOld > 3 ? "urgent" : "normal";
+};
+
+const URGENCY_RANK = { urgent: 0, normal: 1, resolved: 2 };
+
 const STATUS_META = {
-  pending: { label: "Pendiente", className: "bg-amber-100 text-amber-800", Icon: FiClock },
+  pending: { label: "Pendiente", tone: "warning", Icon: FiClock },
   // "pendiente" es el status real que usa requests.service.js (español) para
   // toda solicitud F.ST-20 recien creada -- sin este alias, las solicitudes
   // independientes nunca mostraban el estado correcto ni el panel de
   // aprobar/rechazar.
-  pendiente: { label: "Pendiente", className: "bg-amber-100 text-amber-800", Icon: FiClock },
-  pending_review: { label: "Pendiente revisión", className: "bg-orange-100 text-orange-800", Icon: FiClock },
-  approved: { label: "Aprobada", className: "bg-emerald-100 text-emerald-800", Icon: FiCheckCircle },
-  aprobado: { label: "Aprobada", className: "bg-emerald-100 text-emerald-800", Icon: FiCheckCircle },
-  accepted: { label: "Aceptada", className: "bg-emerald-100 text-emerald-800", Icon: FiCheckCircle },
-  rejected: { label: "Rechazada", className: "bg-red-100 text-red-800", Icon: FiXCircle },
-  rechazado: { label: "Rechazada", className: "bg-red-100 text-red-800", Icon: FiXCircle },
-  cancelled: { label: "Cancelada", className: "bg-slate-200 text-slate-700", Icon: FiXCircle },
-  cancelado: { label: "Cancelada", className: "bg-slate-200 text-slate-700", Icon: FiXCircle },
-  pending_approval: { label: "Pendiente aprobación", className: "bg-amber-100 text-amber-800", Icon: FiClock },
-  completado: { label: "Completada", className: "bg-emerald-100 text-emerald-800", Icon: FiCheckCircle },
-  completed: { label: "Completada", className: "bg-emerald-100 text-emerald-800", Icon: FiCheckCircle },
-  non_compliant_reinspection_pending: { label: "Reinspección pendiente", className: "bg-orange-100 text-orange-800", Icon: FiAlertCircle },
+  pendiente: { label: "Pendiente", tone: "warning", Icon: FiClock },
+  pending_review: { label: "Pendiente revisión", tone: "warning", Icon: FiClock },
+  approved: { label: "Aprobada", tone: "success", Icon: FiCheckCircle },
+  aprobado: { label: "Aprobada", tone: "success", Icon: FiCheckCircle },
+  accepted: { label: "Aceptada", tone: "success", Icon: FiCheckCircle },
+  rejected: { label: "Rechazada", tone: "danger", Icon: FiXCircle },
+  rechazado: { label: "Rechazada", tone: "danger", Icon: FiXCircle },
+  cancelled: { label: "Cancelada", tone: "neutral", Icon: FiXCircle },
+  cancelado: { label: "Cancelada", tone: "neutral", Icon: FiXCircle },
+  pending_approval: { label: "Pendiente aprobación", tone: "warning", Icon: FiClock },
+  completado: { label: "Completada", tone: "success", Icon: FiCheckCircle },
+  completed: { label: "Completada", tone: "success", Icon: FiCheckCircle },
+  non_compliant_reinspection_pending: { label: "Reinspección pendiente", tone: "warning", Icon: FiAlertCircle },
 };
 
 const safeJson = (value) => {
@@ -102,11 +130,7 @@ const resolveBusinessCaseId = (row = {}) =>
 
 const getStatusMeta = (status) => {
   const key = String(status || "").toLowerCase();
-  return STATUS_META[key] || {
-    label: status || "Sin estado",
-    className: "bg-slate-100 text-slate-700",
-    Icon: FiClock,
-  };
+  return STATUS_META[key] || { label: status || "Sin estado", tone: "neutral", Icon: FiClock };
 };
 
 const getPrivateRoleParam = (user) => {
@@ -258,33 +282,25 @@ const normalizeIndependentItems = (payload) => {
     .sort((a, b) => new Date(b.requestedAt || 0).getTime() - new Date(a.requestedAt || 0).getTime());
 };
 
-const MetricCard = ({ label, value }) => (
-  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</p>
-    <p className="mt-2 text-xl font-semibold text-slate-900">{value}</p>
-  </div>
-);
-
 const DetailLine = ({ icon: Icon, label, value }) => (
-  <div className="flex min-w-0 items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-    <div className="shrink-0 rounded-full bg-white p-2 shadow-sm">
-      <Icon size={15} className="text-slate-500" />
+  <div className="flex min-w-0 items-start gap-3 rounded-[var(--st-radius-md)] border px-4 py-4" style={{ borderColor: "var(--st-border)", background: "var(--st-surface-sunken)" }}>
+    <div className="shrink-0 rounded-full p-2" style={{ background: "var(--st-surface)" }}>
+      <Icon size={15} style={{ color: "var(--st-text-muted)" }} />
     </div>
     <div className="min-w-0 flex-1">
-      <p className="text-[11px] font-semibold uppercase leading-5 tracking-[0.1em] text-slate-400 break-normal">
+      <p className="text-[11px] font-semibold uppercase leading-5 tracking-[0.1em] break-normal" style={{ color: "var(--st-text-faint)" }}>
         {label}
       </p>
-      <p className="mt-1 text-base font-medium leading-7 text-slate-700 break-words">
+      <p className="mt-1 text-base font-medium leading-7 break-words" style={{ color: "var(--st-text)" }}>
         {value || "N/D"}
       </p>
     </div>
   </div>
 );
 
-const InspectionRequestsWorkspace = ({ source = "bc" }) => {
+const InspectionRequestsWorkspace = ({ initialSourceFilter = "all" }) => {
   const { user } = useAuth();
   const { showToast } = useUI();
-  const sourceMeta = SOURCE_COPY[source] || SOURCE_COPY.bc;
   const userRoles = useMemo(() => normalizeRoles(user), [user]);
   const isChiefTechnical = useMemo(() => isChiefTechnicalRole(userRoles), [userRoles]);
   const privateRoleParam = useMemo(() => getPrivateRoleParam(user), [user]);
@@ -300,42 +316,59 @@ const InspectionRequestsWorkspace = ({ source = "bc" }) => {
   const [coordDrafts, setCoordDrafts] = useState({});
   const [reviewDrafts, setReviewDrafts] = useState({});
   const [scheduleConflict, setScheduleConflict] = useState(null);
+  const [assignedToMeOnly, setAssignedToMeOnly] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState(
+    SOURCE_FILTERS.some((s) => s.id === initialSourceFilter) ? initialSourceFilter : "all",
+  );
+  const currentUserId = Number(user?.id) || null;
 
+  // Antes esta bandeja se montaba 3 veces (una por pestaña de fuente) y cada
+  // instancia solo cargaba su propia fuente. Ahora es una sola instancia que
+  // trae las 3 en paralelo -- el jefe ya no tiene que recorrer pestañas para
+  // saber que necesita su decision, la fuente pasa a ser un filtro
+  // secundario dentro de una unica lista ordenada por urgencia.
   const loadData = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      if (source === "bc") {
-        const response = await listBusinessCases({ page: 1, pageSize: 100 });
-        setItems(normalizeBcItems(response));
-      } else if (source === "compras") {
-        const [publicResult, privateResult] = await Promise.allSettled([
+      const [bcResult, purchasesResult, independentResult] = await Promise.allSettled([
+        listBusinessCases({ page: 1, pageSize: 100 }),
+        Promise.allSettled([
           listEquipmentPurchases(),
           loadPrivatePurchasesForInspection(privateRoleParam, isChiefTechnical),
-        ]);
-        if (publicResult.status !== "fulfilled") {
-          throw publicResult.reason || new Error("No se pudieron cargar las compras");
-        }
-        const publicRows = Array.isArray(publicResult.value) ? publicResult.value : [];
+        ]),
+        getRequests({ page: 1, pageSize: 100, type: "F.ST-20" }),
+      ]);
+
+      const bcItems = bcResult.status === "fulfilled" ? normalizeBcItems(bcResult.value) : [];
+
+      let purchaseItems = [];
+      if (purchasesResult.status === "fulfilled") {
+        const [publicResult, privateResult] = purchasesResult.value;
+        const publicRows = publicResult.status === "fulfilled" && Array.isArray(publicResult.value) ? publicResult.value : [];
         const privateRows = privateResult.status === "fulfilled" ? privateResult.value : [];
-        setItems(normalizePurchaseItems(publicRows, privateRows));
-      } else {
-        const response = await getRequests({ page: 1, pageSize: 100, type: "F.ST-20" });
-        setItems(normalizeIndependentItems(response));
+        purchaseItems = normalizePurchaseItems(publicRows, privateRows);
+      }
+
+      const independentItems = independentResult.status === "fulfilled" ? normalizeIndependentItems(independentResult.value) : [];
+
+      setItems([...bcItems, ...purchaseItems, ...independentItems]);
+
+      if (bcResult.status !== "fulfilled" && purchasesResult.status !== "fulfilled" && independentResult.status !== "fulfilled") {
+        throw new Error("No se pudo cargar ninguna fuente de inspección");
       }
     } catch (loadError) {
       setError(loadError?.response?.data?.message || loadError?.message || "No se pudo cargar la bandeja");
     } finally {
       setLoading(false);
     }
-  }, [isChiefTechnical, privateRoleParam, source]);
+  }, [isChiefTechnical, privateRoleParam]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
   useEffect(() => {
-    if (source !== "compras" && source !== "independientes") return;
     let cancelled = false;
     (async () => {
       try {
@@ -348,10 +381,10 @@ const InspectionRequestsWorkspace = ({ source = "bc" }) => {
     return () => {
       cancelled = true;
     };
-  }, [source]);
+  }, []);
 
   useEffect(() => {
-    if (source !== "bc" || !isChiefTechnical) return;
+    if (!isChiefTechnical) return;
     let cancelled = false;
     (async () => {
       try {
@@ -366,17 +399,43 @@ const InspectionRequestsWorkspace = ({ source = "bc" }) => {
     return () => {
       cancelled = true;
     };
-  }, [isChiefTechnical, source]);
+  }, [isChiefTechnical]);
+
+  const itemsWithAssignment = useMemo(
+    () =>
+      items.map((item) => ({
+        ...item,
+        // "independientes" (F.ST-20 nativo) no trae el tecnico asignado de
+        // vuelta en el payload -- vive solo en el cronograma compartido, no
+        // en la fila de `requests`. assignedToMe siempre da false ahi, lo
+        // cual es correcto (no hay dato que fabricar), no un bug.
+        assignedToMe:
+          Boolean(currentUserId) &&
+          (Number(item.assignedUserId) === currentUserId || Number(item.assignedTechnicianId) === currentUserId),
+        urgency: computeUrgency(item),
+      })),
+    [items, currentUserId],
+  );
 
   const filteredItems = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    if (!normalized) return items;
-    return items.filter((item) =>
-      [item.clientName, item.city, item.requestId, item.purchaseType, item.businessCaseStatus]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(normalized)),
-    );
-  }, [items, query]);
+    return itemsWithAssignment
+      .filter((item) => {
+        const matchesQuery =
+          !normalized ||
+          [item.clientName, item.city, item.requestId, item.purchaseType, item.businessCaseStatus]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(normalized));
+        const matchesAssigned = !assignedToMeOnly || item.assignedToMe;
+        const matchesSource = sourceFilter === "all" || item.sourceType === sourceFilter;
+        return matchesQuery && matchesAssigned && matchesSource;
+      })
+      .sort((a, b) => {
+        const rankDiff = URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency];
+        if (rankDiff !== 0) return rankDiff;
+        return new Date(b.requestedAt || 0).getTime() - new Date(a.requestedAt || 0).getTime();
+      });
+  }, [itemsWithAssignment, query, assignedToMeOnly, sourceFilter]);
 
   useEffect(() => {
     if (!filteredItems.length) {
@@ -635,581 +694,385 @@ const InspectionRequestsWorkspace = ({ source = "bc" }) => {
   };
 
   const statusMeta = getStatusMeta(selected?.status);
+  const inputClass = "w-full rounded-[var(--st-radius-md)] border px-3 py-3 text-sm outline-none";
+  const inputStyle = { borderColor: "var(--st-border)", color: "var(--st-text)", background: "var(--st-surface)" };
 
-  return (
-    <section className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
-      <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-[linear-gradient(180deg,#FFFFFF_0%,#F8FAFC_100%)] p-5 shadow-[0_18px_48px_rgba(15,23,42,0.08)] sm:p-6">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div className="max-w-3xl">
-            <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${sourceMeta.accent}`}>
-              <sourceMeta.Icon size={14} />
-              {sourceMeta.sourceLabel}
-            </div>
-            <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-900">{sourceMeta.title}</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-500">{sourceMeta.helper}</p>
-          </div>
-
-          <div className="grid w-full gap-3 sm:grid-cols-3 xl:w-[420px]">
-            <MetricCard label="Solicitudes" value={items.length} />
-            <MetricCard label="Pendientes" value={pendingCount} />
-            <MetricCard label="Resueltas" value={approvedCount} />
-          </div>
+  const railContent = (
+    <>
+      <div className="border-b p-4" style={{ borderColor: "var(--st-border)" }}>
+        <div className="flex items-center gap-3 rounded-[var(--st-radius-md)] border px-3 py-2.5" style={{ borderColor: "var(--st-border)", background: "var(--st-surface-sunken)" }}>
+          <FiSearch size={16} style={{ color: "var(--st-text-faint)" }} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Buscar cliente, ciudad o solicitud"
+            className="w-full border-0 bg-transparent text-sm outline-none"
+            style={{ color: "var(--st-text)" }}
+          />
         </div>
-
-        <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
-          <aside className="min-w-0 overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 p-4">
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-                <FiSearch size={16} className="text-slate-400" />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Buscar cliente, ciudad o solicitud"
-                  className="w-full border-0 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
-                />
-              </div>
-              <div className="mt-3 flex items-center justify-between">
-                <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">Bandeja activa</p>
-                <button
-                  type="button"
-                  onClick={loadData}
-                  disabled={loading}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
-                >
-                  <FiRefreshCw size={13} className={loading ? "animate-spin" : ""} />
-                  Actualizar
-                </button>
-              </div>
-            </div>
-
-            <div className="max-h-[65dvh] space-y-3 overflow-y-auto p-4">
-              {error ? (
-                <div className="flex items-start gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  <FiAlertCircle size={16} className="mt-0.5 shrink-0" />
-                  <span>{error}</span>
-                </div>
-              ) : null}
-
-              {loading && !items.length ? (
-                Array.from({ length: 4 }).map((_, index) => (
-                  <div key={index} className="h-28 animate-pulse rounded-3xl bg-slate-100" />
-                ))
-              ) : filteredItems.length ? (
-                filteredItems.map((item) => {
-                  const meta = getStatusMeta(item.status);
-                  const ActiveIcon = meta.Icon;
-                  const active = item.id === selectedId;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setSelectedId(item.id)}
-                      className={`w-full rounded-3xl border px-4 py-4 text-left transition ${
-                        active
-                          ? "border-[#BFDBFE] bg-[#EFF6FF] text-slate-900 shadow-[0_14px_30px_rgba(37,99,235,0.12)]"
-                          : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className={`truncate text-sm font-semibold ${active ? "text-slate-900" : "text-slate-900"}`}>
-                            {item.clientName}
-                          </p>
-                          <p className={`mt-1 text-xs ${active ? "text-slate-600" : "text-slate-500"}`}>
-                            Solicitud #{item.requestId || item.sourceId}
-                          </p>
-                        </div>
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${active ? "bg-white text-slate-700 ring-1 ring-[#DBEAFE]" : meta.className}`}>
-                          <ActiveIcon size={11} />
-                          {meta.label}
-                        </span>
-                      </div>
-
-                      <div className={`mt-4 flex flex-wrap gap-2 text-xs ${active ? "text-slate-600" : "text-slate-500"}`}>
-                        {item.city ? (
-                          <span className="inline-flex items-center gap-1">
-                            <FiMapPin size={12} />
-                            {item.city}
-                          </span>
-                        ) : null}
-                        <span className="inline-flex items-center gap-1">
-                          <FiCalendar size={12} />
-                          {formatDate(item.requestedAt)}
-                        </span>
-                        {item.minDate || item.maxDate ? (
-                          <span className="inline-flex items-center gap-1">
-                            <FiClock size={12} />
-                            {item.minDate ? formatDate(item.minDate) : "N/D"}
-                            <FiArrowRight size={10} />
-                            {item.maxDate ? formatDate(item.maxDate) : "N/D"}
-                          </span>
-                        ) : null}
-                        {item.purchaseType ? (
-                          <span className="rounded-full border border-current/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em]">
-                            {item.purchaseType === "public" ? "Pública" : "Privada"}
-                          </span>
-                        ) : null}
-                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                          active
-                            ? "bg-white text-slate-700 ring-1 ring-[#DBEAFE]"
-                            : item.tipoInspeccion === "costos"
-                              ? "bg-indigo-50 text-indigo-700"
-                              : "bg-slate-100 text-slate-600"
-                        }`}>
-                          {item.tipoInspeccion === "costos" ? "Por costos" : "Normal"}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })
-              ) : (
-                <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 px-5 py-12 text-center">
-                  <p className="text-sm font-medium text-slate-700">{sourceMeta.empty}</p>
-                  <p className="mt-2 text-xs text-slate-500">Ajusta la búsqueda o vuelve a cargar la bandeja.</p>
-                </div>
-              )}
-            </div>
-          </aside>
-
-          <main className="min-w-0 overflow-hidden rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            {!selected ? (
-              <div className="flex min-h-[420px] flex-col items-center justify-center rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-6 text-center">
-                <div className="rounded-full border border-slate-200 bg-white p-4 shadow-sm">
-                  <sourceMeta.Icon size={24} className="text-slate-400" />
-                </div>
-                <p className="mt-4 text-base font-semibold text-slate-800">Selecciona una solicitud</p>
-                <p className="mt-2 max-w-md text-sm text-slate-500">
-                  La gestión operativa y el contexto del expediente se mostrarán aquí.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
-                        {sourceMeta.sourceLabel}
-                      </span>
-                      {selected.purchaseType ? (
-                        <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
-                          Compra {selected.purchaseType === "public" ? "pública" : "privada"}
-                        </span>
-                      ) : null}
-                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                        selected.tipoInspeccion === "costos"
-                          ? "bg-indigo-50 text-indigo-700"
-                          : "bg-slate-100 text-slate-600"
-                      }`}>
-                        {selected.tipoInspeccion === "costos" ? "Por costos" : "Normal"}
-                      </span>
-                    </div>
-                    <h3 className="mt-3 text-2xl font-semibold tracking-tight text-slate-900">{selected.clientName}</h3>
-                    <p className="mt-2 text-sm text-slate-500">
-                      Solicitud #{selected.requestId || selected.sourceId}
-                      {selected.businessCaseStatus ? ` · Estado BC: ${selected.businessCaseStatus}` : ""}
-                      {selected.purchaseStatus ? ` · Estado compra: ${selected.purchaseStatus}` : ""}
-                    </p>
-                  </div>
-
-                  <span className={`inline-flex items-center gap-2 self-start rounded-full px-3.5 py-2 text-sm font-semibold ${statusMeta.className}`}>
-                    <statusMeta.Icon size={15} />
-                    {statusMeta.label}
-                  </span>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
-                  <DetailLine icon={FiCalendar} label="Solicitud" value={formatDate(selected.requestedAt)} />
-                  <DetailLine icon={FiMapPin} label="Ciudad / ubicación" value={selected.city || "No registrada"} />
-                  <DetailLine icon={FiUser} label="Técnico asignado" value={selected.assignedUserName || selected.assignedTechnicianName || "Pendiente"} />
-                  <DetailLine icon={FiCheckCircle} label="Fecha coordinada" value={selected.scheduledDate ? formatDate(selected.scheduledDate) : "Pendiente"} />
-                  <DetailLine
-                    icon={FiClock}
-                    label="Ventana solicitada (min - max)"
-                    value={
-                      selected.minDate || selected.maxDate
-                        ? `${selected.minDate ? formatDate(selected.minDate) : "N/D"} - ${selected.maxDate ? formatDate(selected.maxDate) : "N/D"}`
-                        : "No registrada"
-                    }
-                  />
-                </div>
-
-                <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-                  <h4 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Documentos generados</h4>
-                  {loadingDocuments ? (
-                    <p className="mt-3 text-sm text-slate-500">Cargando documentos...</p>
-                  ) : documents.length ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {documents.map((doc) => (
-                        <a
-                          key={doc.id}
-                          href={doc.drive_link || `https://drive.google.com/file/d/${doc.drive_file_id}/view`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:border-slate-300 hover:bg-white"
-                        >
-                          <FiFileText size={13} />
-                          {doc.title || "Documento"}
-                          <FiExternalLink size={11} className="text-slate-400" />
-                        </a>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-3 text-sm text-slate-500">Aún no hay documentos generados para esta solicitud.</p>
-                  )}
-                </div>
-
-                {source === "bc" ? (
-                  <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                    <h4 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Respuesta operativa</h4>
-                    {isChiefTechnical && String(selected.status || "").toLowerCase() === "pending" ? (
-                      <div className="mt-4 grid gap-5 xl:grid-cols-2">
-                        <div className="space-y-3 rounded-3xl border border-slate-200 bg-white p-4">
-                          <p className="text-sm font-semibold text-slate-900">Aprobar y asignar</p>
-                          <select
-                            value={coordDrafts[selected.id]?.assigned_user_id || ""}
-                            onChange={(event) =>
-                              setCoordDrafts((prev) => ({
-                                ...prev,
-                                [selected.id]: { ...prev[selected.id], assigned_user_id: event.target.value },
-                              }))
-                            }
-                            className="w-full rounded-2xl border border-slate-300 px-3 py-3 text-sm text-slate-700 outline-none focus:border-slate-400"
-                          >
-                            <option value="">Selecciona técnico</option>
-                            {bcUsers.map((option) => (
-                              <option key={option.id} value={option.id}>
-                                {option.fullname || option.name || option.email}
-                              </option>
-                            ))}
-                          </select>
-                          <input
-                            type="date"
-                            min={selected.minDate || undefined}
-                            max={selected.maxDate || undefined}
-                            value={coordDrafts[selected.id]?.inspection_date || ""}
-                            onChange={(event) =>
-                              setCoordDrafts((prev) => ({
-                                ...prev,
-                                [selected.id]: { ...prev[selected.id], inspection_date: event.target.value },
-                              }))
-                            }
-                            className="w-full rounded-2xl border border-slate-300 px-3 py-3 text-sm text-slate-700 outline-none focus:border-slate-400"
-                          />
-                          {scheduleConflict ? (
-                            <p className="flex items-start gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-                              <FiAlertCircle className="mt-0.5 shrink-0" size={14} />
-                              Este colaborador ya tiene {scheduleConflict.rows.length} actividad(es) el {formatDate(scheduleConflict.date)}:{" "}
-                              {scheduleConflict.rows.map((row) => row.title).join(", ")}.
-                            </p>
-                          ) : null}
-                          <textarea
-                            rows={4}
-                            value={coordDrafts[selected.id]?.notes || ""}
-                            onChange={(event) =>
-                              setCoordDrafts((prev) => ({
-                                ...prev,
-                                [selected.id]: { ...prev[selected.id], notes: event.target.value },
-                              }))
-                            }
-                            placeholder="Observaciones internas para la coordinación"
-                            className="w-full rounded-2xl border border-slate-300 px-3 py-3 text-sm text-slate-700 outline-none focus:border-slate-400"
-                          />
-                          <Button onClick={() => handleBcApprove(selected)} loading={saving} className="w-full justify-center">
-                            Aprobar solicitud
-                          </Button>
-                        </div>
-
-                        <div className="space-y-3 rounded-3xl border border-slate-200 bg-white p-4">
-                          <p className="text-sm font-semibold text-slate-900">Rechazar</p>
-                          <textarea
-                            rows={7}
-                            value={reviewDrafts[selected.id]?.reason || ""}
-                            onChange={(event) =>
-                              setReviewDrafts((prev) => ({
-                                ...prev,
-                                [selected.id]: { ...prev[selected.id], reason: event.target.value },
-                              }))
-                            }
-                            placeholder="Motivo de rechazo"
-                            className="w-full rounded-2xl border border-slate-300 px-3 py-3 text-sm text-slate-700 outline-none focus:border-slate-400"
-                          />
-                          <Button variant="danger" onClick={() => handleBcReject(selected)} loading={saving} className="w-full justify-center">
-                            Rechazar solicitud
-                          </Button>
-                        </div>
-                      </div>
-                    ) : isChiefTechnical && ["approved", "non_compliant_reinspection_pending"].includes(String(selected.status || "")) ? (
-                      <div className="mt-4 space-y-3">
-                        <div className="rounded-3xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
-                          {selected.status === "non_compliant_reinspection_pending"
-                            ? "Sitio no conforme en la visita previa. Registra el resultado de la reinspección."
-                            : `Solicitud aprobada para ${formatDate(selected.scheduledDate)}. Registra el resultado tras la visita.`}
-                        </div>
-                        <Fst07ResultPanel
-                          minDate={selected.scheduledDate}
-                          saving={saving}
-                          onSubmit={(payload) => handleBcResult(selected, payload)}
-                        />
-                      </div>
-                    ) : (
-                      <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
-                        {!isChiefTechnical
-                          ? "Esta solicitud está en modo lectura para tu rol."
-                          : selected.status === "completed"
-                          ? "Inspección conforme. Solicitud completada."
-                          : `Solicitud rechazada${selected.reason ? `: ${selected.reason}` : "."}`}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-
-                {source === "compras" ? (
-                  <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                    <h4 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Respuesta operativa</h4>
-                    {isChiefTechnical && String(selected.status || "").toLowerCase() === "pending_review" ? (
-                      <div className="mt-4 space-y-3 rounded-3xl border border-slate-200 bg-white p-4">
-                        <p className="text-sm font-semibold text-slate-900">Revisión de fecha propuesta</p>
-                        <p className="text-sm text-slate-600">
-                          Fecha propuesta por el flujo: {selected.proposedDate ? formatDate(selected.proposedDate) : "No registrada"}.
-                        </p>
-                        <textarea
-                          rows={4}
-                          value={reviewDrafts[selected.id]?.review_notes || ""}
-                          onChange={(event) =>
-                            setReviewDrafts((prev) => ({
-                              ...prev,
-                              [selected.id]: { ...prev[selected.id], review_notes: event.target.value },
-                            }))
-                          }
-                          placeholder="Observaciones de revisión"
-                          className="w-full rounded-2xl border border-slate-300 px-3 py-3 text-sm text-slate-700 outline-none focus:border-slate-400"
-                        />
-                        <div className="flex flex-col gap-3 sm:flex-row">
-                          <Button onClick={() => handlePurchaseReview(selected, "accept")} loading={saving} className="w-full justify-center">
-                            Aceptar propuesta
-                          </Button>
-                          <Button variant="danger" onClick={() => handlePurchaseReview(selected, "reject")} loading={saving} className="w-full justify-center">
-                            Rechazar propuesta
-                          </Button>
-                        </div>
-                      </div>
-                    ) : isChiefTechnical && selected.purchaseType === "public" && !selected.scheduledDate ? (
-                      <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px]">
-                        <div className="space-y-3 rounded-3xl border border-slate-200 bg-white p-4">
-                          <p className="text-sm font-semibold text-slate-900">Coordinar fecha exacta</p>
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <input
-                              type="date"
-                              min={selected.minDate || undefined}
-                              max={selected.maxDate || undefined}
-                              value={coordDrafts[selected.id]?.inspection_date || ""}
-                              onChange={(event) =>
-                                setCoordDrafts((prev) => ({
-                                  ...prev,
-                                  [selected.id]: { ...prev[selected.id], inspection_date: event.target.value },
-                                }))
-                              }
-                              className="w-full rounded-2xl border border-slate-300 px-3 py-3 text-sm text-slate-700 outline-none focus:border-slate-400"
-                            />
-                            <select
-                              value={coordDrafts[selected.id]?.assigned_technician_id || ""}
-                              onChange={(event) =>
-                                setCoordDrafts((prev) => ({
-                                  ...prev,
-                                  [selected.id]: { ...prev[selected.id], assigned_technician_id: event.target.value },
-                                }))
-                              }
-                              className="w-full rounded-2xl border border-slate-300 px-3 py-3 text-sm text-slate-700 outline-none focus:border-slate-400"
-                            >
-                              <option value="">Sin técnico específico</option>
-                              {technicalUsers.map((option) => (
-                                <option key={option.id} value={option.id}>
-                                  {option.fullname || option.name || option.email}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          {scheduleConflict ? (
-                            <p className="flex items-start gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-                              <FiAlertCircle className="mt-0.5 shrink-0" size={14} />
-                              Este colaborador ya tiene {scheduleConflict.rows.length} actividad(es) el {formatDate(scheduleConflict.date)}:{" "}
-                              {scheduleConflict.rows.map((row) => row.title).join(", ")}.
-                            </p>
-                          ) : null}
-                          <textarea
-                            rows={4}
-                            value={coordDrafts[selected.id]?.notes || ""}
-                            onChange={(event) =>
-                              setCoordDrafts((prev) => ({
-                                ...prev,
-                                [selected.id]: { ...prev[selected.id], notes: event.target.value },
-                              }))
-                            }
-                            placeholder="Observaciones para la coordinación"
-                            className="w-full rounded-2xl border border-slate-300 px-3 py-3 text-sm text-slate-700 outline-none focus:border-slate-400"
-                          />
-                          <Button onClick={() => handlePurchaseCoordinate(selected)} loading={saving} className="w-full justify-center">
-                            Coordinar inspección
-                          </Button>
-                        </div>
-
-                        <div className="rounded-3xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
-                          <p className="font-semibold text-slate-900">Ventana solicitada</p>
-                          <p className="mt-2">
-                            {selected.minDate ? formatDate(selected.minDate) : "N/D"} <FiArrowRight className="mx-1 inline-block" size={12} />
-                            {selected.maxDate ? formatDate(selected.maxDate) : "N/D"}
-                          </p>
-                          <p className="mt-3 text-xs leading-5 text-slate-500">
-                            Esta bandeja responde la solicitud F.ST-20. El resto del procedimiento técnico continúa en su flujo propio.
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
-                        {!isChiefTechnical
-                          ? "Esta solicitud está disponible en modo consulta para tu rol."
-                          : selected.scheduledDate
-                          ? `Inspección coordinada para ${formatDate(selected.scheduledDate)}.`
-                          : "Esta solicitud no requiere una acción adicional desde esta bandeja en este momento."}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-
-                {source === "independientes" ? (
-                  <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
-                    <h4 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Detalle de solicitud</h4>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      {Object.entries(selected.payload || {})
-                        .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== "")
-                        .slice(0, 8)
-                        .map(([key, value]) => (
-                          <div key={key} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                              {String(key).replaceAll("_", " ")}
-                            </p>
-                            <p className="mt-1 text-sm text-slate-700">{String(value)}</p>
-                          </div>
-                        ))}
-                    </div>
-                    <div className="mt-5">
-                      <h4 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Respuesta operativa</h4>
-                      {isChiefTechnical && ["pending", "pendiente", "pending_approval"].includes(String(selected.status || "").toLowerCase()) ? (
-                        <div className="mt-4 grid gap-5 xl:grid-cols-2">
-                          <div className="space-y-3 rounded-3xl border border-slate-200 bg-white p-4">
-                            <p className="text-sm font-semibold text-slate-900">Aprobar y asignar</p>
-                            <p className="text-xs text-slate-500">
-                              Ventana solicitada: {selected.minDate ? formatDate(selected.minDate) : "N/D"}{" "}
-                              <FiArrowRight className="mx-1 inline-block" size={11} />{" "}
-                              {selected.maxDate ? formatDate(selected.maxDate) : "N/D"}
-                            </p>
-                            <select
-                              value={coordDrafts[selected.id]?.assigned_user_id || ""}
-                              onChange={(event) =>
-                                setCoordDrafts((prev) => ({
-                                  ...prev,
-                                  [selected.id]: { ...prev[selected.id], assigned_user_id: event.target.value },
-                                }))
-                              }
-                              className="w-full rounded-2xl border border-slate-300 px-3 py-3 text-sm text-slate-700 outline-none focus:border-slate-400"
-                            >
-                              <option value="">Selecciona técnico</option>
-                              {technicalUsers.map((option) => (
-                                <option key={option.id} value={option.id}>
-                                  {option.fullname || option.name || option.email}
-                                </option>
-                              ))}
-                            </select>
-                            <input
-                              type="date"
-                              min={selected.minDate || undefined}
-                              max={selected.maxDate || undefined}
-                              value={coordDrafts[selected.id]?.inspection_date || ""}
-                              onChange={(event) =>
-                                setCoordDrafts((prev) => ({
-                                  ...prev,
-                                  [selected.id]: { ...prev[selected.id], inspection_date: event.target.value },
-                                }))
-                              }
-                              className="w-full rounded-2xl border border-slate-300 px-3 py-3 text-sm text-slate-700 outline-none focus:border-slate-400"
-                            />
-                            {scheduleConflict ? (
-                              <p className="flex items-start gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-                                <FiAlertCircle className="mt-0.5 shrink-0" size={14} />
-                                Este colaborador ya tiene {scheduleConflict.rows.length} actividad(es) el {formatDate(scheduleConflict.date)}:{" "}
-                                {scheduleConflict.rows.map((row) => row.title).join(", ")}.
-                              </p>
-                            ) : null}
-                            <textarea
-                              rows={3}
-                              value={coordDrafts[selected.id]?.notes || ""}
-                              onChange={(event) =>
-                                setCoordDrafts((prev) => ({
-                                  ...prev,
-                                  [selected.id]: { ...prev[selected.id], notes: event.target.value },
-                                }))
-                              }
-                              placeholder="Observaciones internas para la coordinación"
-                              className="w-full rounded-2xl border border-slate-300 px-3 py-3 text-sm text-slate-700 outline-none focus:border-slate-400"
-                            />
-                            <Button onClick={() => handleIndependentApprove(selected)} loading={saving} className="w-full justify-center">
-                              Aprobar solicitud
-                            </Button>
-                          </div>
-
-                          <div className="space-y-3 rounded-3xl border border-slate-200 bg-white p-4">
-                            <p className="text-sm font-semibold text-slate-900">Rechazar</p>
-                            <textarea
-                              rows={4}
-                              value={reviewDrafts[selected.id]?.reason || ""}
-                              onChange={(event) =>
-                                setReviewDrafts((prev) => ({
-                                  ...prev,
-                                  [selected.id]: { ...prev[selected.id], reason: event.target.value },
-                                }))
-                              }
-                              placeholder="Motivo de rechazo (opcional)"
-                              className="w-full rounded-2xl border border-slate-300 px-3 py-3 text-sm text-slate-700 outline-none focus:border-slate-400"
-                            />
-                            <Button variant="danger" onClick={() => handleIndependentReject(selected)} loading={saving} className="w-full justify-center">
-                              Rechazar solicitud
-                            </Button>
-                          </div>
-                        </div>
-                      ) : isChiefTechnical && ["aprobado", "approved"].includes(String(selected.status || "").toLowerCase()) ? (
-                        <div className="mt-4 space-y-3">
-                          <div className="rounded-3xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
-                            Solicitud aprobada y coordinada. Registra el resultado tras la visita.
-                          </div>
-                          <Fst07ResultPanel
-                            minDate={selected.minDate}
-                            saving={saving}
-                            onSubmit={(payload) => handleIndependentResult(selected, payload)}
-                          />
-                        </div>
-                      ) : (
-                        <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
-                          {!isChiefTechnical
-                            ? "Esta solicitud está en modo lectura para tu rol."
-                            : `Solicitud ${getStatusMeta(selected.status).label.toLowerCase()}.`}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : null}
-
-                {selected.notes ? (
-                  <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-                    <h4 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Observaciones</h4>
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">{selected.notes}</p>
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </main>
+        <label className="mt-3 flex items-center gap-2 text-xs font-medium" style={{ color: "var(--st-text-muted)" }}>
+          <input type="checkbox" checked={assignedToMeOnly} onChange={(event) => setAssignedToMeOnly(event.target.checked)} />
+          Solo asignadas a mí
+        </label>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {SOURCE_FILTERS.map((filterOption) => (
+            <button
+              key={filterOption.id}
+              type="button"
+              onClick={() => setSourceFilter(filterOption.id)}
+              className="rounded-[var(--st-radius-pill)] border px-2.5 py-1 text-[11px] font-semibold transition"
+              style={
+                sourceFilter === filterOption.id
+                  ? { borderColor: "var(--st-accent)", background: "var(--st-accent-soft)", color: "var(--st-accent-strong)" }
+                  : { borderColor: "var(--st-border)", color: "var(--st-text-muted)" }
+              }
+            >
+              {filterOption.label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-3 flex items-center justify-between">
+          <p className="text-xs font-medium uppercase tracking-[0.16em]" style={{ color: "var(--st-text-faint)" }}>Bandeja activa</p>
+          <button
+            type="button"
+            onClick={loadData}
+            disabled={loading}
+            className="inline-flex items-center gap-2 rounded-[var(--st-radius-sm)] border px-3 py-2 text-xs font-semibold transition disabled:opacity-60"
+            style={{ borderColor: "var(--st-border)", color: "var(--st-text-muted)", background: "var(--st-surface)" }}
+          >
+            <FiRefreshCw size={13} className={loading ? "animate-spin" : ""} />
+            Actualizar
+          </button>
         </div>
       </div>
-    </section>
+
+      <div className="max-h-[65dvh] space-y-3 overflow-y-auto p-4">
+        {error ? (
+          <div className="flex items-start gap-2 rounded-[var(--st-radius-md)] border px-4 py-3 text-sm" style={{ borderColor: "var(--st-danger)", background: "var(--st-danger-soft)", color: "var(--st-danger)" }}>
+            <FiAlertCircle size={16} className="mt-0.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        ) : null}
+
+        {loading && !items.length ? (
+          Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="h-28 animate-pulse rounded-[var(--st-radius-lg)]" style={{ background: "var(--st-surface-sunken)" }} />
+          ))
+        ) : filteredItems.length ? (
+          filteredItems.map((item) => {
+            const meta = getStatusMeta(item.status);
+            const active = item.id === selectedId;
+            return (
+              <ServicioRailItem
+                key={item.id}
+                active={active}
+                onClick={() => setSelectedId(item.id)}
+                title={
+                  <>
+                    <span
+                      className="mr-2 inline-block h-2 w-2 rounded-full align-middle"
+                      style={{
+                        background:
+                          item.urgency === "urgent"
+                            ? "var(--st-danger)"
+                            : item.urgency === "normal"
+                            ? "var(--st-warning)"
+                            : "var(--st-text-faint)",
+                      }}
+                      aria-hidden="true"
+                    />
+                    {item.clientName}
+                    {item.assignedToMe && <ServicioBadge tone="success" className="ml-2">Asignada a mí</ServicioBadge>}
+                  </>
+                }
+                subtitle={
+                  <>
+                    Solicitud <span className="font-mono-data">#{item.requestId || item.sourceId}</span>
+                  </>
+                }
+                badge={<ServicioBadge tone={meta.tone} icon={meta.Icon}>{meta.label}</ServicioBadge>}
+                meta={
+                  <>
+                    <ServicioBadge tone="neutral">{SOURCE_COPY[item.sourceType]?.sourceLabel || item.sourceType}</ServicioBadge>
+                    {item.city ? (
+                      <span className="inline-flex items-center gap-1"><FiMapPin size={12} />{item.city}</span>
+                    ) : null}
+                    <span className="inline-flex items-center gap-1"><FiCalendar size={12} />{formatDate(item.requestedAt)}</span>
+                    {item.minDate || item.maxDate ? (
+                      <span className="inline-flex items-center gap-1">
+                        <FiClock size={12} />
+                        {item.minDate ? formatDate(item.minDate) : "N/D"}
+                        <FiArrowRight size={10} />
+                        {item.maxDate ? formatDate(item.maxDate) : "N/D"}
+                      </span>
+                    ) : null}
+                    {item.purchaseType ? (
+                      <ServicioBadge tone="neutral">{item.purchaseType === "public" ? "Pública" : "Privada"}</ServicioBadge>
+                    ) : null}
+                    <ServicioBadge tone={item.tipoInspeccion === "costos" ? "accent" : "neutral"}>
+                      {item.tipoInspeccion === "costos" ? "Por costos" : "Normal"}
+                    </ServicioBadge>
+                  </>
+                }
+              />
+            );
+          })
+        ) : (
+          <ServicioEmptyState icon={FiClipboard} title="No hay solicitudes de inspección" description="Ajusta la búsqueda, el filtro de fuente o vuelve a cargar la bandeja." />
+        )}
+      </div>
+    </>
+  );
+
+  const selectedSourceMeta = SOURCE_COPY[selected?.sourceType] || SOURCE_COPY.bc;
+
+  const detailContent = !selected ? (
+    <ServicioEmptyState icon={FiClipboard} title="Selecciona una solicitud" description="La gestión operativa y el contexto del expediente se mostrarán aquí." />
+  ) : (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <ServicioBadge tone="neutral">{selectedSourceMeta.sourceLabel}</ServicioBadge>
+            {selected.purchaseType ? (
+              <ServicioBadge tone="neutral">Compra {selected.purchaseType === "public" ? "pública" : "privada"}</ServicioBadge>
+            ) : null}
+            <ServicioBadge tone={selected.tipoInspeccion === "costos" ? "accent" : "neutral"}>
+              {selected.tipoInspeccion === "costos" ? "Por costos" : "Normal"}
+            </ServicioBadge>
+          </div>
+          <h3 className="mt-3 text-2xl font-semibold tracking-tight" style={{ color: "var(--st-text)", fontFamily: "var(--st-font-display)" }}>
+            {selected.clientName}
+          </h3>
+          <p className="mt-2 text-sm" style={{ color: "var(--st-text-muted)" }}>
+            Solicitud <span className="font-mono-data">#{selected.requestId || selected.sourceId}</span>
+            {selected.businessCaseStatus ? ` · Estado BC: ${selected.businessCaseStatus}` : ""}
+            {selected.purchaseStatus ? ` · Estado compra: ${selected.purchaseStatus}` : ""}
+          </p>
+        </div>
+
+        <ServicioBadge tone={statusMeta.tone} icon={statusMeta.Icon} className="self-start !px-3.5 !py-2 !text-sm">
+          {statusMeta.label}
+        </ServicioBadge>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+        <DetailLine icon={FiCalendar} label="Solicitud" value={formatDate(selected.requestedAt)} />
+        <DetailLine icon={FiMapPin} label="Ciudad / ubicación" value={selected.city || "No registrada"} />
+        <DetailLine icon={FiUser} label="Técnico asignado" value={selected.assignedUserName || selected.assignedTechnicianName || "Pendiente"} />
+        <DetailLine icon={FiCheckCircle} label="Fecha coordinada" value={selected.scheduledDate ? formatDate(selected.scheduledDate) : "Pendiente"} />
+        <DetailLine
+          icon={FiClock}
+          label="Ventana solicitada (min - max)"
+          value={
+            selected.minDate || selected.maxDate
+              ? `${selected.minDate ? formatDate(selected.minDate) : "N/D"} - ${selected.maxDate ? formatDate(selected.maxDate) : "N/D"}`
+              : "No registrada"
+          }
+        />
+      </div>
+
+      <ServicioCard className="p-5">
+        <h4 className="text-sm font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--st-text-faint)" }}>Documentos generados</h4>
+        {loadingDocuments ? (
+          <p className="mt-3 text-sm" style={{ color: "var(--st-text-muted)" }}>Cargando documentos...</p>
+        ) : documents.length ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {documents.map((doc) => (
+              <a
+                key={doc.id}
+                href={doc.drive_link || `https://drive.google.com/file/d/${doc.drive_file_id}/view`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 rounded-[var(--st-radius-md)] border px-3.5 py-2 text-xs font-semibold transition"
+                style={{ borderColor: "var(--st-border)", background: "var(--st-surface-sunken)", color: "var(--st-text)" }}
+              >
+                <FiFileText size={13} />
+                {doc.title || "Documento"}
+                <FiExternalLink size={11} style={{ color: "var(--st-text-faint)" }} />
+              </a>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm" style={{ color: "var(--st-text-muted)" }}>Aún no hay documentos generados para esta solicitud.</p>
+        )}
+      </ServicioCard>
+
+      {selected.sourceType === "bc" ? (
+        <ServicioCard className="p-5" style={{ background: "var(--st-surface-sunken)" }}>
+          <h4 className="text-sm font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--st-text-faint)" }}>Respuesta operativa</h4>
+          {isChiefTechnical && String(selected.status || "").toLowerCase() === "pending" ? (
+            <div className="mt-4">
+              <AssignInspectionPanel
+                minDate={selected.minDate}
+                maxDate={selected.maxDate}
+                technicians={bcUsers}
+                technicianValue={coordDrafts[selected.id]?.assigned_user_id || ""}
+                onTechnicianChange={(value) => setCoordDrafts((prev) => ({ ...prev, [selected.id]: { ...prev[selected.id], assigned_user_id: value } }))}
+                dateValue={coordDrafts[selected.id]?.inspection_date || ""}
+                onDateChange={(value) => setCoordDrafts((prev) => ({ ...prev, [selected.id]: { ...prev[selected.id], inspection_date: value } }))}
+                notesValue={coordDrafts[selected.id]?.notes || ""}
+                onNotesChange={(value) => setCoordDrafts((prev) => ({ ...prev, [selected.id]: { ...prev[selected.id], notes: value } }))}
+                scheduleConflict={scheduleConflict}
+                onAssign={() => handleBcApprove(selected)}
+                saving={saving}
+                onReject={() => handleBcReject(selected)}
+                rejectValue={reviewDrafts[selected.id]?.reason || ""}
+                onRejectChange={(value) => setReviewDrafts((prev) => ({ ...prev, [selected.id]: { ...prev[selected.id], reason: value } }))}
+              />
+            </div>
+          ) : isChiefTechnical && ["approved", "non_compliant_reinspection_pending"].includes(String(selected.status || "")) ? (
+            <div className="mt-4 space-y-3">
+              <ServicioCard className="p-4 text-sm" style={{ color: "var(--st-text-muted)" }}>
+                {selected.status === "non_compliant_reinspection_pending"
+                  ? "Sitio no conforme en la visita previa. Registra el resultado de la reinspección."
+                  : `Solicitud aprobada para ${formatDate(selected.scheduledDate)}. Registra el resultado tras la visita.`}
+              </ServicioCard>
+              <Fst07ResultPanel minDate={selected.scheduledDate} saving={saving} onSubmit={(payload) => handleBcResult(selected, payload)} />
+            </div>
+          ) : (
+            <ServicioCard className="mt-4 p-4 text-sm" style={{ color: "var(--st-text-muted)" }}>
+              {!isChiefTechnical
+                ? "Esta solicitud está en modo lectura para tu rol."
+                : selected.status === "completed"
+                ? "Inspección conforme. Solicitud completada."
+                : `Solicitud rechazada${selected.reason ? `: ${selected.reason}` : "."}`}
+            </ServicioCard>
+          )}
+        </ServicioCard>
+      ) : null}
+
+      {selected.sourceType === "compras" ? (
+        <ServicioCard className="p-5" style={{ background: "var(--st-surface-sunken)" }}>
+          <h4 className="text-sm font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--st-text-faint)" }}>Respuesta operativa</h4>
+          {isChiefTechnical && String(selected.status || "").toLowerCase() === "pending_review" ? (
+            <ServicioCard className="mt-4 space-y-3 p-4">
+              <p className="text-sm font-semibold" style={{ color: "var(--st-text)" }}>Revisión de fecha propuesta</p>
+              <p className="text-sm" style={{ color: "var(--st-text-muted)" }}>
+                Fecha propuesta por el flujo: {selected.proposedDate ? formatDate(selected.proposedDate) : "No registrada"}.
+              </p>
+              <textarea
+                rows={4}
+                value={reviewDrafts[selected.id]?.review_notes || ""}
+                onChange={(event) => setReviewDrafts((prev) => ({ ...prev, [selected.id]: { ...prev[selected.id], review_notes: event.target.value } }))}
+                placeholder="Observaciones de revisión"
+                className={inputClass}
+                style={inputStyle}
+              />
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Button onClick={() => handlePurchaseReview(selected, "accept")} loading={saving} className="w-full justify-center">Aceptar propuesta</Button>
+                <Button variant="danger" onClick={() => handlePurchaseReview(selected, "reject")} loading={saving} className="w-full justify-center">Rechazar propuesta</Button>
+              </div>
+            </ServicioCard>
+          ) : isChiefTechnical && selected.purchaseType === "public" && !selected.scheduledDate ? (
+            <div className="mt-4">
+              <AssignInspectionPanel
+                minDate={selected.minDate}
+                maxDate={selected.maxDate}
+                technicians={technicalUsers}
+                technicianRequired={false}
+                technicianValue={coordDrafts[selected.id]?.assigned_technician_id || ""}
+                onTechnicianChange={(value) => setCoordDrafts((prev) => ({ ...prev, [selected.id]: { ...prev[selected.id], assigned_technician_id: value } }))}
+                dateValue={coordDrafts[selected.id]?.inspection_date || ""}
+                onDateChange={(value) => setCoordDrafts((prev) => ({ ...prev, [selected.id]: { ...prev[selected.id], inspection_date: value } }))}
+                notesValue={coordDrafts[selected.id]?.notes || ""}
+                onNotesChange={(value) => setCoordDrafts((prev) => ({ ...prev, [selected.id]: { ...prev[selected.id], notes: value } }))}
+                scheduleConflict={scheduleConflict}
+                onAssign={() => handlePurchaseCoordinate(selected)}
+                saving={saving}
+              />
+            </div>
+          ) : (
+            <ServicioCard className="mt-4 p-4 text-sm" style={{ color: "var(--st-text-muted)" }}>
+              {!isChiefTechnical
+                ? "Esta solicitud está disponible en modo consulta para tu rol."
+                : selected.scheduledDate
+                ? `Inspección coordinada para ${formatDate(selected.scheduledDate)}.`
+                : "Esta solicitud no requiere una acción adicional desde esta bandeja en este momento."}
+            </ServicioCard>
+          )}
+        </ServicioCard>
+      ) : null}
+
+      {selected.sourceType === "independientes" ? (
+        <ServicioCard className="p-5" style={{ background: "var(--st-surface-sunken)" }}>
+          <h4 className="text-sm font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--st-text-faint)" }}>Detalle de solicitud</h4>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {Object.entries(selected.payload || {})
+              .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== "")
+              .slice(0, 8)
+              .map(([key, value]) => (
+                <ServicioCard key={key} className="px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--st-text-faint)" }}>{String(key).replaceAll("_", " ")}</p>
+                  <p className="mt-1 text-sm" style={{ color: "var(--st-text)" }}>{String(value)}</p>
+                </ServicioCard>
+              ))}
+          </div>
+          <div className="mt-5">
+            <h4 className="text-sm font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--st-text-faint)" }}>Respuesta operativa</h4>
+            {isChiefTechnical && ["pending", "pendiente", "pending_approval"].includes(String(selected.status || "").toLowerCase()) ? (
+              <div className="mt-4">
+                <AssignInspectionPanel
+                  minDate={selected.minDate}
+                  maxDate={selected.maxDate}
+                  technicians={technicalUsers}
+                  technicianValue={coordDrafts[selected.id]?.assigned_user_id || ""}
+                  onTechnicianChange={(value) => setCoordDrafts((prev) => ({ ...prev, [selected.id]: { ...prev[selected.id], assigned_user_id: value } }))}
+                  dateValue={coordDrafts[selected.id]?.inspection_date || ""}
+                  onDateChange={(value) => setCoordDrafts((prev) => ({ ...prev, [selected.id]: { ...prev[selected.id], inspection_date: value } }))}
+                  notesValue={coordDrafts[selected.id]?.notes || ""}
+                  onNotesChange={(value) => setCoordDrafts((prev) => ({ ...prev, [selected.id]: { ...prev[selected.id], notes: value } }))}
+                  scheduleConflict={scheduleConflict}
+                  onAssign={() => handleIndependentApprove(selected)}
+                  saving={saving}
+                  onReject={() => handleIndependentReject(selected)}
+                  rejectValue={reviewDrafts[selected.id]?.reason || ""}
+                  onRejectChange={(value) => setReviewDrafts((prev) => ({ ...prev, [selected.id]: { ...prev[selected.id], reason: value } }))}
+                  rejectPlaceholder="Motivo de rechazo (opcional)"
+                  rejectRequired={false}
+                />
+              </div>
+            ) : isChiefTechnical && ["aprobado", "approved"].includes(String(selected.status || "").toLowerCase()) ? (
+              <div className="mt-4 space-y-3">
+                <ServicioCard className="p-4 text-sm" style={{ color: "var(--st-text-muted)" }}>
+                  Solicitud aprobada y coordinada. Registra el resultado tras la visita.
+                </ServicioCard>
+                <Fst07ResultPanel minDate={selected.minDate} saving={saving} onSubmit={(payload) => handleIndependentResult(selected, payload)} />
+              </div>
+            ) : (
+              <ServicioCard className="mt-4 p-4 text-sm" style={{ color: "var(--st-text-muted)" }}>
+                {!isChiefTechnical
+                  ? "Esta solicitud está en modo lectura para tu rol."
+                  : `Solicitud ${getStatusMeta(selected.status).label.toLowerCase()}.`}
+              </ServicioCard>
+            )}
+          </div>
+        </ServicioCard>
+      ) : null}
+
+      {selected.notes ? (
+        <ServicioCard className="p-5">
+          <h4 className="text-sm font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--st-text-faint)" }}>Observaciones</h4>
+          <p className="mt-3 whitespace-pre-wrap text-sm leading-6" style={{ color: "var(--st-text-muted)" }}>{selected.notes}</p>
+        </ServicioCard>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <ServicioWorkspaceShell
+      eyebrow="Inspección de ambiente"
+      eyebrowIcon={FiClipboard}
+      title="Inspecciones de ambiente"
+      description="Business Case, Compras e Independientes en una sola bandeja, priorizada por urgencia."
+      metrics={[
+        { label: "Solicitudes", value: items.length },
+        { label: "Pendientes", value: pendingCount },
+        { label: "Resueltas", value: approvedCount },
+      ]}
+      rail={railContent}
+      detail={detailContent}
+    />
   );
 };
 

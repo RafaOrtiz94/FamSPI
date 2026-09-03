@@ -382,11 +382,11 @@ const CaseHeader = ({ uiGuidance, onRefresh, onOpenReopenRequest, onOpenReopenDe
  <span className="text-xs text-emerald-800 font-medium">Hoja de Sheets disponible</span>
  <div className="ml-auto flex flex-wrap items-center gap-2">
  {technicalSlaExpired && (
- <span className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700">
- Sincronizacion bloqueada por SLA vencido
+ <span className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700">
+ Aviso: SLA vencido
  </span>
  )}
- {!technicalSlaExpired && canUpdateSheet && (
+ {canUpdateSheet && (
  <>
  <button
  type="button"
@@ -554,17 +554,17 @@ const CaseHeader = ({ uiGuidance, onRefresh, onOpenReopenRequest, onOpenReopenDe
 
  {/* Control de reapertura — solo aparece cuando aplica */}
  {technicalSlaExpired && (
- <div className="flex items-start gap-3 rounded-2xl border border-rose-300 bg-rose-50 p-4 text-rose-900">
- <FiAlertTriangle className="mt-0.5 flex-shrink-0 text-rose-600" size={18} />
+ <div className="flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-900">
+ <FiAlertTriangle className="mt-0.5 flex-shrink-0 text-amber-600" size={18} />
  <div className="min-w-0">
- <p className="text-sm font-bold">SLA vencido: sincronizacion bloqueada</p>
+ <p className="text-sm font-bold">Aviso: SLA vencido</p>
  <p className="mt-1 text-xs leading-5">
- La ventana de 48 horas de Jefe de Servicio termino. Calibradores, controles y materiales permanecen bloqueados porque no fueron completados dentro del plazo.
+ La ventana de 48 horas de Jefe de Servicio termino. Esto ya no bloquea la edicion ni la sincronizacion, pero se recomienda regularizar con una prorroga.
  </p>
- <p className="mt-2 text-xs font-semibold text-rose-800">
+ <p className="mt-2 text-xs font-semibold text-amber-800">
  {extensionRequest?.status === "pending"
   ? "La solicitud de prorroga de 24 horas esta pendiente de decision de Jefe Comercial."
-  : "Jefe de Servicio debe solicitar una prorroga de 24 horas a Jefe Comercial con su justificativo."}
+  : "Jefe de Servicio puede solicitar una prorroga de 24 horas a Jefe Comercial con su justificativo."}
  </p>
  </div>
  </div>

@@ -28,11 +28,45 @@ export const parseDashboardPayload = (payload) => {
   return payload;
 };
 
-export const scheduleBadgeClass = (category) => {
-  if (category === "inspection") return "border-blue-200 bg-blue-50 text-blue-700";
-  if (category === "maintenance") return "border-amber-200 bg-amber-50 text-amber-700";
-  if (category === "training") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  return "border-slate-200 bg-slate-100 text-slate-700";
+// Tono ServicioBadge por categoria del feed unificado de cronograma
+// (technicalSchedule.service.js SOURCE_CONFIG). "withdrawal"/"corrective" se
+// sumaron junto con la extension del feed (Fase F) -- antes ni siquiera
+// llegaban filas de esas categorias al dashboard.
+export const scheduleCategoryTone = (category) => {
+  if (category === "inspection") return "info";
+  if (category === "maintenance") return "warning";
+  if (category === "training") return "success";
+  if (category === "withdrawal") return "accent";
+  if (category === "corrective") return "danger";
+  return "neutral";
+};
+
+// Tono ServicioBadge por urgencia de un item de la cola de acciones
+// (backend/src/modules/servicio/actionQueue.service.js). "urgent" es SLA
+// vencido o backlog viejo, "today" es algo con fecha exacta hoy, el resto
+// es "normal" -- no hay una cuarta categoria.
+export const actionQueueUrgencyTone = (urgency) => {
+  if (urgency === "urgent") return "danger";
+  if (urgency === "today") return "warning";
+  return "neutral";
+};
+
+export const actionQueueUrgencyLabel = (urgency) => {
+  if (urgency === "urgent") return "Urgente";
+  if (urgency === "today") return "Hoy";
+  return "Normal";
+};
+
+// Tipo del item de la cola -> misma paleta semantica que scheduleCategoryTone
+// para que un correctivo se vea igual de "correctivo" en Inicio y en el
+// cronograma, aunque vengan de servicios distintos.
+export const actionQueueTypeTone = (type) => {
+  if (type === "approval") return "info";
+  if (type === "withdrawal") return "accent";
+  if (type === "corrective") return "danger";
+  if (type === "preventive_offer") return "warning";
+  if (type === "external_case") return "neutral";
+  return "neutral";
 };
 
 export const formatTechnicalDateLabel = (value) => {

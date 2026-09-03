@@ -44,6 +44,7 @@ atajo/
 backend/backups/
 *.sql
 *.sql.gz
+!backend/migrations/20260901_add_collab_policy_delivery_category.sql
 
 # Optional local assets
 

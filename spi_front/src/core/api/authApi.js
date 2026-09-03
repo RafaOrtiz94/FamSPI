@@ -168,3 +168,20 @@ export const sandboxLogin = async (email, password) => {
   setTokens(data.accessToken, data.refreshToken);
   return data;
 };
+
+/* ==========================================================
+ 🎓 Login local de produccion (pasantes, sin OAuth)
+ Ver docs/plans/pasantes-access-plan.md
+ ========================================================== */
+export const localLogin = async (username, password) => {
+  const { data } = await api.post("/auth/local-login", { username, password });
+  if (!data?.ok) throw new Error(data?.message || "Credenciales incorrectas");
+  setTokens(data.accessToken, data.refreshToken);
+  return data;
+};
+
+export const changePassword = async ({ currentPassword, newPassword }) => {
+  const { data } = await api.post("/auth/change-password", { currentPassword, newPassword });
+  if (!data?.ok) throw new Error(data?.message || "No se pudo cambiar la contraseña");
+  return data;
+};

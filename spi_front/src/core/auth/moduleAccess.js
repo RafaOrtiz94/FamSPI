@@ -39,6 +39,30 @@ export const MODULE_PATH_PREFIXES = [
   { key: "operaciones", prefixes: ["/dashboard/operaciones"] },
   { key: "logistica", prefixes: ["/dashboard/logistica"] },
   { key: "calidad", prefixes: ["/dashboard/calidad"] },
+
+  // Debe mantenerse en sync con backend/src/modules/module-access/moduleAccess.service.js
+  { key: "collab_entregas", prefixes: ["/dashboard/collab/entregas"] },
+  { key: "collab_resumen", prefixes: ["/dashboard/collab/resumen"] },
+  { key: "ti_actas", prefixes: ["/dashboard/ti/actas"] },
+  { key: "ti_activos", prefixes: ["/dashboard/ti/activos"] },
+  { key: "talento_command_center", prefixes: ["/dashboard/talento-humano/command-center"] },
+  { key: "talento_departamentos", prefixes: ["/dashboard/talento-humano/departamentos"] },
+  { key: "talento_usuarios", prefixes: ["/dashboard/talento-humano/usuarios"] },
+  { key: "talento_solicitudes", prefixes: ["/dashboard/talento-humano/solicitudes"] },
+  { key: "talento_workspace_personal", prefixes: ["/dashboard/talento-humano/workspace-personal"] },
+  { key: "talento_pruebas_tecnicas", prefixes: ["/dashboard/talento-humano/pruebas-tecnicas"] },
+  { key: "talento_reporte_documentacion", prefixes: ["/dashboard/talento-humano/reporte-documentacion"] },
+  { key: "capacitaciones", prefixes: ["/dashboard/capacitaciones"] },
+  { key: "signatures", prefixes: ["/dashboard/signatures"] },
+  { key: "backoffice", prefixes: ["/dashboard/backoffice"] },
+  { key: "crm_fam", prefixes: ["/dashboard/crm-fam"] },
+  { key: "links_interes", prefixes: ["/dashboard/links-interes"] },
+  { key: "gerencia", prefixes: ["/dashboard/gerencia"] },
+  { key: "finanzas", prefixes: ["/dashboard/finanzas"] },
+  { key: "comercial", prefixes: ["/dashboard/comercial"] },
+  { key: "ti", prefixes: ["/dashboard/ti"] },
+  { key: "talento_humano", prefixes: ["/dashboard/talento-humano"] },
+
   { key: "inicio", prefixes: ["/dashboard"] },
 ];
 

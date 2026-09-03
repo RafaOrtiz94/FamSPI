@@ -119,15 +119,15 @@ try {
     "--set-env-vars", "JOBS_RUN_ON_START=false",
     "--set-env-vars", "JOBS_BOOTSTRAP_STAGGER_MS=20000",
     "--set-env-vars", "DB_POOL_MAX=8",    # 3 instancias x 8 = 24 conexiones al pooler Neon (evento Kick Off ~40 usuarios)
-    "--set-env-vars", "DB_POOL_MIN=2",    # 2 conexiones calientes por instancia — reduce latencia del primer request
+    "--set-env-vars", "DB_POOL_MIN=0",    # 0: sin conexiones calientes -> permite autosuspend de Neon fuera de horario/trafico
     "--set-env-vars", "DB_CONN_TIMEOUT_MS=15000",
     "--set-env-vars", "DB_SSL=true",
     "--set-env-vars", "FRONTEND_URL=https://fam-spi-front.web.app",
     "--set-env-vars", "GOOGLE_REDIRECT_URI=https://spi-backend-983537733948.us-central1.run.app/api/v1/auth/google/callback",
-    "--set-env-vars", "DB_HOST=ep-wispy-moon-aqszgsal.c-8.us-east-1.aws.neon.tech",  # MIGRACION 2026-08-11 — muddy-sun agoto cuota de compute, failover a wispy-moon. Endpoint DIRECTO (SIN -pooler): el pooler de Neon no aisla bien el search_path entre conexiones (ver .agents/skills/neon-compute-quota-failover-skill.md)
+    "--set-env-vars", "DB_HOST=ep-lucky-bar-aw5wr0cn.c-12.us-east-1.aws.neon.tech",  # MIGRACION 2026-08-20 — proyecto nuevo (lucky-bar) para evitar la cuota de compute agotada en wispy-moon/muddy-sun. Endpoint DIRECTO (SIN -pooler): el pooler de Neon no aisla bien el search_path entre conexiones (ver .agents/skills/neon-compute-quota-failover-skill.md)
     "--set-env-vars", "DB_PORT=5432",
     "--set-env-vars", "DB_USER=neondb_owner",
-    "--set-env-vars", "DB_NAME=neondb",  # base restaurada del backup 2026-08-10 (NO la base "FamSPI" del mismo servidor, que quedo congelada en 20-jul)
+    "--set-env-vars", "DB_NAME=neondb",
     "--set-env-vars", "GOOGLE_CLIENT_ID=18376271129-1v6irnav4n49298sspaij02qjnigeln3.apps.googleusercontent.com",
     "--set-env-vars", "DRIVE_ROOT_FOLDER_ID=0AILKwXtcdfRFUk9PVA",
     "--set-env-vars", "GMAIL_SERVICE_ACCOUNT_CLIENT_EMAIL=spi-cuenta-servicio@dashboard-spi.iam.gserviceaccount.com",
@@ -162,6 +162,9 @@ try {
     "--set-secrets", "COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID=COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID:latest",
     "--set-secrets", "COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID=COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID:latest",
     "--set-env-vars", "COLLAB_ACTA_EPP_TEMPLATE_ID=17hZiqsespzG-EdoyhHFDL-nLs81LR2T3NHIRitOZVRM",
+    "--set-env-vars", "COLLAB_ACTA_ROPA_TEMPLATE_ID=11nKdp8U-B4wKcWcmBcZeaeQEu2nqyB_5BL8wgUK7NKo",
+    "--set-env-vars", "COLLAB_ACTA_ROPA_INT_TEMPLATE_ID=11nKdp8U-B4wKcWcmBcZeaeQEu2nqyB_5BL8wgUK7NKo",
+    "--set-env-vars", "COLLAB_ACTA_ROPA_EXT_TEMPLATE_ID=1gn3BmysfeS3NzlniNg2NS3IVmzjdLKFrjIK79EMX-70",  # 2026-08-24 — plantilla ropa de trabajo para personal EXTERNO (antes no existia variante, solo caia al template interno)
     "--set-secrets", "TI_ACTA_ENTREGA_TEMPLATE_ID=TI_ACTA_ENTREGA_TEMPLATE_ID:latest",
     "--set-secrets", "TI_ACTA_RETIRO_TEMPLATE_ID=TI_ACTA_RETIRO_TEMPLATE_ID:latest",
     "--set-secrets", "DB_PASSWORD=DB_PASSWORD:latest",

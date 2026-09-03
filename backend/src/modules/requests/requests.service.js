@@ -213,6 +213,19 @@ function normalizeRole(role = "") {
   return String(role || "").trim().toLowerCase();
 }
 
+function getUserRoles(user = {}) {
+  return [
+    user?.role,
+    user?.scope,
+    user?.role_name,
+    ...(Array.isArray(user?.roles) ? user.roles : []),
+    ...(Array.isArray(user?.scopes) ? user.scopes : []),
+    ...(Array.isArray(user?.extra_roles) ? user.extra_roles : []),
+  ]
+    .map(normalizeRole)
+    .filter(Boolean);
+}
+
 function isQualityReviewer(role = "") {
   return QUALITY_REVIEW_ROLES.has(normalizeRole(role));
 }
@@ -1099,6 +1112,12 @@ function normalizeValueBySchema(propertySchema = {}, value) {
   }
   if (value !== undefined && value !== null) return value;
   if (propertySchema.type === "array") return [];
+  // Campos opcionales con enum (ej. "origen" en inspection: ausente en
+  // solicitudes independientes, solo presente cuando el flujo lo fija
+  // automaticamente) no deben rellenarse con "" -- "" nunca es un valor
+  // valido del enum, asi que forzarlo rompia la validacion de ajv en toda
+  // solicitud creada manualmente sin ese campo. Se deja el campo ausente.
+  if (Array.isArray(propertySchema.enum)) return undefined;
   return "";
 }
 
@@ -1128,7 +1147,12 @@ function normalizePayload(schemaKey, payload) {
         normalizedPayload.equipos = [];
       }
     } else {
-      normalizedPayload[key] = normalizeValueBySchema(schema.properties[key], sourcePayload[key]);
+      const normalizedValue = normalizeValueBySchema(schema.properties[key], sourcePayload[key]);
+      if (normalizedValue === undefined) {
+        delete normalizedPayload[key];
+      } else {
+        normalizedPayload[key] = normalizedValue;
+      }
     }
   }
   normalizedPayload.__form_variant = schemaKey;
@@ -2145,19 +2169,18 @@ async function listRequests({ page = 1, pageSize = 50, status, q, type, requeste
     params.push(`%${q.toLowerCase()}%`);
     paramIndex++;
   }
-  const countQuery = `SELECT COUNT(*) ${fromAndJoins} ${whereClauses}`;
-  const totalResult = await db.query(countQuery, params);
-  const total = parseInt(totalResult.rows[0].count, 10);
   const dataParams = [...params, pageSize, offset];
   const dataQuery = `
     SELECT r.*, u.email AS requester_email, rt.title AS type_title, rt.code AS type_code,
-      last_reject.rejection_reason, last_reject.rejected_at
+      last_reject.rejection_reason, last_reject.rejected_at,
+      COUNT(*) OVER() AS total_count
     ${fromAndJoins}
     ${whereClauses}
     ORDER BY r.created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex++}
   `;
   const { rows } = await db.query(dataQuery, dataParams);
-  const mappedRows = rows.map((row) => ({
+  const total = rows.length > 0 ? parseInt(rows[0].total_count, 10) : 0;
+  const mappedRows = rows.map(({ total_count, ...row }) => ({
     ...row,
     type_title: getRequestLabel(row.type_code, row.type_title),
   }));
@@ -3103,11 +3126,10 @@ async function listClientRequests({ page = 1, pageSize = 25, status, q, createdB
     const qIndex = params.length;
     whereClause += ` AND (LOWER(commercial_name) LIKE $${qIndex} OR LOWER(ruc_cedula) LIKE $${qIndex} OR CAST(id AS TEXT) LIKE $${qIndex})`;
   }
-  const countQuery = `SELECT COUNT(*) FROM client_requests ${whereClause}`;
-  const totalResult = await db.query(countQuery, params);
-  const total = parseInt(totalResult.rows[0].count, 10);
-  const dataQuery = `SELECT id, commercial_name, ruc_cedula, created_by, status, created_at, rejection_reason FROM client_requests ${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-  const { rows } = await db.query(dataQuery, [...params, pageSize, offset]);
+  const dataQuery = `SELECT id, commercial_name, ruc_cedula, created_by, status, created_at, rejection_reason, COUNT(*) OVER() AS total_count FROM client_requests ${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+  const { rows: rawRows } = await db.query(dataQuery, [...params, pageSize, offset]);
+  const total = rawRows.length > 0 ? parseInt(rawRows[0].total_count, 10) : 0;
+  const rows = rawRows.map(({ total_count, ...row }) => row);
   return { count: total, rows, page, pageSize };
 }
 
@@ -3165,8 +3187,8 @@ async function getClientRequestById(id, user) {
     throw error;
   }
   const allowedRoles = ["backoffice_comercial", "gerencia", "calidad", "jefe_calidad"];
-  const userRole = normalizeRole(user.role);
-  const isAllowed = allowedRoles.includes(userRole) || request.created_by === user.email;
+  const userRoles = getUserRoles(user);
+  const isAllowed = userRoles.some((role) => allowedRoles.includes(role)) || request.created_by === user.email;
   if (!isAllowed) {
     const error = new Error("Acceso denegado a esta solicitud.");
     error.status = 403;
@@ -3183,8 +3205,9 @@ async function getClientRequestById(id, user) {
 
 async function updateClientRequestQualityChecklist({ id, user, item_key, status, notes }) {
   await ensureClientRequestFileColumns();
-  const role = normalizeRole(user?.role);
-  if (!isQualityReviewer(role)) {
+  const userRoles = getUserRoles(user);
+  const reviewerRole = userRoles.find((role) => isQualityReviewer(role));
+  if (!reviewerRole) {
     const error = new Error("Solo calidad puede validar el checklist de esta solicitud.");
     error.status = 403;
     throw error;
@@ -3251,7 +3274,7 @@ async function updateClientRequestQualityChecklist({ id, user, item_key, status,
       notes ? String(notes).trim() : null,
       user?.id || null,
       user?.email || null,
-      role,
+      reviewerRole,
     ],
   );
 

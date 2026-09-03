@@ -19,9 +19,26 @@
 const SHELL_CACHE = "spi-shell-v1";
 const ASSETS_CACHE = "spi-assets-v1";
 const MAX_ASSET_ENTRIES = 80;
+const SHELL_URL = "/index.html";
+const OFFLINE_URL = "/offline.html";
+const SHELL_PRECACHE_URLS = [
+  SHELL_URL,
+  OFFLINE_URL,
+  "/manifest.json",
+  "/favicon.ico",
+  "/apple-touch-icon.png",
+  "/logo192.png",
+  "/logo512.png",
+];
 
-self.addEventListener("install", () => {
-  self.skipWaiting();
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(SHELL_CACHE);
+      await cache.addAll(SHELL_PRECACHE_URLS);
+      self.skipWaiting();
+    })(),
+  );
 });
 
 self.addEventListener("activate", (event) => {
@@ -61,12 +78,14 @@ async function networkFirstShell(request) {
   try {
     const response = await fetch(request);
     if (response && response.ok) {
-      cache.put("/index.html", response.clone());
+      cache.put(SHELL_URL, response.clone());
     }
     return response;
   } catch (err) {
-    const cached = await cache.match("/index.html");
+    const cached = await cache.match(SHELL_URL);
     if (cached) return cached;
+    const offlineFallback = await cache.match(OFFLINE_URL);
+    if (offlineFallback) return offlineFallback;
     throw err;
   }
 }

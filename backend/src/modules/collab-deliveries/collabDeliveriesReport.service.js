@@ -12,7 +12,7 @@ const db = require("../../config/db");
 
 const CAT_ES = {
   ropa: "Ropa de trabajo", epp: "EPP", herramienta: "Herramienta de trabajo",
-  logistica: "Logística", ti: "Activos TI", suministros: "Suministros",
+  logistica: "Logística", ti: "Activos TI", suministros: "Suministros", poliza: "Póliza de seguro",
 };
 const STATUS_ES = { entregado: "Entregado", retirado: "Retirado", perdido: "Perdido", dañado: "Dañado" };
 

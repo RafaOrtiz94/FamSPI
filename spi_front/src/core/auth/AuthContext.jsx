@@ -22,6 +22,7 @@ import { readCachedResource, writeCachedResource } from "../pwa/localCache";
  */
 export const AuthContext = createContext();
 const AUTH_PROFILE_CACHE_KEY = "auth_profile";
+const ATTENDANCE_MARK_PATH_PREFIX = "/asistencia/marcar";
 
 export const AuthProvider = ({ children }) => {
  const [user, setUser] = useState(null);
@@ -42,6 +43,28 @@ export const AuthProvider = ({ children }) => {
  clearTimeout(sessionTimerRef.current);
  sessionTimerRef.current = null;
  }
+ };
+
+ const isAttendanceMarkingPath = () => {
+ if (typeof window === "undefined") return false;
+ return String(window.location.pathname || "").startsWith(ATTENDANCE_MARK_PATH_PREFIX);
+ };
+
+ const readRecoverableCachedUser = () =>
+  JSON.parse(localStorage.getItem("user") || "null") ||
+  readCachedResource(AUTH_PROFILE_CACHE_KEY)?.data ||
+  null;
+
+ const recoverTransientAttendanceSession = (cachedUser, reason = "transient-network") => {
+ if (!cachedUser || !isAttendanceMarkingPath() || !hasRefreshToken()) {
+  return null;
+ }
+
+ console.warn(`⚠️ Sesión recuperada localmente para marcación (${reason}).`);
+ setUser(cachedUser);
+ setIsAuthenticated(true);
+ setLoading(false);
+ return cachedUser;
  };
 
  // Fase 2 (Plan Maestro Asistencia): distingue "sesion expirada" (recordamos
@@ -133,6 +156,12 @@ export const AuthProvider = ({ children }) => {
  const refreshToken = hasRefreshToken();
 
  if (!accessToken) {
+ if (refreshToken && user) {
+  const recoveredUser = recoverTransientAttendanceSession(user, "missing-access-token");
+  if (recoveredUser) {
+   return;
+  }
+ }
  if (isAuthenticated) {
  forceLogoutAndRedirect();
  }
@@ -248,15 +277,19 @@ export const AuthProvider = ({ children }) => {
  } catch (err) {
  console.warn("⚠️ No se pudo sincronizar sesión:", err.message);
  console.warn("⚠️ AuthContext.refresh failed", err);
- const cachedUser =
-  JSON.parse(localStorage.getItem("user") || "null") ||
-  readCachedResource(AUTH_PROFILE_CACHE_KEY)?.data ||
-  null;
+ const cachedUser = readRecoverableCachedUser();
 
  if (isTransientApiError(err) && cachedUser && getAccessToken()) {
   setUser(cachedUser);
   setIsAuthenticated(true);
   return cachedUser;
+ }
+
+ if (isTransientApiError(err)) {
+  const recoveredUser = recoverTransientAttendanceSession(cachedUser, "refresh-failed");
+  if (recoveredUser) {
+   return recoveredUser;
+  }
  }
 
  setIsAuthenticated(false);
@@ -306,6 +339,7 @@ export const AuthProvider = ({ children }) => {
   scope: payload.scope,
   dashboard: payload.dashboard,
   lopdp_internal_status: payload.lopdp_internal_status || "pending",
+  extra_roles: payload.extra_roles || [],
  };
 
  setUser(nextUser);

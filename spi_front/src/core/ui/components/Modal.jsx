@@ -37,7 +37,7 @@ const Modal = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/60 backdrop-blur-sm sm:items-center sm:p-4"
+      className="fixed inset-0 z-[30] flex items-end justify-center bg-[#0F172A]/60 sm:items-center sm:p-4"
       role="presentation"
       onClick={handleBackdropClick}
     >
@@ -45,7 +45,7 @@ const Modal = ({
         role="dialog"
         aria-modal="true"
         aria-label={title || "Modal"}
-        className={`relative flex w-full flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-[0_30px_80px_rgba(15,23,42,0.20)] sm:rounded-3xl ${maxWidth}`}
+        className={`relative z-[40] flex w-full flex-col overflow-hidden rounded-t-2xl border border-[#E5E7EB] bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)] sm:rounded-2xl ${maxWidth}`}
         style={{ maxHeight: "calc(92dvh - env(safe-area-inset-bottom, 0px))" }}
         onClick={(event) => event.stopPropagation()}
       >
@@ -61,7 +61,7 @@ const Modal = ({
               type="button"
               onClick={() => !disableClose && onClose?.()}
               disabled={disableClose}
-              className="ml-auto rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="ml-auto cursor-pointer rounded-2xl p-2 text-slate-400 transition duration-150 ease-out hover:bg-slate-100 hover:text-slate-700 active:scale-[0.97] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0EA5E9] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <FiX className="h-5 w-5" />
             </button>

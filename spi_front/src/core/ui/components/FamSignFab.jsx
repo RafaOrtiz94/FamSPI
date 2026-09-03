@@ -57,9 +57,14 @@ const FamSignFab = forwardRef(function FamSignFab({ onCountChange } = {}, ref) {
       loadPending({ silent: true });
     };
 
+    // 10 min: > timeout de autosuspend de Neon (~5min) para que el compute
+    // pueda dormir de verdad entre polls si nadie interactua. Hay refresh
+    // inmediato al recuperar foco (handleFocus), asi que la frescura real no
+    // depende de este intervalo.
     const intervalId = window.setInterval(() => {
+      if (document.hidden) return;
       loadPending({ silent: true });
-    }, 60000);
+    }, 10 * 60000);
 
     window.addEventListener("focus", handleFocus);
     return () => {

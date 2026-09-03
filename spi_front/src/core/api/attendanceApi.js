@@ -1,5 +1,5 @@
 // src/core/api/attendanceApi.js
-import api from "./index";
+import api, { isTransientApiError } from "./index";
 import {
   enqueueOfflineMark,
   flushOfflineQueue,
@@ -7,6 +7,14 @@ import {
   hasQueuedMarkForEndpoint,
   onOfflineQueueChanged,
 } from "../../shared/utils/attendanceOfflineQueue";
+import { readCachedResource, writeCachedResource } from "../pwa/localCache";
+
+const ATTENDANCE_TODAY_CACHE_KEY = "attendance_today_snapshot";
+const ATTENDANCE_LIVE_PRESENCE_CACHE_KEY = "attendance_live_presence_snapshot";
+const ATTENDANCE_PUNCTUALITY_CACHE_KEY = "attendance_punctuality_summary_snapshot";
+const ATTENDANCE_TODAY_CACHE_MAX_AGE_MS = 1000 * 60 * 30;
+const ATTENDANCE_LIVE_PRESENCE_CACHE_MAX_AGE_MS = 1000 * 60 * 10;
+const ATTENDANCE_PUNCTUALITY_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 6;
 
 const normalizeLocation = (location) => {
   if (!location) return null;
@@ -83,6 +91,9 @@ const postAttendancePayload = async (endpoint, payload = {}) => {
   return data;
 };
 
+const payloadHasBinary = (payload = {}) =>
+  Object.values(payload || {}).some((value) => value instanceof File);
+
 // Cola offline: solo para marcas cuyo payload es 100% JSON-serializable (sin
 // File/Blob) -- ver src/shared/utils/attendanceOfflineQueue.js. Las marcas con
 // foto (salida/cierre operacional con vehiculo personal) pasan por
@@ -124,6 +135,24 @@ const postQueueableMark = async (endpoint, payload = {}, label) => {
       queued: true,
       message: "Sin conexión: se guardó en este dispositivo y se enviará automáticamente cuando vuelva la señal.",
     };
+  }
+};
+
+const getWithCacheFallback = async ({
+  endpoint,
+  cacheKey,
+  maxAgeMs,
+}) => {
+  try {
+    const { data } = await api.get(endpoint);
+    writeCachedResource(cacheKey, data);
+    return data;
+  } catch (error) {
+    const cached = readCachedResource(cacheKey, { maxAgeMs });
+    if (cached?.data && isTransientApiError(error)) {
+      return cached.data;
+    }
+    throw error;
   }
 };
 
@@ -323,7 +352,10 @@ export const marcarRetornoImprevisto = async (location = null, markMeta = {}) =>
 
 export const marcarSalidaOficina = async (location = null, description = null, markMeta = {}) => {
  const payload = normalizeOperationalStartPayload(location, description, markMeta);
- return postAttendancePayload("/attendance/marcar/salida-oficina", payload);
+ if (payloadHasBinary(payload)) {
+  return postAttendancePayload("/attendance/marcar/salida-oficina", payload);
+ }
+ return postQueueableMark("/attendance/marcar/salida-oficina", payload, "Salida operacional");
 };
 
 export const createTeleworkRequest = async ({ city, location, locationAccuracy = null, reason = "", requestDate = "" } = {}) => {
@@ -362,7 +394,10 @@ export const marcarEntradaOficina = async (location = null, payloadOrMarkMeta = 
 
 export const marcarSalidaCampo = async (location = null, description = null, markMeta = {}) => {
  const payload = normalizeOperationalStartPayload(location, description, markMeta);
- return postAttendancePayload("/attendance/marcar/salida-campo", payload);
+ if (payloadHasBinary(payload)) {
+  return postAttendancePayload("/attendance/marcar/salida-campo", payload);
+ }
+ return postQueueableMark("/attendance/marcar/salida-campo", payload, "Salida operacional");
 };
 
 export const marcarEntradaCampo = async (location = null, payloadOrMarkMeta = {}, maybeMarkMeta = {}) => {
@@ -523,19 +558,27 @@ export const getActiveException = async () => {
  * Get Today's Attendance - For current user
  */
 export const getTodayAttendance = async () => {
-  const { data } = await api.get("/attendance/today");
-
-  return data;
+  return getWithCacheFallback({
+    endpoint: "/attendance/today",
+    cacheKey: ATTENDANCE_TODAY_CACHE_KEY,
+    maxAgeMs: ATTENDANCE_TODAY_CACHE_MAX_AGE_MS,
+  });
 };
 
 export const getAttendanceLivePresence = async () => {
-  const { data } = await api.get("/attendance/live-presence");
-  return data;
+  return getWithCacheFallback({
+    endpoint: "/attendance/live-presence",
+    cacheKey: ATTENDANCE_LIVE_PRESENCE_CACHE_KEY,
+    maxAgeMs: ATTENDANCE_LIVE_PRESENCE_CACHE_MAX_AGE_MS,
+  });
 };
 
 export const getAttendancePunctualitySummary = async () => {
-  const { data } = await api.get("/attendance/punctuality/summary");
-  return data;
+  return getWithCacheFallback({
+    endpoint: "/attendance/punctuality/summary",
+    cacheKey: ATTENDANCE_PUNCTUALITY_CACHE_KEY,
+    maxAgeMs: ATTENDANCE_PUNCTUALITY_CACHE_MAX_AGE_MS,
+  });
 };
 
 /**

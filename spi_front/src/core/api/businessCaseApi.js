@@ -28,17 +28,20 @@ export const normalizeUIGuidanceResponse = (response) => {
  }
  },
  permissions: {
- userRole: data.permissions?.userRole ?? 'comercial',
- canEdit: data.permissions?.canEdit ?? true,
- canCompleteSections: data.permissions?.canCompleteSections ?? true,
- canPromoteStage: data.permissions?.canPromoteStage ?? true,
- canAddObservations: data.permissions?.canAddObservations ?? true,
- canBlockSections: data.permissions?.canBlockSections ?? false,
- canUnblockSections: data.permissions?.canUnblockSections ?? false,
- canRequestPreflowReopen: data.permissions?.canRequestPreflowReopen ?? false,
- canResolvePreflowReopen: data.permissions?.canResolvePreflowReopen ?? false,
- canDecideFeasibility: data.permissions?.canDecideFeasibility ?? false,
- workspaceClosed: data.permissions?.workspaceClosed ?? false,
+  userRole: data.permissions?.userRole ?? 'comercial',
+  canEdit: data.permissions?.canEdit ?? true,
+  canCompleteSections: data.permissions?.canCompleteSections ?? true,
+  canPromoteStage: data.permissions?.canPromoteStage ?? true,
+  canAddObservations: data.permissions?.canAddObservations ?? true,
+  canBlockSections: data.permissions?.canBlockSections ?? false,
+  canUnblockSections: data.permissions?.canUnblockSections ?? false,
+  canRequestPreflowReopen: data.permissions?.canRequestPreflowReopen ?? false,
+  canResolvePreflowReopen: data.permissions?.canResolvePreflowReopen ?? false,
+  canDecideFeasibility: data.permissions?.canDecideFeasibility ?? false,
+   canViewOfferWorkspace: data.permissions?.canViewOfferWorkspace ?? false,
+   canManageOfferWorkspace: data.permissions?.canManageOfferWorkspace ?? false,
+   canDecideOfferWorkspace: data.permissions?.canDecideOfferWorkspace ?? false,
+  workspaceClosed: data.permissions?.workspaceClosed ?? false,
  },
  featureFlags: {
  autosave: data.featureFlags?.autosave || {},
@@ -336,6 +339,17 @@ export const createAutosaveManager = (businessCaseId) => {
  * @param {Object} params - Filters (page, pageSize, status, client_name, q)
  * @returns {Promise<Object>} List response
  */
+// Vista de solo-lectura para jefe_calidad / lorena.loaiza@fam-project.com.
+export const getBusinessCaseQualitySummaryList = async () => {
+  const { data } = await api.get("/business-case/quality-summary");
+  return data?.items || [];
+};
+
+export const getBusinessCaseQualitySummaryItems = async (businessCaseId) => {
+  const { data } = await api.get(`/business-case/${businessCaseId}/quality-summary/items`);
+  return data?.items || [];
+};
+
 export const listBusinessCases = async (params = {}) => {
  const startTime = Date.now();
  const { page = 1, pageSize = 20, status, client_name, q } = params;
@@ -512,6 +526,41 @@ export const resolveBusinessCaseFeasibilityAppeal = async (businessCaseId, paylo
 
 export const getBusinessCaseDispatchWorkspace = async (businessCaseId) => {
  const { data } = await api.get(`/business-case/${businessCaseId}/dispatch-workspace`);
+ return data.data || data;
+};
+
+export const getBusinessCaseOfferWorkspace = async (businessCaseId) => {
+ const { data } = await api.get(`/business-case/${businessCaseId}/offer-workspace`);
+ return data.data || data;
+};
+
+export const createBusinessCaseOfferDraft = async (businessCaseId) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/offer-workspace/draft`);
+ return data.data || data;
+};
+
+export const publishBusinessCaseOfferVersion = async (businessCaseId, offerId) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/offer-workspace/${offerId}/publish`);
+ return data.data || data;
+};
+
+export const regenerateBusinessCaseOfferVersion = async (businessCaseId, offerId) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/offer-workspace/${offerId}/regenerate`);
+ return data.data || data;
+};
+
+export const syncBusinessCaseOfferPricing = async (businessCaseId, offerId) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/offer-workspace/${offerId}/sync-pricing`);
+ return data.data || data;
+};
+
+export const syncBusinessCaseConsumptionFromSheet = async (businessCaseId) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/consumption-items/sync-from-sheet`);
+ return data.data || data;
+};
+
+export const decideBusinessCaseOfferVersion = async (businessCaseId, offerId, payload = {}) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/offer-workspace/${offerId}/decision`, payload);
  return data.data || data;
 };
 

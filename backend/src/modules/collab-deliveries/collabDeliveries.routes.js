@@ -3,7 +3,7 @@ const multer  = require("multer");
 const { verifyToken }  = require("../../middlewares/auth");
 const { requireRole }  = require("../../middlewares/roles");
 const ctrl = require("./collabDeliveries.controller");
-const { COLLAB_WRITE_ROLES, COLLAB_SESSION_ROLES, COLLAB_READ_ROLES } = require("./collabDeliveries.service");
+const { COLLAB_WRITE_ROLES, COLLAB_CATALOG_WRITE_ROLES, COLLAB_SESSION_ROLES, COLLAB_READ_ROLES } = require("./collabDeliveries.service");
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -12,9 +12,9 @@ router.use(verifyToken);
 
 // ── Catálogo ─────────────────────────────────────────────────────────────────
 router.get("/catalog",         requireRole(COLLAB_READ_ROLES),  ctrl.listCatalog);
-router.post("/catalog",        requireRole(COLLAB_WRITE_ROLES), ctrl.createCatalogItem);
-router.patch("/catalog/:id",   requireRole(COLLAB_WRITE_ROLES), ctrl.updateCatalogItem);
-router.delete("/catalog/:id",  requireRole(COLLAB_WRITE_ROLES), ctrl.deleteCatalogItem);
+router.post("/catalog",        requireRole(COLLAB_CATALOG_WRITE_ROLES), ctrl.createCatalogItem);
+router.patch("/catalog/:id",   requireRole(COLLAB_CATALOG_WRITE_ROLES), ctrl.updateCatalogItem);
+router.delete("/catalog/:id",  requireRole(COLLAB_CATALOG_WRITE_ROLES), ctrl.deleteCatalogItem);
 
 // ── Resumen ejecutivo ─────────────────────────────────────────────────────────
 router.get("/summary", requireRole(COLLAB_READ_ROLES), ctrl.getSummary);
@@ -39,7 +39,7 @@ router.post("/actas/:actaId/pdf/regenerate", requireRole(COLLAB_SESSION_ROLES), 
 router.get("/actas/:actaId/signature-workflow", requireRole(COLLAB_READ_ROLES), ctrl.getActaSignatureWorkflow);
 router.post("/actas/:actaId/start-signature-workflow", requireRole(COLLAB_SESSION_ROLES), ctrl.startActaSignatureWorkflow);
 router.post("/actas/:actaId/upload-signed",
-  requireRole(COLLAB_WRITE_ROLES),
+  requireRole(COLLAB_SESSION_ROLES),
   upload.single("file"),
   ctrl.uploadSignedActa,
 );

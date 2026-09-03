@@ -53,7 +53,14 @@ function TipoBadge({ tipo }) {
   );
 }
 
-function EstadoBadge({ isComplete }) {
+function EstadoBadge({ isComplete, isAnnulled = false }) {
+  if (isAnnulled) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-semibold text-red-700">
+        <FiAlertTriangle size={10} /> Anulada
+      </span>
+    );
+  }
   const cfg = ESTADO_CONFIG[String(isComplete)];
   const Icon = cfg.icon;
   return (
@@ -63,7 +70,8 @@ function EstadoBadge({ isComplete }) {
   );
 }
 
-function WorkflowBadge({ status, isComplete }) {
+function WorkflowBadge({ status, isComplete, isAnnulled = false }) {
+  if (isAnnulled) return <EstadoBadge isComplete={isComplete} isAnnulled />;
   const normalized = String(status || "").toLowerCase();
   if (normalized) {
     const cfg = WORKFLOW_STATUS_CONFIG[normalized] || WORKFLOW_STATUS_CONFIG.prepared;
@@ -463,7 +471,8 @@ const TIActasPage = () => {
 
   const total = actas.length;
   const firmadas = actas.filter((acta) => acta.is_complete).length;
-  const pendientes = total - firmadas;
+  const anuladas = actas.filter((acta) => acta.is_annulled).length;
+  const pendientes = total - firmadas - anuladas;
 
   return (
     <>
@@ -472,7 +481,7 @@ const TIActasPage = () => {
           <div>
             <h1 className="text-xl font-bold text-slate-900">Actas de entrega y retiro</h1>
             <p className="mt-0.5 text-xs text-slate-500">
-              {total} acta{total !== 1 ? "s" : ""} generada{total !== 1 ? "s" : ""} · {firmadas} firmada{firmadas !== 1 ? "s" : ""} · {pendientes} pendiente{pendientes !== 1 ? "s" : ""}
+              {total} acta{total !== 1 ? "s" : ""} generada{total !== 1 ? "s" : ""} · {firmadas} firmada{firmadas !== 1 ? "s" : ""} · {pendientes} pendiente{pendientes !== 1 ? "s" : ""} · {anuladas} anulada{anuladas !== 1 ? "s" : ""}
             </p>
           </div>
           <button
@@ -486,11 +495,12 @@ const TIActasPage = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid gap-3 sm:grid-cols-4">
           {[
             { label: "Total", value: total, color: "text-slate-800" },
             { label: "Firmadas", value: firmadas, color: "text-green-700" },
             { label: "Pendientes", value: pendientes, color: "text-amber-700" },
+            { label: "Anuladas", value: anuladas, color: "text-red-700" },
           ].map((item) => (
             <div key={item.label} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
               <p className="text-xs text-slate-400">{item.label}</p>
@@ -568,8 +578,9 @@ const TIActasPage = () => {
                 <tbody className="divide-y divide-slate-100">
                   {filteredActas.map((acta) => {
                     const isUploading = uploadingId === acta.id;
+                    const isAnnulled = Boolean(acta.is_annulled);
                     return (
-                      <tr key={acta.id} className="transition-colors hover:bg-slate-50">
+                      <tr key={acta.id} className={`transition-colors hover:bg-slate-50 ${isAnnulled ? "bg-red-50/30" : ""}`}>
                         <td className="px-4 py-3">
                           <span className="font-mono text-xs font-semibold text-slate-700">
                             {acta.acta_code || `#${String(acta.id).padStart(6, "0")}`}
@@ -596,7 +607,12 @@ const TIActasPage = () => {
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{fmt(acta.generated_at)}</td>
                         <td className="px-4 py-3">
-                          <WorkflowBadge status={acta.signature_workflow_status} isComplete={acta.is_complete} />
+                          <WorkflowBadge status={acta.signature_workflow_status} isComplete={acta.is_complete} isAnnulled={isAnnulled} />
+                          {isAnnulled && acta.annulment_reason ? (
+                            <p className="mt-0.5 max-w-[220px] text-[10px] text-red-500">
+                              {acta.annulment_reason}
+                            </p>
+                          ) : null}
                           {acta.is_complete && acta.signed_at ? (
                             <p className="mt-0.5 text-[10px] text-slate-400">
                               {new Date(acta.signed_at).toLocaleDateString("es-EC")}
@@ -605,7 +621,7 @@ const TIActasPage = () => {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1.5">
-                            {!acta.signature_workflow_id && !acta.signature_workflow_status && !acta.is_complete ? (
+                            {!isAnnulled && !acta.signature_workflow_id && !acta.signature_workflow_status && !acta.is_complete ? (
                               <button
                                 type="button"
                                 onClick={() => handleOpenStartWorkflowModal(acta)}
@@ -615,7 +631,7 @@ const TIActasPage = () => {
                               </button>
                             ) : null}
 
-                            {acta.signature_workflow_id || acta.signature_workflow_status ? (
+                            {!isAnnulled && (acta.signature_workflow_id || acta.signature_workflow_status) ? (
                               <button
                                 type="button"
                                 onClick={() => handleOpenWorkflow(acta)}
@@ -625,7 +641,7 @@ const TIActasPage = () => {
                               </button>
                             ) : null}
 
-                            {String(acta.signature_workflow_status || "").toLowerCase() === "completed" ? (
+                            {!isAnnulled && String(acta.signature_workflow_status || "").toLowerCase() === "completed" ? (
                               <button
                                 type="button"
                                 onClick={() => handleDownloadFinalPdf(acta)}
@@ -648,7 +664,7 @@ const TIActasPage = () => {
                               <FiDownload size={11} /> PDF
                             </button>
 
-                            {acta.is_complete && acta.signed_pdf_drive_url ? (
+                            {!isAnnulled && acta.is_complete && acta.signed_pdf_drive_url ? (
                               <a
                                 href={acta.signed_pdf_drive_url}
                                 target="_blank"
@@ -660,7 +676,7 @@ const TIActasPage = () => {
                               </a>
                             ) : null}
 
-                            {!acta.is_complete ? (
+                            {!isAnnulled && !acta.is_complete ? (
                               <label className="cursor-pointer" title="Subir acta firmada">
                                 <span
                                   className={`flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${

@@ -19,7 +19,7 @@ jest.mock("../../inventario/inventario.service", () => ({
   normalizeDetalleValue: jest.fn(),
 }));
 
-const { sendConsentEmailToken } = require("../requests.service");
+const { sendConsentEmailToken, getClientRequestById } = require("../requests.service");
 
 describe("sendConsentEmailToken", () => {
   it("envia el codigo por un unico camino (sendMail), sin doble intento por gmailService", async () => {
@@ -34,5 +34,33 @@ describe("sendConsentEmailToken", () => {
 
     expect(mockSendMail).toHaveBeenCalledTimes(1);
     expect(mockSendMail.mock.calls[0][0].from).toBe("vendedor@fam-project.com");
+  });
+});
+
+describe("getClientRequestById", () => {
+  it("autoriza el detalle cuando Calidad es un rol adicional", async () => {
+    const db = require("../../../config/db");
+    db.query.mockImplementation(async (sql) => {
+      if (String(sql).includes("FROM client_requests cr")) {
+        return {
+          rows: [{
+            id: 45,
+            created_by: "asesor@fam-project.com",
+            client_type: "privado",
+            commercial_name: "Cliente de prueba",
+          }],
+        };
+      }
+      return { rows: [] };
+    });
+
+    const result = await getClientRequestById(45, {
+      id: 10,
+      email: "usuario@fam-project.com",
+      role: "comercial",
+      extra_roles: ["calidad"],
+    });
+
+    expect(result.id).toBe(45);
   });
 });

@@ -38,10 +38,30 @@ const resolvePurchasesWorkspacePath = (businessCase) => {
  ? businessCase.modern_bc_metadata
  : {};
  const sourceModule = String(metadata?.source_module || "").toLowerCase();
+ const privatePurchaseId = metadata?.private_purchase_id || null;
+ const processId = metadata?.preflow_process_id || null;
+ const processType = String(metadata?.preflow_process_type || "").toLowerCase();
+ const handoff = metadata?.purchase_workspace || {};
+ const handoffType = String(handoff?.type || "").toLowerCase();
+ const handoffPurchaseId = handoff?.purchase_id || null;
 
- if (sourceModule.includes("equipment_purchases")) return "/dashboard/purchases/workspace?tab=public";
- if (sourceModule.includes("private_purchases") || metadata?.private_purchase_id) {
- return "/dashboard/purchases/workspace?tab=private";
+ if (handoffType === "private" && handoffPurchaseId) {
+ return `/dashboard/purchases/workspace?tab=private&requestType=private&requestId=${handoffPurchaseId}`;
+ }
+ if (handoffType === "public" && handoffPurchaseId) {
+ return `/dashboard/purchases/workspace?tab=public&requestType=public&requestId=${handoffPurchaseId}`;
+ }
+
+ if (privatePurchaseId || processType === "private_comodato" || sourceModule.includes("private_purchases")) {
+ const requestId = privatePurchaseId || processId;
+ return requestId
+ ? `/dashboard/purchases/workspace?tab=private&requestType=private&requestId=${requestId}`
+ : "/dashboard/purchases/workspace?tab=private";
+ }
+ if (processType === "public_purchase" || sourceModule.includes("equipment_purchases")) {
+ return processId
+ ? `/dashboard/purchases/workspace?tab=public&requestType=public&requestId=${processId}`
+ : "/dashboard/purchases/workspace?tab=public";
  }
  return "/dashboard/purchases/workspace";
 };

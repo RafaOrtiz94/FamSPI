@@ -4,14 +4,90 @@ const reportSvc = require("./tiAssets.report");
 const { TI_ROLES } = require("./tiAssets.service");
 const { uploadFileToDrive, ensureFolderPath } = require("../../utils/drive");
 
+function resolvePublicBaseUrl(req) {
+  const proto = req.get("x-forwarded-proto") || req.protocol || "https";
+  const host = req.get("x-forwarded-host") || req.get("host") || "";
+  return host ? `${proto}://${host}` : "";
+}
+
 exports.listAssets = asyncHandler(async (req, res) => {
-  const data = await svc.listAssets({ status: req.query?.status, q: req.query?.q });
+  const data = await svc.listAssets({
+    status: req.query?.status,
+    q: req.query?.q,
+    custodyType: req.query?.custody_type,
+    clientId: req.query?.client_id,
+    warehouseCode: req.query?.warehouse_code,
+    publicBaseUrl: resolvePublicBaseUrl(req),
+  });
   res.json({ ok: true, total: data.length, data });
 });
 
+exports.listCustodySummary = asyncHandler(async (_req, res) => {
+  const data = await svc.listCustodySummary();
+  res.json({ ok: true, data });
+});
+
+exports.getPublicAssetByCode = asyncHandler(async (req, res) => {
+  const data = await svc.getPublicAssetByCode(req.params.assetCode, {
+    publicBaseUrl: resolvePublicBaseUrl(req),
+  });
+  res.json({ ok: true, data });
+});
+
+exports.getPublicInitialConditionPhoto = asyncHandler(async (req, res) => {
+  const { buffer, filename, mimeType } = await svc.getInitialConditionPhotoFileByCode(
+    req.params.assetCode,
+    req.params.photoIndex,
+  );
+  res.setHeader("Content-Type", mimeType);
+  res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+  res.setHeader("Cache-Control", "public, max-age=300");
+  res.send(buffer);
+});
+
+exports.listAssetClients = asyncHandler(async (req, res) => {
+  const data = await svc.listAssetClients({ q: req.query?.q, limit: req.query?.limit });
+  res.json({ ok: true, total: data.length, data });
+});
+
+exports.listCustodyHistory = asyncHandler(async (req, res) => {
+  const data = await svc.listAssetCustodyHistory(req.params.id);
+  res.json({ ok: true, total: data.length, data });
+});
+
+exports.moveAssetCustody = asyncHandler(async (req, res) => {
+  const data = await svc.moveAssetCustody({
+    assetId: req.params.id,
+    ...req.body,
+    userId: req.user?.id || null,
+  });
+  res.status(200).json({ ok: true, data });
+});
+
 exports.createAsset = asyncHandler(async (req, res) => {
-  const data = await svc.createAsset({ data: req.body || {}, userId: req.user?.id || null });
+  const files = req.files || (req.file ? [req.file] : []);
+  const conditionPhotos = files.map((file, index) => ({
+    buffer: file.buffer,
+    filename: file.originalname || `condicion-inicial-${index + 1}.jpg`,
+    mimeType: file.mimetype || "image/jpeg",
+  }));
+  const data = await svc.createAsset({ data: req.body || {}, conditionPhotos, userId: req.user?.id || null });
   res.status(201).json({ ok: true, data });
+});
+
+exports.uploadInitialConditionPhotos = asyncHandler(async (req, res) => {
+  const files = req.files || (req.file ? [req.file] : []);
+  const conditionPhotos = files.map((file, index) => ({
+    buffer: file.buffer,
+    filename: file.originalname || `condicion-inicial-${index + 1}.jpg`,
+    mimeType: file.mimetype || "image/jpeg",
+  }));
+  const data = await svc.uploadInitialConditionPhotos({
+    assetId: req.params.id,
+    conditionPhotos,
+    userId: req.user?.id || null,
+  });
+  res.status(200).json({ ok: true, data });
 });
 
 exports.updateAsset = asyncHandler(async (req, res) => {
@@ -425,6 +501,13 @@ exports.uploadLegacySignedActa = asyncHandler(async (req, res) => {
 exports.downloadAssetReport = asyncHandler(async (req, res) => {
   const pdfBuffer = await svc.generateAssetPdfReport(req.params.id);
   const filename  = `Reporte-Activo-${String(req.params.id).padStart(6, "0")}.pdf`;
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.send(pdfBuffer);
+});
+
+exports.downloadAssetLabel = asyncHandler(async (req, res) => {
+  const { pdfBuffer, filename } = await svc.generateAssetLabelPdf(req.params.id);
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.send(pdfBuffer);

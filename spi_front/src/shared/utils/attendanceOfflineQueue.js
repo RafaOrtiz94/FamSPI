@@ -6,32 +6,71 @@
 // AttendanceAction, reintento manual en el widget). Si en el futuro se
 // necesita cubrir tambien esas, el camino es IndexedDB (soporta Blob), no
 // localStorage.
-const QUEUE_STORAGE_KEY = "spi_attendance_offline_queue";
+import {
+  readPwaStorage,
+  readPwaStorageData,
+  subscribePwaStorageEvent,
+  writePwaStorage,
+} from "../../core/pwa/storage";
+
+const QUEUE_STORAGE_KEY = "attendance_offline_queue";
 const QUEUE_CHANGED_EVENT = "attendance-offline-queue-changed";
+const QUEUE_STATUS_STORAGE_KEY = "attendance_offline_queue_status";
+const QUEUE_STATUS_CHANGED_EVENT = "attendance-offline-queue-status-changed";
+
+const buildDefaultStatus = () => ({
+  pendingCount: 0,
+  syncing: false,
+  lastFlushAt: null,
+  lastSuccessAt: null,
+  lastFailureAt: null,
+  lastResult: null,
+  flushedCount: 0,
+  failedCount: 0,
+});
+
+const readStatus = () => {
+  const cached = readPwaStorage(QUEUE_STATUS_STORAGE_KEY, { namespace: "spi_pwa_queue" });
+  return cached?.data && typeof cached.data === "object"
+    ? { ...buildDefaultStatus(), ...cached.data }
+    : buildDefaultStatus();
+};
 
 const readQueue = () => {
-  try {
-    const raw = localStorage.getItem(QUEUE_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  const cached = readPwaStorageData(QUEUE_STORAGE_KEY, { namespace: "spi_pwa_queue" });
+  return Array.isArray(cached?.data) ? cached.data : [];
+};
+
+const writeStatus = (status) => {
+  writePwaStorage(QUEUE_STATUS_STORAGE_KEY, status, {
+    namespace: "spi_pwa_queue",
+    eventName: QUEUE_STATUS_CHANGED_EVENT,
+    meta: {
+      pendingCount: Number(status?.pendingCount || 0),
+      syncing: Boolean(status?.syncing),
+      lastResult: status?.lastResult || null,
+      flushedCount: Number(status?.flushedCount || 0),
+      failedCount: Number(status?.failedCount || 0),
+    },
+  });
+};
+
+const syncStatusWithQueue = (items, partial = {}) => {
+  const previous = readStatus();
+  writeStatus({
+    ...previous,
+    pendingCount: items.length,
+    ...partial,
+  });
 };
 
 const writeQueue = (items) => {
-  try {
-    localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(items));
-  } catch {
-    // localStorage lleno o no disponible -- la marca ya se intento en vivo,
-    // no hay mucho mas que hacer sin IndexedDB.
-  }
-  try {
-    window.dispatchEvent(new CustomEvent(QUEUE_CHANGED_EVENT, { detail: { size: items.length } }));
-  } catch {
-    // entorno sin CustomEvent (tests, SSR) -- no bloqueante
-  }
+  writePwaStorage(QUEUE_STORAGE_KEY, items, {
+    namespace: "spi_pwa_queue",
+    eventName: QUEUE_CHANGED_EVENT,
+    meta: { size: items.length },
+  });
+  syncStatusWithQueue(items);
 };
 
 export const getQueuedMarks = () => readQueue();
@@ -66,9 +105,13 @@ export const removeQueuedMark = (id) => {
 export const clearOfflineQueue = () => writeQueue([]);
 
 export const onOfflineQueueChanged = (handler) => {
-  window.addEventListener(QUEUE_CHANGED_EVENT, handler);
-  return () => window.removeEventListener(QUEUE_CHANGED_EVENT, handler);
+  return subscribePwaStorageEvent(QUEUE_CHANGED_EVENT, handler);
 };
+
+export const getOfflineQueueSyncStatus = () => readStatus();
+
+export const onOfflineQueueStatusChanged = (handler) =>
+  subscribePwaStorageEvent(QUEUE_STATUS_CHANGED_EVENT, handler);
 
 /**
  * Reintenta cada marca encolada, en el orden en que se guardaron (importa:
@@ -85,6 +128,15 @@ export const onOfflineQueueChanged = (handler) => {
 export const flushOfflineQueue = async ({ post }) => {
   const items = readQueue();
   if (!items.length) return { flushed: [], failed: [], stillQueued: 0 };
+
+  const startedAt = new Date().toISOString();
+  syncStatusWithQueue(items, {
+    syncing: true,
+    lastFlushAt: startedAt,
+    lastResult: "syncing",
+    flushedCount: 0,
+    failedCount: 0,
+  });
 
   const flushed = [];
   const failed = [];
@@ -107,5 +159,21 @@ export const flushOfflineQueue = async ({ post }) => {
     }
   }
 
-  return { flushed, failed, stillQueued: getQueueSize() };
+  const completedAt = new Date().toISOString();
+  const stillQueued = getQueueSize();
+  const previous = readStatus();
+  const lastResult =
+    failed.length > 0 ? "partial-failure" : stillQueued > 0 ? "deferred" : "success";
+
+  syncStatusWithQueue(readQueue(), {
+    syncing: false,
+    lastFlushAt: completedAt,
+    lastSuccessAt: flushed.length > 0 ? completedAt : previous.lastSuccessAt,
+    lastFailureAt: failed.length > 0 || stillQueued > 0 ? completedAt : previous.lastFailureAt,
+    lastResult,
+    flushedCount: flushed.length,
+    failedCount: failed.length,
+  });
+
+  return { flushed, failed, stillQueued };
 };

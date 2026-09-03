@@ -20,6 +20,7 @@ const { validateCreateWorkflowPayload } = require("../signature-workflows/signat
 // ── Roles ────────────────────────────────────────────────────────────────────
 const COLLAB_WRITE_ROLES = ["financiero", "jefe_financiero"];
 const COLLAB_SESSION_ROLES = [...COLLAB_WRITE_ROLES, "talento_humano", "jefe_tecnico", "jefe_servicio"];
+const COLLAB_CATALOG_WRITE_ROLES = [...COLLAB_WRITE_ROLES, "talento_humano"];
 const COLLAB_READ_ROLES  = [
   ...COLLAB_SESSION_ROLES,
   "gerencia_general", "gerencia",
@@ -33,10 +34,11 @@ const CATEGORY_TIPO_ROLES = {
   herramienta: { entrega: ["talento_humano","jefe_tecnico","jefe_servicio"], retiro: ["talento_humano","jefe_tecnico","jefe_servicio"] },
   logistica:   { entrega: ["financiero","jefe_financiero"], retiro: ["financiero","jefe_financiero"] },
   suministros: { entrega: ["financiero","jefe_financiero","talento_humano"], retiro: ["financiero","jefe_financiero","talento_humano"] },
+  poliza:      { entrega: ["talento_humano"] },
 };
 
 const ALLOWED_STATUSES = new Set(["entregado", "retirado", "perdido", "dañado"]);
-const ALLOWED_CATEGORIES = new Set(["ropa", "epp", "herramienta", "logistica", "suministros"]);
+const ALLOWED_CATEGORIES = new Set(["ropa", "epp", "herramienta", "logistica", "suministros", "poliza"]);
 const COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID = process.env.COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID || null;
 // Herramientas tiene dos plantillas (mismas variables, distinto formato) --
 // personal interno vs externo. Si las variantes no estan configuradas cae al
@@ -44,13 +46,20 @@ const COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID = process.env.COLLAB_ACTA_HERRAMIENTA_
 const COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID = process.env.COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID || COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID;
 const COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID = process.env.COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID || COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID;
 const COLLAB_ACTA_ROPA_TEMPLATE_ID        = process.env.COLLAB_ACTA_ROPA_TEMPLATE_ID        || null;
+// Ropa, igual que herramienta, tiene variante interno/externo. Si no estan
+// configuradas cae al template generico de ropa para no romper actas ya en uso.
+const COLLAB_ACTA_ROPA_INT_TEMPLATE_ID    = process.env.COLLAB_ACTA_ROPA_INT_TEMPLATE_ID    || COLLAB_ACTA_ROPA_TEMPLATE_ID;
+const COLLAB_ACTA_ROPA_EXT_TEMPLATE_ID    = process.env.COLLAB_ACTA_ROPA_EXT_TEMPLATE_ID    || COLLAB_ACTA_ROPA_TEMPLATE_ID;
 const COLLAB_ACTA_EPP_TEMPLATE_ID         = process.env.COLLAB_ACTA_EPP_TEMPLATE_ID         || null;
+const COLLAB_ACTA_POLIZA_INT_TEMPLATE_ID  = process.env.COLLAB_ACTA_POLIZA_INT_TEMPLATE_ID  || "1YMTwTDXY5myxJPbNwBKamEGjqMiptjhduYlwJVPI0cM";
+const COLLAB_ACTA_POLIZA_EXT_TEMPLATE_ID  = process.env.COLLAB_ACTA_POLIZA_EXT_TEMPLATE_ID  || "1J17iJ49_EV7VEQ-3-g2-bCBL7J2uyBAXQIcIBKIisa0";
 const ACTA_CODE_PREFIX_BY_CATEGORY = {
   herramienta: "ACTA-COL",
   ropa: "ACTA-ROPA",
   epp: "ACTA-EPP",
   logistica: "ACTA-LOG",
   suministros: "ACTA-SUM",
+  poliza: "ACTA-POLIZA",
   ti: "ACTA-TI",
 };
 
@@ -58,7 +67,10 @@ const ACTA_CODE_PREFIX_BY_CATEGORY = {
 logger.info({
   COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID: COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID ? "✓ configurado" : "✗ NO configurado",
   COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID: COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID ? "✓ configurado" : "✗ NO configurado",
-  COLLAB_ACTA_ROPA_TEMPLATE_ID:        COLLAB_ACTA_ROPA_TEMPLATE_ID        ? "✓ configurado" : "✗ NO configurado",
+  COLLAB_ACTA_ROPA_INT_TEMPLATE_ID:    COLLAB_ACTA_ROPA_INT_TEMPLATE_ID    ? "✓ configurado" : "✗ NO configurado",
+  COLLAB_ACTA_ROPA_EXT_TEMPLATE_ID:    COLLAB_ACTA_ROPA_EXT_TEMPLATE_ID    ? "✓ configurado" : "✗ NO configurado",
+  COLLAB_ACTA_POLIZA_INT_TEMPLATE_ID:  COLLAB_ACTA_POLIZA_INT_TEMPLATE_ID  ? "✓ configurado" : "✗ NO configurado",
+  COLLAB_ACTA_POLIZA_EXT_TEMPLATE_ID:  COLLAB_ACTA_POLIZA_EXT_TEMPLATE_ID  ? "✓ configurado" : "✗ NO configurado",
 }, "collab-deliveries: estado de plantillas Google Docs");
 
 const normalizeActaCategory = (value) => {
@@ -139,14 +151,14 @@ const _collabHerramientaCellValues = (item) => {
   ];
 };
 
-// Columns: No. | Prenda | Talla | Cantidad | Estado
-const _collabRopaCellValues = (item, i) => {
+// Columns: Prenda | Cantidad | Marca/Modelo | Talla | Estado
+const _collabRopaCellValues = (item) => {
   const a = parseJsonObject(item.attributes_summary);
   return [
-    String(i + 1),
     item.name || "",
-    a.talla || "",
     a.cantidad != null ? String(a.cantidad) : "",
+    a.marca || "",
+    a.talla || "",
     item.is_new === true ? "Nuevo" : item.is_new === false ? "Usado" : "",
   ];
 };
@@ -163,6 +175,17 @@ const _collabEppCellValues = (item, i) => {
     a.norma_certificacion || "",
     item.serial_number || "",
     item.physical_condition != null ? `${item.physical_condition}/10` : "",
+  ];
+};
+
+const _collabPolizaCellValues = (item) => {
+  const a = parseJsonObject(item.attributes_summary);
+  return [
+    a.tipo_seguro || item.name || "",
+    a.aseguradora || "",
+    a.numero_poliza || "",
+    a.vigencia || "",
+    a.monto_asegurado || "",
   ];
 };
 
@@ -242,6 +265,18 @@ async function _resolveSessionCatalogItem(client, item, category) {
   return cat;
 }
 
+function _validatePolicyAttributes(attributes) {
+  const source = attributes && typeof attributes === "object" ? attributes : {};
+  const required = ["tipo_seguro", "aseguradora", "numero_poliza", "vigencia", "monto_asegurado"];
+  const missing = required.filter((key) => !String(source[key] || "").trim());
+  if (missing.length) {
+    throw Object.assign(new Error(`La póliza requiere: ${missing.join(", ")}`), { status: 400 });
+  }
+  if (!new Set(["Salud", "Vida", "Salud y Vida"]).has(String(source.tipo_seguro).trim())) {
+    throw Object.assign(new Error("tipo_seguro inválido"), { status: 400 });
+  }
+}
+
 async function _insertSessionDeliveries({
   client,
   session,
@@ -255,6 +290,7 @@ async function _insertSessionDeliveries({
 
   for (const item of items) {
     const cat = await _resolveSessionCatalogItem(client, item, category);
+    if (category === "poliza" && tipo === "entrega") _validatePolicyAttributes(item.attributes);
     const status = tipo === "entrega" ? "entregado" : "retirado";
     const attrs = item.attributes && typeof item.attributes === "object"
       ? JSON.stringify(item.attributes)
@@ -598,12 +634,13 @@ async function _buildDriveTemplateActaPdfBuffer(acta) {
     acta.resolved_category || acta.category || acta.items?.[0]?.item_category || acta.items?.[0]?.category,
   );
 
+  const isExterno = String(acta.personnel_type || "").toLowerCase() === "externo";
   const templateId = category === "herramienta"
-    ? (String(acta.personnel_type || "").toLowerCase() === "externo"
-        ? COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID
-        : COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID)
-    : category === "ropa"        ? COLLAB_ACTA_ROPA_TEMPLATE_ID
+    ? (isExterno ? COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID : COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID)
+    : category === "ropa"
+    ? (isExterno ? COLLAB_ACTA_ROPA_EXT_TEMPLATE_ID : COLLAB_ACTA_ROPA_INT_TEMPLATE_ID)
     : category === "epp"         ? COLLAB_ACTA_EPP_TEMPLATE_ID
+    : category === "poliza"      ? (isExterno ? COLLAB_ACTA_POLIZA_EXT_TEMPLATE_ID : COLLAB_ACTA_POLIZA_INT_TEMPLATE_ID)
     : null;
   if (!templateId) {
     const err = new Error(`No hay plantilla Google Docs configurada para la categoría "${category}"`);
@@ -615,6 +652,8 @@ async function _buildDriveTemplateActaPdfBuffer(acta) {
     ? _collabRopaCellValues
     : category === "epp"
       ? _collabEppCellValues
+      : category === "poliza"
+        ? _collabPolizaCellValues
       : _collabHerramientaCellValues;
 
   const filename = acta.acta_code ? `${acta.acta_code}.pdf` : `ACTA-${String(acta.id).padStart(6, "0")}.pdf`;
@@ -838,11 +877,22 @@ async function _buildActaWorkflowSigners(acta) {
   ];
 }
 
+// Categorias que generan acta (todas menos "suministros", que no genera acta)
+// pueden iniciar workflow de firma FamSign en una entrega.
+const WORKFLOW_ELIGIBLE_CATEGORIES = new Set(["herramienta", "ropa", "epp", "logistica", "poliza"]);
+const CATEGORY_ENTREGA_LABEL = {
+  herramienta: "herramientas",
+  ropa: "ropa de trabajo",
+  epp: "equipo de proteccion personal",
+  logistica: "logistica",
+  poliza: "poliza de seguro",
+};
+
 function _shouldAutoStartSignatureWorkflow(acta) {
   const normalizedCategory = normalizeActaCategory(
     acta?.resolved_category || acta?.category || acta?.items?.[0]?.item_category || acta?.items?.[0]?.category
   );
-  return normalizedCategory === "herramienta" && String(acta?.tipo || "").toLowerCase() === "entrega";
+  return WORKFLOW_ELIGIBLE_CATEGORIES.has(normalizedCategory) && String(acta?.tipo || "").toLowerCase() === "entrega";
 }
 
 async function startSignatureWorkflowForActa({ actaId, signers = [], actorUser }) {
@@ -880,12 +930,15 @@ async function startSignatureWorkflowForActa({ actaId, signers = [], actorUser }
   const resolvedSigners = Array.isArray(signers) && signers.length
     ? signers
     : await _buildActaWorkflowSigners(refreshedActa);
+  const normalizedCategory = normalizeActaCategory(
+    refreshedActa.resolved_category || refreshedActa.category || refreshedActa.items?.[0]?.item_category || refreshedActa.items?.[0]?.category
+  );
   const payload = validateCreateWorkflowPayload({
     source_module: "collab-deliveries",
     source_entity: "acta",
     source_entity_id: Number(refreshedActa.id),
-    document_type: "acta_herramienta_entrega",
-    title: `Acta ${refreshedActa.acta_code} - Entrega de herramientas`,
+    document_type: `acta_${normalizedCategory}_entrega`,
+    title: `Acta ${refreshedActa.acta_code} - Entrega de ${CATEGORY_ENTREGA_LABEL[normalizedCategory] || normalizedCategory}`,
     description: refreshedActa.notes || null,
     document: {
       filename: refreshedActa.pdf_filename || `${refreshedActa.acta_code || `ACTA-${refreshedActa.id}`}.pdf`,
@@ -1226,7 +1279,7 @@ async function createCollabSession({
   user_id, category, session_date, tipo = "entrega", notes,
   items = [], // [{catalog_item_id, serial_number, physical_condition, attributes, renewal_date, observations}]
   recipient_nombre, recipient_cedula, recipient_cargo,
-  personnel_type = null, // 'interno' | 'externo' -- solo aplica a category 'herramienta', decide la plantilla del acta
+  personnel_type = null, // 'interno' | 'externo' -- aplica a category 'herramienta' y 'ropa', decide la plantilla del acta
 }, actorId, actorRole) {
   if (!ALLOWED_CATEGORIES.has(category)) throw Object.assign(new Error("Categoría inválida"), { status: 400 });
   if (personnel_type && !["interno", "externo"].includes(personnel_type)) {
@@ -1282,7 +1335,7 @@ async function createCollabSession({
         [acta_code, tipo, category, session.id, user_id,
          recipientInfo.nombre, recipientInfo.cedula, recipientInfo.cargo,
          actaDay, actaMonth, actaYear, actorId,
-         category === "herramienta" ? personnel_type : null,
+         ["herramienta", "ropa", "poliza"].includes(category) ? personnel_type : null,
          session.notes || null],
       );
       acta = newActa;
@@ -1453,7 +1506,7 @@ async function updateCollabSession(sessionId, {
                   acta_day = $5,
                   acta_month = $6,
                   acta_year = $7,
-                  personnel_type = CASE WHEN category = 'herramienta' THEN COALESCE($8, personnel_type) ELSE personnel_type END,
+                  personnel_type = CASE WHEN category IN ('herramienta','ropa','poliza') THEN COALESCE($8, personnel_type) ELSE personnel_type END,
                   notes = $9,
                   pdf_drive_file_id = NULL,
                   pdf_sha256 = NULL,
@@ -1496,7 +1549,7 @@ async function updateCollabSession(sessionId, {
             actaMonth,
             actaYear,
             actorId,
-            session.category === "herramienta" ? (personnel_type || null) : null,
+            ["herramienta", "ropa", "poliza"].includes(session.category) ? (personnel_type || null) : null,
             updatedSession.notes || null,
           ],
         );
@@ -1895,6 +1948,7 @@ async function getCollaboratorReport(userId) {
 module.exports = {
   normalizeActaCategory,
   COLLAB_WRITE_ROLES,
+  COLLAB_CATALOG_WRITE_ROLES,
   COLLAB_SESSION_ROLES,
   COLLAB_READ_ROLES,
   listCatalog,
@@ -1930,5 +1984,6 @@ module.exports = {
   uploadDeliveryDoc,
   getFullReport,
   getCollaboratorReport,
+  _validatePolicyAttributes,
   _REPORT_QUERY,
 };

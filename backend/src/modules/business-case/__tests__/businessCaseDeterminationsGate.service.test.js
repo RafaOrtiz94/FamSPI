@@ -95,9 +95,11 @@ describe("businessCaseDeterminationsGate.service", () => {
 
     expect(gate.deadlineAt).toBe("2026-02-02T10:00:00.000Z");
     expect(gate.technicalSlaExpired).toBe(true);
-    expect(gate.permissions.canEditDeterminations).toBe(false);
-    expect(() => service.assertCanEditDeterminationsOrThrow(gate)).toThrow(
-      /prorroga de 24 horas/i,
-    );
+    // El vencimiento de SLA ya no bloquea edicion/sincronizacion -- solo se
+    // expone via gate.isExpired/technicalSlaExpired para el aviso en UI.
+    // jefe_servicio sigue siendo editor valido de la fase technical_review,
+    // asi que canEditDeterminations es true pese al vencimiento.
+    expect(gate.permissions.canEditDeterminations).toBe(true);
+    expect(() => service.assertCanEditDeterminationsOrThrow(gate)).not.toThrow();
   });
 });

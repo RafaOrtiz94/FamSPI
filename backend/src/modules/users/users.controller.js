@@ -1,8 +1,61 @@
 ﻿// src/modules/users/users.controller.js
+   const bcrypt = require("bcryptjs");
+   const crypto = require("crypto");
    const db = require("../../config/db");
    const logger = require("../../config/logger");
    const { isPassiveEmploymentStatus } = require("../shared/profileSync");
    const { findExistingUserByIdentity } = require("../../utils/userIdentity");
+
+// Columnas seguras para devolver al frontend -- NUNCA incluir password_hash
+// aqui. createUser/updateUser antes hacian "RETURNING *", lo que habria
+// filtrado el hash de pasantes (auth_provider=local) a cualquier respuesta
+// JSON. Ver docs/plans/pasantes-access-plan.md §5.4.
+const SAFE_USER_RETURNING_COLUMNS = `
+  id, google_id, email, name, department_id, role, created_at, updated_at,
+  fullname, lopdp_internal_status, active, username, auth_provider,
+  must_change_password, account_expires_at
+`;
+
+const BCRYPT_ROUNDS = 11;
+const TEMP_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"; // sin 0/O/1/l/I ambiguos
+
+const generateTempPassword = (length = 12) => {
+  const bytes = crypto.randomBytes(length);
+  let out = "";
+  for (let i = 0; i < length; i += 1) {
+    out += TEMP_PASSWORD_ALPHABET[bytes[i] % TEMP_PASSWORD_ALPHABET.length];
+  }
+  return out;
+};
+
+const slugifyUsername = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
+    .slice(0, 60);
+
+async function generateUniqueUsername(baseName) {
+  const base = slugifyUsername(baseName) || "pasante";
+  let candidate = base;
+  let suffix = 1;
+  // Loop acotado: en la practica nunca deberia iterar mas de un par de veces
+  // (colisiones de nombre completo son raras), pero se limita a 50 intentos
+  // por seguridad ante datos anomalos.
+  for (let attempts = 0; attempts < 50; attempts += 1) {
+    const { rows } = await db.query(
+      "SELECT 1 FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1",
+      [candidate],
+    );
+    if (!rows.length) return candidate;
+    suffix += 1;
+    candidate = `${base}${suffix}`;
+  }
+  throw new Error("No se pudo generar un username unico");
+}
 
 const ADMIN_VIEW_ROLES = new Set([
     "talento_humano",
@@ -52,6 +105,7 @@ const ALLOWED_USER_ROLES = new Set([
   "usuario",
   "admin",
   "administrador",
+  "pasante",
 ]);
 
 const normalizeRole = (value) =>
@@ -89,6 +143,14 @@ const collectRoles = (user = {}) => {
   if (Array.isArray(user.scopes)) user.scopes.forEach((scope) => roles.add(normalizeRole(scope)));
   return roles;
 };
+
+// jefe_ti es la UNICA forma de dar de alta o reasignar el rol pasante -- a
+// diferencia del resto de roles (que cualquiera en USER_ADMIN_ROLES puede
+// crear), pasante implica login sin OAuth (password propia) y es un
+// mecanismo de acceso mas sensible, asi que se restringe a un solo dueno en
+// vez de repartirse entre TI/RRHH/gerencia como el resto del CRUD de
+// usuarios. "ti" (sin jefe) y "admin_ti" quedan afuera a proposito.
+const isJefeTi = (req) => collectRoles(req.user || {}).has("jefe_ti") || collectRoles(req.user || {}).has("jefe_de_ti");
 
 const getActorContext = (req) => {
   const roles = Array.from(collectRoles(req.user || {}));
@@ -278,16 +340,30 @@ const getUsers = async (req, res) => {
 const createUser = async (req, res) => {
   try {
     const googleId = normalizeText(req.body?.google_id, 255) || null;
-    const email = normalizeEmail(req.body?.email);
     const fullname = normalizeText(req.body?.fullname);
     const role = normalizeRole(req.body?.role || "pendiente");
     const departmentId = parseDepartmentId(req.body?.department_id);
     const active = req.body?.active !== undefined ? parseBoolean(req.body.active) : true;
+    const isPasante = role === "pasante";
 
+    if (isPasante && !isJefeTi(req)) {
+      return res.status(403).json({
+        ok: false,
+        message: "Solo Jefe TI puede registrar usuarios tipo pasante.",
+        code: "PASANTE_CREATION_REQUIRES_JEFE_TI",
+      });
+    }
+
+    // Pasantes no tienen cuenta Google corporativa (limitante del
+    // requerimiento) -- el email sigue siendo obligatorio (puede ser
+    // personal, no necesita dominio corporativo) porque /auth/me y el resto
+    // del perfil de usuario estan indexados por email; la IDENTIDAD DE LOGIN
+    // real es `username` + password propia, el email es solo dato de
+    // contacto/perfil. Ver docs/plans/pasantes-access-plan.md.
+    const email = normalizeEmail(req.body?.email);
     if (!fullname || !email) {
       return res.status(400).json({ ok: false, message: "Nombre y correo son obligatorios" });
     }
-
     if (!isValidEmail(email)) {
       return res.status(400).json({ ok: false, message: "Correo electrónico inválido" });
     }
@@ -302,6 +378,21 @@ const createUser = async (req, res) => {
 
     if (active === null) {
       return res.status(400).json({ ok: false, message: "Estado activo/inactivo inválido" });
+    }
+
+    let accountExpiresAt = null;
+    if (isPasante) {
+      // Obligatorio a proposito -- fuerza que quien da de alta piense en la
+      // fecha de fin de la pasantia desde el dia uno, en vez de dejar
+      // cuentas activas indefinidamente despues de que el pasante se va.
+      const rawExpiresAt = req.body?.account_expires_at;
+      accountExpiresAt = rawExpiresAt ? new Date(rawExpiresAt) : null;
+      if (!accountExpiresAt || Number.isNaN(accountExpiresAt.getTime())) {
+        return res.status(400).json({ ok: false, message: "Fecha de fin de pasantía (account_expires_at) es obligatoria" });
+      }
+      if (accountExpiresAt.getTime() <= Date.now()) {
+        return res.status(400).json({ ok: false, message: "La fecha de fin de pasantía debe ser futura" });
+      }
     }
 
     await ensureDepartmentExists(departmentId, { requireActive: true });
@@ -320,21 +411,65 @@ const createUser = async (req, res) => {
       });
     }
 
-      const { rows } = await db.query(
-        `
-        INSERT INTO users (google_id, email, fullname, role, department_id, active, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, NOW())
-        RETURNING *
-        `,
-        [googleId, email, fullname, role || "pendiente", departmentId, active]
-      );
-
-      res.status(201).json({ ok: true, data: rows[0] });
-    } catch (err) {
-      logger.error({ err }, "Error creando usuario");
-      res.status(err.status || 500).json({ ok: false, message: err.message || "Error creando usuario" });
+    let username = null;
+    let tempPassword = null;
+    let passwordHash = null;
+    if (isPasante) {
+      const requestedUsername = normalizeText(req.body?.username, 60);
+      username = requestedUsername
+        ? slugifyUsername(requestedUsername)
+        : await generateUniqueUsername(fullname);
+      if (requestedUsername) {
+        const { rows: usernameClash } = await db.query(
+          "SELECT 1 FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1",
+          [username],
+        );
+        if (usernameClash.length) {
+          return res.status(409).json({ ok: false, message: `El username "${username}" ya está en uso.` });
+        }
+      }
+      tempPassword = generateTempPassword();
+      passwordHash = await bcrypt.hash(tempPassword, BCRYPT_ROUNDS);
     }
-  };
+
+    const { rows } = await db.query(
+      `
+      INSERT INTO users (
+        google_id, email, fullname, role, department_id, active, created_at,
+        username, password_hash, auth_provider, must_change_password, account_expires_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8, $9, $10, $11)
+      RETURNING ${SAFE_USER_RETURNING_COLUMNS}
+      `,
+      [
+        googleId,
+        email || null,
+        fullname,
+        role || "pendiente",
+        departmentId,
+        active,
+        username,
+        passwordHash,
+        isPasante ? "local" : "google",
+        isPasante,
+        accountExpiresAt,
+      ],
+    );
+
+    const responseData = { ...rows[0] };
+    if (isPasante) {
+      // La password temporal solo se devuelve UNA vez, en esta misma
+      // respuesta -- nunca se puede volver a leer despues (solo hasheada en
+      // BD). Quien da de alta debe copiarla ahora y entregarla al pasante.
+      responseData.temp_password = tempPassword;
+    }
+
+    res.status(201).json({ ok: true, data: responseData });
+  } catch (err) {
+    logger.error({ err }, "Error creando usuario");
+    res.status(err.status || 500).json({ ok: false, message: err.message || "Error creando usuario" });
+  }
+};
 
   /**
    *  Actualizar rol o departamento de un usuario
@@ -353,8 +488,10 @@ const updateUser = async (req, res) => {
       const email = req.body?.email !== undefined ? normalizeEmail(req.body.email) : undefined;
       const googleId = req.body?.google_id !== undefined ? (normalizeText(req.body.google_id, 255) || null) : undefined;
       const active = req.body?.active !== undefined ? parseBoolean(req.body.active) : undefined;
+      const accountExpiresAtRaw = req.body?.account_expires_at !== undefined ? req.body.account_expires_at : undefined;
+      const resetPassword = req.body?.reset_password === true;
 
-      if (email !== undefined && !isValidEmail(email)) {
+      if (email !== undefined && email && !isValidEmail(email)) {
         return res.status(400).json({ ok: false, message: "Correo electrónico inválido" });
       }
 
@@ -374,7 +511,7 @@ const updateUser = async (req, res) => {
       await ensureUniqueUserIdentity({ email, googleId, excludeId: userId });
 
       const previousResult = await db.query(
-        `SELECT id, email, fullname, role, department_id, active, 
+        `SELECT u.id, u.email, u.fullname, u.role, u.department_id, u.active,
                 cp.profile->'laboral'->>'estatus_empleado' AS estatus_empleado
            FROM users u
            LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
@@ -385,6 +522,20 @@ const updateUser = async (req, res) => {
 
       const prevEmploymentStatus = String(previousResult.rows[0]?.estatus_empleado || "").trim().toLowerCase();
       const prevActive = previousResult.rows[0]?.active !== false;
+      const prevRole = normalizeRole(previousResult.rows[0]?.role);
+
+      // Mismo criterio que createUser: jefe_ti es la unica forma de dar de
+      // alta (o convertir a) un usuario pasante, y de reiniciar su password
+      // -- equivalente a re-registrar la credencial de login.
+      const becomingPasante = role === "pasante" && prevRole !== "pasante";
+      const resettingExistingPasante = resetPassword && prevRole === "pasante";
+      if ((becomingPasante || resettingExistingPasante) && !isJefeTi(req)) {
+        return res.status(403).json({
+          ok: false,
+          message: "Solo Jefe TI puede registrar o reiniciar credenciales de usuarios tipo pasante.",
+          code: "PASANTE_CREATION_REQUIRES_JEFE_TI",
+        });
+      }
 
       const sets = [];
       const values = [];
@@ -414,6 +565,25 @@ const updateUser = async (req, res) => {
         sets.push(`active = $${paramIndex++}`);
         values.push(active);
       }
+      if (accountExpiresAtRaw !== undefined) {
+        // null explicito = quitar vencimiento (ej. convertir pasante a
+        // colaborador permanente); string = nueva fecha, debe ser valida.
+        const parsedExpiresAt = accountExpiresAtRaw === null ? null : new Date(accountExpiresAtRaw);
+        if (parsedExpiresAt !== null && Number.isNaN(parsedExpiresAt.getTime())) {
+          return res.status(400).json({ ok: false, message: "Fecha de fin de pasantía inválida" });
+        }
+        sets.push(`account_expires_at = $${paramIndex++}`);
+        values.push(parsedExpiresAt);
+      }
+      let resetTempPassword = null;
+      if (resetPassword) {
+        resetTempPassword = generateTempPassword();
+        const newHash = await bcrypt.hash(resetTempPassword, BCRYPT_ROUNDS);
+        sets.push(`password_hash = $${paramIndex++}`);
+        values.push(newHash);
+        sets.push(`must_change_password = true`);
+        sets.push(`auth_provider = 'local'`);
+      }
 
       if (sets.length === 0) {
         return res.status(400).json({ ok: false, message: "No hay campos para actualizar" });
@@ -423,7 +593,7 @@ const updateUser = async (req, res) => {
       values.push(userId);
 
       const { rows } = await db.query(
-        `UPDATE users SET ${sets.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
+        `UPDATE users SET ${sets.join(", ")} WHERE id = $${paramIndex} RETURNING ${SAFE_USER_RETURNING_COLUMNS}`,
         values
       );
 
@@ -461,7 +631,14 @@ const updateUser = async (req, res) => {
         );
       }
 
-      res.status(200).json({ ok: true, data: updatedUser });
+      const responseData = { ...updatedUser };
+      if (resetTempPassword) {
+        // Igual que en createUser: solo se puede leer una vez, en esta
+        // respuesta. El admin la entrega al pasante por fuera del sistema.
+        responseData.temp_password = resetTempPassword;
+      }
+
+      res.status(200).json({ ok: true, data: responseData });
     } catch (err) {
       logger.error({ err }, "Error actualizando usuario");
       res.status(err.status || 500).json({ ok: false, message: err.message || "Error actualizando usuario" });

@@ -2096,12 +2096,48 @@ async function createItem(groupId, payload, userId) {
     throw mkErr("groupId invalido", 400);
   }
   const group = await assertGroupAccess(groupId, userId);
+  // Defensa dura contra el bug real reportado (item creado en el proyecto
+  // equivocado por un group_id obsoleto en el frontend, ver
+  // WorkManagementPage.jsx): si el cliente informa a que proyecto CREE que
+  // esta creando el item, se valida contra el proyecto real del grupo antes
+  // de insertar. Si no coinciden, se rechaza en vez de guardar en silencio
+  // bajo el proyecto equivocado. expected_project_id es opcional para no
+  // romper otros consumidores de este metodo que aun no lo envian.
+  if (payload.expected_project_id && String(payload.expected_project_id) !== String(group.project_id)) {
+    throw mkErr(
+      "El grupo seleccionado ya no pertenece al proyecto actual. Vuelve a abrir el formulario e intenta de nuevo.",
+      409
+    );
+  }
   if (!String(payload.title || "").trim()) {
     throw mkErr("El titulo del item es obligatorio", 400);
   }
 
   const assigneeIds = normalizeUserIds(payload.assignee_user_ids);
   await assertWorkspaceAssigneeIds(group.project_id, assigneeIds);
+
+  const normalizedTitle = String(payload.title).trim();
+  // Reintento accidental real detectado en produccion (Karen Barberan, ago
+  // 2026): mismo usuario, mismo grupo, mismo titulo exacto, creados ~2 min
+  // aparte -- consistente con una respuesta de red perdida/lenta despues de
+  // que el INSERT ya habia hecho commit, el usuario vio error y reintento a
+  // mano. No hay idempotency-key en el cliente, asi que la defensa real va
+  // aqui: si el mismo usuario ya creo un item identico en este mismo grupo
+  // en los ultimos 2 minutos, se devuelve ese item en vez de duplicarlo.
+  const { rows: recentDuplicates } = await db.query(
+    `SELECT *
+       FROM work_management.items
+      WHERE group_id = $1
+        AND created_by = $2
+        AND title = $3
+        AND created_at > NOW() - INTERVAL '2 minutes'
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [groupId, userId, normalizedTitle]
+  );
+  if (recentDuplicates.length) {
+    return recentDuplicates[0];
+  }
 
   const client = await db.getClient();
   try {

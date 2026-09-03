@@ -15,7 +15,7 @@ const MODULE_CATALOG = [
   { key: "auditoria", label: "Auditoria y Trazabilidad", path_prefixes: ["/dashboard/auditoria"] },
   { key: "auditoria_preparacion", label: "Auditoria Preparacion", path_prefixes: ["/dashboard/auditoria/preparacion"] },
   { key: "comercial_solicitudes", label: "Comercial Solicitudes", path_prefixes: ["/dashboard/comercial/solicitudes"] },
-  { key: "comercial_clientes", label: "Comercial Clientes", path_prefixes: ["/dashboard/comercial/clientes"] },
+  { key: "comercial_clientes", label: "Comercial Clientes", path_prefixes: ["/dashboard/comercial/clientes", "/dashboard/clientes"] },
   { key: "comercial_planificacion", label: "Comercial Planificacion", path_prefixes: ["/dashboard/comercial/planificacion"] },
   { key: "comercial_aprobacion_planes", label: "Comercial Aprobacion de Planes", path_prefixes: ["/dashboard/comercial/aprobaciones-planificacion"] },
   { key: "comercial_compras_publicas", label: "Comercial Compras Publicas", path_prefixes: ["/dashboard/comercial/equipment-purchases"] },
@@ -42,10 +42,54 @@ const MODULE_CATALOG = [
   { key: "operaciones", label: "Operaciones", path_prefixes: ["/dashboard/operaciones"] },
   { key: "logistica", label: "Logistica", path_prefixes: ["/dashboard/logistica"] },
   { key: "calidad", label: "Calidad", path_prefixes: ["/dashboard/calidad"] },
+
+  // Agregados en auditoria de cobertura (2026-08-18): estas areas ya tenian
+  // paginas y rutas reales en produccion pero nunca se habian registrado en
+  // el catalogo, por lo que quedaban implicitamente bajo "inicio" y no se
+  // podian activar/desactivar por usuario (ej. pasantes) de forma granular.
+  { key: "collab_entregas", label: "Entregas Colaboradores", path_prefixes: ["/dashboard/collab/entregas"] },
+  { key: "collab_resumen", label: "Resumen Entregas Colaboradores", path_prefixes: ["/dashboard/collab/resumen"] },
+  { key: "ti_actas", label: "TI Actas de Entrega", path_prefixes: ["/dashboard/ti/actas"] },
+  { key: "ti_activos", label: "TI Activos (Financiero)", path_prefixes: ["/dashboard/ti/activos"] },
+  { key: "talento_command_center", label: "Talento Centro de Comando", path_prefixes: ["/dashboard/talento-humano/command-center"] },
+  { key: "talento_departamentos", label: "Talento Departamentos", path_prefixes: ["/dashboard/talento-humano/departamentos"] },
+  { key: "talento_usuarios", label: "Talento Gestion de Usuarios", path_prefixes: ["/dashboard/talento-humano/usuarios"] },
+  { key: "talento_solicitudes", label: "Talento Solicitudes", path_prefixes: ["/dashboard/talento-humano/solicitudes"] },
+  { key: "talento_workspace_personal", label: "Talento Workspace Personal", path_prefixes: ["/dashboard/talento-humano/workspace-personal"] },
+  { key: "talento_pruebas_tecnicas", label: "Talento Pruebas Tecnicas", path_prefixes: ["/dashboard/talento-humano/pruebas-tecnicas"] },
+  { key: "talento_reporte_documentacion", label: "Talento Reporte de Documentacion", path_prefixes: ["/dashboard/talento-humano/reporte-documentacion"] },
+  { key: "capacitaciones", label: "Capacitaciones", path_prefixes: ["/dashboard/capacitaciones"] },
+  { key: "signatures", label: "Firmas (FamSign)", path_prefixes: ["/dashboard/signatures"] },
+  { key: "backoffice", label: "Backoffice Comercial", path_prefixes: ["/dashboard/backoffice"] },
+  { key: "crm_fam", label: "CRM Fam", path_prefixes: ["/dashboard/crm-fam"] },
+  { key: "links_interes", label: "Links de Interes", path_prefixes: ["/dashboard/links-interes"] },
+  { key: "gerencia", label: "Gerencia", path_prefixes: ["/dashboard/gerencia"] },
+  { key: "finanzas", label: "Finanzas", path_prefixes: ["/dashboard/finanzas"] },
+  // Catch-alls de area: cubren cualquier ruta futura bajo estos prefijos que
+  // no tenga su propia clave especifica (las claves especificas siguen
+  // ganando por prefijo mas largo), para que nada vuelva a caer en "inicio"
+  // por omision.
+  { key: "comercial", label: "Comercial (General)", path_prefixes: ["/dashboard/comercial"] },
+  { key: "ti", label: "TI (General)", path_prefixes: ["/dashboard/ti"] },
+  { key: "talento_humano", label: "Talento Humano (General)", path_prefixes: ["/dashboard/talento-humano"] },
 ];
 
 let ensureSchemaPromise = null;
 let ensureGlobalStatusSchemaPromise = null;
+
+// ponytail: moduleAccessGuard llama isModuleEnabledForUser en cada request
+// autenticado -> cachear en memoria (TTL 60s) en vez de 1 query por request.
+// Se invalida al toggle de acceso (upsertUserModuleAccess) para que un
+// revoke aplique de inmediato en vez de esperar el TTL.
+const MODULE_ACCESS_CACHE_TTL_MS = 60000;
+const moduleAccessCache = new Map(); // `${userId}:${moduleKey}` -> { enabled, expiresAt }
+
+function invalidateUserModuleAccessCache(userId) {
+  const prefix = `${userId}:`;
+  for (const key of moduleAccessCache.keys()) {
+    if (key.startsWith(prefix)) moduleAccessCache.delete(key);
+  }
+}
 
 async function ensureSchema() {
   if (ensureSchemaPromise) {
@@ -133,6 +177,7 @@ async function upsertUserModuleAccess({ userId, modules, actorUserId }) {
   } finally {
     client.release();
   }
+  invalidateUserModuleAccessCache(userId);
   return listUserModuleAccess(userId);
 }
 
@@ -152,10 +197,17 @@ function resolveModuleKeyByPath(pathname) {
 }
 
 async function isModuleEnabledForUser({ userId, moduleKey }) {
+  const key = sanitizeModuleKey(moduleKey);
+  if (!key) return true;
+
+  const cacheKey = `${userId}:${key}`;
+  const cached = moduleAccessCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.enabled;
+  }
+
   try {
     await ensureSchema();
-    const key = sanitizeModuleKey(moduleKey);
-    if (!key) return true;
     const { rows } = await db.query(
       `
         SELECT is_enabled
@@ -165,8 +217,9 @@ async function isModuleEnabledForUser({ userId, moduleKey }) {
       `,
       [userId, key]
     );
-    if (!rows.length) return true;
-    return Boolean(rows[0].is_enabled);
+    const enabled = !rows.length ? true : Boolean(rows[0].is_enabled);
+    moduleAccessCache.set(cacheKey, { enabled, expiresAt: Date.now() + MODULE_ACCESS_CACHE_TTL_MS });
+    return enabled;
   } catch (_error) {
     return true;
   }
@@ -268,6 +321,7 @@ module.exports = {
   upsertUserModuleAccess,
   resolveModuleKeyByPath,
   isModuleEnabledForUser,
+  invalidateUserModuleAccessCache,
   listGlobalModuleStatuses,
   getGlobalModuleStatusForUser,
   upsertGlobalModuleStatus,

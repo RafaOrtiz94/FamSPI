@@ -71,6 +71,7 @@ async function createOrUpdateSharedAllDayEvent({
   date,
   reminderMinutesBefore = 1440,
   attendees = [],
+  sendUpdates = "all",
 }) {
   if (!date) throw new Error("Se requiere una fecha para crear o actualizar el evento en Calendar");
   const eventDate = new Date(date);
@@ -104,7 +105,7 @@ async function createOrUpdateSharedAllDayEvent({
           calendarId: DEFAULT_CALENDAR_ID,
           eventId,
           requestBody,
-          sendUpdates: "all",
+          sendUpdates,
         }));
         logger.info({ eventId, summary, date: startDate }, "[CALENDAR] Evento all-day actualizado");
       } catch (updateError) {
@@ -115,7 +116,7 @@ async function createOrUpdateSharedAllDayEvent({
         ({ data } = await calendar.events.insert({
           calendarId: DEFAULT_CALENDAR_ID,
           requestBody,
-          sendUpdates: "all",
+          sendUpdates,
         }));
         logger.info({ eventId: data.id, summary, date: startDate }, "[CALENDAR] Evento all-day recreado");
       }
@@ -123,7 +124,7 @@ async function createOrUpdateSharedAllDayEvent({
       ({ data } = await calendar.events.insert({
         calendarId: DEFAULT_CALENDAR_ID,
         requestBody,
-        sendUpdates: "all",
+        sendUpdates,
       }));
       logger.info({ eventId: data.id, summary, date: startDate }, "[CALENDAR] Evento all-day creado");
     }

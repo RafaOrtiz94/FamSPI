@@ -124,17 +124,20 @@ function evaluatePipeline(steps, variables = {}) {
  */
 async function resolveVariables(variablesConfig, context = {}) {
     const resolved = {};
+    const entries = Object.entries(variablesConfig);
 
-    for (const [varName, varConfig] of Object.entries(variablesConfig)) {
-        // Si la variable ya está en el contexto, usarla directamente
+    // ponytail: las variables 'lookup' apuntan a tablas/columnas distintas
+    // entre si, no se pueden fusionar en una sola query -> se resuelven en
+    // paralelo (Promise.all) en vez de un await secuencial por variable.
+    // Ninguna depende del resultado de otra (todas leen de `context`, no de
+    // `resolved`), asi que el orden no importa.
+    await Promise.all(entries.map(async ([varName, varConfig]) => {
         if (context[varName] !== undefined) {
             resolved[varName] = context[varName];
-            continue;
+            return;
         }
 
-        // Resolver según el tipo de source
         if (varConfig.source === 'lookup') {
-            // Buscar en tabla
             try {
                 const query = `SELECT ${varConfig.value} FROM ${varConfig.table} WHERE ${varConfig.key} = $1`;
                 const result = await db.query(query, [context[varConfig.key]]);
@@ -152,8 +155,11 @@ async function resolveVariables(variablesConfig, context = {}) {
             // Literal o desde contexto directo
             resolved[varName] = context[varName] ?? varConfig.default ?? 0;
         }
+    }));
 
-        // Validar que variables requeridas no sean null/undefined
+    // Validar que variables requeridas no sean null/undefined (despues de
+    // resolver todas, para no depender del orden de iteracion original).
+    for (const [varName, varConfig] of entries) {
         if (varConfig.required && (resolved[varName] === null || resolved[varName] === undefined)) {
             throw new Error(`Variable requerida "${varName}" no está disponible`);
         }

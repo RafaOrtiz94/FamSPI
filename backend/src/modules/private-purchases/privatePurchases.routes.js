@@ -113,6 +113,10 @@ router.post('/:id/request-proforma', requireRole(['acp_comercial', ...managerRol
 router.post('/:id/upload-proforma', requireRole(['acp_comercial', ...managerRoles]), controller.uploadProformaAndReserve);
 // Subir proforma firmada por el proveedor (habilita contrato) — solo ACP/gerencia
 router.post('/:id/upload-signed-proforma', requireRole(['acp_comercial', ...managerRoles]), controller.uploadSignedProforma);
+router.get('/:id/offer-workspace', requireRole(comercialAndBackofficeRoles), controller.getOfferWorkspace);
+router.post('/:id/offer-workspace/draft', requireRole(['backoffice', 'backoffice_comercial', ...managerRoles]), controller.createOfferDraft);
+router.post('/:id/offer-workspace/:offerId/publish', requireRole(['backoffice', 'backoffice_comercial', ...managerRoles]), controller.publishOfferVersion);
+router.post('/:id/offer-workspace/:offerId/regenerate', requireRole(['backoffice', 'backoffice_comercial', ...managerRoles]), controller.regenerateOfferVersion);
 router.post('/:id/offer', requireRole(comercialAndBackofficeRoles), controller.sendOffer);
 router.post('/:id/offer/signed', requireRole(['comercial', ...managerRoles]), controller.uploadSignedOffer);
 router.post('/:id/send-to-acp', requireRole(comercialAndBackofficeRoles), controller.forwardToAcp);

@@ -175,18 +175,6 @@ const servicioMantenimientosLink = {
  path: "/dashboard/servicio-tecnico/mantenimientos",
 };
 
-const servicioCorrectivosLink = {
- name: "Correctivos",
- icon: FiActivity,
- path: "/dashboard/servicio-tecnico/correctivos",
-};
-
-const servicioRetirosLink = {
- name: "Retiros",
- icon: FiList,
- path: "/dashboard/servicio-tecnico/retiros",
-};
-
 const servicioSolicitudesLink = {
  name: "Solicitudes",
  icon: FiLayers,
@@ -209,6 +197,12 @@ const servicioAsistenciaLink = {
  name: "Asistencia y Salidas",
  icon: FiCheckCircle,
  path: "/dashboard/servicio-tecnico/asistencia",
+};
+
+const servicioCasosExternosLink = {
+ name: "Casos Externos",
+ icon: FiFileText,
+ path: "/dashboard/servicio-tecnico/casos-externos",
 };
 
 const gerenciaContractApprovalsLink = {
@@ -287,6 +281,24 @@ const clientRequestsReviewLink = {
  path: "/dashboard/backoffice/client-requests",
 };
 
+// Cartera de clientes para backoffice_comercial via extra_roles (ver
+// migrations/276_users_extra_roles.sql, ej. lorena.loaiza). Misma
+// ClientesPage que usan comercial/operaciones, montada en su propia ruta
+// (ver AppRoutes.jsx) para no ampliar el resto de subrutas comerciales.
+const clientRequestsPortfolioLink = {
+ name: "Clientes",
+ icon: FiUsers,
+ path: "/dashboard/backoffice/clientes",
+};
+
+// Resumen de solo-lectura de Business Case (jefe_calidad y, via extra_roles,
+// lorena.loaiza@fam-project.com -- ver businessCase.routes.js).
+const bcQualitySummaryLink = {
+ name: "Business Case (resumen)",
+ icon: FiClipboard,
+ path: "/dashboard/business-case/resumen",
+};
+
 const viaticosLink = {
  name: "Workspace Viaticos",
  icon: FiDollarSign,
@@ -346,7 +358,7 @@ const collabResumenLink = {
 };
 
 // Sistema de prioridades por rol
-const getPriorityGroups = (scope, role, auditActive) => {
+const getPriorityGroups = (scope, role, auditActive, extraRoles = []) => {
  const roleSet = new Set(
  String(role || "")
  .split(",")
@@ -464,17 +476,21 @@ const getPriorityGroups = (scope, role, auditActive) => {
  const isJefeServicio = ["jefe_servicio", "jefe_servicio_tecnico"].includes(scope);
  groups.critical.push(servicioCronogramaLink);
  groups.critical.push(isJefeServicio ? servicioSolicitudesLink : servicioInspeccionesLink);
+ // Correctivos, Retiros, Desinfeccion y Verificacion ya no tienen link
+ // propio: son pestañas/formularios reachable desde Mantenimientos,
+ // Solicitudes y el hub "Aplicaciones ST" respectivamente -- tenerlos
+ // ademas como items de nivel superior duplicaba destino sin agregar
+ // nada, y el area de servicio tecnico tenia el menu mas largo de todos.
  groups.primary.push(
   businessCaseLink,
   purchasesWorkspaceLink,
   equipmentWorkspaceLink,
   workManagementLink,
   servicioMantenimientosLink,
-  servicioCorrectivosLink,
-  ...(isJefeServicio ? [] : [servicioRetirosLink]),
   servicioAplicacionesLink,
   servicioDisponibilidadLink,
   servicioAsistenciaLink,
+  servicioCasosExternosLink,
   permisosLink,
   capacitacionesLink,
   firmaLink,
@@ -551,6 +567,10 @@ else if (["operaciones", "jefe_operaciones", "jefe_de_operaciones"].includes(sco
  // 🎨 CALIDAD - Control de calidad
  else if (["calidad", "jefe_calidad"].includes(scope)) {
  groups.primary.push(clientRequestsReviewLink, solicitudesTalentoLink, permisosLink);
+ // Bug real: jefe_calidad y calidad comparten scope="calidad" (ver
+ // resolveRoleMeta en auth.controller.js) -- scope nunca es "jefe_calidad".
+ // Hay que mirar el rol crudo para no darle este link tambien a "calidad".
+ if (role === "jefe_calidad") groups.primary.push(bcQualitySummaryLink);
  groups.secondary.push(capacitacionesLink, firmaLink);
  if (auditActive) groups.primary.push(auditPrepLink);
  }
@@ -588,6 +608,41 @@ else if (["operaciones", "jefe_operaciones", "jefe_de_operaciones"].includes(sco
  // forma de llegar a la pagina desde el navbar.
  if (!groups.primary.includes(pruebasTecnicasLink) && !groups.secondary.includes(pruebasTecnicasLink)) {
  groups.secondary.push(pruebasTecnicasLink);
+ }
+
+ // extra_roles: capacidad de backoffice_comercial otorgada a un usuario
+ // puntual sin cambiar su rol/scope principal (ver migrations/276_users_extra_roles.sql,
+ // p.ej. lorena.loaiza con scope "financiero"). Cubre tanto la aprobacion de
+ // solicitudes de nuevos clientes como la gestion de cartera de clientes
+ // (misma vista que usa jefe_operaciones/comercial, montada en su propia
+ // ruta /dashboard/backoffice/clientes). Sin esto, la persona puede entrar
+ // por URL directa pero no tiene como descubrir el apartado desde el
+ // navbar -- mismo patron de bug que pruebas tecnicas arriba.
+ if (Array.isArray(extraRoles) && extraRoles.includes("backoffice_comercial")) {
+ if (
+ !groups.critical.includes(clientRequestsReviewLink) &&
+ !groups.primary.includes(clientRequestsReviewLink) &&
+ !groups.secondary.includes(clientRequestsReviewLink)
+ ) {
+ groups.primary.push(clientRequestsReviewLink);
+ }
+ if (
+ !groups.critical.includes(clientRequestsPortfolioLink) &&
+ !groups.primary.includes(clientRequestsPortfolioLink) &&
+ !groups.secondary.includes(clientRequestsPortfolioLink)
+ ) {
+ groups.primary.push(clientRequestsPortfolioLink);
+ }
+ }
+
+ if (Array.isArray(extraRoles) && extraRoles.includes("bc_quality_summary")) {
+ if (
+ !groups.critical.includes(bcQualitySummaryLink) &&
+ !groups.primary.includes(bcQualitySummaryLink) &&
+ !groups.secondary.includes(bcQualitySummaryLink)
+ ) {
+ groups.primary.push(bcQualitySummaryLink);
+ }
  }
 
  // Filtrar elementos vacíos y aplanar arrays
@@ -965,7 +1020,7 @@ const NavigationBar = () => {
 
  const priorityGroups = React.useMemo(
  () => {
- const base = getPriorityGroups(scope, role, auditActive);
+ const base = getPriorityGroups(scope, role, auditActive, user?.extra_roles);
  return {
  critical: filterEnabledLinks(base.critical),
  primary: filterEnabledLinks(base.primary),
@@ -973,7 +1028,7 @@ const NavigationBar = () => {
  admin: filterEnabledLinks(base.admin),
  };
  },
- [scope, role, auditActive, filterEnabledLinks]
+ [scope, role, auditActive, filterEnabledLinks, user?.extra_roles]
  );
  const toggleMobileMenu = () => {
  setMobileMenuOpen(!mobileMenuOpen);

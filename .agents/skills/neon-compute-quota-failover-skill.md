@@ -8,9 +8,130 @@ activo por haber excedido la cuota mensual de CU-hrs del plan (mensaje tipico:
 plan to increase limits.`). Cuando esto pasa, **nadie puede iniciar sesion**
 porque el backend no puede conectar a la base.
 
-Ya paso una vez (2026-07-21: `wispy-moon` -> `muddy-sun`) y volvio a pasar
-(2026-08-11: `muddy-sun` -> `wispy-moon`, a la inversa). Es razonable esperar
-que vuelva a repetirse, en cualquier direccion.
+Ya paso 3 veces:
+- 2026-07-21: `wispy-moon` -> `muddy-sun`
+- 2026-08-11: `muddy-sun` -> `wispy-moon` (a la inversa)
+- 2026-08-20: `wispy-moon` -> `lucky-bar` (migracion completa proactiva, no
+  reactiva — ver "Pool de instancias" abajo)
+
+Es razonable esperar que se repita otra vez, contra cualquiera de las 3.
+
+---
+
+## Pool de instancias (rotan entre si)
+
+Hay **3 proyectos Neon** ya provisionados en `famspi-sbox` para rotar cuando
+el activo agota su cuota de CU-hrs. Cada uno tiene su propio ciclo de
+facturacion independiente, asi que cuando uno se suspende los otros dos
+siguen con cuota disponible (o se recuperan en fechas distintas).
+
+| Alias | Host (endpoint directo, SIN `-pooler`) | Estado a 2026-08-20 |
+|---|---|---|
+| `wispy-moon` | `ep-wispy-moon-aqszgsal.c-8.us-east-1.aws.neon.tech` | activo hasta el 20-ago, ahora en reserva |
+| `muddy-sun` | `ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech` | en reserva |
+| `lucky-bar` | `ep-lucky-bar-aw5wr0cn.c-12.us-east-1.aws.neon.tech` | **activo (produccion actual)** |
+
+Todos usan `DB_PORT=5432`, `DB_USER=neondb_owner`, `DB_NAME=neondb`. Las
+contrasenas de cada proyecto son independientes entre si — la version
+`latest` del secret `DB_PASSWORD` en Secret Manager (`famspi-sbox`)
+siempre corresponde al host que este activo en ese momento; las
+contrasenas de los proyectos en reserva NO quedan guardadas aqui por
+seguridad — si se necesita reactivar uno de ellos y no se tiene la
+contrasena a mano, pedirsela al usuario o revisar el dashboard de Neon
+(console.neon.tech).
+
+**Cual usar cuando el activo se suspende:** de los 2 proyectos en reserva,
+preferir el que lleve mas tiempo sin usarse como activo (su ciclo de
+facturacion probablemente ya reseteo). Verificar cuota disponible de cada
+candidato antes de migrar hacia el (ver "Diagnostico rapido" — el mismo
+sintoma de cuota excedida aplica a cualquiera de los 3, no solo al que esta
+activo ahora).
+
+**Actualizar esta tabla despues de cada migracion**: marcar el nuevo activo,
+y anotar la fecha en la lista de arriba.
+
+---
+
+## Metodo preferido: migracion completa proactiva (no esperar a la caida)
+
+Desde 2026-08-20 el metodo preferido ya no es "restaurar un backup viejo
+sobre el proyecto en reserva reactivamente cuando el activo ya se suspendio"
+— es **migrar TODA la base al proximo proyecto en reserva de forma
+proactiva**, con el origen todavia sirviendo produccion con normalidad, para
+lograr un corte casi imperceptible en vez de una caida real. Usar este
+metodo salvo que el activo ya este suspendido (ahi no queda de otra que ir a
+la seccion "Restaurar desde backup").
+
+1. Confirmar que el destino elegido (ver tabla del pool) esta vacio o es
+   seguro sobreescribir (aplicar la "Regla de oro" de todas formas).
+2. Crear secrets temporales en Secret Manager con las connection strings
+   completas (con password) de origen y destino — **nunca pegarlas en texto
+   plano en un comando bash/PowerShell ni en un archivo que quede en el
+   repo**:
+   ```bash
+   printf '%s' 'postgresql://neondb_owner:<pwd-origen>@<host-origen>/neondb?sslmode=require' > /tmp/src_url.txt
+   printf '%s' 'postgresql://neondb_owner:<pwd-destino>@<host-destino>/neondb?sslmode=require' > /tmp/dst_url.txt
+   gcloud secrets create MIGRATION_SRC_URL --project=famspi-sbox --replication-policy=automatic --data-file=/tmp/src_url.txt
+   gcloud secrets create MIGRATION_DST_URL --project=famspi-sbox --replication-policy=automatic --data-file=/tmp/dst_url.txt
+   PROJECT_NUM=$(gcloud projects describe famspi-sbox --format="value(projectNumber)")
+   gcloud secrets add-iam-policy-binding MIGRATION_SRC_URL --project=famspi-sbox \
+     --member="serviceAccount:${PROJECT_NUM}@cloudbuild.gserviceaccount.com" --role="roles/secretmanager.secretAccessor"
+   gcloud secrets add-iam-policy-binding MIGRATION_DST_URL --project=famspi-sbox \
+     --member="serviceAccount:${PROJECT_NUM}@cloudbuild.gserviceaccount.com" --role="roles/secretmanager.secretAccessor"
+   ```
+3. Correr `pg_dump | psql` dentro de un Cloud Build temporal (este entorno
+   de desarrollo no tiene `pg_dump`/`psql` ni Docker corriendo). Usar la
+   imagen `postgres:17-alpine` — **debe coincidir con la version del server
+   de Neon (17.x)**; `postgres:16-alpine` falla con "server version
+   mismatch". `cloudbuild.yaml`:
+   ```yaml
+   availableSecrets:
+     secretManager:
+       - versionName: projects/famspi-sbox/secrets/MIGRATION_SRC_URL/versions/latest
+         env: 'SRC_URL'
+       - versionName: projects/famspi-sbox/secrets/MIGRATION_DST_URL/versions/latest
+         env: 'DST_URL'
+   steps:
+     - name: 'postgres:17-alpine'
+       entrypoint: 'sh'
+       args:
+         - '-c'
+         - |
+           set -e
+           pg_dump --no-owner --no-privileges --clean --if-exists --dbname="$$SRC_URL" > /tmp/dump.sql
+           psql -v ON_ERROR_STOP=0 --dbname="$$DST_URL" < /tmp/dump.sql > /tmp/restore.log 2>&1
+           tail -n 80 /tmp/restore.log
+           grep -i "^psql:.*ERROR" /tmp/restore.log | sort | uniq -c | sort -rn | head -40 || true
+       secretEnv: ['SRC_URL', 'DST_URL']
+   timeout: 1800s
+   options:
+     logging: CLOUD_LOGGING_ONLY
+     machineType: 'E2_HIGHCPU_8'
+   ```
+   Correrlo con `gcloud builds submit --project=famspi-sbox --config=<ruta>.yaml --no-source`.
+   El primer pase con una base de ~200MB tarda unos 5 minutos.
+4. Repetir el mismo build 2-3 veces mas seguidas (cada pasada usa
+   `--clean --if-exists`, asi que es segura de re-correr y solo mueve el
+   delta escrito desde la pasada anterior — cada una es mas rapida que la
+   anterior). Disparar la ULTIMA pasada inmediatamente antes del paso 5.
+5. Verificar 0 diferencias antes de cortar: comparar `COUNT(*)` de cada
+   tabla de `public` entre origen y destino, `MAX(updated_at)` de una tabla
+   con actividad diaria, y una secuencia clave (ej. `users_id_seq`). Con
+   `pg` desde Node (ver `production-neon-query-skill.md` para el patron de
+   conexion). Si algo no cuadra, correr otra pasada antes de cortar, no
+   cortar con diferencias pendientes.
+6. Aplicar el corte (ver "Aplicar el failover en Cloud Run" mas abajo) lo
+   mas rapido posible despues del paso 5, para minimizar la ventana de
+   escritura perdida.
+7. **Actualizar `scripts/deploy_backend_cloudrun.ps1`** con el nuevo
+   `DB_HOST` (linea `--set-env-vars DB_HOST=...`) — si no, el proximo deploy
+   revierte produccion al host viejo silenciosamente. Actualizar tambien la
+   tabla de "Pool de instancias" arriba.
+8. Borrar los secrets temporales:
+   ```bash
+   gcloud secrets delete MIGRATION_SRC_URL --project=famspi-sbox --quiet
+   gcloud secrets delete MIGRATION_DST_URL --project=famspi-sbox --quiet
+   ```
 
 ---
 
@@ -200,14 +321,21 @@ ad hoc ni para `DB_HOST` en produccion.
 1. Subir el plan de Neon o esperar el reset del ciclo de facturacion en el
    host que quedo suspendido — esto es accion humana en el dashboard de
    Neon (console.neon.tech -> Billing), no se puede resolver por codigo/CLI.
-2. Aplicar sobre el host destino cualquier migracion de
-   `backend/migrations/` posterior a la fecha del backup restaurado.
-3. Reconciliar manualmente cualquier escritura que haya ocurrido en el host
-   viejo durante la ventana en que no era accesible (si el usuario necesita
-   ese dato de vuelta) contra lo que se escribio en el host nuevo mientras
-   tanto — van a ser dos lineas de datos divergentes.
-4. Cuando el host original se recupere, decidir con el usuario si conviene
-   volver a el (con los datos ya reconciliados) o quedarse en el nuevo.
+   Con el pool de 3 instancias, este host queda simplemente "en reserva"
+   para la proxima rotacion, no hace falta apurarse a resolverlo.
+2. Si el corte fue reactivo (restore de un backup, no migracion proactiva
+   con el origen vivo): aplicar sobre el host destino cualquier migracion de
+   `backend/migrations/` posterior a la fecha del backup restaurado, y
+   reconciliar manualmente cualquier escritura que haya ocurrido en el host
+   viejo durante la ventana en que no era accesible contra lo que se
+   escribio en el host nuevo mientras tanto.
+3. Actualizar la tabla de "Pool de instancias" (nuevo activo + fecha) y el
+   `DB_HOST` hardcodeado en `scripts/deploy_backend_cloudrun.ps1` si no se
+   hizo ya en el paso 7 del metodo proactivo.
+4. Con 3 instancias rotando, **no hace falta "volver" al host original** —
+   la proxima vez que el activo actual agote cuota, el destino natural es
+   cualquiera de los otros 2 que lleve mas tiempo en reserva (ver "Pool de
+   instancias").
 
 ---
 

@@ -32,21 +32,6 @@
  *   BC-15: emergency-transition → gerencia y gerencia_general tienen mismo nivel
  */
 
-// Todas las secciones disponibles en orden
-export const ALL_SECTIONS = [
-  "general",
-  "lab",
-  "requirement",
-  "equipment",
-  "lis",
-  "determinations",
-  "investments",
-  "investment_values",
-  "consumption_export",
-  "feasibility",
-  "dispatch_workspace",
-];
-
 export const ROLE_SECTION_CONFIG = {
 
   // ─────────────────────────────────────────────────────────────────
@@ -56,7 +41,7 @@ export const ROLE_SECTION_CONFIG = {
   comercial: {
     visible: [
       "general", "lab", "equipment", "lis", "determinations",
-      "requirement", "investments", "consumption_export", "feasibility",
+      "requirement", "investments", "consumption_export", "feasibility", "offer_workspace",
     ],
     canEdit: [
       // BC-07: NO edita determinations (solo lectura siempre)
@@ -69,7 +54,7 @@ export const ROLE_SECTION_CONFIG = {
     // BC-02: mismo nivel que comercial
     visible: [
       "general", "lab", "equipment", "lis", "determinations",
-      "requirement", "investments", "consumption_export", "feasibility",
+      "requirement", "investments", "consumption_export", "feasibility", "offer_workspace",
     ],
     canEdit: [
       "general", "lab", "lis", "requirement", "investments", "consumption_export",
@@ -80,7 +65,7 @@ export const ROLE_SECTION_CONFIG = {
     // BC-02: mismo nivel que comercial
     visible: [
       "general", "lab", "equipment", "lis", "determinations",
-      "requirement", "investments", "consumption_export", "feasibility",
+      "requirement", "investments", "consumption_export", "feasibility", "offer_workspace",
     ],
     canEdit: [
       "general", "lab", "lis", "requirement", "investments", "consumption_export",
@@ -94,7 +79,7 @@ export const ROLE_SECTION_CONFIG = {
     visible: [
       "general", "lab", "equipment", "lis", "determinations",
       "requirement", "investments", "consumption_export",
-      "dispatch_workspace", "feasibility",
+      "dispatch_workspace", "feasibility", "offer_workspace",
     ],
     canEdit: [
       // BC-05/BC-08: edición de general/equipment/determinations-reactivos con permiso (📩)
@@ -144,7 +129,7 @@ export const ROLE_SECTION_CONFIG = {
       "general", "lab", "equipment", "lis", "determinations",
       "requirement", "investments",
       "investment_values",   // BC-12: ve pero no guarda
-      "consumption_export", "dispatch_workspace", "feasibility",
+      "consumption_export", "dispatch_workspace", "feasibility", "offer_workspace",
     ],
     canEdit: [
       // BC-12: investment_values NO en canEdit — jefe_comercial es solo lectura ahí
@@ -160,7 +145,7 @@ export const ROLE_SECTION_CONFIG = {
       "general", "lab", "equipment", "lis", "determinations",
       "requirement", "investments",
       "investment_values",
-      "consumption_export", "dispatch_workspace", "feasibility",
+      "consumption_export", "dispatch_workspace", "feasibility", "offer_workspace",
     ],
     canEdit: [
       "general", "lab", "equipment", "lis", "determinations",
@@ -364,7 +349,7 @@ export function canRoleViewSection(roleConfig, sectionId) {
 /**
  * Retorna las secciones visibles para un rol, filtradas por las secciones disponibles.
  */
-export function getVisibleSections(role = "", availableSections = ALL_SECTIONS) {
+export function getVisibleSections(role = "", availableSections = []) {
   const config = resolveRoleSectionConfig(role);
   if (config?.visible === "all") return availableSections;
   if (Array.isArray(config?.visible)) {

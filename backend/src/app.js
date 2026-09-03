@@ -13,6 +13,7 @@ if (process.env.NODE_ENV !== "production") {
 
 const express = require("express");
 const cors = require("cors");
+const compression = require("compression");
 const helmet = require("helmet");
 const { rateLimit, ipKeyGenerator } = require("express-rate-limit");
 
@@ -103,6 +104,11 @@ if (!DISABLE_RATE_LIMIT) {
 }
 
 app.use(cors(corsConfig));
+app.use(
+  compression({
+    threshold: 1024,
+  })
+);
 // 25mb: viaticos ya valida documentos de respaldo (file_base64) hasta 15MB
 // en negocio (viaticos.service.js createAllowanceDocument), pero base64
 // infla el tamano ~33% y el body JSON le suma overhead -- con 5mb ese limite
@@ -160,8 +166,5 @@ app.use((err, req, res, next) => {
     request_id: res.getHeader("x-correlation-id") || null,
   });
 });
-
-const { startKickoffScheduler } = require('./modules/kickoff/kickoff.scheduler');
-startKickoffScheduler();
 
 module.exports = app;

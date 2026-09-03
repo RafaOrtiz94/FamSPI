@@ -1,5 +1,7 @@
 const logger = require("../config/logger");
 const { processExpiredPendingSolicitudes } = require("../modules/permisos/permisos.service");
+const { isOffHours } = require("../utils/offHoursPolicy");
+const { registerOffHoursJob } = require("./offHoursCoordinator");
 
 const DEFAULT_INTERVAL_MINUTES = Number(process.env.PERMISOS_PENDING_EXPIRY_INTERVAL_MINUTES || 60);
 const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
@@ -22,8 +24,14 @@ function startPermisosPendingExpiryJob() {
     runOnce().catch((error) => logger.error({ error }, "Error inicial permisos pending expiry job"));
   }
   interval = setInterval(() => {
+    if (isOffHours(new Date()).isOffHours) return; // manejado por offHoursCoordinator
     runOnce().catch((error) => logger.error({ error }, "Error permisos pending expiry job"));
   }, everyMs);
+  registerOffHoursJob({
+    name: "permisos_pending_expiry",
+    runOnce,
+    offHoursIntervalMs: everyMs * 6,
+  });
 }
 
 module.exports = {

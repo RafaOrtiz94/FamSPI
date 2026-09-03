@@ -30,35 +30,50 @@ const SOURCE_CONFIG = {
     category: "training",
     path: "/dashboard/servicio-tecnico/capacitaciones",
   },
+  // ponytail: apuntan directo a Solicitudes.jsx con tab/subtab -- antes
+  // pasaban por /inspecciones, un redirect fijo (AppRoutes.jsx) que
+  // descartaba el query string, dejando a cualquier asignado (F.ST-20,
+  // compra publica/privada) aterrizando siempre en la sub-pestaña por
+  // defecto ("Business Case") en vez de la suya.
   inspeccion_compra_publica: {
     label: "Inspeccion publica",
     category: "inspection",
-    path: "/dashboard/servicio-tecnico/inspecciones?tab=public",
+    path: "/dashboard/servicio-tecnico/solicitudes?tab=inspeccion&subtab=compras",
   },
   inspeccion_compra_privada: {
     label: "Inspeccion privada",
     category: "inspection",
-    path: "/dashboard/servicio-tecnico/inspecciones?tab=private",
+    path: "/dashboard/servicio-tecnico/solicitudes?tab=inspeccion&subtab=compras",
   },
   public_purchase_reinspection: {
     label: "Reinspeccion publica",
     category: "inspection",
-    path: "/dashboard/servicio-tecnico/inspecciones?tab=public",
+    path: "/dashboard/servicio-tecnico/solicitudes?tab=inspeccion&subtab=compras",
   },
   private_purchase_reinspection: {
     label: "Reinspeccion privada",
     category: "inspection",
-    path: "/dashboard/servicio-tecnico/inspecciones?tab=private",
+    path: "/dashboard/servicio-tecnico/solicitudes?tab=inspeccion&subtab=compras",
   },
   solicitud_inspeccion: {
     label: "Solicitud de inspeccion",
     category: "inspection",
-    path: "/dashboard/servicio-tecnico/inspecciones",
+    path: "/dashboard/servicio-tecnico/solicitudes?tab=inspeccion&subtab=independientes",
   },
   inspeccion_bc: {
     label: "Inspeccion de ambiente (BC)",
     category: "inspection",
-    path: "/dashboard/servicio-tecnico/solicitudes",
+    path: "/dashboard/servicio-tecnico/solicitudes?tab=inspeccion&subtab=bc",
+  },
+  retiro: {
+    label: "Retiro de equipo",
+    category: "withdrawal",
+    path: "/dashboard/servicio-tecnico/solicitudes?tab=retiro&subtab=compras",
+  },
+  correctivo: {
+    label: "Caso correctivo",
+    category: "corrective",
+    path: "/dashboard/servicio-tecnico/mantenimientos?tab=corrective",
   },
 };
 
@@ -468,6 +483,92 @@ async function listPendingPrivateInspections({ from, to, scope, user }) {
   );
 }
 
+async function listWithdrawals({ from, to, scope, user }) {
+  const params = [from, to];
+  const where = [
+    `(w.workflow_state->'coordination'->>'scheduled_date')::date BETWEEN $1::date AND $2::date`,
+    `w.workflow_status <> 'cerrado'`,
+  ];
+
+  if (scope === "mine") {
+    params.push(user?.id || null);
+    where.push(`(w.workflow_state->'work_order'->>'assigned_user_id')::int = $3`);
+  }
+
+  const { rows } = await db.query(
+    `
+      SELECT
+        w.id,
+        w.client_name,
+        w.equipment_name,
+        w.workflow_status,
+        (w.workflow_state->'coordination'->>'scheduled_date')::date AS activity_date,
+        (w.workflow_state->'work_order'->>'assigned_user_id')::int AS technician_id,
+        w.workflow_state->'work_order'->>'assigned_to' AS technician_name
+      FROM servicio.withdrawal_workflows w
+      WHERE ${where.join(" AND ")}
+    `,
+    params,
+  );
+
+  return rows.map((row) =>
+    normalizeEvent(row, {
+      source_type: "retiro",
+      activity_date: row.activity_date,
+      title: `Retiro de equipo - ${row.client_name || "cliente"}`,
+      notes: row.equipment_name || null,
+      status: row.workflow_status,
+      user_id: row.technician_id,
+      user_name: row.technician_name,
+      source_id: row.id,
+    }),
+  );
+}
+
+async function listCorrectiveCases({ from, to, scope, user }) {
+  const params = [from, to];
+  const where = [
+    `c.scheduled_visit_at::date BETWEEN $1::date AND $2::date`,
+    `c.closed_at IS NULL`,
+  ];
+
+  if (scope === "mine") {
+    params.push(user?.id || null);
+    where.push(`(c.assigned_specialist_user_id = $3 OR c.dispatcher_user_id = $3)`);
+  }
+
+  const { rows } = await db.query(
+    `
+      SELECT
+        c.id,
+        c.code,
+        c.client_name,
+        c.equipment_name,
+        c.status,
+        c.scheduled_visit_at::date AS activity_date,
+        COALESCE(c.assigned_specialist_user_id, c.dispatcher_user_id) AS technician_id,
+        COALESCE(u.fullname, u.name, u.email) AS technician_name
+      FROM servicio.corrective_cases c
+      LEFT JOIN public.users u ON u.id = COALESCE(c.assigned_specialist_user_id, c.dispatcher_user_id)
+      WHERE ${where.join(" AND ")}
+    `,
+    params,
+  );
+
+  return rows.map((row) =>
+    normalizeEvent(row, {
+      source_type: "correctivo",
+      activity_date: row.activity_date,
+      title: `Correctivo ${row.code || `#${row.id}`} - ${row.client_name || "cliente"}`,
+      notes: row.equipment_name || null,
+      status: row.status,
+      user_id: row.technician_id,
+      user_name: row.technician_name,
+      source_id: row.id,
+    }),
+  );
+}
+
 const buildSummary = (rows = [], backlog = []) => {
   const byCategory = rows.reduce((acc, row) => {
     const key = row.category || "manual";
@@ -517,6 +618,14 @@ async function getTechnicalScheduleFeed({ user, from, to, scope }) {
     backlog.push(...(await listPendingPrivateInspections({ from: normalizedFrom, to: normalizedTo, scope: resolvedScope, user })));
   }
 
+  if (await relationExists("servicio.withdrawal_workflows")) {
+    rows.push(...(await listWithdrawals({ from: normalizedFrom, to: normalizedTo, scope: resolvedScope, user })));
+  }
+
+  if (await relationExists("servicio.corrective_cases")) {
+    rows.push(...(await listCorrectiveCases({ from: normalizedFrom, to: normalizedTo, scope: resolvedScope, user })));
+  }
+
   const sortedRows = sortEvents(rows);
   const sortedBacklog = sortBacklog(backlog);
 
@@ -534,4 +643,5 @@ async function getTechnicalScheduleFeed({ user, from, to, scope }) {
 module.exports = {
   canSeeTeamSchedule,
   getTechnicalScheduleFeed,
+  SOURCE_CONFIG,
 };

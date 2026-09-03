@@ -2,11 +2,11 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const crypto = require("crypto");
 const businessCaseCalculator = require("./businessCaseCalculator.service");
-const integrationService = require("./businessCaseIntegration.service");
 const { PrivatePurchaseStateMachine } = require("../private-purchases/privatePurchaseStateMachine");
 const { PRIVATE_PURCHASE_STATES } = require("../private-purchases/privatePurchaseStates.constants");
 const { ensureBusinessCaseDriveFolder } = require("./businessCaseDriveFolder.service");
 const { filterEquipmentPairsForSheet } = require("./businessCaseSheetEquipment.helper");
+const { ensurePurchaseWorkspaceForFeasibleBusinessCase } = require("./businessCasePurchaseHandoff.service");
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -265,14 +265,6 @@ async function saveFeasibilityDecision(
       throw error;
     }
 
-    if (Boolean(is_feasible)) {
-      await integrationService.reserveInventory({
-        businessCaseId,
-        actorId: user?.id || null,
-        client,
-      });
-    }
-
     feasibility.status = is_feasible ? "factible" : "no_factible";
     feasibility.decision = {
       is_feasible: Boolean(is_feasible),
@@ -416,6 +408,10 @@ async function saveFeasibilityDecision(
         }
       }
     }
+  }
+
+  if (is_feasible) {
+    await ensurePurchaseWorkspaceForFeasibleBusinessCase({ businessCaseId, user });
   }
 
   return getBusinessCaseById(businessCaseId);
@@ -1017,13 +1013,20 @@ function matchesConsumptionItem(item = {}, candidate = {}) {
   const candidateCatalogId = candidate?.catalogId ?? null;
   const itemEquipmentId = item?.equipmentId ?? null;
   const candidateEquipmentId = candidate?.equipmentId ?? null;
+  const hasCatalogIdentity = itemCatalogId !== null && candidateCatalogId !== null;
   if (
-    itemCatalogId !== null &&
-    candidateCatalogId !== null &&
+    hasCatalogIdentity &&
     String(itemCatalogId) === String(candidateCatalogId) &&
     String(itemEquipmentId || "") === String(candidateEquipmentId || "")
   ) {
     return true;
+  }
+  if (
+    hasCatalogIdentity &&
+    String(itemCatalogId) !== String(candidateCatalogId) &&
+    String(itemEquipmentId || "") === String(candidateEquipmentId || "")
+  ) {
+    return false;
   }
 
   const itemId = String(item?.itemId || "").trim();
@@ -1043,21 +1046,57 @@ function matchesConsumptionItem(item = {}, candidate = {}) {
   return false;
 }
 
+function normalizeTemplateConsumptionName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function normalizeTemplateConsumptionIdentity(value) {
+  return normalizeTemplateConsumptionName(value).replace(/[^a-z0-9]/g, "");
+}
+
+function hasCatalogEquivalentIgnoringType(item, catalogItems = []) {
+  const itemEquipmentId = String(item?.equipment_id || item?.equipmentId || "").trim();
+  const itemId = String(item?.item_id || item?.itemId || "").trim();
+  const itemName = normalizeTemplateConsumptionIdentity(item?.item_name || item?.itemName || item?.name);
+  if (!itemEquipmentId || !itemId || !itemName) return false;
+
+  return (Array.isArray(catalogItems) ? catalogItems : []).some((catalogItem) => (
+    String(catalogItem?.equipment_id || catalogItem?.equipmentId || "").trim() === itemEquipmentId &&
+    String(catalogItem?.item_id || catalogItem?.itemId || "").trim() === itemId &&
+    normalizeTemplateConsumptionIdentity(catalogItem?.item_name || catalogItem?.itemName || catalogItem?.name) === itemName
+  ));
+}
+
 function buildTemplateConsumptionSyncItems({ template, equipmentTabs = [], catalogItems = [] }) {
-  const catalogSignatures = new Set(
+  const catalogRowSignatures = new Set(
     (Array.isArray(catalogItems) ? catalogItems : [])
       .map((item) => {
         const equipmentId = String(item?.equipment_id || item?.equipmentId || "").trim();
         const itemId = String(item?.item_id || item?.itemId || "").trim();
         const itemType = String(item?.item_type || item?.itemType || "").trim().toLowerCase();
-        const itemName = String(item?.item_name || item?.itemName || item?.name || "").trim().toLowerCase();
-        return [
-          itemId ? `${equipmentId}:id:${itemId}:${itemType}` : null,
-          itemName ? `${equipmentId}:name:${itemName}:${itemType}` : null,
-        ].filter(Boolean);
+        const itemName = normalizeTemplateConsumptionName(item?.item_name || item?.itemName || item?.name);
+        return equipmentId && itemId && itemType && itemName
+          ? `${equipmentId}:${itemId}:${itemType}:${itemName}`
+          : null;
       })
-      .flat(),
+      .filter(Boolean),
   );
+  const catalogItemsByCode = new Map();
+  (Array.isArray(catalogItems) ? catalogItems : []).forEach((item) => {
+    const equipmentId = String(item?.equipment_id || item?.equipmentId || "").trim();
+    const itemId = String(item?.item_id || item?.itemId || "").trim();
+    const itemType = String(item?.item_type || item?.itemType || "").trim().toLowerCase();
+    if (!equipmentId || !itemId || !itemType) return;
+    const key = `${equipmentId}:${itemId}:${itemType}`;
+    if (!catalogItemsByCode.has(key)) catalogItemsByCode.set(key, []);
+    catalogItemsByCode.get(key).push(item);
+  });
 
   const templateItems = [];
   (Array.isArray(equipmentTabs) ? equipmentTabs : []).forEach((tab) => {
@@ -1067,18 +1106,50 @@ function buildTemplateConsumptionSyncItems({ template, equipmentTabs = [], catal
     if (!Number.isInteger(equipmentId) || equipmentId <= 0) return;
     const equipmentName = Array.isArray(tab?.equipment_names) ? tab.equipment_names[0] : null;
 
-    (Array.isArray(definition.rows) ? definition.rows : []).forEach((row) => {
+    const rows = Array.isArray(definition.rows) ? definition.rows : [];
+    const itemIdOccurrences = rows.reduce((counts, row) => {
+      const itemId = String(row?.itemId || "").trim();
+      if (itemId) counts.set(itemId, (counts.get(itemId) || 0) + 1);
+      return counts;
+    }, new Map());
+    const assignedCatalogRowsByCode = new Map();
+
+    rows.forEach((row) => {
       const itemId = String(row?.itemId || "").trim();
       const name = String(row?.label || "").trim();
       const itemType = String(row?.itemType || "reactivo").trim().toLowerCase();
       if (!itemId) return;
+      const signature = `${equipmentId}:${itemId}:${itemType}:${normalizeTemplateConsumptionName(name)}`;
+      const codeKey = `${equipmentId}:${itemId}:${itemType}`;
+      const catalogRowsForCode = catalogItemsByCode.get(codeKey) || [];
+      const assignedCatalogRows = assignedCatalogRowsByCode.get(codeKey) || 0;
+      const isDuplicateTemplateCode = itemIdOccurrences.get(itemId) > 1;
 
-      const byId = itemId ? `${equipmentId}:id:${itemId}:${itemType}` : null;
-      const byName = name ? `${equipmentId}:name:${name.toLowerCase()}:${itemType}` : null;
-      if ((byId && catalogSignatures.has(byId)) || (byName && catalogSignatures.has(byName))) return;
+      // El bloque CONTROLES Y CALIBRADORES de algunas hojas base comparte
+      // encabezado. Si el parser infiere el tipo distinto al catalogo, la
+      // identidad SKU+nombre sigue siendo la misma: no se debe crear un
+      // segundo item auxiliar que termine desplazado en la oferta.
+      if (hasCatalogEquivalentIgnoringType({ equipment_id: equipmentId, item_id: itemId, item_name: name }, catalogItems)) {
+        assignedCatalogRowsByCode.set(codeKey, assignedCatalogRows + 1);
+        return;
+      }
+      if (!isDuplicateTemplateCode && catalogRowsForCode.length) return;
+      if (catalogRowSignatures.has(signature)) {
+        assignedCatalogRowsByCode.set(codeKey, assignedCatalogRows + 1);
+        return;
+      }
+      if (assignedCatalogRows < catalogRowsForCode.length) {
+        assignedCatalogRowsByCode.set(codeKey, assignedCatalogRows + 1);
+        return;
+      }
+
+      // Una misma pestaña puede tener dos presentaciones con el mismo SKU
+      // (ej. IgG y IgG en suero). La identidad interna debe conservar la
+      // fila de origen para que ambas sobrevivan al upsert del BC.
+      const keyPart = itemIdOccurrences.get(itemId) > 1 ? `${itemId}:${row.rowNumber}` : itemId;
 
       templateItems.push({
-        item_key: `sheet:${equipmentId}:${itemId || row.rowNumber}:${itemType}`,
+        item_key: `sheet:${equipmentId}:${keyPart}:${itemType}`,
         item_id: itemId || null,
         item_name: name || itemId || `Fila ${row.rowNumber}`,
         item_type: itemType,
@@ -1100,6 +1171,11 @@ function isObsoleteTemplateFallbackItem(item = {}) {
   if (!itemId) return true;
   const name = String(item?.name || "").trim().toLowerCase();
   return name === "total det" || name === "total" || name === "sub total" || name === "subtotal";
+}
+
+function isRedundantTemplateFallbackItem(item = {}, catalogItems = []) {
+  return String(item?.source || "").trim().toLowerCase() === "sheet_template" &&
+    hasCatalogEquivalentIgnoringType(item, catalogItems);
 }
 
 function resolveEquipmentIdsForConsumptionSync({ selectionRows = [], extra = {} }) {
@@ -1413,6 +1489,12 @@ async function saveConsumptionItems(businessCaseId, items = [], excluded = [], o
 // POST /:id/consumption-items/sync-from-sheet para forzar un re-sync.
 async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) {
   await assertModernBusinessCase(businessCaseId);
+  // Las ofertas deben reconstruirse con la tabla base vigente. Esto evita que
+  // una correccion manual de SKU quede oculta por la cache del proceso.
+  if (options?.forceTemplateReload) {
+    const { clearSheetCaches } = require("./businessCaseSheetSyncLocal.service");
+    clearSheetCaches();
+  }
   const requestedItemTypes = Array.isArray(options?.itemTypes)
     ? new Set(
       options.itemTypes
@@ -1568,8 +1650,12 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) 
   // no dependa de que se haya abierto antes el workspace de despacho.
   const plannedUpdatesFromSheet = await pullMaximumQuantitiesFromGoogleSheet({ sheetId, equipmentTabs });
   const currentItems = Array.isArray(current?.items)
-    ? current.items.filter((item) => !isObsoleteTemplateFallbackItem(item))
+    ? current.items.filter((item) => (
+      !isObsoleteTemplateFallbackItem(item) &&
+      !isRedundantTemplateFallbackItem(item, catalogItemsForSync)
+    ))
     : [];
+  const removedCount = Math.max(0, (current?.items || []).length - currentItems.length);
   const eligibleCurrentKeys = requestedItemTypes?.size
     ? new Set(
       currentItems
@@ -1583,16 +1669,19 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) 
     ? eligibleCatalogKeys.has(String(entry?.item_key || "").trim()) ||
       eligibleCurrentKeys.has(String(entry?.item_key || "").trim())
     : true);
-  const sheetUpdates = sheetUpdatesFromSheet.filter(filterEligible);
-  const referenceUpdates = referenceUpdatesFromSheet.filter(filterEligible);
-  const plannedUpdates = plannedUpdatesFromSheet.filter(filterEligible);
-  if (!sheetUpdates.length && !referenceUpdates.length && !plannedUpdates.length) {
-    return { updated: 0, created: 0, items: current, annualQuantityProtection };
-  }
-
   const catalogByKey = new Map(mergedCatalogItemsForSync.map((row) => [row.item_key, row]));
   const currentByKey = new Map(currentItems.map((item) => [item.key, item]));
   const excludedSet = new Set(current?.excluded || []);
+  const missingMappedKeys = mergedCatalogItemsForSync
+    .map((item) => String(item?.item_key || "").trim())
+    .filter((itemKey) => itemKey && !currentByKey.has(itemKey) && !excludedSet.has(itemKey));
+  const sheetUpdates = sheetUpdatesFromSheet.filter(filterEligible);
+  const referenceUpdates = referenceUpdatesFromSheet.filter(filterEligible);
+  const plannedUpdates = plannedUpdatesFromSheet.filter(filterEligible);
+  if (!sheetUpdates.length && !referenceUpdates.length && !plannedUpdates.length && !missingMappedKeys.length && !removedCount) {
+    return { updated: 0, created: 0, removed: 0, items: current, annualQuantityProtection };
+  }
+
   const updatesByKey = new Map(sheetUpdates.map((entry) => [entry.item_key, entry.annual_qty]));
   const referenceByKey = new Map(referenceUpdates.map((entry) => [entry.item_key, entry.reference_qty]));
   const plannedByKey = new Map(plannedUpdates.map((entry) => [entry.item_key, entry.planned_qty]));
@@ -1623,6 +1712,7 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) 
   const creationKeys = new Set([
     ...sheetUpdates.map((entry) => entry.item_key),
     ...plannedUpdates.map((entry) => entry.item_key),
+    ...missingMappedKeys,
   ]);
   let createdCount = 0;
   for (const itemKey of creationKeys) {
@@ -1665,8 +1755,8 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) 
     createdCount += 1;
   }
 
-  if (!updatedCount && !createdCount) {
-    return { updated: 0, created: 0, items: current, annualQuantityProtection };
+  if (!updatedCount && !createdCount && !removedCount) {
+    return { updated: 0, created: 0, removed: 0, items: current, annualQuantityProtection };
   }
 
   await syncConsumptionData(businessCaseId, {
@@ -1686,6 +1776,7 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) 
   return {
     updated: updatedCount,
     created: createdCount,
+    removed: removedCount,
     items: await loadConsumptionData(businessCaseId),
     annualQuantityProtection,
   };
@@ -1993,4 +2084,7 @@ module.exports = {
   isComodato,
   recordExcelExportAndMarkWaitingCalculations,
   saveFeasibilityDecision,
+  __testables: {
+    buildTemplateConsumptionSyncItems,
+  },
 };

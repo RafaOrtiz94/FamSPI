@@ -96,6 +96,7 @@ const PrivatePurchasesRoleView = ({ role, title }) => {
  // Refresco periódico: 3 min para no saturar el backend.
  // Limpia estados cacheados para forzar re-consulta en cada ciclo.
  const interval = setInterval(() => {
+   if (document.hidden) return;
    setClientApprovalStatuses({});
    checkClientApprovals(purchases);
  }, 3 * 60 * 1000);

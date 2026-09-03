@@ -1,5 +1,7 @@
 const logger = require("../config/logger");
 const { processApprovalEscalationReminders } = require("../modules/permisos/permisos.service");
+const { isOffHours } = require("../utils/offHoursPolicy");
+const { registerOffHoursJob } = require("./offHoursCoordinator");
 
 const DEFAULT_INTERVAL_MINUTES = Math.min(Number(process.env.PERMISOS_APPROVAL_ESCALATION_INTERVAL_MINUTES || 30), 240);
 const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
@@ -22,8 +24,14 @@ function startPermisosApprovalEscalationJob() {
     runOnce().catch((error) => logger.error({ error }, "Error inicial permisos approval escalation job"));
   }
   interval = setInterval(() => {
+    if (isOffHours(new Date()).isOffHours) return; // manejado por offHoursCoordinator
     runOnce().catch((error) => logger.error({ error }, "Error permisos approval escalation job"));
   }, everyMs);
+  registerOffHoursJob({
+    name: "permisos_approval_escalation",
+    runOnce,
+    offHoursIntervalMs: everyMs * 6,
+  });
 }
 
 module.exports = {

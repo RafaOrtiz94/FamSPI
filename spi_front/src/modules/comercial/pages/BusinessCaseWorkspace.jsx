@@ -24,6 +24,9 @@ import Button from "../../../core/ui/components/Button";
 import { getVisibleSections } from "../components/workspace/roleSectionConfig";
 
 // BC-21: Orden canónico de secciones — incluye investment_values para roles que las ven
+// "Resumen" (consumption_export) va al final: no tiene estado propio (es
+// solo lectura, no un formulario a completar), asi que debe quedar despues
+// de todo lo demas en vez de intercalado entre secciones editables.
 const WORKSPACE_SECTION_ORDER = [
  "general",
  "lab",
@@ -33,9 +36,14 @@ const WORKSPACE_SECTION_ORDER = [
  "determinations",
  "investments",
  "investment_values",
- "consumption_export",
  "feasibility",
+ // offer_workspace faltaba aqui (ver skill bc-workspace-tabs): si aparece en
+ // el tab pero no en esta lista, se rompe el auto-avance ("siguiente
+ // seccion") y la reapertura de esa seccion para los roles que si la tienen
+ // habilitada (comercial, jefe_comercial, jefe_de_comercial, acp_comercial).
+ "offer_workspace",
  "dispatch_workspace",
+ "consumption_export",
 ];
 const LEGACY_DEV_SECTIONS = new Set(["prices", "calculations", "rentability"]);
 const SECTION_LABELS = {
@@ -48,6 +56,7 @@ const SECTION_LABELS = {
  investments: "Inversiones",
  investment_values: "Precios financieros y operativos",
  consumption_export: "Resumen",
+ offer_workspace: "Oferta Comercial",
  dispatch_workspace: "Cantidades Máximas",
  feasibility: "Factibilidad",
 };

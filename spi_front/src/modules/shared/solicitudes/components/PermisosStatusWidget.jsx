@@ -30,7 +30,6 @@ import {
   cancelarSolicitud,
   updateRecoveryPlan,
   resolverRegularizacion,
-  convertirAVacaciones,
 } from "../../../../core/api/permisosApi";
 import UploadJustificantesModal from "../modals/UploadJustificantesModal";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
@@ -105,7 +104,7 @@ const INITIAL_VISIBLE_COUNTS = {
 const getRecoveryCoordinationLabel = (solicitud = {}) => {
   const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
   if (coordinationStatus === "finalized_by_approver" && solicitud?.charged_to_vacation) {
-    return "Sin acuerdo; cargado a vacaciones";
+    return "Sin acuerdo; cierre administrativo";
   }
   return RECOVERY_COORDINATION_LABELS[coordinationStatus] || RECOVERY_COORDINATION_LABELS.not_required;
 };
@@ -353,20 +352,6 @@ const PermisosStatusWidget = () => {
         }
       } catch (error) {
         showToast(error.response?.data?.message || "Error al procesar la regularización", "error");
-      }
-    });
-  };
-
-  const handleConvertirAVacaciones = async (solicitudId) => {
-    await runActionWithLoader(`convertir-vac-${solicitudId}`, "Convirtiendo a vacaciones...", async () => {
-      try {
-        const response = await convertirAVacaciones(solicitudId);
-        if (response?.ok) {
-          showToast("Ausencia convertida a vacaciones correctamente.", "success");
-          await loadData();
-        }
-      } catch (error) {
-        showToast(error.response?.data?.message || "Error al convertir a vacaciones", "error");
       }
     });
   };
@@ -724,7 +709,7 @@ const PermisosStatusWidget = () => {
             )}
             {solicitud?.charged_to_vacation && (
               <p className="text-[11px] text-amber-800 mt-1">
-                Descuento aplicado a vacaciones: {Number(solicitud?.charged_vacation_hours || 0) || recoveryTotal || 0}h
+                Registro histórico de descuento: {Number(solicitud?.charged_vacation_hours || 0) || recoveryTotal || 0}h
                 {Number(solicitud?.charged_vacation_days || 0)
                   ? ` (${formatVacationDaysHours(Number(solicitud?.charged_vacation_days || 0)).text})`
                   : ""}
@@ -933,17 +918,6 @@ const PermisosStatusWidget = () => {
                 >
                   Aceptar por excepción
                 </Button>
-                {solicitud.vacation_conversion_consent && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="flex-1 text-[10px] py-1.5 border-purple-300 text-purple-800 hover:bg-purple-100"
-                    onClick={() => handleConvertirAVacaciones(solicitud.id)}
-                    disabled={!!actionLoading}
-                  >
-                    Convertir a vacaciones
-                  </Button>
-                )}
               </div>
             </div>
           );

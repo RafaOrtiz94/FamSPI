@@ -79,6 +79,10 @@ const ROLE_GROUPS = {
   jefe_talento_humano: ["jefe_talento_humano", "jefe_de_talento_humano"],
   jefe_finanzas: ["jefe_finanzas", "jefe_de_finanzas"],
   backoffice_comercial: ["backoffice_comercial"],
+  // Pasantes: login por credenciales propias (sin OAuth), sin heredar
+  // permisos de ningun area por default -- todo se asigna explicitamente via
+  // user_module_access (ver docs/plans/pasantes-access-plan.md).
+  pasante: ["pasante"],
 };
 
 const SUPER_ROLES = new Set(["admin", "administrador"]);
@@ -108,6 +112,13 @@ const collectUserRoles = (user = {}) => {
     user.scopes.forEach(pushRole);
   }
 
+  // Capacidades adicionales otorgadas a un usuario puntual sin cambiar su rol
+  // principal (ver migrations/276_users_extra_roles.sql). Se propaga en el
+  // JWT (signAccess) para que este chequeo, que solo lee el token, las vea.
+  if (Array.isArray(user.extra_roles)) {
+    user.extra_roles.forEach(pushRole);
+  }
+
   return roles;
 };
 
@@ -126,12 +137,25 @@ function expandRoles(allowed = []) {
 
 function requireRole(allowedRoles = []) {
   const expanded = expandRoles(allowedRoles);
+  const allowsPasante = expanded.has("pasante");
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ ok: false, error: "No autenticado." });
     }
 
     const candidates = collectUserRoles(req.user);
+
+    // Pasantes no tienen un set de roles fijo por endpoint: su acceso real
+    // se decide por user_module_access via moduleAccessGuard (corre antes,
+    // en app.js). Si ese middleware ya marco el request como verificado
+    // (modulo resuelto y habilitado para este usuario), no lo volvemos a
+    // filtrar por rol aqui. Rutas fuera del catalogo de modulos (ej. las de
+    // BYPASS_PREFIXES como auth o el propio module-access) nunca reciben
+    // ese flag, asi que siguen exigiendo el rol exacto de allowedRoles.
+    if (!allowsPasante && candidates.has("pasante") && req._moduleAccessVerified) {
+      return next();
+    }
+
     for (const role of candidates) {
       if (SUPER_ROLES.has(role)) {
         return next();

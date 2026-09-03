@@ -24,33 +24,28 @@ import {
   rateSupportTicket,
   reopenSupportTicket,
 } from "../../api/supportTicketsApi";
+import { readPwaStorageData, removePwaStorage, writePwaStorage } from "../../pwa/storage";
 import { useUI } from "../UIContext";
 import Button from "./Button";
 import Modal from "./Modal";
 
-const DRAFT_STORAGE_KEY = "spi_support_ticket_draft";
+const DRAFT_STORAGE_KEY = "support_ticket_draft";
 const DRAFT_FIELDS = ["ticket_type", "priority", "impact", "urgency", "category", "subcategory", "title", "description"];
 
 const saveDraftToStorage = (formData) => {
-  try {
-    const draft = {};
-    DRAFT_FIELDS.forEach((k) => { draft[k] = formData[k] || ""; });
-    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
-  } catch {}
+  const draft = {};
+  DRAFT_FIELDS.forEach((k) => { draft[k] = formData[k] || ""; });
+  writePwaStorage(DRAFT_STORAGE_KEY, draft, { namespace: "spi_pwa_drafts" });
 };
 
 const loadDraftFromStorage = () => {
-  try {
-    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed.title?.trim() && !parsed.description?.trim()) return null;
-    return parsed;
-  } catch { return null; }
+  const parsed = readPwaStorageData(DRAFT_STORAGE_KEY, { namespace: "spi_pwa_drafts" });
+  if (!parsed?.data?.title?.trim() && !parsed?.data?.description?.trim()) return null;
+  return parsed?.data || null;
 };
 
 const clearDraftFromStorage = () => {
-  try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch {}
+  removePwaStorage(DRAFT_STORAGE_KEY, { namespace: "spi_pwa_drafts" });
 };
 
 const TYPE_OPTIONS = [

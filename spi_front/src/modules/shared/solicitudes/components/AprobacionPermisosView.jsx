@@ -37,7 +37,6 @@ import {
   reviewStudyEnrollment,
   revisarJustificante,
   resolverRegularizacion,
-  convertirAVacaciones,
 } from "../../../../core/api/permisosApi";
 import { useAuth } from "../../../../core/auth/AuthContext";
 
@@ -149,7 +148,7 @@ const NON_CANCELABLE_STATUSES = new Set(["rejected", "rechazado", "cancelled", "
 const getRecoveryCoordinationLabel = (solicitud = {}) => {
   const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
   if (coordinationStatus === "finalized_by_approver" && solicitud?.charged_to_vacation) {
-    return "Sin acuerdo; cargado a vacaciones";
+    return "Sin acuerdo; cierre administrativo";
   }
   return RECOVERY_COORDINATION_LABELS[coordinationStatus] || RECOVERY_COORDINATION_LABELS.not_required;
 };
@@ -506,24 +505,6 @@ const AprobacionPermisosView = ({ compact = false }) => {
           }
         } catch (error) {
           showToast(error.response?.data?.message || "Error al procesar regularización", "error");
-        }
-      },
-    );
-  };
-
-  const handleConvertirAVacaciones = async (solicitud) => {
-    await runActionWithLoader(
-      `conv-${solicitud.id}`,
-      "Convirtiendo a vacaciones...",
-      async () => {
-        try {
-          const response = await convertirAVacaciones(solicitud.id);
-          if (response?.ok) {
-            showToast("Tiempo convertido a vacaciones exitosamente.", "success");
-            await loadStageData();
-          }
-        } catch (error) {
-          showToast(error.response?.data?.message || "Error al convertir a vacaciones", "error");
         }
       },
     );
@@ -922,7 +903,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
             )}
             {solicitud?.charged_to_vacation && (
               <p className="text-[11px] text-amber-800 mt-1">
-                Descuento aplicado a vacaciones:
+                Registro histórico de descuento:
                 {" "}
                 {Number(solicitud?.charged_vacation_hours || 0) || recoveryTotal || 0}h
                 {Number(solicitud?.charged_vacation_days || 0)
@@ -1188,15 +1169,32 @@ const AprobacionPermisosView = ({ compact = false }) => {
 
             {stage === "pending_final" && (
               <>
-                <Button
-                  variant="primary"
-                  onClick={() => handleAprobarFinal(solicitud.id)}
-                  disabled={!!actionLoading}
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-xs py-1.5"
-                >
-                  <FiCheck className="w-3.5 h-3.5 mr-1.5" />
-                  Aprobar Final
-                </Button>
+                {(() => {
+                  // Solicitud urgente con justificante (ej. certificado medico) ya
+                  // entregado pero sin revisar todavia: la aprobacion final la
+                  // rechaza el backend hasta que se revise. Deshabilitar aqui evita
+                  // el clic confuso que termina en "No autorizado".
+                  const pendingJustificanteReview =
+                    Boolean(solicitud.is_urgent) &&
+                    !["procedente", "aceptado_por_excepcion"].includes(
+                      String(solicitud.provisional_status || "").toLowerCase()
+                    ) &&
+                    ["entregado", "en_revision", "observado"].includes(
+                      String(solicitud.justificante_status || "").toLowerCase()
+                    );
+                  return (
+                    <Button
+                      variant="primary"
+                      onClick={() => handleAprobarFinal(solicitud.id)}
+                      disabled={!!actionLoading || pendingJustificanteReview}
+                      title={pendingJustificanteReview ? "Revisa el justificante antes de aprobar" : undefined}
+                      className="flex-1 bg-green-600 hover:bg-green-700 text-xs py-1.5"
+                    >
+                      <FiCheck className="w-3.5 h-3.5 mr-1.5" />
+                      Aprobar Final
+                    </Button>
+                  );
+                })()}
                 <Button
                   variant="secondary"
                   onClick={() => {
@@ -1263,23 +1261,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
               >
                 Aceptar por excepción
               </Button>
-              {solicitud.vacation_conversion_consent && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => handleConvertirAVacaciones(solicitud)}
-                  disabled={!!actionLoading}
-                  className="text-xs py-1 px-2 bg-purple-600 text-white hover:bg-purple-700 border-purple-600"
-                >
-                  Convertir a vacaciones
-                </Button>
-              )}
             </div>
-            {!solicitud.vacation_conversion_consent && (
-              <p className="text-[10px] text-rose-600 italic">
-                El colaborador no dio consentimiento para cargo a vacaciones.
-              </p>
-            )}
           </div>
         )}
       </motion.div>

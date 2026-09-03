@@ -3,6 +3,8 @@ const {
   processAutoCancelledJustificationWarnings,
   processAutoCancelledJustificationDeductions,
 } = require("../modules/permisos/permisos.service");
+const { isOffHours } = require("../utils/offHoursPolicy");
+const { registerOffHoursJob } = require("./offHoursCoordinator");
 
 const DEFAULT_INTERVAL_MINUTES = Number(process.env.PERMISOS_AUTO_CANCELLED_JUSTIFICATION_INTERVAL_MINUTES || 60);
 const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
@@ -28,8 +30,14 @@ function startPermisosAutoCancelledJustificationJob() {
     runOnce().catch((error) => logger.error({ error }, "Error inicial permisos auto-cancelled justification job"));
   }
   interval = setInterval(() => {
+    if (isOffHours(new Date()).isOffHours) return; // manejado por offHoursCoordinator
     runOnce().catch((error) => logger.error({ error }, "Error permisos auto-cancelled justification job"));
   }, everyMs);
+  registerOffHoursJob({
+    name: "permisos_auto_cancelled_justification",
+    runOnce,
+    offHoursIntervalMs: everyMs * 6,
+  });
 }
 
 module.exports = {

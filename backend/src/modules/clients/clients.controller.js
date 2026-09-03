@@ -10,8 +10,10 @@ const listClients = async (req, res) => {
       include_all_for_business_case,
       schedule_scope,
       schedule_window,
+      page,
+      limit,
     } = req.query;
-    const { clients, prospects, leads, scheduleMeta } = await clientsService.listAccessibleClients({
+    const { clients, prospects, leads, scheduleMeta, pagination } = await clientsService.listAccessibleClients({
       user: req.user,
       q: q || null,
       visitDate: date || null,
@@ -20,11 +22,13 @@ const listClients = async (req, res) => {
       includeAllForBusinessCase: include_all_for_business_case === "true",
       scheduleScope: schedule_scope || null,
       scheduleWindow: schedule_window || null,
+      page: page || 1,
+      limit: limit || null,
     });
 
     const summary = scheduleMeta || { total: clients.length, visited: 0, pending: clients.length };
 
-    return res.json({ ok: true, data: clients, prospects, leads, summary });
+    return res.json({ ok: true, data: clients, prospects, leads, summary, pagination });
   } catch (error) {
     const status = error.status || 500;
     return res.status(status).json({

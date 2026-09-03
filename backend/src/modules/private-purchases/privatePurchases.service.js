@@ -49,6 +49,7 @@ const {
   addDriveAttachment,
   markRequestCompleted,
 } = require("../requests/requests.service");
+const crmPurchaseSyncService = require("../crm-fam/crmPurchaseSync.service");
 
 const driveLink = (fileId) => (fileId ? `https://drive.google.com/file/d/${fileId}/view` : null);
 const RESERVATION_VALIDITY_DAYS        = 15;
@@ -1180,6 +1181,12 @@ class PrivatePurchasesService {
         }
       }
 
+      try {
+        await crmPurchaseSyncService.syncPrivatePurchaseCreated(purchaseId, user);
+      } catch (crmSyncError) {
+        logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar creacion de compra privada con CRM');
+      }
+
       return {
         id: purchaseId,
         status: result.rows[0].status,
@@ -1871,6 +1878,11 @@ class PrivatePurchasesService {
       ? 'Oferta mejorada enviada por ACP Comercial'
       : 'Oferta enviada';
     await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.OFFER_SENT, user, transitionReason);
+    try {
+      await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmPurchaseSyncService.STAGE_NAMES.PROPOSAL_PRESENTATION, user);
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar envio de oferta privada con CRM');
+    }
 
     return {
       ...updatedRows[0],
@@ -2065,6 +2077,11 @@ class PrivatePurchasesService {
     );
 
     await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.OFFER_SIGNED, user, 'Oferta firmada recibida');
+    try {
+      await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmPurchaseSyncService.STAGE_NAMES.NEGOTIATION, user);
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar oferta firmada privada con CRM');
+    }
 
 
     return rows[0];
@@ -2132,6 +2149,11 @@ class PrivatePurchasesService {
       user,
       'Contrato borrador cargado, pendiente firma cliente'
     );
+    try {
+      await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmPurchaseSyncService.STAGE_NAMES.CONTRACTS, user);
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar contrato privado con CRM');
+    }
 
     return rows[0];
   }
@@ -2703,6 +2725,11 @@ class PrivatePurchasesService {
       toEmails,
       ccList
     });
+    try {
+      await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmPurchaseSyncService.STAGE_NAMES.NEEDS_ANALYSIS, user);
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar inicio de disponibilidad privada con CRM');
+    }
     return updatedRows[0];
   }
 
@@ -2897,6 +2924,14 @@ class PrivatePurchasesService {
           requestId: id,
           error: reservationError.message
         });
+      }
+    }
+
+    if (normalizedOutcome !== 'none' && normalizedOutcome !== 'unavailable') {
+      try {
+        await crmPurchaseSyncService.syncPrivatePurchaseStage(id, crmPurchaseSyncService.STAGE_NAMES.OFFER_DEVELOPMENT, user);
+      } catch (crmSyncError) {
+        logger.warn({ crmSyncError, purchaseId: id }, 'No se pudo sincronizar respuesta de disponibilidad privada con CRM');
       }
     }
 
@@ -3723,6 +3758,11 @@ class PrivatePurchasesService {
     } catch (error) {
       logger.warn('Error enviando notificacion de cliente aprobado:', error);
     }
+    try {
+      await crmPurchaseSyncService.syncPrivatePurchaseCreated(purchaseId, user);
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar registro de cliente privado con CRM');
+    }
     return rows[0];
   }
 
@@ -3973,6 +4013,11 @@ class PrivatePurchasesService {
 
     // Transicià¸£à¸“n final
     await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.DELIVERED, user, 'Entrega completada exitosamente');
+    try {
+      await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmPurchaseSyncService.STAGE_NAMES.CLOSED_WON, user, 'won');
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar cierre ganado de compra privada con CRM');
+    }
 
     return rows[0];
   }
@@ -4998,8 +5043,9 @@ class PrivatePurchasesService {
       error.code = 'INVALID_DATE_FORMAT';
       throw error;
     }
-    if ((min && selected < min) || (max && selected > max)) {
-      const error = new Error('La fecha coordinada debe estar dentro de la ventana de inspeccion');
+    // sin min: puede adelantar la inspeccion, solo se bloquea pasarse del max
+    if (max && selected > max) {
+      const error = new Error('La fecha coordinada no puede ser posterior a la ventana de inspeccion');
       error.status = 409;
       error.code = 'INSPECTION_DATE_OUT_OF_WINDOW';
       throw error;
@@ -5024,7 +5070,7 @@ class PrivatePurchasesService {
     }
 
     const assignedTechnician = await this._getUserById(assigned_technician_id || user?.id);
-    if (!assignedTechnician || !this._hasAnyRoleToken(assignedTechnician, ['tecnico', 'ing_servicio', 'jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico'])) {
+    if (!assignedTechnician || !this._hasAnyRoleToken(assignedTechnician, ['tecnico', 'ing_servicio', 'esp_app', 'jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico'])) {
       const error = new Error('Debes asignar un tecnico valido para la inspeccion');
       error.status = 409;
       error.code = 'TECHNICAL_ASSIGNEE_INVALID';

@@ -57,6 +57,7 @@ const {
   updateCorrectiveCaseAction,
 } = require("./correctiveCases.service");
 const { getTechnicalScheduleFeed } = require("./technicalSchedule.service");
+const { getActionQueue } = require("./actionQueue.service");
 
 // ===============================================================
 // 🔐 CONFIGURACIÓN GOOGLE DRIVE / DOCS
@@ -446,6 +447,12 @@ const mapDisponibilidadRow = (row) => ({
   status: row.status,
   note: row.note,
   updatedAt: row.updated_at,
+  // T10 del plan de rework: jefe_servicio necesita comparar carga de
+  // ing_servicio vs esp_app para decidir a quien asignar un caso nuevo. El
+  // rol vive en users, no en la tabla de disponibilidad -- se expone aca
+  // para que el frontend pueda filtrar/agrupar el cronograma por especialidad
+  // sin otro roundtrip.
+  role: row.role || null,
 });
 
 const getDisponibilidadTecnicos = async (req, res) => {
@@ -459,7 +466,8 @@ const getDisponibilidadTecnicos = async (req, res) => {
         d.updated_at,
         u.fullname,
         u.name,
-        u.email
+        u.email,
+        u.role
       FROM servicio.disponibilidad_tecnicos d
       LEFT JOIN public.users u ON u.id = d.user_id
       ORDER BY COALESCE(u.fullname, u.name, u.email, d.name) ASC;
@@ -616,6 +624,22 @@ const getTechnicalScheduleFeedController = async (req, res) => {
     res.status(err?.status || 500).json({
       ok: false,
       error: err?.message || "Error al listar cronograma técnico consolidado",
+    });
+  }
+};
+
+const getActionQueueController = async (req, res) => {
+  try {
+    const data = await getActionQueue({
+      user: req.user,
+      scope: req.query?.scope,
+    });
+    res.json(data);
+  } catch (err) {
+    console.error("❌ Error listando cola de acciones de servicio técnico:", err);
+    res.status(err?.status || 500).json({
+      ok: false,
+      error: err?.message || "Error al listar cola de acciones",
     });
   }
 };
@@ -1756,6 +1780,7 @@ module.exports = {
   listActividadesTecnicas,
   createActividadTecnica,
   getTechnicalScheduleFeed: getTechnicalScheduleFeedController,
+  getActionQueue: getActionQueueController,
   getEquipos,
   createEquipo,
   getMantenimientos,

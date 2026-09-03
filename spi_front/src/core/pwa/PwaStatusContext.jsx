@@ -8,6 +8,10 @@ import React, {
  useState,
 } from "react";
 import { onlineManager } from "@tanstack/react-query";
+import {
+ getOfflineQueueSyncStatus,
+ onOfflineQueueStatusChanged,
+} from "../../shared/utils/attendanceOfflineQueue";
 
 const PwaStatusContext = createContext(null);
 const INSTALL_BANNER_STORAGE_KEY = "famspi:pwa-install-banner-dismissed-at";
@@ -85,6 +89,7 @@ export function PwaStatusProvider({ children }) {
   typeof window !== "undefined" ? window.localStorage.getItem(INSTALL_BANNER_STORAGE_KEY) : null,
  lastOnlineAt: navigator.onLine !== false ? new Date().toISOString() : null,
  lastOfflineAt: null,
+ offlineQueueStatus: getOfflineQueueSyncStatus(),
  }));
 
  const refreshSnapshot = useCallback(() => {
@@ -206,6 +211,22 @@ export function PwaStatusProvider({ children }) {
  window.removeEventListener("app:update-available", handleUpdateAvailable);
  window.removeEventListener("app:sw-activated", handleControllerChanged);
  };
+ }, []);
+
+ useEffect(() => {
+  const unsubscribe = onOfflineQueueStatusChanged(() => {
+   setState((prev) => ({
+    ...prev,
+    offlineQueueStatus: getOfflineQueueSyncStatus(),
+   }));
+  });
+
+  setState((prev) => ({
+   ...prev,
+   offlineQueueStatus: getOfflineQueueSyncStatus(),
+  }));
+
+  return unsubscribe;
  }, []);
 
  const applyAppUpdate = useCallback(async () => {

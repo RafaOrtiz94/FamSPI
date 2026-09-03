@@ -23,6 +23,10 @@ export const PRIVATE_PURCHASE_ENDPOINTS = {
  TRANSITIONS: '/private-purchases/:id/transitions',
  VALIDATE_TRANSITION: '/private-purchases/:id/validate-transition',
  OFFER: '/private-purchases/:id/offer',
+ OFFER_WORKSPACE: '/private-purchases/:id/offer-workspace',
+ OFFER_WORKSPACE_DRAFT: '/private-purchases/:id/offer-workspace/draft',
+ OFFER_WORKSPACE_PUBLISH: '/private-purchases/:id/offer-workspace/:offerId/publish',
+ OFFER_WORKSPACE_REGENERATE: '/private-purchases/:id/offer-workspace/:offerId/regenerate',
  SIGNED_OFFER: '/private-purchases/:id/offer/signed',
  REGISTER_CLIENT: '/private-purchases/:id/register-client',
  REQUEST_CLIENT_REGISTRATION: '/private-purchases/:id/request-client-registration',
@@ -721,6 +725,44 @@ export const sendPrivatePurchaseOffer = async (id, offerData) => {
  });
  throw error.response?.data?.message || error.message || 'Error desconocido';
  }
+};
+
+export const getPrivatePurchaseOfferWorkspace = async (id) => {
+ const response = await api.get(PRIVATE_PURCHASE_ENDPOINTS.OFFER_WORKSPACE.replace(':id', id));
+ if (!response.data?.ok) {
+ throw new Error(response.data?.message || 'Error obteniendo workspace de oferta');
+ }
+ return response.data.data;
+};
+
+export const createPrivatePurchaseOfferDraft = async (id) => {
+ const response = await api.post(PRIVATE_PURCHASE_ENDPOINTS.OFFER_WORKSPACE_DRAFT.replace(':id', id));
+ if (!response.data?.ok) {
+ throw new Error(response.data?.message || 'Error creando borrador de oferta');
+ }
+ return response.data.data;
+};
+
+export const publishPrivatePurchaseOfferVersion = async (id, offerId) => {
+ const endpoint = PRIVATE_PURCHASE_ENDPOINTS.OFFER_WORKSPACE_PUBLISH
+ .replace(':id', id)
+ .replace(':offerId', offerId);
+ const response = await api.post(endpoint);
+ if (!response.data?.ok) {
+ throw new Error(response.data?.message || 'Error publicando oferta');
+ }
+ return response.data.data;
+};
+
+export const regeneratePrivatePurchaseOfferVersion = async (id, offerId) => {
+ const endpoint = PRIVATE_PURCHASE_ENDPOINTS.OFFER_WORKSPACE_REGENERATE
+ .replace(':id', id)
+ .replace(':offerId', offerId);
+ const response = await api.post(endpoint);
+ if (!response.data?.ok) {
+ throw new Error(response.data?.message || 'Error regenerando oferta');
+ }
+ return response.data.data;
 };
 
 /**
@@ -1644,6 +1686,10 @@ const privatePurchasesApi = {
  getAllowedTransitions,
  validateTransition,
  sendPrivatePurchaseOffer,
+ getPrivatePurchaseOfferWorkspace,
+ createPrivatePurchaseOfferDraft,
+ publishPrivatePurchaseOfferVersion,
+ regeneratePrivatePurchaseOfferVersion,
  uploadPrivateSignedOffer,
  uploadPrivatePurchaseContract,
  uploadPrivatePurchaseClientSignedContract,

@@ -38,19 +38,39 @@ export const ProtectedRoute = ({ allowedRoles = [], strictRoles = false }) => {
  .filter(Boolean);
  const normalizedUserRoles = userRolesList.map((r) => r.toLowerCase());
  const normalizedScopes = scopesList.map((s) => s.toLowerCase());
+ // Capacidades adicionales otorgadas a un usuario puntual sin cambiar su rol
+ // principal (ver migrations/276_users_extra_roles.sql). No alteran userRole
+ // (el rol principal que se muestra/usa para redirects), solo amplian que
+ // rutas puede pasar.
+ const normalizedExtraRoles = (Array.isArray(user?.extra_roles) ? user.extra_roles : []).map((r) =>
+ String(r || "").toLowerCase()
+ );
  const userRole = normalizedUserRoles[0] || "";
  const hasPendingRole =
  normalizedUserRoles.some((r) => r.includes("pending") || r.includes("pendiente")) ||
  normalizedScopes.some((s) => s.includes("pending") || s.includes("pendiente")) ||
  !userRole;
+ // Pasantes no tienen un rol fijo por seccion: su acceso real a cada pagina
+ // se decide por module_access (ver moduleEnabled mas abajo), asignado caso
+ // por caso desde el Gestor de Modulos. Por eso, igual que gerencia, se les
+ // deja pasar el filtro de roles en rutas no estrictas -- el gate real sigue
+ // siendo el chequeo de moduleEnabled que viene despues.
  const hasPermission =
  normalizedAllowed.length === 0 ||
  normalizedAllowed.some((role) => normalizedUserRoles.includes(role)) ||
  normalizedAllowed.some((role) => normalizedScopes.includes(role)) ||
+ normalizedAllowed.some((role) => normalizedExtraRoles.includes(role)) ||
  (!strictRoles &&
  (normalizedScopes.includes("gerencia") ||
- normalizedUserRoles.includes("gerencia")));
+ normalizedUserRoles.includes("gerencia") ||
+ normalizedScopes.includes("pasante") ||
+ normalizedUserRoles.includes("pasante")));
  const lopdpPending = (user?.lopdp_internal_status || "").toLowerCase() !== "granted";
+ // Pasantes (auth_provider=local) tras alta o reset de password: bloquea
+ // TODA navegacion hasta que cambien la password temporal, igual de estricto
+ // que el gate de LOPDP pero sin permitir "continuar de todos modos" -- una
+ // password temporal generada por el admin no debe quedar en uso indefinido.
+ const mustChangePassword = user?.must_change_password === true;
  const moduleEnabled = isPathEnabledForUser({
  pathname: location.pathname,
  moduleAccess: user?.module_access || [],
@@ -108,6 +128,10 @@ export const ProtectedRoute = ({ allowedRoles = [], strictRoles = false }) => {
 
  if (isAuthenticated && hasPendingRole && location.pathname !== "/registro-en-proceso") {
  return <Navigate to="/registro-en-proceso" replace />;
+ }
+
+ if (isAuthenticated && mustChangePassword && location.pathname !== "/cambiar-password") {
+ return <Navigate to="/cambiar-password" replace />;
  }
 
  // 🎫 Validar roles permitidos
@@ -191,6 +215,7 @@ export const RoleRedirect = () => {
  jefe_logistica: "/dashboard/logistica",
  calidad: "/dashboard/calidad",
  jefe_calidad: "/dashboard/calidad",
+ pasante: "/dashboard/pasante",
  };
 
  const target =

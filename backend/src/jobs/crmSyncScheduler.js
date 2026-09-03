@@ -1,10 +1,13 @@
 const logger = require("../config/logger");
 const { isCrmSyncEnabled } = require("../config/crmDb");
 const { processPendingOutboxBatch } = require("../modules/integrations/integrationOutboxWorker.service");
+const { isOffHours } = require("../utils/offHoursPolicy");
+const { registerOffHoursJob } = require("./offHoursCoordinator");
 
+// 6min: > timeout de autosuspend de Neon (~5min), deja huecos reales en horario laboral.
 const DEFAULT_INTERVAL_MS = Math.max(
   5000,
-  Number(process.env.CRM_SYNC_INTERVAL_MS || 180000),
+  Number(process.env.CRM_SYNC_INTERVAL_MS || 360000),
 );
 const DEFAULT_BATCH_LIMIT = Math.max(
   1,
@@ -39,7 +42,7 @@ function startCrmSyncJob() {
 
   if (intervalRef) return;
 
-  const tick = async () => {
+  const runScheduled = async () => {
     if (running) {
       logger.warn("[CRM_SYNC_JOB] Tick omitido: proceso previo en ejecucion");
       return;
@@ -57,6 +60,11 @@ function startCrmSyncJob() {
     }
   };
 
+  const tick = async () => {
+    if (isOffHours(new Date()).isOffHours) return; // manejado por offHoursCoordinator
+    await runScheduled();
+  };
+
   logger.info({ interval_ms: DEFAULT_INTERVAL_MS }, "[CRM_SYNC_JOB] Scheduler iniciado");
 
   if (SHOULD_RUN_ON_START) {
@@ -66,6 +74,11 @@ function startCrmSyncJob() {
   intervalRef = setInterval(() => {
     tick().catch(() => null);
   }, DEFAULT_INTERVAL_MS);
+  registerOffHoursJob({
+    name: "crm_sync",
+    runOnce: runScheduled,
+    offHoursIntervalMs: DEFAULT_INTERVAL_MS * 6,
+  });
 }
 
 module.exports = { runOnce, startCrmSyncJob };

@@ -29,7 +29,9 @@ const deliveryCeilingsRoutes = require("../modules/delivery-ceilings/deliveryCei
 const publicDeliveryPlansRoutes = require("../modules/public-delivery-plans/publicDeliveryPlans.routes");
 const consumableFilesRoutes = require("../modules/consumable-files/consumableFiles.routes");
 const applicantsRoutes = require("../modules/applicants/applicants.routes");
-const worldCup2026Routes = require("../modules/world-cup-2026/worldCup2026.routes");
+// LEGACY (2026-08-12): Mundial 2026 termino, modulo desactivado. Codigo
+// intacto en modules/world-cup-2026 por si se reutiliza en el futuro.
+// const worldCup2026Routes = require("../modules/world-cup-2026/worldCup2026.routes");
 const {
   businessCaseRoutes,
   equipmentCatalogRoutes,
@@ -69,6 +71,7 @@ const calidadSamplingRoutes = require("../modules/calidad/ca0116.routes");
 const calidadTecnoRoutes = require("../modules/calidad/ca0117.routes");
 const internalJobsRouter = require("./internalJobs.routes");
 const tiAssetsRoutes = require("../modules/ti-assets/tiAssets.routes");
+const tiAssetsPublicRoutes = require("../modules/ti-assets/tiAssets.public.routes");
 const collabDeliveriesRoutes = require("../modules/collab-deliveries/collabDeliveries.routes");
 const moduleAccessRoutes = require("../modules/module-access/moduleAccess.routes");
 const kickoffRoutes = require("../modules/kickoff/kickoff.routes");
@@ -78,11 +81,16 @@ const hiringPipelineRoutes = require("../modules/hiring-pipeline/hiring-pipeline
 const trainingsRoutes = require("../modules/trainings/trainings.routes");
 const crmFamRoutes = require("../modules/crm-fam/crm.routes");
 const workManagementRoutes = require("../modules/work-management/workManagement.routes");
+const suggestionBoxPublicRoutes = require("../modules/suggestion-box/suggestionBox.public.routes");
+const suggestionBoxRoutes = require("../modules/suggestion-box/suggestionBox.routes");
 
 function mountPublicRoutes(app) {
   app.use("/api/v1/auth", authRoutes);
+  app.use("/api/v1/suggestion-box/public", suggestionBoxPublicRoutes);
+  app.use("/api/v1/ti-assets/public", tiAssetsPublicRoutes);
   app.use("/api/applicants", applicantsRoutes);
-  app.use("/api/v1/world-cup-2026", worldCup2026Routes);
+  // LEGACY (2026-08-12): Mundial 2026 termino, endpoint desactivado (ver require arriba).
+  // app.use("/api/v1/world-cup-2026", worldCup2026Routes);
   // Webhook público de EspoCRM — sin JWT, validado por X-Hook-Secret
   app.use("/api/v1/integrations/crm/webhook", crmWebhookRoutes);
 }
@@ -159,6 +167,7 @@ app.use("/api/v1/calidad/capa", calidadCapaRoutes);
   app.use("/api/v1/trainings", trainingsRoutes);
   app.use("/api/v1/crm-fam", crmFamRoutes);
   app.use("/api/v1/work-management", workManagementRoutes);
+  app.use("/api/v1/suggestion-box", suggestionBoxRoutes);
   app.use("/api/v1/viaticos", viaticosRoutes);
   app.use("/internal/jobs", internalJobsRouter);
   app.use("/api/v1/users/me/profile", userProfileRoutes);

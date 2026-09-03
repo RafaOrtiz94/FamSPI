@@ -30,6 +30,7 @@ const {
   addDriveAttachment,
   markRequestCompleted,
 } = require("../requests/requests.service");
+const crmPurchaseSyncService = require("../crm-fam/crmPurchaseSync.service");
 
 const DEFAULT_ROOT_ENV_KEYS = ["DRIVE_ROOT_FOLDER_ID", "DRIVE_FOLDER_ID"];
 const ROOT_FOLDER_NAME = process.env.EQUIPMENT_PURCHASE_ROOT_FOLDER || "Solicitudes de compra de equipos";
@@ -395,7 +396,7 @@ function hasRoleToken(user, token) {
 }
 
 function canViewInspectionQueue(user) {
-  return ["jefe_tecnico", "jefe_servicio", "jefe_servicio_tecnico", "tecnico"].some((role) =>
+  return ["jefe_tecnico", "jefe_servicio", "jefe_servicio_tecnico", "tecnico", "ing_servicio", "esp_app"].some((role) =>
     hasRoleToken(user, role),
   );
 }
@@ -419,6 +420,8 @@ function canReviewInspectionCoordination(user) {
 function canRegisterSiteInspection(user) {
   return [
     "tecnico",
+    "ing_servicio",
+    "esp_app",
     "jefe_tecnico",
     "jefe_servicio",
     "jefe_servicio_tecnico",
@@ -2639,6 +2642,12 @@ async function createPurchaseRequest({
     logger.warn({ notifyError, requestId: created.id }, "No se pudieron enviar notificaciones de creaciÃ³n");
   }
 
+  try {
+    await crmPurchaseSyncService.syncPublicPurchaseCreated(created.id, user);
+  } catch (crmSyncError) {
+    logger.warn({ crmSyncError, requestId: created.id }, "No se pudo sincronizar creacion de compra publica con CRM");
+  }
+
   return created;
 }
 
@@ -2744,6 +2753,12 @@ async function startAvailabilityRequest({ id, user, providerEmail, notes, expect
     markUsed: true,
   });
 
+  try {
+    await crmPurchaseSyncService.syncPublicPurchaseStage(id, crmPurchaseSyncService.STAGE_NAMES.NEEDS_ANALYSIS, user);
+  } catch (crmSyncError) {
+    logger.warn({ crmSyncError, requestId: id }, "No se pudo sincronizar inicio de disponibilidad publica con CRM");
+  }
+
   return mapRequestRow(rows[0]);
 }
 
@@ -2818,6 +2833,13 @@ async function saveProviderResponse({ id, user, outcome, items = [], notes, expe
     });
   } catch (notifyError) {
     logger.warn({ notifyError, requestId: updated.id }, "No se pudieron enviar notificaciones de disponibilidad");
+  }
+  if (!isUnavailable) {
+    try {
+      await crmPurchaseSyncService.syncPublicPurchaseStage(id, crmPurchaseSyncService.STAGE_NAMES.OFFER_DEVELOPMENT, user);
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, requestId: id }, "No se pudo sincronizar respuesta de disponibilidad publica con CRM");
+    }
   }
   return updated;
 }
@@ -3591,8 +3613,11 @@ async function coordinateInspectionDate({
     });
   }
 
-  if (scheduled.getTime() < minDate.getTime() || scheduled.getTime() > maxDate.getTime()) {
-    throw createAppError("La fecha coordinada debe estar dentro de la ventana de inspecciÃ³n", {
+  // ponytail: jefe_servicio puede adelantar la inspeccion a cualquier fecha
+  // <= max_date (incluida toda la ventana propuesta) pero nunca superarla.
+  // min_date ya no bloquea -- solo se usa para mostrar la ventana propuesta.
+  if (scheduled.getTime() > maxDate.getTime()) {
+    throw createAppError("La fecha coordinada no puede ser posterior a la ventana de inspecciÃ³n", {
       status: 409,
       code: "INSPECTION_DATE_OUT_OF_WINDOW",
       details: {
@@ -4868,6 +4893,24 @@ async function registerPublicPortalOutcome({ id, user, outcome, notes, expected_
     logger.warn({ notifyError, requestId: updated.id }, "No se pudieron enviar notificaciones de resultado portal");
   }
 
+  try {
+    const stageNames =
+      normalizedOutcome === "won"
+        ? crmPurchaseSyncService.STAGE_NAMES.NEGOTIATION
+        : normalizedOutcome === "cancelled"
+          ? crmPurchaseSyncService.STAGE_NAMES.ARCHIVED
+          : crmPurchaseSyncService.STAGE_NAMES.CLOSED_LOST;
+    const finalStatus =
+      normalizedOutcome === "cancelled"
+        ? "suspended"
+        : normalizedOutcome === "won"
+          ? null
+          : "lost";
+    await crmPurchaseSyncService.syncPublicPurchaseStage(id, stageNames, user, finalStatus);
+  } catch (crmSyncError) {
+    logger.warn({ crmSyncError, requestId: id }, "No se pudo sincronizar resultado de portal publico con CRM");
+  }
+
   return updated;
 }
 
@@ -4964,6 +5007,12 @@ async function uploadContract({ id, user, file, expected_updated_at }) {
   // "equipment_available" ("Equipo Disponible... listo para entrega"), pero el
   // equipo aun no ha llegado fisicamente en este punto del flujo (eso ocurre en
   // markEquipmentArrived) -- era contenido duplicado y enganoso, se elimino.
+
+  try {
+    await crmPurchaseSyncService.syncPublicPurchaseStage(id, crmPurchaseSyncService.STAGE_NAMES.CONTRACTS, user);
+  } catch (crmSyncError) {
+    logger.warn({ crmSyncError, requestId: id }, "No se pudo sincronizar contrato publico con CRM");
+  }
 
   return completed;
 }
@@ -5185,6 +5234,11 @@ async function completeDelivery({ id, user, notes, expected_updated_at }) {
     meta: { status: updated.status, delivered_at: updated.delivered_at || null },
     priority: 2,
   });
+  try {
+    await crmPurchaseSyncService.syncPublicPurchaseStage(id, crmPurchaseSyncService.STAGE_NAMES.CLOSED_WON, user, "won");
+  } catch (crmSyncError) {
+    logger.warn({ crmSyncError, requestId: id }, "No se pudo sincronizar cierre ganado de compra publica con CRM");
+  }
   return updated;
 }
 
@@ -6055,6 +6109,8 @@ async function activateSupplyControl({ id, user, supplyControlType, expected_upd
 }
 
 module.exports = {
+  canViewInspectionQueue,
+  canRegisterSiteInspection,
   getApprovedClients,
   getAcpCommercialUsers,
   getTechnicalInspectionUsers,

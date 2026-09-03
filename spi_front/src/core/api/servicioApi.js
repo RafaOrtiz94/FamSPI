@@ -370,3 +370,8 @@ export const getServicioCronogramaFeed = async ({ from, to, scope = "team" } = {
  const { data } = await api.get("/servicio/cronograma/feed", { params: { from, to, scope } });
  return data;
 };
+
+export const getServicioActionQueue = async ({ scope = "team" } = {}) => {
+ const { data } = await api.get("/servicio/action-queue", { params: { scope } });
+ return data;
+};

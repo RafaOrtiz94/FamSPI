@@ -151,6 +151,16 @@ export const WORKSPACE_TEXTS = {
         'Si no es factible, seleccione la alternativa comercial que continuara en compras'
       ],
       warnings: ['La decision de factibilidad cierra el Business Case y bloquea nuevas ediciones']
+    },
+    offer_workspace: {
+      title: 'Oferta Comercial',
+      description: 'Generacion de hoja editable, publicacion de PDF y aceptacion o rechazo por el comercial creador',
+      tips: [
+        'Cree una version nueva solo despues de una factibilidad positiva',
+        'Complete los precios en la hoja editable y luego publique el PDF',
+        'Si el comercial rechaza la oferta, use una nueva version para reenviar la propuesta'
+      ],
+      warnings: ['Solo el comercial creador del BC puede aceptar o rechazar la oferta publicada']
     }
   },
 

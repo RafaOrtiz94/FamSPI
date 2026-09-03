@@ -28,14 +28,19 @@ const FIELD_CLIENT_READ_ROLES = new Set([
   "jefe_logistica",
 ]);
 
+// backoffice_comercial: mismo caso que EDIT_CLIENT_ROLES/ASSIGN_CLIENT_ROLES
+// en clients.routes.js (extra_roles, ej. lorena.loaiza) -- sin esto aqui, el
+// gate de la ruta la dejaba pasar pero esta funcion la seguia bloqueando.
 const OPERATIONS_MANAGER_ROLES = new Set([
   "jefe_operaciones",
   "jefe_de_operaciones",
+  "backoffice_comercial",
 ]);
 
 const ASSIGNER_ROLES = new Set([
   "jefe_operaciones",
   "jefe_de_operaciones",
+  "backoffice_comercial",
 ]);
 
 const ADVISOR_ROLES = new Set([
@@ -79,8 +84,18 @@ const CLIENT_VISIT_LOCATION_CLUSTER_RADIUS_METERS = Number.parseInt(
   10,
 );
 
+// Bug real (Lorena Loaiza, scope financiero, extra_roles=["backoffice_comercial"]):
+// este helper solo miraba el rol principal, ignorando extra_roles (capacidad
+// puntual otorgada sin cambiar el rol, ver migrations/276_users_extra_roles.sql).
+// El gate de la ruta (requireRole en clients.routes.js) SI mira extra_roles y
+// la dejaba pasar, pero toda la logica interna de este modulo (isManager,
+// canAssignClients, canEditClients, etc.) seguia evaluandola como si no
+// tuviera ningun permiso especial -- resultado: lista de clientes vacia
+// (scope "solo mios") y asignacion bloqueada, sin ningun error visible.
 function hasRole(user, allowedRoles) {
-  return allowedRoles.has(normalizeRole(user?.role));
+  if (allowedRoles.has(normalizeRole(user?.role))) return true;
+  const extraRoles = Array.isArray(user?.extra_roles) ? user.extra_roles : [];
+  return extraRoles.some((role) => allowedRoles.has(normalizeRole(role)));
 }
 
 function isManager(user) {
@@ -1292,6 +1307,8 @@ async function listAccessibleClients({
   includeAllForBusinessCase = false,
   scheduleScope = null,
   scheduleWindow = null,
+  page = 1,
+  limit = null,
 }) {
   await ensureTables();
   const dateParam = visitDate || new Date().toISOString().slice(0, 10);
@@ -1427,10 +1444,13 @@ async function listAccessibleClients({
     )
   `);
 
-  const requestedLimit = Number.parseInt(String(process.env.CLIENTS_LIST_LIMIT || "5000"), 10);
+  const requestedLimit =
+    Number.parseInt(String(limit || process.env.CLIENTS_LIST_LIMIT || "100"), 10);
   const safeLimit = Number.isFinite(requestedLimit)
-    ? Math.min(Math.max(requestedLimit, 200), 20000)
-    : 5000;
+    ? Math.min(Math.max(requestedLimit, 25), 250)
+    : 100;
+  const safePage = Number.isFinite(Number(page)) ? Math.max(1, Number(page)) : 1;
+  const safeOffset = (safePage - 1) * safeLimit;
 
   // canAssignClients (jefe_operaciones) necesita ver la lista completa para poder elegir a
   // quien asignar cada cliente; sin esto queda ciego apenas no tiene asignaciones activas propias.
@@ -1639,7 +1659,7 @@ async function listAccessibleClients({
           ON LOWER(COALESCE(vu.email, '')) = LOWER(COALESCE(cvl.user_email, ''))
         WHERE cvl.client_request_id = cr.id
         ORDER BY COALESCE(cvl.hora_salida, cvl.hora_entrada, cvl.visit_date::timestamp) DESC
-        LIMIT 20
+        LIMIT 5
       ) logs
     ) visit_history ON TRUE
     LEFT JOIN LATERAL (
@@ -1704,10 +1724,13 @@ async function listAccessibleClients({
     ) crm_followup ON TRUE
     ${whereClause}
     ORDER BY cr.created_at DESC
-    LIMIT ${safeLimit}
+    LIMIT ${safeLimit + 1}
+    OFFSET ${safeOffset}
   `;
 
-  const { rows } = await db.query(query, params);
+  const { rows: rawRows } = await db.query(query, params);
+  const hasMore = rawRows.length > safeLimit;
+  const rows = hasMore ? rawRows.slice(0, safeLimit) : rawRows;
 
   const plannedByClient = plannedVisits.reduce((acc, visit) => {
     acc[visit.client_request_id] = {
@@ -1813,6 +1836,12 @@ async function listAccessibleClients({
       has_approved_schedule: Boolean(approvedSchedule),
       schedule_status: approvedSchedule?.status || null,
       cities_today: citiesToday,
+    },
+    pagination: {
+      page: safePage,
+      limit: safeLimit,
+      has_more: hasMore,
+      returned: clients.length,
     },
   };
 }

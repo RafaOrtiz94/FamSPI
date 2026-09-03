@@ -5,13 +5,58 @@ export const listTiAssets = async (params = {}) => {
  return data?.data || [];
 };
 
+export const listTiCustodySummary = async () => {
+ const { data } = await api.get("/ti-assets/custody/summary");
+ return data?.data || [];
+};
+
+export const listTiAssetClients = async (params = {}) => {
+ const { data } = await api.get("/ti-assets/custody/clients", { params });
+ return data?.data || [];
+};
+
+export const moveTiAssetCustody = async (assetId, payload = {}) => {
+ const { data } = await api.post(`/ti-assets/${assetId}/custody`, payload);
+ return data?.data || null;
+};
+
+export const listTiAssetCustodyHistory = async (assetId) => {
+ const { data } = await api.get(`/ti-assets/${assetId}/custody-history`);
+ return data?.data || [];
+};
+
 export const createTiAsset = async (payload = {}) => {
+ const photos = Array.isArray(payload.condition_photos) ? payload.condition_photos : [];
+ if (photos.length) {
+  const formData = new FormData();
+  Object.entries(payload).forEach(([key, value]) => {
+   if (key === "condition_photos") return;
+   if (value === undefined || value === null) return;
+   formData.append(key, value);
+  });
+  photos.forEach((file) => formData.append("condition_photos", file));
+  const { data } = await api.post("/ti-assets", formData, {
+   headers: { "Content-Type": "multipart/form-data" },
+   timeout: 60000,
+  });
+  return data?.data || null;
+ }
  const { data } = await api.post("/ti-assets", payload);
  return data?.data || null;
 };
 
 export const updateTiAsset = async (assetId, payload = {}) => {
  const { data } = await api.patch(`/ti-assets/${assetId}`, payload);
+ return data?.data || null;
+};
+
+export const uploadTiAssetInitialConditionPhotos = async (assetId, photos = []) => {
+ const formData = new FormData();
+ (Array.isArray(photos) ? photos : []).forEach((file) => formData.append("condition_photos", file));
+ const { data } = await api.post(`/ti-assets/${assetId}/condition-photos`, formData, {
+  headers: { "Content-Type": "multipart/form-data" },
+  timeout: 60000,
+ });
  return data?.data || null;
 };
 
@@ -120,8 +165,7 @@ export const listTiMaintenanceReports = async () => {
 // ─── PDF blob downloader (uses axios → includes Authorization header) ─────────
 
 const triggerBlobDownload = async (apiPath, filename) => {
- const response = await api.get(apiPath, { responseType: "arraybuffer" });
- const blob = new Blob([response.data], { type: "application/pdf" });
+ const blob = await getPdfBlob(apiPath);
  const url  = URL.createObjectURL(blob);
  const a    = document.createElement("a");
  a.href     = url;
@@ -130,6 +174,44 @@ const triggerBlobDownload = async (apiPath, filename) => {
  a.click();
  document.body.removeChild(a);
  URL.revokeObjectURL(url);
+};
+
+const getPdfBlob = async (apiPath) => {
+ const response = await api.get(apiPath, { responseType: "arraybuffer" });
+ return new Blob([response.data], { type: "application/pdf" });
+};
+
+const openPdfPrintDialog = async (apiPath, fallbackFilename) => {
+ const printWindow = window.open("", "_blank");
+ let blob;
+ try {
+  blob = await getPdfBlob(apiPath);
+ } catch (error) {
+  if (printWindow) printWindow.close();
+  throw error;
+ }
+ const url = URL.createObjectURL(blob);
+ if (!printWindow) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fallbackFilename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+  return;
+ }
+ printWindow.opener = null;
+ printWindow.addEventListener("load", () => {
+  try {
+   printWindow.focus();
+   printWindow.print();
+  } catch (_error) {
+   // Browser print policies vary; the opened PDF remains available to print manually.
+  }
+ }, { once: true });
+ printWindow.location.href = url;
+ window.setTimeout(() => URL.revokeObjectURL(url), 60000);
 };
 
 export const downloadTiMaintenanceReport = async ({ period_type = "annual", year, month } = {}) => {
@@ -241,6 +323,20 @@ export const downloadTiAssetReport = async (assetId) => {
  await triggerBlobDownload(
    `/ti-assets/reports/asset/${assetId}`,
    `Reporte-Activo-${String(assetId).padStart(6, "0")}.pdf`,
+ );
+};
+
+export const downloadTiAssetLabel = async (assetId, assetCode = "") => {
+ await triggerBlobDownload(
+   `/ti-assets/${assetId}/label`,
+   `Etiqueta-${assetCode || String(assetId).padStart(6, "0")}.pdf`,
+ );
+};
+
+export const printTiAssetLabel = async (assetId, assetCode = "") => {
+ await openPdfPrintDialog(
+   `/ti-assets/${assetId}/label`,
+   `Etiqueta-${assetCode || String(assetId).padStart(6, "0")}.pdf`,
  );
 };
 

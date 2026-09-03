@@ -64,6 +64,18 @@ export const getSignatureWorkflowSourcePdfBuffer = async (workflowId, documentId
   return response.data; // ArrayBuffer para pdfjs-dist
 };
 
+// Mismo documento que /final-pdf pero como ArrayBuffer para el visor en
+// vivo (pdfjs-dist): incluye las firmas ya registradas por otros firmantes
+// (con espacios en blanco para quienes falten) para que un firmante nuevo
+// vea de inmediato donde ya firmaron los demas y no coloque su firma
+// encima o en un lugar equivocado.
+export const getSignatureWorkflowFinalPdfBuffer = async (workflowId, documentId) => {
+  const response = await api.get(`${base}/${workflowId}/documents/${documentId}/final-pdf`, {
+    responseType: "arraybuffer",
+  });
+  return response.data;
+};
+
 export const downloadSignatureWorkflowSourcePdf = async (workflowId, documentId) => {
   const response = await api.get(`${base}/${workflowId}/documents/${documentId}/pdf`, {
     responseType: "blob",

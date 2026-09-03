@@ -16,6 +16,7 @@ import {
 import toast from "react-hot-toast";
 
 import { createUser, getUsers, updateUser, getUserRoles } from "../../../core/api/usersApi";
+import { useAuth } from "../../../core/auth/AuthContext";
 import { getDepartments } from "../../../core/api/departmentsApi";
 import Button from "../../../core/ui/components/Button";
 import Card from "../../../core/ui/components/Card";
@@ -42,6 +43,8 @@ const EMPTY_FORM = {
   role: "pendiente",
   department_id: "",
   google_id: "",
+  username: "",
+  account_expires_at: "",
 };
 
 const formatDate = (value) => {
@@ -138,6 +141,12 @@ const ActionConfirmModal = ({ state, onClose, onConfirm, loading }) => {
 };
 
 const Usuarios = () => {
+  const { user: currentUser } = useAuth();
+  // jefe_ti es la unica forma de registrar (o reiniciar credenciales de) un
+  // usuario pasante -- el backend ya lo rechaza con 403 para cualquier otro
+  // rol, esto solo evita que un "ti"/"admin_ti" vea la opcion, cargue el
+  // formulario y se lleve el error recien al enviar.
+  const isJefeTi = ["jefe_ti", "jefe_de_ti"].includes(String(currentUser?.role || "").toLowerCase());
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [roleOptions, setRoleOptions] = useState(ROLE_OPTIONS);
@@ -155,6 +164,8 @@ const Usuarios = () => {
   const [saving, setSaving] = useState(false);
   const [actionState, setActionState] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [tempCredentials, setTempCredentials] = useState(null);
+  const [resettingPassword, setResettingPassword] = useState(false);
   const initializedRef = useRef(false);
 
   useEffect(() => {
@@ -232,6 +243,8 @@ const Usuarios = () => {
         role: user.role || "pendiente",
         department_id: user.department_id ? String(user.department_id) : "",
         google_id: user.google_id || "",
+        username: user.username || "",
+        account_expires_at: user.account_expires_at ? String(user.account_expires_at).slice(0, 10) : "",
       });
     } else {
       resetForm();
@@ -251,6 +264,11 @@ const Usuarios = () => {
       toast.error("Nombre completo y correo son obligatorios");
       return;
     }
+    const isPasante = form.role === "pasante";
+    if (isPasante && !form.account_expires_at) {
+      toast.error("La fecha de fin de pasantía es obligatoria para el rol Pasante");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -261,13 +279,20 @@ const Usuarios = () => {
         department_id: form.department_id || null,
         google_id: form.google_id?.trim() || null,
       };
+      if (isPasante) {
+        payload.username = form.username?.trim() || undefined;
+        payload.account_expires_at = form.account_expires_at;
+      }
 
       if (editing) {
         await updateUser(editing.id, payload);
         toast.success("Usuario actualizado correctamente");
       } else {
-        await createUser(payload);
+        const created = await createUser(payload);
         toast.success("Usuario creado correctamente");
+        if (created?.temp_password) {
+          setTempCredentials({ username: created.username, password: created.temp_password });
+        }
       }
 
       closeModal();
@@ -281,6 +306,26 @@ const Usuarios = () => {
       toast.error(message, error?.response?.status === 409 ? { duration: 9000 } : undefined);
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Genera una password temporal nueva para un pasante existente (ej. la
+  // olvido) -- reusa el mismo backend que el alta (reset_password=true),
+  // fuerza must_change_password en el proximo login.
+  const handleResetPassword = async () => {
+    if (!editing) return;
+    setResettingPassword(true);
+    try {
+      const updated = await updateUser(editing.id, { reset_password: true });
+      if (updated?.temp_password) {
+        setTempCredentials({ username: updated.username, password: updated.temp_password });
+      }
+      toast.success("Contraseña temporal generada");
+    } catch (error) {
+      console.error("Error reiniciando password:", error);
+      toast.error(error?.response?.data?.message || "No se pudo reiniciar la contraseña");
+    } finally {
+      setResettingPassword(false);
     }
   };
 
@@ -657,7 +702,7 @@ const Usuarios = () => {
               label="Rol"
               value={form.role}
               onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}
-              options={roleOptions}
+              options={isJefeTi || form.role === "pasante" ? roleOptions : roleOptions.filter((option) => option.value !== "pasante")}
               includePlaceholder={false}
               containerClassName="mb-0"
             />
@@ -670,6 +715,40 @@ const Usuarios = () => {
               containerClassName="mb-0"
             />
           </div>
+
+          {form.role === "pasante" ? (
+            <div className="space-y-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm text-amber-800">
+                Los pasantes no tienen cuenta Google corporativa — inician sesión con usuario y contraseña
+                propia. La contraseña temporal se genera automáticamente y solo se muestra una vez.
+                {!isJefeTi ? " Solo Jefe TI puede registrar pasantes o reiniciar su contraseña." : ""}
+              </p>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Input
+                  label="Usuario (opcional)"
+                  value={form.username}
+                  onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
+                  placeholder="Se genera automático si se deja vacío"
+                  containerClassName="mb-0"
+                  disabled={!isJefeTi}
+                />
+                <Input
+                  label="Fin de pasantía"
+                  type="date"
+                  value={form.account_expires_at}
+                  onChange={(event) => setForm((current) => ({ ...current, account_expires_at: event.target.value }))}
+                  containerClassName="mb-0"
+                  required
+                  disabled={!isJefeTi}
+                />
+              </div>
+              {editing && isJefeTi ? (
+                <Button type="button" variant="secondary" loading={resettingPassword} onClick={handleResetPassword}>
+                  Restablecer contraseña
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
 
           <Input
             label="Google ID"
@@ -688,6 +767,33 @@ const Usuarios = () => {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        open={Boolean(tempCredentials)}
+        onClose={() => setTempCredentials(null)}
+        title="Credenciales temporales del pasante"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            Copia y entrega estas credenciales al pasante ahora — la contraseña no se puede volver a
+            consultar después de cerrar esta ventana. Deberá cambiarla en su primer inicio de sesión.
+          </div>
+          <div className="space-y-2">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Usuario</p>
+              <p className="font-mono text-sm text-slate-800">{tempCredentials?.username}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Contraseña temporal</p>
+              <p className="font-mono text-sm text-slate-800">{tempCredentials?.password}</p>
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button type="button" onClick={() => setTempCredentials(null)}>Entendido</Button>
+          </div>
+        </div>
       </Modal>
 
       <ActionConfirmModal

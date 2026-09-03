@@ -39,10 +39,12 @@ import LocationManager from "../components/LocationManager";
 import { formatDateSafe } from "../../../shared/utils/dateUtils";
 
 const todayStr = new Date().toISOString().slice(0, 10);
+const CLIENTS_PAGE_SIZE = 100;
 
 const ASSIGN_CLIENT_ROLES = new Set([
  "jefe_operaciones",
  "jefe_de_operaciones",
+ "backoffice_comercial",
 ]);
 
 const FULL_ACCESS_ROLES = new Set([
@@ -142,10 +144,16 @@ const ClientesPage = () => {
  const { showToast } = useUI();
  const { role, user } = useAuth();
  const normalizedRole = normalizeRoleToken(role || user?.role || user?.role_name || user?.scope || "");
- const roleTokens = (normalizedRole || "")
+ const baseRoleTokens = (normalizedRole || "")
  .split(/[,|]+/)
  .map((token) => normalizeRoleToken(token))
  .filter(Boolean);
+ // extra_roles: capacidades adicionales otorgadas a un usuario puntual sin
+ // cambiar su rol principal (ver migrations/276_users_extra_roles.sql).
+ const extraRoleTokens = (Array.isArray(user?.extra_roles) ? user.extra_roles : [])
+ .map((token) => normalizeRoleToken(token))
+ .filter(Boolean);
+ const roleTokens = Array.from(new Set([...baseRoleTokens, ...extraRoleTokens]));
  const hasAnyRole = useCallback((allowedRoles) => roleTokens.some((token) => allowedRoles.has(token)), [roleTokens]);
  const canAssignClients = hasAnyRole(ASSIGN_CLIENT_ROLES);
  const canManageAllClients = hasAnyRole(FULL_ACCESS_ROLES);
@@ -178,6 +186,7 @@ const ClientesPage = () => {
  const [filterBySchedule, setFilterBySchedule] = useState(shouldStartWithScheduleFilter);
  const [selectedDate, setSelectedDate] = useState(todayStr);
  const [summary, setSummary] = useState({});
+ const [clientsPagination, setClientsPagination] = useState({ page: 1, limit: CLIENTS_PAGE_SIZE, has_more: false });
  const [temporaryAssignmentsFilter, setTemporaryAssignmentsFilter] = useState("all"); // all | expiring_today | expiring_7
  const [albumSearch, setAlbumSearch] = useState("");
  const [showAllClients, setShowAllClients] = useState(false);
@@ -198,6 +207,13 @@ const ClientesPage = () => {
  const [editFiles, setEditFiles] = useState({});
  const [, setUsersDirectoryByEmail] = useState({});
  const clientsCacheRef = useRef(new Map());
+ // Espejo sincrónico de clientes/registeredClients para loadClientes (ver
+ // mas abajo) -- lee estos refs en vez de las variables de estado directo
+ // para no depender de ellas en su propio useCallback (eso causaba el
+ // bootloop) y sin arriesgarse a que el valor combinado del updater
+ // funcional de setState no este listo a tiempo para el guardado en cache.
+ const clientesRef = useRef([]);
+ const registeredClientsRef = useRef([]);
 
  const getStatusMeta = (statusOrClient) => {
  const status = typeof statusOrClient === "object" && statusOrClient !== null
@@ -422,14 +438,17 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  }
  };
 
- const loadClientes = useCallback(async ({ forceRefresh = false } = {}) => {
- const cacheKey = `${currentEmail}|${selectedDate}|${filterBySchedule ? "1" : "0"}`;
- if (!forceRefresh) {
+ const loadClientes = useCallback(async ({ forceRefresh = false, page = 1, append = false } = {}) => {
+ const cacheKey = `${currentEmail}|${selectedDate}|${filterBySchedule ? "1" : "0"}|${page}`;
+ if (!forceRefresh && !append) {
  const cached = clientsCacheRef.current.get(cacheKey);
  if (cached) {
+ clientesRef.current = cached.clients;
+ registeredClientsRef.current = cached.registeredClients;
  setClientes(cached.clients);
  setRegisteredClients(cached.registeredClients);
  setSummary(cached.summary);
+ setClientsPagination(cached.pagination);
  return;
  }
  }
@@ -441,11 +460,14 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  include_schedule_info: true,
  filter_by_schedule: filterBySchedule,
  schedule_window: "approved_period",
+ limit: CLIENTS_PAGE_SIZE,
+ page,
  });
 
  let loadedClients = [];
  let loadedProspects = [];
  let loadedSummary = {};
+ let loadedPagination = {};
 
  if (Array.isArray(result)) {
  loadedClients = result;
@@ -476,16 +498,48 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  asignados: [currentEmail]
  }));
  loadedSummary = result?.summary || {};
+ loadedPagination = result?.pagination || {};
  }
 
- setClientes([...loadedProspects, ...loadedClients]);
- setRegisteredClients(loadedClients);
+ // Bug real (bootloop reportado por Lorena Loaiza): loadClientes leia
+ // `clientes`/`registeredClients` directo del closure y los tenia en su
+ // propio arreglo de dependencias de useCallback. Como esta misma funcion
+ // llama a setClientes/setRegisteredClients, cada fetch generaba una
+ // identidad nueva de loadClientes, y el useEffect de mas abajo (que
+ // depende de loadClientes) volvia a dispararla -- fetch -> setState ->
+ // nueva identidad -> useEffect -> fetch de nuevo, sin parar. Se leen los
+ // refs sincronicos (clientesRef/registeredClientsRef) en vez del estado
+ // por closure: evita la dependencia circular Y evita el riesgo de leer un
+ // valor no listo a tiempo si se usara el updater funcional de setState
+ // para esto mismo.
+ const mergedClients = append
+ ? [...clientesRef.current, ...loadedClients]
+ : [...loadedProspects, ...loadedClients];
+ const mergedRegisteredClients = append
+ ? [...registeredClientsRef.current, ...loadedClients]
+ : loadedClients;
+ clientesRef.current = mergedClients;
+ registeredClientsRef.current = mergedRegisteredClients;
+ setClientes(mergedClients);
+ setRegisteredClients(mergedRegisteredClients);
  setSummary(loadedSummary);
- clientsCacheRef.current.set(cacheKey, {
- clients: [...loadedProspects, ...loadedClients],
- registeredClients: loadedClients,
- summary: loadedSummary,
+ setClientsPagination({
+ page: loadedPagination?.page || page,
+ limit: loadedPagination?.limit || CLIENTS_PAGE_SIZE,
+ has_more: Boolean(loadedPagination?.has_more),
  });
+ if (!append) {
+ clientsCacheRef.current.set(cacheKey, {
+ clients: mergedClients,
+ registeredClients: mergedRegisteredClients,
+ summary: loadedSummary,
+ pagination: {
+ page: loadedPagination?.page || page,
+ limit: loadedPagination?.limit || CLIENTS_PAGE_SIZE,
+ has_more: Boolean(loadedPagination?.has_more),
+ },
+ });
+ }
  // Solo mostrar alerta de cronograma si es comercial puro (no backoffice, no acp, no jefe)
  // Si no hay cronograma aprobado, se desactiva el filtro para mostrar cartera completa.
  if (filterBySchedule && !loadedSummary?.has_approved_schedule && isCommercialOnly) {
@@ -507,8 +561,34 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  }, [filterBySchedule, selectedDate, showToast, currentEmail, isCommercialOnly]);
 
  useEffect(() => {
- loadClientes();
+ clientsCacheRef.current.clear();
+ loadClientes({ page: 1 });
  }, [filterBySchedule, loadClientes]);
+
+ const handleLoadMoreClients = useCallback(() => {
+ if (loading || !clientsPagination?.has_more) return;
+ loadClientes({
+ page: Number(clientsPagination?.page || 1) + 1,
+ append: true,
+ forceRefresh: true,
+ });
+ }, [clientsPagination, loadClientes, loading]);
+
+ const renderLoadMoreClientsButton = () => {
+ if (!clientsPagination?.has_more) return null;
+ return (
+ <div className="flex justify-center pt-4">
+ <Button
+ type="button"
+ variant="secondary"
+ onClick={handleLoadMoreClients}
+ disabled={loading}
+ >
+ {loading ? "Cargando..." : "Cargar más clientes"}
+ </Button>
+ </div>
+ );
+ };
 
  useEffect(() => {
  if (canAssignClients) loadAdvisors();
@@ -1771,9 +1851,12 @@ const renderAlbumCard = (cliente) => {
                   </div>
 
                   {Array.isArray(filteredClientes) && filteredClientes.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
-                      {filteredClientes.map((cliente) => renderCard(cliente))}
-                    </div>
+                    <>
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
+                        {filteredClientes.map((cliente) => renderCard(cliente))}
+                      </div>
+                      {renderLoadMoreClientsButton()}
+                    </>
                   ) : (
                     <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
                       <FiUsers size={32} className="text-[#D1D5DB]" />
@@ -1853,20 +1936,21 @@ const renderAlbumCard = (cliente) => {
                     </div>
 
                     {Array.isArray(filteredAssignedList) && filteredAssignedList.length > 0 ? (
-                      <div className="grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2 xl:grid-cols-3">
-                        {filteredAssignedList.map((cliente) => {
-                          const ciudad = cliente.shipping_city || getCityFromAddress(cliente.shipping_address);
-                          const provincia = cliente.shipping_province || getProvinceFromAddress(cliente.shipping_address);
-                          const clienteEmail = cliente.client_email || "Correo no disponible";
-                          const clientTypeLabel = formatClientType(cliente.client_type);
-                          const meta = getStatusMeta(cliente);
-                          const sourceMeta = getClientSourceMeta(cliente);
-                          return (
-                            <div
-                              key={`mini-${cliente.id}`}
-                              className="flex cursor-pointer flex-col rounded-2xl border border-[#E5E7EB] bg-white p-3 shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition-shadow duration-200 hover:shadow-[0_4px_16px_rgba(0,0,0,0.10)] active:scale-[0.97] active:transition-transform"
-                              onClick={() => openReportModal(cliente)}
-                            >
+                      <>
+                        <div className="grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2 xl:grid-cols-3">
+                          {filteredAssignedList.map((cliente) => {
+                            const ciudad = cliente.shipping_city || getCityFromAddress(cliente.shipping_address);
+                            const provincia = cliente.shipping_province || getProvinceFromAddress(cliente.shipping_address);
+                            const clienteEmail = cliente.client_email || "Correo no disponible";
+                            const clientTypeLabel = formatClientType(cliente.client_type);
+                            const meta = getStatusMeta(cliente);
+                            const sourceMeta = getClientSourceMeta(cliente);
+                            return (
+                              <div
+                                key={`mini-${cliente.id}`}
+                                className="flex cursor-pointer flex-col rounded-2xl border border-[#E5E7EB] bg-white p-3 shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition-shadow duration-200 hover:shadow-[0_4px_16px_rgba(0,0,0,0.10)] active:scale-[0.97] active:transition-transform"
+                                onClick={() => openReportModal(cliente)}
+                              >
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0 space-y-0.5">
                                   <p className="line-clamp-1 text-sm font-semibold text-[#1F2937]">{cliente.nombre}</p>
@@ -1892,10 +1976,12 @@ const renderAlbumCard = (cliente) => {
                                   {provincia || "Provincia no especificada"}, {ciudad || "Ciudad no especificada"}
                                 </p>
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {renderLoadMoreClientsButton()}
+                      </>
                     ) : (
                       <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
                         <FiUsers size={28} className="text-[#D1D5DB]" />

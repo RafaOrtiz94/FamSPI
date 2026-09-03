@@ -17,6 +17,7 @@
 const { oauth2Client, google } = require("../../config/oauth");
 const db = require("../../config/db");
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
 const logger = require("../../config/logger");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 const {
@@ -78,6 +79,7 @@ const ROLE_META = {
   administrador: { scope: "admin", dashboard: "/dashboard/gerencia" },
   pending: { scope: "pending", dashboard: "/registro-en-proceso" },
   pendiente: { scope: "pending", dashboard: "/registro-en-proceso" },
+  pasante: { scope: "pasante", dashboard: "/dashboard/pasante" },
 };
 const resolveRoleMeta = (role) => {
   const key = (role || "pendiente").toLowerCase();
@@ -107,8 +109,12 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 const isProd = process.env.NODE_ENV === "production";
-const ACCESS_TOKEN_EXPIRES_IN = String(process.env.ACCESS_TOKEN_EXPIRES_IN || "8h").trim();
+const ACCESS_TOKEN_BUSINESS_DAYS = Number.parseInt(
+  String(process.env.ACCESS_TOKEN_BUSINESS_DAYS || "5").trim(),
+  10
+);
 const REFRESH_TOKEN_EXPIRES_IN = String(process.env.REFRESH_TOKEN_EXPIRES_IN || "30d").trim();
+const GUAYAQUIL_UTC_OFFSET_MINUTES = -5 * 60;
 const buildAuthRequestMeta = (req = {}) => ({
   method: req.method || null,
   path: req.originalUrl || req.url || null,
@@ -121,6 +127,30 @@ const buildAuthRequestMeta = (req = {}) => ({
 /* ============================================================
    Helpers seguros para firmar tokens
 ============================================================ */
+const toGuayaquilLocalDate = (date) =>
+  new Date(date.getTime() + GUAYAQUIL_UTC_OFFSET_MINUTES * 60 * 1000);
+
+const fromGuayaquilLocalDate = (date) =>
+  new Date(date.getTime() - GUAYAQUIL_UTC_OFFSET_MINUTES * 60 * 1000);
+
+// "Dias habiles" se interpreta como lunes a viernes. No hay calendario de
+// feriados corporativos cargado en auth, asi que no se descartan festivos.
+const addBusinessDaysInGuayaquil = (date, businessDays) => {
+  const safeBusinessDays = Number.isInteger(businessDays) && businessDays > 0 ? businessDays : 5;
+  const localDate = toGuayaquilLocalDate(date);
+  let remaining = safeBusinessDays;
+
+  while (remaining > 0) {
+    localDate.setUTCDate(localDate.getUTCDate() + 1);
+    const dayOfWeek = localDate.getUTCDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      remaining -= 1;
+    }
+  }
+
+  return fromGuayaquilLocalDate(localDate);
+};
+
 const signAccess = (payload) =>
   jwt.sign(
     {
@@ -128,9 +158,9 @@ const signAccess = (payload) =>
       iss: "spi-fam-backend",
       aud: "spi-fam-frontend",
       sub: payload.id?.toString(),
+      exp: Math.floor(addBusinessDaysInGuayaquil(new Date(), ACCESS_TOKEN_BUSINESS_DAYS).getTime() / 1000),
     },
-    process.env.SECRET_KEY,
-    { expiresIn: ACCESS_TOKEN_EXPIRES_IN }
+    process.env.SECRET_KEY
   );
 
 const signRefresh = (payload) =>
@@ -247,7 +277,7 @@ const googleCallback = async (req, res) => {
     // Buscar o crear usuario (prioriza google_id para evitar duplicados)
     const existingUsers = await db.query(
       `
-      SELECT id, email, fullname, role, department_id, lopdp_internal_status, google_id
+      SELECT id, email, fullname, role, department_id, lopdp_internal_status, google_id, extra_roles
       FROM users
       WHERE google_id = $1 OR email = $2
       ORDER BY CASE WHEN google_id = $1 THEN 0 ELSE 1 END, id ASC
@@ -270,7 +300,7 @@ const googleCallback = async (req, res) => {
             department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $4 LIMIT 1)),
             lopdp_internal_status = COALESCE(lopdp_internal_status, 'pending')
         WHERE google_id = $3
-        RETURNING id, email, fullname, role, department_id, lopdp_internal_status;
+        RETURNING id, email, fullname, role, department_id, lopdp_internal_status, extra_roles;
         `,
         [email, fullname, googleId, "ti"]
       );
@@ -286,7 +316,7 @@ const googleCallback = async (req, res) => {
             department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $4 LIMIT 1)),
             lopdp_internal_status = COALESCE(lopdp_internal_status, 'pending')
         WHERE email = $3
-        RETURNING id, email, fullname, role, department_id, lopdp_internal_status;
+        RETURNING id, email, fullname, role, department_id, lopdp_internal_status, extra_roles;
         `,
         [googleId, fullname, email, "ti"]
       );
@@ -312,7 +342,7 @@ const googleCallback = async (req, res) => {
               department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $5 LIMIT 1)),
               lopdp_internal_status = COALESCE(lopdp_internal_status, 'pending')
           WHERE id = $4
-          RETURNING id, email, fullname, role, department_id, lopdp_internal_status;
+          RETURNING id, email, fullname, role, department_id, lopdp_internal_status, extra_roles;
           `,
           [googleId, email, fullname, existingByIdentity.id, "ti"]
         );
@@ -331,7 +361,7 @@ const googleCallback = async (req, res) => {
             lopdp_internal_status
           )
           VALUES ($1, $2, $3, $4, $5, (SELECT id FROM departments WHERE code = $6 LIMIT 1), 'pending')
-          RETURNING id, email, fullname, role, department_id, lopdp_internal_status;
+          RETURNING id, email, fullname, role, department_id, lopdp_internal_status, extra_roles;
           `,
           [googleId, email, fullname, data.given_name || "Usuario", "pendiente", "comercial"]
         );
@@ -358,6 +388,7 @@ const googleCallback = async (req, res) => {
       scope: roleMeta.scope,
       dashboard: roleMeta.dashboard,
       lopdp_internal_status: user.lopdp_internal_status || "pending",
+      extra_roles: user.extra_roles || [],
     };
 
     // Generar correlation ID para tracking de sesión
@@ -516,7 +547,10 @@ const me = async (req, res) => {
         u.lopdp_internal_status,
         u.lopdp_internal_signed_at,
         u.lopdp_internal_pdf_file_id,
-        u.lopdp_internal_signature_file_id
+        u.lopdp_internal_signature_file_id,
+        u.auth_provider,
+        u.must_change_password,
+        u.extra_roles
       FROM users u
       LEFT JOIN departments d ON u.department_id = d.id
       LEFT JOIN user_profile up ON up.user_id = u.id
@@ -585,7 +619,7 @@ const refreshToken = async (req, res) => {
     const decoded = jwt.verify(token, process.env.REFRESH_SECRET_KEY);
 
     const { rows } = await db.query(
-      "SELECT id, email, fullname, role, department_id FROM users WHERE id = $1 LIMIT 1;",
+      "SELECT id, email, fullname, role, department_id, extra_roles FROM users WHERE id = $1 LIMIT 1;",
       [decoded.id]
     );
     if (!rows.length)
@@ -606,6 +640,7 @@ const refreshToken = async (req, res) => {
       department,
       scope: roleMeta.scope,
       dashboard: roleMeta.dashboard,
+      extra_roles: u.extra_roles || [],
     });
     const newRefreshToken = signRefresh({ id: u.id, email: u.email });
 
@@ -850,6 +885,214 @@ const acceptInternalLopdp = async (req, res) => {
 };
 
 /* ============================================================
+   7️⃣ Login local de PRODUCCION para usuarios sin OAuth (pasantes)
+   Ver docs/plans/pasantes-access-plan.md. Distinto de localLogin (sandbox,
+   mas abajo): aca cada usuario tiene su propio password_hash en BD, no una
+   contrasena compartida, y SI esta habilitado en produccion.
+============================================================ */
+
+// Rate limiting simple en memoria: no hay ningun limitador existente en el
+// modulo auth (ni siquiera /auth/refresh lo tiene, ver CONTEXT.md del
+// modulo) y aca es mas critico que en OAuth -- Google absorbe el riesgo de
+// fuerza bruta ahi, aca no hay nadie mas que lo haga. No es distribuido
+// entre instancias de Cloud Run, pero el volumen esperado de pasantes es
+// bajo y esto ya sube el costo de un ataque de diccionario significativamente
+// mas que no tener nada.
+const LOGIN_ATTEMPT_MAX = 5;
+const LOGIN_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+const loginAttempts = new Map(); // `${username}:${ip}` -> { count, blockedUntil }
+
+function checkLoginRateLimit(key) {
+  const entry = loginAttempts.get(key);
+  if (!entry) return { blocked: false };
+  if (entry.blockedUntil && entry.blockedUntil > Date.now()) {
+    return { blocked: true, retryAfterMs: entry.blockedUntil - Date.now() };
+  }
+  if (entry.blockedUntil && entry.blockedUntil <= Date.now()) {
+    loginAttempts.delete(key);
+  }
+  return { blocked: false };
+}
+
+function registerLoginFailure(key) {
+  const entry = loginAttempts.get(key) || { count: 0, blockedUntil: null };
+  entry.count += 1;
+  if (entry.count >= LOGIN_ATTEMPT_MAX) {
+    entry.blockedUntil = Date.now() + LOGIN_ATTEMPT_WINDOW_MS;
+  }
+  loginAttempts.set(key, entry);
+}
+
+function clearLoginAttempts(key) {
+  loginAttempts.delete(key);
+}
+
+const localAuthLogin = async (req, res) => {
+  const { username, password } = req.body || {};
+  const cleanUsername = String(username || "").trim();
+  if (!cleanUsername || !password) {
+    return res.status(400).json({ ok: false, message: "Usuario y contraseña son requeridos" });
+  }
+
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || req.ip;
+  const rateLimitKey = `${cleanUsername.toLowerCase()}:${ip}`;
+  const rateLimit = checkLoginRateLimit(rateLimitKey);
+  if (rateLimit.blocked) {
+    return res.status(429).json({
+      ok: false,
+      code: "LOGIN_RATE_LIMITED",
+      message: "Demasiados intentos fallidos. Intenta de nuevo en unos minutos.",
+      retryAfterMs: rateLimit.retryAfterMs,
+    });
+  }
+
+  try {
+    const { rows } = await db.query(
+      `SELECT id, email, fullname, role, department_id, lopdp_internal_status,
+              password_hash, auth_provider, must_change_password, account_expires_at,
+              COALESCE(active, true) AS active
+       FROM users
+       WHERE LOWER(username) = LOWER($1)
+       LIMIT 1`,
+      [cleanUsername],
+    );
+
+    const user = rows[0];
+    // Mensaje generico deliberado (no distinguir "usuario no existe" de
+    // "password incorrecta") para no filtrar que usernames son validos.
+    const genericError = () => res.status(401).json({ ok: false, message: "Usuario o contraseña incorrectos" });
+
+    if (!user || user.auth_provider !== "local" || !user.password_hash) {
+      registerLoginFailure(rateLimitKey);
+      return genericError();
+    }
+    if (!user.active) {
+      registerLoginFailure(rateLimitKey);
+      return res.status(403).json({ ok: false, code: "ACCOUNT_INACTIVE", message: "Esta cuenta está inactiva. Contacta al administrador." });
+    }
+    // Mensaje especifico (a diferencia del generico de arriba) a proposito:
+    // un administrador revisando un reporte de "no puedo entrar" necesita
+    // poder distinguir "vencio la pasantia" de "escribio mal la password" --
+    // no es informacion sensible, el username ya se confirmo valido en la
+    // query anterior.
+    if (user.account_expires_at && new Date(user.account_expires_at).getTime() < Date.now()) {
+      registerLoginFailure(rateLimitKey);
+      return res.status(403).json({ ok: false, code: "ACCOUNT_EXPIRED", message: "Esta cuenta venció. Contacta al administrador para renovarla." });
+    }
+
+    const passwordMatches = await bcrypt.compare(String(password), user.password_hash);
+    if (!passwordMatches) {
+      registerLoginFailure(rateLimitKey);
+      return genericError();
+    }
+
+    clearLoginAttempts(rateLimitKey);
+
+    const roleValue = user.role || "pendiente";
+    const roleMeta = resolveRoleMeta(roleValue);
+    let department = roleMeta.scope || "pendiente";
+    if (user.department_id) {
+      const depQ = await db.query("SELECT code FROM departments WHERE id = $1 LIMIT 1", [user.department_id]);
+      department = depQ.rows[0]?.code || department;
+    }
+
+    // Si debe cambiar password (alta reciente o reset admin), se emite un
+    // JWT de alcance reducido: el frontend lo detecta via
+    // must_change_password=true y redirige a /cambiar-password ANTES de
+    // dejar entrar al resto del sistema. El middleware verifyToken no
+    // distingue este caso -- la restriccion real es que change-password es
+    // el unico endpoint que tiene sentido llamar con este estado, y el
+    // frontend no navega a ningun otro lado mientras must_change_password
+    // sea true (ver AuthContext/ProtectedRoute).
+    const userProfile = {
+      id: user.id,
+      email: user.email,
+      fullname: user.fullname,
+      role: roleValue,
+      department,
+      scope: roleMeta.scope,
+      dashboard: roleMeta.dashboard,
+      lopdp_internal_status: user.lopdp_internal_status || "pending",
+      must_change_password: Boolean(user.must_change_password),
+    };
+
+    const accessToken = signAccess(userProfile);
+    const refreshToken = signRefresh({ id: user.id, email: user.email });
+
+    try {
+      await createSession({ email: user.email, ip, userAgent: req.headers["user-agent"], refreshToken });
+    } catch (sessionErr) {
+      logger.warn("[LOCAL_AUTH] No se pudo registrar sesion: %s", sessionErr.message);
+    }
+
+    runAsyncLoginTask(syncAttendanceDuringLogin(user), { userId: user.id, email: user.email });
+
+    logger.info("[LOCAL_AUTH] Login local: %s (id=%s)", cleanUsername, user.id);
+    return res.json({
+      ok: true,
+      accessToken,
+      refreshToken,
+      email: user.email,
+      must_change_password: Boolean(user.must_change_password),
+    });
+  } catch (err) {
+    logger.error({ err }, "[LOCAL_AUTH] Error en login local");
+    return res.status(500).json({ ok: false, message: "Error interno" });
+  }
+};
+
+const MIN_PASSWORD_LENGTH = 8;
+
+const changePassword = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
+
+    const { currentPassword, newPassword } = req.body || {};
+    if (!newPassword || String(newPassword).length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({ ok: false, message: `La nueva contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres` });
+    }
+
+    const { rows } = await db.query(
+      `SELECT id, password_hash, auth_provider, must_change_password FROM users WHERE id = $1 LIMIT 1`,
+      [userId],
+    );
+    const user = rows[0];
+    if (!user || user.auth_provider !== "local") {
+      return res.status(400).json({ ok: false, message: "Esta cuenta no usa autenticación local" });
+    }
+
+    // Si el usuario NO viene de un flujo de cambio obligatorio, se exige la
+    // password actual (cambio voluntario). En el flujo obligatorio
+    // (must_change_password=true, justo tras alta o reset admin) el JWT ya
+    // probo identidad recien emitido por local-login, no hace falta pedirla
+    // de nuevo -- pedirla ahi solo agregaria friccion sin ganancia de
+    // seguridad real (el admin ya le entrego la password temporal aparte).
+    if (!user.must_change_password) {
+      if (!currentPassword) {
+        return res.status(400).json({ ok: false, message: "Debes indicar tu contraseña actual" });
+      }
+      const matches = await bcrypt.compare(String(currentPassword), user.password_hash || "");
+      if (!matches) {
+        return res.status(401).json({ ok: false, message: "Contraseña actual incorrecta" });
+      }
+    }
+
+    const newHash = await bcrypt.hash(String(newPassword), 11);
+    await db.query(
+      `UPDATE users SET password_hash = $1, must_change_password = false, updated_at = NOW() WHERE id = $2`,
+      [newHash, userId],
+    );
+
+    logger.info("[LOCAL_AUTH] Password cambiada: user_id=%s", userId);
+    return res.json({ ok: true, message: "Contraseña actualizada" });
+  } catch (err) {
+    logger.error({ err }, "[LOCAL_AUTH] Error cambiando password");
+    return res.status(500).json({ ok: false, message: "Error interno" });
+  }
+};
+
+/* ============================================================
    7️⃣ Login local (solo sandbox — SANDBOX_AUTH=true)
 ============================================================ */
 const localLogin = async (req, res) => {
@@ -940,4 +1183,6 @@ module.exports = {
   activeUsers,
   acceptInternalLopdp,
   localLogin,
+  localAuthLogin,
+  changePassword,
 };

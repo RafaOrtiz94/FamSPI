@@ -10,6 +10,7 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { UnifiedPurchaseStateMachine, UNIFIED_PURCHASE_STATES } = require('./unifiedPurchaseStateMachine');
+const crmPurchaseSyncService = require("../crm-fam/crmPurchaseSync.service");
 const {
   PURCHASE_TYPES,
   PRIVATE_MODALITIES,
@@ -168,6 +169,16 @@ class UnifiedPurchasesFlowService {
       'Oferta enviada'
     );
 
+    try {
+      await crmPurchaseSyncService.syncPublicPurchaseStage(
+        purchaseId,
+        crmPurchaseSyncService.STAGE_NAMES.PROPOSAL_PRESENTATION,
+        user,
+      );
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar oferta publica con CRM');
+    }
+
     return { sent: true, offerDocumentId };
   }
 
@@ -235,6 +246,16 @@ class UnifiedPurchasesFlowService {
       );
     } catch (transitionError) {
       logger.warn({ error: transitionError.message }, 'No se pudo transicionar estado, pero la oferta se subió correctamente');
+    }
+
+    try {
+      await crmPurchaseSyncService.syncPublicPurchaseStage(
+        purchaseId,
+        crmPurchaseSyncService.STAGE_NAMES.NEGOTIATION,
+        user,
+      );
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar oferta firmada publica con CRM');
     }
 
     return {

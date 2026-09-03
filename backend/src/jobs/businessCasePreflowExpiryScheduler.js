@@ -1,6 +1,8 @@
 const db = require("../config/db");
 const logger = require("../config/logger");
 const notificationManager = require("../modules/notifications/notificationManager");
+const { isOffHours } = require("../utils/offHoursPolicy");
+const { registerOffHoursJob } = require("./offHoursCoordinator");
 
 const DEFAULT_INTERVAL_MINUTES = Number(process.env.BC_PREFLOW_EXPIRY_INTERVAL_MINUTES || 60);
 const SYSTEM_ACTOR_UUID = "00000000-0000-0000-0000-000000000001";
@@ -122,8 +124,14 @@ function startBusinessCasePreflowExpiryJob() {
     runOnce().catch((error) => logger.error({ error }, "Error inicial preflow expiry job"));
   }
   interval = setInterval(() => {
+    if (isOffHours(new Date()).isOffHours) return; // manejado por offHoursCoordinator
     runOnce().catch((error) => logger.error({ error }, "Error preflow expiry job"));
   }, everyMs);
+  registerOffHoursJob({
+    name: "bc_preflow_expiry",
+    runOnce,
+    offHoursIntervalMs: everyMs * 6,
+  });
 }
 
 module.exports = {

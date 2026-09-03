@@ -1,4 +1,5 @@
 const db = require("../../config/db");
+const crypto = require("crypto");
 const logger = require("../../config/logger");
 const notificationManager = require("../notifications/notificationManager");
 const { getHolidaysForYear } = require("../security/security.holidays.ec");
@@ -37,11 +38,34 @@ const TI_READ_ROLES = [
   "ti", "jefe_ti", "admin_ti", "gerencia", "gerencia_general",
   "financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador",
 ];
+const TI_LABEL_PRINT_ROLES = [...TI_READ_ROLES, "pasante"];
 // Roles que pueden crear activos (TI + financiero)
 const TI_ASSET_CREATE_ROLES = [...TI_ROLES, "financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador"];
 const MS_PER_DAY = 86400000;
 const TI_ACTA_ENTREGA_TEMPLATE_ID = process.env.TI_ACTA_ENTREGA_TEMPLATE_ID || null;
 const TI_ACTA_RETIRO_TEMPLATE_ID = process.env.TI_ACTA_RETIRO_TEMPLATE_ID || null;
+
+function buildInitialConditionPhotos(asset = {}, publicBaseUrl = "") {
+  const base = String(publicBaseUrl || "").replace(/\/+$/, "");
+  const code = asset.asset_code ? encodeURIComponent(asset.asset_code) : "";
+  const buildPublicUrl = (index) => code
+    ? `${base}/api/v1/ti-assets/public/${code}/condition-photos/${index}`
+    : null;
+  return [
+    {
+      index: 1,
+      url: buildPublicUrl(1),
+      drive_url: asset.initial_condition_photo_1_url || null,
+      sha256: asset.initial_condition_photo_1_sha256 || null,
+    },
+    {
+      index: 2,
+      url: buildPublicUrl(2),
+      drive_url: asset.initial_condition_photo_2_url || null,
+      sha256: asset.initial_condition_photo_2_sha256 || null,
+    },
+  ].filter((photo) => photo.sha256 || photo.drive_url);
+}
 
 // Schema managed via migration 202_ti_assets_v2.sql.
 // Runtime guard kept for additive columns that must exist in production.
@@ -51,6 +75,29 @@ async function ensureTiAssetsSchema() {
     tiAssetsSchemaPromise = (async () => {
       await db.query(`ALTER TABLE public.ti_asset_financial_docs ADD COLUMN IF NOT EXISTS invoice_number TEXT`);
       await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_asset_financial_docs_invoice_number ON public.ti_asset_financial_docs(invoice_number)`);
+      await db.query(`DROP INDEX IF EXISTS public.idx_ti_financial_docs_asset_type`);
+      await db.query(`
+        ALTER TABLE public.ti_assets
+          ADD COLUMN IF NOT EXISTS warehouse_address TEXT,
+          ADD COLUMN IF NOT EXISTS warehouse_section TEXT,
+          ADD COLUMN IF NOT EXISTS warehouse_shelf TEXT,
+          ADD COLUMN IF NOT EXISTS physical_condition_score INTEGER,
+          ADD COLUMN IF NOT EXISTS functional_condition_score INTEGER,
+          ADD COLUMN IF NOT EXISTS initial_condition_photo_1_drive_file_id TEXT,
+          ADD COLUMN IF NOT EXISTS initial_condition_photo_1_url TEXT,
+          ADD COLUMN IF NOT EXISTS initial_condition_photo_1_sha256 TEXT,
+          ADD COLUMN IF NOT EXISTS initial_condition_photo_2_drive_file_id TEXT,
+          ADD COLUMN IF NOT EXISTS initial_condition_photo_2_url TEXT,
+          ADD COLUMN IF NOT EXISTS initial_condition_photo_2_sha256 TEXT
+      `);
+      await db.query(`
+        ALTER TABLE public.ti_asset_actas
+          ADD COLUMN IF NOT EXISTS is_annulled BOOLEAN NOT NULL DEFAULT false,
+          ADD COLUMN IF NOT EXISTS annulled_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS annulled_by INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+          ADD COLUMN IF NOT EXISTS annulment_reason TEXT
+      `);
+      await db.query(`CREATE INDEX IF NOT EXISTS idx_ti_asset_actas_annulled ON public.ti_asset_actas(is_annulled, acta_code)`);
     })().catch((error) => {
       tiAssetsSchemaPromise = null;
       throw error;
@@ -63,6 +110,97 @@ const normalizeAssetIdentifier = (value) => {
   const normalized = String(value || "").trim();
   return normalized || null;
 };
+
+const generateAssetCode = () =>
+  `TI-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+
+function normalizeConditionScore(value, label) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10) {
+    const err = new Error(`${label} debe ser un entero entre 1 y 10`);
+    err.status = 400;
+    throw err;
+  }
+  return parsed;
+}
+
+function normalizeInitialConditionPhotos(photos = []) {
+  const files = Array.isArray(photos) ? photos.filter((photo) => photo?.buffer) : [];
+  if (files.length !== 2) {
+    const err = new Error("Se requieren exactamente 2 fotos del estado inicial del equipo");
+    err.status = 400;
+    throw err;
+  }
+  const invalid = files.find((photo) => photo.mimeType && !String(photo.mimeType || "").startsWith("image/"));
+  if (invalid) {
+    const err = new Error("Las fotos del estado inicial deben ser imágenes");
+    err.status = 400;
+    throw err;
+  }
+  return files.slice(0, 2);
+}
+
+async function uploadInitialConditionPhotosForAsset({
+  client,
+  asset,
+  conditionPhotos,
+}) {
+  const normalizedConditionPhotos = normalizeInitialConditionPhotos(conditionPhotos);
+  const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || null;
+  if (!rootFolderId) {
+    const err = new Error("DRIVE_ROOT_FOLDER_ID no configurado para guardar fotos del activo");
+    err.status = 500;
+    throw err;
+  }
+
+  const assetsRoot = await ensureFolder("Activos TI", rootFolderId);
+  const conditionRoot = await ensureFolder("Condicion inicial", assetsRoot.id);
+  const assetFolder = await ensureFolder(asset.asset_code || String(asset.id), conditionRoot.id);
+  const uploadedPhotos = [];
+  for (let index = 0; index < normalizedConditionPhotos.length; index += 1) {
+    const photo = normalizedConditionPhotos[index];
+    const sha256 = computeSha256HexFromBuffer(photo.buffer);
+    const safeName = String(photo.filename || `condicion-inicial-${index + 1}.jpg`).replace(/[^\w.\- ]+/g, "_");
+    const uploaded = await uploadBase64File(
+      `${index + 1}-${Date.now()}-${safeName}`,
+      photo.buffer.toString("base64"),
+      photo.mimeType || "image/jpeg",
+      assetFolder.id,
+    );
+    uploadedPhotos.push({
+      drive_file_id: uploaded?.id || null,
+      url: uploaded?.webViewLink || uploaded?.webContentLink || null,
+      sha256,
+    });
+  }
+
+  const updatedAssetQ = await client.query(
+    `UPDATE public.ti_assets
+        SET initial_condition_photo_1_drive_file_id = $1,
+            initial_condition_photo_1_url = $2,
+            initial_condition_photo_1_sha256 = $3,
+            initial_condition_photo_2_drive_file_id = $4,
+            initial_condition_photo_2_url = $5,
+            initial_condition_photo_2_sha256 = $6,
+            updated_at = now()
+      WHERE id = $7
+      RETURNING *`,
+    [
+      uploadedPhotos[0]?.drive_file_id || null,
+      uploadedPhotos[0]?.url || null,
+      uploadedPhotos[0]?.sha256 || null,
+      uploadedPhotos[1]?.drive_file_id || null,
+      uploadedPhotos[1]?.url || null,
+      uploadedPhotos[1]?.sha256 || null,
+      asset.id,
+    ],
+  );
+
+  return {
+    asset: updatedAssetQ.rows[0] || asset,
+    uploadedPhotos,
+  };
+}
 
 async function assertUniqueAssetImei(imei, assetId = null, executor = db) {
   const normalizedImei = normalizeAssetIdentifier(imei);
@@ -92,6 +230,40 @@ async function assertUniqueAssetImei(imei, assetId = null, executor = db) {
   );
   err.status = 409;
   err.code = "DUPLICATE_IMEI";
+  throw err;
+}
+
+async function assertUniqueAssetSerialNumber(serialNumber, assetId = null, executor = db) {
+  const normalizedSerialNumber = normalizeAssetIdentifier(serialNumber);
+  if (!normalizedSerialNumber) return null;
+
+  const params = [normalizedSerialNumber];
+  let where = `
+    WHERE active = true
+      AND LOWER(BTRIM(COALESCE(serial_number, ''))) = LOWER(BTRIM($1))
+  `;
+
+  if (assetId != null) {
+    params.push(assetId);
+    where += ` AND id <> $2`;
+  }
+
+  const duplicate = await executor.query(
+    `SELECT id, asset_code, name, brand, model, serial_number, active
+       FROM public.ti_assets
+       ${where}
+       ORDER BY id
+       LIMIT 1`,
+    params,
+  );
+
+  if (!duplicate.rows.length) return normalizedSerialNumber;
+
+  const err = new Error(
+    `Ya existe un activo TI activo con el número de serie ${normalizedSerialNumber} (ID ${duplicate.rows[0].id})`,
+  );
+  err.status = 409;
+  err.code = "DUPLICATE_SERIAL_NUMBER";
   throw err;
 }
 
@@ -561,7 +733,30 @@ function normalizeStatus(status) {
   return value;
 }
 
-async function listAssets({ status, q }) {
+const CUSTODY_TYPES = new Set(["warehouse", "collaborator", "client", "vendor", "unknown"]);
+const USAGE_CONTEXTS = new Set(["internal", "customer_site", "loan", "spare", "demo"]);
+
+function normalizeCustodyType(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!CUSTODY_TYPES.has(normalized)) {
+    const err = new Error("Tipo de custodia TI no permitido");
+    err.status = 400;
+    throw err;
+  }
+  return normalized;
+}
+
+function normalizeUsageContext(value) {
+  const normalized = String(value || "internal").trim().toLowerCase();
+  if (!USAGE_CONTEXTS.has(normalized)) {
+    const err = new Error("Contexto de uso TI no permitido");
+    err.status = 400;
+    throw err;
+  }
+  return normalized;
+}
+
+async function listAssets({ status, q, custodyType, clientId, warehouseCode, publicBaseUrl }) {
   await ensureTiAssetsSchema();
   const params = [];
   let where = "WHERE a.active = true";
@@ -580,15 +775,42 @@ async function listAssets({ status, q }) {
       OR LOWER(COALESCE(fd.invoice_number,'')) LIKE $${params.length}
       OR LOWER(COALESCE(u.fullname, u.name, u.email, '')) LIKE $${params.length}
       OR LOWER(COALESCE(u.email, '')) LIKE $${params.length}
+      OR LOWER(COALESCE(c.razon_social, c.nombre_comercial, '')) LIKE $${params.length}
+      OR LOWER(COALESCE(a.warehouse_code, '')) LIKE $${params.length}
+      OR LOWER(COALESCE(a.location_label, '')) LIKE $${params.length}
+      OR LOWER(COALESCE(a.client_location_label, '')) LIKE $${params.length}
     )`;
+  }
+  if (custodyType) {
+    params.push(normalizeCustodyType(custodyType));
+    where += ` AND a.custody_type = $${params.length}`;
+  }
+  if (clientId) {
+    const parsedClientId = Number(clientId);
+    if (!Number.isInteger(parsedClientId) || parsedClientId <= 0) {
+      const err = new Error("client_id debe ser un entero positivo");
+      err.status = 400;
+      throw err;
+    }
+    params.push(parsedClientId);
+    where += ` AND a.client_id = $${params.length}`;
+  }
+  if (warehouseCode) {
+    params.push(String(warehouseCode).trim());
+    where += ` AND a.warehouse_code = $${params.length}`;
   }
   const { rows } = await db.query(
     `SELECT a.*,
             u.email AS assigned_to_email,
             COALESCE(u.fullname, u.name, u.email) AS assigned_to_name,
+            COALESCE(c.razon_social, c.nombre_comercial) AS custody_client_name,
+            cu.email AS custodian_user_email,
+            COALESCE(cu.fullname, cu.name, cu.email) AS custodian_user_name,
             fd.invoice_number
        FROM public.ti_assets a
        LEFT JOIN public.users u ON u.id = a.assigned_to_user_id
+       LEFT JOIN public.clients c ON c.id = a.client_id
+       LEFT JOIN public.users cu ON cu.id = a.custodian_user_id
        LEFT JOIN LATERAL (
          SELECT d.invoice_number
            FROM public.ti_asset_financial_docs d
@@ -604,12 +826,331 @@ async function listAssets({ status, q }) {
   );
   return rows.map((row) => ({
     ...row,
+    initial_condition_photos: buildInitialConditionPhotos(row, publicBaseUrl),
     ...computeDepreciation(row.purchase_date),
     depreciation_annual: row.purchase_value && row.purchase_value >= 400 ? (row.purchase_value * 0.1111) : 0,
   }));
 }
 
-async function createAsset({ data, userId }) {
+async function getPublicAssetByCode(assetCode, { publicBaseUrl } = {}) {
+  await ensureTiAssetsSchema();
+  const normalizedCode = String(assetCode || "").trim();
+  if (!normalizedCode) {
+    const err = new Error("Código de activo requerido");
+    err.status = 400;
+    throw err;
+  }
+
+  const { rows } = await db.query(
+    `SELECT a.id,
+            a.asset_code,
+            a.name,
+            a.brand,
+            a.model,
+            a.serial_number,
+            a.imei,
+            a.physical_condition_score,
+            a.functional_condition_score,
+            a.initial_condition_photo_1_url,
+            a.initial_condition_photo_1_sha256,
+            a.initial_condition_photo_2_url,
+            a.initial_condition_photo_2_sha256,
+            a.status,
+            a.custody_type,
+            a.warehouse_code,
+            a.warehouse_address,
+            a.warehouse_section,
+            a.warehouse_shelf,
+            a.location_label,
+            a.client_location_label,
+            a.updated_at,
+            COALESCE(u.fullname, u.name, u.email) AS custodian_user_name,
+            COALESCE(c.razon_social, c.nombre_comercial) AS custody_client_name,
+            c.direccion AS custody_client_address,
+            c.ciudad AS custody_client_city,
+            c.provincia AS custody_client_province,
+            c.pais AS custody_client_country
+       FROM public.ti_assets a
+       LEFT JOIN public.users u ON u.id = COALESCE(a.custodian_user_id, a.assigned_to_user_id)
+       LEFT JOIN public.clients c ON c.id = a.client_id
+      WHERE a.asset_code = $1
+        AND a.active = true
+      LIMIT 1`,
+    [normalizedCode],
+  );
+
+  if (!rows.length) {
+    const err = new Error("Activo TI no encontrado");
+    err.status = 404;
+    throw err;
+  }
+
+  const asset = rows[0];
+  const custodyLabel = asset.custody_type === "client"
+    ? (asset.custody_client_name || "Cliente")
+    : asset.custody_type === "collaborator"
+      ? (asset.custodian_user_name || "Colaborador")
+      : (asset.warehouse_code || "Bodega TI");
+
+  return {
+    id: asset.id,
+    asset_code: asset.asset_code,
+    name: asset.name,
+    brand: asset.brand,
+    model: asset.model,
+    serial_number: asset.serial_number,
+    imei: asset.imei,
+    physical_condition_score: asset.physical_condition_score,
+    functional_condition_score: asset.functional_condition_score,
+    status: asset.status,
+    custody_type: asset.custody_type,
+    custody_label: custodyLabel,
+    client_name: asset.custody_type === "client" ? asset.custody_client_name : null,
+    client_address: asset.custody_type === "client"
+      ? [asset.custody_client_address, asset.custody_client_city, asset.custody_client_province, asset.custody_client_country].filter(Boolean).join(", ") || null
+      : null,
+    warehouse_code: asset.custody_type === "warehouse" ? asset.warehouse_code : null,
+    warehouse_address: asset.custody_type === "warehouse" ? asset.warehouse_address : null,
+    warehouse_section: asset.custody_type === "warehouse" ? asset.warehouse_section : null,
+    warehouse_shelf: asset.custody_type === "warehouse" ? asset.warehouse_shelf : null,
+    location_label: asset.custody_type === "client"
+      ? (asset.client_location_label || asset.location_label || null)
+      : (asset.location_label || asset.warehouse_address || null),
+    initial_condition_photos: buildInitialConditionPhotos(asset, publicBaseUrl),
+    updated_at: asset.updated_at,
+  };
+}
+
+async function getInitialConditionPhotoFileByCode(assetCode, photoIndex) {
+  await ensureTiAssetsSchema();
+  const normalizedCode = String(assetCode || "").trim();
+  const index = Number(photoIndex);
+  if (!normalizedCode || ![1, 2].includes(index)) {
+    const error = new Error("Foto de condicion inicial no valida");
+    error.status = 400;
+    throw error;
+  }
+
+  const fileColumn = index === 1
+    ? "initial_condition_photo_1_drive_file_id"
+    : "initial_condition_photo_2_drive_file_id";
+  const { rows } = await db.query(
+    `SELECT asset_code, ${fileColumn} AS drive_file_id
+       FROM public.ti_assets
+      WHERE asset_code = $1
+        AND active = true
+      LIMIT 1`,
+    [normalizedCode],
+  );
+
+  if (!rows.length) {
+    const error = new Error("Activo TI no encontrado");
+    error.status = 404;
+    throw error;
+  }
+
+  const driveFileId = rows[0]?.drive_file_id || null;
+  if (!driveFileId) {
+    const error = new Error("Foto de condicion inicial no encontrada");
+    error.status = 404;
+    throw error;
+  }
+
+  const { downloadFileBuffer, getFileMetadata } = require("../../utils/drive");
+  const metadata = await getFileMetadata(driveFileId, "id,name,mimeType");
+  const buffer = await downloadFileBuffer(driveFileId);
+
+  return {
+    buffer,
+    filename: metadata?.name || `${rows[0].asset_code}-condicion-${index}.jpg`,
+    mimeType: metadata?.mimeType || "image/jpeg",
+  };
+}
+
+async function listCustodySummary() {
+  await ensureTiAssetsSchema();
+  const { rows } = await db.query(
+    `SELECT custody_type, COUNT(*)::integer AS total
+       FROM public.ti_assets
+      WHERE active = true
+      GROUP BY custody_type
+      ORDER BY custody_type`,
+  );
+  return rows;
+}
+
+async function listAssetClients({ q, limit = 50 }) {
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 50));
+  const params = [];
+  let where = "WHERE COALESCE(c.estado, 'activo') = 'activo'";
+  if (q && String(q).trim()) {
+    params.push(`%${String(q).trim().toLowerCase()}%`);
+    where += ` AND (LOWER(c.razon_social) LIKE $1 OR LOWER(COALESCE(c.nombre_comercial, '')) LIKE $1 OR LOWER(c.ruc) LIKE $1)`;
+  }
+  params.push(safeLimit);
+  const { rows } = await db.query(
+    `SELECT c.id, c.razon_social, c.nombre_comercial, c.ruc
+       FROM public.clients c
+       ${where}
+      ORDER BY c.razon_social ASC
+      LIMIT $${params.length}`,
+    params,
+  );
+  return rows;
+}
+
+async function listAssetCustodyHistory(assetId) {
+  await ensureTiAssetsSchema();
+  const { rows } = await db.query(
+    `SELECT m.*,
+            fu.email AS from_user_email,
+            COALESCE(fu.fullname, fu.name, fu.email) AS from_user_name,
+            tu.email AS to_user_email,
+            COALESCE(tu.fullname, tu.name, tu.email) AS to_user_name,
+            fc.razon_social AS from_client_name,
+            tc.razon_social AS to_client_name,
+            COALESCE(cb.fullname, cb.name, cb.email) AS created_by_name
+       FROM public.ti_asset_custody_movements m
+       LEFT JOIN public.users fu ON fu.id = m.from_user_id
+       LEFT JOIN public.users tu ON tu.id = m.to_user_id
+       LEFT JOIN public.clients fc ON fc.id = m.from_client_id
+       LEFT JOIN public.clients tc ON tc.id = m.to_client_id
+       LEFT JOIN public.users cb ON cb.id = m.created_by
+      WHERE m.asset_id = $1
+      ORDER BY m.created_at DESC, m.id DESC`,
+    [assetId],
+  );
+  return rows;
+}
+
+async function moveAssetCustody({
+  assetId,
+  custody_type: custodyType,
+  to_user_id: toUserId = null,
+  client_id: clientId = null,
+  warehouse_code: warehouseCode = null,
+  warehouse_address: warehouseAddress = null,
+  warehouse_section: warehouseSection = null,
+  warehouse_shelf: warehouseShelf = null,
+  location_label: locationLabel = null,
+  client_location_label: clientLocationLabel = null,
+  usage_context: usageContext = "internal",
+  reason = null,
+  reference_type: referenceType = null,
+  reference_id: referenceId = null,
+  userId,
+}) {
+  await ensureTiAssetsSchema();
+  const targetCustody = normalizeCustodyType(custodyType);
+  const targetUsage = normalizeUsageContext(usageContext);
+  const normalizedWarehouse = warehouseCode ? String(warehouseCode).trim() : null;
+  const normalizedWarehouseAddress = warehouseAddress ? String(warehouseAddress).trim() : null;
+  const normalizedWarehouseSection = warehouseSection ? String(warehouseSection).trim() : null;
+  const normalizedWarehouseShelf = warehouseShelf ? String(warehouseShelf).trim() : null;
+  const normalizedLocation = locationLabel ? String(locationLabel).trim() : null;
+  const normalizedClientLocation = clientLocationLabel ? String(clientLocationLabel).trim() : null;
+  const targetUserId = toUserId ? Number(toUserId) : null;
+  const targetClientId = clientId ? Number(clientId) : null;
+
+  if (targetCustody === "warehouse" && !normalizedWarehouse) {
+    const err = new Error("warehouse_code es obligatorio para custodia en bodega");
+    err.status = 400;
+    throw err;
+  }
+  if (targetCustody === "collaborator" && !targetUserId) {
+    const err = new Error("to_user_id es obligatorio para custodia en colaborador");
+    err.status = 400;
+    throw err;
+  }
+  if (targetCustody === "client" && !targetClientId) {
+    const err = new Error("client_id es obligatorio para custodia en cliente");
+    err.status = 400;
+    throw err;
+  }
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    const currentQ = await client.query(`SELECT * FROM public.ti_assets WHERE id = $1 FOR UPDATE`, [assetId]);
+    if (!currentQ.rows.length) {
+      const err = new Error("Activo TI no encontrado");
+      err.status = 404;
+      throw err;
+    }
+    const current = currentQ.rows[0];
+    if (targetClientId) {
+      const clientQ = await client.query("SELECT id FROM public.clients WHERE id = $1 LIMIT 1", [targetClientId]);
+      if (!clientQ.rows.length) {
+        const err = new Error("Cliente no encontrado");
+        err.status = 404;
+        throw err;
+      }
+    }
+    if (targetUserId) {
+      const userQ = await client.query("SELECT id FROM public.users WHERE id = $1 AND active = true LIMIT 1", [targetUserId]);
+      if (!userQ.rows.length) {
+        const err = new Error("Usuario custodio no encontrado o inactivo");
+        err.status = 404;
+        throw err;
+      }
+    }
+    const nextStatus = ["damaged", "in_maintenance", "retired"].includes(current.status)
+      ? current.status
+      : targetCustody === "collaborator" || targetCustody === "client" ? "assigned" : "available";
+    const updatedQ = await client.query(
+      `UPDATE public.ti_assets
+          SET custody_type = $1::text,
+              warehouse_code = $2::text,
+              client_id = $3::integer,
+              client_location_label = $4::text,
+              location_label = $5::text,
+              warehouse_address = $11::text,
+              warehouse_section = $12::text,
+              warehouse_shelf = $13::text,
+              custodian_user_id = $6::integer,
+              assigned_to_user_id = CASE WHEN $1::text = 'collaborator' THEN $6::integer ELSE NULL END,
+              assigned_at = CASE WHEN $1::text = 'collaborator' THEN now() ELSE NULL END,
+              usage_context = $7::text,
+              status = $8::text,
+              updated_by = $9::integer,
+              updated_at = now()
+        WHERE id = $10::bigint
+        RETURNING *`,
+      [targetCustody, targetCustody === "warehouse" ? normalizedWarehouse : null, targetCustody === "client" ? targetClientId : null,
+        targetCustody === "client" ? normalizedClientLocation : null, normalizedLocation,
+        targetCustody === "collaborator" ? targetUserId : null, targetUsage, nextStatus, userId, assetId,
+        targetCustody === "warehouse" ? normalizedWarehouseAddress : null,
+        targetCustody === "warehouse" ? normalizedWarehouseSection : null,
+        targetCustody === "warehouse" ? normalizedWarehouseShelf : null],
+    );
+    await client.query(
+      `INSERT INTO public.ti_asset_custody_movements (
+         asset_id, from_custody_type, from_user_id, from_client_id, from_warehouse_code, from_location_label,
+         to_custody_type, to_user_id, to_client_id, to_warehouse_code, to_location_label,
+         usage_context, reason, reference_type, reference_id, created_by, created_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,now())`,
+      [assetId, current.custody_type, current.custodian_user_id || current.assigned_to_user_id, current.client_id,
+        current.warehouse_code, current.location_label || current.client_location_label, targetCustody,
+        targetCustody === "collaborator" ? targetUserId : null, targetCustody === "client" ? targetClientId : null,
+        targetCustody === "warehouse" ? normalizedWarehouse : null, normalizedLocation || normalizedClientLocation,
+        targetUsage, reason || null, referenceType || "custody_move", referenceId || null, userId],
+    );
+    await client.query(
+      `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
+       VALUES ($1,'asset_custody_moved',$2::jsonb,$3,now())`,
+      [assetId, JSON.stringify({ from_custody_type: current.custody_type, to_custody_type: targetCustody, client_id: targetClientId, warehouse_code: normalizedWarehouse, warehouse_address: normalizedWarehouseAddress, warehouse_section: normalizedWarehouseSection, warehouse_shelf: normalizedWarehouseShelf, reason }), userId],
+    );
+    await client.query("COMMIT");
+    return { ...updatedQ.rows[0], ...computeDepreciation(updatedQ.rows[0].purchase_date) };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function createAsset({ data, userId, conditionPhotos = [] }) {
   await ensureTiAssetsSchema();
   const {
     name,
@@ -628,41 +1169,122 @@ async function createAsset({ data, userId }) {
     throw err;
   }
   const safePurchaseDate = purchase_date ? String(purchase_date).trim() : null;
-  const normalizedSerialNumber = normalizeAssetIdentifier(serial_number);
+  const normalizedSerialNumber = await assertUniqueAssetSerialNumber(serial_number);
   const normalizedImei = await assertUniqueAssetImei(imei);
+  const normalizedPhysicalScore = normalizeConditionScore(data?.physical_condition_score, "Estado físico");
+  const normalizedFunctionalScore = normalizeConditionScore(data?.functional_condition_score, "Estado funcional");
+  const normalizedConditionPhotos = normalizeInitialConditionPhotos(conditionPhotos);
 
   // FASE 3: Calcular categoría automáticamente
   const parsedValue = purchase_value ? parseFloat(purchase_value) : null;
   const valueCategory = parsedValue && parsedValue >= 400 ? 'asset' : (parsedValue ? 'control_item' : null);
 
-  const { rows } = await db.query(
-    `INSERT INTO public.ti_assets
-       (asset_code, name, brand, model, characteristics, status, maintenance_frequency_months,
-        serial_number, imei, purchase_date, purchase_value, value_category, created_by, updated_by, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5::jsonb,'unassigned',$6,$7,$8,$9::date,$10::decimal,$11,$12,$12,now(),now())
-     RETURNING *`,
-    [
-      `TI-${Date.now()}`,
-      String(name).trim(),
-      brand || null,
-      model || null,
-      JSON.stringify(characteristics || {}),
-      Number.isFinite(Number(maintenance_frequency_months)) ? Number(maintenance_frequency_months) : 12,
-      normalizedSerialNumber,
-      normalizedImei,
-      safePurchaseDate,
-      parsedValue || null,
-      valueCategory,
-      userId,
-    ],
-  );
-  const asset = rows[0];
-  await db.query(
-    `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
-     VALUES ($1,'asset_created',$2::jsonb,$3,now())`,
-    [asset.id, JSON.stringify({ name, brand, model, serial_number: normalizedSerialNumber, imei: normalizedImei, purchase_date: safePurchaseDate, purchase_value: parsedValue }), userId],
-  );
-  return { ...asset, ...computeDepreciation(asset.purchase_date) };
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `INSERT INTO public.ti_assets
+         (asset_code, name, brand, model, characteristics, status, maintenance_frequency_months,
+          serial_number, imei, purchase_date, purchase_value, value_category,
+          physical_condition_score, functional_condition_score,
+          created_by, updated_by, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5::jsonb,'unassigned',$6,$7,$8,$9::date,$10::decimal,$11,$12,$13,$14,$14,now(),now())
+       RETURNING *`,
+      [
+        generateAssetCode(),
+        String(name).trim(),
+        brand || null,
+        model || null,
+        JSON.stringify(characteristics || {}),
+        Number.isFinite(Number(maintenance_frequency_months)) ? Number(maintenance_frequency_months) : 12,
+        normalizedSerialNumber,
+        normalizedImei,
+        safePurchaseDate,
+        parsedValue || null,
+        valueCategory,
+        normalizedPhysicalScore,
+        normalizedFunctionalScore,
+        userId,
+      ],
+    );
+    const asset = rows[0];
+    const { asset: savedAsset, uploadedPhotos } = await uploadInitialConditionPhotosForAsset({
+      client,
+      asset,
+      conditionPhotos,
+    });
+    await client.query(
+      `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
+       VALUES ($1,'asset_created',$2::jsonb,$3,now())`,
+      [asset.id, JSON.stringify({ name, brand, model, serial_number: normalizedSerialNumber, imei: normalizedImei, purchase_date: safePurchaseDate, purchase_value: parsedValue, physical_condition_score: normalizedPhysicalScore, functional_condition_score: normalizedFunctionalScore, initial_condition_photos_count: uploadedPhotos.length }), userId],
+    );
+    await client.query(
+      `INSERT INTO public.ti_asset_custody_movements
+       (asset_id, to_custody_type, to_warehouse_code, usage_context, reason, reference_type, created_by, created_at)
+       VALUES ($1,'warehouse','BODEGA_TI_MAIN','internal','Alta inicial del activo','asset_created',$2,now())`,
+      [asset.id, userId],
+    );
+    await client.query("COMMIT");
+    return { ...savedAsset, ...computeDepreciation(savedAsset.purchase_date) };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function uploadInitialConditionPhotos({ assetId, conditionPhotos = [], userId }) {
+  await ensureTiAssetsSchema();
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    const currentQ = await client.query(
+      `SELECT *
+         FROM public.ti_assets
+        WHERE id = $1
+          AND active = true
+        FOR UPDATE`,
+      [assetId],
+    );
+    if (!currentQ.rows.length) {
+      const err = new Error("Activo TI no encontrado");
+      err.status = 404;
+      throw err;
+    }
+
+    const current = currentQ.rows[0];
+    const hasInitialPhotos = Boolean(
+      current.initial_condition_photo_1_drive_file_id ||
+      current.initial_condition_photo_1_url ||
+      current.initial_condition_photo_2_drive_file_id ||
+      current.initial_condition_photo_2_url,
+    );
+    if (hasInitialPhotos) {
+      const err = new Error("El activo ya tiene fotos de registro. No se reemplazan desde regularizacion.");
+      err.status = 409;
+      throw err;
+    }
+
+    const { asset: savedAsset, uploadedPhotos } = await uploadInitialConditionPhotosForAsset({
+      client,
+      asset: current,
+      conditionPhotos,
+    });
+
+    await client.query(
+      `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
+       VALUES ($1,'initial_condition_photos_uploaded',$2::jsonb,$3,now())`,
+      [current.id, JSON.stringify({ initial_condition_photos_count: uploadedPhotos.length }), userId],
+    );
+    await client.query("COMMIT");
+    return { ...savedAsset, ...computeDepreciation(savedAsset.purchase_date) };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function updateAsset({ assetId, data, userId }) {
@@ -670,7 +1292,7 @@ async function updateAsset({ assetId, data, userId }) {
   const safePurchaseDate = data?.purchase_date ? String(data.purchase_date).trim() : undefined;
   const normalizedSerialNumber =
     data?.serial_number !== undefined
-      ? normalizeAssetIdentifier(data.serial_number)
+      ? await assertUniqueAssetSerialNumber(data.serial_number, assetId)
       : null;
   const normalizedImei =
     data?.imei !== undefined
@@ -683,7 +1305,7 @@ async function updateAsset({ assetId, data, userId }) {
             model = COALESCE($3, model),
             characteristics = COALESCE($4::jsonb, characteristics),
             maintenance_frequency_months = COALESCE($5, maintenance_frequency_months),
-            serial_number = COALESCE($6, serial_number),
+            serial_number = CASE WHEN $11::boolean THEN $6 ELSE serial_number END,
             imei = COALESCE($7, imei),
             purchase_date = COALESCE($8::date, purchase_date),
             updated_by = $9,
@@ -701,6 +1323,7 @@ async function updateAsset({ assetId, data, userId }) {
       safePurchaseDate ?? null,
       userId,
       assetId,
+      data?.serial_number !== undefined,
     ],
   );
   if (!rows.length) {
@@ -736,7 +1359,8 @@ async function assignAsset({
   try {
     await client.query("BEGIN");
     const currentQ = await client.query(
-      `SELECT id, name, assigned_to_user_id, status FROM public.ti_assets WHERE id = $1 LIMIT 1`,
+      `SELECT id, name, assigned_to_user_id, status, custody_type, custodian_user_id, client_id, warehouse_code, location_label, client_location_label
+         FROM public.ti_assets WHERE id = $1 LIMIT 1`,
       [assetId]
     );
     if (!currentQ.rows.length) {
@@ -756,6 +1380,11 @@ async function assignAsset({
     const upd = await client.query(
       `UPDATE public.ti_assets
           SET assigned_to_user_id = $1::integer,
+              custody_type = CASE WHEN $1::integer IS NULL THEN 'warehouse' ELSE 'collaborator' END,
+              custodian_user_id = $1::integer,
+              client_id = NULL,
+              client_location_label = NULL,
+              warehouse_code = CASE WHEN $1::integer IS NULL THEN COALESCE(warehouse_code, 'BODEGA_TI_MAIN') ELSE NULL END,
               assigned_at = CASE WHEN $1::integer IS NULL THEN NULL ELSE now() END,
               status = $2,
               updated_by = $3,
@@ -776,6 +1405,16 @@ async function assignAsset({
       `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
        VALUES ($1,$2,$3::jsonb,$4,now())`,
       [assetId, assignedToUserId ? "asset_assigned" : "asset_unassigned", JSON.stringify({ previous_user_id: current.assigned_to_user_id, assigned_to_user_id: assignedToUserId, reason }), userId],
+    );
+    await client.query(
+      `INSERT INTO public.ti_asset_custody_movements
+       (asset_id, from_custody_type, from_user_id, from_client_id, from_warehouse_code, from_location_label,
+        to_custody_type, to_user_id, to_warehouse_code, usage_context, reason, reference_type, reference_id, created_by, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'internal',$10,'assignment',$11,$12,now())`,
+      [assetId, current.custody_type, current.custodian_user_id || current.assigned_to_user_id, current.client_id,
+        current.warehouse_code, current.location_label || current.client_location_label,
+        assignedToUserId ? "collaborator" : "warehouse", assignedToUserId,
+        assignedToUserId ? null : (current.warehouse_code || "BODEGA_TI_MAIN"), reason, assignmentId, userId],
     );
 
     // Build acta items if not provided: asset principal + accesorios activos
@@ -902,7 +1541,8 @@ async function assignMultipleAssets({
 
     // Fetch all assets
     const assetsQ = await client.query(
-      `SELECT id, name, brand, model, serial_number, imei, assigned_to_user_id FROM public.ti_assets WHERE id = ANY($1::bigint[]) ORDER BY id`,
+      `SELECT id, name, brand, model, serial_number, imei, assigned_to_user_id, custody_type, custodian_user_id, client_id, warehouse_code, location_label, client_location_label
+         FROM public.ti_assets WHERE id = ANY($1::bigint[]) ORDER BY id`,
       [assetIds],
     );
     if (!assetsQ.rows.length) {
@@ -916,6 +1556,11 @@ async function assignMultipleAssets({
     await client.query(
       `UPDATE public.ti_assets
         SET assigned_to_user_id = $1::integer,
+            custody_type = CASE WHEN $1::integer IS NULL THEN 'warehouse' ELSE 'collaborator' END,
+            custodian_user_id = $1::integer,
+            client_id = NULL,
+            client_location_label = NULL,
+            warehouse_code = CASE WHEN $1::integer IS NULL THEN COALESCE(warehouse_code, 'BODEGA_TI_MAIN') ELSE NULL END,
             assigned_at = CASE WHEN $1::integer IS NULL THEN NULL ELSE now() END,
             status = $2,
             updated_by = $3,
@@ -935,6 +1580,16 @@ async function assignMultipleAssets({
         `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
          VALUES ($1,$2,$3::jsonb,$4,now())`,
         [asset.id, assignedToUserId ? "asset_assigned" : "asset_unassigned", JSON.stringify({ previous_user_id: asset.assigned_to_user_id, assigned_to_user_id: assignedToUserId, reason }), userId],
+      );
+      await client.query(
+        `INSERT INTO public.ti_asset_custody_movements
+         (asset_id, from_custody_type, from_user_id, from_client_id, from_warehouse_code, from_location_label,
+          to_custody_type, to_user_id, to_warehouse_code, usage_context, reason, reference_type, created_by, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'internal',$10,'assignment',$11,now())`,
+        [asset.id, asset.custody_type, asset.custodian_user_id || asset.assigned_to_user_id, asset.client_id,
+          asset.warehouse_code, asset.location_label || asset.client_location_label,
+          assignedToUserId ? "collaborator" : "warehouse", assignedToUserId,
+          assignedToUserId ? null : (asset.warehouse_code || "BODEGA_TI_MAIN"), reason, userId],
       );
     }
 
@@ -1889,6 +2544,7 @@ async function updateActa({ actaId, data = {}, userId }) {
     }
 
     const acta = actaRows[0];
+    assertActaNotAnnulled(acta);
     if (acta.is_complete || acta.signed_at || acta.signed_pdf_drive_file_id || acta.signed_pdf_sha256) {
       const err = new Error("El acta ya fue firmada y no puede editarse");
       err.status = 409;
@@ -2054,6 +2710,7 @@ async function uploadSignedActa({ actaId, fileBuffer, originalFilename, userId }
     const err = new Error("actaId invalido"); err.status = 400; throw err;
   }
   const acta = await getActaWithItems(id);
+  assertActaNotAnnulled(acta);
   const wasAlreadySigned = Boolean(
     acta.is_complete || acta.signed_at || acta.signed_pdf_drive_file_id || acta.signed_pdf_sha256,
   );
@@ -2151,9 +2808,10 @@ async function uploadLegacySignedActa({ assignmentId, fileBuffer, originalFilena
           aa.sin_acta = true
           OR NOT EXISTS (
             SELECT 1 FROM public.ti_asset_actas ea
+            LEFT JOIN public.ti_asset_actas_items eai ON eai.acta_id = ea.id
              WHERE ea.active = true AND ea.tipo = 'entrega'
-               AND ea.asset_id = aa.asset_id
                AND ea.recipient_user_id = aa.assigned_to_user_id
+               AND (ea.asset_id = aa.asset_id OR eai.asset_id = aa.asset_id)
           )
         )
       LIMIT 1`,
@@ -2166,78 +2824,62 @@ async function uploadLegacySignedActa({ assignmentId, fileBuffer, originalFilena
   }
   const assignment = rows[0];
 
-  const existing = await db.query(
-    `SELECT DISTINCT a.id
-       FROM public.ti_asset_actas a
-       LEFT JOIN public.ti_asset_actas_items ai ON ai.acta_id = a.id
-      WHERE a.active = true
-        AND a.tipo = 'entrega'
-        AND a.recipient_user_id = $2
-        AND (a.asset_id = $1 OR ai.asset_id = $1)
-      ORDER BY a.generated_at DESC
-      LIMIT 1`,
-    [assignment.asset_id, assignment.assigned_to_user_id],
-  );
-  let actaId = existing.rows[0]?.id || null;
-
-  if (!actaId) {
-    const profile = assignment.profile || {};
-    const personal = profile.personal || {};
-    const laboral = profile.laboral || {};
-    const accessories = await db.query(
-      `SELECT id, name, brand, model, serial_number, imei, is_new, physical_condition, observations
-         FROM public.ti_asset_accessories
-        WHERE asset_id = $1 AND active = true
-        ORDER BY created_at ASC`,
-      [assignment.asset_id],
-    );
-    const items = [
-      {
-        item_type: "equipo",
-        asset_id: assignment.asset_id,
-        name: assignment.name,
-        brand_model: [assignment.brand, assignment.model].filter(Boolean).join(" "),
-        serial_imei: [assignment.serial_number, assignment.imei].filter(Boolean).join(" / ") || null,
-      },
-      ...accessories.rows.map((accessory) => ({
-        item_type: "accesorio",
-        asset_id: assignment.asset_id,
-        accessory_id: accessory.id,
-        name: accessory.name,
-        brand_model: [accessory.brand, accessory.model].filter(Boolean).join(" "),
-        serial_imei: [accessory.serial_number, accessory.imei].filter(Boolean).join(" / ") || null,
-        is_new: accessory.is_new,
-        physical_condition: accessory.physical_condition,
-        observations: accessory.observations,
-      })),
-    ];
-    const acta = await createActa({
-      tipo: "entrega",
-      assetId: assignment.asset_id,
-      recipientUserId: assignment.assigned_to_user_id,
-      previousUserId: assignment.previous_user_id,
-      recipientNombre: assignment.fullname,
-      recipientCedula: personal.cedula || null,
-      recipientCargo: laboral.cargo || null,
-      generatedBy: userId,
-      notes: "Acta historica previa a SPI",
-      items,
-    });
-    actaId = acta.id;
+  const safeFilename = originalFilename || `acta-historica-asignacion-${id}.pdf`;
+  const sha256 = computeSha256HexFromBuffer(fileBuffer);
+  const base =
+    process.env.DRIVE_ROOT_FOLDER_ID ||
+    process.env.DRIVE_DOCS_FOLDER_ID ||
+    process.env.DRIVE_FOLDER_ID ||
+    null;
+  let folderId = null;
+  if (base) {
+    const assetsRoot = await ensureFolder("Activos TI", base);
+    const evidenceFolder = await ensureFolder("Evidencias sin acta", assetsRoot.id);
+    folderId = evidenceFolder.id;
   }
+  const uploaded = await uploadBase64File(
+    `evidencia-asig${id}-${Date.now()}-${safeFilename}`,
+    fileBuffer.toString("base64"),
+    "application/pdf",
+    folderId || undefined,
+  );
+  const driveFileId = uploaded?.id || null;
+  const driveUrl = uploaded?.webViewLink || uploaded?.webContentLink || null;
 
-  const uploaded = await uploadSignedActa({
-    actaId,
-    fileBuffer,
-    originalFilename,
-    userId,
-  });
+  await db.query(
+    `UPDATE public.ti_asset_assignments
+        SET evidence_drive_file_id = $1,
+            evidence_file_url = $2
+      WHERE id = $3`,
+    [driveFileId, driveUrl, id],
+  );
+
   await db.query(
     `INSERT INTO public.ti_asset_events (asset_id, event_type, payload, created_by, created_at)
-     VALUES ($1, 'legacy_acta_uploaded', $2::jsonb, $3, now())`,
-    [assignment.asset_id, JSON.stringify({ assignment_id: id, acta_id: actaId }), userId || null],
+     VALUES ($1, 'legacy_acta_evidence_uploaded', $2::jsonb, $3, now())`,
+    [
+      assignment.asset_id,
+      JSON.stringify({
+        assignment_id: id,
+        filename: safeFilename,
+        drive_file_id: driveFileId,
+        drive_url: driveUrl,
+        sha256,
+      }),
+      userId || null,
+    ],
   );
-  return { ...uploaded, acta_id: actaId, assignment_id: id, legacy: true };
+  return {
+    ok: true,
+    assignment_id: id,
+    legacy: true,
+    evidence_drive_file_id: driveFileId,
+    evidence_file_url: driveUrl,
+    drive_file_id: driveFileId,
+    drive_url: driveUrl,
+    filename: safeFilename,
+    sha256,
+  };
 }
 
 const _SURNAME_PARTICLES = new Set(["de", "del", "la", "el", "los", "las", "van", "von", "le", "y"]);
@@ -2334,6 +2976,13 @@ async function buildActaPdfBuffer(acta, { preferStored = false } = {}) {
   return buildDriveTemplateActaPdfBuffer(acta);
 }
 
+function assertActaNotAnnulled(acta) {
+  if (!acta?.is_annulled) return;
+  const err = new Error("El acta esta anulada y solo puede consultarse como evidencia historica");
+  err.status = 409;
+  throw err;
+}
+
 async function getActaPdfDownload(actaId, { preferStored = true } = {}) {
   const acta = await getActaWithItems(actaId);
   const result = await buildActaPdfBuffer(acta, { preferStored });
@@ -2391,6 +3040,7 @@ function queueTiActaPdfGeneration(actaId) {
 
 async function startSignatureWorkflowForActa({ actaId, signers = [], actorUser }) {
   const acta = await getActaWithItems(actaId);
+  assertActaNotAnnulled(acta);
   if (acta.signature_workflow_id) {
     return signatureWorkflowsService.getWorkflow(Number(acta.signature_workflow_id), actorUser);
   }
@@ -2565,6 +3215,116 @@ async function generateAssetPdfReport(assetId) {
     }
     doc.end();
   });
+}
+
+async function generateAssetLabelPdf(assetId) {
+  const PDFDocument = require("pdfkit");
+  const QRCode = require("qrcode");
+
+  const { rows } = await db.query(
+    `SELECT a.*,
+            COALESCE(u.fullname, u.name, u.email) AS custodian_user_name,
+            COALESCE(c.razon_social, c.nombre_comercial) AS custody_client_name
+       FROM public.ti_assets a
+       LEFT JOIN public.users u ON u.id = COALESCE(a.custodian_user_id, a.assigned_to_user_id)
+       LEFT JOIN public.clients c ON c.id = a.client_id
+      WHERE a.id = $1
+        AND a.active = true
+      LIMIT 1`,
+    [assetId],
+  );
+  if (!rows.length) {
+    const error = new Error("Activo TI no encontrado");
+    error.status = 404;
+    throw error;
+  }
+
+  const asset = rows[0];
+  const assetCode = String(asset.asset_code || `TI-ASSET-${String(asset.id).padStart(6, "0")}`).trim();
+  const frontendBaseUrl = String(
+    process.env.APP_FRONTEND_URL ||
+    process.env.FRONTEND_URL ||
+    process.env.APP_BASE_URL ||
+    "https://fam-spi-front.web.app",
+  ).replace(/\/+$/, "");
+  const custodyLabel = asset.custody_type === "client"
+    ? (asset.custody_client_name || "Cliente")
+    : asset.custody_type === "collaborator"
+      ? (asset.custodian_user_name || "Colaborador")
+      : (asset.warehouse_code || "BODEGA_TI_MAIN");
+  const qrPayload = `${frontendBaseUrl}/activos-ti/${encodeURIComponent(assetCode)}`;
+  const qrBuffer = await QRCode.toBuffer(qrPayload, {
+    errorCorrectionLevel: "M",
+    margin: 1,
+    scale: 12,
+    type: "png",
+  });
+  const filename = `Etiqueta-${assetCode}.pdf`;
+
+  const pdfBuffer = await new Promise((resolve, reject) => {
+    // 6 cm x 2.5 cm converted to PDF points (1 cm = 28.3465 pt).
+    const LABEL_WIDTH = 170;
+    const LABEL_HEIGHT = 71;
+    const QR_SIZE = 56;
+    const doc = new PDFDocument({
+      size: [LABEL_WIDTH, LABEL_HEIGHT],
+      margin: 0,
+      info: {
+        Title: `Etiqueta Activo TI ${assetCode}`,
+        Author: "FamSPI",
+        Subject: "Etiqueta QR Activo TI",
+      },
+    });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    doc.rect(2, 2, LABEL_WIDTH - 4, LABEL_HEIGHT - 4)
+      .lineWidth(0.8)
+      .strokeColor("#000000")
+      .stroke();
+
+    doc.fillColor("#000000").font("Helvetica-Bold").fontSize(6.4).text("ACTIVO TI", 6, 6, {
+      width: 98,
+      lineBreak: false,
+    });
+
+    doc.image(qrBuffer, 111, 8, { width: QR_SIZE, height: QR_SIZE });
+
+    doc.font("Helvetica-Bold").fontSize(7).text(assetCode, 6, 17, {
+      width: 101,
+      height: 15,
+      lineBreak: false,
+      ellipsis: true,
+    });
+    doc.font("Helvetica-Bold").fontSize(6.2).text(String(asset.name || "Activo TI"), 6, 32, {
+      width: 101,
+      height: 8,
+      ellipsis: true,
+    });
+    doc.font("Helvetica").fontSize(6).text(
+      [asset.brand, asset.model].filter(Boolean).join(" ") || "Sin marca/modelo",
+      6,
+      43,
+      { width: 101, height: 7, lineBreak: false, ellipsis: true },
+    );
+    doc.font("Helvetica-Bold").fontSize(6).text(`S: ${asset.serial_number || "-"}`, 6, 53, {
+      width: 101,
+      height: 7,
+      lineBreak: false,
+      ellipsis: true,
+    });
+    doc.font("Helvetica").fontSize(6).text(`C: ${custodyLabel}`, 6, 62, {
+      width: 101,
+      height: 7,
+      lineBreak: false,
+      ellipsis: true,
+    });
+    doc.end();
+  });
+
+  return { pdfBuffer, filename, asset_code: assetCode, qr_payload: qrPayload };
 }
 
 async function generateCollaboratorPdfReport(collaboratorUserId) {
@@ -3340,10 +4100,18 @@ module.exports = {
   TI_ROLES,
   TI_LEGACY_ACTA_UPLOAD_ROLES,
   TI_READ_ROLES,
+  TI_LABEL_PRINT_ROLES,
   TI_ASSET_CREATE_ROLES,
   ensureTiAssetsSchema,
   listAssets,
+  getPublicAssetByCode,
+  getInitialConditionPhotoFileByCode,
+  listCustodySummary,
+  listAssetClients,
+  listAssetCustodyHistory,
+  moveAssetCustody,
   createAsset,
+  uploadInitialConditionPhotos,
   updateAsset,
   assignAsset,
   assignMultipleAssets,
@@ -3391,6 +4159,7 @@ module.exports = {
   getActaSignatureWorkflow,
   // Reports
   generateAssetPdfReport,
+  generateAssetLabelPdf,
   generateCollaboratorPdfReport,
   // Financial docs
   listFinancialDocs,

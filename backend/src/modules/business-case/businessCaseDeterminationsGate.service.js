@@ -309,7 +309,11 @@ function buildGateInfo({
     canUpload ||
     DETERMINATIONS_DOCUMENT_VIEW_ROLES.has(normalizedRole)
   );
-  const canEditDeterminations = enabled && !expired && !quantitiesLocked && editorsByPhase.includes(normalizedRole);
+  // El vencimiento de SLA (expired/technicalSlaExpired) ya no desactiva la
+  // edicion -- solo se expone como aviso (ver isExpired/extensionRequired
+  // mas abajo). Generaba deadlocks reales cuando nadie pedia la prorroga a
+  // tiempo (BC 0ae62377-...).
+  const canEditDeterminations = enabled && !quantitiesLocked && editorsByPhase.includes(normalizedRole);
   const canRequestInspection = enabled && hasDocument && DETERMINATIONS_INSPECTION_REQUEST_ROLES.has(normalizedRole);
 
   return {
@@ -366,19 +370,11 @@ function assertCanEditDeterminationsOrThrow(gate) {
     error.code = "DETERMINATIONS_STAT_DOC_REQUIRED";
     throw error;
   }
-  if (gate?.isExpired) {
-    const error = gate?.extensionRequired
-      ? new Error("La ventana SLA de 48 horas de Jefe de Servicio vencio. La sincronizacion esta bloqueada. Solicita una prorroga de 24 horas a Jefe Comercial.")
-      : new Error("La ventana de 48 horas para determinaciones ya expiro.");
-    error.status = 409;
-    error.code = gate?.extensionRequired
-      ? "DETERMINATIONS_SLA_EXPIRED_EXTENSION_REQUIRED"
-      : "DETERMINATIONS_EDIT_WINDOW_EXPIRED";
-    if (gate?.extensionRequired) {
-      error.details = { extensionHours: 24, responsibleRole: "jefe_servicio" };
-    }
-    throw error;
-  }
+  // El vencimiento de la ventana SLA (48h Jefe de Servicio / prorroga 24h) ya
+  // NO bloquea la edicion/sincronizacion -- generaba deadlocks reales cuando
+  // nadie solicitaba la prorroga a tiempo (BC 0ae62377-...). gate.isExpired y
+  // gate.extensionRequired se siguen calculando y exponiendo para que el
+  // frontend muestre un aviso, pero ya no se lanza excepcion aqui.
   if (!gate?.permissions?.canEditDeterminations) {
     const error = new Error("No tienes permisos para editar determinaciones en este flujo.");
     error.status = 403;

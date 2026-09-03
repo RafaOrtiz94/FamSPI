@@ -2,12 +2,14 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FiAlertTriangle,
   FiBarChart2,
+  FiCamera,
   FiCheck,
-  FiChevronUp,
   FiCpu,
   FiDownload,
   FiFileText,
+  FiImage,
   FiPlus,
+  FiPrinter,
   FiRefreshCw,
   FiSearch,
   FiUploadCloud,
@@ -15,6 +17,7 @@ import {
 } from "react-icons/fi";
 import { useUI } from "../../../core/ui/UIContext";
 import { getUsers } from "../../../core/api/usersApi";
+import Modal from "../../../core/ui/components/Modal";
 import {
   createTiAsset,
   downloadTiActa,
@@ -26,12 +29,16 @@ import {
   uploadTiLegacyActaSigned,
   listTiAssets,
   listTiFinancialDocs,
+  printTiAssetLabel,
+  uploadTiAssetInitialConditionPhotos,
   uploadTiFinancialDoc,
 } from "../../../core/api/tiAssetsApi";
 
 const EMPTY_FORM = {
   name: "", brand: "", model: "", serial_number: "", imei: "",
-  purchase_date: "", purchase_value: "", maintenance_frequency_months: "12",
+  purchase_date: "", purchase_value: "", characteristics: "", maintenance_frequency_months: "12",
+  physical_condition_score: "", functional_condition_score: "",
+  condition_photos: [], condition_photo_previews: [],
 };
 
 // ─── Design tokens (DESIGN.md) ───────────────────────────────────────────────
@@ -112,6 +119,9 @@ const TIAssetsFinancieroPage = () => {
   const [uploadingDoc, setUploadingDoc]     = useState(null); // 'factura' | 'letra_de_cambio' | null
   const [invoiceNumberDraft, setInvoiceNumberDraft] = useState("");
   const [uploadingLegacyActa, setUploadingLegacyActa] = useState(false);
+  const [printingLabelAssetId, setPrintingLabelAssetId] = useState(null);
+  const [conditionBackfill, setConditionBackfill] = useState({ photos: [], previews: [] });
+  const [savingConditionPhotos, setSavingConditionPhotos] = useState(false);
 
   // Reports panel
   const [reportCollab, setReportCollab] = useState("");
@@ -220,7 +230,88 @@ const TIAssetsFinancieroPage = () => {
     }
   };
 
+  const printAssetLabel = async (asset) => {
+    if (!asset?.id) return;
+    setPrintingLabelAssetId(asset.id);
+    try {
+      await printTiAssetLabel(asset.id, asset.asset_code || "");
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo imprimir la etiqueta del activo", "error");
+    } finally {
+      setPrintingLabelAssetId(null);
+    }
+  };
+
+  const handleConditionPhotoFiles = (files, { append = true } = {}) => {
+    const incoming = Array.from(files || []).filter((file) => file && (!file.type || file.type.startsWith("image/")));
+    if (!incoming.length) return;
+    setForm((current) => {
+      const nextFiles = append
+        ? [...current.condition_photos, ...incoming].slice(0, 2)
+        : incoming.slice(0, 2);
+      return {
+        ...current,
+        condition_photos: nextFiles,
+        condition_photo_previews: nextFiles.map((file) => URL.createObjectURL(file)),
+      };
+    });
+  };
+
+  const removeConditionPhoto = (indexToRemove) => {
+    setForm((current) => {
+      const nextFiles = current.condition_photos.filter((_, index) => index !== indexToRemove);
+      return {
+        ...current,
+        condition_photos: nextFiles,
+        condition_photo_previews: nextFiles.map((file) => URL.createObjectURL(file)),
+      };
+    });
+  };
+
   // ── Filters ─────────────────────────────────────────────────────────────────
+
+  const handleBackfillConditionPhotoFiles = (files, { append = true } = {}) => {
+    const incoming = Array.from(files || []).filter((file) => file && (!file.type || file.type.startsWith("image/")));
+    if (!incoming.length) return;
+    setConditionBackfill((current) => {
+      const nextFiles = append
+        ? [...current.photos, ...incoming].slice(0, 2)
+        : incoming.slice(0, 2);
+      return {
+        photos: nextFiles,
+        previews: nextFiles.map((file) => URL.createObjectURL(file)),
+      };
+    });
+  };
+
+  const removeBackfillConditionPhoto = (indexToRemove) => {
+    setConditionBackfill((current) => {
+      const nextFiles = current.photos.filter((_, index) => index !== indexToRemove);
+      return {
+        photos: nextFiles,
+        previews: nextFiles.map((file) => URL.createObjectURL(file)),
+      };
+    });
+  };
+
+  const saveBackfillConditionPhotos = async () => {
+    if (!selected?.id) return;
+    if (conditionBackfill.photos.length !== 2) {
+      return showToast("Debes adjuntar exactamente 2 fotos del estado inicial", "warning");
+    }
+    setSavingConditionPhotos(true);
+    try {
+      await uploadTiAssetInitialConditionPhotos(selected.id, conditionBackfill.photos);
+      showToast("Fotos de registro cargadas correctamente", "success");
+      setConditionBackfill({ photos: [], previews: [] });
+      await loadAll();
+      await loadDetail(selected.id);
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudieron cargar las fotos de registro", "error");
+    } finally {
+      setSavingConditionPhotos(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     let list = assets;
@@ -254,11 +345,15 @@ const TIAssetsFinancieroPage = () => {
 
   const handleCreateAsset = async () => {
     if (!form.name.trim())          return showToast("El nombre es requerido", "warning");
-    if (!form.serial_number.trim()) return showToast("El número de serie es requerido", "warning");
-    if (!form.purchase_date)        return showToast("La fecha de compra es requerida", "warning");
+    const physicalScore = Number(form.physical_condition_score);
+    const functionalScore = Number(form.functional_condition_score);
+    if (!Number.isInteger(physicalScore) || physicalScore < 1 || physicalScore > 10) return showToast("El estado físico debe ser del 1 al 10", "warning");
+    if (!Number.isInteger(functionalScore) || functionalScore < 1 || functionalScore > 10) return showToast("El estado funcional debe ser del 1 al 10", "warning");
+    if (form.condition_photos.length !== 2) return showToast("Debes adjuntar exactamente 2 fotos del estado inicial", "warning");
     setSaving(true);
     try {
-      await createTiAsset(form);
+      const { condition_photo_previews: _previews, ...payload } = form;
+      await createTiAsset(payload);
       showToast("Activo registrado correctamente", "success");
       setForm(EMPTY_FORM);
       setShowCreate(false);
@@ -291,27 +386,34 @@ const TIAssetsFinancieroPage = () => {
           </button>
           <button
             type="button"
-            onClick={() => setShowCreate((v) => !v)}
+            onClick={() => setShowCreate(true)}
             className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors active:scale-[0.97]"
           >
-            {showCreate ? <FiChevronUp size={14} /> : <FiPlus size={14} />}
-            {showCreate ? "Cancelar" : "Nuevo equipo"}
+            <FiPlus size={14} />
+            Nuevo equipo
           </button>
         </div>
       </div>
 
       {/* Create asset form */}
-      {showCreate && (
-        <div className="rounded-xl border border-blue-100 bg-blue-50 p-5 space-y-4">
-          <p className="text-sm font-semibold text-blue-800">Registrar nuevo activo TI</p>
+      <Modal
+        open={showCreate}
+        title="Registrar nuevo activo TI"
+        maxWidth="max-w-5xl"
+        onClose={() => setShowCreate(false)}
+        disableClose={saving}
+      >
+        <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
               { key: "name",           label: "Nombre *",          placeholder: "Ej: Laptop Dell XPS", required: true },
               { key: "brand",          label: "Marca",             placeholder: "Ej: Dell" },
               { key: "model",          label: "Modelo",            placeholder: "Ej: XPS 15" },
-              { key: "serial_number",  label: "N° de serie *",     placeholder: "Ej: SN-ABC123", required: true },
+              { key: "serial_number",  label: "N° de serie",       placeholder: "Opcional, no debe repetirse" },
               { key: "imei",           label: "IMEI",              placeholder: "Solo para móviles" },
               { key: "purchase_value", label: "Valor de compra ($)", placeholder: "Ej: 1200.00", type: "number" },
+              { key: "physical_condition_score", label: "Estado físico (1-10) *", placeholder: "Ej: 9", type: "number" },
+              { key: "functional_condition_score", label: "Estado funcional (1-10) *", placeholder: "Ej: 10", type: "number" },
             ].map(({ key, label, placeholder, type = "text" }) => (
               <div key={key}>
                 <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 block mb-1">{label}</label>
@@ -325,7 +427,7 @@ const TIAssetsFinancieroPage = () => {
               </div>
             ))}
             <div>
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 block mb-1">Fecha de compra *</label>
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 block mb-1">Fecha de compra</label>
               <input
                 type="date"
                 value={form.purchase_date}
@@ -342,6 +444,70 @@ const TIAssetsFinancieroPage = () => {
               >
                 {[3, 6, 12, 24].map((m) => <option key={m} value={m}>{m} meses</option>)}
               </select>
+            </div>
+            <div className="sm:col-span-2 lg:col-span-3">
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 block mb-1">Características</label>
+              <input
+                value={form.characteristics}
+                onChange={setField("characteristics")}
+                placeholder="RAM, disco, procesador, etc."
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none transition-colors"
+              />
+            </div>
+            <div className="sm:col-span-2 lg:col-span-3">
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 block mb-1">
+                Fotos del estado inicial ({form.condition_photos.length}/2) *
+              </label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-900 bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800">
+                  <FiCamera size={15} />
+                  Tomar foto
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={(event) => {
+                      handleConditionPhotoFiles(event.target.files, { append: true });
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50">
+                  <FiDownload size={15} />
+                  Seleccionar archivo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      handleConditionPhotoFiles(event.target.files, { append: false });
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">Toma 2 fotos desde la cÃ¡mara. La selecciÃ³n de archivo queda como respaldo.</p>
+              {form.condition_photo_previews.length > 0 && (
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  {form.condition_photo_previews.map((src, index) => (
+                    <div key={src} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white">
+                      <img src={src} alt={`Estado inicial ${index + 1}`} className="h-28 w-full object-cover" />
+                      <span className="absolute left-2 top-2 rounded-full bg-slate-900/80 px-2 py-0.5 text-[10px] font-semibold text-white">
+                        Foto {index + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeConditionPhoto(index)}
+                        className="absolute right-2 top-2 rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-sm hover:bg-white"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-1">
@@ -363,7 +529,7 @@ const TIAssetsFinancieroPage = () => {
             </button>
           </div>
         </div>
-      )}
+      </Modal>
 
       {/* KPI strip */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -461,6 +627,15 @@ const TIAssetsFinancieroPage = () => {
                   <StatusBadge status={selected.status} />
                   <button
                     type="button"
+                    onClick={() => printAssetLabel(selected)}
+                    disabled={printingLabelAssetId === selected.id}
+                    className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 hover:text-slate-900 hover:border-slate-300 transition-colors cursor-pointer disabled:opacity-60"
+                  >
+                    {printingLabelAssetId === selected.id ? <FiRefreshCw size={11} className="animate-spin" /> : <FiPrinter size={11} />}
+                    Etiqueta
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => downloadTiAssetReport(selected.id)}
                     className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 hover:text-slate-900 hover:border-slate-300 transition-colors cursor-pointer"
                   >
@@ -505,6 +680,8 @@ const TIAssetsFinancieroPage = () => {
                     ["Código",           selected.asset_code || "-"],
                     ["N° de serie",      selected.serial_number || "-"],
                     ["IMEI",             selected.imei || "-"],
+                    ["Estado físico",    selected.physical_condition_score ? `${selected.physical_condition_score}/10` : "-"],
+                    ["Estado funcional", selected.functional_condition_score ? `${selected.functional_condition_score}/10` : "-"],
                     ["Fecha de compra",  selected.purchase_date ? String(selected.purchase_date).slice(0, 10) : "-"],
                     ["Frec. mantenimiento", `${selected.maintenance_frequency_months || 12} meses`],
                     ["Último mantenimiento", selected.last_maintenance_at ? String(selected.last_maintenance_at).slice(0, 10) : "-"],
@@ -516,6 +693,104 @@ const TIAssetsFinancieroPage = () => {
                   ))}
                 </div>
               </div>
+
+              {selected.initial_condition_photos?.length > 0 && (
+                <div className="border-t border-slate-100 pt-4">
+                  <SectionLabel>Fotos de registro</SectionLabel>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {selected.initial_condition_photos.map((photo) => (
+                      <a
+                        key={photo.index}
+                        href={photo.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="group overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+                      >
+                        <img
+                          src={photo.url}
+                          alt={`Foto de registro ${photo.index}`}
+                          className="h-36 w-full object-cover transition-transform group-hover:scale-[1.02]"
+                          loading="lazy"
+                        />
+                        <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-500">
+                          <span className="inline-flex items-center gap-1 font-semibold">
+                            <FiImage size={12} /> Foto {photo.index}
+                          </span>
+                          <span>Ver</span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {!selected.initial_condition_photos?.length && (
+                <div className="border-t border-slate-100 pt-4">
+                  <SectionLabel>Regularizar fotos de registro</SectionLabel>
+                  <p className="mb-3 text-xs text-slate-500">
+                    Este activo fue registrado sin evidencia fotogrÃ¡fica inicial. Carga exactamente 2 fotos para completar la trazabilidad.
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-900 bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800">
+                      <FiCamera size={15} />
+                      Tomar foto
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={(event) => {
+                          handleBackfillConditionPhotoFiles(event.target.files, { append: true });
+                          event.target.value = "";
+                        }}
+                      />
+                    </label>
+                    <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50">
+                      <FiDownload size={15} />
+                      Seleccionar archivo
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={(event) => {
+                          handleBackfillConditionPhotoFiles(event.target.files, { append: false });
+                          event.target.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {conditionBackfill.previews.length > 0 && (
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {conditionBackfill.previews.map((src, index) => (
+                        <div key={src} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white">
+                          <img src={src} alt={`Foto de regularizaciÃ³n ${index + 1}`} className="h-36 w-full object-cover" />
+                          <span className="absolute left-2 top-2 rounded-full bg-slate-900/80 px-2 py-0.5 text-[10px] font-semibold text-white">
+                            Foto {index + 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeBackfillConditionPhoto(index)}
+                            className="absolute right-2 top-2 rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-sm hover:bg-white"
+                          >
+                            Quitar
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      disabled={savingConditionPhotos || conditionBackfill.photos.length !== 2}
+                      onClick={saveBackfillConditionPhotos}
+                      className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors active:scale-[0.97]"
+                    >
+                      {savingConditionPhotos ? <FiRefreshCw size={14} className="animate-spin" /> : <FiCamera size={14} />}
+                      {savingConditionPhotos ? "Cargando fotos..." : "Guardar fotos"}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Current assignment */}
               <div className="border-t border-slate-100 pt-4">
@@ -608,15 +883,19 @@ const TIAssetsFinancieroPage = () => {
                         </label>
                       </div>
                     )}
-                    {actas.map((acta) => (
-                      <div key={acta.id} className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                    {actas.map((acta) => {
+                      const isAnnulled = Boolean(acta.is_annulled);
+                      return (
+                      <div key={acta.id} className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 ${isAnnulled ? "border-red-100 bg-red-50/40" : "border-slate-100 bg-slate-50"}`}>
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${acta.tipo === "entrega" ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"}`}>
                               {acta.tipo}
                             </span>
                             <span className="text-xs font-mono text-slate-500">{acta.acta_code || `#${String(acta.id).padStart(6, "0")}`}</span>
-                            {acta.is_complete
+                            {isAnnulled
+                              ? <span className="flex items-center gap-0.5 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700"><FiAlertTriangle size={9} /> Anulada</span>
+                              : acta.is_complete
                               ? <span className="flex items-center gap-0.5 rounded-full bg-green-50 px-1.5 py-0.5 text-[10px] font-semibold text-green-700"><FiCheck size={9} /> Firmada</span>
                               : <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">Pendiente</span>
                             }
@@ -630,7 +909,7 @@ const TIAssetsFinancieroPage = () => {
                             className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 hover:text-slate-900 transition-colors cursor-pointer">
                             <FiDownload size={10} /> Borrador
                           </button>
-                          {acta.is_complete && acta.signed_pdf_drive_url && (
+                          {!isAnnulled && acta.is_complete && acta.signed_pdf_drive_url && (
                             <a href={acta.signed_pdf_drive_url} target="_blank" rel="noreferrer"
                               className="flex items-center gap-1 rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-xs text-green-700 hover:bg-green-100 transition-colors">
                               <FiCheck size={10} /> Firmada
@@ -638,7 +917,8 @@ const TIAssetsFinancieroPage = () => {
                           )}
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

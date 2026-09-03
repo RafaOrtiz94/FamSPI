@@ -1,5 +1,7 @@
 const logger = require("../config/logger");
 const { processExpiredRecoveryCoordinations } = require("../modules/permisos/permisos.service");
+const { isOffHours } = require("../utils/offHoursPolicy");
+const { registerOffHoursJob } = require("./offHoursCoordinator");
 
 const DEFAULT_INTERVAL_MINUTES = Number(process.env.PERMISOS_RECOVERY_EXPIRY_INTERVAL_MINUTES || 60);
 const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
@@ -24,8 +26,14 @@ function startPermisosRecoveryCoordinationExpiryJob() {
     runOnce().catch((error) => logger.error({ error }, "Error inicial recovery coordination expiry job"));
   }
   interval = setInterval(() => {
+    if (isOffHours(new Date()).isOffHours) return; // manejado por offHoursCoordinator
     runOnce().catch((error) => logger.error({ error }, "Error recovery coordination expiry job"));
   }, everyMs);
+  registerOffHoursJob({
+    name: "permisos_recovery_coordination_expiry",
+    runOnce,
+    offHoursIntervalMs: everyMs * 6,
+  });
 }
 
 module.exports = {

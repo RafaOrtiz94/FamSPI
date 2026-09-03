@@ -29,6 +29,7 @@ const { startBusinessCaseSheetGenerationQueueJob } = require("./jobs/businessCas
 const { start: startBcNotificationQueueJob } = require("./jobs/businessCaseNotificationQueueScheduler");
 const { startDatabaseBackupJob } = require("./jobs/databaseBackupToDrive");
 const { startPermisosPendingExpiryJob } = require("./jobs/permisosPendingExpiryScheduler");
+const { startPasanteAccountExpiryJob } = require("./jobs/pasanteAccountExpiryScheduler");
 const { startPermisosRecoveryCoordinationExpiryJob } = require("./jobs/permisosRecoveryCoordinationExpiryScheduler");
 const { startPermisosAutoCancelledJustificationJob } = require("./jobs/permisosAutoCancelledJustificationScheduler");
 const { startPermisosApprovalEscalationJob } = require("./jobs/permisosApprovalEscalationScheduler");
@@ -39,6 +40,8 @@ const { startSignatureWorkflowReminderJob } = require("./jobs/signatureWorkflowR
 const { startSignatureWorkflowExpiryJob } = require("./jobs/signatureWorkflowExpiryScheduler");
 const { startTrainingSignatureReminderJob } = require("./jobs/trainingSignatureReminderScheduler");
 const { startScheduleVisitCompletionReminderJob } = require("./jobs/scheduleVisitCompletionReminderScheduler");
+const { startKickoffScheduler } = require("./modules/kickoff/kickoff.scheduler");
+const { startOffHoursCoordinator } = require("./jobs/offHoursCoordinator");
 
 const PORT = Number(process.env.PORT) || 8080;
 const ENV = process.env.NODE_ENV || "development";
@@ -56,6 +59,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
 
   if (ENABLE_JOBS && IS_JOBS_RUNNER_INSTANCE) {
     logger.info("Jobs internos habilitados");
+    startOffHoursCoordinator();
     const jobs = [
       { name: "mantenimiento_reminder", fn: startReminderScheduler },
       { name: "expired_reservations", fn: startExpiredReservationsJob },
@@ -65,6 +69,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
       { name: "bc_sheet_generation_queue", fn: startBusinessCaseSheetGenerationQueueJob },
       { name: "bc_notification_queue", fn: startBcNotificationQueueJob },
       { name: "permisos_pending_expiry", fn: startPermisosPendingExpiryJob },
+      { name: "pasante_account_expiry", fn: startPasanteAccountExpiryJob },
       { name: "permisos_recovery_coordination_expiry", fn: startPermisosRecoveryCoordinationExpiryJob },
       { name: "permisos_auto_cancelled_justification", fn: startPermisosAutoCancelledJustificationJob },
       { name: "permisos_approval_escalation", fn: startPermisosApprovalEscalationJob },
@@ -76,6 +81,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
       { name: "signature_workflow_expiry", fn: startSignatureWorkflowExpiryJob },
       { name: "training_signature_reminder", fn: startTrainingSignatureReminderJob },
       { name: "schedule_visit_completion_reminder", fn: startScheduleVisitCompletionReminderJob },
+      { name: "kickoff_autostart_overdue", fn: startKickoffScheduler },
     ];
 
     jobs.forEach((job, index) => {

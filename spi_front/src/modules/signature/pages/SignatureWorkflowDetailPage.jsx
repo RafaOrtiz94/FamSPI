@@ -20,7 +20,7 @@ import {
   downloadSignatureWorkflowFinalPdf,
   downloadSignatureWorkflowSourcePdf,
   getSignatureWorkflow,
-  getSignatureWorkflowSourcePdfBuffer,
+  getSignatureWorkflowFinalPdfBuffer,
   openSignatureWorkflowStep,
   reassignSignatureWorkflowSigner,
   rejectSignatureWorkflowStep,
@@ -181,7 +181,11 @@ const SignatureWorkflowDetailPage = () => {
     const doc = data.documents?.[0];
     if (!doc || !wf) return;
     setPdfLoading(true);
-    getSignatureWorkflowSourcePdfBuffer(wf.id, doc.id)
+    // Usa el PDF con firmas ya registradas (mismo contenido que "PDF firmado
+    // parcial") en vez del original en blanco, para que un firmante nuevo
+    // vea de entrada donde ya firmaron los demas y evite errores de
+    // ubicacion cuando hay varios firmantes.
+    getSignatureWorkflowFinalPdfBuffer(wf.id, doc.id)
       .then((buf) => setPdfBuffer(buf))
       .catch(() => {})
       .finally(() => setPdfLoading(false));

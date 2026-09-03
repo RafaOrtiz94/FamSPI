@@ -3,6 +3,12 @@
 ## 1. Descripción
 Módulo de Calidad GXP/ISO 9001. Contiene 17 sub-módulos (CA-01-01 a CA-01-17) que cubren procesos de control de calidad. Cada sub-módulo tiene su propio controller, repository, service, routes y state machine. Todos comparten el prefijo `/api/v1/calidad`.
 
+## 1.1. Estado actual (2026-08-12): desarrollo pausado, sin uso real
+El módulo aún no tiene adopción en producción — nadie depende hoy de sus alarmas/paneles en tiempo real. Mientras esto sea así:
+- El polling de frontend (`useCa0101Queries.js`, `ComplianceDashboard.jsx`) está deliberadamente alentado a 3 min (antes 30-60s) para no gastar compute de Neon en paneles sin usuarios reales. **Cuando el módulo entre en uso real**, revisar y bajar el intervalo de las alarmas de temperatura (CA-01-01) a 30-60s — ahí sí es dato de seguridad de cadena de frío y la latencia importa.
+- Los schedulers backend `ca0103` a `ca0109` (`backend/src/jobs/ca010{3..9}*.js`) existen en el código pero **no están importados en ningún lado** (ni `server.js` ni rutas) — son código muerto, no corren ni cuestan nada. Solo `ca0102CleaningEscalationScheduler.js` tiene lógica de cron completa pero tampoco está wireado todavía.
+- No se ha borrado nada de esto porque el trabajo de los 17 sub-módulos ya existe y se retomará; esta nota es para que la próxima persona no pierda tiempo buscando por qué "no pasa nada" en Calidad.
+
 ---
 
 ## Sub-módulo CA-01-01: Control de Temperatura

@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { PDFDocument } = require("pdf-lib");
 const db = require("../../config/db");
 const { appendSignatureBlock } = require("./signatureWorkflows.pdf");
 const { uploadBase64File, ensureFolder } = require("../../utils/drive");
@@ -927,6 +928,24 @@ async function signStep({ workflowId, signerId, user, action }) {
     }
 
     const document = data.documents.find((item) => Number(item.id) === Number(signer.document_id));
+
+    // El frontend puede reportar un page_number fuera de rango (ej. contó una
+    // pagina de evidencia que solo existe en el preview, no en el documento
+    // fuente): si no se recorta aqui, appendSignatureBlock lo descarta en
+    // silencio (pageIndex >= pdfPages.length) y la firma nunca aparece en
+    // ningun render, ni parcial ni final.
+    if (action.signature_placement?.page_number && document?.source_pdf_base64) {
+      try {
+        const sourcePdf = await PDFDocument.load(Buffer.from(document.source_pdf_base64, "base64"));
+        const pageCount = sourcePdf.getPageCount();
+        if (action.signature_placement.page_number > pageCount) {
+          action.signature_placement = { ...action.signature_placement, page_number: pageCount };
+        }
+      } catch {
+        // si no se puede leer el PDF fuente, se deja el placement tal cual
+      }
+    }
+
     const signedAt = new Date().toISOString();
     const previousSignatureHash = data.signers
       .filter((item) => item.signature_hash_sha256)

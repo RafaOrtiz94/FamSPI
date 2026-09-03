@@ -3,14 +3,14 @@
 // siempre refleja de inmediato que la primera marca se guardo) no debe
 // generar una segunda entrada en la cola ni un segundo intento de red --
 // eso es lo que causaba marcaciones duplicadas una vez que volvia la senal.
+import api from "../index";
+import { marcarEntrada } from "../attendanceApi";
+import { clearOfflineQueue, getQueueSize } from "../../../shared/utils/attendanceOfflineQueue";
+
 jest.mock("../index", () => ({
   __esModule: true,
   default: { post: jest.fn() },
 }));
-
-import api from "../index";
-import { marcarEntrada } from "../attendanceApi";
-import { clearOfflineQueue, getQueueSize } from "../../../shared/utils/attendanceOfflineQueue";
 
 describe("attendanceApi — dedup de marcas offline", () => {
   beforeEach(() => {

@@ -11,6 +11,7 @@ const FULL_ACCESS_ROLES = new Set([
   "analista_talento_humano",
   "asistente_talento_humano",
   "auxiliar_talento_humano",
+  "pasante",
   "rh",
   "rrhh",
   "gerencia",

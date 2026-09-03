@@ -28,7 +28,7 @@ import {
   finishPermissionExit,
   updateExceptionStatus,
 } from "../../../core/api/attendanceApi";
-import { getLocationForAction, startLocationPrewarm, stopLocationPrewarm } from "../../../shared/utils/attendanceLocationCache";
+import { getLocationForAction, readCachedLocation, startLocationPrewarm, stopLocationPrewarm } from "../../../shared/utils/attendanceLocationCache";
 import { fetchClients } from "../../../core/api/clientsApi";
 import ECUADOR_LOCATIONS from "../../../data/ecuadorGeography";
 import Card from "../../../core/ui/components/Card";
@@ -56,12 +56,81 @@ import {
 
 const TODAY_CONTEXT_CACHE_KEY = "attendance-shortcuts:today-context";
 const TODAY_CONTEXT_CACHE_TTL_MS = 30000;
+const GPS_ACCURACY_GOOD_METERS = 40;
+const GPS_ACCURACY_STABLE_METERS = 120;
+const GPS_ACCURACY_LIMIT_METERS = 250;
 
 const getLocalDateKey = (date = new Date()) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+};
+
+const formatGpsAccuracy = (accuracy) => {
+  const parsed = Number(accuracy);
+  return Number.isFinite(parsed) && parsed >= 0 ? `${Math.round(parsed)} m` : "Sin lectura";
+};
+
+const describeGpsSignal = (accuracy) => {
+  const parsed = Number(accuracy);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return {
+      label: "Buscando senal",
+      toneClass: "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+      helper: "Esperando la primera lectura GPS del dispositivo.",
+    };
+  }
+
+  if (parsed <= GPS_ACCURACY_GOOD_METERS) {
+    return {
+      label: "Senal alta",
+      toneClass: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+      helper: "La precision es solida para completar la marcacion.",
+    };
+  }
+
+  if (parsed <= GPS_ACCURACY_STABLE_METERS) {
+    return {
+      label: "Senal estable",
+      toneClass: "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300",
+      helper: "La lectura va mejorando y suele resolver la marcacion.",
+    };
+  }
+
+  if (parsed <= GPS_ACCURACY_LIMIT_METERS) {
+    return {
+      label: "Senal limitada",
+      toneClass: "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
+      helper: "Todavia esta cerca del limite. Espera unos segundos mas.",
+    };
+  }
+
+  return {
+    label: "Senal debil",
+    toneClass: "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300",
+    helper: "Muevete a una zona abierta o cerca de una ventana antes de reintentar.",
+  };
+};
+
+const describeGpsSource = (source) => {
+  switch (String(source || "").trim()) {
+    case "prewarm_watch":
+      return "Lectura continua del dispositivo";
+    case "browser_high_accuracy":
+    case "current":
+    case "watch":
+    case "live_watch":
+      return "GPS preciso del dispositivo";
+    case "browser_quick":
+    case "quick_coarse":
+      return "Lectura rapida del dispositivo";
+    case "cache_extended":
+    case "cached":
+      return "Ultima lectura guardada";
+    default:
+      return "GPS del dispositivo";
+  }
 };
 
 const readCachedTodayContext = () => {
@@ -247,8 +316,10 @@ const AttendanceAction = () => {
   const [lateJustificationReason, setLateJustificationReason] = useState("");
   const [lateJustificationLoading, setLateJustificationLoading] = useState(false);
   const [exitConfirmAccepted, setExitConfirmAccepted] = useState(false);
+  const [liveGpsReading, setLiveGpsReading] = useState(null);
   const processedRef = useRef(false);
   const executionKeyRef = useRef("");
+  const lowAccuracyRecoveryAttemptedRef = useRef(false);
   const actionParams = parseActionParams(location.search);
   const executionKey = `${action || ""}|${location.search || ""}|${location.key || ""}|${user?.id || ""}`;
   const shortcutIntentKey = useMemo(() => resolveAttendanceIntentKey(action), [action]);
@@ -1072,6 +1143,7 @@ const AttendanceAction = () => {
       setLegacyOverrideAction(null);
       setTodayAttendance(null);
       setCompatibilityPrompt(null);
+      lowAccuracyRecoveryAttemptedRef.current = false;
       setEntryRegularizationReason("");
       setEntryRegularizationLoading(false);
       setLateJustificationReason("");
@@ -1091,6 +1163,44 @@ const AttendanceAction = () => {
       }
     }, 22000);
     return () => clearTimeout(timer);
+  }, [status]);
+
+  useEffect(() => {
+    if (status !== "geolocating") {
+      setLiveGpsReading(null);
+      return undefined;
+    }
+
+    const cachedReading = readCachedLocation();
+    setLiveGpsReading(cachedReading || null);
+
+    if (!navigator?.geolocation) {
+      return undefined;
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        setLiveGpsReading({
+          latitude: Number(position?.coords?.latitude),
+          longitude: Number(position?.coords?.longitude),
+          accuracy: Number(position?.coords?.accuracy || 0),
+          timestamp: Number(position?.timestamp || Date.now()),
+          source: "live_watch",
+        });
+      },
+      () => {
+        // El flujo principal ya informa permisos o fallos; aqui solo reflejamos lecturas disponibles.
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 15000,
+      }
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+    };
   }, [status]);
 
   // Prewarm GPS as soon as the page loads so cache is warm when needed
@@ -1168,9 +1278,58 @@ const AttendanceAction = () => {
       }
       throw new Error(response?.message || "Error al procesar la solicitud.");
     } catch (err) {
-      const statusCode = Number(err?.response?.status || 0);
-      const backendCode = String(err?.response?.data?.code || "").trim();
-      const backendMessage = String(err?.response?.data?.message || "").trim();
+      let finalError = err;
+      let statusCode = Number(finalError?.response?.status || 0);
+      let backendCode = String(finalError?.response?.data?.code || "").trim();
+      let backendMessage = String(finalError?.response?.data?.message || "").trim();
+      if (backendCode === "LOCATION_ACCURACY_LOW" && !lowAccuracyRecoveryAttemptedRef.current) {
+        lowAccuracyRecoveryAttemptedRef.current = true;
+        setStatus("geolocating");
+        setMessage("La precision GPS fue insuficiente. Buscando una lectura mas precisa.");
+        setErrorDetails(backendMessage || "Reintentando con una nueva lectura GPS sin usar cache reciente.");
+
+        try {
+          const refreshedLoc = await withTimeout(
+            getLocationForAction({ forceRefresh: true }),
+            30000,
+            "El GPS no logro mejorar la precision a tiempo. Reintenta en una zona con mejor senal."
+          );
+
+          if (refreshedLoc?.accuracy && currentLoc?.accuracy && refreshedLoc.accuracy >= currentLoc.accuracy) {
+            throw new Error(
+              `La nueva lectura GPS sigue siendo imprecisa (${Math.round(refreshedLoc.accuracy)}m). Muevete a una zona abierta y reintenta.`
+            );
+          }
+
+          setStatus("processing");
+          setMessage("Ubicacion actualizada. Reintentando marcacion.");
+          setErrorDetails("");
+          const retryResponse = await config.fn(
+            refreshedLoc,
+            effectiveActionParams,
+            { occurred_at: occurredAt || new Date().toISOString() }
+          );
+
+          if (retryResponse?.ok) {
+            const destination = actionParams.returnUrl || "/dashboard";
+            setStatus("success");
+            setMessage(retryResponse.message || `${config.label} registrada correctamente.`);
+            showToast(retryResponse.message || `${config.label} registrada`, "success");
+            setTimeout(() => {
+              navigate(destination, { replace: true });
+            }, 3500);
+            return;
+          }
+
+          throw new Error(retryResponse?.message || "Error al procesar la solicitud.");
+        } catch (retryErr) {
+          finalError = retryErr;
+          statusCode = Number(finalError?.response?.status || 0);
+          backendCode = String(finalError?.response?.data?.code || "").trim();
+          backendMessage = String(finalError?.response?.data?.message || "").trim();
+        }
+      }
+
       const isClientExitAction = effectiveActionKey === "cliente-salida" || effectiveActionKey === "salida-cliente";
       if (
         isClientExitAction &&
@@ -1204,7 +1363,7 @@ const AttendanceAction = () => {
         return;
       }
 
-      const info = getAttendanceErrorInfo(err, "No se pudo completar la marcacion.", "error");
+      const info = getAttendanceErrorInfo(finalError, "No se pudo completar la marcacion.", "error");
       setStatus("error");
       setMessage(`No se pudo registrar la ${config.label.toLowerCase()}.`);
       setErrorDetails(info.message || "Error desconocido");
@@ -1293,6 +1452,8 @@ const AttendanceAction = () => {
   // perder el contexto ya ingresado (cliente, motivo, kilometraje) en el paso manual.
   const handleRetry = useCallback(() => {
     processedRef.current = false;
+    lowAccuracyRecoveryAttemptedRef.current = false;
+    setLiveGpsReading(null);
     setStatus("initializing");
     setMessage("");
     setErrorDetails("");
@@ -1300,6 +1461,15 @@ const AttendanceAction = () => {
     setExitConfirmAccepted(false);
     setRetryTick((tick) => tick + 1);
   }, []);
+
+  const gpsSignal = useMemo(
+    () => describeGpsSignal(liveGpsReading?.accuracy),
+    [liveGpsReading?.accuracy]
+  );
+  const gpsSourceLabel = useMemo(
+    () => describeGpsSource(liveGpsReading?.source),
+    [liveGpsReading?.source]
+  );
 
   const handleEntryRegularizationSubmit = useCallback(async () => {
     const normalizedReason = String(entryRegularizationReason || "").trim();
@@ -2201,6 +2371,32 @@ const AttendanceAction = () => {
                 </div>
                 <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Obteniendo ubicación</h2>
                 <p className="text-gray-500 dark:text-gray-400 italic">Un momento, por favor...</p>
+                <div className="mt-5 w-full max-w-sm rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left shadow-sm dark:border-slate-700 dark:bg-slate-800/70">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">
+                      Senal GPS
+                    </span>
+                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${gpsSignal.toneClass}`}>
+                      {gpsSignal.label}
+                    </span>
+                  </div>
+                  <div className="mt-3 flex items-end justify-between gap-4">
+                    <div>
+                      <p className="text-2xl font-semibold text-slate-900 dark:text-slate-50">
+                        {formatGpsAccuracy(liveGpsReading?.accuracy)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        {gpsSourceLabel}
+                      </p>
+                    </div>
+                    <p className="max-w-[11rem] text-right text-xs leading-5 text-slate-500 dark:text-slate-300">
+                      {gpsSignal.helper}
+                    </p>
+                  </div>
+                  <div className="mt-3 border-t border-slate-200 pt-3 text-[11px] text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                    Limite actual de marcacion: hasta {GPS_ACCURACY_LIMIT_METERS} m de precision.
+                  </div>
+                </div>
                 {helpHint && (
                   <p className="mt-4 max-w-xs text-xs text-gray-400 dark:text-gray-500">{helpHint}</p>
                 )}

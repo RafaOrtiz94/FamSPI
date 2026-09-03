@@ -261,10 +261,18 @@ const getCatalogRowCompletenessScore = (row = {}) => {
 };
 
 const getCatalogRowBusinessKey = (row = {}) => {
- const equipmentKey = normalizeTextKey(row?.equipmentId);
- const manufacturerKey = normalizeTextKey(row?.manufacturerId || row?.itemId);
- if (manufacturerKey) return [equipmentKey, "manufacturer", manufacturerKey].join("|");
- return [equipmentKey, normalizeTextKey(row?.name), getTypeFamily(row?.type)].join("|");
+  if (row?.catalogId != null) {
+    return [
+      normalizeTextKey(row?.equipmentId),
+      row?.catalogKind || "catalog",
+      "catalog",
+      normalizeTextKey(row?.catalogId),
+    ].join("|");
+  }
+  const equipmentKey = normalizeTextKey(row?.equipmentId);
+  const manufacturerKey = normalizeTextKey(row?.manufacturerId || row?.itemId);
+  if (manufacturerKey) return [equipmentKey, "manufacturer", manufacturerKey].join("|");
+  return [equipmentKey, normalizeTextKey(row?.name), getTypeFamily(row?.type)].join("|");
 };
 
 const dedupeCatalogRowsForUI = (items = []) => {
@@ -833,11 +841,19 @@ return map;
 
  const mergedRows = useMemo(() => {
  const customItems = (savedItems || []).filter((item) => item.source === "custom");
+ const persistedSyncedItems = (savedItems || []).filter((item) => item.source !== "custom");
  const catalogVisible = (catalogItems || []).filter((item) => {
  if (excludedKeys.includes(item.key)) return false;
  if (item.legacyKey && excludedKeys.includes(item.legacyKey)) return false;
  return true;
  });
+ const normalizedPersistedSynced = persistedSyncedItems.map((item) => ({
+ ...item,
+ type: toUiType(item?.type),
+ manufacturerId: item.manufacturerId || item.itemId || null,
+ equipmentName: item.equipmentName || "Manual",
+ equipmentId: item.equipmentId || null,
+ }));
  const enrichedCustom = customItems.map((item) => ({
  ...item,
  type: toUiType(item?.type),
@@ -845,7 +861,11 @@ return map;
  equipmentName: item.equipmentName || "Manual",
  equipmentId: item.equipmentId || null,
  }));
- return dedupeVisibleRowsForUI([...catalogVisible, ...enrichedCustom]);
+ return dedupeVisibleRowsForUI([
+ ...catalogVisible,
+ ...normalizedPersistedSynced,
+ ...enrichedCustom,
+ ]);
  }, [catalogItems, savedItems, excludedKeys]);
 
  const groupedByEquipment = useMemo(() => {
@@ -917,18 +937,27 @@ return map;
  const rowEquipmentMissing = rowEquipmentId == null || rowEquipmentNormalized === "";
  const itemEquipmentMissing = itemEquipmentId == null || itemEquipmentNormalized === "";
 
- if (
- rowCatalogId !== null &&
- itemCatalogId !== null &&
- String(rowCatalogId) === String(itemCatalogId) &&
- (sameEquipment || rowEquipmentMissing || itemEquipmentMissing)
- ) {
- return true;
- }
+  if (
+  rowCatalogId !== null &&
+  itemCatalogId !== null &&
+  String(rowCatalogId) === String(itemCatalogId) &&
+  (sameEquipment || rowEquipmentMissing || itemEquipmentMissing)
+  ) {
+  return true;
+  }
 
- if (
- normalizedItemId &&
- itemId &&
+  if (
+  rowCatalogId !== null &&
+  itemCatalogId !== null &&
+  String(rowCatalogId) !== String(itemCatalogId) &&
+  sameEquipment
+  ) {
+  return false;
+  }
+
+  if (
+  normalizedItemId &&
+  itemId &&
  normalizedItemId === itemId &&
  normalizedType === itemType &&
  (sameEquipment || rowEquipmentMissing || itemEquipmentMissing)
@@ -1007,10 +1036,11 @@ return map;
   isJefeComercial ||
   (isPublicBC ? normalizedCurrentRole === "acp_comercial" : normalizedCurrentRole === "backoffice_comercial");
 
+ // El vencimiento de SLA ya no bloquea esta accion, solo se muestra como
+ // aviso (ver banner de technicalSlaExpired mas abajo).
  const canValidateReactivos =
   gatePhase === "commercial_input" &&
   gateInfo?.documentUploaded === true &&
-  gateInfo?.isExpired !== true &&
   canValidateReactivosByRole &&
   !quantitiesLocked &&
   !isSubsectionLocked("reactivos") &&
@@ -1021,7 +1051,6 @@ return map;
  const needsReactivoSyncBeforeValidate =
   gatePhase === "commercial_input" &&
   gateInfo?.documentUploaded === true &&
-  gateInfo?.isExpired !== true &&
   canValidateReactivosByRole &&
   !quantitiesLocked &&
   !isSubsectionLocked("reactivos") &&
@@ -1690,13 +1719,16 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  </div>
  )}
 
+{technicalSlaExpired && (
+<div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+ Aviso: la ventana SLA de 48 horas de Jefe de Servicio vencio. Esto ya no bloquea la edicion ni la sincronizacion, pero se recomienda solicitar una prorroga a Jefe Comercial para regularizar el flujo.
+</div>
+)}
 {!canEditFinal && (
 <div className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
- {technicalSlaExpired
- ? "No se puede editar ni sincronizar determinaciones por SLA vencido. Solicita una prorroga de 24 horas a Jefe Comercial."
- : quantitiesLocked
+ {quantitiesLocked
  ? "Las cantidades quedaron bloqueadas tras cierre tecnico. Solicita reapertura con Jefe Comercial."
- : "No tienes habilitada la edicion de determinaciones para este flujo o la ventana de 48 horas ya expiro."}
+ : "No tienes habilitada la edicion de determinaciones para este flujo."}
 </div>
 )}
 {canRenewCommercialWindow && (
@@ -1785,7 +1817,8 @@ const rowLimit = getWindowLimit(group.key, section.key);
  // Reactivos se validan con DET/AÑO/PROCESO. Las subsecciones técnicas
  // (controles, calibradores y materiales) se validan visualmente con Producto
  // a Enviar, porque es la columna que llena jefe_servicio en el Sheet.
- const hasSyncedItems = !rows.length || rows.some((row) => (
+ const hasRows = rows.length > 0;
+ const hasSyncedItems = hasRows && rows.some((row) => (
  toPositiveNumber(getSheetQtyDisplayValue(row, section.key)) > 0
  ));
  // Reactivos: cierre individual de acp_comercial/jefe_comercial (es su unica
@@ -1883,11 +1916,15 @@ Rechazar desbloqueo
 )}
 <span
 className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${
- hasSyncedItems ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+ !hasRows
+ ? "bg-gray-100 text-gray-600"
+ : hasSyncedItems
+ ? "bg-emerald-100 text-emerald-700"
+ : "bg-amber-100 text-amber-700"
 }`}
  >
  <FiCheck size={11} />
- {hasSyncedItems ? "Sincronizado" : "Pendiente"}
+ {!hasRows ? "Sin elementos" : hasSyncedItems ? "Sincronizado" : "Pendiente"}
  </span>
  <button
  type="button"

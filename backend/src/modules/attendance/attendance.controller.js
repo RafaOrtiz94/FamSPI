@@ -1914,6 +1914,7 @@ const hasTeamAttendanceLeadAccess = (user = {}) => {
     user?.rol,
     ...(Array.isArray(user?.roles) ? user.roles : []),
     ...(Array.isArray(user?.scopes) ? user.scopes : []),
+    ...(Array.isArray(user?.extra_roles) ? user.extra_roles : []),
   ]
     .map(normalizeRoleToken)
     .filter(Boolean);
@@ -1929,6 +1930,7 @@ const hasHrDashboardAccess = (user = {}) => {
     user?.rol,
     ...(Array.isArray(user?.roles) ? user.roles : []),
     ...(Array.isArray(user?.scopes) ? user.scopes : []),
+    ...(Array.isArray(user?.extra_roles) ? user.extra_roles : []),
   ]
     .map(normalizeRoleToken)
     .filter(Boolean);

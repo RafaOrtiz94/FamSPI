@@ -5,14 +5,6 @@ import { FiLoader } from "react-icons/fi";
 import { handleGoogleCallback } from "../../../core/api/authApi";
 import { useAuth } from "../../../core/auth/AuthContext";
 
-/**
- * LoginCallback.jsx
- * ------------------------------------------------------------
- * - Procesa el fragmento (#accessToken & refreshToken)
- * - Guarda tokens y actualiza el contexto global
- * - Redirige automáticamente al dashboard según el rol
- * - Verifica si el usuario tiene firma registrada
- */
 const LoginCallback = () => {
  const navigate = useNavigate();
  const { refresh, bootstrapSessionFromToken } = useAuth();
@@ -26,27 +18,28 @@ const LoginCallback = () => {
 
    try {
     const hash = window.location.hash;
-    if (!hash) throw new Error("No se encontró información de tokens.");
+    if (!hash) throw new Error("No se encontro informacion de tokens.");
 
     const { accessToken, refreshToken } = handleGoogleCallback(hash);
-
     if (!accessToken || !refreshToken) {
-     throw new Error("Tokens inválidos o incompletos.");
+      throw new Error("Tokens invalidos o incompletos.");
     }
-
-    console.log("✅ Tokens recibidos y guardados en localStorage.");
-    console.log("🔑 Access:", accessToken.slice(0, 15) + "...");
 
     const bootstrappedUser = bootstrapSessionFromToken?.(accessToken);
     if (!bootstrappedUser) {
-     throw new Error("No se pudo hidratar la sesión inicial.");
+     throw new Error("No se pudo hidratar la sesion inicial.");
     }
 
     window.history.replaceState(null, "", window.location.pathname);
 
     const role = (bootstrappedUser.role || "pendiente").toLowerCase();
     const scope = (bootstrappedUser.scope || role).toLowerCase();
-    const isPendingRole = !role || role === "pendiente" || role === "pending" || scope === "pendiente" || scope === "pending";
+    const isPendingRole =
+      !role ||
+      role === "pendiente" ||
+      role === "pending" ||
+      scope === "pendiente" ||
+      scope === "pending";
 
     const roleRoutes = {
      gerencia: "/dashboard/gerencia",
@@ -77,37 +70,37 @@ const LoginCallback = () => {
      jefe_calidad: "/dashboard/calidad",
     };
 
-    const target = sessionStorage.getItem("redirectTo") || (isPendingRole
-     ? "/registro-en-proceso"
-     : bootstrappedUser.dashboard || roleRoutes[role] || roleRoutes[scope] || "/unauthorized");
+    const target =
+      sessionStorage.getItem("redirectTo") ||
+      (isPendingRole
+       ? "/registro-en-proceso"
+       : bootstrappedUser.dashboard || roleRoutes[role] || roleRoutes[scope] || "/unauthorized");
     sessionStorage.removeItem("redirectTo");
-    console.log(`🚀 Redirigiendo a: ${target}`);
 
     void refresh().catch((syncError) => {
-     console.warn("⚠️ La sincronización completa del perfil falló tras el login:", syncError);
+     console.warn("La sincronizacion completa del perfil fallo tras el login:", syncError);
     });
 
     navigate(target, { replace: true });
    } catch (err) {
-    console.error("❌ Error procesando callback:", err);
+    console.error("Error procesando callback:", err);
     navigate("/login?error=auth_failed", { replace: true });
    }
   };
 
   processCallback();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
- }, []);
+ }, [bootstrapSessionFromToken, navigate, refresh]);
 
  return (
-  <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-200">
+  <div className="flex min-h-screen items-center justify-center bg-gray-50 text-gray-700 dark:bg-gray-900 dark:text-gray-200">
    <motion.div
     initial={{ opacity: 0, scale: 0.9 }}
     animate={{ opacity: 1, scale: 1 }}
     transition={{ duration: 0.5 }}
     className="text-center"
    >
-    <FiLoader className="animate-spin text-blue-600 dark:text-blue-400 text-4xl mx-auto mb-4" />
-    <h1 className="text-lg font-semibold">Procesando inicio de sesión...</h1>
+    <FiLoader className="mx-auto mb-4 animate-spin text-4xl text-blue-600 dark:text-blue-400" />
+    <h1 className="text-lg font-semibold">Procesando inicio de sesion...</h1>
     <p className="text-sm text-gray-500 dark:text-gray-400">
      Por favor espera un momento.
     </p>

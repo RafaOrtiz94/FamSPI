@@ -30,8 +30,10 @@ export default function StageTechnicalTest({ entry, stageResult, isCompleted, is
 
   const isAssigned = Boolean(form.assigned_to_id && form.available_from && form.available_to && form.phase === "assigned");
   const isDateConfirmed = Boolean(form.selected_datetime && form.phase === "confirmed");
-  // Paso 1 queda bloqueado en cuanto se asigna O se confirma la fecha
-  const isStep1Locked = isAssigned || isDateConfirmed;
+  // Mientras la prueba espera confirmacion, TH puede reprogramar o reasignar.
+  // Una fecha ya confirmada no se cambia por este flujo para preservar la
+  // trazabilidad y el acuerdo del responsable con el postulante.
+  const isStep1Locked = isDateConfirmed;
 
   // Solo el responsable asignado puede confirmar la fecha
   const isAssignedUser = Boolean(user?.id && String(user.id) === String(form.assigned_to_id));
@@ -41,6 +43,7 @@ export default function StageTechnicalTest({ entry, stageResult, isCompleted, is
     const patch = {
       ...form,
       phase: "assigned",
+      selected_datetime: null,
       assigned_to_name: selectedUser?.fullname || "",
       assigned_to_email: selectedUser?.email || "",
     };
@@ -125,12 +128,12 @@ export default function StageTechnicalTest({ entry, stageResult, isCompleted, is
                     className="inline-flex items-center gap-1.5 rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 cursor-pointer transition hover:bg-[#1D4ED8]"
                   >
                     {saving ? <FiRefreshCw size={13} className="animate-spin" /> : <FiSend size={13} />}
-                    Asignar y notificar
+                    {isAssigned ? "Actualizar asignacion y notificar" : "Asignar y notificar"}
                   </button>
                 </div>
               )}
 
-              {isStep1Locked && (
+              {isAssigned && !isDateConfirmed && (
                 <div className="mt-2 rounded-xl border border-[#BBF7D0] bg-[#F0FDF4] px-4 py-2.5 flex items-center gap-2 text-xs text-[#16A34A] font-medium">
                   <FiUser size={13} />
                   Asignado a <span className="font-bold">{form.assigned_to_name}</span>
@@ -140,6 +143,11 @@ export default function StageTechnicalTest({ entry, stageResult, isCompleted, is
                     </span>
                   )}
                 </div>
+              )}
+              {isAssigned && !isDateConfirmed && (
+                <p className="mt-2 text-xs text-[#6B7280]">
+                  Si el responsable no esta disponible, cambia el responsable o el rango y vuelve a notificar.
+                </p>
               )}
             </div>
 

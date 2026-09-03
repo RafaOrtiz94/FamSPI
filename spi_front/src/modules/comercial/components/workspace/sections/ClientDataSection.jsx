@@ -31,6 +31,11 @@ const SECTION_ORDER = ["general"];
 // (businessCase.routes.js) -- unico camino para reabrir "general" una vez
 // que comercial guardo y quedo bloqueada automaticamente.
 const GENERAL_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_de_comercial"]);
+const PRIVATE_CONTRACT_OBJECT_OPTIONS = [
+ { value: "TODO COMPRADO", label: "TODO COMPRADO" },
+ { value: "DETERMINACION", label: "DETERMINACION" },
+ { value: "DETERMINACION EFECTIVA", label: "DETERMINACION EFECTIVA" },
+];
 
 const normalizeText = (value) => String(value || "").trim().toLowerCase();
 
@@ -123,6 +128,9 @@ const isPublicPurchaseType = (value) => {
  return normalized.includes("public");
 };
 
+const isKnownPrivateContractObject = (value) =>
+ PRIVATE_CONTRACT_OBJECT_OPTIONS.some((option) => option.value === String(value || "").trim());
+
 const AccordionSection = ({
  id,
  title,
@@ -196,6 +204,7 @@ const ClientDataSection = ({
  const fallbackBusinessCase = useMemo(() => uiGuidance?.businessCase || null, [uiGuidance?.businessCase]);
  const bcPurchaseType = businessCase?.bc_purchase_type || fallbackBusinessCase?.bc_purchase_type || "";
  const startedAsPublic = isPublicPurchaseType(bcPurchaseType);
+ const isPrivateBusinessCase = !startedAsPublic;
  const originLabel = startedAsPublic ? "Compra publica" : "Compra privada";
 
  const defaultValues = useMemo(() => ({}), []);
@@ -214,6 +223,17 @@ const watchClient = watch("client");
 const watchLocationId = watch("locationId");
 const watchClientType = watch("clientType");
 const watchProvinceCity = watch("provinceCity");
+const watchContractObject = watch("contractObject");
+const privateContractObjectOptions = useMemo(() => {
+ const currentValue = String(watchContractObject || "").trim();
+ if (!currentValue || isKnownPrivateContractObject(currentValue)) {
+ return PRIVATE_CONTRACT_OBJECT_OPTIONS;
+ }
+ return [
+  ...PRIVATE_CONTRACT_OBJECT_OPTIONS,
+  { value: currentValue, label: `Valor actual: ${currentValue}` },
+ ];
+}, [watchContractObject]);
  const selectedClientLabel = selectedClient ? normalizeText(getClientLabel(selectedClient)) : "";
  const [openSections, setOpenSections] = useState(() =>
  SECTION_ORDER.reduce((acc, id) => {
@@ -977,14 +997,36 @@ const watchProvinceCity = watch("provinceCity");
  <label className="flex flex-col gap-1.5">
  <div className="flex items-center justify-between">
  <span className="text-sm font-bold text-gray-700">Objeto de contratación</span>
- {renderNAButton("contractObject")}
+ {!isPrivateBusinessCase && renderNAButton("contractObject")}
  </div>
+ {isPrivateBusinessCase ? (
+ <select
+ className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-gray-900 outline-none transition-all focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100 disabled:text-gray-500"
+ disabled={!isEditing}
+ {...register("contractObject", {
+  validate: (value) => {
+   if (!isPrivateBusinessCase) return true;
+   if (String(value || "").trim()) return true;
+   return "El objeto de contratación es obligatorio";
+  },
+ })}
+ >
+ <option value="">Selecciona una opción</option>
+ {privateContractObjectOptions.map((option) => (
+  <option key={option.value} value={option.value}>
+   {option.label}
+  </option>
+ ))}
+ </select>
+ ) : (
  <input
  type="text"
  className={naInputClass("contractObject")}
  disabled={isNA("contractObject") || !isEditing}
  {...register("contractObject")}
  />
+ )}
+ {errors.contractObject && <p className="ml-1 text-xs font-medium text-rose-500">{errors.contractObject.message}</p>}
  </label>
  <label className="flex flex-col gap-1.5 md:col-span-2">
  <div className="flex items-center justify-between">

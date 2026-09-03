@@ -1,5 +1,9 @@
 import React from "react";
-import { FiCheckCircle, FiClock, FiLock, FiAlertTriangle, FiUser, FiMessageSquare, FiChevronDown } from "react-icons/fi";
+import {
+ FiCheckCircle, FiClock, FiLock, FiAlertTriangle, FiUser, FiMessageSquare, FiChevronDown, FiEye,
+ FiActivity, FiClipboard, FiHardDrive, FiLink2, FiBarChart2, FiDollarSign, FiCreditCard, FiFlag,
+ FiSend, FiTruck, FiFileText,
+} from "react-icons/fi";
 import { useAuth } from "../../../../core/auth/AuthContext";
 import Modal from "../../../../core/ui/components/Modal";
 import {
@@ -34,43 +38,43 @@ const SectionNavigator = ({
  id: "general",
  title: "Datos Generales",
  description: "Cliente, contrato y requerimientos basicos",
- icon: "DG"
+ icon: FiUser
  },
  {
  id: "lab",
  title: "Entorno Laboratorio",
  description: "Configuracion y operacion del laboratorio",
- icon: "LAB"
+ icon: FiActivity
  },
  {
  id: "requirement",
  title: "Condiciones del BC",
  description: "Plazos, entregas y observaciones clave",
- icon: "BC"
+ icon: FiClipboard
  },
  {
  id: "equipment",
  title: "Equipamiento",
  description: "Seleccion y configuracion de equipos",
- icon: "EQ"
+ icon: FiHardDrive
  },
  {
  id: "lis",
  title: "Integracion LIS",
  description: "Sistema de informacion laboratorio",
- icon: "LIS"
+ icon: FiLink2
  },
  {
  id: "determinations",
  title: "Determinaciones",
  description: "Analisis y cuantificaciones",
- icon: "DET"
+ icon: FiBarChart2
  },
  {
  id: "investments",
  title: "Inversiones",
  description: "Costos adicionales y presupuestos",
- icon: "INV"
+ icon: FiDollarSign
  },
  // BC-12: estas dos secciones ya estaban soportadas en roleSectionConfig.js
  // y SectionContent.jsx (solo jefe_operaciones/jefe_financiero editan, cada
@@ -81,33 +85,43 @@ const SectionNavigator = ({
  title: "Precios — Inversiones Operativas",
  label: "Precios financieros y operativos",
  description: "Cotizacion, precio operativo, precio financiero y depreciacion en una sola vista",
- icon: "$"
+ icon: FiCreditCard
  },
  {
  id: "investment_values_fin",
  hidden: true,
  title: "Precios — Inversiones Financieras",
  description: "Precio unitario de servicios y mano de obra del carrito (solo Jefe Financiero)",
- icon: "$FIN"
- },
- {
- id: "consumption_export",
- title: "Resumen",
- description: "Resumen de todo lo registrado en el Business Case hasta este punto",
- icon: "EXP"
+ icon: FiCreditCard
  },
  {
  id: "feasibility",
  title: "Factibilidad",
  description: "Decision final del BC para cierre y continuidad en compras",
- icon: "FAC"
+ icon: FiFlag
+ },
+ {
+ id: "offer_workspace",
+ title: "Oferta Comercial",
+ description: "Hoja editable, PDF visible y decision final del comercial creador",
+ icon: FiSend
  },
  {
  id: "dispatch_workspace",
  title: "Cantidades Maximas",
  description: "Sincronizacion desde Sheet y control operativo posterior a factibilidad",
- icon: "OPS"
- }
+ icon: FiTruck
+ },
+ // Va al final: es solo lectura (resumen de todo lo demas), no un
+ // formulario propio -- no tiene sentido que participe del estado
+ // completado/pendiente ni que aparezca intercalada entre secciones
+ // editables (ver getSectionStatus mas abajo, que la trata aparte).
+ {
+ id: "consumption_export",
+ title: "Resumen",
+ description: "Resumen de todo lo registrado en el Business Case hasta este punto",
+ icon: FiFileText
+ },
  ];
 
  // Filter sections based on role
@@ -117,9 +131,13 @@ const SectionNavigator = ({
  : availableSections.filter(s => roleConfig.visible.includes(s.id));
  // BC cerrado no factible: solo el Resumen queda navegable, sin importar el rol.
  const isClosedNoFactible = uiGuidance?.workflowState?.currentStage === "cerrado_no_factible";
- const visibleSections = isClosedNoFactible
+ const visibleSectionsBase = isClosedNoFactible
  ? availableSections.filter((s) => s.id === "consumption_export")
  : roleVisibleSections;
+ const visibleSections = visibleSectionsBase.filter((section) => {
+ if (section.id !== "offer_workspace") return true;
+ return uiGuidance?.permissions?.canViewOfferWorkspace === true;
+ });
 
  // Check if section is editable by current role
  const canEditSection = (sectionId) => {
@@ -136,6 +154,12 @@ const SectionNavigator = ({
  }
  if (sectionId === "determinations") {
  return uiGuidance?.permissions?.canEditDeterminations === true;
+ }
+ if (sectionId === "offer_workspace") {
+ return (
+ uiGuidance?.permissions?.canManageOfferWorkspace === true
+ || uiGuidance?.permissions?.canDecideOfferWorkspace === true
+ );
  }
  return canRoleEditSection(roleConfig, sectionId);
  };
@@ -159,6 +183,10 @@ const SectionNavigator = ({
  };
 
  const getSectionStatus = (sectionId) => {
+ // Resumen es solo lectura: nunca "completado" ni "pendiente", no aplica.
+ if (sectionId === "consumption_export") {
+ return { status: "info", icon: FiEye, color: "text-gray-400" };
+ }
  const rule = sectionId === "investment_values"
  ? {
  ...(rules.investment_values_fin || {}),
@@ -223,6 +251,7 @@ const SectionNavigator = ({
   completed: "Completado",
   "in-progress": "En curso",
   pending: "Pendiente",
+  info: "Solo lectura",
   }[status] || "Pendiente");
 
   const selectedSectionData = visibleSections.find((section) => section.id === selectedSection);
@@ -276,7 +305,7 @@ const SectionNavigator = ({
  {/* Section content */}
   <div className="min-w-0 flex-1">
   <div className="mb-1 flex min-w-0 flex-wrap items-center gap-2">
- <span className="text-sm">{section.icon}</span>
+ <section.icon size={14} className="shrink-0 text-gray-400" />
   <h4 className={`min-w-0 flex-1 break-words text-sm font-semibold ${status.isLocked ? "text-gray-500" : isSelected ? "text-blue-900" : "text-gray-900"
  }`}>
  {section.label || section.title}
@@ -402,8 +431,8 @@ const SectionNavigator = ({
   className="flex w-full min-w-0 items-center gap-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-3 text-left transition-colors hover:bg-blue-100"
   aria-label="Abrir secciones del Business Case"
   >
-  <span className="shrink-0 rounded-lg bg-white px-2 py-1 text-xs font-bold text-blue-700 shadow-sm">
-  {selectedSectionData?.icon || "BC"}
+  <span className="shrink-0 rounded-lg bg-white p-2 text-blue-700 shadow-sm">
+  {React.createElement(selectedSectionData?.icon || FiClipboard, { size: 16 })}
   </span>
   <span className="min-w-0 flex-1">
   <span className="block truncate text-sm font-semibold text-blue-950">

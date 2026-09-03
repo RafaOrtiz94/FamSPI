@@ -10,6 +10,7 @@ const audit = require("../../utils/audit");
 const { sendMail } = require("../../utils/mailer");
 const requestsService = require("../requests/requests.service");
 const notificationManager = require("../notifications/notificationManager");
+const { ROLE_GROUPS } = require("../../middlewares/roles");
 
 const MAIL_ENABLED = process.env.DISABLE_MAIL !== "true";
 const REQUEST_TYPE_LABELS = {
@@ -85,9 +86,12 @@ async function listPending(page = 1, pageSize = 10, actor = {}) {
     SELECT r.id,
            r.status,
            r.created_at,
+           r.payload,
            COALESCE(u.fullname, u.name, u.email) AS requester_name,
+           u.email AS requester_email,
            rt.code AS type_code,
-           rt.title AS type_title
+           rt.title AS type_title,
+           COUNT(*) OVER() AS total_count
     ${baseQuery}
     ORDER BY r.created_at DESC
     LIMIT ${limitParam} OFFSET ${offsetParam}
@@ -95,20 +99,13 @@ async function listPending(page = 1, pageSize = 10, actor = {}) {
     listParams
   );
 
-  const totalQ = await db.query(
-    `
-    SELECT COUNT(*) AS total
-    ${baseQuery}
-    `,
-    baseParams
-  );
-
-  const mapped = q.rows.map((row) => ({
+  const total = q.rows.length > 0 ? parseInt(q.rows[0].total_count, 10) : 0;
+  const mapped = q.rows.map(({ total_count, ...row }) => ({
     ...row,
     type_title: getRequestLabel(row.type_code, row.type_title),
   }));
 
-  return { rows: mapped, total: parseInt(totalQ.rows[0].total, 10) };
+  return { rows: mapped, total };
 }
 
 /**
@@ -176,8 +173,9 @@ async function approve(request_id, approver_id, coordination = {}) {
 
       const minDate = String(requestPayload?.fecha_instalacion || "").slice(0, 10);
       const maxDate = String(requestPayload?.fecha_tope_instalacion || minDate || "").slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(inspectionDate) || (minDate && (inspectionDate < minDate || inspectionDate > (maxDate || minDate)))) {
-        throw Object.assign(new Error("La fecha de inspección debe estar dentro de la ventana solicitada."), {
+      // sin min: puede adelantar la inspeccion, solo se bloquea pasarse del max
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(inspectionDate) || (maxDate && inspectionDate > maxDate)) {
+        throw Object.assign(new Error("La fecha de inspección no puede ser posterior a la fecha tope solicitada."), {
           status: 409,
         });
       }
@@ -185,11 +183,21 @@ async function approve(request_id, approver_id, coordination = {}) {
       const {
         rows: [assignedUser],
       } = await client.query(
-        `SELECT id, email, COALESCE(fullname, name, email) AS display_name FROM public.users WHERE id = $1`,
+        `SELECT id, email, role, COALESCE(fullname, name, email) AS display_name FROM public.users WHERE id = $1`,
         [assignedUserId]
       );
       if (!assignedUser) {
         throw Object.assign(new Error("El usuario asignado no existe."), { status: 400 });
+      }
+      // Solo ing_servicio, esp_app o jefe_servicio (y sus alias legacy) pueden
+      // quedar asignados a cumplir la inspeccion -- antes cualquier user_id
+      // pasaba sin validar rol.
+      const assignedRole = String(assignedUser.role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+      if (!ROLE_GROUPS.tecnico.includes(assignedRole)) {
+        throw Object.assign(
+          new Error("El usuario asignado debe ser ingeniero de servicio, especialista de aplicaciones o jefe de servicio."),
+          { status: 409 }
+        );
       }
       assignedTechnician = { ...assignedUser, inspectionDate, notes };
 
