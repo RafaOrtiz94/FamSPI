@@ -655,13 +655,11 @@ else if (["operaciones", "jefe_operaciones", "jefe_de_operaciones"].includes(sco
  return groups;
 };
 
-// Componente para botones de navegación — superficie clara (DESIGN.md §3.1/§4),
-// apoyada sobre el "riel" de trazabilidad que dibuja DesktopAdaptiveNav (mismo
-// motivo visual que las etapas de un expediente: una línea base con marcas).
+// Componente para botones de navegación — superficie clara (DESIGN.md §3.1/§4).
 // `variant` da peso visual por prioridad (crítico se ve como control con
-// borde; el resto son tabs planos sobre el riel). `context="popover"` es para
-// cuando el link vive en un panel flotante (menú "Más" / hoja móvil) en vez
-// de la fila principal — mismos tokens de superficie, sin el riel/marcador.
+// borde; el resto son tabs planos). `context="popover"` es para cuando el
+// link vive en un panel flotante (menú "Más" / hoja móvil) en vez de la fila
+// principal — mismos tokens de superficie, sin el marcador de activo.
 const NavButton = ({ link, variant = "primary", mobile = false, context = "nav", onClick, globalStatusMap }) => {
  const moduleStatus = globalStatusMap?.get(link.path) || null;
  const showConstructionBadge = moduleStatus?.stage === 'construction' || (moduleStatus?.stage === 'testing' && !moduleStatus?.in_whitelist);
@@ -737,12 +735,12 @@ const NavButton = ({ link, variant = "primary", mobile = false, context = "nav",
  {showBetaBadge && (
    <span className="ml-1.5 flex-shrink-0 rounded-md bg-[var(--info-bg)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--info-text)]">Beta</span>
  )}
- {/* Marca de calibración sobre el riel — único indicador de "activo" (DESIGN.md §3.1/§3.3) */}
+ {/* Subrayado de activo — único indicador visual para los tabs planos */}
  {isActive && context === "nav" && !mobile && !isChip && (
    <motion.span
      layoutId="nav-underline-indicator"
      transition={indicatorTransition}
-     className="pointer-events-none absolute inset-x-2 -bottom-[7px] h-[2px] rounded-full bg-[var(--action)]"
+     className="pointer-events-none absolute inset-x-2 -bottom-1 h-[2px] rounded-full bg-[var(--action)]"
    />
  )}
  </>
@@ -751,17 +749,9 @@ const NavButton = ({ link, variant = "primary", mobile = false, context = "nav",
  );
 };
 
-// Marca de graduación entre grupos — se posa sobre el riel (ver DesktopAdaptiveNav),
-// como las divisiones de una regla, en vez de un divisor vertical genérico.
-const GroupSeparator = () => (
- <div className="mx-1 hidden self-stretch items-end xl:flex">
-   {/* Cruza el riel (bottom-1, ver DesktopAdaptiveNav) con margen amplio a
-       propósito: el tick vive en un flujo flex (self-stretch) y el riel es
-       absolute — un margen ajustado al px exacto se desalinea por
-       redondeo de subpíxel entre ambos sistemas. mb-0 + h-4 lo garantiza. */}
-   <span className="mb-0 h-4 w-px bg-[var(--border-control)]" />
- </div>
-);
+// Separación entre el grupo crítico y el resto — solo espacio, sin línea ni
+// marca decorativa (se probó con línea+tick y no funcionó visualmente).
+const GroupSeparator = () => <div className="w-2 xl:w-3" aria-hidden="true" />;
 
 const renderGroup = (links, variant, onClick, isMobile, globalStatusMap, context = "nav") =>
  links.map((link) => (
@@ -1056,10 +1046,6 @@ const DesktopAdaptiveNav = ({ criticalLinks, primaryLinks, secondaryLinks, admin
  className="relative hidden h-10 min-w-0 flex-1 flex-nowrap items-center justify-start gap-1 overflow-x-clip overflow-y-hidden py-1 md:flex xl:gap-1.5"
  aria-label="Navegación principal"
  >
- {/* Riel de trazabilidad (DESIGN.md §3.3): línea base bajo toda la fila,
-     la marca de calibración de cada NavButton "se posa" sobre ella. */}
- <span className="pointer-events-none absolute inset-x-0 bottom-1 h-px bg-[var(--border)]" aria-hidden="true" />
-
  {/* Medición real fuera de flujo: no afecta el layout visible. */}
  <MeasureRow links={allLinks} onMeasured={handleMeasured} />
 
@@ -1165,10 +1151,9 @@ const NavigationBar = () => {
  return (
  <>
  {/* Barra de accesos — superficie clara, en contraste deliberado con el
-     Header naval de arriba (identidad oscura / navegación clara). */}
- {/* Sin border-b propio: el riel de trazabilidad de abajo ya cierra la
-     barra — un segundo borde aquí queda ~11px por debajo del riel y no
-     coincide con las marcas de graduación (se leía como doble línea suelta). */}
+     Header naval de arriba (identidad oscura / navegación clara). Sin
+     border-b ni línea decorativa: solo la superficie clara marca el límite
+     contra el canvas de la página. */}
  <nav className="hidden bg-[var(--surface)] md:block">
  <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-8">
  <div className="flex min-h-12 items-center justify-between gap-4 py-1.5">
