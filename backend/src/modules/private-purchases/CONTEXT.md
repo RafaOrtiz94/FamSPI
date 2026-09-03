@@ -60,12 +60,11 @@ Módulo de compras privadas (equipos para clientes finales). Cubre el flujo comp
 - `signature`: acta de entrega puede requerir firma digital
 
 ## 7. Frontend asociado
-- `/dashboard/backoffice/private-purchases` → `PrivatePurchasesPage`
-- `/dashboard/operaciones/private-purchases` → `OperacionesPrivatePurchases`
-- `/dashboard/logistica/private-purchases` → `LogisticaPrivatePurchases`
-- `/dashboard/servicio-tecnico/compras-privadas` → `TecnicoPrivatePurchases`
-- `/dashboard/servicio-tecnico/entregas-privadas` → `ServicioPrivatePurchaseDeliveries`
-- `/dashboard/purchases/workspace` → `PurchasesWorkspace`
+
+**Este backend está VIGENTE y activo.** No hay backend "purchases-workspace" nuevo — el workspace unificado de producción pega directamente a estos mismos endpoints vía `core/api/privatePurchasesApi.js`. Ver `.claude/skills/modulo-compras-comercial/SKILL.md` para el mapa completo legacy→producción.
+
+- **Producción (ruta real montada):** `/dashboard/purchases/workspace` (query `?tab=private`) → `spi_front/src/modules/shared/purchases-workspace/PurchasesWorkspace.jsx`, con la lógica de expediente privado en `expediente/tabs/PrivateFlowTab.jsx` y compañía.
+- **Legacy (rutas redirigidas):** en `AppRoutes.jsx`, `/dashboard/backoffice/private-purchases`, `/dashboard/operaciones/private-purchases` y `/dashboard/logistica/private-purchases` renderizan `<LegacyPrivatePurchaseRedirect />` — un `<Navigate>` inmediato a `/dashboard/purchases/workspace?tab=private...`. `/dashboard/servicio-tecnico/entregas-privadas` también quedó como `<Navigate>` directo al mismo workspace (`?tab=private`). Ninguna de estas rutas renderiza ya una página `PrivatePurchasesPage`/`OperacionesPrivatePurchases`/etc. — confirmar con grep en `AppRoutes.jsx` antes de asumir que existen esos componentes; si existieran archivos con esos nombres en el repo, están huérfanos (sin importador en el router activo).
 
 ## 8. Riesgos detectados
 - `privatePurchases.service.js` (211KB) — el segundo archivo más grande del repositorio
@@ -76,3 +75,4 @@ Módulo de compras privadas (equipos para clientes finales). Cubre el flujo comp
 - `AGENTS.md` presente en el módulo
 - `privatePurchaseEvents.js` gestiona SSE
 - Módulo transversal: involucra comercial, técnico, operaciones, logística
+- Igual que en `equipment-purchases`: el backend es único y vigente, sin versión legacy propia. La migración legacy→producción ocurrió solo en el frontend (páginas por rol viejas → workspace unificado con tabs `public`/`private`).

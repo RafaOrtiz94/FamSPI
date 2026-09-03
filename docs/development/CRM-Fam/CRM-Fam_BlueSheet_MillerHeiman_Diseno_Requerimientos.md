@@ -29,7 +29,7 @@ Este documento fue auditado contra el código fuente actual de SPI Fam. Se docum
 
 **Roles que SÍ existen y son relevantes para CRM-Fam** (de `backend/src/middlewares/roles.js`):
 - **Admin operativo:** `jefe_ti`, `jefe_de_ti`
-- **Comercial:** `comercial`, `jefe_comercial` (alias: `jefe_de_comercial`), `asesor_comercial`, `analista_comercial`, `acp_comercial`, `backoffice_comercial`, `backoffice`
+- **Comercial:** `comercial`, `jefe_comercial`, `asesor_comercial`, `analista_comercial`, `acp_comercial`, `backoffice_comercial`, `backoffice`
 - **Gerencia:** `gerencia`, `gerencia_general`, `gerente_general`, `director`, `gerente`
 - **Técnico:** `servicio_tecnico`, `tecnico`, `ing_servicio`, `esp_app`
 - **Finanzas:** `finanzas`, `financiero`, `jefe_finanzas`, `contador`
@@ -255,7 +255,7 @@ No se incluye en la primera versión:
 | `jefe_ti` / `jefe_de_ti` | **Administrador real del sistema CRM-Fam.** Rol asignado a usuarios reales de TI en producción. Gestiona configuración, catálogos, etapas, reglas y permisos del módulo. |
 | `administrador` / `admin` | Bypasean todos los controles de rol a nivel middleware. No están asignados a usuarios reales en producción — son roles de sistema/emergencia. La administración operativa del CRM-Fam recae en `jefe_ti`. |
 | `gerencia` / `gerencia_general` | Visualiza pipeline global, KPIs, oportunidades críticas, aprobaciones y reportes ejecutivos. Incluye aliases: `gerente_general`, `director`, `gerente`. |
-| `jefe_comercial` | Revisa, observa y aprueba Blue Sheets; asigna oportunidades y da seguimiento. Alias en sistema: `jefe_de_comercial`. |
+| `jefe_comercial` | Revisa, observa y aprueba Blue Sheets; asigna oportunidades y da seguimiento. |
 | `comercial` | Gestiona sus leads, clientes, contactos, oportunidades, actividades y Blue Sheets. |
 | `asesor_comercial` / `analista_comercial` / `acp_comercial` | Roles comerciales con acceso equivalente al `comercial`. |
 | `backoffice_comercial` / `backoffice` | Apoya documentación, cotizaciones, validación administrativa y actualización de datos. |

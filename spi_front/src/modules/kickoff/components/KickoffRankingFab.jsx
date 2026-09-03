@@ -260,7 +260,7 @@ export default function KickoffRankingFab({ alwaysShow = false }) {
     <>
       {/* FAB — elevated in dashboard to clear other FABs; standard position on standalone pages */}
       {!open && (
-        <div className={`fixed right-4 z-[89] sm:right-6 ${alwaysShow ? 'bottom-6 sm:bottom-6' : 'bottom-40 sm:bottom-44'}`}>
+        <div className={`fixed right-4 z-[89] sm:right-6 ${alwaysShow ? 'bottom-20 sm:bottom-20 md:bottom-6' : 'bottom-56 sm:bottom-60 md:bottom-40'}`}>
           <button
             onClick={() => setOpen(true)}
             title="Ranking en vivo"

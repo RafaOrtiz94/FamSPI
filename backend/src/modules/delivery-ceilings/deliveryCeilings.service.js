@@ -2,7 +2,11 @@ const db = require("../../config/db");
 
 const DELIVERY_CEILING_STATUSES = Object.freeze(["draft", "approved", "active", "closed"]);
 const DELIVERY_CEILING_PURCHASE_TYPES = Object.freeze(["private", "public"]);
-const OPEN_REQUEST_STATUSES = Object.freeze(["pending"]);
+// Debe coincidir con delivery-requests/deliveryRequests.service.js: una solicitud
+// ops_approved ya bloquea saldo al validar nuevas solicitudes, asi que tambien debe
+// contarse como reservada aqui (de lo contrario el saldo mostrado es mas optimista
+// que el saldo real disponible).
+const OPEN_REQUEST_STATUSES = Object.freeze(["pending", "ops_approved"]);
 
 const buildError = (
   message,

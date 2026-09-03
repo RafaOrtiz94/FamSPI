@@ -51,7 +51,7 @@ const ContractTab = ({ purchase, type, userRoles, refresh }) => {
   // Alineado con RoleGatedAction del paso 1 (linea ~328) y con lo que el
   // backend uploadContract realmente acepta: backoffice o comercial/jefes/gerencia.
   const canUploadDraftRole = userRoles.some((r) =>
-    ['backoffice_comercial', 'jefe_comercial', 'jefe_de_comercial', 'gerencia', 'gerencia_general'].includes(r)
+    ['backoffice_comercial', 'jefe_comercial', 'gerencia', 'gerencia_general'].includes(r)
   );
   const canCommercialClientSign = hasRole('comercial');
   const linkedBusinessCaseId = purchase?.extra?.auto_business_case_id || purchase?.business_case_id || null;
@@ -72,7 +72,7 @@ const ContractTab = ({ purchase, type, userRoles, refresh }) => {
 
   // Gerencia — solo puede aprobar/rechazar (sin subir archivo)
   const canGerenciaDecide  = userRoles.some((r) =>
-    ['gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial'].includes(r)
+    ['gerencia', 'gerencia_general', 'jefe_comercial'].includes(r)
   );
   // Decisión de gerencia sobre el contrato
   const gerenciaDecision = purchase?.manager_contract_decision || null; // 'approved' | 'rejected' | null
@@ -96,7 +96,7 @@ const ContractTab = ({ purchase, type, userRoles, refresh }) => {
   const providerContractReceived  = Boolean(purchase?.provider_contract_received_at);
   const providerContractLink      = driveLink(purchase?.provider_contract_document_id);
   const canAcpProviderContract    = userRoles.some((r) =>
-    ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial'].includes(r)
+    ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial'].includes(r)
   );
 
   const blockerMessage = (() => {
@@ -295,7 +295,7 @@ const ContractTab = ({ purchase, type, userRoles, refresh }) => {
                 </div>
                 <RoleGatedAction
                   allowedRoles={['backoffice_comercial', 'comercial', 'asesor_comercial', 'analista_comercial',
-                    'jefe_comercial', 'jefe_de_comercial', 'gerencia', 'gerencia_general', 'acp_comercial']}
+                    'jefe_comercial', 'gerencia', 'gerencia_general', 'acp_comercial']}
                   userRoles={userRoles}
                 >
                   <button
@@ -317,13 +317,13 @@ const ContractTab = ({ purchase, type, userRoles, refresh }) => {
               status={roleStepStatus(
                 Boolean(contractLink),
                 signedProformaUploaded && !contractLink,
-                ['backoffice_comercial','jefe_comercial','jefe_de_comercial','gerencia','gerencia_general'],
+                ['backoffice_comercial','jefe_comercial','gerencia','gerencia_general'],
               )}
               completedAt={purchase?.contract_uploaded_at || undefined}
             >
               {/* Backoffice y gerencia: zona de subida completa */}
               <RoleGatedAction
-                allowedRoles={['backoffice_comercial', 'jefe_comercial', 'jefe_de_comercial', 'gerencia', 'gerencia_general']}
+                allowedRoles={['backoffice_comercial', 'jefe_comercial', 'gerencia', 'gerencia_general']}
                 userRoles={userRoles}
               >
                 <FileUploadZone
@@ -419,12 +419,12 @@ const ContractTab = ({ purchase, type, userRoles, refresh }) => {
               status={roleStepStatus(
                 Boolean(gerenciaDecision),
                 Boolean(clientContractLink) && purchase?.status === 'pending_contract_approval' && !gerenciaDecision,
-                ['gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
+                ['gerencia','gerencia_general','jefe_comercial'],
               )}
               completedAt={purchase?.manager_contract_decision_at || undefined}
             >
               <RoleGatedAction
-                allowedRoles={['gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']}
+                allowedRoles={['gerencia', 'gerencia_general', 'jefe_comercial']}
                 userRoles={userRoles}
               >
                 {gerenciaDecision === 'approved' ? (
@@ -494,12 +494,12 @@ const ContractTab = ({ purchase, type, userRoles, refresh }) => {
               status={roleStepStatus(
                 Boolean(managerContractLink),
                 gerenciaDecision === 'approved' && !managerContractLink,
-                ['acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
+                ['acp_comercial','gerencia','gerencia_general','jefe_comercial'],
               )}
               completedAt={purchase?.contract_signed_uploaded_at || undefined}
             >
               <RoleGatedAction
-                allowedRoles={['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']}
+                allowedRoles={['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial']}
                 userRoles={userRoles}
               >
                 <FileUploadZone
@@ -539,12 +539,12 @@ const ContractTab = ({ purchase, type, userRoles, refresh }) => {
                 status={roleStepStatus(
                   providerContractReceived,
                   !providerContractReceived,
-                  ['acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
+                  ['acp_comercial','gerencia','gerencia_general','jefe_comercial'],
                 )}
                 completedAt={purchase?.provider_contract_received_at || undefined}
               >
                 <RoleGatedAction
-                  allowedRoles={['acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial']}
+                  allowedRoles={['acp_comercial','gerencia','gerencia_general','jefe_comercial']}
                   userRoles={userRoles}
                 >
                   {providerContractReceived ? (
@@ -577,12 +577,12 @@ const ContractTab = ({ purchase, type, userRoles, refresh }) => {
                 status={roleStepStatus(
                   Boolean(providerContractLink),
                   providerContractReceived && !providerContractLink,
-                  ['acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
+                  ['acp_comercial','gerencia','gerencia_general','jefe_comercial'],
                 )}
                 completedAt={purchase?.provider_contract_uploaded_at || undefined}
               >
                 <RoleGatedAction
-                  allowedRoles={['acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial']}
+                  allowedRoles={['acp_comercial','gerencia','gerencia_general','jefe_comercial']}
                   userRoles={userRoles}
                 >
                   <FileUploadZone
@@ -619,7 +619,7 @@ const ContractTab = ({ purchase, type, userRoles, refresh }) => {
               status={roleStepStatus(
                 Boolean(contractLink),
                 true,
-                ['jefe_comercial','jefe_de_comercial','backoffice_comercial','gerencia','gerencia_general'],
+                ['jefe_comercial','backoffice_comercial','gerencia','gerencia_general'],
               )}
               completedAt={purchase?.contract_signed_uploaded_at || undefined}
             >

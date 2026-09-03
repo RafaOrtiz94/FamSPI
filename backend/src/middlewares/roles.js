@@ -9,7 +9,6 @@ const ROLE_GROUPS = {
   comercial: [
     "comercial",
     "jefe_comercial",
-    "jefe_de_comercial",
     "backoffice_comercial",
     "asesor_comercial",
     "analista_comercial",
@@ -70,7 +69,7 @@ const ROLE_GROUPS = {
     "rrhh",
   ],
   finanzas: ["finanzas", "financiero", "jefe_finanzas", "jefe_de_finanzas", "contador", "jefe_financiero"],
-  jefe_comercial: ["jefe_comercial", "jefe_de_comercial"],
+  jefe_comercial: ["jefe_comercial"],
   jefe_servicio_tecnico: ["jefe_servicio_tecnico", "jefe_de_servicio_tecnico"],
   jefe_tecnico: ["jefe_tecnico", "jefe_de_tecnico", "jefe_servicio", "jefe_servicio_tecnico", "jefe_de_servicio_tecnico"],
   jefe_operaciones: ["jefe_operaciones", "jefe_de_operaciones"],
@@ -179,4 +178,10 @@ function requireRole(allowedRoles = []) {
   };
 }
 
-module.exports = { requireRole, ROLE_GROUPS };
+module.exports = {
+  requireRole,
+  ROLE_GROUPS,
+  normalizeRoleName,
+  collectUserRoles,
+  expandRoles,
+};

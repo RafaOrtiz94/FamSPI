@@ -29,7 +29,7 @@ export default function MobileFabDock({ famSignRef, helpTicketRef, famSignCount 
   };
 
   return (
-    <div ref={dockRef} className="fixed bottom-6 left-3 z-[9998] sm:hidden">
+    <div ref={dockRef} className="fixed bottom-20 left-3 z-[9998] sm:hidden">
       {/* Speed-dial sub-buttons */}
       <div
         className={`absolute bottom-14 left-0 flex flex-col items-start gap-3 transition-all duration-200 ${

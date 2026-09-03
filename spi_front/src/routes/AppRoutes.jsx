@@ -356,7 +356,6 @@ const AppRoutes = () => {
                   "backoffice",
                   "backoffice_comercial",
                   "jefe_comercial",
-                  "jefe_de_comercial",
                   "gerencia",
                   "gerencia_general",
                   "operaciones",
@@ -795,7 +794,7 @@ const AppRoutes = () => {
             element={
               <ProtectedRoute
                 allowedRoles={[
-                  "comercial","jefe_comercial","jefe_de_comercial",
+                  "comercial","jefe_comercial",
                   "backoffice_comercial","asesor_comercial","analista_comercial",
                   "acp_comercial","backoffice",
                   "gerencia","gerencia_general","gerente_general","director","gerente",

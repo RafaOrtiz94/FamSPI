@@ -24,7 +24,7 @@ describe("businessCaseDeterminationsGate.service", () => {
     });
 
     expect(gate.workflowType).toBe("private_comodato");
-    expect(gate.editors).toEqual(["jefe_comercial", "jefe_de_comercial", "backoffice_comercial"]);
+    expect(gate.editors).toEqual(["jefe_comercial", "backoffice_comercial"]);
     expect(gate.permissions.canEditDeterminations).toBe(true);
     expect(gate.documentUploaded).toBe(true);
   });
@@ -52,7 +52,7 @@ describe("businessCaseDeterminationsGate.service", () => {
     });
 
     expect(gate.workflowType).toBe("public");
-    expect(gate.editors).toEqual(["jefe_comercial", "jefe_de_comercial", "acp_comercial"]);
+    expect(gate.editors).toEqual(["jefe_comercial", "acp_comercial"]);
     expect(gate.permissions.canUploadDocument).toBe(false);
     expect(gate.permissions.canEditDeterminations).toBe(true);
   });

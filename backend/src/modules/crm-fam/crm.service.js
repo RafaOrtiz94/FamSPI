@@ -19,7 +19,7 @@ const sanitizeFileToken = (value, fallback = "documento") => {
 const MANAGER_ROLES = new Set([
   'jefe_ti','jefe_de_ti','admin','administrador',
   'gerencia','gerencia_general','gerente_general',
-  'director','gerente','jefe_comercial','jefe_de_comercial',
+  'director','gerente','jefe_comercial',
 ]);
 const isManager = (user) => MANAGER_ROLES.has(user.role);
 
@@ -109,7 +109,7 @@ async function crmAuditLog({ entity_name, entity_id, action, old_data, new_data,
 // Blue sheet notification helpers
 async function notifyBlueSheetSubmitted(blueSheet, opportunity, submitter) {
   const ids = await resolveUserIdsByRole([
-    'jefe_comercial','jefe_de_comercial','gerencia','gerencia_general','jefe_ti','jefe_de_ti',
+    'jefe_comercial','gerencia','gerencia_general','jefe_ti','jefe_de_ti',
   ]);
   await crmNotify(ids, {
     title: 'Blue Sheet listo para revisión',
@@ -142,7 +142,7 @@ async function notifyBlueSheetApproved(blueSheet, opportunity, approver) {
 
 async function notifyRedFlagCritical(redFlag, blueSheet, opportunity) {
   const managerIds = await resolveUserIdsByRole([
-    'jefe_comercial','jefe_de_comercial','jefe_ti','jefe_de_ti',
+    'jefe_comercial','jefe_ti','jefe_de_ti',
   ]);
   const allIds = [...new Set([opportunity.owner_user_id, ...managerIds])];
   await crmNotify(allIds, {
@@ -524,7 +524,6 @@ const mkErr = (msg, status) => Object.assign(new Error(msg), { status });
 const LEAD_OWNER_ROLES = new Set([
   'comercial',
   'jefe_comercial',
-  'jefe_de_comercial',
   'backoffice_comercial',
   'asesor_comercial',
   'analista_comercial',

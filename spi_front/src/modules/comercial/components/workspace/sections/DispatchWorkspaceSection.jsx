@@ -21,7 +21,7 @@ const TYPE_LABELS = {
  otro: "Otro",
 };
 
-const COMMERCIAL_ROLES = new Set(["acp_comercial", "jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]);
+const COMMERCIAL_ROLES = new Set(["acp_comercial", "jefe_comercial", "gerencia", "gerencia_general"]);
 const OPERATIONS_ROLES = new Set(["jefe_operaciones", "gerencia", "gerencia_general"]);
 
 const toNumber = (value, fallback = 0) => {

@@ -9,7 +9,7 @@ import { useAutoEditSection } from "../BusinessCaseWorkspaceContext";
 import SectionEditorBadge from "../SectionEditorBadge";
 
 // Mismos roles que ya autoriza el backend en POST /sections/:section/unlock.
-const LAB_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_de_comercial"]);
+const LAB_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial"]);
 
 // EMPTY SCHEMA - Initialize with no default values
 const EMPTY_SCHEMA = {

@@ -15,13 +15,13 @@ export const PURCHASE_ROLE_GROUPS = {
     'comercial', 'asesor_comercial', 'analista_comercial',
     'backoffice', 'backoffice_comercial',
     'acp_comercial',
-    'jefe_comercial', 'jefe_de_comercial',
+    'jefe_comercial',
   ],
   // Sub-grupos finos: para permisos donde asesor/backoffice/ACP son distintos entre sí.
   comercial_advisor: ['comercial', 'asesor_comercial', 'analista_comercial'],
   backoffice: ['backoffice', 'backoffice_comercial'],
   acp_comercial: ['acp_comercial'],
-  jefe_comercial: ['jefe_comercial', 'jefe_de_comercial'],
+  jefe_comercial: ['jefe_comercial'],
   tecnico: [
     'tecnico', 'ing_servicio', 'esp_app', 'servicio_tecnico',
     'jefe_tecnico', 'jefe_de_tecnico',

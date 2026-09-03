@@ -425,7 +425,7 @@ const DeterminationsSection = ({
  const canEditBase = permissions.canEditDeterminations === true && ownership?.canUserEdit !== false;
  const currentRole = user?.role;
  const normalizedCurrentRole = String(currentRole || "").trim().toLowerCase();
- const isJefeComercial = normalizedCurrentRole === "jefe_comercial" || normalizedCurrentRole === "jefe_de_comercial";
+ const isJefeComercial = normalizedCurrentRole === "jefe_comercial";
  const gateActive = gateInfo?.enabledForBusinessCase === true;
  const gatePhase = String(gateInfo?.phase || "commercial_input").toLowerCase();
  const quantitiesLocked = gateInfo?.quantitiesLocked === true;

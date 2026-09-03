@@ -14,7 +14,6 @@ import SectionEditorBadge from "../SectionEditorBadge";
 const EDIT_ROLES = new Set([
   "acp_comercial",
   "jefe_comercial",
-  "jefe_de_comercial",
   "jefe_operaciones",
   "jefe_servicio",
   "jefe_logistica",

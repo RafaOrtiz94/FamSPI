@@ -3883,7 +3883,7 @@ const AttendanceWidget = () => {
   return (
     <>
       {!widgetModalOpen && (
-        <div className="fixed bottom-20 right-4 z-[49] sm:bottom-24 sm:right-6">
+        <div className="fixed bottom-36 right-4 z-[49] sm:bottom-40 sm:right-6 md:bottom-24">
           <motion.button
             onClick={() => setWidgetModalOpen(true)}
             className={`relative flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg shadow-slate-900/20 transition focus-visible:ring-2 focus-visible:ring-accent ${launcherColorClass}`}

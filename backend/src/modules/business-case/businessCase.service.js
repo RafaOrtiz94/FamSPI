@@ -122,7 +122,6 @@ function normalizeFallbackOfferKind(value) {
 const FEASIBILITY_ALLOWED_ROLES = new Set([
   "acp_comercial",
   "jefe_comercial",
-  "jefe_de_comercial",
   "jefe_operaciones",
   "jefe_tecnico",
   "jefe_servicio",

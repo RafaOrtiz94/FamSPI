@@ -47,10 +47,10 @@ const SUPPLY_CONTROL_TYPES = {
   none:                    { label: 'Sin control',                description: 'Esta solicitud no requiere seguimiento de insumos.' },
 };
 
-const SUPPLY_CONTROL_ACTIVATE_ROLES  = ['acp_comercial', 'jefe_comercial', 'jefe_de_comercial'];
-const DELIVERY_REQUEST_CREATOR_ROLES = ['comercial', 'asesor_comercial', 'analista_comercial', 'backoffice', 'backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial'];
-const DR_OPS_APPROVE_ROLES           = ['jefe_operaciones', 'operaciones', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial'];
-const DR_LOGISTICS_CONFIRM_ROLES     = ['jefe_logistica', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial'];
+const SUPPLY_CONTROL_ACTIVATE_ROLES  = ['acp_comercial', 'jefe_comercial'];
+const DELIVERY_REQUEST_CREATOR_ROLES = ['comercial', 'asesor_comercial', 'analista_comercial', 'backoffice', 'backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial'];
+const DR_OPS_APPROVE_ROLES           = ['jefe_operaciones', 'operaciones', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial'];
+const DR_LOGISTICS_CONFIRM_ROLES     = ['jefe_logistica', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial'];
 
 const ALERT_THRESHOLD = 0.80; // warn when delivered / max >= 80%
 

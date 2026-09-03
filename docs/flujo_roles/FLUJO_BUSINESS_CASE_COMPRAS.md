@@ -34,7 +34,6 @@
 | `backoffice_comercial` | comercial | Backoffice comercial — mismos permisos que `backoffice` |
 | `backoffice` | comercial | Backoffice general — soporte documental |
 | `jefe_comercial` | comercial | Jefatura comercial — aprobaciones y edición directa |
-| `jefe_de_comercial` | comercial | Alias de `jefe_comercial` — mismos permisos |
 | `jefe_operaciones` | operaciones | Jefe de operaciones |
 | `operaciones` | operaciones | Analista de operaciones |
 | `jefe_logistica` | logistica | Jefe de logística |
@@ -992,7 +991,7 @@ Control Operativo habilitado por acp_comercial / jefe_comercial
 | # | Descripción | Archivos modificados | Estado |
 |---|-------------|---------------------|--------|
 | CP-01 | Expediente público se activa desde BC aprobado — sin botón "Iniciar BC" en expediente | Verificado: `PurchaseExpedienteDetail.jsx` no tiene ningún botón "Iniciar BC" — el BC se vincula automáticamente vía `auto_business_case_id` | ✅ |
-| CP-02 | `comercial`* solo ve sus propios expedientes | `equipmentPurchases.service.js` — `listByUser()` filtra `created_by = user.id OR assigned_to = user.id`; `MANAGER_ROLES` ampliado con `jefe_de_comercial` | ✅ |
+| CP-02 | `comercial`* solo ve sus propios expedientes | `equipmentPurchases.service.js` — `listByUser()` filtra `created_by = user.id OR assigned_to = user.id` | ✅ |
 | CP-03 | `jefe_comercial` NO puede confirmar disponibilidad ACP | `equipmentPurchases.routes.js` — `acpConfirmRoles = ["acp_comercial"]` | ✅ |
 | CP-04 | `tecnico` solo ve inspecciones asignadas a él | `equipmentPurchases.service.js` — `listByUser()` separado: `jefe_tecnico` ve toda la cola, `tecnico` base filtrado por `assigned_to = user.id` (BUG-05) | ✅ |
 | CP-05 | `logistica` no genera actas | `EquipmentLogisticsTab.jsx` — "Subir acta logistica" restringida a `jefe_logistica` + managers (base `logistica` excluida) | ✅ |
@@ -1037,13 +1036,13 @@ Control Operativo habilitado por acp_comercial / jefe_comercial
 
 | Bug | Descripción | Archivos modificados | Estado |
 |-----|-------------|---------------------|--------|
-| BUG-01 | `jefe_comercial`/`jefe_de_comercial` no podían editar calibradores/controles/materiales | `DeterminationsSection.jsx` — creado `TECNICO_EDIT_ROLES` (split de `TECNICO_ROLES`) | ✅ |
+| BUG-01 | `jefe_comercial` no podía editar calibradores/controles/materiales | `DeterminationsSection.jsx` — creado `TECNICO_EDIT_ROLES` (split de `TECNICO_ROLES`) | ✅ |
 | BUG-02 | `TECNICO_ROLES` tenía doble responsabilidad (identidad + edición) | `DeterminationsSection.jsx` — `canEditType()` usa `TECNICO_EDIT_ROLES` para calibradores/controles/materiales | ✅ |
 | BUG-03 | `backoffice` podía bloquear/desbloquear secciones en BC públicos | `businessCase.controller.js` — `lockSection` y `unlockSection` validan `purchase_type` para roles `BACKOFFICE_LOCK_ROLES` | ✅ |
 | BUG-04 | `backoffice` veía la pestaña `feasibility` (sin acceso según flujo BC-7) | `roleSectionConfig.js` — `feasibility` eliminado de `backoffice.visible` y `backoffice_comercial.visible` | ✅ |
 | BUG-05 | `tecnico` (base) veía TODOS los expedientes en cola de inspección | `equipmentPurchases.service.js` — `listByUser()` separado: `jefe_tecnico` ve toda la cola; `tecnico` solo ve `assigned_to = user.id` | ✅ |
 | BUG-06 | `operaciones` (base) no tenía acceso al BC para editar `dispatch_workspace` | `businessCase.routes.js` — `operaciones` añadido a `businessCaseRoles` | ✅ |
-| BUG-07 | Rutas `commercial-plan` y `operations-control` con roles incompletos | `businessCase.routes.js` — rutas corregidas para incluir `jefe_de_comercial`, `operaciones` y `jefe_operaciones` | ✅ |
+| BUG-07 | Rutas `commercial-plan` y `operations-control` con roles incompletos | `businessCase.routes.js` — rutas corregidas para incluir `operaciones` y `jefe_operaciones` | ✅ |
 | BUG-08 | `servicio_tecnico` y `jefe_servicio_tecnico` en `roleSectionConfig.js` (roles inexistentes) | `roleSectionConfig.js` — entrada `servicio_tecnico` eliminada; comentario BUG-08 añadido | ✅ |
 | GAP-01 | Backend no valida que BC exista antes de aceptar `supplyControlType = 'BC_MAXIMUMS'` | `equipmentPurchases.service.js` — `activateSupplyControl` valida `linkedBcId` antes de aceptar `bc_maximums`; error 409 con código `NO_LINKED_BUSINESS_CASE` | ✅ |
 | GAP-02 | `jefe_financiero` y `jefe_operaciones` no estaban en `MANAGER_ROLES` — solo veían sus propios expedientes | `equipmentPurchases.service.js` — ambos roles añadidos a `MANAGER_ROLES` | ✅ |
@@ -1058,14 +1057,14 @@ Control Operativo habilitado por acp_comercial / jefe_comercial
 | Bug | Descripción | Archivos modificados | Estado |
 |-----|-------------|---------------------|--------|
 | NUEVO-01 | `PRIVATE_PURCHASE_TYPES` no incluía `private_comodato` ni `private_sale` — backoffice bloqueado en BC comodato privado | `businessCase.controller.js` — constante ampliada | ✅ |
-| NUEVO-02 | `jefe_comercial`/`jefe_de_comercial` no podían editar reactivos/determinaciones en `DeterminationsSection` | `DeterminationsSection.jsx` — `canEditType()` agrega `isJefeComercial` antes del branch isPublicBC | ✅ |
+| NUEVO-02 | `jefe_comercial` no podía editar reactivos/determinaciones en `DeterminationsSection` | `DeterminationsSection.jsx` — `canEditType()` agrega `isJefeComercial` antes del branch isPublicBC | ✅ |
 | NUEVO-03 | `jefe_comercial` puede editar sección `general` (potencial conflicto con preflow review) | Decisión de diseño intencional — FLUJO doc lo autoriza; no se modifica | ✅ (diseño) |
 | NUEVO-04 | `acp_comercial` puede enviar contratos de compra privada vía `managerRoles` | Revisado: comportamiento intencional según PR-02 | ✅ (diseño) |
 | NUEVO-05 | `backoffice`/`backoffice_comercial` no podían registrar clientes en compras privadas (rutas con `['comercial', ...managerRoles]`) | `privatePurchases.routes.js` — `backoffice` y `backoffice_comercial` añadidos a rutas `request-client-registration`, `register-client`, `client-registration` | ✅ |
-| NUEVO-06 | `jefe_de_comercial` no estaba en ruta `start-business-case` de compras privadas | `privatePurchases.routes.js` — `jefe_de_comercial` añadido al `requireRole` del endpoint | ✅ |
-| NUEVO-07 | `jefe_de_comercial` faltaba en `LOCK_ROLES` del controller (routes ya lo tenían) | `businessCase.controller.js` — `LOCK_ROLES` ampliado; `canBlockSections`/`canUnblockSections` en `getUIGuidance` usan este array | ✅ |
-| NUEVO-08 | `jefe_de_comercial` no podía resolver solicitudes de desbloqueo de sub-secciones de determinaciones | `businessCase.routes.js` — `jefe_de_comercial` añadido a `resolve-unlock-subsection` | ✅ |
-| NUEVO-09 | `jefe_de_comercial` no podía aprobar reapertura de ventana preflow (`reopen-decision`) | `businessCase.routes.js` — `jefe_de_comercial` añadido a `preflow/reopen-decision` | ✅ |
+| NUEVO-06 | `jefe_comercial` no estaba en ruta `start-business-case` de compras privadas | `privatePurchases.routes.js` — `jefe_comercial` añadido al `requireRole` del endpoint | ✅ |
+| NUEVO-07 | `jefe_comercial` faltaba en `LOCK_ROLES` del controller (routes ya lo tenían) | `businessCase.controller.js` — `LOCK_ROLES` ampliado; `canBlockSections`/`canUnblockSections` en `getUIGuidance` usan este array | ✅ |
+| NUEVO-08 | `jefe_comercial` no podía resolver solicitudes de desbloqueo de sub-secciones de determinaciones | `businessCase.routes.js` — `jefe_comercial` añadido a `resolve-unlock-subsection` | ✅ |
+| NUEVO-09 | `jefe_comercial` no podía aprobar reapertura de ventana preflow (`reopen-decision`) | `businessCase.routes.js` — `jefe_comercial` añadido a `preflow/reopen-decision` | ✅ |
 
 ---
 
@@ -1075,10 +1074,10 @@ Control Operativo habilitado por acp_comercial / jefe_comercial
 - ✅ **PR-01**: Inspección auto-disparada al subir oferta firmada; notifica jefe_tecnico; idempotente
 
 **Archivos adicionales modificados en flujo completo (sesión 3 — 2026-05-23):**
-- `businessCase.controller.js` — `LOCK_ROLES` incluye `jefe_de_comercial`; `PRIVATE_PURCHASE_TYPES` incluye `private_comodato` y `private_sale`
-- `businessCase.routes.js` — `jefe_de_comercial` en `resolve-unlock-subsection` y `preflow/reopen-decision`; `jefe_de_comercial` en lock/unlock sections
-- `DeterminationsSection.jsx` — `canEditType()` corregido para reactivos/determinaciones: `jefe_comercial`/`jefe_de_comercial` siempre pueden editar
-- `privatePurchases.routes.js` — `backoffice`/`backoffice_comercial` en client-registration; `jefe_de_comercial` en `start-business-case`
+- `businessCase.controller.js` — `LOCK_ROLES` incluye `jefe_comercial`; `PRIVATE_PURCHASE_TYPES` incluye `private_comodato` y `private_sale`
+- `businessCase.routes.js` — `jefe_comercial` en `resolve-unlock-subsection` y `preflow/reopen-decision`; `jefe_comercial` en lock/unlock sections
+- `DeterminationsSection.jsx` — `canEditType()` corregido para reactivos/determinaciones: `jefe_comercial` siempre puede editar
+- `privatePurchases.routes.js` — `backoffice`/`backoffice_comercial` en client-registration; `jefe_comercial` en `start-business-case`
 
 **Archivos modificados en sesión 4 — BC-17 y PR-01 (2026-05-23):**
 - `privatePurchases.service.js` — columna `paused_reason` (ensurePrivatePausedReasonColumn); método `_assertNotPaused`; método `_autoTriggerInspectionOnSignedOffer`; auto-trigger en `uploadSignedOffer`; guard en `uploadContract` y `saveInspectionRequest`

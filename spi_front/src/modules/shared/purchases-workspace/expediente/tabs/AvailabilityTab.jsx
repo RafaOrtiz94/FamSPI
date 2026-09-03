@@ -117,7 +117,7 @@ const AVAILABILITY_STATUSES = {
 };
 
 /* Roles that can approve/reject on behalf of the client (CU decision) */
-const CU_APPROVAL_ROLES = ['comercial', 'asesor_comercial', 'analista_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial'];
+const CU_APPROVAL_ROLES = ['comercial', 'asesor_comercial', 'analista_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial'];
 
 /* ─── Private purchase availability derivation ─────────────────────────────
  * private_purchase_requests doesn't have an availability_status column —
@@ -305,8 +305,8 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
    * (no email sending, no provider request forms).
    */
   const actionRoles = isPrivate
-    ? ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial', 'backoffice_comercial']
-    : ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial'];
+    ? ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'backoffice_comercial']
+    : ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial'];
 
   /* ── supplier request / provider response ───────────────────── */
   const runSupplierAction = async (actionName, handler) => {
@@ -393,21 +393,18 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
     'asesor_comercial',
     'analista_comercial',
     'jefe_comercial',
-    'jefe_de_comercial',
     'gerencia',
     'gerencia_general',
   ].includes(r));
   const canManagePrivateSupplierAvailability = userRoles.some((r) => [
     'acp_comercial',
     'jefe_comercial',
-    'jefe_de_comercial',
     'gerencia',
     'gerencia_general',
   ].includes(r));
   const canRenewReservation = userRoles.some((r) => [
     'acp_comercial',
     'jefe_comercial',
-    'jefe_de_comercial',
     'gerencia',
     'gerencia_general',
   ].includes(r));
@@ -664,7 +661,7 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
     : null;
   const reservationExpired = reservationDaysRemaining !== null && reservationDaysRemaining <= 0;
 
-  const canUploadProforma = userRoles.some((r) => ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial'].includes(r));
+  const canUploadProforma = userRoles.some((r) => ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial'].includes(r));
 
   // Step number offsets (isInternal skips Paso 2 "Registrar respuesta proveedor")
   // Confirmación con cliente
@@ -1028,7 +1025,7 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                 </div>
               </div>
 
-              <RoleGatedAction allowedRoles={['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']} userRoles={userRoles}>
+              <RoleGatedAction allowedRoles={['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial']} userRoles={userRoles}>
                 <button
                   type="button"
                   onClick={handleAcpImportConfirm}
@@ -1042,7 +1039,7 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                 </button>
               </RoleGatedAction>
 
-              {!userRoles.some((r) => ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial'].includes(r)) && (
+              {!userRoles.some((r) => ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial'].includes(r)) && (
                 <p className="text-xs text-warm-ash italic">
                   En espera de que ACP Comercial confirme que tiene al cliente asegurado para proceder.
                 </p>
@@ -1061,7 +1058,7 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             isPrivate
               ? (purchase?.status === 'acp_availability_requested' || purchase?.status === 'sent_to_acp')
               : true,
-            ['acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial','backoffice_comercial'],
+            ['acp_comercial','gerencia','gerencia_general','jefe_comercial','backoffice_comercial'],
           )}
           completedAt={purchase?.availability_email_sent_at || undefined}
         >
@@ -1319,7 +1316,7 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             status={roleStepStatus(
               Boolean(purchase?.provider_response_at),
               Boolean(purchase?.availability_email_sent_at) && purchase?.status === 'acp_availability_requested',
-              ['acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial','backoffice_comercial'],
+              ['acp_comercial','gerencia','gerencia_general','jefe_comercial','backoffice_comercial'],
             )}
             completedAt={purchase?.provider_response_at || undefined}
           >
@@ -1483,7 +1480,7 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
               Boolean(purchase?.provider_response_at) && purchase?.status !== 'acp_availability_requested',
               // Activo solo mientras el status es acp_availability_requested y ya hay respuesta del proveedor
               Boolean(purchase?.provider_response_at) && purchase?.status === 'acp_availability_requested',
-              ['comercial','asesor_comercial','analista_comercial','jefe_comercial','jefe_de_comercial','gerencia','gerencia_general'],
+              ['comercial','asesor_comercial','analista_comercial','jefe_comercial','gerencia','gerencia_general'],
             )}
           >
             {purchase?.provider_response_at && (() => {
@@ -1541,7 +1538,7 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                   )}
 
                   <RoleGatedAction
-                    allowedRoles={['comercial', 'asesor_comercial', 'analista_comercial', 'jefe_comercial', 'jefe_de_comercial', 'gerencia', 'gerencia_general']}
+                    allowedRoles={['comercial', 'asesor_comercial', 'analista_comercial', 'jefe_comercial', 'gerencia', 'gerencia_general']}
                     userRoles={userRoles}
                   >
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
@@ -1587,12 +1584,12 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             status={roleStepStatus(
               proformaRequested,
               purchase?.status === 'acp_availability_confirmed' && !proformaRequested,
-              ['acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
+              ['acp_comercial','gerencia','gerencia_general','jefe_comercial'],
             )}
             completedAt={purchase?.extra?.proforma_request_sent_at || undefined}
           >
             <RoleGatedAction
-              allowedRoles={['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']}
+              allowedRoles={['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial']}
               userRoles={userRoles}
             >
               <div className="space-y-3">
@@ -1679,12 +1676,12 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             status={roleStepStatus(
               proformaUploaded,
               proformaRequested && !proformaUploaded,
-              ['acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
+              ['acp_comercial','gerencia','gerencia_general','jefe_comercial'],
             )}
             completedAt={purchase?.extra?.proforma_uploaded_at || undefined}
           >
             <RoleGatedAction
-              allowedRoles={['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']}
+              allowedRoles={['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial']}
               userRoles={userRoles}
             >
               <div className="space-y-4">
@@ -1800,12 +1797,12 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             status={roleStepStatus(
               signedProformaUploaded,
               proformaUploaded && !signedProformaUploaded,
-              ['acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
+              ['acp_comercial','gerencia','gerencia_general','jefe_comercial'],
             )}
             completedAt={purchase?.extra?.proforma_signed_uploaded_at || undefined}
           >
             <RoleGatedAction
-              allowedRoles={['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']}
+              allowedRoles={['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial']}
               userRoles={userRoles}
             >
               <div className="space-y-3">
@@ -1950,7 +1947,7 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                   )}
 
                   <RoleGatedAction
-                    allowedRoles={['acp_comercial', 'jefe_comercial', 'jefe_de_comercial', 'gerencia', 'gerencia_general']}
+                    allowedRoles={['acp_comercial', 'jefe_comercial', 'gerencia', 'gerencia_general']}
                     userRoles={userRoles}
                   >
                     <button
@@ -1995,7 +1992,7 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             </div>
 
             <RoleGatedAction
-              allowedRoles={['acp_comercial', 'jefe_operaciones', 'jefe_comercial', 'jefe_de_comercial', 'gerencia', 'gerencia_general']}
+              allowedRoles={['acp_comercial', 'jefe_operaciones', 'jefe_comercial', 'gerencia', 'gerencia_general']}
               userRoles={userRoles}
             >
               <div className="flex flex-col sm:flex-row gap-2 mb-4">

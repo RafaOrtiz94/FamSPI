@@ -13,7 +13,6 @@ const MANAGER_ROLES = new Set([
   "director",
   "gerente",
   "jefe_comercial",
-  "jefe_de_comercial",
 ]);
 
 function mkErr(message, status = 400) {

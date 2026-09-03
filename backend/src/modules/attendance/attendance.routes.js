@@ -52,7 +52,6 @@ const normalizeRoleToken = (value) =>
 
 const TEAM_LEAD_ROLES = new Set([
   "jefe_comercial",
-  "jefe_de_comercial",
   "jefe_tecnico",
   "jefe_servicio_tecnico",
   "jefe_ti",

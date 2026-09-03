@@ -24,7 +24,6 @@ const businessCaseRoles = [
   "backoffice",
   "backoffice_comercial",
   "jefe_comercial",
-  "jefe_de_comercial",
   "jefe_operaciones",
   "operaciones",          // BUG-06: necesita editar dispatch_workspace en BC
   "jefe_tecnico",
@@ -38,7 +37,7 @@ const businessCaseRoles = [
   "gerencia_general",
 ];
 // Lista de inversiones (sin carrito): todos los participantes del BC pueden
-// verla; solo acp_comercial/jefe_comercial/jefe_de_comercial/jefe_operaciones/
+// verla; solo acp_comercial/jefe_comercial/jefe_operaciones/
 // jefe_servicio/jefe_logistica pueden editarla en paralelo — el controller
 // valida ese gate (INVESTMENT_EDIT_ROLES) ademas del documento estadistico.
 const investmentRoles = businessCaseRoles;
@@ -147,7 +146,6 @@ router.post("/", verifyToken, requireRole([
   "analista_comercial",
   "acp_comercial",
   "jefe_comercial",
-  "jefe_de_comercial",
   "backoffice",
   "backoffice_comercial",
 ]), ctrl.create);
@@ -161,14 +159,13 @@ router.get("/:id/determinations/stat-document", verifyToken, requireRole(busines
 router.post("/:id/determinations/lock-subsection", verifyToken, requireRole(businessCaseRoles), ctrl.lockDeterminationsSubsection);
 router.post("/:id/determinations/lock-all-technical-subsections", verifyToken, requireRole(businessCaseRoles), ctrl.lockAllDeterminationsTechnicalSubsections);
 router.post("/:id/determinations/request-unlock-subsection", verifyToken, requireRole(businessCaseRoles), ctrl.requestDeterminationsSubsectionUnlock);
-// NUEVO-08: jefe_de_comercial = mismo nivel que jefe_comercial para aprobar desbloqueo de sub-secciones
-router.post("/:id/determinations/resolve-unlock-subsection", verifyToken, requireRole(["jefe_comercial", "jefe_de_comercial"]), ctrl.resolveDeterminationsSubsectionUnlock);
-router.post("/:id/determinations/reopen-commercial", verifyToken, requireRole(["jefe_comercial", "jefe_de_comercial"]), ctrl.reopenDeterminationsCommercial);
-router.post("/:id/determinations/renew-commercial-window", verifyToken, requireRole(["jefe_comercial", "jefe_de_comercial"]), ctrl.renewDeterminationsCommercialWindow);
+router.post("/:id/determinations/resolve-unlock-subsection", verifyToken, requireRole(["jefe_comercial"]), ctrl.resolveDeterminationsSubsectionUnlock);
+router.post("/:id/determinations/reopen-commercial", verifyToken, requireRole(["jefe_comercial"]), ctrl.reopenDeterminationsCommercial);
+router.post("/:id/determinations/renew-commercial-window", verifyToken, requireRole(["jefe_comercial"]), ctrl.renewDeterminationsCommercialWindow);
 router.post(
   "/:id/determinations/parse-quantities-file",
   verifyToken,
-  requireRole(["backoffice_comercial", "jefe_comercial", "jefe_de_comercial"]),
+  requireRole(["backoffice_comercial", "jefe_comercial"]),
   upload.single("file"),
   ctrl.parseDeterminationsQuantitiesFile,
 );
@@ -228,7 +225,7 @@ router.get("/:id/export/excel", verifyToken, requireRole(businessCaseRoles), ctr
 router.post(
   "/:id/feasibility-decision",
   verifyToken,
-  requireRole(["acp_comercial", "jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]),
+  requireRole(["acp_comercial", "jefe_comercial", "gerencia", "gerencia_general"]),
   ctrl.submitFeasibilityDecision,
 );
 router.put("/:id/economic-data", verifyToken, requireRole(businessCaseRoles), ctrl.updateEconomicData);
@@ -246,31 +243,31 @@ router.get("/:id/ui-guidance", verifyToken, requireRole(businessCaseRoles), ctrl
 router.get(
   "/:id/offer-workspace",
   verifyToken,
-  requireRole(["comercial", "asesor_comercial", "analista_comercial", "acp_comercial", "jefe_comercial", "jefe_de_comercial"]),
+  requireRole(["comercial", "asesor_comercial", "analista_comercial", "acp_comercial", "jefe_comercial"]),
   ctrl.getOfferWorkspace,
 );
 router.post(
   "/:id/offer-workspace/draft",
   verifyToken,
-  requireRole(["acp_comercial", "jefe_comercial", "jefe_de_comercial"]),
+  requireRole(["acp_comercial", "jefe_comercial"]),
   ctrl.createOfferDraft,
 );
 router.post(
   "/:id/offer-workspace/:offerId/publish",
   verifyToken,
-  requireRole(["acp_comercial", "jefe_comercial", "jefe_de_comercial"]),
+  requireRole(["acp_comercial", "jefe_comercial"]),
   ctrl.publishOfferVersion,
 );
 router.post(
   "/:id/offer-workspace/:offerId/regenerate",
   verifyToken,
-  requireRole(["acp_comercial", "jefe_comercial", "jefe_de_comercial"]),
+  requireRole(["acp_comercial", "jefe_comercial"]),
   ctrl.regenerateOfferVersion,
 );
 router.post(
   "/:id/offer-workspace/:offerId/sync-pricing",
   verifyToken,
-  requireRole(["acp_comercial", "jefe_comercial", "jefe_de_comercial"]),
+  requireRole(["acp_comercial", "jefe_comercial"]),
   ctrl.syncOfferPricingAndPdf,
 );
 router.post(
@@ -282,15 +279,13 @@ router.post(
 router.get("/:id/ownership", verifyToken, requireRole(businessCaseRoles), ctrl.getDataOwnership);
 router.post("/:id/ownership/complete", verifyToken, requireRole(businessCaseRoles), ctrl.recordSectionCompletion);
 // BC-20: Bloqueo/desbloqueo de secciones — solo acp_comercial, jefe_comercial (públicas) y backoffice (privadas)
-// NUEVO-07: jefe_de_comercial = mismo nivel que jefe_comercial → debe poder bloquear/desbloquear
-router.post("/:id/sections/:section/lock", verifyToken, requireRole(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_de_comercial"]), ctrl.lockSection);
-router.post("/:id/sections/:section/unlock", verifyToken, requireRole(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_de_comercial"]), ctrl.unlockSection);
+router.post("/:id/sections/:section/lock", verifyToken, requireRole(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial"]), ctrl.lockSection);
+router.post("/:id/sections/:section/unlock", verifyToken, requireRole(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial"]), ctrl.unlockSection);
 router.post("/:id/preflow/reopen-request", verifyToken, requireRole(businessCaseRoles), ctrl.requestPreflowReopen);
 router.post(
   "/:id/preflow/reopen-decision",
   verifyToken,
-  // NUEVO-09: jefe_de_comercial = mismo nivel que jefe_comercial para aprobar reapertura de preflow
-  requireRole(["jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]),
+  requireRole(["jefe_comercial", "gerencia", "gerencia_general"]),
   ctrl.resolvePreflowReopen,
 );
 // BC-16: Apelación de factibilidad rechazada — comercial* solicita revisión; jefe_comercial/gerencia resuelve
@@ -303,7 +298,7 @@ router.post(
 router.post(
   "/:id/feasibility/appeal/resolve",
   verifyToken,
-  requireRole(["jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]),
+  requireRole(["jefe_comercial", "gerencia", "gerencia_general"]),
   ctrl.resolveFeasibilityAppeal,
 );
 
@@ -334,15 +329,15 @@ router.get("/:id/dispatch-workspace", verifyToken, requireRole(businessCaseRoles
 router.put(
   "/:id/dispatch-workspace/commercial-plan",
   verifyToken,
-  // BUG-07: acp_comercial y jefe_de_comercial también editan el plan comercial de dispatch
-  requireRole(["acp_comercial", "jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]),
+  // BUG-07: acp_comercial también edita el plan comercial de dispatch
+  requireRole(["acp_comercial", "jefe_comercial", "gerencia", "gerencia_general"]),
   ctrl.saveCommercialDispatchPlan,
 );
 router.put(
   "/:id/dispatch-workspace/operations-control",
   verifyToken,
   // BUG-07: acp_comercial, jefe_comercial y operaciones (base) también guardan control operativo
-  requireRole(["acp_comercial", "jefe_comercial", "jefe_de_comercial", "jefe_operaciones", "operaciones", "gerencia", "gerencia_general"]),
+  requireRole(["acp_comercial", "jefe_comercial", "jefe_operaciones", "operaciones", "gerencia", "gerencia_general"]),
   ctrl.saveOperationsDispatchControl,
 );
 

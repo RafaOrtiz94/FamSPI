@@ -1130,7 +1130,7 @@ class PrivatePurchasesService {
       // solicitar disponibilidad a ACP -- ver Paso 1 de PrivateFlowTab.jsx)
       try {
         const recipientGroups = await Promise.all(
-          ['backoffice_comercial', 'jefe_comercial', 'jefe_de_comercial'].map((role) =>
+          ['backoffice_comercial', 'jefe_comercial'].map((role) =>
             PrivatePurchaseStateMachine._getUsersByRole(role)),
         );
         const recipients = Array.from(
@@ -1778,9 +1778,7 @@ class PrivatePurchasesService {
     }
 
     if (toState === PRIVATE_PURCHASE_STATES.PRICE_IMPROVEMENT_REQUESTED) {
-      // _hasRoleToken usa substring: 'jefe_de_comercial' no contiene 'jefe_comercial'
-      // (el '_de_' rompe el match), por eso se listan ambos explicitamente.
-      const isJefeComercial = this._hasAnyRoleToken(user, ['jefe_comercial', 'jefe_de_comercial']);
+      const isJefeComercial = this._hasAnyRoleToken(user, ['jefe_comercial']);
       if (!isJefeComercial) {
         const error = new Error('Solo jefe comercial puede solicitar mejora de precios');
         error.status = 403;
@@ -1796,7 +1794,7 @@ class PrivatePurchasesService {
     }
 
     if (toState === PRIVATE_PURCHASE_STATES.REJECTED && currentState === PRIVATE_PURCHASE_STATES.OFFER_REJECTED_BY_COMMERCIAL) {
-      const isJefeComercial = this._hasAnyRoleToken(user, ['jefe_comercial', 'jefe_de_comercial']);
+      const isJefeComercial = this._hasAnyRoleToken(user, ['jefe_comercial']);
       if (!isJefeComercial) {
         const error = new Error('Solo jefe comercial puede confirmar el rechazo final');
         error.status = 403;
@@ -2106,7 +2104,7 @@ class PrivatePurchasesService {
     }
 
     const isBackofficeRole = this._hasRoleToken(user, 'backoffice');
-    const isComercialRole  = this._hasAnyRoleToken(user, ['comercial', 'asesor', 'analista', 'jefe_comercial', 'jefe_de_comercial', 'gerencia', 'acp_comercial']);
+    const isComercialRole  = this._hasAnyRoleToken(user, ['comercial', 'asesor', 'analista', 'jefe_comercial', 'gerencia', 'acp_comercial']);
 
     if (!isBackofficeRole && !isComercialRole) {
       const error = new Error('Acceso denegado para subir contrato borrador');
@@ -2164,7 +2162,7 @@ class PrivatePurchasesService {
    * Rechazado → transiciona a contract_rejected.
    */
   async registerManagerContractDecision(purchaseId, { decision, reason } = {}, user) {
-    const isGerencia = this._hasAnyRoleToken(user, ['gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']);
+    const isGerencia = this._hasAnyRoleToken(user, ['gerencia', 'gerencia_general', 'jefe_comercial']);
     if (!isGerencia) {
       throw Object.assign(new Error('Solo gerencia puede aprobar o rechazar el contrato'), { status: 403, code: 'ROLE_NOT_ALLOWED' });
     }
@@ -2947,7 +2945,7 @@ class PrivatePurchasesService {
    * solo permite escritura a esos dos roles).
    */
   async registerProviderDeliveryDate(purchaseId, { date, notes } = {}, user) {
-    const canRegister = this._hasAnyRoleToken(user, ['acp_comercial', 'jefe_operaciones', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']);
+    const canRegister = this._hasAnyRoleToken(user, ['acp_comercial', 'jefe_operaciones', 'gerencia', 'gerencia_general', 'jefe_comercial']);
     if (!canRegister) {
       const error = new Error('Solo ACP Comercial o Jefe de Operaciones pueden registrar la fecha tentativa de entrega del proveedor');
       error.status = 403;

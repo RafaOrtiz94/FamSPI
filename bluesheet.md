@@ -170,7 +170,7 @@ Admin sistema       RevOps / SalesOps     Gobernar catálogos,    Laptop
   Persona BS          →  Rol(es) en users.role de FamSPI
   ──────────────────────────────────────────────────────
   Vendedor (rep)      →  'comercial', 'asesor_comercial', 'acp_comercial'
-  Gerente (manager)   →  'jefe_comercial', 'jefe_de_comercial'
+  Gerente (manager)   →  'jefe_comercial'
   Director            →  Roles de dirección general
   Admin (RevOps)      →  'admin', 'ti'
   Pre-venta           →  'backoffice_comercial', 'acp_comercial'

@@ -15,7 +15,6 @@ const DETERMINATIONS_ALLOWED_UPLOAD_ROLES = new Set(["comercial"]);
 const DETERMINATIONS_INSPECTION_REQUEST_ROLES = new Set([
   "comercial",
   "jefe_comercial",
-  "jefe_de_comercial",
   "acp_comercial",
   "backoffice_comercial",
 ]);
@@ -40,7 +39,7 @@ function getRoleConfig(businessCase = {}) {
   if (normalizedType === "private_comodato") {
     return {
       type: "private_comodato",
-      commercialEditors: ["jefe_comercial", "jefe_de_comercial", "backoffice_comercial"],
+      commercialEditors: ["jefe_comercial", "backoffice_comercial"],
       technicalEditors: ["jefe_tecnico", "jefe_servicio"],
       notify: ["jefe_tecnico", "jefe_servicio"],
       label: "Compra privada comodato",
@@ -48,7 +47,7 @@ function getRoleConfig(businessCase = {}) {
   }
   return {
     type: "public",
-    commercialEditors: ["jefe_comercial", "jefe_de_comercial", "acp_comercial"],
+    commercialEditors: ["jefe_comercial", "acp_comercial"],
     technicalEditors: ["jefe_tecnico", "jefe_servicio"],
     notify: ["jefe_tecnico", "jefe_servicio"],
     label: "Compra publica",

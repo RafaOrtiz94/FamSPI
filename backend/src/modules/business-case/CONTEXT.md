@@ -3,7 +3,7 @@
 ## 1. Descripción
 Módulo de Business Case comercial. Gestiona la evaluación económica y operacional de propuestas de instalación de equipos para clientes. Incluye: catálogo de equipos, determinaciones (pruebas de laboratorio), cálculos de ROI, generación de hojas Google Sheets / Excel / PDF, observabilidad, feature flags, state machine y SLA.
 
-Controller: `businessCase.controller.js` (~5700 líneas). Service principal: `businessCase.service.js`.
+Controller: `businessCase.controller.js` (7005 líneas — creció desde las ~5700 documentadas antes; agregó oferta comercial, resumen de calidad, revisión/resultado de inspección ambiental y varias rutas de inversión). Service principal: `businessCase.service.js` (2090 líneas).
 
 ## 2. Roles
 
@@ -11,23 +11,29 @@ Controller: `businessCase.controller.js` (~5700 líneas). Service principal: `bu
 ```
 comercial, asesor_comercial, analista_comercial, acp_comercial,
 backoffice, backoffice_comercial,
-jefe_comercial, jefe_de_comercial,
+jefe_comercial,
 jefe_operaciones, operaciones,
 jefe_tecnico, jefe_servicio, ing_servicio,
 esp_app,
 jefe_financiero, jefe_ti,
+jefe_logistica,          -- NUEVO: edita la lista de inversiones en paralelo (sin carrito)
 gerencia, gerencia_general
 ```
 
 ### investmentRoles (agregar ítems al carrito de inversiones)
-```
-comercial, asesor_comercial, analista_comercial, acp_comercial,
-backoffice, backoffice_comercial,
-jefe_comercial, jefe_de_comercial, jefe_operaciones,
-jefe_tecnico, jefe_servicio, ing_servicio,
-jefe_financiero, jefe_ti,
-gerencia, gerencia_general
-```
+`investmentRoles = businessCaseRoles` (mismo array, por referencia) — ya NO es un
+subconjunto propio como documentaba esta sección antes. Todos los participantes
+del BC ven la lista de inversiones; quién puede *editarla en paralelo* (sin
+carrito) lo filtra el controller vía `INVESTMENT_EDIT_ROLES` (acp_comercial,
+jefe_comercial, jefe_operaciones, jefe_servicio,
+jefe_logistica), no el middleware de rutas.
+
+### bc_quality_summary (vista de solo-lectura del resumen del BC)
+`GET /quality-summary` y `GET /:id/quality-summary/items` — roles
+`jefe_calidad` + rol sintético `bc_quality_summary` (no es un grupo de
+`ROLE_GROUPS`; se otorga a usuarios puntuales vía `extra_roles` en el JWT,
+ver `migrations/276_users_extra_roles.sql`, ej. lorena.loaiza@fam-project.com).
+Da acceso de solo lectura al resumen, no al workspace completo.
 
 ### investmentValuesRoles (ver/guardar valores de inversión)
 ```
@@ -49,6 +55,12 @@ admin, gerencia, jefe_tecnico, jefe_servicio, comercial, acp_comercial
 
 Prefijo: `/api/v1/business-case`
 
+### Resumen de calidad (nuevo)
+| Método | Ruta | Handler | Roles |
+|--------|------|---------|-------|
+| GET | `/quality-summary` | `getQualitySummaryList` | jefe_calidad, bc_quality_summary |
+| GET | `/:id/quality-summary/items` | `getQualitySummaryItems` | jefe_calidad, bc_quality_summary |
+
 ### Observabilidad
 | Método | Ruta | Handler | Roles |
 |--------|------|---------|-------|
@@ -66,7 +78,7 @@ Prefijo: `/api/v1/business-case`
 | Método | Ruta | Handler | Roles |
 |--------|------|---------|-------|
 | GET | `/` | `list` | businessCaseRoles |
-| POST | `/` | `create` | comercial, asesor_comercial, analista_comercial, acp_comercial, jefe_comercial, jefe_de_comercial, backoffice, backoffice_comercial |
+| POST | `/` | `create` | comercial, asesor_comercial, analista_comercial, acp_comercial, jefe_comercial, backoffice, backoffice_comercial |
 | GET | `/:id` | `getById` | businessCaseRoles |
 | PUT | `/:id` | `update` | businessCaseRoles |
 | DELETE | `/:id` | `remove` | gerencia, admin |
@@ -83,11 +95,15 @@ Prefijo: `/api/v1/business-case`
 | GET | `/:id/determinations/stat-document` | `getDeterminationsGateInfo` | businessCaseRoles |
 | POST | `/:id/determinations/stat-document` | `uploadDeterminationsStatDocument` | businessCaseRoles (multipart) |
 | POST | `/:id/determinations/lock-subsection` | `lockDeterminationsSubsection` | businessCaseRoles |
+| POST | `/:id/determinations/lock-all-technical-subsections` | `lockAllDeterminationsTechnicalSubsections` | businessCaseRoles |
 | POST | `/:id/determinations/request-unlock-subsection` | `requestDeterminationsSubsectionUnlock` | businessCaseRoles |
-| POST | `/:id/determinations/resolve-unlock-subsection` | `resolveDeterminationsSubsectionUnlock` | jefe_comercial, jefe_de_comercial |
-| POST | `/:id/determinations/reopen-commercial` | `reopenDeterminationsCommercial` | jefe_comercial, jefe_de_comercial |
-| POST | `/:id/determinations/parse-quantities-file` | `parseDeterminationsQuantitiesFile` | backoffice_comercial, jefe_comercial, jefe_de_comercial (multipart) |
+| POST | `/:id/determinations/resolve-unlock-subsection` | `resolveDeterminationsSubsectionUnlock` | jefe_comercial |
+| POST | `/:id/determinations/reopen-commercial` | `reopenDeterminationsCommercial` | jefe_comercial |
+| POST | `/:id/determinations/renew-commercial-window` | `renewDeterminationsCommercialWindow` | jefe_comercial |
+| POST | `/:id/determinations/parse-quantities-file` | `parseDeterminationsQuantitiesFile` | backoffice_comercial, jefe_comercial (multipart) |
 | POST | `/:id/determinations/inspection-request` | `requestEnvironmentInspection` | businessCaseRoles |
+| POST | `/:id/inspection-request/review` | `reviewEnvironmentInspectionRequest` | businessCaseRoles |
+| POST | `/:id/inspection-request/result` | `registerEnvironmentInspectionResult` | businessCaseRoles |
 | POST | `/:id/determinations` | `addDetermination` | businessCaseRoles + validateDeterminationEquipment + validateEquipmentCapacity |
 | PUT | `/:id/determinations/:detId` | `updateDetermination` | businessCaseRoles + validateDeterminationEquipment + validateEquipmentCapacity |
 | DELETE | `/:id/determinations/:detId` | `removeDetermination` | businessCaseRoles |
@@ -116,9 +132,21 @@ Prefijo: `/api/v1/business-case`
 ### Viabilidad (Feasibility)
 | Método | Ruta | Handler | Roles |
 |--------|------|---------|-------|
-| POST | `/:id/feasibility-decision` | `submitFeasibilityDecision` | acp_comercial, jefe_comercial, jefe_de_comercial, gerencia, gerencia_general |
+| POST | `/:id/feasibility-decision` | `submitFeasibilityDecision` | acp_comercial, jefe_comercial, gerencia, gerencia_general |
 | POST | `/:id/feasibility/appeal` | `requestFeasibilityAppeal` | comercial, asesor_comercial, analista_comercial |
-| POST | `/:id/feasibility/appeal/resolve` | `resolveFeasibilityAppeal` | jefe_comercial, jefe_de_comercial, gerencia, gerencia_general |
+| POST | `/:id/feasibility/appeal/resolve` | `resolveFeasibilityAppeal` | jefe_comercial, gerencia, gerencia_general |
+
+### Oferta comercial (Offer Workspace — nuevo, `businessCaseOffer.service.js`)
+Genera y versiona la oferta (PDF/Excel) a partir del template `formato oferta.xlsx`.
+
+| Método | Ruta | Handler | Roles |
+|--------|------|---------|-------|
+| GET | `/:id/offer-workspace` | `getOfferWorkspace` | comercial, asesor_comercial, analista_comercial, acp_comercial, jefe_comercial |
+| POST | `/:id/offer-workspace/draft` | `createOfferDraft` | acp_comercial, jefe_comercial |
+| POST | `/:id/offer-workspace/:offerId/publish` | `publishOfferVersion` | acp_comercial, jefe_comercial |
+| POST | `/:id/offer-workspace/:offerId/regenerate` | `regenerateOfferVersion` | acp_comercial, jefe_comercial |
+| POST | `/:id/offer-workspace/:offerId/sync-pricing` | `syncOfferPricingAndPdf` | acp_comercial, jefe_comercial |
+| POST | `/:id/offer-workspace/:offerId/decision` | `decideOfferVersion` | comercial, asesor_comercial, analista_comercial |
 
 ### UI Guidance y Ownership
 | Método | Ruta | Handler | Roles |
@@ -130,14 +158,14 @@ Prefijo: `/api/v1/business-case`
 ### Secciones (Bloqueo)
 | Método | Ruta | Handler | Roles |
 |--------|------|---------|-------|
-| POST | `/:id/sections/:section/lock` | `lockSection` | acp_comercial, backoffice, backoffice_comercial, jefe_comercial, jefe_de_comercial |
-| POST | `/:id/sections/:section/unlock` | `unlockSection` | acp_comercial, backoffice, backoffice_comercial, jefe_comercial, jefe_de_comercial |
+| POST | `/:id/sections/:section/lock` | `lockSection` | acp_comercial, backoffice, backoffice_comercial, jefe_comercial |
+| POST | `/:id/sections/:section/unlock` | `unlockSection` | acp_comercial, backoffice, backoffice_comercial, jefe_comercial |
 
 ### Preflow
 | Método | Ruta | Handler | Roles |
 |--------|------|---------|-------|
 | POST | `/:id/preflow/reopen-request` | `requestPreflowReopen` | businessCaseRoles |
-| POST | `/:id/preflow/reopen-decision` | `resolvePreflowReopen` | jefe_comercial, jefe_de_comercial, gerencia, gerencia_general |
+| POST | `/:id/preflow/reopen-decision` | `resolvePreflowReopen` | jefe_comercial, gerencia, gerencia_general |
 
 ### Inversiones (audited — REQ-BC-12)
 Todas las rutas de inversión registran auditoría vía `auditSection()`.
@@ -151,10 +179,12 @@ Todas las rutas de inversión registran auditoría vía `auditSection()`.
 | GET | `/:id/investments/catalog` | `getInvestmentCatalog` | investmentRoles |
 | POST | `/:id/investments/catalog` | `createInvestmentCatalogItem` | investmentRoles |
 | POST | `/:id/investments/selections` | `saveInvestmentSelection` | investmentRoles |
-| POST | `/:id/investments/selections/request-increase` | `requestInvestmentQuantityIncrease` | investmentRoles |
-| POST | `/:id/investments/confirm-cart` | `confirmInvestmentCart` | investmentRoles |
+| POST | `/:id/investments/close-without-items` | `closeInvestmentsWithoutAdditionalItems` | investmentRoles ∪ investmentValuesRoles |
 | GET | `/:id/investments/values` | `getInvestmentValues` | investmentValuesRoles |
 | POST | `/:id/investments/values` | `saveInvestmentValues` | investmentValuesRoles |
+| GET | `/:id/investments/values/assignees` | `getInvestmentQuotationAssignees` | investmentValuesRoles |
+| POST | `/:id/investments/values/assignment` | `assignInvestmentQuotation` | investmentValuesRoles |
+| POST | `/:id/investments/values/request-quotation` | `requestInvestmentQuotation` | investmentValuesRoles |
 
 ### Consumibles
 | Método | Ruta | Handler | Roles |
@@ -162,13 +192,14 @@ Todas las rutas de inversión registran auditoría vía `auditSection()`.
 | GET | `/:id/consumption-items` | `getConsumptionItems` | businessCaseRoles |
 | PUT | `/:id/consumption-items` | `saveConsumptionItems` | businessCaseRoles |
 | PATCH | `/:id/consumption-items/:itemKey` | `patchConsumptionItem` | businessCaseRoles |
+| POST | `/:id/consumption-items/sync-from-sheet` | `syncConsumptionFromSheet` | businessCaseRoles |
 
 ### Dispatch Workspace
 | Método | Ruta | Handler | Roles |
 |--------|------|---------|-------|
 | GET | `/:id/dispatch-workspace` | `getDispatchWorkspace` | businessCaseRoles |
-| PUT | `/:id/dispatch-workspace/commercial-plan` | `saveCommercialDispatchPlan` | acp_comercial, jefe_comercial, jefe_de_comercial, gerencia, gerencia_general |
-| PUT | `/:id/dispatch-workspace/operations-control` | `saveOperationsDispatchControl` | acp_comercial, jefe_comercial, jefe_de_comercial, jefe_operaciones, operaciones, gerencia, gerencia_general |
+| PUT | `/:id/dispatch-workspace/commercial-plan` | `saveCommercialDispatchPlan` | acp_comercial, jefe_comercial, gerencia, gerencia_general |
+| PUT | `/:id/dispatch-workspace/operations-control` | `saveOperationsDispatchControl` | acp_comercial, jefe_comercial, jefe_operaciones, operaciones, gerencia, gerencia_general |
 
 ### Formulario Manual BC (secciones operacionales)
 | Método | Ruta | Handler | Roles |
@@ -288,6 +319,10 @@ solo compartía el prefijo de URL):
 | `businessCasePreflow.service.js` | — | Lógica de preflow y reapertura |
 | `businessCaseIntegration.service.js` | — | Integración con otros módulos |
 | `businessCaseSheetGeneration.service.js` | 45KB | Generación hojas Google Sheets (job async) |
+| `businessCaseSheetGeneration.controller.js` | 193 líneas | Controller separado (no `businessCase.controller.js`) para las rutas `/:id/sheets/*` |
+| `businessCaseSheetGeneration.contract.js` | 143 líneas | Contrato/esquema del job de generación de hoja (usado también en tests) |
+| `businessCaseSheetSyncLocal.service.js` | 2016 líneas | Motor local de mapeo/sync de plantillas de hoja (reemplaza lectura remota en varios flujos); genera los payloads que usan sheet-generation y offer |
+| `businessCaseSheetEquipment.helper.js` | 25 líneas | Helper pequeño de resolución de equipo para hojas |
 | `businessCaseSheetVersioning.helper.js` | — | Versionado de documentos generados |
 | `businessCaseDriveFolder.service.js` | — | Carpeta Google Drive por BC |
 | `pdfGenerator.service.js` | — | Export PDF |
@@ -295,7 +330,6 @@ solo compartía el prefijo de URL):
 | `businessCaseScoring.service.js` | — | Scoring de viabilidad |
 | `calculationEngine.service.js` | — | Motor de cálculo de ROI |
 | `businessCaseCalculator.service.js` | — | Cálculos económicos |
-| `deliveryCeiling.service.js` | — | Topes de entrega |
 | `equipmentCompatibility.service.js` | — | Compatibilidad equipo principal/backup |
 | `equipmentSelection.service.js` | — | Lógica de selección de equipo |
 | `determinations.service.js` | — | Servicio de determinaciones |
@@ -306,6 +340,9 @@ solo compartía el prefijo de URL):
 | `bcDeliveries.service.js` | — | Entregas comprometidas |
 | `bcDispatchWorkspace.service.js` | — | Workspace de despacho |
 | `businessCaseNotificationQueue.service.js` | — | Cola de notificaciones del BC |
+| `businessCaseOffer.service.js` | 3508 líneas | **NUEVO — no documentado antes.** Genera y versiona la Oferta comercial (Excel/PDF) desde `Mapeador_Sheets/formato oferta.xlsx`; soporta layouts split/combinado de calibrador+control (equipo cobas Pure `<303>` hardcodeado como excepción, id 9); resuelve el flujo de oferta privada (`acp_availability_confirmed`, `price_improvement_requested`) descrito en `businessCasePurchaseHandoff.service.js`. Corrige un bug real de path: antes apuntaba a `docs/validation/assets/` (excluido por `.dockerignore`), por eso el logo/marca de agua del PDF nunca se renderizaba en producción — ahora usa `backend/src/assets/`. |
+| `businessCaseWorkflowSla.service.js` | 1045 líneas | **NUEVO — no documentado antes.** SLA de flujo de trabajo (distinto de `businessCaseSla.service.js`, que es el SLA general del BC); calcula tiempos por etapa del workflow. |
+| `businessCasePurchaseHandoff.service.js` | 259 líneas | **NUEVO — no documentado antes.** Handoff entre Business Case y compra privada (`private-purchases`); referenciado desde `businessCaseOffer.service.js`. |
 
 ---
 
@@ -343,8 +380,12 @@ Ver `README_TABLE_STRUCTURE.md` para estructura completa.
 ## 9. Frontend asociado
 - `/dashboard/business-case` → `BusinessCaseWorkspace`
 - `/dashboard/comercial/business-case` → `BusinessCaseWorkspace`
+- `/dashboard/business-case/workspace` → `BusinessCaseWorkspace` (sin `:id`, faltaba documentar)
 - `/dashboard/business-case/workspace/:id` → `BusinessCaseWorkspace`
 - `/dashboard/business-case/observabilidad` → `BusinessCaseObservabilityDashboard`
+- `/dashboard/business-case/resumen` → `BusinessCaseQualitySummary` (NUEVO — página de solo lectura para `jefe_calidad`/`bc_quality_summary`, faltaba documentar)
+
+API client: `spi_front/src/core/api/businessCaseApi.js` (672 líneas) — todas las funciones de fetch del módulo viven aquí, no en `spi_front/src/modules/comercial/api/` (esa carpeta solo tiene `privatePurchasesApi.js` y `opportunitiesApi.js`, de otros módulos comerciales).
 
 ---
 
@@ -357,12 +398,14 @@ Ver `README_TABLE_STRUCTURE.md` para estructura completa.
 ---
 
 ## 11. Riesgos y notas técnicas
-- `businessCase.controller.js` (~5600 líneas) — el controller más grande del sistema; no editar sin entender el flujo completo
-- `businessCase.service.js` (47KB) — lógica de negocio densa; cambios con cuidado
+- `businessCase.controller.js` (7005 líneas) — el controller más grande del sistema; no editar sin entender el flujo completo
+- `businessCase.service.js` (2090 líneas / 47KB) — lógica de negocio densa; cambios con cuidado
+- `businessCaseOffer.service.js` (3508 líneas) es ahora el segundo archivo más grande del módulo y no estaba documentado en ninguna versión previa de este CONTEXT.md
+- Frontend: `spi_front/src/modules/comercial/components/workspace/sections/InvestmentValuesSection.jsx` está huérfano — cero importadores reales (verificado con grep); fue reemplazado por `InvestmentValuesUnifiedSection.jsx`, que sí está cableado en `SectionContent.jsx`. No editar el primero esperando que afecte el workspace.
 - `businessCaseSheetGeneration.service.js` (45KB) — dependencia fuerte con Google Sheets API; la generación es async (job)
 - `businessCasePermissions.js` (21KB) — RBAC muy granular; verificar siempre contra este archivo antes de agregar roles a rutas
-- `jefe_de_comercial` = mismo nivel que `jefe_comercial` en casi todas las rutas (ver comentarios NUEVO-07, NUEVO-08, NUEVO-09 en routes)
 - `operaciones` (base) agregado a businessCaseRoles y dispatch-workspace (BUG-06/BUG-07)
 - `ing_servicio`, `esp_app` = solo visualización en BC
 - Inversiones tienen audit logging adicional (REQ-BC-12) via `businessCaseSectionAccessAudit.service`
-- Tests en `__tests__/`: calculationEngine, exporters, consumptionVersionConflict (integration), preflow, businessCaseSheetGeneration (contract), deliveryCeiling, businessCaseDeterminationsGate
+- Tests en `__tests__/`: calculationEngine, exporters, consumptionVersionConflict (integration), preflow, businessCaseSheetGeneration (contract), businessCaseDeterminationsGate
+- `deliveryCeiling.service.js` fue eliminado (código muerto, sin callers reales en producción); ver skill `modulo-techos-entrega`

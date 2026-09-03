@@ -46,6 +46,7 @@ router.get("/", requireRole(OPPORTUNITY_READ_ROLES), controller.listOpportunitie
 router.post("/", requireRole(OPPORTUNITY_WRITE_ROLES), controller.createOpportunity);
 router.get("/:id", requireRole(OPPORTUNITY_READ_ROLES), controller.getOpportunity);
 router.put("/:id", requireRole(OPPORTUNITY_WRITE_ROLES), controller.updateOpportunity);
+router.put("/:id/rating", requireRole(OPPORTUNITY_WRITE_ROLES), controller.updateRating);
 
 router.post("/:id/influences", requireRole(OPPORTUNITY_WRITE_ROLES), controller.upsertInfluence);
 router.delete("/:id/influences/:influenceId", requireRole(OPPORTUNITY_WRITE_ROLES), controller.deleteInfluence);

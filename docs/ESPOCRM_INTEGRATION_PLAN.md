@@ -265,7 +265,7 @@ EspoCRM tiene **12 stages** para reflejar mejor la operación comercial FAM. Fam
 | Rol FamSPI | Team EspoCRM | Rol EspoCRM |
 |---|---|---|
 | `comercial`, `asesor_comercial` | Team: Comercial | Sales Representative |
-| `jefe_comercial`, `jefe_de_comercial` | Team: Jefatura Comercial | Sales Manager |
+| `jefe_comercial` | Team: Jefatura Comercial | Sales Manager |
 | `backoffice_comercial` | Team: Backoffice | Support |
 | `acp_comercial` | Team: ACP | Specialist |
 | `gerencia`, `gerente_general`, `director` | Team: Gerencia | Executive |

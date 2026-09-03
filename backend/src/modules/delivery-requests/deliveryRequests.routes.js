@@ -5,7 +5,7 @@ const controller = require("./deliveryRequests.controller");
 
 const router = express.Router();
 
-const MANAGER_ROLES      = ["acp_comercial", "gerencia", "gerencia_general", "jefe_comercial", "jefe_de_comercial"];
+const MANAGER_ROLES      = ["acp_comercial", "gerencia", "gerencia_general", "jefe_comercial"];
 
 // DR-01: Creadores — comercial, asesor_comercial, analista_comercial, backoffice + managers
 const REQUEST_CREATOR_ROLES = [

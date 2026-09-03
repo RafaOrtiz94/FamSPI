@@ -6,7 +6,7 @@ const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
 const { streamPurchaseUpdates } = require("./purchaseEvents");
 
-const managerRoles = ["acp_comercial", "gerencia", "gerencia_general", "jefe_comercial", "jefe_de_comercial"];
+const managerRoles = ["acp_comercial", "gerencia", "gerencia_general", "jefe_comercial"];
 
 // CP-01: Creadores — comercial, asesor_comercial, analista_comercial + managers
 const creatorRoles = ["comercial", "asesor_comercial", "analista_comercial", ...managerRoles];
@@ -53,10 +53,10 @@ const comercialAndBackofficeRoles = Array.from(new Set([
 // CP-03: solo acp_comercial confirma disponibilidad ACP (jefe_comercial ya NO)
 const acpConfirmRoles = ["acp_comercial"];
 // Para otras acciones ACP (devolver, portal, etc.) se mantiene el grupo completo
-const acpRoles = ["acp_comercial", "jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"];
+const acpRoles = ["acp_comercial", "jefe_comercial", "gerencia", "gerencia_general"];
 
 // CP-09: Control Operativo — solo acp_comercial o jefe_comercial habilitan
-const controlOperativoRoles = ["acp_comercial", "jefe_comercial", "jefe_de_comercial"];
+const controlOperativoRoles = ["acp_comercial", "jefe_comercial"];
 
 const supplyRequestRoles = ["comercial", "asesor_comercial", "analista_comercial", "backoffice", "backoffice_comercial", ...managerRoles];
 const supplyApproveRoles = ["jefe_operaciones", "operaciones", ...managerRoles];

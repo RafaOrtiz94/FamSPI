@@ -6,7 +6,6 @@ const { isCrmSyncEnabled } = require("../../config/crmDb");
 
 const MANAGER_ROLES = new Set([
   "jefe_comercial",
-  "jefe_de_comercial",
   "gerencia",
   "gerencia_general",
   "gerente_general",
@@ -263,7 +262,8 @@ const getOpportunityBase = async (opportunityId) => {
        r.has_coach,
        r.has_competition_strategy,
        r.has_red_flag_mitigation,
-       r.has_clear_objective
+       r.has_clear_objective,
+       r.manual_criteria
      FROM opportunity o
      LEFT JOIN accounts a ON a.id = o.account_id
      LEFT JOIN users u ON u.id = o.owner_id
@@ -299,6 +299,7 @@ const getOpportunityDetail = async (opportunityId) => {
       has_competition_strategy: opportunity.has_competition_strategy ?? false,
       has_red_flag_mitigation: opportunity.has_red_flag_mitigation ?? false,
       has_clear_objective: opportunity.has_clear_objective ?? false,
+      manual_criteria: opportunity.manual_criteria ?? {},
     },
     influences: influences.rows,
     flags: flags.rows,
@@ -733,8 +734,69 @@ const createComment = async (opportunityId, payload, actorUser) => {
   return getOpportunityDetail(opportunityId);
 };
 
-const deleteComment = async (opportunityId, commentId) => {
+const deleteComment = async (opportunityId, commentId, actorUser) => {
+  const { rows } = await db.query(
+    `SELECT id, author_user_id FROM bs_comment WHERE opportunity_id = $1 AND id = $2`,
+    [opportunityId, commentId]
+  );
+  if (!rows.length) {
+    throw new Error("Comentario no encontrado");
+  }
+
+  const actorId = getActorId(actorUser);
+  const role = getActorRole(actorUser);
+  const isAuthor = rows[0].author_user_id != null && Number(rows[0].author_user_id) === actorId;
+  const isManager = MANAGER_ROLES.has(role);
+  if (!isAuthor && !isManager) {
+    throw new Error("No tiene permiso para borrar este comentario");
+  }
+
   await db.query(`DELETE FROM bs_comment WHERE opportunity_id = $1 AND id = $2`, [opportunityId, commentId]);
+  return getOpportunityDetail(opportunityId);
+};
+
+// Criterios manuales (S/N/D) capturados en el tab "Valoración" del workspace de
+// FamSheets (OpportunityWorkspace.jsx, guardarCriterio). Se guardan como dato
+// informativo en opportunity_rating.manual_criteria; NO alteran total_score
+// (columna GENERATED ALWAYS calculada por refreshRating() a partir de señales
+// reales). Tras guardar, se dispara refreshRating() para devolver el score real
+// actualizado junto con los criterios manuales recién guardados.
+const MANUAL_RATING_CRITERIA_IDS = [
+  "tiene_presupuesto",
+  "tiene_acceso",
+  "entiende_proceso_compra",
+  "relacion_con_eb",
+  "tiene_coach",
+];
+const MANUAL_RATING_VALID_VALUES = new Set(["S", "N", "D"]);
+
+const updateOpportunityRating = async (opportunityId, payload, actorUser) => {
+  const actorId = getActorId(actorUser);
+
+  const criteria = {};
+  for (const criterioId of MANUAL_RATING_CRITERIA_IDS) {
+    const raw = payload?.[criterioId];
+    if (raw === undefined) continue;
+    const value = String(raw).toUpperCase();
+    if (!MANUAL_RATING_VALID_VALUES.has(value)) {
+      throw new Error(`Valor inválido para el criterio ${criterioId}`);
+    }
+    criteria[criterioId] = value;
+  }
+
+  await db.query(
+    `INSERT INTO opportunity_rating (opportunity_id, manual_criteria, updated_by)
+     VALUES ($1, $2::jsonb, $3)
+     ON CONFLICT (opportunity_id)
+     DO UPDATE SET
+       manual_criteria = opportunity_rating.manual_criteria || EXCLUDED.manual_criteria,
+       updated_by = EXCLUDED.updated_by,
+       updated_at = NOW()`,
+    [opportunityId, JSON.stringify(criteria), actorId]
+  );
+
+  await refreshRating(opportunityId, actorId);
+
   return getOpportunityDetail(opportunityId);
 };
 
@@ -936,6 +998,7 @@ module.exports = {
   getOpportunityDetail,
   createOpportunity,
   updateOpportunity,
+  updateOpportunityRating,
   upsertInfluence,
   deleteInfluence,
   upsertFlag,

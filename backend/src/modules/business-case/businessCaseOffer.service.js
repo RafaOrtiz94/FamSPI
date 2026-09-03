@@ -22,8 +22,8 @@ const OFFER_PDF_FONT_BOLD_PATH = path.resolve(__dirname, "../../assets/fonts/Not
 const OFFER_PDF_FONT_REGULAR = "OfferNotoSans";
 const OFFER_PDF_FONT_BOLD = "OfferNotoSansBold";
 const VIEWER_COMMERCIAL_ROLES = new Set(["comercial", "asesor_comercial", "analista_comercial"]);
-const MANAGER_ROLES = new Set(["acp_comercial", "jefe_comercial", "jefe_de_comercial"]);
-const PRIVATE_OFFER_MANAGER_ROLES = new Set(["acp_comercial", "jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]);
+const MANAGER_ROLES = new Set(["acp_comercial", "jefe_comercial"]);
+const PRIVATE_OFFER_MANAGER_ROLES = new Set(["acp_comercial", "jefe_comercial", "gerencia", "gerencia_general"]);
 const OFFER_CREATOR_ALLOWED_STATUSES = new Set(["accepted", "rejected"]);
 const OFFER_PUBLISHABLE_STATUSES = new Set(["draft", "rejected"]);
 const ELECTROLYTE_KEYWORDS = ["electrol", "ise", "electrodo", "reference electrode"];
@@ -70,7 +70,6 @@ function toObject(value) {
 
 function normalizeRole(role) {
   const normalized = String(role || "").trim().toLowerCase();
-  if (normalized === "jefe_de_comercial") return "jefe_comercial";
   if (normalized === "asesor_comercial") return "comercial";
   if (normalized === "analista_comercial") return "comercial";
   return normalized;
@@ -1355,7 +1354,7 @@ async function getJefeComercialName() {
         AND lower(role) = ANY($1::text[])
       ORDER BY id ASC
       LIMIT 1`,
-    [["jefe_comercial", "jefe_de_comercial"]],
+    [["jefe_comercial"]],
   );
   return rows[0]?.fullname || null;
 }
@@ -2467,7 +2466,7 @@ async function getManagerUserIds() {
        FROM users
       WHERE active = true
         AND lower(role) = ANY($1::text[])`,
-    [["acp_comercial", "jefe_comercial", "jefe_de_comercial"]],
+    [["acp_comercial", "jefe_comercial"]],
   );
   return rows.map((row) => Number(row.id)).filter((value) => Number.isInteger(value) && value > 0);
 }

@@ -15,7 +15,7 @@ const REVIEW_ROLE_BY_TYPE = Object.freeze({
   private_comodato: "jefe_comercial",
   comodato_privado: "jefe_comercial",
 });
-const MANAGER_ROLES = new Set(["jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]);
+const MANAGER_ROLES = new Set(["jefe_comercial", "gerencia", "gerencia_general"]);
 
 const isUuid = (value) =>
   typeof value === "string" &&
@@ -725,7 +725,7 @@ async function requestPreflowReopen({
     const { rows: recipients } = await db.query(
       `SELECT id
          FROM users
-        WHERE role IN ('jefe_comercial', 'jefe_de_comercial')
+        WHERE role = 'jefe_comercial'
           AND active = true`,
     );
     await Promise.all(

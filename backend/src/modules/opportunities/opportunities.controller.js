@@ -9,7 +9,8 @@ const sendError = (res, error, fallback = "Error interno del servidor", status =
 const resolveBadRequestStatus = (error) => {
   const message = String(error?.message || "").toLowerCase();
   if (message.includes("no encontrada") || message.includes("no encontrado")) return 404;
-  if (message.includes("obligatorio") || message.includes("soportado")) return 400;
+  if (message.includes("permiso") || message.includes("autoriz")) return 403;
+  if (message.includes("obligatorio") || message.includes("soportado") || message.includes("inválido")) return 400;
   return 500;
 };
 
@@ -79,6 +80,15 @@ const createOpportunity = async (req, res) => {
 const updateOpportunity = async (req, res) => {
   try {
     const data = await service.updateOpportunity(req.params.id, req.body, req.user);
+    res.status(200).json({ ok: true, data });
+  } catch (error) {
+    sendError(res, error, error?.message, resolveBadRequestStatus(error));
+  }
+};
+
+const updateRating = async (req, res) => {
+  try {
+    const data = await service.updateOpportunityRating(req.params.id, req.body, req.user);
     res.status(200).json({ ok: true, data });
   } catch (error) {
     sendError(res, error, error?.message, resolveBadRequestStatus(error));
@@ -168,7 +178,7 @@ const createComment = async (req, res) => {
 
 const deleteComment = async (req, res) => {
   try {
-    const data = await service.deleteComment(req.params.id, req.params.commentId);
+    const data = await service.deleteComment(req.params.id, req.params.commentId, req.user);
     res.status(200).json({ ok: true, data });
   } catch (error) {
     sendError(res, error, error?.message, resolveBadRequestStatus(error));
@@ -223,6 +233,7 @@ module.exports = {
   getOpportunity,
   createOpportunity,
   updateOpportunity,
+  updateRating,
   upsertInfluence,
   deleteInfluence,
   upsertFlag,

@@ -66,10 +66,18 @@ export const MODULE_PATH_PREFIXES = [
   { key: "inicio", prefixes: ["/dashboard"] },
 ];
 
-export const resolveModuleKeyForPath = (pathname = "") => {
+const normalizeModuleCatalog = (moduleCatalog) => {
+  if (!Array.isArray(moduleCatalog) || moduleCatalog.length === 0) return MODULE_PATH_PREFIXES;
+  return moduleCatalog.map((item) => ({
+    key: item?.key,
+    prefixes: item?.path_prefixes || item?.prefixes || [],
+  }));
+};
+
+export const resolveModuleKeyForPath = (pathname = "", moduleCatalog) => {
   let bestKey = null;
   let bestLen = -1;
-  for (const item of MODULE_PATH_PREFIXES) {
+  for (const item of normalizeModuleCatalog(moduleCatalog)) {
     for (const prefix of item.prefixes || []) {
       if (String(pathname).startsWith(prefix) && prefix.length > bestLen) {
         bestKey = item.key;
@@ -88,8 +96,8 @@ export const buildModuleAccessMap = (moduleAccess = []) => {
   return map;
 };
 
-export const isPathEnabledForUser = ({ pathname, moduleAccess }) => {
-  const key = resolveModuleKeyForPath(pathname);
+export const isPathEnabledForUser = ({ pathname, moduleAccess, moduleCatalog }) => {
+  const key = resolveModuleKeyForPath(pathname, moduleCatalog);
   if (!key) return true;
   const map = buildModuleAccessMap(moduleAccess);
   if (!map.has(key)) return true;
@@ -110,17 +118,17 @@ export const buildGlobalStatusMap = (moduleGlobalStatus = []) => {
 };
 
 // Returns { stage, in_whitelist } for a path. stage defaults to 'production' if unknown.
-export const getModuleStatusForPath = ({ pathname, moduleGlobalStatus }) => {
-  const key = resolveModuleKeyForPath(pathname);
+export const getModuleStatusForPath = ({ pathname, moduleGlobalStatus, moduleCatalog }) => {
+  const key = resolveModuleKeyForPath(pathname, moduleCatalog);
   if (!key) return { stage: 'production', in_whitelist: false };
   const map = buildGlobalStatusMap(moduleGlobalStatus);
   return map.get(key) || { stage: 'production', in_whitelist: false };
 };
 
 // Returns true if the user should see the "under construction" page
-export const isModuleUnderConstruction = ({ pathname, moduleGlobalStatus, isTiAdmin = false }) => {
+export const isModuleUnderConstruction = ({ pathname, moduleGlobalStatus, moduleCatalog, isTiAdmin = false }) => {
   if (isTiAdmin) return false; // TI always passes through
-  const { stage, in_whitelist } = getModuleStatusForPath({ pathname, moduleGlobalStatus });
+  const { stage, in_whitelist } = getModuleStatusForPath({ pathname, moduleGlobalStatus, moduleCatalog });
   if (stage === 'construction') return true;
   if (stage === 'testing' && !in_whitelist) return true;
   return false;

@@ -56,7 +56,7 @@ const EQUIP_TYPE_CONFIG = {
 };
 
 /* Roles que pueden EDITAR tipo/modalidad (solo expedientes públicos) */
-const TYPE_EDIT_ROLES = ['jefe_comercial', 'jefe_de_comercial', 'gerencia', 'gerencia_general'];
+const TYPE_EDIT_ROLES = ['jefe_comercial', 'gerencia', 'gerencia_general'];
 
 /* ─── Pequeño campo de detalle ────────────────────────────────────────── */
 const DetailField = ({ icon: Icon, label, value }) => {

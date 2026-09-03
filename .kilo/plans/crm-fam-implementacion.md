@@ -212,7 +212,7 @@ spi_front/src/modules/crm/
 /dashboard/crm/opportunities/:id             → OpportunityDetailPage
 ```
 
-Roles: `comercial, jefe_comercial, jefe_de_comercial, backoffice_comercial, asesor_comercial, analista_comercial, acp_comercial, backoffice, gerencia, gerencia_general`
+Roles: `comercial, jefe_comercial, backoffice_comercial, asesor_comercial, analista_comercial, acp_comercial, backoffice, gerencia, gerencia_general`
 
 ---
 

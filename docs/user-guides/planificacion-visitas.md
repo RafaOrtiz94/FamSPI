@@ -24,7 +24,7 @@ Incluye:
 | Rol o perfil | Acceso |
 |---|---|
 | `comercial`, `asesor_comercial`, `analista_comercial`, `acp_comercial`, `backoffice`, `backoffice_comercial` | Crear, editar, enviar a aprobación, agregar/editar/borrar visitas, justificar desviaciones |
-| `jefe_comercial`, `jefe_de_comercial`, `gerencia`, `gerencia_general`, `admin`, `administrador` | Aprobar, rechazar, ver analíticas, ver equipo |
+| `jefe_comercial`, `gerencia`, `gerencia_general`, `admin`, `administrador` | Aprobar, rechazar, ver analíticas, ver equipo |
 
 ---
 

@@ -11,7 +11,6 @@
  *   - comercial = asesor_comercial = analista_comercial (mismo nivel)
  *   - gerencia = gerencia_general (mismo nivel)
  *   - backoffice = backoffice_comercial (mismo nivel)
- *   - jefe_comercial = jefe_de_comercial (mismo nivel)
  *   - Secciones con 📩 (permiso requerido) están en canEdit pero el sistema de propiedad
  *     de ítems controla quién puede modificar qué dentro de la sección.
  *   - La sección "prices" SOLO la edita jefe_operaciones (regla absoluta, no configurable aquí).
@@ -133,21 +132,6 @@ export const ROLE_SECTION_CONFIG = {
     ],
     canEdit: [
       // BC-12: investment_values NO en canEdit — jefe_comercial es solo lectura ahí
-      "general", "lab", "equipment", "lis", "determinations",
-      "requirement", "investments", "consumption_export",
-      "dispatch_workspace", "feasibility",
-    ],
-  },
-
-  jefe_de_comercial: {
-    // BC-04 equiv: jefe_de_comercial = jefe_comercial
-    visible: [
-      "general", "lab", "equipment", "lis", "determinations",
-      "requirement", "investments",
-      "investment_values",
-      "consumption_export", "dispatch_workspace", "feasibility", "offer_workspace",
-    ],
-    canEdit: [
       "general", "lab", "equipment", "lis", "determinations",
       "requirement", "investments", "consumption_export",
       "dispatch_workspace", "feasibility",
@@ -307,14 +291,13 @@ export const ROLE_SECTION_CONFIG = {
 
 /**
  * Resuelve la configuración de sección para un rol dado.
- * Soporta alias de roles (jefe_de_comercial → jefe_comercial, etc.).
+ * Soporta alias de roles (backoffice_comercial → backoffice, etc.).
  */
 export function resolveRoleSectionConfig(role = "") {
   const normalizedRole = String(role || "").toLowerCase().trim();
 
   // Alias directos para roles equivalentes
   const roleAliases = {
-    "jefe_de_comercial": "jefe_comercial",
     "backoffice_comercial": "backoffice",
     "administrador": "admin",
     // gerencia y gerencia_general ya están definidos por separado con configs idénticas

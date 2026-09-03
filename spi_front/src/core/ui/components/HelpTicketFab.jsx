@@ -341,7 +341,7 @@ const HelpTicketFab = forwardRef(function HelpTicketFab(props, ref) {
   return (
     <>
       {/* Trigger button: only visible on desktop; mobile uses MobileFabDock */}
-      <div className="hidden sm:block fixed bottom-6 left-4 z-20">
+      <div className="hidden sm:block fixed bottom-20 left-4 z-20 md:bottom-6">
         <button
           type="button"
           onClick={handleOpen}

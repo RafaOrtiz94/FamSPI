@@ -12,7 +12,7 @@ const router = express.Router();
 const { verifyToken, requireRole } = require('../../middlewares/auth');
 const { streamPrivatePurchaseUpdates } = require('./privatePurchaseEvents');
 
-const managerRoles = ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial'];
+const managerRoles = ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial'];
 
 // PR-01: Creadores — comercial, asesor_comercial, analista_comercial + managers
 const creatorRoles = ['comercial', 'asesor_comercial', 'analista_comercial', ...managerRoles];
@@ -64,13 +64,12 @@ const inspectionRequestRoles = [
   'backoffice',
   'backoffice_comercial',
   'jefe_comercial',
-  'jefe_de_comercial',
   'gerencia',
   'gerencia_general',
 ];
 
 // PR-05: Control Operativo — SOLO acp_comercial o jefe_comercial pueden configurar tipo
-const supplyControlRoles = ['acp_comercial', 'jefe_comercial', 'jefe_de_comercial'];
+const supplyControlRoles = ['acp_comercial', 'jefe_comercial'];
 
 const serialRoles = [...managerRoles, 'jefe_logistica', 'logistica'];
 
@@ -123,8 +122,7 @@ router.post('/:id/send-to-acp', requireRole(comercialAndBackofficeRoles), contro
 router.post('/:id/start-availability', requireRole(managerRoles), controller.startAvailability);
 router.post(
   '/:id/start-business-case',
-  // NUEVO-06: jefe_de_comercial = mismo nivel que jefe_comercial
-  requireRole(['backoffice_comercial', 'acp_comercial', 'jefe_comercial', 'jefe_de_comercial']),
+  requireRole(['backoffice_comercial', 'acp_comercial', 'jefe_comercial']),
   controller.startBusinessCase,
 );
 router.post('/:id/provider-response', requireRole(managerRoles), controller.saveProviderResponse);
@@ -134,7 +132,7 @@ router.post('/:id/confirm-import-approval',  requireRole(['comercial', 'asesor_c
 router.post('/:id/submit-contract', requireRole(comercialAndBackofficeRoles), controller.uploadContract);
 router.post('/:id/contract/client-signed', requireRole(['comercial', ...managerRoles]), controller.uploadClientSignedContract);
 // Gerencia aprueba o rechaza el contrato (sin subir archivo)
-router.post('/:id/contract/gerencia-decision', requireRole(['gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']), controller.registerManagerContractDecision);
+router.post('/:id/contract/gerencia-decision', requireRole(['gerencia', 'gerencia_general', 'jefe_comercial']), controller.registerManagerContractDecision);
 // ACP sube el contrato firmado (solo tras aprobación de gerencia)
 router.post('/:id/contract/acp-signed', requireRole(['acp_comercial', ...managerRoles]), controller.uploadAcpSignedContract);
 // Reiniciar flujo de contrato tras rechazo de gerencia

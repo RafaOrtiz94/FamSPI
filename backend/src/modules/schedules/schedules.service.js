@@ -13,7 +13,6 @@ const metadataCache = new Map();
 
 const MANAGER_ROLES = new Set([
   "jefe_comercial",
-  "jefe_de_comercial",
   "gerencia",
   "gerencia_general",
   "admin",

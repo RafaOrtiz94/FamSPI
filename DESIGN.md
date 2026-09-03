@@ -1,59 +1,67 @@
 ---
 name: FamSPI
-description: Sistema de procesos internos de FAM — operaciones centralizadas para equipos de campo y oficina.
+version: "2.1"
+updated: "2026-09-03"
+description: Sistema de procesos internos de FAM. Una interfaz empresarial de precisión para coordinar decisiones, documentos y trabajo de campo.
+designDirection: "Precisión operativa"
 colors:
-  naval-slate: "#1E293B"
-  storm-slate: "#334155"
-  midnight-slate: "#0F172A"
-  action-blue: "#2563EB"
-  sky-signal: "#0EA5E9"
+  naval-slate: "#182838"
+  storm-slate: "#263C50"
+  midnight-slate: "#101820"
+  action-blue: "#2458D3"
+  sky-signal: "#91B5FF"
   surface-white: "#FFFFFF"
-  paper-white: "#F9FAFB"
-  dark-surface: "#111827"
-  dark-card: "#1F2937"
-  ink-slate: "#1F2937"
-  warm-ash: "#6B7280"
-  fog: "#D1D5DB"
-  soft-border: "#E5E7EB"
-  operative-green: "#16A34A"
-  green-soft: "#DCFCE7"
-  alert-red: "#DC2626"
-  red-soft: "#FEE2E2"
-  caution-amber: "#D97706"
-  amber-soft: "#FEF3C7"
+  paper-white: "#F3F5F7"
+  dark-surface: "#101820"
+  dark-card: "#18232F"
+  ink-slate: "#172B3A"
+  warm-ash: "#586A79"
+  fog: "#7B8B99"
+  soft-border: "#DCE3E9"
+  operative-green: "#166344"
+  green-soft: "#E6F4ED"
+  alert-red: "#B42336"
+  red-soft: "#FDECEF"
+  caution-amber: "#805500"
+  amber-soft: "#FFF3D6"
 typography:
   display:
-    fontFamily: "'Geist', system-ui, sans-serif"
-    fontSize: "clamp(1.5rem, 3vw, 2rem)"
-    fontWeight: 700
-    lineHeight: 1.2
-    letterSpacing: "-0.02em"
+    fontFamily: "'Geist', system-ui, -apple-system, sans-serif"
+    fontSize: "clamp(1.75rem, 2.2vw, 2.25rem)"
+    fontWeight: 650
+    lineHeight: 1.15
+    letterSpacing: "-0.03em"
   headline:
-    fontFamily: "'Geist', system-ui, sans-serif"
+    fontFamily: "'Geist', system-ui, -apple-system, sans-serif"
     fontSize: "1.25rem"
     fontWeight: 600
     lineHeight: 1.3
-    letterSpacing: "-0.01em"
+    letterSpacing: "-0.015em"
   title:
-    fontFamily: "'Geist', system-ui, sans-serif"
-    fontSize: "1.125rem"
+    fontFamily: "'Geist', system-ui, -apple-system, sans-serif"
+    fontSize: "1rem"
     fontWeight: 600
     lineHeight: 1.4
   body:
-    fontFamily: "'Geist', system-ui, sans-serif"
+    fontFamily: "'Geist', system-ui, -apple-system, sans-serif"
     fontSize: "0.875rem"
     fontWeight: 400
-    lineHeight: 1.6
+    lineHeight: 1.5
   label:
-    fontFamily: "'Geist', system-ui, sans-serif"
-    fontSize: "0.75rem"
+    fontFamily: "'Geist', system-ui, -apple-system, sans-serif"
+    fontSize: "0.8125rem"
     fontWeight: 500
     lineHeight: 1.4
-    letterSpacing: "0.01em"
+  mono:
+    fontFamily: "'Geist Mono', ui-monospace, monospace"
+    fontSize: "0.8125rem"
+    fontWeight: 400
+    lineHeight: 1.5
 rounded:
-  sm: "8px"
-  md: "12px"
-  lg: "16px"
+  sm: "6px"
+  md: "8px"
+  lg: "12px"
+  xl: "16px"
   full: "9999px"
 spacing:
   xs: "4px"
@@ -61,6 +69,7 @@ spacing:
   md: "16px"
   lg: "24px"
   xl: "32px"
+  2xl: "48px"
 zIndex:
   sticky: 10
   dropdown: 20
@@ -68,719 +77,572 @@ zIndex:
   modal: 40
   toast: 50
 animation:
-  durationButtonPress: "120ms"
-  durationTooltip: "150ms"
-  durationDropdown: "200ms"
-  durationModal: "280ms"
-  easingOut: "cubic-bezier(0.23, 1, 0.32, 1)"
-  easingInOut: "cubic-bezier(0.77, 0, 0.175, 1)"
-  easingDrawer: "cubic-bezier(0.32, 0.72, 0, 1)"
+  durationButtonPress: "100ms"
+  durationTooltip: "120ms"
+  durationDropdown: "160ms"
+  durationModal: "200ms"
+  durationDrawer: "240ms"
+  easingOut: "cubic-bezier(0.2, 0.8, 0.2, 1)"
+  easingInOut: "cubic-bezier(0.4, 0, 0.2, 1)"
 components:
   button-primary:
-    backgroundColor: "{colors.action-blue}"
-    textColor: "{colors.surface-white}"
-    rounded: "{rounded.lg}"
-    padding: "8px 16px"
-    activeScale: "0.97"
-    transition: "120ms cubic-bezier(0.23, 1, 0.32, 1)"
+    backgroundColor: "var(--action)"
+    textColor: "var(--on-action)"
+    rounded: "{rounded.md}"
+    padding: "8px 14px"
+    minHeight: "36px"
+    activeScale: "1"
+    shadow: "none"
   button-primary-hover:
-    backgroundColor: "#1D4ED8"
-    textColor: "{colors.surface-white}"
-    rounded: "{rounded.lg}"
-    padding: "8px 16px"
+    backgroundColor: "var(--action-hover)"
+    textColor: "var(--on-action)"
+    rounded: "{rounded.md}"
+    padding: "8px 14px"
   button-secondary:
-    backgroundColor: "{colors.surface-white}"
-    textColor: "{colors.ink-slate}"
-    rounded: "{rounded.lg}"
-    padding: "8px 16px"
-    activeScale: "0.97"
+    backgroundColor: "var(--surface)"
+    textColor: "var(--text)"
+    border: "1px solid var(--border-control)"
+    rounded: "{rounded.md}"
+    padding: "8px 14px"
   button-ghost:
     backgroundColor: "transparent"
-    textColor: "{colors.warm-ash}"
-    rounded: "{rounded.lg}"
-    padding: "8px 16px"
+    textColor: "var(--text-secondary)"
+    rounded: "{rounded.md}"
+    padding: "8px 12px"
   button-danger:
-    backgroundColor: "{colors.alert-red}"
-    textColor: "{colors.surface-white}"
-    rounded: "{rounded.lg}"
-    padding: "8px 16px"
-    activeScale: "0.97"
+    backgroundColor: "var(--danger-solid)"
+    textColor: "#FFFFFF"
+    rounded: "{rounded.md}"
+    padding: "8px 14px"
   badge-neutral:
-    backgroundColor: "#F3F4F6"
-    textColor: "{colors.ink-slate}"
-    rounded: "{rounded.full}"
-    padding: "2px 10px"
+    backgroundColor: "var(--surface-subtle)"
+    textColor: "var(--text-secondary)"
+    rounded: "{rounded.sm}"
+    padding: "2px 7px"
   badge-blue:
-    backgroundColor: "#DBEAFE"
-    textColor: "#1D4ED8"
-    rounded: "{rounded.full}"
-    padding: "2px 10px"
+    backgroundColor: "var(--info-bg)"
+    textColor: "var(--info-text)"
+    rounded: "{rounded.sm}"
+    padding: "2px 7px"
   badge-green:
-    backgroundColor: "{colors.green-soft}"
-    textColor: "{colors.operative-green}"
-    rounded: "{rounded.full}"
-    padding: "2px 10px"
+    backgroundColor: "var(--success-bg)"
+    textColor: "var(--success-text)"
+    rounded: "{rounded.sm}"
+    padding: "2px 7px"
   badge-red:
-    backgroundColor: "{colors.red-soft}"
-    textColor: "{colors.alert-red}"
-    rounded: "{rounded.full}"
-    padding: "2px 10px"
+    backgroundColor: "var(--danger-bg)"
+    textColor: "var(--danger-text)"
+    rounded: "{rounded.sm}"
+    padding: "2px 7px"
   badge-amber:
-    backgroundColor: "{colors.amber-soft}"
-    textColor: "{colors.caution-amber}"
-    rounded: "{rounded.full}"
-    padding: "2px 10px"
+    backgroundColor: "var(--warning-bg)"
+    textColor: "var(--warning-text)"
+    rounded: "{rounded.sm}"
+    padding: "2px 7px"
   input-default:
-    backgroundColor: "{colors.surface-white}"
-    textColor: "{colors.ink-slate}"
+    backgroundColor: "var(--surface)"
+    textColor: "var(--text)"
     rounded: "{rounded.md}"
     padding: "8px 12px"
     minHeight: "40px"
-    focusBorder: "{colors.action-blue}"
-    focusRing: "2px {colors.sky-signal}/20"
+    border: "1px solid var(--border-control)"
+    focusRing: "2px solid var(--focus)"
   card-default:
-    backgroundColor: "{colors.surface-white}"
-    textColor: "{colors.ink-slate}"
+    backgroundColor: "var(--surface)"
+    textColor: "var(--text)"
     rounded: "{rounded.lg}"
     padding: "20px"
-    border: "1px solid {colors.soft-border}"
-    shadow: "0 2px 10px rgba(0,0,0,0.06)"
+    border: "1px solid var(--border)"
+    shadow: "none"
 ---
 
-# Design System: FamSPI
+# FamSPI · Sistema de diseño 2.1
 
-## 1. Carácter del sistema
+## 1. Dirección: precisión operativa
 
-**North Star: "El Escritorio Profesional"**
+FamSPI debe sentirse como una herramienta propia de FAM: clara, sólida y cuidadosamente diseñada. Su identidad nace de la composición, del ritmo entre información y acciones, y de cómo muestra el avance del trabajo.
 
-FamSPI vive en la oficina bien organizada: cada documento en su lugar, cada acción disponible sin buscar. La interfaz cede el espacio al usuario; los colores orientan, no decoran. La jerarquía se percibe antes de que el usuario la lea conscientemente.
+**La firma visual combina cuatro elementos:** navbar horizontal superior naval, lienzo mineral claro, tipografía de jerarquía marcada y una línea de etapas que hace visible la trazabilidad. El cobalto identifica la acción y la selección. Los estados conservan su significado empresarial.
 
-El sistema no es un SaaS genérico ni una app de consumo. Es una herramienta de equipo usada en tres contextos físicos: oficina iluminada con múltiples pestañas abiertas, tablet en campo revisando entre reuniones, y mobile en movimiento para acciones rápidas. El diseño responde a los tres sin compromisos.
+Un usuario debe distinguir en pocos segundos qué necesita atención, quién tiene la siguiente acción y dónde continúa su trabajo. La personalización proviene de prioridades reales según rol, no de un saludo grande ni de estadísticas de relleno.
 
-**Lo que distingue FamSPI visualmente:**
-- Naval Slate como ancla estructural — no decoración, no "dark mode por moda"
-- Action Blue aparece exactamente donde hay una decisión. Cuando se ve, el usuario sabe que ahí hace algo
-- Radio de 16px como firma constante: más generoso que Bootstrap, más controlado que Material
-- Sombras que revelan jerarquía, no que decoran superficies
-- Status colors estrictamente semánticos — verde no "decora", verde dice "aprobado"
+### Qué cambia frente a la versión anterior
 
-**La pregunta de la escena.** Antes de cada decisión de diseño significativa, escribe una oración sobre quién usa esto, dónde, bajo qué luz y en qué estado de ánimo. "Asesor comercial aprobando una solicitud de permiso desde el móvil en el estacionamiento antes de entrar a una reunión" fuerza mejores decisiones que "pantalla de aprobación". Si la oración no fuerza la respuesta, no es suficientemente concreta.
+| Antes | Decisión vigente |
+|---|---|
+| Botones y tarjetas con radio uniforme de 16px | Radios por función: 6px etiquetas, 8px controles, 12px paneles, 16px overlays |
+| Casi toda superficie es una tarjeta con sombra | Lienzo abierto, separadores y paneles planos; sombra solo para capas flotantes |
+| Diferenciación basada en restricciones de color | Identidad construida con navegación, tipografía, composición y trazabilidad |
+| Mismo peso visual para muchos bloques | Un área dominante y contexto subordinado según tarea |
+| Monoespaciada para todo dato exacto | Mono para identificadores; cifras tabulares en importes, fechas y métricas |
+| Modales recomendados y desaconsejados simultáneamente | Una matriz de patrones según contexto, complejidad y continuidad |
+| Overlay obligatorio a partir de dos segundos | Feedback local; bloqueo únicamente cuando la integridad del flujo lo exige |
+| Escala al pulsar cualquier elemento | Feedback de color; movimiento mínimo y opcional en acciones aisladas |
 
----
+### Cómo se incorporan referencias actuales
 
-## 2. Colors: La Paleta Naval
+La actualización de Linear de marzo de 2026 prioriza consistencia de cabeceras y controles, navegación menos dominante y lectura rápida. FamSPI adopta esos principios, con su propia identidad naval y sus flujos operativos [1]. El uso de tokens semánticos y tipografía por función se apoya en las prácticas de Atlassian [2, 3]. Son referencias de producto, no una afirmación de que exista una estética universal de 2026.
 
-Una paleta contenida: un único acento de acción sobre Slate Naval y grises neutros. La escasez del azul es lo que le da peso. Los colores de estado son semánticos — comunican condición, no decoran.
+Decisiones propias de FamSPI: densidad ajustable, panel de inspección contextual, jerarquía editorial en el inicio y trazabilidad como firma. No agregar efectos ni funcionalidades solo para parecer actual.
 
-### Primary
-- **Deep Naval Slate** `#1E293B` — Color estructural. Fondos de navegación, encabezados de sección, elementos de anclaje. Nunca fondo de card, nunca acento decorativo.
-- **Storm Slate** `#334155` — Hover en navegación, bordes de card enfocada, texto sobre fondos oscuros.
-- **Midnight Slate** `#0F172A` — Fondo de página en oscuro. Máxima profundidad.
+## 2. Alcance y precedencia
 
-### Action
-- **Action Blue** `#2563EB` — El único color de acción. Botones primarios, enlaces activos, indicadores de progreso, estados activos en navegación. Aparece en ≤10% de cualquier pantalla.
-- **Sky Signal** `#0EA5E9` — Focus rings, notificaciones, estados secundarios.
+Este archivo sustituye las reglas visuales e interactivas de la versión anterior. El frontmatter mantiene las familias principales de configuración; sus valores evolucionan y se añaden tokens. **Esto no garantiza compatibilidad automática con un parser existente:** comprobar cómo consume el repositorio las referencias y variables CSS antes de migrarlo.
 
-### Neutral
-- **Surface White** `#FFFFFF` — Fondo de cards, paneles, formularios.
-- **Paper White** `#F9FAFB` — Fondo de página. Separación sutil respecto al blanco puro.
-- **Dark Surface** `#111827` — Fondo de página en oscuro.
-- **Dark Card** `#1F2937` — Cards en oscuro.
-- **Ink Slate** `#1F2937` — Texto principal y títulos.
-- **Warm Ash** `#6B7280` — Texto secundario, placeholders, timestamps.
-- **Fog** `#D1D5DB` — Bordes de inputs, separadores, líneas de tabla.
-- **Soft Border** `#E5E7EB` — Bordes de cards en reposo.
+La tabla de tokens y su bloque CSS son la fuente de verdad para temas. Los valores `colors` del frontmatter son primitivas y aliases de transición del tema claro; los componentes nuevos consumen roles semánticos.
 
-### Status (solo semántico, nunca decorativo)
-- **Operative Green** `#16A34A` / soft `#DCFCE7` — Aprobado, activo, presente, completado.
-- **Alert Red** `#DC2626` / soft `#FEE2E2` — Rechazado, error, destructivo, vencido.
-- **Caution Amber** `#D97706` / soft `#FEF3C7` — Pendiente, parcial, por revisar.
+Se conservan `DashboardLayout`, `WORKSPACE_PAGE_CLASS`, `WORKSPACE_2COL_CLASS`, `WORKSPACE_3COL_CLASS`, `<Modal>` y `AttendanceWidget` como contratos descritos por el archivo original. Su implementación debe revisarse en el repositorio real antes de modificarla. Este documento no acredita cambios ya implementados en la aplicación.
 
-### Reglas nombradas
+## 3. Identidad visual reconocible
 
-**The Sparrow Rule.** Action Blue toca ≤10% de cualquier pantalla. Encabezados azules, fondos azules, bordes decorativos azules: prohibidos. La duda se resuelve con "no".
+### 3.1 Navbar horizontal superior
 
-**The Naval Structure Rule.** Deep Naval Slate es estructura. Navegación y elementos de anclaje. Nunca fondo de card.
+**La navegación principal de FamSPI es una barra horizontal en la parte superior.** Esta definición se aplica a todos los módulos y tamaños de pantalla. El contenido aprovecha todo el ancho disponible debajo de la barra; no se reserva una columna lateral para navegar.
 
-**The Semantic Seal.** Verde/rojo/ámbar no aparecen como color de marca, de bienvenida ni de decoración de sección. Cuando el usuario ve rojo, algo requiere atención. Cuando ve verde, algo fue aprobado. Si se usa por estética, pierde todo su significado.
+#### Anatomía y apariencia
 
-**El test del contexto nocturno.** En modo oscuro, los colores de estado deben mantener ≥4.5:1 de contraste sobre el fondo oscuro. No reducir chroma sin verificar.
+| Zona | Contenido | Tratamiento |
+|---|---|---|
+| Izquierda | Logo aprobado de FAM e identificador FamSPI | Enlace al inicio; tamaño contenido, sin inventar activos de marca |
+| Centro | Destinos principales autorizados para el usuario | Enlaces horizontales con nombres breves; agrupación desplegable cuando haga falta |
+| Derecha | Utilidades existentes y perfil | Búsqueda y notificaciones solo si están implementadas; perfil como botón con desplegable |
 
----
+Fondo sólido `var(--nav)`, texto `var(--nav-text)` y borde inferior discreto. Altura mínima de 64px en escritorio y 56px en móvil; permitir crecimiento con zoom o textos ampliados. Padding horizontal alineado con el contenido del `DashboardLayout`. Logo e iconos no deben competir con los nombres de los módulos.
 
-## 3. Typography: Geist
+Distribuir las zonas con flex o grid: marca y utilidades conservan su espacio; los destinos usan el ancho restante con `min-width: 0`. Mantener la barra en una sola fila a escala normal. Cuando no alcance el espacio, agrupar destinos antes de reducir fuentes, truncar etiquetas o producir scroll horizontal de página.
 
-**Display + Body:** Geist — fallback `system-ui, -apple-system, sans-serif`
-**Mono:** Geist Mono — para IDs, montos, fechas exactas, cualquier valor que el usuario pueda necesitar copiar.
+La navbar puede ser sticky con `top: 0` y nivel 10 dentro del contenedor de scroll real. Mantiene su espacio en el flujo. Si el layout existente la fija fuera del flujo, compensar su altura real una sola vez. Respetar `env(safe-area-inset-top)`; no duplicar el padding global ni ocultar contenido al navegar a un ancla.
 
-**Carácter.** Geist tiene la precisión de una fuente técnica sin la frialdad monoespaciada. El tracking negativo en display y headline (-0.02em / -0.01em) refuerza la sensación de herramienta de alto rendimiento — apretada, sin ornamentos. El contraste de peso entre niveles es deliberado: ≥150 de diferencia en font-weight entre pasos crea jerarquía real.
+#### Estados de los destinos
 
-### Jerarquía
+| Estado | Apariencia y comportamiento |
+|---|---|
+| Reposo | Fondo transparente, texto naval claro, peso 500 |
+| Hover | Fondo `var(--nav-active)`, texto blanco; solo en dispositivos con hover |
+| Ruta actual | Texto blanco, peso 600, fondo naval elevado sutil y subrayado inferior de 3px `var(--nav-marker)` |
+| Foco de teclado | Outline azul claro de 2px con separación de 3px; independiente del subrayado de selección |
+| Desplegable abierto | Superficie naval elevada y chevron orientado según estado; `aria-expanded="true"` |
 
-| Nivel    | Peso | Tamaño                   | Line-height | Tracking | Uso |
-|----------|------|--------------------------|-------------|----------|-----|
-| Display  | 700  | clamp(1.5rem, 3vw, 2rem) | 1.2         | -0.02em  | Título de módulo. Máximo 1 por pantalla. |
-| Headline | 600  | 1.25rem (20px)           | 1.3         | -0.01em  | Sección, modal header, card con peso propio. |
-| Title    | 600  | 1.125rem (18px)          | 1.4         | 0        | Card secundaria, encabezado de tabla. |
-| Body     | 400  | 0.875rem (14px)          | 1.6         | 0        | Contenido. Máx 70ch en lectura larga. |
-| Label    | 500  | 0.75rem (12px)           | 1.4         | 0.01em   | Etiqueta de campo, metadata, timestamp. |
+El indicador activo es horizontal, bajo el nombre del destino. No usar un marcador vertical. Los enlaces de ruta llevan `aria-current="page"` cuando corresponda. Un grupo puede señalar que contiene la ruta actual, pero su botón no se anuncia como la página actual. No marcar dos destinos equivalentes como activos.
 
-### Reglas nombradas
+#### Desplegables y utilidades
 
-**The Geist Mono Rule.** IDs, montos en viáticos, fechas en tablas de asistencia van en `font-mono`. La diferencia es sutil pero marca que ese dato es exacto y copiable.
+Agrupar módulos según la organización y permisos existentes. Usar «Más» cuando los destinos excedan el ancho disponible; mantener identificable el módulo actual. No forzar un número fijo de enlaces si sus etiquetas no caben.
 
-**La regla de contraste tipográfico.** Nunca dos niveles adyacentes con el mismo peso. Si el título es 600, el subtítulo que le sigue es 400, no 500. La jerarquía se lee en la escala de pesos antes que en el tamaño.
+Los desplegables se abren por click, toque o teclado, no únicamente por hover. Usar botones para expandir y enlaces reales para navegar, dentro de `<nav aria-label="Navegación principal">`. Preferir el patrón disclosure con tabulación normal; no aplicar `role="menu"` a una lista de enlaces si no se implementa su interacción de teclado completa.
 
-**Mayúsculas solo para labels de estado en badges.** `PENDIENTE` dentro de un badge ámbar funciona porque el color ya da el contexto. En texto corrido, nunca. En encabezados de sección, nunca.
+Un desplegable tiene superficie `surface-raised`, radio 12px, sombra de popover y nivel 20. Alinear con su activador y ajustar al viewport; limitar altura y permitir scroll interno si la lista es larga. `Escape` cierra y devuelve el foco al activador. Cerrar al seleccionar un destino; un click exterior también puede cerrar. No atrapar el foco en un desplegable no modal.
 
----
+Búsqueda, notificaciones y perfil deben tener nombre accesible. Mostrar contadores solo con datos reales y comunicar su significado; no añadir un punto rojo decorativo. En móvil conservar acceso a las utilidades mediante el menú aunque sus botones dejen de estar expuestos en la barra.
 
-## 4. Elevation: Estratificada
+#### Responsive
 
-Las sombras revelan jerarquía, no decoran superficies. En reposo, las superficies son planas. La sombra aparece como respuesta a estado o como señal de una capa genuinamente superior.
+- **Escritorio:** marca, destinos y utilidades en la misma barra horizontal. Agrupar en «Más» según el espacio real disponible.
+- **Tablet:** conservar la barra superior; compactar utilidades y agrupar destinos. Si las etiquetas no caben, usar el mismo menú de navegación de móvil.
+- **Móvil:** marca a la izquierda y botón «Menú» a la derecha, más una utilidad prioritaria solo si cabe. El menú abre un panel desplegable anclado debajo de la barra, de ancho disponible, con enlaces apilados y utilidades. No ocupa una columna permanente.
+- El menú móvil se limita al alto visible disponible y permite desplazarse; no exige que el usuario haga scroll horizontal. Al cambiar de breakpoint, limpiar estados abiertos incompatibles y conservar la ruta actual.
 
-### Vocabulario de sombras
+No introducir sidebar ni navegación inferior como sustitutos de esta estructura. Los inspectores laterales de expedientes siguen siendo paneles de contenido contextual y no forman parte de la navegación principal.
 
-| Nombre     | Valor                                                               | Uso |
-|------------|---------------------------------------------------------------------|-----|
-| Ambient    | `0 2px 10px rgba(0,0,0,0.06)`                                      | Cards en reposo. |
-| Lifted     | `0 4px 16px rgba(0,0,0,0.10)`                                      | Hover, focus, panel activo. |
-| Structural | `0 15px 35px rgba(15,23,42,0.08)`                                  | Paneles flotantes, sidebars. |
-| Overlay    | `0 20px 60px rgba(15,23,42,0.18), 0 4px 16px rgba(15,23,42,0.10)` | Modales, dropdowns. |
+### 3.2 Cabecera de trabajo
 
-En modo oscuro: las sombras se reducen a la mitad de opacidad. La elevación se expresa principalmente con tonal layering (superficies más claras en capas superiores).
+La cabecera del módulo se sitúa debajo de la navbar global y no repite sus enlaces ni utilidades. Dos niveles consistentes: ubicación y contexto arriba; título, vistas y acciones debajo. El título usa 28–36px en páginas de entrada, 24–28px en bandejas densas. Puede acompañarse de un contador discreto, periodo o ámbito. Una sola acción primaria por zona de tarea.
 
-**The Flat-Then-Lift Rule.** Una card que nace con sombra dramática le quita impacto al hover y confunde la jerarquía. Ambient en reposo, Lifted como respuesta.
+Nada de contenedor blanco con borde alrededor de toda la cabecera. Un encabezado abierto sobre el lienzo hace visible la jerarquía y evita la apariencia de plantilla de tarjetas.
 
-**Nunca inventar valores.** Si la sombra necesitada no existe en la escala, revisar si el diseño es correcto — probablemente el elemento no necesita esa elevación.
+### 3.3 Trazabilidad como firma
 
----
+Para solicitudes y expedientes con un flujo conocido, representar etapas reales mediante nodos y conectores finos: completada, actual, pendiente y bloqueada. Añadir texto, responsable y fecha cuando estén disponibles. La etapa actual se enfatiza con cobalto; los conectores son neutros.
 
-## 5. Z-Index: Escala fija
+En móvil, convertir la secuencia en una lista vertical o en un resumen de etapa actual con acceso al historial. No encoger los nombres hasta hacerlos ilegibles. Etapas, aprobaciones y fechas provienen del proceso real, no de una secuencia inventada por el diseño.
 
-No se usan valores arbitrarios. Toda capa tiene una posición semántica:
+### 3.4 Composición por prioridad
 
-| Capa            | Valor | Descripción |
-|-----------------|-------|-------------|
-| Sticky header   | 10    | Headers fijos al scroll |
-| Dropdown        | 20    | Menús flotantes, selects, popovers |
-| Modal backdrop  | 30    | Overlay oscuro detrás del modal |
-| Modal           | 40    | El modal en sí |
-| Toast / Snack   | 50    | Notificaciones — siempre encima de todo |
+Inicio: una bandeja de trabajo dominante y un panel menor de contexto. Listados: tabla o lista continua. Expedientes: contenido central y panel contextual. Reportes: gráfico principal y comparaciones subordinadas.
 
-Nunca `z-index: 9999`. Si hay conflicto, revisar cuál capa está mal posicionada.
+La asimetría responde al contenido. No convertir cada pantalla en una cuadrícula «bento» ni alterar el orden lógico de lectura para producir una composición vistosa.
 
----
+## 4. Color y temas
 
-## 6. Motion: Sistema de animación
+| Rol | Claro | Oscuro | Uso |
+|---|---|---|---|
+| Canvas | `#F3F5F7` | `#101820` | Fondo global |
+| Surface | `#FFFFFF` | `#18232F` | Contenido y controles |
+| Surface subtle | `#EAF0F4` | `#213140` | Agrupación secundaria, hover |
+| Surface raised | `#FFFFFF` | `#263A4C` | Menús y overlays |
+| Text | `#172B3A` | `#EEF3F7` | Lectura principal |
+| Text secondary | `#586A79` | `#B4C2CF` | Metadatos legibles |
+| Border | `#DCE3E9` | `#3B4D5E` | Separación decorativa |
+| Border control | `#7B8B99` | `#7D90A2` | Identificación de inputs y controles |
+| Action | `#2458D3` | `#91B5FF` | CTA, enlace o selección |
+| On action | `#FFFFFF` | `#101820` | Texto sobre botón primario |
+| Focus | `#2458D3` | `#91B5FF` | Foco visible |
 
-*(Aportación directa del principio "unseen details compound" — Emil Kowalski / Design Engineering)*
+**Distribución orientativa:** predominan los neutros; el color de acción se concentra en decisiones y selección. No medir un porcentaje rígido de píxeles ni sacrificar claridad para cumplirlo.
 
-Las animaciones existen para tres propósitos válidos: orientación espacial, feedback de estado, y prevención de cambios abruptos. Si el propósito no es uno de estos tres, la animación no se incluye.
+El azul informativo comunica «En revisión» mediante tokens `info`; no convierte cada badge en un enlace. Los enlaces dentro de texto llevan subrayado. Los colores de éxito, alerta y error no se usan como decoración de módulos.
 
-### La decisión antes del código
-
-Antes de animar cualquier cosa, responde:
-
-**¿Con qué frecuencia lo verá el usuario?**
-
-| Frecuencia             | Decisión |
-|------------------------|----------|
-| 100+ veces/día (AttendanceWidget, comando rápido) | Sin animación. Nunca. |
-| Decenas/día (hover, navegación entre secciones)   | Reducir o eliminar |
-| Ocasional (modales, drawers, toasts)              | Animación estándar |
-| Raro/primera vez (onboarding, confirmaciones)     | Puede incluir detalle |
-
-**Regla crítica.** Nunca animar acciones iniciadas por teclado. Se repiten cientos de veces al día — la animación hace la UI sentirse lenta y desconectada.
-
-### Duraciones
-
-| Elemento                          | Duración |
-|-----------------------------------|----------|
-| Press feedback (scale button)     | 100–160ms |
-| Tooltip / popover pequeño         | 125–200ms |
-| Dropdown, select                  | 150–250ms |
-| Tab switch, content change        | 150–200ms |
-| Modal open/close                  | 200–320ms |
-| Drawer (lateral/bottom)           | 250–400ms |
-| Spinner de carga                  | linear continuo — más rápido = más ágil percibido |
-
-UI animations: máximo 300ms. Más lento = percibido como bug, no como elegancia.
-
-### Curvas de easing
-
-Los built-ins de CSS (`ease`, `ease-in-out`) son débiles. Usar curvas fuertes:
+### Tokens CSS de referencia
 
 ```css
-/* Entradas y salidas de UI — fuerte al inicio */
---ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-
-/* Movimiento en pantalla — aceleración/desaceleración natural */
---ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
-
-/* Drawer bottom/lateral — curva tipo iOS */
---ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
-```
-
-**Nunca `ease-in` para UI.** Empieza lento — exactamente en el momento en que el usuario mira más atento. Un dropdown con `ease-in` a 200ms se siente más lento que uno con `ease-out` a 250ms.
-
-**La regla de dirección.** ¿El elemento entra o sale? → `ease-out`. ¿Se mueve en pantalla? → `ease-in-out`. ¿Hover / cambio de color? → `ease`. ¿Movimiento continuo? → `linear`.
-
-### Implementación: patrones concretos
-
-**Press feedback en botones y cards tappables:**
-```css
-.btn, .card-interactive {
-  transition: transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
+:root {
+  color-scheme: light;
+  --canvas: #F3F5F7;
+  --surface: #FFFFFF;
+  --surface-subtle: #EAF0F4;
+  --surface-raised: #FFFFFF;
+  --text: #172B3A;
+  --text-secondary: #586A79;
+  --border: #DCE3E9;
+  --border-control: #7B8B99;
+  --action: #2458D3;
+  --action-hover: #1D47B0;
+  --on-action: #FFFFFF;
+  --selected: #EAF0FF;
+  --focus: #2458D3;
+  --nav: #182838;
+  --nav-active: #263C50;
+  --nav-text: #C5D1DC;
+  --nav-selected-text: #FFFFFF;
+  --nav-marker: #91B5FF;
+  --success-bg: #E6F4ED;
+  --success-text: #166344;
+  --warning-bg: #FFF3D6;
+  --warning-text: #805500;
+  --danger-bg: #FDECEF;
+  --danger-text: #B42336;
+  --danger-solid: #B42336;
+  --info-bg: #EAF0FF;
+  --info-text: #234BA4;
+  --radius-badge: 6px;
+  --radius-control: 8px;
+  --radius-panel: 12px;
+  --radius-overlay: 16px;
+  --shadow-popover: 0 8px 24px rgb(16 24 32 / 12%);
+  --shadow-overlay: 0 24px 64px rgb(16 24 32 / 22%);
+  --duration-fast: 100ms;
+  --duration-panel: 200ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --control-height: 40px;
+  --row-height: 48px;
 }
-.btn:active, .card-interactive:active {
-  transform: scale(0.97);
+[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #101820;
+  --surface: #18232F;
+  --surface-subtle: #213140;
+  --surface-raised: #263A4C;
+  --text: #EEF3F7;
+  --text-secondary: #B4C2CF;
+  --border: #3B4D5E;
+  --border-control: #7D90A2;
+  --action: #91B5FF;
+  --action-hover: #B3CCFF;
+  --on-action: #101820;
+  --selected: #253D5D;
+  --focus: #91B5FF;
+  --nav: #111D29;
+  --nav-active: #263C50;
+  --success-bg: #173D30;
+  --success-text: #9FE0BB;
+  --warning-bg: #40331A;
+  --warning-text: #F2D08A;
+  --danger-bg: #44252E;
+  --danger-text: #FFB4BF;
+  --info-bg: #243650;
+  --info-text: #B4CDFF;
+  --shadow-popover: 0 8px 24px rgb(0 0 0 / 24%);
+  --shadow-overlay: 0 24px 64px rgb(0 0 0 / 36%);
 }
-```
-
-Todo elemento presionable — botón, card de acción rápida, item de lista — debe dar feedback de escala al presionar. Sin esto, la UI parece no responder.
-
-**Nunca animar desde scale(0).** Nada en el mundo real aparece de la nada. Empezar desde `scale(0.95) + opacity: 0`:
-```css
-/* Correcto */
-.entering { transform: scale(0.95); opacity: 0; }
-
-/* Incorrecto */
-.entering { transform: scale(0); }
-```
-
-**Popovers y dropdowns — origin-aware.** El popover debe escalar desde su trigger, no desde el centro:
-```css
-.popover { transform-origin: var(--radix-popover-content-transform-origin); }
-```
-Excepción: modales. Los modales escalan desde el centro del viewport porque no están anclados a un trigger específico.
-
-**Tooltips — skip en hover subsecuente:**
-El primer tooltip tiene delay de entrada. Una vez que uno está abierto, el siguiente aparece instantáneamente al hacer hover (sin animación, sin delay). La toolbar entera se siente más rápida.
-
-**CSS transitions > keyframes para UI interruptible.** Los transitions se retargetizan suavemente si el usuario cambia de estado a mitad de la animación. Los keyframes reinician desde cero. Para toasts, tabs, toggles: usar transitions.
-
-**Hardware acceleration.** En Framer Motion, las propiedades shorthand (`x`, `y`, `scale`) corren en el main thread con rAF. Para hardware acceleration real:
-```jsx
-// Correcto — GPU
-<motion.div animate={{ transform: "translateX(100px)" }} />
-
-// Incorrecto — main thread
-<motion.div animate={{ x: 100 }} />
-```
-
-**Reduced motion.** Siempre respetar `prefers-reduced-motion`:
-```css
+[data-density="compact"] {
+  --control-height: 36px;
+  --row-height: 40px;
+}
+@media (pointer: coarse), (max-width: 767px) {
+  :root, [data-density="compact"] {
+    --control-height: 44px;
+    --row-height: 56px;
+  }
+}
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+/* El cobalto oscuro no sirve de foco sobre la navegación naval. */
+.fam-nav {
+  --focus: var(--nav-marker);
+}
+.fam-numeric { font-variant-numeric: tabular-nums; }
+.fam-id { font-family: 'Geist Mono', ui-monospace, monospace; }
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+  .fam-motion {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
   }
 }
 ```
 
-### Springs — cuándo usarlos
+Integrar los tokens en el proveedor de tema existente. La preferencia explícita del usuario prevalece; «Sistema» sigue `prefers-color-scheme`. Evitar el destello de tema incorrecto al cargar. Las variables por sí solas no implementan persistencia ni detección de preferencias.
 
-Springs no tienen duración fija; se resuelven según física. Usarlos solo para:
-- Drag con momentum (drawers, cartas deslizables)
-- Elementos que pueden interrumpirse mid-animation
-- Decoraciones con mouse-tracking (no funcionales)
+Los bordes decorativos no necesitan funcionar como identificadores de controles. Para campos, checkbox y límites imprescindibles de componentes usar `border-control`, no `border`. Comprobar cada pareja y estado sobre su fondo real.
 
-Para el 90% de UI de FamSPI: duration-based con custom easing es correcto y más predecible.
+## 5. Tipografía, ritmo e iconos
 
----
+Mantener Geist para preservar continuidad. Preferir la fuente variable si está disponible; si solo existen pesos estáticos, resolver 650 como 600. Cargar únicamente los archivos necesarios con `font-display: swap`.
 
-## 7. Components
+| Uso | Tamaño | Peso | Tratamiento |
+|---|---|---|---|
+| Título de entrada | 28–36px | 650 | Tracking −0.03em, máximo uno |
+| Título operativo | 24–28px | 600 | Menor altura en bandejas |
+| Sección | 20px | 600 | Tracking −0.015em |
+| Título de panel | 16px | 600 | Breve, sin subtítulo redundante |
+| Interfaz y tabla | 14px | 400/500 | Interlineado 1.5 |
+| Lectura y campo móvil | 16px | 400 | Cómodo para lectura y captura |
+| Etiqueta / metadato | 13px | 400/500 | Contraste completo |
+| Nota secundaria | 12px | 400 | Uso excepcional, nunca acción principal |
+| Métrica principal | 28–40px | 600 | Cifras tabulares, sin icono ornamental |
 
-### Buttons
+Usar `rem` para tamaños tipográficos. La jerarquía combina tamaño, peso, espacio y posición: no exige una diferencia arbitraria de peso entre todos los niveles. Importes alineados a la derecha con cifras tabulares; mono reservado a códigos y datos técnicos copiables. Fechas pueden usar Geist normal con cifras tabulares.
 
-Radio 16px como firma visual constante. Touch target mínimo 44px en mobile, 36px en desktop.
+Escala espacial: 4, 8, 12, 16, 20, 24, 32 y 48px. Relacionados a 8–12px, grupos a 16–24px y secciones a 32–48px. En listas densas reducir espacio vertical antes de reducir la legibilidad.
 
-- **Primary:** Action Blue `#2563EB`, texto blanco, Ambient shadow en reposo, Lifted en hover. `scale(0.97)` en `:active`. Transición 120ms ease-out.
-- **Secondary:** Fondo blanco, borde Fog, texto Ink Slate. Hover: Paper White + Lifted shadow.
-- **Ghost:** Sin fondo ni borde. Texto Warm Ash. Hover: fondo `#F3F4F6`, texto Ink Slate.
-- **Danger:** Alert Red, texto blanco. Solo para destructivas con confirmación previa. Nunca como "Cancelar".
-- **Focus:** `outline: 2px solid #0EA5E9; outline-offset: 2px` — visible en todos los variantes.
-- **Loading:** Deshabilitar el botón durante operaciones async. Nunca dejar que el usuario haga doble clic en submit.
+Una única familia de iconos lineales, preferentemente la ya instalada. Tamaños 16, 20 y 24px; grosor consistente. Un icono apoya una acción o entidad: no añadir un cuadrado de color a cada encabezado. Tooltips complementan etiquetas; no sustituyen nombres accesibles.
 
-### Badges / Chips
+## 6. Layout global y adaptación
 
-Pastillas `border-radius: 9999px`, fondo soft del color semántico, texto 12px/500.
+`DashboardLayout` proporciona fondo, scroll principal y padding responsive. No añade `max-width`, `mx-auto`, tarjeta, borde, sombra ni radio global. Root de módulo: `WORKSPACE_PAGE_CLASS`, equivalente a `flex min-w-0 flex-col`.
 
-| Variante | Fondo     | Texto      | Uso |
-|----------|-----------|------------|-----|
-| Neutral  | `#F3F4F6` | Ink Slate  | Sin connotación semántica |
-| Blue     | `#DBEAFE` | `#1D4ED8`  | En proceso, informativo |
-| Green    | `#DCFCE7` | `#16A34A`  | Aprobado, activo, presente |
-| Red      | `#FEE2E2` | `#DC2626`  | Rechazado, error, vencido |
-| Amber    | `#FEF3C7` | `#D97706`  | Pendiente, parcial |
+Conservar el espacio operativo: `px-2 py-2`, `sm:px-4 sm:py-4`, `lg:px-6 lg:py-6`, `2xl:px-8`. El espaciado adicional corresponde al contenido del módulo. Prohibir márgenes negativos compensatorios en `WORKSPACE_2COL_CLASS` y `WORKSPACE_3COL_CLASS`.
 
-### Cards
+| Ancho disponible | Composición |
+|---|---|
+| <768px | Navbar superior compacta con menú desplegable; contenido en una columna; inspector como pantalla completa |
+| 768–1199px | Navbar horizontal con destinos agrupados o menú compacto; contenido fluido; detalle bajo demanda |
+| ≥1200px | Navbar horizontal completa; contenido a todo el ancho; inspector opcional de 320–400px |
+| ≥1600px | Más columnas útiles, no aumento ilimitado del tamaño de fuente |
 
-Fondo Surface White, borde Soft Border, sombra Ambient, radio 16px.
+Los breakpoints orientan; la aparición del inspector depende del ancho restante real. Si una tabla pierde sus columnas esenciales, cerrar el panel lateral o abrir el detalle en ruta propia. No forzar tres columnas por alcanzar un ancho fijo.
 
-- **Interactivas:** hover → Lifted shadow + borde Fog. `scale(0.99)` en `:active` opcional.
-- **No interactivas:** sin hover state. No añadir cursor ni sombra.
-- **Padding:** 20px desktop, 16px mobile.
-- **Nunca anidadas.** Si el contenido necesita sub-superficie: separador, cambio de `background-color` de sección, o indented layout.
+Lecturas y formularios lineales pueden limitar su ancho a 65–75ch o a 720–880px según campos. Tablas, kanban, bandejas, reportes y dashboards operativos permanecen fluidos.
 
-### Inputs / Fields
+Por defecto hay un scroll vertical principal. Un inspector puede tener scroll independiente si lo necesita; una tabla puede desplazarse horizontalmente dentro de su región. No introducir scroll dentro de cada tarjeta ni usar `min-h-screen` en páginas dentro del layout. Kanban puede tener columnas con scroll si la interacción lo requiere y se verifica con teclado y móvil.
 
-- Fondo blanco, borde Fog, radio 12px, altura mínima 40px desktop / 44px mobile.
-- Label siempre visible encima del campo (12px/500/Ink Slate). Nunca solo placeholder.
-- Focus: borde Action Blue + ring 2px sky-signal/20.
-- Error: borde Alert Red + mensaje debajo del campo en 12px/Alert Red. El error debe estar cerca del problema, nunca solo en la parte superior de la pantalla.
-- Disabled: fondo Paper White, texto Warm Ash/50, cursor not-allowed.
+En móvil: respetar safe areas, evitar que la navbar superior o su menú oculten el foco y mantener acceso al CTA durante captura. Una pantalla alta es válida cuando organiza bien una tarea; el objetivo no es eliminar todo scroll. Verificar 320px de ancho, zoom y teclado virtual.
 
-### Navigation
+## 7. Recetas de pantalla: decisiones de composición
 
-**Desktop sidebar:** Naval Slate `#1E293B`. Ítems: texto blanco/70, icono 16px. Hover: Storm Slate. Activo: Action Blue, texto blanco.
+Estas recetas describen estructura. Los ejemplos de texto no son datos de producción.
 
-**Mobile bottom bar:** Fondo blanco, borde superior Fog. Icono 20px + label 10px/500. Activo: Action Blue. Máximo 5 módulos.
+### Inicio operativo
 
-**Tablet:** Sidebar colapsada a 56px, solo iconos, tooltip con nombre al hover.
+- Cabecera abierta «Mi jornada» o el nombre vigente del módulo, con fecha y ámbito de trabajo.
+- Franja horizontal de hasta tres indicadores relevantes, sin tarjetas independientes ni iconos decorativos. Cada indicador explica su periodo y permite ir al detalle si existe.
+- Área dominante: «Requiere tu acción», con solicitudes reales ordenadas por la prioridad definida por el negocio. Mostrar estado, responsable, vencimiento y siguiente paso.
+- Columna secundaria: asistencia y agenda o actividad real. En móvil, priorizar asistencia cuando corresponda al rol y después la bandeja.
+- Accesos secundarios como lista compacta o menú; no un mosaico de doce tarjetas idénticas.
 
-### Workspace Layout
+### Bandeja de solicitudes / aprobaciones
 
-Páginas de módulo usan `WORKSPACE_PAGE_CLASS` (`"flex min-w-0 flex-col"`) como root. Las páginas de 3 columnas usan `WORKSPACE_3COL_CLASS`. El DashboardLayout provee el fondo de página, el scroll compartido y padding responsive mínimo. No provee `max-width`, `mx-auto`, tarjeta global, borde global ni sombra global. Las páginas no declaran `min-h-screen`, `bg-gray-50`, `mx-auto` ni `max-w-*` propios salvo contenido de lectura estrecha.
+Cabecera con título, contador y «Nueva solicitud» si el rol puede crear. Debajo: vistas guardadas o pestañas existentes, búsqueda y filtros. Tabla continua en una superficie, con encabezado tranquilo y líneas horizontales sutiles.
 
-### Signature: AttendanceWidget
+Orden inicial sugerido: solicitud, solicitante, estado, vencimiento y responsable; incluir monto cuando sea relevante. Mantener visibles las columnas esenciales y permitir configurar las demás si está implementado. Inspeccionar un registro abre el panel contextual y conserva filtros, selección y posición.
 
-Componente de mayor frecuencia de uso en mobile. Reglas inamovibles:
-- Botón de acción principal siempre visible sin scroll en viewport de 390px.
-- Estado actual en Headline (20px/600) con badge semántico adyacente.
-- Sin cards anidadas.
-- Touch targets ≥48px.
-- **Sin animación en el botón de marcar.** Se usa decenas de veces al día.
+### Expediente o detalle
 
----
+Título con nombre y código copiable. Debajo, estado y etapa actual; después, contenido principal agrupado con separadores. Columna de contexto para responsable, fechas y acciones. Historial real como lista cronológica, con actor y momento; distinguir comentarios de cambios de estado.
 
-## 8. Progressive Disclosure & Gestión del Scroll
+Una aprobación muestra el objeto, alcance y consecuencia antes de confirmar. No comunicar éxito definitivo antes de recibir confirmación del servidor.
 
-Cada sección visible compite por el mismo presupuesto de scroll del viewport. Cuando una pantalla tiene demasiadas zonas de interacción simultáneas, el usuario pierde contexto y necesita hacer scroll para recordar qué decidió antes. Las reglas de esta sección evitan ese problema.
+### AttendanceWidget
 
-### El presupuesto de scroll
+El estado actual tiene prioridad: «Sin registro», «Jornada iniciada» o el estado real equivalente. Hora, lugar o condiciones se muestran solo cuando existen y son pertinentes. Una única acción dominante, altura mínima de 48px y sin animación de transformación al marcar.
 
-Una página bien diseñada en FamSPI tiene **como máximo dos zonas de scroll independientes**: el área de contenido principal y, opcionalmente, un panel lateral. Todo lo demás debe revelarse bajo demanda.
+En el inicio móvil, situar el widget arriba para facilitar el registro. Verificar la acción visible en 390×844px a escala normal; con zoom, pantallas menores o teclado abierto permitir scroll accesible. No asumir que «390px» define por sí solo un viewport completo.
 
-**Señales de que el scroll está fuera de control:**
-- El usuario hace scroll para llegar a un formulario de acción (crear, editar, configurar)
-- Una vista secundaria reemplaza la vista principal sin navegación real (un "modo" dentro de la misma página)
-- Hay más de 3 paneles apilados verticalmente en el mismo flujo
-- Un formulario inline empuja el contenido circundante hacia abajo
+Mostrar inmediatamente «Registrando…», prevenir envíos duplicados y conservar el estado previo ante fallo. Presentar «Registro confirmado» solo tras la respuesta real. No simular asistencia, ubicación ni sincronización pendiente.
 
-### Cuándo usar modal
+### Compras, servicio y formularios largos
 
-| Situación | Patrón |
-|-----------|--------|
-| Formulario de creación (≤ 12 campos) | Modal `max-w-lg` o `max-w-2xl` |
-| Formulario de edición puntual (1–5 campos) | Modal compacto `max-w-md` |
-| Acción destructiva con confirmación | Modal `max-w-sm` |
-| Detalle de un ítem de lista sin navegación | Modal `max-w-2xl` |
-| Formulario de configuración compleja (> 12 campos) | Página dedicada o side panel |
-| Vista que reemplaza la pantalla actual | Página dedicada con back button |
+Formulario en página dedicada cuando necesite varias secciones, adjuntos o navegación propia. Resumen lateral de lo capturado cuando ayude a decidir. Etapas visibles solo si el proceso tiene etapas reales. Validación junto al campo y resumen navegable de errores al enviar.
 
-**Regla de la acción inline.** Si al hacer clic en "Nueva solicitud", "Revisar" o "Configurar" se sustituye el contenido principal de la pantalla por otro contenido, es una señal clara de que ese flujo debe ir en un modal o drawer — no como un "activeMainView" dentro de la misma página.
+Las tarjetas kanban contienen información para decidir: referencia, responsable, vencimiento y próximo paso. Los colores pertenecen a estados o alertas. El movimiento entre columnas necesita alternativa accesible por menú y validación de permisos.
 
-### Cuándo usar accordion
+## 8. Componentes y estados
 
-El accordion es para contenido de lectura-escritura donde el usuario necesita ver otros campos simultáneamente (ej.: secciones de un formulario largo con progreso visible por sección). **No** es para acciones independientes — un accordión con un formulario de crear/editar dentro es un modal mal disfrazado.
+### Botones
 
-| Patrón | Correcto | Incorrecto |
-|--------|----------|------------|
-| Secciones de un perfil con autosave | Accordion | Modal |
-| Formulario de "Iniciar requerimiento de salida" | Modal | Accordion anidado |
-| Checklist operativo con items | Lista inline | Modal |
-| Formulario de creación de solicitud | Modal | View takeover |
+Radio 8px; 36px en escritorio compacto, 40px por defecto, al menos 44px en táctil. Primario sólido sin sombra. Secundario con borde funcional. Ghost para acciones de menor jerarquía. Danger solo para acciones destructivas; «Cancelar» es neutral.
 
-### Cuándo usar drawer / bottom sheet
+Hover cambia el color; pressed lo refuerza sin mover filas ni deformar controles. No escalar todos los botones. Mantener etiqueta durante carga y añadir estado accesible. Bloquear envíos duplicados desde el inicio, aunque el indicador de carga tenga un breve retraso para evitar destellos.
 
-El drawer lateral o bottom sheet es para contenido que:
-- El usuario necesita ver junto al contenido principal (no lo reemplaza)
-- En mobile se convierte en bottom sheet automáticamente (el `Modal` del sistema ya lo hace)
-- Tiene múltiples acciones pero no requiere navegación propia
+Los enlaces navegan; los botones ejecutan. Cursor de mano en enlaces y botones, cursor de texto en campos. El cursor no reemplaza semántica HTML ni feedback.
 
-### La regla del selector mobile
+### Tablas y listas
 
-En mobile, un selector de ítems (lista de solicitudes, colaboradores, aspirantes) nunca debe renderizarse inline expandiendo el layout. Debe abrirse como un bottom sheet/modal. El layout mobile tiene un solo scroll y el selector no debe empujar el contenido de trabajo hacia abajo.
+Filas de 48px, 40px en compacto y al menos 56px cuando el contenido móvil lo necesite. Son alturas mínimas: permitir crecimiento por salto de línea o zoom. Padding horizontal de 12–16px. Sin líneas verticales por defecto.
 
-### Jerarquía de patrones para evitar scroll
+Hover de superficie; selección con fondo `selected`, checkbox y estado accesible. Ordenamiento con botón en la cabecera y `aria-sort`. La acción principal del registro debe ser un enlace o botón real, aunque exista click auxiliar sobre la fila. Los controles internos no deben disparar la navegación de la fila.
 
-```
-Acción puntual (1–3 campos)    → Popover o modal compacto
-Formulario medio (4–12 campos) → Modal
-Formulario largo (> 12 campos) → Página dedicada o side panel
-Vista secundaria               → Modal fullscreen o página
-Selector de ítem (mobile)      → Bottom sheet / Modal
-Secciones de expediente        → Accordions con autosave
-```
+Importes alineados a la derecha, texto a la izquierda. Acciones secundarias disponibles por menú accesible; no depender del hover. Barra de acciones masivas solo al seleccionar. Conservar paginación, filtros y retorno al registro. Virtualizar únicamente si el volumen lo justifica, verificando lectores de pantalla.
 
-### Checklist anti-scroll
+En móvil, presentar como lista resumida cuando la comparación por columnas no sea esencial; para comparación tabular conservar tabla con desplazamiento horizontal y señal clara de continuación.
 
-Antes de renderizar algo inline, responde:
-- [ ] ¿Este contenido empuja otros elementos hacia abajo cuando aparece?
-- [ ] ¿El usuario necesita hacer scroll para encontrar el botón de acción principal?
-- [ ] ¿Se sustituye el contenido de trabajo principal para mostrar esto?
-- [ ] ¿Hay más de 3 bloques de interacción simultáneos en la misma pantalla?
+### Paneles y superficies
 
-Si alguna respuesta es "sí", el contenido va en modal, drawer o página dedicada.
+Panel estándar: radio 12px, borde decorativo, sin sombra. Padding de 20px en escritorio y 16px en móvil. Secciones internas con espacio o separadores, evitando tarjeta dentro de tarjeta.
 
----
+Un panel informativo no tiene hover ni cursor de acción. Un panel interactivo tiene acción identificable y foco. Las sombras de popover y overlay se reservan a capas flotantes. En oscuro, la elevación se expresa además mediante superficies más claras.
 
-## 10. Interaction Design
+### Badges, filtros y estados
 
-*(Aportación de ui-ux-pro-max: touch, cursors, accessibility, feedback)*
+Badges de estado con radio 6px, texto en formato oración y color semántico. «Pendiente», «En revisión», «Aprobado» y «Vencido» son ejemplos; usar el vocabulario real del proceso. No comunicar estado exclusivamente mediante color.
 
-### Touch y clickabilidad
+Filtros seleccionables pueden ser pastillas con control para quitar. Su apariencia debe distinguirse de una etiqueta informativa. No añadir un punto de color a todas las etiquetas si no aporta una distinción.
 
-- **`cursor-pointer`** en todo elemento interactivo. Sin excepción. Si se puede clickear, lo dice el cursor.
-- **Touch targets mínimos:** 44×44px en cualquier elemento interactivo en mobile. No negociable.
-- **`touch-action: manipulation`** en botones para eliminar el delay de 300ms en iOS/Android.
-- **Hover states:** solo aplicar con `@media (hover: hover)`. En touch, el hover persiste — es un bug visual.
+### Campos
 
-### Feedback de estado
+Label visible de 13px, texto de captura de 14px en escritorio y 16px en móvil. Ayuda vinculada con `aria-describedby`; error con `aria-invalid`. Mantener lo ingresado después de fallos.
 
-- **Loading:** Deshabilitar botón durante async. Mostrar spinner dentro del botón, no reemplazar el texto. El spinner debe girar más rápido que un spinner genérico — velocidad percibida importa.
-- **Error feedback:** Siempre cerca del problema. Un input con error muestra el mensaje debajo, no en un toast. Los toasts son para mensajes del sistema que no tienen campo asociado.
-- **Success:** Toast con mensaje conciso. Duración 3–4s con dismiss manual opcional.
-- **Empty states:** Nunca dejar una sección vacía sin explicación. Siempre: ícono neutral + una línea de qué esperar + acción si corresponde.
+Diferenciar obligatorio, opcional, solo lectura y deshabilitado. No reducir la opacidad de todo el formulario. Estados disabled pueden tener tratamiento atenuado, pero la explicación debe seguir siendo legible. Autosave solo cuando existe soporte, mostrando guardando, guardado y fallo reales.
 
-### Focus management
+## 9. Elegir inline, inspector, modal o página
 
-- Focus rings visibles en todos los elementos interactivos: `outline: 2px solid #0EA5E9; outline-offset: 2px`
-- Nunca `outline: none` sin reemplazo visual.
-- Al abrir un modal, el focus va al primer elemento interactivo del modal. Al cerrar, regresa al trigger.
-- Tab order sigue el orden visual. Si el DOM no coincide con el visual, arreglarlo en el DOM, no con `tabindex`.
+| Necesidad | Patrón preferido | Condición |
+|---|---|---|
+| Cambiar un atributo simple | Inline | Validación y cancelación claras, sin desorganizar la vista |
+| Consultar detalle mientras se compara una lista | Inspector lateral | Ancho suficiente y contexto preservado |
+| Acción breve y autocontenida | Modal del sistema | Foco temporal; no necesita URL propia |
+| Decisión destructiva de impacto | Confirmación del sistema | Explicar objeto y consecuencia |
+| Captura con adjuntos, etapas o varias secciones | Página dedicada | URL, volver, conservar borrador si existe |
+| Selector largo en móvil | Sheet o diálogo | Búsqueda y selección accesibles |
+| Leer secciones secundarias | Accordion | El contenido principal sigue comprensible |
 
----
+El número de campos orienta, pero no decide por sí solo. No abrir un modal automáticamente porque aparezca scroll. No encadenar modales para completar un proceso largo.
 
-## 11. Loading y Empty States
+Reutilizar `<Modal>` y primitives existentes. En móvil, sheets para selección breve; captura larga en pantalla completa o página. No asumir que todo modal se transforma automáticamente en sheet: comprobar el componente real.
 
-*(Aportación de ui-ux-pro-max + frontend-design: perceived performance, atmosphere)*
+Al abrir un diálogo, ubicar el foco según su contenido, contenerlo mientras sea modal y devolverlo al activador al cerrar. Para textos largos, el título puede recibir foco inicial. `Escape` cierra cuando sea seguro; los cambios sin guardar siguen el patrón de confirmación existente.
 
-### Pantallas de carga: por duración de espera
+Escala global: sticky 10, dropdown 20, backdrop 30, modal 40, toast 50. Popovers dentro del modal pertenecen a su contexto de apilado o al mecanismo del primitive; no enviarlos a un portal global por debajo del diálogo. Los toasts informan sin cubrir su acción principal.
 
-Cada operación async tiene una duración esperada. La respuesta visual debe ser proporcional: demasiado poco = el usuario duda si ocurrió algo; demasiado = ruido innecesario.
+## 10. Motion, rendimiento y asincronía
 
-| Duración esperada | Patrón de carga | Notas |
-|-------------------|-----------------|-------|
-| <300ms | Ninguno | El cambio de estado ya es feedback suficiente |
-| 300ms–2s | Spinner dentro del botón + botón deshabilitado | `FiRefreshCw` con `animate-spin`, `disabled:opacity-60 disabled:cursor-wait` |
-| 2s–15s | Spinner en botón **+** overlay bloqueante con mensaje contextual | El overlay impide interacción accidental; el mensaje explica qué está pasando |
-| >15s o indeterminado | Overlay con mensaje + barra de progreso o etapas si están disponibles | Considerar estimación ("suele tardar ~20 segundos") |
+El movimiento comunica origen, continuidad o resultado. Navegación y trabajo repetitivo responden de inmediato; ningún usuario debe esperar una transición para poder actuar.
 
-**El overlay bloqueante** (para esperas 2s–15s, ej.: generación de PDF en Google Docs):
-- Fondo: `fixed inset-0 z-[30] bg-[#0F172A]/60` — Midnight Slate al 60%
-- Card: `z-[40]` Surface White, `rounded-2xl`, borde Soft Border, sombra Overlay
-- Ícono: `FiRefreshCw` 28px `animate-spin` en Action Blue `#2563EB`
-- Título: 17px/600/Ink Slate — describe la acción ("Generando PDF")
-- Subtítulo: 13px/Warm Ash — contexto de por qué tarda ("Preparando el documento en Google Docs. Esto puede tomar unos segundos.")
-- No incluir botón de cancelar a menos que la operación sea genuinamente cancelable en backend
+| Elemento | Duración | Tratamiento |
+|---|---|---|
+| Hover / pressed | 100ms | Color y borde |
+| Tooltip | 120ms | Opacidad; delay inicial breve |
+| Menú | 160ms | Opacidad y desplazamiento ≤4px desde su origen |
+| Modal | 200ms | Opacidad; escala opcional 0.98 → 1 |
+| Drawer | 240ms | Entrada corta y orientación espacial |
+| Asistencia / selección de fila | Inmediata | Sin transformación |
 
-```jsx
-{loadingState !== null && (
-  <div className="fixed inset-0 z-[30] flex items-center justify-center bg-[#0F172A]/60">
-    <div className="z-[40] flex flex-col items-center gap-5 rounded-2xl border border-[#E5E7EB] bg-white px-10 py-8 shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]">
-      <FiRefreshCw size={28} className="animate-spin text-[#2563EB]" />
-      <div className="flex flex-col items-center gap-1 text-center">
-        <span className="text-[17px] font-semibold leading-snug tracking-tight text-[#1F2937]">
-          Título de la operación
-        </span>
-        <span className="max-w-[260px] text-[13px] leading-relaxed text-[#6B7280]">
-          Explicación breve del proceso y por qué tarda.
-        </span>
-      </div>
-    </div>
-  </div>
-)}
-```
+Respetar `prefers-reduced-motion` en CSS y librerías; conservar mensajes de progreso aunque se retire la animación. No animar la entrada de todas las filas ni hacer cascadas en cada navegación. Hover solo con `@media (hover: hover)`.
 
-**Regla del botón durante async.** En toda operación async, el botón que la inició debe deshabilitarse y mostrar spinner mientras dura, independientemente de si hay overlay adicional. Esto previene doble envío y da feedback inmediato antes de que el overlay aparezca.
+Preferir `transform` y `opacity` cuando se necesite movimiento, sin prometer aceleración GPU por una sintaxis concreta. Medir en los dispositivos objetivo; no introducir librerías pesadas para animaciones que CSS resuelve.
 
-**El mensaje contextual importa.** "Cargando..." no calma al usuario. "Preparando el documento en Google Docs" sí — porque explica la causa de la espera. Si el sistema sabe qué está haciendo, dígalo.
+### Esperas y resultados
 
-### Skeletons
+| Situación | Feedback |
+|---|---|
+| Acción rápida | Respuesta inmediata y protección contra duplicación |
+| Petición en curso | Indicador local; conservar el contenido útil |
+| Primera carga sin datos | Skeleton con estructura estable si la espera es perceptible |
+| Exportación o proceso largo | Estado persistente y resultado accesible; ejecución en segundo plano solo si está soportada |
+| Transacción que exige impedir interacción | Bloquear únicamente el ámbito necesario con explicación |
+| Fallo parcial | Error junto a la región fallida y reintento seguro |
 
-Para cualquier contenido que tarda >300ms en cargar: mostrar skeleton, no spinner de página completa. El skeleton tiene la misma forma que el contenido real — mismo número de líneas, misma proporción. Fondo `#F3F4F6` animado con pulso suave (opacity 0.5 → 1, 1.5s linear infinite). No usar gradients shimmer — penaliza en mobile de gama baja.
+La duración por sí sola nunca impone un overlay bloqueante. No inventar porcentajes, estimaciones, cancelación ni colas offline. Usar progreso determinado solo cuando exista medición; de lo contrario, describir la etapa real. Un reintento debe considerar si la operación anterior pudo completarse.
 
-### Empty states
+Skeletons discretos, sin cambiar la geometría del contenido; animación opcional. Toast para confirmaciones breves no esenciales. Errores, decisiones y acciones que requieren tiempo permanecen hasta resolverse o descartarse. Anunciar resultados con `role="status"`; errores urgentes con `role="alert"` cuando proceda.
 
-Anatomía estándar:
-1. Ícono neutral en `#D1D5DB` (Fog), 40px
-2. Línea principal en 14px/500/Ink Slate: qué hay aquí cuando hay datos
-3. Línea secundaria opcional en 12px/Warm Ash: qué acción crea el primer dato
-4. Botón de acción si corresponde (primary, variant="primary")
+Distinguir vacíos: todavía no hay registros, filtros sin coincidencias, acceso restringido y fallo de conexión. Cada uno tiene explicación y acción apropiada. No presentar un cero cuando los datos no pudieron cargarse.
 
-Nunca: ilustraciones complejas, texto de marketing, múltiples párrafos.
+## 11. Datos, gráficos y contenido
 
-### Error states de red
+Mostrar cifras reales, periodo, unidad y actualización cuando sea relevante. Mantener el formato local del producto; usar `Intl.NumberFormat` e `Intl.DateTimeFormat` con locale, moneda y zona configurados. Los contadores operativos siempre usan cifras. Fechas ambiguas deben acompañarse de contexto.
 
-- Mostrar el error cerca de los datos que fallaron, no en un banner de página completa.
-- Incluir un botón "Reintentar" con acción concreta.
-- Mensaje en español directo: "No se pudieron cargar los datos. Verifica tu conexión." No códigos de error al usuario.
+Gráficos con un propósito claro: tendencia, comparación o composición. Evitar 3D, degradados ornamentales, indicadores circulares de adorno y sparklines sin datos. Un gráfico relevante puede usar más color que una tabla; la restricción de acción no debe impedir entender una visualización.
 
----
+Para varias series, usar una paleta de datos separada: azul `#2458D3`, violeta `#7654A3`, verde azulado `#167D8D` y tierra `#98613C`. Estos colores distinguen categorías; no representan aprobación o error. Verificar contraste en el tema real y añadir etiquetas, marcadores o trazos. En oscuro se necesitan variantes validadas, no reutilización automática de estos valores.
 
-## 12. Copy y Contenido
+Todos los gráficos requieren alternativa textual o tabular; tooltips accesibles por teclado cuando contienen información adicional. No depender del color para distinguir series.
 
-*(Aportación de impeccable: word economy, label hierarchy)*
+Copy en español directo: «Crear solicitud», «Guardar cambios», «Revisar aprobación». No mostrar tecnicismos internos salvo que ayuden al usuario. No afirmar una causa de error desconocida: «No se pudo guardar. Inténtalo de nuevo» es preferible a culpar a campos válidos. Añadir detalle de validación solo cuando el sistema lo confirma.
 
-**Cada palabra gana su lugar.** Si se puede eliminar y el significado no cambia, se elimina. Encabezados que repiten el título de la página, intros que dicen "En esta sección encontrarás...", subtítulos que son sinónimos del título: todos eliminados.
+## 12. Accesibilidad como criterio de entrega
 
-**Formato de etiquetas.** Las etiquetas de campo van en formato oración (primera letra mayúscula, resto minúsculas). Las etiquetas de estado en badges pueden ir en mayúsculas si el badge ya aporta el color semántico.
+Objetivo de conformidad: WCAG 2.2 AA [4]. Este documento define requisitos; la conformidad se verifica en la implementación completa.
 
-**Mensajes de error accionables.** "Error al guardar" no ayuda. "No se pudo guardar: verifica que todos los campos obligatorios estén completos" sí. El mensaje describe qué falló y qué hacer.
+- Texto normal ≥4.5:1; texto grande ≥3:1. Grande: al menos 24px normal o aproximadamente 18.67px en negrita [5].
+- Límites y estados visuales necesarios para identificar controles: ≥3:1 respecto a colores adyacentes. No confundir separadores decorativos con bordes funcionales.
+- Foco visible y no oculto por cabeceras o barras; nombres accesibles en controles, HTML semántico y navegación por teclado.
+- Objetivos táctiles internos de FamSPI: mínimo 44×44px; asistencia 48px. Es una exigencia de producto más generosa que el mínimo de 24×24 CSS px de WCAG 2.2 AA, sujeto a sus excepciones [4].
+- Reflow a 320 CSS px salvo contenido que requiera dos dimensiones, como tablas; texto al 200% sin pérdida de funcionalidad.
+- No depender de arrastrar, hover, color ni animación para completar tareas.
+- Logo e imágenes informativas con alternativa apropiada; decorativas con `alt=""`.
+- Revisar también modo oscuro, alto contraste del sistema, contenido largo, estados vacíos y formularios con errores.
 
-**Sin guión largo (—) en UI.** Usar coma, dos puntos, punto y coma, punto, o paréntesis. El em dash es ambiguo en pantallas pequeñas y rompe flow de lectura. En código, tampoco `--`.
+## 13. Reglas para evitar un resultado genérico
 
-**Números en texto.** Del 1 al 9: escribir la palabra ("tres solicitudes"). Del 10 en adelante: cifra ("45 solicitudes"). IDs, montos y fechas exactas: siempre cifras en Geist Mono.
+**Toda pantalla nueva debe definir primero:** la tarea dominante, la información que la sostiene y un patrón FamSPI reconocible. Reutilizar componentes mantiene coherencia; copiar su composición indiscriminadamente produce monotonía.
 
----
+| Evitar | Resolver así |
+|---|---|
+| Cuatro KPI idénticos con iconos de colores | Franja compacta con indicadores pertinentes y contexto |
+| Gran bienvenida que desplaza el trabajo | Título breve y prioridades del usuario |
+| Cards y botones redondeados de la misma forma | Radios por función |
+| Todo encerrado en tarjetas | Lienzo abierto, paneles necesarios y separadores |
+| Un color distinto por módulo | Identidad compartida y estados semánticos |
+| Azul sólido en cada elemento seleccionado | Selección tonal; cobalto concentrado en decisiones |
+| Glassmorphism en tablas y formularios | Superficies opacas y contraste estable |
+| Brillos, texto degradado y fondos orbitales | Jerarquía tipográfica y datos reales |
+| Adornos para sugerir IA | Capacidades reales, alcance y revisión humana cuando corresponda |
+| Prohibir cualquier repetición | Repetición útil en filas, controles y registros comparables |
 
-## 13. El Estándar de Craft
+Un tratamiento atmosférico muy discreto podría evaluarse en una futura pantalla de acceso, fuera del área de trabajo, si aporta identidad de marca y cumple contraste. No es requisito ni permiso para llenar de gradientes los módulos.
 
-*(Aportación de impeccable: the AI slop test, category-reflex check)*
+## 14. Implementación y validación
 
-### El test del slop
+### Secuencia de adopción
 
-Si alguien puede mirar la interfaz y decir "una IA hizo esto" sin dudarlo, el diseño falló. Los síntomas:
+1. Inventariar tokens, componentes y consumidores del frontmatter. Mapear nombres existentes; confirmar el soporte de variables CSS y tema.
+2. Actualizar fundamentos y shell: paleta, tipografía, radios, navbar horizontal superior y cabecera de módulo. Mantener rutas, permisos y lógica de negocio.
+3. Aplicar la receta de bandeja a una pantalla real representativa, con inspector si existe soporte. Revisar con usuarios frecuentes antes de extender el patrón.
+4. Aplicar inicio operativo y `AttendanceWidget`; después formularios, expedientes y reportes.
+5. Extender tokens a modo oscuro y completar accesibilidad. Retirar aliases obsoletos solo al comprobar que no quedan consumidores.
 
-- Cada sección tiene su propio color temático sin razón semántica (arcoíris visual)
-- Los KPIs son siempre: número grande, label pequeña, ícono de colorcito, sombra de colorcito
-- Las cards de acción son un grid de tarjetas idénticas: ícono + título + descripción, todas iguales
-- El estado activo de un tab usa gradient azul
-- Cada módulo parece hecho por un equipo diferente
-- La sección de "estadísticas" tiene fondos gradientes por card individual
+No introducir refactorizaciones ajenas al diseño. Si una capacidad propuesta no existe, separar su implementación funcional de la actualización visual y presentar una interfaz completa con las capacidades disponibles.
 
-### El test del reflejo
+### Checklist de aceptación
 
-Si alguien puede adivinar la paleta de color y la estética solo con saber el tipo de producto, el diseño falló. El reflejo a evitar: "app empresarial interna → azul corporativo + grays". FamSPI es azul porque el azul está reservado exclusivamente para acciones — no porque sea "corporativo". Si la respuesta al por qué del azul es "parecemos enterprise", el color está mal usado.
+- [ ] La primera vista deja clara la tarea principal y su siguiente acción.
+- [ ] Se reconocen navbar horizontal naval, jerarquía tipográfica y composición FamSPI.
+- [ ] No existe espacio lateral reservado para navegación ni una barra inferior añadida.
+- [ ] Destinos, «Más» y menú móvil funcionan con teclado, toque y etiquetas largas.
+- [ ] El estado activo usa subrayado horizontal; el foco permanece visible al abrir y cerrar desplegables.
+- [ ] La trazabilidad aparece cuando existe un proceso que representar.
+- [ ] Los módulos comparten componentes sin repetir innecesariamente el mismo layout.
+- [ ] No hay tarjeta global centrada ni pérdida innecesaria de ancho operativo.
+- [ ] Tabla, cabecera e inspector conservan alineación y contexto.
+- [ ] Radios, sombras y colores proceden de tokens.
+- [ ] Cada estado interactivo tiene tratamiento claro en ambos temas.
+- [ ] El recorrido por teclado funciona; foco, zoom y contraste se revisaron.
+- [ ] Móvil permite completar la acción con teclado virtual y safe areas.
+- [ ] Carga, error, vacío, contenido largo y permisos están contemplados.
+- [ ] No se muestran métricas, progreso ni capacidades ficticias.
+- [ ] El diseño no altera validaciones, aprobaciones ni permisos.
 
-### Bans absolutos
+Validar visualmente con registros representativos y anonimizados. Comparar capturas de la misma tarea antes y después a 390, 768 y 1440px; añadir revisión de reflow a 320px y zoom. Observar si usuarios reales encuentran y completan una tarea frecuente, registrando tiempo, errores y comprensión. La satisfacción visual por sí sola no demuestra una mejora operativa.
 
-Estos elementos se reconocen y se rechazan sin excepción:
+## 15. Referencias
 
-| Elemento | Por qué está baneado | Alternativa |
-|----------|---------------------|-------------|
-| `border-left > 1px` como acento de color en cards o lista items | Side-stripe decorativa — cliché de "alerta" | Fondo suave semántico, badge, o ninguno |
-| `background-clip: text` con gradiente | Texto gradiente — nunca meaningful | Color sólido, énfasis con peso o tamaño |
-| Glassmorphism como default | `backdrop-blur` inconsistente entre módulos, penaliza mobile | Fondos sólidos Surface White |
-| Hero-metric template | Número grande, label, stat supporting, gradient accent por card | Strip de datos en una sola superficie con dividers |
-| Grid de cards idénticas | Ícono + título + texto × N, todas iguales | Jerarquía diferente entre items, lista con densidad variable |
-| Modal como primera respuesta | Interrumpe cuando podría continuar inline | Inline form, progressive disclosure, side panel |
-| Gradientes en fondos de cards de acción | Cada card tiene su propio color temático | Fondo blanco, icono del color semántico en badge pequeño |
-| `min-h-screen` en páginas dentro de DashboardLayout | Crea scroll doble | `WORKSPACE_PAGE_CLASS` del layout system |
+Consultadas el 3 de septiembre de 2026. Informan principios; los valores de tokens y las composiciones de FamSPI son decisiones de esta propuesta.
 
-### Checklist pre-entrega
-
-Antes de marcar un componente o página como listo:
-
-**Visual**
-- [ ] Sin `border-left > 1px` como acento de color
-- [ ] Sin gradiente en texto
-- [ ] Sin glassmorphism como default
-- [ ] Sin cards anidadas dentro de cards
-- [ ] Radio de 16px en todos los botones y cards
-- [ ] Action Blue en ≤10% de la superficie
-
-**Interacción**
-- [ ] `cursor-pointer` en todos los elementos clickeables
-- [ ] `scale(0.97)` en `:active` de botones y cards interactivas
-- [ ] Touch targets ≥44px en mobile
-- [ ] Botón deshabilitado + spinner durante operaciones async (toda duración)
-- [ ] Overlay bloqueante para operaciones async >2s con mensaje contextual
-- [ ] Focus ring visible en todos los elementos
-
-**Contenido**
-- [ ] Sin texto hardcodeado falso (fake data de ejemplo en producción)
-- [ ] Empty state definido para todos los listados
-- [ ] Mensajes de error accionables (no solo "Error")
-- [ ] Sin em dashes en copy
-
-**Estructura**
-- [ ] Root de workspace usa `WORKSPACE_PAGE_CLASS`
-- [ ] Sin `min-h-screen` en páginas dentro de DashboardLayout
-- [ ] Modales usan `<Modal>` del sistema, no DIY `fixed inset-0`
-- [ ] Z-index dentro de la escala definida
-
-**Accesibilidad**
-- [ ] Contraste WCAG AA: 4.5:1 texto, 3:1 UI elements
-- [ ] `prefers-reduced-motion` respetado
-- [ ] Labels sobre inputs (no solo placeholder)
-- [ ] Alt text en imágenes funcionales
-
----
-
-## 14. Accesibilidad
-
-**Baseline obligatoria: WCAG AA**
-
-- Contraste mínimo: 4.5:1 para texto normal, 3:1 para texto grande (≥18px/bold o ≥24px) y elementos UI.
-- Focus rings visibles en todos los elementos interactivos. Nunca `outline: none` sin reemplazo.
-- Imágenes informativas: `alt` descriptivo. Decorativas: `alt=""`.
-- Formularios: label siempre asociada con `for`/`htmlFor`. Nunca solo placeholder.
-- No depender exclusivamente del color para comunicar estado — siempre combinar con texto o ícono.
-- `prefers-reduced-motion`: reducir o eliminar todas las transitions/animations cuando está activo.
-- Tab order: lógico y predecible, siguiendo el flujo visual izquierda-derecha, arriba-abajo.
-
----
-
-## 15. Do's and Don'ts (expandido)
-
-### Do
-
-- **Do** usar Deep Naval Slate para navegación y headers — da coherencia entre módulos.
-- **Do** reservar Action Blue exclusivamente para botones primarios, links de acción y estados activos en navegación.
-- **Do** mantener radio de 16px en botones y cards. La consistencia del radio es la firma visual del sistema.
-- **Do** asegurar que la acción primaria sea alcanzable sin scroll en viewport de 390px.
-- **Do** usar Geist Mono para IDs, montos, fechas exactas en tablas.
-- **Do** seguir la escala de sombras (Ambient → Lifted → Structural → Overlay). Nunca inventar valores.
-- **Do** garantizar WCAG AA en modo claro y oscuro.
-- **Do** mostrar label encima del input siempre, nunca solo placeholder.
-- **Do** usar `scale(0.97)` en `:active` en todos los elementos presionables.
-- **Do** deshabilitar botones durante operaciones async.
-- **Do** escribir la oración de escena antes de decidir dark vs light en componentes nuevos.
-- **Do** usar `WORKSPACE_PAGE_CLASS` como root de cualquier página de módulo.
-- **Do** agregar `cursor-pointer` a todo elemento interactivo.
-- **Do** respetar `prefers-reduced-motion` eliminando transitions y animations.
-- **Do** colocar mensajes de error cerca del campo o elemento que los originó.
-
-### Don't
-
-- **Don't** usar `backdrop-blur` con fondo semitransparente como default de cards.
-- **Don't** replicar Bootstrap genérico: radios 4-6px, sombras azuladas, grids de tarjetas idénticas.
-- **Don't** hacer que módulos distintos parezcan construidos por equipos distintos.
-- **Don't** usar modal como primera respuesta. Agotar inline o progressive antes.
-- **Don't** poner Action Blue en >10% de la superficie. Encabezados azules, fondos azules: prohibidos.
-- **Don't** usar `border-left > 1px` como acento de color en cards o lista items.
-- **Don't** usar gradientes en texto (`background-clip: text`).
-- **Don't** anidar cards dentro de cards.
-- **Don't** usar el mismo peso visual para toda la información en un dashboard.
-- **Don't** animar acciones iniciadas por teclado o usadas 100+ veces/día.
-- **Don't** animar desde `scale(0)`. Mínimo `scale(0.95) + opacity: 0`.
-- **Don't** usar `ease-in` para entradas de UI — empieza lento donde el usuario mira.
-- **Don't** aplicar gradientes en fondos de cards de acciones rápidas — cada una en su propio color es el problema.
-- **Don't** usar `min-h-screen` dentro de DashboardLayout — rompe el scroll compartido.
-- **Don't** dejar listados sin un empty state definido.
-- **Don't** hardcodear datos de ejemplo en producción (fake stats, actividad reciente inventada).
-- **Don't** inventar valores de z-index fuera de la escala definida (10/20/30/40/50).
-- **Don't** mostrar mensajes de error genéricos. Cada error necesita contexto y siguiente paso.
-- **Don't** usar colores de estado (verde/rojo/ámbar) como decoración de sección o marca visual.
-
----
-
-## 16. Layout Global Fluido
-
-Esta seccion reemplaza cualquier regla anterior que indique que `DashboardLayout` debe entregar `max-width` o una tarjeta global centrada.
-
-**Regla vigente.** `DashboardLayout` provee fondo, scroll compartido y padding responsive minimo. No provee `max-width`, `mx-auto`, tarjeta blanca global, borde global, sombra global ni radio global.
-
-**Regla del margen lateral cero.** Ningun modulo operativo debe vivir dentro de una tarjeta centrada `max-w-6xl`, `mx-auto` o equivalente. Ese patron roba espacio lateral en desktop y fuerza scroll interno en tablas, kanban, bandejas, expedientes, reportes y dashboards.
-
-**Superficies visuales.** Las cards, bordes, sombras y radios pertenecen a cada modulo o componente. El contenedor raiz del dashboard es solo un lienzo fluido: `w-full min-w-0`.
-
-**Padding global permitido.** Usar padding progresivo, no margen lateral estructural: `px-2 py-2` en mobile, `sm:px-4 sm:py-4`, `lg:px-6 lg:py-6`, `2xl:px-8`. No usar padding que reduzca el area operativa de forma permanente.
-
-**Uso permitido de `max-w-*`.** Solo para contenido de lectura o captura lineal: documentos, formularios simples, perfil, ayuda y modales. Prohibido en kanban, reportes, tablas, bandejas, expedientes, dashboards operativos y vistas con columnas.
-
-**Helpers de workspace.** `WORKSPACE_2COL_CLASS` y `WORKSPACE_3COL_CLASS` no deben usar `sm:-mx-*` ni margenes negativos. El layout global ya es fluido; los margenes negativos reintroducen overflow y rompen mobile.
+1. Linear. (12 de marzo de 2026). *UI refresh*. https://linear.app/changelog/2026-03-12-ui-refresh
+2. Atlassian Design. *Design tokens explained*. https://atlassian.design/tokens/design-tokens
+3. Atlassian Design. *Typography*. https://atlassian.design/foundations/typography/
+4. W3C. *Web Content Accessibility Guidelines (WCAG) 2.2*. https://www.w3.org/TR/WCAG22/
+5. W3C WAI. *Understanding Success Criterion 1.4.3: Contrast (Minimum)*. https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html

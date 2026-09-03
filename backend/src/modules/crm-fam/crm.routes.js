@@ -4,8 +4,8 @@ const router = express.Router();
 const controller = require("./crm.controller");
 const { requireRole } = require("../../middlewares/roles");
 
-const crmRoles = ['comercial', 'jefe_comercial', 'jefe_de_comercial', 'backoffice_comercial', 'asesor_comercial', 'analista_comercial', 'acp_comercial', 'backoffice'];
-const managerRoles = ['jefe_comercial', 'jefe_de_comercial', 'gerencia', 'gerencia_general', 'gerente_general', 'director', 'gerente'];
+const crmRoles = ['comercial', 'jefe_comercial', 'backoffice_comercial', 'asesor_comercial', 'analista_comercial', 'acp_comercial', 'backoffice'];
+const managerRoles = ['jefe_comercial', 'gerencia', 'gerencia_general', 'gerente_general', 'director', 'gerente'];
 const crmAll = [...new Set([...crmRoles, ...managerRoles])];
 const adminRoles = ['jefe_ti', 'jefe_de_ti', 'admin', 'administrador'];
 const allCrm = [...new Set([...crmAll, ...adminRoles])];

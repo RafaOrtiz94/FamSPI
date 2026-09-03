@@ -27,7 +27,7 @@ El objetivo es evitar que se envíen propuestas sin análisis previo y asegurar 
 |---|---|
 | `comercial`, `asesor_comercial`, `analista_comercial` | Crear y editar BC |
 | `acp_comercial`, `backoffice`, `backoffice_comercial` | Editar y apoyar |
-| `jefe_comercial`, `jefe_de_comercial`, `jefe_operaciones`, `jefe_tecnico` | Visión y edición |
+| `jefe_comercial`, `jefe_operaciones`, `jefe_tecnico` | Visión y edición |
 | `gerencia`, `gerencia_general` | Acceso completo + decisión de viabilidad |
 | `admin` | Acceso para gestión |
 

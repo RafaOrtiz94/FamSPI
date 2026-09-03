@@ -489,7 +489,7 @@ class PrivatePurchaseStateMachine {
                 // continuar con el envio de la oferta (OFFER_SEND_STATES).
                 {
                     const offerSenders = await Promise.all(
-                        ['backoffice_comercial', 'jefe_comercial', 'jefe_de_comercial'].map(role => this._getUsersByRole(role))
+                        ['backoffice_comercial', 'jefe_comercial'].map(role => this._getUsersByRole(role))
                     );
                     const uniqueOfferSenders = Array.from(
                         new Map(offerSenders.flat().map(u => [u.id, u])).values()

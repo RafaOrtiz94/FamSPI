@@ -74,15 +74,17 @@ export const ProtectedRoute = ({ allowedRoles = [], strictRoles = false }) => {
  const moduleEnabled = isPathEnabledForUser({
  pathname: location.pathname,
  moduleAccess: user?.module_access || [],
+ moduleCatalog: user?.module_catalog || [],
  });
  const isTiAdmin = ['jefe_ti', 'admin_ti', 'admin', 'administrador'].includes(userRole);
  const underConstruction = !loading && isAuthenticated && isModuleUnderConstruction({
    pathname: location.pathname,
    moduleGlobalStatus: user?.module_global_status || [],
+   moduleCatalog: user?.module_catalog || [],
    isTiAdmin,
  });
  const constructionStage = underConstruction
-   ? getModuleStatusForPath({ pathname: location.pathname, moduleGlobalStatus: user?.module_global_status || [] }).stage
+   ? getModuleStatusForPath({ pathname: location.pathname, moduleGlobalStatus: user?.module_global_status || [], moduleCatalog: user?.module_catalog || [] }).stage
    : null;
 
  useEffect(() => {

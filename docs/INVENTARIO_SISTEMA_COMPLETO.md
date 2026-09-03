@@ -278,7 +278,7 @@ Los siguientes grupos de roles estan definidos en `roles.js`.
 
 | Grupo RBAC | Roles incluidos |
 |---|---|
-| `comercial` | `comercial`, `jefe_comercial`, `jefe_de_comercial`, `backoffice_comercial`, `asesor_comercial`, `analista_comercial`, `acp_comercial`, `backoffice` |
+| `comercial` | `comercial`, `jefe_comercial`, `backoffice_comercial`, `asesor_comercial`, `analista_comercial`, `acp_comercial`, `backoffice` |
 | `tecnico` | `tecnico`, `servicio_tecnico`, `jefe_servicio_tecnico`, `jefe_de_servicio_tecnico`, `jefe_tecnico`, `jefe_de_tecnico` |
 | `servicio_tecnico` | `servicio_tecnico`, `tecnico`, `jefe_servicio_tecnico`, `jefe_de_servicio_tecnico`, `jefe_tecnico`, `jefe_de_tecnico` |
 | `gerencia` | `gerencia`, `gerencia_general`, `gerente_general`, `director`, `gerente` |
@@ -288,7 +288,7 @@ Los siguientes grupos de roles estan definidos en `roles.js`.
 | `admin` | `admin`, `administrador` |
 | `talento_humano` | `talento_humano`, `jefe_talento_humano`, `jefe_de_talento_humano`, `analista_talento_humano`, `asistente_talento_humano`, `auxiliar_talento_humano`, `rh`, `rrhh` |
 | `finanzas` | `finanzas`, `financiero`, `jefe_finanzas`, `jefe_de_finanzas`, `contador`, `jefe_financiero` |
-| `jefe_comercial` | `jefe_comercial`, `jefe_de_comercial` |
+| `jefe_comercial` | `jefe_comercial` |
 | `jefe_servicio_tecnico` | `jefe_servicio_tecnico`, `jefe_de_servicio_tecnico` |
 | `jefe_tecnico` | `jefe_tecnico`, `jefe_de_tecnico` |
 | `jefe_operaciones` | `jefe_operaciones`, `jefe_de_operaciones` |

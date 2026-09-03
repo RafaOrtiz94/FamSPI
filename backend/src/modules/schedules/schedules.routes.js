@@ -14,7 +14,6 @@ const advisorRoles = [
 ];
 const managerRoles = [
   "jefe_comercial",
-  "jefe_de_comercial",
   "gerencia",
   "gerencia_general",
   "admin",

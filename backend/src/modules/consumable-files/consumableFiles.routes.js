@@ -14,7 +14,6 @@ const viewerRoles = [
   "backoffice",
   "backoffice_comercial",
   "jefe_comercial",
-  "jefe_de_comercial",
   "jefe_operaciones",
   "operaciones",
   "jefe_logistica",
@@ -31,7 +30,6 @@ const editRoles = [
   "backoffice",
   "backoffice_comercial",
   "jefe_comercial",
-  "jefe_de_comercial",
   "gerencia",
   "gerencia_general",
 ];

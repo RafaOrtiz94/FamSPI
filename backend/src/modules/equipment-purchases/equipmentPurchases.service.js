@@ -169,9 +169,8 @@ const STATUS_STATS_ORDER = [
   STATUS.COMPLETED,
 ];
 
-// CP-02: jefe_de_comercial = same permissions as jefe_comercial â€” must canManageAll
 // GAP-02: jefe_financiero y jefe_operaciones necesitan ver todos los expedientes (no solo los propios)
-const MANAGER_ROLES = new Set(["acp_comercial", "gerencia", "gerencia_general", "jefe_comercial", "jefe_de_comercial", "jefe_financiero", "jefe_operaciones"]);
+const MANAGER_ROLES = new Set(["acp_comercial", "gerencia", "gerencia_general", "jefe_comercial", "jefe_financiero", "jefe_operaciones"]);
 const ACTION_BY_STATUS = {
   [STATUS.PENDING_PROVIDER]:           "start_availability",
   [STATUS.WAITING_PROVIDER]:           "save_provider_response",

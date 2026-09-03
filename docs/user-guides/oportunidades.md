@@ -27,7 +27,7 @@ El objetivo es darle a Comercial una herramienta estructurada para convertir lea
 |---|---|
 | `comercial`, `asesor_comercial`, `analista_comercial`, `acp_comercial` | CRUD sobre FamSheets |
 | `backoffice`, `backoffice_comercial` | Lectura y apoyo |
-| `jefe_comercial`, `jefe_de_comercial`, `gerencia`, `gerencia_general` | Visión agregada y control |
+| `jefe_comercial`, `gerencia`, `gerencia_general` | Visión agregada y control |
 
 ---
 

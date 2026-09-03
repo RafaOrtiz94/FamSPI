@@ -21,7 +21,6 @@ const FILE_EDIT_ROLES = new Set([
   "backoffice_comercial",
   "acp_comercial",
   "jefe_comercial",
-  "jefe_de_comercial",
   "gerencia",
   "gerencia_general",
 ]);
@@ -38,7 +37,6 @@ const STANDALONE_ADVISOR_ROLES = new Set([
   "backoffice_comercial",
   "acp_comercial",
   "jefe_comercial",
-  "jefe_de_comercial",
 ]);
 // ponytail: solo 'comercial' inicia el flujo de Control de Consumibles (decision de negocio,
 // no ampliar a otros roles de venta sin pedirlo explicitamente).

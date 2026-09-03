@@ -32,7 +32,11 @@ const { notifyTIAboutOffHoursLogin } = require("../../modules/notifications/noti
 const { logAction } = require("../../utils/audit");
 const { findExistingUserByIdentity } = require("../../utils/userIdentity");
 const { ensureDailyClockIn } = require("../attendance/attendance.utils");
-const { listUserModuleAccess, getGlobalModuleStatusForUser } = require("../module-access/moduleAccess.service");
+const { getCatalog, listUserModuleAccess, getGlobalModuleStatusForUser } = require("../module-access/moduleAccess.service");
+const {
+  AUTHORIZATION_MANIFEST_VERSION,
+  listPermissionsForUser,
+} = require("../../security/authorization/authorization");
 // Use crypto.randomUUID() (Node.js 18+ native)
 const { randomUUID } = require('crypto');
 const LOGIN_ATTENDANCE_SYNC_ENABLED = process.env.AUTH_ENABLE_LOGIN_CLOCK_IN !== "false";
@@ -597,6 +601,9 @@ const me = async (req, res) => {
         ...baseUser,
         module_access: moduleAccess,
         module_global_status: moduleGlobalStatus,
+        module_catalog: getCatalog(),
+        permissions: listPermissionsForUser(payload),
+        authorization_manifest_version: AUTHORIZATION_MANIFEST_VERSION,
       },
     });
   } catch (err) {

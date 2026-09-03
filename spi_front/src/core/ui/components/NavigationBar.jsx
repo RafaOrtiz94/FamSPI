@@ -25,8 +25,10 @@ import {
  FiTarget,
  FiKey,
  FiMoreHorizontal,
+ FiX,
 } from "react-icons/fi";
 import clsx from "clsx";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 
 import { useAuth } from "../../auth/AuthContext";
 import useAuditStatus from "../../hooks/useAuditStatus";
@@ -653,29 +655,47 @@ else if (["operaciones", "jefe_operaciones", "jefe_de_operaciones"].includes(sco
  return groups;
 };
 
-// Componente para botones de navegación
-const NavButton = ({ link, variant = "primary", mobile = false, onClick, globalStatusMap }) => {
+// Componente para botones de navegación — superficie clara (DESIGN.md §3.1/§4),
+// apoyada sobre el "riel" de trazabilidad que dibuja DesktopAdaptiveNav (mismo
+// motivo visual que las etapas de un expediente: una línea base con marcas).
+// `variant` da peso visual por prioridad (crítico se ve como control con
+// borde; el resto son tabs planos sobre el riel). `context="popover"` es para
+// cuando el link vive en un panel flotante (menú "Más" / hoja móvil) en vez
+// de la fila principal — mismos tokens de superficie, sin el riel/marcador.
+const NavButton = ({ link, variant = "primary", mobile = false, context = "nav", onClick, globalStatusMap }) => {
  const moduleStatus = globalStatusMap?.get(link.path) || null;
  const showConstructionBadge = moduleStatus?.stage === 'construction' || (moduleStatus?.stage === 'testing' && !moduleStatus?.in_whitelist);
  const showBetaBadge = moduleStatus?.stage === 'testing' && moduleStatus?.in_whitelist;
- const baseClasses = mobile
- ? "flex items-center px-3 py-2 text-base font-medium rounded-md transition-colors duration-200"
- : "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-1.5 text-xs font-medium transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-800 lg:text-[13px]";
+ const isChip = variant === "critical" && !mobile && context === "nav";
 
- const variantClasses = {
- critical: mobile
- ? "text-gray-900 dark:text-white"
- : "text-gray-900 dark:text-white bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800",
- primary: mobile
- ? "text-gray-700 dark:text-gray-200"
- : "text-gray-700 dark:text-gray-200 hover:text-blue-600 dark:hover:text-blue-400",
- secondary: mobile
- ? "text-gray-600 dark:text-gray-300"
- : "text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100",
- admin: mobile
- ? "text-gray-500 dark:text-gray-400"
- : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+ const baseClasses = mobile
+ ? "flex items-center px-3 py-2.5 text-[15px] font-medium rounded-lg transition-colors duration-150 active:bg-[var(--surface-subtle)]"
+ : clsx(
+   "relative inline-flex shrink-0 items-center whitespace-nowrap text-xs font-medium transition-colors duration-150 lg:text-[13px]",
+   isChip ? "rounded-lg border px-2.5 py-1.5" : "rounded-md px-2 py-1.5"
+ );
+
+ const tierClasses = {
+ critical: isChip
+   ? "border-[var(--border-control)] bg-[var(--surface)] text-[var(--text)] font-semibold shadow-sm hover:border-[var(--action)] hover:text-[var(--action)]"
+   : "text-[var(--text)] font-semibold hover:text-[var(--action)]",
+ primary: "text-[var(--text)] hover:text-[var(--action)]",
+ secondary: "text-[var(--text-secondary)] hover:text-[var(--text)]",
+ admin: "text-[var(--text-secondary)]/70 hover:text-[var(--text-secondary)]",
  };
+ const popoverTierClasses = {
+ critical: "text-[var(--text)] font-semibold hover:bg-[var(--surface-subtle)]",
+ primary: "text-[var(--text)] hover:bg-[var(--surface-subtle)]",
+ secondary: "text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text)]",
+ admin: "text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text)]",
+ };
+ // Spring "instrumento de precisión": rápido y sin rebote perceptible — se
+ // mueve como una aguja de dial, no como un elemento elástico/juguetón.
+ // Desactivado (salto instantáneo) si el usuario prefiere menos movimiento.
+ const prefersReducedMotion = useReducedMotion();
+ const indicatorTransition = prefersReducedMotion
+ ? { duration: 0 }
+ : { type: "spring", stiffness: 520, damping: 40, mass: 0.7 };
 
  return (
  <NavLink
@@ -685,25 +705,45 @@ const NavButton = ({ link, variant = "primary", mobile = false, onClick, globalS
  className={({ isActive }) =>
  clsx(
  baseClasses,
- variantClasses[variant],
- isActive && "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
+ context === "popover" ? popoverTierClasses[variant] : tierClasses[variant],
+ isActive && context === "popover" && "bg-[var(--selected)] text-[var(--action)] font-semibold",
+ isActive && context === "nav" && !isChip && "text-[var(--action)] font-semibold",
+ isActive && context === "nav" && isChip && "border-[var(--action)] text-[var(--action)]"
  )
  }
  >
  {({ isActive }) => (
  <>
+ {/* Indicador "mágico" — un único elemento compartido (layoutId) que
+     Framer Motion desliza/redimensiona entre ítems al cambiar de ruta,
+     en vez de aparecer/desaparecer de golpe en la nueva posición. */}
+ {isActive && context === "nav" && isChip && (
+   <motion.span
+     layoutId="nav-chip-indicator"
+     transition={indicatorTransition}
+     className="absolute inset-0 -z-10 rounded-lg bg-[var(--selected)]"
+   />
+ )}
  {React.createElement(link.icon, {
  className: clsx(
  mobile ? "mr-3 h-5 w-5 flex-shrink-0" : "mr-1.5 h-3.5 w-3.5 flex-shrink-0 lg:h-4 lg:w-4",
- isActive ? "text-blue-600 dark:text-blue-400" : "text-gray-500 dark:text-gray-400"
+ isActive ? "text-[var(--action)]" : "text-[var(--text-secondary)]"
  )
  })}
  <span className="truncate leading-none">{link.name}</span>
  {showConstructionBadge && (
-   <span className="ml-1.5 flex-shrink-0 text-xs bg-amber-100 text-amber-700 rounded-full px-1.5 py-0.5 font-semibold leading-none">🚧</span>
+   <span className="ml-1.5 flex-shrink-0 rounded-md bg-[var(--warning-bg)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--warning-text)]">🚧</span>
  )}
  {showBetaBadge && (
-   <span className="ml-1.5 flex-shrink-0 text-xs bg-violet-100 text-violet-700 rounded-full px-1.5 py-0.5 font-semibold leading-none">Beta</span>
+   <span className="ml-1.5 flex-shrink-0 rounded-md bg-[var(--info-bg)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--info-text)]">Beta</span>
+ )}
+ {/* Marca de calibración sobre el riel — único indicador de "activo" (DESIGN.md §3.1/§3.3) */}
+ {isActive && context === "nav" && !mobile && !isChip && (
+   <motion.span
+     layoutId="nav-underline-indicator"
+     transition={indicatorTransition}
+     className="pointer-events-none absolute inset-x-2 -bottom-[7px] h-[2px] rounded-full bg-[var(--action)]"
+   />
  )}
  </>
  )}
@@ -711,22 +751,85 @@ const NavButton = ({ link, variant = "primary", mobile = false, onClick, globalS
  );
 };
 
-// Separador visual entre grupos
+// Marca de graduación entre grupos — se posa sobre el riel (ver DesktopAdaptiveNav),
+// como las divisiones de una regla, en vez de un divisor vertical genérico.
 const GroupSeparator = () => (
- <div className="mx-1 hidden h-5 w-px bg-gradient-to-b from-transparent via-slate-300 to-transparent dark:via-slate-600 xl:block" />
+ <div className="mx-1 hidden self-stretch items-end xl:flex">
+   {/* Cruza el riel (bottom-1) en vez de flotar sobre él — si no toca la
+       línea base se lee como una coma suelta en vez de una graduación. */}
+   <span className="mb-0.5 h-2.5 w-px bg-[var(--border-control)]" />
+ </div>
 );
 
-const renderGroup = (links, variant, onClick, isMobile, globalStatusMap) =>
+const renderGroup = (links, variant, onClick, isMobile, globalStatusMap, context = "nav") =>
  links.map((link) => (
  <NavButton
  key={link.path}
  link={link}
  variant={variant}
  mobile={isMobile}
+ context={context}
  onClick={onClick}
  globalStatusMap={globalStatusMap}
  />
  ));
+
+// Tab del dock inferior móvil (<768px) — icono sobre etiqueta, patrón app
+// nativa (DESIGN.md §6: "navegación inferior de 3–5 destinos"). Reemplaza el
+// menú hamburguesa: los destinos críticos quedan a un toque del pulgar en
+// vez de dos (abrir menú → elegir).
+const MobileTabLink = ({ link, globalStatusMap }) => {
+ const moduleStatus = globalStatusMap?.get(link.path) || null;
+ const showConstructionBadge = moduleStatus?.stage === 'construction' || (moduleStatus?.stage === 'testing' && !moduleStatus?.in_whitelist);
+ const showBetaBadge = moduleStatus?.stage === 'testing' && moduleStatus?.in_whitelist;
+ const prefersReducedMotion = useReducedMotion();
+ const indicatorTransition = prefersReducedMotion
+ ? { duration: 0 }
+ : { type: "spring", stiffness: 520, damping: 40, mass: 0.7 };
+ return (
+ <NavLink
+ to={link.path}
+ end
+ className={({ isActive }) =>
+ clsx(
+ "relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 pb-1 pt-2 text-[10px] font-medium leading-none transition-colors duration-150",
+ isActive ? "text-[var(--nav-selected-text)]" : "text-[var(--nav-text)]"
+ )
+ }
+ style={{ minHeight: "var(--row-height)" }}
+ >
+ {({ isActive }) => (
+ <>
+ {isActive && (
+   <motion.span
+     layoutId="mobile-tab-indicator"
+     transition={indicatorTransition}
+     className="absolute inset-x-3 top-0 h-[2px] rounded-full bg-[var(--nav-marker)]"
+   />
+ )}
+ <motion.span
+ className="relative"
+ whileTap={prefersReducedMotion ? undefined : { scale: 0.82 }}
+ transition={{ duration: 0.12 }}
+ >
+ {React.createElement(link.icon, {
+ className: clsx("h-5 w-5", isActive ? "text-[var(--nav-marker)]" : "text-[var(--nav-text)]"),
+ })}
+ {(showConstructionBadge || showBetaBadge) && (
+ <span
+ className={clsx(
+ "absolute -right-1 -top-1 h-2 w-2 rounded-full ring-1 ring-[var(--nav)]",
+ showBetaBadge ? "bg-[var(--info-text)]" : "bg-[var(--warning-text)]"
+ )}
+ />
+ )}
+ </motion.span>
+ <span className="max-w-full truncate">{link.name}</span>
+ </>
+ )}
+ </NavLink>
+ );
+};
 
 const DesktopOverflowMenu = ({ links, globalStatusMap }) => {
  const [open, setOpen] = React.useState(false);
@@ -787,33 +890,34 @@ const DesktopOverflowMenu = ({ links, globalStatusMap }) => {
  type="button"
  onClick={() => setOpen((prev) => !prev)}
  className={clsx(
- "inline-flex min-h-10 items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-semibold transition-all duration-200 lg:text-[13px]",
+ "inline-flex min-h-10 items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors duration-150 lg:text-[13px]",
  open
- ? "border-blue-200 bg-blue-50 text-blue-700 shadow-sm"
- : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900",
+ ? "border-[var(--action)] bg-[var(--selected)] text-[var(--action)]"
+ : "border-[var(--border-control)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--action)] hover:text-[var(--action)]",
  )}
  aria-haspopup="menu"
  aria-expanded={open}
  >
- <FiMoreHorizontal className={clsx("h-4 w-4 flex-shrink-0", open ? "text-blue-600" : "text-slate-500")} />
+ <FiMoreHorizontal className="h-4 w-4 flex-shrink-0" />
  <span className="leading-none">Más</span>
  </button>
  {open && menuStyle ? createPortal(
  <div
  ref={menuRef}
- className="fixed z-[1000] rounded-3xl border border-slate-200 bg-white p-3 shadow-[0_20px_60px_rgba(15,23,42,0.18),0_4px_16px_rgba(15,23,42,0.10)]"
+ className="fixed z-[1000] rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-popover)]"
  style={menuStyle}
  role="menu"
  >
- <div className="mb-1 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+ <div className="mb-1 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
  Más módulos
  </div>
- <div className="flex flex-col gap-1">
+ <div className="flex flex-col gap-0.5">
  {links.map((link) => (
  <NavButton
  key={link.path}
  link={link}
- variant="secondary"
+ variant={link.navVariant || "secondary"}
+ context="popover"
  mobile
  onClick={() => setOpen(false)}
  globalStatusMap={globalStatusMap}
@@ -855,7 +959,7 @@ const MeasureRow = ({ links, onMeasured }) => {
  // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [links]);
 
- // Portal a document.body: así queda fuera del contenedor con overflow-x-auto
+ // Portal a document.body: así queda fuera del contenedor de la barra
  // y no infla su scrollWidth (un descendiente absolute/relative sí lo haría).
  return createPortal(
  <div
@@ -875,16 +979,22 @@ const MeasureRow = ({ links, onMeasured }) => {
 
 const DesktopAdaptiveNav = ({ criticalLinks, primaryLinks, secondaryLinks, adminLinks, globalStatusMap }) => {
  const containerRef = React.useRef(null);
+ // Único grupo siempre fijo: crítico (Inicio + lo esencial del rol, 1-3
+ // ítems). Todo lo demás — primary, secondary, admin, en ese orden de
+ // prioridad — es candidato a colapsar en "Más" según el espacio real
+ // disponible. Antes solo secondary/admin colapsaban y primary quedaba fijo,
+ // lo que producía scroll horizontal cuando un rol tenía muchos primary.
  const candidates = React.useMemo(
  () => [
+ ...primaryLinks.map((link) => ({ ...link, navVariant: "primary" })),
  ...secondaryLinks.map((link) => ({ ...link, navVariant: "secondary" })),
  ...adminLinks.map((link) => ({ ...link, navVariant: "admin" })),
  ],
- [secondaryLinks, adminLinks],
+ [primaryLinks, secondaryLinks, adminLinks],
  );
  const allLinks = React.useMemo(
- () => [...criticalLinks, ...primaryLinks, ...candidates],
- [criticalLinks, primaryLinks, candidates],
+ () => [...criticalLinks, ...candidates],
+ [criticalLinks, candidates],
  );
  const [measuredWidths, setMeasuredWidths] = React.useState({});
  const [visibleCount, setVisibleCount] = React.useState(candidates.length);
@@ -902,9 +1012,8 @@ const DesktopAdaptiveNav = ({ criticalLinks, primaryLinks, secondaryLinks, admin
  const calculate = () => {
  if (!containerRef.current) return;
  const containerWidth = containerRef.current.getBoundingClientRect().width;
- const fixedLinks = [...criticalLinks, ...primaryLinks];
- const fixedWidth = fixedLinks.reduce((total, link) => total + widthOf(link), 0);
- const separatorsWidth = (primaryLinks.length > 0 ? 18 : 0) + (candidates.length > 0 ? 18 : 0);
+ const fixedWidth = criticalLinks.reduce((total, link) => total + widthOf(link), 0);
+ const separatorsWidth = candidates.length > 0 ? 18 : 0;
  const safetyGap = 24;
  const availableForCandidates = containerWidth - fixedWidth - separatorsWidth - safetyGap;
 
@@ -934,7 +1043,7 @@ const DesktopAdaptiveNav = ({ criticalLinks, primaryLinks, secondaryLinks, admin
  const observer = new ResizeObserver(calculate);
  observer.observe(containerRef.current);
  return () => observer.disconnect();
- }, [adminLinks, candidates, criticalLinks, primaryLinks, secondaryLinks, widthOf]);
+ }, [candidates, criticalLinks, widthOf]);
 
  const visibleCandidates = candidates.slice(0, visibleCount);
  const overflowLinks = candidates.slice(visibleCount);
@@ -942,27 +1051,23 @@ const DesktopAdaptiveNav = ({ criticalLinks, primaryLinks, secondaryLinks, admin
  return (
  <div
  ref={containerRef}
- className="relative hidden h-10 min-w-0 flex-1 flex-nowrap items-center justify-start gap-1 overflow-x-auto overflow-y-hidden py-1 md:flex xl:gap-1.5"
+ className="relative hidden h-10 min-w-0 flex-1 flex-nowrap items-center justify-start gap-1 overflow-x-clip overflow-y-hidden py-1 md:flex xl:gap-1.5"
  aria-label="Navegación principal"
  >
+ {/* Riel de trazabilidad (DESIGN.md §3.3): línea base bajo toda la fila,
+     la marca de calibración de cada NavButton "se posa" sobre ella. */}
+ <span className="pointer-events-none absolute inset-x-0 bottom-1 h-px bg-[var(--border)]" aria-hidden="true" />
+
  {/* Medición real fuera de flujo: no afecta el layout visible. */}
  <MeasureRow links={allLinks} onMeasured={handleMeasured} />
 
  <div className="flex shrink-0 items-center justify-end gap-1 whitespace-nowrap">
  {renderGroup(criticalLinks, "critical", undefined, false, globalStatusMap)}
  </div>
- {primaryLinks.length > 0 && (
- <>
- <GroupSeparator />
- <div className="flex shrink-0 items-center justify-end gap-1 whitespace-nowrap">
- {renderGroup(primaryLinks, "primary", undefined, false, globalStatusMap)}
- </div>
- </>
- )}
  {(visibleCandidates.length > 0 || overflowLinks.length > 0) && (
  <>
  <GroupSeparator />
- <div className="flex shrink-0 items-center justify-start gap-1 whitespace-nowrap">
+ <div className="flex min-w-0 shrink items-center justify-start gap-1 whitespace-nowrap">
  {visibleCandidates.map((link) => (
  <NavButton
  key={link.path}
@@ -999,24 +1104,28 @@ const NavigationBar = () => {
  const scope = scopeList[0] || roleList[0] || "";
  const { status: auditStatus } = useAuditStatus();
  const auditActive = Boolean(auditStatus?.active);
- const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+ const prefersReducedMotion = useReducedMotion();
+ const [moreSheetOpen, setMoreSheetOpen] = React.useState(false);
  const filterEnabledLinks = React.useCallback(
- (links) => links.filter((link) => isPathEnabledForUser({ pathname: link.path, moduleAccess: user?.module_access || [] })),
- [user?.module_access]
+ (links) => links.filter((link) => isPathEnabledForUser({ pathname: link.path, moduleAccess: user?.module_access || [], moduleCatalog: user?.module_catalog || [] })),
+ [user?.module_access, user?.module_catalog]
  );
 
  // Map: link.path â†’ { stage, in_whitelist } â€” for construction/beta badges
  const globalStatusMap = React.useMemo(() => {
    const byKey = buildGlobalStatusMap(user?.module_global_status || []);
    const byPath = new Map();
-   for (const entry of MODULE_PATH_PREFIXES || []) {
+   const catalog = user?.module_catalog?.length
+     ? user.module_catalog.map((item) => ({ ...item, prefixes: item.path_prefixes || item.prefixes || [] }))
+     : MODULE_PATH_PREFIXES;
+   for (const entry of catalog || []) {
      const status = byKey.get(entry.key);
      if (status) {
        for (const p of entry.prefixes || []) byPath.set(p, status);
      }
    }
    return byPath;
- }, [user?.module_global_status]);
+ }, [user?.module_global_status, user?.module_catalog]);
 
  const priorityGroups = React.useMemo(
  () => {
@@ -1030,19 +1139,34 @@ const NavigationBar = () => {
  },
  [scope, role, auditActive, filterEnabledLinks, user?.extra_roles]
  );
- const toggleMobileMenu = () => {
- setMobileMenuOpen(!mobileMenuOpen);
- };
 
- const closeMobileMenu = () => {
- setMobileMenuOpen(false);
- };
+ const closeMoreSheet = () => setMoreSheetOpen(false);
+ const toggleMoreSheet = () => setMoreSheetOpen((prev) => !prev);
+
+ // Dock inferior móvil: hasta 5 destinos totales. Si hay más módulos de los
+ // que caben, el último slot se cede a "Más" (hoja con el resto, en orden de
+ // prioridad — mismo orden que ya calculó getPriorityGroups).
+ const allMobileLinks = React.useMemo(
+ () => [
+ ...priorityGroups.critical,
+ ...priorityGroups.primary,
+ ...priorityGroups.secondary,
+ ...priorityGroups.admin,
+ ],
+ [priorityGroups]
+ );
+ const MOBILE_TAB_LIMIT = 5;
+ const hasMobileOverflow = allMobileLinks.length > MOBILE_TAB_LIMIT;
+ const bottomTabs = hasMobileOverflow ? allMobileLinks.slice(0, MOBILE_TAB_LIMIT - 1) : allMobileLinks;
+ const moreSheetLinks = hasMobileOverflow ? allMobileLinks.slice(MOBILE_TAB_LIMIT - 1) : [];
 
  return (
- <nav className="border-b border-slate-200 bg-white">
+ <>
+ {/* Barra de accesos — superficie clara, en contraste deliberado con el
+     Header naval de arriba (identidad oscura / navegación clara). */}
+ <nav className="hidden border-b border-[var(--border)] bg-[var(--surface)] md:block">
  <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-8">
- <div className="flex min-h-16 items-center justify-between gap-4 py-2">
-
+ <div className="flex min-h-12 items-center justify-between gap-4 py-1.5">
  <DesktopAdaptiveNav
  criticalLinks={priorityGroups.critical}
  primaryLinks={priorityGroups.primary}
@@ -1050,55 +1174,84 @@ const NavigationBar = () => {
  adminLinks={priorityGroups.admin}
  globalStatusMap={globalStatusMap}
  />
+ </div>
+ </div>
+ </nav>
 
- {/* Mobile menu button */}
- <div className="ml-auto md:hidden">
- <button
- type="button"
- onClick={toggleMobileMenu}
- className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white p-2 text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
- aria-controls="mobile-menu"
- aria-expanded={mobileMenuOpen}
+ {/* Dock inferior móvil — reemplaza el menú hamburguesa (DESIGN.md §6) */}
+ <nav
+ className="fixed inset-x-0 bottom-0 z-30 flex border-t border-white/10 bg-[var(--nav)] pb-[env(safe-area-inset-bottom)] md:hidden"
+ aria-label="Navegación principal"
  >
- <span className="sr-only">Abrir navegación</span>
- <svg className="block h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
- <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
- </svg>
- </button>
- </div>
- </div>
- </div>
-
- {/* Mobile menu */}
- {mobileMenuOpen && (
- <div className="md:hidden" id="mobile-menu">
- <div className="space-y-1 border-t border-slate-200 bg-slate-50 px-2 pb-3 pt-2">
- {renderGroup(priorityGroups.critical, "critical", closeMobileMenu, true, globalStatusMap)}
-
- {priorityGroups.primary.length > 0 && (
- <>
- <div className="my-2 border-t border-slate-200" />
- {renderGroup(priorityGroups.primary, "primary", closeMobileMenu, true, globalStatusMap)}
- </>
+ {bottomTabs.map((link) => (
+ <MobileTabLink key={link.path} link={link} globalStatusMap={globalStatusMap} />
+ ))}
+ {hasMobileOverflow && (
+ <motion.button
+ type="button"
+ onClick={toggleMoreSheet}
+ whileTap={prefersReducedMotion ? undefined : { scale: 0.88 }}
+ aria-haspopup="menu"
+ aria-expanded={moreSheetOpen}
+ className={clsx(
+ "relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 pb-1 pt-2 text-[10px] font-medium leading-none transition-colors duration-150",
+ moreSheetOpen ? "text-[var(--nav-selected-text)]" : "text-[var(--nav-text)]"
  )}
-
- {priorityGroups.secondary.length > 0 && (
- <>
- <div className="my-2 border-t border-slate-200" />
- {renderGroup(priorityGroups.secondary, "secondary", closeMobileMenu, true, globalStatusMap)}
- </>
- )}
-
- {priorityGroups.admin.length > 0 && (
- <>
- <div className="my-2 border-t border-slate-200" />
- {renderGroup(priorityGroups.admin, "admin", closeMobileMenu, true, globalStatusMap)}
- </>
- )}
- </div>
- </div>
+ style={{ minHeight: "var(--row-height)" }}
+ >
+ <FiMoreHorizontal className={clsx("h-5 w-5", moreSheetOpen ? "text-[var(--nav-marker)]" : "text-[var(--nav-text)]")} />
+ <span>Más</span>
+ </motion.button>
  )}
  </nav>
+
+ {/* Hoja "Más módulos" — el resto de los accesos, fuera de las 5 pestañas.
+     z-[9999]: por encima de TODOS los widgets flotantes fijos del shell
+     (NotificationBell z-90, KickoffRankingFab z-89, MobileFabDock z-[9998],
+     etc.) — antes el overlay quedaba en z-30 y esos botones se veían encima
+     del fondo oscuro, colándose sobre la hoja. */}
+ <AnimatePresence>
+ {moreSheetOpen && (
+ <div className="fixed inset-0 z-[9999] md:hidden" role="dialog" aria-modal="true" aria-label="Más módulos">
+ <motion.div
+ className="absolute inset-0 bg-black/40"
+ onClick={closeMoreSheet}
+ initial={{ opacity: 0 }}
+ animate={{ opacity: 1 }}
+ exit={{ opacity: 0 }}
+ transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.2 }}
+ />
+ <motion.div
+ className="absolute inset-x-0 bottom-0 max-h-[70vh] overflow-y-auto rounded-t-2xl border-t border-[var(--border)] bg-[var(--surface-raised)] p-3 shadow-[var(--shadow-overlay)]"
+ style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.75rem)" }}
+ initial={{ y: "100%" }}
+ animate={{ y: 0 }}
+ exit={{ y: "100%" }}
+ transition={
+ prefersReducedMotion
+ ? { duration: 0 }
+ : { type: "spring", stiffness: 420, damping: 38, mass: 0.8 }
+ }
+ >
+ <div className="mb-2 flex items-center justify-between px-1">
+ <span className="text-sm font-semibold text-[var(--text)]">Más módulos</span>
+ <button
+ type="button"
+ onClick={closeMoreSheet}
+ aria-label="Cerrar"
+ className="rounded-lg p-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-subtle)]"
+ >
+ <FiX className="h-5 w-5" />
+ </button>
+ </div>
+ <div className="space-y-0.5 pb-1">
+ {renderGroup(moreSheetLinks, "primary", closeMoreSheet, true, globalStatusMap, "popover")}
+ </div>
+ </motion.div>
+ </div>
+ )}
+ </AnimatePresence>
+ </>
  );
 };
 

@@ -40,7 +40,7 @@ const WORKSPACE_SECTION_ORDER = [
  // offer_workspace faltaba aqui (ver skill bc-workspace-tabs): si aparece en
  // el tab pero no en esta lista, se rompe el auto-avance ("siguiente
  // seccion") y la reapertura de esa seccion para los roles que si la tienen
- // habilitada (comercial, jefe_comercial, jefe_de_comercial, acp_comercial).
+ // habilitada (comercial, jefe_comercial, acp_comercial).
  "offer_workspace",
  "dispatch_workspace",
  "consumption_export",

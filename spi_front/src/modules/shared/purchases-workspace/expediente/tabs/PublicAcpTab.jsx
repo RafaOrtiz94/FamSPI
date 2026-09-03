@@ -62,7 +62,7 @@ function ReservationPanel({ purchase, userRoles, refresh }) {
   const [freedExpanded,    setFreedExpanded]    = useState(false);
   const [error,            setError]            = useState(null);
 
-  const canManage = userRoles.some((r) => ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial'].includes(r));
+  const canManage = userRoles.some((r) => ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial'].includes(r));
 
   const hasReservation       = Boolean(purchase?.reservation_email_sent_at);
   const reservationExpiresAt = purchase?.reservation_expires_at;
@@ -514,7 +514,7 @@ const PublicAcpTab = ({ purchase, type, userRoles, refresh }) => {
         <ReservationPanel purchase={purchase} userRoles={userRoles} refresh={refresh} />
 
         {/* Proformas, Checklist y SOCE — solo acp_comercial, gerencia, jefe_comercial */}
-        <RoleGatedAction allowedRoles={['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']} userRoles={userRoles}>
+        <RoleGatedAction allowedRoles={['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial']} userRoles={userRoles}>
           <div className="bg-white rounded-xl border border-soft-border p-5 shadow-ambient">
             <div className="flex items-center gap-2 mb-4">
               <FiGlobe className="text-action-blue" size={18} />

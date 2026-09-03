@@ -6,7 +6,7 @@
  * · Subida de oferta firmada      → comercial
  * · Reenvío a ACP                 → backoffice_comercial
  * · Rechazo de oferta             → comercial
- * · Aceptar rechazo / mejora      → jefe_comercial, jefe_de_comercial
+ * · Aceptar rechazo / mejora      → jefe_comercial
  * · Registro de cliente           → comercial (con modal de revisión)
  *
  * Solo se monta en compras privadas (el tab ni aparece en públicas).
@@ -127,7 +127,6 @@ const PrivateOfferWorkspacePanel = ({ purchase, userRoles, enabled, refresh }) =
     'backoffice_comercial',
     'acp_comercial',
     'jefe_comercial',
-    'jefe_de_comercial',
     'gerencia',
     'gerencia_general',
   ].includes(role));
@@ -528,7 +527,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                     </p>
                   </div>
                   <RoleGatedAction
-                    allowedRoles={['comercial', 'backoffice', 'backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']}
+                    allowedRoles={['comercial', 'backoffice', 'backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial']}
                     userRoles={userRoles}
                   >
                     <button
@@ -599,7 +598,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             status={roleStepStatus(
               Boolean(purchase?.forwarded_to_acp_at),
               status === 'pending_backoffice',
-              ['backoffice_comercial','acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
+              ['backoffice_comercial','acp_comercial','gerencia','gerencia_general','jefe_comercial'],
             )}
             completedAt={purchase?.forwarded_to_acp_at}
           >
@@ -613,7 +612,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
               </div>
             ) : (
               <RoleGatedAction
-                allowedRoles={['backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']}
+                allowedRoles={['backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial']}
                 userRoles={userRoles}
               >
                 <button
@@ -637,7 +636,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             status={roleStepStatus(
               Boolean(purchase?.offer_document_id),
               OFFER_SEND_STATES.includes(status),
-              ['backoffice_comercial','acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
+              ['backoffice_comercial','acp_comercial','gerencia','gerencia_general','jefe_comercial'],
             )}
           >
             {!hasLinkedBc && (
@@ -673,7 +672,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
               />
             ) : (
               <RoleGatedAction
-                allowedRoles={['backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']}
+                allowedRoles={['backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial']}
                 userRoles={userRoles}
               >
                 <FileUploadZone
@@ -704,7 +703,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             status={roleStepStatus(
               Boolean(purchase?.offer_signed_document_id),
               OFFER_SIGN_STATES.includes(status),
-              ['comercial','asesor_comercial','analista_comercial','acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
+              ['comercial','asesor_comercial','analista_comercial','acp_comercial','gerencia','gerencia_general','jefe_comercial'],
             )}
             completedAt={purchase?.offer_signed_uploaded_at}
           >
@@ -773,7 +772,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                 <p className="text-xs text-warm-ash mb-3">
                   El cliente rechazó la oferta. Solicitá una mejora de precio para reenviar una nueva oferta, o aceptá el rechazo para cerrar la solicitud.
                 </p>
-                <RoleGatedAction allowedRoles={['jefe_comercial', 'jefe_de_comercial']} userRoles={userRoles}>
+                <RoleGatedAction allowedRoles={['jefe_comercial']} userRoles={userRoles}>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
@@ -807,7 +806,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             status={roleStepStatus(
               isClientRegistered,
               CLIENT_REG_STATES.includes(status),
-              ['comercial','asesor_comercial','analista_comercial','backoffice','backoffice_comercial','acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
+              ['comercial','asesor_comercial','analista_comercial','backoffice','backoffice_comercial','acp_comercial','gerencia','gerencia_general','jefe_comercial'],
             )}
             completedAt={purchase?.client_registered_at}
           >
@@ -830,7 +829,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
                   </div>
                 )}
                 <RoleGatedAction
-                  allowedRoles={['comercial', 'backoffice', 'backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']}
+                  allowedRoles={['comercial', 'backoffice', 'backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial']}
                   userRoles={userRoles}
                 >
                   <button
@@ -857,7 +856,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
               isClientRegistered && status === 'client_registered',
               ['comercial','asesor_comercial','analista_comercial',
                'backoffice','backoffice_comercial',
-               'acp_comercial','gerencia','gerencia_general','jefe_comercial','jefe_de_comercial'],
+               'acp_comercial','gerencia','gerencia_general','jefe_comercial'],
             )}
             completedAt={purchase?.inspection_requested_at}
           >

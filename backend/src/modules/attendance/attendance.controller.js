@@ -751,7 +751,6 @@ const TALENTO_HUMANO_ALERT_ROLES = Object.freeze([
 ]);
 const TEAM_ATTENDANCE_LEAD_ROLES = Object.freeze([
   "jefe_comercial",
-  "jefe_de_comercial",
   "jefe_tecnico",
   "jefe_servicio",
   "jefe_servicio_tecnico",

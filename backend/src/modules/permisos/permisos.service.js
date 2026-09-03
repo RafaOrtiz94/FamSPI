@@ -106,7 +106,6 @@ const ROLE_CANONICAL_ALIASES = {
   jefe_de_servicio_tecnico: "jefe_tecnico",
   jefe_de_tecnico: "jefe_tecnico",
   jefe_de_operaciones: "jefe_operaciones",
-  jefe_de_comercial: "jefe_comercial",
   jefe_de_calidad: "jefe_calidad",
   jefe_de_talento_humano: "jefe_talento_humano",
   finanzas: "financiero",
@@ -120,7 +119,7 @@ const APPROVER_ROLE_ALIASES = {
   jefe_operaciones: ["jefe_operaciones", "jefe_de_operaciones"],
   jefe_calidad: ["jefe_calidad", "jefe_de_calidad"],
   jefe_financiero: ["jefe_financiero", "jefe_finanzas", "jefe_de_finanzas"],
-  jefe_comercial: ["jefe_comercial", "jefe_de_comercial"],
+  jefe_comercial: ["jefe_comercial"],
   jefe_talento_humano: ["jefe_talento_humano", "jefe_de_talento_humano"],
 };
 

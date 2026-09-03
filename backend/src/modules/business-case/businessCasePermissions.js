@@ -56,7 +56,6 @@ const ROLE_CANONICAL_MAP = {
   jefe_servicio: 'jefe_tecnico',
   asesor_comercial: 'comercial',
   analista_comercial: 'comercial',
-  jefe_de_comercial: 'jefe_comercial',
   jefe_de_operaciones: 'jefe_operaciones',
   operaciones: 'jefe_operaciones',
   gerencia_general: 'gerencia',
@@ -942,7 +941,7 @@ class BusinessCasePermissions {
   }
 
   /**
-   * Normaliza un rol crudo (alias como asesor_comercial/jefe_de_comercial) a
+   * Normaliza un rol crudo (alias como asesor_comercial) a
    * su rol canonico. Usar en cualquier otro modulo del BC que necesite
    * comparar roles contra un set fijo, en vez de duplicar la lista de alias.
    * @param {string} role

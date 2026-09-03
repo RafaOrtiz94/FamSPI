@@ -608,7 +608,7 @@ const ConsumableFilesTab = ({ purchase, type, userRoles = [], fileId = null }) =
   const isFileEditor = userRoles.some((role) => [
     "comercial", "asesor_comercial", "analista_comercial",
     "backoffice", "backoffice_comercial", "acp_comercial",
-    "jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general",
+    "jefe_comercial", "gerencia", "gerencia_general",
   ].includes(role));
   const canEditFile = fileStatus === "draft" && isFileEditor;
   const allLines = (detail?.sections || []).flatMap((section) => section.lines || []);

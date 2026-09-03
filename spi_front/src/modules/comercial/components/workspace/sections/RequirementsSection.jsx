@@ -13,7 +13,7 @@ const DELIVERY_OPTIONS = [
 ];
 
 // Mismos roles que ya autoriza el backend en POST /sections/:section/unlock.
-const REQUIREMENT_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_de_comercial"]);
+const REQUIREMENT_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial"]);
 
 const defaultForm = {
   deadlineMonths: "",

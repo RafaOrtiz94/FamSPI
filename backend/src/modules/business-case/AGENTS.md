@@ -88,7 +88,7 @@ ing_servicio/esp_app son de solo lectura.
 `businessCaseDeterminationsGate.service.js` comparaba el rol crudo contra
 `Set`s literales (`DETERMINATIONS_ALLOWED_UPLOAD_ROLES`, `_DOCUMENT_VIEW_ROLES`,
 `_INSPECTION_REQUEST_ROLES`) que solo tenian `"comercial"`/`"jefe_comercial"`,
-sin sus alias `asesor_comercial`/`analista_comercial`/`jefe_de_comercial`
+sin sus alias `asesor_comercial`/`analista_comercial`
 (documentados en todo el modulo como "mismo nivel", BC-02). Resultado:
 asesor_comercial/analista_comercial recibian 403 al intentar subir el
 documento estadistico, bloqueando el paso 4 del flujo para ellos. Corregido
@@ -99,7 +99,7 @@ rol antes de comparar contra los Sets. Si se agregan mas alias de rol a
 `ROLE_CANONICAL_MAP`, este archivo los hereda automaticamente sin tocarlo.
 Confirmado con el usuario: el rol base `comercial` (y sus alias) NO debe
 editar cantidades de determinaciones en fase `commercial_input` (solo
-jefe_comercial/jefe_de_comercial/acp_comercial editan ahi) — eso quedo igual,
+jefe_comercial/acp_comercial editan ahi) — eso quedo igual,
 a proposito.
 
 ## Bug corregido (canonical_state atascado en DRAFT_INICIAL, bloqueaba determinaciones para TODOS)

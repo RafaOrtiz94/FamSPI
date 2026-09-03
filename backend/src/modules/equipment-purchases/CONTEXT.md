@@ -65,9 +65,11 @@ Roles:
 - `servicio`: inspección técnica ejecutada por técnicos del módulo servicio
 
 ## 7. Frontend asociado
-- `/dashboard/comercial/equipment-purchases` → `EquipmentPurchasesPage`
-- `/dashboard/comercial/acp-compras` → `ACPEquipmentPurchasesPage`
-- `/dashboard/purchases/workspace` → `PurchasesWorkspace`
+
+**Este backend está VIGENTE y activo. Sirve por igual al frontend nuevo (producción) y a las páginas viejas huérfanas (no enrutadas).** Ver `.claude/skills/modulo-compras-comercial/SKILL.md` para el mapa completo legacy→producción.
+
+- **Producción (ruta real montada):** `/dashboard/purchases/workspace` (query `?tab=public`) → `spi_front/src/modules/shared/purchases-workspace/PurchasesWorkspace.jsx`. Este workspace llama `core/api/equipmentPurchasesApi.js`, que pega contra los mismos endpoints listados en la sección 2 de este documento — no hay backend nuevo.
+- **Legacy (rutas redirigidas, código huérfano):** `/dashboard/comercial/equipment-purchases` y `/dashboard/comercial/acp-compras` en `AppRoutes.jsx` ya NO renderizan `EquipmentPurchasesPage`/`ACPEquipmentPurchasesPage` — ambas rutas renderizan `<LegacyPublicPurchaseRedirect />`, que hace `<Navigate>` inmediato a `/dashboard/purchases/workspace?tab=public...`. Los archivos `spi_front/src/modules/comercial/pages/EquipmentPurchases.jsx` y `ACPEquipmentPurchases.jsx` (y el componente que ambos usan, `EquipmentPurchaseWidget.jsx`) siguen en el repo pero **no están importados por ningún router activo** — son código muerto que igual pega a este mismo backend si alguna vez se vuelve a montar. No confundir "sigue compilando y pegando a la API real" con "está en producción": nadie navega a esa UI.
 
 ## 8. Riesgos detectados
 - `equipmentPurchases.service.js` (169KB) — extremadamente grande
@@ -76,3 +78,4 @@ Roles:
 
 ## 9. Notas técnicas
 - Módulo paralelo a `private-purchases` — compras públicas vs. privadas
+- El backend NO tiene versión legacy/vigente separada: es un único set de endpoints vigente. Lo que migró a legacy fue solo el frontend (páginas comerciales viejas → workspace unificado). No existe un módulo backend "purchases-workspace" ni equivalente — el workspace unificado consume literalmente estas mismas rutas.

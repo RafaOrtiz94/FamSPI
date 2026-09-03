@@ -14,7 +14,7 @@ import { useParams } from "react-router-dom";
 import SectionEditorBadge from "./SectionEditorBadge";
 
 // Mismos roles que ya autoriza el backend en POST /sections/:section/unlock.
-const EQUIPMENT_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_de_comercial"]);
+const EQUIPMENT_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial"]);
 
 const generateLocalId = () => {
  if (typeof crypto !== "undefined" && crypto.randomUUID) {

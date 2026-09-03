@@ -191,8 +191,7 @@ const REVIEW_ROLES = ["acp_comercial", "backoffice_comercial"];
 // BUG-03: backoffice incluido — pero la validación de tipo de compra se hace en lockSection/unlockSection
 // En BC público: solo acp_comercial / jefe_comercial pueden bloquear/desbloquear
 // En BC privado: también backoffice / backoffice_comercial pueden bloquear/desbloquear
-// NUEVO-07: jefe_de_comercial tiene mismos permisos que jefe_comercial para bloquear/desbloquear
-const LOCK_ROLES = ["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_de_comercial"];
+const LOCK_ROLES = ["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial"];
 const BACKOFFICE_LOCK_ROLES = new Set(["backoffice", "backoffice_comercial"]);
 // NUEVO-01: private_comodato y private_sale también son tipos privados válidos en BD
 // comodato_privado y private_comodato son la misma cosa con nombres distintos según el origen
@@ -218,8 +217,8 @@ const BUSINESS_CASE_PROCESS_MAIL_ROLES = [
 const DETERMINATIONS_REACTIVO_TYPES = new Set(["reactivo", "determinacion"]);
 const DETERMINATIONS_TECH_TYPES = new Set(["control", "calibrador", "consumible", "material"]);
 // Reactivos are filled by the commercial lead plus the flow-specific operator.
-const DETERMINATIONS_REACTIVO_PUBLIC_ROLES = new Set(["jefe_comercial", "jefe_de_comercial", "acp_comercial"]);
-const DETERMINATIONS_REACTIVO_PRIVATE_ROLES = new Set(["jefe_comercial", "jefe_de_comercial", "backoffice_comercial"]);
+const DETERMINATIONS_REACTIVO_PUBLIC_ROLES = new Set(["jefe_comercial", "acp_comercial"]);
+const DETERMINATIONS_REACTIVO_PRIVATE_ROLES = new Set(["jefe_comercial", "backoffice_comercial"]);
 // comercial puede solicitar inspección en cualquier tipo de BC; backoffice roles en privados
 const INSPECTION_REQUEST_ROLES = new Set(["comercial", "backoffice_comercial", "backoffice"]);
 // ing_servicio + jefe_servicio reemplazan a tecnico + jefe_tecnico para controls/calibrators/materials
@@ -244,7 +243,6 @@ const INVESTMENT_VALUES_FIN_ROLES = new Set(["jefe_financiero"]);
 const INVESTMENT_EDIT_ROLES = new Set([
   "acp_comercial",
   "jefe_comercial",
-  "jefe_de_comercial",
   "jefe_operaciones",
   "jefe_servicio",
   "jefe_logistica",
@@ -252,7 +250,6 @@ const INVESTMENT_EDIT_ROLES = new Set([
 const INVESTMENT_COMPLETE_ROLES = new Set([
   "acp_comercial",
   "jefe_comercial",
-  "jefe_de_comercial",
   ...INVESTMENT_VALUES_OP_ROLES,
 ]);
 
@@ -429,7 +426,7 @@ function resolveRequestRole(req) {
   return String(req.user?.role || req.user?.scope || req.user?.role_name || "").trim().toLowerCase();
 }
 
-// Carrito eliminado: acp_comercial, jefe_comercial, jefe_de_comercial,
+// Carrito eliminado: acp_comercial, jefe_comercial,
 // jefe_operaciones, jefe_servicio y jefe_logistica editan la lista de
 // inversiones en paralelo, sin dueno por item ni confirmacion que bloquee.
 async function assertInvestmentsEditable(businessCase, role = "unknown") {
@@ -2274,7 +2271,7 @@ async function notifyNonFeasibleDecision({ businessCaseId, bc, reason, actorEmai
   try {
     const { rows } = await db.query(
       `SELECT id, email FROM users WHERE active = true AND lower(role) = ANY($1::text[])`,
-      [["jefe_comercial", "jefe_de_comercial", "acp_comercial"]],
+      [["jefe_comercial", "acp_comercial"]],
     );
     const normalizedActor = String(actorEmail || "").trim().toLowerCase();
     const recipientIds = new Set(
@@ -4137,7 +4134,7 @@ async function getUIGuidance(req, res) {
     };
     const preflow = preflowService.buildPreflowInfo(bc, ownershipRules);
     const canResolvePreflowReopen = Boolean(
-      ['jefe_comercial', 'jefe_de_comercial', 'gerencia', 'gerencia_general'].includes(userRole) &&
+      ['jefe_comercial', 'gerencia', 'gerencia_general'].includes(userRole) &&
       preflow?.extensionRequest?.status === 'pending',
     );
     const canRequestPreflowReopen = Boolean(
@@ -5335,7 +5332,7 @@ async function renewDeterminationsCommercialWindow(req, res) {
   try {
     const { id } = req.params;
     const role = resolveRequestRole(req);
-    if (role !== "jefe_comercial" && role !== "jefe_de_comercial") {
+    if (role !== "jefe_comercial") {
       return res.status(403).json({ ok: false, message: "Solo jefe_comercial puede renovar la ventana comercial de determinaciones." });
     }
     const businessCase = await businessCaseService.getBusinessCaseById(id);
@@ -6024,7 +6021,7 @@ async function resolvePreflowReopen(req, res) {
 // BC-16: Roles que pueden solicitar apelación de factibilidad rechazada
 const FEASIBILITY_APPEAL_REQUESTER_ROLES = new Set(["comercial", "asesor_comercial", "analista_comercial"]);
 // BC-16: Roles que pueden resolver (aprobar/rechazar) una apelación
-const FEASIBILITY_APPEAL_RESOLVER_ROLES = new Set(["jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]);
+const FEASIBILITY_APPEAL_RESOLVER_ROLES = new Set(["jefe_comercial", "gerencia", "gerencia_general"]);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // BC-17: Helpers para pausar/desbloquear/cancelar expedientes vinculados al BC
@@ -6231,7 +6228,7 @@ async function requestFeasibilityAppeal(req, res) {
     try {
       const managers = await db.query(
         `SELECT id FROM users WHERE active = true AND lower(role) = ANY($1::text[])`,
-        [["jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]],
+        [["jefe_comercial", "gerencia", "gerencia_general"]],
       );
       for (const mgr of managers.rows) {
         notificationManager.sendNotification({
