@@ -5,9 +5,7 @@ export const PUBLIC_PURCHASE_STATUS_OVERVIEW = [
  { key: "proforma_received", label: "Proforma recibida" },
  { key: "waiting_signed_proforma", label: "Reservado y esperando proforma firmada" },
  { key: "pending_contract", label: "Pendiente contrato" },
- { key: "contract_available", label: "Contrato disponible" },
- { key: "delivery_dates_requested", label: "Pendiente fechas de entrega" },
- { key: "delivery_dates_submitted", label: "Fechas de entrega registradas" },
+ { key: "contract_available", label: "Contrato disponible — confirmar solicitud de entrega" },
  { key: "waiting_dispatch", label: "Esperando despacho" },
  { key: "dispatch_ready", label: "Despacho listo" },
  { key: "no_stock", label: "Sin stock" },
@@ -22,7 +20,5 @@ export const getPublicPurchaseActiveCount = (stats = {}) =>
  (stats?.waiting_signed_proforma ?? 0) +
  (stats?.pending_contract ?? 0) +
  (stats?.contract_available ?? 0) +
- (stats?.delivery_dates_requested ?? 0) +
- (stats?.delivery_dates_submitted ?? 0) +
  (stats?.waiting_dispatch ?? 0) +
  (stats?.dispatch_ready ?? 0);

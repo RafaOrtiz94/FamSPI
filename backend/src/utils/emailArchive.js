@@ -98,8 +98,21 @@ async function archiveEmail({ html, subject, folderId, prefix = "correo", reques
   return stored?.id || null;
 }
 
-async function sendAndArchive({ user, to, subject, html, cc, folderId, prefix, request, actionLabel }) {
-  await sendMail({
+// threadContext encadena los correos de una misma solicitud como respuestas
+// del mismo hilo de Gmail en vez de crear un correo nuevo en cada etapa.
+async function sendAndArchive({
+  user,
+  to,
+  subject,
+  html,
+  cc,
+  folderId,
+  prefix,
+  request,
+  actionLabel,
+  threadContext = null,
+}) {
+  const sendResult = await sendMail({
     to,
     cc,
     subject,
@@ -107,8 +120,16 @@ async function sendAndArchive({ user, to, subject, html, cc, folderId, prefix, r
     gmailUserId: user?.id,
     from: user?.email,
     replyTo: user?.email,
+    threadId: threadContext?.threadId || undefined,
+    inReplyTo: threadContext?.lastMessageId || undefined,
+    references: threadContext?.lastMessageId || undefined,
   });
-  return archiveEmail({ html, subject, folderId, prefix, request, actionLabel, user });
+  const fileId = await archiveEmail({ html, subject, folderId, prefix, request, actionLabel, user });
+  return {
+    fileId,
+    threadId: sendResult?.providerThreadId || threadContext?.threadId || null,
+    lastMessageId: sendResult?.rfc822MessageId || threadContext?.lastMessageId || null,
+  };
 }
 
 module.exports = {

@@ -8,7 +8,6 @@ import { useApi } from "../core/hooks/useApi";
 import { useUI } from "../core/ui/UIContext";
 import {
  getMantenimientos,
- createMantenimiento,
  exportMantenimientoPDF,
 } from "../core/api/mantenimientosApi";
 

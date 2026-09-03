@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
  FiBell,
  FiCheckCircle,
@@ -75,8 +75,7 @@ export default function NotificationBell() {
  const [open, setOpen] = useState(false);
  const containerRef = useRef(null);
  const navigate = useNavigate();
- const location = useLocation();
- const containerClassName = "fixed bottom-4 right-4 z-[60] sm:bottom-6 sm:right-6";
+ const containerClassName = "fixed bottom-4 right-4 z-[90] sm:bottom-6 sm:right-6";
 
  useEffect(() => {
  if (!open) return undefined;
@@ -108,13 +107,6 @@ export default function NotificationBell() {
  return sorted.slice(0, 6);
  }, [notifications]);
 
- const resolvePrivatePurchaseBasePath = () => {
- const pathname = String(location?.pathname || "").toLowerCase();
- if (pathname.includes("/dashboard/logistica/")) return "/dashboard/logistica/private-purchases";
- if (pathname.includes("/dashboard/operaciones/")) return "/dashboard/operaciones/private-purchases";
- return "/dashboard/backoffice/private-purchases";
- };
-
  const resolveFallbackTargetPath = (notification) => {
  const source = normalizeSource(notification?.source);
  const purchaseId = getMetaValue(notification, ["purchase_id", "purchaseId"]);
@@ -123,11 +115,11 @@ export default function NotificationBell() {
  const businessCaseId = getMetaValue(notification, ["business_case_id", "businessCaseId", "bc_id", "bcId"]);
 
  if (source.startsWith("private_purchase") && purchaseId) {
- return `${resolvePrivatePurchaseBasePath()}?purchaseId=${purchaseId}`;
+ return `/dashboard/purchases/workspace?tab=private&requestId=${purchaseId}&requestType=private`;
  }
 
  if ((source.startsWith("equipment_purchase") || source.startsWith("equipment_purchases")) && publicRequestId) {
- return `/dashboard/comercial/equipment-purchases?requestId=${publicRequestId}`;
+ return `/dashboard/purchases/workspace?tab=public&requestId=${publicRequestId}&requestType=public`;
  }
 
  if ((source.startsWith("permisos_vacaciones") || source.startsWith("vacaciones")) && solicitudId) {
@@ -181,7 +173,7 @@ export default function NotificationBell() {
  </button>
 
  {open && (
- <div className="absolute bottom-[3.75rem] right-0 w-[22rem] bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 overflow-hidden">
+ <div className="absolute bottom-[3.75rem] right-0 w-[min(22rem,calc(100vw-1.5rem))] bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 overflow-hidden">
  <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
  <div>
  <p className="text-sm font-semibold text-slate-800">Notificaciones</p>
@@ -262,8 +254,17 @@ export default function NotificationBell() {
  </div>
  ))}
  </div>
- <div className="px-4 py-2 border-t border-slate-200 bg-slate-50 text-[11px] text-slate-500">
- Solo se muestran las 6 notificaciones mas recientes. Se priorizan urgencia alta y fecha reciente.
+ <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-2">
+   <p className="text-[11px] text-slate-500">
+     {notifications.length > 6 ? `${notifications.length - 6} mas sin mostrar` : "Mostrando las mas recientes"}
+   </p>
+   <button
+     type="button"
+     onClick={() => { setOpen(false); navigate("/dashboard/notificaciones"); }}
+     className="cursor-pointer text-[11px] font-semibold text-accent hover:text-accent-dark"
+   >
+     Ver todas →
+   </button>
  </div>
  </div>
  )}

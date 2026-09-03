@@ -1,42 +1,186 @@
 // src/modules/shared/pages/AttendanceAction.jsx
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { FiClock, FiCheckCircle, FiAlertCircle, FiLoader, FiMapPin } from "react-icons/fi";
 import { useAuth } from "../../../core/auth/AuthContext";
 import { useUI } from "../../../core/ui/UIContext";
-import { 
-  marcarEntrada, 
-  marcarAlmuerzoSalida, 
-  marcarAlmuerzoEntrada, 
+import {
+  marcarEntrada,
+  marcarAlmuerzoSalida,
+  marcarAlmuerzoEntrada,
   marcarSalida,
-  marcarSalidaImprevista,
-  marcarRegresoImprevisto,
+  marcarSalidaOficina,
+  marcarEntradaOficina,
+  marcarSalidaCampo,
+  marcarEntradaCampo,
+  marcarLlegadaDestino,
+  marcarCierreViaje,
   marcarVisitaEntrada,
   marcarVisitaSalida,
-  registerException,
+  getTodayAttendance,
+  getActiveException,
+  createTeleworkRequest,
+  getTeleworkRequests,
+  justifyLateArrival,
+  requestEntryRegularization,
+  startPermissionEntry,
+  finishPermissionExit,
   updateExceptionStatus,
-  syncAttendanceLocation,
 } from "../../../core/api/attendanceApi";
-import { getPreciseLocation } from "../../../shared/utils/preciseGeolocation";
+import { getLocationForAction, readCachedLocation, startLocationPrewarm, stopLocationPrewarm } from "../../../shared/utils/attendanceLocationCache";
 import { fetchClients } from "../../../core/api/clientsApi";
+import ECUADOR_LOCATIONS from "../../../data/ecuadorGeography";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
+import CameraCaptureField from "../../../core/ui/components/CameraCaptureField";
+import { getAttendanceErrorInfo } from "../../../core/ui/attendanceErrorUtils";
+import {
+  isOperationalFlow,
+  getAttendanceNextStepHint,
+  getAttendanceHelpHint,
+  validateOperationalCategoryStep,
+  validateOperationalVehicleStart,
+  validateOperationalVehicleClosure,
+  buildOperationalStartPayload,
+  buildOperationalClosurePayload,
+  buildOperationalTripClosePayload,
+  isOperationalExitCategory,
+  isTeleworkCategory,
+  validateOperationalDestinationStep,
+  resolveAttendanceActionKey,
+  resolveAttendanceIntentKey,
+  resolveAttendanceFlowStep,
+  resolveAttendanceShortcutIntent,
+} from "../../../core/ui/attendanceFlowUtils";
 
-const PRECISE_LOCATION_OPTIONS = Object.freeze({
-  desiredAccuracyMeters: 40,
-  goodAccuracyMeters: 25,
-  highAccuracyTimeoutMs: 7000,
-  sampleWindowMs: 4500,
-  sampleCount: 2,
-});
+const TODAY_CONTEXT_CACHE_KEY = "attendance-shortcuts:today-context";
+const TODAY_CONTEXT_CACHE_TTL_MS = 30000;
+const GPS_ACCURACY_GOOD_METERS = 40;
+const GPS_ACCURACY_STABLE_METERS = 120;
+const GPS_ACCURACY_LIMIT_METERS = 250;
 
-const getActionLocation = async () => {
-  const locationPromise = getPreciseLocation(PRECISE_LOCATION_OPTIONS).then(
-    (result) => result?.location || null
-  );
-  const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), 4200));
-  return Promise.race([locationPromise, timeoutPromise]);
+const getLocalDateKey = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const formatGpsAccuracy = (accuracy) => {
+  const parsed = Number(accuracy);
+  return Number.isFinite(parsed) && parsed >= 0 ? `${Math.round(parsed)} m` : "Sin lectura";
+};
+
+const describeGpsSignal = (accuracy) => {
+  const parsed = Number(accuracy);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return {
+      label: "Buscando senal",
+      toneClass: "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+      helper: "Esperando la primera lectura GPS del dispositivo.",
+    };
+  }
+
+  if (parsed <= GPS_ACCURACY_GOOD_METERS) {
+    return {
+      label: "Senal alta",
+      toneClass: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+      helper: "La precision es solida para completar la marcacion.",
+    };
+  }
+
+  if (parsed <= GPS_ACCURACY_STABLE_METERS) {
+    return {
+      label: "Senal estable",
+      toneClass: "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300",
+      helper: "La lectura va mejorando y suele resolver la marcacion.",
+    };
+  }
+
+  if (parsed <= GPS_ACCURACY_LIMIT_METERS) {
+    return {
+      label: "Senal limitada",
+      toneClass: "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
+      helper: "Todavia esta cerca del limite. Espera unos segundos mas.",
+    };
+  }
+
+  return {
+    label: "Senal debil",
+    toneClass: "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300",
+    helper: "Muevete a una zona abierta o cerca de una ventana antes de reintentar.",
+  };
+};
+
+const describeGpsSource = (source) => {
+  switch (String(source || "").trim()) {
+    case "prewarm_watch":
+      return "Lectura continua del dispositivo";
+    case "browser_high_accuracy":
+    case "current":
+    case "watch":
+    case "live_watch":
+      return "GPS preciso del dispositivo";
+    case "browser_quick":
+    case "quick_coarse":
+      return "Lectura rapida del dispositivo";
+    case "cache_extended":
+    case "cached":
+      return "Ultima lectura guardada";
+    default:
+      return "GPS del dispositivo";
+  }
+};
+
+const readCachedTodayContext = () => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(TODAY_CONTEXT_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.savedAt || !parsed?.data) return null;
+    if ((Date.now() - Number(parsed.savedAt)) > TODAY_CONTEXT_CACHE_TTL_MS) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+};
+
+const writeCachedTodayContext = (data) => {
+  if (typeof window === "undefined") return;
+  try {
+    if (!data) {
+      window.sessionStorage.removeItem(TODAY_CONTEXT_CACHE_KEY);
+      return;
+    }
+    window.sessionStorage.setItem(
+      TODAY_CONTEXT_CACHE_KEY,
+      JSON.stringify({ savedAt: Date.now(), data }),
+    );
+  } catch {}
+};
+
+const resolveLegacyCompatibilityTarget = ({ actionKey, allowedActionKeys = [], nextActionKey = null }) => {
+  if (!actionKey) return nextActionKey || null;
+
+  if (["llegada-destino", "cliente-entrada"].includes(actionKey)) {
+    if (allowedActionKeys.includes("cliente-entrada")) return "cliente-entrada";
+    if (allowedActionKeys.includes("llegada-destino")) return "llegada-destino";
+  }
+
+  if (["cliente-salida", "salida-cliente"].includes(actionKey)) {
+    if (allowedActionKeys.includes("cliente-salida")) return "cliente-salida";
+    if (allowedActionKeys.includes("retorno-operacional")) return "retorno-operacional";
+  }
+
+  if (["entrada-oficina", "entrada-campo", "cierre-viaje"].includes(actionKey)) {
+    if (allowedActionKeys.includes("cierre-viaje")) return "cierre-viaje";
+    if (allowedActionKeys.includes("entrada-oficina")) return "entrada-oficina";
+    if (allowedActionKeys.includes("entrada-campo")) return "entrada-campo";
+  }
+
+  return nextActionKey || null;
 };
 
 const resolveShortcutParam = (params, keys = []) => {
@@ -47,15 +191,84 @@ const resolveShortcutParam = (params, keys = []) => {
   return "";
 };
 
+const parseOptionalBooleanParam = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (["1", "true", "si", "sí", "yes"].includes(normalized)) return true;
+  if (["0", "false", "no"].includes(normalized)) return false;
+  return null;
+};
+
 const parseActionParams = (search) => {
   const params = new URLSearchParams(search || "");
+  const returnToOfficeParam = resolveShortcutParam(params, ["return_to_office", "retorno_oficina", "returnToOffice"]);
   return {
     clientId: resolveShortcutParam(params, ["client_id", "cliente_id", "clientId"]),
     prospectName: resolveShortcutParam(params, ["prospect_name", "prospecto", "prospectName"]),
+    destinationCity: resolveShortcutParam(params, ["destination_city", "destinationCity", "ciudad", "city"]),
     description: resolveShortcutParam(params, ["motivo", "descripcion", "description"]),
     observations: resolveShortcutParam(params, ["observaciones", "observacion", "observations", "obs"]),
+    returnToOffice: parseOptionalBooleanParam(returnToOfficeParam),
+    returnUrl: resolveShortcutParam(params, ["return_url", "returnUrl", "redirect"]),
   };
 };
+
+const normalizeText = (value) =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+const buildClientDisplayLabel = (client = {}) => {
+  const rawName = String(
+    client?.commercial_name ||
+    client?.business_name ||
+    client?.name ||
+    client?.nombre ||
+    client?.razon_social ||
+    ""
+  ).trim();
+  const safeName = rawName.length >= 3 ? rawName : `Cliente #${client?.id || ""}`;
+  const city = getClientCity(client);
+  const scheduleInfo = client?.scheduled_info || {};
+  const isScheduledToday = Boolean(
+    scheduleInfo?.is_planned_commercial || scheduleInfo?.is_planned_technical || scheduleInfo?.is_planned
+  );
+  const base = city ? `${safeName} - ${city} (#${client?.id})` : `${safeName} (#${client?.id})`;
+  return isScheduledToday ? `${base} · Programado hoy` : base;
+};
+
+function getClientCity(client = {}) {
+  return String(client?.city || client?.ciudad || client?.shipping_city || "").trim();
+}
+
+const withTimeout = (promise, ms, timeoutMessage) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(timeoutMessage || "Operacion agotada por tiempo"));
+    }, ms);
+    Promise.resolve(promise)
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+
+const OPERATIONAL_CATEGORY_OPTIONS = [
+  { value: "operacional", label: "Salida operacional", helper: "Gestion laboral fuera de la oficina" },
+  { value: "teletrabajo", label: "Teletrabajo", helper: "Jornada laboral desde ubicacion remota" },
+];
+
+const OPERATIONAL_VISIT_TYPE_OPTIONS = [
+  { value: "cronograma", label: "Cliente de cronograma", helper: "Visita planificada del dia" },
+  { value: "prospecto", label: "Prospecto", helper: "Gestion comercial nueva" },
+  { value: "otra", label: "Otra gestion", helper: "Banco, ministerio, proveedor u otro destino" },
+];
 
 const AttendanceAction = () => {
   const { action } = useParams();
@@ -63,146 +276,297 @@ const AttendanceAction = () => {
   const location = useLocation();
   const { user, loading: authLoading } = useAuth();
   const { showToast } = useUI();
-  
+
   const [status, setStatus] = useState("initializing"); // initializing, geolocating, processing, success, error
   const [message, setMessage] = useState("");
   const [errorDetails, setErrorDetails] = useState("");
   const [availableClients, setAvailableClients] = useState([]);
   const [loadingClients, setLoadingClients] = useState(false);
   const [manualClientId, setManualClientId] = useState("");
+  const [manualClientSearch, setManualClientSearch] = useState("");
   const [manualProspectName, setManualProspectName] = useState("");
   const [manualReason, setManualReason] = useState("");
-  const [manualObservations, setManualObservations] = useState("");
+  const [manualPostVisitAction, setManualPostVisitAction] = useState("");
   const [manualStepError, setManualStepError] = useState("");
+  const [activeOperationalException, setActiveOperationalException] = useState(null);
+  const [operationalCategory, setOperationalCategory] = useState("");
+  const [operationalVisitType, setOperationalVisitType] = useState("cronograma");
+  const [operationalDetail, setOperationalDetail] = useState("");
+  const [teleworkRequestDate, setTeleworkRequestDate] = useState(() => getLocalDateKey());
+  const [teleworkRequests, setTeleworkRequests] = useState([]);
+  const [teleworkRequestsLoading, setTeleworkRequestsLoading] = useState(false);
+  const [selectedTeleworkRequestId, setSelectedTeleworkRequestId] = useState("");
+  const [teleworkRequestMode, setTeleworkRequestMode] = useState("approved");
+  const [operationalDestination, setOperationalDestination] = useState("");
+  const [operationalDestinationCity, setOperationalDestinationCity] = useState("");
+  const [operationalCitySuggestionsOpen, setOperationalCitySuggestionsOpen] = useState(false);
+  const [usesPersonalVehicle, setUsesPersonalVehicle] = useState("no");
+  const [startOdometerKm, setStartOdometerKm] = useState("");
+  const [endOdometerKm, setEndOdometerKm] = useState("");
+  const [startOdometerPhoto, setStartOdometerPhoto] = useState(null);
+  const [endOdometerPhoto, setEndOdometerPhoto] = useState(null);
   const [manualSubmitNonce, setManualSubmitNonce] = useState(0);
+  const [retryTick, setRetryTick] = useState(0);
+  const [resolvedShortcutAction, setResolvedShortcutAction] = useState(null);
+  const [legacyOverrideAction, setLegacyOverrideAction] = useState(null);
+  const [todayAttendance, setTodayAttendance] = useState(null);
+  const [compatibilityPrompt, setCompatibilityPrompt] = useState(null);
+  const [entryRegularizationReason, setEntryRegularizationReason] = useState("");
+  const [entryRegularizationLoading, setEntryRegularizationLoading] = useState(false);
+  const [lateJustificationReason, setLateJustificationReason] = useState("");
+  const [lateJustificationLoading, setLateJustificationLoading] = useState(false);
+  const [exitConfirmAccepted, setExitConfirmAccepted] = useState(false);
+  const [liveGpsReading, setLiveGpsReading] = useState(null);
   const processedRef = useRef(false);
+  const executionKeyRef = useRef("");
+  const lowAccuracyRecoveryAttemptedRef = useRef(false);
   const actionParams = parseActionParams(location.search);
+  const executionKey = `${action || ""}|${location.search || ""}|${location.key || ""}|${user?.id || ""}`;
+  const shortcutIntentKey = useMemo(() => resolveAttendanceIntentKey(action), [action]);
 
-  const ACTION_MAP = {
+  useEffect(() => {
+    if (actionParams.prospectName) {
+      setOperationalVisitType("prospecto");
+    } else if (actionParams.clientId) {
+      setOperationalVisitType("cronograma");
+    }
+  }, [actionParams.clientId, actionParams.prospectName]);
+
+  const ensureExceptionFlow = useCallback(async (expectedFlow) => {
+    const activeResponse = await getActiveException();
+    const activeException = activeResponse?.data;
+    const operationalFlow = isOperationalFlow(activeException);
+
+    if (expectedFlow === "operational") {
+      if (!activeException) {
+        throw new Error("No tienes una salida operacional activa para cerrar.");
+      }
+      if (!operationalFlow) {
+        throw new Error("La salida activa actual es inesperada. Usa el flujo de regreso imprevisto.");
+      }
+      return;
+    }
+
+    if (!activeException) {
+      throw new Error("La marcacion solicitada ya no esta disponible en la interfaz.");
+    }
+    if (operationalFlow) {
+      throw new Error("La salida activa actual es operacional. Usa el flujo operacional para continuar.");
+    }
+  }, []);
+
+  const resolveVisitExitPayload = useCallback(async (params = {}) => {
+    const directClientId = params.clientId ? Number(params.clientId) : null;
+    const directProspectName = String(params.prospectName || "").trim();
+    if (directClientId || directProspectName) {
+      return {
+        client_id: Number.isFinite(directClientId) && directClientId > 0 ? directClientId : undefined,
+        prospect_name: directProspectName || undefined,
+      };
+    }
+
+    try {
+      const today = await getTodayAttendance();
+      const activeVisit = today?.active_field_visit || null;
+      const activeClientId = Number(activeVisit?.client_id);
+      const activeProspectName = String(activeVisit?.prospect_name || "").trim();
+
+      return {
+        client_id: Number.isFinite(activeClientId) && activeClientId > 0 ? activeClientId : undefined,
+        prospect_name: activeProspectName || undefined,
+      };
+    } catch {
+      // Allow backend auto-resolution of latest active visit.
+      return {};
+    }
+  }, []);
+
+  const ACTION_MAP = useMemo(() => ({
     entrada: {
-      fn: async (currentLoc) => marcarEntrada(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarEntrada(currentLoc, markMeta),
       label: "Entrada",
       syncTarget: "entry",
       requiresParams: false,
       icon: <FiClock className="text-blue-500" />,
     },
     "almuerzo-salida": {
-      fn: async (currentLoc) => marcarAlmuerzoSalida(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarAlmuerzoSalida(currentLoc, markMeta),
       label: "Salida a almuerzo",
       syncTarget: "lunch_start",
       requiresParams: false,
       icon: <FiClock className="text-orange-500" />,
     },
     "salida-almuerzo": {
-      fn: async (currentLoc) => marcarAlmuerzoSalida(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarAlmuerzoSalida(currentLoc, markMeta),
       label: "Salida a almuerzo",
       syncTarget: "lunch_start",
       requiresParams: false,
       icon: <FiClock className="text-orange-500" />,
     },
     almuerzo: {
-      fn: async (currentLoc) => marcarAlmuerzoSalida(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarAlmuerzoSalida(currentLoc, markMeta),
       label: "Salida a almuerzo",
       syncTarget: "lunch_start",
       requiresParams: false,
       icon: <FiClock className="text-orange-500" />,
     },
     "almuerzo-entrada": {
-      fn: async (currentLoc) => marcarAlmuerzoEntrada(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarAlmuerzoEntrada(currentLoc, markMeta),
       label: "Entrada de almuerzo",
       syncTarget: "lunch_end",
       requiresParams: false,
       icon: <FiClock className="text-green-500" />,
     },
     "entrada-almuerzo": {
-      fn: async (currentLoc) => marcarAlmuerzoEntrada(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarAlmuerzoEntrada(currentLoc, markMeta),
       label: "Entrada de almuerzo",
       syncTarget: "lunch_end",
       requiresParams: false,
       icon: <FiClock className="text-green-500" />,
     },
     salida: {
-      fn: async (currentLoc) => marcarSalida(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarSalida(currentLoc, markMeta),
       label: "Salida final",
       syncTarget: "exit",
       requiresParams: false,
       icon: <FiClock className="text-red-500" />,
     },
     "salida-final": {
-      fn: async (currentLoc) => marcarSalida(currentLoc),
+      fn: async (currentLoc, _params, markMeta) => marcarSalida(currentLoc, markMeta),
       label: "Salida final",
       syncTarget: "exit",
       requiresParams: false,
       icon: <FiClock className="text-red-500" />,
     },
-    "salida-imprevista": {
-      fn: async (currentLoc, params) =>
-        marcarSalidaImprevista(currentLoc, params.description || "Salida imprevista via atajo"),
-      label: "Salida inesperada",
-      syncTarget: "start",
+    "permission-entry-start": {
+      fn: async (currentLoc) => startPermissionEntry(currentLoc),
+      label: "Entrada + salida a permiso",
+      syncTarget: "permission_start",
       requiresParams: false,
-      icon: <FiClock className="text-rose-500" />,
+      icon: <FiClock className="text-cyan-500" />,
     },
-    "regreso-imprevisto": {
-      fn: async (currentLoc) => marcarRegresoImprevisto(currentLoc),
-      label: "Entrada inesperada",
-      syncTarget: "return",
+    "permission-exit-finish": {
+      fn: async (currentLoc) => finishPermissionExit(currentLoc),
+      label: "Salida del permiso",
+      syncTarget: "permission_end",
       requiresParams: false,
-      icon: <FiClock className="text-rose-500" />,
-    },
-    "llegada-imprevista": {
-      fn: async (currentLoc) => updateExceptionStatus("ON_SITE", currentLoc),
-      label: "Llegada al lugar inesperado",
-      syncTarget: "onsite",
-      requiresParams: false,
-      icon: <FiClock className="text-rose-500" />,
-    },
-    "retorno-imprevisto": {
-      fn: async (currentLoc) => updateExceptionStatus("RETURNING", currentLoc),
-      label: "Salida del lugar (retorno oficina)",
-      syncTarget: "returning",
-      requiresParams: false,
-      icon: <FiClock className="text-rose-500" />,
+      icon: <FiCheckCircle className="text-cyan-500" />,
     },
     "salida-oficina": {
-      fn: async (currentLoc, params) =>
-        registerException("otro", params.description || "Salida de oficina o viaje via atajo", currentLoc),
-      label: "Salida oficina o viaje",
+      fn: async (currentLoc, params, markMeta) =>
+        marcarSalidaOficina(currentLoc, buildOperationalStartPayload({
+          description: params.description,
+          category: params.operationalCategory,
+          usesPersonalVehicle: params.usesPersonalVehicle,
+          startKm: params.startOdometerKm,
+          startPhoto: params.startOdometerPhoto,
+          destinationLabel: params.destinationLabel,
+          destinationCity: params.destinationCity,
+          teleworkRequestId: params.teleworkRequestId,
+        }), markMeta),
+      label: "Salida operacional",
       syncTarget: "start",
       requiresParams: false,
       icon: <FiClock className="text-amber-500" />,
     },
     "entrada-oficina": {
-      fn: async (currentLoc) => updateExceptionStatus("COMPLETED", currentLoc),
-      label: "Entrada oficina o viaje",
+      fn: async (currentLoc, _params, markMeta) => {
+        await ensureExceptionFlow("operational");
+        return marcarEntradaOficina(currentLoc, buildOperationalClosurePayload({
+          endKm: _params.endOdometerKm,
+          endPhoto: _params.endOdometerPhoto,
+        }), markMeta);
+      },
+      label: "Cierre operacional",
       syncTarget: "return",
       requiresParams: false,
       icon: <FiClock className="text-amber-500" />,
     },
     "salida-campo": {
-      fn: async (currentLoc, params) =>
-        registerException("otro", params.description || "Salida de campo via atajo", currentLoc),
-      label: "Salida de campo",
+      fn: async (currentLoc, params, markMeta) =>
+        marcarSalidaCampo(currentLoc, buildOperationalStartPayload({
+          description: params.description,
+          category: params.operationalCategory,
+          usesPersonalVehicle: params.usesPersonalVehicle,
+          startKm: params.startOdometerKm,
+          startPhoto: params.startOdometerPhoto,
+          destinationLabel: params.destinationLabel,
+          destinationCity: params.destinationCity,
+          teleworkRequestId: params.teleworkRequestId,
+        }), markMeta),
+      label: "Salida operacional",
       syncTarget: "start",
       requiresParams: false,
       icon: <FiClock className="text-amber-500" />,
     },
     "entrada-campo": {
-      fn: async (currentLoc) => updateExceptionStatus("COMPLETED", currentLoc),
-      label: "Entrada de campo",
+      fn: async (currentLoc, _params, markMeta) => {
+        await ensureExceptionFlow("operational");
+        return marcarEntradaCampo(currentLoc, buildOperationalClosurePayload({
+          endKm: _params.endOdometerKm,
+          endPhoto: _params.endOdometerPhoto,
+        }), markMeta);
+      },
+      label: "Cierre operacional",
       syncTarget: "return",
       requiresParams: false,
       icon: <FiClock className="text-amber-500" />,
     },
+    "llegada-destino": {
+      fn: async (currentLoc, _params, markMeta) => {
+        await ensureExceptionFlow("operational");
+        return marcarLlegadaDestino(currentLoc, markMeta);
+      },
+      label: "Llegada a destino",
+      syncTarget: "arrival",
+      requiresParams: false,
+      icon: <FiMapPin className="text-amber-500" />,
+    },
+    "cierre-viaje": {
+      fn: async (currentLoc, params, markMeta) => {
+        await ensureExceptionFlow("operational");
+        return marcarCierreViaje(currentLoc, buildOperationalTripClosePayload({
+          closureReason: params.description,
+          endKm: params.endOdometerKm,
+          endPhoto: params.endOdometerPhoto,
+        }), markMeta);
+      },
+      label: "Cierre de viaje",
+      syncTarget: "return",
+      requiresParams: false,
+      icon: <FiCheckCircle className="text-amber-500" />,
+    },
+    "retorno-operacional": {
+      fn: async (currentLoc) => {
+        await ensureExceptionFlow("operational");
+        return updateExceptionStatus("RETURNING", currentLoc);
+      },
+      label: "Retorno operacional",
+      syncTarget: "returning",
+      requiresParams: false,
+      icon: <FiMapPin className="text-amber-500" />,
+    },
+    "regreso-operacional": {
+      fn: async (currentLoc) => {
+        await ensureExceptionFlow("operational");
+        return updateExceptionStatus("RETURNING", currentLoc);
+      },
+      label: "Retorno operacional",
+      syncTarget: "returning",
+      requiresParams: false,
+      icon: <FiMapPin className="text-amber-500" />,
+    },
     "cliente-entrada": {
-      fn: async (currentLoc, params) => {
+      fn: async (currentLoc, params, markMeta) => {
         if (!params.clientId && !params.prospectName) {
           throw new Error("Para entrada cliente debes enviar client_id o prospect_name en la URL.");
         }
         return marcarVisitaEntrada({
           location: currentLoc,
+          occurred_at: markMeta?.occurred_at,
           client_id: params.clientId ? Number(params.clientId) : undefined,
           prospect_name: params.prospectName || undefined,
+          destination_city: params.destinationCity || undefined,
           observations: params.observations || params.description || undefined,
         });
       },
@@ -212,14 +576,16 @@ const AttendanceAction = () => {
       icon: <FiClock className="text-violet-500" />,
     },
     "entrada-cliente": {
-      fn: async (currentLoc, params) => {
+      fn: async (currentLoc, params, markMeta) => {
         if (!params.clientId && !params.prospectName) {
           throw new Error("Para entrada cliente debes enviar client_id o prospect_name en la URL.");
         }
         return marcarVisitaEntrada({
           location: currentLoc,
+          occurred_at: markMeta?.occurred_at,
           client_id: params.clientId ? Number(params.clientId) : undefined,
           prospect_name: params.prospectName || undefined,
+          destination_city: params.destinationCity || undefined,
           observations: params.observations || params.description || undefined,
         });
       },
@@ -229,75 +595,349 @@ const AttendanceAction = () => {
       icon: <FiClock className="text-violet-500" />,
     },
     "cliente-salida": {
-      fn: async (currentLoc, params) => {
-        if (!params.clientId && !params.prospectName) {
-          throw new Error("Para salida cliente debes enviar client_id o prospect_name en la URL.");
-        }
+      fn: async (currentLoc, params, markMeta) => {
+        const visitScopePayload = await resolveVisitExitPayload(params);
         return marcarVisitaSalida({
           location: currentLoc,
-          client_id: params.clientId ? Number(params.clientId) : undefined,
-          prospect_name: params.prospectName || undefined,
+          occurred_at: markMeta?.occurred_at,
+          ...visitScopePayload,
           observations: params.observations || params.description || undefined,
+          return_to_office: params.returnToOffice,
+          post_visit_action: params.postVisitAction,
         });
       },
       label: "Salida cliente",
       syncTarget: "departure",
-      requiresParams: true,
+      requiresParams: false,
       icon: <FiClock className="text-violet-500" />,
     },
     "salida-cliente": {
-      fn: async (currentLoc, params) => {
-        if (!params.clientId && !params.prospectName) {
-          throw new Error("Para salida cliente debes enviar client_id o prospect_name en la URL.");
-        }
+      fn: async (currentLoc, params, markMeta) => {
+        const visitScopePayload = await resolveVisitExitPayload(params);
         return marcarVisitaSalida({
           location: currentLoc,
-          client_id: params.clientId ? Number(params.clientId) : undefined,
-          prospect_name: params.prospectName || undefined,
+          occurred_at: markMeta?.occurred_at,
+          ...visitScopePayload,
           observations: params.observations || params.description || undefined,
+          return_to_office: params.returnToOffice,
+          post_visit_action: params.postVisitAction,
         });
       },
       label: "Salida cliente",
       syncTarget: "departure",
-      requiresParams: true,
+      requiresParams: false,
       icon: <FiClock className="text-violet-500" />,
     },
-  };
+  }), [ensureExceptionFlow, resolveVisitExitPayload]);
 
-  const config = ACTION_MAP[action];
+  const canonicalLegacyAction = useMemo(() => resolveAttendanceActionKey(action), [action]);
+  const effectiveActionKey = shortcutIntentKey ? resolvedShortcutAction : (legacyOverrideAction || canonicalLegacyAction || action);
+  const config = effectiveActionKey ? ACTION_MAP[effectiveActionKey] : null;
+  // Fase 8 (Plan Maestro Asistencia): ayuda contextual breve antes de pedir GPS.
+  const helpHint = useMemo(() => getAttendanceHelpHint(effectiveActionKey), [effectiveActionKey]);
+  const operationalPhase = effectiveActionKey === "salida-oficina" || effectiveActionKey === "salida-campo"
+    ? "start"
+    : effectiveActionKey === "entrada-oficina" || effectiveActionKey === "entrada-campo"
+      ? "end"
+      : effectiveActionKey === "cierre-viaje"
+        ? "close"
+        : null;
+  const requiresOperationalStep = Boolean(operationalPhase);
+  const activeOperationalUsesPersonalVehicle = Boolean(activeOperationalException?.uses_personal_vehicle);
+  const activeOperationalIsTelework = isTeleworkCategory(activeOperationalException?.operational_category);
+  const shouldPromptExitConfirmation = effectiveActionKey === "salida";
+  const shouldOfferEntryRegularization = Boolean(
+    !todayAttendance?.entry_time &&
+    !todayAttendance?.late_policy?.entryPendingRegularization &&
+    todayAttendance?.late_policy?.entryMarkCutoffPassed &&
+    (effectiveActionKey === "entrada" || shortcutIntentKey === "resolver-entrada-tardia")
+  );
+  const shouldShowPendingEntryRegularization = Boolean(todayAttendance?.late_policy?.entryPendingRegularization);
+  const shouldOfferLateJustification = Boolean(
+    todayAttendance?.late_policy?.justification?.canJustify &&
+    shortcutIntentKey === "resolver-entrada-tardia"
+  );
+
+  const getNextStepHint = useCallback((currentAction) => getAttendanceNextStepHint(currentAction), []);
+
+  const resolveFriendlyDuplicateMessage = useCallback(({ currentAction, statusCode, backendCode, backendMessage }) => {
+    const msg = String(backendMessage || "").toLowerCase();
+    const hasAlreadyMarked =
+      msg.includes("ya has marcado") ||
+      msg.includes("ya tienes una salida") ||
+      msg.includes("ya se encontraba cerrada") ||
+      msg.includes("ya estaba cerrada");
+    const noActiveButLikelyCompleted = statusCode === 404 && backendCode === "NO_ACTIVE_OPERATIONAL";
+
+    if (!hasAlreadyMarked && !noActiveButLikelyCompleted) {
+      return null;
+    }
+
+    return `Esta marcación ya estaba registrada. ${getNextStepHint(currentAction)}`;
+  }, [getNextStepHint]);
   const needsManualClientStep = Boolean(
     config?.requiresParams && !actionParams.clientId && !actionParams.prospectName
   );
+  const isClientExitAction = effectiveActionKey === "cliente-salida" || effectiveActionKey === "salida-cliente";
+  const needsPostVisitDecisionStep = Boolean(
+    isClientExitAction && actionParams.returnToOffice === null && !manualPostVisitAction
+  );
+
+  const filteredClients = useMemo(() => {
+    const term = normalizeText(manualClientSearch);
+    if (!term) return availableClients.slice(0, 80);
+    return availableClients.filter((client) => {
+      const label = normalizeText(buildClientDisplayLabel(client));
+      const idText = String(client?.id || "");
+      return label.includes(term) || idText.includes(term);
+    }).slice(0, 120);
+  }, [availableClients, manualClientSearch]);
+  const selectedOperationalClient = useMemo(
+    () => availableClients.find((client) => String(client.id) === String(actionParams.clientId || manualClientId)) || null,
+    [actionParams.clientId, availableClients, manualClientId],
+  );
+  const todayKey = getLocalDateKey();
+  const approvedTeleworkRequests = useMemo(
+    () => teleworkRequests
+      .filter((request) =>
+        String(request?.status || "").toUpperCase() === "APPROVED"
+        && !request?.consumed_at
+      )
+      .sort((a, b) => String(a?.request_date || "").localeCompare(String(b?.request_date || ""))),
+    [teleworkRequests],
+  );
+  const markableTeleworkRequests = useMemo(
+    () => approvedTeleworkRequests.filter((request) => String(request?.request_date || "").slice(0, 10) === todayKey),
+    [approvedTeleworkRequests, todayKey],
+  );
+  const selectedTeleworkRequest = useMemo(
+    () => approvedTeleworkRequests.find((request) => String(request.id) === String(selectedTeleworkRequestId)) || null,
+    [approvedTeleworkRequests, selectedTeleworkRequestId],
+  );
+  const operationalCityOptions = useMemo(() => {
+    const cities = availableClients
+      .map((client) => String(client?.city || client?.ciudad || client?.shipping_city || "").trim())
+      .filter((city) => city && normalizeText(city) !== "sin ciudad");
+    const ecuadorCities = ECUADOR_LOCATIONS.map((location) => location?.canton).filter(Boolean);
+    return [...new Map([...ecuadorCities, ...cities].map((city) => [normalizeText(city), city])).values()]
+      .sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
+  }, [availableClients]);
+  const resolvedOperationalDestination = useMemo(() => {
+    if (isOperationalExitCategory(operationalCategory)) {
+      if (operationalVisitType === "cronograma") {
+        return {
+          label: String(
+            selectedOperationalClient?.commercial_name
+            || selectedOperationalClient?.business_name
+            || selectedOperationalClient?.name
+            || selectedOperationalClient?.nombre
+            || selectedOperationalClient?.razon_social
+            || ""
+          ).trim(),
+          city: String(selectedOperationalClient?.city || selectedOperationalClient?.ciudad || selectedOperationalClient?.shipping_city || "").trim(),
+        };
+      }
+      if (operationalVisitType === "prospecto") {
+        return {
+          label: String(actionParams.prospectName || manualProspectName || "").trim(),
+          city: String(operationalDestinationCity || "").trim(),
+        };
+      }
+      return {
+        label: String(operationalDestination || "").trim(),
+        city: String(operationalDestinationCity || "").trim(),
+      };
+    }
+
+    if (String(operationalCategory || "").trim().toLowerCase() === "teletrabajo") {
+      return {
+        label: selectedTeleworkRequest && teleworkRequestMode === "approved" ? "Teletrabajo" : "",
+        city: String((teleworkRequestMode === "approved" ? selectedTeleworkRequest?.city : "") || operationalDestinationCity || "").trim(),
+      };
+    }
+
+    return {
+      label: String(operationalDestination || "").trim(),
+      city: String(operationalDestinationCity || "").trim(),
+    };
+  }, [
+    actionParams.prospectName,
+    manualProspectName,
+    operationalCategory,
+    operationalDestinationCity,
+    operationalDestination,
+    operationalVisitType,
+    selectedOperationalClient,
+    selectedTeleworkRequest,
+    teleworkRequestMode,
+  ]);
+  const renderOperationalCityField = ({ value, onChange } = {}) => {
+    const normalizedValue = normalizeText(value);
+    const suggestions = operationalCityOptions
+      .filter((city) => !normalizedValue || normalizeText(city).includes(normalizedValue))
+      .slice(0, 8);
+
+    return (
+      <label className="flex flex-col gap-2">
+        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Ciudad</span>
+        <div className="relative">
+          <input
+            type="text"
+            value={value || ""}
+            onFocus={() => setOperationalCitySuggestionsOpen(true)}
+            onBlur={() => setOperationalCitySuggestionsOpen(false)}
+            onChange={(e) => {
+              setOperationalCitySuggestionsOpen(true);
+              onChange(e.target.value);
+            }}
+            placeholder="Escribe para buscar una ciudad"
+            className="min-h-[44px] w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 pr-10 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+            autoComplete="off"
+          />
+          {value ? (
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onChange("");
+                setOperationalCitySuggestionsOpen(false);
+              }}
+              className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+              aria-label="Limpiar ciudad"
+            >
+              x
+            </button>
+          ) : null}
+          {operationalCitySuggestionsOpen && normalizedValue && suggestions.length > 0 ? (
+            <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-lg" role="listbox" aria-label="Ciudades sugeridas">
+              {suggestions.map((city) => (
+                <button
+                  key={city}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    onChange(city);
+                    setOperationalCitySuggestionsOpen(false);
+                  }}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-900"
+                  role="option"
+                  aria-selected={value === city}
+                >
+                  {city}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </label>
+    );
+  };
   const effectiveActionParams = useMemo(
     () => ({
       clientId: actionParams.clientId || manualClientId,
       prospectName: actionParams.prospectName || manualProspectName,
-      description: actionParams.description || manualReason,
-      observations: actionParams.observations || manualObservations,
+      description: actionParams.description || operationalDetail || manualReason,
+      observations: actionParams.observations,
+      returnToOffice: actionParams.returnToOffice ?? (manualPostVisitAction === "return_to_office"),
+      postVisitAction: actionParams.returnToOffice === null
+        ? manualPostVisitAction || undefined
+        : (actionParams.returnToOffice ? "return_to_office" : "continue_operation"),
+      operationalCategory,
+      usesPersonalVehicle: usesPersonalVehicle === "si",
+      startOdometerKm,
+      endOdometerKm,
+      startOdometerPhoto,
+      endOdometerPhoto,
+      destinationLabel: resolvedOperationalDestination.label,
+      destinationCity: actionParams.destinationCity
+        || operationalDestinationCity
+        || getClientCity(selectedOperationalClient)
+        || resolvedOperationalDestination.city,
+      teleworkRequestDate: teleworkRequestMode === "approved" && selectedTeleworkRequest ? selectedTeleworkRequest.request_date : teleworkRequestDate,
+      teleworkRequestId: teleworkRequestMode === "approved" && selectedTeleworkRequest ? selectedTeleworkRequest.id : "",
     }),
     [
       actionParams.clientId,
       actionParams.prospectName,
       actionParams.description,
       actionParams.observations,
+      actionParams.returnToOffice,
+      actionParams.destinationCity,
       manualClientId,
       manualProspectName,
       manualReason,
-      manualObservations,
+      manualPostVisitAction,
+      operationalCategory,
+      operationalDetail,
+      operationalDestinationCity,
+      usesPersonalVehicle,
+      startOdometerKm,
+      endOdometerKm,
+      startOdometerPhoto,
+      endOdometerPhoto,
+      resolvedOperationalDestination.city,
+      resolvedOperationalDestination.label,
+      selectedOperationalClient,
+      selectedTeleworkRequest,
+      teleworkRequestMode,
+      teleworkRequestDate,
     ]
   );
+  // Regla de negocio confirmada: si el cronograma aplica (hay clientes
+  // planificados para hoy), se elige de una lista cerrada -- no se permite
+  // escribir un nombre libre (mismo criterio que AttendanceWidget). Los ya
+  // visitados hoy (visit_status del fetchClients) van al final, pero siguen
+  // seleccionables por si hace falta una re-visita.
+  const scheduledClientsToday = useMemo(
+    () => availableClients
+      .filter((client) => {
+        const info = client?.scheduled_info || {};
+        return Boolean(info?.is_planned_commercial || info?.is_planned_technical || info?.is_planned);
+      })
+      .sort((a, b) => {
+        const aVisited = String(a?.visit_status || "").trim().toLowerCase() === "visited";
+        const bVisited = String(b?.visit_status || "").trim().toLowerCase() === "visited";
+        return Number(aVisited) - Number(bVisited);
+      }),
+    [availableClients],
+  );
+
+  const resolveClientIdFromSearch = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    if (/^\d+$/.test(raw)) return raw;
+
+    const normalized = normalizeText(raw);
+    const exact = availableClients.find((client) => normalizeText(buildClientDisplayLabel(client)) === normalized);
+    if (exact?.id) return String(exact.id);
+
+    const startsWith = availableClients.find((client) =>
+      normalizeText(buildClientDisplayLabel(client)).startsWith(normalized)
+    );
+    if (startsWith?.id) return String(startsWith.id);
+    return "";
+  };
+
+  const needsSharedClientCatalog = needsManualClientStep || (requiresOperationalStep && operationalPhase === "start" && Boolean(operationalCategory));
 
   useEffect(() => {
-    if (!needsManualClientStep || !user || authLoading) return;
+    if (!needsSharedClientCatalog || !user || authLoading) return;
 
     let isMounted = true;
     const loadClients = async () => {
       setLoadingClients(true);
       try {
-        const response = await fetchClients();
+        // Fase 5 (Plan Maestro Asistencia): trae info de cronograma para priorizar
+        // en la lista a los clientes ya planificados para hoy (contexto conocido).
+        const response = await fetchClients({ include_schedule_info: true, schedule_scope: "mine" });
         const clients = Array.isArray(response?.clients) ? response.clients : [];
+        const isScheduledToday = (client) => {
+          const info = client?.scheduled_info || {};
+          return Boolean(info?.is_planned_commercial || info?.is_planned_technical || info?.is_planned);
+        };
+        const sorted = [...clients].sort((a, b) => Number(isScheduledToday(b)) - Number(isScheduledToday(a)));
         if (isMounted) {
-          setAvailableClients(clients);
+          setAvailableClients(sorted);
           setStatus("initializing");
         }
       } catch (err) {
@@ -315,72 +955,651 @@ const AttendanceAction = () => {
     return () => {
       isMounted = false;
     };
-  }, [needsManualClientStep, user, authLoading]);
+  }, [needsSharedClientCatalog, user, authLoading]);
 
   useEffect(() => {
-    if (authLoading || !user || processedRef.current || !config) return;
-    if (needsManualClientStep && manualSubmitNonce === 0) return;
-    
-    const performAction = async () => {
-      processedRef.current = true;
-      setStatus("geolocating");
-      
-      let currentLoc = null;
-      try {
-        currentLoc = await getActionLocation();
-      } catch (err) {
-        console.warn("Geolocalizacion fallida o denegada:", err.message);
-      }
+    if (
+      !requiresOperationalStep ||
+      operationalPhase !== "start" ||
+      !isTeleworkCategory(operationalCategory) ||
+      !user ||
+      authLoading
+    ) {
+      return;
+    }
 
-      setStatus("processing");
+    let cancelled = false;
+    const loadTeleworkRequests = async () => {
+      setTeleworkRequestsLoading(true);
       try {
-        const response = await config.fn(currentLoc, effectiveActionParams);
-        if (response.ok) {
-          if (config.syncTarget && !currentLoc) {
-            Promise.resolve()
-              .then(() => getPreciseLocation(PRECISE_LOCATION_OPTIONS))
-              .then((result) => {
-                if (!result?.location) return null;
-                return syncAttendanceLocation(config.syncTarget, result.location);
-              })
-              .catch(() => null);
-          }
-
-          setStatus("success");
-          setMessage(response.message || `${config.label} registrada correctamente.`);
-          showToast(response.message || `${config.label} registrada`, "success");
-          
-          // Redirect after 3 seconds
-          setTimeout(() => {
-            navigate("/dashboard", { replace: true });
-          }, 3500);
+        const response = await getTeleworkRequests({ scope: "mine" });
+        if (cancelled) return;
+        const requests = Array.isArray(response?.data?.requests) ? response.data.requests : [];
+        setTeleworkRequests(requests);
+        const todayApproved = requests.find((request) =>
+          String(request?.status || "").toUpperCase() === "APPROVED"
+          && !request?.consumed_at
+          && String(request?.request_date || "").slice(0, 10) === getLocalDateKey()
+        );
+        if (todayApproved) {
+          setSelectedTeleworkRequestId(String(todayApproved.id));
+          setTeleworkRequestMode("approved");
+          setTeleworkRequestDate(String(todayApproved.request_date || "").slice(0, 10));
+          setOperationalDestinationCity(String(todayApproved.city || ""));
+          setOperationalDetail(String(todayApproved.reason || ""));
         } else {
-          throw new Error(response.message || "Error al procesar la solicitud.");
+          setTeleworkRequestMode("request");
         }
-      } catch (err) {
-        setStatus("error");
-        setMessage(`No se pudo registrar la ${config.label.toLowerCase()}.`);
-        setErrorDetails(err.response?.data?.message || err.message || "Error desconocido");
-        showToast(err.response?.data?.message || err.message || "Error de red", "error");
+      } catch {
+        if (!cancelled) {
+          setManualStepError("No se pudieron cargar tus solicitudes de teletrabajo aprobadas.");
+        }
+      } finally {
+        if (!cancelled) setTeleworkRequestsLoading(false);
       }
     };
 
-    performAction();
+    loadTeleworkRequests();
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, operationalCategory, operationalPhase, requiresOperationalStep, user]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const resolveTodayContext = async () => {
+      setResolvedShortcutAction(null);
+      setLegacyOverrideAction(null);
+      setCompatibilityPrompt(null);
+      setStatus("initializing");
+      setMessage("");
+      setErrorDetails("");
+      try {
+        const cached = readCachedTodayContext();
+        const todayResponse = cached ? { data: cached } : await getTodayAttendance();
+        if (cancelled) return;
+        const todayData = todayResponse?.data || todayResponse || {};
+        setTodayAttendance(todayData);
+        writeCachedTodayContext(todayData);
+
+        const todayFlowStep = resolveAttendanceFlowStep(todayData?.canonical_flow || null);
+        if (shortcutIntentKey) {
+          const resolution = resolveAttendanceShortcutIntent({
+            rawIntent: shortcutIntentKey,
+            attendanceData: todayData,
+          });
+
+          if (shortcutIntentKey === "resolver-entrada-tardia" && todayData?.late_policy?.justification?.canJustify && todayData?.entry_time) {
+            return;
+          }
+
+          if (!resolution.isAvailable || !resolution.resolvedActionKey) {
+            setStatus("error");
+            setMessage("Este atajo no esta disponible ahora.");
+            setErrorDetails(resolution.reason || "No existe una accion valida para el estado actual de asistencia.");
+            return;
+          }
+          setResolvedShortcutAction(resolution.resolvedActionKey);
+          return;
+        }
+
+        if (canonicalLegacyAction && todayFlowStep.allowedActionKeys.includes(canonicalLegacyAction)) {
+          return;
+        }
+
+        const compatibilityTarget = resolveLegacyCompatibilityTarget({
+          actionKey: canonicalLegacyAction,
+          allowedActionKeys: todayFlowStep.allowedActionKeys,
+          nextActionKey: todayFlowStep.nextActionKey,
+        });
+
+        if (canonicalLegacyAction && compatibilityTarget) {
+          setLegacyOverrideAction(compatibilityTarget);
+          setCompatibilityPrompt({
+            originalAction: canonicalLegacyAction,
+            remappedAction: compatibilityTarget,
+            message: "Este atajo ya no corresponde al paso actual de hoy. Puedes continuar con la accion permitida.",
+          });
+          return;
+        }
+
+        if (canonicalLegacyAction && todayFlowStep.currentStep === "entry_pending_regularization") {
+          return;
+        }
+
+        if (!shortcutIntentKey && !canonicalLegacyAction) {
+          setStatus("error");
+          setMessage("La ruta de asistencia no existe.");
+          setErrorDetails("No se reconocio la accion solicitada.");
+        }
+      } catch (err) {
+        if (cancelled) return;
+        const info = getAttendanceErrorInfo(err, "No se pudo resolver el atajo.", "error");
+        setStatus("error");
+        setMessage("No se pudo preparar la marcacion.");
+        setErrorDetails(info.message || "Error desconocido");
+      }
+    };
+
+    resolveTodayContext();
+    return () => {
+      cancelled = true;
+    };
+  }, [canonicalLegacyAction, retryTick, shortcutIntentKey]);
+
+  useEffect(() => {
+    if (!requiresOperationalStep || operationalPhase === "start" || !user || authLoading) return;
+
+    let cancelled = false;
+    const loadActiveOperational = async () => {
+      try {
+        const response = await getActiveException();
+        if (cancelled) return;
+        const activeException = response?.data || null;
+        setActiveOperationalException(activeException);
+        if (activeException?.description && !operationalDetail) {
+          setOperationalDetail(String(activeException.description).split("\n")[0] || "");
+        }
+      } catch {
+        if (!cancelled) {
+          setManualStepError("No se pudo cargar la salida operacional activa. Reintenta.");
+        }
+      }
+    };
+
+    loadActiveOperational();
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, operationalDetail, operationalPhase, requiresOperationalStep, user]);
+
+  useEffect(() => {
+    if (executionKeyRef.current !== executionKey) {
+      executionKeyRef.current = executionKey;
+      processedRef.current = false;
+      setStatus("initializing");
+      setMessage("");
+      setErrorDetails("");
+      setManualPostVisitAction("");
+      setManualStepError("");
+      setActiveOperationalException(null);
+      setOperationalCategory("");
+      setOperationalDetail("");
+      setTeleworkRequestDate(getLocalDateKey());
+      setTeleworkRequests([]);
+      setTeleworkRequestsLoading(false);
+      setSelectedTeleworkRequestId("");
+      setTeleworkRequestMode("approved");
+      setOperationalDestination("");
+      setOperationalDestinationCity("");
+      setOperationalCitySuggestionsOpen(false);
+      setUsesPersonalVehicle("no");
+      setStartOdometerKm("");
+      setEndOdometerKm("");
+      setStartOdometerPhoto(null);
+      setEndOdometerPhoto(null);
+      setManualSubmitNonce(0);
+      setResolvedShortcutAction(null);
+      setLegacyOverrideAction(null);
+      setTodayAttendance(null);
+      setCompatibilityPrompt(null);
+      lowAccuracyRecoveryAttemptedRef.current = false;
+      setEntryRegularizationReason("");
+      setEntryRegularizationLoading(false);
+      setLateJustificationReason("");
+      setLateJustificationLoading(false);
+      setExitConfirmAccepted(false);
+    }
+  }, [executionKey]);
+
+  useEffect(() => {
+    if (status !== "geolocating") return undefined;
+    const timer = setTimeout(() => {
+      if (status === "geolocating") {
+        processedRef.current = false;
+        setStatus("error");
+        setMessage("No se pudo obtener tu ubicación a tiempo.");
+        setErrorDetails("El GPS tardó demasiado. Reintenta y verifica permisos de ubicación para este sitio.");
+      }
+    }, 22000);
+    return () => clearTimeout(timer);
+  }, [status]);
+
+  useEffect(() => {
+    if (status !== "geolocating") {
+      setLiveGpsReading(null);
+      return undefined;
+    }
+
+    const cachedReading = readCachedLocation();
+    setLiveGpsReading(cachedReading || null);
+
+    if (!navigator?.geolocation) {
+      return undefined;
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        setLiveGpsReading({
+          latitude: Number(position?.coords?.latitude),
+          longitude: Number(position?.coords?.longitude),
+          accuracy: Number(position?.coords?.accuracy || 0),
+          timestamp: Number(position?.timestamp || Date.now()),
+          source: "live_watch",
+        });
+      },
+      () => {
+        // El flujo principal ya informa permisos o fallos; aqui solo reflejamos lecturas disponibles.
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 15000,
+      }
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, [status]);
+
+  // Prewarm GPS as soon as the page loads so cache is warm when needed
+  useEffect(() => {
+    startLocationPrewarm();
+    return () => stopLocationPrewarm();
+  }, []);
+
+  const handleConfirmMark = useCallback(async (currentLoc, occurredAt) => {
+    if (!currentLoc || !config) return;
+    setStatus("processing");
+    try {
+      let markParams = effectiveActionParams;
+      if (operationalPhase === "start" && isTeleworkCategory(operationalCategory)) {
+        let request = effectiveActionParams.teleworkRequestId
+          ? approvedTeleworkRequests.find((item) => String(item?.id) === String(effectiveActionParams.teleworkRequestId)) || null
+          : null;
+        if (!request) {
+          const requestResponse = await createTeleworkRequest({
+            city: effectiveActionParams.destinationCity,
+            location: currentLoc,
+            locationAccuracy: currentLoc?.accuracy,
+            reason: effectiveActionParams.description,
+            requestDate: effectiveActionParams.teleworkRequestDate,
+          });
+          request = requestResponse?.data || null;
+        }
+        const requestIsForToday = String(request?.request_date || "").slice(0, 10) === getLocalDateKey();
+        if (String(request?.status || "").toUpperCase() !== "APPROVED" || !requestIsForToday) {
+          setStatus("success");
+          setMessage(
+            request?.status === "REJECTED"
+              ? "La solicitud anterior fue rechazada. Puedes volver a solicitar teletrabajo."
+              : requestIsForToday
+                ? "Solicitud enviada a Talento Humano. Podras marcar cuando sea aprobada."
+                : `Solicitud registrada para el ${request?.request_date}. Marca teletrabajo ese dia cuando este aprobada.`,
+          );
+          setErrorDetails("");
+          showToast("Solicitud de teletrabajo enviada a Talento Humano.", "info");
+          writeCachedTodayContext(null);
+          setTimeout(() => navigate(actionParams.returnUrl || "/dashboard", { replace: true }), 2500);
+          return;
+        }
+        markParams = {
+          ...effectiveActionParams,
+          destinationLabel: "Teletrabajo",
+          destinationCity: request.city || effectiveActionParams.destinationCity,
+          description: request.reason || "Teletrabajo",
+          teleworkRequestId: request.id,
+        };
+      }
+
+      const response = await config.fn(currentLoc, markParams, { occurred_at: occurredAt || new Date().toISOString() });
+      if (response?.ok) {
+        const isOperationalClosure = effectiveActionKey === "entrada-oficina"
+          || effectiveActionKey === "entrada-campo"
+          || effectiveActionKey === "cierre-viaje";
+        const persistedEndKm = response?.data?.odometer_end_km;
+        const persistedEndPhoto = response?.data?.odometer_end_photo_drive_url || response?.data?.odometer_end_photo_drive_file_id;
+        if (isOperationalClosure && activeOperationalUsesPersonalVehicle && (persistedEndKm === null || persistedEndKm === undefined || !persistedEndPhoto)) {
+          throw new Error("El cierre no confirmo el kilometraje o la fotografia final. Intenta nuevamente.");
+        }
+        setStatus("success");
+        setMessage(response.message || `${config.label} registrada correctamente.`);
+        showToast(response.message || `${config.label} registrada`, "success");
+        // "Salir del cliente" es neutral -- no decide aqui si la operacion
+        // termina. Si el usuario ya esta en el destino donde cierra la
+        // jornada, cierra con el atajo "cierre-viaje" por separado, cuando
+        // este listo (mismo criterio que el widget, ver handleFieldVisitMark).
+        const destination = actionParams.returnUrl || "/dashboard";
+        setTimeout(() => {
+          navigate(destination, { replace: true });
+        }, 3500);
+        return;
+      }
+      throw new Error(response?.message || "Error al procesar la solicitud.");
+    } catch (err) {
+      let finalError = err;
+      let statusCode = Number(finalError?.response?.status || 0);
+      let backendCode = String(finalError?.response?.data?.code || "").trim();
+      let backendMessage = String(finalError?.response?.data?.message || "").trim();
+      if (backendCode === "LOCATION_ACCURACY_LOW" && !lowAccuracyRecoveryAttemptedRef.current) {
+        lowAccuracyRecoveryAttemptedRef.current = true;
+        setStatus("geolocating");
+        setMessage("La precision GPS fue insuficiente. Buscando una lectura mas precisa.");
+        setErrorDetails(backendMessage || "Reintentando con una nueva lectura GPS sin usar cache reciente.");
+
+        try {
+          const refreshedLoc = await withTimeout(
+            getLocationForAction({ forceRefresh: true }),
+            30000,
+            "El GPS no logro mejorar la precision a tiempo. Reintenta en una zona con mejor senal."
+          );
+
+          if (refreshedLoc?.accuracy && currentLoc?.accuracy && refreshedLoc.accuracy >= currentLoc.accuracy) {
+            throw new Error(
+              `La nueva lectura GPS sigue siendo imprecisa (${Math.round(refreshedLoc.accuracy)}m). Muevete a una zona abierta y reintenta.`
+            );
+          }
+
+          setStatus("processing");
+          setMessage("Ubicacion actualizada. Reintentando marcacion.");
+          setErrorDetails("");
+          const retryResponse = await config.fn(
+            refreshedLoc,
+            effectiveActionParams,
+            { occurred_at: occurredAt || new Date().toISOString() }
+          );
+
+          if (retryResponse?.ok) {
+            const destination = actionParams.returnUrl || "/dashboard";
+            setStatus("success");
+            setMessage(retryResponse.message || `${config.label} registrada correctamente.`);
+            showToast(retryResponse.message || `${config.label} registrada`, "success");
+            setTimeout(() => {
+              navigate(destination, { replace: true });
+            }, 3500);
+            return;
+          }
+
+          throw new Error(retryResponse?.message || "Error al procesar la solicitud.");
+        } catch (retryErr) {
+          finalError = retryErr;
+          statusCode = Number(finalError?.response?.status || 0);
+          backendCode = String(finalError?.response?.data?.code || "").trim();
+          backendMessage = String(finalError?.response?.data?.message || "").trim();
+        }
+      }
+
+      const isClientExitAction = effectiveActionKey === "cliente-salida" || effectiveActionKey === "salida-cliente";
+      if (
+        isClientExitAction &&
+        statusCode === 404 &&
+        (backendCode === "NO_ACTIVE_VISIT" || /no se encontró una visita activa/i.test(backendMessage))
+      ) {
+        setStatus("success");
+        setMessage("La salida cliente ya estaba cerrada o no tenía una visita activa pendiente.");
+        setErrorDetails("");
+        showToast("No había visita activa pendiente. Estado sincronizado.", "info");
+        setTimeout(() => {
+          navigate(actionParams.returnUrl || "/dashboard", { replace: true });
+        }, 2500);
+        return;
+      }
+
+      const duplicateMessage = resolveFriendlyDuplicateMessage({
+        currentAction: effectiveActionKey,
+        statusCode,
+        backendCode,
+        backendMessage,
+      });
+      if (duplicateMessage) {
+        setStatus("success");
+        setMessage(duplicateMessage);
+        setErrorDetails("");
+        showToast("Marcación ya registrada. Continuando flujo.", "info");
+        setTimeout(() => {
+          navigate(actionParams.returnUrl || "/dashboard", { replace: true });
+        }, 2500);
+        return;
+      }
+
+      const info = getAttendanceErrorInfo(finalError, "No se pudo completar la marcacion.", "error");
+      setStatus("error");
+      setMessage(`No se pudo registrar la ${config.label.toLowerCase()}.`);
+      setErrorDetails(info.message || "Error desconocido");
+      showToast(info.message || "Error de red", info.type || "error");
+    }
+  }, [
+    actionParams.returnUrl,
+    config,
+    effectiveActionKey,
+    effectiveActionParams,
+    activeOperationalUsesPersonalVehicle,
+    approvedTeleworkRequests,
+    navigate,
+    operationalCategory,
+    operationalPhase,
+    resolveFriendlyDuplicateMessage,
+    showToast,
+  ]);
+
+  useEffect(() => {
+    if (authLoading || !user || processedRef.current || !config) return;
+    if (shortcutIntentKey && !effectiveActionKey) return;
+    if (compatibilityPrompt) return;
+    if (shouldPromptExitConfirmation && !exitConfirmAccepted) return;
+    if (shouldOfferEntryRegularization || shouldShowPendingEntryRegularization || shouldOfferLateJustification) return;
+    if (needsManualClientStep && manualSubmitNonce === 0) return;
+    if (needsPostVisitDecisionStep) return;
+    if (requiresOperationalStep && manualSubmitNonce === 0) return;
+
+    let cancelled = false;
+    const resolveLocationOnly = async () => {
+      processedRef.current = true;
+      const intentAt = new Date().toISOString();
+      setStatus("geolocating");
+      try {
+        const currentLoc = await withTimeout(
+          getLocationForAction(),
+          20000,
+          "GPS tardó demasiado en responder. Verifica permisos de ubicación y vuelve a intentar."
+        );
+        if (cancelled) return;
+        setStatus("processing");
+        setMessage("Ubicación lista. Registrando marcación.");
+        setErrorDetails("");
+        await handleConfirmMark(currentLoc, intentAt);
+      } catch (err) {
+        if (!cancelled) {
+          const info = getAttendanceErrorInfo(err, "No se pudo obtener la ubicacion.", "error");
+          setStatus("error");
+          setMessage("No se pudo obtener tu ubicación.");
+          setErrorDetails(info.message || "Error desconocido");
+          showToast(info.message || "Error de red", info.type || "error");
+          processedRef.current = false;
+        }
+      }
+    };
+
+    resolveLocationOnly();
+    return () => { cancelled = true; };
   }, [
     authLoading,
     user,
     config,
+    compatibilityPrompt,
+    exitConfirmAccepted,
+    effectiveActionKey,
     navigate,
     showToast,
     needsManualClientStep,
+    needsPostVisitDecisionStep,
+    requiresOperationalStep,
     manualSubmitNonce,
+    retryTick,
     effectiveActionParams,
+    actionParams.returnUrl,
+    handleConfirmMark,
+    resolveFriendlyDuplicateMessage,
+    shouldOfferEntryRegularization,
+    shouldOfferLateJustification,
+    shouldPromptExitConfirmation,
+    shouldShowPendingEntryRegularization,
+    shortcutIntentKey,
   ]);
+
+  // Fase 3 (Plan Maestro Asistencia): reintento sin recargar la pagina, para no
+  // perder el contexto ya ingresado (cliente, motivo, kilometraje) en el paso manual.
+  const handleRetry = useCallback(() => {
+    processedRef.current = false;
+    lowAccuracyRecoveryAttemptedRef.current = false;
+    setLiveGpsReading(null);
+    setStatus("initializing");
+    setMessage("");
+    setErrorDetails("");
+    setCompatibilityPrompt(null);
+    setExitConfirmAccepted(false);
+    setRetryTick((tick) => tick + 1);
+  }, []);
+
+  const gpsSignal = useMemo(
+    () => describeGpsSignal(liveGpsReading?.accuracy),
+    [liveGpsReading?.accuracy]
+  );
+  const gpsSourceLabel = useMemo(
+    () => describeGpsSource(liveGpsReading?.source),
+    [liveGpsReading?.source]
+  );
+
+  const handleEntryRegularizationSubmit = useCallback(async () => {
+    const normalizedReason = String(entryRegularizationReason || "").trim();
+    if (normalizedReason.length < 8) {
+      setManualStepError("Describe el motivo con al menos 8 caracteres.");
+      return;
+    }
+    setManualStepError("");
+    setEntryRegularizationLoading(true);
+    try {
+      const res = await requestEntryRegularization({ reason: normalizedReason });
+      if (res?.ok) {
+        setStatus("success");
+        setMessage(res?.message || "Solicitud enviada a Talento Humano.");
+        setErrorDetails("");
+        showToast(res?.message || "Solicitud enviada a Talento Humano.", "success");
+        writeCachedTodayContext(null);
+        setTimeout(() => navigate(actionParams.returnUrl || "/dashboard", { replace: true }), 2500);
+        return;
+      }
+      throw new Error(res?.message || "No se pudo enviar la solicitud.");
+    } catch (err) {
+      const info = getAttendanceErrorInfo(err, "Error enviando solicitud", "error");
+      setManualStepError(info.message || "No se pudo enviar la solicitud.");
+      showToast(info.message || "Error enviando solicitud", info.type || "error");
+    } finally {
+      setEntryRegularizationLoading(false);
+    }
+  }, [actionParams.returnUrl, entryRegularizationReason, navigate, showToast]);
+
+  const handleLateJustificationSubmit = useCallback(async () => {
+    const normalizedReason = String(lateJustificationReason || "").trim();
+    if (normalizedReason.length < 8) {
+      setManualStepError("Describe una justificacion de al menos 8 caracteres.");
+      return;
+    }
+    setManualStepError("");
+    setLateJustificationLoading(true);
+    try {
+      const res = await justifyLateArrival({
+        reason: normalizedReason,
+        date: todayAttendance?.date || undefined,
+      });
+      if (res?.ok) {
+        setStatus("success");
+        setMessage(res?.message || "Justificacion de atraso registrada.");
+        setErrorDetails("");
+        showToast(res?.message || "Justificacion de atraso registrada.", "success");
+        writeCachedTodayContext(null);
+        setTimeout(() => navigate(actionParams.returnUrl || "/dashboard", { replace: true }), 2500);
+        return;
+      }
+      throw new Error(res?.message || "No se pudo registrar la justificacion.");
+    } catch (err) {
+      const info = getAttendanceErrorInfo(err, "Error registrando justificacion", "error");
+      setManualStepError(info.message || "No se pudo registrar la justificacion.");
+      showToast(info.message || "Error registrando justificacion", info.type || "error");
+    } finally {
+      setLateJustificationLoading(false);
+    }
+  }, [actionParams.returnUrl, lateJustificationReason, navigate, showToast, todayAttendance?.date]);
+
 
   const handleManualClientSubmit = () => {
     setManualStepError("");
+    if (requiresOperationalStep) {
+      // Mitigacion D1: regla compartida con AttendanceWidget.submitOperationalModal
+      // via attendanceFlowUtils.js (misma logica, un solo lugar para mantenerla).
+      if (operationalPhase === "start") {
+        const categoryCheck = validateOperationalCategoryStep(operationalCategory);
+        if (!categoryCheck.ok) {
+          setManualStepError(categoryCheck.error);
+          return;
+        }
+        if (isTeleworkCategory(operationalCategory)) {
+          if (teleworkRequestMode === "approved") {
+            if (!selectedTeleworkRequest) {
+              setManualStepError("Selecciona una solicitud aprobada para hoy o usa la opcion de solicitar una nueva.");
+              return;
+            }
+            const requestDate = String(selectedTeleworkRequest.request_date || "").slice(0, 10);
+            if (requestDate !== getLocalDateKey()) {
+              setManualStepError("Esta solicitud esta aprobada para otra fecha. Solo puedes marcar la solicitud aprobada de hoy.");
+              return;
+            }
+            setManualSubmitNonce(Date.now());
+            return;
+          }
+        }
+        const vehicleStartCheck = validateOperationalVehicleStart({
+          usesPersonalVehicle: usesPersonalVehicle === "si",
+          startKm: startOdometerKm,
+          startPhoto: startOdometerPhoto,
+        });
+        if (!vehicleStartCheck.ok) {
+          setManualStepError(vehicleStartCheck.error);
+          return;
+        }
+        const destinationCheck = validateOperationalDestinationStep({
+          category: operationalCategory,
+          visitType: operationalVisitType,
+          destinationLabel: resolvedOperationalDestination.label,
+          destinationCity: resolvedOperationalDestination.city,
+        });
+        if (!destinationCheck.ok) {
+          setManualStepError(destinationCheck.error);
+          return;
+        }
+      }
+      if (operationalPhase === "end" || operationalPhase === "close") {
+        const vehicleClosureCheck = validateOperationalVehicleClosure({
+          requiresClosure: activeOperationalUsesPersonalVehicle,
+          endKm: endOdometerKm,
+          endPhoto: endOdometerPhoto,
+        });
+        if (!vehicleClosureCheck.ok) {
+          setManualStepError(vehicleClosureCheck.error);
+          return;
+        }
+      }
+      setManualSubmitNonce(Date.now());
+      return;
+    }
+
     if (!manualClientId && !manualProspectName.trim()) {
       setManualStepError("Selecciona un cliente o escribe el nombre del prospecto.");
+      return;
+    }
+    if (!String(effectiveActionParams.destinationCity || "").trim()) {
+      setManualStepError("Selecciona o busca la ciudad de la visita.");
       return;
     }
     if (!manualReason.trim()) {
@@ -390,7 +1609,149 @@ const AttendanceAction = () => {
     setManualSubmitNonce(Date.now());
   };
 
-  if (!config) {
+  const handlePostVisitDecision = (nextAction) => {
+    setManualStepError("");
+    setManualPostVisitAction(nextAction);
+  };
+
+  if (shortcutIntentKey && !effectiveActionKey && status !== "error") {
+    return (
+      <div className="flex items-center justify-center min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
+        <Card className="max-w-md w-full text-center py-10">
+          <FiLoader className="mx-auto text-sky-500 text-5xl mb-4 animate-spin" />
+          <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2">Preparando atajo</h2>
+          <p className="text-gray-600 dark:text-gray-400">
+            Validando el siguiente paso correcto de tu asistencia.
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
+  if (compatibilityPrompt && config) {
+    return (
+      <div className="flex items-center justify-center min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
+        <Card className="max-w-xl w-full py-8 px-6">
+          <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2">Atajo actualizado</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">{compatibilityPrompt.message}</p>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 mb-6">
+            Atajo solicitado: <strong>{compatibilityPrompt.originalAction}</strong><br />
+            Paso correcto de hoy: <strong>{compatibilityPrompt.remappedAction}</strong>
+          </div>
+          <div className="flex gap-3">
+            <Button
+              onClick={() => setCompatibilityPrompt(null)}
+              variant="primary"
+            >
+              Continuar con el paso correcto
+            </Button>
+            <Button onClick={() => navigate("/dashboard")} variant="ghost">
+              Cancelar
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (shouldPromptExitConfirmation) {
+    return (
+      <div className="flex items-center justify-center min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
+        <Card className="max-w-md w-full py-8 px-6">
+          <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2">Confirmar salida</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
+            ¿Confirmas que deseas registrar tu <strong>salida final</strong> de hoy? Esta acción cerrará tu jornada.
+          </p>
+          <div className="flex gap-3">
+            <Button onClick={() => setExitConfirmAccepted(true)} variant="danger">
+              Sí, registrar salida
+            </Button>
+            <Button onClick={() => navigate("/dashboard")} variant="ghost">
+              Cancelar
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (shouldShowPendingEntryRegularization) {
+    return (
+      <div className="flex items-center justify-center min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
+        <Card className="max-w-lg w-full py-8 px-6">
+          <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2">Entrada pendiente de regularización</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
+            Tu entrada de hoy ya fue enviada a Talento Humano para revisión. No necesitas registrar otra acción desde este atajo.
+          </p>
+          <Button onClick={() => navigate("/dashboard")} variant="primary">
+            Volver al dashboard
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
+  if (shouldOfferEntryRegularization) {
+    return (
+      <div className="flex items-center justify-center min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
+        <Card className="max-w-lg w-full py-8 px-6">
+          <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2">Solicitar regularización de entrada</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+            La hora límite para marcar entrada hoy ya pasó. Desde aquí puedes enviar la solicitud formal a Talento Humano.
+          </p>
+          <textarea
+            value={entryRegularizationReason}
+            onChange={(e) => setEntryRegularizationReason(e.target.value)}
+            placeholder="Describe el motivo con al menos 8 caracteres"
+            className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 mb-4 min-h-[110px]"
+          />
+          {manualStepError ? (
+            <p className="text-sm text-red-600 dark:text-red-400 mb-4">{manualStepError}</p>
+          ) : null}
+          <div className="flex gap-3">
+            <Button onClick={handleEntryRegularizationSubmit} variant="primary" disabled={entryRegularizationLoading}>
+              {entryRegularizationLoading ? "Enviando..." : "Enviar a Talento Humano"}
+            </Button>
+            <Button onClick={() => navigate("/dashboard")} variant="ghost">
+              Cancelar
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (shouldOfferLateJustification) {
+    return (
+      <div className="flex items-center justify-center min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
+        <Card className="max-w-lg w-full py-8 px-6">
+          <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2">Justificar atraso</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+            Tu entrada ya fue registrada con atraso. Desde este atajo puedes enviar la justificación formal de hoy.
+          </p>
+          <textarea
+            value={lateJustificationReason}
+            onChange={(e) => setLateJustificationReason(e.target.value)}
+            placeholder="Describe la justificación con al menos 8 caracteres"
+            className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 mb-4 min-h-[110px]"
+          />
+          {manualStepError ? (
+            <p className="text-sm text-red-600 dark:text-red-400 mb-4">{manualStepError}</p>
+          ) : null}
+          <div className="flex gap-3">
+            <Button onClick={handleLateJustificationSubmit} variant="primary" disabled={lateJustificationLoading}>
+              {lateJustificationLoading ? "Enviando..." : "Registrar justificación"}
+            </Button>
+            <Button onClick={() => navigate("/dashboard")} variant="ghost">
+              Cancelar
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!config && status !== "error") {
     return (
       <div className="flex items-center justify-center min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
         <Card className="max-w-md w-full text-center py-10">
@@ -398,6 +1759,47 @@ const AttendanceAction = () => {
           <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2">Acción no válida</h2>
           <p className="text-gray-600 dark:text-gray-400 mb-6">La ruta de asistencia solicitada no existe.</p>
           <Button onClick={() => navigate("/dashboard")} variant="primary">Volver al Dashboard</Button>
+        </Card>
+      </div>
+    );
+  }
+
+  if (needsPostVisitDecisionStep) {
+    return (
+      <div className="flex items-center justify-center min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
+        <Card className="max-w-xl w-full py-8 px-6">
+          <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2">
+            Salida cliente: siguiente paso
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+            Selecciona que ocurrira despues de cerrar la visita.
+          </p>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button
+              onClick={() => handlePostVisitDecision("continue_operation")}
+              variant="primary"
+              className="min-h-[96px] flex-col items-start justify-center text-left"
+            >
+              <span className="font-semibold">Continuar operacion</span>
+              <span className="text-xs opacity-90">Mantiene el viaje abierto para otro cliente.</span>
+            </Button>
+            <Button
+              onClick={() => handlePostVisitDecision("return_to_office")}
+              variant="secondary"
+              className="min-h-[96px] flex-col items-start justify-center text-left"
+            >
+              <span className="font-semibold">Iniciar retorno</span>
+              <span className="text-xs opacity-90">Cambia el viaje a estado de regreso.</span>
+            </Button>
+          </div>
+          <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
+            ¿Ya terminaste la jornada aqui? Usa el atajo "Cierre viaje" por separado cuando estes listo para cerrar.
+          </p>
+
+          <Button onClick={() => navigate("/dashboard")} variant="ghost" className="mt-6">
+            Cancelar
+          </Button>
         </Card>
       </div>
     );
@@ -414,33 +1816,100 @@ const AttendanceAction = () => {
             Este atajo requiere identificar el cliente para completar la marcacion.
           </p>
 
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Cliente asignado
-          </label>
-          <select
-            value={manualClientId}
-            onChange={(e) => {
-              setManualClientId(e.target.value);
-              if (e.target.value) setManualProspectName("");
-            }}
-            className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 mb-4"
-            disabled={loadingClients}
-          >
-            <option value="">{loadingClients ? "Cargando clientes..." : "Selecciona un cliente"}</option>
-            {availableClients.map((client) => {
-              const label =
-                client?.name ||
-                client?.business_name ||
-                client?.nombre ||
-                client?.razon_social ||
-                `Cliente ${client?.id}`;
-              return (
-                <option key={client.id} value={String(client.id)}>
-                  {label}
-                </option>
-              );
-            })}
-          </select>
+          {!loadingClients && scheduledClientsToday.length > 0 ? (
+            <>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Cliente de tu cronograma
+              </label>
+              {/* Tarjetas tocables en vez de un <select> nativo -- mas visual
+                  e interactivo en movil (mismo criterio que AttendanceWidget). */}
+              <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {scheduledClientsToday.map((client) => {
+                  const active = String(manualClientId) === String(client.id);
+                  const name = String(
+                    client?.commercial_name || client?.business_name || client?.name || client?.nombre || `Cliente #${client.id}`
+                  ).trim();
+                  const city = String(client?.city || client?.ciudad || "").trim();
+                  const isVisitedToday = String(client?.visit_status || "").trim().toLowerCase() === "visited";
+                  return (
+                    <button
+                      key={client.id}
+                      type="button"
+                      onClick={() => {
+                        setManualClientId(String(client.id));
+                        setManualProspectName("");
+                        setOperationalDestinationCity(getClientCity(client));
+                      }}
+                      aria-pressed={active}
+                      className={`rounded-md border px-3 py-2.5 text-left transition ${
+                        active
+                          ? "border-primary bg-primary/10 dark:border-primary dark:bg-primary/20"
+                          : isVisitedToday
+                            ? "border-gray-200 bg-gray-50 opacity-70 hover:opacity-100 dark:border-gray-700 dark:bg-gray-800/40"
+                            : "border-gray-300 bg-white hover:border-primary/60 dark:border-gray-700 dark:bg-gray-800"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{name}</p>
+                        {isVisitedToday ? (
+                          <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                            Visitado
+                          </span>
+                        ) : null}
+                      </div>
+                      {city ? <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{city}</p> : null}
+                      {isVisitedToday ? (
+                        <p className="mt-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                          Ya visitado hoy. Selecciona si necesitas una re-visita.
+                        </p>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Buscar cliente por coincidencia
+              </label>
+              <input
+                type="text"
+                value={manualClientSearch}
+                list="attendance-shortcut-clients-list"
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setManualClientSearch(value);
+                  const resolvedId = resolveClientIdFromSearch(value);
+                  setManualClientId(resolvedId);
+                  if (resolvedId) {
+                    const resolvedClient = availableClients.find((client) => String(client.id) === String(resolvedId));
+                    setManualProspectName("");
+                    setOperationalDestinationCity(getClientCity(resolvedClient));
+                  } else if (!value.trim()) {
+                    setOperationalDestinationCity("");
+                  }
+                }}
+                placeholder={loadingClients ? "Cargando clientes..." : "Escribe nombre, ciudad o ID del cliente"}
+                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 mb-2"
+                disabled={loadingClients}
+              />
+              <datalist id="attendance-shortcut-clients-list">
+                {filteredClients.map((client) => (
+                  <option key={client.id} value={buildClientDisplayLabel(client)}>{buildClientDisplayLabel(client)}</option>
+                ))}
+              </datalist>
+              {manualClientId ? (
+                <p className="mb-4 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                  Cliente seleccionado: #{manualClientId}
+                </p>
+              ) : (
+                <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+                  {loadingClients ? "Cargando clientes..." : "Selecciona una coincidencia de la lista sugerida."}
+                </p>
+              )}
+            </>
+          )}
 
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             O prospecto manual (si no existe en la lista)
@@ -450,11 +1919,23 @@ const AttendanceAction = () => {
             value={manualProspectName}
             onChange={(e) => {
               setManualProspectName(e.target.value);
-              if (e.target.value.trim()) setManualClientId("");
+              if (e.target.value.trim()) {
+                setManualClientId("");
+                setManualClientSearch("");
+              }
             }}
             placeholder="Nombre de prospecto"
             className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 mb-4"
           />
+
+          <div className="mb-4">
+            {renderOperationalCityField({ value: operationalDestinationCity, onChange: setOperationalDestinationCity })}
+            {manualClientId ? (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Puedes mantener la ciudad del cliente o cambiarla si la visita continua en otra ciudad.
+              </p>
+            ) : null}
+          </div>
 
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             Motivo (obligatorio)
@@ -465,16 +1946,6 @@ const AttendanceAction = () => {
             onChange={(e) => setManualReason(e.target.value)}
             placeholder="Ejemplo: visita por emergencia"
             className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 mb-4"
-          />
-
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Observaciones
-          </label>
-          <textarea
-            value={manualObservations}
-            onChange={(e) => setManualObservations(e.target.value)}
-            placeholder="Detalle adicional (opcional)"
-            className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 mb-4 min-h-[88px]"
           />
 
           {manualStepError ? (
@@ -494,6 +1965,375 @@ const AttendanceAction = () => {
     );
   }
 
+  if (requiresOperationalStep && manualSubmitNonce === 0) {
+    const requiresVehicleClosure = operationalPhase !== "start" && activeOperationalUsesPersonalVehicle;
+    const vehicleBadgeText = operationalPhase === "start"
+      ? "Define si la salida sera en vehiculo personal."
+      : (requiresVehicleClosure ? "Esta salida activa requiere kilometraje final y foto." : "Esta salida no requiere control de kilometraje.");
+
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F9FAFB] p-4">
+        <Card className="w-full max-w-2xl overflow-hidden rounded-2xl border border-[#E5E7EB] bg-white p-0 shadow-[0_15px_35px_rgba(15,23,42,0.08)]">
+          <div className="border-b border-slate-100 bg-[#1E293B] px-6 py-5 text-white">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-sky-200">Asistencia</p>
+            <h2 className="mt-1 text-2xl font-bold">
+              {operationalPhase === "start"
+                ? (isTeleworkCategory(operationalCategory) ? "Registrar teletrabajo" : "Registrar salida o visita")
+                : (activeOperationalIsTelework ? "Finalizar teletrabajo" : "Cerrar salida o visita")}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-200">
+              {operationalPhase === "start"
+                ? (isTeleworkCategory(operationalCategory)
+                  ? "Registra una jornada remota con la ciudad desde la que trabajaras."
+                  : "Selecciona si iniciaras una salida operacional o una jornada de teletrabajo.")
+                : (activeOperationalIsTelework
+                  ? "Confirma el cierre de tu jornada remota."
+                  : "Completa el cierre de la salida operacional activa.")}
+            </p>
+          </div>
+
+          <div className="space-y-5 px-6 py-6">
+            {operationalPhase === "start" ? (
+              <>
+                <div className="flex flex-col gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Tipo de salida</span>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {OPERATIONAL_CATEGORY_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => {
+                          setOperationalCategory(option.value);
+                          setManualStepError("");
+                          if (option.value === "teletrabajo") {
+                            setUsesPersonalVehicle("no");
+                          } else {
+                            setSelectedTeleworkRequestId("");
+                          }
+                        }}
+                        aria-pressed={operationalCategory === option.value}
+                        className={`min-h-[64px] rounded-2xl border px-3 py-2.5 text-left transition active:scale-[0.97] ${operationalCategory === option.value ? "border-[#2563EB] bg-[#DBEAFE] text-[#1D4ED8]" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"}`}
+                      >
+                        <span className="block text-sm font-semibold">{option.label}</span>
+                        <span className="mt-0.5 block text-[11px] font-normal opacity-75">{option.helper}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {isOperationalExitCategory(operationalCategory) ? (
+                  <div className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div>
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Tipo de visita</p>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        {OPERATIONAL_VISIT_TYPE_OPTIONS.map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setOperationalVisitType(option.value)}
+                            aria-pressed={operationalVisitType === option.value}
+                            className={`rounded-xl border px-3 py-2 text-left transition ${operationalVisitType === option.value ? "border-sky-500 bg-sky-50 text-sky-900" : "border-slate-200 bg-white text-slate-700 hover:border-sky-300"}`}
+                          >
+                            <p className="text-xs font-semibold">{option.label}</p>
+                            <p className="text-[10px] text-slate-500">{option.helper}</p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {operationalVisitType === "cronograma" ? (
+                      <>
+                        <label className="flex flex-col gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Cliente de cronograma</span>
+                          <input
+                            type="text"
+                            value={manualClientSearch}
+                            list="attendance-operational-clients-list"
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setManualClientSearch(value);
+                              setManualClientId(resolveClientIdFromSearch(value));
+                              setManualProspectName("");
+                            }}
+                            placeholder={loadingClients ? "Cargando clientes..." : "Busca nombre, ciudad o ID"}
+                            className="min-h-[44px] rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                            disabled={loadingClients}
+                          />
+                          <datalist id="attendance-operational-clients-list">
+                            {filteredClients.map((client) => (
+                              <option key={client.id} value={buildClientDisplayLabel(client)}>{buildClientDisplayLabel(client)}</option>
+                            ))}
+                          </datalist>
+                        </label>
+                      </>
+                    ) : null}
+
+                    {operationalVisitType === "prospecto" ? (
+                      <>
+                        <label className="flex flex-col gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Prospecto</span>
+                          <input
+                            type="text"
+                            value={manualProspectName}
+                            onChange={(e) => {
+                              setManualProspectName(e.target.value);
+                              setManualClientId("");
+                            }}
+                            placeholder="Nombre del prospecto"
+                            className="min-h-[44px] rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                          />
+                        </label>
+                        {renderOperationalCityField({ value: operationalDestinationCity, onChange: setOperationalDestinationCity })}
+                      </>
+                    ) : null}
+
+                    {operationalVisitType === "otra" ? (
+                      <>
+                        <label className="flex flex-col gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Destino</span>
+                          <input
+                            type="text"
+                            value={operationalDestination}
+                            onChange={(e) => setOperationalDestination(e.target.value)}
+                            placeholder="Banco Pichincha matriz, Ministerio de Trabajo o Proveedor ABC"
+                            className="min-h-[44px] rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                          />
+                        </label>
+                        {renderOperationalCityField({ value: operationalDestinationCity, onChange: setOperationalDestinationCity })}
+                      </>
+                    ) : null}
+
+                  </div>
+                ) : null}
+
+                {operationalCategory === "teletrabajo" ? (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4">
+                    <p className="mb-1 text-sm font-semibold text-emerald-900">Jornada remota</p>
+                    <p className="mb-4 text-xs leading-5 text-emerald-800">Primero elige una solicitud aprobada para hoy. Si aun no tienes una, puedes crear la solicitud en la parte inferior.</p>
+
+                    {teleworkRequestsLoading ? (
+                      <div className="rounded-xl border border-white/80 bg-white/80 px-3 py-3 text-sm text-emerald-900">
+                        Cargando solicitudes aprobadas...
+                      </div>
+                    ) : null}
+
+                    {!teleworkRequestsLoading && markableTeleworkRequests.length > 0 ? (
+                      <div className="mb-4 grid gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-emerald-800">Aprobadas para marcar hoy</p>
+                        {markableTeleworkRequests.map((request) => {
+                          const active = teleworkRequestMode === "approved" && String(selectedTeleworkRequestId) === String(request.id);
+                          return (
+                            <button
+                              key={request.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedTeleworkRequestId(String(request.id));
+                                setTeleworkRequestMode("approved");
+                                setTeleworkRequestDate(String(request.request_date || "").slice(0, 10));
+                                setOperationalDestinationCity(String(request.city || ""));
+                                setOperationalDetail(String(request.reason || ""));
+                                setManualStepError("");
+                              }}
+                              className={`rounded-xl border px-4 py-3 text-left transition ${active ? "border-emerald-500 bg-white text-emerald-950 shadow-sm" : "border-emerald-100 bg-white/70 text-slate-700 hover:border-emerald-300"}`}
+                              aria-pressed={active}
+                            >
+                              <span className="block text-sm font-semibold">Teletrabajo · {request.city || "Sin ciudad"}</span>
+                              <span className="mt-1 block text-xs text-slate-500">Fecha: {String(request.request_date || "").slice(0, 10)}</span>
+                              {request.reason ? <span className="mt-1 block text-xs text-slate-500">Motivo: {request.reason}</span> : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+
+                    {!teleworkRequestsLoading && markableTeleworkRequests.length === 0 ? (
+                      <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                        No tienes solicitudes aprobadas para marcar hoy.
+                      </div>
+                    ) : null}
+
+                    {!teleworkRequestsLoading && approvedTeleworkRequests.some((request) => String(request?.request_date || "").slice(0, 10) !== todayKey) ? (
+                      <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                        Tienes solicitudes aprobadas para otra fecha. Solo se puede marcar la aprobada para hoy.
+                      </div>
+                    ) : null}
+
+                    <div className="mt-5 border-t border-emerald-200 pt-4">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTeleworkRequestMode("request");
+                          setSelectedTeleworkRequestId("");
+                          setOperationalDetail("");
+                          setManualStepError("");
+                        }}
+                        className={`mb-4 w-full rounded-xl border px-4 py-3 text-left transition ${teleworkRequestMode === "request" ? "border-emerald-500 bg-white text-emerald-950 shadow-sm" : "border-emerald-100 bg-white/70 text-slate-700 hover:border-emerald-300"}`}
+                        aria-pressed={teleworkRequestMode === "request"}
+                      >
+                        <span className="block text-sm font-semibold">Solicitar teletrabajo</span>
+                        <span className="mt-1 block text-xs text-slate-500">Usa esta opcion si todavia no tienes una solicitud aprobada para hoy.</span>
+                      </button>
+
+                      {teleworkRequestMode === "request" ? (
+                        <>
+                        <label className="mb-4 flex flex-col gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-emerald-800">Fecha del teletrabajo</span>
+                          <input
+                            type="date"
+                            min={getLocalDateKey()}
+                            value={teleworkRequestDate}
+                            onChange={(event) => setTeleworkRequestDate(event.target.value)}
+                            className="min-h-[44px] rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                          />
+                        </label>
+                        {renderOperationalCityField({ value: operationalDestinationCity, onChange: setOperationalDestinationCity })}
+                        <label className="mt-4 flex flex-col gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-emerald-800">Motivo de la solicitud <span className="font-normal normal-case">(opcional)</span></span>
+                          <textarea
+                            value={operationalDetail}
+                            onChange={(event) => setOperationalDetail(event.target.value)}
+                            rows={2}
+                            placeholder="Indica el motivo de la jornada remota"
+                            className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                          />
+                        </label>
+                        </>
+                      ) : null}
+                    </div>
+
+                    {teleworkRequestMode === "approved" && selectedTeleworkRequest ? (
+                      <div className="rounded-xl border border-white/80 bg-white/80 px-3 py-2 text-sm text-slate-700">
+                        Se usara la solicitud aprobada de {selectedTeleworkRequest.city || "Sin ciudad"} para registrar la marcacion.
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                {operationalCategory !== "teletrabajo" ? <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Movilidad</p>
+                  <p className="mt-1 text-sm text-slate-600">{vehicleBadgeText}</p>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setUsesPersonalVehicle("no")}
+                      className={`min-h-[52px] rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition active:scale-[0.97] ${usesPersonalVehicle === "no" ? "border-[#2563EB] bg-[#DBEAFE] text-[#1D4ED8]" : "border-slate-200 bg-white text-slate-700"}`}
+                    >
+                      Sin vehiculo personal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUsesPersonalVehicle("si")}
+                      className={`min-h-[52px] rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition active:scale-[0.97] ${usesPersonalVehicle === "si" ? "border-[#2563EB] bg-[#DBEAFE] text-[#1D4ED8]" : "border-slate-200 bg-white text-slate-700"}`}
+                    >
+                      Con vehiculo personal
+                    </button>
+                  </div>
+                </div> : null}
+
+                {operationalCategory !== "teletrabajo" && usesPersonalVehicle === "si" ? (
+                  <div className="grid gap-5">
+                    <label className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Kilometraje inicial</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={startOdometerKm}
+                        onChange={(e) => setStartOdometerKm(e.target.value)}
+                        className="min-h-[44px] rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                        placeholder="Ejemplo: 152340"
+                      />
+                    </label>
+                    <CameraCaptureField
+                      label="Foto de kilometraje inicial"
+                      hint="La foto debe tomarse en el momento de la salida."
+                      value={startOdometerPhoto}
+                      onChange={setStartOdometerPhoto}
+                      fileNamePrefix="odometro_inicio"
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="grid gap-5">
+                {activeOperationalIsTelework ? (
+                  <div className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4">
+                    <div>
+                      <p className="text-sm font-semibold text-emerald-900">Jornada remota activa</p>
+                      <p className="mt-1 text-xs leading-5 text-emerald-800">Confirma el cierre cuando termines tu jornada de teletrabajo.</p>
+                    </div>
+                    <div className="rounded-xl border border-white/80 bg-white/80 px-3 py-2 text-sm font-semibold text-slate-700">
+                      Ciudad: {activeOperationalException?.operational_destination_city || "Sin ciudad registrada"}
+                    </div>
+                    <p className="text-xs text-emerald-800">No se requiere observacion, destino ni kilometraje para finalizar.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Estado del cierre</p>
+                      <p className="mt-1 text-sm text-slate-600">{vehicleBadgeText}</p>
+                    </div>
+
+                    <label className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                        {operationalPhase === "close" ? "Motivo del cierre fuera de oficina" : "Observacion de cierre"}
+                      </span>
+                      <textarea
+                        value={operationalDetail}
+                        onChange={(e) => setOperationalDetail(e.target.value)}
+                        rows={3}
+                        placeholder="Detalle final de la salida operacional"
+                        className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                      />
+                    </label>
+                  </>
+                )}
+
+                {requiresVehicleClosure ? (
+                  <>
+                    <label className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Kilometraje final</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={endOdometerKm}
+                        onChange={(e) => setEndOdometerKm(e.target.value)}
+                        className="min-h-[44px] rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                        placeholder="Ejemplo: 152380"
+                      />
+                    </label>
+                    <CameraCaptureField
+                      label="Foto de kilometraje final"
+                      hint="La foto debe tomarse en el momento del cierre."
+                      value={endOdometerPhoto}
+                      onChange={setEndOdometerPhoto}
+                      fileNamePrefix="odometro_fin"
+                    />
+                  </>
+                ) : null}
+              </div>
+            )}
+
+            {manualStepError ? <p className="text-sm text-[#DC2626]">{manualStepError}</p> : null}
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button onClick={handleManualClientSubmit} variant="primary">
+                {activeOperationalIsTelework
+                  ? "Finalizar teletrabajo"
+                  : isTeleworkCategory(operationalCategory) && operationalPhase === "start"
+                    ? (teleworkRequestMode === "approved" && selectedTeleworkRequest ? "Registrar teletrabajo aprobado" : "Solicitar teletrabajo")
+                    : "Continuar con la marcacion"}
+              </Button>
+              <Button onClick={() => navigate("/dashboard")} variant="ghost">
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center justify-center min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
       <motion.div
@@ -503,6 +2343,20 @@ const AttendanceAction = () => {
       >
         <Card className="text-center py-12 px-8 overflow-hidden relative">
           <AnimatePresence mode="wait">
+            {(status === "initializing") && (
+              <motion.div
+                key="initializing"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="flex flex-col items-center"
+              >
+                <FiLoader className="text-5xl text-gray-400 animate-spin mb-6" />
+                <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Verificando sesión</h2>
+                <p className="text-gray-500 dark:text-gray-400 italic">Un momento...</p>
+              </motion.div>
+            )}
+
             {status === "geolocating" && (
               <motion.div
                 key="geolocating"
@@ -517,6 +2371,35 @@ const AttendanceAction = () => {
                 </div>
                 <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Obteniendo ubicación</h2>
                 <p className="text-gray-500 dark:text-gray-400 italic">Un momento, por favor...</p>
+                <div className="mt-5 w-full max-w-sm rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left shadow-sm dark:border-slate-700 dark:bg-slate-800/70">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-300">
+                      Senal GPS
+                    </span>
+                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${gpsSignal.toneClass}`}>
+                      {gpsSignal.label}
+                    </span>
+                  </div>
+                  <div className="mt-3 flex items-end justify-between gap-4">
+                    <div>
+                      <p className="text-2xl font-semibold text-slate-900 dark:text-slate-50">
+                        {formatGpsAccuracy(liveGpsReading?.accuracy)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        {gpsSourceLabel}
+                      </p>
+                    </div>
+                    <p className="max-w-[11rem] text-right text-xs leading-5 text-slate-500 dark:text-slate-300">
+                      {gpsSignal.helper}
+                    </p>
+                  </div>
+                  <div className="mt-3 border-t border-slate-200 pt-3 text-[11px] text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                    Limite actual de marcacion: hasta {GPS_ACCURACY_LIMIT_METERS} m de precision.
+                  </div>
+                </div>
+                {helpHint && (
+                  <p className="mt-4 max-w-xs text-xs text-gray-400 dark:text-gray-500">{helpHint}</p>
+                )}
               </motion.div>
             )}
 
@@ -561,13 +2444,13 @@ const AttendanceAction = () => {
                 <div className="bg-red-100 dark:bg-red-900/30 p-4 rounded-full mb-6">
                   <FiAlertCircle className="text-6xl text-red-500" />
                 </div>
-                <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Ups, algo salió mal</h2>
+                <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Ups, algo salio mal</h2>
                 <p className="text-red-600 dark:text-red-400 font-medium mb-4">{message}</p>
                 <div className="bg-gray-100 dark:bg-gray-700/50 p-3 rounded-lg text-xs text-gray-500 dark:text-gray-400 mb-8 w-full">
                   {errorDetails}
                 </div>
                 <div className="flex gap-3">
-                  <Button onClick={() => window.location.reload()} variant="primary">Reintentar</Button>
+                  <Button onClick={handleRetry} variant="primary">Reintentar</Button>
                   <Button onClick={() => navigate("/dashboard")} variant="ghost">Ir al Dashboard</Button>
                 </div>
               </motion.div>

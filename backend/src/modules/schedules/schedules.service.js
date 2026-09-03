@@ -5,19 +5,29 @@ const HOLIDAYS_EC = require("../../config/holidays.ec.json");
 const axios = require("axios");
 const { createEvents } = require("ics");
 const { Readable } = require("stream");
+const { createOrUpdateSharedAllDayEvent } = require("../../utils/calendar");
+const notificationManager = require("../notifications/notificationManager");
 
 const GOOGLE_DIRECTIONS_URL = "https://maps.googleapis.com/maps/api/directions/json";
 const metadataCache = new Map();
 
 const MANAGER_ROLES = new Set([
   "jefe_comercial",
+  "jefe_de_comercial",
   "gerencia",
   "gerencia_general",
   "admin",
   "administrador",
 ]);
 
-const ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice", "backoffice_comercial"]);
+const ADVISOR_ROLES = new Set([
+  "comercial",
+  "asesor_comercial",
+  "analista_comercial",
+  "acp_comercial",
+  "backoffice",
+  "backoffice_comercial",
+]);
 
 function isManager(user) {
   return MANAGER_ROLES.has((user?.role || "").toLowerCase());
@@ -150,6 +160,35 @@ async function ensureVisitScheduleReviewNotesColumn() {
     return true;
   } catch (error) {
     logger.warn({ error }, "No se pudo crear la columna review_notes en visit_schedules");
+    metadataCache.set(cacheKey, false);
+    return false;
+  }
+}
+
+async function ensureScheduledVisitsExternalSyncColumns() {
+  const cacheKey = "public.scheduled_visits.external_synced_at";
+  if (metadataCache.has(cacheKey)) return metadataCache.get(cacheKey);
+
+  const exists = await columnExists("public", "scheduled_visits", "external_synced_at");
+  if (exists) {
+    metadataCache.set(cacheKey, true);
+    return true;
+  }
+
+  try {
+    await db.query(`
+      ALTER TABLE scheduled_visits
+        ADD COLUMN IF NOT EXISTS crm_meeting_id TEXT,
+        ADD COLUMN IF NOT EXISTS crm_activity_id UUID,
+        ADD COLUMN IF NOT EXISTS calendar_event_id TEXT,
+        ADD COLUMN IF NOT EXISTS calendar_event_link TEXT,
+        ADD COLUMN IF NOT EXISTS calendar_event_calendar_id TEXT,
+        ADD COLUMN IF NOT EXISTS external_synced_at TIMESTAMPTZ
+    `);
+    metadataCache.set(cacheKey, true);
+    return true;
+  } catch (error) {
+    logger.warn({ error }, "No se pudieron crear columnas de sincronizacion externa en scheduled_visits");
     metadataCache.set(cacheKey, false);
     return false;
   }
@@ -442,6 +481,23 @@ async function findScheduleOrThrow(id) {
   return rows[0];
 }
 
+let holidaySetCache = null;
+function getHolidaySet() {
+  if (holidaySetCache) return holidaySetCache;
+  const source = HOLIDAYS_EC && typeof HOLIDAYS_EC === "object" ? HOLIDAYS_EC : {};
+  const flatDates = Object.values(source)
+    .flatMap((value) => (Array.isArray(value) ? value : []))
+    .filter(Boolean);
+  holidaySetCache = new Set(flatDates);
+  return holidaySetCache;
+}
+
+// Las semanas del cronograma comercial son de 5 dias habiles (lun-vie) -- los
+// fines de semana no cuentan como semana y los feriados reducen los dias
+// disponibles de esa semana, pero no se planifican visitas en ellos. Antes
+// esta funcion solo validaba mes/anio: no habia ningun chequeo de dia habil,
+// por eso cronogramas aprobados (ej. karen.barberan agosto 2026) terminaron
+// con visitas en sabado/domingo.
 function validateVisitDateWithinSchedule(plannedDate, schedule) {
   if (!plannedDate) {
     const error = new Error("La fecha planificada es obligatoria");
@@ -461,6 +517,20 @@ function validateVisitDateWithinSchedule(plannedDate, schedule) {
 
   if (visitMonth !== Number(schedule.month) || visitYear !== Number(schedule.year)) {
     const error = new Error("La fecha de visita debe estar dentro del mes del cronograma");
+    error.status = 400;
+    throw error;
+  }
+
+  const weekday = parsed.getUTCDay(); // 0 = domingo, 6 = sabado
+  if (weekday === 0 || weekday === 6) {
+    const error = new Error("No se pueden planificar visitas en fin de semana. Elige un dia habil (lunes a viernes).");
+    error.status = 400;
+    throw error;
+  }
+
+  const dateOnly = toDateOnlyString(plannedDate);
+  if (dateOnly && getHolidaySet().has(dateOnly)) {
+    const error = new Error("La fecha seleccionada es feriado en Ecuador. Elige otro dia habil.");
     error.status = 400;
     throw error;
   }
@@ -494,6 +564,34 @@ function ensureOwner(schedule, user) {
   }
 }
 
+async function assertClientAccessibleToAdvisor({ clientRequestId, user }) {
+  const { rows } = await db.query(
+    `SELECT 1
+       FROM client_requests cr
+      WHERE cr.id = $1
+        AND (
+          LOWER(COALESCE(cr.created_by, '')) = LOWER($2)
+          OR EXISTS (
+            SELECT 1
+              FROM client_assignments ca
+             WHERE ca.client_request_id = cr.id
+               AND ca.is_active = TRUE
+               AND (ca.starts_at IS NULL OR ca.starts_at <= NOW())
+               AND (ca.ends_at IS NULL OR ca.ends_at >= NOW())
+               AND LOWER(COALESCE(ca.assigned_to_email, '')) = LOWER($2)
+          )
+        )
+      LIMIT 1`,
+    [clientRequestId, user?.email || ""],
+  );
+
+  if (!rows.length) {
+    const error = new Error("El cliente no esta asignado al asesor");
+    error.status = 403;
+    throw error;
+  }
+}
+
 async function getClientOrThrow(clientRequestId) {
   const { rows } = await db.query(
     `SELECT id, commercial_name, shipping_city, shipping_province, shipping_address
@@ -510,6 +608,45 @@ async function getClientOrThrow(clientRequestId) {
   return rows[0];
 }
 
+async function listAccessibleClientsByCity({ city, user }) {
+  const { rows } = await db.query(
+    `SELECT cr.id, cr.commercial_name, cr.shipping_city, cr.shipping_province, cr.shipping_address
+       FROM client_requests cr
+      WHERE (
+        LOWER(COALESCE(cr.created_by, '')) = LOWER($1)
+        OR EXISTS (
+          SELECT 1
+            FROM client_assignments ca
+           WHERE ca.client_request_id = cr.id
+             AND ca.is_active = TRUE
+             AND (ca.starts_at IS NULL OR ca.starts_at <= NOW())
+             AND (ca.ends_at IS NULL OR ca.ends_at >= NOW())
+             AND LOWER(COALESCE(ca.assigned_to_email, '')) = LOWER($1)
+        )
+      )
+        AND LOWER(TRIM(COALESCE(cr.shipping_city, cr.shipping_province, ''))) = LOWER(TRIM($2))
+      ORDER BY COALESCE(NULLIF(TRIM(cr.commercial_name), ''), ('Cliente #' || cr.id::text)) ASC`,
+    [user?.email || "", city || ""],
+  );
+  return rows;
+}
+
+async function listAccessibleLeadsByCity({ city, user }) {
+  const ownerUserId = await getOwnerUserIdByEmail(user?.email);
+  if (!ownerUserId) return [];
+  const { rows } = await db.query(
+    `SELECT l.id, l.full_name, l.company_name, l.city
+       FROM crm.crm_leads l
+      WHERE l.owner_user_id = $1
+        AND l.deleted_at IS NULL
+        AND l.status NOT IN ('converted', 'disqualified', 'unqualified')
+        AND LOWER(TRIM(COALESCE(l.city, ''))) = LOWER(TRIM($2))
+      ORDER BY COALESCE(NULLIF(TRIM(l.full_name), ''), NULLIF(TRIM(l.company_name), ''), ('Lead #' || l.id::text)) ASC`,
+    [ownerUserId, city || ""],
+  );
+  return rows;
+}
+
 function resolveCity({ city, client }) {
   return (
     city ||
@@ -518,6 +655,332 @@ function resolveCity({ city, client }) {
     client?.shipping_address ||
     null
   );
+}
+
+function normalizeProspectName(value) {
+  return String(value || "").trim();
+}
+
+function getVisitDisplayName(visit = {}) {
+  const clientName = String(visit.client_name || "").trim();
+  if (clientName) return clientName;
+  const prospectName = normalizeProspectName(visit.prospect_name);
+  if (prospectName) return prospectName;
+  if (visit.client_request_id) return `Cliente #${visit.client_request_id}`;
+  return `Visita #${visit.id || "sin nombre"}`;
+}
+
+async function getOwnerUserIdByEmail(email) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) return null;
+  const { rows } = await db.query(
+    `SELECT id
+       FROM public.users
+      WHERE LOWER(COALESCE(email, '')) = LOWER($1)
+      LIMIT 1`,
+    [normalizedEmail],
+  );
+  return rows[0]?.id || null;
+}
+
+async function getScheduleOwner(schedule) {
+  const normalizedEmail = String(schedule?.user_email || "").trim().toLowerCase();
+  if (!normalizedEmail) return null;
+  const { rows } = await db.query(
+    `SELECT id, email, COALESCE(fullname, name, email) AS fullname
+       FROM public.users
+      WHERE LOWER(COALESCE(email, '')) = LOWER($1)
+        AND active IS DISTINCT FROM FALSE
+      LIMIT 1`,
+    [normalizedEmail],
+  );
+  return rows[0] || null;
+}
+
+async function listScheduleManagers() {
+  const roles = [...MANAGER_ROLES];
+  const { rows } = await db.query(
+    `SELECT id, email, COALESCE(fullname, name, email) AS fullname, role
+       FROM public.users
+      WHERE active IS DISTINCT FROM FALSE
+        AND LOWER(REPLACE(REPLACE(COALESCE(role, ''), ' ', '_'), '-', '_')) = ANY($1::text[])
+      ORDER BY COALESCE(fullname, name, email) ASC`,
+    [roles],
+  );
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = String(row.email || row.id).trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function getScheduleNotificationSummary(scheduleId) {
+  const { rows } = await db.query(
+    `SELECT
+       COUNT(*)::int AS total_visits,
+       COALESCE(
+         json_agg(DISTINCT city ORDER BY city)
+           FILTER (WHERE NULLIF(TRIM(COALESCE(city, '')), '') IS NOT NULL),
+         '[]'::json
+       ) AS cities
+       FROM scheduled_visits
+      WHERE schedule_id = $1`,
+    [scheduleId],
+  );
+  const { rows: visits } = await db.query(
+    `SELECT
+       sv.id,
+       sv.client_request_id,
+       sv.prospect_name,
+       sv.planned_date,
+       cr.commercial_name AS client_name
+     FROM scheduled_visits sv
+     LEFT JOIN client_requests cr ON cr.id = sv.client_request_id
+     WHERE sv.schedule_id = $1
+     ORDER BY sv.planned_date ASC, sv.id ASC`,
+    [scheduleId],
+  );
+  const row = rows[0] || {};
+  const cities = Array.isArray(row.cities) ? row.cities : [];
+  return {
+    totalVisits: Number(row.total_visits || 0),
+    cities,
+    citiesLabel: cities.length ? cities.join(", ") : "Sin ciudades registradas",
+    visits,
+  };
+}
+
+function formatSchedulePeriod(schedule) {
+  return `${String(schedule?.month || "").padStart(2, "0")}/${schedule?.year || ""}`;
+}
+
+async function notifyScheduleSubmitted(schedule, actorUser) {
+  const managers = await listScheduleManagers();
+  if (!managers.length) return { sent: 0, reason: "no_managers" };
+
+  const owner = await getScheduleOwner(schedule);
+  const summary = await getScheduleNotificationSummary(schedule.id);
+  const period = formatSchedulePeriod(schedule);
+  const processKey = `schedule:${schedule.id}`;
+  const subject = `Cronograma ${period} - revision de planificacion`;
+  const message =
+    `${owner?.fullname || schedule.user_email} envio el cronograma ${period} para aprobacion. ` +
+    `Incluye ${summary.totalVisits} visita(s). Ciudades: ${summary.citiesLabel}.`;
+
+  await Promise.all(
+    managers.map((manager) => notificationManager.sendNotification({
+      userId: manager.id,
+      template: "schedule_submitted",
+      customTitle: "Cronograma pendiente de aprobacion",
+      customMessage: message,
+      type: "task",
+      priority: 2,
+      source: "schedules.submit_for_approval",
+      email: true,
+      data: {
+        email_subject: subject,
+        target_path: "/dashboard/comercial/aprobaciones-planificacion",
+        cta_label: "Revisar cronograma",
+        schedule_id: schedule.id,
+        advisor_email: schedule.user_email,
+        advisor_name: owner?.fullname || schedule.user_email,
+        period,
+        total_visits: summary.totalVisits,
+        cities: summary.citiesLabel,
+      },
+      meta: {
+        process_key: processKey,
+        schedule_id: schedule.id,
+        actor_email: actorUser?.email || null,
+        advisor_email: schedule.user_email,
+        email_subject: subject,
+        target_path: "/dashboard/comercial/aprobaciones-planificacion",
+        cta_label: "Revisar cronograma",
+      },
+    })),
+  );
+
+  return { sent: managers.length };
+}
+
+async function notifyScheduleReviewed(schedule, { approved, notes, actorUser }) {
+  const owner = await getScheduleOwner(schedule);
+  if (!owner?.id) return { sent: 0, reason: "owner_not_found" };
+
+  const summary = await getScheduleNotificationSummary(schedule.id);
+  const period = formatSchedulePeriod(schedule);
+  const processKey = `schedule:${schedule.id}`;
+  const subject = `Cronograma ${period} - resultado de revision`;
+  const title = approved ? "Cronograma aprobado" : "Cronograma rechazado";
+  const approvedVisits = summary.visits
+    .map((visit) => `${getVisitDisplayName(visit)} (${toDateOnlyString(visit.planned_date) || "fecha pendiente"})`)
+    .join("; ");
+  const message = approved
+    ? `Tu cronograma ${period} fue aprobado por ${actorUser?.fullname || actorUser?.name || actorUser?.email || "jefatura"}. Clientes aprobados: ${approvedVisits || "sin visitas registradas"}. ${notes ? `Comentario: ${notes}` : ""}`
+    : `Tu cronograma ${period} fue rechazado por ${actorUser?.fullname || actorUser?.name || actorUser?.email || "jefatura"}. Motivo: ${notes || "Sin detalle"}`;
+
+  await notificationManager.sendNotification({
+    userId: owner.id,
+    template: approved ? "schedule_approved" : "schedule_rejected",
+    customTitle: title,
+    customMessage: message,
+    type: approved ? "task" : "alert",
+    priority: approved ? 1 : 2,
+    source: approved ? "schedules.approved" : "schedules.rejected",
+    email: true,
+    data: {
+      email_subject: subject,
+      target_path: "/dashboard/comercial/planificacion",
+      cta_label: "Abrir planificacion",
+      schedule_id: schedule.id,
+      period,
+      total_visits: summary.totalVisits,
+      cities: summary.citiesLabel,
+      approved_visits: summary.visits,
+      review_notes: notes || "",
+    },
+    meta: {
+      process_key: processKey,
+      schedule_id: schedule.id,
+      actor_email: actorUser?.email || null,
+      advisor_email: schedule.user_email,
+      email_subject: subject,
+      target_path: "/dashboard/comercial/planificacion",
+      cta_label: "Abrir planificacion",
+    },
+  });
+
+  return { sent: 1 };
+}
+
+async function notifyScheduleReapprovalRequired(schedule, actorUser) {
+  const managers = await listScheduleManagers();
+  if (!managers.length) return { sent: 0, reason: "no_managers" };
+
+  const owner = await getScheduleOwner(schedule);
+  const summary = await getScheduleNotificationSummary(schedule.id);
+  const period = formatSchedulePeriod(schedule);
+  const subject = `Cronograma ${period} - cambios requieren nueva revision`;
+  const message =
+    `${owner?.fullname || schedule.user_email} modifico el cronograma ${period}; ` +
+    `requiere nueva aprobacion. Visitas: ${summary.totalVisits}. Ciudades: ${summary.citiesLabel}.`;
+
+  await Promise.all(
+    managers.map((manager) => notificationManager.sendNotification({
+      userId: manager.id,
+      template: "schedule_reapproval_required",
+      customTitle: "Cronograma requiere nueva revision",
+      customMessage: message,
+      type: "alert",
+      priority: 2,
+      source: "schedules.reapproval_required",
+      email: true,
+      data: {
+        email_subject: subject,
+        target_path: "/dashboard/comercial/aprobaciones-planificacion",
+        cta_label: "Revisar cambios",
+        schedule_id: schedule.id,
+        advisor_email: schedule.user_email,
+        advisor_name: owner?.fullname || schedule.user_email,
+        period,
+        total_visits: summary.totalVisits,
+        cities: summary.citiesLabel,
+      },
+      meta: {
+        process_key: `schedule:${schedule.id}`,
+        schedule_id: schedule.id,
+        actor_email: actorUser?.email || null,
+        advisor_email: schedule.user_email,
+        email_subject: subject,
+        target_path: "/dashboard/comercial/aprobaciones-planificacion",
+        cta_label: "Revisar cambios",
+      },
+    })),
+  );
+
+  return { sent: managers.length };
+}
+
+async function notifyReapprovalIfTransitioned(previousSchedule, currentSchedule, actorUser) {
+  const previousStatus = String(previousSchedule?.status || "");
+  const currentStatus = String(currentSchedule?.status || "");
+  if (!["approved", "rejected"].includes(previousStatus) || currentStatus !== "pending_approval") {
+    return { sent: 0, reason: "no_reapproval_transition" };
+  }
+  return notifyScheduleReapprovalRequired(currentSchedule, actorUser);
+}
+
+function toDateOnlyString(value) {
+  if (!value) return "";
+  return value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
+}
+
+function buildScheduledVisitTimestamp(plannedDate) {
+  const normalized = toDateOnlyString(plannedDate);
+  if (!normalized) return null;
+  return `${normalized}T09:00:00-05:00`;
+}
+
+async function upsertCrmFamActivityForScheduledVisit({ schedule, visit, ownerUserId }) {
+  const hasCrmActivities = await tableExists("crm", "crm_activities");
+  if (!hasCrmActivities || !ownerUserId) return null;
+
+  const visitLabel = getVisitDisplayName(visit);
+  const subject = `Visita planificada · ${visitLabel}`;
+  const description = [
+    `Origen: cronograma comercial aprobado`,
+    `Asesor: ${schedule.user_email}`,
+    `Cronograma: ${String(schedule.month).padStart(2, "0")}/${schedule.year}`,
+    `Visita planificada: ${toDateOnlyString(visit.planned_date)}`,
+    visit.city ? `Ciudad: ${visit.city}` : null,
+    visit.notes ? `Notas: ${visit.notes}` : null,
+    `Schedule ID: ${schedule.id}`,
+    `Scheduled Visit ID: ${visit.id}`,
+  ].filter(Boolean).join("\n");
+  const scheduledAt = buildScheduledVisitTimestamp(visit.planned_date);
+
+  if (visit.crm_activity_id) {
+    const { rows } = await db.query(
+      `UPDATE crm.crm_activities
+          SET activity_type = 'visita',
+              subject = $2,
+              description = $3,
+              scheduled_at = $4,
+              owner_user_id = $5,
+              status = CASE
+                WHEN status IN ('visited_pending_followup', 'completed', 'cancelled') THEN status
+                ELSE 'scheduled'
+              END,
+              updated_by = $5,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING id`,
+      [visit.crm_activity_id, subject, description, scheduledAt, ownerUserId],
+    );
+    if (rows[0]?.id) return rows[0].id;
+  }
+
+  const { rows } = await db.query(
+    `INSERT INTO crm.crm_activities (
+        opportunity_id,
+        account_id,
+        contact_id,
+        activity_type,
+        subject,
+        description,
+        scheduled_at,
+        owner_user_id,
+        status,
+        created_by,
+        updated_by
+      )
+      VALUES (NULL, NULL, NULL, 'visita', $1, $2, $3, $4, 'scheduled', $4, $4)
+      RETURNING id`,
+    [subject, description, scheduledAt, ownerUserId],
+  );
+  return rows[0]?.id || null;
 }
 
 async function listMySchedules(user) {
@@ -577,7 +1040,8 @@ async function listPendingApproval(user) {
            DISTINCT jsonb_build_object(
              'id', sv.id,
              'client_request_id', sv.client_request_id,
-             'client_name', cr.commercial_name,
+             'client_name', COALESCE(cr.commercial_name, sv.prospect_name),
+             'prospect_name', sv.prospect_name,
              'planned_date', sv.planned_date,
              'city', sv.city,
              'priority', sv.priority
@@ -591,7 +1055,8 @@ async function listPendingApproval(user) {
      LEFT JOIN client_visit_logs vl
        ON vl.client_request_id = sv.client_request_id
       AND vl.user_email = vs.user_email
-      AND vl.visit_date = sv.planned_date
+      AND EXTRACT(MONTH FROM vl.visit_date) = vs.month
+      AND EXTRACT(YEAR FROM vl.visit_date) = vs.year
      LEFT JOIN users u ON u.email = vs.user_email
      WHERE vs.status = 'pending_approval'
      GROUP BY vs.id, u.fullname, u.name
@@ -651,7 +1116,6 @@ async function listTeamSchedules(user) {
              FROM scheduled_visits sv2
              WHERE sv2.schedule_id = vs.id
                AND sv2.client_request_id = cvl.client_request_id
-               AND sv2.planned_date = cvl.visit_date
            )
        ) AS unexpected_client_visits
      FROM visit_schedules vs
@@ -659,7 +1123,8 @@ async function listTeamSchedules(user) {
      LEFT JOIN client_visit_logs vl
        ON vl.client_request_id = sv.client_request_id
       AND vl.user_email = vs.user_email
-      AND vl.visit_date = sv.planned_date
+      AND EXTRACT(MONTH FROM vl.visit_date) = vs.month
+      AND EXTRACT(YEAR FROM vl.visit_date) = vs.year
      LEFT JOIN users u ON u.email = vs.user_email
      WHERE COALESCE(LOWER(u.role), '') IN ('comercial','acp_comercial','backoffice','backoffice_comercial','asesor_comercial')
      GROUP BY vs.id, u.fullname, u.name
@@ -699,6 +1164,8 @@ async function getScheduleDetail({ id, user }) {
        sv.id,
        sv.schedule_id,
        sv.client_request_id,
+       sv.lead_id,
+       sv.prospect_name,
        COALESCE(sv.city, cr.shipping_city, cr.shipping_province, cr.shipping_address) AS city,
        sv.planned_date,
        sv.priority,
@@ -710,24 +1177,31 @@ async function getScheduleDetail({ id, user }) {
        cr.shipping_city AS client_city,
        cr.shipping_province AS client_province,
        cr.shipping_address AS client_address,
-       vl.status AS visit_status,
-       vl.hora_entrada,
-       vl.hora_salida,
-       vl.lat_entrada,
-       vl.lng_entrada,
-       vl.lat_salida,
-       vl.lng_salida,
-       vl.observaciones,
+       COALESCE(vl.status, pv.status) AS visit_status,
+       COALESCE(vl.hora_entrada, pv.check_in_time) AS hora_entrada,
+       COALESCE(vl.hora_salida, pv.check_out_time) AS hora_salida,
+       COALESCE(vl.lat_entrada, pv.check_in_lat) AS lat_entrada,
+       COALESCE(vl.lng_entrada, pv.check_in_lng) AS lng_entrada,
+       COALESCE(vl.lat_salida, pv.check_out_lat) AS lat_salida,
+       COALESCE(vl.lng_salida, pv.check_out_lng) AS lng_salida,
+       COALESCE(vl.observaciones, pv.observations) AS observaciones,
        vl.duracion_minutos
      FROM scheduled_visits sv
-     JOIN client_requests cr ON cr.id = sv.client_request_id
+     LEFT JOIN client_requests cr ON cr.id = sv.client_request_id
      LEFT JOIN client_visit_logs vl
        ON vl.client_request_id = sv.client_request_id
       AND vl.user_email = $2
-      AND vl.visit_date = sv.planned_date
+      AND EXTRACT(MONTH FROM vl.visit_date) = $3
+      AND EXTRACT(YEAR FROM vl.visit_date) = $4
+     LEFT JOIN prospect_visits pv
+       ON pv.lead_id = sv.lead_id
+      AND sv.lead_id IS NOT NULL
+      AND LOWER(COALESCE(pv.user_email, '')) = LOWER($2)
+      AND EXTRACT(MONTH FROM pv.visit_date) = $3
+      AND EXTRACT(YEAR FROM pv.visit_date) = $4
      WHERE sv.schedule_id = $1
      ORDER BY sv.planned_date ASC, sv.priority ASC`,
-    [id, schedule.user_email],
+    [id, schedule.user_email, Number(schedule.month), Number(schedule.year)],
   );
   const startDate = new Date(Number(schedule.year), Number(schedule.month) - 1, 1);
   const endDate = new Date(Number(schedule.year), Number(schedule.month), 1);
@@ -777,7 +1251,6 @@ async function getScheduleDetail({ id, user }) {
          FROM scheduled_visits sv
          WHERE sv.schedule_id = $4
            AND sv.client_request_id = vl.client_request_id
-           AND sv.planned_date = vl.visit_date
        )
      ORDER BY vl.visit_date DESC, vl.hora_entrada DESC NULLS LAST`,
     [
@@ -794,6 +1267,120 @@ async function getScheduleDetail({ id, user }) {
     unexpected_visits: unexpectedVisits,
     unexpected_client_visits: unexpectedClientVisits,
   };
+}
+
+async function listScheduleVisitsForExternalSync(scheduleId) {
+  const { rows } = await db.query(
+    `SELECT
+       sv.id,
+       sv.schedule_id,
+       sv.client_request_id,
+       sv.prospect_name,
+       sv.planned_date,
+       sv.city,
+       sv.priority,
+       sv.notes,
+       sv.crm_meeting_id,
+       sv.crm_activity_id,
+       sv.calendar_event_id,
+       sv.calendar_event_link,
+       sv.calendar_event_calendar_id,
+       cr.commercial_name AS client_name
+     FROM scheduled_visits sv
+     LEFT JOIN client_requests cr ON cr.id = sv.client_request_id
+     WHERE sv.schedule_id = $1
+     ORDER BY sv.planned_date ASC, sv.priority DESC, sv.id ASC`,
+    [scheduleId],
+  );
+  return rows;
+}
+
+function buildScheduleVisitCalendarPayload({ schedule, visit }) {
+  const visitLabel = getVisitDisplayName(visit);
+  const summary = `CRM-FAM · ${visitLabel}`;
+  const description = [
+    `Actividad aprobada desde cronograma comercial`,
+    `Asesor: ${schedule.user_email}`,
+    `Cliente: ${visitLabel}`,
+    visit.city ? `Ciudad: ${visit.city}` : null,
+    visit.notes ? `Notas: ${visit.notes}` : null,
+    `Cronograma: ${String(schedule.month).padStart(2, "0")}/${schedule.year}`,
+    `Visita planificada: ${toDateOnlyString(visit.planned_date)}`,
+  ].filter(Boolean).join("\n");
+
+  return {
+    summary,
+    description,
+    date: toDateOnlyString(visit.planned_date),
+  };
+}
+
+async function syncApprovedScheduleArtifacts(schedule) {
+  const hasSyncColumns = await ensureScheduledVisitsExternalSyncColumns();
+  const visits = await listScheduleVisitsForExternalSync(schedule.id);
+  const ownerUserId = await getOwnerUserIdByEmail(schedule.user_email);
+  const summary = {
+    total_visits: visits.length,
+    crm_fam: { synced: 0, failed: 0 },
+    calendar: { synced: 0, failed: 0 },
+  };
+
+  for (const visit of visits) {
+    try {
+      const crmActivityId = await upsertCrmFamActivityForScheduledVisit({ schedule, visit, ownerUserId });
+      if (hasSyncColumns && crmActivityId) {
+        await db.query(
+          `UPDATE scheduled_visits
+              SET crm_activity_id = $2,
+                  external_synced_at = NOW(),
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [visit.id, crmActivityId],
+        );
+      }
+      if (crmActivityId) {
+        summary.crm_fam.synced += 1;
+      } else {
+        summary.crm_fam.failed += 1;
+      }
+    } catch (error) {
+      summary.crm_fam.failed += 1;
+      logger.warn(
+        { schedule_id: schedule.id, visit_id: visit.id, error: error?.message },
+        "[SCHEDULES] Error creando actividad aprobada en CRM-FAM",
+      );
+    }
+
+    try {
+      const calendarEvent = await createOrUpdateSharedAllDayEvent({
+        eventId: visit.calendar_event_id || null,
+        ...buildScheduleVisitCalendarPayload({ schedule, visit }),
+        // Las visitas quedan en el calendario compartido sin generar una invitacion por cliente.
+        sendUpdates: "none",
+      });
+      if (hasSyncColumns && calendarEvent?.id) {
+        await db.query(
+          `UPDATE scheduled_visits
+              SET calendar_event_id = $2,
+                  calendar_event_link = $3,
+                  calendar_event_calendar_id = $4,
+                  external_synced_at = NOW(),
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [visit.id, calendarEvent.id, calendarEvent.htmlLink || null, calendarEvent.calendarId || null],
+        );
+      }
+      summary.calendar.synced += 1;
+    } catch (error) {
+      summary.calendar.failed += 1;
+      logger.warn(
+        { schedule_id: schedule.id, visit_id: visit.id, error: error?.message },
+        "[SCHEDULES] Error creando evento de Google Calendar para actividad aprobada",
+      );
+    }
+  }
+
+  return summary;
 }
 
 async function createSchedule({ month, year, notes, user }) {
@@ -842,7 +1429,12 @@ async function updateSchedule({ id, notes, user }) {
     [notes || null, id, needsReapproval],
   );
 
-  return { ...rows[0], needs_reapproval: needsReapproval };
+  const updatedSchedule = rows[0];
+  const notifications = needsReapproval
+    ? await notifyReapprovalIfTransitioned(schedule, updatedSchedule, user)
+    : { sent: 0 };
+
+  return { ...updatedSchedule, needs_reapproval: needsReapproval, notifications };
 }
 
 async function deleteSchedule({ id, user }) {
@@ -888,36 +1480,212 @@ async function submitForApproval({ id, user }) {
      RETURNING *`,
     [id],
   );
-  return rows[0];
+  const submittedSchedule = rows[0];
+  submittedSchedule.notifications = await notifyScheduleSubmitted(submittedSchedule, user);
+  return submittedSchedule;
 }
 
-async function addVisit({ scheduleId, clientRequestId, plannedDate, city, priority, notes, user }) {
+async function addVisit({ scheduleId, clientRequestId, prospectName, plannedDate, city, priority, notes, user }) {
   assertAdvisor(user);
   const schedule = await findScheduleOrThrow(scheduleId);
   ensureOwner(schedule, user);
-  if (!plannedDate || !clientRequestId) {
-    const error = new Error("Fecha y cliente son obligatorios");
+  const normalizedProspectName = normalizeProspectName(prospectName);
+  const hasClient = Number.isInteger(Number(clientRequestId)) && Number(clientRequestId) > 0;
+  if (!plannedDate || (!hasClient && !normalizedProspectName)) {
+    const error = new Error("La fecha y el nombre de la visita son obligatorios");
     error.status = 400;
     throw error;
   }
   validateVisitDateWithinSchedule(plannedDate, schedule);
-  const client = await getClientOrThrow(clientRequestId);
+  let client = null;
+  if (hasClient) {
+    await assertClientAccessibleToAdvisor({ clientRequestId: Number(clientRequestId), user });
+    client = await getClientOrThrow(Number(clientRequestId));
+  }
   const targetCity = resolveCity({ city, client }) || "Ciudad no especificada";
+  const dedupeParams = [scheduleId, plannedDate];
+  let existingVisitQuery = `
+    SELECT id
+      FROM scheduled_visits
+     WHERE schedule_id = $1
+       AND planned_date = $2
+  `;
+  if (hasClient) {
+    dedupeParams.push(Number(clientRequestId));
+    existingVisitQuery += ` AND client_request_id = $3 LIMIT 1`;
+  } else {
+    dedupeParams.push(normalizedProspectName);
+    existingVisitQuery += ` AND client_request_id IS NULL AND LOWER(TRIM(COALESCE(prospect_name, ''))) = LOWER(TRIM($3)) LIMIT 1`;
+  }
+  const { rows: existingRows } = await db.query(existingVisitQuery, dedupeParams);
+  if (existingRows.length) {
+    const { rows } = await db.query(
+      `UPDATE scheduled_visits
+          SET city = $2,
+              priority = $3,
+              notes = $4,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [existingRows[0].id, targetCity, priority || 1, notes || null],
+    );
+    const updatedSchedule = await triggerReapprovalIfNeeded(schedule);
+    await notifyReapprovalIfTransitioned(schedule, updatedSchedule, user);
+    return { ...rows[0], schedule_status: updatedSchedule.status };
+  }
   const { rows } = await db.query(
-    `INSERT INTO scheduled_visits (schedule_id, client_request_id, planned_date, city, priority, notes)
-     VALUES ($1,$2,$3,$4,$5,$6)
-     ON CONFLICT (schedule_id, client_request_id, planned_date) DO UPDATE
-    SET city = EXCLUDED.city, priority = EXCLUDED.priority, notes = EXCLUDED.notes, updated_at = NOW()
+    `INSERT INTO scheduled_visits (schedule_id, client_request_id, prospect_name, planned_date, city, priority, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
     RETURNING *`,
-    [scheduleId, clientRequestId, plannedDate, targetCity, priority || 1, notes || null],
+    [
+      scheduleId,
+      hasClient ? Number(clientRequestId) : null,
+      hasClient ? null : normalizedProspectName,
+      plannedDate,
+      targetCity,
+      priority || 1,
+      notes || null,
+    ],
   );
 
   const updatedSchedule = await triggerReapprovalIfNeeded(schedule);
+  await notifyReapprovalIfTransitioned(schedule, updatedSchedule, user);
 
   return { ...rows[0], schedule_status: updatedSchedule.status };
 }
 
-async function updateVisit({ scheduleId, visitId, city, plannedDate, priority, notes, user }) {
+async function syncWeekCity({ scheduleId, city, dates, user }) {
+  assertAdvisor(user);
+  const schedule = await findScheduleOrThrow(scheduleId);
+  ensureOwner(schedule, user);
+
+  const normalizedCity = String(city || "").trim();
+  const normalizedDates = [...new Set((Array.isArray(dates) ? dates : []).map((value) => String(value || "").slice(0, 10)).filter(Boolean))];
+
+  if (!normalizedCity) {
+    const error = new Error("La ciudad es obligatoria");
+    error.status = 400;
+    throw error;
+  }
+
+  if (!normalizedDates.length) {
+    const error = new Error("La semana no contiene fechas validas");
+    error.status = 400;
+    throw error;
+  }
+
+  // Bug real (urgente, cronograma de octubre 2026): buildFourWeekBlocks en el
+  // frontend arma "semanas" como bloques fijos de dias-del-mes (1-7, 8-14,
+  // 15-21, 22-fin), no semanas lunes-viernes reales -- asi que casi siempre
+  // incluye sabados/domingos (ej. dias 1-7 de octubre 2026 = jue a mie,
+  // incluye sab 3 y dom 4). validateVisitDateWithinSchedule tira 400 ante
+  // CUALQUIER fecha invalida (fin de semana, feriado, fuera del mes -- este
+  // ultimo caso tambien posible si alguna vez se envia una semana real que
+  // cruza el limite del mes), y antes se aplicaba a las 7 fechas del bloque
+  // completo, tumbando la sincronizacion de la ciudad para toda la semana
+  // por un solo sabado/domingo. Ahora se descartan en silencio las fechas
+  // que no son dias habiles del mes del cronograma (fin de semana, feriado,
+  // fuera de mes) y solo se sincronizan las que si son validas.
+  const validDates = normalizedDates.filter((plannedDate) => {
+    const parsed = new Date(plannedDate);
+    if (Number.isNaN(parsed.getTime())) return false;
+    if (
+      parsed.getUTCMonth() + 1 !== Number(schedule.month)
+      || parsed.getUTCFullYear() !== Number(schedule.year)
+    ) return false;
+    const weekday = parsed.getUTCDay();
+    if (weekday === 0 || weekday === 6) return false;
+    const dateOnly = toDateOnlyString(plannedDate);
+    if (dateOnly && getHolidaySet().has(dateOnly)) return false;
+    return true;
+  });
+
+  if (!validDates.length) {
+    const error = new Error("Ninguna fecha de esta semana es un dia habil dentro del mes del cronograma");
+    error.status = 400;
+    throw error;
+  }
+
+  const [clients, leads] = await Promise.all([
+    listAccessibleClientsByCity({ city: normalizedCity, user }),
+    listAccessibleLeadsByCity({ city: normalizedCity, user }),
+  ]);
+  const targets = [
+    ...clients.map((c) => ({ client_request_id: c.id, lead_id: null, prospect_name: null })),
+    ...leads.map((l) => ({
+      client_request_id: null,
+      lead_id: l.id,
+      prospect_name: l.full_name || l.company_name || `Lead #${l.id}`,
+    })),
+  ];
+  if (!targets.length) {
+    return {
+      schedule_id: scheduleId,
+      city: normalizedCity,
+      inserted: 0,
+      dates: validDates,
+      visits: [],
+    };
+  }
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    // Solo se borran las visitas de ESTA ciudad en la semana (permite re-sincronizar
+    // para refrescar) -- antes borraba TODA la semana, asi que cargar una segunda
+    // ciudad eliminaba las visitas de la primera. Una semana puede tener varias ciudades.
+    await client.query(
+      `DELETE FROM scheduled_visits
+        WHERE schedule_id = $1
+          AND planned_date = ANY($2::date[])
+          AND city = $3`,
+      [scheduleId, validDates, normalizedCity],
+    );
+
+    const insertedVisits = [];
+    for (let index = 0; index < targets.length; index += 1) {
+      const target = targets[index];
+      const plannedDate = validDates[index % validDates.length];
+      const { rows } = await client.query(
+        `INSERT INTO scheduled_visits (schedule_id, client_request_id, lead_id, prospect_name, planned_date, city, priority, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING *`,
+        [scheduleId, target.client_request_id, target.lead_id, target.prospect_name, plannedDate, normalizedCity, 1, null],
+      );
+      insertedVisits.push(rows[0]);
+    }
+
+    await client.query("COMMIT");
+    const updatedSchedule = await triggerReapprovalIfNeeded(schedule);
+    await notifyReapprovalIfTransitioned(schedule, updatedSchedule, user);
+    return {
+      schedule_id: scheduleId,
+      city: normalizedCity,
+      inserted: insertedVisits.length,
+      dates: validDates,
+      schedule_status: updatedSchedule.status,
+      visits: insertedVisits,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function updateVisit({
+  scheduleId,
+  visitId,
+  clientRequestId,
+  prospectName,
+  city,
+  plannedDate,
+  priority,
+  notes,
+  preserveApprovedStatus = false,
+  user,
+}) {
   assertAdvisor(user);
   const schedule = await findScheduleOrThrow(scheduleId);
   ensureOwner(schedule, user);
@@ -929,17 +1697,57 @@ async function updateVisit({ scheduleId, visitId, city, plannedDate, priority, n
   }
   const visit = rows[0];
   validateVisitDateWithinSchedule(plannedDate || visit.planned_date, schedule);
-  const client = await getClientOrThrow(visit.client_request_id);
+  const normalizedProspectName = normalizeProspectName(prospectName);
+  const targetClientRequestId = clientRequestId || visit.client_request_id || null;
+  const targetProspectName = targetClientRequestId ? null : (normalizedProspectName || normalizeProspectName(visit.prospect_name));
+  if (!targetClientRequestId && !targetProspectName) {
+    const error = new Error("La visita debe tener un cliente o un prospecto");
+    error.status = 400;
+    throw error;
+  }
+  let client = null;
+  if (targetClientRequestId) {
+    await assertClientAccessibleToAdvisor({ clientRequestId: targetClientRequestId, user });
+    client = await getClientOrThrow(targetClientRequestId);
+  }
   const targetCity = resolveCity({ city: city || visit.city, client }) || "Ciudad no especificada";
   const { rows: updated } = await db.query(
     `UPDATE scheduled_visits
-     SET city = $1, planned_date = $2, priority = $3, notes = $4, updated_at = NOW()
-    WHERE id = $5
+     SET client_request_id = $1,
+         prospect_name = $2,
+         city = $3,
+         planned_date = $4,
+         priority = $5,
+         notes = $6,
+         updated_at = NOW()
+    WHERE id = $7
     RETURNING *`,
-    [targetCity, plannedDate || visit.planned_date, priority || visit.priority, notes || visit.notes, visitId],
+    [
+      targetClientRequestId,
+      targetProspectName,
+      targetCity,
+      plannedDate || visit.planned_date,
+      priority || visit.priority,
+      notes !== undefined ? notes : visit.notes,
+      visitId,
+    ],
   );
 
-  const updatedSchedule = await triggerReapprovalIfNeeded(schedule);
+  const preserveApprovedReorder =
+    Boolean(preserveApprovedStatus) &&
+    schedule.status === "approved" &&
+    targetClientRequestId === (visit.client_request_id || null) &&
+    (targetProspectName || null) === (visit.prospect_name || null) &&
+    targetCity === (visit.city || null) &&
+    Number(priority || visit.priority) === Number(visit.priority) &&
+    (notes !== undefined ? notes : visit.notes) === visit.notes;
+
+  const updatedSchedule = preserveApprovedReorder
+    ? schedule
+    : await triggerReapprovalIfNeeded(schedule);
+  if (!preserveApprovedReorder) {
+    await notifyReapprovalIfTransitioned(schedule, updatedSchedule, user);
+  }
 
   return { ...updated[0], schedule_status: updatedSchedule.status };
 }
@@ -949,7 +1757,8 @@ async function deleteVisit({ scheduleId, visitId, user }) {
   const schedule = await findScheduleOrThrow(scheduleId);
   ensureOwner(schedule, user);
   await db.query("DELETE FROM scheduled_visits WHERE id = $1 AND schedule_id = $2", [visitId, scheduleId]);
-  await triggerReapprovalIfNeeded(schedule);
+  const updatedSchedule = await triggerReapprovalIfNeeded(schedule);
+  await notifyReapprovalIfTransitioned(schedule, updatedSchedule, user);
   return { deleted: true };
 }
 
@@ -996,11 +1805,6 @@ async function justifySchedule({ id, justification, user }) {
 async function approveSchedule({ id, notes, user }) {
   assertManager(user);
   const reviewNotes = normalizeReviewNotes(notes);
-  if (!reviewNotes) {
-    const error = new Error("Debes incluir notes para aprobar el cronograma");
-    error.status = 400;
-    throw error;
-  }
 
   const schedule = await findScheduleOrThrow(id);
   if (schedule.status !== "pending_approval") {
@@ -1017,13 +1821,20 @@ async function approveSchedule({ id, notes, user }) {
            reviewed_by_email = $1,
            reviewed_at = NOW(),
            rejection_reason = NULL,
-           review_notes = $2,
+           review_notes = NULLIF($2, ''),
            updated_at = NOW()
        WHERE id = $3
        RETURNING *`,
       [user.email, reviewNotes, id],
     );
-    return rows[0];
+    const approvedSchedule = rows[0];
+    approvedSchedule.external_sync = await syncApprovedScheduleArtifacts(approvedSchedule);
+    approvedSchedule.notifications = await notifyScheduleReviewed(approvedSchedule, {
+      approved: true,
+      notes: reviewNotes,
+      actorUser: user,
+    });
+    return approvedSchedule;
   }
 
   const auditNote = buildAuditNote({ action: "approve", notes: reviewNotes, user });
@@ -1034,6 +1845,7 @@ async function approveSchedule({ id, notes, user }) {
          reviewed_at = NOW(),
          rejection_reason = NULL,
          notes = CASE
+           WHEN NULLIF($2, '') IS NULL THEN notes
            WHEN notes IS NULL OR btrim(notes) = '' THEN $2
            ELSE notes || E'\n' || $2
          END,
@@ -1042,7 +1854,14 @@ async function approveSchedule({ id, notes, user }) {
      RETURNING *`,
     [user.email, auditNote, id],
   );
-  return rows[0];
+  const approvedSchedule = rows[0];
+  approvedSchedule.external_sync = await syncApprovedScheduleArtifacts(approvedSchedule);
+  approvedSchedule.notifications = await notifyScheduleReviewed(approvedSchedule, {
+    approved: true,
+    notes: reviewNotes,
+    actorUser: user,
+  });
+  return approvedSchedule;
 }
 
 async function rejectSchedule({ id, reason, notes, user }) {
@@ -1075,7 +1894,13 @@ async function rejectSchedule({ id, reason, notes, user }) {
        RETURNING *`,
       [user.email, reviewNotes, id],
     );
-    return rows[0];
+    const rejectedSchedule = rows[0];
+    rejectedSchedule.notifications = await notifyScheduleReviewed(rejectedSchedule, {
+      approved: false,
+      notes: reviewNotes,
+      actorUser: user,
+    });
+    return rejectedSchedule;
   }
 
   const auditNote = buildAuditNote({ action: "reject", notes: reviewNotes, user });
@@ -1094,18 +1919,29 @@ async function rejectSchedule({ id, reason, notes, user }) {
      RETURNING *`,
     [user.email, reviewNotes, auditNote, id],
   );
-  return rows[0];
+  const rejectedSchedule = rows[0];
+  rejectedSchedule.notifications = await notifyScheduleReviewed(rejectedSchedule, {
+    approved: false,
+    notes: reviewNotes,
+    actorUser: user,
+  });
+  return rejectedSchedule;
 }
 
-async function findApprovedScheduleForMonth({ userEmail, month, year }) {
+async function findApprovedScheduleForMonth({ userEmail, month, year, allowPendingReapproval = false }) {
+  const statusFilter = allowPendingReapproval
+    ? `status IN ('approved', 'pending_approval')`
+    : `status = 'approved'`;
   const { rows } = await db.query(
     `SELECT *
        FROM visit_schedules
       WHERE user_email = $1
-        AND status = 'approved'
+        AND ${statusFilter}
         AND month = $2
         AND year = $3
-      ORDER BY reviewed_at DESC NULLS LAST
+      ORDER BY
+        CASE status WHEN 'approved' THEN 0 ELSE 1 END ASC,
+        reviewed_at DESC NULLS LAST
       LIMIT 1`,
     [userEmail, month, year],
   );
@@ -1121,7 +1957,7 @@ async function getApprovedScheduleCurrent({ userEmail, month, year, user }) {
   const schedule = await findApprovedScheduleForMonth({ userEmail: targetEmail, month: targetMonth, year: targetYear });
   if (!schedule) return null;
   const { rows: visits } = await db.query(
-    `SELECT client_request_id, planned_date, city, priority, notes
+    `SELECT client_request_id, prospect_name, planned_date, city, priority, notes
        FROM scheduled_visits
       WHERE schedule_id = $1
       ORDER BY planned_date ASC, priority ASC`,
@@ -1147,6 +1983,7 @@ async function getMyCalendarIcsStream({ user }) {
        sv.city,
        sv.priority,
        sv.notes,
+       sv.prospect_name,
        cr.commercial_name AS client_name
      FROM visit_schedules vs
      JOIN scheduled_visits sv
@@ -1167,7 +2004,7 @@ async function getMyCalendarIcsStream({ user }) {
       if (!start) return null;
       const end = shiftDateTuple(start, 1);
       if (!end) return null;
-      const titleBase = String(visit.client_name || "").trim() || `Cliente #${visit.id}`;
+      const titleBase = getVisitDisplayName(visit);
       const descriptionParts = [
         `Tipo: Visita comercial`,
         `Cliente: ${titleBase}`,
@@ -1277,6 +2114,7 @@ async function optimizeRoute({ scheduleIds, user }) {
         sv.id AS visit_id,
         sv.schedule_id,
         sv.client_request_id,
+        sv.prospect_name,
         sv.planned_date,
         sv.priority,
         sv.notes,
@@ -1285,6 +2123,7 @@ async function optimizeRoute({ scheduleIds, user }) {
         COALESCE(
           ${catalogNameSelect},
           cr.commercial_name,
+          NULLIF(TRIM(sv.prospect_name), ''),
           cr.establishment_name,
           cr.shipping_contact_name,
           ('Cliente #' || sv.client_request_id::text)
@@ -1342,6 +2181,7 @@ async function optimizeRoute({ scheduleIds, user }) {
           visit_id: visit.visit_id,
           schedule_id: visit.schedule_id,
           client_request_id: visit.client_request_id,
+          prospect_name: visit.prospect_name,
           client_name: visit.client_name,
           reason: "No existe coordenada ni direccion para la visita",
         });
@@ -1352,6 +2192,7 @@ async function optimizeRoute({ scheduleIds, user }) {
         visit_id: visit.visit_id,
         schedule_id: visit.schedule_id,
         client_request_id: visit.client_request_id,
+        prospect_name: visit.prospect_name,
         client_name: visit.client_name,
         planned_date: String(visit.planned_date || "").slice(0, 10),
         priority: Number(visit.priority || 1),
@@ -1498,7 +2339,66 @@ async function getAnalytics(user) {
   return { byStatus, topCities: visits };
 }
 
+async function findTodayScheduledVisit({ userEmail, clientRequestId, leadId, date }) {
+  if (!clientRequestId && !leadId) return null;
+  // `date` puede llegar como objeto Date (p.ej. desde un RETURNING de Postgres
+  // en attendance.controller.js) o como string "YYYY-MM-DD" (desde clients.service.js).
+  // String(dateObj) da formato "Thu Jul 30 2026 ..." -- .slice(0,10) rompía el
+  // cast ::date mas abajo y el sync silenciosamente nunca corria para ningun
+  // cierre de visita hecho desde Asistencia.
+  const normalizedDate = date instanceof Date
+    ? date.toISOString().slice(0, 10)
+    : String(date || "").slice(0, 10);
+  const month = Number(normalizedDate.slice(5, 7));
+  const year = Number(normalizedDate.slice(0, 4));
+  const params = [String(userEmail || "").toLowerCase(), normalizedDate, month, year];
+  const conditions = [
+    "LOWER(COALESCE(vs.user_email, '')) = $1",
+    "vs.status = 'approved'",
+    "(sv.planned_date = $2::date OR (vs.month = $3 AND vs.year = $4))",
+  ];
+  if (clientRequestId) {
+    params.push(clientRequestId);
+    conditions.push(`sv.client_request_id = $${params.length}`);
+  } else {
+    params.push(leadId);
+    conditions.push(`sv.lead_id = $${params.length}`);
+  }
+  const { rows } = await db.query(
+    `SELECT sv.id, sv.crm_activity_id
+       FROM scheduled_visits sv
+       JOIN visit_schedules vs ON vs.id = sv.schedule_id
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY CASE WHEN sv.planned_date = $2::date THEN 0 ELSE 1 END, sv.planned_date ASC, sv.id ASC
+      LIMIT 1`,
+    params,
+  );
+  return rows[0] || null;
+}
+
+async function markCrmActivityCompleted(crmActivityId, userId, { visitLogId = null } = {}) {
+  if (!crmActivityId) return;
+  await db.query(
+    `UPDATE crm.crm_activities
+        SET status = CASE
+              WHEN activity_type = 'visita' THEN 'visited_pending_followup'
+              ELSE 'completed'
+            END,
+            completed_at = CASE
+              WHEN activity_type = 'visita' THEN completed_at
+              ELSE NOW()
+            END,
+            visit_log_id = COALESCE($3, visit_log_id),
+            updated_by = $2,
+            updated_at = NOW()
+      WHERE id = $1
+        AND status NOT IN ('completed', 'cancelled')`,
+    [crmActivityId, userId || null, visitLogId],
+  );
+}
+
 module.exports = {
+  buildGoogleMapsDeepLink,
   listMySchedules,
   getHolidays,
   listPendingApproval,
@@ -1509,6 +2409,7 @@ module.exports = {
   deleteSchedule,
   submitForApproval,
   addVisit,
+  syncWeekCity,
   updateVisit,
   deleteVisit,
   approveSchedule,
@@ -1519,6 +2420,6 @@ module.exports = {
   getApprovedScheduleCurrent,
   findApprovedScheduleForMonth,
   getMyCalendarIcsStream,
+  findTodayScheduledVisit,
+  markCrmActivityCompleted,
 };
-
-

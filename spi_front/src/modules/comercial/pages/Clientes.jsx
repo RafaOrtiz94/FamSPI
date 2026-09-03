@@ -39,15 +39,12 @@ import LocationManager from "../components/LocationManager";
 import { formatDateSafe } from "../../../shared/utils/dateUtils";
 
 const todayStr = new Date().toISOString().slice(0, 10);
+const CLIENTS_PAGE_SIZE = 100;
 
 const ASSIGN_CLIENT_ROLES = new Set([
- "jefe_comercial",
- "jefe_de_comercial",
- "gerencia",
- "gerente",
- "admin",
- "administrador",
- "ti",
+ "jefe_operaciones",
+ "jefe_de_operaciones",
+ "backoffice_comercial",
 ]);
 
 const FULL_ACCESS_ROLES = new Set([
@@ -60,6 +57,8 @@ const FULL_ACCESS_ROLES = new Set([
  "admin",
  "administrador",
  "ti",
+ "jefe_operaciones",
+ "jefe_de_operaciones",
 ]);
 const ADVISOR_ROLES = new Set([
  "comercial",
@@ -75,6 +74,8 @@ const CHECKIN_CARDS_HIDDEN_ROLES = new Set([
  "acp_comercial",
  "backoffice_comercial",
  "jefe_comercial",
+ "jefe_operaciones",
+ "jefe_de_operaciones",
 ]);
 const ASSIGNABLE_ADVISOR_ROLES = new Set([
  "comercial",
@@ -95,37 +96,64 @@ const normalizeRoleToken = (value) =>
 
 const normalizeStatus = (status) => {
  const value = (status || "").toLowerCase();
+ if (["visited_pending_followup", "visitada_pendiente_cierre"].includes(value)) return "visitada_pendiente_cierre";
  if (["visited", "visitado"].includes(value)) return "visitado";
  if (["en_visita", "in_visit", "in_progress"].includes(value)) return "en_visita";
  return "pendiente";
 };
 
+const getClientVisitStatus = (client) => {
+ const visitStatus = String(client?.visit_status || "").toLowerCase();
+ const followupStatus = String(client?.crm_followup_status || "").toLowerCase();
+ const activityStatus = String(client?.crm_activity_status || "").toLowerCase();
+ if (
+   ["visited", "visitado"].includes(visitStatus) &&
+   (activityStatus === "visited_pending_followup" ||
+    followupStatus === "pending_followup" ||
+    followupStatus === "incomplete_followup")
+ ) {
+   return "visitada_pendiente_cierre";
+ }
+ return client?.visit_status;
+};
+
 const STATUS_STYLES = {
- pendiente: {
- label: "Pendiente",
- chip: "bg-gray-100 text-gray-700",
- led: "bg-gray-300",
- },
- en_visita: {
- label: "En visita",
- chip: "bg-blue-50 text-blue-700",
- led: "bg-blue-500",
- },
- visitado: {
- label: "Visitado",
- chip: "bg-green-50 text-green-700",
- led: "bg-green-500",
- },
+  pendiente: {
+    label: "Pendiente",
+    chip: "bg-[#F3F4F6] text-[#1F2937]",
+    led: "bg-[#D1D5DB]",
+  },
+  en_visita: {
+    label: "En visita",
+    chip: "bg-[#DBEAFE] text-[#1D4ED8]",
+    led: "bg-[#2563EB]",
+  },
+  visitado: {
+    label: "Visitado",
+    chip: "bg-[#DCFCE7] text-[#16A34A]",
+    led: "bg-[#16A34A]",
+  },
+  visitada_pendiente_cierre: {
+    label: "Visitada, pendiente de cierre",
+    chip: "bg-[#FEF3C7] text-[#D97706]",
+    led: "bg-[#D97706]",
+  },
 };
 
 const ClientesPage = () => {
  const { showToast } = useUI();
  const { role, user } = useAuth();
  const normalizedRole = normalizeRoleToken(role || user?.role || user?.role_name || user?.scope || "");
- const roleTokens = (normalizedRole || "")
- .split(/[,\|]+/)
+ const baseRoleTokens = (normalizedRole || "")
+ .split(/[,|]+/)
  .map((token) => normalizeRoleToken(token))
  .filter(Boolean);
+ // extra_roles: capacidades adicionales otorgadas a un usuario puntual sin
+ // cambiar su rol principal (ver migrations/276_users_extra_roles.sql).
+ const extraRoleTokens = (Array.isArray(user?.extra_roles) ? user.extra_roles : [])
+ .map((token) => normalizeRoleToken(token))
+ .filter(Boolean);
+ const roleTokens = Array.from(new Set([...baseRoleTokens, ...extraRoleTokens]));
  const hasAnyRole = useCallback((allowedRoles) => roleTokens.some((token) => allowedRoles.has(token)), [roleTokens]);
  const canAssignClients = hasAnyRole(ASSIGN_CLIENT_ROLES);
  const canManageAllClients = hasAnyRole(FULL_ACCESS_ROLES);
@@ -158,6 +186,7 @@ const ClientesPage = () => {
  const [filterBySchedule, setFilterBySchedule] = useState(shouldStartWithScheduleFilter);
  const [selectedDate, setSelectedDate] = useState(todayStr);
  const [summary, setSummary] = useState({});
+ const [clientsPagination, setClientsPagination] = useState({ page: 1, limit: CLIENTS_PAGE_SIZE, has_more: false });
  const [temporaryAssignmentsFilter, setTemporaryAssignmentsFilter] = useState("all"); // all | expiring_today | expiring_7
  const [albumSearch, setAlbumSearch] = useState("");
  const [showAllClients, setShowAllClients] = useState(false);
@@ -176,10 +205,22 @@ const ClientesPage = () => {
  const [editSubmitting, setEditSubmitting] = useState(false);
  const [editForm, setEditForm] = useState({});
  const [editFiles, setEditFiles] = useState({});
- const [usersDirectoryByEmail, setUsersDirectoryByEmail] = useState({});
+ const [, setUsersDirectoryByEmail] = useState({});
  const clientsCacheRef = useRef(new Map());
+ // Espejo sincrónico de clientes/registeredClients para loadClientes (ver
+ // mas abajo) -- lee estos refs en vez de las variables de estado directo
+ // para no depender de ellas en su propio useCallback (eso causaba el
+ // bootloop) y sin arriesgarse a que el valor combinado del updater
+ // funcional de setState no este listo a tiempo para el guardado en cache.
+ const clientesRef = useRef([]);
+ const registeredClientsRef = useRef([]);
 
- const getStatusMeta = (status) => STATUS_STYLES[normalizeStatus(status)] || STATUS_STYLES.pendiente;
+ const getStatusMeta = (statusOrClient) => {
+ const status = typeof statusOrClient === "object" && statusOrClient !== null
+ ? getClientVisitStatus(statusOrClient)
+ : statusOrClient;
+ return STATUS_STYLES[normalizeStatus(status)] || STATUS_STYLES.pendiente;
+ };
 
  const formatTime = (value) =>
  value ? new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
@@ -225,19 +266,19 @@ return "Provincia no especificada";
 };
 
 const getClientSourceMeta = (client) => {
-const createdBy = String(client?.created_by || "").trim().toLowerCase();
-const dataSource = String(client?.data_source || "").trim().toLowerCase();
-const isOdooSource = dataSource === "odoo" || createdBy === "odoo_sync@spi.local";
-if (isOdooSource) {
-return {
-label: "Origen: Odoo",
-className: "border-indigo-200 bg-indigo-50 text-indigo-700",
-};
-}
-return {
-label: "Origen: SPI",
-className: "border-slate-200 bg-slate-100 text-slate-700",
-};
+  const createdBy = String(client?.created_by || "").trim().toLowerCase();
+  const dataSource = String(client?.data_source || "").trim().toLowerCase();
+  const isOdooSource = dataSource === "odoo" || createdBy === "odoo_sync@spi.local";
+  if (isOdooSource) {
+    return {
+      label: "Origen: ERP",
+      className: "border-[#DBEAFE] bg-[#DBEAFE] text-[#1D4ED8]",
+    };
+  }
+  return {
+    label: "Origen: SPI",
+    className: "border-[#E5E7EB] bg-[#F3F4F6] text-[#1F2937]",
+  };
 };
 
 const isClientFromOdoo = (client) => {
@@ -284,15 +325,6 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  }
  }
  return [];
- };
-
- const isUserPassiveOrInactive = (userInfo) => {
- if (!userInfo) return false;
- const employmentStatus = String(
- userInfo.estatus_empleado || userInfo.employment_status || "",
- ).trim().toLowerCase();
- if (userInfo.active === false) return true;
- return PASSIVE_EMPLOYMENT_STATUSES.has(employmentStatus);
  };
 
  const getTemporaryAssignmentInfo = useCallback((client) => {
@@ -406,14 +438,17 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  }
  };
 
- const loadClientes = useCallback(async ({ forceRefresh = false } = {}) => {
- const cacheKey = `${currentEmail}|${selectedDate}|${filterBySchedule ? "1" : "0"}`;
- if (!forceRefresh) {
+ const loadClientes = useCallback(async ({ forceRefresh = false, page = 1, append = false } = {}) => {
+ const cacheKey = `${currentEmail}|${selectedDate}|${filterBySchedule ? "1" : "0"}|${page}`;
+ if (!forceRefresh && !append) {
  const cached = clientsCacheRef.current.get(cacheKey);
  if (cached) {
+ clientesRef.current = cached.clients;
+ registeredClientsRef.current = cached.registeredClients;
  setClientes(cached.clients);
  setRegisteredClients(cached.registeredClients);
  setSummary(cached.summary);
+ setClientsPagination(cached.pagination);
  return;
  }
  }
@@ -424,11 +459,15 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  date: selectedDate,
  include_schedule_info: true,
  filter_by_schedule: filterBySchedule,
+ schedule_window: "approved_period",
+ limit: CLIENTS_PAGE_SIZE,
+ page,
  });
 
  let loadedClients = [];
  let loadedProspects = [];
  let loadedSummary = {};
+ let loadedPagination = {};
 
  if (Array.isArray(result)) {
  loadedClients = result;
@@ -459,16 +498,48 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  asignados: [currentEmail]
  }));
  loadedSummary = result?.summary || {};
+ loadedPagination = result?.pagination || {};
  }
 
- setClientes([...loadedProspects, ...loadedClients]);
- setRegisteredClients(loadedClients);
+ // Bug real (bootloop reportado por Lorena Loaiza): loadClientes leia
+ // `clientes`/`registeredClients` directo del closure y los tenia en su
+ // propio arreglo de dependencias de useCallback. Como esta misma funcion
+ // llama a setClientes/setRegisteredClients, cada fetch generaba una
+ // identidad nueva de loadClientes, y el useEffect de mas abajo (que
+ // depende de loadClientes) volvia a dispararla -- fetch -> setState ->
+ // nueva identidad -> useEffect -> fetch de nuevo, sin parar. Se leen los
+ // refs sincronicos (clientesRef/registeredClientsRef) en vez del estado
+ // por closure: evita la dependencia circular Y evita el riesgo de leer un
+ // valor no listo a tiempo si se usara el updater funcional de setState
+ // para esto mismo.
+ const mergedClients = append
+ ? [...clientesRef.current, ...loadedClients]
+ : [...loadedProspects, ...loadedClients];
+ const mergedRegisteredClients = append
+ ? [...registeredClientsRef.current, ...loadedClients]
+ : loadedClients;
+ clientesRef.current = mergedClients;
+ registeredClientsRef.current = mergedRegisteredClients;
+ setClientes(mergedClients);
+ setRegisteredClients(mergedRegisteredClients);
  setSummary(loadedSummary);
- clientsCacheRef.current.set(cacheKey, {
- clients: [...loadedProspects, ...loadedClients],
- registeredClients: loadedClients,
- summary: loadedSummary,
+ setClientsPagination({
+ page: loadedPagination?.page || page,
+ limit: loadedPagination?.limit || CLIENTS_PAGE_SIZE,
+ has_more: Boolean(loadedPagination?.has_more),
  });
+ if (!append) {
+ clientsCacheRef.current.set(cacheKey, {
+ clients: mergedClients,
+ registeredClients: mergedRegisteredClients,
+ summary: loadedSummary,
+ pagination: {
+ page: loadedPagination?.page || page,
+ limit: loadedPagination?.limit || CLIENTS_PAGE_SIZE,
+ has_more: Boolean(loadedPagination?.has_more),
+ },
+ });
+ }
  // Solo mostrar alerta de cronograma si es comercial puro (no backoffice, no acp, no jefe)
  // Si no hay cronograma aprobado, se desactiva el filtro para mostrar cartera completa.
  if (filterBySchedule && !loadedSummary?.has_approved_schedule && isCommercialOnly) {
@@ -490,8 +561,34 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  }, [filterBySchedule, selectedDate, showToast, currentEmail, isCommercialOnly]);
 
  useEffect(() => {
- loadClientes();
+ clientsCacheRef.current.clear();
+ loadClientes({ page: 1 });
  }, [filterBySchedule, loadClientes]);
+
+ const handleLoadMoreClients = useCallback(() => {
+ if (loading || !clientsPagination?.has_more) return;
+ loadClientes({
+ page: Number(clientsPagination?.page || 1) + 1,
+ append: true,
+ forceRefresh: true,
+ });
+ }, [clientsPagination, loadClientes, loading]);
+
+ const renderLoadMoreClientsButton = () => {
+ if (!clientsPagination?.has_more) return null;
+ return (
+ <div className="flex justify-center pt-4">
+ <Button
+ type="button"
+ variant="secondary"
+ onClick={handleLoadMoreClients}
+ disabled={loading}
+ >
+ {loading ? "Cargando..." : "Cargar más clientes"}
+ </Button>
+ </div>
+ );
+ };
 
  useEffect(() => {
  if (canAssignClients) loadAdvisors();
@@ -518,8 +615,10 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
 
  const commercialKpi = useMemo(() => {
  const base = Array.isArray(clientes) ? clientes.filter((c) => !c.is_prospect) : [];
- const plannedToday = Number(summary?.planned_today || 0);
+ const plannedPeriod = Number(summary?.planned_period ?? summary?.planned_today ?? 0);
  const effective = base.filter((c) => c.hora_entrada && c.hora_salida);
+ const checkIns = base.filter((c) => c.hora_entrada).length;
+ const checkOuts = base.filter((c) => c.hora_salida).length;
  const avgDuration =
  effective.length > 0
  ? Math.round(
@@ -529,10 +628,12 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  : 0;
 
  return {
- plannedToday,
+ plannedPeriod,
  visited: visitedCount,
  effectiveVisits: effective.length,
- compliance: plannedToday > 0 ? Math.round((visitedCount / plannedToday) * 100) : null,
+ checkIns,
+ checkOuts,
+ compliance: plannedPeriod > 0 ? Math.round((visitedCount / plannedPeriod) * 100) : null,
  avgDuration,
  };
  }, [clientes, summary, visitedCount]);
@@ -1050,8 +1151,8 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  };
 
  const renderCard = (cliente) => {
- const status = normalizeStatus(cliente.visit_status);
- const meta = getStatusMeta(status);
+ const status = normalizeStatus(getClientVisitStatus(cliente));
+ const meta = getStatusMeta(cliente);
  const duration = cliente.duracion_minutos ?? calculateDuration(cliente);
 const temporaryInfo = getTemporaryAssignmentInfo(cliente);
 const assignmentDetails = normalizeAssignmentDetails(cliente.assignment_details);
@@ -1073,272 +1174,266 @@ const isCommercialPlanned = Boolean(
 const isTechnicalPlanned = Boolean(cliente.scheduled_info?.is_planned_technical);
 const isPlanned = isCommercialPlanned || isTechnicalPlanned;
 
- return (
- <div
- key={cliente.id}
- className="relative flex flex-col rounded-none border border-gray-100 border-x-0 bg-white/90 p-4 shadow-none backdrop-blur transition cursor-pointer sm:rounded-2xl sm:border sm:bg-white/80 sm:shadow-sm sm:hover:shadow-md sm:hover:-translate-y-0.5"
- onClick={() => openReportModal(cliente)}
- >
-{isPlanned && (
-  <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1">
-    {isCommercialPlanned && (
-      <span className="px-2 py-1 bg-green-500 text-white text-xs rounded-full flex items-center gap-1">
-        <FiCalendar size={12} />
-        Cronograma comercial
-      </span>
-    )}
-    {isTechnicalPlanned && (
-      <span className="px-2 py-1 bg-blue-600 text-white text-xs rounded-full flex items-center gap-1">
-        <FiCalendar size={12} />
-        Cronograma técnico
-      </span>
-    )}
-  </div>
-)}
- {temporaryInfo && (
- <span className="absolute top-3 left-24 px-2 py-1 bg-amber-500 text-white text-xs rounded-full">
- {temporaryInfo.daysRemaining <= 0
- ? "Temporal vencida"
- : `Temporal vence en ${temporaryInfo.daysRemaining}d`}
- </span>
- )}
- <span className={`absolute top-3 right-3 h-2.5 w-2.5 rounded-full ${meta.led}`} />
-
- <div className="flex items-start justify-between gap-3">
- <div className="space-y-1">
-<p className="text-sm font-semibold text-gray-900">{cliente.nombre}</p>
-<span className={`inline-flex items-center rounded-full border px-2 py-[1px] text-[10px] font-semibold ${sourceMeta.className}`}>
-{sourceMeta.label}
-</span>
- <p className="text-xs text-gray-500 flex items-center gap-1">
- <FiMapPin className="text-gray-400" /> {cliente.shipping_address || "Sin dirección"}
- </p>
- <p className="text-[11px] text-gray-400">ID #{cliente.id}</p>
- </div>
- <span className={`px-2 py-[2px] text-xs font-semibold rounded-full ${meta.chip}`}>
- {meta.label}
- </span>
- </div>
-
- <div className="mt-3 space-y-2 text-sm text-gray-700">
- <div className="flex items-center justify-between text-xs text-gray-600">
- <span>Entrada</span>
- <span className="font-semibold text-gray-800">{formatTime(cliente.hora_entrada)}</span>
- </div>
- <div className="flex items-center justify-between text-xs text-gray-600">
- <span>Salida</span>
- <span className="font-semibold text-gray-800">{formatTime(cliente.hora_salida)}</span>
- </div>
- <div className="flex items-center justify-between text-xs text-gray-600">
- <span>Duración</span>
- <span className="font-semibold text-gray-800">{formatDuration(duration)}</span>
- </div>
- <p className="text-xs text-gray-600">
- <span className="font-semibold text-gray-700">Asignado:</span> {assigned}
- </p>
-          {isJefeComercial && assignmentAlerts.length > 0 && (
-            <div className="mt-2 space-y-1 rounded-lg bg-rose-50/50 p-2 border border-rose-100">
-              {assignmentAlerts.map((alert) => (
-                <p
-                  key={alert.email}
-                  className={`text-[11px] flex items-center gap-1 font-bold ${
-                    alert.isPassive ? "text-rose-700" : "text-amber-700"
-                  }`}
-                >
-                  <FiAlertCircle size={12} className="shrink-0" />
-                  <span className="truncate">
-                    {alert.isPassive
-                      ? `${alert.advisorName} inactivo/desvinculado.`
-                      : alert.hasVacaciones
-                        ? `${alert.advisorName} en vacaciones hoy.`
-                        : `${alert.advisorName} en permiso hoy.`}
-                  </span>
-                </p>
-              ))}
-              <p className="text-[10px] text-rose-600/70 italic ml-4 font-medium">
-                Acción requerida: Reasignar cliente para asegurar continuidad.
-              </p>
-            </div>
+  return (
+    <div
+      key={cliente.id}
+      className="relative flex flex-col rounded-2xl border border-[#E5E7EB] bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition-shadow duration-200 cursor-pointer hover:shadow-[0_4px_16px_rgba(0,0,0,0.10)] active:scale-[0.97] active:transition-transform"
+      onClick={() => openReportModal(cliente)}
+    >
+      {isPlanned && (
+        <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1">
+          {isCommercialPlanned && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#DCFCE7] px-2 py-[2px] text-[10px] font-semibold text-[#16A34A]">
+              <FiCalendar size={10} />
+              Comercial
+            </span>
           )}
- </div>
+          {isTechnicalPlanned && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#DBEAFE] px-2 py-[2px] text-[10px] font-semibold text-[#1D4ED8]">
+              <FiCalendar size={10} />
+              Técnico
+            </span>
+          )}
+        </div>
+      )}
+      {temporaryInfo && (
+        <span className="absolute top-3 left-24 inline-flex rounded-full bg-[#FEF3C7] px-2 py-[2px] text-[10px] font-semibold text-[#D97706]">
+          {temporaryInfo.daysRemaining <= 0
+            ? "Temporal vencida"
+            : `Temporal vence en ${temporaryInfo.daysRemaining}d`}
+        </span>
+      )}
+      <span className={`absolute top-3 right-3 h-2.5 w-2.5 rounded-full ${meta.led}`} />
 
- <div className="mt-4 flex flex-wrap gap-2">
- {status === "pendiente" && (
- <Button
- className="flex-1"
- icon={FiMapPin}
- onClick={(e) => {
- e.stopPropagation();
- openVisitFlow(cliente, "start");
- }}
- >
- Iniciar visita
- </Button>
- )}
- {status === "en_visita" && (
- <Button
- className="flex-1"
- icon={FiCheckCircle}
- onClick={(e) => {
- e.stopPropagation();
- openVisitFlow(cliente, "end");
- }}
- >
- Finalizar visita
- </Button>
- )}
- {status === "visitado" && (
- <Button
- className="flex-1"
- variant="secondary"
- icon={FiInfo}
- onClick={(e) => {
- e.stopPropagation();
- openReportModal(cliente);
- }}
- >
- Ver reporte
- </Button>
- )}
- {status !== "visitado" && (
- <Button
- variant="ghost"
- icon={FiInfo}
- className="px-3 py-2"
- onClick={(e) => {
- e.stopPropagation();
- openReportModal(cliente);
- }}
- >
- Detalles
- </Button>
- )}
- {!cliente.is_prospect && (
- <Button
- variant="ghost"
- className="px-3 py-2"
- onClick={(e) => {
- e.stopPropagation();
- openReprogramModal(cliente);
- }}
- >
- Reprogramar
- </Button>
- )}
- </div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <p className="text-sm font-semibold text-[#1F2937]">{cliente.nombre}</p>
+          <span className={`inline-flex items-center rounded-full border px-2 py-[1px] text-[10px] font-medium ${sourceMeta.className}`}>
+            {sourceMeta.label}
+          </span>
+          <p className="flex items-center gap-1 text-xs text-[#6B7280]">
+            <FiMapPin className="text-[#D1D5DB]" size={12} /> {cliente.shipping_address || "Sin dirección"}
+          </p>
+          <p className="font-mono text-[11px] text-[#6B7280]">#{cliente.id}</p>
+        </div>
+        <span className={`shrink-0 rounded-full px-2 py-[2px] text-[10px] font-semibold ${meta.chip}`}>
+          {meta.label}
+        </span>
+      </div>
 
- <div className="mt-3 flex flex-wrap gap-2 text-xs">
- {hasEntryCoords && (
- <a
- href={`https://www.google.com/maps?q=${cliente.lat_entrada},${cliente.lng_entrada}`}
- target="_blank"
- rel="noreferrer"
- onClick={(e) => e.stopPropagation()}
- className="rounded-full border border-gray-200 px-3 py-1 text-gray-700 hover:bg-gray-50"
- >
- Ver ubicación entrada
- </a>
- )}
- {hasExitCoords && (
- <a
- href={`https://www.google.com/maps?q=${cliente.lat_salida},${cliente.lng_salida}`}
- target="_blank"
- rel="noreferrer"
- onClick={(e) => e.stopPropagation()}
- className="rounded-full border border-gray-200 px-3 py-1 text-gray-700 hover:bg-gray-50"
- >
- Ver ubicación salida
- </a>
- )}
- </div>
+      <div className="mt-3 space-y-1.5">
+        <div className="flex items-center justify-between text-xs text-[#6B7280]">
+          <span>Entrada</span>
+          <span className="font-mono font-semibold text-[#1F2937]">{formatTime(cliente.hora_entrada)}</span>
+        </div>
+        <div className="flex items-center justify-between text-xs text-[#6B7280]">
+          <span>Salida</span>
+          <span className="font-mono font-semibold text-[#1F2937]">{formatTime(cliente.hora_salida)}</span>
+        </div>
+        <div className="flex items-center justify-between text-xs text-[#6B7280]">
+          <span>Duración</span>
+          <span className="font-mono font-semibold text-[#1F2937]">{formatDuration(duration)}</span>
+        </div>
+        <p className="text-xs text-[#6B7280]">
+          <span className="font-medium text-[#1F2937]">Asignado:</span> {assigned}
+        </p>
+        {isJefeComercial && assignmentAlerts.length > 0 && (
+          <div className="mt-2 space-y-1 rounded-xl border border-[#FEE2E2] bg-[#FEE2E2] p-2.5">
+            {assignmentAlerts.map((alert) => (
+              <p
+                key={alert.email}
+                className={`flex items-center gap-1 text-[11px] font-semibold ${
+                  alert.isPassive ? "text-[#DC2626]" : "text-[#D97706]"
+                }`}
+              >
+                <FiAlertCircle size={11} className="shrink-0" />
+                <span className="truncate">
+                  {alert.isPassive
+                    ? `${alert.advisorName} inactivo/desvinculado.`
+                    : alert.hasVacaciones
+                      ? `${alert.advisorName} en vacaciones hoy.`
+                      : `${alert.advisorName} en permiso hoy.`}
+                </span>
+              </p>
+            ))}
+            <p className="ml-4 text-[10px] font-medium text-[#DC2626]/70">
+              Acción requerida: Reasignar para asegurar continuidad.
+            </p>
+          </div>
+        )}
+      </div>
 
- <div className="mt-3 border-t border-gray-100 pt-3">
- <button
- type="button"
- className="text-xs font-semibold text-blue-700 hover:underline"
- onClick={(e) => {
- e.stopPropagation();
- setExpandedTimeline((prev) => ({ ...prev, [cliente.id]: !prev[cliente.id] }));
- }}
- >
- {timelineOpen ? "Ocultar timeline" : "Ver timeline"}
- </button>
- {timelineOpen && (
- <div className="mt-2 space-y-1 text-xs text-gray-600">
- <p>Entrada: {formatTime(cliente.hora_entrada)}</p>
- <p>Salida: {formatTime(cliente.hora_salida)}</p>
- <p>Duración: {formatDuration(duration)}</p>
- <p>Observación: {cliente.observaciones || "Sin observaciones"}</p>
- </div>
- )}
- </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {status === "pendiente" && (
+          <Button
+            className="flex-1"
+            icon={FiMapPin}
+            onClick={(e) => {
+              e.stopPropagation();
+              openVisitFlow(cliente, "start");
+            }}
+          >
+            Iniciar visita
+          </Button>
+        )}
+        {status === "en_visita" && (
+          <Button
+            className="flex-1"
+            icon={FiCheckCircle}
+            onClick={(e) => {
+              e.stopPropagation();
+              openVisitFlow(cliente, "end");
+            }}
+          >
+            Finalizar visita
+          </Button>
+        )}
+        {status === "visitado" && (
+          <Button
+            className="flex-1"
+            variant="secondary"
+            icon={FiInfo}
+            onClick={(e) => {
+              e.stopPropagation();
+              openReportModal(cliente);
+            }}
+          >
+            Ver reporte
+          </Button>
+        )}
+        {status !== "visitado" && (
+          <Button
+            variant="ghost"
+            icon={FiInfo}
+            className="px-3 py-2"
+            onClick={(e) => {
+              e.stopPropagation();
+              openReportModal(cliente);
+            }}
+          >
+            Detalles
+          </Button>
+        )}
+        {!cliente.is_prospect && (
+          <Button
+            variant="ghost"
+            className="px-3 py-2"
+            onClick={(e) => {
+              e.stopPropagation();
+              openReprogramModal(cliente);
+            }}
+          >
+            Reprogramar
+          </Button>
+        )}
+      </div>
 
- {canAssignClients && (
- <div className="mt-4 flex flex-col gap-2 rounded-lg bg-gray-50 p-3" onClick={(e) => e.stopPropagation()}>
- <p className="text-xs font-semibold text-gray-700">Reasignar asesor</p>
- <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
- <select
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
- value={assignments[cliente.id]?.email || ""}
- onChange={(e) =>
- setAssignments((prev) => ({
- ...prev,
- [cliente.id]: {
- ...(prev[cliente.id] || {}),
- email: e.target.value,
- },
- }))
- }
- >
- <option value="">Selecciona asesor</option>
- {Array.isArray(advisors) && advisors.map((u) => (
- <option key={u.id} value={u.email}>
- {u.fullname || u.name || u.email}
- </option>
- ))}
- </select>
- <label className="inline-flex items-center gap-2 text-xs text-gray-700">
- <input
- type="checkbox"
- checked={Boolean(assignments[cliente.id]?.temporary)}
- onChange={(e) =>
- setAssignments((prev) => ({
- ...prev,
- [cliente.id]: {
- ...(prev[cliente.id] || {}),
- temporary: e.target.checked,
- ends_at: e.target.checked ? prev[cliente.id]?.ends_at : "",
- },
- }))
- }
- />
- Asignación temporal
- </label>
- {Boolean(assignments[cliente.id]?.temporary) && (
- <input
- type="date"
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
- value={assignments[cliente.id]?.ends_at || ""}
- onChange={(e) =>
- setAssignments((prev) => ({
- ...prev,
- [cliente.id]: {
- ...(prev[cliente.id] || {}),
- ends_at: e.target.value,
- },
- }))
- }
- />
- )}
- <Button onClick={() => handleAssign(cliente.id)}>Asignar</Button>
- <Button variant="ghost" onClick={() => handleUnassign(cliente.id)}>
- Quitar
- </Button>
- </div>
- </div>
- )}
- </div>
- );
+      {(hasEntryCoords || hasExitCoords) && (
+        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+          {hasEntryCoords && (
+            <a
+              href={`https://www.google.com/maps?q=${cliente.lat_entrada},${cliente.lng_entrada}`}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1 rounded-full border border-[#E5E7EB] px-3 py-1 text-[#1F2937] hover:bg-[#F9FAFB] transition-colors cursor-pointer"
+            >
+              <FiMapPin size={11} /> Entrada
+            </a>
+          )}
+          {hasExitCoords && (
+            <a
+              href={`https://www.google.com/maps?q=${cliente.lat_salida},${cliente.lng_salida}`}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1 rounded-full border border-[#E5E7EB] px-3 py-1 text-[#1F2937] hover:bg-[#F9FAFB] transition-colors cursor-pointer"
+            >
+              <FiMapPin size={11} /> Salida
+            </a>
+          )}
+        </div>
+      )}
+
+      <div className="mt-3 border-t border-[#E5E7EB] pt-3">
+        <button
+          type="button"
+          className="text-xs font-medium text-[#2563EB] hover:text-[#1D4ED8] transition-colors cursor-pointer"
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpandedTimeline((prev) => ({ ...prev, [cliente.id]: !prev[cliente.id] }));
+          }}
+        >
+          {timelineOpen ? "Ocultar timeline" : "Ver timeline"}
+        </button>
+        {timelineOpen && (
+          <div className="mt-2 space-y-1 text-xs text-[#6B7280]">
+            <p>Entrada: <span className="font-mono text-[#1F2937]">{formatTime(cliente.hora_entrada)}</span></p>
+            <p>Salida: <span className="font-mono text-[#1F2937]">{formatTime(cliente.hora_salida)}</span></p>
+            <p>Duración: <span className="font-mono text-[#1F2937]">{formatDuration(duration)}</span></p>
+            <p>Observación: {cliente.observaciones || "Sin observaciones"}</p>
+          </div>
+        )}
+      </div>
+
+      {canAssignClients && (
+        <div className="mt-4 flex flex-col gap-2 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-3" onClick={(e) => e.stopPropagation()}>
+          <p className="text-xs font-semibold text-[#1F2937]">Reasignar asesor</p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <select
+              className="w-full rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
+              value={assignments[cliente.id]?.email || ""}
+              onChange={(e) =>
+                setAssignments((prev) => ({
+                  ...prev,
+                  [cliente.id]: { ...(prev[cliente.id] || {}), email: e.target.value },
+                }))
+              }
+            >
+              <option value="">Selecciona asesor</option>
+              {Array.isArray(advisors) && advisors.map((u) => (
+                <option key={u.id} value={u.email}>
+                  {u.fullname || u.name || u.email}
+                </option>
+              ))}
+            </select>
+            <label className="inline-flex items-center gap-2 text-xs text-[#6B7280] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={Boolean(assignments[cliente.id]?.temporary)}
+                onChange={(e) =>
+                  setAssignments((prev) => ({
+                    ...prev,
+                    [cliente.id]: {
+                      ...(prev[cliente.id] || {}),
+                      temporary: e.target.checked,
+                      ends_at: e.target.checked ? prev[cliente.id]?.ends_at : "",
+                    },
+                  }))
+                }
+              />
+              Asignación temporal
+            </label>
+            {Boolean(assignments[cliente.id]?.temporary) && (
+              <input
+                type="date"
+                className="w-full rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
+                value={assignments[cliente.id]?.ends_at || ""}
+                onChange={(e) =>
+                  setAssignments((prev) => ({
+                    ...prev,
+                    [cliente.id]: { ...(prev[cliente.id] || {}), ends_at: e.target.value },
+                  }))
+                }
+              />
+            )}
+            <Button onClick={() => handleAssign(cliente.id)}>Asignar</Button>
+            <Button variant="ghost" onClick={() => handleUnassign(cliente.id)}>Quitar</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
  };
 
 const renderAlbumCard = (cliente) => {
@@ -1366,54 +1461,55 @@ const renderAlbumCard = (cliente) => {
     return (
       <div
         key={`album-${cliente.id}`}
-        className="flex flex-col rounded-none border border-gray-100 border-x-0 bg-white/95 p-4 shadow-none transition sm:rounded-2xl sm:border sm:bg-white/90 sm:shadow-sm"
+        className="flex flex-col rounded-2xl border border-[#E5E7EB] bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition-shadow duration-200 hover:shadow-[0_4px_16px_rgba(0,0,0,0.10)]"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
-            <p className="text-sm font-semibold text-gray-900">{clientName}</p>
-            <span
-              className={`inline-flex items-center rounded-full border px-2 py-[1px] text-[10px] font-semibold ${sourceMeta.className}`}
-            >
+            <p className="text-sm font-semibold text-[#1F2937]">{clientName}</p>
+            <span className={`inline-flex items-center rounded-full border px-2 py-[1px] text-[10px] font-medium ${sourceMeta.className}`}>
               {sourceMeta.label}
             </span>
-            <p className="text-xs text-gray-500">{identifier}</p>
+            <p className="font-mono text-xs text-[#6B7280]">{identifier}</p>
           </div>
-          <span className="rounded-full bg-emerald-50 px-2 py-[2px] text-xs font-semibold text-emerald-700">
+          <span className="shrink-0 rounded-full bg-[#DCFCE7] px-2 py-[2px] text-[10px] font-semibold text-[#16A34A]">
             Aprobado
           </span>
         </div>
 
-        <div className="mt-3 space-y-2 text-xs text-gray-700">
-          <p className="flex items-center gap-1 text-gray-600">
-            <FiMapPin className="text-gray-400" /> {address}
+        <div className="mt-3 space-y-1.5 text-xs text-[#6B7280]">
+          <p className="flex items-center gap-1.5">
+            <FiMapPin size={12} className="shrink-0 text-[#D1D5DB]" /> {address}
           </p>
-          <p className="flex items-center gap-1 text-gray-600">
-            <FiUser className="text-gray-400" /> {contactName}
+          <p className="flex items-center gap-1.5">
+            <FiUser size={12} className="shrink-0 text-[#D1D5DB]" /> {contactName}
           </p>
-          <p className="flex items-center gap-1 text-gray-600">
-            <FiPhone className="text-gray-400" /> {contactPhone}
+          <p className="flex items-center gap-1.5">
+            <FiPhone size={12} className="shrink-0 text-[#D1D5DB]" /> {contactPhone}
           </p>
-          <p className="text-gray-600">
-            <span className="font-semibold text-gray-700">Asignado:</span> {assigned}
+          <p>
+            <span className="font-medium text-[#1F2937]">Asignado:</span> {assigned}
           </p>
           {isPlanned && (
-            <p className="text-gray-600">
-              <span className="font-semibold text-gray-700">Cronograma:</span>{" "}
-              {isCommercialPlanned && isTechnicalPlanned
-                ? "Comercial y técnico"
-                : isCommercialPlanned
-                  ? "Comercial"
-                  : "Técnico"}
-            </p>
+            <div className="flex flex-wrap gap-1 pt-0.5">
+              {isCommercialPlanned && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-[#DCFCE7] px-2 py-[2px] text-[10px] font-semibold text-[#16A34A]">
+                  <FiCalendar size={9} /> Comercial
+                </span>
+              )}
+              {isTechnicalPlanned && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-[#DBEAFE] px-2 py-[2px] text-[10px] font-semibold text-[#1D4ED8]">
+                  <FiCalendar size={9} /> Técnico
+                </span>
+              )}
+            </div>
           )}
-
           {isJefeComercial && assignmentAlerts.length > 0 && (
-            <div className="mt-2 space-y-1 border-t border-rose-100 pt-2">
+            <div className="mt-1.5 space-y-1 rounded-xl border border-[#FEE2E2] bg-[#FEE2E2] p-2">
               {assignmentAlerts.map((alert) => (
                 <p
                   key={alert.email}
-                  className={`text-[10px] flex items-center gap-1 font-bold ${
-                    alert.isPassive ? "text-rose-700" : "text-amber-700"
+                  className={`flex items-center gap-1 text-[10px] font-semibold ${
+                    alert.isPassive ? "text-[#DC2626]" : "text-[#D97706]"
                   }`}
                 >
                   <FiAlertCircle size={10} className="shrink-0" />
@@ -1421,8 +1517,8 @@ const renderAlbumCard = (cliente) => {
                     {alert.isPassive
                       ? `${alert.advisorName} desvinculado.`
                       : alert.hasVacaciones
-                        ? `${alert.advisorName} en vacaciones hoy.`
-                        : `${alert.advisorName} en permiso hoy.`}
+                        ? `${alert.advisorName} en vacaciones.`
+                        : `${alert.advisorName} en permiso.`}
                   </span>
                 </p>
               ))}
@@ -1431,30 +1527,27 @@ const renderAlbumCard = (cliente) => {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => openEditModal(cliente)}>
+          <Button variant="secondary" className="px-3 py-1.5 text-xs cursor-pointer" onClick={() => openEditModal(cliente)}>
             <FiEdit2 className="mr-1" /> Editar
           </Button>
           {canManageAllClients && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
-              <FiFileText /> Documentos disponibles
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#DBEAFE] px-2 py-1 text-[10px] font-semibold text-[#1D4ED8]">
+              <FiFileText size={10} /> Documentos
             </span>
           )}
         </div>
 
         {canAssignClients && (
-          <div className="mt-4 flex flex-col gap-2 rounded-lg bg-gray-50 p-3">
-            <p className="text-xs font-semibold text-gray-700">Asignacion comercial</p>
+          <div className="mt-4 flex flex-col gap-2 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-3">
+            <p className="text-xs font-semibold text-[#1F2937]">Asignación comercial</p>
             <div className="flex flex-col gap-2">
               <select
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
                 value={assignments[cliente.id]?.email || ""}
                 onChange={(e) =>
                   setAssignments((prev) => ({
                     ...prev,
-                    [cliente.id]: {
-                      ...(prev[cliente.id] || {}),
-                      email: e.target.value,
-                    },
+                    [cliente.id]: { ...(prev[cliente.id] || {}), email: e.target.value },
                   }))
                 }
               >
@@ -1465,16 +1558,11 @@ const renderAlbumCard = (cliente) => {
                   </option>
                 ))}
               </select>
-
               <div className="flex flex-wrap gap-2">
-                <Button className="px-3 py-1.5 text-xs" onClick={() => handleAssign(cliente.id)}>
+                <Button className="px-3 py-1.5 text-xs cursor-pointer" onClick={() => handleAssign(cliente.id)}>
                   Asignar
                 </Button>
-                <Button
-                  variant="ghost"
-                  className="px-3 py-1.5 text-xs"
-                  onClick={() => handleUnassign(cliente.id)}
-                >
+                <Button variant="ghost" className="px-3 py-1.5 text-xs cursor-pointer" onClick={() => handleUnassign(cliente.id)}>
                   Quitar
                 </Button>
               </div>
@@ -1503,12 +1591,12 @@ const renderAlbumCard = (cliente) => {
  <header className="space-y-4">
  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
  <div>
- <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
- <FiUsers className="text-blue-600" /> Gestión de Clientes
- </h1>
- <p className="text-xs sm:text-sm text-gray-500 max-w-xl">
- Clientes aprobados que puedes gestionar, con enfoque en tu ruta diaria de visitas.
- </p>
+                <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight text-[#1F2937] sm:text-2xl">
+                  <FiUsers className="text-[#1E293B]" /> Gestión de Clientes
+                </h1>
+                <p className="max-w-xl text-xs text-[#6B7280] sm:text-sm">
+                  Clientes aprobados que puedes gestionar, con enfoque en tu ruta diaria de visitas.
+                </p>
  </div>
  </div>
 
@@ -1521,86 +1609,85 @@ const renderAlbumCard = (cliente) => {
  <div className="space-y-3">
  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
  <div>
- <h2 className="text-lg font-semibold text-gray-900">Panel de jefatura comercial</h2>
- <p className="text-sm text-gray-500">
- Gestiona cartera completa, asignaciones por asesor y alertas de continuidad comercial.
- </p>
- </div>
- <div className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-700">
- {advisorAssignmentBoard.length} asesores con clientes asignados
- </div>
- </div>
+                <h2 className="text-lg font-semibold text-[#1F2937]">Panel de jefatura comercial</h2>
+                <p className="text-sm text-[#6B7280]">
+                  Gestiona cartera completa, asignaciones por asesor y alertas de continuidad comercial.
+                </p>
+                </div>
+                <div className="rounded-full bg-[#DBEAFE] px-3 py-1 text-[11px] font-semibold text-[#1D4ED8]">
+                  {advisorAssignmentBoard.length} asesores con clientes asignados
+                </div>
+                </div>
 
- {advisorAssignmentBoard.length > 0 ? (
- <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                {advisorAssignmentBoard.length > 0 ? (
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 {advisorAssignmentBoard.map((row) => (
-                  <div key={row.advisorEmail} className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div key={row.advisorEmail} className="rounded-2xl border border-[#E5E7EB] bg-white p-3 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900 truncate">{row.advisorName}</p>
-                        <p className="text-xs text-slate-500 truncate">{row.advisorEmail}</p>
+                        <p className="truncate text-sm font-semibold text-[#1F2937]">{row.advisorName}</p>
+                        <p className="truncate text-xs text-[#6B7280]">{row.advisorEmail}</p>
                       </div>
-                      <div className="flex flex-col items-end gap-1 shrink-0">
+                      <div className="flex shrink-0 flex-col items-end gap-1">
                         <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                            row.passive ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            row.passive ? "bg-[#FEE2E2] text-[#DC2626]" : "bg-[#DCFCE7] text-[#16A34A]"
                           }`}
                         >
                           {row.passive ? "Inactivo / Desvinculado" : "Laboralmente Activo"}
                         </span>
                         {row.hasPermiso && (
-                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                          <span className="rounded-full bg-[#FEF3C7] px-2 py-0.5 text-[10px] font-semibold text-[#D97706]">
                             En Permiso
                           </span>
                         )}
                         {row.hasVacaciones && (
-                          <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold text-orange-700">
+                          <span className="rounded-full bg-[#FEF3C7] px-2 py-0.5 text-[10px] font-semibold text-[#D97706]">
                             En Vacaciones
                           </span>
                         )}
                       </div>
                     </div>
-                    <p className="mt-2 text-xs text-slate-600">
-                      <span className="font-semibold text-indigo-600">{row.clients.length}</span> clientes asignados
+                    <p className="mt-2 text-xs text-[#6B7280]">
+                      <span className="font-mono font-semibold text-[#2563EB]">{row.clients.length}</span> clientes asignados
                     </p>
-                    <p className="mt-1 text-[11px] text-slate-500 line-clamp-2 italic">
+                    <p className="mt-1 line-clamp-2 text-[11px] text-[#6B7280]">
                       {row.clients.map((client) => client.name).join(", ")}
                     </p>
                   </div>
                 ))}
- </div>
- ) : (
- <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
- No hay asignaciones activas para asesores comerciales.
- </div>
- )}
+                </div>
+                ) : (
+                <div className="flex items-center gap-2 rounded-2xl border border-[#E5E7EB] bg-[#F9FAFB] px-4 py-3 text-xs text-[#6B7280]">
+                  <FiUsers size={14} className="text-[#D1D5DB]" />
+                  No hay asignaciones activas para asesores comerciales.
+                </div>
+                )}
  </div>
  ) : isAcpCommercial ? (
  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
  <div>
- <h2 className="text-lg font-semibold text-gray-900">
- Vista global de clientes
- </h2>
- <p className="text-sm text-gray-500">
- Puedes revisar todos los clientes aprobados y sus asignaciones comerciales.
- </p>
- </div>
- <div className="flex items-center gap-3">
- <div className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700">
- {allAlbumClients.length} clientes
- </div>
- <div className="relative">
- <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
- <input
- type="text"
- value={assignedSearch}
- onChange={(e) => setAssignedSearch(e.target.value)}
- placeholder="Buscar cliente..."
- className="w-56 rounded-full border border-gray-200 bg-white pl-9 pr-4 py-2 text-sm text-gray-700 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100"
- />
- </div>
- </div>
- </div>
+                <h2 className="text-lg font-semibold text-[#1F2937]">Vista global de clientes</h2>
+                <p className="text-sm text-[#6B7280]">
+                  Puedes revisar todos los clientes aprobados y sus asignaciones comerciales.
+                </p>
+                </div>
+                <div className="flex items-center gap-3">
+                <div className="rounded-full bg-[#DCFCE7] px-3 py-1 text-[11px] font-semibold text-[#16A34A]">
+                  <span className="font-mono">{allAlbumClients.length}</span> clientes
+                </div>
+                <div className="relative">
+                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-[#D1D5DB]" size={14} />
+                <input
+                  type="text"
+                  value={assignedSearch}
+                  onChange={(e) => setAssignedSearch(e.target.value)}
+                  placeholder="Buscar cliente..."
+                  className="w-56 rounded-xl border border-[#D1D5DB] bg-white py-2 pl-9 pr-4 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
+                />
+                </div>
+                </div>
+                </div>
  ) : (
  <>
  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -1615,93 +1702,100 @@ const renderAlbumCard = (cliente) => {
  Visita Prospecto
  </Button>
  </div>
- <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-2 sm:min-w-[210px]">
- <label className="text-gray-700 text-xs sm:text-sm">Fecha</label>
- <input
- type="date"
- value={selectedDate}
- onChange={(e) => setSelectedDate(e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs sm:w-[180px] sm:px-3 sm:py-2 sm:text-sm"
- />
- </div>
+                <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-2 sm:min-w-[210px]">
+                  <label className="text-xs font-medium text-[#1F2937] sm:text-sm">Fecha</label>
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    className="w-full rounded-xl border border-[#D1D5DB] bg-white px-2.5 py-1.5 text-xs text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20 sm:w-[180px] sm:px-3 sm:py-2 sm:text-sm"
+                  />
+                </div>
  </div>
  <div className="flex items-start gap-2 sm:items-center">
- <label className="flex items-start gap-2 cursor-pointer text-xs text-gray-700 sm:items-center sm:text-sm">
- <input
- type="checkbox"
- checked={filterBySchedule}
- onChange={(e) => setFilterBySchedule(e.target.checked)}
- className="rounded"
- />
- <span>Mostrar solo clientes planificados</span>
- </label>
+                <label className="flex cursor-pointer items-start gap-2 text-xs text-[#6B7280] sm:items-center sm:text-sm">
+                  <input
+                    type="checkbox"
+                    checked={filterBySchedule}
+                    onChange={(e) => setFilterBySchedule(e.target.checked)}
+                    className="rounded accent-[#2563EB]"
+                  />
+                  <span>Mostrar solo clientes planificados</span>
+                </label>
  </div>
  </div>
 
  {summary?.has_approved_schedule && (
- <Card className="rounded-none border-x-0 border-blue-200 bg-blue-50 p-4 shadow-none sm:rounded-3xl sm:border sm:shadow-[0_15px_35px_rgba(15,23,42,0.08)]">
- <div className="flex items-center justify-between">
- <div>
- <h4 className="font-semibold text-blue-900 flex items-center gap-2">
- <FiCalendar /> Planificación de Hoy
- </h4>
- <p className="text-sm text-blue-700 mt-1">
- {(summary.cities_today || []).join(", ") || "Ciudades"}
- </p>
- </div>
- <div className="text-right">
- <p className="text-2xl font-bold text-blue-900">{summary.planned_today || 0}</p>
- <p className="text-xs text-blue-600">clientes planificados</p>
- </div>
- </div>
-
- <div className="mt-3">
- <div className="flex items-center justify-between text-sm">
- <span className="text-blue-700">Progreso</span>
- <span className="font-semibold text-blue-900">
- {visitedCount} / {summary.planned_today || 0}
- </span>
- </div>
- <div className="w-full bg-blue-200 rounded-full h-2 mt-1">
- <div
- className="bg-blue-600 h-2 rounded-full transition-all"
- style={{
- width: `${summary.planned_today
- ? Math.min(100, (visitedCount / summary.planned_today) * 100)
- : 0}%`,
- }}
- />
- </div>
- </div>
- </Card>
+                <Card className="rounded-2xl border border-[#E5E7EB] bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <h4 className="flex items-center gap-2 font-semibold text-[#1F2937]">
+                        <FiCalendar size={15} className="text-[#2563EB]" /> Planificación mensual aprobada
+                      </h4>
+                      <p className="mt-1 break-words text-sm text-[#6B7280]">
+                        {(summary.cities_today || []).join(", ") || "Ciudades"}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-left sm:text-right">
+                      <p className="font-mono text-2xl font-bold text-[#1F2937]">{summary.planned_period ?? summary.planned_today ?? 0}</p>
+                      <p className="text-xs text-[#6B7280]">visitas planificadas del mes</p>
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-[#6B7280]">Progreso</span>
+                      <span className="font-mono font-semibold text-[#1F2937]">
+                        {visitedCount} / {summary.planned_period ?? summary.planned_today ?? 0}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[#E5E7EB]">
+                      <div
+                        className="h-1.5 rounded-full bg-[#2563EB] transition-all duration-300"
+                        style={{
+                          width: `${(summary.planned_period ?? summary.planned_today)
+                            ? Math.min(100, (visitedCount / (summary.planned_period ?? summary.planned_today)) * 100)
+                            : 0}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </Card>
  )}
 
  <MyClientRequestsWidget
- total={summary?.planned_today ?? (Array.isArray(clientes) ? clientes.length : 0)}
+ total={summary?.planned_period ?? summary?.planned_today ?? (Array.isArray(clientes) ? clientes.length : 0)}
  visited={visitedCount}
  pending={pendingCount}
  onFilterChange={setStatusFilter}
  />
 
  {isCommercialOnly && (
- <Card className="rounded-none border-x-0 p-4 shadow-none sm:rounded-3xl sm:border sm:shadow-[0_15px_35px_rgba(15,23,42,0.08)]">
- <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
- <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3">
- <p className="text-xs font-semibold text-emerald-700">Cumplimiento plan</p>
- <p className="mt-1 text-xl font-bold text-emerald-900">
- {commercialKpi.compliance === null ? "N/A" : `${commercialKpi.compliance}%`}
- </p>
- </div>
- <div className="rounded-xl border border-blue-100 bg-blue-50 p-3">
- <p className="text-xs font-semibold text-blue-700">Visitas efectivas</p>
- <p className="mt-1 text-xl font-bold text-blue-900">{commercialKpi.effectiveVisits}</p>
- </div>
- <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3">
- <p className="text-xs font-semibold text-indigo-700">Promedio en sitio</p>
- <p className="mt-1 text-xl font-bold text-indigo-900">{formatDuration(commercialKpi.avgDuration)}</p>
- </div>
- </div>
- </Card>
+                <Card className="rounded-2xl border border-[#E5E7EB] bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
+                  <div className="grid grid-cols-1 divide-y divide-[#E5E7EB] sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-5">
+                    <div className="px-0 py-3 first:pt-0 last:pb-0 sm:px-4 sm:py-0 sm:first:pl-0 sm:last:pr-0">
+                      <p className="text-xs font-medium text-[#6B7280]">Cumplimiento plan</p>
+                      <p className="mt-1 font-mono text-xl font-bold text-[#1F2937]">
+                        {commercialKpi.compliance === null ? "N/A" : `${commercialKpi.compliance}%`}
+                      </p>
+                    </div>
+                    <div className="px-0 py-3 sm:px-4 sm:py-0 sm:first:pl-0 sm:last:pr-0">
+                      <p className="text-xs font-medium text-[#6B7280]">Visitas efectivas</p>
+                      <p className="mt-1 font-mono text-xl font-bold text-[#1F2937]">{commercialKpi.effectiveVisits}</p>
+                    </div>
+                    <div className="px-0 py-3 sm:px-4 sm:py-0 sm:first:pl-0 sm:last:pr-0">
+                      <p className="text-xs font-medium text-[#6B7280]">Check-ins</p>
+                      <p className="mt-1 font-mono text-xl font-bold text-[#1F2937]">{commercialKpi.checkIns}</p>
+                    </div>
+                    <div className="px-0 py-3 sm:px-4 sm:py-0 sm:first:pl-0 sm:last:pr-0">
+                      <p className="text-xs font-medium text-[#6B7280]">Check-outs</p>
+                      <p className="mt-1 font-mono text-xl font-bold text-[#1F2937]">{commercialKpi.checkOuts}</p>
+                    </div>
+                    <div className="px-0 py-3 last:pb-0 sm:px-4 sm:py-0 sm:first:pl-0 sm:last:pr-0">
+                      <p className="text-xs font-medium text-[#6B7280]">Promedio en sitio</p>
+                      <p className="mt-1 font-mono text-xl font-bold text-[#1F2937]">{formatDuration(commercialKpi.avgDuration)}</p>
+                    </div>
+                  </div>
+                </Card>
  )}
  </>
  )}
@@ -1711,273 +1805,275 @@ const renderAlbumCard = (cliente) => {
  showVisitFlow && (
  <>
  {canSeeCheckInOutCards && (
- <Card className="rounded-none border-x-0 p-4 shadow-none sm:rounded-3xl sm:border sm:p-5 sm:shadow-[0_15px_35px_rgba(15,23,42,0.08)] space-y-4">
- <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
- <div>
- <h2 className="text-lg font-semibold text-gray-900">Tarjetas de clientes para check-in/check-out</h2>
- <p className="text-sm text-gray-500">
- Usa las tarjetas para iniciar o finalizar visita y consulta el detalle completo de cada cliente.
- </p>
- </div>
- <div className="flex flex-wrap items-center gap-2">
- <button
- type="button"
- onClick={() => setTemporaryAssignmentsFilter("all")}
- className={`rounded-full px-3 py-1 text-xs font-semibold ${
- temporaryAssignmentsFilter === "all"
- ? "bg-gray-900 text-white"
- : "bg-gray-100 text-gray-700"
- }`}
- >
- Todas
- </button>
- <button
- type="button"
- onClick={() => setTemporaryAssignmentsFilter("expiring_7")}
- className={`rounded-full px-3 py-1 text-xs font-semibold ${
- temporaryAssignmentsFilter === "expiring_7"
- ? "bg-amber-600 text-white"
- : "bg-amber-100 text-amber-800"
- }`}
- >
- Temporales (7d)
- </button>
- <button
- type="button"
- onClick={() => setTemporaryAssignmentsFilter("expiring_today")}
- className={`rounded-full px-3 py-1 text-xs font-semibold ${
- temporaryAssignmentsFilter === "expiring_today"
- ? "bg-red-600 text-white"
- : "bg-red-100 text-red-800"
- }`}
- >
- Vencen hoy
- </button>
- </div>
- </div>
+                <Card className="space-y-4 rounded-2xl border border-[#E5E7EB] bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)] sm:p-5">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold text-[#1F2937]">Check-in / Check-out</h2>
+                      <p className="text-sm text-[#6B7280]">
+                        Inicia o finaliza visitas y consulta el detalle de cada cliente.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTemporaryAssignmentsFilter("all")}
+                        className={`cursor-pointer rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                          temporaryAssignmentsFilter === "all"
+                            ? "bg-[#1E293B] text-white"
+                            : "bg-[#F3F4F6] text-[#1F2937]"
+                        }`}
+                      >
+                        Todas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTemporaryAssignmentsFilter("expiring_7")}
+                        className={`cursor-pointer rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                          temporaryAssignmentsFilter === "expiring_7"
+                            ? "bg-[#D97706] text-white"
+                            : "bg-[#FEF3C7] text-[#D97706]"
+                        }`}
+                      >
+                        Temporales (7d)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTemporaryAssignmentsFilter("expiring_today")}
+                        className={`cursor-pointer rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                          temporaryAssignmentsFilter === "expiring_today"
+                            ? "bg-[#DC2626] text-white"
+                            : "bg-[#FEE2E2] text-[#DC2626]"
+                        }`}
+                      >
+                        Vencen hoy
+                      </button>
+                    </div>
+                  </div>
 
- {Array.isArray(filteredClientes) && filteredClientes.length > 0 ? (
- <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
- {filteredClientes.map((cliente) => renderCard(cliente))}
- </div>
- ) : (
- <div className="py-10 text-center text-gray-500">
- {loading ? "Cargando clientes..." : "No se encontraron clientes"}
- </div>
- )}
- </Card>
+                  {Array.isArray(filteredClientes) && filteredClientes.length > 0 ? (
+                    <>
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
+                        {filteredClientes.map((cliente) => renderCard(cliente))}
+                      </div>
+                      {renderLoadMoreClientsButton()}
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+                      <FiUsers size={32} className="text-[#D1D5DB]" />
+                      <p className="text-sm font-medium text-[#1F2937]">
+                        {loading ? "Cargando clientes..." : "Sin clientes para mostrar"}
+                      </p>
+                      {!loading && (
+                        <p className="text-xs text-[#6B7280]">Ajusta los filtros o cambia la fecha seleccionada.</p>
+                      )}
+                    </div>
+                  )}
+                </Card>
  )}
 
  {/* Widget: Clientes asignados / registrados por mí (solo comercial) */}
- {canSeeDailyManagedClients && (
- <Card className="rounded-none border-x-0 p-4 shadow-none sm:rounded-3xl sm:border sm:p-5 sm:shadow-[0_15px_35px_rgba(15,23,42,0.08)] space-y-4">
- <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
- <div>
- <h2 className="text-lg font-semibold text-gray-900">
- Mis clientes de gestión diaria
- </h2>
- <p className="text-sm text-gray-500">
- Revisa rápidamente los clientes que tienes asignados, que tú mismo registraste o el conjunto de todos.
- </p>
- </div>
- <div className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-700">
- Vista solo para tu usuario
- </div>
- </div>
+                {canSeeDailyManagedClients && (
+                  <Card className="space-y-4 rounded-2xl border border-[#E5E7EB] bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)] sm:p-5">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <h2 className="text-lg font-semibold text-[#1F2937]">Mis clientes de gestión diaria</h2>
+                        <p className="text-sm text-[#6B7280]">
+                          Clientes asignados, registrados por ti o el conjunto completo.
+                        </p>
+                      </div>
+                      <div className="inline-flex rounded-full bg-[#DBEAFE] px-3 py-1 text-[11px] font-semibold text-[#1D4ED8]">
+                        Solo tu usuario
+                      </div>
+                    </div>
 
- <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
- <div className="flex w-full flex-wrap rounded-full bg-gray-100 p-1 text-xs font-medium text-gray-700 sm:w-auto">
- <button
- type="button"
- onClick={() => setAssignedViewFilter("assigned")}
- className={`px-3 py-1 rounded-full transition ${assignedViewFilter === "assigned"
- ? "bg-white shadow-sm text-gray-900"
- : "text-gray-500"
- }`}
- >
- Asignados a mí ({Array.isArray(assignedToMe) ? assignedToMe.length : 0})
- </button>
- <button
- type="button"
- onClick={() => setAssignedViewFilter("created")}
- className={`px-3 py-1 rounded-full transition ${assignedViewFilter === "created"
- ? "bg-white shadow-sm text-gray-900"
- : "text-gray-500"
- }`}
- >
- Registrados por mí ({Array.isArray(createdByMe) ? createdByMe.length : 0})
- </button>
- <button
- type="button"
- onClick={() => setAssignedViewFilter("all")}
- className={`px-3 py-1 rounded-full transition ${assignedViewFilter === "all"
- ? "bg-white shadow-sm text-gray-900"
- : "text-gray-500"
- }`}
- >
- Todos mis clientes ({Array.isArray(allMine) ? allMine.length : 0})
- </button>
- </div>
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div className="flex w-full flex-wrap rounded-xl bg-[#F3F4F6] p-1 text-xs font-medium sm:w-auto">
+                        <button
+                          type="button"
+                          onClick={() => setAssignedViewFilter("assigned")}
+                          className={`cursor-pointer rounded-lg px-3 py-1.5 transition-colors ${
+                            assignedViewFilter === "assigned"
+                              ? "bg-white text-[#1F2937] shadow-sm"
+                              : "text-[#6B7280]"
+                          }`}
+                        >
+                          Asignados ({Array.isArray(assignedToMe) ? assignedToMe.length : 0})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAssignedViewFilter("created")}
+                          className={`cursor-pointer rounded-lg px-3 py-1.5 transition-colors ${
+                            assignedViewFilter === "created"
+                              ? "bg-white text-[#1F2937] shadow-sm"
+                              : "text-[#6B7280]"
+                          }`}
+                        >
+                          Registrados ({Array.isArray(createdByMe) ? createdByMe.length : 0})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAssignedViewFilter("all")}
+                          className={`cursor-pointer rounded-lg px-3 py-1.5 transition-colors ${
+                            assignedViewFilter === "all"
+                              ? "bg-white text-[#1F2937] shadow-sm"
+                              : "text-[#6B7280]"
+                          }`}
+                        >
+                          Todos ({Array.isArray(allMine) ? allMine.length : 0})
+                        </button>
+                      </div>
 
- <div className="relative w-full md:max-w-xs">
- <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
- <input
- type="text"
- placeholder="Buscar por nombre, RUC o ciudad..."
- value={assignedSearch}
- onChange={(e) => setAssignedSearch(e.target.value)}
- className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
- />
- </div>
- </div>
+                      <div className="relative w-full md:max-w-xs">
+                        <FiSearch className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#D1D5DB]" />
+                        <input
+                          type="text"
+                          placeholder="Buscar por nombre, RUC o ciudad..."
+                          value={assignedSearch}
+                          onChange={(e) => setAssignedSearch(e.target.value)}
+                          className="w-full rounded-xl border border-[#D1D5DB] py-2 pl-9 pr-3 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
+                        />
+                      </div>
+                    </div>
 
- {Array.isArray(filteredAssignedList) && filteredAssignedList.length > 0 ? (
- <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5">
- {filteredAssignedList.map((cliente) => {
- const ciudad = cliente.shipping_city || getCityFromAddress(cliente.shipping_address);
- const provincia = cliente.shipping_province || getProvinceFromAddress(cliente.shipping_address);
- const clienteEmail = cliente.client_email || "Correo no disponible";
-const clientTypeLabel = formatClientType(cliente.client_type);
-const status = normalizeStatus(cliente.visit_status);
-const meta = getStatusMeta(status);
-const sourceMeta = getClientSourceMeta(cliente);
-return (
- <div
- key={`mini-${cliente.id}`}
- className="flex flex-col rounded-none border border-gray-100 border-x-0 bg-white/90 p-3 shadow-none transition cursor-pointer sm:rounded-xl sm:border sm:bg-white/80 sm:shadow-sm sm:hover:shadow-md"
- onClick={() => openReportModal(cliente)}
- >
- <div className="flex items-start justify-between gap-2">
-<div className="space-y-0.5">
-<p className="text-sm font-semibold text-gray-900 line-clamp-1">
-{cliente.nombre}
-</p>
-<span className={`inline-flex items-center rounded-full border px-2 py-[1px] text-[10px] font-semibold ${sourceMeta.className}`}>
-{sourceMeta.label}
-</span>
-</div>
- <span className={`px-2 py-[1px] text-[10px] font-semibold rounded-full ${meta.chip}`}>
- {meta.label}
- </span>
- </div>
-
- <div className="mt-2 space-y-1 text-[11px] text-gray-600">
- <p className="flex items-center gap-1">
- <FiMail className="h-3 w-3 text-gray-400" />
- <span className="truncate">{clienteEmail}</span>
- </p>
- <p className="flex items-center gap-1">
- <FiUser className="h-3 w-3 text-gray-400" />
- {clientTypeLabel}
- </p>
- <p className="flex items-center gap-1">
- <FiMapPin className="h-3 w-3 text-gray-400" />
- {provincia || "Provincia no especificada"}
- </p>
- <p className="flex items-center gap-1">
- <FiMapPin className="h-3 w-3 text-gray-400" />
- {ciudad || "Ciudad no especificada"}
- </p>
- </div>
- </div>
- );
- })}
- </div>
- ) : (
- <p className="text-sm text-gray-500">
- {assignedViewFilter === "assigned"
- ? "No tienes clientes asignados que coincidan con el filtro."
- : assignedViewFilter === "created"
- ? "No tienes clientes registrados por ti que coincidan con el filtro."
- : "No tienes clientes asignados o registrados por ti que coincidan con el filtro."}
- </p>
- )}
- </Card>
- )}
+                    {Array.isArray(filteredAssignedList) && filteredAssignedList.length > 0 ? (
+                      <>
+                        <div className="grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2 xl:grid-cols-3">
+                          {filteredAssignedList.map((cliente) => {
+                            const ciudad = cliente.shipping_city || getCityFromAddress(cliente.shipping_address);
+                            const provincia = cliente.shipping_province || getProvinceFromAddress(cliente.shipping_address);
+                            const clienteEmail = cliente.client_email || "Correo no disponible";
+                            const clientTypeLabel = formatClientType(cliente.client_type);
+                            const meta = getStatusMeta(cliente);
+                            const sourceMeta = getClientSourceMeta(cliente);
+                            return (
+                              <div
+                                key={`mini-${cliente.id}`}
+                                className="flex cursor-pointer flex-col rounded-2xl border border-[#E5E7EB] bg-white p-3 shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition-shadow duration-200 hover:shadow-[0_4px_16px_rgba(0,0,0,0.10)] active:scale-[0.97] active:transition-transform"
+                                onClick={() => openReportModal(cliente)}
+                              >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 space-y-0.5">
+                                  <p className="line-clamp-1 text-sm font-semibold text-[#1F2937]">{cliente.nombre}</p>
+                                  <span className={`inline-flex items-center rounded-full border px-2 py-[1px] text-[10px] font-medium ${sourceMeta.className}`}>
+                                    {sourceMeta.label}
+                                  </span>
+                                </div>
+                                <span className={`shrink-0 rounded-full px-2 py-[1px] text-[10px] font-semibold ${meta.chip}`}>
+                                  {meta.label}
+                                </span>
+                              </div>
+                              <div className="mt-2 space-y-1 text-[11px] text-[#6B7280]">
+                                <p className="flex items-center gap-1.5">
+                                  <FiMail className="h-3 w-3 shrink-0 text-[#D1D5DB]" />
+                                  <span className="truncate">{clienteEmail}</span>
+                                </p>
+                                <p className="flex items-center gap-1.5">
+                                  <FiUser className="h-3 w-3 shrink-0 text-[#D1D5DB]" />
+                                  {clientTypeLabel}
+                                </p>
+                                <p className="flex items-center gap-1.5">
+                                  <FiMapPin className="h-3 w-3 shrink-0 text-[#D1D5DB]" />
+                                  {provincia || "Provincia no especificada"}, {ciudad || "Ciudad no especificada"}
+                                </p>
+                              </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {renderLoadMoreClientsButton()}
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+                        <FiUsers size={28} className="text-[#D1D5DB]" />
+                        <p className="text-sm text-[#6B7280]">
+                          {assignedViewFilter === "assigned"
+                            ? "No tienes clientes asignados que coincidan."
+                            : assignedViewFilter === "created"
+                              ? "No tienes clientes registrados que coincidan."
+                              : "No tienes clientes asignados o registrados que coincidan."}
+                        </p>
+                      </div>
+                    )}
+                  </Card>
+                )}
  </>
  )
  }
 
- <Card className="rounded-none border-x-0 p-4 shadow-none sm:rounded-3xl sm:border sm:p-5 sm:shadow-[0_15px_35px_rgba(15,23,42,0.08)] space-y-4">
- <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
- <div>
- <h2 className="text-lg font-semibold text-gray-900">
- Clientes registrados
- </h2>
- <p className="text-sm text-gray-500">
- Gestiona clientes aprobados. Puedes editar nombre comercial y contacto; los roles avanzados pueden ver documentos.
- </p>
- </div>
- <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
- <div className="relative w-full md:max-w-xs">
- <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
- <input
- type="text"
- placeholder="Buscar cliente..."
- value={albumSearch}
- onChange={(e) => setAlbumSearch(e.target.value)}
- className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
- />
- </div>
- <p className="text-xs text-gray-500 md:max-w-xs">
- Ingresa aquí el nombre del cliente que deseas encontrar.
- </p>
- <Button
- variant="secondary"
- className="w-full md:w-auto"
- onClick={() => setShowAllClients(true)}
- >
- Ver todos los clientes
- </Button>
- </div>
- </div>
+                <Card className="space-y-4 rounded-2xl border border-[#E5E7EB] bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)] sm:p-5">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold text-[#1F2937]">Clientes registrados</h2>
+                      <p className="text-sm text-[#6B7280]">
+                        Gestiona clientes aprobados. Edita nombre comercial y contacto; los roles avanzados acceden a documentos.
+                      </p>
+                    </div>
+                    <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
+                      <div className="relative w-full md:max-w-xs">
+                        <FiSearch className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#D1D5DB]" />
+                        <input
+                          type="text"
+                          placeholder="Buscar cliente..."
+                          value={albumSearch}
+                          onChange={(e) => setAlbumSearch(e.target.value)}
+                          className="w-full rounded-xl border border-[#D1D5DB] py-2 pl-9 pr-3 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
+                        />
+                      </div>
+                      <Button
+                        variant="secondary"
+                        className="w-full cursor-pointer md:w-auto"
+                        onClick={() => setShowAllClients(true)}
+                      >
+                        Ver todos
+                      </Button>
+                    </div>
+                  </div>
 
- {(isJefeComercial || canManageAllClients) && (
- <div className="flex flex-wrap items-center gap-2">
- <button
- type="button"
- onClick={() => setClientSourceFilter("all")}
- className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
- clientSourceFilter === "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"
- }`}
- >
- Todos ({sourceTotals.all})
- </button>
- <button
- type="button"
- onClick={() => setClientSourceFilter("spi")}
- className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
- clientSourceFilter === "spi" ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-700"
- }`}
- >
- SPI ({sourceTotals.spi})
- </button>
- <button
- type="button"
- onClick={() => setClientSourceFilter("odoo")}
- className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
- clientSourceFilter === "odoo" ? "bg-indigo-600 text-white" : "bg-indigo-50 text-indigo-700"
- }`}
- >
- Odoo ({sourceTotals.odoo})
- </button>
- </div>
- )}
+                  {(isJefeComercial || canManageAllClients) && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setClientSourceFilter("all")}
+                        className={`cursor-pointer rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                          clientSourceFilter === "all" ? "bg-[#1E293B] text-white" : "bg-[#F3F4F6] text-[#1F2937]"
+                        }`}
+                      >
+                        Todos ({sourceTotals.all})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setClientSourceFilter("spi")}
+                        className={`cursor-pointer rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                          clientSourceFilter === "spi" ? "bg-[#334155] text-white" : "bg-[#F3F4F6] text-[#1F2937]"
+                        }`}
+                      >
+                        SPI ({sourceTotals.spi})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setClientSourceFilter("odoo")}
+                        className={`cursor-pointer rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                          clientSourceFilter === "odoo" ? "bg-[#2563EB] text-white" : "bg-[#DBEAFE] text-[#1D4ED8]"
+                        }`}
+                      >
+                        ERP ({sourceTotals.odoo})
+                      </button>
+                    </div>
+                  )}
 
- {Array.isArray(albumClients) && albumClients.length > 0 ? (
- <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
- {albumClients.map((cliente) => renderAlbumCard(cliente))}
- </div>
- ) : (
- <div className="py-10 text-center text-gray-500">
- {loading
- ? "Cargando clientes..."
- : albumSearch
- ? "No se encontraron clientes con ese criterio."
- : "Mostrando tus clientes más recientes. Usa el buscador para filtrar."}
- </div>
- )}
- </Card>
+                  {Array.isArray(albumClients) && albumClients.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3">
+                      {albumClients.map((cliente) => renderAlbumCard(cliente))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+                      <FiUsers size={32} className="text-[#D1D5DB]" />
+                      <p className="text-sm font-medium text-[#1F2937]">
+                        {loading ? "Cargando clientes..." : albumSearch ? "Sin resultados para esa búsqueda." : "Usa el buscador para encontrar clientes."}
+                      </p>
+                    </div>
+                  )}
+                </Card>
 
  <Modal
  isOpen={showAllClients}
@@ -1985,31 +2081,30 @@ return (
  title="Todos los clientes registrados"
  maxWidth="max-w-5xl"
  >
- <div className="space-y-4">
- <div className="relative w-full md:max-w-sm">
- <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
- <input
- type="text"
- placeholder="Buscar cliente..."
- value={allClientsSearch}
- onChange={(e) => setAllClientsSearch(e.target.value)}
- className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
- />
+                <div className="space-y-4">
+                  <div className="relative w-full md:max-w-sm">
+                    <FiSearch className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#D1D5DB]" />
+                    <input
+                      type="text"
+                      placeholder="Buscar cliente..."
+                      value={allClientsSearch}
+                      onChange={(e) => setAllClientsSearch(e.target.value)}
+                      className="w-full rounded-xl border border-[#D1D5DB] py-2 pl-9 pr-3 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
+                    />
  </div>
 
- {Array.isArray(filteredAllAlbumClients) && filteredAllAlbumClients.length > 0 ? (
- <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
- {filteredAllAlbumClients.map((cliente) => renderAlbumCard(cliente))}
- </div>
- ) : (
- <div className="py-10 text-center text-gray-500">
- {loading
- ? "Cargando clientes..."
- : allClientsSearch
- ? "No se encontraron clientes con ese criterio."
- : "No hay clientes para mostrar"}
- </div>
- )}
+                  {Array.isArray(filteredAllAlbumClients) && filteredAllAlbumClients.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3">
+                      {filteredAllAlbumClients.map((cliente) => renderAlbumCard(cliente))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+                      <FiUsers size={32} className="text-[#D1D5DB]" />
+                      <p className="text-sm text-[#6B7280]">
+                        {loading ? "Cargando clientes..." : allClientsSearch ? "Sin resultados para esa búsqueda." : "No hay clientes para mostrar."}
+                      </p>
+                    </div>
+                  )}
  </div>
  </Modal>
 
@@ -2019,40 +2114,40 @@ return (
  title={`Reprogramar visita${reprogramModal.client?.nombre ? `: ${reprogramModal.client.nombre}` : ""}`}
  maxWidth="max-w-md"
  >
- <div className="space-y-4">
- <div className="space-y-1">
- <label className="text-sm font-medium text-gray-700">Nueva fecha</label>
- <input
- type="date"
- value={reprogramModal.date}
- min={todayStr}
- onChange={(e) => setReprogramModal((prev) => ({ ...prev, date: e.target.value }))}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
- />
- </div>
- <div className="space-y-1">
- <label className="text-sm font-medium text-gray-700">Nota (opcional)</label>
- <textarea
- rows={3}
- value={reprogramModal.note}
- onChange={(e) => setReprogramModal((prev) => ({ ...prev, note: e.target.value }))}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
- placeholder="Motivo de la reprogramación"
- />
- </div>
- <div className="flex justify-end gap-3 pt-2">
- <Button variant="secondary" onClick={closeReprogramModal} disabled={reprogramModal.submitting}>
- Cancelar
- </Button>
- <Button
- onClick={handleReprogramVisit}
- isLoading={reprogramModal.submitting}
- disabled={!reprogramModal.date || reprogramModal.submitting}
- >
- Confirmar
- </Button>
- </div>
- </div>
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-[#1F2937]">Nueva fecha</label>
+                    <input
+                      type="date"
+                      value={reprogramModal.date}
+                      min={todayStr}
+                      onChange={(e) => setReprogramModal((prev) => ({ ...prev, date: e.target.value }))}
+                      className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-[#1F2937]">Nota (opcional)</label>
+                    <textarea
+                      rows={3}
+                      value={reprogramModal.note}
+                      onChange={(e) => setReprogramModal((prev) => ({ ...prev, note: e.target.value }))}
+                      className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] placeholder:text-[#6B7280] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
+                      placeholder="Motivo de la reprogramación"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-3 pt-2">
+                    <Button variant="secondary" onClick={closeReprogramModal} disabled={reprogramModal.submitting}>
+                      Cancelar
+                    </Button>
+                    <Button
+                      onClick={handleReprogramVisit}
+                      isLoading={reprogramModal.submitting}
+                      disabled={!reprogramModal.date || reprogramModal.submitting}
+                    >
+                      Confirmar
+                    </Button>
+                  </div>
+                </div>
  </Modal>
 
  {/* Modal de visita normal (usuario registrado) */}
@@ -2062,68 +2157,62 @@ return (
  title={modalType === "start" ? "Iniciar visita a cliente" : "Finalizar visita y reportar"}
  maxWidth="max-w-md"
  >
- <div className="space-y-4">
- <p className="text-sm text-gray-600">
- {modalType === "start"
- ? `Estás a punto de iniciar la visita a ${activeClient?.nombre}. Se registrará tu ubicación y hora de entrada.`
- : `Finaliza la visita a ${activeClient?.nombre}. Puedes agregar observaciones finales.`}
- </p>
+                <div className="space-y-4">
+                  <p className="text-sm text-[#6B7280]">
+                    {modalType === "start"
+                      ? `Estás a punto de iniciar la visita a ${activeClient?.nombre}. Se registrará tu ubicación y hora de entrada.`
+                      : `Finaliza la visita a ${activeClient?.nombre}. Puedes agregar observaciones finales.`}
+                  </p>
 
- <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-500 space-y-1">
- <div className="flex justify-between">
- <span>Fecha:</span>
- <span className="font-medium text-gray-900">
- {visitModal.timestamp?.toLocaleDateString()}
- </span>
- </div>
- <div className="flex justify-between">
- <span>Hora:</span>
- <span className="font-medium text-gray-900">
- {formatTime(visitModal.timestamp)}
- </span>
- </div>
- {visitModal.loadingLocation ? (
- <div className="flex items-center gap-2 text-blue-600">
- <FiNavigation className="animate-spin" /> Obteniendo ubicación...
- </div>
- ) : visitModal.coords ? (
- <div className="flex items-center gap-2 text-green-600">
- <FiMapPin />{" "}
- {`${visitModal.coords.latitude.toFixed(5)}, ${visitModal.coords.longitude.toFixed(5)}`}
- </div>
- ) : (
- <div className="text-red-500">Ubicación no disponible</div>
- )}
- </div>
+                  <div className="space-y-1.5 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-3 text-xs text-[#6B7280]">
+                    <div className="flex justify-between">
+                      <span>Fecha</span>
+                      <span className="font-mono font-medium text-[#1F2937]">{visitModal.timestamp?.toLocaleDateString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Hora</span>
+                      <span className="font-mono font-medium text-[#1F2937]">{formatTime(visitModal.timestamp)}</span>
+                    </div>
+                    {visitModal.loadingLocation ? (
+                      <div className="flex items-center gap-2 text-[#2563EB]">
+                        <FiNavigation className="animate-spin" size={13} /> Obteniendo ubicación...
+                      </div>
+                    ) : visitModal.coords ? (
+                      <div className="flex items-center gap-2 text-[#16A34A]">
+                        <FiMapPin size={13} />
+                        <span className="font-mono">{visitModal.coords.latitude.toFixed(5)}, {visitModal.coords.longitude.toFixed(5)}</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 text-[#DC2626]">
+                        <FiAlertCircle size={13} /> Ubicación no disponible
+                      </div>
+                    )}
+                  </div>
 
- <div className="space-y-1">
- <label className="text-sm font-medium text-gray-700">Observaciones (opcional)</label>
- <textarea
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
- rows={3}
- placeholder="Escribe aquí notas sobre la visita..."
- value={visitModal.note}
- onChange={(e) => setVisitModal((prev) => ({ ...prev, note: e.target.value }))}
- />
- </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-[#1F2937]">Observaciones (opcional)</label>
+                    <textarea
+                      className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] placeholder:text-[#6B7280] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
+                      rows={3}
+                      placeholder="Escribe aquí notas sobre la visita..."
+                      value={visitModal.note}
+                      onChange={(e) => setVisitModal((prev) => ({ ...prev, note: e.target.value }))}
+                    />
+                  </div>
 
- <div className="flex justify-end gap-3 pt-2">
- <Button
- variant="secondary"
- onClick={closeModal}
- disabled={submittingVisit}
- >
- Cancelar
- </Button>
- <Button
- onClick={handleConfirmVisit}
- disabled={submittingVisit || visitModal.loadingLocation || !visitModal.coords}
- isLoading={submittingVisit}
- >
- {modalType === "start" ? "Confirmar inicio" : "Confirmar finalización"}
- </Button>
- </div>
- </div>
+                  <div className="flex justify-end gap-3 pt-2">
+                    <Button variant="secondary" onClick={closeModal} disabled={submittingVisit}>
+                      Cancelar
+                    </Button>
+                    <Button
+                      onClick={handleConfirmVisit}
+                      disabled={submittingVisit || visitModal.loadingLocation || !visitModal.coords}
+                      isLoading={submittingVisit}
+                    >
+                      {modalType === "start" ? "Confirmar inicio" : "Confirmar finalización"}
+                    </Button>
+                  </div>
+                </div>
  </Modal>
 
  {/* Modal de visita a PROSPECTO */}
@@ -2153,53 +2242,53 @@ return (
  maxWidth="max-w-4xl"
  >
  {editLoading ? (
- <div className="py-6 text-center text-sm text-gray-500">Cargando detalle...</div>
+                <div className="py-6 text-center text-sm text-[#6B7280]">Cargando detalle...</div>
  ) : (
  <form onSubmit={handleEditSubmit} className="space-y-6">
- <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-4">
- <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Datos principales</h4>
+                <div className="rounded-2xl border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Datos principales</h4>
  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Nombre comercial</label>
+ <label className="text-xs font-medium text-[#1F2937]">Nombre comercial</label>
  <input
  type="text"
  value={editForm.commercial_name || ""}
  onChange={(e) => handleEditChange("commercial_name", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Contacto principal</label>
+ <label className="text-xs font-medium text-[#1F2937]">Contacto principal</label>
  <input
  type="text"
  value={editForm.shipping_contact_name || ""}
  onChange={(e) => handleEditChange("shipping_contact_name", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Telefono</label>
+ <label className="text-xs font-medium text-[#1F2937]">Telefono</label>
  <input
  type="text"
  value={editForm.shipping_phone || ""}
  onChange={(e) => handleEditChange("shipping_phone", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Celular</label>
+ <label className="text-xs font-medium text-[#1F2937]">Celular</label>
  <input
  type="text"
  value={editForm.shipping_cellphone || ""}
  onChange={(e) => handleEditChange("shipping_cellphone", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  </div>
  </div>
 
- <div className="rounded-xl border border-gray-100 bg-white p-4">
- <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Ubicaciones para visitas y rutas</h4>
+                <div className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
+                  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Ubicaciones para visitas y rutas</h4>
  <LocationManager
  clientId={Number(activeClient?.id || editDetail?.id || 0)}
  canEdit
@@ -2208,15 +2297,15 @@ return (
 
  {canManageAllClients && (
  <>
- <div className="rounded-xl border border-gray-100 bg-white p-4">
- <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Informacion legal</h4>
+                <div className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
+                  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Informacion legal</h4>
  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Tipo de cliente</label>
+ <label className="text-xs font-medium text-[#1F2937]">Tipo de cliente</label>
  <select
  value={editForm.client_type || ""}
  onChange={(e) => handleEditChange("client_type", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  >
  <option value="">Selecciona...</option>
  <option value="persona_juridica">Persona juridica</option>
@@ -2225,202 +2314,202 @@ return (
  </select>
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">RUC / Cedula</label>
+ <label className="text-xs font-medium text-[#1F2937]">RUC / Cedula</label>
  <input
  type="text"
  value={editForm.ruc_cedula || ""}
  onChange={(e) => handleEditChange("ruc_cedula", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Razon social</label>
+ <label className="text-xs font-medium text-[#1F2937]">Razon social</label>
  <input
  type="text"
  value={editForm.legal_person_business_name || ""}
  onChange={(e) => handleEditChange("legal_person_business_name", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Nombre establecimiento</label>
+ <label className="text-xs font-medium text-[#1F2937]">Nombre establecimiento</label>
  <input
  type="text"
  value={editForm.establishment_name || ""}
  onChange={(e) => handleEditChange("establishment_name", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  </div>
  </div>
 
- <div className="rounded-xl border border-gray-100 bg-white p-4">
- <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Direccion de establecimiento</h4>
+                <div className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
+                  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Direccion de establecimiento</h4>
  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Provincia</label>
+ <label className="text-xs font-medium text-[#1F2937]">Provincia</label>
  <input
  type="text"
  value={editForm.establishment_province || ""}
  onChange={(e) => handleEditChange("establishment_province", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Ciudad</label>
+ <label className="text-xs font-medium text-[#1F2937]">Ciudad</label>
  <input
  type="text"
  value={editForm.establishment_city || ""}
  onChange={(e) => handleEditChange("establishment_city", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1 sm:col-span-2">
- <label className="text-xs font-semibold text-gray-600">Direccion</label>
+ <label className="text-xs font-medium text-[#1F2937]">Direccion</label>
  <input
  type="text"
  value={editForm.establishment_address || ""}
  onChange={(e) => handleEditChange("establishment_address", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1 sm:col-span-2">
- <label className="text-xs font-semibold text-gray-600">Referencia</label>
+ <label className="text-xs font-medium text-[#1F2937]">Referencia</label>
  <input
  type="text"
  value={editForm.establishment_reference || ""}
  onChange={(e) => handleEditChange("establishment_reference", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  </div>
  </div>
 
- <div className="rounded-xl border border-gray-100 bg-white p-4">
- <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Representante legal</h4>
+                <div className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
+                  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Representante legal</h4>
  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Nombre</label>
+ <label className="text-xs font-medium text-[#1F2937]">Nombre</label>
  <input
  type="text"
  value={editForm.legal_rep_name || ""}
  onChange={(e) => handleEditChange("legal_rep_name", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Cargo</label>
+ <label className="text-xs font-medium text-[#1F2937]">Cargo</label>
  <input
  type="text"
  value={editForm.legal_rep_position || ""}
  onChange={(e) => handleEditChange("legal_rep_position", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Cedula</label>
+ <label className="text-xs font-medium text-[#1F2937]">Cedula</label>
  <input
  type="text"
  value={editForm.legal_rep_id_document || ""}
  onChange={(e) => handleEditChange("legal_rep_id_document", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Email</label>
+ <label className="text-xs font-medium text-[#1F2937]">Email</label>
  <input
  type="email"
  value={editForm.legal_rep_email || ""}
  onChange={(e) => handleEditChange("legal_rep_email", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Celular</label>
+ <label className="text-xs font-medium text-[#1F2937]">Celular</label>
  <input
  type="text"
  value={editForm.legal_rep_cellphone || ""}
  onChange={(e) => handleEditChange("legal_rep_cellphone", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  </div>
  </div>
 
- <div className="rounded-xl border border-gray-100 bg-white p-4">
- <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Direccion de envio</h4>
+                <div className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
+                  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Direccion de envio</h4>
  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
  <div className="space-y-1 sm:col-span-2">
- <label className="text-xs font-semibold text-gray-600">Direccion</label>
+ <label className="text-xs font-medium text-[#1F2937]">Direccion</label>
  <input
  type="text"
  value={editForm.shipping_address || ""}
  onChange={(e) => handleEditChange("shipping_address", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Provincia</label>
+ <label className="text-xs font-medium text-[#1F2937]">Provincia</label>
  <input
  type="text"
  value={editForm.shipping_province || ""}
  onChange={(e) => handleEditChange("shipping_province", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Ciudad</label>
+ <label className="text-xs font-medium text-[#1F2937]">Ciudad</label>
  <input
  type="text"
  value={editForm.shipping_city || ""}
  onChange={(e) => handleEditChange("shipping_city", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1 sm:col-span-2">
- <label className="text-xs font-semibold text-gray-600">Referencia</label>
+ <label className="text-xs font-medium text-[#1F2937]">Referencia</label>
  <input
  type="text"
  value={editForm.shipping_reference || ""}
  onChange={(e) => handleEditChange("shipping_reference", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Horario de entrega</label>
+ <label className="text-xs font-medium text-[#1F2937]">Horario de entrega</label>
  <input
  type="text"
  value={editForm.shipping_delivery_hours || ""}
  onChange={(e) => handleEditChange("shipping_delivery_hours", e.target.value)}
- className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+ className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
  />
  </div>
  </div>
  </div>
 
- <div className="rounded-xl border border-gray-100 bg-white p-4">
- <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Documentos</h4>
- {Array.isArray(editDetail?.attachments) && editDetail.attachments.length > 0 ? (
- <div className="mb-4 space-y-2 text-xs">
- {editDetail.attachments.map((doc) => (
- <a
- key={doc.key}
- href={doc.link}
- target="_blank"
- rel="noreferrer"
- className="inline-flex items-center gap-2 text-blue-600 hover:underline"
- >
- <FiFileText /> {doc.label}
- </a>
- ))}
- </div>
- ) : (
- <p className="text-xs text-gray-500 mb-4">No hay documentos cargados.</p>
- )}
+                <div className="rounded-2xl border border-[#E5E7EB] bg-white p-4">
+                  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Documentos</h4>
+                  {Array.isArray(editDetail?.attachments) && editDetail.attachments.length > 0 ? (
+                    <div className="mb-4 space-y-1.5 text-xs">
+                      {editDetail.attachments.map((doc) => (
+                        <a
+                          key={doc.key}
+                          href={doc.link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-2 text-[#2563EB] hover:text-[#1D4ED8] transition-colors"
+                        >
+                          <FiFileText size={13} /> {doc.label}
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mb-4 text-xs text-[#6B7280]">No hay documentos cargados.</p>
+                  )}
 
  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Documento de identificacion (PDF)</label>
+ <label className="text-xs font-medium text-[#1F2937]">Documento de identificacion (PDF)</label>
  <input
  type="file"
  accept="application/pdf,image/*"
@@ -2429,7 +2518,7 @@ return (
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">RUC (PDF)</label>
+ <label className="text-xs font-medium text-[#1F2937]">RUC (PDF)</label>
  <input
  type="file"
  accept="application/pdf,image/*"
@@ -2438,7 +2527,7 @@ return (
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Permiso de funcionamiento</label>
+ <label className="text-xs font-medium text-[#1F2937]">Permiso de funcionamiento</label>
  <input
  type="file"
  accept="application/pdf,image/*"
@@ -2447,7 +2536,7 @@ return (
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Nombramiento representante legal</label>
+ <label className="text-xs font-medium text-[#1F2937]">Nombramiento representante legal</label>
  <input
  type="file"
  accept="application/pdf,image/*"
@@ -2456,7 +2545,7 @@ return (
  />
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-600">Evidencia LOPDP</label>
+ <label className="text-xs font-medium text-[#1F2937]">Evidencia LOPDP</label>
  <input
  type="file"
  accept="application/pdf,image/*"
@@ -2491,104 +2580,110 @@ return (
  <div className="space-y-6">
  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-500 uppercase">Cliente</label>
- <p className="text-sm font-medium text-gray-900">{activeClient?.nombre}</p>
+ <label className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Cliente</label>
+ <p className="text-sm font-medium text-[#1F2937]">{activeClient?.nombre}</p>
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-500 uppercase">Identificación</label>
- <p className="text-sm text-gray-900">{activeClient?.identificador || "N/A"}</p>
+ <label className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Identificación</label>
+ <p className="text-sm text-[#1F2937]">{activeClient?.identificador || "N/A"}</p>
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-500 uppercase">Visita</label>
+ <label className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Visita</label>
  <div className="flex items-center gap-2">
  <span className={`h-2 w-2 rounded-full ${getStatusMeta(activeClient?.visit_status).led}`} />
- <span className="text-sm text-gray-900">{getStatusMeta(activeClient?.visit_status).label}</span>
+ <span className="text-sm text-[#1F2937]">{getStatusMeta(activeClient?.visit_status).label}</span>
  </div>
  </div>
  <div className="space-y-1">
- <label className="text-xs font-semibold text-gray-500 uppercase">Duración</label>
- <p className="text-sm text-gray-900">
+ <label className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Duración</label>
+ <p className="text-sm text-[#1F2937]">
  {formatDuration(activeClient?.duracion_minutos ?? calculateDuration(activeClient))}
  </p>
  </div>
  </div>
 
- <div className="rounded-xl bg-gray-50 p-4 border border-gray-100">
- <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Tiempos y Ubicación</h4>
- <div className="space-y-3">
- <div className="flex justify-between items-center text-sm">
- <span className="text-gray-600">Entrada:</span>
- <span className="font-medium text-gray-900">{formatTime(activeClient?.hora_entrada)}</span>
- </div>
- {activeClient?.lat_entrada && (
- <div className="flex justify-end">
- <a
- href={`https://www.google.com/maps?q=${activeClient.lat_entrada},${activeClient.lng_entrada}`}
- target="_blank"
- rel="noreferrer"
- className="text-xs text-blue-600 hover:underline flex items-center gap-1"
- >
- <FiMapPin /> Ver ubicación
- </a>
- </div>
- )}
- <div className="border-t border-gray-200 my-2" />
- <div className="flex justify-between items-center text-sm">
- <span className="text-gray-600">Salida:</span>
- <span className="font-medium text-gray-900">{formatTime(activeClient?.hora_salida)}</span>
- </div>
- {activeClient?.lat_salida && (
- <div className="flex justify-end">
- <a
- href={`https://www.google.com/maps?q=${activeClient.lat_salida},${activeClient.lng_salida}`}
- target="_blank"
- rel="noreferrer"
- className="text-xs text-blue-600 hover:underline flex items-center gap-1"
- >
- <FiMapPin /> Ver ubicación
- </a>
- </div>
- )}
- </div>
- </div>
+                <div className="rounded-2xl border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+                  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Tiempos y ubicación</h4>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-[#6B7280]">Entrada</span>
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono font-medium text-[#1F2937]">{formatTime(activeClient?.hora_entrada)}</span>
+                        {activeClient?.lat_entrada && (
+                          <a
+                            href={`https://www.google.com/maps?q=${activeClient.lat_entrada},${activeClient.lng_entrada}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1 text-xs text-[#2563EB] hover:text-[#1D4ED8] transition-colors"
+                          >
+                            <FiMapPin size={11} /> Ver
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    <div className="border-t border-[#E5E7EB]" />
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-[#6B7280]">Salida</span>
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono font-medium text-[#1F2937]">{formatTime(activeClient?.hora_salida)}</span>
+                        {activeClient?.lat_salida && (
+                          <a
+                            href={`https://www.google.com/maps?q=${activeClient.lat_salida},${activeClient.lng_salida}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1 text-xs text-[#2563EB] hover:text-[#1D4ED8] transition-colors"
+                          >
+                            <FiMapPin size={11} /> Ver
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
- <div className="space-y-2">
- <label className="text-xs font-semibold text-gray-500 uppercase">Observaciones</label>
- <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700 min-h-[80px]">
- {activeClient?.observaciones || "Sin observaciones registradas."}
- </div>
- </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Observaciones</label>
+                  <div className="min-h-[80px] rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-3 text-sm text-[#1F2937]">
+                    {activeClient?.observaciones || <span className="text-[#6B7280]">Sin observaciones registradas.</span>}
+                  </div>
+                </div>
 
- <div className="space-y-2">
- <label className="text-xs font-semibold text-gray-500 uppercase">Historial de visitas comerciales</label>
- {activeClientVisitLogs.length > 0 ? (
- <div className="space-y-2">
- {activeClientVisitLogs.slice(0, 8).map((visit, index) => (
- <div key={`${visit?.id || "visit"}-${index}`} className="rounded-lg border border-gray-200 bg-white p-3">
- <div className="flex items-center justify-between gap-2">
- <p className="text-sm font-semibold text-gray-900">
- {visit?.advisor_name || visit?.advisor_email || "Asesor no identificado"}
- </p>
- <span className="text-xs text-gray-500">{formatDateSafe(visit?.visit_date, "dd/MM/yyyy")}</span>
- </div>
- <p className="mt-1 text-xs text-gray-600">
- Rol: {visit?.advisor_role || "N/A"} · Estado: {getStatusMeta(visit?.status).label}
- </p>
- <p className="text-xs text-gray-600">
- Entrada: {formatTime(visit?.hora_entrada)} · Salida: {formatTime(visit?.hora_salida)}
- </p>
- <p className="text-xs text-gray-600">
- Duración: {formatDuration(visit?.duracion_minutos)} · Nota: {visit?.observaciones || "Sin nota"}
- </p>
- </div>
- ))}
- </div>
- ) : (
- <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3 text-sm text-gray-500">
- No hay visitas históricas registradas para este cliente.
- </div>
- )}
- </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Historial de visitas comerciales</label>
+                  {activeClientVisitLogs.length > 0 ? (
+                    <div className="space-y-2">
+                      {activeClientVisitLogs.slice(0, 8).map((visit, index) => (
+                        <div key={`${visit?.id || "visit"}-${index}`} className="rounded-xl border border-[#E5E7EB] bg-white p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-[#1F2937]">
+                              {visit?.advisor_name || visit?.advisor_email || "Asesor no identificado"}
+                            </p>
+                            <span className="font-mono text-xs text-[#6B7280]">{formatDateSafe(visit?.visit_date, "dd/MM/yyyy")}</span>
+                          </div>
+                          <p className="mt-1 text-xs text-[#6B7280]">
+                            {visit?.advisor_role || "N/A"} ·{" "}
+                            <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${getStatusMeta(visit?.status).chip}`}>
+                              {getStatusMeta(visit?.status).label}
+                            </span>
+                          </p>
+                          <p className="text-xs text-[#6B7280]">
+                            <span className="font-mono">{formatTime(visit?.hora_entrada)}</span>{" "}
+                            — <span className="font-mono">{formatTime(visit?.hora_salida)}</span>{" "}
+                            · {formatDuration(visit?.duracion_minutos)}
+                          </p>
+                          {visit?.observaciones && (
+                            <p className="mt-1 text-xs text-[#6B7280]">{visit.observaciones}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 rounded-xl border border-dashed border-[#D1D5DB] bg-[#F9FAFB] p-4 text-sm text-[#6B7280]">
+                      <FiInfo size={14} className="shrink-0 text-[#D1D5DB]" />
+                      No hay visitas históricas registradas para este cliente.
+                    </div>
+                  )}
+                </div>
 
  <div className="flex justify-end pt-2">
  <Button variant="secondary" onClick={closeModal}>
@@ -2635,29 +2730,29 @@ const ProspectVisitForm = ({ onClose, onSuccess, captureLocation }) => {
  };
 
  return (
- <form onSubmit={handleSubmit} className="space-y-4">
- <div>
- <label className="block text-sm font-medium text-gray-700">Nombre del Laboratorio / Prospecto</label>
- <input
- autoFocus
- type="text"
- value={name}
- onChange={e => setName(e.target.value)}
- className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2"
- placeholder="Ej. Laboratorio Clínico Central"
- required
- />
- </div>
- <div>
- <label className="block text-sm font-medium text-gray-700">Observaciones</label>
- <textarea
- value={note}
- onChange={e => setNote(e.target.value)}
- className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2"
- placeholder="Contactos, dirección, interés..."
- rows={3}
- />
- </div>
+  <form onSubmit={handleSubmit} className="space-y-4">
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium text-[#1F2937]">Nombre del laboratorio / prospecto</label>
+      <input
+        autoFocus
+        type="text"
+        value={name}
+        onChange={e => setName(e.target.value)}
+        className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] placeholder:text-[#6B7280] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
+        placeholder="Ej. Laboratorio Clínico Central"
+        required
+      />
+    </div>
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium text-[#1F2937]">Observaciones</label>
+      <textarea
+        value={note}
+        onChange={e => setNote(e.target.value)}
+        className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] placeholder:text-[#6B7280] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
+        placeholder="Contactos, dirección, interés..."
+        rows={3}
+      />
+    </div>
  <div className="flex justify-end gap-3 pt-2">
  <Button variant="secondary" onClick={onClose} disabled={loading}>
  Cancelar

@@ -4,7 +4,6 @@ import {
   FiCheckCircle,
   FiEdit2,
   FiFolder,
-  FiGrid,
   FiHash,
   FiPlus,
   FiRefreshCw,
@@ -29,28 +28,27 @@ import Select from "../../../core/ui/components/Select";
 const isInactiveDepartment = (department) =>
   String(department?.status || "").toLowerCase() === "inactive" || department?.active === false;
 
-const SummaryCard = ({ icon: Icon, label, value, helper, tone = "slate" }) => {
-  const styles = {
-    slate: "bg-slate-950 text-white",
-    blue: "bg-blue-600 text-white",
-    emerald: "bg-emerald-600 text-white",
-  };
-
-  return (
-    <Card className="rounded-[26px] border border-white/80 bg-white/92 p-4 shadow-[0_14px_35px_rgba(15,23,42,0.08)]">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">{label}</p>
-          <p className="mt-3 text-3xl font-black tracking-tight text-slate-900">{value}</p>
-          <p className="mt-1 text-xs text-slate-500">{helper}</p>
-        </div>
-        <div className={`inline-flex rounded-2xl p-3 ${styles[tone] || styles.slate}`}>
-          <Icon className="text-lg" />
-        </div>
-      </div>
-    </Card>
-  );
-};
+// Strip de métricas en una sola superficie con dividers (no hero-metric cards)
+const MetricsStrip = ({ items }) => (
+  <Card className="overflow-hidden p-0 shadow-soft">
+    <div className="grid divide-y divide-slate-100 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <div key={item.label} className="flex items-center gap-3 px-5 py-4">
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
+              <Icon size={16} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium text-slate-500 truncate">{item.label}</p>
+              <p className="text-lg font-semibold text-slate-900 leading-tight">{item.value}</p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  </Card>
+);
 
 const StatusBadge = ({ active }) => (
   <span
@@ -250,48 +248,30 @@ const Departamentos = () => {
 
   return (
     <div className="space-y-5">
-      <section className="rounded-[28px] border border-white/80 bg-white/88 p-4 shadow-[0_18px_45px_rgba(15,23,42,0.08)] backdrop-blur sm:p-5 lg:p-6">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div className="max-w-2xl space-y-3">
-            <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-700">
-              <FiGrid size={12} />
-              Gestión de departamentos
-            </div>
-            <div>
-              <h2 className="text-2xl font-black tracking-tight text-slate-900">Estructura organizacional y disponibilidad operativa</h2>
-              <p className="mt-2 text-sm leading-7 text-slate-600">
-                Mantén el catálogo de áreas con nombre, código, estado y descripción operativa. Esta vista
-                prioriza claridad de disponibilidad para asignaciones internas y control estructural continuo.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
-            <Button
-              variant="secondary"
-              leftIcon={FiRefreshCw}
-              onClick={() => fetchDepartamentos({ silent: true })}
-              loading={isRefreshing}
-              className="justify-center"
-            >
+      {/* Toolbar: acciones + filtros */}
+      <Card className="p-4 shadow-soft sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm font-semibold text-slate-900">Estructura organizacional</p>
+          <div className="flex w-full gap-2 sm:w-auto">
+            <Button variant="secondary" leftIcon={FiRefreshCw} onClick={() => fetchDepartamentos({ silent: true })} loading={isRefreshing} size="sm" className="flex-1 justify-center sm:flex-none">
               Actualizar
             </Button>
-            <Button leftIcon={FiPlus} onClick={() => openModal()} className="justify-center">
+            <Button leftIcon={FiPlus} onClick={() => openModal()} size="sm" className="flex-1 justify-center sm:flex-none">
               Nuevo departamento
             </Button>
           </div>
         </div>
 
-        <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,0.9fr)]">
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Buscar por nombre o código"
-            containerClassName="mb-0"
-            className="min-h-[46px] rounded-2xl border-slate-200 bg-slate-50 pl-11"
-          />
-          <div className="pointer-events-none relative lg:col-start-1 lg:row-start-1">
-            <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,0.9fr)]">
+          <div className="relative lg:col-start-1 lg:row-start-1">
+            <FiSearch className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar por nombre o código"
+              containerClassName="mb-0"
+              className="min-h-[44px] pl-10"
+            />
           </div>
           <Select
             value={statusFilter}
@@ -303,34 +283,37 @@ const Departamentos = () => {
             ]}
             includePlaceholder={false}
             containerClassName="mb-0"
-            className="min-h-[46px] rounded-2xl border-slate-200 bg-slate-50"
+            className="min-h-[44px]"
           />
         </div>
 
-        <div className="mt-3 flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">
-            <FiFolder size={14} />
-            {isRefreshing ? "Actualizando estructura..." : `${summary.total} departamento(s) visibles`}
-          </div>
+        <div className="mt-3 flex items-center justify-between text-sm">
+          <span className="inline-flex items-center gap-2 text-xs font-medium text-slate-500">
+            <FiFolder size={13} />
+            {isRefreshing ? "Actualizando..." : `${summary.total} departamento(s)`}
+          </span>
           {hasActiveFilters ? (
-            <Button variant="ghost" className="justify-center text-sm" onClick={() => { setSearch(""); setStatusFilter("all"); }}>
+            <Button variant="ghost" size="sm" onClick={() => { setSearch(""); setStatusFilter("all"); }}>
               Limpiar filtros
             </Button>
           ) : null}
         </div>
-      </section>
+      </Card>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <SummaryCard icon={FiFolder} label="Departamentos visibles" value={summary.total} helper="Resultado actual" tone="slate" />
-        <SummaryCard icon={FiCheckCircle} label="Activos" value={summary.active} helper="Disponibles para asignación" tone="emerald" />
-        <SummaryCard icon={FiXCircle} label="Inactivos" value={summary.inactive} helper="Fuera de uso operativo" tone="blue" />
-      </section>
+      {/* Métricas */}
+      <MetricsStrip
+        items={[
+          { icon: FiFolder, label: "Departamentos visibles", value: summary.total },
+          { icon: FiCheckCircle, label: "Activos", value: summary.active },
+          { icon: FiXCircle, label: "Inactivos", value: summary.inactive },
+        ]}
+      />
 
-      <section className="rounded-[28px] border border-white/80 bg-white/92 shadow-[0_18px_45px_rgba(15,23,42,0.08)] backdrop-blur">
-        <div className="flex flex-col gap-2 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <section className="rounded-2xl border border-slate-200 bg-white shadow-soft overflow-hidden">
+        <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-lg font-bold text-slate-900">Catálogo operativo</h3>
-            <p className="text-sm text-slate-500">Comparación rápida en escritorio y tarjetas compactas en móvil.</p>
+            <h3 className="text-base font-semibold text-slate-900">Catálogo operativo</h3>
+            <p className="text-sm text-slate-500">Tabla en escritorio, tarjetas en móvil.</p>
           </div>
           {errorMessage ? (
             <div className="inline-flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
@@ -344,11 +327,11 @@ const Departamentos = () => {
           {loading ? (
             <div className="grid gap-4">
               {[1, 2, 3].map((item) => (
-                <div key={item} className="h-24 animate-pulse rounded-[24px] bg-slate-100" />
+                <div key={item} className="h-24 animate-pulse rounded-2xl bg-slate-100" />
               ))}
             </div>
           ) : errorMessage ? (
-            <div className="rounded-[24px] border border-dashed border-red-200 bg-red-50/70 p-6 text-center">
+            <div className="rounded-2xl border border-dashed border-red-200 bg-red-50 p-6 text-center">
               <p className="text-base font-semibold text-red-800">No se pudo cargar la gestión de departamentos</p>
               <p className="mt-2 text-sm text-red-700">Reintenta la consulta para recuperar el catálogo actual.</p>
               <div className="mt-4 flex justify-center">
@@ -358,7 +341,7 @@ const Departamentos = () => {
               </div>
             </div>
           ) : filteredDepartamentos.length === 0 ? (
-            <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center">
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
               <p className="text-lg font-semibold text-slate-900">
                 {hasActiveFilters ? "No hay departamentos que coincidan con los filtros actuales" : "Aún no hay departamentos registrados"}
               </p>
@@ -396,7 +379,7 @@ const Departamentos = () => {
                       {filteredDepartamentos.map((department) => {
                         const active = !isInactiveDepartment(department);
                         return (
-                          <tr key={department.id} className="transition-colors hover:bg-slate-50/80">
+                          <tr key={department.id} className="transition-colors hover:bg-slate-50">
                             <td className="px-4 py-4">
                               <div className="flex items-start gap-3">
                                 <div className="inline-flex rounded-2xl bg-slate-100 p-3 text-slate-700">
@@ -447,8 +430,8 @@ const Departamentos = () => {
                   return (
                     <Card
                       key={department.id}
-                      className={`rounded-[26px] border p-4 shadow-[0_12px_32px_rgba(15,23,42,0.08)] ${
-                        active ? "border-slate-100 bg-white" : "border-slate-200 bg-slate-50/80"
+                      className={`rounded-2xl border p-4 shadow-soft ${
+                        active ? "border-slate-100 bg-white" : "border-slate-200 bg-slate-50"
                       }`}
                     >
                       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -503,7 +486,7 @@ const Departamentos = () => {
         maxWidth="max-w-2xl"
       >
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
             Registra la unidad organizacional con nombre, código y una descripción breve que ayude a su uso
             operativo dentro del sistema.
           </div>

@@ -44,28 +44,6 @@ const UserAvatar = ({ name, size = "md" }) => {
   );
 };
 
-const getUnexpectedExitLabel = (row = {}) => {
-  if (!row?.exception_id) return null;
-  const status = String(row.exception_status || "").trim().toUpperCase();
-  if (status === "ACTIVE") return "Imprevista activa";
-  if (status === "ON_SITE") return "En sitio";
-  if (status === "RETURNING") return "Retornando";
-  if (status === "COMPLETED") return "Imprevista cerrada";
-  return "Imprevista";
-};
-
-const getUnexpectedMarks = (row = {}) => {
-  const hasUnexpected = Boolean(row?.exception_id);
-  if (!hasUnexpected) return null;
-
-  return {
-    out: formatTimeSafe(row?.start_time) || "--",
-    in: formatTimeSafe(row?.return_time) || "--",
-    clientIn: formatTimeSafe(row?.arrival_time) || "--",
-    clientOut: formatTimeSafe(row?.departure_time) || "--",
-  };
-};
-
 const getFieldOpsCount = (row = {}) => {
   if (Array.isArray(row?.field_events)) {
     return row.field_events.filter((event) => Boolean(event?.time || event?.timestamp || event?.occurred_at)).length;
@@ -100,6 +78,17 @@ const getFieldOpsBreakdown = (row = {}) => {
   });
 
   return summary;
+};
+
+const isOperationalExceptionType = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return [
+    "operacion_campo",
+    "operacion_de_campo",
+    "salida_oficina",
+    "viaje",
+    "campo",
+  ].includes(normalized);
 };
 
 const getFieldOpsTimeSummary = (row = {}) => {
@@ -181,37 +170,68 @@ const AttendanceReportsTableView = ({ rows = [], onRowClick, onProfileClick, onM
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-      <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-slate-100 max-h-[500px] overflow-y-auto">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-slate-50 px-4 py-3">
+        <p className="text-xs font-medium text-slate-600">
+          Horas en formato 24h (hora Ecuador, UTC-5).
+        </p>
+        <p className="text-xs text-slate-500">
+          Registros: <span className="font-semibold text-slate-700">{sortedRows.length}</span>
+        </p>
+      </div>
+      <div className="max-h-[560px] overflow-x-auto overflow-y-auto scrollbar-thin scrollbar-track-slate-100 scrollbar-thumb-slate-300">
+        <table className="min-w-[1640px] divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-900 text-white">
             <tr>
-              <th className="px-4 py-3 text-left font-semibold cursor-pointer hover:bg-slate-800" onClick={() => handleSort("date")}>Fecha<SortIcon field="date" /></th>
-              <th className="px-4 py-3 text-left font-semibold cursor-pointer hover:bg-slate-800" onClick={() => handleSort("fullname")}>Colaborador<SortIcon field="fullname" /></th>
-              <th className="px-4 py-3 text-left font-semibold">Departamento</th>
-              <th className="px-4 py-3 text-left font-semibold">Estado</th>
-              <th className="px-4 py-3 text-left font-semibold">Imprevistas</th>
-              <th className="px-4 py-3 text-left font-semibold">Oper. campo</th>
-              <th className="px-4 py-3 text-left font-semibold">Disc.</th>
-              <th className="px-4 py-3 text-left font-semibold">Geo</th>
-              <th className="px-4 py-3 text-left font-semibold">E/S completas</th>
-              <th className="px-4 py-3 text-right font-semibold cursor-pointer hover:bg-slate-800" onClick={() => handleSort("total_hours")}>Horas<SortIcon field="total_hours" /></th>
-              <th className="px-4 py-3"></th>
+              <th
+                className="sticky left-0 top-0 z-30 w-32 cursor-pointer bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide hover:bg-slate-800"
+                onClick={() => handleSort("date")}
+              >
+                Fecha
+                <SortIcon field="date" />
+              </th>
+              <th
+                className="sticky left-32 top-0 z-30 w-80 cursor-pointer bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide hover:bg-slate-800"
+                onClick={() => handleSort("fullname")}
+              >
+                Colaborador
+                <SortIcon field="fullname" />
+              </th>
+              <th className="sticky top-0 z-20 w-48 bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Departamento</th>
+              <th className="sticky top-0 z-20 w-44 bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Estado</th>
+              <th className="sticky top-0 z-20 w-64 bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Salidas y visitas</th>
+              <th className="sticky top-0 z-20 w-24 bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Disc.</th>
+              <th className="sticky top-0 z-20 w-24 bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Geo</th>
+              <th className="sticky top-0 z-20 w-[440px] bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Resumen de marcaciones</th>
+              <th
+                className="sticky top-0 z-20 w-28 cursor-pointer bg-slate-900 px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide hover:bg-slate-800"
+                onClick={() => handleSort("total_hours")}
+              >
+                Horas
+                <SortIcon field="total_hours" />
+              </th>
+              <th className="sticky top-0 z-20 w-40 bg-slate-900 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {sortedRows.map((row) => {
               const fieldOpsSummary = getFieldOpsBreakdown(row);
               const fieldOpsTimes = getFieldOpsTimeSummary(row);
-              const unexpectedMarks = getUnexpectedMarks(row);
+              const fieldOpsCount = getFieldOpsCount(row);
+              const operationalSpanDays = Number(row?.operational_span_days || 0);
+              const hasOperationalMultiDay = isOperationalExceptionType(row?.exception_type) && operationalSpanDays > 1;
+              const operationalElapsedHours = Number(row?.operational_elapsed_hours || 0);
+              const collaboratorLabel = row.fullname || row.email || "Usuario";
               return (
               <tr
                 key={`${row.id}-${row.date}`}
-                className="bg-white hover:bg-slate-50 cursor-pointer"
+                className="group cursor-pointer bg-white hover:bg-slate-50"
                 onClick={() => onRowClick?.(row)}
               >
-                <td className="px-4 py-3 text-slate-700">{formatDateSafe(row.date, "dd/MM/yyyy")}</td>
-                <td className="px-4 py-3">
+                <td className="sticky left-0 z-20 bg-white px-4 py-3 text-slate-700 group-hover:bg-slate-50">
+                  <div className="font-semibold text-slate-800">{formatDateSafe(row.date, "dd/MM/yyyy")}</div>
+                </td>
+                <td className="sticky left-32 z-20 bg-white px-4 py-3 group-hover:bg-slate-50">
                   <button
                     type="button"
                     onClick={(event) => {
@@ -222,57 +242,58 @@ const AttendanceReportsTableView = ({ rows = [], onRowClick, onProfileClick, onM
                   >
                     <UserAvatar name={row.fullname || row.email} size="md" />
                     <div>
-                      <div className="font-semibold text-slate-950">{row.fullname || row.email || "Usuario"}</div>
+                      <div className="font-semibold text-slate-950">{collaboratorLabel}</div>
                       <div className="text-xs text-slate-500">{row.email || "-"}</div>
                     </div>
                   </button>
                 </td>
                 <td className="px-4 py-3 text-slate-700">{row.department_name || "-"}</td>
                 <td className="px-4 py-3">
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                  <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
                     {row.attendance_status_label || "Sin estado"}
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  {getUnexpectedExitLabel(row) ? (
-                    <div className="space-y-1 text-xs">
-                      <span className="inline-flex items-center rounded-full bg-rose-50 px-2 py-1 font-medium text-rose-700">
-                        {getUnexpectedExitLabel(row)}
+                  {fieldOpsCount > 0 ? (
+                    <div className="space-y-2 text-xs">
+                      <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-1 font-medium text-blue-700">
+                        {fieldOpsCount} evento{fieldOpsCount === 1 ? "" : "s"}
                       </span>
-                      {unexpectedMarks ? (
-                        <div className="flex flex-col gap-1 text-[11px] text-rose-800">
-                          <span>Salida inesperada: {unexpectedMarks.out}</span>
-                          <span>Entrada inesperada: {unexpectedMarks.in}</span>
+                      <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-2 text-[11px] text-slate-700">
+                        <div>Oficina/viaje: <span className="font-semibold">{fieldOpsSummary.officeExit}</span> salida / <span className="font-semibold">{fieldOpsSummary.officeEntry}</span> entrada</div>
+                        <div>Cliente: <span className="font-semibold">{fieldOpsSummary.clientEntry}</span> entrada / <span className="font-semibold">{fieldOpsSummary.clientExit}</span> salida</div>
+                      </div>
+                      {hasOperationalMultiDay ? (
+                        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-2 text-[11px] text-indigo-800">
+                          <div className="font-semibold">Operaci&oacute;n multi-d&iacute;a</div>
+                          <div>
+                            Duraci&oacute;n: {operationalSpanDays} d&iacute;as ({Number.isFinite(operationalElapsedHours) ? operationalElapsedHours.toFixed(1) : "0.0"} h)
+                          </div>
+                          <div>
+                            Rango: {formatDateSafe(row?.operational_start_date, "dd/MM/yyyy") || "--"} - {formatDateSafe(row?.operational_end_date, "dd/MM/yyyy") || "--"}
+                          </div>
                         </div>
                       ) : null}
                     </div>
                   ) : (
-                    <span className="text-xs text-slate-400">-</span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  {getFieldOpsCount(row) > 0 ? (
-                    <div className="space-y-1 text-xs">
-                      <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-1 font-medium text-blue-700">
-                        {getFieldOpsCount(row)} evento{getFieldOpsCount(row) === 1 ? "" : "s"}
-                      </span>
-                      <div className="flex flex-col gap-1 text-[11px] text-slate-600">
-                        <span>Oficina/viaje: {fieldOpsSummary.officeExit} salida / {fieldOpsSummary.officeEntry} entrada</span>
-                        <span>Cliente: {fieldOpsSummary.clientEntry} entrada / {fieldOpsSummary.clientExit} salida</span>
-                        {unexpectedMarks ? (
-                          <span className="text-rose-700">
-                            Imprevista cliente: {unexpectedMarks.clientIn} entrada / {unexpectedMarks.clientOut} salida
-                          </span>
-                        ) : null}
+                    hasOperationalMultiDay ? (
+                      <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-2 text-[11px] text-indigo-800">
+                        <div className="font-semibold">Operaci&oacute;n multi-d&iacute;a</div>
+                        <div>
+                          Duraci&oacute;n: {operationalSpanDays} d&iacute;as ({Number.isFinite(operationalElapsedHours) ? operationalElapsedHours.toFixed(1) : "0.0"} h)
+                        </div>
+                        <div>
+                          Rango: {formatDateSafe(row?.operational_start_date, "dd/MM/yyyy") || "--"} - {formatDateSafe(row?.operational_end_date, "dd/MM/yyyy") || "--"}
+                        </div>
                       </div>
-                    </div>
-                  ) : (
-                    <span className="text-xs text-slate-400">-</span>
+                    ) : (
+                      <span className="text-xs text-slate-400">-</span>
+                    )
                   )}
                 </td>
                 <td className="px-4 py-3">
                   {row.has_discrepancy ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">
                       <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M8.257 3.099c.765 1.36 2.722 3.78 5.392 4.402a1.94 1.94 0 011.823 2.04l-.588 4.308a1.94 1.94 0 01-1.913 1.597H6.837a1.94 1.94 0 01-1.913-1.597L4.336 9.541A1.94 1.94 0 016.16 7.5c.48-.062 1.105-.143 1.823-.01 1.48-.32 2.525-1.38 3.01-2.22a1.521 1.521 0 00-1.08-2.063l-.928-.17c-.87-.158-1.65-.06-2.304.275-.64.33-1.152.885-1.465 1.547l-.295.063a.29.29 0 00-.198.35c.063.166.19.31.345.39l.928.482c.32.166.672.253 1.037.253.448 0 .873-.139 1.238-.38.345-.227.598-.553.738-.95l.218-.62c.233-.663.114-1.42-.32-2.006a.29.29 0 00-.345-.062l-.928.17zM10 13a1 1 0 11-2 0 1 1 0 012 0z" clipRule="evenodd" />
                       </svg>
@@ -284,7 +305,7 @@ const AttendanceReportsTableView = ({ rows = [], onRowClick, onProfileClick, onM
                 </td>
                 <td className="px-4 py-3">
                   {row.has_geo ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
                       <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
                       </svg>
@@ -295,47 +316,56 @@ const AttendanceReportsTableView = ({ rows = [], onRowClick, onProfileClick, onM
                   )}
                 </td>
                 <td className="px-4 py-3 text-slate-700">
-                  <div className="space-y-1 text-xs">
-                    <div className="font-semibold text-slate-800">Normal</div>
-                    <div>Entrada: {formatTimeSafe(row.entry_time) || "--"}</div>
-                    <div>Salida: {formatTimeSafe(row.exit_time) || "--"}</div>
-                    <div className="pt-1 font-semibold text-rose-700">Inesperada</div>
-                    <div>Salida: {unexpectedMarks?.out || "--"}</div>
-                    <div>Entrada: {unexpectedMarks?.in || "--"}</div>
-                    <div className="pt-1 font-semibold text-blue-700">Campo (oficina/viaje)</div>
-                    <div>Salida: {fieldOpsTimes.officeExit}</div>
-                    <div>Entrada: {fieldOpsTimes.officeEntry}</div>
-                    <div className="pt-1 font-semibold text-violet-700">Cliente</div>
-                    <div>Entrada: {fieldOpsTimes.clientEntry !== "--" ? fieldOpsTimes.clientEntry : unexpectedMarks?.clientIn || "--"}</div>
-                    <div>Salida: {fieldOpsTimes.clientExit !== "--" ? fieldOpsTimes.clientExit : unexpectedMarks?.clientOut || "--"}</div>
+                  <div className="grid grid-cols-1 gap-2 text-xs lg:grid-cols-2">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                      <div className="mb-1 font-semibold text-slate-800">Normal</div>
+                      <div>Entrada: <span className="font-medium">{formatTimeSafe(row.entry_time) || "--"}</span></div>
+                      <div>Salida: <span className="font-medium">{formatTimeSafe(row.exit_time) || "--"}</span></div>
+                    </div>
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-2">
+                      <div className="mb-1 font-semibold text-blue-700">Oficina / viaje</div>
+                      <div>Salida: <span className="font-medium">{fieldOpsTimes.officeExit}</span></div>
+                      <div>Entrada: <span className="font-medium">{fieldOpsTimes.officeEntry}</span></div>
+                    </div>
+                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-2">
+                      <div className="mb-1 font-semibold text-violet-700">Cliente</div>
+                      <div>
+                        Entrada: <span className="font-medium">{fieldOpsTimes.clientEntry}</span>
+                      </div>
+                      <div>
+                        Salida: <span className="font-medium">{fieldOpsTimes.clientExit}</span>
+                      </div>
+                    </div>
                   </div>
                 </td>
                 <td className="px-4 py-3 text-right font-semibold text-slate-900">
                   {row.total_hours ? `${Number(row.total_hours).toFixed(1)}h` : "--"}
                 </td>
                 <td className="px-4 py-3">
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onProfileClick?.(row);
-                    }}
-                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300"
-                  >
-                    Ver perfil
-                  </button>
-                  {onMapClick && row.has_geo ? (
+                  <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();
-                        onMapClick?.(row);
+                        onProfileClick?.(row);
                       }}
-                      className="ml-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300"
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:border-slate-400 hover:bg-slate-50"
                     >
-                      Mapa
+                      Ver perfil
                     </button>
-                  ) : null}
+                    {onMapClick && row.has_geo ? (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onMapClick?.(row);
+                        }}
+                        className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-700 hover:border-blue-300 hover:bg-blue-100"
+                      >
+                        Mapa
+                      </button>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
               );

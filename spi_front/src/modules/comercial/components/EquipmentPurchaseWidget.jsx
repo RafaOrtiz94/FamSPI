@@ -10,8 +10,6 @@ import {
  saveProviderResponse,
  registerPublicPortalOutcome,
  uploadContract,
- requestDeliveryDates,
- submitDeliveryDates,
  markEquipmentArrived,
  markDispatchReady,
  completeDelivery,
@@ -36,22 +34,10 @@ import RequestActions from "./RequestActions";
 import { usePurchaseSSE } from "../../../core/hooks/usePurchaseSSE";
 import {
  STATUS_CONFIG,
- VALIDATION_MESSAGES,
- MODAL_TITLES,
- PROCESSING_STEPS,
- SUCCESS_MESSAGES,
- EMPTY_STATES,
- LOADING_MESSAGES,
- ARIA_LABELS,
 } from "./EquipmentPurchaseWidget.constants";
 import {
  normalizeResponseItems,
  dedupeEquipmentList,
- getEquipmentDisplayList,
- getFormattedProviderResponse,
- getPaginationInfo,
- validateForm,
- getEquipmentPayload,
  formatProviderOutcome,
 } from "./EquipmentPurchaseWidget.utils";
 import { formatDateTimeEC } from "../../../core/utils/dateUtils";
@@ -66,6 +52,8 @@ import {
  FiChevronUp,
  FiList,
 } from "react-icons/fi";
+import PublicPurchaseInstallationPanel from "./PublicPurchaseInstallationPanel";
+import PublicPurchaseTimelinePanel from "./PublicPurchaseTimelinePanel";
 
 const CHECKLIST_ACTION_LABELS = {
  start_availability: "Solicitar disponibilidad al proveedor",
@@ -209,7 +197,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  notes: "",
  });
  const [responseDraft, setResponseDraft] = useState({ open: false, id: null, outcome: "new", notes: "", items: [] });
- const [inspectionDraft, setInspectionDraft] = useState({});
+ const [inspectionDraft] = useState({});
  const [inspectionModal, setInspectionModal] = useState({
  open: false,
  requestId: null,
@@ -721,6 +709,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  await coordinateInspectionDate(request.id, {
  inspection_date: selectedDate,
  notes: draft.notes || "",
+ assigned_technician_id: draft.assigned_technician_id || request?.inspection_assigned_technician_id || null,
  expected_updated_at: request.updated_at,
  });
  showToast("Fecha propuesta enviada. Pendiente aprobación de Jefe Técnico", "success");
@@ -761,26 +750,6 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  );
  };
 
- const handleRequestDeliveryDates = async (request) => {
- await runWithOverlay(
- "Solicitando fechas de entrega",
- [{ id: "delivery-dates-request", label: "Solicitando fechas" }],
- async () => {
- try {
- const draft = deliveryDrafts[request.id] || {};
- await requestDeliveryDates(request.id, {
- notes: draft.notes || "",
- expected_updated_at: request.updated_at,
- });
- showToast("Solicitud de fechas de entrega enviada", "success");
- loadAll();
- } catch (error) {
- console.error(error);
- handleApiError(error, "No se pudo solicitar fechas de entrega");
- }
- },
- );
- };
 
  const handleRegisterPublicPortalOutcome = async (request) => {
  if (!request?.id) return;
@@ -815,33 +784,6 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  } catch (error) {
  console.error(error);
  handleApiError(error, "No se pudo registrar el resultado del portal");
- }
- },
- );
- };
-
- const handleSubmitDeliveryDates = async (request) => {
- const draft = deliveryDrafts[request.id] || {};
- if (!draft.delivery_start_at || !draft.delivery_end_at) {
- showToast("Debes definir fecha de inicio y fin de entrega", "warning");
- return;
- }
- await runWithOverlay(
- "Registrando fechas de entrega",
- [{ id: "delivery-dates-submit", label: "Guardando fechas" }],
- async () => {
- try {
- await submitDeliveryDates(request.id, {
- delivery_start_at: draft.delivery_start_at,
- delivery_end_at: draft.delivery_end_at,
- notes: draft.notes || "",
- expected_updated_at: request.updated_at,
- });
- showToast("Fechas de entrega registradas", "success");
- loadAll();
- } catch (error) {
- console.error(error);
- handleApiError(error, "No se pudo registrar fechas de entrega");
  }
  },
  );
@@ -1175,12 +1117,10 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  );
  });
  const showDeliverySummary = Boolean(
- req.delivery_start_at ||
- req.delivery_end_at ||
  req.equipment_arrived_at ||
  req.dispatch_ready_at ||
  req.delivered_at ||
- ["contract_available", "delivery_dates_requested", "delivery_dates_submitted", "waiting_dispatch", "dispatch_ready", "completed"].includes(req.status),
+ ["contract_available", "waiting_dispatch", "dispatch_ready", "completed"].includes(req.status),
  );
  const generatedDocuments = [
  req.process_doc_link
@@ -1443,6 +1383,26 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  placeholder="Notas de coordinación (opcional)"
  className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
  />
+ <select
+ className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+ value={inspectionCoordinationDraft.assigned_technician_id ?? req.inspection_assigned_technician_id ?? ""}
+ onChange={(event) =>
+ setInspectionCoordDrafts((prev) => ({
+ ...prev,
+ [req.id]: {
+ ...prev[req.id],
+ assigned_technician_id: event.target.value,
+ },
+ }))
+ }
+ >
+ <option value="">Asignarme como técnico responsable</option>
+ {(meta.technical_users || []).map((user) => (
+ <option key={user.id} value={user.id}>
+ {user.name} · {user.role}
+ </option>
+ ))}
+ </select>
  <Button
  size="sm"
  onClick={() => handleCoordinateInspection(req)}
@@ -1615,12 +1575,6 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  Entrega
  </p>
  <p className="text-xs text-slate-700">
- Ventana:{" "}
- <span className="font-medium">
- {req.delivery_start_at || "Pendiente"} - {req.delivery_end_at || "Pendiente"}
- </span>
- </p>
- <p className="text-xs text-slate-700">
  Arribo: <span className="font-medium">{req.equipment_arrived_at ? formatDateTimeEC(req.equipment_arrived_at) : "Pendiente"}</span>
  </p>
  <p className="text-xs text-slate-700">
@@ -1631,6 +1585,10 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  </p>
  </div>
  )}
+
+ <PublicPurchaseInstallationPanel request={req} onRefresh={loadAll} />
+
+ {expanded && <PublicPurchaseTimelinePanel purchaseId={req.id} />}
 
  {hasDocumentsSection && (
  <details className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -1789,8 +1747,6 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  onUploadSignedProforma={(_id, action, file) => handleUpload(req, action, file)}
  onUploadProforma={(_id, action, file) => handleUpload(req, action, file)}
  onUploadContract={(_id, action, file) => handleUpload(req, action, file)}
- onRequestDeliveryDates={() => handleRequestDeliveryDates(req)}
- onSubmitDeliveryDates={() => handleSubmitDeliveryDates(req)}
  onMarkEquipmentArrived={() => handleMarkEquipmentArrived(req)}
  onMarkDispatchReady={() => handleMarkDispatchReady(req)}
  onCompleteDelivery={() => handleCompleteDelivery(req)}

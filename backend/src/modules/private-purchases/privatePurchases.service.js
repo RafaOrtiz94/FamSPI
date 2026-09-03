@@ -1,8 +1,8 @@
-/**
+﻿/**
  * Private Purchases Service
  *
- * Servicio principal para gestiรณn de compras privadas.
- * Maneja creaciรณn, transiciones de estado y operaciones del workflow.
+ * Servicio principal para gestià¸£à¸“n de compras privadas.
+ * Maneja creacià¸£à¸“n, transiciones de estado y operaciones del workflow.
  */
 
 const db = require("../../config/db");
@@ -14,9 +14,9 @@ const { createAllDayEvent } = require("../../utils/calendar");
 const { uploadBase64File, ensureFolder, drive } = require("../../utils/drive");
 const { resolveExternalDriveIntegrity } = require("../../utils/documentHash");
 const { sendAndArchive } = require("../../utils/emailArchive");
+const { renderProviderEmail } = require("../../utils/emailTemplate");
 const { generateDeliveryActPdf } = require("./privatePurchases.acta");
 const businessCaseService = require('../business-case/businessCase.service');
-const { enqueuePurchaseStatusChangedEvent } = require("../integrations/hooks");
 const {
   SITE_INSPECTION_RESULT,
   SITE_INSPECTION_STATUS,
@@ -38,6 +38,7 @@ const {
   buildVisualReceptionPatch,
   buildVerificationDecisionPatch,
   buildVerificationRemediationPatch,
+  appendVerificationAttempt,
   buildCuProviderReportPatch,
   computeInstallationClosureGate,
   enrichInstallationWorkflowWithGate,
@@ -46,10 +47,14 @@ const {
 const {
   createRequest: createServiceRequest,
   addDriveAttachment,
+  markRequestCompleted,
 } = require("../requests/requests.service");
+const crmPurchaseSyncService = require("../crm-fam/crmPurchaseSync.service");
 
 const driveLink = (fileId) => (fileId ? `https://drive.google.com/file/d/${fileId}/view` : null);
-const RESERVATION_REMINDER_OFFSET_DAYS = 55;
+const RESERVATION_VALIDITY_DAYS        = 15;
+const RESERVATION_REMINDER_DAYS_BEFORE = 3;
+const RESERVATION_REMINDER_OFFSET_DAYS = RESERVATION_VALIDITY_DAYS - RESERVATION_REMINDER_DAYS_BEFORE; // = 12
 const PRIVATE_OFFER_KIND_CANONICAL_MAP = Object.freeze({
   venta: "venta",
   comodato: "comodato",
@@ -73,15 +78,15 @@ const PRIVATE_CHECKLIST_ITEM_LABELS = {
   offer_uploaded: "Oferta cargada",
   signed_offer_uploaded: "Oferta firmada del cliente cargada",
   client_registered: "Cliente registrado",
-  inspection_requested: "Inspección de ambiente solicitada",
-  inspection_act_uploaded: "Acta de inspección cargada",
-  inspection_window_defined: "Ventana de inspección definida",
-  inspection_date_coordinated: "Fecha de inspección coordinada",
-  lopdp_approved: "Aprobación LOPDP confirmada",
-  client_id_uploaded: "Documento de identificación del cliente cargado",
+  inspection_requested: "InspecciÃ³n de ambiente solicitada",
+  inspection_act_uploaded: "Acta de inspecciÃ³n cargada",
+  inspection_window_defined: "Ventana de inspecciÃ³n definida",
+  inspection_date_coordinated: "Fecha de inspecciÃ³n coordinada",
+  lopdp_approved: "AprobaciÃ³n LOPDP confirmada",
+  client_id_uploaded: "Documento de identificaciÃ³n del cliente cargado",
   contract_draft_uploaded: "Contrato borrador cargado",
   contract_client_signed_uploaded: "Contrato firmado por cliente cargado",
-  inspection_site_compliant: "Sitio conforme para instalación (F.ST-07)",
+  inspection_site_compliant: "Sitio conforme para instalaciÃ³n (F.ST-07)",
   equipment_arrived: "Equipo marcado como arribado",
   delivery_dates_submitted: "Fechas de entrega registradas",
 };
@@ -89,7 +94,7 @@ const PRIVATE_CHECKLIST_ITEM_LABELS = {
 const formatEquipmentList = (equipment = []) => {
   return equipment
     .map((item) => {
-      const typeLabel = item.type === "cu" ? " (CU)" : item.type === "new_import" ? " (Nuevo para importación)" : item.type === "installed_client" ? " (Instalado en cliente)" : " (Nuevo disponible)";
+      const typeLabel = item.type === "cu" ? " (CU)" : item.type === "new_import" ? " (Nuevo para importaciÃ³n)" : item.type === "installed_client" ? " (Instalado en cliente)" : " (Nuevo)";
       const name = item.name || item.sku || "Equipo";
       return `- ${name}${typeLabel}`;
     })
@@ -112,6 +117,26 @@ const addDaysIso = (days = 0) => {
 const TECHNICAL_DAILY_CAPACITY = Number.parseInt(process.env.TECHNICAL_DAILY_CAPACITY || "3", 10);
 let privateSiteInspectionColumnsReady = false;
 let privateInstallationWorkflowColumnsReady = false;
+// BC-17: paused_reason column
+let privatePausedReasonColumnReady = false;
+// extra JSONB column (metadata auxiliar)
+let privateExtraColumnReady = false;
+// provider contract columns (188)
+let privateProviderContractColumnsReady = false;
+
+const ensurePrivatePausedReasonColumn = async () => {
+  if (privatePausedReasonColumnReady) return;
+  await db.query(`
+    ALTER TABLE private_purchase_requests
+      ADD COLUMN IF NOT EXISTS paused_reason TEXT DEFAULT NULL
+  `);
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS idx_private_purchase_paused_reason
+      ON private_purchase_requests (paused_reason)
+      WHERE paused_reason IS NOT NULL`,
+  );
+  privatePausedReasonColumnReady = true;
+};
 
 const ensurePrivateSiteInspectionColumns = async () => {
   if (privateSiteInspectionColumnsReady) return;
@@ -150,12 +175,129 @@ const ensurePrivateInstallationWorkflowColumns = async () => {
   privateInstallationWorkflowColumnsReady = true;
 };
 
+const ensurePrivateExtraColumn = async () => {
+  if (privateExtraColumnReady) return;
+  await db.query(`
+    ALTER TABLE private_purchase_requests
+      ADD COLUMN IF NOT EXISTS extra JSONB NOT NULL DEFAULT '{}'::jsonb
+  `);
+  privateExtraColumnReady = true;
+};
+
+const ensurePrivateProviderContractColumns = async () => {
+  if (privateProviderContractColumnsReady) return;
+  await db.query(`
+    ALTER TABLE private_purchase_requests
+      ADD COLUMN IF NOT EXISTS provider_contract_received_at  TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS provider_contract_received_by  INTEGER,
+      ADD COLUMN IF NOT EXISTS provider_contract_document_id  TEXT,
+      ADD COLUMN IF NOT EXISTS provider_contract_uploaded_at  TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS provider_contract_uploaded_by  INTEGER
+  `);
+  privateProviderContractColumnsReady = true;
+};
+
 class PrivatePurchasesService {
+  _normalizeAvailabilityType(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw) return null;
+    if (['new', 'new_available', 'nuevo', 'disponible_nuevo'].includes(raw)) return 'new_available';
+    if (['cu', 'cu_available', 'condicion_uso', 'used'].includes(raw)) return 'cu_available';
+    if (['import_new', 'new_import', 'import_available', 'importacion'].includes(raw)) return 'import_available';
+    if (['none', 'not_available', 'unavailable', 'reject'].includes(raw)) return 'not_available';
+    return raw;
+  }
+
+  _isRequestedTypeEquivalent(requestedType, availableType) {
+    const requested = this._normalizeAvailabilityType(requestedType);
+    const available = this._normalizeAvailabilityType(availableType);
+    if (!available || available === 'not_available') return false;
+    if (!requested) return true;
+    return requested === available;
+  }
+
+  async _ensureReservationForPurchase(purchaseId, user, purchase, acceptedItems = []) {
+    if (!purchase?.provider_email) return;
+    if (purchase?.reservation_email_sent_at) return;
+    if (!Array.isArray(acceptedItems) || acceptedItems.length === 0) return;
+
+    const folderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
+    const reservationClientName = purchase.client_snapshot?.commercial_name || purchase.client_snapshot?.name || "Cliente pendiente";
+    const reservationHtml = renderProviderEmail({
+      title: "Confirmación de reserva de equipos",
+      bodyHtml: `
+        <p>Solicitamos reservar los equipos cotizados para ${reservationClientName}.</p>
+        <p>Confirmamos reserva para:</p>
+        ${formatEquipmentList(acceptedItems)}
+      `,
+      user,
+    });
+    const { fileId: reservationFileId, threadId, lastMessageId } = await sendAndArchive({
+      user,
+      to: purchase.provider_email,
+      subject: `${purchase.provider_email_thread_id ? "Re: " : ""}Solicitud de disponibilidad - ${reservationClientName}`,
+      html: reservationHtml,
+      folderId,
+      prefix: 'reserva',
+      request: {
+        id: purchaseId,
+        client_name: purchase.client_snapshot?.commercial_name || purchase.client_snapshot?.name || 'Cliente',
+        provider_email: purchase.provider_email,
+        equipment: acceptedItems,
+      },
+      actionLabel: 'Confirmacion de reserva',
+      threadContext: {
+        threadId: purchase.provider_email_thread_id,
+        lastMessageId: purchase.provider_email_last_message_id,
+      },
+    });
+
+    const reservationExpiresAt = new Date();
+    reservationExpiresAt.setDate(reservationExpiresAt.getDate() + RESERVATION_VALIDITY_DAYS);
+    const reminderDate = new Date();
+    reminderDate.setDate(reminderDate.getDate() + RESERVATION_REMINDER_OFFSET_DAYS); // dia 12
+
+    const acpEmail = purchase?.provider_response?.actor?.email || user?.email || null;
+    let calendarEvent = {};
+    try {
+      calendarEvent = await createAllDayEvent({
+        summary: `âš ï¸ Reserva por vencer â€” ${purchase.client_snapshot?.commercial_name || purchase.client_snapshot?.name || 'Cliente'}`,
+        description: `La reserva vence el ${reservationExpiresAt.toLocaleDateString('es-EC')}. Confirma proforma firmada o renueva la reserva.`,
+        date: reminderDate,
+        attendees: [acpEmail].filter(Boolean),
+      });
+    } catch (calendarError) {
+      logger.warn('[FLOW_PRIVADA][BE][ACP][RESERVATION][CALENDAR_WARN]', calendarError.message);
+    }
+
+    await db.query(
+      `UPDATE private_purchase_requests
+          SET reservation_email_sent_at     = NOW(),
+              reservation_expires_at        = $2,
+              reservation_email_file_id     = $3,
+              reservation_calendar_event_id = $4,
+              reservation_calendar_event_link = $5,
+              provider_email_thread_id = $6,
+              provider_email_last_message_id = $7,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [
+        purchaseId,
+        reservationExpiresAt,
+        reservationFileId,
+        calendarEvent?.id || null,
+        calendarEvent?.htmlLink || null,
+        threadId,
+        lastMessageId,
+      ],
+    );
+  }
+
   _normalizeStatusFilter(rawStatus) {
     const normalized = String(rawStatus || "").trim().toLowerCase();
     if (!normalized) return null;
     if (!Object.values(PRIVATE_PURCHASE_STATES).includes(normalized)) {
-      const error = new Error(`Estado inválido para filtro: ${rawStatus}`);
+      const error = new Error(`Estado invÃ¡lido para filtro: ${rawStatus}`);
       error.status = 400;
       error.code = 'INVALID_STATUS_FILTER';
       throw error;
@@ -181,6 +323,10 @@ class PrivatePurchasesService {
       if (!row || typeof row !== "object") return;
       row.offer_kind = this._normalizeOfferKind(row.offer_kind, { allowLegacyAlias: true }) || row.offer_kind;
     });
+  }
+
+  _inspectionHandledByBusinessCase(_row = {}) {
+    return false;
   }
 
   _getUserRoles(user) {
@@ -214,6 +360,89 @@ class PrivatePurchasesService {
 
   _hasAnyRoleToken(user, tokens = []) {
     return tokens.some((token) => this._hasRoleToken(user, token));
+  }
+
+  // BC-17: lanza 423 si el expediente estÃ¡ pausado por apelaciÃ³n de factibilidad
+  async _assertNotPaused(purchaseId) {
+    await ensurePrivatePausedReasonColumn();
+    const { rows } = await db.query(
+      `SELECT paused_reason FROM private_purchase_requests WHERE id = $1`,
+      [purchaseId],
+    );
+    const reason = rows[0]?.paused_reason;
+    if (reason) {
+      const err = new Error(
+        reason === 'feasibility_appeal_pending'
+          ? 'El expediente estÃ¡ pausado mientras se resuelve la apelaciÃ³n de factibilidad del Business Case vinculado.'
+          : `El expediente estÃ¡ pausado: ${reason}`,
+      );
+      err.status = 423; // Locked
+      err.code = 'EXPEDIENT_PAUSED';
+      err.pausedReason = reason;
+      throw err;
+    }
+  }
+
+  // PR-01: auto-dispara solicitud de inspecciÃ³n al subir oferta firmada (fire-and-forget)
+  async _autoTriggerInspectionOnSignedOffer(purchaseId, user) {
+    try {
+      const { rows } = await db.query(
+        `SELECT inspection_request_id FROM private_purchase_requests WHERE id = $1`,
+        [purchaseId],
+      );
+      if (rows[0]?.inspection_request_id) {
+        logger.debug(`[PR-01][AUTO_INSPECTION] Ya existe inspection_request_id para ${purchaseId}, saltando`);
+        return;
+      }
+      const purchase = rows[0];
+      // Crear solicitud en el sistema externo (createServiceRequest ya importado en top-level)
+      const inspectionRequest = await createServiceRequest({
+        requester_id: user?.id,
+        requester_email: user?.email || null,
+        requester_name: user?.fullname || user?.name || null,
+        request_type_id: 'F.ST-20',
+        payload: { purchase_id: purchaseId, auto_triggered: true, trigger: 'signed_offer_uploaded' },
+      });
+      const resolvedRequestId =
+        inspectionRequest?.request?.id ||
+        inspectionRequest?.request_id ||
+        inspectionRequest?.id ||
+        null;
+      if (!resolvedRequestId) {
+        logger.warn({ purchaseId }, '[PR-01][AUTO_INSPECTION] No se pudo obtener inspection_request_id del servicio externo');
+        return;
+      }
+      await db.query(
+        `UPDATE private_purchase_requests
+            SET inspection_request_id = $1,
+                inspection_requested_at = NOW(),
+                updated_at = NOW()
+          WHERE id = $2 AND inspection_request_id IS NULL`,
+        [resolvedRequestId, purchaseId],
+      );
+      // Notificar a jefes de servicio
+      const { rows: jefesTecnico } = await db.query(
+        `SELECT id FROM users WHERE active = true AND lower(role) = ANY($1::text[])`,
+        [['jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico']],
+      );
+      for (const jefe of jefesTecnico) {
+        notificationManager.sendNotification({
+          userId: jefe.id,
+          customTitle: 'Nueva solicitud de inspecciÃ³n',
+          customMessage: `Se generÃ³ automÃ¡ticamente una solicitud de inspecciÃ³n de ambiente al subir la oferta firmada del expediente ${purchaseId}.`,
+          type: 'task',
+          source: 'private_purchase.inspection.auto_triggered',
+          priority: 2,
+          email: true,
+          chat: true,
+          meta: { purchaseId, inspectionRequestId: resolvedRequestId },
+        });
+      }
+      logger.info({ purchaseId, resolvedRequestId }, '[PR-01][AUTO_INSPECTION] InspecciÃ³n auto-disparada al subir oferta firmada');
+    } catch (autoErr) {
+      // No fallamos el upload por error en auto-trigger
+      logger.warn({ autoErr, purchaseId }, '[PR-01][AUTO_INSPECTION] Error al auto-disparar inspecciÃ³n â€” el comercial puede solicitarla manualmente');
+    }
   }
 
   _getInspectionResponsibleName(user) {
@@ -262,7 +491,7 @@ class PrivatePurchasesService {
     row.site_inspection_updated_by = state.updated_by || null;
     row.site_inspection_updated_by_email = state.updated_by_email || null;
 
-    // Aliases compat para workspace técnico existente.
+    // Aliases compat para workspace tÃ©cnico existente.
     row.inspection_site_status = state.status;
     row.inspection_site_result = state.result;
     row.inspection_site_follow_up_date = state.follow_up_date || null;
@@ -318,7 +547,7 @@ class PrivatePurchasesService {
     row.installation_cu_flow = state.cu_flow;
     row.installation_delivery_act = state.delivery_act;
 
-    // Aliases para frontend técnico.
+    // Aliases para frontend tÃ©cnico.
     row.fst14_report_file_id = state.visual_reception?.report_file_id || null;
     row.fst14_report_link = state.visual_reception?.report_link || null;
     row.fst14_result = state.visual_reception?.result || null;
@@ -360,7 +589,7 @@ class PrivatePurchasesService {
   _assertSiteReadyForInstallation(row = {}) {
     const state = this._parseSiteInspectionState(row);
     if (state.ready_for_installation) return;
-    const error = new Error("El sitio inspeccionado no está conforme para instalación");
+    const error = new Error("El sitio inspeccionado no estÃ¡ conforme para instalaciÃ³n");
     error.status = 409;
     error.code = "SITE_NOT_READY_FOR_INSTALLATION";
     error.details = {
@@ -374,8 +603,8 @@ class PrivatePurchasesService {
     if (!purchase?.id || !followUpDate) return;
     const sourceType = "private_purchase_reinspection";
     const sourceId = String(purchase.id);
-    const title = `Reinspección de ambiente - ${purchase?.client_snapshot?.commercial_name || purchase?.client_snapshot?.name || "cliente"}`;
-    const notes = `Reinspección F.ST-07 para compra privada #${purchase.id}`;
+    const title = `ReinspecciÃ³n de ambiente - ${purchase?.client_snapshot?.commercial_name || purchase?.client_snapshot?.name || "cliente"}`;
+    const notes = `ReinspecciÃ³n F.ST-07 para compra privada #${purchase.id}`;
 
     const { rows } = await db.query(
       `SELECT id
@@ -434,6 +663,80 @@ class PrivatePurchasesService {
     );
   }
 
+  async _getUserById(userId) {
+    const parsed = Number.parseInt(String(userId || ""), 10);
+    if (!Number.isFinite(parsed) || parsed < 1) return null;
+    const { rows } = await db.query(
+      `SELECT id, email, fullname, name, role
+         FROM users
+        WHERE id = $1
+          AND active = true
+        LIMIT 1`,
+      [parsed],
+    );
+    return rows[0] || null;
+  }
+
+  async _upsertPrivateInspectionTechnicalActivity({ purchase, inspectionDate, assignedTechnician, chiefUser }) {
+    if (!purchase?.id || !inspectionDate) return;
+    const sourceType = "private_purchase_inspection";
+    const sourceId = String(purchase.id);
+    const clientName =
+      purchase?.client_snapshot?.commercial_name ||
+      purchase?.client_snapshot?.name ||
+      purchase?.client_snapshot?.client_name ||
+      "cliente";
+    const techLabel =
+      assignedTechnician?.fullname ||
+      assignedTechnician?.name ||
+      assignedTechnician?.email ||
+      "Tecnico por definir";
+    const title = `Inspeccion de ambiente - ${clientName}`;
+    const notes = `Compra privada #${purchase.id} - Tecnico: ${techLabel}`;
+
+    const { rows } = await db.query(
+      `SELECT id
+         FROM servicio.cronograma_actividades_tecnicas
+        WHERE source_type = $1
+          AND source_id = $2
+        ORDER BY id DESC
+        LIMIT 1`,
+      [sourceType, sourceId],
+    );
+
+    if (rows[0]?.id) {
+      await db.query(
+        `UPDATE servicio.cronograma_actividades_tecnicas
+            SET user_id = $1,
+                activity_date = $2,
+                title = $3,
+                notes = $4,
+                status = 'programado',
+                updated_at = now()
+          WHERE id = $5`,
+        [assignedTechnician?.id || null, inspectionDate, title, notes, rows[0].id],
+      );
+      return;
+    }
+
+    await db.query(
+      `INSERT INTO servicio.cronograma_actividades_tecnicas (
+          user_id, activity_date, title, notes, status, source_type, source_id, created_by, created_by_email, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, 'programado', $5, $6, $7, $8, now(), now())`,
+      [
+        assignedTechnician?.id || null,
+        inspectionDate,
+        title,
+        notes,
+        sourceType,
+        sourceId,
+        Number.isFinite(Number(chiefUser?.id)) ? Number(chiefUser.id) : null,
+        chiefUser?.email || null,
+      ],
+    );
+  }
+
   async _listTechnicalScheduleByDate({ date, excludePrivatePurchaseId = null, excludeInspectionRequestId = null }) {
     const dateKey = String(date || "").slice(0, 10);
     if (!dateKey) return [];
@@ -444,7 +747,7 @@ class PrivatePurchasesService {
           SELECT
             a.activity_date::date AS activity_date,
             'actividad_tecnica'::text AS source_type,
-            COALESCE(a.title, 'Actividad técnica') AS summary
+            COALESCE(a.title, 'Actividad tÃ©cnica') AS summary
           FROM servicio.cronograma_actividades_tecnicas a
           WHERE a.activity_date = $1::date
             AND COALESCE(lower(a.status), 'programado') IN ('programado', 'confirmado', 'en_proceso')
@@ -464,7 +767,7 @@ class PrivatePurchasesService {
           SELECT
             c.fecha::date AS activity_date,
             'capacitacion'::text AS source_type,
-            COALESCE(c.titulo, 'Capacitación técnica') AS summary
+            COALESCE(c.titulo, 'CapacitaciÃ³n tÃ©cnica') AS summary
           FROM servicio.cronograma_capacitacion c
           WHERE c.fecha = $1::date
             AND COALESCE(lower(c.estado), 'programado') NOT IN ('cancelada', 'cancelado')
@@ -474,7 +777,7 @@ class PrivatePurchasesService {
           SELECT
             epr.inspection_scheduled_date::date AS activity_date,
             'inspeccion_compra_publica'::text AS source_type,
-            COALESCE(epr.client_name, 'Inspección compra pública') AS summary
+            COALESCE(epr.client_name, 'InspecciÃ³n compra pÃºblica') AS summary
           FROM equipment_purchase_requests epr
           WHERE epr.inspection_scheduled_date = $1::date
             AND (epr.status IS NULL OR epr.status::text NOT IN ('completed'))
@@ -484,18 +787,22 @@ class PrivatePurchasesService {
           SELECT
             ppr.inspection_scheduled_date::date AS activity_date,
             'inspeccion_compra_privada'::text AS source_type,
-            COALESCE(ppr.client_name, 'Inspección compra privada') AS summary
+            COALESCE(
+              ppr.client_snapshot->>'commercial_name',
+              ppr.client_snapshot->>'name',
+              'Inspección compra privada'
+            ) AS summary
           FROM private_purchase_requests ppr
           WHERE ppr.inspection_scheduled_date = $1::date
             AND ($2::uuid IS NULL OR ppr.id <> $2::uuid)
-            AND (ppr.status IS NULL OR ppr.status::text NOT IN ('completed', 'cancelled'))
+            AND (ppr.status IS NULL OR ppr.status::text NOT IN ('delivered_signed', 'rejected'))
 
           UNION ALL
 
           SELECT
             (r.payload->>'fecha_instalacion')::date AS activity_date,
             'solicitud_inspeccion'::text AS source_type,
-            COALESCE(r.payload->>'nombre_cliente', 'Solicitud de inspección') AS summary
+            COALESCE(r.payload->>'nombre_cliente', 'Solicitud de inspecciÃ³n') AS summary
           FROM requests r
           JOIN request_types rt ON rt.id = r.request_type_id
           WHERE rt.code = 'F.ST-20'
@@ -552,7 +859,7 @@ class PrivatePurchasesService {
     logger.info({
       purchaseId,
       status: row.status,
-      message: 'Comodato sin BC, creando automáticamente'
+      message: 'Comodato sin BC, creando automÃ¡ticamente'
     }, '[FLOW_PRIVADA][BE][BC_AUTO][START]');
 
     const clientSnapshot = row.client_snapshot || {};
@@ -590,7 +897,7 @@ class PrivatePurchasesService {
       );
       const bcId = bcRecord?.business_case_id || bcRecord?.id || null;
       if (!bcId) {
-        logger.warn({ purchaseId }, 'Business Case automático creado sin ID');
+        logger.warn({ purchaseId }, 'Business Case automÃ¡tico creado sin ID');
         return null;
       }
 
@@ -605,11 +912,11 @@ class PrivatePurchasesService {
             purchaseId,
             PRIVATE_PURCHASE_STATES.BUSINESS_CASE_IN_PROGRESS,
             user,
-            'Business Case creado automáticamente'
+            'Business Case creado automÃ¡ticamente'
           );
         }
       } catch (transitionError) {
-        logger.warn({ transitionError, purchaseId }, 'No se pudo transicionar tras crear BC automático');
+        logger.warn({ transitionError, purchaseId }, 'No se pudo transicionar tras crear BC automÃ¡tico');
       }
 
       logger.info({
@@ -620,7 +927,7 @@ class PrivatePurchasesService {
 
       return bcId;
     } catch (bcError) {
-      logger.error({ bcError, purchaseId }, 'Error creando Business Case automático para comodato');
+      logger.error({ bcError, purchaseId }, 'Error creando Business Case automÃ¡tico para comodato');
       return null;
     }
   }
@@ -711,7 +1018,7 @@ class PrivatePurchasesService {
 
     const normalizedOfferKind = this._normalizeOfferKind(offerKind, { allowLegacyAlias: true });
     if (!normalizedOfferKind) {
-      throw new Error(`Tipo de oferta invรกlido. Valores permitidos: ${PRIVATE_OFFER_KIND_ALLOWED.join(', ')}`);
+      throw new Error(`Tipo de oferta invà¸£à¸lido. Valores permitidos: ${PRIVATE_OFFER_KIND_ALLOWED.join(', ')}`);
     }
 
     const client = await db.getClient();
@@ -743,9 +1050,9 @@ class PrivatePurchasesService {
         AND created_at > NOW() - INTERVAL '24 hours'
       `, [user.id, clientData.name]);
 
-      // Se permite hasta 3 solicitudes similares por día (antes era 1)
+      // Se permite hasta 3 solicitudes similares por dÃ­a (antes era 1)
       if (recentCheck.rows.length >= 3) {
-        throw new Error('Has alcanzado el límite de 3 solicitudes similares creadas en las últimas 24 horas');
+        throw new Error('Has alcanzado el lÃ­mite de 3 solicitudes similares creadas en las Ãºltimas 24 horas');
       }
 
       // Crear registro en private_purchase_requests
@@ -794,7 +1101,7 @@ class PrivatePurchasesService {
       const creatorSubject = `Compra privada - ${clientDisplayName} - Solicitud ${purchaseId}`;
       const backofficeSubject = `Nueva solicitud privada - ${clientDisplayName} - ${normalizedOfferKind}`;
 
-      // Enviar notificaciรณn de creaciรณn (síncrono para Cloud Run)
+      // Enviar notificacià¸£à¸“n de creacià¸£à¸“n (sÃ­ncrono para Cloud Run)
       try {
         await notificationManager.sendNotification({
           userId: user.id,
@@ -816,14 +1123,21 @@ class PrivatePurchasesService {
           },
         });
       } catch (error) {
-        logger.error('[PRIVATE_PURCHASE] Error enviando notificaciรณn de creaciรณn:', error);
+        logger.error('[PRIVATE_PURCHASE] Error enviando notificacià¸£à¸“n de creacià¸£à¸“n:', error);
       }
 
-      // Notificar a backoffice (síncrono para Cloud Run)
+      // Notificar a backoffice y jefe_comercial (cualquiera de los dos puede
+      // solicitar disponibilidad a ACP -- ver Paso 1 de PrivateFlowTab.jsx)
       try {
-        const recipients = await PrivatePurchaseStateMachine._getUsersByRole('backoffice_comercial');
+        const recipientGroups = await Promise.all(
+          ['backoffice_comercial', 'jefe_comercial', 'jefe_de_comercial'].map((role) =>
+            PrivatePurchaseStateMachine._getUsersByRole(role)),
+        );
+        const recipients = Array.from(
+          new Map(recipientGroups.flat().map((recipient) => [recipient.id, recipient])).values(),
+        );
         if (!recipients.length) {
-          logger.info({ purchaseId }, '[PRIVATE_PURCHASE] Sin destinatarios backoffice para notificación inicial');
+          logger.info({ purchaseId }, '[PRIVATE_PURCHASE] Sin destinatarios backoffice/jefe_comercial para notificaciÃ³n inicial');
         }
         const payload = {
           purchase_id: purchaseId,
@@ -863,8 +1177,14 @@ class PrivatePurchasesService {
         try {
           await this.forwardToAcp(purchaseId, user);
         } catch (forwardError) {
-          logger.warn({ forwardError, purchaseId }, 'No se pudo enviar automáticamente a ACP para comodato');
+          logger.warn({ forwardError, purchaseId }, 'No se pudo enviar automÃ¡ticamente a ACP para comodato');
         }
+      }
+
+      try {
+        await crmPurchaseSyncService.syncPrivatePurchaseCreated(purchaseId, user);
+      } catch (crmSyncError) {
+        logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar creacion de compra privada con CRM');
       }
 
       return {
@@ -914,8 +1234,8 @@ class PrivatePurchasesService {
       logger.debug('[FLOW_PRIVADA][BE][DRIVE][SUCCESS] Carpeta padre encontrada:', baseFolderId);
     } catch (error) {
       if (error.message?.includes('File not found') && baseFolderId) {
-        logger.debug('[FLOW_PRIVADA][BE][DRIVE][FALLBACK] Carpeta padre no existe, creando en raíz:', baseFolderId);
-        // Si la carpeta padre no existe, crear en la raíz de Drive
+        logger.debug('[FLOW_PRIVADA][BE][DRIVE][FALLBACK] Carpeta padre no existe, creando en raÃ­z:', baseFolderId);
+        // Si la carpeta padre no existe, crear en la raÃ­z de Drive
         root = await ensureFolder('Compras Privadas', null);
       } else {
         throw error;
@@ -939,6 +1259,7 @@ class PrivatePurchasesService {
   async getById(id, user) {
     await ensurePrivateSiteInspectionColumns();
     await ensurePrivateInstallationWorkflowColumns();
+    await ensurePrivateExtraColumn();
     const query = `
       SELECT * FROM private_purchase_requests
       WHERE id = $1
@@ -955,10 +1276,13 @@ class PrivatePurchasesService {
     this._attachSiteInspectionState([purchase]);
     this._attachInstallationWorkflowState([purchase]);
     await this._attachClientRequestSnapshot(purchase);
+    // Auto-resolver registro de cliente: si el cliente fue aprobado en client_requests
+    // desde la ultima vez que se cargo esta compra, actualiza client_registered_at.
+    await this._autoResolveClientRegistration([purchase], user);
     await this._ensureArrivalStates([purchase], user);
     await this._attachChecklistState([purchase]);
 
-    // Verificar permisos bรกsicos (por ahora todos pueden ver, pero se puede restringir)
+    // Verificar permisos bà¸£à¸sicos (por ahora todos pueden ver, pero se puede restringir)
     return purchase;
   }
 
@@ -971,7 +1295,8 @@ class PrivatePurchasesService {
               site_inspection_report_document_id,
               site_inspection_report_link,
               availability_email_file_id, reservation_email_file_id, reservation_calendar_event_link,
-              client_snapshot, client_request_id, installation_workflow
+              client_snapshot, client_request_id, installation_workflow,
+              provider_contract_document_id, provider_contract_received_at, provider_contract_uploaded_at
          FROM private_purchase_requests
         WHERE id = $1`,
       [purchaseId]
@@ -1116,6 +1441,10 @@ class PrivatePurchasesService {
         contract_document_id,
         contract_client_signed_document_id,
         contract_signed_document_id,
+        manager_contract_decision,
+        manager_contract_decision_at,
+        manager_contract_decision_by,
+        manager_contract_decision_reason,
         delivery_act_document_id,
         delivery_act_draft_document_id,
         delivery_act_logistics_signed_document_id,
@@ -1139,7 +1468,7 @@ class PrivatePurchasesService {
         provider_response_at,\n        reservation_email_sent_at,\n        reservation_email_file_id,\n        reservation_calendar_event_id,\n        reservation_calendar_event_link,\n        includes_starter_kit,\n        operations_notes,\n        estimated_arrival_at,\n        estimated_arrival_updated_at,\n        equipment_arrived_at,\n        equipment_arrived_by,
         dispatch_items_json,
         dispatch_notes,
-        inspection_request_id,\n        inspection_acta_document_id,\n        inspection_requested_at,\n        inspection_min_date,\n        inspection_max_date,\n        inspection_proposed_date,\n        inspection_proposed_notes,\n        inspection_proposed_at,\n        inspection_proposed_by,\n        inspection_proposed_by_email,\n        inspection_coordination_status,\n        inspection_review_notes,\n        inspection_reviewed_at,\n        inspection_reviewed_by,\n        inspection_reviewed_by_email,\n        inspection_scheduled_date,\n        inspection_coordination_notes,\n        inspection_coordinated_at,\n        inspection_coordinated_by,\n        inspection_coordinated_by_email,\n        site_inspection,\n        site_inspection_status,\n        site_inspection_result,\n        site_inspection_follow_up_date,\n        site_inspection_report_document_id,\n        site_inspection_report_link,\n        site_inspection_report_generated_at,\n        site_inspection_ready_for_installation,\n        site_inspection_requires_reinspection,\n        site_inspection_updated_at,\n        site_inspection_updated_by,\n        site_inspection_updated_by_email,\n        installation_workflow\n      FROM private_purchase_requests
+        inspection_request_id,\n        inspection_acta_document_id,\n        inspection_requested_at,\n        inspection_min_date,\n        inspection_max_date,\n        inspection_proposed_date,\n        inspection_proposed_notes,\n        inspection_proposed_at,\n        inspection_proposed_by,\n        inspection_proposed_by_email,\n        inspection_coordination_status,\n        inspection_review_notes,\n        inspection_reviewed_at,\n        inspection_reviewed_by,\n        inspection_reviewed_by_email,\n        inspection_scheduled_date,\n        inspection_coordination_notes,\n        inspection_coordinated_at,\n        inspection_coordinated_by,\n        inspection_coordinated_by_email,\n        site_inspection,\n        site_inspection_status,\n        site_inspection_result,\n        site_inspection_follow_up_date,\n        site_inspection_report_document_id,\n        site_inspection_report_link,\n        site_inspection_report_generated_at,\n        site_inspection_ready_for_installation,\n        site_inspection_requires_reinspection,\n        site_inspection_updated_at,\n        site_inspection_updated_by,\n        site_inspection_updated_by_email,\n        installation_workflow,\n        provider_contract_received_at,\n        provider_contract_received_by,\n        provider_contract_document_id,\n        provider_contract_uploaded_at,\n        provider_contract_uploaded_by\n      FROM private_purchase_requests
       WHERE created_by = $1
       ORDER BY created_at DESC
     `;
@@ -1174,7 +1503,7 @@ class PrivatePurchasesService {
           row.id,
           PRIVATE_PURCHASE_STATES.WAITING_DISPATCH,
           user,
-          'Autotransición tras llegada registrada'
+          'AutotransiciÃ³n tras llegada registrada'
         );
         const { rows: refreshed } = await db.query(
           'SELECT status, updated_at FROM private_purchase_requests WHERE id = $1',
@@ -1281,6 +1610,7 @@ class PrivatePurchasesService {
         break;
 
       case 'jefe_tecnico':
+      case 'jefe_servicio':
       case 'jefe_servicio_tecnico':
         whereClause = 'status = ANY($1)';
         params = [[
@@ -1295,6 +1625,7 @@ class PrivatePurchasesService {
         break;
 
       case 'tecnico':
+      case 'ing_servicio':
         whereClause = 'status = ANY($1)';
         params = [[
           PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED,
@@ -1329,6 +1660,10 @@ class PrivatePurchasesService {
         contract_document_id,
         contract_client_signed_document_id,
         contract_signed_document_id,
+        manager_contract_decision,
+        manager_contract_decision_at,
+        manager_contract_decision_by,
+        manager_contract_decision_reason,
         delivery_act_document_id,
         delivery_act_draft_document_id,
         delivery_act_number,
@@ -1359,7 +1694,7 @@ class PrivatePurchasesService {
         dispatch_items_json,
         dispatch_notes,
         delivery_act_observations_json,
-        inspection_request_id,\n        inspection_acta_document_id,\n        inspection_requested_at,\n        inspection_min_date,\n        inspection_max_date,\n        inspection_proposed_date,\n        inspection_proposed_notes,\n        inspection_proposed_at,\n        inspection_proposed_by,\n        inspection_proposed_by_email,\n        inspection_coordination_status,\n        inspection_review_notes,\n        inspection_reviewed_at,\n        inspection_reviewed_by,\n        inspection_reviewed_by_email,\n        inspection_scheduled_date,\n        inspection_coordination_notes,\n        inspection_coordinated_at,\n        inspection_coordinated_by,\n        inspection_coordinated_by_email,\n        site_inspection,\n        site_inspection_status,\n        site_inspection_result,\n        site_inspection_follow_up_date,\n        site_inspection_report_document_id,\n        site_inspection_report_link,\n        site_inspection_report_generated_at,\n        site_inspection_ready_for_installation,\n        site_inspection_requires_reinspection,\n        site_inspection_updated_at,\n        site_inspection_updated_by,\n        site_inspection_updated_by_email,\n        installation_workflow\n      FROM private_purchase_requests
+        inspection_request_id,\n        inspection_acta_document_id,\n        inspection_requested_at,\n        inspection_min_date,\n        inspection_max_date,\n        inspection_proposed_date,\n        inspection_proposed_notes,\n        inspection_proposed_at,\n        inspection_proposed_by,\n        inspection_proposed_by_email,\n        inspection_coordination_status,\n        inspection_review_notes,\n        inspection_reviewed_at,\n        inspection_reviewed_by,\n        inspection_reviewed_by_email,\n        inspection_scheduled_date,\n        inspection_coordination_notes,\n        inspection_coordinated_at,\n        inspection_coordinated_by,\n        inspection_coordinated_by_email,\n        site_inspection,\n        site_inspection_status,\n        site_inspection_result,\n        site_inspection_follow_up_date,\n        site_inspection_report_document_id,\n        site_inspection_report_link,\n        site_inspection_report_generated_at,\n        site_inspection_ready_for_installation,\n        site_inspection_requires_reinspection,\n        site_inspection_updated_at,\n        site_inspection_updated_by,\n        site_inspection_updated_by_email,\n        installation_workflow,\n        provider_contract_received_at,\n        provider_contract_received_by,\n        provider_contract_document_id,\n        provider_contract_uploaded_at,\n        provider_contract_uploaded_by\n      FROM private_purchase_requests
       WHERE ${whereClause}
       ORDER BY
         CASE
@@ -1399,7 +1734,7 @@ class PrivatePurchasesService {
   }
 
   /**
-   * Transiciรณn de estado con validaciรณn - FASE 6: auditoría contrato errores
+   * Transicià¸£à¸“n de estado con validacià¸£à¸“n - FASE 6: auditorÃ­a contrato errores
    */
   async transitionState(purchaseId, toState, user, reason = '') {
     logger.debug(`[FLOW_PRIVADA][BE][FASE6][ERROR_CONTRACT][MISMATCH] Verificando contrato error para transitionState`);
@@ -1435,7 +1770,7 @@ class PrivatePurchasesService {
         throw error;
       }
       if (![PRIVATE_PURCHASE_STATES.OFFER_SENT, PRIVATE_PURCHASE_STATES.PENDING_CLIENT_SIGNATURE].includes(currentState)) {
-        const error = new Error('La oferta solo puede rechazarse cuando está enviada al cliente');
+        const error = new Error('La oferta solo puede rechazarse cuando estÃ¡ enviada al cliente');
         error.status = 409;
         error.code = 'INVALID_STATE';
         throw error;
@@ -1443,7 +1778,9 @@ class PrivatePurchasesService {
     }
 
     if (toState === PRIVATE_PURCHASE_STATES.PRICE_IMPROVEMENT_REQUESTED) {
-      const isJefeComercial = this._hasRoleToken(user, 'jefe_comercial');
+      // _hasRoleToken usa substring: 'jefe_de_comercial' no contiene 'jefe_comercial'
+      // (el '_de_' rompe el match), por eso se listan ambos explicitamente.
+      const isJefeComercial = this._hasAnyRoleToken(user, ['jefe_comercial', 'jefe_de_comercial']);
       if (!isJefeComercial) {
         const error = new Error('Solo jefe comercial puede solicitar mejora de precios');
         error.status = 403;
@@ -1459,7 +1796,7 @@ class PrivatePurchasesService {
     }
 
     if (toState === PRIVATE_PURCHASE_STATES.REJECTED && currentState === PRIVATE_PURCHASE_STATES.OFFER_REJECTED_BY_COMMERCIAL) {
-      const isJefeComercial = this._hasRoleToken(user, 'jefe_comercial');
+      const isJefeComercial = this._hasAnyRoleToken(user, ['jefe_comercial', 'jefe_de_comercial']);
       if (!isJefeComercial) {
         const error = new Error('Solo jefe comercial puede confirmar el rechazo final');
         error.status = 403;
@@ -1472,15 +1809,8 @@ class PrivatePurchasesService {
 
     const transitionResult = await PrivatePurchaseStateMachine.transition(purchaseId, toState, user.id, reason, {
       user_role: user.role,
-      user_name: user.fullname || user.name
-    });
-
-    // REQ-SPI-013: no await externo en el request path.
-    enqueuePurchaseStatusChangedEvent({
-      purchaseType: "private_purchase",
-      id: purchaseId,
-      status: toState,
-      businessCaseId: null,
+      user_name: user.fullname || user.name,
+      user_email: user.email
     });
 
     return transitionResult;
@@ -1548,6 +1878,11 @@ class PrivatePurchasesService {
       ? 'Oferta mejorada enviada por ACP Comercial'
       : 'Oferta enviada';
     await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.OFFER_SENT, user, transitionReason);
+    try {
+      await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmPurchaseSyncService.STAGE_NAMES.PROPOSAL_PRESENTATION, user);
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar envio de oferta privada con CRM');
+    }
 
     return {
       ...updatedRows[0],
@@ -1569,7 +1904,10 @@ class PrivatePurchasesService {
               site_inspection_status,
               site_inspection_result,
               site_inspection_follow_up_date,
-              site_inspection_ready_for_installation
+              site_inspection_ready_for_installation,
+              offer_kind,
+              business_case_id,
+              extra
          FROM private_purchase_requests
         WHERE id = $1`,
       [purchaseId]
@@ -1597,14 +1935,26 @@ class PrivatePurchasesService {
       throw error;
     }
 
-    if (!rows[0].equipment_arrived_at) {
-      const error = new Error('Debe marcar la llegada del equipo antes de solicitar fecha de entrega');
-      error.status = 409;
-      error.code = 'EQUIPMENT_NOT_ARRIVED';
-      throw error;
-    }
+    // No se exige equipment_arrived_at: operaciones puede coordinar/solicitar
+    // fecha de entrega con el cliente usando la fecha tentativa del proveedor
+    // (registrada por ACP en Disponibilidad) sin esperar a que el equipo
+    // llegue fisicamente -- son dos acciones independientes.
+    //
+    // La inspeccion de ambiente (F.ST-07) si es obligatoria: antes esta funcion
+    // solo validaba el sitio SI ya se habia solicitado una inspeccion, permitiendo
+    // solicitar fecha de entrega sin haber inspeccionado nunca. Excepcion: comodato
+    // con Business Case vinculado usa su propio mecanismo de inspeccion (no F.ST-07).
+    const inspectionHandledByBusinessCase =
+      String(rows[0]?.offer_kind || '').toLowerCase() === 'comodato' &&
+      Boolean(rows[0]?.business_case_id);
 
-    if (rows[0]?.inspection_request_id || rows[0]?.inspection_scheduled_date) {
+    if (!inspectionHandledByBusinessCase) {
+      if (!rows[0]?.inspection_request_id) {
+        const error = new Error('Falta solicitar la inspeccion de ambiente antes de solicitar fecha de entrega');
+        error.status = 409;
+        error.code = 'SITE_INSPECTION_MISSING';
+        throw error;
+      }
       this._assertSiteReadyForInstallation(rows[0]);
     }
 
@@ -1615,21 +1965,8 @@ class PrivatePurchasesService {
       'Solicitar fechas de entrega'
     );
 
-    const purchase = rows[0];
-    if (purchase.created_by) {
-      await notificationManager.sendNotification({
-        userId: purchase.created_by,
-        template: 'private_purchase_delivery_date_requested',
-        data: {
-          client_name: purchase.client_snapshot?.commercial_name || purchase.client_snapshot?.name || 'Cliente',
-          purchase_id: purchaseId
-        },
-        source: 'private_purchase.delivery_date_requested',
-        email: true,
-        chat: false
-      });
-    }
-
+    // El creador ya recibe aviso de este cambio de estado via el
+    // private_purchase_state_transition generico que dispara transitionState.
     return { ok: true };
   }
 
@@ -1740,6 +2077,12 @@ class PrivatePurchasesService {
     );
 
     await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.OFFER_SIGNED, user, 'Oferta firmada recibida');
+    try {
+      await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmPurchaseSyncService.STAGE_NAMES.NEGOTIATION, user);
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar oferta firmada privada con CRM');
+    }
+
 
     return rows[0];
   }
@@ -1747,11 +2090,14 @@ class PrivatePurchasesService {
   /**
    * FASE 2: Upload contract with idempotency check
    */
-  async uploadContract(purchaseId, { fileId, contractBase64, fileName, mimeType, decisionReason } = {}, user) {
-    logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][CHECK] Verificando duplicado contract para purchase ${purchaseId}`);
+  async uploadContract(purchaseId, { fileId, contractBase64, fileName, mimeType } = {}, user) {
+    // Solo backoffice/comercial sube el contrato borrador.
+    // La aprobación de gerencia y la firma de ACP tienen sus propios endpoints.
+    await ensurePrivateExtraColumn();
+    await this._assertNotPaused(purchaseId);
 
     const { rows: existingRows } = await db.query(
-      'SELECT contract_document_id, contract_client_signed_document_id, contract_signed_document_id, inspection_request_id, inspection_acta_document_id, inspection_scheduled_date, client_snapshot, drive_folder_id FROM private_purchase_requests WHERE id = $1',
+      'SELECT contract_document_id, inspection_request_id, offer_kind, business_case_id, extra, client_snapshot, drive_folder_id FROM private_purchase_requests WHERE id = $1',
       [purchaseId]
     );
 
@@ -1759,106 +2105,182 @@ class PrivatePurchasesService {
       throw new Error('Solicitud no encontrada');
     }
 
-    const isManagerRole = this._hasAnyRoleToken(user, ['gerencia', 'gerente']);
     const isBackofficeRole = this._hasRoleToken(user, 'backoffice');
+    const isComercialRole  = this._hasAnyRoleToken(user, ['comercial', 'asesor', 'analista', 'jefe_comercial', 'jefe_de_comercial', 'gerencia', 'acp_comercial']);
 
-    if (!isManagerRole && !isBackofficeRole) {
-      const error = new Error('Acceso denegado para subir contrato');
+    if (!isBackofficeRole && !isComercialRole) {
+      const error = new Error('Acceso denegado para subir contrato borrador');
       error.status = 403;
       error.code = 'ROLE_NOT_ALLOWED';
       throw error;
     }
 
-    if (!isManagerRole && !existingRows[0].inspection_request_id) {
-      const error = new Error('Debe solicitar inspeccion de ambiente antes de subir el contrato');
-      error.status = 409;
-      error.code = 'INSPECTION_REQUIRED';
-      throw error;
-    }
-
-    if (!isManagerRole && !existingRows[0].inspection_scheduled_date) {
-      const error = new Error('Debe coordinar la fecha de inspección antes de subir el contrato');
-      error.status = 409;
-      error.code = 'INSPECTION_COORDINATION_REQUIRED';
-      throw error;
-    }
-
-    if (!isManagerRole && existingRows[0].contract_document_id) {
-      logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][BLOCKED] Contract draft ya existe para purchase ${purchaseId}`);
-      const error = new Error('Contrato ya fue subido anteriormente');
+    if (existingRows[0].contract_document_id) {
+      const error = new Error('Contrato borrador ya fue subido anteriormente');
       error.status = 409;
       error.code = 'DOC_ALREADY_EXISTS';
       error.details = { docType: 'CONTRACT_DRAFT', existingRef: existingRows[0].contract_document_id };
       throw error;
     }
 
-    if (isManagerRole && existingRows[0].contract_signed_document_id) {
-      logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][BLOCKED] Contract signed ya existe para purchase ${purchaseId}`);
-      const error = new Error('Contrato firmado ya fue subido anteriormente');
-      error.status = 409;
-      error.code = 'DOC_ALREADY_EXISTS';
-      error.details = { docType: 'CONTRACT_SIGNED', existingRef: existingRows[0].contract_signed_document_id };
-      throw error;
+    let resolvedFileId = fileId;
+    if (!resolvedFileId) {
+      if (!contractBase64 || !fileName) {
+        throw Object.assign(new Error('Archivo de contrato requerido'), { status: 400 });
+      }
+      const baseFolderId = await this._ensureDriveFolder(purchaseId, existingRows[0].client_snapshot, existingRows[0].drive_folder_id);
+      const targetFolder = await ensureFolder('Contrato borrador', baseFolderId);
+      const stored = await uploadBase64File(fileName, contractBase64, mimeType || 'application/pdf', targetFolder?.id || baseFolderId);
+      resolvedFileId = stored.id;
     }
 
-    if (isManagerRole && !existingRows[0].contract_client_signed_document_id) {
-      const error = new Error('Debe subir el contrato firmado por el cliente antes de gerencia');
-      error.status = 409;
-      error.code = 'CLIENT_SIGNATURE_REQUIRED';
-      throw error;
+    const { rows } = await db.query(
+      `UPDATE private_purchase_requests
+           SET contract_document_id = $1,
+               updated_at = NOW()
+         WHERE id = $2
+         RETURNING *`,
+      [resolvedFileId, purchaseId]
+    );
+
+    await this.transitionState(
+      purchaseId,
+      PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_CLIENT_SIGNATURE,
+      user,
+      'Contrato borrador cargado, pendiente firma cliente'
+    );
+    try {
+      await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmPurchaseSyncService.STAGE_NAMES.CONTRACTS, user);
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar contrato privado con CRM');
+    }
+
+    return rows[0];
+  }
+
+  /**
+   * Gerencia General aprueba o rechaza el contrato.
+   * Aprobado → permanece en pending_contract_approval (ACP deberá subir el firmado).
+   * Rechazado → transiciona a contract_rejected.
+   */
+  async registerManagerContractDecision(purchaseId, { decision, reason } = {}, user) {
+    const isGerencia = this._hasAnyRoleToken(user, ['gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']);
+    if (!isGerencia) {
+      throw Object.assign(new Error('Solo gerencia puede aprobar o rechazar el contrato'), { status: 403, code: 'ROLE_NOT_ALLOWED' });
+    }
+
+    if (!['approved', 'rejected'].includes(decision)) {
+      throw Object.assign(new Error('Decisión inválida: debe ser approved o rejected'), { status: 400 });
+    }
+
+    const { rows } = await db.query(
+      'SELECT id, status, manager_contract_decision FROM private_purchase_requests WHERE id = $1',
+      [purchaseId]
+    );
+
+    if (!rows.length) {
+      throw Object.assign(new Error('Solicitud no encontrada'), { status: 404 });
+    }
+
+    const purchase = rows[0];
+
+    if (purchase.status !== PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_APPROVAL) {
+      throw Object.assign(
+        new Error(`El expediente no está en estado pendiente de aprobación (estado actual: ${purchase.status})`),
+        { status: 409, code: 'INVALID_STATUS' }
+      );
+    }
+
+    if (purchase.manager_contract_decision) {
+      // Idempotente: ya tiene decisión
+      const { rows: current } = await db.query('SELECT * FROM private_purchase_requests WHERE id = $1', [purchaseId]);
+      return current[0];
+    }
+
+    const { rows: updated } = await db.query(
+      `UPDATE private_purchase_requests
+           SET manager_contract_decision        = $1,
+               manager_contract_decision_reason = $2,
+               manager_contract_decision_at     = NOW(),
+               manager_contract_decision_by     = $3,
+               updated_at = NOW()
+         WHERE id = $4
+         RETURNING *`,
+      [decision, reason || null, user?.id || null, purchaseId]
+    );
+
+    if (decision === 'rejected') {
+      await this.transitionState(
+        purchaseId,
+        PRIVATE_PURCHASE_STATES.CONTRACT_REJECTED,
+        user,
+        reason ? `Contrato rechazado por gerencia: ${reason}` : 'Contrato rechazado por gerencia'
+      );
+    }
+
+    logger.info(`[CONTRACT_DECISION] purchase=${purchaseId} decision=${decision} by=${user?.id}`);
+    return updated[0];
+  }
+
+  /**
+   * ACP Comercial sube el contrato firmado, una vez que gerencia lo aprobó.
+   */
+  async uploadAcpSignedContract(purchaseId, { fileId, contractBase64, fileName, mimeType } = {}, user) {
+    const { rows } = await db.query(
+      'SELECT id, status, manager_contract_decision, contract_signed_document_id, client_snapshot, drive_folder_id FROM private_purchase_requests WHERE id = $1',
+      [purchaseId]
+    );
+
+    if (!rows.length) {
+      throw Object.assign(new Error('Solicitud no encontrada'), { status: 404 });
+    }
+
+    const purchase = rows[0];
+
+    if (purchase.manager_contract_decision !== 'approved') {
+      throw Object.assign(
+        new Error('Gerencia debe aprobar el contrato antes de que ACP pueda subir el firmado'),
+        { status: 409, code: 'GERENCIA_APPROVAL_REQUIRED' }
+      );
+    }
+
+    if (purchase.contract_signed_document_id) {
+      const err = new Error('Contrato firmado ya fue subido anteriormente');
+      err.status = 409;
+      err.code = 'DOC_ALREADY_EXISTS';
+      err.details = { docType: 'CONTRACT_SIGNED', existingRef: purchase.contract_signed_document_id };
+      throw err;
     }
 
     let resolvedFileId = fileId;
     if (!resolvedFileId) {
       if (!contractBase64 || !fileName) {
-        const error = new Error('Archivo de contrato requerido');
-        error.status = 400;
-        throw error;
+        throw Object.assign(new Error('Archivo de contrato firmado requerido'), { status: 400 });
       }
-      const baseFolderId = await this._ensureDriveFolder(purchaseId, existingRows[0].client_snapshot, existingRows[0].drive_folder_id);
-      const subfolderName = isManagerRole ? 'Contrato firmado gerencia' : 'Contrato borrador';
-      const targetFolder = await ensureFolder(subfolderName, baseFolderId);
+      const baseFolderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
+      const targetFolder = await ensureFolder('Contrato firmado ACP', baseFolderId);
       const stored = await uploadBase64File(fileName, contractBase64, mimeType || 'application/pdf', targetFolder?.id || baseFolderId);
       resolvedFileId = stored.id;
     }
 
-    logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][OK] Contract no existe, permitiendo upload para purchase ${purchaseId}`);
-
-    const updateQuery = isManagerRole
-      ? `UPDATE private_purchase_requests
+    const { rows: updated } = await db.query(
+      `UPDATE private_purchase_requests
            SET contract_signed_document_id = $1,
-               contract_signed_uploaded_at = NOW(),
-               manager_contract_decision = 'approved',
-               manager_contract_decision_reason = $3,
-               manager_contract_decision_at = NOW(),
-               manager_contract_decision_by = $4,
+               contract_signed_uploaded_at  = NOW(),
                updated_at = NOW()
          WHERE id = $2
-         RETURNING *`
-      : `UPDATE private_purchase_requests
-           SET contract_document_id = $1,
-               updated_at = NOW()
-         WHERE id = $2
-         RETURNING *`;
-
-    const updateParams = isManagerRole
-      ? [resolvedFileId, purchaseId, decisionReason || null, user?.id || null]
-      : [resolvedFileId, purchaseId];
-
-    const { rows } = await db.query(updateQuery, updateParams);
-
-    const nextState = isManagerRole
-      ? PRIVATE_PURCHASE_STATES.CONTRACT_AVAILABLE
-      : PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_CLIENT_SIGNATURE;
+         RETURNING *`,
+      [resolvedFileId, purchaseId]
+    );
 
     await this.transitionState(
       purchaseId,
-      nextState,
+      PRIVATE_PURCHASE_STATES.CONTRACT_AVAILABLE,
       user,
-      isManagerRole ? 'Contrato firmado por gerencia' : 'Contrato borrador cargado, pendiente firma cliente'
+      'Contrato firmado por ACP — disponible para entrega'
     );
 
-    return rows[0];
+    return updated[0];
   }
 
   /**
@@ -1952,6 +2374,172 @@ class PrivatePurchasesService {
   }
 
 
+  /**
+   * ACP marca que el contrato físico del proveedor ha llegado.
+   * Operación idempotente — si ya está marcado devuelve el estado actual.
+   */
+  async markProviderContractReceived(purchaseId, user) {
+    await ensurePrivateProviderContractColumns();
+
+    const { rows } = await db.query(
+      'SELECT id, provider_contract_received_at FROM private_purchase_requests WHERE id = $1',
+      [purchaseId]
+    );
+
+    if (!rows.length) {
+      throw Object.assign(new Error('Solicitud no encontrada'), { status: 404 });
+    }
+
+    if (rows[0].provider_contract_received_at) {
+      // Ya marcado — idempotente
+      const { rows: current } = await db.query(
+        'SELECT * FROM private_purchase_requests WHERE id = $1',
+        [purchaseId]
+      );
+      return current[0];
+    }
+
+    const { rows: updated } = await db.query(
+      `UPDATE private_purchase_requests
+           SET provider_contract_received_at = NOW(),
+               provider_contract_received_by  = $2,
+               updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+      [purchaseId, user?.id || null]
+    );
+
+    logger.info(`[PROVIDER_CONTRACT][RECEIVED] purchase=${purchaseId} by=${user?.id}`);
+    return updated[0];
+  }
+
+  /**
+   * ACP sube el contrato del proveedor ya firmado a Drive.
+   * Requiere que provider_contract_received_at esté definido.
+   */
+  async uploadProviderContract(purchaseId, { contractBase64, fileName, mimeType } = {}, user) {
+    await ensurePrivateProviderContractColumns();
+
+    const { rows } = await db.query(
+      'SELECT id, provider_contract_received_at, provider_contract_document_id, client_snapshot, drive_folder_id FROM private_purchase_requests WHERE id = $1',
+      [purchaseId]
+    );
+
+    if (!rows.length) {
+      throw Object.assign(new Error('Solicitud no encontrada'), { status: 404 });
+    }
+
+    const purchase = rows[0];
+
+    if (!purchase.provider_contract_received_at) {
+      throw Object.assign(
+        new Error('Debe marcar primero que el contrato del proveedor ha llegado'),
+        { status: 409, code: 'PROVIDER_CONTRACT_NOT_RECEIVED' }
+      );
+    }
+
+    if (purchase.provider_contract_document_id) {
+      const err = new Error('Contrato del proveedor ya fue subido anteriormente');
+      err.status = 409;
+      err.code = 'DOC_ALREADY_EXISTS';
+      err.details = { docType: 'PROVIDER_CONTRACT', existingRef: purchase.provider_contract_document_id };
+      throw err;
+    }
+
+    if (!contractBase64 || !fileName) {
+      throw Object.assign(new Error('Archivo de contrato del proveedor requerido'), { status: 400 });
+    }
+
+    const baseFolderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
+    const targetFolder = await ensureFolder('Contrato proveedor firmado', baseFolderId);
+    const stored = await uploadBase64File(
+      fileName,
+      contractBase64,
+      mimeType || 'application/pdf',
+      targetFolder?.id || baseFolderId
+    );
+
+    const { rows: updated } = await db.query(
+      `UPDATE private_purchase_requests
+           SET provider_contract_document_id = $1,
+               provider_contract_uploaded_at  = NOW(),
+               provider_contract_uploaded_by   = $3,
+               updated_at = NOW()
+         WHERE id = $2
+         RETURNING *`,
+      [stored.id, purchaseId, user?.id || null]
+    );
+
+    logger.info(`[PROVIDER_CONTRACT][UPLOADED] purchase=${purchaseId} fileId=${stored.id} by=${user?.id}`);
+    return updated[0];
+  }
+
+  /**
+   * Reinicia el flujo de contrato tras un rechazo de gerencia.
+   * Limpia todos los campos del contrato y vuelve al estado donde
+   * backoffice puede subir un nuevo borrador.
+   */
+  async restartContractAfterRejection(purchaseId, user) {
+    const { rows } = await db.query(
+      `SELECT id, status, offer_kind, inspection_request_id, business_case_id, extra
+         FROM private_purchase_requests WHERE id = $1`,
+      [purchaseId]
+    );
+
+    if (!rows.length) {
+      throw Object.assign(new Error('Solicitud no encontrada'), { status: 404 });
+    }
+
+    const purchase = rows[0];
+
+    if (purchase.status !== PRIVATE_PURCHASE_STATES.CONTRACT_REJECTED) {
+      throw Object.assign(
+        new Error(`Solo se puede reiniciar el contrato cuando está rechazado (estado actual: ${purchase.status})`),
+        { status: 409, code: 'INVALID_STATUS' }
+      );
+    }
+
+    // Limpiar todos los campos de contrato para empezar desde cero
+    await db.query(
+      `UPDATE private_purchase_requests
+           SET contract_document_id             = NULL,
+               contract_client_signed_document_id = NULL,
+               contract_client_signed_uploaded_at = NULL,
+               contract_client_signed_by          = NULL,
+               contract_signed_document_id       = NULL,
+               contract_signed_uploaded_at       = NULL,
+               manager_contract_decision         = NULL,
+               manager_contract_decision_reason  = NULL,
+               manager_contract_decision_at      = NULL,
+               manager_contract_decision_by      = NULL,
+               updated_at = NOW()
+         WHERE id = $1`,
+      [purchaseId]
+    );
+
+    // Determinar estado de reinicio según el tipo de compra
+    const isComodato = String(purchase.offer_kind || '').toLowerCase() === 'comodato';
+    const hasInspection = Boolean(purchase.inspection_request_id);
+    const restartState = (isComodato && !hasInspection)
+      ? PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED
+      : PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED;
+
+    await this.transitionState(
+      purchaseId,
+      restartState,
+      user,
+      'Contrato reiniciado tras rechazo — backoffice debe subir nuevo borrador'
+    );
+
+    logger.info(`[CONTRACT_RESTART] purchase=${purchaseId} → ${restartState} by=${user?.id}`);
+
+    const { rows: updated } = await db.query(
+      'SELECT * FROM private_purchase_requests WHERE id = $1',
+      [purchaseId]
+    );
+    return updated[0];
+  }
+
   async forwardToAcp(purchaseId, user) {
     logger.debug('[FLOW_PRIVADA][BE][ACP_FORWARD][REQUEST]', {
       requestId: purchaseId,
@@ -1995,13 +2583,35 @@ class PrivatePurchasesService {
     return { forwarded: true };
   }
 
-  async startAvailabilityRequest(purchaseId, user, providerEmail, notes = '') {
+  // CC fija en todo correo de disponibilidad, sin importar quien lo envie.
+  static AVAILABILITY_FIXED_CC = 'pamela.altamirano@fam-project.com';
+
+  // Acepta string ("a@x.com, b@y.com") o array -- normaliza a array de
+  // correos unicos y validos (formato basico), sin depender del formato
+  // que use el caller (backend viejo mandaba un solo string).
+  _normalizeEmailList(value) {
+    const raw = Array.isArray(value) ? value : String(value || '').split(',');
+    const seen = new Set();
+    const out = [];
+    for (const item of raw) {
+      const email = String(item || '').trim();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue;
+      const key = email.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(email);
+    }
+    return out;
+  }
+
+  async startAvailabilityRequest(purchaseId, user, providerEmails, notes = '', ccEmails = []) {
+    const toEmails = this._normalizeEmailList(providerEmails);
     logger.debug('[FLOW_PRIVADA][BE][ACP][EMAIL][START]', {
       requestId: purchaseId,
       userId: user?.id,
-      providerEmail
+      toEmails
     });
-    if (!providerEmail) {
+    if (!toEmails.length) {
       const error = new Error('El correo del proveedor es obligatorio');
       error.status = 400;
       throw error;
@@ -2039,54 +2649,87 @@ class PrivatePurchasesService {
       throw error;
     }
 
-    const equipmentList = formatEquipmentList(equipment);
-    const html = `
-      <h2>Solicitud de disponibilidad</h2>
-      <p>Equipos requeridos para la solicitud #${purchaseId}:</p>
-      <p>${equipmentList}</p>
-      ${notes ? `<p>Notas: ${notes}</p>` : purchase.notes ? `<p>Notas: ${purchase.notes}</p>` : ""}
-    `;
+    // pamela.altamirano siempre va en copia, sin duplicar si ya la pusieron
+    // explicitamente y sin duplicar contra los destinatarios principales.
+    const ccList = this._normalizeEmailList([
+      ...this._normalizeEmailList(ccEmails),
+      PrivatePurchasesService.AVAILABILITY_FIXED_CC,
+    ]).filter((email) => !toEmails.some((to) => to.toLowerCase() === email.toLowerCase()));
 
-    const folderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
     const clientName =
       purchase.client_snapshot?.commercial_name ||
       purchase.client_snapshot?.name ||
       'Cliente';
+    const equipmentNames = equipment.map((item) => item.name || item.sku || 'Equipo');
+    const isPlural = equipment.length > 1;
+    const equipmentLines = equipment
+      .map((item) => {
+        const typeLabel = item.type === 'cu' ? 'CU' : item.type === 'new_import' ? 'Nuevo para importación' : item.type === 'installed_client' ? 'Instalado en cliente' : 'Nuevo';
+        const name = item.name || item.sku || 'Equipo';
+        return `<p>${name}&nbsp;&nbsp;&nbsp;${typeLabel}</p>`;
+      })
+      .join('');
+    const observation = notes || purchase.notes || '';
 
-    const emailFileId = await sendAndArchive({
+    const html = renderProviderEmail({
+      title: `Disponibilidad de Equipo ${equipmentNames.join(', ')}`,
+      greeting: 'Estimados,',
+      bodyHtml: `
+        <p>Reciban un cordial saludo</p>
+        <p>Por medio de la presente solicito su gentil ayuda con la disponibilidad de${isPlural ? ' los equipos' : 'l equipo'}.</p>
+        ${equipmentLines}
+        ${observation ? `<p><strong>Observación</strong></p><p>${observation}</p>` : ''}
+        <p>Cualquier novedad me quedo al pendiente</p>
+      `,
       user,
-      to: providerEmail,
-      subject: `Disponibilidad de equipos - Solicitud #${purchaseId}`,
+    });
+
+    const folderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
+
+    const { fileId: emailFileId, threadId, lastMessageId } = await sendAndArchive({
+      user,
+      to: toEmails,
+      cc: ccList,
+      subject: `Disponibilidad de Equipo ${equipmentNames.join(', ')}`,
       html,
       folderId,
       prefix: 'disponibilidad',
       request: {
         id: purchaseId,
         client_name: clientName,
-        provider_email: providerEmail,
+        provider_email: toEmails.join(', '),
         equipment,
         created_at: purchase.created_at,
-        notes: notes || purchase.notes
+        notes: observation
       },
       actionLabel: 'Informe de disponibilidad de equipos'
     });
 
+    const providerEmailValue = toEmails.join(', ');
     const { rows: updatedRows } = await db.query(
       `UPDATE private_purchase_requests
           SET provider_email = $1,
               availability_request_notes = $2,
               availability_email_sent_at = NOW(),
               availability_email_file_id = $3,
+              provider_email_thread_id = $5,
+              provider_email_last_message_id = $6,
               updated_at = NOW()
         WHERE id = $4
         RETURNING *`,
-      [providerEmail, notes || null, emailFileId, purchaseId]
+      [providerEmailValue, notes || null, emailFileId, purchaseId, threadId, lastMessageId]
     );
 
     logger.debug('[FLOW_PRIVADA][BE][ACP][EMAIL][SUCCESS]', {
       requestId: purchaseId,
-      providerEmail
+      toEmails,
+      ccList
     });
+    try {
+      await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmPurchaseSyncService.STAGE_NAMES.NEEDS_ANALYSIS, user);
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar inicio de disponibilidad privada con CRM');
+    }
     return updatedRows[0];
   }
 
@@ -2100,7 +2743,8 @@ class PrivatePurchasesService {
 
     const { rows } = await db.query(
       `SELECT id, status, provider_response_at, equipment, provider_email, reservation_email_sent_at,
-              availability_email_sent_at, client_snapshot, drive_folder_id
+              availability_email_sent_at, client_snapshot, drive_folder_id,
+              provider_email_thread_id, provider_email_last_message_id
          FROM private_purchase_requests
         WHERE id = $1`,
       [id]
@@ -2112,7 +2756,7 @@ class PrivatePurchasesService {
 
     const purchase = rows[0];
     if (purchase.status !== PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_REQUESTED) {
-      const error = new Error('La solicitud no está en disponibilidad ACP');
+      const error = new Error('La solicitud no estÃ¡ en disponibilidad ACP');
       error.status = 409;
       throw error;
     }
@@ -2177,11 +2821,32 @@ class PrivatePurchasesService {
       })
       : [];
 
-    // Calcular outcome basado en items aceptados
+    // Calcular outcome por equivalencia solicitada vs respuesta de proveedor.
+    // Si todo lo aceptado coincide con lo solicitado => flujo directo a oferta (backoffice).
+    // Si difiere => requiere aceptaciÃ³n/rechazo comercial (CU/import).
     const acceptedItems = normalizedItems.filter(
       (item) => item.available_type !== "none" && item.decision !== "reject"
     );
-    const normalizedOutcome = acceptedItems.length > 0 ? "new" : "none";
+    const hasAvailabilityDifference = acceptedItems.some(
+      (item) => !this._isRequestedTypeEquivalent(item.requested_type, item.available_type),
+    );
+    const hasCuAvailable = acceptedItems.some(
+      (item) => this._normalizeAvailabilityType(item.available_type) === 'cu_available',
+    );
+    const hasImportAvailable = acceptedItems.some(
+      (item) => this._normalizeAvailabilityType(item.available_type) === 'import_available',
+    );
+
+    const isCuOnly = hasAvailabilityDifference && hasCuAvailable && !hasImportAvailable;
+    const isImportNew = hasAvailabilityDifference && hasImportAvailable;
+
+    const normalizedOutcome = acceptedItems.length === 0
+      ? "none"
+      : isImportNew
+        ? 'import_new'
+        : isCuOnly
+          ? 'cu_only'
+          : 'new';
 
     logger.debug('[FLOW_PRIVADA][BE][ACP][RESPONSE][NORMALIZED]', {
       requestId: id,
@@ -2194,7 +2859,8 @@ class PrivatePurchasesService {
     const actor = {
       id: user?.id || null,
       name: user?.fullname || user?.name || user?.email || 'Usuario',
-      role: user?.role || null
+      role: user?.role || null,
+      email: user?.email || null,
     };
 
     const { rows: updatedRows } = await db.query(
@@ -2212,82 +2878,47 @@ class PrivatePurchasesService {
       finalOutcome: normalizedOutcome
     });
 
-    // La respuesta queda registrada y se mantiene en disponibilidad ACP
-    // para que backoffice apruebe o rechace.
-    logger.debug('[FLOW_PRIVADA][BE][ACP][RESPONSE][PENDING_BACKOFFICE_DECISION]', {
-      requestId: id,
-      state: purchase.status,
-      outcome: normalizedOutcome
-    });
+    // Auto-transiciÃ³n para CU e importaciÃ³n: requieren aprobaciÃ³n explÃ­cita del cliente
+    if (isCuOnly) {
+      try {
+        await this.transitionState(id, PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CU_PENDING, user,
+          'Proveedor respondiÃ³: solo disponible en condiciÃ³n de uso. Esperando aprobaciÃ³n del cliente.');
+        logger.debug('[FLOW_PRIVADA][BE][ACP][RESPONSE][CU_PENDING]', { requestId: id });
+      } catch (transErr) {
+        logger.warn('[FLOW_PRIVADA][BE][ACP][RESPONSE][CU_TRANSITION_WARN]', transErr.message);
+      }
+    } else if (isImportNew) {
+      try {
+        await this.transitionState(id, PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_IMPORT_PENDING, user,
+          'Proveedor respondiÃ³: solo disponible vÃ­a importaciÃ³n. Esperando aprobaciÃ³n vinculante del cliente.');
+        logger.debug('[FLOW_PRIVADA][BE][ACP][RESPONSE][IMPORT_PENDING]', { requestId: id });
+      } catch (transErr) {
+        logger.warn('[FLOW_PRIVADA][BE][ACP][RESPONSE][IMPORT_TRANSITION_WARN]', transErr.message);
+      }
+    } else {
+      // Legacy: la respuesta queda registrada y se mantiene en disponibilidad ACP
+      // para que backoffice/comercial tome la decision de confirmar o rechazar.
+      logger.debug('[FLOW_PRIVADA][BE][ACP][RESPONSE][PENDING_BACKOFFICE_DECISION]', {
+        requestId: id,
+        state: purchase.status,
+        outcome: normalizedOutcome
+      });
+    }
 
-    // Solicitar reserva al proveedor cuando hay equipos aceptados
-    const hasReservation = Boolean(purchase.reservation_email_sent_at);
-    const hasProviderEmail = Boolean(purchase.provider_email);
+    // Solicitar reserva al proveedor automÃ¡ticamente cuando la disponibilidad es equivalente.
     const acceptedForReservation = acceptedItems || [];
-    if (!hasReservation && hasProviderEmail && acceptedForReservation.length > 0) {
+    if (!hasAvailabilityDifference) {
       logger.debug('[FLOW_PRIVADA][BE][ACP][RESERVATION][START]', {
         requestId: id,
         providerEmail: purchase.provider_email,
         itemsCount: acceptedForReservation.length
       });
       try {
-        const folderId = await this._ensureDriveFolder(id, purchase.client_snapshot, purchase.drive_folder_id);
-        const reservationHtml = `
-          <p>Solicitamos reservar los equipos cotizados para la solicitud #${id}.</p>
-          <p>Confirmamos reserva para:</p>
-          ${formatEquipmentList(acceptedForReservation)}
-        `;
-        const reservationFileId = await sendAndArchive({
-          user,
-          to: purchase.provider_email,
-          subject: `Reserva de equipos - Solicitud #${id}`,
-          html: reservationHtml,
-          folderId,
-          prefix: 'reserva',
-          request: {
-            id,
-            client_name: purchase.client_snapshot?.commercial_name || purchase.client_snapshot?.name || 'Cliente',
-            provider_email: purchase.provider_email,
-            equipment: acceptedForReservation
-          },
-          actionLabel: 'Confirmacion de reserva'
-        });
-
-        const reminderDate = new Date();
-        reminderDate.setDate(reminderDate.getDate() + RESERVATION_REMINDER_OFFSET_DAYS);
-        let calendarEvent = {};
-        try {
-          calendarEvent = await createAllDayEvent({
-            summary: `Recordatorio de reserva - ${purchase.client_snapshot?.commercial_name || purchase.client_snapshot?.name || 'Cliente'}`,
-            description: 'La reserva caduca en 60 dias. Confirma cierre o renovacion.',
-            date: reminderDate,
-            attendees: [user?.email].filter(Boolean)
-          });
-        } catch (calendarError) {
-          logger.warn('[FLOW_PRIVADA][BE][ACP][RESERVATION][CALENDAR_WARN]', calendarError.message);
-        }
-
-        await db.query(
-          `UPDATE private_purchase_requests
-              SET reservation_email_sent_at = NOW(),
-                  reservation_email_file_id = $2,
-                  reservation_calendar_event_id = $3,
-                  reservation_calendar_event_link = $4,
-                  updated_at = NOW()
-            WHERE id = $1`,
-          [
-            id,
-            reservationFileId,
-            calendarEvent?.id || null,
-            calendarEvent?.htmlLink || null
-          ]
-        );
-
-        logger.debug('[FLOW_PRIVADA][BE][ACP][RESERVATION][SUCCESS]', {
-          requestId: id,
-          reservationFileId,
-          calendarEventId: calendarEvent?.id || null
-        });
+        await this._ensureReservationForPurchase(id, user, {
+          ...purchase,
+          provider_response: { outcome: normalizedOutcome, items: normalizedItems, notes, actor },
+        }, acceptedForReservation);
+        logger.debug('[FLOW_PRIVADA][BE][ACP][RESERVATION][SUCCESS]', { requestId: id });
       } catch (reservationError) {
         logger.warn('[FLOW_PRIVADA][BE][ACP][RESERVATION][ERROR]', {
           requestId: id,
@@ -2296,13 +2927,615 @@ class PrivatePurchasesService {
       }
     }
 
+    if (normalizedOutcome !== 'none' && normalizedOutcome !== 'unavailable') {
+      try {
+        await crmPurchaseSyncService.syncPrivatePurchaseStage(id, crmPurchaseSyncService.STAGE_NAMES.OFFER_DEVELOPMENT, user);
+      } catch (crmSyncError) {
+        logger.warn({ crmSyncError, purchaseId: id }, 'No se pudo sincronizar respuesta de disponibilidad privada con CRM');
+      }
+    }
+
     return updatedRows[0];
   }
 
+  /**
+   * Fecha tentativa de entrega informada por el proveedor. Se acumula como
+   * historial (no se sobreescribe) porque el proveedor puede dar nuevas fechas
+   * a lo largo del proceso. acp_comercial la registra; acp_comercial o
+   * jefe_operaciones pueden agregar una nueva version; jefe_logistica y el
+   * resto solo la consultan (gate de lectura vive en el frontend, esta ruta
+   * solo permite escritura a esos dos roles).
+   */
+  async registerProviderDeliveryDate(purchaseId, { date, notes } = {}, user) {
+    const canRegister = this._hasAnyRoleToken(user, ['acp_comercial', 'jefe_operaciones', 'gerencia', 'gerencia_general', 'jefe_comercial', 'jefe_de_comercial']);
+    if (!canRegister) {
+      const error = new Error('Solo ACP Comercial o Jefe de Operaciones pueden registrar la fecha tentativa de entrega del proveedor');
+      error.status = 403;
+      error.code = 'ROLE_NOT_ALLOWED';
+      throw error;
+    }
+
+    if (!date) {
+      const error = new Error('Fecha tentativa de entrega requerida');
+      error.status = 400;
+      throw error;
+    }
+
+    const parsedDate = new Date(date);
+    if (Number.isNaN(parsedDate.getTime())) {
+      const error = new Error('Fecha tentativa de entrega invalida');
+      error.status = 400;
+      throw error;
+    }
+
+    const { rows: existingRows } = await db.query(
+      'SELECT provider_delivery_dates_history FROM private_purchase_requests WHERE id = $1',
+      [purchaseId]
+    );
+    if (!existingRows.length) {
+      throw Object.assign(new Error('Solicitud no encontrada'), { status: 404 });
+    }
+
+    const history = Array.isArray(existingRows[0].provider_delivery_dates_history)
+      ? existingRows[0].provider_delivery_dates_history
+      : [];
+
+    const entry = {
+      date: parsedDate.toISOString(),
+      notes: notes || null,
+      registered_by: user?.id || null,
+      registered_by_email: user?.email || null,
+      registered_at: new Date().toISOString(),
+    };
+
+    const nextHistory = [...history, entry];
+
+    const { rows } = await db.query(
+      `UPDATE private_purchase_requests
+          SET provider_delivery_dates_history = $1,
+              updated_at = NOW()
+        WHERE id = $2
+        RETURNING *`,
+      [JSON.stringify(nextHistory), purchaseId]
+    );
+
+    return rows[0];
+  }
+
+  /**
+   * El usuario comercial registra la decisiÃ³n del cliente sobre disponibilidad en CU.
+   *   decision === 'approve' â†’ ACP_AVAILABILITY_CONFIRMED (flujo continÃºa)
+   *   decision === 'reject'  â†’ REJECTED (flujo termina â€” cliente no acepta CU)
+   */
+  async confirmClientCuApproval(purchaseId, user, decision) {
+    await ensurePrivateExtraColumn();
+    const { rows } = await db.query(
+      `SELECT id, status, extra, client_snapshot, provider_email, provider_response, reservation_email_sent_at, drive_folder_id,
+              provider_email_thread_id, provider_email_last_message_id
+         FROM private_purchase_requests
+        WHERE id = $1`,
+      [purchaseId]
+    );
+    if (!rows.length) throw Object.assign(new Error('Solicitud no encontrada'), { status: 404 });
+    const purchase = rows[0];
+    if (purchase.status !== PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CU_PENDING) {
+      const err = new Error('La solicitud no estÃ¡ en estado de aprobaciÃ³n CU del cliente');
+      err.status = 409;
+      err.code = 'INVALID_STATE';
+      throw err;
+    }
+    const approved = String(decision || '').toLowerCase() === 'approve';
+    const nextState = approved
+      ? PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CONFIRMED
+      : PRIVATE_PURCHASE_STATES.REJECTED;
+    const reason = approved
+      ? 'Cliente aceptÃ³ disponibilidad en condiciÃ³n de uso.'
+      : 'Cliente rechazÃ³ disponibilidad en condiciÃ³n de uso. Flujo cerrado.';
+
+    const nextExtra = {
+      ...(purchase.extra || {}),
+      cu_approval_decision: approved ? 'approve' : 'reject',
+      cu_approved_at: new Date().toISOString(),
+      cu_approved_by_email: user?.email || null,
+    };
+    await db.query(
+      `UPDATE private_purchase_requests SET extra = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify(nextExtra), purchaseId]
+    );
+
+    const result = await this.transitionState(purchaseId, nextState, user, reason);
+
+    if (approved) {
+      try {
+        const acceptedItems = (purchase.provider_response?.items || []).filter(
+          (item) => item?.available_type !== 'none' && item?.decision !== 'reject',
+        );
+        await this._ensureReservationForPurchase(purchaseId, user, purchase, acceptedItems);
+      } catch (reservationError) {
+        logger.warn('[FLOW_PRIVADA][BE][ACP][RESERVATION][CU_APPROVAL_WARN]', reservationError.message);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * El usuario comercial registra la decisiÃ³n vinculante del cliente sobre importaciÃ³n nueva.
+   * ADVERTENCIA: si el cliente aprueba, la importaciÃ³n queda comprometida â€” no se puede revertir.
+   *   decision === 'approve' â†’ ACP_AVAILABILITY_CONFIRMED + flag extra.import_approved = true
+   *   decision === 'reject'  â†’ REJECTED
+   */
+  async confirmClientImportApproval(purchaseId, user, decision) {
+    await ensurePrivateExtraColumn();
+    const { rows } = await db.query(
+      `SELECT id, status, extra, client_snapshot, provider_email, provider_response, reservation_email_sent_at, drive_folder_id,
+              provider_email_thread_id, provider_email_last_message_id
+         FROM private_purchase_requests
+        WHERE id = $1`,
+      [purchaseId]
+    );
+    if (!rows.length) throw Object.assign(new Error('Solicitud no encontrada'), { status: 404 });
+    const purchase = rows[0];
+    if (purchase.status !== PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_IMPORT_PENDING) {
+      const err = new Error('La solicitud no estÃ¡ en estado de aprobaciÃ³n de importaciÃ³n');
+      err.status = 409;
+      err.code = 'INVALID_STATE';
+      throw err;
+    }
+    const approved = String(decision || '').toLowerCase() === 'approve';
+    const nextState = approved
+      ? PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CONFIRMED
+      : PRIVATE_PURCHASE_STATES.REJECTED;
+    const reason = approved
+      ? 'Cliente aprobÃ³ importaciÃ³n nueva (compromiso vinculante). Flujo continÃºa.'
+      : 'Cliente rechazÃ³ importaciÃ³n nueva. Flujo cerrado.';
+
+    const nextExtra = {
+      ...(purchase.extra || {}),
+      import_approval_decision: approved ? 'approve' : 'reject',
+      import_approved_at: new Date().toISOString(),
+      import_approved_by_email: user?.email || null,
+      ...(approved && { import_is_binding: true }),
+    };
+    await db.query(
+      `UPDATE private_purchase_requests SET extra = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify(nextExtra), purchaseId]
+    );
+
+    const result = await this.transitionState(purchaseId, nextState, user, reason);
+
+    if (approved) {
+      try {
+        const acceptedItems = (purchase.provider_response?.items || []).filter(
+          (item) => item?.available_type !== 'none' && item?.decision !== 'reject',
+        );
+        await this._ensureReservationForPurchase(purchaseId, user, purchase, acceptedItems);
+      } catch (reservationError) {
+        logger.warn('[FLOW_PRIVADA][BE][ACP][RESERVATION][IMPORT_APPROVAL_WARN]', reservationError.message);
+      }
+    }
+
+    return result;
+  }
+
+  async renewReservation(purchaseId, user) {
+    const { rows } = await db.query(
+      `SELECT id, provider_response, client_snapshot, reservation_email_sent_at, reservation_expires_at
+         FROM private_purchase_requests
+        WHERE id = $1`,
+      [purchaseId],
+    );
+    if (!rows.length) {
+      const err = new Error('Solicitud no encontrada');
+      err.status = 404;
+      throw err;
+    }
+    const purchase = rows[0];
+    if (!purchase.reservation_email_sent_at) {
+      const err = new Error('No existe una reserva activa para renovar');
+      err.status = 409;
+      err.code = 'RESERVATION_NOT_FOUND';
+      throw err;
+    }
+
+    const currentExpiry = purchase.reservation_expires_at ? new Date(purchase.reservation_expires_at) : new Date();
+    const baseDate = currentExpiry > new Date() ? currentExpiry : new Date();
+    const nextExpiry = new Date(baseDate);
+    nextExpiry.setDate(nextExpiry.getDate() + RESERVATION_VALIDITY_DAYS);
+    const reminderDate = new Date(baseDate);
+    reminderDate.setDate(reminderDate.getDate() + RESERVATION_REMINDER_OFFSET_DAYS);
+
+    const acpEmail = purchase?.provider_response?.actor?.email || user?.email || null;
+    let calendarEvent = {};
+    try {
+      calendarEvent = await createAllDayEvent({
+        summary: `âš ï¸ Reserva por vencer â€” ${purchase.client_snapshot?.commercial_name || purchase.client_snapshot?.name || 'Cliente'}`,
+        description: `Reserva renovada. Nuevo vencimiento: ${nextExpiry.toLocaleDateString('es-EC')}.`,
+        date: reminderDate,
+        attendees: [acpEmail].filter(Boolean),
+      });
+    } catch (calendarError) {
+      logger.warn('[FLOW_PRIVADA][BE][ACP][RESERVATION_RENEW][CALENDAR_WARN]', calendarError.message);
+    }
+
+    const { rows: updated } = await db.query(
+      `UPDATE private_purchase_requests
+          SET reservation_expires_at = $2,
+              reservation_calendar_event_id = $3,
+              reservation_calendar_event_link = $4,
+              updated_at = NOW()
+        WHERE id = $1
+      RETURNING *`,
+      [purchaseId, nextExpiry, calendarEvent?.id || null, calendarEvent?.htmlLink || null],
+    );
+    return updated[0];
+  }
+
+  /**
+   * Solicitar proforma al proveedor.
+   * Aplica cuando ACP ya confirmó disponibilidad con el cliente y necesita pedirle al
+   * proveedor que envíe la proforma para reservar el equipo.
+   *
+   * viaEmail=false cubre el caso donde ACP ya solicitó la proforma respondiendo
+   * manualmente el hilo de Gmail (no por SPI) y solo necesita registrar el paso
+   * como hecho, sin disparar un correo nuevo.
+   */
+  async requestProformaFromProvider(purchaseId, user, { providerEmail, notes = '', viaEmail = true } = {}) {
+    await ensurePrivateExtraColumn();
+    if (viaEmail && !providerEmail) {
+      const error = new Error('El correo del proveedor es obligatorio');
+      error.status = 400;
+      throw error;
+    }
+
+    const { rows } = await db.query(
+      `SELECT id, status, equipment, notes, client_snapshot, drive_folder_id, provider_email,
+              provider_response, extra, provider_email_thread_id, provider_email_last_message_id
+         FROM private_purchase_requests
+        WHERE id = $1`,
+      [purchaseId],
+    );
+    if (!rows.length) {
+      const error = new Error('Solicitud no encontrada');
+      error.status = 404;
+      throw error;
+    }
+    const purchase = rows[0];
+
+    if (purchase.status !== PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CONFIRMED) {
+      const error = new Error('La proforma solo puede solicitarse cuando la disponibilidad está confirmada');
+      error.status = 409;
+      error.code = 'INVALID_STATUS';
+      error.details = { currentStatus: purchase.status };
+      throw error;
+    }
+
+    if (purchase.extra?.proforma_request_sent_at) {
+      const error = new Error('La proforma ya fue solicitada al proveedor');
+      error.status = 409;
+      error.code = 'DOC_ALREADY_EXISTS';
+      throw error;
+    }
+
+    const acceptedItems = Array.isArray(purchase.provider_response?.items)
+      ? purchase.provider_response.items.filter(
+          (item) => item?.available_type !== 'none' && item?.decision !== 'reject',
+        )
+      : [];
+    const itemsForProforma = acceptedItems.length > 0
+      ? acceptedItems
+      : (Array.isArray(purchase.equipment) ? purchase.equipment : []);
+
+    let emailFileId = null;
+    let threadId = purchase.provider_email_thread_id || null;
+    let lastMessageId = purchase.provider_email_last_message_id || null;
+    const resolvedProviderEmail = providerEmail || purchase.provider_email || null;
+
+    if (viaEmail) {
+      const clientName =
+        purchase.client_snapshot?.commercial_name ||
+        purchase.client_snapshot?.name ||
+        'Cliente';
+      const equipmentList = formatEquipmentList(itemsForProforma);
+      const html = renderProviderEmail({
+        title: "Solicitud de proforma",
+        bodyHtml: `
+          <p>Solicitamos por favor proforma para los siguientes equipos de ${clientName}:</p>
+          <p>${equipmentList}</p>
+          ${notes ? `<p><strong>Notas:</strong> ${notes}</p>` : ''}
+          <p>Quedamos atentos a su respuesta.</p>
+        `,
+        user,
+      });
+
+      const folderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
+
+      const sendResult = await sendAndArchive({
+        user,
+        to: providerEmail,
+        subject: `${purchase.provider_email_thread_id ? "Re: " : ""}Solicitud de proforma - ${clientName}`,
+        html,
+        folderId,
+        prefix: 'solicitud_proforma',
+        request: {
+          id: purchaseId,
+          client_name: clientName,
+          provider_email: providerEmail,
+          equipment: itemsForProforma,
+          notes,
+        },
+        actionLabel: 'Solicitud de proforma',
+        threadContext: {
+          threadId: purchase.provider_email_thread_id,
+          lastMessageId: purchase.provider_email_last_message_id,
+        },
+      });
+      emailFileId = sendResult.fileId;
+      threadId = sendResult.threadId;
+      lastMessageId = sendResult.lastMessageId;
+    }
+
+    await db.query(
+      `UPDATE private_purchase_requests
+          SET provider_email = COALESCE(provider_email, $1),
+              extra = extra || $2::jsonb,
+              provider_email_thread_id = $4,
+              provider_email_last_message_id = $5,
+              updated_at = NOW()
+        WHERE id = $3`,
+      [
+        resolvedProviderEmail,
+        JSON.stringify({
+          proforma_request_sent_at: new Date().toISOString(),
+          proforma_request_email_file_id: emailFileId || null,
+          proforma_request_provider_email: resolvedProviderEmail,
+          proforma_request_notes: notes || null,
+          proforma_request_channel: viaEmail ? 'spi_email' : 'manual_thread',
+        }),
+        purchaseId,
+        threadId,
+        lastMessageId,
+      ],
+    );
+
+    const { rows: updated } = await db.query(
+      'SELECT * FROM private_purchase_requests WHERE id = $1',
+      [purchaseId],
+    );
+    return updated[0];
+  }
+
+  /**
+   * Subir proforma firmada por el proveedor. Habilita la gestión del contrato.
+   * Requiere que primero se haya subido la proforma sin firmar.
+   */
+  async uploadSignedProforma(purchaseId, { proformaBase64, fileName, mimeType } = {}, user) {
+    await ensurePrivateExtraColumn();
+
+    if (!proformaBase64 || !fileName) {
+      const error = new Error('Archivo de proforma firmada requerido');
+      error.status = 400;
+      throw error;
+    }
+
+    const { rows } = await db.query(
+      `SELECT id, status, client_snapshot, drive_folder_id, extra
+         FROM private_purchase_requests WHERE id = $1`,
+      [purchaseId],
+    );
+    if (!rows.length) {
+      const error = new Error('Solicitud no encontrada');
+      error.status = 404;
+      throw error;
+    }
+    const purchase = rows[0];
+
+    if (!purchase.extra?.proforma_file_id) {
+      const error = new Error('Debe subir primero la proforma sin firmar');
+      error.status = 409;
+      error.code = 'UNSIGNED_PROFORMA_REQUIRED';
+      throw error;
+    }
+
+    if (purchase.extra?.proforma_signed_file_id) {
+      const error = new Error('La proforma firmada ya fue subida');
+      error.status = 409;
+      error.code = 'DOC_ALREADY_EXISTS';
+      throw error;
+    }
+
+    const folderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
+    const stored = await uploadBase64File(fileName, proformaBase64, mimeType || 'application/pdf', folderId);
+
+    await db.query(
+      `UPDATE private_purchase_requests
+          SET extra = extra || $2::jsonb,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [
+        purchaseId,
+        JSON.stringify({
+          proforma_signed_file_id: stored.id,
+          proforma_signed_file_link: stored.webViewLink || null,
+          proforma_signed_uploaded_at: new Date().toISOString(),
+        }),
+      ],
+    );
+
+    const { rows: updatedRows } = await db.query(
+      'SELECT * FROM private_purchase_requests WHERE id = $1',
+      [purchaseId],
+    );
+    return updatedRows[0];
+  }
+
+  /**
+   * Subir proforma sin firmar y activar reserva del equipo.
+   * Condiciones de reserva:
+   *  - NEW/CU: reserva automática al subir la proforma
+   *  - IMPORTACIÓN: reserva solo si el usuario marcó reserveImport=true (compromiso 100%)
+   */
+  async uploadProformaAndReserve(purchaseId, { proformaBase64, fileName, mimeType, reserveImport = false } = {}, user) {
+    await ensurePrivateExtraColumn();
+
+    if (!proformaBase64 || !fileName) {
+      const error = new Error('Archivo de proforma requerido');
+      error.status = 400;
+      throw error;
+    }
+
+    const { rows } = await db.query(
+      `SELECT id, status, client_snapshot, drive_folder_id, provider_email,
+              provider_response, reservation_email_sent_at, extra, equipment,
+              provider_email_thread_id, provider_email_last_message_id
+         FROM private_purchase_requests WHERE id = $1`,
+      [purchaseId],
+    );
+    if (!rows.length) {
+      const error = new Error('Solicitud no encontrada');
+      error.status = 404;
+      throw error;
+    }
+    const purchase = rows[0];
+
+    if (purchase.status !== PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CONFIRMED) {
+      const error = new Error('La proforma solo puede subirse cuando la disponibilidad está confirmada');
+      error.status = 409;
+      error.code = 'INVALID_STATUS';
+      error.details = { currentStatus: purchase.status, requiredStatus: PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CONFIRMED };
+      throw error;
+    }
+
+    if (purchase.extra?.proforma_file_id) {
+      const error = new Error('Proforma ya fue subida para esta solicitud');
+      error.status = 409;
+      error.code = 'DOC_ALREADY_EXISTS';
+      error.details = { docType: 'PROFORMA', existingRef: purchase.extra.proforma_file_id };
+      throw error;
+    }
+
+    // Upload to Drive
+    const folderId = await this._ensureDriveFolder(purchaseId, purchase.client_snapshot, purchase.drive_folder_id);
+    const stored = await uploadBase64File(fileName, proformaBase64, mimeType || 'application/pdf', folderId);
+
+    // Determine reservation conditions based on provider response outcome
+    const outcome = purchase.provider_response?.outcome;
+    const isImportType = outcome === 'import_new';
+    const shouldReserve = !isImportType || reserveImport === true;
+
+    // Store proforma info in extra
+    await db.query(
+      `UPDATE private_purchase_requests
+          SET extra = extra || $2::jsonb,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [purchaseId, JSON.stringify({
+        proforma_file_id: stored.id,
+        proforma_file_link: stored.webViewLink || null,
+        proforma_uploaded_at: new Date().toISOString(),
+        proforma_reserve_import: isImportType && reserveImport === true,
+      })],
+    );
+
+    if (shouldReserve) {
+      // Intentar enviar email de reserva al proveedor + evento de calendario.
+      // Si falla, solo se registra un warning — la reserva queda activa igual.
+      try {
+        const acceptedItems = Array.isArray(purchase.provider_response?.items)
+          ? purchase.provider_response.items.filter(
+              (item) => item?.available_type !== 'none' && item?.decision !== 'reject',
+            )
+          : [];
+        const itemsForReservation = acceptedItems.length > 0
+          ? acceptedItems
+          : (Array.isArray(purchase.equipment) ? purchase.equipment : []);
+
+        await this._ensureReservationForPurchase(
+          purchaseId,
+          user,
+          { ...purchase, extra: { ...(purchase.extra || {}), proforma_file_id: stored.id } },
+          itemsForReservation,
+        );
+        logger.debug('[FLOW_PRIVADA][BE][ACP][PROFORMA][RESERVATION_OK]', { requestId: purchaseId });
+      } catch (reservationError) {
+        logger.warn('[FLOW_PRIVADA][BE][ACP][PROFORMA][RESERVATION_WARN]', reservationError.message);
+      }
+
+      // Garantía: la reserva queda registrada en BD aunque el email/calendar haya fallado.
+      // COALESCE respeta los valores ya seteados por _ensureReservationForPurchase si el email tuvo éxito.
+      const proformaReservationExpiry = new Date();
+      proformaReservationExpiry.setDate(proformaReservationExpiry.getDate() + RESERVATION_VALIDITY_DAYS);
+      await db.query(
+        `UPDATE private_purchase_requests
+            SET reservation_email_sent_at = COALESCE(reservation_email_sent_at, NOW()),
+                reservation_expires_at    = COALESCE(reservation_expires_at, $2::timestamptz),
+                updated_at                = NOW()
+          WHERE id = $1`,
+        [purchaseId, proformaReservationExpiry],
+      );
+      logger.debug('[FLOW_PRIVADA][BE][ACP][PROFORMA][RESERVATION_STAMP_OK]', { requestId: purchaseId });
+    }
+
+    const { rows: updatedRows } = await db.query(
+      'SELECT * FROM private_purchase_requests WHERE id = $1',
+      [purchaseId],
+    );
+    return updatedRows[0];
+  }
+
+  /**
+   * Obtener todas las reservas activas (no expiradas, no canceladas) de compras privadas.
+   * Uso: panel de gestión de reservas para acp_comercial.
+   */
+  async getActiveReservations() {
+    // Incluye registros con reserva explícita (email enviado) O con proforma subida
+    // sin email (puede ocurrir cuando el servicio de email falló pero la proforma sí se guardó).
+    const { rows } = await db.query(
+      `SELECT id, status, client_snapshot, equipment, provider_email,
+              reservation_email_sent_at, reservation_expires_at,
+              reservation_calendar_event_link, extra
+         FROM private_purchase_requests
+        WHERE (
+          reservation_email_sent_at IS NOT NULL
+          OR (extra->>'proforma_file_id' IS NOT NULL AND extra->>'proforma_reserve_import' IS DISTINCT FROM 'false')
+        )
+          AND status::text NOT IN ('completed', 'cancelled', 'rejected')
+        ORDER BY COALESCE(reservation_expires_at,
+                          (extra->>'proforma_uploaded_at')::timestamptz + (${RESERVATION_VALIDITY_DAYS} * INTERVAL '1 day')
+                         ) ASC NULLS LAST`,
+    );
+    const now = new Date();
+    return rows.map((r) => {
+      // Fallback: si el email de reserva falló, usar proforma_uploaded_at como fecha de activación
+      const reservationSentAt = r.reservation_email_sent_at
+        || r.extra?.proforma_uploaded_at
+        || null;
+      const reservationExpiresAt = r.reservation_expires_at
+        || (r.extra?.proforma_uploaded_at
+          ? new Date(new Date(r.extra.proforma_uploaded_at).getTime() + RESERVATION_VALIDITY_DAYS * 86_400_000).toISOString()
+          : null);
+      return {
+        id: r.id,
+        status: r.status,
+        client_name: r.client_snapshot?.commercial_name || r.client_snapshot?.name || 'Cliente',
+        client_ruc: r.client_snapshot?.ruc || r.client_snapshot?.identification || null,
+        equipment: Array.isArray(r.equipment) ? r.equipment : [],
+        provider_email: r.provider_email || null,
+        reservation_email_sent_at: reservationSentAt,
+        reservation_expires_at: reservationExpiresAt,
+        reservation_calendar_event_link: r.reservation_calendar_event_link || null,
+        proforma_file_link: r.extra?.proforma_file_link || null,
+        is_expired: reservationExpiresAt ? new Date(reservationExpiresAt) < now : false,
+        days_remaining: reservationExpiresAt
+          ? Math.ceil((new Date(reservationExpiresAt) - now) / (1000 * 60 * 60 * 24))
+          : null,
+      };
+    });
+  }
 
   /**
    * Solicitar registro de cliente
-   * Cambia el estado a CLIENT_REGISTRATION_REQUESTED para indicar que se está esperando aprobación
+   * Cambia el estado a CLIENT_REGISTRATION_REQUESTED para indicar que se estÃ¡ esperando aprobaciÃ³n
    */
   async requestClientRegistration(purchaseId, user) {
     logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][REQUEST] Solicitando registro de cliente para purchase ${purchaseId}`);
@@ -2371,6 +3604,44 @@ class PrivatePurchasesService {
       }
     }
 
+    // Intentar vincular client_request_id aunque el cliente aún esté pendiente de aprobación.
+    // Esto permite que _autoResolveClientRegistration lo encuentre por ID cuando se apruebe,
+    // sin depender solo del match por nombre/RUC que puede fallar si hay diferencias de formato.
+    try {
+      const snap = purchase.client_snapshot || {};
+      const alreadyLinked = snap.client_request_id || snap.registered_client_id;
+      if (!alreadyLinked) {
+        const nameVal = snap.commercial_name || snap.name || '';
+        const rucVal  = snap.ruc_cedula || snap.client_identifier || '';
+        if (nameVal || rucVal) {
+          const { rows: pendingRows } = await db.query(
+            `SELECT id FROM client_requests
+              WHERE status IN ('pending','submitted','pending_review','draft')
+                AND (
+                  (commercial_name = $1 AND $1 <> '')
+                  OR (ruc_cedula = $2 AND $2 <> '' AND ruc_cedula IS NOT NULL)
+                )
+              ORDER BY created_at DESC
+              LIMIT 1`,
+            [nameVal, rucVal]
+          );
+          if (pendingRows.length > 0) {
+            const pendingId = pendingRows[0].id;
+            await db.query(
+              `UPDATE private_purchase_requests
+                  SET client_snapshot = jsonb_set(COALESCE(client_snapshot, '{}'), '{client_request_id}', $2::text::jsonb),
+                      updated_at = NOW()
+                WHERE id = $1`,
+              [purchaseId, String(pendingId)]
+            );
+            logger.debug(`[CLIENT_REG_LINK] Vinculado client_request ${pendingId} a purchase ${purchaseId}`);
+          }
+        }
+      }
+    } catch (linkErr) {
+      logger.warn('[CLIENT_REG_LINK] Error vinculando client_request_id:', linkErr);
+    }
+
     return {
       requested: true,
       alreadyRequested,
@@ -2380,10 +3651,10 @@ class PrivatePurchasesService {
 
   /**
    * Actualizar datos de cliente registrado
-   * Valida que el cliente esté aprobado antes de permitir el registro
+   * Valida que el cliente estÃ© aprobado antes de permitir el registro
    */
   async updateClientRegistration(purchaseId, clientId, user) {
-    logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Iniciando validación para purchase ${purchaseId}`);
+    logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Iniciando validaciÃ³n para purchase ${purchaseId}`);
 
     // Obtener datos de la compra privada
     const purchaseQuery = `
@@ -2402,7 +3673,7 @@ class PrivatePurchasesService {
 
     logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Cliente en compra: ${clientData.commercial_name || clientData.name}`);
 
-    // Validar que el cliente esté aprobado en el sistema de solicitudes de clientes
+    // Validar que el cliente estÃ© aprobado en el sistema de solicitudes de clientes
     const clientValidationQuery = `
       SELECT id, status, commercial_name, ruc_cedula
       FROM client_requests
@@ -2420,23 +3691,16 @@ class PrivatePurchasesService {
       clientData.ruc_cedula
     ]);
 
-    if (!approvedClients.length) {
-      const error = new Error('El cliente debe estar aprobado por backoffice antes de poder registrarse en la compra privada');
-      error.status = 400;
-      error.code = 'CLIENT_NOT_APPROVED';
-      error.details = {
-        clientName: clientData.commercial_name || clientData.name,
-        rucCedula: clientData.ruc_cedula,
-        message: 'Cliente no encontrado en solicitudes aprobadas'
-      };
-      throw error;
+    const approvedClient = approvedClients[0] || null;
+
+    if (approvedClient) {
+      logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Cliente aprobado encontrado: ${approvedClient.commercial_name} (ID: ${approvedClient.id})`);
+    } else {
+      logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Cliente no encontrado en sistema, procede como posible cliente: ${clientData.commercial_name || clientData.name}`);
     }
 
-    const approvedClient = approvedClients[0];
-    logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Cliente aprobado encontrado: ${approvedClient.commercial_name} (ID: ${approvedClient.id})`);
-
-    // Usar el ID del cliente aprobado
-    const finalClientId = clientId || approvedClient.id;
+    // Si estÃ¡ registrado usa su ID; si no, procede sin registered_client_id (posible cliente)
+    const finalClientId = clientId || approvedClient?.id || null;
 
     const hasClientId = finalClientId !== undefined && finalClientId !== null && String(finalClientId).trim().length > 0;
     const query = hasClientId
@@ -2463,14 +3727,15 @@ class PrivatePurchasesService {
       throw new Error('Solicitud no encontrada');
     }
 
-    logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][SUCCESS] Cliente registrado exitosamente: ${approvedClient.commercial_name}`);
+    const clientLabel = approvedClient?.commercial_name || clientData.commercial_name || clientData.name || 'Posible cliente';
+    logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][SUCCESS] Cliente registrado: ${clientLabel}`);
 
     // Transicion automatica a CLIENT_REGISTERED (esperando contrato)
     await this.transitionState(
       purchaseId,
       PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED,
       user,
-      `Cliente aprobado registrado: ${approvedClient.commercial_name}`
+      `Cliente registrado: ${clientLabel}`
     );
 
     // Notificar a backoffice que puede continuar flujo documental
@@ -2482,7 +3747,7 @@ class PrivatePurchasesService {
           userId: recipient.id,
           template: 'private_purchase_client_approved_contract_pending',
           data: {
-            client_name: approvedClient.commercial_name || 'Cliente',
+            client_name: clientLabel,
             purchase_id: purchaseId
           },
           source: 'private_purchase.client_registration',
@@ -2493,26 +3758,12 @@ class PrivatePurchasesService {
     } catch (error) {
       logger.warn('Error enviando notificacion de cliente aprobado:', error);
     }
-    let result = rows[0];
     try {
-      // Producción madura: generar inspección automáticamente al aprobar registro del cliente.
-      result = await this.saveInspectionRequest(
-        purchaseId,
-        {
-          inspection_min_date: addDaysIso(1),
-          inspection_max_date: addDaysIso(7),
-        },
-        user
-      );
-    } catch (inspectionError) {
-      logger.error(
-        { inspectionError, purchaseId },
-        'No se pudo generar automáticamente la inspección de ambiente',
-      );
-      throw inspectionError;
+      await crmPurchaseSyncService.syncPrivatePurchaseCreated(purchaseId, user);
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar registro de cliente privado con CRM');
     }
-
-    return result;
+    return rows[0];
   }
 
   /**
@@ -2520,6 +3771,18 @@ class PrivatePurchasesService {
    */
   async setDeliveryDates(purchaseId, deliveryDates, user, deliveryNotes = '') {
     await ensurePrivateSiteInspectionColumns();
+
+    // Planificacion (igual que requestDeliveryDates): Operaciones confirma las
+    // fechas propuestas. Antes esta funcion no validaba rol propio -- solo
+    // confiaba en el gate de ruta (deliveryRoles = todos combinados).
+    const canPlan = this._hasAnyRoleToken(user, ['jefe_operaciones', 'operaciones', 'jefe_comercial', 'gerencia', 'acp_comercial']);
+    if (!canPlan) {
+      const error = new Error('Solo operaciones puede confirmar fechas de entrega');
+      error.status = 403;
+      error.code = 'ROLE_NOT_ALLOWED';
+      throw error;
+    }
+
     logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][CHECK] Verificando duplicado delivery dates para purchase ${purchaseId}`);
 
     const { rows: existingRows } = await db.query(
@@ -2589,8 +3852,15 @@ class PrivatePurchasesService {
       throw new Error('Solicitud no encontrada');
     }
 
-    // Transicion a fechas establecidas
-    await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.DELIVERY_DATES_SUBMITTED, user, 'Fechas de entrega establecidas');
+    // Transicion a fechas establecidas. El motivo queda con las fechas reales
+    // para que el aviso a jefe_logistica (generico, via transitionState) sea util.
+    const deliveryLabel = `${startDate?.toLocaleDateString('es-ES')} - ${endDate?.toLocaleDateString('es-ES')}`;
+    await this.transitionState(
+      purchaseId,
+      PRIVATE_PURCHASE_STATES.DELIVERY_DATES_SUBMITTED,
+      user,
+      `Fechas de entrega establecidas: ${deliveryLabel}`,
+    );
 
     // Crear evento en calendario
     const purchase = rows[0];
@@ -2634,29 +3904,6 @@ class PrivatePurchasesService {
     const result = rows[0];
     result.calendar = calendarStatus;
 
-    // Notificacion de fechas establecidas (síncrona para Cloud Run)
-    try {
-      const logisticsUsers = await this._getUsersByRole('jefe_logistica');
-      const deliveryLabel = `${startDate?.toLocaleDateString('es-ES')} - ${endDate?.toLocaleDateString('es-ES')}`;
-
-      for (const recipient of logisticsUsers) {
-        await notificationManager.sendNotification({
-          userId: recipient.id,
-          template: 'private_purchase_delivery_date_set',
-          data: {
-            client_name: clientData.name || 'Cliente',
-            delivery_dates: deliveryLabel,
-            purchase_id: purchaseId
-          },
-          source: 'private_purchase.delivery_dates',
-          email: true,
-          chat: true
-        });
-      }
-    } catch (error) {
-      logger.warn('Error enviando notificacion de fechas entrega:', error);
-    }
-
     return result;
   }
 
@@ -2665,6 +3912,15 @@ class PrivatePurchasesService {
    */
   async markReadyForDelivery(purchaseId, user) {
     await ensurePrivateSiteInspectionColumns();
+
+    const canExecute = this._hasAnyRoleToken(user, ['jefe_logistica', 'logistica', 'jefe_comercial', 'gerencia', 'acp_comercial']);
+    if (!canExecute) {
+      const error = new Error('Solo logistica puede marcar la solicitud como lista para entrega');
+      error.status = 403;
+      error.code = 'ROLE_NOT_ALLOWED';
+      throw error;
+    }
+
     const { rows: inspectionRows } = await db.query(
       `SELECT id,
               inspection_request_id,
@@ -2698,30 +3954,10 @@ class PrivatePurchasesService {
       throw new Error('Solicitud no encontrada');
     }
 
-    // Transiciรณn a listo para entrega
+    // Transicion a listo para entrega. jefe_logistica ya recibe aviso via el
+    // private_purchase_state_transition generico que dispara DISPATCH_READY
+    // (antes se notificaba por error a quien ejecuta esta accion, no a logistica).
     await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.DISPATCH_READY, user, 'Listo para entrega final');
-
-    // Notificaciรณn
-    const purchase = rows[0];
-    const clientData = purchase.client_snapshot || {};
-
-    setImmediate(async () => {
-      try {
-        await notificationManager.sendNotification({
-          userId: user.id,
-          template: 'private_purchase_ready_for_delivery',
-          data: {
-            client_name: clientData.name || 'Cliente',
-            purchase_id: purchaseId
-          },
-          source: 'private_purchase.ready_for_delivery',
-          email: true,
-          chat: true
-        });
-      } catch (error) {
-        logger.warn('Error enviando notificaciรณn listo para entrega:', error);
-      }
-    });
 
     return rows[0];
   }
@@ -2731,6 +3967,15 @@ class PrivatePurchasesService {
    */
   async completeDelivery(purchaseId, user, deliveryNotes = '') {
     await ensurePrivateSiteInspectionColumns();
+
+    const canExecute = this._hasAnyRoleToken(user, ['jefe_logistica', 'logistica', 'jefe_comercial', 'gerencia', 'acp_comercial']);
+    if (!canExecute) {
+      const error = new Error('Solo logistica puede completar la entrega');
+      error.status = 403;
+      error.code = 'ROLE_NOT_ALLOWED';
+      throw error;
+    }
+
     const { rows: inspectionRows } = await db.query(
       `SELECT id,
               inspection_request_id,
@@ -2766,8 +4011,13 @@ class PrivatePurchasesService {
       throw new Error('Solicitud no encontrada');
     }
 
-    // Transiciรณn final
+    // Transicià¸£à¸“n final
     await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.DELIVERED, user, 'Entrega completada exitosamente');
+    try {
+      await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmPurchaseSyncService.STAGE_NAMES.CLOSED_WON, user, 'won');
+    } catch (crmSyncError) {
+      logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar cierre ganado de compra privada con CRM');
+    }
 
     return rows[0];
   }
@@ -2912,7 +4162,11 @@ class PrivatePurchasesService {
 
   async updateDispatchDetails(purchaseId, { items = [], notes = '', dispatchedAt, observations } = {}, user) {
     await ensurePrivateInstallationWorkflowColumns();
-    const isLogisticsRole = this._hasAnyRoleToken(user, ['jefe_logistica', 'logistica']);
+    // Mismo criterio que uploadDeliveryGuides/markReadyForDelivery/completeDelivery:
+    // jefe_logistica/logistica ejecutan, managers pueden respaldar. El frontend
+    // (LOGISTICS_ROLES) ya habilitaba estos roles -- el backend solo aceptaba
+    // jefe_logistica/logistica y rechazaba a gerencia/jefe_comercial/acp_comercial con 403.
+    const isLogisticsRole = this._hasAnyRoleToken(user, ['jefe_logistica', 'logistica', 'jefe_comercial', 'gerencia', 'acp_comercial']);
 
     if (!isLogisticsRole) {
       const error = new Error('Rol no autorizado para registrar despacho');
@@ -3022,7 +4276,7 @@ class PrivatePurchasesService {
         workflow: dispatchWorkflow,
         payload: {
           status: "validated",
-          guide_reference: notes || "Guía validada en despacho",
+          guide_reference: notes || "GuÃ­a validada en despacho",
           proforma_reference: existing?.delivery_act_number || null,
           notes,
         },
@@ -3086,7 +4340,7 @@ class PrivatePurchasesService {
   }
 
   async assignDeliveryActTechnician(purchaseId, { assigned_to_email, assigned_to_name } = {}, user) {
-    const isLeadRole = this._hasAnyRoleToken(user, ['jefe_tecnico', 'jefe_servicio_tecnico']);
+    const isLeadRole = this._hasAnyRoleToken(user, ['jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico']);
 
     if (!isLeadRole) {
       const error = new Error('Rol no autorizado para asignar tecnico');
@@ -3180,7 +4434,10 @@ class PrivatePurchasesService {
   }
 
   async uploadDeliveryActLogisticsSigned(purchaseId, { fileId, actBase64, fileName, mimeType } = {}, user) {
-    const isLogisticsRole = this._hasRoleToken(user, 'logistica');
+    // CP-05: jefe_logistica/logistica ejecutan; managers pueden respaldar
+    // (mismo criterio que markReadyForDelivery/completeDelivery). El frontend
+    // ya habilitaba estos roles -- el backend solo aceptaba 'logistica'.
+    const isLogisticsRole = this._hasAnyRoleToken(user, ['jefe_logistica', 'logistica', 'jefe_comercial', 'gerencia', 'acp_comercial']);
 
     if (!isLogisticsRole) {
       const error = new Error('Rol no autorizado para firmar acta');
@@ -3255,7 +4512,7 @@ class PrivatePurchasesService {
 
   async uploadDeliveryActFinalSigned(purchaseId, { fileId, actBase64, fileName, mimeType } = {}, user) {
     await ensurePrivateInstallationWorkflowColumns();
-    const isTechnicalRole = this._hasRoleToken(user, 'tecnico');
+    const isTechnicalRole = this._hasAnyRoleToken(user, ['tecnico', 'ing_servicio', 'jefe_servicio']);
 
     if (!isTechnicalRole) {
       const error = new Error('Rol no autorizado para subir acta final');
@@ -3448,7 +4705,18 @@ class PrivatePurchasesService {
     return rows[0];
   }
 
-  _buildPrivateInspectionPayload(purchase = {}, inspectionWindow = {}) {
+  /**
+   * Construye el payload para la solicitud de inspección (F.ST-20).
+   *
+   * Prioridad de datos de cliente:
+   *   1. clientRecord  → registro aprobado en client_requests (datos completos)
+   *   2. client_snapshot → datos capturados al crear la solicitud de compra (respaldo)
+   *
+   * @param {object} purchase       - Fila de private_purchase_requests
+   * @param {object} inspectionWindow - { inspection_min_date, inspection_max_date, accesorios?, observaciones? }
+   * @param {object|null} clientRecord - Registro de client_requests (puede ser null)
+   */
+  _buildPrivateInspectionPayload(purchase = {}, inspectionWindow = {}, clientRecord = null) {
     const snapshot = purchase?.client_snapshot || {};
     const equipment = Array.isArray(purchase?.equipment) ? purchase.equipment : [];
     const equipos = equipment.map((item) => ({
@@ -3458,26 +4726,72 @@ class PrivatePurchasesService {
       serial: item?.serial || "",
     }));
 
+    // ── Datos del cliente: preferir clientRecord (datos oficiales completos) ──
+    const nombre_cliente =
+      clientRecord?.commercial_name ||
+      snapshot?.commercial_name ||
+      snapshot?.name ||
+      snapshot?.client_name ||
+      "";
+
+    const direccion_cliente =
+      clientRecord?.shipping_address ||
+      snapshot?.shipping_address ||
+      snapshot?.address ||
+      "";
+
+    const persona_contacto =
+      clientRecord?.shipping_contact_name ||
+      snapshot?.shipping_contact_name ||
+      snapshot?.contact_name ||
+      snapshot?.contact_person ||
+      snapshot?.legal_rep_name ||
+      "";
+
+    const celular_contacto =
+      clientRecord?.shipping_phone ||
+      clientRecord?.shipping_cellphone ||
+      snapshot?.shipping_phone ||
+      snapshot?.shipping_cellphone ||
+      snapshot?.phone ||
+      "";
+
+    const email_cliente =
+      clientRecord?.client_email ||
+      snapshot?.client_email ||
+      snapshot?.email ||
+      "";
+
+    // ── Accesorios y observaciones: ingresados por el comercial en el formulario ──
+    // Respaldo: notes de la solicitud de compra.
+    const accesorios    = inspectionWindow?.accesorios    || "";
+    const observaciones = inspectionWindow?.observaciones || purchase?.notes || "";
+
     return {
-      nombre_cliente: snapshot?.commercial_name || snapshot?.name || snapshot?.client_name || "",
-      direccion_cliente: snapshot?.shipping_address || snapshot?.address || "",
-      persona_contacto: snapshot?.shipping_contact_name || snapshot?.contact_name || snapshot?.legal_rep_name || "",
-      celular_contacto: snapshot?.shipping_phone || snapshot?.shipping_cellphone || snapshot?.phone || "",
-      email_cliente: snapshot?.client_email || snapshot?.email || "",
-      fecha_instalacion: inspectionWindow?.inspection_min_date || addDaysIso(1),
-      fecha_tope_instalacion: inspectionWindow?.inspection_max_date || addDaysIso(7),
-      requiere_lis: Boolean(purchase?.includes_starter_kit),
+      nombre_cliente,
+      direccion_cliente,
+      persona_contacto,
+      celular_contacto,
+      email_cliente,
+      fecha_instalacion:       inspectionWindow?.inspection_min_date || addDaysIso(1),
+      fecha_tope_instalacion:  inspectionWindow?.inspection_max_date || addDaysIso(7),
+      requiere_lis:            Boolean(purchase?.includes_starter_kit),
       equipos,
-      anotaciones: "Inspección de ambiente generada automáticamente desde compra privada",
-      accesorios: "",
-      observaciones: purchase?.notes || "",
+      anotaciones:             accesorios || "Inspección de ambiente generada desde compra privada",
+      accesorios,
+      observaciones,
+      // Fijo por origen (no es eleccion del usuario), igual que en compra
+      // publica: la inspeccion de compras es operativa. "origen" permite a
+      // la bandeja "Independientes" de Solicitudes excluir esta fila.
+      tipo_inspeccion: "normal",
+      origen: "compras",
     };
   }
 
   async _notifyInspectionStakeholders(purchaseId, purchaseRow, user, message) {
     try {
       const creatorId = purchaseRow?.created_by || null;
-      const technicalRoles = ["jefe_tecnico", "jefe_servicio_tecnico", "tecnico"];
+      const technicalRoles = ["jefe_tecnico", "jefe_servicio", "jefe_servicio_tecnico", "tecnico"];
       const technicalUsers = await Promise.all(technicalRoles.map((role) => this._getUsersByRole(role)));
       const recipients = new Map();
 
@@ -3486,7 +4800,7 @@ class PrivatePurchasesService {
         if (u?.id) recipients.set(String(u.id), u.id);
       });
 
-      const title = "Inspección de ambiente - Compra privada";
+      const title = "InspecciÃ³n de ambiente - Compra privada";
       const notificationPayload = {
         client_name:
           purchaseRow?.client_snapshot?.commercial_name ||
@@ -3509,15 +4823,18 @@ class PrivatePurchasesService {
         });
       }
     } catch (error) {
-      logger.warn({ error, purchaseId }, "No se pudo notificar coordinación de inspección privada");
+      logger.warn({ error, purchaseId }, "No se pudo notificar coordinaciÃ³n de inspecciÃ³n privada");
     }
   }
 
-  async saveInspectionRequest(purchaseId, { requestId, actaDocumentId, inspection_min_date, inspection_max_date } = {}, user) {
+  async saveInspectionRequest(purchaseId, { requestId, actaDocumentId, inspection_min_date, inspection_max_date, accesorios, observaciones } = {}, user) {
+    // BC-17: bloquear si el expediente estÃ¡ pausado
+    await ensurePrivateExtraColumn();
+    await this._assertNotPaused(purchaseId);
     const { rows } = await db.query(
       `SELECT id, status, inspection_request_id, inspection_scheduled_date, inspection_min_date, inspection_max_date,
               created_by, created_by_email, client_snapshot, equipment, includes_starter_kit, notes, offer_kind,
-              offer_signed_document_id
+              business_case_id, extra, offer_signed_document_id
          FROM private_purchase_requests
         WHERE id = $1`,
       [purchaseId]
@@ -3555,10 +4872,51 @@ class PrivatePurchasesService {
 
     const minDate = inspection_min_date || purchase.inspection_min_date || addDaysIso(1);
     const maxDate = inspection_max_date || purchase.inspection_max_date || addDaysIso(7);
+
+    // ── Enriquecer con datos del cliente registrado ──────────────────────
+    // El F.ST-20 necesita dirección, contacto y teléfono de sitio que viven
+    // en client_requests y no en el snapshot inicial de la compra privada.
+    const clientRequestId = Number(
+      purchase.client_snapshot?.registered_client_id ||
+      purchase.client_snapshot?.client_request_id ||
+      null,
+    );
+    let clientRecord = null;
+    if (Number.isFinite(clientRequestId) && clientRequestId > 0) {
+      try {
+        const { rows: clientRows } = await db.query(
+          `SELECT id, commercial_name, shipping_address, shipping_contact_name,
+                  shipping_phone, shipping_cellphone, client_email, ruc_cedula
+             FROM client_requests
+            WHERE id = $1`,
+          [clientRequestId],
+        );
+        clientRecord = clientRows[0] || null;
+        if (clientRecord) {
+          logger.debug(
+            { purchaseId, clientRequestId },
+            '[INSPECTION][F.ST-20] Datos del cliente registrado obtenidos para enriquecer acta',
+          );
+        }
+      } catch (clientLookupErr) {
+        logger.warn(
+          { clientLookupErr, clientRequestId, purchaseId },
+          '[INSPECTION][F.ST-20] No se pudo obtener client_requests — se usará client_snapshot como respaldo',
+        );
+      }
+    } else {
+      logger.debug(
+        { purchaseId },
+        '[INSPECTION][F.ST-20] Sin registered_client_id en snapshot — usando solo client_snapshot para el acta',
+      );
+    }
+
     const payload = this._buildPrivateInspectionPayload(purchase, {
       inspection_min_date: minDate,
       inspection_max_date: maxDate,
-    });
+      accesorios,
+      observaciones,
+    }, clientRecord);
 
     let resolvedRequestId = requestId;
     if (!resolvedRequestId) {
@@ -3579,7 +4937,7 @@ class PrivatePurchasesService {
     }
 
     if (!resolvedRequestId) {
-      const error = new Error("No se pudo generar la solicitud de inspección");
+      const error = new Error("No se pudo generar la solicitud de inspecciÃ³n");
       error.status = 500;
       error.code = "INSPECTION_REQUEST_CREATE_FAILED";
       throw error;
@@ -3620,7 +4978,7 @@ class PrivatePurchasesService {
           title: "Oferta firmada del cliente",
         });
       } catch (attachmentError) {
-        logger.warn({ attachmentError, purchaseId }, "No se pudo adjuntar oferta firmada a inspección privada");
+        logger.warn({ attachmentError, purchaseId }, "No se pudo adjuntar oferta firmada a inspecciÃ³n privada");
       }
     }
 
@@ -3637,45 +4995,40 @@ class PrivatePurchasesService {
       purchaseId,
       updatedRows[0],
       user,
-      "Se creó la inspección de ambiente. Comercial debe coordinar fecha con Jefe Técnico/Técnico.",
+      "Se creÃ³ la inspecciÃ³n de ambiente. Comercial debe coordinar fecha con Jefe de Servicio.",
     );
 
     return updatedRows[0];
   }
 
-  async coordinateInspectionDate(purchaseId, { inspection_date, notes = '' } = {}, user) {
-    const canCoordinate = this._hasAnyRoleToken(user, [
-      'comercial',
-      'acp_comercial',
-      'jefe_comercial',
-    ]);
+  async coordinateInspectionDate(purchaseId, { inspection_date, notes = '', assigned_technician_id = null } = {}, user) {
+    await ensurePrivateExtraColumn();
+    const canCoordinate = this._hasAnyRoleToken(user, ['jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico']);
     if (!canCoordinate) {
-      const error = new Error('No autorizado para coordinar inspección');
+      const error = new Error('No autorizado para coordinar inspeccion');
       error.status = 403;
       error.code = 'ROLE_NOT_ALLOWED';
       throw error;
     }
 
     const { rows } = await db.query(
-      `SELECT id, status, inspection_request_id, inspection_min_date, inspection_max_date, client_snapshot, created_by
+      `SELECT id, status, inspection_request_id, inspection_min_date, inspection_max_date,
+              client_snapshot, equipment, created_by, created_by_email, offer_kind, business_case_id, extra
          FROM private_purchase_requests
         WHERE id = $1`,
       [purchaseId]
     );
-    if (!rows.length) {
-      throw new Error('Solicitud no encontrada');
-    }
+    if (!rows.length) throw new Error('Solicitud no encontrada');
     const purchase = rows[0];
 
     if (!purchase.inspection_request_id) {
-      const error = new Error('La inspección de ambiente aún no fue generada');
+      const error = new Error('La inspeccion de ambiente aun no fue generada');
       error.status = 409;
       error.code = 'INSPECTION_REQUIRED';
       throw error;
     }
-
     if (!inspection_date) {
-      const error = new Error('Debe seleccionar fecha coordinada de inspección');
+      const error = new Error('Debe seleccionar fecha coordinada de inspeccion');
       error.status = 400;
       error.code = 'INSPECTION_DATE_REQUIRED';
       throw error;
@@ -3685,13 +5038,14 @@ class PrivatePurchasesService {
     const min = purchase.inspection_min_date ? new Date(`${purchase.inspection_min_date}T00:00:00`) : null;
     const max = purchase.inspection_max_date ? new Date(`${purchase.inspection_max_date}T00:00:00`) : null;
     if (Number.isNaN(selected.getTime())) {
-      const error = new Error('Formato de fecha inválido');
+      const error = new Error('Formato de fecha invalido');
       error.status = 400;
       error.code = 'INVALID_DATE_FORMAT';
       throw error;
     }
-    if ((min && selected < min) || (max && selected > max)) {
-      const error = new Error('La fecha coordinada debe estar dentro de la ventana de inspección');
+    // sin min: puede adelantar la inspeccion, solo se bloquea pasarse del max
+    if (max && selected > max) {
+      const error = new Error('La fecha coordinada no puede ser posterior a la ventana de inspeccion');
       error.status = 409;
       error.code = 'INSPECTION_DATE_OUT_OF_WINDOW';
       throw error;
@@ -3703,18 +5057,23 @@ class PrivatePurchasesService {
       excludeInspectionRequestId: purchase.inspection_request_id || null,
     });
     if (conflictRows.length >= TECHNICAL_DAILY_CAPACITY) {
-      const error = new Error('El cronograma técnico está lleno para esa fecha. Selecciona otro día.');
+      const error = new Error('El cronograma tecnico esta lleno para esa fecha. Selecciona otro dia.');
       error.status = 409;
       error.code = 'TECHNICAL_SCHEDULE_FULL';
       error.details = {
         date: String(inspection_date || '').slice(0, 10),
         capacity: TECHNICAL_DAILY_CAPACITY,
         conflicts_count: conflictRows.length,
-        conflicts: conflictRows.map((item) => ({
-          source_type: item.source_type,
-          summary: item.summary,
-        })),
+        conflicts: conflictRows.map((item) => ({ source_type: item.source_type, summary: item.summary })),
       };
+      throw error;
+    }
+
+    const assignedTechnician = await this._getUserById(assigned_technician_id || user?.id);
+    if (!assignedTechnician || !this._hasAnyRoleToken(assignedTechnician, ['tecnico', 'ing_servicio', 'esp_app', 'jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico'])) {
+      const error = new Error('Debes asignar un tecnico valido para la inspeccion');
+      error.status = 409;
+      error.code = 'TECHNICAL_ASSIGNEE_INVALID';
       throw error;
     }
 
@@ -3725,36 +5084,87 @@ class PrivatePurchasesService {
              inspection_proposed_at = NOW(),
              inspection_proposed_by = $4,
              inspection_proposed_by_email = $5,
-             inspection_coordination_status = 'pending_review',
-             inspection_scheduled_date = NULL,
-             inspection_coordinated_at = NULL,
-             inspection_coordinated_by = NULL,
-             inspection_coordinated_by_email = NULL,
-             inspection_reviewed_at = NULL,
-             inspection_reviewed_by = NULL,
-             inspection_reviewed_by_email = NULL,
-             inspection_review_notes = NULL,
+             inspection_coordination_status = 'accepted',
+             inspection_scheduled_date = $2,
+             inspection_coordinated_at = NOW(),
+             inspection_coordinated_by = $4,
+             inspection_coordinated_by_email = $5,
+             inspection_reviewed_at = NOW(),
+             inspection_reviewed_by = $4,
+             inspection_reviewed_by_email = $5,
+             inspection_review_notes = $3,
              inspection_coordination_notes = $3,
+             extra = COALESCE(extra, '{}'::jsonb) || jsonb_build_object(
+               'inspection_assigned_technician_id', $6::integer,
+               'inspection_assigned_technician_email', $7::text,
+               'inspection_assigned_technician_name', $8::text
+             ),
              updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
-      [purchaseId, inspection_date, notes || null, user?.id || null, user?.email || null]
+      [
+        purchaseId,
+        inspection_date,
+        notes || null,
+        user?.id || null,
+        user?.email || null,
+        assignedTechnician.id || null,
+        assignedTechnician.email || null,
+        assignedTechnician.fullname || assignedTechnician.name || assignedTechnician.email || null,
+      ]
     );
+
+    const updated = updatedRows[0];
+    await this._upsertPrivateInspectionTechnicalActivity({
+      purchase: updated,
+      inspectionDate: inspection_date,
+      assignedTechnician,
+      chiefUser: user,
+    });
+
+    try {
+      const attendees = [assignedTechnician.email || null, user?.email || null, updated?.created_by_email || null].filter(Boolean);
+      const calendarEvent = await createAllDayEvent({
+        summary: `Inspeccion ambiente - ${updated?.client_snapshot?.commercial_name || updated?.client_snapshot?.name || 'cliente'}`,
+        description: [
+          `Compra privada #${updated.id}`,
+          `Tecnico asignado: ${assignedTechnician.fullname || assignedTechnician.name || assignedTechnician.email || 'N/D'}`,
+          `Jefe tecnico: ${user?.fullname || user?.name || user?.email || 'N/D'}`,
+        ].join('\n'),
+        date: inspection_date,
+        attendees,
+      });
+      if (calendarEvent?.id || calendarEvent?.htmlLink) {
+        const { rows: calendarRows } = await db.query(
+          `UPDATE private_purchase_requests
+              SET extra = COALESCE(extra, '{}'::jsonb) || jsonb_build_object(
+                    'inspection_calendar_event_id', $2::text,
+                    'inspection_calendar_event_link', $3::text
+                  ),
+                  updated_at = NOW()
+            WHERE id = $1
+            RETURNING *`,
+          [purchaseId, calendarEvent.id || null, calendarEvent.htmlLink || null],
+        );
+        if (calendarRows[0]) Object.assign(updated, calendarRows[0]);
+      }
+    } catch (calendarError) {
+      logger.warn({ calendarError, purchaseId }, 'No se pudo crear evento de calendario para inspeccion privada');
+    }
 
     await this._notifyInspectionStakeholders(
       purchaseId,
-      updatedRows[0],
+      updated,
       user,
-      `Comercial propuso fecha de inspección para ${inspection_date}. Pendiente validación de Jefe Técnico.`,
+      `Jefe Tecnico planifico la inspeccion para ${inspection_date} y asigno a ${assignedTechnician.fullname || assignedTechnician.name || assignedTechnician.email}.`,
     );
 
-    return updatedRows[0];
+    return updated;
   }
-
   async reviewInspectionDate(purchaseId, { decision, review_notes = '' } = {}, user) {
-    const canReview = this._hasAnyRoleToken(user, ['jefe_tecnico', 'jefe_servicio_tecnico']);
+    const canReview = this._hasAnyRoleToken(user, ['jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico']);
     if (!canReview) {
-      const error = new Error('No autorizado para revisar coordinación de inspección');
+      const error = new Error('No autorizado para revisar coordinaciÃ³n de inspecciÃ³n');
       error.status = 403;
       error.code = 'ROLE_NOT_ALLOWED';
       throw error;
@@ -3762,7 +5172,7 @@ class PrivatePurchasesService {
 
     const normalizedDecision = String(decision || '').toLowerCase();
     if (!['accept', 'reject'].includes(normalizedDecision)) {
-      const error = new Error("Decisión inválida. Usa 'accept' o 'reject'");
+      const error = new Error("DecisiÃ³n invÃ¡lida. Usa 'accept' o 'reject'");
       error.status = 400;
       error.code = 'INVALID_REVIEW_DECISION';
       throw error;
@@ -3780,13 +5190,13 @@ class PrivatePurchasesService {
     const purchase = rows[0];
 
     if (!purchase.inspection_request_id) {
-      const error = new Error('La inspección de ambiente aún no fue generada');
+      const error = new Error('La inspecciÃ³n de ambiente aÃºn no fue generada');
       error.status = 409;
       error.code = 'INSPECTION_REQUIRED';
       throw error;
     }
     if (!purchase.inspection_proposed_date) {
-      const error = new Error('No existe fecha propuesta pendiente de revisión');
+      const error = new Error('No existe fecha propuesta pendiente de revisiÃ³n');
       error.status = 409;
       error.code = 'INSPECTION_PROPOSAL_REQUIRED';
       throw error;
@@ -3815,7 +5225,7 @@ class PrivatePurchasesService {
         purchaseId,
         updatedRows[0],
         user,
-        `Jefe Técnico rechazó la fecha propuesta. ${review_notes || 'Comercial debe proponer otra fecha.'}`,
+        `Jefe TÃ©cnico rechazÃ³ la fecha propuesta. ${review_notes || 'Comercial debe proponer otra fecha.'}`,
       );
       return updatedRows[0];
     }
@@ -3826,7 +5236,7 @@ class PrivatePurchasesService {
       excludeInspectionRequestId: purchase.inspection_request_id || null,
     });
     if (conflictRows.length >= TECHNICAL_DAILY_CAPACITY) {
-      const error = new Error('El cronograma técnico está lleno para esa fecha.');
+      const error = new Error('El cronograma tÃ©cnico estÃ¡ lleno para esa fecha.');
       error.status = 409;
       error.code = 'TECHNICAL_SCHEDULE_FULL';
       error.details = {
@@ -3869,7 +5279,7 @@ class PrivatePurchasesService {
       purchaseId,
       updatedRows[0],
       user,
-      `Jefe Técnico aprobó la fecha de inspección para ${proposalDate}.`,
+      `Jefe TÃ©cnico aprobÃ³ la fecha de inspecciÃ³n para ${proposalDate}.`,
     );
 
     return updatedRows[0];
@@ -3890,7 +5300,7 @@ class PrivatePurchasesService {
     user,
   ) {
     await ensurePrivateSiteInspectionColumns();
-    const canRegister = this._hasAnyRoleToken(user, ["tecnico", "jefe_tecnico", "jefe_servicio_tecnico"]);
+    const canRegister = this._hasAnyRoleToken(user, ["tecnico", "jefe_tecnico", "jefe_servicio", "jefe_servicio_tecnico"]);
     if (!canRegister) {
       const error = new Error("No autorizado para registrar F.ST-07");
       error.status = 403;
@@ -3943,7 +5353,7 @@ class PrivatePurchasesService {
         Number.isFinite(currentMs) &&
         Math.abs(expectedMs - currentMs) > 1000
       ) {
-        const error = new Error("La solicitud cambió en otra sesión. Refresca e intenta nuevamente.");
+        const error = new Error("La solicitud cambiÃ³ en otra sesiÃ³n. Refresca e intenta nuevamente.");
         error.status = 409;
         error.code = "STALE_REQUEST_STATE";
         throw error;
@@ -3952,7 +5362,7 @@ class PrivatePurchasesService {
 
     if (!purchase.inspection_request_id || !purchase.inspection_scheduled_date) {
       throw createSiteInspectionError(
-        "Primero se debe coordinar la fecha exacta de inspección (F.ST-20)",
+        "Primero se debe coordinar la fecha exacta de inspecciÃ³n (F.ST-20)",
         {
           status: 409,
           code: "SITE_INSPECTION_NOT_COORDINATED",
@@ -3962,7 +5372,7 @@ class PrivatePurchasesService {
 
     const normalizedResult = normalizeInspectionResult(result);
     if (!normalizedResult) {
-      throw createSiteInspectionError("Debes indicar un resultado válido para la inspección en sitio", {
+      throw createSiteInspectionError("Debes indicar un resultado vÃ¡lido para la inspecciÃ³n en sitio", {
         status: 400,
         code: "SITE_INSPECTION_RESULT_REQUIRED",
       });
@@ -3981,7 +5391,7 @@ class PrivatePurchasesService {
         excludeInspectionRequestId: purchase.inspection_request_id || null,
       });
       if (conflicts.length >= TECHNICAL_DAILY_CAPACITY) {
-        const error = new Error("El cronograma técnico está lleno para la reinspección en esa fecha");
+        const error = new Error("El cronograma tÃ©cnico estÃ¡ lleno para la reinspecciÃ³n en esa fecha");
         error.status = 409;
         error.code = "TECHNICAL_SCHEDULE_FULL";
         error.details = {
@@ -4019,7 +5429,7 @@ class PrivatePurchasesService {
       purchase.client_snapshot,
       purchase.drive_folder_id,
     );
-    const siteInspectionFolder = await ensureFolder("Inspección de ambiente", baseFolderId);
+    const siteInspectionFolder = await ensureFolder("InspecciÃ³n de ambiente", baseFolderId);
 
     const { buffer: fst07Buffer, generatedAt } = await generateFst07PdfBuffer({
       clientName,
@@ -4056,10 +5466,10 @@ class PrivatePurchasesService {
         await addDriveAttachment({
           request_id: purchase.inspection_request_id,
           drive_file_id: reportFileId,
-          title: "F.ST-07 Inspección de Ambiente",
+          title: "F.ST-07 InspecciÃ³n de Ambiente",
         });
       } catch (attachmentError) {
-        logger.warn({ attachmentError, purchaseId }, "No se pudo adjuntar F.ST-07 a la solicitud técnica privada");
+        logger.warn({ attachmentError, purchaseId }, "No se pudo adjuntar F.ST-07 a la solicitud tÃ©cnica privada");
       }
     }
 
@@ -4155,6 +5565,12 @@ class PrivatePurchasesService {
       });
     } else if (normalizedResult === SITE_INSPECTION_RESULT.COMPLIANT) {
       await this._closePrivateReinspectionTechnicalActivity(purchaseId);
+      if (updated?.inspection_request_id) {
+        markRequestCompleted(updated.inspection_request_id, {
+          actorUser: user,
+          resultMeta: { source: "private_purchase_site_inspection", result: normalizedResult },
+        }).catch((err) => logger.warn({ err }, "No se pudo completar la solicitud F.ST-20 (compra privada)"));
+      }
     }
 
     await trackFst07WorkflowDocument({
@@ -4181,8 +5597,8 @@ class PrivatePurchasesService {
       updated,
       user,
       normalizedResult === SITE_INSPECTION_RESULT.COMPLIANT
-        ? "F.ST-07 registrado conforme. Se habilita instalación/entrega."
-        : `F.ST-07 no conforme. Reinspección requerida para ${normalizedFollowUpDate || "fecha pendiente"}.`,
+        ? "F.ST-07 registrado conforme. Se habilita instalaciÃ³n/entrega."
+        : `F.ST-07 no conforme. ReinspecciÃ³n requerida para ${normalizedFollowUpDate || "fecha pendiente"}.`,
     );
 
     return updated;
@@ -4231,6 +5647,7 @@ class PrivatePurchasesService {
     const allowedRoles = [
       "tecnico",
       "jefe_tecnico",
+      "jefe_servicio",
       "jefe_servicio_tecnico",
       "jefe_operaciones",
       "jefe_logistica",
@@ -4289,7 +5706,7 @@ class PrivatePurchasesService {
         Math.abs(expectedMs - currentMs) > 1000
       ) {
         throw createInstallationWorkflowError(
-          "La solicitud cambió en otra sesión. Refresca e intenta nuevamente.",
+          "La solicitud cambiÃ³ en otra sesiÃ³n. Refresca e intenta nuevamente.",
           {
             status: 409,
             code: "STALE_REQUEST_STATE",
@@ -4328,6 +5745,7 @@ class PrivatePurchasesService {
       const canVisualInspect = this._hasAnyRoleToken(user, [
         "tecnico",
         "jefe_tecnico",
+        "jefe_servicio",
         "jefe_servicio_tecnico",
       ]);
       if (!canVisualInspect) {
@@ -4342,7 +5760,7 @@ class PrivatePurchasesService {
         purchase.client_snapshot,
         purchase.drive_folder_id,
       );
-      const installationFolder = await ensureFolder("Instalación y entrega", baseFolderId);
+      const installationFolder = await ensureFolder("InstalaciÃ³n y entrega", baseFolderId);
       const reportFolder = await ensureFolder("F.ST-14", installationFolder?.id || baseFolderId);
 
       const photoPayload = Array.isArray(payload.photos) ? payload.photos : [];
@@ -4441,6 +5859,7 @@ class PrivatePurchasesService {
     } else if (normalizedAction === "verification_decision") {
       const canDecideVerification = this._hasAnyRoleToken(user, [
         "jefe_tecnico",
+        "jefe_servicio",
         "jefe_servicio_tecnico",
       ]);
       if (!canDecideVerification) {
@@ -4462,6 +5881,52 @@ class PrivatePurchasesService {
         workflow: currentWorkflow,
         payload,
         user,
+      });
+    } else if (normalizedAction === "verification_attempt") {
+      // Registra un intento del ciclo de verificacion F.ST-09 (solo aplica si
+      // verification_decision.applies === true). appendVerificationAttempt ya
+      // estaba implementado en installationWorkflow.service.js pero nunca se
+      // conecto a ninguna accion -- no habia forma de registrar un intento.
+      const canRegisterVerification = this._hasAnyRoleToken(user, [
+        "tecnico",
+        "jefe_tecnico",
+        "jefe_servicio",
+        "jefe_servicio_tecnico",
+      ]);
+      if (!canRegisterVerification) {
+        throw createInstallationWorkflowError("Solo el equipo tecnico puede registrar la verificacion F.ST-09", {
+          status: 403,
+          code: "FORBIDDEN",
+        });
+      }
+
+      let attemptFileId = payload.document_file_id || payload.file_id || null;
+      let attemptFileLink = payload.document_link || payload.link || null;
+      if (!attemptFileId && payload.file_base64 && payload.file_name) {
+        const baseFolderId = await this._ensureDriveFolder(
+          purchaseId,
+          purchase.client_snapshot,
+          purchase.drive_folder_id,
+        );
+        const installationFolder = await ensureFolder("Instalacion y entrega", baseFolderId);
+        const verificationFolder = await ensureFolder("F.ST-09", installationFolder?.id || baseFolderId);
+        const stored = await uploadBase64File(
+          payload.file_name,
+          String(payload.file_base64).includes(",")
+            ? String(payload.file_base64).split(",")[1]
+            : String(payload.file_base64),
+          payload.mime_type || "application/pdf",
+          verificationFolder?.id || baseFolderId,
+        );
+        attemptFileId = stored?.id || null;
+        attemptFileLink = stored?.webViewLink || (attemptFileId ? driveLink(attemptFileId) : null);
+      }
+
+      nextWorkflow = appendVerificationAttempt({
+        workflow: currentWorkflow,
+        payload,
+        user,
+        document: { file_id: attemptFileId, link: attemptFileLink },
       });
     } else if (normalizedAction === "cu_provider_report") {
       let fileId = payload.provider_repair_report_file_id || payload.file_id || null;
@@ -4572,6 +6037,14 @@ class PrivatePurchasesService {
   }
 
   async uploadDeliveryGuides(purchaseId, { guides = [] } = {}, user) {
+    const canExecute = this._hasAnyRoleToken(user, ['jefe_logistica', 'logistica', 'jefe_comercial', 'gerencia', 'acp_comercial']);
+    if (!canExecute) {
+      const error = new Error('Solo logistica puede subir guias de entrega');
+      error.status = 403;
+      error.code = 'ROLE_NOT_ALLOWED';
+      throw error;
+    }
+
     if (!Array.isArray(guides) || guides.length === 0) {
       const error = new Error('Debe adjuntar al menos una guia');
       error.status = 400;
@@ -4641,7 +6114,7 @@ class PrivatePurchasesService {
     let params = [];
     let paramIndex = 1;
 
-    // Aplicar filtros básicos
+    // Aplicar filtros bÃ¡sicos
     const normalizedStatusFilter = this._normalizeStatusFilter(filters.status);
     if (normalizedStatusFilter) {
       whereClause += ` AND status = $${paramIndex}`;
@@ -4792,7 +6265,7 @@ class PrivatePurchasesService {
   }
 
   /**
-   * Obtener estadรญsticas por rol
+   * Obtener estadà¸£à¸sticas por rol
    */
   async getStatsByRole(user, role) {
     let statusFilter = '';
@@ -4836,7 +6309,7 @@ class PrivatePurchasesService {
   }
 
   /**
-   * Consultar estado de aprobación de cliente
+   * Consultar estado de aprobaciÃ³n de cliente
    */
   async checkClientApprovalStatus(clientData, purchase = {}) {
     const clientRequestId =
@@ -5096,11 +6569,15 @@ class PrivatePurchasesService {
     const { rows: clientRows } = await db.query(
       `SELECT
           id,
+          status,
+          approved_at,
           commercial_name,
           ruc_cedula,
+          client_email,
           establishment_name,
           establishment_address,
           establishment_phone,
+          establishment_cellphone,
           shipping_contact_name,
           shipping_address,
           shipping_phone,
@@ -5185,19 +6662,19 @@ class PrivatePurchasesService {
       case PRIVATE_PURCHASE_STATES.CLIENT_REGISTRATION_REQUESTED:
         return {
           action: "wait_client_registration",
-          action_label: "Esperar aprobación del registro del cliente",
+          action_label: "Esperar aprobaciÃ³n del registro del cliente",
           requirements: ["client_registered"],
         };
       case PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED:
         return {
           action: "auto_inspection_creation",
-          action_label: "Generación automática de inspección",
+          action_label: "GeneraciÃ³n automÃ¡tica de inspecciÃ³n",
           requirements: ["client_registered", "inspection_requested", "inspection_window_defined"],
         };
       case PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED:
         return {
           action: "coordinate_inspection_then_upload_contract",
-          action_label: "Coordinar inspección y subir contrato borrador",
+          action_label: "Coordinar inspecciÃ³n y subir contrato borrador",
           requirements: [
             "inspection_requested",
             "inspection_window_defined",
@@ -5214,7 +6691,7 @@ class PrivatePurchasesService {
       case PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_APPROVAL:
         return {
           action: "manager_review",
-          action_label: "Revisión de gerencia",
+          action_label: "RevisiÃ³n de gerencia",
           requirements: [
             "client_registered",
             "inspection_act_uploaded",
@@ -5632,6 +7109,279 @@ class PrivatePurchasesService {
       logger.warn('[PRIVATE_PURCHASE] Error obteniendo usuarios por rol:', error.message);
       return [];
     }
+  }
+
+  // ----------------------------------------------------------
+  // WORKFLOW ALIGNMENT â€” supply_control_type
+  // ----------------------------------------------------------
+
+  _deriveSupplyControlType(offerKind, hasCommercialDeliverables = false) {
+    const kind = String(offerKind || '').trim().toLowerCase();
+    if (kind === 'comodato') return 'bc_maximums';
+    if (['venta', 'alquiler', 'alquiler_transferencia_dominio'].includes(kind)) {
+      return hasCommercialDeliverables ? 'commercial_deliverables' : 'none';
+    }
+    return 'pending';
+  }
+
+  async setSupplyControlType(purchaseId, user, { controlType, hasCommercialDeliverables = false } = {}) {
+    const { rows } = await db.query(
+      `SELECT id, offer_kind, supply_control_type, status, created_by FROM private_purchase_requests WHERE id = $1 LIMIT 1`,
+      [purchaseId]
+    );
+    if (!rows.length) {
+      const err = new Error('Solicitud de compra privada no encontrada');
+      err.status = 404;
+      err.code = 'PRIVATE_PURCHASE_NOT_FOUND';
+      throw err;
+    }
+    const row = rows[0];
+
+    const derived = controlType
+      ? String(controlType).trim()
+      : this._deriveSupplyControlType(row.offer_kind, hasCommercialDeliverables);
+
+    const allowed = ['bc_maximums', 'commercial_deliverables', 'none', 'open_orders'];
+    if (!allowed.includes(derived)) {
+      const err = new Error(`supply_control_type invÃ¡lido: ${derived}. Valores: ${allowed.join(', ')}`);
+      err.status = 400;
+      err.code = 'INVALID_SUPPLY_CONTROL_TYPE';
+      throw err;
+    }
+
+    const { rows: updated } = await db.query(
+      `UPDATE private_purchase_requests
+          SET supply_control_type = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING id, offer_kind, supply_control_type, status`,
+      [derived, purchaseId]
+    );
+
+    // open_orders: auto-create ceiling with 4 predefined lines (no max)
+    if (derived === 'open_orders') {
+      try {
+        const { createOpenOrderCeiling } = require('../delivery-requests/deliveryRequests.service');
+        await createOpenOrderCeiling(purchaseId);
+      } catch (ceilingErr) {
+        logger.warn({ ceilingErr, purchaseId }, '[PRIVATE_PURCHASE] No se pudo crear open_order ceiling');
+      }
+    }
+
+    const typeLabels = {
+      bc_maximums:             'MÃ¡ximos del BC',
+      commercial_deliverables: 'Entregables comerciales',
+      open_orders:             'Pedidos abiertos (reactivos/calibradores/controles/materiales)',
+      none:                    'Sin control de insumos',
+    };
+
+    try {
+      await notificationManager.sendNotification({
+        userId: row.created_by,
+        customTitle: 'Control de insumos activado',
+        customMessage: `La solicitud quedÃ³ en modo "${typeLabels[derived] || derived}".`,
+        type: 'info',
+        source: 'private_purchase_supply_control',
+        priority: 1,
+        data: { purchase_id: purchaseId, supply_control_type: derived },
+        email: true,
+        chat: false,
+      });
+    } catch (notifyErr) {
+      logger.warn({ notifyErr, purchaseId }, '[PRIVATE_PURCHASE] No se pudo notificar activaciÃ³n de control de insumos');
+    }
+
+    return updated[0];
+  }
+
+  // ----------------------------------------------------------
+  // WORKFLOW ALIGNMENT â€” serial_status
+  // ----------------------------------------------------------
+
+  async registerSerial(purchaseId, user, { serialNumber, unitId = null } = {}) {
+    const { rows } = await db.query(
+      `SELECT id, serial_status, status, created_by, client_snapshot, equipment FROM private_purchase_requests WHERE id = $1 LIMIT 1`,
+      [purchaseId]
+    );
+    if (!rows.length) {
+      const err = new Error('Solicitud de compra privada no encontrada');
+      err.status = 404;
+      err.code = 'PRIVATE_PURCHASE_NOT_FOUND';
+      throw err;
+    }
+    const row = rows[0];
+
+    if (row.serial_status !== 'received_pending_serial') {
+      const err = new Error(
+        `El serial solo se registra cuando el equipo ha sido recibido fÃ­sicamente. Estado actual: ${row.serial_status || 'not_applicable_yet'}`
+      );
+      err.status = 409;
+      err.code = 'SERIAL_NOT_ALLOWED_YET';
+      err.details = {
+        current_serial_status: row.serial_status || 'not_applicable_yet',
+        required_serial_status: 'received_pending_serial',
+        hint: 'Primero registra la llegada fÃ­sica del equipo (mark-equipment-arrived).',
+      };
+      throw err;
+    }
+
+    if (!serialNumber || !String(serialNumber).trim()) {
+      const err = new Error('El nÃºmero de serie es obligatorio');
+      err.status = 400;
+      err.code = 'SERIAL_NUMBER_REQUIRED';
+      throw err;
+    }
+
+    const { rows: updated } = await db.query(
+      `UPDATE private_purchase_requests
+          SET serial_status = 'serial_registered',
+              extra = COALESCE(extra, '{}'::jsonb) || jsonb_build_object(
+                'serial_number', $1::text,
+                'serial_registered_at', NOW()::text,
+                'serial_registered_by', $2::integer,
+                'unit_id', $3::text
+              ),
+              updated_at = NOW()
+        WHERE id = $4
+        RETURNING id, serial_status, extra, status`,
+      [
+        String(serialNumber).trim(),
+        user?.id || null,
+        unitId ? String(unitId) : null,
+        purchaseId,
+      ]
+    );
+
+    try {
+      await notificationManager.sendNotification({
+        userId: row.created_by,
+        customTitle: 'NÃºmero de serie registrado',
+        customMessage: `Serie ${serialNumber} registrada para la solicitud de compra privada.`,
+        type: 'success',
+        source: 'private_purchase_serial',
+        priority: 1,
+        data: { purchase_id: purchaseId, serial_number: serialNumber },
+        email: true,
+        chat: false,
+      });
+    } catch (notifyErr) {
+      logger.warn({ notifyErr, purchaseId }, '[PRIVATE_PURCHASE] No se pudo notificar registro de serial');
+    }
+
+    return updated[0];
+  }
+
+  // ----------------------------------------------------------
+  // WORKFLOW ALIGNMENT â€” notificaciÃ³n supply bloqueado
+  // ----------------------------------------------------------
+
+  async notifySupplyBlocked(purchaseId, { itemName, maxQuantity, sentQty, requestedBy } = {}) {
+    try {
+      const { rows } = await db.query(
+        `SELECT created_by FROM private_purchase_requests WHERE id = $1 LIMIT 1`,
+        [purchaseId]
+      );
+      const userIds = [rows[0]?.created_by, requestedBy].filter(Boolean);
+      await Promise.all(userIds.map((userId) =>
+        notificationManager.sendNotification({
+          userId,
+          customTitle: 'Solicitud de insumo bloqueada',
+          customMessage: `No se puede solicitar "${itemName}": saldo agotado. MÃ¡ximo: ${maxQuantity}, Enviado: ${sentQty}.`,
+          type: 'warning',
+          source: 'private_purchase_supply_blocked',
+          priority: 2,
+          data: { purchase_id: purchaseId, item_name: itemName, max_quantity: maxQuantity, sent_qty: sentQty },
+          email: true,
+          chat: true,
+        })
+      ));
+    } catch (err) {
+      logger.warn({ err, purchaseId }, '[PRIVATE_PURCHASE] No se pudo notificar bloqueo de insumo');
+    }
+  }
+
+  /**
+   * Devuelve la carga de inspecciones por técnico para una fecha concreta.
+   * Usado por el planificador del Jefe Técnico para saber cuántas visitas
+   * tiene asignadas cada técnico en el día seleccionado.
+   *
+   * @param {string} date  — ISO date string (YYYY-MM-DD)
+   * @returns {Array<{ technician_id, technician_name, technician_email, count, purchases }>}
+   */
+  async getTechnicianInspectionLoad(date) {
+    await ensurePrivateExtraColumn();
+    const dateKey = String(date || '').slice(0, 10);
+    if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return { by_technician: [], technicians: [], total_public_unassigned: 0, date: '' };
+
+    // ── 1. Todos los usuarios técnicos activos ────────────────────────────
+    const { rows: allTechs } = await db.query(
+      `SELECT id, email, fullname, name, role
+         FROM users
+        WHERE active = true
+          AND lower(role) IN ('tecnico', 'ing_servicio', 'jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico')
+        ORDER BY
+          CASE WHEN lower(role) IN ('jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico') THEN 0 ELSE 1 END,
+          fullname NULLS LAST, email ASC`,
+    );
+
+    // ── 2. Inspecciones privadas programadas ese día ──────────────────────
+    // Usamos status::text para evitar errores de enum con valores desconocidos.
+    const { rows: privateRows } = await db.query(
+      `SELECT
+          (extra->>'inspection_assigned_technician_id')::int  AS technician_id,
+          id::text                                            AS purchase_id,
+          client_snapshot->>'commercial_name'                 AS client_name
+       FROM private_purchase_requests
+       WHERE inspection_scheduled_date::date = $1::date
+         AND status::text NOT IN ('delivered_signed', 'rejected')
+         AND extra->>'inspection_assigned_technician_id' IS NOT NULL`,
+      [dateKey],
+    );
+
+    // ── 3. Compras públicas sin técnico asignado ese día ──────────────────
+    const { rows: publicRows } = await db.query(
+      `SELECT COUNT(*)::int AS total_public
+       FROM equipment_purchase_requests
+       WHERE inspection_scheduled_date::date = $1::date
+         AND (status IS NULL OR status::text NOT IN ('completed', 'cancelled', 'delivered'))`,
+      [dateKey],
+    ).catch(() => ({ rows: [{ total_public: 0 }] }));
+
+    // ── 4. Construir mapa de carga por técnico ────────────────────────────
+    const loadMap = {};
+    for (const row of privateRows) {
+      const key = String(row.technician_id || 'unknown');
+      if (!loadMap[key]) loadMap[key] = { count: 0, purchases: [] };
+      loadMap[key].count++;
+      loadMap[key].purchases.push({ id: row.purchase_id, client: row.client_name });
+    }
+
+    // ── 5. Unificar: todos los técnicos con su carga (0 si no tienen) ─────
+    const by_technician = allTechs.map((tech) => {
+      const load = loadMap[String(tech.id)] || { count: 0, purchases: [] };
+      return {
+        technician_id:    tech.id,
+        technician_name:  tech.fullname || tech.name || tech.email,
+        technician_email: tech.email,
+        role:             tech.role,
+        count:            load.count,
+        purchases:        load.purchases,
+      };
+    });
+
+    return {
+      // by_technician: todos los técnicos con carga del día (0 si no tienen)
+      by_technician,
+      // technicians: misma lista, formato compatible con el selector del PlanModal
+      technicians: allTechs.map((t) => ({
+        id:       t.id,
+        email:    t.email,
+        role:     t.role,
+        fullname: t.fullname || t.name || t.email,
+        name:     t.fullname || t.name || t.email,
+      })),
+      total_public_unassigned: publicRows[0]?.total_public || 0,
+      date: dateKey,
+    };
   }
 
 }

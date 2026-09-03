@@ -467,7 +467,7 @@ async function list({
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
   const listSql = `
-    SELECT p.*
+    SELECT p.*, COUNT(*) OVER()::int AS total_count
     FROM public.public_delivery_plan p
     ${whereSql}
     ORDER BY p.updated_at DESC, p.id DESC
@@ -475,16 +475,9 @@ async function list({
     OFFSET $${params.length + 2}
   `;
 
-  const countSql = `
-    SELECT COUNT(*)::int AS total
-    FROM public.public_delivery_plan p
-    ${whereSql}
-  `;
-
-  const [listResult, countResult] = await Promise.all([
-    db.query(listSql, [...params, safeLimit, offset]),
-    db.query(countSql, params),
-  ]);
+  const { rows: rawRows } = await db.query(listSql, [...params, safeLimit, offset]);
+  const total = rawRows.length > 0 ? rawRows[0].total_count : 0;
+  const listResult = { rows: rawRows.map(({ total_count, ...row }) => row) };
 
   const planIds = listResult.rows.map((row) => Number(row.id));
   const linesByPlan = new Map();
@@ -510,7 +503,7 @@ async function list({
   return {
     page: safePage,
     limit: safeLimit,
-    total: Number(countResult.rows[0]?.total || 0),
+    total,
     rows: listResult.rows.map((row) => ({
       ...mapPlan(row),
       lines: linesByPlan.get(Number(row.id)) || [],

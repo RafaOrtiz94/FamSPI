@@ -27,6 +27,11 @@ import { fetchClients } from "../../core/api/clientsApi";
 import { getPendientes } from "../../core/api/permisosApi";
 import { getCollaboratorStats } from "../../core/api/collaboratorsApi";
 import { usePurchaseSSE } from "../../core/hooks/usePurchaseSSE";
+import {
+  getAttendanceNonCompliance,
+  getAttendanceRange,
+  scheduleAttendanceFollowUpMeeting,
+} from "../../core/api/attendanceApi";
 
 const Dashboard = () => {
  const { showToast, showLoader, hideLoader } = useUI();
@@ -38,6 +43,12 @@ const Dashboard = () => {
  const [vacationPending, setVacationPending] = useState(0);
  const [profilePercent, setProfilePercent] = useState(0);
  const [pendingRequests, setPendingRequests] = useState([]);
+ const [attendanceTodaySummary, setAttendanceTodaySummary] = useState(null);
+ const [nonComplianceRows, setNonComplianceRows] = useState([]);
+ const [nonComplianceDays, setNonComplianceDays] = useState(7);
+ const [meetingDateByUser, setMeetingDateByUser] = useState({});
+ const [meetingTimeByUser, setMeetingTimeByUser] = useState({});
+ const [schedulingUserId, setSchedulingUserId] = useState(null);
  const reportRef = React.useRef();
 
  const quickAccess = useMemo(
@@ -79,6 +90,19 @@ const Dashboard = () => {
  getPendientes("pending"),
  getCollaboratorStats(),
  ]);
+ const nonCompliance = await getAttendanceNonCompliance(nonComplianceDays);
+ setNonComplianceRows(Array.isArray(nonCompliance?.data) ? nonCompliance.data : []);
+ const today = new Date();
+ const yyyy = today.getFullYear();
+ const mm = String(today.getMonth() + 1).padStart(2, "0");
+ const dd = String(today.getDate()).padStart(2, "0");
+ const todayIso = `${yyyy}-${mm}-${dd}`;
+ const attendanceToday = await getAttendanceRange({
+  startDate: todayIso,
+  endDate: todayIso,
+  userId: "all",
+ });
+ setAttendanceTodaySummary(attendanceToday?.summary || null);
 
  const totalClients = clients?.summary?.total || (clients?.clients?.length || 0);
  setClientsCount(totalClients);
@@ -102,6 +126,38 @@ const Dashboard = () => {
  setLoading(false);
  }
  };
+
+ const reloadNonCompliance = useCallback(async () => {
+  try {
+   const response = await getAttendanceNonCompliance(nonComplianceDays);
+   setNonComplianceRows(Array.isArray(response?.data) ? response.data : []);
+  } catch (error) {
+   console.error(error);
+   showToast("No se pudo consultar incumplimientos de horario", "error");
+  }
+ }, [nonComplianceDays, showToast]);
+
+ const handleScheduleMeeting = useCallback(async (row) => {
+  if (!row?.user_id) return;
+  const selectedDate = meetingDateByUser[row.user_id] || String(row.date || "").slice(0, 10);
+  const selectedTime = meetingTimeByUser[row.user_id] || "09:30";
+  setSchedulingUserId(row.user_id);
+  try {
+   const result = await scheduleAttendanceFollowUpMeeting(row.user_id, {
+    date: selectedDate,
+    start_time: selectedTime,
+    duration_minutes: 30,
+    reason: `Seguimiento gerencial por incumplimiento de horario: ${row.breach_label || "Incumplimiento"}`,
+   });
+   showToast(result?.message || "Reunión agendada correctamente", "success");
+   await reloadNonCompliance();
+  } catch (error) {
+   console.error(error);
+   showToast(error?.response?.data?.message || "No se pudo agendar la reunión", "error");
+  } finally {
+   setSchedulingUserId(null);
+  }
+ }, [meetingDateByUser, meetingTimeByUser, reloadNonCompliance, showToast]);
 
  const handlePurchaseEvent = useCallback(() => {
  refreshPurchaseStats().catch((error) => {
@@ -255,6 +311,116 @@ const Dashboard = () => {
  </div>
  </div>
  ))}
+ </div>
+ )}
+ </section>
+
+ <section className="mb-8">
+ <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+ <h2 className="text-base font-semibold text-gray-900">Reporte de asistencia (hoy)</h2>
+ <a
+  href="/dashboard/talento-humano/asistencia-reportes"
+  className="text-xs font-semibold text-blue-600 hover:underline"
+ >
+  Abrir reporte completo
+ </a>
+ </div>
+ <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+ <div className="rounded-xl border border-slate-200 bg-white p-3">
+ <p className="text-[11px] text-slate-500">Registros</p>
+ <p className="text-lg font-semibold text-slate-900">{attendanceTodaySummary?.total || 0}</p>
+ </div>
+ <div className="rounded-xl border border-slate-200 bg-white p-3">
+ <p className="text-[11px] text-slate-500">Sin entrada</p>
+ <p className="text-lg font-semibold text-slate-900">{attendanceTodaySummary?.byStatus?.no_entry || 0}</p>
+ </div>
+ <div className="rounded-xl border border-slate-200 bg-white p-3">
+ <p className="text-[11px] text-slate-500">Jornada abierta</p>
+ <p className="text-lg font-semibold text-slate-900">{attendanceTodaySummary?.byStatus?.working || 0}</p>
+ </div>
+ <div className="rounded-xl border border-slate-200 bg-white p-3">
+ <p className="text-[11px] text-slate-500">Jornada cerrada</p>
+ <p className="text-lg font-semibold text-slate-900">{attendanceTodaySummary?.byStatus?.completed || 0}</p>
+ </div>
+ </div>
+ </section>
+
+ <section className="mb-8">
+ <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+ <h2 className="text-base font-semibold text-gray-900">Incumplimientos de horario</h2>
+ <div className="flex items-center gap-2">
+ <label className="text-xs text-slate-600">Últimos días</label>
+ <select
+  value={nonComplianceDays}
+  onChange={(event) => setNonComplianceDays(Number(event.target.value))}
+  className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"
+ >
+  <option value={3}>3</option>
+  <option value={7}>7</option>
+  <option value={14}>14</option>
+  <option value={30}>30</option>
+ </select>
+ <Button variant="secondary" size="sm" onClick={reloadNonCompliance}>
+  Consultar
+ </Button>
+ </div>
+ </div>
+ {nonComplianceRows.length === 0 ? (
+ <div className="rounded-xl border border-dashed border-slate-200 p-4 text-xs text-slate-500">
+ Sin incumplimientos en el periodo seleccionado.
+ </div>
+ ) : (
+ <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+ <table className="min-w-full text-xs">
+ <thead className="bg-slate-50 text-slate-600">
+ <tr>
+ <th className="px-2 py-2 text-left">Fecha</th>
+ <th className="px-2 py-2 text-left">Colaborador</th>
+ <th className="px-2 py-2 text-left">Incumplimiento</th>
+ <th className="px-2 py-2 text-left">Atraso</th>
+ <th className="px-2 py-2 text-left">Almuerzo</th>
+ <th className="px-2 py-2 text-left">Reunión</th>
+ </tr>
+ </thead>
+ <tbody>
+ {nonComplianceRows.map((row) => (
+ <tr key={`${row.user_id}-${row.date}-${row.breach_type}`} className="border-t border-slate-100">
+ <td className="px-2 py-2">{String(row.date || "").slice(0, 10)}</td>
+ <td className="px-2 py-2">
+ <div className="font-medium text-slate-900">{row.fullname || "Sin nombre"}</div>
+ <div className="text-[10px] text-slate-500">{row.email || "-"}</div>
+ </td>
+ <td className="px-2 py-2">{row.breach_label || "Incumplimiento"}</td>
+ <td className="px-2 py-2">{row.late_minutes ? `${row.late_minutes} min` : "-"}</td>
+ <td className="px-2 py-2">{row.lunch_minutes ? `${row.lunch_minutes} min` : "-"}</td>
+ <td className="px-2 py-2">
+ <div className="flex flex-wrap items-center gap-2">
+ <input
+  type="date"
+  value={meetingDateByUser[row.user_id] || String(row.date || "").slice(0, 10)}
+  onChange={(e) => setMeetingDateByUser((prev) => ({ ...prev, [row.user_id]: e.target.value }))}
+  className="rounded border border-slate-300 px-2 py-1 text-[10px]"
+ />
+ <input
+  type="time"
+  value={meetingTimeByUser[row.user_id] || "09:30"}
+  onChange={(e) => setMeetingTimeByUser((prev) => ({ ...prev, [row.user_id]: e.target.value }))}
+  className="rounded border border-slate-300 px-2 py-1 text-[10px]"
+ />
+ <Button
+  variant="primary"
+  size="sm"
+  onClick={() => handleScheduleMeeting(row)}
+  disabled={schedulingUserId === row.user_id}
+ >
+  {schedulingUserId === row.user_id ? "Agendando..." : "Agendar"}
+ </Button>
+ </div>
+ </td>
+ </tr>
+ ))}
+ </tbody>
+ </table>
  </div>
  )}
  </section>

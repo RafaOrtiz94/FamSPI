@@ -279,13 +279,8 @@ const HRPersonnelRequestsWidget = ({ onReviewRequest }) => {
  </div>
 
  <div className="border-t border-gray-200 pt-3 text-sm text-gray-700">
- <p className="font-medium text-gray-900 mb-2">Condiciones laborales</p>
- <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
- <div>Horario: {selectedRequest.work_schedule || "N/A"}</div>
- <div>Rango salarial: {selectedRequest.salary_range || "N/A"}</div>
- <div>Ubicacion: {selectedRequest.work_location || "N/A"}</div>
- <div>Beneficios: {selectedRequest.benefits || "N/A"}</div>
- </div>
+ <p className="font-medium text-gray-900 mb-2">Sitio a laborar</p>
+ <div>Ciudad: {selectedRequest.work_location || "N/A"}</div>
  </div>
 
  {canApprove && (

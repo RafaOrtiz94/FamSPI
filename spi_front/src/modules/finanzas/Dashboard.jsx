@@ -7,6 +7,8 @@ import {
     FiClipboard,
     FiShield,
     FiUser,
+    FiBarChart2,
+    FiUserPlus,
 } from "react-icons/fi";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -14,11 +16,16 @@ import Card from "../../core/ui/components/Card";
 import ActionCard from "../../core/ui/patterns/ActionCard";
 import PermisosStatusWidget from "../shared/solicitudes/components/PermisosStatusWidget";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
+import { useAuth } from "../../core/auth/AuthContext";
 
 const DashboardFinanzas = () => {
     const navigate = useNavigate();
     const location = useLocation();
+    const { user } = useAuth();
     const handleRefresh = useCallback(() => { }, []);
+    // Capacidad puntual otorgada via extra_roles (ver migrations/276_users_extra_roles.sql),
+    // no un cambio de rol -- solo el/los usuarios con esta capacidad ven la tarjeta.
+    const canReviewClientRequests = Array.isArray(user?.extra_roles) && user.extra_roles.includes("backoffice_comercial");
 
     return (
         <DashboardLayout includeWidgets={false}>
@@ -44,6 +51,13 @@ const DashboardFinanzas = () => {
                     onClick={() => navigate("/dashboard/finanzas/viaticos")}
                 />
                 <ActionCard
+                    icon={FiBarChart2}
+                    subtitle="Activos TI"
+                    title="Activos Tecnologicos"
+                    color="indigo"
+                    onClick={() => navigate("/dashboard/ti/activos")}
+                />
+                <ActionCard
                     icon={FiPieChart}
                     subtitle="Control"
                     title="Asistencia Reportes"
@@ -64,6 +78,15 @@ const DashboardFinanzas = () => {
                     color="orange"
                     onClick={() => navigate("/dashboard/auditoria/preparacion")}
                 />
+                {canReviewClientRequests && (
+                    <ActionCard
+                        icon={FiUserPlus}
+                        subtitle="Comercial"
+                        title="Solicitudes de Clientes"
+                        color="indigo"
+                        onClick={() => navigate("/dashboard/backoffice/client-requests")}
+                    />
+                )}
             </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

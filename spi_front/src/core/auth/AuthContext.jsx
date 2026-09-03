@@ -8,6 +8,8 @@ import {
  hasRefreshToken,
  clearTokens,
 } from "../api/authApi";
+import { isTransientApiError } from "../api/index";
+import { readCachedResource, writeCachedResource } from "../pwa/localCache";
 
 /**
  * ============================================================
@@ -19,12 +21,15 @@ import {
  * ============================================================
  */
 export const AuthContext = createContext();
+const AUTH_PROFILE_CACHE_KEY = "auth_profile";
+const ATTENDANCE_MARK_PATH_PREFIX = "/asistencia/marcar";
 
 export const AuthProvider = ({ children }) => {
  const [user, setUser] = useState(null);
  const [isAuthenticated, setIsAuthenticated] = useState(false);
  const [loading, setLoading] = useState(true);
  const sessionTimerRef = useRef(null);
+ const profileEnrichmentPromiseRef = useRef(null);
 
  const redirectToLogin = (error = null) => {
  if (!window.location.pathname.startsWith("/login")) {
@@ -40,12 +45,50 @@ export const AuthProvider = ({ children }) => {
  }
  };
 
- const forceLogoutAndRedirect = (error = null) => {
+ const isAttendanceMarkingPath = () => {
+ if (typeof window === "undefined") return false;
+ return String(window.location.pathname || "").startsWith(ATTENDANCE_MARK_PATH_PREFIX);
+ };
+
+ const readRecoverableCachedUser = () =>
+  JSON.parse(localStorage.getItem("user") || "null") ||
+  readCachedResource(AUTH_PROFILE_CACHE_KEY)?.data ||
+  null;
+
+ const recoverTransientAttendanceSession = (cachedUser, reason = "transient-network") => {
+ if (!cachedUser || !isAttendanceMarkingPath() || !hasRefreshToken()) {
+  return null;
+ }
+
+ console.warn(`⚠️ Sesión recuperada localmente para marcación (${reason}).`);
+ setUser(cachedUser);
+ setIsAuthenticated(true);
+ setLoading(false);
+ return cachedUser;
+ };
+
+ // Fase 2 (Plan Maestro Asistencia): distingue "sesion expirada" (recordamos
+ // a donde volver) de "logout manual" (el usuario decidio salir, no hay que
+ // reofrecer continuidad). manual=true => no guarda redirectTo ni marca error.
+ const forceLogoutAndRedirect = (error = null, { manual = false } = {}) => {
  clearSessionTimer();
  setUser(null);
  setIsAuthenticated(false);
  clearTokens();
+
+ if (manual) {
+ sessionStorage.removeItem("redirectTo");
  redirectToLogin(error);
+ return;
+ }
+
+ if (!window.location.pathname.startsWith("/login")) {
+ const currentPath = window.location.pathname + window.location.search;
+ if (currentPath && currentPath !== "/") {
+ sessionStorage.setItem("redirectTo", currentPath);
+ }
+ }
+ redirectToLogin(error || "session_expired");
  };
 
  const decodeJwtExp = (token) => {
@@ -55,6 +98,16 @@ export const AuthProvider = ({ children }) => {
  const decoded = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
  return decoded?.exp ? Number(decoded.exp) : null;
  } catch (err) {
+ return null;
+  }
+ };
+
+ const decodeJwtPayload = (token) => {
+ try {
+ const [, payload] = String(token || "").split(".");
+ if (!payload) return null;
+ return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+ } catch (_err) {
  return null;
  }
  };
@@ -103,6 +156,12 @@ export const AuthProvider = ({ children }) => {
  const refreshToken = hasRefreshToken();
 
  if (!accessToken) {
+ if (refreshToken && user) {
+  const recoveredUser = recoverTransientAttendanceSession(user, "missing-access-token");
+  if (recoveredUser) {
+   return;
+  }
+ }
  if (isAuthenticated) {
  forceLogoutAndRedirect();
  }
@@ -117,17 +176,58 @@ export const AuthProvider = ({ children }) => {
 
  try {
  if (refreshToken) {
- const newAccess = await refreshAccessToken();
- if (newAccess) {
- scheduleSessionExpiry();
- return;
- }
+  const newAccess = await refreshAccessToken();
+  if (newAccess) {
+   scheduleSessionExpiry();
+   return;
+  }
  }
  } catch (err) {
- // fall through
+ if (isTransientApiError(err) && user) {
+  return;
+ }
  }
 
  forceLogoutAndRedirect();
+ };
+
+ const mergeAndPersistUser = (incomingProfile, fallbackStoredUser = null) => {
+  const nextUser = {
+  ...((fallbackStoredUser && fallbackStoredUser.email === incomingProfile?.email) ? fallbackStoredUser : {}),
+  ...(incomingProfile || {}),
+  };
+  setUser(nextUser);
+  setIsAuthenticated(true);
+  localStorage.setItem("user", JSON.stringify(nextUser));
+  writeCachedResource(AUTH_PROFILE_CACHE_KEY, nextUser);
+  return nextUser;
+ };
+
+ const enrichProfileInBackground = async () => {
+ if (profileEnrichmentPromiseRef.current) {
+  return profileEnrichmentPromiseRef.current;
+ }
+
+ profileEnrichmentPromiseRef.current = (async () => {
+  try {
+   const fullProfile = await getProfile();
+   setUser((current) => {
+    const nextUser = { ...(current || {}), ...(fullProfile || {}) };
+    localStorage.setItem("user", JSON.stringify(nextUser));
+    writeCachedResource(AUTH_PROFILE_CACHE_KEY, nextUser);
+    return nextUser;
+   });
+   setIsAuthenticated(true);
+   return fullProfile;
+  } catch (error) {
+   console.warn("⚠️ No se pudo enriquecer el perfil en segundo plano:", error?.message || error);
+   return null;
+  } finally {
+   profileEnrichmentPromiseRef.current = null;
+  }
+ })();
+
+ return profileEnrichmentPromiseRef.current;
  };
 
  /* ============================================================
@@ -151,12 +251,12 @@ export const AuthProvider = ({ children }) => {
    forceLogoutAndRedirect("missing_refresh_token");
    return false;
   }
-  const profile = await getProfile();
- setUser(profile);
- setIsAuthenticated(true);
- localStorage.setItem("user", JSON.stringify(profile));
- scheduleSessionExpiry();
- return profile;
+  const storedUser = JSON.parse(localStorage.getItem("user") || "null");
+  const profile = await getProfile({ lite: true });
+  mergeAndPersistUser(profile, storedUser);
+  scheduleSessionExpiry();
+  void enrichProfileInBackground();
+  return profile;
  }
 
  if (!hasRefreshToken()) {
@@ -168,16 +268,31 @@ export const AuthProvider = ({ children }) => {
 
  const newAccess = await refreshAccessToken();
  if (!newAccess) return false;
- const profile = await getProfile();
- setUser(profile);
- setIsAuthenticated(true);
- localStorage.setItem("user", JSON.stringify(profile));
+ const storedUser = JSON.parse(localStorage.getItem("user") || "null");
+ const profile = await getProfile({ lite: true });
+ mergeAndPersistUser(profile, storedUser);
  scheduleSessionExpiry();
+ void enrichProfileInBackground();
  return profile; // 👈 importante
  } catch (err) {
  console.warn("⚠️ No se pudo sincronizar sesión:", err.message);
- setIsAuthenticated(false);
  console.warn("⚠️ AuthContext.refresh failed", err);
+ const cachedUser = readRecoverableCachedUser();
+
+ if (isTransientApiError(err) && cachedUser && getAccessToken()) {
+  setUser(cachedUser);
+  setIsAuthenticated(true);
+  return cachedUser;
+ }
+
+ if (isTransientApiError(err)) {
+  const recoveredUser = recoverTransientAttendanceSession(cachedUser, "refresh-failed");
+  if (recoveredUser) {
+   return recoveredUser;
+  }
+ }
+
+ setIsAuthenticated(false);
  forceLogoutAndRedirect();
  return false;
  } finally {
@@ -194,21 +309,47 @@ export const AuthProvider = ({ children }) => {
  } catch (err) {
  console.error("❌ Error cerrando sesión:", err);
  } finally {
- forceLogoutAndRedirect();
+ forceLogoutAndRedirect(null, { manual: true });
  }
  };
 
  const reloadProfile = async () => {
  try {
  const profile = await getProfile();
- setUser(profile);
- setIsAuthenticated(true);
- localStorage.setItem("user", JSON.stringify(profile));
+ mergeAndPersistUser(profile);
  return profile;
  } catch (err) {
  // Silent error
  return null;
- }
+  }
+ };
+
+ const bootstrapSessionFromToken = (token) => {
+ const payload = decodeJwtPayload(token);
+ if (!payload) return null;
+
+ const storedUser = JSON.parse(localStorage.getItem("user") || "null");
+ const nextUser = {
+  ...((storedUser && storedUser.email === payload.email) ? storedUser : {}),
+  id: payload.id,
+  email: payload.email,
+  fullname: payload.fullname,
+  role: payload.role,
+  department: payload.department,
+  scope: payload.scope,
+  dashboard: payload.dashboard,
+  lopdp_internal_status: payload.lopdp_internal_status || "pending",
+  extra_roles: payload.extra_roles || [],
+ };
+
+ setUser(nextUser);
+ setIsAuthenticated(true);
+ setLoading(false);
+ localStorage.setItem("user", JSON.stringify(nextUser));
+  writeCachedResource(AUTH_PROFILE_CACHE_KEY, nextUser);
+ scheduleSessionExpiry();
+ void enrichProfileInBackground();
+ return nextUser;
  };
 
  /* ============================================================
@@ -262,23 +403,29 @@ export const AuthProvider = ({ children }) => {
  window.removeEventListener("visibilitychange", handleVisibilityOrFocus);
  window.removeEventListener("focus", handleVisibilityOrFocus);
  };
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, []);
 
  // ✅ Alias esperados por otros componentes
  const login = refresh;
  const logoutFn = signOut;
+ // Fase 2: para 401 detectados en vivo (ej. AttendanceWidget) — a diferencia
+ // de logout() (manual), preserva returnUrl y marca error=session_expired.
+ const handleSessionExpired = () => forceLogoutAndRedirect(null);
 
  return (
  <AuthContext.Provider
  value={{
- user,
- isAuthenticated,
- loading,
- refresh,
- reloadProfile,
- login,
+  user,
+  isAuthenticated,
+  loading,
+  refresh,
+  reloadProfile,
+  bootstrapSessionFromToken,
+  login,
  logout: logoutFn, // alias usado por Header y navegación
  signOut,
+ handleSessionExpired,
  }}
  >
  {children}

@@ -2,10 +2,10 @@
 # Script para ejecutar migraciones en Neon usando secretos de gcloud
 
 $PROJECT_ID = "famspi-sbox"
-$DB_HOST = "ep-muddy-sun-ah5um48r-pooler.c-3.us-east-1.aws.neon.tech"
+$DB_HOST = "ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech" # MIGRACION 2026-07-21 (sin pooler)
 $DB_PORT = "5432"
 $DB_USER = "neondb_owner"
-$DB_NAME = "FamSPI"
+$DB_NAME = "neondb"
 
 Write-Host "Obteniendo contrasena de base de datos desde Secret Manager..."
 $DB_PASSWORD = gcloud secrets versions access latest --secret="DB_PASSWORD" --project=$PROJECT_ID

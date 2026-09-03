@@ -12,6 +12,34 @@ const logger = require("../../config/logger");
 const { PRIVATE_PURCHASE_STATES, PRIVATE_PURCHASE_TRANSITIONS, FLOW_TYPES } = require('./privatePurchaseStates.constants');
 const { broadcastPrivatePurchaseUpdate } = require('./privatePurchaseEvents');
 
+// Mapea cada estado a la etapa (tab del expediente) que representa, para
+// registrar quien hizo la ultima accion en esa etapa (tab Resumen). Solo
+// cubre las etapas sin actor tracking propio -- tecnica ya tiene sus columnas
+// (inspection_coordinated_by_email, site_inspection_updated_by_email).
+const STATE_TO_STAGE_ACTOR_COLUMN = {
+    [PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE]: 'flujo_comercial_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.OFFER_SENT]: 'flujo_comercial_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.PENDING_MANAGER_SIGNATURE]: 'flujo_comercial_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.PENDING_CLIENT_SIGNATURE]: 'flujo_comercial_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.OFFER_SIGNED]: 'flujo_comercial_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.OFFER_REJECTED_BY_COMMERCIAL]: 'flujo_comercial_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.PRICE_IMPROVEMENT_REQUESTED]: 'flujo_comercial_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.CLIENT_REGISTRATION_REQUESTED]: 'flujo_comercial_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED]: 'flujo_comercial_last_actor_email',
+
+    [PRIVATE_PURCHASE_STATES.SENT_TO_ACP]: 'disponibilidad_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_REQUESTED]: 'disponibilidad_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CONFIRMED]: 'disponibilidad_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_REJECTED]: 'disponibilidad_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CU_PENDING]: 'disponibilidad_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_IMPORT_PENDING]: 'disponibilidad_last_actor_email',
+
+    [PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_CLIENT_SIGNATURE]: 'contrato_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_APPROVAL]: 'contrato_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.CONTRACT_AVAILABLE]: 'contrato_last_actor_email',
+    [PRIVATE_PURCHASE_STATES.CONTRACT_REJECTED]: 'contrato_last_actor_email',
+};
+
 class PrivatePurchaseStateMachine {
     static async _ensureTransitionTable() {
         if (this._transitionTableReady) return;
@@ -159,12 +187,21 @@ class PrivatePurchaseStateMachine {
         }
 
         const client = await db.getClient();
+        const stageActorColumn = STATE_TO_STAGE_ACTOR_COLUMN[toState] || null;
 
         try {
             await client.query('BEGIN');
 
-            // Update status
-            const updateResult = await client.query(
+            // Update status (+ actor de la etapa, si el nuevo estado pertenece a una
+            // etapa con tracking de actor -- usado por el tab Resumen del expediente)
+            const updateResult = stageActorColumn && metadata.user_email
+                ? await client.query(
+                    `UPDATE private_purchase_requests
+             SET status = $1, updated_at = NOW(), ${stageActorColumn} = $3
+             WHERE id = $2`,
+                    [toState, purchaseId, metadata.user_email]
+                )
+                : await client.query(
                 `UPDATE private_purchase_requests
          SET status = $1, updated_at = NOW()
          WHERE id = $2`,
@@ -433,6 +470,39 @@ class PrivatePurchaseStateMachine {
                 }
                 break;
 
+            case PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_REQUESTED:
+                // Notify ACP: backoffice/jefe_comercial ya reenvio la solicitud,
+                // esperan que ACP gestione disponibilidad con el proveedor.
+                {
+                    const acpToNotify = await this._getUsersByRole('acp_comercial');
+                    recipients.push(...acpToNotify.map(u => ({
+                        userId: u.id,
+                        sendEmail: true,
+                        sendChat: true,
+                        extraInfo: 'Se solicito disponibilidad, requiere gestion con proveedor'
+                    })));
+                }
+                break;
+
+            case PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CONFIRMED:
+                // ACP confirmo disponibilidad -- backoffice/jefe_comercial deben
+                // continuar con el envio de la oferta (OFFER_SEND_STATES).
+                {
+                    const offerSenders = await Promise.all(
+                        ['backoffice_comercial', 'jefe_comercial', 'jefe_de_comercial'].map(role => this._getUsersByRole(role))
+                    );
+                    const uniqueOfferSenders = Array.from(
+                        new Map(offerSenders.flat().map(u => [u.id, u])).values()
+                    );
+                    recipients.push(...uniqueOfferSenders.map(u => ({
+                        userId: u.id,
+                        sendEmail: true,
+                        sendChat: true,
+                        extraInfo: 'ACP confirmo disponibilidad, envia la oferta al cliente'
+                    })));
+                }
+                break;
+
             case PRIVATE_PURCHASE_STATES.PRICE_IMPROVEMENT_REQUESTED:
                 // Notify ACP + backoffice to submit improved offer
                 {
@@ -469,6 +539,21 @@ class PrivatePurchaseStateMachine {
             case PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED:
                 // Notify asesor_comercial to upload signed offer
                 // Already included above
+                break;
+
+            case PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_CLIENT_SIGNATURE:
+                // Contrato borrador cargado, esperando firma del cliente --
+                // backoffice debe hacer seguimiento (mismo rol que en
+                // CONTRACT_REJECTED/CONTRACT_AVAILABLE, ya gestiona esta etapa).
+                {
+                    const backofficeFollowUp = await this._getUsersByRole('backoffice_comercial');
+                    recipients.push(...backofficeFollowUp.map(u => ({
+                        userId: u.id,
+                        sendEmail: true,
+                        sendChat: false,
+                        extraInfo: 'Contrato borrador cargado, en espera de firma del cliente'
+                    })));
+                }
                 break;
 
             case PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_APPROVAL:
@@ -698,6 +783,50 @@ class PrivatePurchaseStateMachine {
                     })));
                 }
                 break;
+
+            case PRIVATE_PURCHASE_STATES.DELIVERED:
+                // Notify tecnico asignado + operaciones + logistica: nadie del
+                // equipo de entrega se enteraba antes del cierre del expediente.
+                {
+                    if (assignedTechnicianId) {
+                        recipients.push({
+                            userId: assignedTechnicianId,
+                            sendEmail: true,
+                            sendChat: true,
+                            extraInfo: 'Entrega completada'
+                        });
+                    }
+
+                    const operations = await this._getUsersByRole('jefe_operaciones');
+                    recipients.push(...operations.map(u => ({
+                        userId: u.id,
+                        sendEmail: true,
+                        sendChat: true,
+                        extraInfo: 'Entrega completada'
+                    })));
+
+                    const logistics = await this._getUsersByRole('jefe_logistica');
+                    recipients.push(...logistics.map(u => ({
+                        userId: u.id,
+                        sendEmail: true,
+                        sendChat: true,
+                        extraInfo: 'Entrega completada'
+                    })));
+                }
+                break;
+
+            case PRIVATE_PURCHASE_STATES.REJECTED:
+                // Notify jefe_comercial: un rechazo final tampoco se avisaba mas alla del creador.
+                {
+                    const jefeComercial = await this._getUsersByRole('jefe_comercial');
+                    recipients.push(...jefeComercial.map(u => ({
+                        userId: u.id,
+                        sendEmail: true,
+                        sendChat: false,
+                        extraInfo: 'Solicitud privada rechazada'
+                    })));
+                }
+                break;
         }
 
         return recipients;
@@ -710,7 +839,7 @@ class PrivatePurchaseStateMachine {
     static async _getUsersByRole(role) {
         try {
             const { rows } = await db.query(
-                'SELECT id, email, fullname FROM users WHERE role = $1 AND active = true ORDER BY id ASC LIMIT 1',
+                'SELECT id, email, fullname FROM users WHERE role = $1 AND active = true ORDER BY id ASC',
                 [role]
             );
             return rows;
@@ -791,7 +920,7 @@ class PrivatePurchaseStateMachine {
     static async _checkRequiredDocumentsForGerencia(purchaseId) {
         const requiredDocs = [
             'CLIENT_REGISTRATION',
-            'INSPECTION_ACT',
+            // INSPECTION_ACT ya NO es requisito para gerencia — inspección y contrato son flujos paralelos
             'LOPDP_APPROVAL',
             'CLIENT_ID',
             'ACP_RESPONSE',
@@ -862,10 +991,8 @@ class PrivatePurchaseStateMachine {
             presentDocs.push('CLIENT_REGISTRATION');
         }
 
-        // Check inspection act
-        if (!purchase.inspection_acta_document_id) {
-            missingDocs.push('INSPECTION_ACT');
-        } else {
+        // Inspection act — informativo, ya NO bloquea gerencia (flujo paralelo al contrato)
+        if (purchase.inspection_acta_document_id) {
             presentDocs.push('INSPECTION_ACT');
         }
 

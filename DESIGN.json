@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-04-28T00:00:00Z",
+  "title": "Design System: FamSPI",
+  "extensions": {
+    "colorMeta": {
+      "naval-slate":      { "role": "primary",  "displayName": "Deep Naval Slate",  "canonical": "oklch(22% 0.043 245)", "tonalRamp": ["#08101C", "#0F1A2E", "#1E293B", "#253549", "#334155", "#556780", "#8EA0B4", "#C8D6E5"] },
+      "storm-slate":      { "role": "primary",  "displayName": "Storm Slate",       "canonical": "oklch(30% 0.05 245)",  "tonalRamp": ["#0F1A2E", "#1E293B", "#253549", "#334155", "#475569", "#64748B", "#94A3B8", "#CBD5E1"] },
+      "midnight-slate":   { "role": "primary",  "displayName": "Midnight Slate",    "canonical": "oklch(14% 0.033 245)", "tonalRamp": ["#04080F", "#080E1C", "#0F172A", "#1A2338", "#253348", "#3A4C63", "#637A96", "#A8BBCC"] },
+      "action-blue":      { "role": "secondary","displayName": "Action Blue",        "canonical": "oklch(51% 0.25 264)",  "tonalRamp": ["#0D1660", "#1228A0", "#1A42D4", "#2563EB", "#4A82F5", "#7FAAF8", "#BDCEFB", "#DDE8FE"] },
+      "sky-signal":       { "role": "secondary","displayName": "Sky Signal",         "canonical": "oklch(64% 0.19 216)",  "tonalRamp": ["#042838", "#075B80", "#0891C0", "#0EA5E9", "#38BDF8", "#7DD3FC", "#BAE6FD", "#E0F2FE"] },
+      "operative-green":  { "role": "status",   "displayName": "Operative Green",   "canonical": "oklch(50% 0.17 145)",  "tonalRamp": ["#072B12", "#0B4020", "#0F6030", "#16A34A", "#22C55E", "#4ADE80", "#86EFAC", "#DCFCE7"] },
+      "alert-red":        { "role": "status",   "displayName": "Alert Red",         "canonical": "oklch(50% 0.21 27)",   "tonalRamp": ["#3D0A0A", "#6B1212", "#9B1C1C", "#DC2626", "#EF4444", "#F87171", "#FCA5A5", "#FEE2E2"] },
+      "caution-amber":    { "role": "status",   "displayName": "Caution Amber",     "canonical": "oklch(67% 0.17 68)",   "tonalRamp": ["#1C0E00", "#3D1F00", "#784200", "#B45309", "#D97706", "#F59E0B", "#FCD34D", "#FEF3C7"] },
+      "ink-slate":        { "role": "neutral",  "displayName": "Ink Slate",         "canonical": "oklch(25% 0.028 245)", "tonalRamp": ["#0A0F18", "#111827", "#1F2937", "#374151", "#4B5563", "#6B7280", "#9CA3AF", "#F3F4F6"] },
+      "warm-ash":         { "role": "neutral",  "displayName": "Warm Ash",          "canonical": "oklch(50% 0.014 245)", "tonalRamp": ["#1F2937", "#374151", "#4B5563", "#6B7280", "#9CA3AF", "#D1D5DB", "#E5E7EB", "#F9FAFB"] },
+      "paper-white":      { "role": "neutral",  "displayName": "Paper White",       "canonical": "oklch(98% 0.004 245)", "tonalRamp": ["#E5E7EB", "#F3F4F6", "#F9FAFB", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF"] }
+    },
+    "typographyMeta": {
+      "display":  { "displayName": "Display",  "purpose": "Títulos de página y pantallas de módulo. Máximo uno por pantalla." },
+      "headline": { "displayName": "Headline", "purpose": "Encabezados de sección, títulos de modal, cards con peso propio." },
+      "title":    { "displayName": "Title",    "purpose": "Cards secundarias, encabezados de tabla, módulos en nav." },
+      "body":     { "displayName": "Body",     "purpose": "Todo el contenido textual. Máximo 70ch en columnas de lectura." },
+      "label":    { "displayName": "Label",    "purpose": "Etiquetas de campo, metadatos, timestamps, badges de estado." }
+    },
+    "shadows": [
+      { "name": "ambient",    "value": "0 2px 10px rgba(0,0,0,0.06)",                                           "purpose": "Cards en reposo. Señala que la card está sobre el fondo sin drama." },
+      { "name": "lifted",     "value": "0 4px 16px rgba(0,0,0,0.10)",                                           "purpose": "Cards en hover, paneles activos, inputs con focus." },
+      { "name": "structural", "value": "0 15px 35px rgba(15,23,42,0.08)",                                       "purpose": "Paneles flotantes, sidebars desplegables, contenedores con peso propio." },
+      { "name": "overlay",    "value": "0 20px 60px rgba(15,23,42,0.18), 0 4px 16px rgba(15,23,42,0.10)",      "purpose": "Modales, dropdowns, tooltips. La capa más alta visible." }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Easing estándar para transiciones de estado (hover, focus, cambio de color)." },
+      { "name": "ease-exit",     "value": "cubic-bezier(0.4, 0, 1, 1)",   "purpose": "Salida de elementos (fade out, collapse, cierre de panel)." },
+      { "name": "duration-fast", "value": "150ms",                         "purpose": "Hover, focus, cambios de color y borde." },
+      { "name": "duration-mid",  "value": "250ms",                         "purpose": "Expansión de paneles, apertura de dropdowns, slide-in de sidebars." }
+    ],
+    "breakpoints": [
+      { "name": "sm",  "value": "640px",  "note": "Mobile landscape / tablet portrait mínimo" },
+      { "name": "md",  "value": "768px",  "note": "Tablet portrait — sidebar colapsada a iconos" },
+      { "name": "lg",  "value": "1024px", "note": "Tablet landscape / desktop mínimo — sidebar expandida" },
+      { "name": "xl",  "value": "1280px", "note": "Desktop estándar" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Button Primary",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Acción principal de cualquier pantalla. Un solo botón primario por sección visible.",
+      "html": "<button class=\"ds-btn-primary\">Guardar cambios</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 6px; background: #2563EB; color: #ffffff; padding: 8px 16px; border-radius: 16px; font-size: 14px; font-weight: 500; font-family: 'Geist', system-ui, sans-serif; border: none; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,0.06); transition: background 0.15s ease-out, box-shadow 0.15s ease-out, transform 0.15s ease-out; min-height: 36px; white-space: nowrap; text-decoration: none; } .ds-btn-primary:hover { background: #1D4ED8; box-shadow: 0 4px 16px rgba(0,0,0,0.1); transform: translateY(-1px); } .ds-btn-primary:focus-visible { outline: 2px solid rgba(14,165,233,0.5); outline-offset: 2px; } .ds-btn-primary:active { background: #1E40AF; transform: translateY(0); box-shadow: 0 2px 10px rgba(0,0,0,0.06); } .ds-btn-primary:disabled { background: #93C5FD; cursor: not-allowed; transform: none; box-shadow: none; }"
+    },
+    {
+      "name": "Button Secondary",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Acción secundaria. Mismo peso visual que el ghost pero con borde explícito para contextos de mayor peso.",
+      "html": "<button class=\"ds-btn-secondary\">Cancelar</button>",
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; gap: 6px; background: #ffffff; color: #1F2937; border: 1px solid #D1D5DB; padding: 8px 16px; border-radius: 16px; font-size: 14px; font-weight: 500; font-family: 'Geist', system-ui, sans-serif; cursor: pointer; transition: background 0.15s ease-out, box-shadow 0.15s ease-out; min-height: 36px; } .ds-btn-secondary:hover { background: #F9FAFB; box-shadow: 0 4px 16px rgba(0,0,0,0.1); } .ds-btn-secondary:focus-visible { outline: 2px solid rgba(14,165,233,0.5); outline-offset: 2px; } .ds-btn-secondary:active { background: #F3F4F6; } .ds-btn-secondary:disabled { color: #9CA3AF; border-color: #E5E7EB; cursor: not-allowed; }"
+    },
+    {
+      "name": "Button Ghost",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Acción terciaria o de navegación inline. Sin borde ni fondo en reposo.",
+      "html": "<button class=\"ds-btn-ghost\">Ver detalle</button>",
+      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; gap: 6px; background: transparent; color: #6B7280; border: none; padding: 8px 16px; border-radius: 16px; font-size: 14px; font-weight: 500; font-family: 'Geist', system-ui, sans-serif; cursor: pointer; transition: background 0.15s ease-out, color 0.15s ease-out; min-height: 36px; } .ds-btn-ghost:hover { background: #F3F4F6; color: #1F2937; } .ds-btn-ghost:focus-visible { outline: 2px solid rgba(14,165,233,0.5); outline-offset: 2px; } .ds-btn-ghost:active { background: #E5E7EB; }"
+    },
+    {
+      "name": "Button Danger",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Solo para acciones destructivas con confirmación explícita. Nunca como botón de cancelar.",
+      "html": "<button class=\"ds-btn-danger\">Eliminar solicitud</button>",
+      "css": ".ds-btn-danger { display: inline-flex; align-items: center; gap: 6px; background: #DC2626; color: #ffffff; border: none; padding: 8px 16px; border-radius: 16px; font-size: 14px; font-weight: 500; font-family: 'Geist', system-ui, sans-serif; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,0.06); transition: background 0.15s ease-out, box-shadow 0.15s ease-out; min-height: 36px; } .ds-btn-danger:hover { background: #B91C1C; box-shadow: 0 4px 16px rgba(220,38,38,0.2); } .ds-btn-danger:focus-visible { outline: 2px solid rgba(220,38,38,0.5); outline-offset: 2px; } .ds-btn-danger:active { background: #991B1B; }"
+    },
+    {
+      "name": "Badge",
+      "kind": "chip",
+      "refersTo": "badge-green",
+      "description": "Badges semánticos para estados de solicitudes, asistencia, aprobaciones. Variantes: neutral, blue, green, red, amber.",
+      "html": "<span class=\"ds-badge ds-badge-green\">Aprobado</span> <span class=\"ds-badge ds-badge-red\">Rechazado</span> <span class=\"ds-badge ds-badge-amber\">Pendiente</span> <span class=\"ds-badge ds-badge-blue\">En revisión</span> <span class=\"ds-badge ds-badge-neutral\">Borrador</span>",
+      "css": ".ds-badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 500; font-family: 'Geist', system-ui, sans-serif; white-space: nowrap; line-height: 1.4; } .ds-badge-green { background: #DCFCE7; color: #16A34A; } .ds-badge-red { background: #FEE2E2; color: #DC2626; } .ds-badge-amber { background: #FEF3C7; color: #D97706; } .ds-badge-blue { background: #DBEAFE; color: #1D4ED8; } .ds-badge-neutral { background: #F3F4F6; color: #1F2937; }"
+    },
+    {
+      "name": "Input Field",
+      "kind": "input",
+      "refersTo": "input-default",
+      "description": "Campo de texto estándar con label visible siempre encima. Nunca label-solo-como-placeholder.",
+      "html": "<div class=\"ds-field\"><label class=\"ds-label\">Motivo de viático</label><input type=\"text\" class=\"ds-input\" placeholder=\"Descripción del gasto...\" /></div>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; } .ds-label { font-size: 12px; font-weight: 500; color: #1F2937; font-family: 'Geist', system-ui, sans-serif; } .ds-input { width: 100%; background: #ffffff; color: #1F2937; border: 1px solid #D1D5DB; border-radius: 12px; padding: 8px 12px; font-size: 14px; font-family: 'Geist', system-ui, sans-serif; min-height: 40px; transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out; outline: none; box-sizing: border-box; } .ds-input:focus { border-color: #2563EB; box-shadow: 0 0 0 2px rgba(14,165,233,0.2); } .ds-input::placeholder { color: #6B7280; } .ds-input:disabled { background: #F9FAFB; color: #6B7280; border-color: rgba(209,213,219,0.5); cursor: not-allowed; }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card-default",
+      "description": "Contenedor de sección estándar. Sin glassmorphism, sin cards anidadas.",
+      "html": "<div class=\"ds-card\"><h3 class=\"ds-card-title\">Resumen de viáticos</h3><p class=\"ds-card-body\">Total del mes: S/ 1,240.00</p></div>",
+      "css": ".ds-card { background: #ffffff; color: #1F2937; border-radius: 16px; padding: 20px; border: 1px solid #E5E7EB; box-shadow: 0 2px 10px rgba(0,0,0,0.06); transition: box-shadow 0.15s ease-out; } .ds-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.1); } .ds-card-title { font-size: 18px; font-weight: 600; color: #1F2937; font-family: 'Geist', system-ui, sans-serif; margin: 0 0 8px 0; letter-spacing: -0.01em; line-height: 1.4; } .ds-card-body { font-size: 14px; color: #6B7280; font-family: 'Geist', system-ui, sans-serif; line-height: 1.6; margin: 0; }"
+    },
+    {
+      "name": "Nav Item (Desktop Sidebar)",
+      "kind": "nav",
+      "refersTo": "button-ghost",
+      "description": "Ítem de navegación en sidebar desktop sobre fondo Deep Naval Slate.",
+      "html": "<nav style=\"background:#1E293B;padding:8px;border-radius:12px;display:flex;flex-direction:column;gap:2px;width:200px\"><a class=\"ds-nav-item ds-nav-item--active\" href=\"#\"><svg class=\"ds-nav-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\"></rect><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\"></rect><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\"></rect><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\"></rect></svg><span>Dashboard</span></a><a class=\"ds-nav-item\" href=\"#\"><svg class=\"ds-nav-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2\"></path><circle cx=\"9\" cy=\"7\" r=\"4\"></circle><path d=\"M23 21v-2a4 4 0 0 0-3-3.87\"></path><path d=\"M16 3.13a4 4 0 0 1 0 7.75\"></path></svg><span>Talento</span></a><a class=\"ds-nav-item\" href=\"#\"><svg class=\"ds-nav-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"8\" y1=\"6\" x2=\"21\" y2=\"6\"></line><line x1=\"8\" y1=\"12\" x2=\"21\" y2=\"12\"></line><line x1=\"8\" y1=\"18\" x2=\"21\" y2=\"18\"></line><line x1=\"3\" y1=\"6\" x2=\"3.01\" y2=\"6\"></line><line x1=\"3\" y1=\"12\" x2=\"3.01\" y2=\"12\"></line><line x1=\"3\" y1=\"18\" x2=\"3.01\" y2=\"18\"></line></svg><span>Solicitudes</span></a></nav>",
+      "css": ".ds-nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px; font-size: 14px; font-weight: 500; font-family: 'Geist', system-ui, sans-serif; color: rgba(255,255,255,0.65); text-decoration: none; transition: background 0.15s ease-out, color 0.15s ease-out; cursor: pointer; } .ds-nav-item:hover { background: #334155; color: #ffffff; } .ds-nav-item--active { background: #2563EB; color: #ffffff; } .ds-nav-icon { width: 16px; height: 16px; flex-shrink: 0; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "El Escritorio Profesional",
+    "overview": "FamSPI vive en la oficina bien organizada: cada documento en su lugar, cada carpeta etiquetada, cada acción disponible sin buscar. La interfaz no compite con el usuario — le cede el espacio para que trabaje. Los colores sirven para orientar, no para decorar. La jerarquía se siente antes de que el usuario la lea.\n\nEl sistema adopta un registro visual entre Rippling y Notion: la estructura firme de una herramienta de operaciones, atemperada por una calidez que previene la frialdad corporativa. Geist aporta la voz tipográfica — técnica pero no fría, moderna pero sin modismos. El Slate Naval oscuro ancla cada pantalla; el Azul Acción aparece únicamente donde el usuario necesita tomar una decisión.\n\nLo que FamSPI rechaza explícitamente: la sensación de plantilla Bootstrap de 2018, los diseños que cambian de estilo entre módulo y módulo como si los hubiera construido equipos distintos, y los flujos que interrumpen con un modal cuando podrían continuar en línea.",
+    "keyCharacteristics": [
+      "Un lenguaje visual único, sin variaciones entre módulos",
+      "Densidad adaptativa: más información en paralelo en desktop; flujo vertical con touch targets de 44px mínimo en mobile",
+      "Profundidad estratificada: las sombras revelan jerarquía, no decoran superficies",
+      "Action Blue reservado para decisiones — cuando aparece, el usuario sabe que ahí hay algo que hacer",
+      "Modo claro y oscuro como primera clase, sin compromisos entre ambos"
+    ],
+    "rules": [
+      { "name": "The Sparrow Rule",        "body": "Action Blue toca ≤10% de cualquier pantalla. Encabezados azules, fondos azules, bordes decorativos azules: todos prohibidos. Si hay duda de si un elemento debe ser azul, la respuesta es no.", "section": "colors" },
+      { "name": "The Naval Structure Rule","body": "Deep Naval Slate es estructura, no decoración. Navegación, headers y elementos de anclaje. Nunca como fondo de card ni como texto de acento en contenido corrido.", "section": "colors" },
+      { "name": "The Geist Mono Rule",     "body": "Valores numéricos de referencia — IDs, montos en viáticos, fechas en tablas de asistencia — van en Geist Mono. La diferencia es sutil pero señala que ese dato es exacto y copiable.", "section": "typography" },
+      { "name": "The Flat-Then-Lift Rule", "body": "Las superficies son planas en reposo. La sombra aparece como respuesta a estado, no como decoración por defecto. Una card que nace con sombra dramática le quita impacto al hover y confunde la jerarquía.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do usar Deep Naval Slate (#1E293B) para navegación, headers y elementos estructurales.",
+      "Do reservar Action Blue (#2563EB) exclusivamente para botones primarios, links de acción y estados activos en nav.",
+      "Do mantener radio de 16px en botones y cards en todos los módulos.",
+      "Do asegurarte de que cada acción primaria sea alcanzable con el pulgar sin scroll en viewport de 390px.",
+      "Do usar Geist Mono para IDs, montos, fechas exactas y valores que el usuario pueda necesitar copiar.",
+      "Do seguir la escala de sombras definida (Ambient → Lifted → Structural → Overlay).",
+      "Do garantizar WCAG AA (4.5:1 en texto, 3:1 en elementos UI) en modo claro y oscuro.",
+      "Do mostrar el label del campo siempre encima del input, nunca solo como placeholder."
+    ],
+    "donts": [
+      "Don't usar backdrop-blur con fondo semitransparente (glassmorphism) como estilo por defecto de cards.",
+      "Don't replicar el estilo Bootstrap genérico: radios de 4-6px, sombras azuladas, grids de tarjetas idénticas.",
+      "Don't hacer que módulos distintos parezcan construidos por equipos distintos.",
+      "Don't usar modal como primera respuesta a una acción. Agotar alternativas inline antes.",
+      "Don't poner Action Blue en más del 10% de la superficie de cualquier pantalla.",
+      "Don't usar border-left mayor a 1px como acento de color en cards o items de lista.",
+      "Don't usar gradientes en texto (background-clip: text con gradiente).",
+      "Don't anidar cards dentro de cards.",
+      "Don't usar el mismo peso visual para toda la información en un dashboard."
+    ]
+  }
+}

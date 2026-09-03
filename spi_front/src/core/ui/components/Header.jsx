@@ -1,10 +1,13 @@
 // src/core/ui/components/Header.jsx
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/useAuth";
 import { useUI } from "../UIContext";
 import { FiSun, FiMoon, FiLogOut } from "react-icons/fi";
 import famLogo from "../../../assets/famproject_logo.png";
+import { getAttendancePunctualitySummary } from "../../api/attendanceApi";
+import PunctualityWinnerBadge from "./PunctualityWinnerBadge";
+import { usePwaStatus } from "../../pwa/PwaStatusContext";
 
 /* ============================================================
  🧭 Header — Estilo Empresarial Moderno
@@ -19,6 +22,8 @@ export default function Header() {
  const { theme, toggleTheme } = useUI();
  const navigate = useNavigate();
  const location = useLocation();
+ const [isPunctualityLeader, setIsPunctualityLeader] = useState(false);
+ const { isOnline, isSlowConnection, effectiveType } = usePwaStatus();
 
  const displayName = useMemo(
  () => user?.fullname || user?.name || user?.email || "Usuario",
@@ -26,9 +31,31 @@ export default function Header() {
  );
  const userInitial = displayName?.charAt(0)?.toUpperCase() || "U";
 
+ useEffect(() => {
+ if (!user?.id) {
+ setIsPunctualityLeader(false);
+ return;
+ }
+
+ let cancelled = false;
+ const loadPunctuality = async () => {
+ try {
+ const response = await getAttendancePunctualitySummary();
+ if (!cancelled) setIsPunctualityLeader(Boolean(response?.data?.currentUser?.isWinner));
+ } catch (_error) {
+ if (!cancelled) setIsPunctualityLeader(false);
+ }
+ };
+
+ loadPunctuality();
+ return () => {
+ cancelled = true;
+ };
+ }, [user?.id]);
+
  return (
- <header className="sticky top-0 z-40 bg-primary/95 text-white shadow-md backdrop-blur-md border-b border-primary-light transition-all duration-300">
- <div className="flex items-center justify-between h-16 px-4 sm:px-6">
+ <header className="sticky top-0 z-10 bg-primary/95 text-white shadow-md backdrop-blur-md border-b border-primary-light transition-all duration-300">
+ <div className="flex h-16 items-center justify-between gap-2 px-3 sm:px-6">
  {/* =======================================================
  🔹 IZQUIERDA: Logo + Nombre
  ======================================================= */}
@@ -55,6 +82,19 @@ export default function Header() {
  🔹 DERECHA: Acciones
  ======================================================= */}
  <div className="flex items-center gap-2 sm:gap-3">
+ <div
+ className={`hidden rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] md:inline-flex ${
+ isOnline
+ ? isSlowConnection
+ ? "bg-amber-400/15 text-amber-100 ring-1 ring-amber-300/40"
+ : "bg-emerald-400/15 text-emerald-100 ring-1 ring-emerald-300/30"
+ : "bg-rose-400/15 text-rose-100 ring-1 ring-rose-300/40"
+ }`}
+ title={isOnline ? "Estado actual de conectividad de la PWA" : "La PWA está sin conexión"}
+ >
+ {isOnline ? (isSlowConnection ? `Red limitada${effectiveType ? ` ${effectiveType}` : ""}` : "PWA estable") : "Sin conexión"}
+ </div>
+
  {/* Tema */}
  <button
  onClick={toggleTheme}
@@ -74,7 +114,7 @@ export default function Header() {
  className="flex items-center gap-3 rounded-lg bg-primary-light/40 px-3 py-1.5 shadow-inner hover:bg-white/10 transition focus-visible:ring-2 focus-visible:ring-accent"
  title="Ir a Mi Perfil"
  >
- <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-sm font-bold uppercase text-white">
+ <div className="relative flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-sm font-bold uppercase text-white">
  {user?.avatar_url ? (
  <img
  src={user.avatar_url}
@@ -84,9 +124,10 @@ export default function Header() {
  ) : (
  userInitial
  )}
+ <PunctualityWinnerBadge visible={isPunctualityLeader} size="sm" />
  </div>
  <div className="flex flex-col items-start leading-tight">
- <span className="text-sm font-semibold text-white truncate max-w-[160px]">
+ <span className="text-sm font-semibold text-white truncate max-w-[120px] sm:max-w-[160px]">
  {displayName}
  </span>
  <span className="text-[11px] text-accent-light uppercase tracking-wide">

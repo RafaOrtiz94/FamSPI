@@ -28,16 +28,23 @@ const { resolveExternalDriveIntegrity } = require("../../utils/documentHash");
 const { resolveRequestDriveFolders, padId } = require("../../utils/drivePaths");
 const { logAction } = require("../../utils/audit");
 const { sendMail } = require("../../utils/mailer");
-const gmailService = require("../../services/gmail.service");
 const { createClientFolder, moveClientFolderToApproved } = require("../../utils/driveClientManager");
 const notificationManager = require("../notifications/notificationManager");
 const crypto = require("crypto");
 const { enqueueIntegrationEvent } = require("../integrations/integrationOutbox.service");
-const { callOdoo, IntegrationDisabledError } = require("../integrations/odooClient");
+const { isCrmSyncEnabled } = require("../../config/crmDb");
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
 const { captureSerial, cambiarEstadoUnidad, assignUnidad, normalizeDetalleValue } = require("../inventario/inventario.service");
 const requestSchemas = require("./requestSchemas");
+const {
+  normalizeInspectionResult,
+  normalizeFst07Checklist,
+  assertFollowUpDateConsistency,
+  createSiteInspectionError,
+} = require("../servicio/siteInspectionRules.service");
+const { generateFst07PdfBuffer, buildFst07FileName } = require("../servicio/fst07Pdf.service");
+const { trackFst07WorkflowDocument } = require("../servicio/fst07.service");
 
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3001").replace(
   /\$\/$/, ""
@@ -51,6 +58,7 @@ const REQUEST_TYPE_LABELS = {
   "F.ST-20": "Solicitud de inspección de ambiente",
   "F.ST-21": "Solicitud de retiro de equipo",
   "F.ST-22": "Registro de nuevo cliente",
+  "F.VE-02": "Solicitud de credito",
 };
 
 const CLIENT_APPROVAL_TEMPLATE_ID = process.env.DOC_TEMPLATE_CLIENT_APPROVAL;
@@ -61,13 +69,71 @@ const DEFAULT_REQUEST_TYPES = [
   { code: "F.ST-20", title: "Solicitud de inspección de ambiente" },
   { code: "F.ST-21", title: "Solicitud de retiro de equipo" },
   { code: "F.ST-22", title: "Registro de nuevo cliente" },
+  { code: "F.VE-02", title: "Solicitud de credito" },
 ];
 
 const SOLICITUD_TEMPLATE_MAP = {
   "F.ST-19": process.env.DOC_TEMPLATE_SOLICITUD_1 || null,
   "F.ST-20": process.env.DOC_TEMPLATE_SOLICITUD_2 || null,
   "F.ST-21": process.env.DOC_TEMPLATE_SOLICITUD_3 || null,
+  "F.VE-02": process.env.DOC_TEMPLATE_SOLICITUD_CREDITO || "175eA-ItqJaeOY9pv6T04txXyscGib5_ubti-yYyy6Bw",
 };
+
+const CREDIT_REQUEST_TEMPLATE_FIELDS = [
+  "asesor_comercial",
+  "fecha_solicitud",
+  "razon_social",
+  "ruc_id",
+  "telefono_contacto",
+  "correo_electronico",
+  "cupo_credito_sugerido",
+  "plazo_pago_acordado",
+  "activos",
+  "pasivos",
+  "patrimonio",
+  "ingresos_negocio",
+  "egresos_negocio",
+  "ingresos_relacion_dependencia",
+  "gastos_familiares",
+  "otros_ingresos",
+  "prestamos_obligaciones",
+  "total_ingresos",
+  "total_egresos",
+  "justificacion_otros_ingresos",
+  "utilidad_perdida_neta",
+  "banco_1",
+  "banco_2",
+  "cuenta_corriente_1",
+  "cuenta_corriente_2",
+  "cuenta_ahorros_1",
+  "cuenta_ahorros_2",
+  "proveedor_1",
+  "proveedor_2",
+  "contacto_proveedor_1",
+  "contacto_proveedor_2",
+  "telefono_proveedor_1",
+  "telefono_proveedor_2",
+  "ref_personal_nombre_1",
+  "ref_personal_nombre_2",
+  "ref_personal_parentesco_1",
+  "ref_personal_parentesco_2",
+  "ref_personal_telefono_1",
+  "ref_personal_telefono_2",
+  "nombre_responsable_cobros",
+  "direccion_fisica",
+  "ciudad",
+  "provincia",
+  "telefono_fijo",
+  "telefono_celular",
+  "ruc_ci_firmante",
+  "monto_sugerido_jefe_comercial",
+  "validacion_referencias",
+  "decision_solicitud",
+  "monto_credito_autorizado",
+  "plazo_credito_autorizado",
+  "fecha_resolucion",
+  "observaciones_validacion",
+];
 
 function getSolicitudTemplateId(typeCode) {
   const normalized = String(typeCode || "").toUpperCase();
@@ -145,6 +211,19 @@ const QUALITY_CHECK_STATUS = new Set(["pending", "valid", "inconsistent", "not_a
 
 function normalizeRole(role = "") {
   return String(role || "").trim().toLowerCase();
+}
+
+function getUserRoles(user = {}) {
+  return [
+    user?.role,
+    user?.scope,
+    user?.role_name,
+    ...(Array.isArray(user?.roles) ? user.roles : []),
+    ...(Array.isArray(user?.scopes) ? user.scopes : []),
+    ...(Array.isArray(user?.extra_roles) ? user.extra_roles : []),
+  ]
+    .map(normalizeRole)
+    .filter(Boolean);
 }
 
 function isQualityReviewer(role = "") {
@@ -400,8 +479,17 @@ async function ensureOwnerClientAssignment({ clientRequestId, ownerEmail, actorE
 function getRequestApproverRoles(typeCode) {
   const normalized = String(typeCode || "").toUpperCase();
   if (normalized === "F.ST-22") return ["backoffice_comercial"];
+  if (normalized === "F.VE-02") return ["jefe_financiero"];
   if (["F.ST-20", "F.ST-21"].includes(normalized)) {
-    return ["jefe_servicio_tecnico", "jefe_tecnico", "servicio_tecnico"];
+    return [
+      "jefe_servicio",
+      "jefe_servicio_tecnico",
+      "jefe_de_servicio_tecnico",
+      "jefe_tecnico",
+      "jefe_de_tecnico",
+      "servicio_tecnico",
+      "ing_servicio",
+    ];
   }
   return [];
 }
@@ -437,151 +525,6 @@ function getClientRequestAttachments(request = {}) {
       };
     })
     .filter(Boolean);
-}
-
-function normalizeOdooText(value, fallback = null) {
-  const normalized = String(value || "").trim();
-  return normalized || fallback;
-}
-
-function buildOdooPartnerPayloadFromClientRequest(request = {}) {
-  const name =
-    normalizeOdooText(request.commercial_name) ||
-    normalizeOdooText(request.legal_person_business_name) ||
-    normalizeOdooText(request.establishment_name) ||
-    `Cliente SPI #${request.id}`;
-
-  const email =
-    normalizeOdooText(request.client_email) ||
-    normalizeOdooText(request.consent_recipient_email) ||
-    normalizeOdooText(request.legal_rep_email);
-
-  const phone = normalizeOdooText(request.shipping_phone) || normalizeOdooText(request.establishment_phone);
-  const mobile = normalizeOdooText(request.shipping_cellphone) || normalizeOdooText(request.establishment_cellphone);
-  const street = normalizeOdooText(request.shipping_address) || normalizeOdooText(request.establishment_address);
-  const city = normalizeOdooText(request.shipping_city) || normalizeOdooText(request.establishment_city);
-  const vat = normalizeOdooText(request.ruc_cedula);
-
-  return {
-    name,
-    email: email || false,
-    phone: phone || false,
-    mobile: mobile || false,
-    street: street || false,
-    city: city || false,
-    vat: vat || false,
-    customer_rank: 1,
-    type: "contact",
-    comment: `Creado desde SPI (client_request_id=${request.id})`,
-  };
-}
-
-async function syncApprovedClientToOdoo(request = {}) {
-  if (!request?.id) return { synced: false, reason: "invalid_request" };
-
-  const payload = buildOdooPartnerPayloadFromClientRequest(request);
-  const idempotencyKey = `client_request:${request.id}:approved_to_odoo`;
-  const correlationId = `client_request_${request.id}`;
-
-  try {
-    const existingExternalId = Number.parseInt(String(request.external_id || ""), 10);
-
-    if (Number.isFinite(existingExternalId) && existingExternalId > 0) {
-      await callOdoo({
-        method: "execute_kw",
-        eventType: "clients.spi.approved.update_partner",
-        correlationId,
-        params: {
-          model: "res.partner",
-          fn: "write",
-          args: [[existingExternalId], payload],
-        },
-      });
-
-      await db.query(
-        `
-          UPDATE client_requests
-          SET
-            external_source = 'odoo',
-            external_id = $2,
-            external_updated_at = NOW(),
-            last_synced_at = NOW(),
-            updated_at = NOW()
-          WHERE id = $1
-        `,
-        [request.id, String(existingExternalId)],
-      );
-
-      return { synced: true, mode: "update", external_id: String(existingExternalId) };
-    }
-
-    const createdPartnerId = await callOdoo({
-      method: "execute_kw",
-      eventType: "clients.spi.approved.create_partner",
-      correlationId,
-      params: {
-        model: "res.partner",
-        fn: "create",
-        args: [payload],
-      },
-    });
-
-    const normalizedExternalId = Number.parseInt(String(createdPartnerId || ""), 10);
-    if (!Number.isFinite(normalizedExternalId) || normalizedExternalId <= 0) {
-      throw new Error("Odoo no devolvio un partner_id valido");
-    }
-
-    await db.query(
-      `
-        UPDATE client_requests
-        SET
-          external_source = 'odoo',
-          external_id = $2,
-          external_updated_at = NOW(),
-          last_synced_at = NOW(),
-          updated_at = NOW()
-        WHERE id = $1
-      `,
-      [request.id, String(normalizedExternalId)],
-    );
-
-    return { synced: true, mode: "create", external_id: String(normalizedExternalId) };
-  } catch (error) {
-    if (error instanceof IntegrationDisabledError || error?.code === "ODOO_INTEGRATION_DISABLED") {
-      return { synced: false, reason: "integration_disabled" };
-    }
-
-    try {
-      await enqueueIntegrationEvent({
-        eventType: "client.approved.sync_to_odoo",
-        idempotencyKey,
-        correlationId,
-        payload: {
-          client_request_id: request.id,
-          action: "upsert_partner",
-          client: payload,
-        },
-      });
-    } catch (enqueueError) {
-      logger.warn(
-        {
-          request_id: request.id,
-          enqueue_error: enqueueError?.message || String(enqueueError),
-        },
-        "No se pudo encolar evento de sincronizacion de cliente aprobado a Odoo",
-      );
-    }
-
-    logger.warn(
-      {
-        request_id: request.id,
-        error: error?.message || String(error),
-      },
-      "Fallo sincronizando cliente aprobado hacia Odoo",
-    );
-
-    return { synced: false, reason: "odoo_sync_failed", error: error?.message || String(error) };
-  }
 }
 
 async function getBackofficeCommercialEmails() {
@@ -890,27 +833,19 @@ async function sendConsentEmailToken({ user, client_email, recipient_email, clie
     <p>Si no reconoces esta solicitud, ignora este correo.</p>
   `;
 
-  try {
-    // Intentar enviar con Gmail API (usuario autenticado)
-    await gmailService.sendEmail({
-      userId: user.id,
-      to: normalizedEmail,
-      subject: "Codigo de autorizacion para tratamiento de datos",
-      html,
-      replyTo: user?.email
-    });
-  } catch (error) {
-    logger.warn(`⚠️ Falló envío con Gmail API, intentando fallback SMTP: ${error.message}`);
-    // Fallback a SMTP si falla la API
-    await sendMail({
-      to: normalizedEmail,
-      subject: "Codigo de autorizacion para tratamiento de datos",
-      html,
-      senderName: user?.fullname || user?.name || user?.email || "SPI",
-      replyTo: user?.email || undefined,
-      gmailUserId: user?.id || null,
-    });
-  }
+  // Un solo camino de envío -- antes se intentaba gmailService.sendEmail (OAuth del
+  // usuario) y, ante cualquier error (incluyendo timeouts ambiguos donde Gmail ya
+  // habia entregado el mensaje), se caia a sendMail como fallback, duplicando el
+  // correo con el mismo codigo. sendMail ya tiene su propia cadena de fallback interna.
+  await sendMail({
+    to: normalizedEmail,
+    subject: "Codigo de autorizacion para tratamiento de datos",
+    html,
+    senderName: user?.fullname || user?.name || user?.email || "SPI",
+    replyTo: user?.email || undefined,
+    from: user?.email || undefined,
+    gmailUserId: user?.id || null,
+  });
 
   return {
     token_id: insert.rows[0].id,
@@ -1090,6 +1025,8 @@ async function resolveRequestTypeId(input) {
     retiro: "F.ST-21",
     compra: "F.ST-19",
     cliente: "F.ST-22",
+    credito: "F.VE-02",
+    credit: "F.VE-02",
   };
   const codeHint = aliasToCode[raw] || input;
   let q = await db.query(
@@ -1112,22 +1049,110 @@ function resolveSchemaKey(code) {
   if (normalized === "F.ST-20") return "inspection";
   if (normalized === "F.ST-21") return "retiro";
   if (normalized === "F.ST-19") return "compra";
+  if (normalized === "F.VE-02") return "credito";
   return "cliente";
+}
+
+function parseCurrencyLike(value) {
+  if (value === undefined || value === null || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const normalized = String(value)
+    .replace(/\s/g, "")
+    .replace(/\$/g, "")
+    .replace(/,/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function roundMoney(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.round(number * 100) / 100;
+}
+
+function normalizeCreditPayload(payload = {}) {
+  const next = { ...payload };
+  if (!next.fecha_solicitud) next.fecha_solicitud = formatDate(new Date());
+
+  const totalIngresos = roundMoney(
+    parseCurrencyLike(next.ingresos_negocio) +
+    parseCurrencyLike(next.ingresos_relacion_dependencia) +
+    parseCurrencyLike(next.otros_ingresos),
+  );
+  const totalEgresos = roundMoney(
+    parseCurrencyLike(next.egresos_negocio) +
+    parseCurrencyLike(next.gastos_familiares) +
+    parseCurrencyLike(next.prestamos_obligaciones),
+  );
+  const patrimonio = roundMoney(parseCurrencyLike(next.activos) - parseCurrencyLike(next.pasivos));
+
+  if (next.total_ingresos === undefined || next.total_ingresos === "") next.total_ingresos = totalIngresos;
+  if (next.total_egresos === undefined || next.total_egresos === "") next.total_egresos = totalEgresos;
+  if (next.patrimonio === undefined || next.patrimonio === "") next.patrimonio = patrimonio;
+  if (next.utilidad_perdida_neta === undefined || next.utilidad_perdida_neta === "") {
+    next.utilidad_perdida_neta = roundMoney(parseCurrencyLike(next.total_ingresos) - parseCurrencyLike(next.total_egresos));
+  }
+
+  return next;
+}
+
+function normalizeBooleanLike(value, fallback = false) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (["true", "1", "si", "sí", "yes", "y"].includes(normalized)) return true;
+  if (["false", "0", "no", "n"].includes(normalized)) return false;
+  return fallback;
+}
+
+function normalizeValueBySchema(propertySchema = {}, value) {
+  if (propertySchema.type === "boolean") {
+    return normalizeBooleanLike(value, false);
+  }
+  if (value !== undefined && value !== null) return value;
+  if (propertySchema.type === "array") return [];
+  // Campos opcionales con enum (ej. "origen" en inspection: ausente en
+  // solicitudes independientes, solo presente cuando el flujo lo fija
+  // automaticamente) no deben rellenarse con "" -- "" nunca es un valor
+  // valido del enum, asi que forzarlo rompia la validacion de ajv en toda
+  // solicitud creada manualmente sin ese campo. Se deja el campo ausente.
+  if (Array.isArray(propertySchema.enum)) return undefined;
+  return "";
+}
+
+function buildCreditRequestReplacements(payload = {}, req = {}) {
+  return CREDIT_REQUEST_TEMPLATE_FIELDS.reduce((acc, field) => {
+    let value = payload[field];
+    if (field === "asesor_comercial" && !value) value = req.requester_name;
+    if (field === "fecha_solicitud" && !value) value = formatDate(req.created_at || new Date());
+    acc[field] = asText(value);
+    acc[`{{${field}}}`] = asText(value);
+    return acc;
+  }, {});
 }
 
 function normalizePayload(schemaKey, payload) {
   const schema = requestSchemas[schemaKey] || { properties: {} };
-  const normalizedPayload = { ...(payload || {}) };
+  const sourcePayload = schemaKey === "credito" ? normalizeCreditPayload(payload || {}) : (payload || {});
+  const normalizedPayload = { ...sourcePayload };
   for (const key of Object.keys(schema.properties || {})) {
     if (key === "equipos") {
-      if (Array.isArray(payload?.equipos)) {
-        normalizedPayload.equipos = payload.equipos.map((e) => ({ ...e }));
+      if (Array.isArray(sourcePayload?.equipos)) {
+        normalizedPayload.equipos = sourcePayload.equipos.map((e) => ({
+          ...e,
+          serial_pendiente: normalizeBooleanLike(e?.serial_pendiente, false),
+        }));
       } else {
         normalizedPayload.equipos = [];
       }
     } else {
-      normalizedPayload[key] =
-        payload[key] !== undefined && payload[key] !== null ? payload[key] : "";
+      const normalizedValue = normalizeValueBySchema(schema.properties[key], sourcePayload[key]);
+      if (normalizedValue === undefined) {
+        delete normalizedPayload[key];
+      } else {
+        normalizedPayload[key] = normalizedValue;
+      }
     }
   }
   normalizedPayload.__form_variant = schemaKey;
@@ -1154,7 +1179,7 @@ function buildEquipmentEntries(payload = {}) {
       serial: item?.serial ? String(item.serial).trim() : null,
       estado: item?.estado || item?.estado_equipo || null,
       cantidad: Number.isFinite(Number(item?.cantidad)) ? Number(item.cantidad) : item?.cantidad ?? null,
-      serial_pendiente: item?.serial_pendiente ?? false,
+      serial_pendiente: normalizeBooleanLike(item?.serial_pendiente, false),
     }))
     .filter((entry) => entry.unidad_id || entry.serial);
 
@@ -1165,7 +1190,7 @@ function buildEquipmentEntries(payload = {}) {
     serial: payload.serial ? String(payload.serial).trim() : null,
     estado: payload.estado_equipo || payload.estado || null,
     cantidad: Number.isFinite(Number(payload.cantidad)) ? Number(payload.cantidad) : payload.cantidad ?? null,
-    serial_pendiente: payload.serial_pendiente ?? false,
+    serial_pendiente: normalizeBooleanLike(payload.serial_pendiente, false),
   };
 
   if (fallback.unidad_id || fallback.serial) {
@@ -1231,7 +1256,7 @@ async function createRequest({
 
   const { normalizedPayload, schema } = normalizePayload(schemaKey, payload);
   const validate = ajv.compile(schema);
-  const valid = validate(payload || {});
+  const valid = validate(normalizedPayload || {});
 
   if (!valid) {
     const errors = validate.errors
@@ -1268,6 +1293,9 @@ async function createRequest({
   }
 
   const isJefeComercial = (requesterRole || "").toLowerCase() === "jefe_comercial";
+  if (schemaKey === "credito" && !normalizedPayload.asesor_comercial) {
+    normalizedPayload.asesor_comercial = requester_name || requester_email || "";
+  }
 
   logger.info(
     {
@@ -1315,7 +1343,7 @@ async function createRequest({
     });
   }
 
-  const shouldGenerateActa = isJefeComercial || ["F.ST-20", "F.ST-21"].includes(code);
+  const shouldGenerateActa = isJefeComercial || ["F.ST-20", "F.ST-21", "F.VE-02"].includes(code);
 
   let doc = null;
   if (shouldGenerateActa) {
@@ -1565,11 +1593,27 @@ async function generateInspectionFormPdf({
   const sourcePdfBytes = fs.readFileSync(INSPECTION_FORM_PDF_PATH);
   const pdfDoc = await PdfLibDocument.load(sourcePdfBytes);
   const form = pdfDoc.getForm();
-  const baseFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const baseFont = await pdfDoc.embedFont(StandardFonts.TimesRoman);
 
-  const setTextField = (fieldName, value, { fontSize = 8 } = {}) => {
+  const setTextField = (fieldName, value, { fontSize = 10 } = {}) => {
     const textField = form.getTextField(fieldName);
-    textField.setFontSize(fontSize);
+    try {
+      textField.setFontSize(fontSize);
+    } catch (error) {
+      // Algunos campos de esta plantilla (ej. "cliente") no traen /DA
+      // (default appearance) en el PDF fuente, y pdf-lib no puede fijar el
+      // tamaño de fuente in-place en ese caso (regex sobre el DA existente).
+      // Se sintetiza un /DA valido desde cero: el nombre de fuente ("Helv")
+      // es solo un token, pdf-lib no lo resuelve contra recursos reales al
+      // hornear la apariencia -- solo importa el tamaño numerico, que es lo
+      // unico que getDefaultFontSize() lee. Sin esto, el campo se renderiza
+      // con auto-size (mucho mas grande que el resto, ej. "cliente").
+      try {
+        textField.acroField.setDefaultAppearance(`/Helv ${fontSize} Tf 0 g`);
+      } catch (fallbackError) {
+        logger.warn({ fieldName, error: error.message, fallbackError: fallbackError.message }, "No se pudo fijar tamaño de fuente en campo F.ST-20, se usa el default");
+      }
+    }
     textField.setText(asText(value));
     textField.updateAppearances(baseFont);
   };
@@ -1580,24 +1624,24 @@ async function generateInspectionFormPdf({
       ? (payload.requiere_lis ? "Si" : "No")
       : asText(payload?.requiere_lis);
 
-  setTextField("asesor", req?.requester_name || "", { fontSize: 8 });
-  setTextField("fecha", formatDate(req?.created_at), { fontSize: 8 });
-  setTextField("correo", req?.requester_email || "", { fontSize: 8 });
-  setTextField("cliente", payload?.nombre_cliente || "", { fontSize: 8 });
-  setTextField("dir_cliente", payload?.direccion_cliente || "", { fontSize: 8 });
-  setTextField("pc_cliente", payload?.persona_contacto || "", { fontSize: 8 });
-  setTextField("cp_cliente", payload?.celular_contacto || "", { fontSize: 8 });
-  setTextField("fecha_ins", payload?.fecha_instalacion ? formatDate(payload.fecha_instalacion) : "", { fontSize: 8 });
-  setTextField("req_lis", reqLisValue, { fontSize: 8 });
-  setTextField("Acc_extras", buildInspectionExtrasText(payload), { fontSize: 8 });
-  setTextField("obs", payload?.observaciones || "", { fontSize: 8 });
+  setTextField("asesor", req?.requester_name || "");
+  setTextField("fecha", formatDate(req?.created_at));
+  setTextField("correo", req?.requester_email || "");
+  setTextField("cliente", payload?.nombre_cliente || "");
+  setTextField("dir_cliente", payload?.direccion_cliente || "");
+  setTextField("pc_cliente", payload?.persona_contacto || "");
+  setTextField("cp_cliente", payload?.celular_contacto || "");
+  setTextField("fecha_ins", payload?.fecha_instalacion ? formatDate(payload.fecha_instalacion) : "");
+  setTextField("req_lis", reqLisValue);
+  setTextField("Acc_extras", buildInspectionExtrasText(payload));
+  setTextField("obs", payload?.observaciones || "");
 
   for (let i = 0; i < 4; i += 1) {
     const equipment = firstFourEquipments[i];
     const name = equipment?.displayName || equipment?.nombre_equipo || "";
     const state = equipment?.displayState || equipment?.estado || "";
-    setTextField(`equipo_${i + 1}`, name, { fontSize: 8 });
-    setTextField(`e_equipo_${i + 1}`, state, { fontSize: 8 });
+    setTextField(`equipo_${i + 1}`, name);
+    setTextField(`e_equipo_${i + 1}`, state);
   }
 
   securePdfForm(form);
@@ -1679,9 +1723,9 @@ async function generateActa(request_id, uploaded_by, options = {}) {
       pdfDoc.on("error", reject);
 
       const title = `${docLabel}`;
-      pdfDoc.fontSize(16).text(title, { underline: true });
+      pdfDoc.font("Times-Bold").fontSize(10).text(title, { underline: true });
       pdfDoc.moveDown();
-      pdfDoc.fontSize(11).text(`Solicitud: ${request_id}`);
+      pdfDoc.font("Times-Roman").fontSize(10).text(`Solicitud: ${request_id}`);
       pdfDoc.text(`Cliente: ${payload.nombre_cliente || ""}`);
       pdfDoc.text(`Dirección: ${payload.direccion_cliente || ""}`);
       pdfDoc.text(`Contacto: ${payload.persona_contacto || ""}`);
@@ -1786,6 +1830,9 @@ async function generateActa(request_id, uploaded_by, options = {}) {
     }
 
     const fechaInstalacionRaw = payload.fecha_instalacion || payload.fecha_retiro || payload.fecha_tentativa_visita || "";
+    const creditRequestReplacements = typeCode === "F.VE-02"
+      ? buildCreditRequestReplacements(payload, req)
+      : {};
     const replacements = {
       ID_SOLICITUD: asText(request_id),
       NOMBRE_CLIENTE: asText(payload.nombre_cliente),
@@ -1811,6 +1858,7 @@ async function generateActa(request_id, uploaded_by, options = {}) {
       "<<Observaciones>>": asText(payload.observaciones || payload.anotaciones),
       "<<LIS>>": typeof payload.requiere_lis === "boolean" ? (payload.requiere_lis ? "Sí" : "No") : asText(payload.requiere_lis),
       ...equipmentTags,
+      ...creditRequestReplacements,
     };
 
     await replaceTags(doc.id, replacements);
@@ -1937,7 +1985,7 @@ async function addDriveAttachment({ request_id, drive_file_id, title, mime_type 
 
 async function getRequestFull(id) {
   const { rows } = await db.query(
-    `SELECT r.*, u.email AS requester_email, rt.title AS type_title
+    `SELECT r.*, u.email AS requester_email, rt.title AS type_title, rt.code AS type_code
      FROM requests r
      LEFT JOIN users u ON u.id=r.requester_id
      LEFT JOIN request_types rt ON rt.id=r.request_type_id
@@ -1952,12 +2000,144 @@ async function getRequestFull(id) {
   return { request, attachments, documents };
 }
 
-async function listRequests({ page = 1, pageSize = 50, status, q, type }) {
+function assertCreditDecisionPayload({ action, payload = {} }) {
+  const normalizedAction = String(action || "").trim().toLowerCase();
+  if (!["approve", "reject"].includes(normalizedAction)) {
+    throw buildHttpError("Accion invalida. Usa approve o reject.", 400);
+  }
+
+  const required = normalizedAction === "approve"
+    ? [
+      "monto_sugerido_jefe_comercial",
+      "validacion_referencias",
+      "monto_credito_autorizado",
+      "plazo_credito_autorizado",
+    ]
+    : ["validacion_referencias", "observaciones_validacion"];
+
+  const missing = required.filter((key) => {
+    const value = payload[key];
+    return value === undefined || value === null || String(value).trim() === "";
+  });
+
+  if (missing.length) {
+    throw buildHttpError(`Faltan campos internos para resolver la solicitud: ${missing.join(", ")}`, 400);
+  }
+}
+
+async function processCreditRequestDecision({ id, user, action, payload = {} }) {
+  const normalizedAction = String(action || "").trim().toLowerCase();
+  assertCreditDecisionPayload({ action: normalizedAction, payload });
+
+  const { rows } = await db.query(
+    `SELECT r.*, rt.code AS type_code, rt.title AS type_title, u.email AS requester_email, u.fullname AS requester_name
+       FROM requests r
+       JOIN request_types rt ON rt.id = r.request_type_id
+       LEFT JOIN users u ON u.id = r.requester_id
+      WHERE r.id = $1
+      LIMIT 1`,
+    [id],
+  );
+  const request = rows[0];
+  if (!request) throw buildHttpError("Solicitud no encontrada", 404);
+  if (String(request.type_code || "").toUpperCase() !== "F.VE-02") {
+    throw buildHttpError("Esta accion solo aplica a solicitudes de credito F.VE-02", 400);
+  }
+
+  const currentStatus = String(request.status || "").toLowerCase();
+  if (["aprobado", "rechazado", "cancelado", "cancelled", "approved", "rejected"].includes(currentStatus)) {
+    throw buildHttpError(`La solicitud ya fue resuelta (estado: ${request.status}).`, 409);
+  }
+
+  const currentPayload = typeof request.payload === "string"
+    ? JSON.parse(request.payload || "{}")
+    : request.payload || {};
+  const now = new Date();
+  const internalPayload = {
+    monto_sugerido_jefe_comercial: payload.monto_sugerido_jefe_comercial ?? "",
+    validacion_referencias: payload.validacion_referencias ?? "",
+    decision_solicitud: normalizedAction === "approve" ? "APROBADA" : "NEGADA",
+    monto_credito_autorizado: normalizedAction === "approve" ? payload.monto_credito_autorizado ?? "" : "",
+    plazo_credito_autorizado: normalizedAction === "approve" ? payload.plazo_credito_autorizado ?? "" : "",
+    fecha_resolucion: payload.fecha_resolucion || formatDate(now),
+    observaciones_validacion: payload.observaciones_validacion || "",
+  };
+  const nextPayload = normalizeCreditPayload({ ...currentPayload, ...internalPayload });
+  const nextStatus = normalizedAction === "approve" ? "aprobado" : "rechazado";
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const updatedResult = await client.query(
+      `UPDATE requests
+          SET payload = $1,
+              status = $2,
+              updated_at = now()
+        WHERE id = $3
+        RETURNING *`,
+      [JSON.stringify(nextPayload), nextStatus, id],
+    );
+    await client.query(
+      `INSERT INTO request_approvals (request_id, approver_id, used, action, comments, acted_at)
+       VALUES ($1, $2, TRUE, $3, $4, now())`,
+      [
+        id,
+        user?.id || null,
+        normalizedAction === "approve" ? "approve" : "reject",
+        nextPayload.observaciones_validacion || nextPayload.validacion_referencias || null,
+      ],
+    );
+    await client.query("COMMIT");
+
+    const updated = updatedResult.rows[0];
+    let document = null;
+    try {
+      document = await generateActa(id, user?.id || request.requester_id, "credito");
+    } catch (error) {
+      logger.error({ error, requestId: id }, "No se pudo regenerar la solicitud de credito con decision financiera");
+    }
+
+    setImmediate(async () => {
+      try {
+        if (request.requester_id) {
+          const notify = nextStatus === "aprobado"
+            ? notificationManager.notifyRequestApproved
+            : notificationManager.notifyRequestRejected;
+          await notify.call(notificationManager, request.requester_id, id, {
+            request_type: request.type_code,
+            acted_at: now.toISOString(),
+          });
+        }
+      } catch (error) {
+        logger.warn({ error, requestId: id }, "No se pudo notificar decision de credito");
+      }
+    });
+
+    return {
+      request: { ...updated, payload: nextPayload, type_code: request.type_code, type_title: request.type_title },
+      document,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function listRequests({ page = 1, pageSize = 50, status, q, type, requester_id }) {
   const offset = (page - 1) * pageSize;
   const fromAndJoins = `
     FROM requests r
     LEFT JOIN users u ON u.id = r.requester_id
     LEFT JOIN request_types rt ON rt.id = r.request_type_id
+    LEFT JOIN LATERAL (
+      SELECT comments AS rejection_reason, acted_at AS rejected_at
+      FROM request_approvals ra
+      WHERE ra.request_id = r.id AND ra.action = 'reject'
+      ORDER BY ra.acted_at DESC
+      LIMIT 1
+    ) last_reject ON TRUE
   `;
   let whereClauses = "WHERE 1=1";
   const params = [];
@@ -1969,10 +2149,15 @@ async function listRequests({ page = 1, pageSize = 50, status, q, type }) {
       whereClauses += ` AND r.request_type_id = $${paramIndex++}`;
       params.push(typeId);
     } catch (e) {
-      // Si el tipo no existe, retornamos lista vacía o ignoramos. 
+      // Si el tipo no existe, retornamos lista vacía o ignoramos.
       // Retornar vacío es más correcto para un filtro fallido.
       return { rows: [], total: 0 };
     }
+  }
+
+  if (requester_id) {
+    whereClauses += ` AND r.requester_id = $${paramIndex++}`;
+    params.push(requester_id);
   }
 
   if (status) {
@@ -1984,18 +2169,18 @@ async function listRequests({ page = 1, pageSize = 50, status, q, type }) {
     params.push(`%${q.toLowerCase()}%`);
     paramIndex++;
   }
-  const countQuery = `SELECT COUNT(*) ${fromAndJoins} ${whereClauses}`;
-  const totalResult = await db.query(countQuery, params);
-  const total = parseInt(totalResult.rows[0].count, 10);
   const dataParams = [...params, pageSize, offset];
   const dataQuery = `
-    SELECT r.*, u.email AS requester_email, rt.title AS type_title
+    SELECT r.*, u.email AS requester_email, rt.title AS type_title, rt.code AS type_code,
+      last_reject.rejection_reason, last_reject.rejected_at,
+      COUNT(*) OVER() AS total_count
     ${fromAndJoins}
     ${whereClauses}
     ORDER BY r.created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex++}
   `;
   const { rows } = await db.query(dataQuery, dataParams);
-  const mappedRows = rows.map((row) => ({
+  const total = rows.length > 0 ? parseInt(rows[0].total_count, 10) : 0;
+  const mappedRows = rows.map(({ total_count, ...row }) => ({
     ...row,
     type_title: getRequestLabel(row.type_code, row.type_title),
   }));
@@ -2132,40 +2317,251 @@ async function updateRequestStatus(id, status, client = db) {
   );
   const updated = rows[0];
   if (updated) {
-    // Enviar notificaciones automáticas
-    setImmediate(async () => {
-      try {
-        const { rows: requestRows } = await db.query(
-          `SELECT r.*, u.email as requester_email, u.id as requester_id
-           FROM requests r
-           LEFT JOIN users u ON r.requester_id = u.id
-           WHERE r.id = $1`,
-          [updated.id]
-        );
-        const requestData = requestRows[0];
-
-        if (requestData && requestData.requester_id) {
-          if (status.toLowerCase().includes('aprob')) {
-            await notificationManager.notifyRequestApproved(requestData.requester_id, updated.id, {
-              request_type: requestData.request_type_id,
-              approved_at: new Date().toISOString()
-            });
-          } else if (status.toLowerCase().includes('rechaz')) {
-            await notificationManager.notifyRequestRejected(requestData.requester_id, updated.id, {
-              request_type: requestData.request_type_id,
-              rejected_at: new Date().toISOString()
-            });
-          }
-        }
-      } catch (error) {
-        logger.error('Error enviando notificación automática:', error);
-        // No lanzamos error para no detener el flujo
-      }
-
+    // La notificacion de aprobado/rechazado la envia quien decide la solicitud
+    // (approvals.service.js, o el modulo especifico del tipo de solicitud) con
+    // el contenido correcto para ese proceso. Aqui solo se sincroniza el equipo
+    // para no duplicar el correo con una version generica sin cliente/detalle.
+    setImmediate(() => {
       syncEquipmentFromRequest({ requestId: updated.id, status: updated.status, client });
     });
   }
   return updated;
+}
+
+// Estados terminales: una vez ahi, markRequestCompleted no debe pisarlos
+// (ej. no "completar" una solicitud que ya fue rechazada o cancelada).
+const TERMINAL_REQUEST_STATUSES = new Set([
+  "completado", "rechazado", "rejected", "cancelado", "cancelled",
+]);
+
+/**
+ * Cierra el ciclo de vida de una solicitud (F.ST-20/F.ST-21/etc) cuando su
+ * cumplimiento real ya se registro en el flujo de origen (F.ST-07 conforme,
+ * retiro cerrado, ...). Idempotente y no pisa estados terminales existentes.
+ */
+async function markRequestCompleted(requestId, { actorUser, resultMeta = {} } = {}) {
+  if (!requestId) return null;
+
+  const { rows } = await db.query(`SELECT id, status FROM requests WHERE id = $1 LIMIT 1`, [requestId]);
+  const current = rows[0];
+  if (!current) return null;
+  if (TERMINAL_REQUEST_STATUSES.has(String(current.status || "").toLowerCase())) {
+    return current;
+  }
+
+  const updated = await updateRequestStatus(requestId, "completado");
+
+  try {
+    await logAction({
+      user_id: actorUser?.id || null,
+      module: "requests",
+      action: "complete",
+      entity: "requests",
+      entity_id: requestId,
+      details: resultMeta,
+    });
+  } catch (auditErr) {
+    logger.warn({ auditErr }, "No se pudo registrar auditoría al completar solicitud");
+  }
+
+  return updated;
+}
+
+// F.ST-07 para F.ST-20 "independientes": la solicitud vive nativa en
+// `requests` (sin tabla intermedia como BC/compras), y la coordinacion
+// (tecnico + fecha) ya quedo guardada como actividad en
+// servicio.cronograma_actividades_tecnicas (source_type='solicitud_inspeccion')
+// al aprobar -- se reusa esa fila en vez de duplicar el dato en el payload.
+async function registerIndependentInspectionResult(requestId, body = {}, user = null) {
+  const { rows: reqRows } = await db.query(
+    `SELECT r.id, r.status, r.payload, r.requester_id, rt.code AS type_code
+       FROM requests r
+       LEFT JOIN request_types rt ON rt.id = r.request_type_id
+      WHERE r.id = $1
+      LIMIT 1`,
+    [requestId],
+  );
+  const request = reqRows[0];
+  if (!request) {
+    throw createSiteInspectionError("Solicitud no encontrada", { status: 404, code: "REQUEST_NOT_FOUND" });
+  }
+  if (request.type_code !== "F.ST-20") {
+    throw createSiteInspectionError("Esta solicitud no es una inspeccion de ambiente", { status: 400, code: "REQUEST_TYPE_MISMATCH" });
+  }
+
+  const { rows: activityRows } = await db.query(
+    `SELECT activity_date, user_id, (SELECT COALESCE(fullname, name, email) FROM public.users WHERE id = a.user_id) AS user_name
+       FROM servicio.cronograma_actividades_tecnicas a
+      WHERE source_type = 'solicitud_inspeccion' AND source_id = $1
+      ORDER BY id DESC
+      LIMIT 1`,
+    [String(requestId)],
+  );
+  const activity = activityRows[0];
+  if (!activity?.activity_date) {
+    throw createSiteInspectionError("Primero se debe aprobar y asignar tecnico y fecha de inspeccion", {
+      status: 409,
+      code: "SITE_INSPECTION_NOT_COORDINATED",
+    });
+  }
+
+  const normalizedResult = normalizeInspectionResult(body?.result);
+  if (!normalizedResult) {
+    throw createSiteInspectionError("Debes indicar un resultado valido para la inspeccion en sitio", {
+      status: 400,
+      code: "SITE_INSPECTION_RESULT_REQUIRED",
+    });
+  }
+  const normalizedChecklist = normalizeFst07Checklist(body?.checklist || {});
+  const clientSignerName = String(body?.client_signer_name || "").trim();
+  if (!clientSignerName) {
+    throw createSiteInspectionError("Debes registrar el nombre de quien firma por parte del cliente", {
+      status: 400,
+      code: "CLIENT_SIGNATURE_REQUIRED",
+    });
+  }
+  const normalizedFollowUpDate = assertFollowUpDateConsistency({
+    result: normalizedResult,
+    followUpDate: body?.follow_up_date,
+    scheduledDate: activity.activity_date,
+  });
+
+  const payload = typeof request.payload === "string" ? JSON.parse(request.payload) : request.payload || {};
+  const clientName = payload?.nombre_cliente || "Cliente";
+  const equipmentName = Array.isArray(payload?.equipos)
+    ? payload.equipos.map((item) => item?.nombre_equipo).filter(Boolean).join(", ")
+    : "";
+
+  const { buffer: fst07Buffer, generatedAt } = await generateFst07PdfBuffer({
+    clientName,
+    equipmentName: equipmentName || "Equipo no especificado",
+    scheduledDate: activity.activity_date,
+    responsibleName: activity.user_name || "",
+    result: normalizedResult,
+    checklist: normalizedChecklist,
+    observations: body?.observations,
+    recommendations: body?.recommendations,
+    followUpDate: normalizedFollowUpDate,
+    isReinspection: Boolean(body?.is_reinspection),
+    clientSignerName,
+  });
+
+  const { folders } = await resolveRequestFolder(requestId);
+  const parentFolder = folders.requestFolderId || folders.typeFolderId || folders.departmentFolderId || folders.rootId;
+  const fileName = buildFst07FileName({ clientName, generatedAt });
+  const stored = await uploadBase64File(fileName, fst07Buffer.toString("base64"), "application/pdf", parentFolder);
+  if (!stored?.id) {
+    throw createSiteInspectionError("No se pudo almacenar el documento F.ST-07 en Drive", {
+      status: 500,
+      code: "SITE_INSPECTION_REPORT_FAILED",
+    });
+  }
+
+  await db.query(
+    `INSERT INTO request_attachments(request_id, drive_file_id, drive_link, mime_type, uploaded_by, title)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [requestId, stored.id, stored.webViewLink || null, "application/pdf", user?.id || null, "F.ST-07 Inspección de Ambiente"],
+  );
+
+  const nowIso = new Date().toISOString();
+  const nextPayload = {
+    ...payload,
+    inspection_result: normalizedResult,
+    inspection_follow_up_date: normalizedResult === "non_compliant" ? normalizedFollowUpDate : null,
+    inspection_checklist: normalizedChecklist,
+    inspection_observations: String(body?.observations || "").trim() || null,
+    inspection_recommendations: String(body?.recommendations || "").trim() || null,
+    inspection_client_signer_name: clientSignerName,
+    inspection_report_file_id: stored.id,
+    inspection_report_link: stored.webViewLink || null,
+    inspection_result_registered_by: user?.email || null,
+    inspection_result_registered_at: nowIso,
+  };
+  await db.query(`UPDATE requests SET payload = $1::jsonb, updated_at = now() WHERE id = $2`, [
+    JSON.stringify(nextPayload),
+    requestId,
+  ]);
+
+  if (normalizedResult === "non_compliant" && normalizedFollowUpDate) {
+    await db.query(
+      `UPDATE servicio.cronograma_actividades_tecnicas
+          SET activity_date = $1, status = 'programado', updated_at = now()
+        WHERE source_type = 'solicitud_inspeccion' AND source_id = $2`,
+      [normalizedFollowUpDate, String(requestId)],
+    );
+  } else if (normalizedResult === "compliant") {
+    await db.query(
+      `UPDATE servicio.cronograma_actividades_tecnicas
+          SET status = 'completado', updated_at = now()
+        WHERE source_type = 'solicitud_inspeccion' AND source_id = $1
+          AND COALESCE(lower(status), 'programado') IN ('programado', 'confirmado', 'en_proceso')`,
+      [String(requestId)],
+    );
+    await markRequestCompleted(requestId, {
+      actorUser: user,
+      resultMeta: { source: "independent_site_inspection", result: normalizedResult },
+    });
+  }
+
+  await trackFst07WorkflowDocument({
+    sourceType: "commercial_request",
+    sourceId: String(requestId),
+    requestId,
+    driveFileId: stored.id,
+    driveFolderId: parentFolder,
+    driveLink: stored.webViewLink || null,
+    result: normalizedResult,
+    followUpDate: normalizedFollowUpDate,
+    isReinspection: Boolean(body?.is_reinspection),
+    clientName,
+    equipmentName: equipmentName || null,
+    user,
+    metadata: { source_module: "requests", request_id: requestId },
+  });
+
+  const resultLabel = normalizedResult === "compliant" ? "conforme" : "no conforme";
+  const subjectLabel = `F.ST-20 - ${clientName} - Inspección ${resultLabel}`;
+  try {
+    if (request.requester_id) {
+      await notificationManager.sendNotification({
+        userId: request.requester_id,
+        customTitle: `Inspección de ambiente ${resultLabel}`,
+        customMessage:
+          normalizedResult === "compliant"
+            ? `La inspección de ambiente para ${clientName} fue registrada como conforme.`
+            : `La inspección de ambiente para ${clientName} fue registrada como no conforme. Se agendó reinspección para ${normalizedFollowUpDate}.`,
+        type: normalizedResult === "compliant" ? "success" : "alert",
+        source: "requests.site_inspection.result",
+        priority: normalizedResult === "compliant" ? 0 : 2,
+        email: true,
+        data: { email_subject: subjectLabel },
+        meta: { request_id: requestId, result: normalizedResult },
+      });
+    }
+    if (normalizedResult === "non_compliant") {
+      const approverRoles = getRequestApproverRoles("F.ST-20");
+      const approverUsers = approverRoles.length ? await getUsersByRoles(approverRoles) : [];
+      await Promise.all(
+        approverUsers.map((approverUser) =>
+          notificationManager.sendNotification({
+            userId: approverUser.id,
+            customTitle: "Reinspección de ambiente requerida",
+            customMessage: `La inspección de ambiente para ${clientName} resultó no conforme. Reinspección agendada para ${normalizedFollowUpDate}.`,
+            type: "alert",
+            source: "requests.site_inspection.result",
+            priority: 2,
+            email: true,
+            data: { email_subject: subjectLabel },
+            meta: { request_id: requestId, result: normalizedResult },
+          }),
+        ),
+      );
+    }
+  } catch (notifyError) {
+    logger.warn({ notifyError, requestId }, "No se pudo notificar el resultado de la inspeccion");
+  }
+
+  return { result: normalizedResult, payload: nextPayload };
 }
 
 async function resolveRequesterProfile({ requester_id, requester_email, requester_name }) {
@@ -2188,7 +2584,9 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
   const approverUsers = approverRoles.length ? await getUsersByRoles(approverRoles) : [];
   const approverEmails = approverUsers.map((user) => user.email).filter(Boolean);
   const fallbackEmail = getFallbackNotificationEmail();
-  const dashboardLink = `${FRONTEND_URL}/dashboard/servicio-tecnico`;
+  const dashboardLink = String(requestType?.code || "").toUpperCase() === "F.VE-02"
+    ? `${FRONTEND_URL}/dashboard/comercial/solicitudes`
+    : `${FRONTEND_URL}/dashboard/servicio-tecnico`;
   const detailLink = `${dashboardLink}?request=${request.id}`;
   const summaryItems = [];
   if (payload?.nombre_cliente) summaryItems.push(`<li><b>Cliente:</b> ${asText(payload.nombre_cliente)}</li>`);
@@ -2207,9 +2605,13 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
       .join("\n")
     : "• Sin detalles adicionales";
 
+  const requestCode = requestType?.code || "";
+  const clientLabel = payload?.nombre_cliente ? asText(payload.nombre_cliente) : null;
+  const emailSubject = `Solicitud pendiente de aprobación${requestCode ? ` ${requestCode}` : ""} - ${clientLabel || requestTitle}`;
+
   const documentLine = document?.link ? `• Documento generado: ${document.link}` : null;
   const lines = [
-    `*Solicitud pendiente de aprobación* (#${request.id})`,
+    `*Solicitud pendiente de aprobación* (${requestCode || requestTitle})`,
     `*Tipo:* ${requestTitle}`,
     `*Solicitante:* ${requesterName}${requesterEmail ? ` (${requesterEmail})` : ""}`,
     summaryText,
@@ -2222,7 +2624,7 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
   if (recipients.length) {
     await sendMail({
       to: recipients,
-      subject: `Solicitud pendiente de aprobación (#${request.id})`,
+      subject: emailSubject,
       html: `
         <h2>Solicitud pendiente de aprobación</h2>
         <p><strong>Tipo:</strong> ${requestTitle}</p>
@@ -2325,7 +2727,7 @@ async function resubmit({ id, user_id, payload }) {
   const schemaKey = resolveSchemaKey(request.type_code);
   const { normalizedPayload, schema } = normalizePayload(schemaKey, payload || {});
   const validate = ajv.compile(schema);
-  const valid = validate(payload || {});
+  const valid = validate(normalizedPayload || {});
   if (!valid) {
     const errors = validate.errors
       .map((e) => `${e.instancePath || e.keyword} ${e.message} `)
@@ -2409,8 +2811,16 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
 
   const validate = ajv.getSchema('newClient');
   if (!validate(data)) {
-    const error = new Error("Datos de solicitud inválidos.");
+    // El handler global de errores (app.js) solo reenvia err.details/err.meta al
+    // frontend -- err.validationErrors (usado por otros validadores de este mismo
+    // archivo) se perdia en silencio, dejando "details: null" sin decir que campo fallo.
+    const errors = (validate.errors || [])
+      .map((e) => `${e.instancePath || e.keyword} ${e.message}`)
+      .join(", ");
+    logger.warn({ errors: validate.errors, data }, "⚠️ Validación AJV fallida al crear solicitud de cliente");
+    const error = new Error(`Datos de solicitud inválidos: ${errors}`);
     error.validationErrors = validate.errors;
+    error.details = validate.errors;
     error.status = 400;
     throw error;
   }
@@ -2613,7 +3023,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
     const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${newRequest.id}`;
     await sendMail({
       to: recipients,
-      subject: `Nueva solicitud de cliente (#${newRequest.id}) pendiente de revisión`,
+      subject: `Nueva solicitud de cliente F.ST-22 - ${commercial_name} pendiente de revisión`,
       html: `
         <h2>Nueva solicitud de cliente</h2>
         <p><strong>Cliente:</strong> ${commercial_name}</p>
@@ -2622,7 +3032,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
         <p>Revisar y aprobar/rechazar en el dashboard de Backoffice:</p>
         <p><a href="${detailLink}" target="_blank" rel="noopener">Abrir en SPI</a></p>
       `,
-      text: `Nueva solicitud de cliente (#${newRequest.id})\nCliente: ${commercial_name}\nTipo: ${data.client_type}\nSolicitante: ${user.email}\nRevisar en SPI: ${detailLink}`,
+      text: `Nueva solicitud de cliente F.ST-22 - ${commercial_name}\nCliente: ${commercial_name}\nTipo: ${data.client_type}\nSolicitante: ${user.email}\nRevisar en SPI: ${detailLink}`,
       gmailUserId: user?.id || null,
       replyTo: user?.email || undefined,
       from: user?.email || undefined,
@@ -2660,6 +3070,35 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
     } catch (notifyError) {
       logger.warn({ notifyError, requestId: newRequest.id }, "Error enviando notificaciones de cliente");
     }
+    // Hook CRM: sincronizar como Lead/Prospecto en EspoCRM
+    if (isCrmSyncEnabled()) {
+      try {
+        await enqueueIntegrationEvent({
+          eventType: "crm.prospect.upsert",
+          payload: {
+            id:                          newRequest.id,
+            ruc_cedula:                  newRequest.ruc_cedula,
+            commercial_name:             newRequest.commercial_name,
+            legal_person_business_name:  newRequest.legal_person_business_name,
+            natural_person_firstname:    newRequest.natural_person_firstname,
+            natural_person_lastname:     newRequest.natural_person_lastname,
+            client_type:                 newRequest.client_type,
+            client_email:                newRequest.client_email,
+            legal_rep_email:             newRequest.legal_rep_email,
+            establishment_city:          newRequest.establishment_city,
+            establishment_province:      newRequest.establishment_province,
+            shipping_city:               newRequest.shipping_city,
+            shipping_province:           newRequest.shipping_province,
+            assigned_advisor_email:      newRequest.assigned_advisor_email || user.email,
+          },
+          idempotencyKey: `crm.prospect.${newRequest.id}`,
+          correlationId:  String(newRequest.id),
+        });
+      } catch (crmErr) {
+        logger.warn({ request_id: newRequest.id, error: crmErr?.message }, "[CRM_SYNC] Error encolando prospecto");
+      }
+    }
+
     return newRequest;
   } catch (error) {
     await dbClient.query("ROLLBACK");
@@ -2687,11 +3126,10 @@ async function listClientRequests({ page = 1, pageSize = 25, status, q, createdB
     const qIndex = params.length;
     whereClause += ` AND (LOWER(commercial_name) LIKE $${qIndex} OR LOWER(ruc_cedula) LIKE $${qIndex} OR CAST(id AS TEXT) LIKE $${qIndex})`;
   }
-  const countQuery = `SELECT COUNT(*) FROM client_requests ${whereClause}`;
-  const totalResult = await db.query(countQuery, params);
-  const total = parseInt(totalResult.rows[0].count, 10);
-  const dataQuery = `SELECT id, commercial_name, ruc_cedula, created_by, status, created_at, rejection_reason FROM client_requests ${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-  const { rows } = await db.query(dataQuery, [...params, pageSize, offset]);
+  const dataQuery = `SELECT id, commercial_name, ruc_cedula, created_by, status, created_at, rejection_reason, COUNT(*) OVER() AS total_count FROM client_requests ${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+  const { rows: rawRows } = await db.query(dataQuery, [...params, pageSize, offset]);
+  const total = rawRows.length > 0 ? parseInt(rawRows[0].total_count, 10) : 0;
+  const rows = rawRows.map(({ total_count, ...row }) => row);
   return { count: total, rows, page, pageSize };
 }
 
@@ -2749,8 +3187,8 @@ async function getClientRequestById(id, user) {
     throw error;
   }
   const allowedRoles = ["backoffice_comercial", "gerencia", "calidad", "jefe_calidad"];
-  const userRole = normalizeRole(user.role);
-  const isAllowed = allowedRoles.includes(userRole) || request.created_by === user.email;
+  const userRoles = getUserRoles(user);
+  const isAllowed = userRoles.some((role) => allowedRoles.includes(role)) || request.created_by === user.email;
   if (!isAllowed) {
     const error = new Error("Acceso denegado a esta solicitud.");
     error.status = 403;
@@ -2767,8 +3205,9 @@ async function getClientRequestById(id, user) {
 
 async function updateClientRequestQualityChecklist({ id, user, item_key, status, notes }) {
   await ensureClientRequestFileColumns();
-  const role = normalizeRole(user?.role);
-  if (!isQualityReviewer(role)) {
+  const userRoles = getUserRoles(user);
+  const reviewerRole = userRoles.find((role) => isQualityReviewer(role));
+  if (!reviewerRole) {
     const error = new Error("Solo calidad puede validar el checklist de esta solicitud.");
     error.status = 403;
     throw error;
@@ -2835,7 +3274,7 @@ async function updateClientRequestQualityChecklist({ id, user, item_key, status,
       notes ? String(notes).trim() : null,
       user?.id || null,
       user?.email || null,
-      role,
+      reviewerRole,
     ],
   );
 
@@ -2902,7 +3341,6 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
   );
   const updatedRequest = updatedRows[0];
   let approvalLetter = null;
-  let odooSync = null;
   if (newStatus === 'approved') {
     await moveClientFolderToApproved(request.drive_folder_id);
     await ensureOwnerClientAssignment({
@@ -2922,10 +3360,43 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
       );
       updatedRequest.approval_letter_file_id = approvalLetter.id;
     }
-    odooSync = await syncApprovedClientToOdoo(updatedRequest);
-    if (odooSync?.external_id) {
-      updatedRequest.external_source = "odoo";
-      updatedRequest.external_id = odooSync.external_id;
+    if (isCrmSyncEnabled()) {
+      try {
+        await enqueueIntegrationEvent({
+          eventType: "crm.client.approved",
+          payload: {
+            famspi_client_request_id: updatedRequest.id,
+            ruc_cedula: updatedRequest.ruc_cedula,
+            commercial_name: updatedRequest.commercial_name,
+            legal_person_business_name: updatedRequest.legal_person_business_name,
+            natural_person_firstname: updatedRequest.natural_person_firstname,
+            natural_person_lastname: updatedRequest.natural_person_lastname,
+            client_type: updatedRequest.client_type,
+            client_email: updatedRequest.client_email,
+            establishment_phone: updatedRequest.establishment_phone,
+            establishment_cellphone: updatedRequest.establishment_cellphone,
+            establishment_address: updatedRequest.establishment_address,
+            establishment_city: updatedRequest.establishment_city,
+            establishment_province: updatedRequest.establishment_province,
+            shipping_address: updatedRequest.shipping_address,
+            shipping_city: updatedRequest.shipping_city,
+            shipping_province: updatedRequest.shipping_province,
+            shipping_contact_name: updatedRequest.shipping_contact_name,
+            legal_rep_name: updatedRequest.legal_rep_name,
+            legal_rep_email: updatedRequest.legal_rep_email,
+            approved_at: updatedRequest.approved_at,
+            external_source: updatedRequest.external_source,
+            external_id: updatedRequest.external_id,
+          },
+          idempotencyKey: `crm.client.approved.${updatedRequest.id}`,
+          correlationId: String(updatedRequest.id),
+        });
+      } catch (crmErr) {
+        logger.warn(
+          { client_request_id: updatedRequest.id, error: crmErr?.message },
+          "[CRM_SYNC] Error encolando evento de aprobacion de cliente — no bloquea la aprobacion",
+        );
+      }
     }
   }
   const outcome = newStatus === 'approved' ? 'Aprobada' : 'Rechazada';
@@ -2937,17 +3408,17 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
   const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${request.id}`;
   await sendMail({
     to: recipients,
-    subject: `Solicitud de cliente #${request.id} ${outcome}`,
+    subject: `Solicitud de cliente F.ST-22 - ${request.commercial_name} ${outcome}`,
     html: `
       <h2>Solicitud ${outcome}</h2>
-      <p><strong>Cliente:</strong> ${request.commercial_name} (#${request.id})</p>
+      <p><strong>Cliente:</strong> ${request.commercial_name}</p>
       <p><strong>Estado:</strong> ${outcome}</p>
       <p><strong>Procesado por:</strong> ${user.email}</p>
       ${newStatus === 'rejected' && rejection_reason ? `<p><strong>Motivo:</strong> ${rejection_reason}</p>` : ''}
       ${approvalLetterLink ? `<p><strong>Oficio de aprobación:</strong> <a href="${approvalLetterLink}" target="_blank" rel="noopener">${approvalLetterLink}</a></p>` : ''}
       <p>Consulta el detalle en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
     `,
-    text: `Solicitud ${outcome}\nCliente: ${request.commercial_name} (#${request.id})\nEstado: ${outcome}\nProcesado por: ${user.email}${newStatus === 'rejected' && rejection_reason ? `\nMotivo: ${rejection_reason}` : ''}${approvalLetterLink ? `\nOficio de aprobación: ${approvalLetterLink}` : ''}\nDetalle: ${detailLink}`,
+    text: `Solicitud ${outcome}\nCliente: ${request.commercial_name}\nEstado: ${outcome}\nProcesado por: ${user.email}${newStatus === 'rejected' && rejection_reason ? `\nMotivo: ${rejection_reason}` : ''}${approvalLetterLink ? `\nOficio de aprobación: ${approvalLetterLink}` : ''}\nDetalle: ${detailLink}`,
     gmailUserId: user?.id || null,
     replyTo: user?.email || undefined,
     from: user?.email || undefined,
@@ -3048,10 +3519,9 @@ async function grantConsent({ token, audit = {} }) {
   const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${updatedRequest.id}`;
   await sendMail({
     to: recipients,
-    subject: `Consentimiento confirmado para solicitud #${updatedRequest.id}`,
+    subject: `Consentimiento confirmado F.ST-22 - ${updatedRequest.commercial_name || "Cliente pendiente"}`,
     html: `
       <h2>Consentimiento confirmado</h2>
-      <p><strong>Solicitud:</strong> #${updatedRequest.id}</p>
       <p><strong>Cliente:</strong> ${updatedRequest.commercial_name || "N/A"}</p>
       <p><strong>Email:</strong> ${updatedRequest.client_email || "N/A"}</p>
       <p>Revisar la solicitud en Backoffice: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
@@ -3173,10 +3643,10 @@ async function updateClientRequest(id, user, rawData = {}, rawFiles = {}) {
   const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${updatedRequest.id}`;
   await sendMail({
     to: recipients,
-    subject: `Solicitud de cliente #${updatedRequest.id} corregida`,
+    subject: `Solicitud de cliente F.ST-22 - ${updatedRequest.commercial_name} corregida`,
     html: `
       <h2>Solicitud corregida y reenviada</h2>
-      <p><strong>Cliente:</strong> ${updatedRequest.commercial_name} (#${updatedRequest.id})</p>
+      <p><strong>Cliente:</strong> ${updatedRequest.commercial_name}</p>
       <p>El usuario ha corregido la solicitud previamente rechazada. Está pendiente de nueva revisión.</p>
       <p>Revisar en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
     `,
@@ -3199,6 +3669,9 @@ module.exports = {
   generateActa,
   generateClientApprovalLetter,
   updateRequestStatus,
+  processCreditRequestDecision,
+  markRequestCompleted,
+  registerIndependentInspectionResult,
   cancelRequest,
   resubmit,
   createClientRequest,

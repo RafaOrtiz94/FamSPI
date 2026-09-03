@@ -34,31 +34,69 @@ const installChunkLoadRecovery = () => {
   });
 };
 
-const cleanupLegacyServiceWorkers = () => {
-  if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
-  const reloadFlag = "spi_sw_cleanup_done";
+// Registra el Service Worker propio (public/service-worker.js). Antes este
+// mismo archivo desregistraba CUALQUIER service worker que encontrara --
+// remanente de un SW mal configurado que dejo usuarios atascados con una
+// version vieja/rota. El nuevo service-worker.js es network-first para el
+// HTML (nunca sirve un shell viejo mientras haya internet) y cache-first
+// solo para los archivos con hash de /static/ (inmutables por construccion),
+// asi que no deberia repetir ese problema. El navegador reemplaza
+// automaticamente cualquier SW anterior registrado en la misma URL en
+// cuanto detecta que el contenido del archivo cambio.
+const registerServiceWorker = () => {
+ if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
+ window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/service-worker.js")
+      .then((registration) => {
+        const emitUpdateAvailable = () => {
+          window.dispatchEvent(new CustomEvent("app:update-available"));
+        };
 
-  window.addEventListener("load", async () => {
-    try {
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      if (!Array.isArray(registrations) || registrations.length === 0) return;
+        if (registration.waiting) {
+          emitUpdateAvailable();
+        }
 
-      await Promise.all(registrations.map((registration) => registration.unregister()));
+        registration.addEventListener("updatefound", () => {
+          const installingWorker = registration.installing;
+          if (!installingWorker) return;
 
-      // If a SW is controlling this page, force a single reload after unregister.
-      if (navigator.serviceWorker.controller && !sessionStorage.getItem(reloadFlag)) {
-        sessionStorage.setItem(reloadFlag, "1");
-        window.location.reload();
-      }
-    } catch (error) {
-      // Non-blocking: app should keep working even if cleanup fails.
-      console.warn("No se pudo limpiar service workers legados:", error);
-    }
+          installingWorker.addEventListener("statechange", () => {
+            if (
+              installingWorker.state === "installed" &&
+              navigator.serviceWorker.controller
+            ) {
+              emitUpdateAvailable();
+            }
+          });
+        });
+
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+          if (refreshing) return;
+          refreshing = true;
+          window.dispatchEvent(new CustomEvent("app:sw-activated"));
+          window.location.reload();
+        });
+
+        navigator.serviceWorker.addEventListener("message", (event) => {
+          const type = event?.data?.type;
+          if (type === "SW_ACTIVATED") {
+            window.dispatchEvent(new CustomEvent("app:sw-activated"));
+          }
+          if (type === "SW_UPDATE_READY") {
+            emitUpdateAvailable();
+          }
+        });
+      })
+      .catch((error) => {
+        console.warn("No se pudo registrar el service worker:", error);
+      });
   });
 };
 
 installChunkLoadRecovery();
-cleanupLegacyServiceWorkers();
+registerServiceWorker();
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(

@@ -77,3 +77,73 @@ export const getTipoLabel = (solicitud = {}) => {
 
 export const hasJustificantes = (solicitud = {}) =>
   Array.isArray(solicitud.justificantes_urls) && solicitud.justificantes_urls.length > 0;
+
+export const hasExternalCoordinationEvidence = (solicitud = {}) =>
+  Array.isArray(solicitud.external_coordination_urls) && solicitud.external_coordination_urls.length > 0;
+
+export const JUSTIFICANTE_STATUS_META = {
+  pendiente: {
+    label: "Justificante pendiente de revisión",
+    bg: "bg-blue-50", border: "border-blue-200", text: "text-blue-900",
+  },
+  observado: {
+    label: "Justificante con observaciones — resubmite los documentos",
+    bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-900",
+  },
+  aceptado: {
+    label: "Justificante aceptado",
+    bg: "bg-green-50", border: "border-green-200", text: "text-green-900",
+  },
+  vencido: {
+    label: "Plazo de justificante vencido",
+    bg: "bg-red-50", border: "border-red-200", text: "text-red-900",
+  },
+  rechazado: {
+    label: "Justificante rechazado",
+    bg: "bg-red-50", border: "border-red-200", text: "text-red-900",
+  },
+};
+
+export const ESCALATION_STATUS_META = {
+  reminder_sent: {
+    label: "Recordatorio enviado al jefe",
+    badge: "bg-orange-100 text-orange-800 border-orange-200",
+  },
+  escalated: {
+    label: "Escalado a Talento Humano",
+    badge: "bg-rose-100 text-rose-800 border-rose-200",
+  },
+};
+
+export const PROVISIONAL_STATUS_META = {
+  salida_provisional_autorizada: {
+    label: "Salida provisional autorizada",
+    badge: "bg-orange-100 text-orange-800 border-orange-200",
+    bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-900",
+  },
+  procedente: {
+    label: "Procedente — pendiente aprobación final",
+    badge: "bg-teal-100 text-teal-800 border-teal-200",
+    bg: "bg-teal-50", border: "border-teal-200", text: "text-teal-900",
+  },
+  pendiente_regularizacion: {
+    label: "Pendiente de regularización",
+    badge: "bg-rose-100 text-rose-800 border-rose-200",
+    bg: "bg-rose-50", border: "border-rose-200", text: "text-rose-900",
+  },
+  rechazado_formalmente: {
+    label: "Rechazado formalmente",
+    badge: "bg-red-100 text-red-800 border-red-200",
+    bg: "bg-red-50", border: "border-red-200", text: "text-red-900",
+  },
+  aceptado_por_excepcion: {
+    label: "Aceptado por excepción",
+    badge: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-900",
+  },
+  convertido_a_vacaciones: {
+    label: "Convertido a vacaciones",
+    badge: "bg-purple-100 text-purple-800 border-purple-200",
+    bg: "bg-purple-50", border: "border-purple-200", text: "text-purple-900",
+  },
+};

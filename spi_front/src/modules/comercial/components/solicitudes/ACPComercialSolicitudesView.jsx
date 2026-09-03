@@ -1,4 +1,4 @@
-import React, { useState, useContext } from "react";
+import React, { useState } from "react";
 import { FiCreditCard, FiUserPlus, FiUsers, FiBriefcase, FiUser } from "react-icons/fi";
 import { getClientRequests } from "../../../../core/api/requestsApi";
 import Modal from "../../../../core/ui/components/Modal";
@@ -8,12 +8,10 @@ import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVaca
 import RequestStatWidget from "../../../shared/solicitudes/components/RequestStatWidget";
 import RequestsListModal from "../../../shared/solicitudes/components/RequestsListModal";
 import BaseSolicitudesView from "../../../shared/solicitudes/BaseSolicitudesView";
-import { useUI } from "../../../../core/ui/useUI";
-import { AuthContext } from "../../../../core/auth/AuthContext";
 
 const ACPComercialSolicitudesView = () => {
  // UI States
- const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
+ const [, setShowPurchaseHandoff] = useState(false);
  const [showPermisoModal, setShowPermisoModal] = useState(false);
  const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
 

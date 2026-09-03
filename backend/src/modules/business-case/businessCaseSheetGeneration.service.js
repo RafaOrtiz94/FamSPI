@@ -5,7 +5,6 @@ const logger = require("../../config/logger");
 const idempotencyService = require("./businessCaseIdempotency.service");
 const investmentsService = require("./investments.service");
 const bcLabEnvironmentService = require("./bcLabEnvironment.service");
-const bcEquipmentDetailsService = require("./bcEquipmentDetails.service");
 const bcLisIntegrationService = require("./bcLisIntegration.service");
 const bcRequirementsService = require("./bcRequirements.service");
 const bcDeliveriesService = require("./bcDeliveries.service");
@@ -16,10 +15,18 @@ const {
   syncBusinessCaseToGoogleSheet,
 } = require("./businessCaseSheetSyncLocal.service");
 const {
+  resolveSheetSyncOutcome,
+  mergeSheetGenerationHistory,
+} = require("./businessCaseSheetVersioning.helper");
+const {
   validateGenerationRequest,
   buildSignedWebAppPayload,
   DEFAULT_MAPPING_VERSION,
 } = require("./businessCaseSheetGeneration.contract");
+const {
+  filterEquipmentPairsForSheet,
+  shouldIncludeBackupInSheet,
+} = require("./businessCaseSheetEquipment.helper");
 
 const OPERATION_SCOPE_ENQUEUE = "bc_sheet_generation_enqueue_v1";
 const RETRYABLE_ERROR_CODES = new Set([
@@ -185,7 +192,7 @@ async function assertBusinessCaseExists(businessCaseId) {
   const { rows } = await db.query(
     `SELECT id, request_type, uses_modern_system, client_name, bc_purchase_type, drive_folder_id,
             bc_equipment_cost,
-            process_code, contract_object, modern_bc_metadata, extra
+            process_code, contract_object, modern_bc_metadata, extra, canonical_state
        FROM equipment_purchase_requests
       WHERE id = $1
       LIMIT 1`,
@@ -254,6 +261,34 @@ function normalizePurchaseTypeLabel(value) {
   return normalized;
 }
 
+function normalizeClientProcessTypeLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.includes("public") || normalized.includes("publico")) return "publico";
+  if (normalized.includes("priv") || normalized.includes("privado")) return "privado";
+  if (normalized.includes("juridica") || normalized.includes("natural")) return null;
+  return normalized;
+}
+
+function normalizeLisProviderLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "other" || normalized === "otro") return "Otro";
+  if (normalized === "cobas_infiniti" || normalized.includes("infiniti")) return "Cobas Infinity";
+  if (normalized === "orion" || normalized.includes("orion")) return "Orion";
+  return value;
+}
+
+function resolveSmartObjective(metadata = {}, generalData = {}, bcRow = {}) {
+  return pickFirst(
+    generalData.smart_objective,
+    generalData.smartObjective,
+    metadata.smart_objective,
+    metadata.smartObjective,
+    bcRow.smart_objective,
+  );
+}
+
 function normalizeEquipmentTypeLabel(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return null;
@@ -275,6 +310,28 @@ function normalizeInvestmentNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function calculateProcessDepreciation({ unitPrice, percentage, projectedMonths }) {
+  const base = normalizeInvestmentNumber(unitPrice);
+  if (base === null) return null;
+
+  const rate = normalizeInvestmentNumber(percentage);
+  const months = normalizeInvestmentNumber(projectedMonths);
+  const safeRate = rate === null || rate < 0 ? 0 : rate;
+  const safeMonths = months === null || months <= 0 ? 0 : months;
+  const annual = base * (safeRate / 100);
+  const monthly = annual / 12;
+  return Number((monthly * safeMonths).toFixed(2));
+}
+
+function normalizeBool(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "boolean") return value ? "Si" : "No";
+  const s = String(value).trim().toLowerCase();
+  if (s === "true" || s === "1" || s === "yes" || s === "si" || s === "sí") return "Si";
+  if (s === "false" || s === "0" || s === "no") return "No";
+  return value;
+}
+
 async function getEquipmentNamesMapByIds(ids = []) {
   const cleanIds = Array.from(
     new Set(
@@ -285,20 +342,14 @@ async function getEquipmentNamesMapByIds(ids = []) {
   );
   if (!cleanIds.length) return new Map();
 
+  // equipment_id de v_equipment_full_catalog es servicio.equipos.id_equipo, la
+  // misma tabla que bc_equipment_selection -- no public.equipment_models (tabla
+  // huerfana sin FK real, siempre vacia para ids reales de BC).
   const { rows } = await db.query(
     `
-    WITH source AS (
-      SELECT equipment_id::int AS id, equipment_name::text AS name
-      FROM v_equipment_full_catalog
-      WHERE equipment_id = ANY($1::int[])
-      UNION
-      SELECT id::int AS id, name::text AS name
-      FROM equipment_models
-      WHERE id = ANY($1::int[])
-    )
-    SELECT id, MAX(name) AS name
-    FROM source
-    GROUP BY id
+    SELECT equipment_id::int AS id, equipment_name::text AS name
+    FROM v_equipment_full_catalog
+    WHERE equipment_id = ANY($1::int[])
     `,
     [cleanIds],
   );
@@ -320,11 +371,12 @@ async function getEquipmentCatalogMapByIds(ids = []) {
   );
   if (!cleanIds.length) return new Map();
 
+  // equipment_id aqui es servicio.equipos.id_equipo (ver comentario arriba).
   const { rows } = await db.query(
     `
-    SELECT id, name, code, model
-    FROM equipment_models
-    WHERE id = ANY($1::int[])
+    SELECT equipment_id AS id, equipment_name AS name, equipment_code AS code, model
+    FROM v_equipment_full_catalog
+    WHERE equipment_id = ANY($1::int[])
     `,
     [cleanIds],
   );
@@ -341,7 +393,7 @@ async function getEquipmentCatalogMapByIds(ids = []) {
   return map;
 }
 
-function buildInversionesPayload(investments = []) {
+function buildInversionesPayload(investments = [], options = {}) {
   const out = {};
   const safeInvestments = Array.isArray(investments) ? investments : [];
   safeInvestments
@@ -350,11 +402,22 @@ function buildInversionesPayload(investments = []) {
       const name = String(item?.name || "").trim();
       if (!name) return;
       const cantidad = normalizeInvestmentNumber(item?.quantity);
-      const precio = normalizeInvestmentNumber(item?.unit_price);
-      if (cantidad === null && precio === null) return;
+      const financialPrice = normalizeInvestmentNumber(item?.unit_price_financial ?? item?.unit_price);
+      const processDepreciation = calculateProcessDepreciation({
+        unitPrice: financialPrice,
+        percentage: item?.depreciation_percentage,
+        projectedMonths: options.projectedMonths,
+      });
       out[name] = {
+        nombre: name,
+        categoria: String(item?.category || "").trim(),
+        caracteristicas: String(item?.characteristics || "").trim(),
+        observaciones: String(item?.notes || "").trim(),
         cantidad: cantidad === null ? 0 : cantidad,
-        precio: precio === null ? 0 : precio,
+        precio: processDepreciation === null ? 0 : processDepreciation,
+        precio_operativo: normalizeInvestmentNumber(item?.unit_price) ?? 0,
+        precio_financiero: normalizeInvestmentNumber(item?.unit_price_financial) ?? null,
+        descripcion: String(item?.characteristics || item?.notes || name || "").trim(),
       };
     });
   return out;
@@ -422,12 +485,13 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   const extra = toObject(bcRow?.extra);
   const equipmentPairs = Array.isArray(extra?.equipment_details) ? extra.equipment_details : [];
   const primaryPair = equipmentPairs.find((pair) => Number(pair?.primary_id) > 0) || equipmentPairs[0] || null;
+  const sheetEquipmentPairs = filterEquipmentPairsForSheet(equipmentPairs);
+  const includePrimaryBackup = shouldIncludeBackupInSheet(primaryPair || {});
   const primaryId = Number(primaryPair?.primary_id) || null;
-  const backupId = Number(primaryPair?.backup_id) || null;
+  const backupId = includePrimaryBackup ? Number(primaryPair?.backup_id) || null : null;
 
   const [
     labEnvironment,
-    equipmentDetails,
     lisIntegration,
     requirements,
     deliveries,
@@ -437,14 +501,13 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     maximumQuantities,
   ] = await Promise.all([
     bcLabEnvironmentService.getLabEnvironment(businessCaseId),
-    bcEquipmentDetailsService.getEquipmentDetails(businessCaseId),
     bcLisIntegrationService.getLisIntegration(businessCaseId),
     bcRequirementsService.getRequirements(businessCaseId),
     bcDeliveriesService.getDeliveries(businessCaseId),
     investmentsService.getCatalogWithSelections(businessCaseId),
     getEquipmentNamesMapByIds([primaryId, backupId]),
     getEquipmentCatalogMapByIds(
-      equipmentPairs.flatMap((pair) => [pair?.primary_id, pair?.backup_id]),
+      sheetEquipmentPairs.flatMap((pair) => [pair?.primary_id, pair?.backup_id]),
     ),
     getMaximumQuantitiesByBusinessCaseId(businessCaseId),
   ]);
@@ -455,9 +518,9 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
 
   const fields = {};
   setFieldIfPresent(fields, "TipoDeCliente", pickFirst(
-    generalData.clientType,
-    metadata.clientType,
-    normalizePurchaseTypeLabel(bcRow?.bc_purchase_type),
+    normalizeClientProcessTypeLabel(bcRow?.bc_purchase_type),
+    normalizeClientProcessTypeLabel(generalData.purchaseType),
+    normalizeClientProcessTypeLabel(metadata.purchaseType),
   ));
   setFieldIfPresent(fields, "EntidadContratante", pickFirst(
     generalData.contractingEntity,
@@ -466,6 +529,7 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   setFieldIfPresent(fields, "Cliente", bcRow?.client_name);
   setFieldIfPresent(fields, "CodigoProceso", bcRow?.process_code);
   setFieldIfPresent(fields, "ObjetoContratacion", bcRow?.contract_object);
+  setFieldIfPresent(fields, "SmartObjective", resolveSmartObjective(metadata, generalData, bcRow));
   setFieldIfPresent(fields, "ProvinciaCiudad", pickFirst(
     generalData.provinceCity,
     metadata.provinceCity,
@@ -480,41 +544,40 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   setFieldIfPresent(fields, "PruebasEspeciales", labEnvironment?.special_tests);
   setFieldIfPresent(fields, "FrecuenciaControlesEspeciales", labEnvironment?.special_qc_frequency);
 
-  setFieldIfPresent(fields, "NombreEquipoPrincipal", pickFirst(
-    equipmentNamesMap.get(primaryId),
-    equipmentDetails?.equipment_name,
-  ));
+  setFieldIfPresent(fields, "NombreEquipoPrincipal", equipmentNamesMap.get(primaryId));
   setFieldIfPresent(fields, "EstadoEquipoPrincipal", pickFirst(
-    equipmentDetails?.equipment_status,
+    primaryPair?.equipment_status,
     normalizeEquipmentTypeLabel(primaryPair?.primary_type),
   ));
-  setFieldIfPresent(fields, "PropiedadEquipoPrincipal", equipmentDetails?.ownership_status);
-  setFieldIfPresent(fields, "NombreEquipoBackUp", pickFirst(
-    equipmentNamesMap.get(backupId),
-    equipmentDetails?.backup_equipment_name,
-  ));
-  setFieldIfPresent(fields, "EstadoEquipoBackUp", pickFirst(
-    equipmentDetails?.backup_status,
-    normalizeEquipmentTypeLabel(primaryPair?.backup_type),
-  ));
-  setFieldIfPresent(fields, "InstalarJuntoPrincipal", pickFirst(
-    primaryPair?.backup_install_simultaneous,
-    equipmentDetails?.install_with_primary,
-  ));
-  setFieldIfPresent(fields, "UbicacionEquipos", equipmentDetails?.installation_location);
-  setFieldIfPresent(fields, "RequiereEquipoComplementario", equipmentDetails?.requires_complementary);
-  setFieldIfPresent(fields, "EquipoComplementarioPrueba", equipmentDetails?.complementary_test_purpose);
+  if (includePrimaryBackup) {
+    setFieldIfPresent(fields, "NombreEquipoBackUp", equipmentNamesMap.get(backupId));
+    setFieldIfPresent(fields, "EstadoEquipoBackUp", pickFirst(
+      primaryPair?.backup_status,
+      normalizeEquipmentTypeLabel(primaryPair?.backup_type),
+    ));
+    setFieldIfPresent(fields, "InstalarJuntoPrincipal", normalizeBool(primaryPair?.backup_install_simultaneous));
+  }
+  setFieldIfPresent(fields, "UbicacionEquipos", primaryPair?.installation_location);
+  setFieldIfPresent(fields, "RequiereEquipoComplementario", normalizeBool(primaryPair?.requires_complementary));
+  setFieldIfPresent(fields, "EquipoComplementarioPrueba", primaryPair?.complementary_test_purpose);
 
   const includesLis = pickFirst(lisIntegration?.includes_lis, lisIntegration?.lis_includes);
-  const hasCurrentSystem = hasValue(lisIntegration?.current_system_name) || hasValue(lisIntegration?.current_system_provider);
-  setFieldIfPresent(fields, "IncluyeLIS", includesLis);
-  setFieldIfPresent(fields, "ProveedorSistemaTrabajar", lisIntegration?.lis_provider);
-  setFieldIfPresent(fields, "IncluyeHadwareLIS", lisIntegration?.includes_hardware);
+  const requiresInterface = Boolean(
+    lisIntegration?.requires_interface ||
+    (
+      !includesLis &&
+      (
+        hasValue(lisIntegration?.current_system_name) ||
+        hasValue(lisIntegration?.current_system_provider) ||
+        Boolean(lisIntegration?.current_system_hardware)
+      )
+    )
+  );
+  setFieldIfPresent(fields, "IncluyeLIS", normalizeBool(includesLis));
+  setFieldIfPresent(fields, "ProveedorSistemaTrabajar", normalizeLisProviderLabel(lisIntegration?.lis_provider));
+  setFieldIfPresent(fields, "IncluyeHadwareLIS", normalizeBool(lisIntegration?.includes_hardware));
   setFieldIfPresent(fields, "NumeroPacientesMensual", lisIntegration?.monthly_patients);
-  setFieldIfPresent(fields, "InterfazSistemaActual", hasCurrentSystem);
-  setFieldIfPresent(fields, "NombreSistema", lisIntegration?.current_system_name);
-  setFieldIfPresent(fields, "ProveedorSistemaActual", lisIntegration?.current_system_provider);
-  setFieldIfPresent(fields, "IncluyeHadwareSistemaActual", lisIntegration?.current_system_hardware);
+  setFieldIfPresent(fields, "InterfazSistemaActual", normalizeBool(requiresInterface));
   setFieldIfPresent(fields, "ModeloProveedor1", lisInterfaces[0]?.model || lisInterfaces[0]?.provider);
   setFieldIfPresent(fields, "ModeloProveedor2", lisInterfaces[1]?.model || lisInterfaces[1]?.provider);
   setFieldIfPresent(fields, "ModeloProveedor3", lisInterfaces[2]?.model || lisInterfaces[2]?.provider);
@@ -535,7 +598,7 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     generalData.purchase_commitment,
   ));
   setFieldIfPresent(fields, "TipoEntrega", normalizeDeliveryTypeLabel(deliveries?.delivery_type));
-  setFieldIfPresent(fields, "DeterminacionEfectiva", deliveries?.effective_determination);
+  setFieldIfPresent(fields, "DeterminacionEfectiva", normalizeBool(deliveries?.effective_determination));
   setFieldIfPresent(fields, "Observaciones", pickFirst(requirements?.observations, metadata?.notes, generalData?.notes));
 
   // The WebApp contract requires at least one field. Keep Cliente as minimal fallback.
@@ -551,7 +614,7 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
 
   const selectedEquipmentRecords = Array.from(
     new Map(
-      equipmentPairs
+      sheetEquipmentPairs
         .flatMap((pair) => [pair?.primary_id, pair?.backup_id])
         .map((rawId) => Number(rawId))
         .filter((value) => Number.isInteger(value) && value > 0)
@@ -560,20 +623,36 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     ).values(),
   );
   const fallbackEquipmentRecords = !selectedEquipmentRecords.length
-    ? Array.from(
-        new Map(
-          (Array.isArray(maximumQuantities) ? maximumQuantities : [])
-            .map((row) => ({
-              id: Number(row.equipment_id),
-              name: row.equipment_name || null,
-              code: null,
-              model: null,
-            }))
-            .filter((row) => Number.isInteger(row.id) && row.id > 0)
-            .map((row) => [row.id, row]),
-        ).values(),
-      )
+    ? (() => {
+        const byId = new Map();
+        const byName = new Map();
+        for (const row of (Array.isArray(maximumQuantities) ? maximumQuantities : [])) {
+          if (!row.equipment_name) continue;
+          const numId = Number(row.equipment_id);
+          const hasId = Number.isInteger(numId) && numId > 0;
+          const record = { id: hasId ? numId : null, name: row.equipment_name, code: null, model: null };
+          if (hasId) {
+            if (!byId.has(numId)) byId.set(numId, record);
+          } else {
+            const nameKey = String(row.equipment_name).trim().toLowerCase();
+            if (!byName.has(nameKey)) byName.set(nameKey, record);
+          }
+        }
+        return [...byId.values(), ...byName.values()];
+      })()
     : [];
+
+  logger.info(
+    {
+      businessCaseId,
+      equipmentPairsCount: equipmentPairs.length,
+      selectedEquipmentRecordsCount: selectedEquipmentRecords.length,
+      fallbackEquipmentRecordsCount: fallbackEquipmentRecords.length,
+      selectedRecordNames: selectedEquipmentRecords.map((r) => r.name).filter(Boolean),
+      fallbackRecordNames: fallbackEquipmentRecords.map((r) => r.name).filter(Boolean),
+    },
+    "[SheetGen] equipment records for tab matching",
+  );
 
   const sheetContext = {
     deadline_months: requirements?.deadline_months ?? null,
@@ -610,7 +689,9 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   return {
     ...input,
     fields,
-    inversiones: hasManualInversiones ? input.inversiones : buildInversionesPayload(investments),
+    inversiones: hasManualInversiones
+      ? input.inversiones
+      : buildInversionesPayload(investments, { projectedMonths: sheetContext.projected_deadline_months }),
     max_quantities: preparedMaximumQuantities,
     equipment_tabs: equipmentTabs,
     sheet_context: sheetContext,
@@ -765,6 +846,7 @@ async function enqueueGenerationJob({
           max_quantities: normalized.max_quantities || [],
           equipment_tabs: normalized.equipment_tabs || [],
           sheet_context: normalized.sheet_context || {},
+          force_recreate: Boolean(normalized.force_recreate),
         }),
         Math.max(1, MAX_ATTEMPTS_DEFAULT),
         correlationId,
@@ -863,6 +945,8 @@ async function getGenerationPreview({ businessCaseId, input = {} }) {
             sheet_id: lastGeneration.sheet_id || null,
             sheet_url: lastGeneration.sheet_url || null,
             generated_at: lastGeneration.generated_at || null,
+            sync_mode: lastGeneration.sync_mode || null,
+            replacement_reason: lastGeneration.replacement_reason || null,
           }
         : null,
     },
@@ -1069,6 +1153,11 @@ async function persistSheetResultInBusinessCase({
       ? { ...metadata.bc_sheet_generation }
       : {};
     const history = Array.isArray(current.history) ? [...current.history] : [];
+    const previousSheetId = current?.last?.sheet_id || null;
+    const syncOutcome = resolveSheetSyncOutcome({
+      previousSheetId,
+      webAppResponse,
+    });
     let createdByEmail = null;
     if (createdByUserId) {
       const { rows: userRows } = await client.query(
@@ -1086,14 +1175,20 @@ async function persistSheetResultInBusinessCase({
       sheet_url: webAppResponse.url,
       generated_at: webAppResponse.timestamp || nowIso,
       provider: webAppResponse.provider || "apps_script_webapp",
+      sync_mode: syncOutcome.syncMode,
+      replacement_reason: syncOutcome.replacementReason,
+      missing_required_sheets: syncOutcome.missingRequiredSheets,
+      previous_sheet_id: syncOutcome.previousSheetId,
+      previous_sheet_preserved: webAppResponse.previous_sheet_preserved === true,
+      previous_sheet_preservation_reason: webAppResponse.previous_sheet_preservation_reason || null,
+      selected_sheets: Array.isArray(webAppResponse.selected_sheets) ? webAppResponse.selected_sheets : [],
       updated_at: nowIso,
     };
 
-    history.unshift(record);
+    current.history = mergeSheetGenerationHistory(history, record, syncOutcome);
     current.status = "completed";
     current.updated_at = nowIso;
     current.last = record;
-    current.history = history.slice(0, 10);
     metadata.bc_sheet_generation = current;
 
     const feasibility = toObject(metadata.feasibility);
@@ -1130,6 +1225,7 @@ async function persistSheetResultInBusinessCase({
       [businessCaseId, JSON.stringify(metadata), nextStage],
     );
     await client.query("COMMIT");
+    return { record, syncOutcome };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -1237,20 +1333,24 @@ async function processSingleJob(job) {
   };
 
   try {
-    const payload = job.request_payload && typeof job.request_payload === "object"
+    const storedPayload = job.request_payload && typeof job.request_payload === "object"
       ? job.request_payload
       : {};
+    // Strip inversiones so buildAutoGenerationInput always fetches fresh data from DB.
+    // The stored payload may have stale inversiones from enqueue time.
+    const { inversiones: _stale, ...inputWithoutInversiones } = storedPayload;
     const bcRow = await assertBusinessCaseExists(job.business_case_id);
     const refreshedPayload = await buildAutoGenerationInput({
       businessCaseId: job.business_case_id,
       bcRow,
-      input: payload,
+      input: inputWithoutInversiones,
     });
     const outputFolderId = await resolveOutputFolderIdForJob(job);
     const previousSheetMeta = toObject(bcRow?.modern_bc_metadata)?.bc_sheet_generation?.last || {};
     const previousSheetId = previousSheetMeta?.provider === "google_sheets_local"
       ? previousSheetMeta.sheet_id || null
       : null;
+    const forceRecreate = Boolean(storedPayload.force_recreate);
     const enrichedPayload = {
       ...refreshedPayload,
       output_folder_id: outputFolderId,
@@ -1262,9 +1362,10 @@ async function processSingleJob(job) {
           outputFolderId,
           payload: enrichedPayload,
           previousSheetId,
+          forceRecreate,
         });
 
-    await persistSheetResultInBusinessCase({
+    const persistenceResult = await persistSheetResultInBusinessCase({
       businessCaseId: job.business_case_id,
       jobId: job.id,
       requestId: job.request_id,
@@ -1276,6 +1377,26 @@ async function processSingleJob(job) {
       jobId: job.id,
       webAppResponse,
     });
+    if (persistenceResult?.syncOutcome?.shouldCreateDocumentVersion) {
+      await recordDocumentVersion({
+        businessCaseId: job.business_case_id,
+        documentType: "sheets",
+        documentUrl: webAppResponse.url,
+        sheetId: webAppResponse.sheetId,
+        fileName: null,
+        canonicalState: bcRow.canonical_state || null,
+        generatedBy: job.created_by || null,
+        metadata: {
+          job_id: Number(job.id),
+          mapping_version: job.mapping_version,
+          sync_mode: persistenceResult.syncOutcome.syncMode,
+          replacement_reason: persistenceResult.syncOutcome.replacementReason,
+          previous_sheet_id: persistenceResult.syncOutcome.previousSheetId,
+          missing_required_sheets: persistenceResult.syncOutcome.missingRequiredSheets,
+          selected_sheets: Array.isArray(webAppResponse.selected_sheets) ? webAppResponse.selected_sheets : [],
+        },
+      });
+    }
 
     return { ok: true, jobId: Number(job.id) };
   } catch (error) {
@@ -1426,6 +1547,49 @@ async function getQueueMetrics() {
   };
 }
 
+async function recordDocumentVersion({ businessCaseId, documentType, documentUrl, sheetId, fileName, canonicalState, generatedBy, metadata = {} }) {
+  try {
+    await db.query(
+      `SELECT insert_bc_document_version($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [businessCaseId, documentType, documentUrl || null, sheetId || null, fileName || null, canonicalState || null, generatedBy || null, JSON.stringify(metadata)],
+    );
+  } catch (error) {
+    logger.warn({ error: error?.message, businessCaseId }, "[BC_SHEET] Failed to record document version (non-fatal)");
+  }
+}
+
+async function getDocumentVersions({ businessCaseId, limit = 20 }) {
+  const safeLimit = Math.max(1, Math.min(50, Number(limit || 20)));
+  const { rows } = await db.query(
+    `SELECT id, business_case_id, version_number, document_type, document_url,
+            sheet_id, file_name, canonical_state, generated_by, generated_at, is_current, metadata
+       FROM bc_document_versions
+      WHERE business_case_id = $1
+      ORDER BY generated_at DESC
+      LIMIT $2`,
+    [businessCaseId, safeLimit],
+  );
+  return {
+    ok: true,
+    data: {
+      business_case_id: businessCaseId,
+      versions: rows.map((r) => ({
+        id: r.id,
+        version_number: Number(r.version_number),
+        document_type: r.document_type,
+        document_url: r.document_url || null,
+        sheet_id: r.sheet_id || null,
+        file_name: r.file_name || null,
+        canonical_state: r.canonical_state || null,
+        generated_by: r.generated_by || null,
+        generated_at: r.generated_at,
+        is_current: Boolean(r.is_current),
+        metadata: r.metadata || {},
+      })),
+    },
+  };
+}
+
 module.exports = {
   enqueueGenerationJob,
   getGenerationPreview,
@@ -1434,4 +1598,8 @@ module.exports = {
   getLatestJobStatus,
   getQueueMetrics,
   ensureQueueTable,
+  recordDocumentVersion,
+  getDocumentVersions,
+  filterEquipmentPairsForSheet,
+  shouldIncludeBackupInSheet,
 };

@@ -45,21 +45,42 @@ try {
     }
   }
 
+  # Orden base: primero los definidos globalmente, luego los propios del area no listados
+  $areaDocOrder = @('01_URS_requerimientos_usuario.md','02_FRS_requerimientos_funcionales.md',
+    '03_DDS_diseno_tecnico.md','03A_DD_diccionario_datos.md','07A_evaluacion_riesgos_area_01.md',
+    '04_IQ_validacion_instalacion.md','05_OQ_validacion_funcionamiento.md',
+    '06_PQ_validacion_operacion_real.md','08_revision_hallazgos_produccion.md',
+    '09_informe_hallazgos_area_01.md','10_IQ_protocolo_ejecucion.md',
+    '11_OQ_protocolo_ejecucion.md','12_PQ_protocolo_ejecucion.md',
+    '13_registro_evidencias_desviaciones.md')
+
   $orderedFiles = @()
-  foreach ($name in $config.documentOrder) {
+  $includedPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+  foreach ($name in $areaDocOrder) {
     if ($name -like '00_*') { continue }
     $path = Join-Path $fullAreaPath $name
     if (Test-Path $path) {
       $orderedFiles += $path
+      [void]$includedPaths.Add($path)
       continue
     }
     if ($name -like '09_informe_hallazgos_*') {
       $fallbackFinding = Get-ChildItem $fullAreaPath -Filter '09_informe_hallazgos_area_*.md' -File -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -First 1
-      if ($fallbackFinding) {
+      if ($fallbackFinding -and -not $includedPaths.Contains($fallbackFinding.FullName)) {
         $orderedFiles += $fallbackFinding.FullName
+        [void]$includedPaths.Add($fallbackFinding.FullName)
       }
     }
   }
+
+  # Agregar cualquier .md del area no capturado por el orden definido (excluyendo 00_*)
+  $extraFiles = Get-ChildItem $fullAreaPath -Filter '*.md' -File | Sort-Object Name |
+    Where-Object { $_.Name -notlike '00_*' -and -not $includedPaths.Contains($_.FullName) }
+  foreach ($extra in $extraFiles) {
+    $orderedFiles += $extra.FullName
+  }
+
   if ($orderedFiles.Count -eq 0) {
     throw "No se encontraron documentos formales en $fullAreaPath"
   }
@@ -254,11 +275,30 @@ try {
     [void]$builder.AppendLine()
   }
 
+  # Anexos WHO Appendix 5 estructurados
+  Show-ValidationProgress -Id $progressId -Activity 'Generando paquete consolidado' -Status 'Generando Anexos WHO App5 (A-H)' -PercentComplete 58
+
+  $docFilesMap = @{}
+  foreach ($f in $orderedFiles) {
+    $key = [System.IO.Path]::GetFileName($f).ToLowerInvariant()
+    $docFilesMap[$key] = Repair-ValidationDocumentText -Text (Get-Content $f -Raw -Encoding UTF8)
+  }
+
+  $annexMarkdown = Build-WhoAnnexMarkdown `
+    -DocumentFiles $docFilesMap `
+    -AreaLabel $AreaLabel `
+    -Code $Code `
+    -IncludeAnnexes @('A','B','C','D','E','F','G','H')
+
+  [void]$builder.AppendLine((Repair-ValidationDocumentText -Text $annexMarkdown))
+  [void]$builder.AppendLine()
+
+  # Anexos gráficos adicionales (imágenes de assets)
   if ($AssetsPath -and (Test-Path $AssetsPath)) {
     $images = Get-ChildItem $AssetsPath -File | Where-Object { $_.Extension -match '^\.(png|jpg|jpeg|bmp)$' } | Sort-Object Name
     if ($images.Count -gt 0) {
-      Show-ValidationProgress -Id $progressId -Activity 'Generando paquete consolidado' -Status 'Anexando recursos graficos' -PercentComplete 60
-      [void]$builder.AppendLine("# Anexos graficos")
+      Show-ValidationProgress -Id $progressId -Activity 'Generando paquete consolidado' -Status 'Anexando recursos graficos' -PercentComplete 62
+      [void]$builder.AppendLine("# ANEXO I: Recursos Graficos")
       [void]$builder.AppendLine()
       foreach ($image in $images) {
         [void]$builder.AppendLine("## $($image.BaseName)")

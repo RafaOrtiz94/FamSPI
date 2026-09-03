@@ -18,6 +18,7 @@ import PermisosStatusWidget from "../shared/solicitudes/components/PermisosStatu
 import Card from "../../core/ui/components/Card";
 import Button from "../../core/ui/components/Button";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
+import DispatchWorkspaceWidget from "./components/DispatchWorkspaceWidget";
 
 const unwrapRows = (payload) =>
  payload?.rows || payload?.result?.rows || payload?.result || payload || [];
@@ -151,6 +152,8 @@ const DashboardOperaciones = () => {
  <div className="grid grid-cols-1 gap-4">
  <ClientRequestWidget />
  </div>
+
+ <DispatchWorkspaceWidget />
 
  <PermisosStatusWidget />
 

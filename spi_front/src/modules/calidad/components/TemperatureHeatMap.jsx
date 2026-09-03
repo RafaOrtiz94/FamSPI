@@ -15,7 +15,7 @@ const TemperatureHeatMap = ({ area = 'CAMARA_FRIA', compact = false }) => {
   const { data: currentTemps, isLoading: loadingTemps } = useQuery({
     queryKey: ['ca01xx-current-temperatures'],
     queryFn: () => api.get('/ca01xx/devices/current'),
-    refetchInterval: 300000,
+    refetchInterval: 600000, // >5min: deja hueco para que Neon autosuspenda entre polls
   });
 
   const startNewSession = async () => {

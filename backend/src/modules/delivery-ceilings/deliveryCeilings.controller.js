@@ -4,6 +4,7 @@ const service = require("./deliveryCeilings.service");
 const listQuerySchema = Joi.object({
   ceilingId: Joi.number().integer().positive().optional(),
   businessCaseId: Joi.string().trim().optional(),
+  privatePurchaseId: Joi.alternatives().try(Joi.number().integer().positive(), Joi.string().trim()).optional(),
   status: Joi.string()
     .trim()
     .valid(...service.DELIVERY_CEILING_STATUSES)

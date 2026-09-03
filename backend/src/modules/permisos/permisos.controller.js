@@ -4,11 +4,36 @@ const { uploadJustificante } = require("./permisos.drive");
 const { shouldRespondJson, renderVerificationHtml } = require("../../utils/legalVerificationView");
 const multer = require("multer");
 const fs = require("fs");
+const ALLOWED_MIME_TYPES = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+]);
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB por archivo
+    fileSize: 10 * 1024 * 1024,
     files: 10,
+  },
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_MIME_TYPES.has(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Tipo de archivo no permitido: ${file.mimetype}. Solo se aceptan PDF, Word, JPG y PNG.`));
+    }
+  },
+});
+
+const createUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    files: 5,
   },
 });
 
@@ -54,7 +79,12 @@ const getRequestMeta = (req) => ({
 
 async function create(req, res) {
   try {
-    const result = await permisosService.createSolicitud({ body: req.body, user: req.user, meta: getRequestMeta(req) });
+    const result = await permisosService.createSolicitud({
+      body: req.body,
+      user: req.user,
+      files: req.files || [],
+      meta: getRequestMeta(req),
+    });
     res.status(201).json({ ok: true, data: result });
   } catch (error) {
     console.error("Error creando solicitud:", error);
@@ -184,6 +214,22 @@ async function uploadJustificantes(req, res) {
   }
 }
 
+async function revisarJustificantes(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await permisosService.revisarJustificante({
+      id: Number(id),
+      decision: req.body?.decision,
+      observations: req.body?.observations,
+      approver: req.user,
+    });
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    console.error("Error revisando justificantes:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
 async function aprobarFinal(req, res) {
   try {
     const { id } = req.params;
@@ -297,7 +343,11 @@ async function listarResumenColaboradores(req, res) {
       return res.status(403).json({ ok: false, message: "No tienes permisos para ver este resumen" });
     }
 
-    const result = await permisosService.listarResumenColaboradores();
+    const { department_id, year } = req.query;
+    const result = await permisosService.listarResumenColaboradores({
+      departmentId: department_id ? Number(department_id) : null,
+      year: year ? Number(year) : null,
+    });
     const normalized = result.map((row) => ({
       ...row,
       permisos: {
@@ -381,6 +431,58 @@ async function verifyLegalToken(req, res) {
   }
 }
 
+const TH_REPORT_ROLES = new Set([
+  "talento_humano",
+  "jefe_talento_humano",
+  "gerencia",
+  "gerencia_general",
+  "gerente_general",
+  "admin",
+  "administrador",
+]);
+
+async function getReportePeriodo(req, res) {
+  try {
+    const role = String(req.user?.role || "").toLowerCase();
+    if (!TH_REPORT_ROLES.has(role)) {
+      return res.status(403).json({ ok: false, message: "No tienes permisos para este reporte" });
+    }
+    const { start_date, end_date, department_id, tipo_solicitud, status } = req.query;
+    if (!start_date || !end_date) {
+      return res.status(400).json({ ok: false, message: "Se requieren start_date y end_date" });
+    }
+    const result = await permisosService.getReportePeriodo({
+      startDate: start_date,
+      endDate: end_date,
+      departmentId: department_id ? Number(department_id) : null,
+      tipoSolicitud: tipo_solicitud || null,
+      status: status || null,
+    });
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    console.error("Error generando reporte de periodo:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function getKpiDashboard(req, res) {
+  try {
+    const role = String(req.user?.role || "").toLowerCase();
+    if (!TH_REPORT_ROLES.has(role)) {
+      return res.status(403).json({ ok: false, message: "No tienes permisos para este dashboard" });
+    }
+    const { year, department_id } = req.query;
+    const result = await permisosService.getKpiDashboard({
+      year: year ? Number(year) : null,
+      departmentId: department_id ? Number(department_id) : null,
+    });
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    console.error("Error generando KPI dashboard:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
 async function getLegalCoverage(req, res) {
   try {
     const role = String(req.user?.role || "").toLowerCase();
@@ -396,6 +498,37 @@ async function getLegalCoverage(req, res) {
   }
 }
 
+async function convertirAVacaciones(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await permisosService.convertirAVacaciones({
+      id: Number(id),
+      actor: req.user,
+    });
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    console.error("Error convirtiendo ausencia a vacaciones:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function resolverRegularizacion(req, res) {
+  try {
+    const { id } = req.params;
+    const { action, reason } = req.body;
+    const result = await permisosService.resolverRegularizacion({
+      id: Number(id),
+      action,
+      reason,
+      actor: req.user,
+    });
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    console.error("Error resolviendo regularización:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
 module.exports = {
   create,
   registerStudyEnrollment,
@@ -405,6 +538,7 @@ module.exports = {
   reviewStudyEnrollment,
   aprobarParcial,
   uploadJustificantes,
+  revisarJustificantes,
   aprobarFinal,
   rechazar,
   cancelar,
@@ -415,5 +549,10 @@ module.exports = {
   listarResumenColaboradores,
   verifyLegalToken,
   getLegalCoverage,
+  getReportePeriodo,
+  getKpiDashboard,
+  resolverRegularizacion,
+  convertirAVacaciones,
   upload,
+  createUpload,
 };

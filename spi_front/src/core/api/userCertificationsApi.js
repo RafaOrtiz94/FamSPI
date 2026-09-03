@@ -30,6 +30,10 @@ export const createMyCertification = async (data, file = null) => {
   // Add text fields (filter out empty strings for optional fields)
   Object.keys(data).forEach(key => {
     const value = data[key];
+    if (key === 'metadata' && value && typeof value === 'object') {
+      formData.append(key, JSON.stringify(value));
+      return;
+    }
     // Skip null, undefined, and empty strings for optional fields
     // Only send title (required) and non-empty values
     if (value !== null && value !== undefined && (key === 'title' || value !== '')) {
@@ -107,7 +111,7 @@ export const downloadUserCertificationsPdf = async (userId) => {
   return response.data;
 };
 
-export default {
+const userCertificationsApi = {
   listMyCertifications,
   createMyCertification,
   createBulkCertifications,
@@ -115,3 +119,5 @@ export default {
   getUserCertifications,
   downloadUserCertificationsPdf
 };
+
+export default userCertificationsApi;

@@ -20,7 +20,46 @@ const ROLES = {
   BACKOFFICE_COMERCIAL: 'backoffice_comercial',
   JEFE_TECNICO: 'jefe_tecnico',
   JEFE_COMERCIAL: 'jefe_comercial',
-  JEFE_OPERACIONES: 'jefe_operaciones'
+  JEFE_OPERACIONES: 'jefe_operaciones',
+  JEFE_FINANCIERO: 'jefe_financiero',
+  JEFE_TI: 'jefe_ti',
+  ING_SERVICIO: 'ing_servicio',
+  ESP_APP: 'esp_app',
+  GERENCIA: 'gerencia'
+};
+
+// Roles que se mapean al rol canónico de la matriz de permisos.
+// jefe_servicio hereda exactamente los permisos de jefe_tecnico (reemplazo
+// directo del mismo puesto).
+//
+// BUG corregido: gerencia/gerencia_general mapeaban a jefe_comercial, dandoles
+// edicion completa en todas las secciones/estados. El frontend
+// (roleSectionConfig.js, BC-04) documenta explicitamente que gerencia es
+// "solo lectura en todo excepto feasibility" -- feasibility no es una seccion
+// de esta matriz (se gatea aparte via assertCanSaveFeasibilityDecision/rutas),
+// asi que el rol GERENCIA aqui queda de solo lectura en las 7 secciones que
+// esta matriz controla.
+//
+// jefe_ti y jefe_financiero YA NO se mapean a jefe_tecnico/jefe_operaciones:
+// jefe_ti solo trabaja el carrito de inversiones (BC-10), no tiene trabajo
+// tecnico real en el BC; jefe_financiero es su propio bucket de solo
+// precios/valores financieros, sin los permisos operacionales completos de
+// jefe_operaciones. Cada uno tiene su propia fila en PERMISSION_MATRIX.
+//
+// BUG corregido: ing_servicio y esp_app mapeaban a jefe_tecnico (edicion
+// completa), contradiciendo los comentarios de businessCase.routes.js que
+// los documentan como "solo visualizacion en BC". ing_servicio reemplaza al
+// tecnico base (no al jefe), esp_app es un rol nuevo de solo lectura. Ambos
+// tienen su propia fila en PERMISSION_MATRIX (identica a JEFE_TI: solo
+// investments accesible, todo lo demas de solo lectura).
+const ROLE_CANONICAL_MAP = {
+  jefe_servicio: 'jefe_tecnico',
+  asesor_comercial: 'comercial',
+  analista_comercial: 'comercial',
+  jefe_de_comercial: 'jefe_comercial',
+  jefe_de_operaciones: 'jefe_operaciones',
+  operaciones: 'jefe_operaciones',
+  gerencia_general: 'gerencia',
 };
 
 // Section definitions
@@ -110,6 +149,51 @@ const PERMISSION_MATRIX = {
       [SECTIONS.DETERMINATIONS]: false,
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: true
+    },
+    [ROLES.JEFE_FINANCIERO]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: true
+    },
+    [ROLES.JEFE_TI]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true, // Solo carrito (BC-10)
+      [SECTIONS.PRICES]: false
+    },
+    [ROLES.ING_SERVICIO]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true, // Solo lectura en BC, salvo carrito
+      [SECTIONS.PRICES]: false
+    },
+    [ROLES.ESP_APP]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true, // Solo lectura en BC, salvo carrito
+      [SECTIONS.PRICES]: false
+    },
+    [ROLES.GERENCIA]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true, // Always accessible (ver canEdit)
+      [SECTIONS.PRICES]: false
     }
   },
 
@@ -129,7 +213,12 @@ const PERMISSION_MATRIX = {
       [SECTIONS.LAB_ENVIRONMENT]: false,
       [SECTIONS.EQUIPMENT]: false,
       [SECTIONS.LIS]: false,
-      [SECTIONS.DETERMINATIONS]: false,
+      // BUG corregido: acp_comercial es el editor de reactivos en compra
+      // publica (equivalente a backoffice_comercial en compra privada, que
+      // ya tenia esto en true abajo) -- determinationsGateService y
+      // DETERMINATIONS_REACTIVO_PUBLIC_ROLES en el controller ya lo
+      // esperaban, pero esta matriz lo bloqueaba antes de llegar ahi.
+      [SECTIONS.DETERMINATIONS]: true,
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: false
     },
@@ -177,6 +266,33 @@ const PERMISSION_MATRIX = {
       [SECTIONS.DETERMINATIONS]: true,
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: true
+    },
+    [ROLES.JEFE_FINANCIERO]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: true
+    },
+    [ROLES.JEFE_TI]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
+    },
+    [ROLES.GERENCIA]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
     }
   },
 
@@ -196,7 +312,9 @@ const PERMISSION_MATRIX = {
       [SECTIONS.LAB_ENVIRONMENT]: false,
       [SECTIONS.EQUIPMENT]: false,
       [SECTIONS.LIS]: false,
-      [SECTIONS.DETERMINATIONS]: false,
+      // BUG corregido: acp_comercial edita reactivos en compra publica (ver
+      // nota en DATOS_BASE_COMPLETOS).
+      [SECTIONS.DETERMINATIONS]: true,
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: false
     },
@@ -244,6 +362,33 @@ const PERMISSION_MATRIX = {
       [SECTIONS.DETERMINATIONS]: true,
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: true
+    },
+    [ROLES.JEFE_FINANCIERO]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: true
+    },
+    [ROLES.JEFE_TI]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
+    },
+    [ROLES.GERENCIA]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
     }
   },
 
@@ -263,7 +408,9 @@ const PERMISSION_MATRIX = {
       [SECTIONS.LAB_ENVIRONMENT]: true,
       [SECTIONS.EQUIPMENT]: true,
       [SECTIONS.LIS]: true,
-      [SECTIONS.DETERMINATIONS]: false,
+      // BUG corregido: acp_comercial edita reactivos en compra publica (ver
+      // nota en DATOS_BASE_COMPLETOS).
+      [SECTIONS.DETERMINATIONS]: true,
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: false
     },
@@ -311,6 +458,33 @@ const PERMISSION_MATRIX = {
       [SECTIONS.DETERMINATIONS]: true,
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: true
+    },
+    [ROLES.JEFE_FINANCIERO]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: true
+    },
+    [ROLES.JEFE_TI]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
+    },
+    [ROLES.GERENCIA]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
     }
   },
 
@@ -378,6 +552,33 @@ const PERMISSION_MATRIX = {
       [SECTIONS.DETERMINATIONS]: false,
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: true
+    },
+    [ROLES.JEFE_FINANCIERO]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: true
+    },
+    [ROLES.JEFE_TI]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
+    },
+    [ROLES.GERENCIA]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
     }
   },
 
@@ -445,6 +646,33 @@ const PERMISSION_MATRIX = {
       [SECTIONS.DETERMINATIONS]: false,
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: true
+    },
+    [ROLES.JEFE_FINANCIERO]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: true
+    },
+    [ROLES.JEFE_TI]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
+    },
+    [ROLES.GERENCIA]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
     }
   },
 
@@ -512,6 +740,33 @@ const PERMISSION_MATRIX = {
       [SECTIONS.DETERMINATIONS]: false,
       [SECTIONS.INVESTMENTS]: true, // Keep investments accessible
       [SECTIONS.PRICES]: false // Even jefe_operaciones cannot edit prices in final state
+    },
+    [ROLES.JEFE_FINANCIERO]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
+    },
+    [ROLES.JEFE_TI]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
+    },
+    [ROLES.GERENCIA]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
     }
   }
 };
@@ -527,19 +782,28 @@ class BusinessCasePermissions {
    * @returns {boolean} True if editing is allowed
    */
   static canEdit({ role, canonicalState, section, field }) {
-    // Validate inputs
-    if (!role || !canonicalState || !section) {
+    // Validate inputs (canonicalState se valida mas abajo, despues del bypass
+    // de INVESTMENTS -- esa seccion es state-independent por diseño y no debe
+    // depender de que canonical_state ya este seteado).
+    if (!role || !section) {
       return false;
     }
 
-    // Price-sensitive fields can ONLY be edited by jefe_operaciones
+    // Normalizar roles nuevos a su canónico en la matriz
+    const effectiveRole = ROLE_CANONICAL_MAP[role] ?? role;
+
+    // Price-sensitive fields can ONLY be edited by jefe_operaciones o jefe_financiero
     if (field && PRICE_SENSITIVE_FIELDS.includes(field)) {
-      return role === ROLES.JEFE_OPERACIONES;
+      return effectiveRole === ROLES.JEFE_OPERACIONES || effectiveRole === ROLES.JEFE_FINANCIERO;
     }
 
     // Investments section is ALWAYS accessible (state-independent)
     if (section === SECTIONS.INVESTMENTS) {
       return true;
+    }
+
+    if (!canonicalState) {
+      return false;
     }
 
     // Check permission matrix
@@ -548,7 +812,7 @@ class BusinessCasePermissions {
       return false;
     }
 
-    const rolePermissions = statePermissions[role];
+    const rolePermissions = statePermissions[effectiveRole];
     if (!rolePermissions) {
       return false;
     }
@@ -567,12 +831,14 @@ class BusinessCasePermissions {
       return [];
     }
 
+    const effectiveRole = ROLE_CANONICAL_MAP[role] ?? role;
+
     const statePermissions = PERMISSION_MATRIX[canonicalState];
     if (!statePermissions) {
       return [];
     }
 
-    const rolePermissions = statePermissions[role];
+    const rolePermissions = statePermissions[effectiveRole];
     if (!rolePermissions) {
       return [];
     }
@@ -674,11 +940,23 @@ class BusinessCasePermissions {
   static getSections() {
     return { ...SECTIONS };
   }
+
+  /**
+   * Normaliza un rol crudo (alias como asesor_comercial/jefe_de_comercial) a
+   * su rol canonico. Usar en cualquier otro modulo del BC que necesite
+   * comparar roles contra un set fijo, en vez de duplicar la lista de alias.
+   * @param {string} role
+   * @returns {string}
+   */
+  static normalizeRole(role) {
+    return ROLE_CANONICAL_MAP[role] ?? role;
+  }
 }
 
 module.exports = {
   BusinessCasePermissions,
   ROLES,
   SECTIONS,
-  PRICE_SENSITIVE_FIELDS
+  PRICE_SENSITIVE_FIELDS,
+  ROLE_CANONICAL_MAP
 };

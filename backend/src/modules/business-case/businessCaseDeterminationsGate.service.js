@@ -2,6 +2,7 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { resolveExternalDriveIntegrity } = require("../../utils/documentHash");
 const { drive } = require("../../utils/drive");
+const { BusinessCasePermissions } = require("./businessCasePermissions");
 
 const DETERMINATIONS_DEADLINE_HOURS = 48;
 const DETERMINATIONS_DOCUMENT_VIEW_ROLES = new Set([
@@ -11,6 +12,13 @@ const DETERMINATIONS_DOCUMENT_VIEW_ROLES = new Set([
   "backoffice_comercial",
 ]);
 const DETERMINATIONS_ALLOWED_UPLOAD_ROLES = new Set(["comercial"]);
+const DETERMINATIONS_INSPECTION_REQUEST_ROLES = new Set([
+  "comercial",
+  "jefe_comercial",
+  "jefe_de_comercial",
+  "acp_comercial",
+  "backoffice_comercial",
+]);
 let determinationsDocsTableEnsured = false;
 
 function normalizePurchaseType(value) {
@@ -21,20 +29,28 @@ function normalizePurchaseType(value) {
   return "public";
 }
 
+// technicalEditors: quien puede editar determinaciones en fase technical_review.
+// BUG corregido: la lista tenia "tecnico" (rol legacy, reemplazado por
+// ing_servicio, que hoy es de solo visualizacion en BC) y le faltaba
+// "jefe_servicio" (reemplazo real de jefe_tecnico) -- jefe_servicio recibia
+// 403 al intentar cargar calibradores/controles/materiales por reactivo, su
+// tarea principal. ing_servicio/esp_app quedan fuera a proposito (solo ven).
 function getRoleConfig(businessCase = {}) {
   const normalizedType = normalizePurchaseType(businessCase?.bc_purchase_type);
   if (normalizedType === "private_comodato") {
     return {
       type: "private_comodato",
-      editors: ["backoffice_comercial", "jefe_comercial"],
-      notify: ["backoffice_comercial", "jefe_comercial"],
+      commercialEditors: ["jefe_comercial", "jefe_de_comercial", "backoffice_comercial"],
+      technicalEditors: ["jefe_tecnico", "jefe_servicio"],
+      notify: ["jefe_tecnico", "jefe_servicio"],
       label: "Compra privada comodato",
     };
   }
   return {
     type: "public",
-    editors: ["acp_comercial"],
-    notify: ["acp_comercial"],
+    commercialEditors: ["jefe_comercial", "jefe_de_comercial", "acp_comercial"],
+    technicalEditors: ["jefe_tecnico", "jefe_servicio"],
+    notify: ["jefe_tecnico", "jefe_servicio"],
     label: "Compra publica",
   };
 }
@@ -49,8 +65,14 @@ function toIsoOrNull(value) {
   return value instanceof Date && !Number.isNaN(value.getTime()) ? value.toISOString() : null;
 }
 
+function phaseIsTechnicalReview(gatePhase, preflowPhase) {
+  return String(gatePhase || "").trim().toLowerCase() === "technical_review"
+    && String(preflowPhase || "").trim().toLowerCase() === "review";
+}
+
 function isUploadRole(role = "") {
-  return DETERMINATIONS_ALLOWED_UPLOAD_ROLES.has(String(role || "").toLowerCase());
+  const normalized = BusinessCasePermissions.normalizeRole(String(role || "").toLowerCase());
+  return DETERMINATIONS_ALLOWED_UPLOAD_ROLES.has(normalized);
 }
 
 async function ensureDeterminationsDocumentsTable() {
@@ -229,37 +251,95 @@ function buildGateInfo({
     : metadataDocument;
 
   const uploadedAt = toDateOrNull(rawGate?.enabled_at || document?.uploaded_at || null);
-  const deadlineAt = toDateOrNull(rawGate?.deadline_at || null)
+  const phase = String(rawGate?.phase || "commercial_input").trim().toLowerCase();
+  const metadataPreflow = businessCase?.modern_bc_metadata && typeof businessCase.modern_bc_metadata === "object"
+    ? businessCase.modern_bc_metadata
+    : {};
+  const preflowPhase = String(metadataPreflow?.preflow_phase || "").trim().toLowerCase();
+  const preflowReviewDeadlineAt = toDateOrNull(metadataPreflow?.preflow_review_deadline_at || null);
+  const rawDeadlineAt = toDateOrNull(rawGate?.deadline_at || null)
     || (uploadedAt ? new Date(uploadedAt.getTime() + DETERMINATIONS_DEADLINE_HOURS * 60 * 60 * 1000) : null);
+  // La ventana visible para Jefe de Servicio pertenece al preflow de revisión.
+  // Usar también el deadline interno de determinaciones permitía que ambos SLA
+  // quedaran desalineados y mantuvieran activa la sincronización después del vencimiento.
+  const usesTechnicalPreflowSla = phaseIsTechnicalReview(rawGate?.phase, preflowPhase);
+  const deadlineAt = usesTechnicalPreflowSla && preflowReviewDeadlineAt
+    ? preflowReviewDeadlineAt
+    : rawDeadlineAt;
   const hasDocument = Boolean(document?.drive_file_id || document?.drive_link);
   const enabled = Boolean(rawGate?.enabled && hasDocument && uploadedAt);
+  const quantitiesLocked = Boolean(rawGate?.quantities_locked || phase === "locked");
+  const rawSectionLocks = rawGate?.section_locks && typeof rawGate.section_locks === "object"
+    ? rawGate.section_locks
+    : {};
+  const sectionLocks = {
+    reactivos: Boolean(rawSectionLocks.reactivos || phase === "technical_review" || phase === "locked"),
+    controles: Boolean(rawSectionLocks.controles || phase === "locked"),
+    calibradores: Boolean(rawSectionLocks.calibradores || phase === "locked"),
+    materiales: Boolean(rawSectionLocks.materiales || phase === "locked"),
+  };
+  const unlockRequests = Array.isArray(rawGate?.unlock_requests)
+    ? rawGate.unlock_requests
+      .filter((entry) => entry && typeof entry === "object")
+      .map((entry) => ({
+        id: entry.id || null,
+        subsection: entry.subsection || null,
+        status: entry.status || "pending",
+        requestedAt: entry.requested_at || null,
+        requestedByEmail: entry.requested_by_email || null,
+        requestedByRole: entry.requested_by_role || null,
+        reason: entry.reason || "",
+        resolvedAt: entry.resolved_at || null,
+        resolvedByEmail: entry.resolved_by_email || null,
+        resolutionNotes: entry.resolution_notes || "",
+      }))
+    : [];
   const expiredByTime = Boolean(deadlineAt && deadlineAt.getTime() < now.getTime());
   const expiredByFlag = Boolean(rawGate?.is_expired);
   const expired = expiredByTime || expiredByFlag;
-  const normalizedRole = String(role || "").toLowerCase();
+  const technicalSlaExpired = usesTechnicalPreflowSla && expired;
+  const normalizedRole = BusinessCasePermissions.normalizeRole(String(role || "").toLowerCase());
+  const editorsByPhase = phase === "technical_review"
+    ? config.technicalEditors
+    : phase === "locked"
+      ? []
+      : config.commercialEditors;
   const canUpload = isUploadRole(normalizedRole);
   const canViewDocument = hasDocument && (
     canUpload ||
     DETERMINATIONS_DOCUMENT_VIEW_ROLES.has(normalizedRole)
   );
-  const canEditDeterminations = enabled && !expired && config.editors.includes(normalizedRole);
+  // El vencimiento de SLA (expired/technicalSlaExpired) ya no desactiva la
+  // edicion -- solo se expone como aviso (ver isExpired/extensionRequired
+  // mas abajo). Generaba deadlocks reales cuando nadie pedia la prorroga a
+  // tiempo (BC 0ae62377-...).
+  const canEditDeterminations = enabled && !quantitiesLocked && editorsByPhase.includes(normalizedRole);
+  const canRequestInspection = enabled && hasDocument && DETERMINATIONS_INSPECTION_REQUEST_ROLES.has(normalizedRole);
 
   return {
     enabledForBusinessCase: true,
     workflowType: config.type,
     workflowLabel: config.label,
     requiresDocument: true,
+    phase,
+    quantitiesLocked,
+    sectionLocks,
+    unlockRequests,
     documentUploaded: hasDocument,
     enabledAt: toIsoOrNull(uploadedAt),
     deadlineAt: toIsoOrNull(deadlineAt),
     remainingMs: deadlineAt ? Math.max(0, deadlineAt.getTime() - now.getTime()) : null,
     isExpired: expired,
-    editors: config.editors,
+    technicalSlaExpired,
+    extensionRequired: technicalSlaExpired,
+    extensionHours: technicalSlaExpired ? 24 : null,
+    editors: editorsByPhase,
     notificationsTargetRoles: config.notify,
     permissions: {
       canUploadDocument: canUpload,
       canViewDocument,
       canEditDeterminations,
+      canRequestInspection,
     },
     document: hasDocument
       ? {
@@ -278,18 +358,23 @@ function buildGateInfo({
 }
 
 function assertCanEditDeterminationsOrThrow(gate) {
+  if (gate?.quantitiesLocked) {
+    const error = new Error("Las cantidades de determinaciones estan bloqueadas. Solicita reapertura a Jefe Comercial.");
+    error.status = 409;
+    error.code = "DETERMINATIONS_QUANTITIES_LOCKED";
+    throw error;
+  }
   if (!gate?.documentUploaded) {
     const error = new Error("Debe cargarse el documento estadistico antes de editar determinaciones.");
     error.status = 409;
     error.code = "DETERMINATIONS_STAT_DOC_REQUIRED";
     throw error;
   }
-  if (gate?.isExpired) {
-    const error = new Error("La ventana de 48 horas para determinaciones ya expiro.");
-    error.status = 409;
-    error.code = "DETERMINATIONS_EDIT_WINDOW_EXPIRED";
-    throw error;
-  }
+  // El vencimiento de la ventana SLA (48h Jefe de Servicio / prorroga 24h) ya
+  // NO bloquea la edicion/sincronizacion -- generaba deadlocks reales cuando
+  // nadie solicitaba la prorroga a tiempo (BC 0ae62377-...). gate.isExpired y
+  // gate.extensionRequired se siguen calculando y exponiendo para que el
+  // frontend muestre un aviso, pero ya no se lanza excepcion aqui.
   if (!gate?.permissions?.canEditDeterminations) {
     const error = new Error("No tienes permisos para editar determinaciones en este flujo.");
     error.status = 403;

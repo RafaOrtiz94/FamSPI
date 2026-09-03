@@ -21,6 +21,8 @@ import {
   STATUS_META,
   formatDateShort,
   hasJustificantes,
+  hasExternalCoordinationEvidence,
+  PROVISIONAL_STATUS_META,
 } from "../utils/solicitudesHelpers";
 import { formatVacationDaysHours } from "../utils/vacationDisplay";
 import {
@@ -33,6 +35,8 @@ import {
   revisarCancelacionSolicitud,
   updateRecoveryPlan,
   reviewStudyEnrollment,
+  revisarJustificante,
+  resolverRegularizacion,
 } from "../../../../core/api/permisosApi";
 import { useAuth } from "../../../../core/auth/AuthContext";
 
@@ -42,6 +46,7 @@ const INITIAL_VISIBLE_COUNTS = {
   cancellation_pending: 8,
   study_enrollments: 6,
   approved: 8,
+  regularizacion_pendiente: 8,
 };
 
 const expandRoleAliases = (roles = []) => {
@@ -131,36 +136,19 @@ const addDaysToDateOnly = (value, days = 0) => {
   return `${outYear}-${outMonth}-${outDay}`;
 };
 
-const getTodayLocalDate = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
 
-const canCancelByDateRule = (solicitud = {}) => {
-  const startDate = normalizeDateOnly(solicitud?.fecha_inicio || solicitud?.fecha_inicio_hora);
-  if (!startDate) return false;
-  return getTodayLocalDate() <= startDate;
-};
+
 
 const isSameEmail = (a, b) =>
   String(a || "").trim().toLowerCase() !== "" &&
   String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 
-const APPROVED_CANCEL_FLOW_STATUSES = new Set(["approved", "aprobado"]);
-const DIRECT_CANCELABLE_STATUSES = new Set([
-  "pending",
-  "pendiente",
-  "partially_approved",
-  "pending_final",
-]);
+const NON_CANCELABLE_STATUSES = new Set(["rejected", "rechazado", "cancelled", "cancelado"]);
 
 const getRecoveryCoordinationLabel = (solicitud = {}) => {
   const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
   if (coordinationStatus === "finalized_by_approver" && solicitud?.charged_to_vacation) {
-    return "Sin acuerdo; cargado a vacaciones";
+    return "Sin acuerdo; cierre administrativo";
   }
   return RECOVERY_COORDINATION_LABELS[coordinationStatus] || RECOVERY_COORDINATION_LABELS.not_required;
 };
@@ -234,10 +222,27 @@ const AprobacionPermisosView = ({ compact = false }) => {
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [recoveryRows, setRecoveryRows] = useState([]);
   const [visibleItemsBySection, setVisibleItemsBySection] = useState(INITIAL_VISIBLE_COUNTS);
+  const [showJustificanteModal, setShowJustificanteModal] = useState(false);
+  const [justificanteSolicitud, setJustificanteSolicitud] = useState(null);
+  const [justificanteDecision, setJustificanteDecision] = useState("aceptado");
+  const [justificanteObservations, setJustificanteObservations] = useState("");
+  const [showRegularizacionModal, setShowRegularizacionModal] = useState(false);
+  const [regularizacionSolicitud, setRegularizacionSolicitud] = useState(null);
+  const [regularizacionAction, setRegularizacionAction] = useState(null);
+  const [regularizacionReason, setRegularizacionReason] = useState("");
 
   const canSeeApproved = useMemo(() => {
     const role = String(user?.role || "").toLowerCase();
-    return role.includes("jefe") || role.includes("gerencia") || role === "admin";
+    return role.includes("jefe") || role.includes("gerencia") || role === "admin" || role === "gerente_general";
+  }, [user]);
+
+  const isTalentRole = useMemo(() => {
+    const scope = String(user?.scope || user?.role || "").toLowerCase();
+    return [
+      "talento_humano", "jefe_talento_humano", "talento-humano",
+      "gerencia_general", "gerente_general",
+      "admin", "administrador",
+    ].some((r) => scope === r);
   }, [user]);
 
   const userId = user?.id;
@@ -419,6 +424,90 @@ const AprobacionPermisosView = ({ compact = false }) => {
         showToast(error.response?.data?.message || "Error al aprobar", "error");
       }
     });
+  };
+
+  const openJustificanteModal = (solicitud) => {
+    setJustificanteSolicitud(solicitud);
+    setJustificanteDecision("aceptado");
+    setJustificanteObservations("");
+    setShowJustificanteModal(true);
+  };
+
+  const handleRevisarJustificante = async () => {
+    if (!justificanteSolicitud) return;
+    const needsObs = justificanteDecision === "rechazado" || justificanteDecision === "observado";
+    if (needsObs && !justificanteObservations.trim()) {
+      showToast("Las observaciones son obligatorias al rechazar u observar", "warning");
+      return;
+    }
+    await runActionWithLoader(
+      `just-${justificanteSolicitud.id}`,
+      "Revisando justificante...",
+      async () => {
+        try {
+          const response = await revisarJustificante(
+            justificanteSolicitud.id,
+            justificanteDecision,
+            justificanteObservations.trim() || null,
+          );
+          if (response?.ok) {
+            const msgs = {
+              aceptado: "Justificante aceptado. La solicitud queda como procedente.",
+              observado: "Observaciones registradas. El colaborador debe resubmitir los documentos.",
+              rechazado: "Justificante rechazado. La solicitud queda pendiente de regularización.",
+            };
+            showToast(msgs[justificanteDecision] || "Justificante revisado", "success");
+            setShowJustificanteModal(false);
+            setJustificanteSolicitud(null);
+            setJustificanteObservations("");
+            await loadStageData();
+          }
+        } catch (error) {
+          showToast(error.response?.data?.message || "Error al revisar justificante", "error");
+        }
+      },
+    );
+  };
+
+  const openRegularizacionModal = (solicitud, action) => {
+    setRegularizacionSolicitud(solicitud);
+    setRegularizacionAction(action);
+    setRegularizacionReason("");
+    setShowRegularizacionModal(true);
+  };
+
+  const handleConfirmRegularizacion = async () => {
+    if (!regularizacionSolicitud || !regularizacionAction) return;
+    if (!regularizacionReason.trim()) {
+      showToast("El motivo es obligatorio", "warning");
+      return;
+    }
+    await runActionWithLoader(
+      `reg-${regularizacionSolicitud.id}`,
+      "Procesando regularización...",
+      async () => {
+        try {
+          const response = await resolverRegularizacion(
+            regularizacionSolicitud.id,
+            regularizacionAction,
+            regularizacionReason.trim(),
+          );
+          if (response?.ok) {
+            const msgs = {
+              rechazar_formalmente: "Solicitud rechazada formalmente.",
+              aceptar_excepcion: "Excepción aceptada. La solicitud queda lista para aprobación final.",
+            };
+            showToast(msgs[regularizacionAction] || "Regularización procesada", "success");
+            setShowRegularizacionModal(false);
+            setRegularizacionSolicitud(null);
+            setRegularizacionReason("");
+            await loadStageData();
+          }
+        } catch (error) {
+          showToast(error.response?.data?.message || "Error al procesar regularización", "error");
+        }
+      },
+    );
   };
 
   const handleRechazar = async () => {
@@ -695,15 +784,11 @@ const AprobacionPermisosView = ({ compact = false }) => {
 
     const cancellationStatus = String(solicitud?.cancellation_status || "none").toLowerCase();
     const hasPendingCancellation = cancellationStatus === "pending";
-    const isApprovedCancellationFlowStatus = APPROVED_CANCEL_FLOW_STATUSES.has(normalizedStatus);
-    const isDirectCancelableStatus = DIRECT_CANCELABLE_STATUSES.has(normalizedStatus);
     const canCancelThis =
       cancellationStatus !== "pending" &&
       (isRequesterOfSolicitud || isApproverOfSolicitud) &&
-      (isDirectCancelableStatus ||
-        (isApprovedCancellationFlowStatus && canCancelByDateRule(solicitud)));
-    const requiresCancellationRequestFlow =
-      isApprovedCancellationFlowStatus && isRequesterOfSolicitud && !isApproverOfSolicitud;
+      !NON_CANCELABLE_STATUSES.has(normalizedStatus);
+    const requiresCancellationRequestFlow = false;
 
     const isRejectedStatus = ["rejected", "rechazado"].includes(normalizedStatus);
     const isCancelledStatus = ["cancelled", "cancelado"].includes(normalizedStatus);
@@ -733,23 +818,40 @@ const AprobacionPermisosView = ({ compact = false }) => {
       >
         <div
           className={`absolute left-0 top-0 h-full w-1 rounded-l-xl ${
-            solicitud.status === "approved" || solicitud.status === "aprobado"
-              ? "bg-green-500"
-              : solicitud.status === "partially_approved"
-                ? "bg-blue-500"
-                : solicitud.status === "pending_final"
-                  ? "bg-purple-500"
-                  : solicitud.status === "rejected"
-                    ? "bg-red-500"
-                    : "bg-amber-400"
+            solicitud.provisional_status === "pendiente_regularizacion"
+              ? "bg-rose-500"
+              : solicitud.is_urgent && solicitud.provisional_status === "salida_provisional_autorizada"
+                ? "bg-orange-400"
+                : solicitud.status === "approved" || solicitud.status === "aprobado"
+                  ? "bg-green-500"
+                  : solicitud.status === "partially_approved"
+                    ? "bg-blue-500"
+                    : solicitud.status === "pending_final"
+                      ? "bg-purple-500"
+                      : solicitud.status === "rejected"
+                        ? "bg-red-500"
+                        : "bg-amber-400"
           }`}
         />
 
         <div className="flex items-start justify-between gap-3 mb-2">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex flex-wrap items-center gap-1.5 mb-1">
               <span className="text-xs font-bold text-gray-900">{getTipoLabel(solicitud)}</span>
               {getStatusBadge(solicitud.status)}
+              {solicitud.is_urgent && (
+                <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold rounded bg-red-100 text-red-700 border border-red-200">
+                  URGENTE
+                </span>
+              )}
+              {solicitud.provisional_status && (() => {
+                const pm = PROVISIONAL_STATUS_META[String(solicitud.provisional_status).toLowerCase()];
+                return pm ? (
+                  <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold rounded border ${pm.badge}`}>
+                    {pm.label}
+                  </span>
+                ) : null;
+              })()}
             </div>
             <p className="text-xs text-gray-600 mb-1">
               <FiUsers className="inline mr-1" />
@@ -801,7 +903,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
             )}
             {solicitud?.charged_to_vacation && (
               <p className="text-[11px] text-amber-800 mt-1">
-                Descuento aplicado a vacaciones:
+                Registro histórico de descuento:
                 {" "}
                 {Number(solicitud?.charged_vacation_hours || 0) || recoveryTotal || 0}h
                 {Number(solicitud?.charged_vacation_days || 0)
@@ -927,6 +1029,41 @@ const AprobacionPermisosView = ({ compact = false }) => {
                 </a>
               ))}
             </div>
+            {["entregado", "en_revision", "observado"].includes(String(solicitud.justificante_status || "").toLowerCase()) &&
+              (isTalentRole || isApproverOfSolicitud) && (
+              <div className="mt-2 pt-2 border-t border-blue-200">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={() => openJustificanteModal(solicitud)}
+                  disabled={!!actionLoading}
+                  className="text-xs"
+                  leftIcon={FiShield}
+                >
+                  Revisar justificante
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {hasExternalCoordinationEvidence(solicitud) && (
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 mt-2">
+            <p className="text-[11px] font-semibold text-slate-900 mb-1.5">Evidencia de coordinación externa:</p>
+            <div className="flex flex-wrap gap-1.5">
+              {solicitud.external_coordination_urls.map((url, idx) => (
+                <a
+                  key={`${solicitud.id}-coord-${idx}`}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-slate-300 rounded text-[10px] font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+                >
+                  <FiEye className="w-3 h-3" />
+                  Evidencia {idx + 1}
+                </a>
+              ))}
+            </div>
           </div>
         )}
 
@@ -1032,15 +1169,32 @@ const AprobacionPermisosView = ({ compact = false }) => {
 
             {stage === "pending_final" && (
               <>
-                <Button
-                  variant="primary"
-                  onClick={() => handleAprobarFinal(solicitud.id)}
-                  disabled={!!actionLoading}
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-xs py-1.5"
-                >
-                  <FiCheck className="w-3.5 h-3.5 mr-1.5" />
-                  Aprobar Final
-                </Button>
+                {(() => {
+                  // Solicitud urgente con justificante (ej. certificado medico) ya
+                  // entregado pero sin revisar todavia: la aprobacion final la
+                  // rechaza el backend hasta que se revise. Deshabilitar aqui evita
+                  // el clic confuso que termina en "No autorizado".
+                  const pendingJustificanteReview =
+                    Boolean(solicitud.is_urgent) &&
+                    !["procedente", "aceptado_por_excepcion"].includes(
+                      String(solicitud.provisional_status || "").toLowerCase()
+                    ) &&
+                    ["entregado", "en_revision", "observado"].includes(
+                      String(solicitud.justificante_status || "").toLowerCase()
+                    );
+                  return (
+                    <Button
+                      variant="primary"
+                      onClick={() => handleAprobarFinal(solicitud.id)}
+                      disabled={!!actionLoading || pendingJustificanteReview}
+                      title={pendingJustificanteReview ? "Revisa el justificante antes de aprobar" : undefined}
+                      className="flex-1 bg-green-600 hover:bg-green-700 text-xs py-1.5"
+                    >
+                      <FiCheck className="w-3.5 h-3.5 mr-1.5" />
+                      Aprobar Final
+                    </Button>
+                  );
+                })()}
                 <Button
                   variant="secondary"
                   onClick={() => {
@@ -1069,7 +1223,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
             </Button>
           </div>
         )}
-        {["pending", "pending_final", "approved"].includes(stage) && canCancelThis && (
+        {canCancelThis && (
           <div className="mt-3">
             <Button
               variant="secondary"
@@ -1079,6 +1233,35 @@ const AprobacionPermisosView = ({ compact = false }) => {
             >
               {requiresCancellationRequestFlow ? "Solicitar cancelacion" : "Cancelar solicitud"}
             </Button>
+          </div>
+        )}
+
+        {isTalentRole && String(solicitud.provisional_status || "").toLowerCase() === "pendiente_regularizacion" && (
+          <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 space-y-2">
+            <p className="text-xs font-semibold text-rose-900">Regularización pendiente — acción requerida</p>
+            <p className="text-[11px] text-rose-800">
+              El justificante fue rechazado. Debes decidir cómo regularizar esta ausencia urgente.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => openRegularizacionModal(solicitud, "rechazar_formalmente")}
+                disabled={!!actionLoading}
+                className="text-xs py-1 px-2 bg-rose-600 text-white hover:bg-rose-700 border-rose-600"
+              >
+                Rechazar formalmente
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => openRegularizacionModal(solicitud, "aceptar_excepcion")}
+                disabled={!!actionLoading}
+                className="text-xs py-1 px-2 bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600"
+              >
+                Aceptar por excepción
+              </Button>
+            </div>
           </div>
         )}
       </motion.div>
@@ -1162,6 +1345,13 @@ const AprobacionPermisosView = ({ compact = false }) => {
     { id: "pending", label: "Aprobacion Parcial", icon: FiClock, color: "blue" },
     { id: "pending_final", label: "Aprobacion Final", icon: FiFileText, color: "purple" },
     {
+      id: "regularizacion_pendiente",
+      label: "Regularización Urgente",
+      icon: FiAlertCircle,
+      color: "rose",
+      hidden: !isTalentRole,
+    },
+    {
       id: "cancellation_pending",
       label: "Cancelaciones",
       icon: FiAlertCircle,
@@ -1230,18 +1420,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
     rose: "bg-rose-600",
   };
   const selectedCancellationStatus = String(selectedSolicitud?.cancellation_status || "").toLowerCase();
-  const selectedStatus = String(selectedSolicitud?.status || "").toLowerCase();
-  const selectedIsRequester =
-    Boolean(selectedSolicitud) &&
-    ((userId && selectedSolicitud?.user_id && Number(userId) === Number(selectedSolicitud.user_id)) ||
-      isSameEmail(userEmail, selectedSolicitud?.user_email));
-  const selectedIsApprover =
-    Boolean(selectedSolicitud) &&
-    canCurrentUserActAsAssignedApprover(selectedSolicitud);
-  const selectedRequiresCancellationRequestFlow =
-    APPROVED_CANCEL_FLOW_STATUSES.has(selectedStatus) &&
-    selectedIsRequester &&
-    !selectedIsApprover;
+  const selectedRequiresCancellationRequestFlow = false;
 
   const renderContent = () => {
     if (loading) {
@@ -1643,6 +1822,145 @@ const AprobacionPermisosView = ({ compact = false }) => {
                 }}
               >
                 Cerrar
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {showRegularizacionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <Card className="w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-1">
+              {regularizacionAction === "rechazar_formalmente" ? "Rechazar formalmente" : "Aceptar por excepción"}
+            </h3>
+            <p className="text-xs text-gray-500 mb-4">
+              Solicitante: {regularizacionSolicitud?.user_fullname || regularizacionSolicitud?.user_email}
+            </p>
+            {regularizacionAction === "aceptar_excepcion" && (
+              <div className="mb-4 rounded-lg bg-emerald-50 border border-emerald-200 p-3">
+                <p className="text-xs text-emerald-800">
+                  La solicitud quedará en estado <strong>aceptado por excepción</strong> y pasará a aprobación final.
+                </p>
+              </div>
+            )}
+            {regularizacionAction === "rechazar_formalmente" && (
+              <div className="mb-4 rounded-lg bg-rose-50 border border-rose-200 p-3">
+                <p className="text-xs text-rose-800">
+                  La solicitud será <strong>rechazada de forma definitiva</strong>. El colaborador recibirá notificación con el motivo.
+                </p>
+              </div>
+            )}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Motivo (requerido)</label>
+              <textarea
+                value={regularizacionReason}
+                onChange={(e) => setRegularizacionReason(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                placeholder="Explica el fundamento de la decisión..."
+              />
+            </div>
+            <div className="flex gap-3">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (actionLoading) return;
+                  setShowRegularizacionModal(false);
+                  setRegularizacionSolicitud(null);
+                  setRegularizacionReason("");
+                }}
+                className="flex-1"
+                disabled={!!actionLoading}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleConfirmRegularizacion}
+                disabled={!!actionLoading || !regularizacionReason.trim()}
+                className={
+                  regularizacionAction === "rechazar_formalmente"
+                    ? "flex-1 bg-rose-600 hover:bg-rose-700"
+                    : "flex-1 bg-emerald-600 hover:bg-emerald-700"
+                }
+              >
+                Confirmar
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {showJustificanteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <Card className="w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-1">Revisar justificante</h3>
+            <p className="text-xs text-gray-500 mb-4">
+              Solicitante: {justificanteSolicitud?.user_fullname || justificanteSolicitud?.user_email}
+            </p>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Decisión</label>
+              <select
+                value={justificanteDecision}
+                onChange={(e) => setJustificanteDecision(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+              >
+                <option value="aceptado">Aceptado — procede, pasa a aprobación final</option>
+                <option value="observado">Observado — solicitar resubmisión al colaborador</option>
+                <option value="rechazado">Rechazado — queda pendiente de regularización</option>
+              </select>
+            </div>
+            {(justificanteDecision === "rechazado" || justificanteDecision === "observado") && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Observaciones (requeridas)</label>
+                <textarea
+                  value={justificanteObservations}
+                  onChange={(e) => setJustificanteObservations(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                  placeholder="Indica qué falta o por qué se rechaza..."
+                />
+              </div>
+            )}
+            {justificanteDecision === "rechazado" && (
+              <div className="mb-4 rounded-lg bg-rose-50 border border-rose-200 p-3">
+                <p className="text-xs text-rose-800">
+                  El rechazo dejará la solicitud en estado <strong>pendiente de regularización</strong>.
+                  Talento Humano deberá decidir si rechazarla formalmente, aceptarla por excepción o convertirla a vacaciones.
+                </p>
+              </div>
+            )}
+            <div className="flex gap-3">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (actionLoading) return;
+                  setShowJustificanteModal(false);
+                  setJustificanteSolicitud(null);
+                  setJustificanteObservations("");
+                }}
+                className={actionButton}
+                disabled={!!actionLoading}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleRevisarJustificante}
+                disabled={
+                  !!actionLoading ||
+                  ((justificanteDecision === "rechazado" || justificanteDecision === "observado") && !justificanteObservations.trim())
+                }
+                className={
+                  justificanteDecision === "aceptado"
+                    ? "flex-1 bg-emerald-600 hover:bg-emerald-700"
+                    : justificanteDecision === "observado"
+                      ? "flex-1 bg-amber-600 hover:bg-amber-700"
+                      : "flex-1 bg-rose-600 hover:bg-rose-700"
+                }
+              >
+                Confirmar revisión
               </Button>
             </div>
           </Card>

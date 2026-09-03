@@ -24,6 +24,7 @@ Thumbs.db
 .env.*.local
 backend/.env
 spi_front/.env
+espocrm/.env
 
 # Temporary secrets and local probes
 /db_pass.txt
@@ -36,6 +37,14 @@ backend/src/data/dashboard-*.json
 backend/src/data/service-account*.json
 !backend/src/data/service-account.example.json
 
+# Shortcuts de iPhone (Cherri): traen el JWT del atajo hardcodeado
+atajo/
+
+# Backups locales de base de datos (datos de produccion, nunca a git)
+backend/backups/
+*.sql
+*.sql.gz
+!backend/migrations/20260901_add_collab_policy_delivery_category.sql
+
 # Optional local assets
-/Mapeador_Sheets
-Mapeador_Sheets/excel_mapper.py
+

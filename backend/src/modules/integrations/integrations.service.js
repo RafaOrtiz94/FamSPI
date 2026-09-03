@@ -1,14 +1,11 @@
 const externalCasesService = require("../servicio/externalCases.service");
 const externalCaseSyncService = require("../servicio/externalCaseSync.service");
-const odooIntegrationService = require("./odoo.service");
 const productMapService = require("./productMap.service");
 
 const getExternalIntegrationsHealth = async () => {
   const providers = await externalCasesService.listProviderHealth();
-  const odoo = odooIntegrationService.getOdooIntegrationHealth();
   return {
     providers,
-    odoo,
     generated_at: new Date().toISOString(),
   };
 };

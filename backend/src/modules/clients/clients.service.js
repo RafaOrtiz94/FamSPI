@@ -4,7 +4,8 @@ const schedulesService = require("../schedules/schedules.service");
 const { uploadBase64File } = require("../../utils/drive");
 const axios = require("axios");
 const crypto = require("crypto");
-const { callOdoo, IntegrationDisabledError } = require("../integrations/odooClient");
+const { enqueueIntegrationEvent } = require("../integrations/integrationOutbox.service");
+const { isCrmSyncEnabled } = require("../../config/crmDb");
 
 const FULL_ACCESS_ROLES = new Set([
   "jefe_comercial",
@@ -18,13 +19,28 @@ const FULL_ACCESS_ROLES = new Set([
   "ti",
 ]);
 
+const FIELD_CLIENT_READ_ROLES = new Set([
+  "tecnico",
+  "jefe_tecnico",
+  "servicio_tecnico",
+  "jefe_servicio_tecnico",
+  "logistica",
+  "jefe_logistica",
+]);
+
+// backoffice_comercial: mismo caso que EDIT_CLIENT_ROLES/ASSIGN_CLIENT_ROLES
+// en clients.routes.js (extra_roles, ej. lorena.loaiza) -- sin esto aqui, el
+// gate de la ruta la dejaba pasar pero esta funcion la seguia bloqueando.
+const OPERATIONS_MANAGER_ROLES = new Set([
+  "jefe_operaciones",
+  "jefe_de_operaciones",
+  "backoffice_comercial",
+]);
+
 const ASSIGNER_ROLES = new Set([
-  "jefe_comercial",
-  "gerencia",
-  "gerente",
-  "admin",
-  "administrador",
-  "ti",
+  "jefe_operaciones",
+  "jefe_de_operaciones",
+  "backoffice_comercial",
 ]);
 
 const ADVISOR_ROLES = new Set([
@@ -45,15 +61,6 @@ const ASSIGNABLE_ADVISOR_ROLES = new Set([
   "backoffice",
   "backoffice_comercial",
 ]);
-const ODOO_SYNC_ALLOWED_ROLES = new Set([
-  "jefe_comercial",
-  "jefe_de_comercial",
-  "gerencia",
-  "gerente",
-  "admin",
-  "administrador",
-  "ti",
-]);
 const PASSIVE_EMPLOYMENT_STATUSES = new Set(["pasivo", "desvinculado", "inactivo"]);
 const ODOO_SYNC_USER_EMAIL = "odoo_sync@spi.local";
 
@@ -68,25 +75,47 @@ const ACTIVE_ASSIGNMENT_CONDITION = `
 const VALID_VISIT_STATUS = new Set(["visited", "pending", "skipped", "in_visit"]);
 const VALID_INTERACTION_TYPES = new Set(["call", "visit"]);
 const GOOGLE_GEOCODING_URL = "https://maps.googleapis.com/maps/api/geocode/json";
+const CLIENT_VISIT_LOCATION_LEARNING_THRESHOLD = Number.parseInt(
+  process.env.CLIENT_VISIT_LOCATION_LEARNING_THRESHOLD || "3",
+  10,
+);
+const CLIENT_VISIT_LOCATION_CLUSTER_RADIUS_METERS = Number.parseInt(
+  process.env.CLIENT_VISIT_LOCATION_CLUSTER_RADIUS_METERS || "250",
+  10,
+);
 
+// Bug real (Lorena Loaiza, scope financiero, extra_roles=["backoffice_comercial"]):
+// este helper solo miraba el rol principal, ignorando extra_roles (capacidad
+// puntual otorgada sin cambiar el rol, ver migrations/276_users_extra_roles.sql).
+// El gate de la ruta (requireRole en clients.routes.js) SI mira extra_roles y
+// la dejaba pasar, pero toda la logica interna de este modulo (isManager,
+// canAssignClients, canEditClients, etc.) seguia evaluandola como si no
+// tuviera ningun permiso especial -- resultado: lista de clientes vacia
+// (scope "solo mios") y asignacion bloqueada, sin ningun error visible.
 function hasRole(user, allowedRoles) {
-  return allowedRoles.has(normalizeRole(user?.role));
+  if (allowedRoles.has(normalizeRole(user?.role))) return true;
+  const extraRoles = Array.isArray(user?.extra_roles) ? user.extra_roles : [];
+  return extraRoles.some((role) => allowedRoles.has(normalizeRole(role)));
 }
 
 function isManager(user) {
   return hasRole(user, FULL_ACCESS_ROLES);
 }
 
+function hasFieldClientReadAccess(user) {
+  return hasRole(user, FIELD_CLIENT_READ_ROLES);
+}
+
 function canAssignClients(user) {
   return hasRole(user, ASSIGNER_ROLES);
 }
 
-function isAdvisor(user) {
-  return isManager(user) || ADVISOR_ROLES.has(normalizeRole(user?.role));
+function canEditClients(user) {
+  return hasRole(user, OPERATIONS_MANAGER_ROLES);
 }
 
-function canSyncOdooClients(user) {
-  return ODOO_SYNC_ALLOWED_ROLES.has(normalizeRole(user?.role));
+function isAdvisor(user) {
+  return isManager(user) || ADVISOR_ROLES.has(normalizeRole(user?.role));
 }
 
 function normalizeRole(value) {
@@ -188,6 +217,47 @@ function normalizeLocationPayload(payload = {}) {
   };
 }
 
+function parseCompositeOdooLocation(value) {
+  const raw = normalizeText(value);
+  if (!raw.includes("/")) return null;
+  const parts = raw
+    .split("/")
+    .map((item) => normalizeText(item))
+    .filter(Boolean);
+  if (parts.length < 3) return null;
+  return {
+    province: parts[0] || "",
+    city: parts[1] || "",
+    address: parts.slice(2).join(" / "),
+  };
+}
+
+function normalizeOdooLocationFields({ address, city, province }) {
+  const normalized = {
+    address: normalizeText(address),
+    city: normalizeText(city),
+    province: normalizeText(province),
+  };
+
+  const parsedFromCity = parseCompositeOdooLocation(normalized.city);
+  const parsedFromAddress = parseCompositeOdooLocation(normalized.address);
+  const parsed = parsedFromCity || parsedFromAddress;
+
+  if (parsed) {
+    normalized.city = parsed.city || normalized.city;
+    normalized.province = parsed.province || normalized.province;
+    if (!normalized.address || parsedFromAddress) {
+      normalized.address = parsed.address || normalized.address;
+    }
+  }
+
+  return {
+    address: normalized.address || "Direccion no registrada",
+    city: normalized.city || "Ciudad no especificada",
+    province: normalized.province || "Provincia no especificada",
+  };
+}
+
 function buildDriveLink(fileId) {
   return `https://drive.google.com/file/d/${fileId}/view`;
 }
@@ -216,8 +286,19 @@ function getClientRequestAttachments(request = {}) {
     .filter(Boolean);
 }
 
+let _tablesEnsured = false;
 async function ensureTables() {
-  await db.query(`
+  if (_tablesEnsured) return;
+  _tablesEnsured = true; // set early so concurrent requests don't pile up
+  const run = async (label, sql) => {
+    try {
+      await db.query(sql);
+    } catch (err) {
+      logger.warn({ err, label }, "[CLIENTS] ensureTables: non-fatal DDL/DML failure");
+    }
+  };
+
+  await run("client_requests columns", `
     ALTER TABLE client_requests
       ADD COLUMN IF NOT EXISTS external_source TEXT,
       ADD COLUMN IF NOT EXISTS external_id TEXT,
@@ -228,7 +309,7 @@ async function ensureTables() {
       ADD COLUMN IF NOT EXISTS consent_record_file_id VARCHAR(255);
   `);
 
-  await db.query(`
+  await run("client_requests indexes", `
     CREATE INDEX IF NOT EXISTS idx_client_requests_external_source
       ON client_requests (external_source);
     CREATE UNIQUE INDEX IF NOT EXISTS ux_client_requests_external_identity
@@ -236,7 +317,7 @@ async function ensureTables() {
       WHERE external_source IS NOT NULL AND external_id IS NOT NULL;
   `);
 
-  await db.query(`
+  await run("client_assignments table", `
     CREATE TABLE IF NOT EXISTS client_assignments (
       id SERIAL PRIMARY KEY,
       client_request_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
@@ -255,7 +336,7 @@ async function ensureTables() {
     );
   `);
 
-  await db.query(`
+  await run("client_assignments columns", `
     ALTER TABLE client_assignments
       ADD COLUMN IF NOT EXISTS assignment_type VARCHAR(20) NOT NULL DEFAULT 'manual',
       ADD COLUMN IF NOT EXISTS is_temporary BOOLEAN NOT NULL DEFAULT FALSE,
@@ -265,7 +346,7 @@ async function ensureTables() {
       ADD COLUMN IF NOT EXISTS reason TEXT;
   `);
 
-  await db.query(`
+  await run("client_assignments constraint", `
     DO $$
     BEGIN
       IF NOT EXISTS (
@@ -280,14 +361,14 @@ async function ensureTables() {
     END $$;
   `);
 
-  await db.query(`
+  await run("client_assignments indexes", `
     CREATE INDEX IF NOT EXISTS idx_client_assignments_client_active
       ON client_assignments (client_request_id, is_active, starts_at, ends_at);
     CREATE INDEX IF NOT EXISTS idx_client_assignments_assigned_email
       ON client_assignments (assigned_to_email);
   `);
 
-  await db.query(`
+  await run("client_assignments seed owners", `
     INSERT INTO client_assignments (
       client_request_id,
       assigned_to_email,
@@ -318,7 +399,7 @@ async function ensureTables() {
 
   // Los clientes migrados desde Odoo deben quedar disponibles para reasignacion real
   // por jefatura comercial, no asignados al usuario tecnico de sincronizacion.
-  await db.query(`
+  await run("client_assignments deactivate odoo technical", `
     UPDATE client_assignments ca
        SET is_active = FALSE,
            ends_at = COALESCE(ca.ends_at, NOW()),
@@ -336,7 +417,7 @@ async function ensureTables() {
        );
   `);
 
-  await db.query(`
+  await run("client_visit_logs table", `
     CREATE TABLE IF NOT EXISTS client_visit_logs (
       id SERIAL PRIMARY KEY,
       client_request_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
@@ -358,8 +439,7 @@ async function ensureTables() {
     );
   `);
 
-  // Asegurar columnas nuevas en instalaciones existentes
-  await db.query(`
+  await run("client_visit_logs columns", `
     ALTER TABLE client_visit_logs
       ADD COLUMN IF NOT EXISTS hora_entrada TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS hora_salida TIMESTAMPTZ,
@@ -370,9 +450,9 @@ async function ensureTables() {
       ADD COLUMN IF NOT EXISTS observaciones TEXT,
       ADD COLUMN IF NOT EXISTS duracion_minutos INTEGER,
       ADD COLUMN IF NOT EXISTS is_planned BOOLEAN DEFAULT FALSE;
-    `);
+  `);
 
-  await db.query(`
+  await run("prospect_visits table", `
     CREATE TABLE IF NOT EXISTS prospect_visits (
       id SERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
@@ -391,7 +471,7 @@ async function ensureTables() {
     );
   `);
 
-  await db.query(`
+  await run("client_interactions table", `
     CREATE TABLE IF NOT EXISTS client_interactions (
       id SERIAL PRIMARY KEY,
       client_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
@@ -402,14 +482,14 @@ async function ensureTables() {
     );
   `);
 
-  await db.query(`
+  await run("client_interactions indexes", `
     CREATE INDEX IF NOT EXISTS idx_client_interactions_client_created_at
       ON client_interactions (client_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_client_interactions_created_by
       ON client_interactions (created_by);
   `);
 
-  await db.query(`
+  await run("client_locations table", `
     CREATE TABLE IF NOT EXISTS client_locations (
       id SERIAL PRIMARY KEY,
       client_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
@@ -425,7 +505,15 @@ async function ensureTables() {
     );
   `);
 
-  await db.query(`
+  await run("client_locations learning columns", `
+    ALTER TABLE client_locations
+      ADD COLUMN IF NOT EXISTS location_source TEXT NOT NULL DEFAULT 'manual',
+      ADD COLUMN IF NOT EXISTS visit_sample_count INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS last_learned_visit_id INTEGER,
+      ADD COLUMN IF NOT EXISTS learned_at TIMESTAMPTZ;
+  `);
+
+  await run("client_locations indexes", `
     CREATE INDEX IF NOT EXISTS idx_client_locations_client_id
       ON client_locations (client_id);
     CREATE INDEX IF NOT EXISTS idx_client_locations_geo
@@ -433,9 +521,12 @@ async function ensureTables() {
     CREATE UNIQUE INDEX IF NOT EXISTS uq_client_locations_single_main
       ON client_locations (client_id)
       WHERE is_main = TRUE;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_client_locations_visit_learning
+      ON client_locations (client_id)
+      WHERE location_source = 'visit_learning';
   `);
 
-  await db.query(`
+  await run("client_locations seed main", `
     INSERT INTO client_locations (client_id, name, address, city, province, is_main)
     SELECT
       cr.id,
@@ -474,7 +565,7 @@ async function getClientOrThrow(clientId) {
 }
 
 async function ensureClientAccess({ clientId, user }) {
-  if (isManager(user)) return;
+  if (isManager(user) || canAssignClients(user)) return;
 
   const { rows } = await db.query(
     `SELECT 1 FROM client_requests cr
@@ -612,13 +703,30 @@ async function getClientDetail({ clientId, user }) {
   }
   if (!Array.isArray(assignmentDetails)) assignmentDetails = [];
   const locations = await getClientLocationsInternal(clientId);
+  const normalizedRouteLocation = normalizeOdooLocationFields({
+    address: request.shipping_address,
+    city: request.shipping_city,
+    province: request.shipping_province,
+  });
 
   return {
     ...request,
+    shipping_address:
+      String(request.external_source || "").toLowerCase() === "odoo"
+        ? normalizedRouteLocation.address
+        : request.shipping_address,
+    shipping_city:
+      String(request.external_source || "").toLowerCase() === "odoo"
+        ? normalizedRouteLocation.city
+        : request.shipping_city,
+    shipping_province:
+      String(request.external_source || "").toLowerCase() === "odoo"
+        ? normalizedRouteLocation.province
+        : request.shipping_province,
     asignados,
     assignment_details: assignmentDetails,
     locations,
-    attachments: isManager(user) ? getClientRequestAttachments(request) : [],
+    attachments: isManager(user) || canEditClients(user) ? getClientRequestAttachments(request) : [],
   };
 }
 
@@ -633,6 +741,11 @@ async function addLocation({ clientId, user, payload = {} }) {
   await ensureTables();
   await getClientOrThrow(clientId);
   await ensureClientAccess({ clientId, user });
+  if (!canEditClients(user)) {
+    const error = new Error("Solo jefe de operaciones puede editar sedes de clientes");
+    error.status = 403;
+    throw error;
+  }
 
   const normalized = normalizeLocationPayload(payload);
   if (!normalized.name) {
@@ -712,6 +825,11 @@ async function updateLocation({ clientId, locationId, user, payload = {} }) {
   await ensureTables();
   await getClientOrThrow(clientId);
   await ensureClientAccess({ clientId, user });
+  if (!canEditClients(user)) {
+    const error = new Error("Solo jefe de operaciones puede editar sedes de clientes");
+    error.status = 403;
+    throw error;
+  }
 
   const incoming = payload && typeof payload === "object" ? payload : {};
   const hasField = (field) => Object.prototype.hasOwnProperty.call(incoming, field);
@@ -840,6 +958,11 @@ async function removeLocation({ clientId, locationId, user }) {
   await ensureTables();
   await getClientOrThrow(clientId);
   await ensureClientAccess({ clientId, user });
+  if (!canEditClients(user)) {
+    const error = new Error("Solo jefe de operaciones puede editar sedes de clientes");
+    error.status = 403;
+    throw error;
+  }
 
   const client = await db.getClient();
   try {
@@ -969,6 +1092,203 @@ async function syncMainLocationFromShippingAddress({
   }
 }
 
+function toFiniteCoordinate(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+const toRad = (value) => (Number(value) * Math.PI) / 180;
+
+function distanceMeters({ lat1, lng1, lat2, lng2 }) {
+  const radius = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return radius * c;
+}
+
+function averageVisitCoordinates(rows = []) {
+  const points = rows
+    .map((row) => ({
+      visitId: row.id,
+      lat: toFiniteCoordinate(row.lat),
+      lng: toFiniteCoordinate(row.lng),
+    }))
+    .filter((point) => point.lat !== null && point.lng !== null);
+
+  if (points.length < CLIENT_VISIT_LOCATION_LEARNING_THRESHOLD) return null;
+
+  const lat = points.reduce((sum, point) => sum + point.lat, 0) / points.length;
+  const lng = points.reduce((sum, point) => sum + point.lng, 0) / points.length;
+  const maxDistance = Math.max(
+    ...points.map((point) => distanceMeters({ lat1: lat, lng1: lng, lat2: point.lat, lng2: point.lng })),
+  );
+
+  if (maxDistance > CLIENT_VISIT_LOCATION_CLUSTER_RADIUS_METERS) {
+    return {
+      eligible: false,
+      reason: "LOCATION_SAMPLES_NOT_CONSISTENT",
+      sampleCount: points.length,
+      maxDistanceMeters: Number(maxDistance.toFixed(2)),
+    };
+  }
+
+  return {
+    eligible: true,
+    lat,
+    lng,
+    sampleCount: points.length,
+    latestVisitId: points[0]?.visitId || null,
+    maxDistanceMeters: Number(maxDistance.toFixed(2)),
+  };
+}
+
+async function learnFrequentLocationFromVisits({ clientId, city = null, province = null } = {}) {
+  const numericClientId = Number(clientId);
+  if (!Number.isInteger(numericClientId) || numericClientId <= 0) return null;
+
+  await ensureTables();
+
+  const { rows: visitRows } = await db.query(
+    `
+      SELECT
+        id,
+        COALESCE(lat_entrada, lat_salida) AS lat,
+        COALESCE(lng_entrada, lng_salida) AS lng,
+        visit_date,
+        COALESCE(hora_salida, hora_entrada, updated_at) AS sort_ts
+      FROM client_visit_logs
+      WHERE client_request_id = $1
+        AND status = 'visited'
+        AND COALESCE(lat_entrada, lat_salida) IS NOT NULL
+        AND COALESCE(lng_entrada, lng_salida) IS NOT NULL
+      ORDER BY COALESCE(hora_salida, hora_entrada, updated_at) DESC, id DESC
+      LIMIT 10
+    `,
+    [numericClientId],
+  );
+
+  const learned = averageVisitCoordinates(visitRows);
+  if (!learned?.eligible) return learned;
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: mainRows } = await client.query(
+      `
+        SELECT id, lat, lng, location_source
+        FROM client_locations
+        WHERE client_id = $1 AND is_main = TRUE
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [numericClientId],
+    );
+    const mainLocation = mainRows[0] || null;
+    const canFillMainLocation =
+      mainLocation &&
+      mainLocation.lat === null &&
+      mainLocation.lng === null;
+
+    if (canFillMainLocation) {
+      const { rows } = await client.query(
+        `
+          UPDATE client_locations
+          SET
+            lat = $2,
+            lng = $3,
+            location_source = 'visit_learning',
+            visit_sample_count = $4,
+            last_learned_visit_id = $5,
+            learned_at = NOW(),
+            updated_at = NOW()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [
+          mainLocation.id,
+          learned.lat,
+          learned.lng,
+          learned.sampleCount,
+          learned.latestVisitId,
+        ],
+      );
+      await client.query("COMMIT");
+      return { ...learned, location: rows[0], action: "main_location_updated" };
+    }
+
+    const { rows } = await client.query(
+      `
+        INSERT INTO client_locations (
+          client_id,
+          name,
+          address,
+          city,
+          province,
+          lat,
+          lng,
+          is_main,
+          location_source,
+          visit_sample_count,
+          last_learned_visit_id,
+          learned_at
+        )
+        VALUES (
+          $1,
+          'Ubicacion frecuente de visita',
+          'Ubicacion aprendida por visitas recurrentes',
+          $2,
+          $3,
+          $4,
+          $5,
+          FALSE,
+          'visit_learning',
+          $6,
+          $7,
+          NOW()
+        )
+        ON CONFLICT (client_id) WHERE location_source = 'visit_learning'
+        DO UPDATE SET
+          lat = EXCLUDED.lat,
+          lng = EXCLUDED.lng,
+          city = COALESCE(EXCLUDED.city, client_locations.city),
+          province = COALESCE(EXCLUDED.province, client_locations.province),
+          visit_sample_count = EXCLUDED.visit_sample_count,
+          last_learned_visit_id = EXCLUDED.last_learned_visit_id,
+          learned_at = NOW(),
+          updated_at = NOW()
+        RETURNING *
+      `,
+      [
+        numericClientId,
+        normalizeText(city) || null,
+        normalizeText(province) || null,
+        learned.lat,
+        learned.lng,
+        learned.sampleCount,
+        learned.latestVisitId,
+      ],
+    );
+
+    await client.query("COMMIT");
+    return { ...learned, location: rows[0], action: "learned_location_upserted" };
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      logger.error({ rollbackError: rollbackError.message, clientId: numericClientId }, "Error al hacer rollback en learnFrequentLocationFromVisits");
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 function normalizeText(value) {
   if (value === undefined || value === null) return "";
   return String(value).trim();
@@ -978,388 +1298,109 @@ function normalizeEmail(value) {
   return normalizeText(value).toLowerCase();
 }
 
-function extractProvinceFromStateId(stateId) {
-  if (!stateId) return "";
-  if (Array.isArray(stateId) && stateId.length > 1) {
-    return normalizeText(stateId[1]);
-  }
-  return normalizeText(stateId);
-}
-
-function isGenericOdooClientName(name) {
-  const normalized = normalizeText(name).toUpperCase();
-  if (!normalized) return true;
-  return /^CLIENTE( ID)?\s+[0-9]{1,13}$/.test(normalized);
-}
-
-function isLikelyTaxId(value) {
-  const normalized = normalizeText(value).replace(/\s+/g, "");
-  return /^[0-9]{10,13}$/.test(normalized);
-}
-
-function mapOdooPartnerToClientDraft(partner = {}) {
-  const rawCandidates = [
-    partner.commercial_company_name,
-    partner.company_name,
-    partner.display_name,
-    partner.name,
-  ];
-  const rawName = rawCandidates
-    .map((item) => normalizeText(item))
-    .find((item) => item && !isGenericOdooClientName(item)) || "";
-  const vat = normalizeText(partner.vat);
-  const email = normalizeText(partner.email);
-  const name = rawName || (isLikelyTaxId(vat) ? `RUC ${vat}` : email ? email : "");
-  const phone = normalizeText(partner.phone);
-  const mobile = normalizeText(partner.mobile);
-  const city = normalizeText(partner.city);
-  const province = extractProvinceFromStateId(partner.state_id);
-  const contactAddress =
-    normalizeText(partner.contact_address) || normalizeText(partner.street) || "Direccion no registrada";
-
-  return {
-    external_source: "odoo",
-    external_id: normalizeText(partner.id),
-    external_updated_at: normalizeText(partner.write_date) || null,
-    commercial_name: name,
-    ruc_cedula: vat || null,
-    client_email: email || null,
-    consent_recipient_email: email || null,
-    shipping_contact_name: name,
-    shipping_address: contactAddress,
-    shipping_city: city || "Ciudad no especificada",
-    shipping_province: province || "Provincia no especificada",
-    shipping_phone: phone || null,
-    shipping_cellphone: mobile || null,
-  };
-}
-
-async function fetchOdooCommercialPartnersPage({ offset = 0, limit = 500 } = {}) {
-  const requestedFields = [
-    "id",
-    "name",
-    "display_name",
-    "commercial_company_name",
-    "company_name",
-    "write_date",
-    "vat",
-    "email",
-    "phone",
-    "mobile",
-    "street",
-    "city",
-    "state_id",
-    "contact_address",
-  ];
-
-  let partnerFields = requestedFields;
-  try {
-    const fieldsMeta = await callOdoo({
-      method: "execute_kw",
-      eventType: "clients.sync.odoo.fields",
-      params: {
-        model: "res.partner",
-        method: "fields_get",
-        args: [],
-        kwargs: {
-          attributes: ["type"],
-        },
-      },
-    });
-
-    if (fieldsMeta && typeof fieldsMeta === "object" && !Array.isArray(fieldsMeta)) {
-      const availableFieldNames = new Set(Object.keys(fieldsMeta));
-      partnerFields = requestedFields.filter((fieldName) => availableFieldNames.has(fieldName));
-    }
-  } catch (_error) {
-    partnerFields = requestedFields.filter((fieldName) => fieldName !== "mobile");
-  }
-
-  const result = await callOdoo({
-    method: "execute_kw",
-    eventType: "clients.sync.odoo",
-    params: {
-      model: "res.partner",
-      method: "search_read",
-      args: [[["active", "=", true], ["customer_rank", ">", 0]]],
-      kwargs: {
-        fields: partnerFields,
-        order: "write_date desc",
-        limit,
-        offset,
-      },
-    },
-  });
-
-  if (Array.isArray(result)) return result;
-  if (Array.isArray(result?.records)) return result.records;
-  if (Array.isArray(result?.data)) return result.data;
-  return [];
-}
-
-async function fetchOdooCommercialPartners() {
-  const batchSize = 500;
-  const maxRows = Number.parseInt(process.env.ODOO_CLIENTS_SYNC_MAX_ROWS || "50000", 10);
-  const safeMaxRows = Number.isFinite(maxRows) && maxRows > 0 ? maxRows : 50000;
-
-  const allPartners = [];
-  let offset = 0;
-
-  while (allPartners.length < safeMaxRows) {
-    const page = await fetchOdooCommercialPartnersPage({
-      offset,
-      limit: Math.min(batchSize, safeMaxRows - allPartners.length),
-    });
-    if (!page.length) break;
-    allPartners.push(...page);
-    if (page.length < batchSize) break;
-    offset += page.length;
-  }
-
-  return allPartners;
-}
-
-async function syncOdooPartnersIntoClientRequests({ user }) {
-  if (!canSyncOdooClients(user)) return;
-
-  let partners = [];
-  try {
-    partners = await fetchOdooCommercialPartners();
-  } catch (error) {
-    if (error instanceof IntegrationDisabledError || error?.code === "ODOO_INTEGRATION_DISABLED") {
-      return;
-    }
-    logger.warn(
-      { error: error.message, code: error.code || null, role: user?.role || null },
-      "No se pudo sincronizar clientes desde Odoo",
-    );
-    return;
-  }
-
-  if (!partners.length) return;
-
-  for (const partner of partners) {
-    const draft = mapOdooPartnerToClientDraft(partner);
-    const externalId = normalizeText(draft.external_id);
-    if (!externalId) continue;
-    if (!normalizeText(draft.commercial_name)) continue;
-
-    const rucKey = normalizeText(draft.ruc_cedula).toLowerCase();
-    const emailKey = normalizeEmail(draft.client_email);
-    const nameKey = normalizeText(draft.commercial_name).toLowerCase();
-
-    try {
-      const candidateParams = [];
-      const candidatePredicates = [];
-
-      if (rucKey) {
-        candidateParams.push(rucKey);
-        candidatePredicates.push(`LOWER(TRIM(COALESCE(ruc_cedula, ''))) = $${candidateParams.length + 2}`);
-      }
-      if (emailKey) {
-        candidateParams.push(emailKey);
-        const emailParam = candidateParams.length + 2;
-        candidatePredicates.push(
-          `(
-            LOWER(TRIM(COALESCE(client_email, ''))) = $${emailParam}
-            OR LOWER(TRIM(COALESCE(consent_recipient_email, ''))) = $${emailParam}
-          )`,
-        );
-      }
-      if (nameKey) {
-        candidateParams.push(nameKey);
-        candidatePredicates.push(`LOWER(TRIM(COALESCE(commercial_name, ''))) = $${candidateParams.length + 2}`);
-      }
-
-      if (candidatePredicates.length) {
-        const { rows: linkedRows } = await db.query(
-          `
-            UPDATE client_requests
-            SET
-              external_source = 'odoo',
-              external_id = $1,
-              external_updated_at = COALESCE($2::timestamptz, external_updated_at),
-              last_synced_at = NOW()
-            WHERE id = (
-              SELECT id
-              FROM client_requests
-              WHERE status = 'approved'
-                AND (external_source IS NULL OR external_source = '')
-                AND (${candidatePredicates.join(" OR ")})
-              ORDER BY created_at ASC
-              LIMIT 1
-            )
-            RETURNING id
-          `,
-          [externalId, draft.external_updated_at, ...candidateParams],
-        );
-
-        if (linkedRows.length) continue;
-      }
-
-      await db.query(
-        `
-          INSERT INTO client_requests (
-            created_by,
-            status,
-            approved_at,
-            external_source,
-            external_id,
-            external_updated_at,
-            last_synced_at,
-            lopdp_token,
-            client_type,
-            data_processing_consent,
-            lopdp_consent_status,
-            consent_capture_method,
-            consent_capture_details,
-            lopdp_consent_method,
-            lopdp_consent_details,
-            lopdp_consent_at,
-            client_sector,
-            commercial_name,
-            ruc_cedula,
-            client_email,
-            consent_recipient_email,
-            shipping_contact_name,
-            shipping_address,
-            shipping_city,
-            shipping_province,
-            shipping_phone,
-            shipping_cellphone
-          )
-          VALUES (
-            $1,
-            'approved',
-            NOW(),
-            $2,
-            $3,
-            $4::timestamptz,
-            NOW(),
-            $5,
-            'persona_juridica',
-            TRUE,
-            'granted',
-            'odoo_sync',
-            'Cliente importado automáticamente desde Odoo',
-            'odoo_sync',
-            'Consentimiento heredado de sistema externo Odoo',
-            NOW(),
-            'privado',
-            $6,
-            $7,
-            $8,
-            $9,
-            $10,
-            $11,
-            $12,
-            $13,
-            $14,
-            $15
-          )
-          ON CONFLICT (external_source, external_id)
-          DO UPDATE SET
-            status = 'approved',
-            approved_at = COALESCE(client_requests.approved_at, NOW()),
-            external_updated_at = COALESCE(EXCLUDED.external_updated_at, client_requests.external_updated_at),
-            last_synced_at = NOW(),
-            commercial_name = COALESCE(NULLIF(EXCLUDED.commercial_name, ''), client_requests.commercial_name),
-            ruc_cedula = COALESCE(NULLIF(EXCLUDED.ruc_cedula, ''), client_requests.ruc_cedula),
-            client_email = COALESCE(NULLIF(EXCLUDED.client_email, ''), client_requests.client_email),
-            consent_recipient_email = COALESCE(
-              NULLIF(EXCLUDED.consent_recipient_email, ''),
-              client_requests.consent_recipient_email
-            ),
-            shipping_contact_name = COALESCE(
-              NULLIF(EXCLUDED.shipping_contact_name, ''),
-              client_requests.shipping_contact_name
-            ),
-            shipping_address = COALESCE(NULLIF(EXCLUDED.shipping_address, ''), client_requests.shipping_address),
-            shipping_city = COALESCE(NULLIF(EXCLUDED.shipping_city, ''), client_requests.shipping_city),
-            shipping_province = COALESCE(NULLIF(EXCLUDED.shipping_province, ''), client_requests.shipping_province),
-            shipping_phone = COALESCE(NULLIF(EXCLUDED.shipping_phone, ''), client_requests.shipping_phone),
-            shipping_cellphone = COALESCE(NULLIF(EXCLUDED.shipping_cellphone, ''), client_requests.shipping_cellphone)
-        `,
-        [
-          ODOO_SYNC_USER_EMAIL,
-          "odoo",
-          externalId,
-          draft.external_updated_at,
-          crypto.randomBytes(24).toString("hex"),
-          draft.commercial_name,
-          draft.ruc_cedula,
-          draft.client_email,
-          draft.consent_recipient_email,
-          draft.shipping_contact_name,
-          draft.shipping_address,
-          draft.shipping_city,
-          draft.shipping_province,
-          draft.shipping_phone,
-          draft.shipping_cellphone,
-        ],
-      );
-    } catch (error) {
-      if (error?.code === "23505") continue;
-      logger.warn(
-        {
-          error: error.message,
-          external_id: externalId,
-          commercial_name: draft.commercial_name,
-          ruc: draft.ruc_cedula,
-          email: draft.client_email,
-        },
-        "No se pudo insertar cliente de Odoo en client_requests",
-      );
-    }
-  }
-}
-
-async function syncOdooClientsBackfill({ user }) {
+async function listAccessibleClients({
+  user,
+  q,
+  visitDate,
+  includeScheduleInfo = false,
+  filterBySchedule = false,
+  includeAllForBusinessCase = false,
+  scheduleScope = null,
+  scheduleWindow = null,
+  page = 1,
+  limit = null,
+}) {
   await ensureTables();
-  await syncOdooPartnersIntoClientRequests({ user });
-}
-
-async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo = false, filterBySchedule = false }) {
-  await ensureTables();
-  await syncOdooPartnersIntoClientRequests({ user });
   const dateParam = visitDate || new Date().toISOString().slice(0, 10);
+  const normalizedScheduleWindow = String(scheduleWindow || "").trim().toLowerCase();
+  const shouldUseApprovedPeriod = normalizedScheduleWindow === "approved_period";
 
   const normalizedEmail = (user?.email || "").toLowerCase();
   let approvedSchedule = null;
   let plannedVisits = [];
   let plannedTechnicalByClient = {};
+  let scheduledLeadsToday = [];
 
   if (includeScheduleInfo || filterBySchedule) {
     approvedSchedule = await schedulesService.findApprovedScheduleForMonth({
       userEmail: normalizedEmail,
       month: Number(dateParam.slice(5, 7)),
       year: Number(dateParam.slice(0, 4)),
+      allowPendingReapproval: true,
     });
 
     if (approvedSchedule) {
       const { rows } = await db.query(
         `SELECT client_request_id, planned_date, city, priority, notes, schedule_id
            FROM scheduled_visits
-          WHERE schedule_id = $1 AND planned_date = $2`,
-        [approvedSchedule.id, dateParam],
+          WHERE schedule_id = $1
+            AND ($2::boolean = TRUE OR planned_date = $3::date)
+          ORDER BY planned_date ASC, priority DESC, id ASC`,
+        [approvedSchedule.id, shouldUseApprovedPeriod, dateParam],
       );
       plannedVisits = rows || [];
+
+      const { rows: leadRows } = await db.query(
+        `SELECT
+           sv.id AS scheduled_visit_id,
+           sv.lead_id,
+           sv.city,
+           sv.priority,
+           sv.notes,
+           sv.schedule_id,
+           l.full_name,
+           l.company_name,
+           COALESCE(pv.status, 'pending') AS visit_status,
+           pv.check_in_time,
+           pv.check_out_time
+         FROM scheduled_visits sv
+         JOIN crm.crm_leads l ON l.id = sv.lead_id
+         LEFT JOIN prospect_visits pv
+          ON pv.lead_id = sv.lead_id
+          AND LOWER(COALESCE(pv.user_email, '')) = $3
+          AND pv.visit_date = sv.planned_date
+        WHERE sv.schedule_id = $1
+          AND ($4::boolean = TRUE OR sv.planned_date = $2::date)
+          AND sv.lead_id IS NOT NULL
+        ORDER BY sv.planned_date ASC, sv.priority DESC, sv.id ASC`,
+        [approvedSchedule.id, dateParam, normalizedEmail, shouldUseApprovedPeriod],
+      );
+      scheduledLeadsToday = leadRows || [];
     }
 
     try {
+      const normalizedScheduleScope = String(scheduleScope || "").trim().toLowerCase();
+      const technicalParams = [dateParam];
+      const technicalWhere = [
+        `cat.activity_date = $1`,
+        `COALESCE(lower(cat.status), 'programado') IN ('programado', 'confirmado', 'en_proceso')`,
+        `COALESCE(epr.client_id, ppr.client_request_id) IS NOT NULL`,
+      ];
+
+      if (normalizedScheduleScope === "mine") {
+        technicalParams.push(Number(user?.id) || null, normalizedEmail);
+        technicalWhere.push(`
+          (
+            cat.user_id = $2
+            OR LOWER(COALESCE(tu.email, '')) = LOWER($3)
+          )
+        `);
+      }
+
       const { rows: technicalScheduleRows } = await db.query(
         `
         SELECT DISTINCT
           COALESCE(epr.client_id, ppr.client_request_id) AS client_request_id
         FROM servicio.cronograma_actividades_tecnicas cat
+        LEFT JOIN public.users tu
+          ON tu.id = cat.user_id
         LEFT JOIN equipment_purchase_requests epr
           ON epr.id::text = cat.source_id
         LEFT JOIN private_purchase_requests ppr
           ON ppr.id::text = cat.source_id
-        WHERE cat.activity_date = $1
-          AND COALESCE(epr.client_id, ppr.client_request_id) IS NOT NULL
+        WHERE ${technicalWhere.join(" AND ")}
         `,
-        [dateParam],
+        technicalParams,
       );
 
       plannedTechnicalByClient = (technicalScheduleRows || []).reduce((acc, row) => {
@@ -1377,27 +1418,53 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
   }
 
   const params = [user.email, dateParam];
-  const clauses = ["cr.status = 'approved'"]; // base status filter
+  const plannedClientIdsForScheduleAccess =
+    includeScheduleInfo && String(scheduleScope || "").trim().toLowerCase() === "mine"
+      ? [...new Set(plannedVisits.map((visit) => Number(visit?.client_request_id)).filter(Number.isFinite))]
+      : [];
+  let plannedClientParamIndex = null;
+  if (plannedClientIdsForScheduleAccess.length) {
+    params.push(plannedClientIdsForScheduleAccess);
+    plannedClientParamIndex = params.length;
+  }
+  const clauses = [
+    plannedClientParamIndex
+      ? `(cr.status = 'approved' OR cr.id = ANY($${plannedClientParamIndex}::int[]))`
+      : "cr.status = 'approved'",
+  ]; // base status filter
   clauses.push(`
     NOT (
       LOWER(COALESCE(cr.external_source, '')) = 'odoo'
       AND LOWER(COALESCE(cr.created_by, '')) = LOWER('${ODOO_SYNC_USER_EMAIL}')
       AND (
         TRIM(COALESCE(cr.commercial_name, '')) = ''
+        OR LENGTH(TRIM(COALESCE(cr.commercial_name, ''))) <= 1
         OR UPPER(TRIM(COALESCE(cr.commercial_name, ''))) ~ '^(CLIENTE( ID)? [0-9]{1,13}|RUC ODOO-.+)$'
       )
     )
   `);
 
-  const requestedLimit = Number.parseInt(String(process.env.CLIENTS_LIST_LIMIT || "5000"), 10);
+  const requestedLimit =
+    Number.parseInt(String(limit || process.env.CLIENTS_LIST_LIMIT || "100"), 10);
   const safeLimit = Number.isFinite(requestedLimit)
-    ? Math.min(Math.max(requestedLimit, 200), 20000)
-    : 5000;
+    ? Math.min(Math.max(requestedLimit, 25), 250)
+    : 100;
+  const safePage = Number.isFinite(Number(page)) ? Math.max(1, Number(page)) : 1;
+  const safeOffset = (safePage - 1) * safeLimit;
 
-  if (!isManager(user)) {
+  // canAssignClients (jefe_operaciones) necesita ver la lista completa para poder elegir a
+  // quien asignar cada cliente; sin esto queda ciego apenas no tiene asignaciones activas propias.
+  const canBypassAssignmentScope = includeAllForBusinessCase || canAssignClients(user);
+
+  if (!canBypassAssignmentScope && !isManager(user) && !hasFieldClientReadAccess(user)) {
     params.push(user.email, user.email);
+    const createdByParamIndex = params.length - 1;
+    const assignedToParamIndex = params.length;
+    const plannedClientAccessClause = plannedClientParamIndex
+      ? `OR cr.id = ANY($${plannedClientParamIndex}::int[])`
+      : "";
     clauses.push(`(
-      LOWER(COALESCE(cr.created_by, '')) = LOWER($${params.length - 1})
+      LOWER(COALESCE(cr.created_by, '')) = LOWER($${createdByParamIndex})
       OR EXISTS (
         SELECT 1
         FROM client_assignments ca_filter
@@ -1405,8 +1472,9 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
           AND ca_filter.is_active = TRUE
           AND (ca_filter.starts_at IS NULL OR ca_filter.starts_at <= NOW())
           AND (ca_filter.ends_at IS NULL OR ca_filter.ends_at >= NOW())
-          AND LOWER(COALESCE(ca_filter.assigned_to_email, '')) = LOWER($${params.length})
+          AND LOWER(COALESCE(ca_filter.assigned_to_email, '')) = LOWER($${assignedToParamIndex})
       )
+      ${plannedClientAccessClause}
     )`);
   }
 
@@ -1496,7 +1564,10 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
       vl.lat_salida,
       vl.lng_salida,
       vl.observaciones,
-      vl.duracion_minutos
+      vl.duracion_minutos,
+      crm_followup.activity_id AS crm_activity_id,
+      crm_followup.activity_status AS crm_activity_status,
+      crm_followup.followup_status AS crm_followup_status
     FROM client_requests cr
     LEFT JOIN LATERAL (
       SELECT
@@ -1588,17 +1659,78 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
           ON LOWER(COALESCE(vu.email, '')) = LOWER(COALESCE(cvl.user_email, ''))
         WHERE cvl.client_request_id = cr.id
         ORDER BY COALESCE(cvl.hora_salida, cvl.hora_entrada, cvl.visit_date::timestamp) DESC
-        LIMIT 20
+        LIMIT 5
       ) logs
     ) visit_history ON TRUE
-    LEFT JOIN client_visit_logs vl
-      ON vl.client_request_id = cr.id AND vl.user_email = $1 AND vl.visit_date = $2
+    LEFT JOIN LATERAL (
+      SELECT visit_log.*
+      FROM client_visit_logs visit_log
+      WHERE visit_log.client_request_id = cr.id
+        AND LOWER(COALESCE(visit_log.user_email, '')) = LOWER($1)
+        AND ${
+          shouldUseApprovedPeriod
+            ? `EXTRACT(MONTH FROM visit_log.visit_date) = EXTRACT(MONTH FROM $2::date)
+               AND EXTRACT(YEAR FROM visit_log.visit_date) = EXTRACT(YEAR FROM $2::date)`
+            : `visit_log.visit_date = $2::date`
+        }
+      ORDER BY
+        CASE WHEN visit_log.status = 'visited' THEN 0 WHEN visit_log.status = 'in_visit' THEN 1 ELSE 2 END,
+        COALESCE(visit_log.hora_salida, visit_log.hora_entrada, visit_log.visit_date::timestamp) DESC,
+        visit_log.id DESC
+      LIMIT 1
+    ) vl ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT
+        a.id AS activity_id,
+        a.status AS activity_status,
+        CASE
+          WHEN a.status = 'visited_pending_followup' THEN 'pending_followup'
+          WHEN a.status = 'completed'
+           AND NULLIF(TRIM(COALESCE(a.outcome_notes, '')), '') IS NOT NULL
+           AND NULLIF(TRIM(COALESCE(a.outcome, '')), '') IS NOT NULL
+            THEN 'completed'
+          WHEN a.status = 'completed' THEN 'incomplete_followup'
+          ELSE 'not_applicable'
+        END AS followup_status
+      FROM crm.crm_activities a
+      WHERE a.deleted_at IS NULL
+        AND a.activity_type = 'visita'
+        AND (
+          (vl.id IS NOT NULL AND a.visit_log_id = vl.id)
+          OR EXISTS (
+            SELECT 1
+            FROM scheduled_visits sv2
+            JOIN visit_schedules vs2 ON vs2.id = sv2.schedule_id
+            WHERE sv2.crm_activity_id = a.id
+              AND sv2.client_request_id = cr.id
+              AND LOWER(COALESCE(vs2.user_email, '')) = LOWER($1)
+              AND (
+                sv2.planned_date = $2
+                OR (
+                  vs2.month = EXTRACT(MONTH FROM $2::date)
+                  AND vs2.year = EXTRACT(YEAR FROM $2::date)
+                )
+              )
+          )
+        )
+      ORDER BY
+        CASE
+          WHEN a.status = 'visited_pending_followup' THEN 0
+          WHEN a.status = 'completed' THEN 1
+          ELSE 2
+        END,
+        a.updated_at DESC
+      LIMIT 1
+    ) crm_followup ON TRUE
     ${whereClause}
     ORDER BY cr.created_at DESC
-    LIMIT ${safeLimit}
+    LIMIT ${safeLimit + 1}
+    OFFSET ${safeOffset}
   `;
 
-  const { rows } = await db.query(query, params);
+  const { rows: rawRows } = await db.query(query, params);
+  const hasMore = rawRows.length > safeLimit;
+  const rows = hasMore ? rawRows.slice(0, safeLimit) : rawRows;
 
   const plannedByClient = plannedVisits.reduce((acc, visit) => {
     acc[visit.client_request_id] = {
@@ -1613,6 +1745,14 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
   }, {});
 
   const clients = rows.map((row) => {
+    const normalizedRouteLocation =
+      row.data_source === "odoo"
+        ? normalizeOdooLocationFields({
+            address: row.shipping_address,
+            city: row.shipping_city,
+            province: row.shipping_province,
+          })
+        : null;
     let asignados = row.asignados;
     // PostgreSQL puede devolver json_agg como string JSON, parsearlo si es necesario
     if (typeof asignados === "string") {
@@ -1665,6 +1805,9 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
 
     return {
       ...row,
+      shipping_address: normalizedRouteLocation?.address || row.shipping_address,
+      shipping_city: normalizedRouteLocation?.city || row.shipping_city,
+      shipping_province: normalizedRouteLocation?.province || row.shipping_province,
       asignados,
       assignment_details: assignmentDetails,
       visit_logs: visitLogs,
@@ -1680,13 +1823,25 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
   return {
     clients,
     prospects: prospects.rows, // Return prospects too
+    leads: scheduledLeadsToday,
     scheduleMeta: {
       total: clients.length,
       visited: visitedCount,
       pending: Math.max(0, clients.length - visitedCount),
       planned_today: plannedVisits.length,
+      planned_period: plannedVisits.length,
+      schedule_window: shouldUseApprovedPeriod ? "approved_period" : "selected_date",
+      period_month: Number(dateParam.slice(5, 7)),
+      period_year: Number(dateParam.slice(0, 4)),
       has_approved_schedule: Boolean(approvedSchedule),
+      schedule_status: approvedSchedule?.status || null,
       cities_today: citiesToday,
+    },
+    pagination: {
+      page: safePage,
+      limit: safeLimit,
+      has_more: hasMore,
+      returned: clients.length,
     },
   };
 }
@@ -1708,6 +1863,11 @@ async function updateClient({ clientId, user, rawData = {}, rawFiles = {} }) {
   }
 
   await ensureClientAccess({ clientId, user });
+  if (!canEditClients(user)) {
+    const error = new Error("Solo jefe de operaciones puede editar clientes aprobados");
+    error.status = 403;
+    throw error;
+  }
 
   const data = Object.fromEntries(
     Object.entries(rawData || {}).map(([key, value]) => [
@@ -1716,7 +1876,7 @@ async function updateClient({ clientId, user, rawData = {}, rawFiles = {} }) {
     ]),
   );
 
-  const canEditFull = isManager(user);
+  const canEditFull = canEditClients(user);
   const normalizedFiles = rawFiles && typeof rawFiles === "object" ? rawFiles : {};
   const fileIds = {};
 
@@ -1847,6 +2007,36 @@ async function updateClient({ clientId, user, rawData = {}, rawFiles = {} }) {
     }
   }
 
+  if (isCrmSyncEnabled()) {
+    try {
+      await enqueueIntegrationEvent({
+        eventType: "crm.client.updated",
+        payload: {
+          famspi_client_request_id: updated.id,
+          ruc_cedula: updated.ruc_cedula,
+          commercial_name: updated.commercial_name,
+          client_email: updated.client_email,
+          establishment_phone: updated.establishment_phone,
+          establishment_city: updated.establishment_city,
+          establishment_province: updated.establishment_province,
+          shipping_address: updated.shipping_address,
+          shipping_city: updated.shipping_city,
+          shipping_province: updated.shipping_province,
+          shipping_contact_name: updated.shipping_contact_name,
+          legal_rep_name: updated.legal_rep_name,
+          legal_rep_email: updated.legal_rep_email,
+        },
+        idempotencyKey: `crm.client.updated.${updated.id}.${Date.now()}`,
+        correlationId: String(updated.id),
+      });
+    } catch (crmErr) {
+      logger.warn(
+        { client_request_id: updated.id, error: crmErr?.message },
+        "[CRM_SYNC] Error encolando actualizacion de cliente — no bloquea el update",
+      );
+    }
+  }
+
   return {
     ...updated,
     attachments: canEditFull ? getClientRequestAttachments(updated) : [],
@@ -1864,7 +2054,7 @@ async function assignClient({
   unassign = false,
 }) {
   if (!canAssignClients(user)) {
-    const error = new Error("Solo los jefes pueden asignar clientes");
+    const error = new Error("Solo jefe de operaciones puede asignar clientes");
     error.status = 403;
     throw error;
   }
@@ -2060,7 +2250,7 @@ async function upsertVisitStatus({
       : baseDate;
 
   // Validar acceso a cliente
-  if (!isManager(user)) {
+  if (!isManager(user) && !canAssignClients(user)) {
     const { rows } = await db.query(
       `SELECT 1 FROM client_requests cr
        LEFT JOIN client_assignments ca
@@ -2163,6 +2353,58 @@ async function upsertVisitStatus({
     { clientId, user: user.email, status: rows[0].status },
     "Visita de cliente registrada",
   );
+
+  if (rows[0].status === "visited") {
+    learnFrequentLocationFromVisits({ clientId }).catch((error) => {
+      logger.warn(
+        { error: error?.message, clientId },
+        "No se pudo actualizar ubicacion frecuente del cliente desde visitas",
+      );
+    });
+    try {
+      const scheduledVisit = await schedulesService.findTodayScheduledVisit({
+        userEmail: user.email,
+        clientRequestId: clientId,
+        date: dateValue,
+      });
+      if (scheduledVisit?.crm_activity_id) {
+        await schedulesService.markCrmActivityCompleted(scheduledVisit.crm_activity_id, user.id, {
+          visitLogId: rows[0].id,
+        });
+      }
+    } catch (crmActivityError) {
+      logger.warn(
+        { error: crmActivityError?.message, clientId, user: user.email },
+        "No se pudo marcar la actividad CRM de visita como pendiente de cierre",
+      );
+    }
+  }
+
+  if (isCrmSyncEnabled()) {
+    try {
+      await enqueueIntegrationEvent({
+        eventType: "crm.visit.registered",
+        payload: {
+          client_id:        clientId,
+          client_name:      client.legal_person_business_name || client.commercial_name ||
+                            `${client.natural_person_firstname || ""} ${client.natural_person_lastname || ""}`.trim() ||
+                            client.ruc_cedula,
+          user_email:       user.email,
+          visit_date:       dateValue,
+          status:           rows[0].status,
+          hora_entrada:     rows[0].hora_entrada,
+          hora_salida:      rows[0].hora_salida,
+          observaciones:    rows[0].observaciones,
+          duracion_minutos: rows[0].duracion_minutos,
+        },
+        idempotencyKey: `crm.visit.${clientId}.${user.email}.${dateValue}`,
+        correlationId:  String(clientId),
+      });
+    } catch (crmErr) {
+      logger.warn({ client_id: clientId, error: crmErr?.message }, "[CRM_SYNC] Error encolando visita");
+    }
+  }
+
   return rows[0];
 }
 
@@ -2292,7 +2534,7 @@ async function getClientHistory({ clientId, user, limit = 100 }) {
 }
 
 module.exports = {
-  syncOdooClientsBackfill,
+  buildDriveLink,
   listAccessibleClients,
   getClientDetail,
   listClientLocations,
@@ -2302,6 +2544,7 @@ module.exports = {
   removeLocation,
   assignClient,
   upsertVisitStatus,
+  learnFrequentLocationFromVisits,
   upsertProspectVisit,
   registerInteraction,
   getClientHistory,

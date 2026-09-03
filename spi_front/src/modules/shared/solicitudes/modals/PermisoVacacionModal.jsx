@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from "react";
+﻿import React, { useState, useEffect } from "react";
 import { FiX, FiCalendar, FiClock, FiFileText, FiChevronDown, FiChevronUp, FiUpload } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
 import { Dialog } from "@headlessui/react";
 import Button from "../../../../core/ui/components/Button";
 import { useUI } from "../../../../core/ui/UIContext";
+import { useAuth } from "../../../../core/auth/AuthContext";
 import {
  createSolicitud,
  getMisSolicitudes,
@@ -15,6 +16,13 @@ import api from "../../../../core/api";
 import LoadingOverlay from "../../../../core/ui/components/LoadingOverlay";
 import { formatVacationDaysHours } from "../utils/vacationDisplay";
 
+const EXTERNAL_COORDINATION_ROLES = new Set(["ing_servicio_ext", "esp_app_ext"]);
+const normalizeRoleCandidate = (value = "") =>
+ String(value || "")
+  .trim()
+  .toLowerCase()
+  .replace(/[\s-]+/g, "_");
+
 /**
  * Modal unificado para solicitudes de permisos y vacaciones
  * Flujo multi-paso:
@@ -24,6 +32,7 @@ import { formatVacationDaysHours } from "../utils/vacationDisplay";
  */
 const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  const { showToast, showLoader, hideLoader } = useUI();
+ const { user } = useAuth();
  const MAX_SALUD_JUSTIFICANTES = 5;
  const MAX_SALUD_JUSTIFICANTE_SIZE_BYTES = 10 * 1024 * 1024;
  const [step, setStep] = useState(1);
@@ -43,6 +52,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  const [calamidadDuracionTipo, setCalamidadDuracionTipo] = useState("dias"); // 'horas' o 'dias'
  const [subtipoSalud, setSubtipoSalud] = useState(""); // 'enfermedad_certificada' | 'atencion_medica_familiar'
  const [esEmergencia, setEsEmergencia] = useState(false);
+ const [calamidadParentesco, setCalamidadParentesco] = useState("");
+ const [vacationConversionConsent, setVacationConversionConsent] = useState(false);
  const [vacacionMedioDia, setVacacionMedioDia] = useState(false);
  const [studyEnrollments, setStudyEnrollments] = useState([]);
  const [selectedStudyEnrollmentId, setSelectedStudyEnrollmentId] = useState("");
@@ -50,13 +61,23 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  const [submittingStudyEnrollment, setSubmittingStudyEnrollment] = useState(false);
  const [studySectionOpen, setStudySectionOpen] = useState(true);
  const [saludJustificantesFiles, setSaludJustificantesFiles] = useState([]);
+ const [externalCoordinationFile, setExternalCoordinationFile] = useState(null);
  const [studyForm, setStudyForm] = useState({
  institution_name: "",
  program_name: "",
  valid_from: "",
  valid_until: "",
- matricula_file: null,
+  matricula_file: null,
  });
+ const isExternalCoordinationRole = [
+  user?.role,
+  user?.scope,
+  user?.role_name,
+  ...(Array.isArray(user?.roles) ? user.roles : []),
+ ]
+  .flat()
+  .map(normalizeRoleCandidate)
+  .some((role) => EXTERNAL_COORDINATION_ROLES.has(role));
  const usesPermisoHoras = (permiso, saludTipo, calamidadTipo) =>
  permiso === "estudios" ||
  permiso === "personal" ||
@@ -74,6 +95,13 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  (permiso === "calamidad" && calamidadTipo === "horas");
  const extractDatePart = (value) =>
  typeof value === "string" && value.includes("T") ? value.split("T")[0] : value || "";
+ const getTodayDateOnly = () => {
+ const now = new Date();
+ const year = now.getFullYear();
+ const month = String(now.getMonth() + 1).padStart(2, "0");
+ const day = String(now.getDate()).padStart(2, "0");
+ return `${year}-${month}-${day}`;
+ };
  const toIsoDateTime = (value) => {
  if (!value) return "";
  const date = new Date(value);
@@ -197,6 +225,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  if (open && tipoSolicitud === "vacaciones") {
  loadVacationSummary();
  }
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [open, tipoSolicitud]);
 
  useEffect(() => {
@@ -204,6 +233,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  if (step === 2 && tipoSolicitud === "vacaciones") {
  loadVacationSummary();
  }
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [open, step, tipoSolicitud]);
 
  useEffect(() => {
@@ -462,6 +492,60 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  }
  };
 
+ const handleSelectExternalCoordinationFile = (event) => {
+ const file = event?.target?.files?.[0] || null;
+ if (event?.target) event.target.value = "";
+ setExternalCoordinationFile(file);
+ };
+
+ const clearExternalCoordinationFile = () => {
+ setExternalCoordinationFile(null);
+ };
+
+ const renderExternalCoordinationGate = () => {
+ if (!isExternalCoordinationRole) return null;
+
+ return (
+ <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+ <div className="space-y-2">
+ <p className="text-sm font-semibold text-slate-900">Evidencia de coordinación externa</p>
+ <p className="text-xs leading-relaxed text-slate-600">
+ Adjunta la evidencia aprobada por tu coordinador. Cuando el archivo esté cargado, se habilitará el formulario de fechas y horas.
+ </p>
+ </div>
+
+ <div className="mt-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+ <input
+ type="file"
+ onChange={handleSelectExternalCoordinationFile}
+ className="block w-full text-xs text-slate-700 file:mr-3 file:rounded-xl file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-xs file:font-medium file:text-white hover:file:bg-slate-700"
+ />
+ <p className="mt-2 text-[11px] text-slate-500">
+ Formato libre. Se conserva como respaldo de la aprobación externa.
+ </p>
+ </div>
+
+ {externalCoordinationFile && (
+ <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+ <div className="min-w-0">
+ <p className="truncate text-xs font-medium text-slate-800">{externalCoordinationFile.name}</p>
+ <p className="text-[11px] text-slate-500">
+ {(externalCoordinationFile.size / (1024 * 1024)).toFixed(2)} MB
+ </p>
+ </div>
+ <button
+ type="button"
+ onClick={clearExternalCoordinationFile}
+ className="rounded-lg px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-200"
+ >
+ Quitar
+ </button>
+ </div>
+ )}
+ </div>
+ );
+ };
+
  const handleReset = () => {
  setStep(1);
  setTipoSolicitud("");
@@ -470,6 +554,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  setSubtipoSalud("");
  setEsEmergencia(false);
  setSaludDuracionTipo("dias");
+ setCalamidadParentesco("");
+ setVacationConversionConsent(false);
  setVacacionMedioDia(false);
  setVacationSummary(null);
  setVacationBalanceValidation(null);
@@ -480,6 +566,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  setRejectedVacationDays(0);
  setCancelledVacationDays(0);
  setSaludJustificantesFiles([]);
+ setExternalCoordinationFile(null);
  setFormData({
  fecha_inicio: "",
  fecha_fin: "",
@@ -591,9 +678,11 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  const handleSubmit = async () => {
  setLoading(true);
  showLoader();
- try {
- const famSignConsentText =
- "Al enviar esta solicitud acepto el uso de FamSign para firmar la solicitud y registrar la aprobacion/rechazo del jefe inmediato en SPI.";
+try {
+ const isExternalFlow = isExternalCoordinationRole;
+ const famSignConsentText = isExternalFlow
+ ? "Al enviar esta solicitud acepto el uso de FamSign para firmar la solicitud y registrar la aprobacion respaldada por coordinacion externa en SPI."
+ : "Al enviar esta solicitud acepto el uso de FamSign para firmar la solicitud y registrar la aprobacion/rechazo del jefe inmediato en SPI.";
  const payload = {
  tipo_solicitud: tipoSolicitud,
  ...formData,
@@ -601,9 +690,18 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  fam_sign_consent_text: famSignConsentText,
  };
 
+ if (esEmergencia) {
+   payload.es_emergencia = true;
+ }
+
  if (tipoSolicitud === "permiso") {
  payload.tipo_permiso = tipoPermiso;
- payload.es_emergencia = Boolean(esEmergencia);
+ if (esEmergencia) {
+   payload.vacation_conversion_consent = vacationConversionConsent;
+ }
+ if (tipoPermiso === "calamidad" && calamidadParentesco.trim()) {
+   payload.calamidad_parentesco = calamidadParentesco.trim();
+ }
  const rawRequestedHours = Number(formData.duracion_horas || 0);
  const uiHourLimit = getPermisoHourLimit(tipoPermiso);
  if (Number.isFinite(rawRequestedHours) && rawRequestedHours > 0 && uiHourLimit !== null && rawRequestedHours > uiHourLimit) {
@@ -620,10 +718,12 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  payload.subtipo_salud = subtipoSalud;
  }
  if (tipoPermiso === "estudios") {
- if (!selectedStudyEnrollmentId) {
+ if (!isExternalFlow && !selectedStudyEnrollmentId) {
  throw new Error("Debes seleccionar una matrícula activa para continuar.");
  }
+ if (!isExternalFlow) {
  payload.study_enrollment_id = Number(selectedStudyEnrollmentId);
+ }
  }
  const shouldUseDateTime = usesPermisoDateTime(tipoPermiso, saludDuracionTipo, calamidadDuracionTipo);
  if (shouldUseDateTime) {
@@ -708,13 +808,30 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  payload.allow_negative = exceedsBalance;
  }
 
- const response = await createSolicitud(payload);
+ if (isExternalFlow && !externalCoordinationFile) {
+ throw new Error("Debes adjuntar la evidencia de coordinación externa para continuar.");
+ }
+
+ const requestPayload = isExternalFlow
+ ? (() => {
+ const form = new FormData();
+ Object.entries(payload).forEach(([key, value]) => {
+ if (value === undefined || value === null || value === "") return;
+ form.append(key, typeof value === "boolean" ? String(value) : value);
+ });
+ form.append("external_coordination_evidence", externalCoordinationFile);
+ return form;
+ })()
+ : payload;
+
+ const response = await createSolicitud(requestPayload);
 
  if (response.ok) {
  let uploadWarning = "";
  let uploadCompleted = false;
  const createdSolicitudId = Number(response?.data?.id || 0);
  const shouldUploadSaludJustificantes =
+ !isExternalFlow &&
  tipoSolicitud === "permiso" &&
  tipoPermiso === "salud" &&
  createdSolicitudId > 0 &&
@@ -749,7 +866,9 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  );
  } else {
  showToast(
- tipoSolicitud === "vacaciones"
+ isExternalFlow
+ ? "Solicitud registrada y aprobada automáticamente por coordinación externa."
+ : tipoSolicitud === "vacaciones"
  ? "Solicitud de vacaciones enviada para aprobacion del jefe inmediato"
  : "Solicitud de permiso enviada para aprobacion del jefe inmediato",
  "success"
@@ -875,10 +994,11 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  usesSimplifiedHours &&
  Boolean(startValue && computedEndValue) &&
  extractDatePart(startValue) !== extractDatePart(computedEndValue);
- const hasDuration = Boolean(usesHoras ? formData.duracion_horas : formData.duracion_dias);
- const isAutoHours = usesHoras && usesDateTime;
- const needsEnrollment = tipoPermiso === "estudios";
- const requiresActiveEnrollmentSelection = needsEnrollment && !selectedStudyEnrollmentId;
+const hasDuration = Boolean(usesHoras ? formData.duracion_horas : formData.duracion_dias);
+const isAutoHours = usesHoras && usesDateTime;
+const needsEnrollment = tipoPermiso === "estudios";
+const externalCoordinationReady = !isExternalCoordinationRole || Boolean(externalCoordinationFile);
+const requiresActiveEnrollmentSelection = !isExternalCoordinationRole && needsEnrollment && !selectedStudyEnrollmentId;
  const permisoHoursLimit = getPermisoHourLimit(tipoPermiso);
  const enteredHours = Number(formData.duracion_horas || 0);
  const exceedsPermisoHourLimit =
@@ -967,16 +1087,18 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  >
  <p className="font-semibold text-sm">Calamidad Doméstica</p>
  <p className="text-xs text-gray-500 mt-1">Emergencia familiar</p>
- </button>
- </div>
+</button>
+</div>
 
- {tipoPermiso && (
- <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
+{tipoPermiso && renderExternalCoordinationGate()}
+
+{tipoPermiso && !isExternalCoordinationRole && (
+<div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
  <label className="flex items-start gap-3 cursor-pointer">
  <input
  type="checkbox"
  checked={esEmergencia}
- onChange={(e) => setEsEmergencia(e.target.checked)}
+ onChange={(e) => { setEsEmergencia(e.target.checked); if (!e.target.checked) setVacationConversionConsent(false); }}
  className="mt-1 h-4 w-4 rounded border-orange-300 text-orange-600 focus:ring-orange-500"
  />
  <span>
@@ -988,20 +1110,53 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  </span>
  </span>
  </label>
+</div>
+)}
+
+{tipoPermiso === "calamidad" && externalCoordinationReady && (
+<div className="space-y-3">
+ <div>
+ <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Calamidad</label>
+ <select
+   value={subtipoCalamidad}
+   onChange={(e) => { setSubtipoCalamidad(e.target.value); setCalamidadParentesco(""); }}
+   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+   required
+ >
+   <option value="">Selecciona el tipo de calamidad</option>
+   <option value="fallecimiento">Fallecimiento de familiar</option>
+   <option value="enfermedad_grave_familiar">Enfermedad grave de familiar</option>
+   <option value="accidente_familiar">Accidente de familiar</option>
+   <option value="hospitalizacion_familiar">Hospitalización de familiar</option>
+   <option value="accidente_propio">Accidente propio</option>
+   <option value="emergencia_medica_propia">Emergencia médica propia</option>
+   <option value="desastre">Desastre (incendio, robo, desastre natural)</option>
+   <option value="otro">Otro asunto fortuito imprevisto</option>
+ </select>
+ </div>
+ {["fallecimiento", "enfermedad_grave_familiar", "accidente_familiar", "hospitalizacion_familiar"].includes(subtipoCalamidad) && (
+ <div>
+ <label className="block text-sm font-medium text-gray-700 mb-1">Parentesco con el familiar afectado</label>
+ <select
+   value={calamidadParentesco}
+   onChange={(e) => setCalamidadParentesco(e.target.value)}
+   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+   required
+ >
+   <option value="">Selecciona el parentesco</option>
+   <option value="conyuge">Cónyuge / Conviviente / Pareja</option>
+   <option value="padre">Padre / Madre</option>
+   <option value="hijo">Hijo / Hija</option>
+   <option value="hermano">Hermano / Hermana</option>
+   <option value="abuelo">Abuelo / Abuela</option>
+   <option value="nieto">Nieto / Nieta</option>
+   <option value="suegro">Suegro / Suegra</option>
+   <option value="yerno">Yerno / Nuera</option>
+   <option value="tio">Tío / Tía</option>
+   <option value="sobrino">Sobrino / Sobrina</option>
+ </select>
  </div>
  )}
-
- {tipoPermiso === "calamidad" && (
- <div className="space-y-3">
- <label className="block text-sm font-medium text-gray-700">Tipo de Calamidad</label>
- <input
- type="text"
- value={subtipoCalamidad}
- onChange={(e) => setSubtipoCalamidad(e.target.value)}
- placeholder="Ej: fallecimiento, accidente, desastre, etc."
- className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
- required
- />
  <div>
  <label className="block text-sm font-medium text-gray-700 mb-2">Duración</label>
  <select
@@ -1024,13 +1179,13 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  required
  />
  </div>
- </div>
- )}
+</div>
+)}
 
- {tipoPermiso && (
- <>
- {tipoPermiso === "estudios" && (
- <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 space-y-3">
+{tipoPermiso && externalCoordinationReady && (
+<>
+{tipoPermiso === "estudios" && !isExternalCoordinationRole && (
+<div className="rounded-xl border border-sky-200 bg-sky-50 p-3 space-y-3">
  <button
  type="button"
  onClick={() => setStudySectionOpen((prev) => !prev)}
@@ -1185,8 +1340,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 mb-3"
  >
  <option value="">Selecciona subtipo</option>
- <option value="enfermedad_certificada">Enfermedad certificada</option>
- <option value="atencion_medica_familiar">Atención médica / salud familiar</option>
+ <option value="enfermedad_certificada">Enfermedad</option>
+ <option value="atencion_medica_familiar">Atención médica</option>
  </select>
 
  <label className="block text-sm font-medium text-gray-700 mb-2">Duración</label>
@@ -1455,12 +1610,13 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  !tipoPermiso ||
  (isSalud && !subtipoSalud) ||
  (tipoPermiso === "calamidad" && (!String(subtipoCalamidad || "").trim() || !String(formData.observaciones || "").trim())) ||
+ (tipoPermiso === "calamidad" && ["fallecimiento", "enfermedad_grave_familiar", "accidente_familiar", "hospitalizacion_familiar"].includes(subtipoCalamidad) && !calamidadParentesco.trim()) ||
  !hasDates ||
  !hasDuration ||
  invalidDateRange ||
  crossesDayInSimplifiedHours ||
  exceedsPermisoHourLimit ||
- (needsEnrollment && !selectedStudyEnrollmentId)
+ requiresActiveEnrollmentSelection
  }
  >
  Continuar
@@ -1508,16 +1664,28 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  const cancelledVacationDisplay = formatVacationDaysHours(cancelledDisplay);
  const hasDates = formData.fecha_inicio && (vacacionMedioDia || formData.fecha_fin);
  const hasVacationTimeRange = !vacacionMedioDia || (formData.vacation_start_time && formData.vacation_end_time);
+ const isSameDayVacationStart = Boolean(formData.fecha_inicio) && formData.fecha_inicio === getTodayDateOnly();
  const allowMissingHireDate = vacationSummary?.missing_hire_date;
  const exceedsBalance = !allowMissingHireDate && !isAdvanceRequest && days > remaining;
- const canSubmit = days > 0 && hasDates && hasVacationTimeRange;
+ const isWithin24h = (() => {
+   if (!formData.fecha_inicio) return false;
+   const start = new Date(`${formData.fecha_inicio}T00:00:00`);
+   return start < new Date(Date.now() + 24 * 60 * 60 * 1000);
+ })();
+const blockedByAnticipation = !isExternalCoordinationRole && isWithin24h && !esEmergencia;
+const canSubmit = days > 0 && hasDates && hasVacationTimeRange && !blockedByAnticipation;
+const externalCoordinationReady = !isExternalCoordinationRole || Boolean(externalCoordinationFile);
 
- return (
- <div className="space-y-4">
- <h3 className="text-lg font-semibold text-gray-900">Solicitud de Vacaciones</h3>
+return (
+<div className="space-y-4">
+<h3 className="text-lg font-semibold text-gray-900">Solicitud de Vacaciones</h3>
+{renderExternalCoordinationGate()}
 
- {vacationSummary && (
- <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+{externalCoordinationReady && (
+<>
+
+{vacationSummary && (
+<div className="grid grid-cols-2 md:grid-cols-5 gap-3">
  <div className="p-3 bg-green-50 rounded-lg text-center">
  <p className="text-xs text-green-600 font-medium">Disponibles</p>
  <p className="text-xl font-bold text-green-700">{remainingVacationDisplay.shortText}</p>
@@ -1565,6 +1733,15 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  Falta registrar la <strong>fecha de ingreso</strong> en tu perfil.
  Puedes enviar la solicitud, pero Talento Humano debe completar ese dato
  para calcular correctamente tus vacaciones.
+ </p>
+ </div>
+ )}
+
+ {!isExternalCoordinationRole && isSameDayVacationStart && (
+ <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+ <p className="text-xs text-amber-800">
+ <strong>Aviso importante:</strong> si solicitas vacaciones para el mismo día de inicio,
+ la solicitud puede cancelarse automáticamente por regla operativa si no se aprueba a tiempo.
  </p>
  </div>
  )}
@@ -1696,11 +1873,39 @@ Saldo resultante:{" "}
 </div>
  )}
 
+ {!isExternalCoordinationRole && blockedByAnticipation && (
+   <div className="p-3 bg-rose-50 border border-rose-300 rounded-lg">
+     <p className="text-sm font-semibold text-rose-900">Solicitud con menos de 24 horas de anticipación</p>
+     <p className="text-xs text-rose-700 mt-0.5">
+       Las vacaciones que inician hoy o mañana no pueden solicitarse de forma normal. Si se trata de una emergencia, márcala como tal para continuar.
+     </p>
+   </div>
+ )}
+
+ {!isExternalCoordinationRole && (
+ <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
+   <label className="flex items-start gap-3 cursor-pointer">
+     <input
+       type="checkbox"
+       checked={esEmergencia}
+       onChange={(e) => setEsEmergencia(e.target.checked)}
+       className="mt-1 h-4 w-4 rounded border-orange-300 text-orange-600 focus:ring-orange-500"
+     />
+     <span>
+       <span className="block text-sm font-semibold text-orange-900">Es una emergencia</span>
+       <span className="block text-xs text-orange-800 mt-0.5">
+         Las vacaciones inician hoy o en menos de 24 horas. El jefe aprueba y se notifica al equipo de inmediato.
+       </span>
+     </span>
+   </label>
+ </div>
+ )}
+
  <div className="flex gap-3 pt-4">
  <Button type="button" variant="secondary" onClick={() => setStep(1)} className="flex-1">
  Atrás
  </Button>
- <Button
+<Button
  type="button"
  variant="primary"
  onClick={() => setStep(3)}
@@ -1710,9 +1915,11 @@ Saldo resultante:{" "}
  Continuar
  </Button>
  </div>
+ </>
+ )}
  </div>
  );
- };
+};
 
  const renderStep3 = () => {
  const usesDateTime =
@@ -1727,6 +1934,10 @@ Saldo resultante:{" "}
  tipoSolicitud === "vacaciones"
  ? getVacationShiftLabel(formData.vacation_start_time, formData.vacation_end_time)
  : "";
+ const isSameDayVacationStart =
+ tipoSolicitud === "vacaciones" &&
+ Boolean(formData.fecha_inicio) &&
+ formData.fecha_inicio === getTodayDateOnly();
  return (
  <div className="space-y-4">
  <h3 className="text-lg font-semibold text-gray-900">Confirmar Solicitud</h3>
@@ -1772,11 +1983,17 @@ Saldo resultante:{" "}
  : `${formData.duracion_dias} días`}
  </span>
  </div>
- {tipoSolicitud === "permiso" && (
+ {esEmergencia && (
  <div className="flex justify-between">
- <span className="text-sm text-gray-600">Emergencia:</span>
- <span className={`text-sm font-semibold ${esEmergencia ? "text-orange-700" : "text-gray-900"}`}>
- {esEmergencia ? "Sí" : "No"}
+ <span className="text-sm text-gray-600">Urgente:</span>
+ <span className="text-sm font-semibold text-orange-700">Sí — autorización provisional</span>
+ </div>
+ )}
+ {tipoSolicitud === "permiso" && esEmergencia && (
+ <div className="flex justify-between">
+ <span className="text-sm text-gray-600">Cons. vacaciones:</span>
+ <span className={`text-sm font-semibold ${vacationConversionConsent ? "text-amber-700" : "text-gray-500"}`}>
+ {vacationConversionConsent ? "Autorizado" : "No autorizado"}
  </span>
  </div>
  )}
@@ -1786,12 +2003,52 @@ Saldo resultante:{" "}
  <p className="text-sm text-gray-700 italic">"{formData.observaciones}"</p>
  </div>
  )}
+ {isExternalCoordinationRole && externalCoordinationFile && (
+ <div className="mt-2 pt-2 border-t border-gray-200">
+ <p className="text-[11px] text-gray-500 uppercase font-bold tracking-wider mb-1">Respaldo:</p>
+ <p className="text-sm text-gray-700">Coordinación externa adjunta: {externalCoordinationFile.name}</p>
  </div>
+ )}
+ </div>
+
+ {!isExternalCoordinationRole && isSameDayVacationStart && (
+ <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+ <p className="text-xs text-amber-800">
+ <strong>Aviso importante:</strong> esta solicitud inicia hoy. Si no alcanza aprobación en tiempo,
+ el sistema puede cancelarla automáticamente.
+ </p>
+ </div>
+ )}
+
+ {tipoSolicitud === "permiso" && esEmergencia && (
+ <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg space-y-3">
+ <p className="text-xs font-semibold text-amber-900">Consentimiento de regularización provisional</p>
+ <p className="text-xs text-amber-800 italic">
+ "Entiendo que esta solicitud se autoriza de forma provisional y quedará pendiente de validación.
+ Si posteriormente se determina que no procede bajo el tipo solicitado, autorizo que el tiempo sea
+ regularizado con cargo a mis vacaciones disponibles, siempre que exista saldo suficiente."
+ </p>
+ <label className="flex items-start gap-2 cursor-pointer">
+ <input
+   type="checkbox"
+   checked={vacationConversionConsent}
+   onChange={(e) => setVacationConversionConsent(e.target.checked)}
+   className="mt-0.5 h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+ />
+ <span className="text-xs text-amber-900 font-medium">
+   Acepto y autorizo la regularización con cargo a vacaciones si aplica
+ </span>
+ </label>
+ </div>
+ )}
 
  <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg space-y-2">
  <p className="text-xs text-indigo-800">
  <strong>Consentimiento FamSign:</strong> Al enviar esta solicitud aceptas el uso de la firma electronica
- FamSign para registrar la firma del solicitante y la decision final del jefe inmediato.
+ FamSign para registrar la firma del solicitante y{" "}
+ {isExternalCoordinationRole
+ ? "la aprobacion respaldada por coordinacion externa."
+ : "la decision final del jefe inmediato."}
  </p>
  <p className="text-xs text-indigo-700">
  Este consentimiento queda registrado en la trazabilidad legal de la solicitud
@@ -1799,7 +2056,7 @@ Saldo resultante:{" "}
  </p>
  </div>
 
- {tipoSolicitud === "permiso" && tipoPermiso === "salud" && (
+ {tipoSolicitud === "permiso" && tipoPermiso === "salud" && !isExternalCoordinationRole && (
  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
  <div className="flex items-start gap-2">
  <FiUpload className="w-4 h-4 text-blue-700 mt-0.5" />
@@ -1846,7 +2103,7 @@ Saldo resultante:{" "}
  variant="primary"
  onClick={handleSubmit}
  className="flex-1"
- disabled={loading}
+ disabled={loading || (tipoSolicitud === "permiso" && esEmergencia && !vacationConversionConsent)}
  >
  {loading ? "Enviando..." : "Enviar Solicitud"}
  </Button>

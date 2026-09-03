@@ -9,7 +9,6 @@ import {
   FiRefreshCw,
   FiRotateCcw,
   FiSearch,
-  FiShield,
   FiUser,
   FiUsers,
   FiXCircle,
@@ -17,6 +16,7 @@ import {
 import toast from "react-hot-toast";
 
 import { createUser, getUsers, updateUser, getUserRoles } from "../../../core/api/usersApi";
+import { useAuth } from "../../../core/auth/AuthContext";
 import { getDepartments } from "../../../core/api/departmentsApi";
 import Button from "../../../core/ui/components/Button";
 import Card from "../../../core/ui/components/Card";
@@ -30,6 +30,7 @@ const ROLE_OPTIONS = [
   { label: "Comercial", value: "comercial" },
   { label: "Servicio Técnico", value: "servicio_tecnico" },
   { label: "Técnico", value: "tecnico" },
+  { label: "Responsable Técnico", value: "responsable_tecnico" },
   { label: "Finanzas", value: "finanzas" },
   { label: "Talento Humano", value: "talento_humano" },
   { label: "TI", value: "ti" },
@@ -42,6 +43,8 @@ const EMPTY_FORM = {
   role: "pendiente",
   department_id: "",
   google_id: "",
+  username: "",
+  account_expires_at: "",
 };
 
 const formatDate = (value) => {
@@ -68,29 +71,27 @@ const buildDepartmentOption = (department) => ({
   value: String(department.id),
 });
 
-const SummaryCard = ({ icon: Icon, label, value, tone = "slate", helper }) => {
-  const styles = {
-    slate: "bg-slate-950 text-white",
-    blue: "bg-blue-600 text-white",
-    emerald: "bg-emerald-600 text-white",
-    amber: "bg-amber-500 text-white",
-  };
-
-  return (
-    <Card className="rounded-[26px] border border-white/80 bg-white/92 p-4 shadow-[0_14px_35px_rgba(15,23,42,0.08)]">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">{label}</p>
-          <p className="mt-3 text-3xl font-black tracking-tight text-slate-900">{value}</p>
-          <p className="mt-1 text-xs text-slate-500">{helper}</p>
-        </div>
-        <div className={`inline-flex rounded-2xl p-3 ${styles[tone] || styles.slate}`}>
-          <Icon className="text-lg" />
-        </div>
-      </div>
-    </Card>
-  );
-};
+// Strip de métricas en una sola superficie con dividers (no hero-metric cards)
+const MetricsStrip = ({ items }) => (
+  <Card className="overflow-hidden p-0 shadow-soft">
+    <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <div key={item.label} className="flex items-center gap-3 px-5 py-4">
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
+              <Icon size={16} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium text-slate-500 truncate">{item.label}</p>
+              <p className="text-lg font-semibold text-slate-900 leading-tight">{item.value}</p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  </Card>
+);
 
 const StatusBadge = ({ active }) => (
   <span
@@ -140,6 +141,12 @@ const ActionConfirmModal = ({ state, onClose, onConfirm, loading }) => {
 };
 
 const Usuarios = () => {
+  const { user: currentUser } = useAuth();
+  // jefe_ti es la unica forma de registrar (o reiniciar credenciales de) un
+  // usuario pasante -- el backend ya lo rechaza con 403 para cualquier otro
+  // rol, esto solo evita que un "ti"/"admin_ti" vea la opcion, cargue el
+  // formulario y se lleve el error recien al enviar.
+  const isJefeTi = ["jefe_ti", "jefe_de_ti"].includes(String(currentUser?.role || "").toLowerCase());
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [roleOptions, setRoleOptions] = useState(ROLE_OPTIONS);
@@ -157,6 +164,8 @@ const Usuarios = () => {
   const [saving, setSaving] = useState(false);
   const [actionState, setActionState] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [tempCredentials, setTempCredentials] = useState(null);
+  const [resettingPassword, setResettingPassword] = useState(false);
   const initializedRef = useRef(false);
 
   useEffect(() => {
@@ -234,6 +243,8 @@ const Usuarios = () => {
         role: user.role || "pendiente",
         department_id: user.department_id ? String(user.department_id) : "",
         google_id: user.google_id || "",
+        username: user.username || "",
+        account_expires_at: user.account_expires_at ? String(user.account_expires_at).slice(0, 10) : "",
       });
     } else {
       resetForm();
@@ -253,6 +264,11 @@ const Usuarios = () => {
       toast.error("Nombre completo y correo son obligatorios");
       return;
     }
+    const isPasante = form.role === "pasante";
+    if (isPasante && !form.account_expires_at) {
+      toast.error("La fecha de fin de pasantía es obligatoria para el rol Pasante");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -263,22 +279,53 @@ const Usuarios = () => {
         department_id: form.department_id || null,
         google_id: form.google_id?.trim() || null,
       };
+      if (isPasante) {
+        payload.username = form.username?.trim() || undefined;
+        payload.account_expires_at = form.account_expires_at;
+      }
 
       if (editing) {
         await updateUser(editing.id, payload);
         toast.success("Usuario actualizado correctamente");
       } else {
-        await createUser(payload);
+        const created = await createUser(payload);
         toast.success("Usuario creado correctamente");
+        if (created?.temp_password) {
+          setTempCredentials({ username: created.username, password: created.temp_password });
+        }
       }
 
       closeModal();
       await loadUsers();
     } catch (error) {
       console.error("Error guardando usuario:", error);
-      toast.error(error?.response?.data?.message || "No se pudo guardar el usuario");
+      const message = error?.response?.data?.message || "No se pudo guardar el usuario";
+      // ponytail: mensajes de conflicto de identidad (409) son largos y accionables
+      // (traen id/correo de la cuenta existente) -- necesitan mas tiempo en pantalla
+      // que un error corto generico.
+      toast.error(message, error?.response?.status === 409 ? { duration: 9000 } : undefined);
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Genera una password temporal nueva para un pasante existente (ej. la
+  // olvido) -- reusa el mismo backend que el alta (reset_password=true),
+  // fuerza must_change_password en el proximo login.
+  const handleResetPassword = async () => {
+    if (!editing) return;
+    setResettingPassword(true);
+    try {
+      const updated = await updateUser(editing.id, { reset_password: true });
+      if (updated?.temp_password) {
+        setTempCredentials({ username: updated.username, password: updated.temp_password });
+      }
+      toast.success("Contraseña temporal generada");
+    } catch (error) {
+      console.error("Error reiniciando password:", error);
+      toast.error(error?.response?.data?.message || "No se pudo reiniciar la contraseña");
+    } finally {
+      setResettingPassword(false);
     }
   };
 
@@ -343,49 +390,30 @@ const Usuarios = () => {
 
   return (
     <div className="space-y-5">
-      <section className="rounded-[28px] border border-white/80 bg-white/88 p-4 shadow-[0_18px_45px_rgba(15,23,42,0.08)] backdrop-blur sm:p-5 lg:p-6">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div className="max-w-2xl space-y-3">
-            <div className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-blue-700">
-              <FiShield size={12} />
-              Gestión de usuarios
-            </div>
-            <div>
-              <h2 className="text-2xl font-black tracking-tight text-slate-900">Identidades internas y control operativo</h2>
-              <p className="mt-2 text-sm leading-7 text-slate-600">
-                Administra accesos, roles, estados y asignación departamental desde una vista preparada
-                para operación diaria. La consola prioriza velocidad de búsqueda, claridad de estado y
-                acción directa por registro.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
-            <Button
-              variant="secondary"
-              leftIcon={FiRefreshCw}
-              onClick={loadUsers}
-              loading={isRefreshing}
-              className="justify-center"
-            >
+      {/* Toolbar: acciones + filtros */}
+      <Card className="p-4 shadow-soft sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm font-semibold text-slate-900">Identidades internas</p>
+          <div className="flex w-full gap-2 sm:w-auto">
+            <Button variant="secondary" leftIcon={FiRefreshCw} onClick={loadUsers} loading={isRefreshing} size="sm" className="flex-1 justify-center sm:flex-none">
               Actualizar
             </Button>
-            <Button leftIcon={FiPlus} onClick={() => openModal()} className="justify-center">
+            <Button leftIcon={FiPlus} onClick={() => openModal()} size="sm" className="flex-1 justify-center sm:flex-none">
               Nuevo usuario
             </Button>
           </div>
         </div>
 
-        <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))]">
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Buscar por nombre, correo o rol"
-            containerClassName="mb-0"
-            className="min-h-[46px] rounded-2xl border-slate-200 bg-slate-50 pl-11"
-          />
-          <div className="relative pointer-events-none lg:col-start-1 lg:row-start-1">
-            <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))]">
+          <div className="relative lg:col-start-1 lg:row-start-1">
+            <FiSearch className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar por nombre, correo o rol"
+              containerClassName="mb-0"
+              className="min-h-[44px] pl-10"
+            />
           </div>
           <Select
             value={roleFilter}
@@ -393,7 +421,7 @@ const Usuarios = () => {
             options={[{ label: "Todos los roles", value: "all" }, ...roleOptions]}
             includePlaceholder={false}
             containerClassName="mb-0"
-            className="min-h-[46px] rounded-2xl border-slate-200 bg-slate-50"
+            className="min-h-[44px]"
           />
           <Select
             value={departmentFilter}
@@ -401,7 +429,7 @@ const Usuarios = () => {
             options={departmentFilterOptions}
             includePlaceholder={false}
             containerClassName="mb-0"
-            className="min-h-[46px] rounded-2xl border-slate-200 bg-slate-50"
+            className="min-h-[44px]"
           />
           <Select
             value={statusFilter}
@@ -413,19 +441,19 @@ const Usuarios = () => {
             ]}
             includePlaceholder={false}
             containerClassName="mb-0"
-            className="min-h-[46px] rounded-2xl border-slate-200 bg-slate-50"
+            className="min-h-[44px]"
           />
         </div>
 
-        <div className="mt-3 flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">
-            <FiFilter size={14} />
-            {isRefreshing ? "Actualizando resultados..." : `${summary.total} registro(s) visibles`}
-          </div>
+        <div className="mt-3 flex items-center justify-between text-sm">
+          <span className="inline-flex items-center gap-2 text-xs font-medium text-slate-500">
+            <FiFilter size={13} />
+            {isRefreshing ? "Actualizando..." : `${summary.total} registro(s)`}
+          </span>
           {hasActiveFilters ? (
             <Button
               variant="ghost"
-              className="justify-center text-sm"
+              size="sm"
               onClick={() => {
                 setSearch("");
                 setRoleFilter("all");
@@ -437,20 +465,23 @@ const Usuarios = () => {
             </Button>
           ) : null}
         </div>
-      </section>
+      </Card>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard icon={FiUsers} label="Usuarios visibles" value={summary.total} helper="Resultado actual" tone="slate" />
-        <SummaryCard icon={FiCheckCircle} label="Activos" value={summary.active} helper="Disponibles para operación" tone="emerald" />
-        <SummaryCard icon={FiXCircle} label="Inactivos" value={summary.inactive} helper="Fuera de uso operativo" tone="amber" />
-        <SummaryCard icon={FiMail} label="Con departamento" value={summary.withDepartment} helper="Asignación estructural" tone="blue" />
-      </section>
+      {/* Métricas */}
+      <MetricsStrip
+        items={[
+          { icon: FiUsers, label: "Usuarios visibles", value: summary.total },
+          { icon: FiCheckCircle, label: "Activos", value: summary.active },
+          { icon: FiXCircle, label: "Inactivos", value: summary.inactive },
+          { icon: FiMail, label: "Con departamento", value: summary.withDepartment },
+        ]}
+      />
 
-      <section className="rounded-[28px] border border-white/80 bg-white/92 shadow-[0_18px_45px_rgba(15,23,42,0.08)] backdrop-blur">
-        <div className="flex flex-col gap-2 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <section className="rounded-2xl border border-slate-200 bg-white shadow-soft overflow-hidden">
+        <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-lg font-bold text-slate-900">Listado operativo</h3>
-            <p className="text-sm text-slate-500">Comparación rápida en escritorio y tarjetas legibles en móvil.</p>
+            <h3 className="text-base font-semibold text-slate-900">Listado operativo</h3>
+            <p className="text-sm text-slate-500">Tabla en escritorio, tarjetas en móvil.</p>
           </div>
           {errorMessage ? (
             <div className="inline-flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
@@ -464,11 +495,11 @@ const Usuarios = () => {
           {loading ? (
             <div className="grid gap-4">
               {[1, 2, 3].map((item) => (
-                <div key={item} className="h-24 animate-pulse rounded-[24px] bg-slate-100" />
+                <div key={item} className="h-24 animate-pulse rounded-2xl bg-slate-100" />
               ))}
             </div>
           ) : errorMessage ? (
-            <div className="rounded-[24px] border border-dashed border-red-200 bg-red-50/70 p-6 text-center">
+            <div className="rounded-2xl border border-dashed border-red-200 bg-red-50 p-6 text-center">
               <p className="text-base font-semibold text-red-800">No se pudo cargar la gestión de usuarios</p>
               <p className="mt-2 text-sm text-red-700">Reintenta la consulta para recuperar la información actual.</p>
               <div className="mt-4 flex justify-center">
@@ -478,7 +509,7 @@ const Usuarios = () => {
               </div>
             </div>
           ) : visibleUsers.length === 0 ? (
-            <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center">
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
               <p className="text-lg font-semibold text-slate-900">
                 {hasActiveFilters ? "No hay usuarios que coincidan con los filtros actuales" : "Aún no hay usuarios registrados"}
               </p>
@@ -525,7 +556,7 @@ const Usuarios = () => {
                       {visibleUsers.map((user) => {
                         const isActive = user.active !== false;
                         return (
-                          <tr key={user.id} className="transition-colors hover:bg-slate-50/80">
+                          <tr key={user.id} className="transition-colors hover:bg-slate-50">
                             <td className="px-4 py-4">
                               <div className="flex items-start gap-3">
                                 <div className="inline-flex rounded-2xl bg-slate-100 p-3 text-slate-700">
@@ -575,8 +606,8 @@ const Usuarios = () => {
                   return (
                     <Card
                       key={user.id}
-                      className={`rounded-[26px] border p-4 shadow-[0_12px_32px_rgba(15,23,42,0.08)] ${
-                        isActive ? "border-slate-100 bg-white" : "border-slate-200 bg-slate-50/80"
+                      className={`rounded-2xl border p-4 shadow-soft ${
+                        isActive ? "border-slate-100 bg-white" : "border-slate-200 bg-slate-50"
                       }`}
                     >
                       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -640,7 +671,7 @@ const Usuarios = () => {
         maxWidth="max-w-2xl"
       >
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
             Define identidad base, rol operativo y asignación estructural. El correo será el identificador
             principal para uso interno.
           </div>
@@ -671,7 +702,7 @@ const Usuarios = () => {
               label="Rol"
               value={form.role}
               onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}
-              options={roleOptions}
+              options={isJefeTi || form.role === "pasante" ? roleOptions : roleOptions.filter((option) => option.value !== "pasante")}
               includePlaceholder={false}
               containerClassName="mb-0"
             />
@@ -684,6 +715,40 @@ const Usuarios = () => {
               containerClassName="mb-0"
             />
           </div>
+
+          {form.role === "pasante" ? (
+            <div className="space-y-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm text-amber-800">
+                Los pasantes no tienen cuenta Google corporativa — inician sesión con usuario y contraseña
+                propia. La contraseña temporal se genera automáticamente y solo se muestra una vez.
+                {!isJefeTi ? " Solo Jefe TI puede registrar pasantes o reiniciar su contraseña." : ""}
+              </p>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Input
+                  label="Usuario (opcional)"
+                  value={form.username}
+                  onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
+                  placeholder="Se genera automático si se deja vacío"
+                  containerClassName="mb-0"
+                  disabled={!isJefeTi}
+                />
+                <Input
+                  label="Fin de pasantía"
+                  type="date"
+                  value={form.account_expires_at}
+                  onChange={(event) => setForm((current) => ({ ...current, account_expires_at: event.target.value }))}
+                  containerClassName="mb-0"
+                  required
+                  disabled={!isJefeTi}
+                />
+              </div>
+              {editing && isJefeTi ? (
+                <Button type="button" variant="secondary" loading={resettingPassword} onClick={handleResetPassword}>
+                  Restablecer contraseña
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
 
           <Input
             label="Google ID"
@@ -702,6 +767,33 @@ const Usuarios = () => {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        open={Boolean(tempCredentials)}
+        onClose={() => setTempCredentials(null)}
+        title="Credenciales temporales del pasante"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            Copia y entrega estas credenciales al pasante ahora — la contraseña no se puede volver a
+            consultar después de cerrar esta ventana. Deberá cambiarla en su primer inicio de sesión.
+          </div>
+          <div className="space-y-2">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Usuario</p>
+              <p className="font-mono text-sm text-slate-800">{tempCredentials?.username}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Contraseña temporal</p>
+              <p className="font-mono text-sm text-slate-800">{tempCredentials?.password}</p>
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button type="button" onClick={() => setTempCredentials(null)}>Entendido</Button>
+          </div>
+        </div>
       </Modal>
 
       <ActionConfirmModal

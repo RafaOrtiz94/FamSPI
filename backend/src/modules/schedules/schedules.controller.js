@@ -45,11 +45,23 @@ const addVisit = (req, res) =>
     res,
     service.addVisit({
       scheduleId: Number(req.params.id),
-      clientRequestId: Number(req.body.client_request_id),
+      clientRequestId: req.body.client_request_id ? Number(req.body.client_request_id) : null,
+      prospectName: req.body.prospect_name,
       plannedDate: req.body.planned_date,
       city: req.body.city,
       priority: req.body.priority,
       notes: req.body.notes || null,
+      user: req.user,
+    }),
+  );
+
+const syncWeekCity = (req, res) =>
+  respond(
+    res,
+    service.syncWeekCity({
+      scheduleId: Number(req.params.id),
+      city: req.body.city,
+      dates: Array.isArray(req.body.dates) ? req.body.dates : [],
       user: req.user,
     }),
   );
@@ -60,10 +72,13 @@ const updateVisit = (req, res) =>
     service.updateVisit({
       scheduleId: Number(req.params.id),
       visitId: Number(req.params.visitId),
+      clientRequestId: req.body.client_request_id ? Number(req.body.client_request_id) : null,
+      prospectName: req.body.prospect_name,
       city: req.body.city,
       plannedDate: req.body.planned_date,
       priority: req.body.priority,
       notes: req.body.notes || null,
+      preserveApprovedStatus: Boolean(req.body.preserve_approved_status),
       user: req.user,
     }),
   );
@@ -171,6 +186,7 @@ module.exports = {
   deleteSchedule,
   submitForApproval,
   addVisit,
+  syncWeekCity,
   updateVisit,
   deleteVisit,
   approveSchedule,

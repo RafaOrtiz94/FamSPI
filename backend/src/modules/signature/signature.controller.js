@@ -67,6 +67,8 @@ const validateSignatureRequest = (body) => {
     throw error;
   }
 };
+// Expuesto para pruebas de verificacion del control de firma.
+exports.validateSignatureRequest = validateSignatureRequest;
 
 const calculateDocumentHash = async (client, documentId, documentBuffer, userId) => {
   const hashValue = crypto.createHash(SIGNATURE_CONSTANTS.ALGORITHMS.SHA256).update(documentBuffer).digest("hex");

@@ -12,7 +12,7 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { drive } = require("../../config/google");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
-const { securePdfForm } = require("../../utils/pdfFormSecurity");
+const { securePdfForm, setFieldFontSizeSafe } = require("../../utils/pdfFormSecurity");
 const {
   normalizeInstallationWorkflowState,
   appendVerificationAttempt,
@@ -173,7 +173,7 @@ const generateEquipmentVerificationPDF = async (verificationPayload) => {
   const templateBytes = fs.readFileSync(TEMPLATE_PATH);
   const pdfDoc = await PDFDocument.load(templateBytes);
   const form = pdfDoc.getForm();
-  const baseFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const baseFont = await pdfDoc.embedFont(StandardFonts.TimesRoman);
 
   const signatureBuffer = await resolveImageBuffer(input.firma_af_image);
   const annexBuffers = await resolveAnnexBuffers(input.anexos_af_image);
@@ -206,14 +206,16 @@ const generateEquipmentVerificationPDF = async (verificationPayload) => {
     setFieldTextVariants(form, ["anexos_af_image"], `Adjuntos: ${annexBuffers.length}`);
   }
 
-  try {
-    form.getFields().forEach((field) => {
+  // Por campo: un campo sin /DA (default appearance) en la plantilla no debe
+  // abortar el resto (mismo bug que rompia F.ST-20 entero).
+  form.getFields().forEach((field) => {
+    setFieldFontSizeSafe(field, 10);
+    try {
       if (typeof field.updateAppearances === "function") field.updateAppearances(baseFont);
-      if (typeof field.setFontSize === "function") field.setFontSize(10);
-    });
-  } catch (appearanceError) {
-    logger.warn({ appearanceError }, "No se pudieron actualizar apariencias de F.ST-09");
-  }
+    } catch (appearanceError) {
+      logger.warn({ fieldName: field.getName?.(), appearanceError }, "No se pudo actualizar apariencia de campo F.ST-09");
+    }
+  });
 
   securePdfForm(form);
   const pdfBytes = await pdfDoc.save();

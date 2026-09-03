@@ -1,18 +1,19 @@
-import React, { useState } from "react";
-import Card from "../../../../core/ui/components/Card";
+import React, { useState, useEffect } from "react";
+import { FiLock, FiInfo } from "react-icons/fi";
 import { lockSection, unlockSection } from "../../../../core/api/businessCaseApi";
 import { useUI } from "../../../../core/ui/UIContext";
 import EquipmentSection from "./EquipmentSection";
 import DeterminationsSection from "./DeterminationsSection";
 import InvestmentsSection from "./InvestmentsSection";
+import InvestmentValuesUnifiedSection from "./sections/InvestmentValuesUnifiedSection";
 import ClientDataSection from "./ClientDataSection";
 import RequirementsSection from "./sections/RequirementsSection";
-// New sections - Phase 1 UX Improvements
 import LabSection from "./sections/LabSection";
 import LISSection from "./sections/LISSection";
 import ConsumptionExportSection from "./sections/ConsumptionExportSection";
 import DispatchWorkspaceSection from "./sections/DispatchWorkspaceSection";
 import FeasibilitySection from "./sections/FeasibilitySection";
+import OfferWorkspaceSection from "./sections/OfferWorkspaceSection";
 
 const SectionContent = ({
  selectedSection,
@@ -23,261 +24,259 @@ const SectionContent = ({
 }) => {
  const { showToast } = useUI();
  const [lockBusy, setLockBusy] = useState(false);
- const sectionRule = uiGuidance?.sectionOwnership?.rules?.[selectedSection] || {};
+
+ // Lazy mount + keep alive: sección se monta la primera vez que se visita y
+ // permanece montada. Evita fetches prematuros en secciones no visitadas.
+ const [mountedSections, setMountedSections] = useState(() => new Set([selectedSection]));
+ useEffect(() => {
+  setMountedSections((prev) => {
+   if (prev.has(selectedSection)) return prev;
+   const next = new Set(prev);
+   next.add(selectedSection);
+   return next;
+  });
+ }, [selectedSection]);
+
  const permissions = uiGuidance?.permissions || {};
+ const sectionRule = uiGuidance?.sectionOwnership?.rules?.[selectedSection] || {};
  const isInvestments = selectedSection === "investments";
- const canLock = permissions.canBlockSections && !sectionRule.isLocked && !isInvestments;
- const canUnlock = permissions.canUnblockSections && sectionRule.isLocked && !isInvestments;
+ const isInvestmentValues = selectedSection === "investment_values";
+ const isOfferWorkspace = selectedSection === "offer_workspace";
+ const hasOwnPermissionModel = isInvestments || isInvestmentValues || isOfferWorkspace;
+ const canLock = permissions.canBlockSections && !sectionRule.isLocked && !hasOwnPermissionModel;
+ const canUnlock = permissions.canUnblockSections && sectionRule.isLocked && !hasOwnPermissionModel;
  const businessCaseId = businessCase?.id || uiGuidance?.businessCase?.id;
- const forwardSave = (options = {}) => {
- onSectionSave?.({ ...options, section: selectedSection });
+
+ // Each section passes its own id so save is always attributed correctly
+ const makeForwardSave = (sectionId) => (options = {}) => {
+  onSectionSave?.({ ...options, section: sectionId });
  };
 
  const handleLock = async () => {
- if (!businessCaseId) return;
- setLockBusy(true);
- try {
- await lockSection(businessCaseId, selectedSection);
- showToast("Seccion bloqueada para edicion", "success");
- forwardSave({ markComplete: false });
- } catch (error) {
- showToast(error?.response?.data?.message || "No se pudo bloquear la seccion", "error");
- } finally {
- setLockBusy(false);
- }
+  if (!businessCaseId) return;
+  setLockBusy(true);
+  try {
+   await lockSection(businessCaseId, selectedSection);
+   showToast("Seccion bloqueada para edicion", "success");
+   makeForwardSave(selectedSection)({ markComplete: false });
+  } catch (error) {
+   showToast(error?.response?.data?.message || "No se pudo bloquear la seccion", "error");
+  } finally {
+   setLockBusy(false);
+  }
  };
 
  const handleUnlock = async () => {
- if (!businessCaseId) return;
- setLockBusy(true);
- try {
- await unlockSection(businessCaseId, selectedSection);
- showToast("Seccion desbloqueada", "success");
- forwardSave({ markComplete: false });
- } catch (error) {
- showToast(error?.response?.data?.message || "No se pudo desbloquear la seccion", "error");
- } finally {
- setLockBusy(false);
- }
- };
- // Section metadata for display
- const sectionInfo = {
- general: {
- title: "Datos Generales",
- description: "Informacion basica del cliente y requerimientos del proyecto",
- icon: "DG"
- },
- lab: {
- title: "Entorno Laboratorio",
- description: "Configuracion operativa y parametros del laboratorio",
- icon: "LAB"
- },
- requirement: {
- title: "Condiciones del BC",
- description: "Plazos y entregas clave antes del calculo",
- icon: "BC"
- },
- equipment: {
- title: "Equipamiento",
- description: "Seleccion y configuracion de equipos medicos",
- icon: "EQ"
- },
- lis: {
- title: "Integracion LIS",
- description: "Sistema de informacion laboratorio y interfaces",
- icon: "LIS"
- },
- determinations: {
- title: "Determinaciones",
- description: "Analisis clinicos y cuantificaciones por periodo",
- icon: "DET"
- },
- investments: {
- title: "Inversiones Adicionales",
- description: "Costos adicionales y presupuesto de inversiones",
- icon: "INV"
- },
- consumption_export: {
- title: "Sincronizacion Sheets",
- description: "Creacion y sincronizacion del formato oficial BC en Google Sheets",
- icon: "EXP"
- },
- dispatch_workspace: {
- title: "Cantidades Maximas",
- description: "Cantidades maximas comerciales y control operativo por elemento",
- icon: "OPS"
- },
- feasibility: {
- title: "Factibilidad",
- description: "Decision final del Business Case y cierre para continuidad en compras",
- icon: "FAC"
- }
+  if (!businessCaseId) return;
+  setLockBusy(true);
+  try {
+   await unlockSection(businessCaseId, selectedSection);
+   showToast("Seccion desbloqueada", "success");
+   makeForwardSave(selectedSection)({ markComplete: false });
+  } catch (error) {
+   showToast(error?.response?.data?.message || "No se pudo desbloquear la seccion", "error");
+  } finally {
+   setLockBusy(false);
+  }
  };
 
- const currentSection = sectionInfo[selectedSection] || sectionInfo.general;
+ const canonicalState = businessCase?.canonical_state || uiGuidance?.workflowState?.currentState;
+ const purchaseType = businessCase?.purchase_type || businessCase?.type || '';
+ const isPrivatePurchase = ['privada', 'private', 'PRIVADA'].includes(String(purchaseType).toLowerCase());
 
- const renderSection = () => {
- if (selectedSection === "general") {
+ const isTerminalState = ['CANCELADO', 'RECHAZADO_POR_GERENCIA', 'CERRADO_PARA_APROBACION'].includes(canonicalState);
+ const isStateLocked = sectionRule.isLocked;
+ const isPermissionLocked = !permissions.canEdit && !hasOwnPermissionModel;
+
+ const unlockAuthorizer = isPrivatePurchase ? 'Backoffice' : 'ACP Comercial o Jefe Comercial';
+
+ const terminalStateLabel =
+  canonicalState === 'CANCELADO' ? 'Cancelado'
+  : canonicalState === 'RECHAZADO_POR_GERENCIA' ? 'Rechazado por Gerencia'
+  : 'Cerrado para Aprobación';
+
+ const readOnlyReason = isTerminalState
+  ? `BC en estado "${terminalStateLabel}" — edición deshabilitada`
+  : isStateLocked
+  ? `Sección bloqueada por ${sectionRule.lockedByRole || 'un supervisor'} — Para modificar, solicitar desbloqueo a ${unlockAuthorizer}`
+  : isPermissionLocked
+  ? `Tu rol no tiene permiso de edición en esta sección`
+  : null;
+
  return (
- <ClientDataSection
- businessCase={businessCase}
- uiGuidance={uiGuidance}
- permissions={permissions}
- ownership={uiGuidance?.sectionOwnership?.rules?.general || {}}
- onSave={forwardSave}
- />
- );
- }
+  <div className="space-y-5 lg:space-y-6">
+   {readOnlyReason && (
+    <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+     <FiLock className="flex-shrink-0 text-slate-500" size={16} />
+     <span>{readOnlyReason}</span>
+    </div>
+   )}
+   {!readOnlyReason && !isTerminalState && canonicalState === 'OBSERVADO_POR_VIABILIDAD' && (
+    <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+     <FiInfo className="flex-shrink-0" size={16} />
+     <span>BC observado por viabilidad — revisa los comentarios antes de editar</span>
+    </div>
+   )}
+   {(canLock || canUnlock) && (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+     {canLock && (
+      <button
+       type="button"
+       onClick={handleLock}
+       disabled={lockBusy}
+       className="px-3 py-1.5 text-xs font-semibold rounded-full bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-60"
+      >
+       Cerrar sección
+      </button>
+     )}
+     {canUnlock && (
+      <button
+       type="button"
+       onClick={handleUnlock}
+       disabled={lockBusy}
+       className="px-3 py-1.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-900 hover:bg-amber-200 disabled:opacity-60"
+      >
+       Reabrir sección
+      </button>
+     )}
+    </div>
+   )}
 
- if (selectedSection === "lab") {
- return (
- <LabSection
- businessCase={businessCase}
- uiGuidance={uiGuidance}
- permissions={permissions}
- ownership={uiGuidance?.sectionOwnership?.rules?.lab || {}}
- onSave={forwardSave}
- />
- );
- }
+   {/* Lazy mount + keep alive: sección se renderiza solo cuando ha sido visitada
+       (o es la activa). Una vez montada permanece en el DOM oculta para preservar
+       el estado del formulario (isEditing, campos no guardados). */}
+   {mountedSections.has("general") && (
+    <div className={selectedSection === "general" ? "" : "hidden"}>
+     <ClientDataSection
+      businessCase={businessCase}
+      uiGuidance={uiGuidance}
+      permissions={permissions}
+      ownership={uiGuidance?.sectionOwnership?.rules?.general || {}}
+      onSave={makeForwardSave("general")}
+     />
+    </div>
+   )}
 
- if (selectedSection === "requirement") {
- return (
- <RequirementsSection
- businessCase={businessCase}
- permissions={permissions}
- ownership={uiGuidance?.sectionOwnership?.rules?.requirement || {}}
- onSave={forwardSave}
- />
- );
- }
+   {mountedSections.has("lab") && (
+    <div className={selectedSection === "lab" ? "" : "hidden"}>
+     <LabSection
+      businessCase={businessCase}
+      uiGuidance={uiGuidance}
+      permissions={permissions}
+      ownership={uiGuidance?.sectionOwnership?.rules?.lab || {}}
+      onSave={makeForwardSave("lab")}
+     />
+    </div>
+   )}
 
- if (selectedSection === "equipment") {
- return (
- <EquipmentSection
- businessCase={businessCase}
- permissions={permissions}
- ownership={uiGuidance?.sectionOwnership?.rules?.equipment || {}}
- onSave={forwardSave}
- />
- );
- }
+   {mountedSections.has("requirement") && (
+    <div className={selectedSection === "requirement" ? "" : "hidden"}>
+     <RequirementsSection
+      businessCase={businessCase}
+      permissions={permissions}
+      ownership={uiGuidance?.sectionOwnership?.rules?.requirement || {}}
+      onSave={makeForwardSave("requirement")}
+     />
+    </div>
+   )}
 
- if (selectedSection === "lis") {
- return (
- <LISSection
- businessCase={businessCase}
- permissions={permissions}
- ownership={uiGuidance?.sectionOwnership?.rules?.lis || {}}
- onSave={forwardSave}
- />
- );
- }
+   {mountedSections.has("equipment") && (
+    <div className={selectedSection === "equipment" ? "" : "hidden"}>
+     <EquipmentSection
+      businessCase={businessCase}
+      permissions={permissions}
+      ownership={uiGuidance?.sectionOwnership?.rules?.equipment || {}}
+      onSave={makeForwardSave("equipment")}
+     />
+    </div>
+   )}
 
- if (selectedSection === "determinations") {
- return (
- <DeterminationsSection
- businessCase={businessCase}
- permissions={permissions}
- featureFlags={uiGuidance?.featureFlags || {}}
- ownership={uiGuidance?.sectionOwnership?.rules?.determinations || {}}
- onSave={forwardSave}
- />
- );
- }
+   {mountedSections.has("lis") && (
+    <div className={selectedSection === "lis" ? "" : "hidden"}>
+     <LISSection
+      businessCase={businessCase}
+      permissions={permissions}
+      ownership={uiGuidance?.sectionOwnership?.rules?.lis || {}}
+      onSave={makeForwardSave("lis")}
+     />
+    </div>
+   )}
 
- if (selectedSection === "investments") {
- return (
- <InvestmentsSection
- businessCase={businessCase}
- permissions={permissions}
- ownership={uiGuidance?.sectionOwnership?.rules?.investments || {}}
- onSave={forwardSave}
- />
- );
- }
+   {mountedSections.has("determinations") && (
+    <div className={selectedSection === "determinations" ? "" : "hidden"}>
+     <DeterminationsSection
+      businessCase={businessCase}
+      permissions={permissions}
+      featureFlags={uiGuidance?.featureFlags || {}}
+      ownership={uiGuidance?.sectionOwnership?.rules?.determinations || {}}
+      onSave={makeForwardSave("determinations")}
+     />
+    </div>
+   )}
 
- if (selectedSection === "consumption_export") {
- return (
- <ConsumptionExportSection
- businessCase={businessCase}
- />
- );
- }
+   {mountedSections.has("investments") && (
+    <div className={selectedSection === "investments" ? "" : "hidden"}>
+     <InvestmentsSection
+      businessCase={businessCase}
+      permissions={permissions}
+      ownership={uiGuidance?.sectionOwnership?.rules?.investments || {}}
+      onSave={makeForwardSave("investments")}
+     />
+    </div>
+   )}
 
- if (selectedSection === "dispatch_workspace") {
- return (
- <DispatchWorkspaceSection
- onSave={forwardSave}
- />
- );
- }
+   {mountedSections.has("investment_values") && (
+    <div className={selectedSection === "investment_values" ? "" : "hidden"}>
+     <InvestmentValuesUnifiedSection
+      businessCase={businessCase}
+      permissions={permissions}
+      operationalOwnership={uiGuidance?.sectionOwnership?.rules?.investment_values_op || {}}
+      financialOwnership={uiGuidance?.sectionOwnership?.rules?.investment_values_fin || {}}
+      onSave={makeForwardSave("investment_values")}
+     />
+    </div>
+   )}
 
- if (selectedSection === "feasibility") {
- return (
- <FeasibilitySection
- businessCase={businessCase}
- permissions={permissions}
- ownership={uiGuidance?.sectionOwnership?.rules?.feasibility || {}}
- onSave={forwardSave}
- />
- );
- }
+   {mountedSections.has("consumption_export") && (
+    <div className={selectedSection === "consumption_export" ? "" : "hidden"}>
+     <ConsumptionExportSection
+      businessCase={businessCase}
+     />
+    </div>
+   )}
 
- return null;
- };
+   {mountedSections.has("dispatch_workspace") && (
+    <div className={selectedSection === "dispatch_workspace" ? "" : "hidden"}>
+     <DispatchWorkspaceSection
+      onSave={makeForwardSave("dispatch_workspace")}
+      ownership={uiGuidance?.sectionOwnership?.rules?.dispatch_workspace || {}}
+     />
+    </div>
+   )}
 
- const sectionContent = renderSection();
+   {mountedSections.has("feasibility") && (
+    <div className={selectedSection === "feasibility" ? "" : "hidden"}>
+     <FeasibilitySection
+      businessCase={businessCase}
+      permissions={permissions}
+      ownership={uiGuidance?.sectionOwnership?.rules?.feasibility || {}}
+      workflowState={uiGuidance?.workflowState || {}}
+      onSave={makeForwardSave("feasibility")}
+     />
+    </div>
+   )}
 
- if (sectionContent) {
- return (
- <div className="space-y-5 lg:space-y-6">
- {(canLock || canUnlock) && (
- <div className="flex flex-wrap items-center justify-end gap-2">
- {canLock && (
- <button
- type="button"
- onClick={handleLock}
- disabled={lockBusy}
- className="px-3 py-1.5 text-xs font-semibold rounded-full bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-60"
- >
- Cerrar seccion
- </button>
- )}
- {canUnlock && (
- <button
- type="button"
- onClick={handleUnlock}
- disabled={lockBusy}
- className="px-3 py-1.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-900 hover:bg-amber-200 disabled:opacity-60"
- >
- Reabrir seccion
- </button>
- )}
- </div>
- )}
- {sectionContent}
- </div>
- );
- }
-
- // Fallback for unknown sections (should not happen now)
- return (
- <div className="space-y-6">
- <div className="flex items-center gap-4">
- <div className="text-3xl">{currentSection.icon}</div>
- <div>
- <h2 className="text-2xl font-bold text-gray-900">{currentSection.title}</h2>
- <p className="text-sm text-gray-600">{currentSection.description}</p>
- </div>
- </div>
- <Card className="p-8">
- <div className="text-center space-y-4">
- <div className="text-6xl opacity-50">!</div>
- <p className="text-gray-600">Seccion no reconocida: {selectedSection}</p>
- </div>
- </Card>
- </div>
+   {mountedSections.has("offer_workspace") && (
+    <div className={selectedSection === "offer_workspace" ? "" : "hidden"}>
+     <OfferWorkspaceSection
+      businessCase={businessCase}
+      permissions={permissions}
+      ownership={uiGuidance?.sectionOwnership?.rules?.offer_workspace || {}}
+      onSave={makeForwardSave("offer_workspace")}
+     />
+    </div>
+   )}
+  </div>
  );
 };
 

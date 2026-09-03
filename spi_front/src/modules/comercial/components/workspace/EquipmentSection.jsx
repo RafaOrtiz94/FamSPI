@@ -11,6 +11,10 @@ import {
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
+import SectionEditorBadge from "./SectionEditorBadge";
+
+// Mismos roles que ya autoriza el backend en POST /sections/:section/unlock.
+const EQUIPMENT_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_de_comercial"]);
 
 const generateLocalId = () => {
  if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -26,6 +30,9 @@ const DEFAULT_EQUIPMENT_PAIR = () => ({
  backup: null,
  backup_type: "new_available",
  requiresBackup: false,
+ installation_location: "",
+ requiresComplementary: false,
+ complementary_test_purpose: "",
 });
 
 const EQUIPMENT_TYPE_OPTIONS = [
@@ -247,6 +254,24 @@ const EquipmentSection = ({
  const { id: bcId } = useParams();
  const { showToast, showLoader, hideLoader } = useUI();
  const canEdit = permissions.canEdit !== false && ownership?.canUserEdit !== false;
+ // Reabrir "equipment" tras el auto-bloqueo al guardar comercial (ver
+ // saveEquipmentDetailsV2 en businessCase.controller.js). Mismos roles que
+ // ya autoriza el backend en POST /sections/:section/unlock.
+ const canReopenEquipment = ownership?.isLocked === true && EQUIPMENT_REOPEN_ROLES.has(permissions?.userRole || "");
+ const [reopening, setReopening] = useState(false);
+ const handleReopenEquipment = async () => {
+  if (!bcId || reopening) return;
+  setReopening(true);
+  try {
+   await api.post(`/business-case/${bcId}/sections/equipment/unlock`);
+   onSave();
+   showToast("Sección reabierta para edición.", "success");
+  } catch (err) {
+   showToast(err?.response?.data?.message || "No se pudo reabrir la sección.", "error");
+  } finally {
+   setReopening(false);
+  }
+ };
 
  const [items, setItems] = useState([]);
  const [loadingCatalog, setLoadingCatalog] = useState(false);
@@ -276,6 +301,9 @@ const EquipmentSection = ({
  id: detail.id || generateLocalId() || String(index + 1),
  primary_type: normalizeEquipmentType(detail.primary_type || detail.primary?.type),
  requiresBackup: detail.requires_backup ?? detail.requiresBackup ?? Boolean(detail.backup),
+ installation_location: detail.installation_location || "",
+ requiresComplementary: Boolean(detail.requires_complementary),
+ complementary_test_purpose: detail.complementary_test_purpose || "",
  primary: detail.primary
  ? {
  id: detail.primary.id,
@@ -690,6 +718,9 @@ const EquipmentSection = ({
  requires_backup: Boolean(pair.requiresBackup),
  backup_id: pair.requiresBackup ? Number(pair.backup?.id || null) : null,
  backup_install_simultaneous: pair.requiresBackup && pair.backup ? Boolean(pair.backup.install_with_primary) : false,
+ installation_location: pair.installation_location || null,
+ requires_complementary: Boolean(pair.requiresComplementary),
+ complementary_test_purpose: pair.requiresComplementary ? (pair.complementary_test_purpose || null) : null,
  })),
  };
 
@@ -734,6 +765,9 @@ const EquipmentSection = ({
  <div>
  <h2 className={UI.title}>Seleccion de equipos</h2>
  <p className={UI.subtitle}>Define principal y backup por grupo.</p>
+ <div className="mt-2">
+ <SectionEditorBadge ownership={ownership} />
+ </div>
  </div>
  <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
  <button
@@ -758,8 +792,22 @@ const EquipmentSection = ({
  </div>
 
  {!canEdit && (
- <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-700">
- Esta seccion esta en modo solo lectura para tu rol.
+ <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+ <span>
+ {ownership?.isLocked
+  ? "Comercial ya guardó esta sección y quedó en solo lectura."
+  : "Esta seccion esta en modo solo lectura para tu rol."}
+ </span>
+ {canReopenEquipment && (
+ <button
+  type="button"
+  onClick={handleReopenEquipment}
+  disabled={reopening}
+  className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 w-full sm:w-auto"
+ >
+  Reabrir para edición
+ </button>
+ )}
  </div>
  )}
 
@@ -892,6 +940,20 @@ const EquipmentSection = ({
  </select>
  </div>
 
+ <div className="w-full sm:max-w-sm">
+ <label className="mb-1 block text-xs font-semibold text-gray-600 uppercase tracking-wide">
+ Ubicacion de instalacion
+ </label>
+ <input
+ type="text"
+ placeholder="Ej: Laboratorio central, piso 2"
+ value={pair.installation_location || ""}
+ onChange={(event) => updatePair(pair.id, { installation_location: event.target.value })}
+ disabled={!canEdit}
+ className={INPUT_CLASS}
+ />
+ </div>
+
  <button
  type="button"
  aria-label="Cambiar equipo principal"
@@ -914,6 +976,7 @@ const EquipmentSection = ({
  </div>
 
  {pair.primary && (
+ <>
  <div className="space-y-3 border-t border-slate-200 pt-4 rounded-xl">
  <div className="flex justify-between items-center">
  <div>
@@ -1046,6 +1109,29 @@ const EquipmentSection = ({
  </>
  )}
  </div>
+
+ <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+ <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
+ <input
+ type="checkbox"
+ checked={Boolean(pair.requiresComplementary)}
+ onChange={(event) => updatePair(pair.id, { requiresComplementary: event.target.checked })}
+ disabled={!canEdit}
+ />
+ Requiere equipo complementario
+ </label>
+ {pair.requiresComplementary && (
+ <input
+ type="text"
+ placeholder="Proposito del equipo complementario"
+ value={pair.complementary_test_purpose || ""}
+ onChange={(event) => updatePair(pair.id, { complementary_test_purpose: event.target.value })}
+ disabled={!canEdit}
+ className={INPUT_CLASS}
+ />
+ )}
+ </div>
+ </>
  )}
 
  <div className="pt-4 flex justify-end border-t border-slate-200">
@@ -1065,9 +1151,10 @@ const EquipmentSection = ({
  <div className="px-2 pb-2">
  <button
  type="button"
- className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+ className={`${UI.actionSecondary} w-full cursor-pointer gap-1.5 active:scale-[0.97] transition-transform duration-150`}
  onClick={() => increaseVisibleRows(pair.id, "primary")}
  >
+ <FiChevronDown size={14} />
  Mostrar mas equipos ({filteredPrimaryItems.length - visiblePrimaryItems.length} restantes)
  </button>
  </div>
@@ -1076,9 +1163,10 @@ const EquipmentSection = ({
  <div className="px-2 pb-2">
  <button
  type="button"
- className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+ className={`${UI.actionSecondary} w-full cursor-pointer gap-1.5 active:scale-[0.97] transition-transform duration-150`}
  onClick={() => increaseVisibleRows(pair.id, "backup")}
  >
+ <FiChevronDown size={14} />
  Mostrar mas backups ({compatibleCandidates.length - visibleBackupCandidates.length} restantes)
  </button>
  </div>

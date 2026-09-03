@@ -40,6 +40,7 @@ router.delete("/:id", requireRole(advisorRoles), controller.deleteSchedule);
 router.post("/:id/submit", requireRole(advisorRoles), controller.submitForApproval);
 router.post("/:id/justify", requireRole(advisorRoles), controller.justifySchedule);
 router.post("/:id/visits", requireRole(advisorRoles), controller.addVisit);
+router.post("/:id/weeks/sync-city", requireRole(advisorRoles), controller.syncWeekCity);
 router.put("/:id/visits/:visitId", requireRole(advisorRoles), controller.updateVisit);
 router.delete("/:id/visits/:visitId", requireRole(advisorRoles), controller.deleteVisit);
 router.post("/:id/visits/:visitId/justify", requireRole(advisorRoles), controller.justifyVisit);

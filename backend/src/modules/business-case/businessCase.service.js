@@ -2,10 +2,11 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const crypto = require("crypto");
 const businessCaseCalculator = require("./businessCaseCalculator.service");
-const integrationService = require("./businessCaseIntegration.service");
 const { PrivatePurchaseStateMachine } = require("../private-purchases/privatePurchaseStateMachine");
 const { PRIVATE_PURCHASE_STATES } = require("../private-purchases/privatePurchaseStates.constants");
 const { ensureBusinessCaseDriveFolder } = require("./businessCaseDriveFolder.service");
+const { filterEquipmentPairsForSheet } = require("./businessCaseSheetEquipment.helper");
+const { ensurePurchaseWorkspaceForFeasibleBusinessCase } = require("./businessCasePurchaseHandoff.service");
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -112,10 +113,22 @@ function normalizeFallbackOfferKind(value) {
   ) {
     return "alquiler_transferencia_dominio";
   }
+  // No es una alternativa comercial: cierra el BC como rechazado sin ofrecer
+  // venta/alquiler, porque no hubo información suficiente para evaluarlo.
+  if (normalized === "rechazado_falta_informacion") return "rechazado_falta_informacion";
   return null;
 }
 
-const FEASIBILITY_ALLOWED_ROLES = new Set(["jefe_operaciones", "jefe_tecnico"]);
+const FEASIBILITY_ALLOWED_ROLES = new Set([
+  "acp_comercial",
+  "jefe_comercial",
+  "jefe_de_comercial",
+  "jefe_operaciones",
+  "jefe_tecnico",
+  "jefe_servicio",
+  "gerencia",
+  "gerencia_general",
+]);
 
 function normalizeRoleToken(value) {
   return String(value || "")
@@ -143,7 +156,7 @@ function assertCanSaveFeasibilityDecision(user = {}) {
 
   if (isAllowed) return;
 
-  const error = new Error("No tienes permisos para aprobar factibilidad y bloquear inventario.");
+  const error = new Error("No tienes permisos para registrar la decision de factibilidad.");
   error.status = 403;
   error.code = "INSUFFICIENT_ROLE";
   throw error;
@@ -229,28 +242,27 @@ async function saveFeasibilityDecision(
     const feasibility = toObject(metadata.feasibility);
     const exportInfo = toObject(feasibility.export_excel);
 
-    if (!exportInfo.at) {
+    if (Boolean(is_feasible) && !exportInfo.at) {
       const error = new Error("Primero debe exportar los reactivos para iniciar calculos");
       error.status = 409;
       error.code = "EXPORT_REQUIRED";
       throw error;
     }
 
+    if (is_feasible === false && !String(notes || "").trim()) {
+      const error = new Error("Debe registrar el motivo para cerrar el Business Case como no factible");
+      error.status = 400;
+      error.code = "NON_FEASIBLE_REASON_REQUIRED";
+      throw error;
+    }
+
     if (is_feasible === false && !normalizedFallback) {
       const error = new Error(
-        "Debe seleccionar venta directa, alquiler o alquiler con transferencia de dominio cuando no es factible",
+        "Debe seleccionar venta directa, alquiler, alquiler con transferencia de dominio o rechazado por falta de informacion cuando no es factible",
       );
       error.status = 400;
       error.code = "FALLBACK_OFFER_KIND_REQUIRED";
       throw error;
-    }
-
-    if (Boolean(is_feasible)) {
-      await integrationService.reserveInventory({
-        businessCaseId,
-        actorId: user?.id || null,
-        client,
-      });
     }
 
     feasibility.status = is_feasible ? "factible" : "no_factible";
@@ -396,6 +408,10 @@ async function saveFeasibilityDecision(
         }
       }
     }
+  }
+
+  if (is_feasible) {
+    await ensurePurchaseWorkspaceForFeasibleBusinessCase({ businessCaseId, user });
   }
 
   return getBusinessCaseById(businessCaseId);
@@ -761,12 +777,23 @@ async function updateBusinessCase(id, data) {
   const values = [];
 
   allowedFields.forEach((field) => {
-    if (data[field] !== undefined) {
-      values.push(field === "bc_progress" || field === "extra" || field === "modern_bc_metadata"
-        ? JSON.stringify(data[field])
-        : data[field]);
-      sets.push(`${field} = $${values.length}`);
+    if (data[field] === undefined) return;
+    if (field === "modern_bc_metadata") {
+      // Merge JSONB a nivel de Postgres (no reemplazo ciego) para cerrar una
+      // condicion de carrera real detectada en produccion: multiples
+      // endpoints leen todo el metadata al inicio del request, mutan UNA
+      // clave anidada (ej. determinations_gate) y reescriben el objeto
+      // completo al final. Si otro request (ej. aprobacion de prorroga SLA)
+      // commitea entre medio, un SET ciego pisa esa clave top-level entera
+      // con la copia vieja -- revirtiendo la aprobacion silenciosamente.
+      // El operador `||` de jsonb hace merge superficial (top-level) de
+      // forma atomica en la misma sentencia UPDATE, sin ventana de carrera.
+      values.push(JSON.stringify(data[field]));
+      sets.push(`modern_bc_metadata = COALESCE(modern_bc_metadata, '{}'::jsonb) || $${values.length}::jsonb`);
+      return;
     }
+    values.push(field === "bc_progress" || field === "extra" ? JSON.stringify(data[field]) : data[field]);
+    sets.push(`${field} = $${values.length}`);
   });
 
   if (!sets.length) {
@@ -796,13 +823,14 @@ async function updateBusinessCase(id, data) {
 
   await db.query(query, values);
 
-  if (
-    data?.modern_bc_metadata &&
-    (Array.isArray(data.modern_bc_metadata.consumption_items) ||
-      Array.isArray(data.modern_bc_metadata.consumption_excluded))
-  ) {
-    await syncConsumptionData(id, data.modern_bc_metadata);
-  }
+  // CRITICAL:
+  // No sincronizar consumos desde PUT general de BC.
+  // Este endpoint se usa para multiples secciones y puede traer
+  // modern_bc_metadata parcial/desactualizado (incluyendo arreglos vacios),
+  // lo que termina borrando bc_consumption_items.
+  // La fuente de verdad de consumos debe modificarse solo por:
+  // - PUT /business-case/:id/consumption-items
+  // - PATCH /business-case/:id/consumption-items/:itemKey
 
   logger.info({
     business_case_id: id
@@ -814,10 +842,22 @@ async function updateBusinessCase(id, data) {
 async function loadConsumptionData(businessCaseId) {
   try {
     const { rows: items } = await db.query(
-      `SELECT item_key, item_id, name, item_type, source, catalog_id, annual_qty, equipment_id, equipment_name
-       FROM bc_consumption_items
-       WHERE business_case_id = $1
-       ORDER BY name`,
+      `SELECT
+         c.item_key, c.item_id, c.name, c.item_type, c.source, c.catalog_id,
+         c.annual_qty, c.reference_qty, c.equipment_id, c.equipment_name,
+         -- Producto a Enviar: si jefe_operaciones/comercial ya ajusto
+         -- manualmente el valor en el workspace de despacho
+         -- (commercial_updated_at), esa decision manual manda; si no, se usa
+         -- el valor recien sincronizado directo desde el Sheet en esta tabla.
+         CASE
+           WHEN d.commercial_updated_at IS NOT NULL THEN d.planned_qty
+           ELSE COALESCE(c.planned_qty, d.planned_qty)
+         END AS planned_qty
+       FROM bc_consumption_items c
+       LEFT JOIN bc_dispatch_items d
+         ON d.business_case_id = c.business_case_id AND d.item_key = c.item_key
+       WHERE c.business_case_id = $1
+       ORDER BY c.name`,
       [businessCaseId],
     );
     const { rows: excluded } = await db.query(
@@ -833,6 +873,8 @@ async function loadConsumptionData(businessCaseId) {
       source: row.source,
       catalogId: row.catalog_id,
       annualQty: row.annual_qty,
+      referenceQty: row.reference_qty === null || row.reference_qty === undefined ? null : Number(row.reference_qty),
+      plannedQty: row.planned_qty === null || row.planned_qty === undefined ? null : Number(row.planned_qty),
       equipmentId: row.equipment_id,
       equipmentName: row.equipment_name,
     }));
@@ -841,6 +883,16 @@ async function loadConsumptionData(businessCaseId) {
       excluded.map((row) => row.item_key),
     );
     const version = buildConsumptionVersion(mappedItems, mappedExcluded);
+    logger.info(
+      {
+        businessCaseId,
+        version,
+        itemsCount: mappedItems.length,
+        excludedCount: mappedExcluded.length,
+        nonZeroItems: mappedItems.filter((item) => Number(item?.annualQty ?? 0) > 0).length,
+      },
+      "[BC_AUDIT][BE][LOAD_CONSUMPTION]",
+    );
 
     return {
       items: mappedItems,
@@ -878,8 +930,12 @@ function normalizeConsumptionItemsForComparison(items = []) {
     const key = String(item.key || "").trim();
     if (!key) continue;
 
-    const annualQtyRaw = item.annualQty ?? item.annual_qty ?? 0;
+    const annualQtyRaw = item.annualQty ?? item.annualQuantity ?? item.annual_qty ?? 0;
     const annualQty = Number(annualQtyRaw);
+    const referenceQtyRaw = item.referenceQty ?? item.reference_qty ?? null;
+    const referenceQty = referenceQtyRaw === null || referenceQtyRaw === undefined ? null : Number(referenceQtyRaw);
+    const plannedQtyRaw = item.plannedQty ?? item.planned_qty ?? null;
+    const plannedQty = plannedQtyRaw === null || plannedQtyRaw === undefined ? null : Number(plannedQtyRaw);
 
     byKey.set(key, {
       key,
@@ -889,6 +945,13 @@ function normalizeConsumptionItemsForComparison(items = []) {
       source: String(item.source || "catalog").trim().toLowerCase(),
       catalogId: item.catalogId ?? item.catalog_id ?? null,
       annualQty: Number.isFinite(annualQty) ? annualQty : 0,
+      // Producto Calculado para reactivos: solo de referencia visual, nunca
+      // se usa en calculos (annualQty sigue viniendo unicamente de DET/AÑO
+      // PROCESO). null cuando no aplica (equipos no-reactivo o sin dato).
+      referenceQty: Number.isFinite(referenceQty) ? referenceQty : null,
+      // Producto a Enviar (PRODUCTO A ENTREGAR/ENVIAR): aplica a todos los
+      // tipos por igual, se sincroniza junto con annualQty.
+      plannedQty: Number.isFinite(plannedQty) ? plannedQty : null,
       equipmentId: item.equipmentId ?? item.equipment_id ?? null,
       equipmentName: item.equipmentName ?? item.equipment_name ?? null,
     });
@@ -950,13 +1013,20 @@ function matchesConsumptionItem(item = {}, candidate = {}) {
   const candidateCatalogId = candidate?.catalogId ?? null;
   const itemEquipmentId = item?.equipmentId ?? null;
   const candidateEquipmentId = candidate?.equipmentId ?? null;
+  const hasCatalogIdentity = itemCatalogId !== null && candidateCatalogId !== null;
   if (
-    itemCatalogId !== null &&
-    candidateCatalogId !== null &&
+    hasCatalogIdentity &&
     String(itemCatalogId) === String(candidateCatalogId) &&
     String(itemEquipmentId || "") === String(candidateEquipmentId || "")
   ) {
     return true;
+  }
+  if (
+    hasCatalogIdentity &&
+    String(itemCatalogId) !== String(candidateCatalogId) &&
+    String(itemEquipmentId || "") === String(candidateEquipmentId || "")
+  ) {
+    return false;
   }
 
   const itemId = String(item?.itemId || "").trim();
@@ -976,6 +1046,156 @@ function matchesConsumptionItem(item = {}, candidate = {}) {
   return false;
 }
 
+function normalizeTemplateConsumptionName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function normalizeTemplateConsumptionIdentity(value) {
+  return normalizeTemplateConsumptionName(value).replace(/[^a-z0-9]/g, "");
+}
+
+function hasCatalogEquivalentIgnoringType(item, catalogItems = []) {
+  const itemEquipmentId = String(item?.equipment_id || item?.equipmentId || "").trim();
+  const itemId = String(item?.item_id || item?.itemId || "").trim();
+  const itemName = normalizeTemplateConsumptionIdentity(item?.item_name || item?.itemName || item?.name);
+  if (!itemEquipmentId || !itemId || !itemName) return false;
+
+  return (Array.isArray(catalogItems) ? catalogItems : []).some((catalogItem) => (
+    String(catalogItem?.equipment_id || catalogItem?.equipmentId || "").trim() === itemEquipmentId &&
+    String(catalogItem?.item_id || catalogItem?.itemId || "").trim() === itemId &&
+    normalizeTemplateConsumptionIdentity(catalogItem?.item_name || catalogItem?.itemName || catalogItem?.name) === itemName
+  ));
+}
+
+function buildTemplateConsumptionSyncItems({ template, equipmentTabs = [], catalogItems = [] }) {
+  const catalogRowSignatures = new Set(
+    (Array.isArray(catalogItems) ? catalogItems : [])
+      .map((item) => {
+        const equipmentId = String(item?.equipment_id || item?.equipmentId || "").trim();
+        const itemId = String(item?.item_id || item?.itemId || "").trim();
+        const itemType = String(item?.item_type || item?.itemType || "").trim().toLowerCase();
+        const itemName = normalizeTemplateConsumptionName(item?.item_name || item?.itemName || item?.name);
+        return equipmentId && itemId && itemType && itemName
+          ? `${equipmentId}:${itemId}:${itemType}:${itemName}`
+          : null;
+      })
+      .filter(Boolean),
+  );
+  const catalogItemsByCode = new Map();
+  (Array.isArray(catalogItems) ? catalogItems : []).forEach((item) => {
+    const equipmentId = String(item?.equipment_id || item?.equipmentId || "").trim();
+    const itemId = String(item?.item_id || item?.itemId || "").trim();
+    const itemType = String(item?.item_type || item?.itemType || "").trim().toLowerCase();
+    if (!equipmentId || !itemId || !itemType) return;
+    const key = `${equipmentId}:${itemId}:${itemType}`;
+    if (!catalogItemsByCode.has(key)) catalogItemsByCode.set(key, []);
+    catalogItemsByCode.get(key).push(item);
+  });
+
+  const templateItems = [];
+  (Array.isArray(equipmentTabs) ? equipmentTabs : []).forEach((tab) => {
+    const definition = template?.equipmentSheets?.find((entry) => entry.name === tab?.sheet_name);
+    if (!definition) return;
+    const equipmentId = Number(tab?.equipment_ids?.[0] || 0);
+    if (!Number.isInteger(equipmentId) || equipmentId <= 0) return;
+    const equipmentName = Array.isArray(tab?.equipment_names) ? tab.equipment_names[0] : null;
+
+    const rows = Array.isArray(definition.rows) ? definition.rows : [];
+    const itemIdOccurrences = rows.reduce((counts, row) => {
+      const itemId = String(row?.itemId || "").trim();
+      if (itemId) counts.set(itemId, (counts.get(itemId) || 0) + 1);
+      return counts;
+    }, new Map());
+    const assignedCatalogRowsByCode = new Map();
+
+    rows.forEach((row) => {
+      const itemId = String(row?.itemId || "").trim();
+      const name = String(row?.label || "").trim();
+      const itemType = String(row?.itemType || "reactivo").trim().toLowerCase();
+      if (!itemId) return;
+      const signature = `${equipmentId}:${itemId}:${itemType}:${normalizeTemplateConsumptionName(name)}`;
+      const codeKey = `${equipmentId}:${itemId}:${itemType}`;
+      const catalogRowsForCode = catalogItemsByCode.get(codeKey) || [];
+      const assignedCatalogRows = assignedCatalogRowsByCode.get(codeKey) || 0;
+      const isDuplicateTemplateCode = itemIdOccurrences.get(itemId) > 1;
+
+      // El bloque CONTROLES Y CALIBRADORES de algunas hojas base comparte
+      // encabezado. Si el parser infiere el tipo distinto al catalogo, la
+      // identidad SKU+nombre sigue siendo la misma: no se debe crear un
+      // segundo item auxiliar que termine desplazado en la oferta.
+      if (hasCatalogEquivalentIgnoringType({ equipment_id: equipmentId, item_id: itemId, item_name: name }, catalogItems)) {
+        assignedCatalogRowsByCode.set(codeKey, assignedCatalogRows + 1);
+        return;
+      }
+      if (!isDuplicateTemplateCode && catalogRowsForCode.length) return;
+      if (catalogRowSignatures.has(signature)) {
+        assignedCatalogRowsByCode.set(codeKey, assignedCatalogRows + 1);
+        return;
+      }
+      if (assignedCatalogRows < catalogRowsForCode.length) {
+        assignedCatalogRowsByCode.set(codeKey, assignedCatalogRows + 1);
+        return;
+      }
+
+      // Una misma pestaña puede tener dos presentaciones con el mismo SKU
+      // (ej. IgG y IgG en suero). La identidad interna debe conservar la
+      // fila de origen para que ambas sobrevivan al upsert del BC.
+      const keyPart = itemIdOccurrences.get(itemId) > 1 ? `${itemId}:${row.rowNumber}` : itemId;
+
+      templateItems.push({
+        item_key: `sheet:${equipmentId}:${keyPart}:${itemType}`,
+        item_id: itemId || null,
+        item_name: name || itemId || `Fila ${row.rowNumber}`,
+        item_type: itemType,
+        equipment_id: equipmentId,
+        equipment_name: equipmentName,
+        catalog_id: null,
+        source: "sheet_template",
+      });
+    });
+  });
+
+  return templateItems;
+}
+
+function isObsoleteTemplateFallbackItem(item = {}) {
+  const source = String(item?.source || "").trim().toLowerCase();
+  if (source !== "sheet_template") return false;
+  const itemId = String(item?.itemId || item?.item_id || "").trim();
+  if (!itemId) return true;
+  const name = String(item?.name || "").trim().toLowerCase();
+  return name === "total det" || name === "total" || name === "sub total" || name === "subtotal";
+}
+
+function isRedundantTemplateFallbackItem(item = {}, catalogItems = []) {
+  return String(item?.source || "").trim().toLowerCase() === "sheet_template" &&
+    hasCatalogEquivalentIgnoringType(item, catalogItems);
+}
+
+function resolveEquipmentIdsForConsumptionSync({ selectionRows = [], extra = {} }) {
+  const ids = new Set(
+    (Array.isArray(selectionRows) ? selectionRows : [])
+      .map((row) => Number(row?.equipment_id))
+      .filter((id) => Number.isInteger(id) && id > 0),
+  );
+
+  const equipmentPairs = Array.isArray(extra?.equipment_details) ? extra.equipment_details : [];
+  filterEquipmentPairsForSheet(equipmentPairs).forEach((pair) => {
+    [pair?.primary_id, pair?.backup_id]
+      .map((value) => Number(value))
+      .filter((id) => Number.isInteger(id) && id > 0)
+      .forEach((id) => ids.add(id));
+  });
+
+  return Array.from(ids);
+}
+
 function isSameConsumptionPayload(current = {}, nextItems = [], nextExcluded = []) {
   const currentItems = normalizeConsumptionItemsForComparison(current.items || []);
   const currentExcluded = normalizeExcludedKeysForComparison(current.excluded || []);
@@ -992,6 +1212,13 @@ function assertConsumptionVersion(expectedVersion, currentVersion) {
   const normalizedExpected = normalizeExpectedVersion(expectedVersion);
   if (!normalizedExpected) return;
   if (normalizedExpected === currentVersion) return;
+  logger.warn(
+    {
+      expectedVersion: normalizedExpected,
+      currentVersion,
+    },
+    "[BC_AUDIT][BE][VERSION_CONFLICT]",
+  );
 
   const error = new Error("Los consumos fueron actualizados por otro usuario. Refresca antes de guardar.");
   error.status = 409;
@@ -1010,8 +1237,20 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
     name: item.name || item.key,
     item_type: item.type || "consumible",
     source: item.source || "catalog",
-    catalog_id: Number.isFinite(Number(item.catalogId)) ? Number(item.catalogId) : null,
-    annual_qty: Math.max(0, Number(item.annualQty || 0)),
+    catalog_id: item.catalogId === null || item.catalogId === undefined
+      ? null
+      : (Number.isFinite(Number(item.catalogId)) ? Number(item.catalogId) : null),
+    annual_qty: Math.max(0, Number(item.annualQty ?? item.annualQuantity ?? 0)),
+    // ojo: Number(null) es 0, no NaN -- hay que descartar null/undefined
+    // explicitamente antes de convertir, si no un item sin referencia/plan
+    // (ej. un control, que nunca tiene reference_qty) queda guardado como 0
+    // en vez de quedar NULL.
+    reference_qty: item.referenceQty === null || item.referenceQty === undefined
+      ? null
+      : (Number.isFinite(Number(item.referenceQty)) ? Number(item.referenceQty) : null),
+    planned_qty: item.plannedQty === null || item.plannedQty === undefined
+      ? null
+      : (Number.isFinite(Number(item.plannedQty)) ? Number(item.plannedQty) : null),
     equipment_id: Number.isFinite(Number(item.equipmentId)) ? Number(item.equipmentId) : null,
     equipment_name: item.equipmentName || null,
   }));
@@ -1020,6 +1259,15 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
     Array.isArray(metadata.consumption_excluded) ? metadata.consumption_excluded : [],
   );
   const client = await db.getClient();
+  logger.info(
+    {
+      businessCaseId,
+      itemsCount: items.length,
+      excludedCount: excluded.length,
+      nonZeroItems: items.filter((item) => Number(item?.annual_qty ?? 0) > 0).length,
+    },
+    "[BC_AUDIT][BE][SYNC_INPUT]",
+  );
 
   await client.query("BEGIN");
   try {
@@ -1036,7 +1284,9 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
             item_type text,
             source text,
             catalog_id integer,
-            annual_qty integer,
+            annual_qty numeric,
+            reference_qty numeric,
+            planned_qty numeric,
             equipment_id integer,
             equipment_name text
           )
@@ -1050,6 +1300,8 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
           source,
           catalog_id,
           annual_qty,
+          reference_qty,
+          planned_qty,
           equipment_id,
           equipment_name,
           created_at,
@@ -1064,6 +1316,8 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
           p.source,
           p.catalog_id,
           p.annual_qty,
+          p.reference_qty,
+          p.planned_qty,
           p.equipment_id,
           p.equipment_name,
           NOW(),
@@ -1077,6 +1331,8 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
           source = EXCLUDED.source,
           catalog_id = EXCLUDED.catalog_id,
           annual_qty = EXCLUDED.annual_qty,
+          reference_qty = EXCLUDED.reference_qty,
+          planned_qty = EXCLUDED.planned_qty,
           equipment_id = EXCLUDED.equipment_id,
           equipment_name = EXCLUDED.equipment_name,
           updated_at = NOW()
@@ -1131,6 +1387,24 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
     }
 
     await client.query("COMMIT");
+    const { rows: counters } = await db.query(
+      `
+      SELECT
+        COUNT(*)::int AS items_count,
+        COALESCE(SUM(CASE WHEN annual_qty > 0 THEN 1 ELSE 0 END), 0)::int AS non_zero_items,
+        COALESCE(SUM(annual_qty), 0)::int AS total_qty
+      FROM bc_consumption_items
+      WHERE business_case_id = $1
+      `,
+      [businessCaseId],
+    );
+    logger.info(
+      {
+        businessCaseId,
+        persisted: counters?.[0] || null,
+      },
+      "[BC_AUDIT][BE][SYNC_RESULT]",
+    );
   } catch (error) {
     await client.query("ROLLBACK");
     logger.error({ error: error.message, businessCaseId }, "Error sincronizando consumos de BC");
@@ -1163,6 +1437,17 @@ async function saveConsumptionItems(businessCaseId, items = [], excluded = [], o
   }
   nextExcluded = normalizeExcludedForItems(nextItems, nextExcluded);
   const current = await loadConsumptionData(businessCaseId);
+  logger.info(
+    {
+      businessCaseId,
+      expectedVersion,
+      currentVersion: current?.version || null,
+      incomingItems: nextItems.length,
+      incomingExcluded: nextExcluded.length,
+      incomingNonZero: nextItems.filter((item) => Number(item?.annualQty ?? item?.annualQuantity ?? 0) > 0).length,
+    },
+    "[BC_AUDIT][BE][SAVE_CONSUMPTION_PRECHECK]",
+  );
   assertConsumptionVersion(expectedVersion, current?.version || null);
 
   if (current && isSameConsumptionPayload(current, nextItems, nextExcluded)) {
@@ -1173,7 +1458,328 @@ async function saveConsumptionItems(businessCaseId, items = [], excluded = [], o
     consumption_items: nextItems,
     consumption_excluded: nextExcluded
   });
-  return loadConsumptionData(businessCaseId);
+  const reloaded = await loadConsumptionData(businessCaseId);
+  logger.info(
+    {
+      businessCaseId,
+      version: reloaded?.version || null,
+      itemsCount: Array.isArray(reloaded?.items) ? reloaded.items.length : 0,
+      nonZeroItems: Array.isArray(reloaded?.items)
+        ? reloaded.items.filter((item) => Number(item?.annualQty ?? 0) > 0).length
+        : 0,
+    },
+    "[BC_AUDIT][BE][SAVE_CONSUMPTION_POST]",
+  );
+  return reloaded;
+}
+
+// Sincronizacion inversa Sheet -> SPI: la hoja oficial es la fuente de verdad
+// de CANTIDADES para reactivos, calibradores, controles y materiales. La
+// columna real difiere por bloque: reactivos usa "DET/AÑO PROCESO"; jefe de
+// servicio registra calibradores/controles/materiales en "PRODUCTO CALCULADO"
+// (ver ANNUAL_QUANTITY_HEADERS en businessCaseSheetSyncLocal.service.js).
+// Esta funcion no solo actualiza cantidades de items
+// que ya existen en bc_consumption_items -- tambien CREA los que esten
+// llenos en la hoja pero todavia no se hayan agregado en SPI, usando el
+// catalogo del equipo (catalog_equipment_consumables) como fuente de
+// item_type/nombre, ya que la hoja nunca indica el tipo, solo la cantidad.
+// Se dispara automaticamente al cargar la pantalla de consumo (ver
+// getConsumptionItems en el controller, que la salta si la subseccion ya
+// esta bloqueada) y tambien queda disponible como accion manual via
+// POST /:id/consumption-items/sync-from-sheet para forzar un re-sync.
+async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) {
+  await assertModernBusinessCase(businessCaseId);
+  // Las ofertas deben reconstruirse con la tabla base vigente. Esto evita que
+  // una correccion manual de SKU quede oculta por la cache del proceso.
+  if (options?.forceTemplateReload) {
+    const { clearSheetCaches } = require("./businessCaseSheetSyncLocal.service");
+    clearSheetCaches();
+  }
+  const requestedItemTypes = Array.isArray(options?.itemTypes)
+    ? new Set(
+      options.itemTypes
+        .map((value) => String(value || "").trim().toLowerCase())
+        .filter(Boolean),
+    )
+    : null;
+  const annualQuantityProtectionSubsection = String(options?.protectAnnualQuantities || "").trim().toLowerCase();
+
+  const { rows: bcRows } = await db.query(
+    `SELECT modern_bc_metadata, extra FROM equipment_purchase_requests WHERE id = $1 LIMIT 1`,
+    [businessCaseId],
+  );
+  const bcRow = bcRows[0] || {};
+  const metadata = bcRow.modern_bc_metadata && typeof bcRow.modern_bc_metadata === "object" ? bcRow.modern_bc_metadata : {};
+  const extra = bcRow.extra && typeof bcRow.extra === "object" ? bcRow.extra : {};
+  const sheetId = metadata?.bc_sheet_generation?.last?.sheet_id || null;
+
+  if (!sheetId) {
+    const error = new Error("Este Business Case no tiene una hoja de Sheets generada todavia.");
+    error.status = 409;
+    error.code = "SHEET_NOT_GENERATED";
+    throw error;
+  }
+
+  const current = await loadConsumptionData(businessCaseId);
+
+  const { rows: selectionRows } = await db.query(
+    `SELECT equipment_id FROM bc_equipment_selection WHERE business_case_id = $1`,
+    [businessCaseId],
+  );
+  const equipmentIds = resolveEquipmentIdsForConsumptionSync({ selectionRows, extra });
+  if (!equipmentIds.length) {
+    if (annualQuantityProtectionSubsection) {
+      const error = new Error("No existen equipos seleccionados para localizar las celdas anuales del Sheet.");
+      error.status = 409;
+      error.code = "ANNUAL_QUANTITY_PROTECTION_FAILED";
+      throw error;
+    }
+    return { updated: 0, created: 0, items: current };
+  }
+
+  const { rows: equipmentRows } = await db.query(
+    `SELECT equipment_id, equipment_name FROM v_equipment_full_catalog WHERE equipment_id = ANY($1::int[])`,
+    [equipmentIds],
+  );
+  const equipmentNameById = new Map(equipmentRows.map((row) => [Number(row.equipment_id), row.equipment_name]));
+
+  const { rows: catalogRows } = await db.query(
+    `SELECT ec.equipment_id, c.id AS catalog_id, c.name, c.type AS item_type, c.supplier_code
+       FROM catalog_equipment_consumables ec
+       JOIN catalog_consumables c ON c.id = ec.consumable_id
+      WHERE ec.equipment_id = ANY($1::int[])`,
+    [equipmentIds],
+  );
+
+  const {
+    loadTemplateDefinition,
+    buildSheetPayloads,
+    pullAnnualQuantitiesFromGoogleSheet,
+    pullReferenceQuantitiesFromGoogleSheet,
+    pullMaximumQuantitiesFromGoogleSheet,
+  } = require("./businessCaseSheetSyncLocal.service");
+  const templateDefinition = loadTemplateDefinition();
+
+  const equipmentRecords = equipmentIds.map((id) => ({
+    id,
+    name: equipmentNameById.get(id) || null,
+    code: null,
+    model: null,
+  }));
+
+  // The sync catalog only identifies rows. Quantities are read exclusively
+  // from the annual column DET/AÑO/PROCESO, never from PRODUCTO A ENVIAR.
+  const catalogRowsForSync = requestedItemTypes?.size
+    ? catalogRows.filter((row) => requestedItemTypes.has(String(row.item_type || "").trim().toLowerCase()))
+    : catalogRows;
+  const catalogItemsForSync = catalogRowsForSync.map((row) => ({
+    item_key: `cons:${row.equipment_id}:${row.catalog_id}`,
+    item_id: row.supplier_code || null,
+    item_name: row.name || null,
+    item_type: row.item_type || null,
+    equipment_id: row.equipment_id,
+    equipment_name: equipmentNameById.get(Number(row.equipment_id)) || null,
+    catalog_id: row.catalog_id,
+  }));
+
+  let equipmentTabs = buildSheetPayloads({
+    template: templateDefinition,
+    equipmentRecords,
+    payload: { fields: {}, sync_items: catalogItemsForSync, sheet_context: {} },
+  });
+  const templateItemsForSync = buildTemplateConsumptionSyncItems({
+    template: templateDefinition,
+    equipmentTabs,
+    catalogItems: catalogItemsForSync,
+  }).filter((item) => (
+    requestedItemTypes?.size
+      ? requestedItemTypes.has(String(item?.item_type || "").trim().toLowerCase())
+      : true
+  ));
+  const mergedCatalogItemsForSync = [...catalogItemsForSync, ...templateItemsForSync];
+  if (templateItemsForSync.length) {
+    equipmentTabs = buildSheetPayloads({
+      template: templateDefinition,
+      equipmentRecords,
+      payload: { fields: {}, sync_items: mergedCatalogItemsForSync, sheet_context: {} },
+    });
+    logger.warn(
+      {
+        businessCaseId,
+        templateFallbackItems: templateItemsForSync.length,
+        selectedEquipmentIds: equipmentIds,
+        selectedSheets: equipmentTabs.map((tab) => tab.sheet_name),
+      },
+      "[BC_AUDIT][BE][SHEET_TEMPLATE_CONSUMPTION_FALLBACK]",
+    );
+  }
+
+  let annualQuantityProtection = null;
+  if (annualQuantityProtectionSubsection) {
+    const {
+      protectAnnualQuantityCellsForSubsection,
+    } = require("./businessCaseSheetSyncLocal.service");
+    annualQuantityProtection = await protectAnnualQuantityCellsForSubsection({
+      sheetId,
+      businessCaseId,
+      subsection: annualQuantityProtectionSubsection,
+      equipmentTabs,
+    });
+    if (!annualQuantityProtection?.protected) {
+      const error = new Error(
+        annualQuantityProtection?.reason === "NO_ANNUAL_CELLS_FOUND"
+          ? "No se encontraron celdas de cantidades anuales para proteger en el Sheet."
+          : "No se pudo proteger la columna de cantidades anuales en el Sheet.",
+      );
+      error.status = annualQuantityProtection?.reason === "NO_ANNUAL_CELLS_FOUND" ? 409 : 503;
+      error.code = "ANNUAL_QUANTITY_PROTECTION_FAILED";
+      throw error;
+    }
+  }
+
+  const sheetUpdatesFromSheet = await pullAnnualQuantitiesFromGoogleSheet({ sheetId, equipmentTabs });
+  // Producto Calculado para reactivos: solo de referencia visual (ver
+  // pullReferenceQuantitiesFromGoogleSheet). Se combina por item_key con las
+  // actualizaciones de annual_qty, sin afectar la logica de creacion/edicion
+  // existente.
+  const referenceUpdatesFromSheet = await pullReferenceQuantitiesFromGoogleSheet({ sheetId, equipmentTabs });
+  // "Producto a Enviar" (PRODUCTO A ENTREGAR/ENVIAR en el Sheet): aplica por
+  // igual a reactivos, calibradores, controles y materiales, sin distincion
+  // de categoria (a diferencia de la cantidad anual). Se sincroniza aqui
+  // directo a bc_consumption_items para que la pantalla de Determinaciones
+  // no dependa de que se haya abierto antes el workspace de despacho.
+  const plannedUpdatesFromSheet = await pullMaximumQuantitiesFromGoogleSheet({ sheetId, equipmentTabs });
+  const currentItems = Array.isArray(current?.items)
+    ? current.items.filter((item) => (
+      !isObsoleteTemplateFallbackItem(item) &&
+      !isRedundantTemplateFallbackItem(item, catalogItemsForSync)
+    ))
+    : [];
+  const removedCount = Math.max(0, (current?.items || []).length - currentItems.length);
+  const eligibleCurrentKeys = requestedItemTypes?.size
+    ? new Set(
+      currentItems
+        .filter((item) => requestedItemTypes.has(String(item?.type || "").trim().toLowerCase()))
+        .map((item) => String(item?.key || "").trim())
+        .filter(Boolean),
+    )
+    : null;
+  const eligibleCatalogKeys = new Set(mergedCatalogItemsForSync.map((item) => item.item_key));
+  const filterEligible = (entry) => (requestedItemTypes?.size
+    ? eligibleCatalogKeys.has(String(entry?.item_key || "").trim()) ||
+      eligibleCurrentKeys.has(String(entry?.item_key || "").trim())
+    : true);
+  const catalogByKey = new Map(mergedCatalogItemsForSync.map((row) => [row.item_key, row]));
+  const currentByKey = new Map(currentItems.map((item) => [item.key, item]));
+  const excludedSet = new Set(current?.excluded || []);
+  const missingMappedKeys = mergedCatalogItemsForSync
+    .map((item) => String(item?.item_key || "").trim())
+    .filter((itemKey) => itemKey && !currentByKey.has(itemKey) && !excludedSet.has(itemKey));
+  const sheetUpdates = sheetUpdatesFromSheet.filter(filterEligible);
+  const referenceUpdates = referenceUpdatesFromSheet.filter(filterEligible);
+  const plannedUpdates = plannedUpdatesFromSheet.filter(filterEligible);
+  if (!sheetUpdates.length && !referenceUpdates.length && !plannedUpdates.length && !missingMappedKeys.length && !removedCount) {
+    return { updated: 0, created: 0, removed: 0, items: current, annualQuantityProtection };
+  }
+
+  const updatesByKey = new Map(sheetUpdates.map((entry) => [entry.item_key, entry.annual_qty]));
+  const referenceByKey = new Map(referenceUpdates.map((entry) => [entry.item_key, entry.reference_qty]));
+  const plannedByKey = new Map(plannedUpdates.map((entry) => [entry.item_key, entry.planned_qty]));
+
+  let updatedCount = 0;
+  const nextItems = currentItems.map((item) => {
+    const hasAnnualUpdate = updatesByKey.has(item.key);
+    const hasReferenceUpdate = referenceByKey.has(item.key);
+    const hasPlannedUpdate = plannedByKey.has(item.key);
+    if (!hasAnnualUpdate && !hasReferenceUpdate && !hasPlannedUpdate) return item;
+
+    const nextQty = hasAnnualUpdate ? Math.max(0, Number(updatesByKey.get(item.key)) || 0) : Number(item.annualQty);
+    const nextReferenceQty = hasReferenceUpdate
+      ? Math.max(0, Number(referenceByKey.get(item.key)) || 0)
+      : (item.referenceQty ?? null);
+    const nextPlannedQty = hasPlannedUpdate
+      ? Math.max(0, Number(plannedByKey.get(item.key)) || 0)
+      : (item.plannedQty ?? null);
+    if (
+      nextQty === Number(item.annualQty) &&
+      nextReferenceQty === (item.referenceQty ?? null) &&
+      nextPlannedQty === (item.plannedQty ?? null)
+    ) return item;
+    updatedCount += 1;
+    return { ...item, annualQty: nextQty, referenceQty: nextReferenceQty, plannedQty: nextPlannedQty };
+  });
+
+  const creationKeys = new Set([
+    ...sheetUpdates.map((entry) => entry.item_key),
+    ...plannedUpdates.map((entry) => entry.item_key),
+    ...missingMappedKeys,
+  ]);
+  let createdCount = 0;
+  for (const itemKey of creationKeys) {
+    if (currentByKey.has(itemKey)) continue; // ya actualizado arriba
+    if (excludedSet.has(itemKey)) continue; // el usuario lo excluyo a proposito
+    const catalogInfo = catalogByKey.get(itemKey);
+    if (!catalogInfo) continue;
+
+    const candidate = {
+      key: itemKey,
+      itemId: catalogInfo.item_id,
+      name: catalogInfo.item_name,
+      type: catalogInfo.item_type,
+      source: catalogInfo.source || "catalog",
+      catalogId: catalogInfo.catalog_id,
+      annualQty: updatesByKey.has(itemKey)
+        ? Math.max(0, Number(updatesByKey.get(itemKey)) || 0)
+        : 0,
+      referenceQty: referenceByKey.has(itemKey)
+        ? Math.max(0, Number(referenceByKey.get(itemKey)) || 0)
+        : null,
+      plannedQty: plannedByKey.has(itemKey)
+        ? Math.max(0, Number(plannedByKey.get(itemKey)) || 0)
+        : null,
+      equipmentId: catalogInfo.equipment_id,
+      equipmentName: catalogInfo.equipment_name,
+    };
+
+    const equivalentIndex = nextItems.findIndex((item) => matchesConsumptionItem(item, candidate));
+    if (equivalentIndex >= 0) {
+      nextItems[equivalentIndex] = {
+        ...nextItems[equivalentIndex],
+        ...candidate,
+      };
+      updatedCount += 1;
+      continue;
+    }
+
+    nextItems.push(candidate);
+    createdCount += 1;
+  }
+
+  if (!updatedCount && !createdCount && !removedCount) {
+    return { updated: 0, created: 0, removed: 0, items: current, annualQuantityProtection };
+  }
+
+  await syncConsumptionData(businessCaseId, {
+    consumption_items: nextItems,
+    consumption_excluded: current?.excluded || [],
+  });
+
+  try {
+    await recalculateBusinessCase(businessCaseId);
+  } catch (error) {
+    logger.warn(
+      { businessCaseId, error: error.message },
+      "No se pudo recalcular tras sincronizar cantidades desde Sheet",
+    );
+  }
+
+  return {
+    updated: updatedCount,
+    created: createdCount,
+    removed: removedCount,
+    items: await loadConsumptionData(businessCaseId),
+    annualQuantityProtection,
+  };
 }
 
 async function patchConsumptionItem(businessCaseId, itemKey, patch = {}, options = {}) {
@@ -1220,6 +1826,8 @@ async function patchConsumptionItem(businessCaseId, itemKey, patch = {}, options
         source: String(row.source || existingItem?.source || "custom").trim().toLowerCase(),
         catalogId: row.catalogId ?? existingItem?.catalogId ?? null,
         annualQty,
+        referenceQty: existingItem?.referenceQty ?? null,
+        plannedQty: existingItem?.plannedQty ?? null,
         equipmentId: row.equipmentId ?? existingItem?.equipmentId ?? null,
         equipmentName: row.equipmentName ?? existingItem?.equipmentName ?? null,
       }),
@@ -1350,6 +1958,13 @@ function isComodato(businessCase) {
   return true;
 }
 
+// NO es codigo muerto: bc_master/bc_economic_data son tablas de un diseño
+// anterior (migracion 022) reemplazado por el enfoque actual (reusar
+// equipment_purchase_requests, ver README_TABLE_STRUCTURE.md), pero todavia
+// tienen 6 filas reales en produccion (verificado). Esta funcion migra ese BC
+// legacy a equipment_purchase_requests la primera vez que se toca via el
+// endpoint moderno (PUT /:id/economic-data). No borrar sin antes migrar o
+// archivar esas 6 filas.
 async function insertEquipmentPurchaseRequestFromBcMaster(id) {
   const { rows } = await db.query(
     "SELECT client_name, client_id, bc_type FROM bc_master WHERE id = $1",
@@ -1462,10 +2077,14 @@ module.exports = {
   getConsumptionItems,
   saveConsumptionItems,
   patchConsumptionItem,
+  syncConsumptionQuantitiesFromSheet,
   getBusinessCaseType,
   isPublicComodato,
   isPrivateComodato,
   isComodato,
   recordExcelExportAndMarkWaitingCalculations,
   saveFeasibilityDecision,
+  __testables: {
+    buildTemplateConsumptionSyncItems,
+  },
 };

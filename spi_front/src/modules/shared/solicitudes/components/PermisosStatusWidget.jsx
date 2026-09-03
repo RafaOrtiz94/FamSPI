@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
   FiClock,
-  FiCheck,
   FiFileText,
   FiDownload,
   FiAlertCircle,
@@ -10,22 +9,30 @@ import {
   FiEye,
   FiShield,
 } from "react-icons/fi";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useAuth } from "../../../../core/auth/AuthContext";
-import { STATUS_META, getTipoLabel, formatDateShort, hasJustificantes } from "../utils/solicitudesHelpers";
+import {
+  STATUS_META,
+  getTipoLabel,
+  formatDateShort,
+  hasJustificantes,
+  hasExternalCoordinationEvidence,
+  JUSTIFICANTE_STATUS_META,
+  ESCALATION_STATUS_META,
+  PROVISIONAL_STATUS_META,
+} from "../utils/solicitudesHelpers";
 import { formatVacationDaysHours } from "../utils/vacationDisplay";
 import {
   getMisSolicitudes,
   cancelarSolicitud,
   updateRecoveryPlan,
+  resolverRegularizacion,
 } from "../../../../core/api/permisosApi";
 import UploadJustificantesModal from "../modals/UploadJustificantesModal";
-import { getActiveException } from "../../../../core/api/attendanceApi";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
-import { formatTimeSafe } from "../../../../shared/utils/dateUtils";
 
 const normalizeRole = (value = "") => value.toLowerCase();
 
@@ -72,31 +79,14 @@ const normalizeDateOnly = (value) => {
   return parsed.toISOString().slice(0, 10);
 };
 
-const getTodayLocalDate = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
 
-const canCancelByDateRule = (solicitud = {}) => {
-  const startDate = normalizeDateOnly(solicitud?.fecha_inicio || solicitud?.fecha_inicio_hora);
-  if (!startDate) return false;
-  return getTodayLocalDate() <= startDate;
-};
+
 
 const isSameEmail = (a, b) =>
   String(a || "").trim().toLowerCase() !== "" &&
   String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 
-const APPROVED_CANCEL_FLOW_STATUSES = new Set(["approved", "aprobado"]);
-const DIRECT_CANCELABLE_STATUSES = new Set([
-  "pending",
-  "pendiente",
-  "partially_approved",
-  "pending_final",
-]);
+const NON_CANCELABLE_STATUSES = new Set(["rejected", "rechazado", "cancelled", "cancelado"]);
 
 const RECOVERY_COORDINATION_LABELS = {
   not_required: "No requiere coordinación",
@@ -114,7 +104,7 @@ const INITIAL_VISIBLE_COUNTS = {
 const getRecoveryCoordinationLabel = (solicitud = {}) => {
   const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
   if (coordinationStatus === "finalized_by_approver" && solicitud?.charged_to_vacation) {
-    return "Sin acuerdo; cargado a vacaciones";
+    return "Sin acuerdo; cierre administrativo";
   }
   return RECOVERY_COORDINATION_LABELS[coordinationStatus] || RECOVERY_COORDINATION_LABELS.not_required;
 };
@@ -173,10 +163,12 @@ const PermisosStatusWidget = () => {
   const [cancelReason, setCancelReason] = useState("");
   const [visibleItemsBySection, setVisibleItemsBySection] = useState(INITIAL_VISIBLE_COUNTS);
   const [recoveryRows, setRecoveryRows] = useState([]);
-  const [activeException, setActiveException] = useState(null);
+  const [recoveryModalAction, setRecoveryModalAction] = useState("propose");
+  const [regularizacionModal, setRegularizacionModal] = useState({ open: false, solicitudId: null, action: null });
+  const [regularizacionReason, setRegularizacionReason] = useState("");
   const refreshPromiseRef = useRef(null);
 
-  const isTalentRole = ["talento_humano", "jefe_talento_humano", "talento-humano", "jefe_financiero", "jefe_finanzas"].includes(scope);
+  const isTalentRole = ["talento_humano", "jefe_talento_humano", "talento-humano", "gerencia_general", "gerente_general", "gerencia", "gerente", "director", "admin", "administrador"].includes(scope);
 
   const normalizeDateValue = (value) => {
     if (!value) return null;
@@ -222,27 +214,10 @@ const PermisosStatusWidget = () => {
     updated_at: normalizeDateValue(solicitud?.updated_at),
   });
 
-  const isApprovedSolicitud = (solicitud) =>
-    ["approved", "aprobado"].includes(String(solicitud?.status || "").toLowerCase());
-
   const canCoordinateRecoveryByStatus = (solicitud) =>
     ["partially_approved", "pending_final", "approved", "aprobado"].includes(
       String(solicitud?.status || "").toLowerCase()
     );
-
-  const fetchActiveException = async () => {
-    try {
-      const response = await getActiveException();
-      if (response?.ok) {
-        setActiveException(response.data || null);
-      } else {
-        setActiveException(null);
-      }
-    } catch (error) {
-      console.error("Error fetching active exception:", error);
-      setActiveException(null);
-    }
-  };
 
   const loadData = async ({ silent = false } = {}) => {
     if (refreshPromiseRef.current) return refreshPromiseRef.current;
@@ -258,9 +233,6 @@ const PermisosStatusWidget = () => {
         console.error("Error loading permisos:", error);
         if (!silent) showToast("Error al cargar solicitudes", "error");
       } finally {
-        if (!isTalentRole) {
-          await fetchActiveException();
-        }
         if (!silent) setLoading(false);
       }
     })();
@@ -324,20 +296,64 @@ const PermisosStatusWidget = () => {
     });
   };
 
-  const openRecoveryEditor = (solicitud) => {
+  const openRecoveryEditor = (solicitud, action = "propose") => {
     const currentPlan = Array.isArray(solicitud?.recovery_plan) ? solicitud.recovery_plan : [];
     setSelectedSolicitud(solicitud);
+    setRecoveryModalAction(action);
+    // log_progress always starts with a blank row to enter new execution entries
     setRecoveryRows(
-      currentPlan.length > 0
-        ? currentPlan.map((row) => ({
-          date: String(row?.date || ""),
-          start_time: normalizeTimeText(row?.start_time),
-          end_time: normalizeTimeText(row?.end_time),
-          notes: String(row?.notes || ""),
-        }))
-        : [{ date: "", start_time: "", end_time: "", notes: "" }]
+      action === "log_progress"
+        ? [{ date: "", start_time: "", end_time: "", notes: "" }]
+        : currentPlan.length > 0
+          ? currentPlan.map((row) => ({
+            date: String(row?.date || ""),
+            start_time: normalizeTimeText(row?.start_time),
+            end_time: normalizeTimeText(row?.end_time),
+            notes: String(row?.notes || ""),
+          }))
+          : [{ date: "", start_time: "", end_time: "", notes: "" }]
     );
     setShowRecoveryModal(true);
+  };
+
+  const handleCloseRecovery = async (solicitudId) => {
+    await runActionWithLoader(`close-recovery-${solicitudId}`, "Confirmando recuperación completada...", async () => {
+      try {
+        const response = await updateRecoveryPlan(solicitudId, [], "close");
+        if (response?.ok) {
+          showToast("Recuperación marcada como completada", "success");
+          await loadData();
+        }
+      } catch (error) {
+        showToast(error.response?.data?.message || "Error al cerrar la recuperación", "error");
+      }
+    });
+  };
+
+  const openRegularizacionModal = (solicitudId, action) => {
+    setRegularizacionReason("");
+    setRegularizacionModal({ open: true, solicitudId, action });
+  };
+
+  const handleConfirmRegularizacion = async () => {
+    const { solicitudId, action } = regularizacionModal;
+    if (!solicitudId || !action) return;
+    if (!regularizacionReason.trim()) {
+      showToast("Debes ingresar un motivo para continuar.", "error");
+      return;
+    }
+    await runActionWithLoader(`regularizacion-${solicitudId}`, "Procesando regularización...", async () => {
+      try {
+        const response = await resolverRegularizacion(solicitudId, action, regularizacionReason.trim());
+        if (response?.ok) {
+          showToast("Regularización procesada correctamente.", "success");
+          setRegularizacionModal({ open: false, solicitudId: null, action: null });
+          await loadData();
+        }
+      } catch (error) {
+        showToast(error.response?.data?.message || "Error al procesar la regularización", "error");
+      }
+    });
   };
 
   const handleSaveRecoveryPlan = async (action = "propose") => {
@@ -408,24 +424,10 @@ const PermisosStatusWidget = () => {
     ((userId && selectedSolicitud?.user_id && Number(userId) === Number(selectedSolicitud.user_id)) ||
       isSameEmail(userEmail, selectedSolicitud?.user_email));
 
-  const canSelectedUserApproveRecovery =
-    Boolean(selectedSolicitud) &&
-    ["pending_requester_acceptance", "pending_approver_proposal"].includes(selectedRecoveryStatus) &&
-    isSelectedRequester;
   const canSelectedRequesterCounterPropose =
     selectedRecoveryStatus === "pending_requester_acceptance" &&
     isSelectedRequester;
-  const selectedStatus = String(selectedSolicitud?.status || "").toLowerCase();
-  const selectedIsApprover =
-    Boolean(selectedSolicitud) &&
-    ((userId &&
-      selectedSolicitud?.approver_user_id &&
-      Number(userId) === Number(selectedSolicitud.approver_user_id)) ||
-      isSameEmail(userEmail, selectedSolicitud?.approver_email));
-  const selectedRequiresCancellationRequestFlow =
-    APPROVED_CANCEL_FLOW_STATUSES.has(selectedStatus) &&
-    isSelectedRequester &&
-    !selectedIsApprover;
+  const selectedRequiresCancellationRequestFlow = false;
 
   const pendientesDeJustificante = useMemo(
     () =>
@@ -444,45 +446,6 @@ const PermisosStatusWidget = () => {
       ),
     [misSolicitudes]
   );
-
-  const exceptionStatus = activeException?.status || "NONE";
-  const exceptionStepLabel =
-    {
-      ACTIVE: "En ruta",
-      ON_SITE: "En sitio",
-      RETURNING: "Regresando",
-      COMPLETED: "Completada",
-      NONE: "Sin salidas inesperadas",
-    }[exceptionStatus] || "Sin salidas inesperadas";
-
-  const exceptionTimeEntries = activeException
-    ? [
-      {
-        label: "Salida inesperada",
-        value: activeException.start_time,
-        colors: "bg-amber-50 border-amber-200 text-amber-800",
-        note: activeException.type ? activeException.type.replace(/_/g, " ").toUpperCase() : "Sin motivo",
-      },
-      {
-        label: "Llegada a destino",
-        value: activeException.arrival_time,
-        colors: "bg-orange-50 border-orange-200 text-orange-800",
-        note: exceptionStatus === "ON_SITE" ? "Llegaste" : "Pendiente",
-      },
-      {
-        label: "Salida del destino",
-        value: activeException.departure_time,
-        colors: "bg-yellow-50 border-yellow-200 text-yellow-800",
-        note: exceptionStatus === "RETURNING" ? "Regresando" : "Pendiente",
-      },
-      {
-        label: "Regreso a oficina",
-        value: activeException.return_time,
-        colors: "bg-emerald-50 border-emerald-200 text-emerald-800",
-        note: exceptionStatus === "COMPLETED" ? "Completado" : "Pendiente",
-      },
-    ]
-    : [];
 
   const tabs = useMemo(() => {
     return [
@@ -600,9 +563,6 @@ const PermisosStatusWidget = () => {
     const isRequesterOfSolicitud =
       Boolean(userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id)) ||
       isSameEmail(userEmail, solicitud?.user_email);
-    const isApproverOfSolicitud =
-      (userId && solicitud?.approver_user_id && Number(userId) === Number(solicitud.approver_user_id)) ||
-      isSameEmail(userEmail, solicitud?.approver_email);
     const normalizedStatus = String(solicitud?.status || "").toLowerCase();
 
     const canEditRecovery =
@@ -619,15 +579,11 @@ const PermisosStatusWidget = () => {
 
     const cancellationStatus = String(solicitud?.cancellation_status || "none").toLowerCase();
     const hasPendingCancellation = cancellationStatus === "pending";
-    const isApprovedCancellationFlowStatus = APPROVED_CANCEL_FLOW_STATUSES.has(normalizedStatus);
-    const isDirectCancelableStatus = DIRECT_CANCELABLE_STATUSES.has(normalizedStatus);
     const canCancelThis =
       cancellationStatus !== "pending" &&
       isRequesterOfSolicitud &&
-      (isDirectCancelableStatus ||
-        (isApprovedCancellationFlowStatus && canCancelByDateRule(solicitud)));
-    const requiresCancellationRequestFlow =
-      isApprovedCancellationFlowStatus && isRequesterOfSolicitud && !isApproverOfSolicitud;
+      !NON_CANCELABLE_STATUSES.has(normalizedStatus);
+    const requiresCancellationRequestFlow = false;
 
     const signatureSummary = solicitud.firma_avanzada_resumen || null;
     const isVacation = solicitud.tipo_solicitud === "vacaciones";
@@ -652,15 +608,19 @@ const PermisosStatusWidget = () => {
       >
         <div
           className={`absolute left-0 top-0 h-full w-1 rounded-l-xl ${
-            solicitud.status === "approved" || solicitud.status === "aprobado"
-              ? "bg-green-500"
-              : solicitud.status === "partially_approved"
-                ? "bg-blue-500"
-                : solicitud.status === "pending_final"
-                  ? "bg-purple-500"
-                  : solicitud.status === "rejected"
-                    ? "bg-red-500"
-                    : "bg-amber-400"
+            solicitud.provisional_status === "pendiente_regularizacion"
+              ? "bg-rose-500"
+              : solicitud.provisional_status === "salida_provisional_autorizada"
+                ? "bg-orange-400"
+                : solicitud.status === "approved" || solicitud.status === "aprobado"
+                  ? "bg-green-500"
+                  : solicitud.status === "partially_approved"
+                    ? "bg-blue-500"
+                    : solicitud.status === "pending_final"
+                      ? "bg-purple-500"
+                      : solicitud.status === "rejected"
+                        ? "bg-red-500"
+                        : "bg-amber-400"
           }`}
         />
 
@@ -681,6 +641,31 @@ const PermisosStatusWidget = () => {
                 );
               })()}
             </div>
+            {solicitud.is_urgent && (
+              <span className="mt-1 inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded border bg-red-100 text-red-800 border-red-200">
+                URGENTE
+              </span>
+            )}
+            {(() => {
+              const prov = String(solicitud.provisional_status || "").toLowerCase();
+              const provMeta = PROVISIONAL_STATUS_META[prov];
+              if (!provMeta) return null;
+              return (
+                <span className={`mt-1 inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded border ${provMeta.badge}`}>
+                  {provMeta.label}
+                </span>
+              );
+            })()}
+            {(() => {
+              const esc = String(solicitud.escalation_status || "").toLowerCase();
+              const escMeta = ESCALATION_STATUS_META[esc];
+              if (!escMeta) return null;
+              return (
+                <span className={`mt-1 inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded border ${escMeta.badge}`}>
+                  {escMeta.label}
+                </span>
+              );
+            })()}
             <div className="flex items-center gap-3 text-xs text-gray-500">
               <span>
                 {formatDateShort(solicitud.fecha_inicio)} - {formatDateShort(solicitud.fecha_fin)}
@@ -724,7 +709,7 @@ const PermisosStatusWidget = () => {
             )}
             {solicitud?.charged_to_vacation && (
               <p className="text-[11px] text-amber-800 mt-1">
-                Descuento aplicado a vacaciones: {Number(solicitud?.charged_vacation_hours || 0) || recoveryTotal || 0}h
+                Registro histórico de descuento: {Number(solicitud?.charged_vacation_hours || 0) || recoveryTotal || 0}h
                 {Number(solicitud?.charged_vacation_days || 0)
                   ? ` (${formatVacationDaysHours(Number(solicitud?.charged_vacation_days || 0)).text})`
                   : ""}
@@ -807,6 +792,27 @@ const PermisosStatusWidget = () => {
           </div>
         )}
 
+        {(() => {
+          const jStatus = String(solicitud.justificante_status || "").toLowerCase();
+          const jMeta = JUSTIFICANTE_STATUS_META[jStatus];
+          if (!jMeta || jStatus === "aceptado") return null;
+          return (
+            <div className={`mt-2 rounded-lg border p-2 ${jMeta.bg} ${jMeta.border}`}>
+              <p className={`text-[11px] font-semibold ${jMeta.text}`}>{jMeta.label}</p>
+              {solicitud.justificante_observations && (
+                <p className={`text-[11px] italic mt-1 ${jMeta.text}`}>
+                  {solicitud.justificante_observations}
+                </p>
+              )}
+              {solicitud.justificante_deadline && (
+                <p className={`text-[11px] mt-1 ${jMeta.text}`}>
+                  Plazo: {formatDateShort(solicitud.justificante_deadline)}
+                </p>
+              )}
+            </div>
+          );
+        })()}
+
         {hasJustificantes(solicitud) && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {solicitud.justificantes_urls.map((url, idx) => (
@@ -819,6 +825,23 @@ const PermisosStatusWidget = () => {
               >
                 <FiEye className="w-3 h-3" />
                 Justificante {idx + 1}
+              </a>
+            ))}
+          </div>
+        )}
+
+        {hasExternalCoordinationEvidence(solicitud) && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {solicitud.external_coordination_urls.map((url, idx) => (
+              <a
+                key={`${solicitud.id}-coord-${idx}`}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[10px] font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+              >
+                <FiEye className="w-3 h-3" />
+                Coordinación externa {idx + 1}
               </a>
             ))}
           </div>
@@ -865,65 +888,110 @@ const PermisosStatusWidget = () => {
           </div>
         )}
 
-        <div className="mt-3 flex gap-2">
-          {canCancelThis && (
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setSelectedSolicitud(solicitud);
-                setCancelReason("");
-                setShowCancelModal(true);
-              }}
-              className="flex-1 text-[10px] py-1.5 text-rose-600 border-rose-100 hover:bg-rose-50"
-            >
-              {requiresCancellationRequestFlow ? "Solicitar cancelacion" : "Cancelar solicitud"}
-            </Button>
-          )}
-        </div>
+        {(() => {
+          const provStatus = String(solicitud.provisional_status || "").toLowerCase();
+          const showRegularizacionActions =
+            isTalentRole && provStatus === "pendiente_regularizacion";
+          if (!showRegularizacionActions) return null;
+          const provMeta = PROVISIONAL_STATUS_META.pendiente_regularizacion;
+          return (
+            <div className={`mt-2 rounded-lg border p-2.5 ${provMeta.bg} ${provMeta.border}`}>
+              <p className={`text-[11px] font-semibold mb-2 ${provMeta.text}`}>
+                Ausencia urgente no procedente — requiere acción de regularización
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="flex-1 text-[10px] py-1.5 border-rose-300 text-rose-800 hover:bg-rose-100"
+                  onClick={() => openRegularizacionModal(solicitud.id, "rechazar_formalmente")}
+                  disabled={!!actionLoading}
+                >
+                  Rechazar formalmente
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="flex-1 text-[10px] py-1.5 border-emerald-300 text-emerald-800 hover:bg-emerald-100"
+                  onClick={() => openRegularizacionModal(solicitud.id, "aceptar_excepcion")}
+                  disabled={!!actionLoading}
+                >
+                  Aceptar por excepción
+                </Button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {(() => {
+          const jStatus = String(solicitud.justificante_status || "").toLowerCase();
+          const showResubmit = jStatus === "observado" && isRequesterOfSolicitud;
+          const showLogProgress =
+            Boolean(solicitud.es_recuperable) &&
+            coordinationStatus === "execution_in_progress" &&
+            isRequesterOfSolicitud;
+          const showCloseRecovery =
+            Boolean(solicitud.es_recuperable) &&
+            coordinationStatus === "pending_verification" &&
+            isRequesterOfSolicitud;
+          const hasAnyAction = canCancelThis || showResubmit || showLogProgress || showCloseRecovery;
+          if (!hasAnyAction) return null;
+          return (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {showResubmit && (
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setSelectedSolicitud(solicitud);
+                    setShowUploadModal(true);
+                  }}
+                  className="flex-1 text-[10px] py-1.5 bg-amber-600 hover:bg-amber-700"
+                >
+                  Resubmitir justificante
+                </Button>
+              )}
+              {showLogProgress && (
+                <Button
+                  variant="secondary"
+                  onClick={() => openRecoveryEditor(solicitud, "log_progress")}
+                  className="flex-1 text-[10px] py-1.5"
+                >
+                  Registrar progreso
+                </Button>
+              )}
+              {showCloseRecovery && (
+                <Button
+                  variant="primary"
+                  onClick={() => handleCloseRecovery(solicitud.id)}
+                  disabled={!!actionLoading}
+                  className="flex-1 text-[10px] py-1.5 bg-emerald-600 hover:bg-emerald-700"
+                >
+                  Confirmar recuperación
+                </Button>
+              )}
+              {canCancelThis && (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setSelectedSolicitud(solicitud);
+                    setCancelReason("");
+                    setShowCancelModal(true);
+                  }}
+                  className="flex-1 text-[10px] py-1.5 text-rose-600 border-rose-100 hover:bg-rose-50"
+                >
+                  {requiresCancellationRequestFlow ? "Solicitar cancelacion" : "Cancelar solicitud"}
+                </Button>
+              )}
+            </div>
+          );
+        })()}
       </motion.div>
     );
   };
 
   return (
+    <>
     <div className="space-y-4">
-      {/* Widget de Salida Inesperada */}
-      {!isTalentRole && (
-        <Card className="p-4 border-amber-100 bg-gradient-to-br from-amber-50/50 to-white">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-bold text-gray-900">Gestión de Salidas Inesperadas</h3>
-              <p className="text-xs text-gray-500 mt-0.5">Control de excepciones de asistencia en tiempo real</p>
-            </div>
-            <div className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
-              activeException ? "bg-amber-100 border-amber-200 text-amber-800 animate-pulse" : "bg-gray-100 border-gray-200 text-gray-500"
-            }`}>
-              {exceptionStepLabel.toUpperCase()}
-            </div>
-          </div>
-
-          {activeException ? (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {exceptionTimeEntries.map((entry, idx) => (
-                  <div key={`exc-time-${idx}`} className={`p-2 rounded-lg border ${entry.colors} transition-all`}>
-                    <p className="text-[10px] font-semibold opacity-80 mb-1 uppercase tracking-wider">{entry.label}</p>
-                    <p className="text-xs font-bold font-mono">
-                      {entry.value ? formatTimeSafe(entry.value) : "--:--"}
-                    </p>
-                    <p className="text-[9px] mt-1 font-medium italic opacity-70">{entry.note}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="py-4 text-center border-2 border-dashed border-gray-100 rounded-xl bg-gray-50/30">
-              <FiClock className="w-8 h-8 text-gray-200 mx-auto mb-2" />
-              <p className="text-xs text-gray-400 font-medium">No tienes salidas inesperadas activas en este momento</p>
-            </div>
-          )}
-        </Card>
-      )}
-
       {/* Widget de Carga de Justificantes */}
       {pendientesDeJustificante.length > 0 && (
         <Card className="p-4 border-blue-100 bg-gradient-to-br from-blue-50/50 to-white">
@@ -1062,10 +1130,15 @@ const PermisosStatusWidget = () => {
               <div className="p-2 bg-emerald-50 rounded-lg">
                 <FiClock className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-bold">Plan de recuperación</h3>
+              <h3 className="text-lg font-bold">
+                {recoveryModalAction === "log_progress" ? "Registrar progreso de recuperación" : "Plan de recuperación"}
+              </h3>
             </div>
             <p className="text-sm text-gray-600 mb-4">
-              Coordinación de tramos para cubrir <span className="font-bold text-emerald-700">{requestedRecoveryHours}h</span> pendientes.
+              {recoveryModalAction === "log_progress"
+                ? <>Ingresa las horas ya ejecutadas. Total a recuperar: <span className="font-bold text-emerald-700">{requestedRecoveryHours}h</span>.</>
+                : <>Coordinación de tramos para cubrir <span className="font-bold text-emerald-700">{requestedRecoveryHours}h</span> pendientes.</>
+              }
             </p>
 
             <div className="mt-4 space-y-3 max-h-[40vh] overflow-auto pr-1">
@@ -1156,14 +1229,24 @@ const PermisosStatusWidget = () => {
               >
                 Cancelar
               </Button>
-              {canSelectedRequesterCounterPropose && (
+              {recoveryModalAction === "log_progress" && (
+                <Button
+                  variant="primary"
+                  onClick={() => handleSaveRecoveryPlan("log_progress")}
+                  disabled={actionLoading === `recovery-${selectedSolicitud?.id}`}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 rounded-xl"
+                >
+                  Guardar progreso
+                </Button>
+              )}
+              {isSelectedRequester && recoveryModalAction !== "log_progress" && (
                 <Button
                   variant="primary"
                   onClick={() => handleSaveRecoveryPlan("propose")}
                   disabled={actionLoading === `recovery-${selectedSolicitud?.id}`}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-700 rounded-xl"
                 >
-                  Enviar propuesta
+                  {canSelectedRequesterCounterPropose ? "Enviar contrapropuesta" : "Enviar propuesta"}
                 </Button>
               )}
             </div>
@@ -1171,6 +1254,52 @@ const PermisosStatusWidget = () => {
         </div>
       )}
     </div>
+
+    {/* Modal de razón para regularización urgente */}
+    {regularizacionModal.open && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="w-full max-w-md rounded-xl bg-white shadow-xl p-5">
+          <h3 className="text-sm font-semibold text-gray-900 mb-1">
+            {regularizacionModal.action === "rechazar_formalmente"
+              ? "Rechazar formalmente la ausencia urgente"
+              : "Aceptar ausencia urgente por excepción"}
+          </h3>
+          <p className="text-xs text-gray-500 mb-3">
+            {regularizacionModal.action === "rechazar_formalmente"
+              ? "Esta acción cierra la solicitud como rechazada. Indica el motivo formal del rechazo."
+              : "Esta acción acepta la ausencia por excepción y la envía a aprobación final. Indica el motivo de la excepción."}
+          </p>
+          <textarea
+            className="w-full rounded-lg border border-gray-200 text-xs p-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            rows={3}
+            placeholder="Motivo obligatorio..."
+            value={regularizacionReason}
+            onChange={(e) => setRegularizacionReason(e.target.value)}
+          />
+          <div className="mt-3 flex gap-2 justify-end">
+            <Button
+              size="sm"
+              variant="secondary"
+              className="text-xs"
+              onClick={() => setRegularizacionModal({ open: false, solicitudId: null, action: null })}
+              disabled={!!actionLoading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              className={`text-xs ${regularizacionModal.action === "rechazar_formalmente" ? "bg-rose-600 hover:bg-rose-700" : "bg-emerald-600 hover:bg-emerald-700"}`}
+              onClick={handleConfirmRegularizacion}
+              disabled={!!actionLoading || !regularizacionReason.trim()}
+            >
+              {actionLoading ? "Procesando..." : "Confirmar"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 };
 
