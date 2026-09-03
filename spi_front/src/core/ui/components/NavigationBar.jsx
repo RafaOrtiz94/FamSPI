@@ -755,9 +755,11 @@ const NavButton = ({ link, variant = "primary", mobile = false, context = "nav",
 // como las divisiones de una regla, en vez de un divisor vertical genérico.
 const GroupSeparator = () => (
  <div className="mx-1 hidden self-stretch items-end xl:flex">
-   {/* Cruza el riel (bottom-1) en vez de flotar sobre él — si no toca la
-       línea base se lee como una coma suelta en vez de una graduación. */}
-   <span className="mb-0.5 h-2.5 w-px bg-[var(--border-control)]" />
+   {/* Cruza el riel (bottom-1, ver DesktopAdaptiveNav) con margen amplio a
+       propósito: el tick vive en un flujo flex (self-stretch) y el riel es
+       absolute — un margen ajustado al px exacto se desalinea por
+       redondeo de subpíxel entre ambos sistemas. mb-0 + h-4 lo garantiza. */}
+   <span className="mb-0 h-4 w-px bg-[var(--border-control)]" />
  </div>
 );
 
@@ -1164,7 +1166,10 @@ const NavigationBar = () => {
  <>
  {/* Barra de accesos — superficie clara, en contraste deliberado con el
      Header naval de arriba (identidad oscura / navegación clara). */}
- <nav className="hidden border-b border-[var(--border)] bg-[var(--surface)] md:block">
+ {/* Sin border-b propio: el riel de trazabilidad de abajo ya cierra la
+     barra — un segundo borde aquí queda ~11px por debajo del riel y no
+     coincide con las marcas de graduación (se leía como doble línea suelta). */}
+ <nav className="hidden bg-[var(--surface)] md:block">
  <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-8">
  <div className="flex min-h-12 items-center justify-between gap-4 py-1.5">
  <DesktopAdaptiveNav
