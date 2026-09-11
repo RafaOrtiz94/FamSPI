@@ -124,12 +124,20 @@ const postQueueableMark = async (endpoint, payload = {}, label) => {
     return { ok: true, queued: true, alreadyQueued: true, message: ALREADY_QUEUED_MESSAGE };
   }
 
+  // Capture the event time before the request can be delayed by a bad
+  // connection. This also covers legacy callers that do not pass markMeta.
+  const occurredAt = payload?.occurred_at || payload?.occurredAt;
+  const parsedOccurredAt = occurredAt ? new Date(occurredAt) : null;
+  const requestPayload = parsedOccurredAt && !Number.isNaN(parsedOccurredAt.getTime())
+    ? { ...payload, occurred_at: parsedOccurredAt.toISOString() }
+    : { ...payload, occurred_at: new Date().toISOString() };
+
   try {
-    const { data } = await api.post(endpoint, payload, { timeout: MARK_TIMEOUT_MS });
+    const { data } = await api.post(endpoint, requestPayload, { timeout: MARK_TIMEOUT_MS });
     return data;
   } catch (err) {
     if (!isNetworkError(err)) throw err;
-    enqueueOfflineMark({ endpoint, payload, label });
+    enqueueOfflineMark({ endpoint, payload: requestPayload, label });
     return {
       ok: true,
       queued: true,
@@ -389,7 +397,10 @@ export const decideTeleworkRequest = async (requestId, decision, reason = "") =>
 
 export const marcarEntradaOficina = async (location = null, payloadOrMarkMeta = {}, maybeMarkMeta = {}) => {
  const payload = normalizeOperationalEndPayload(location, payloadOrMarkMeta, maybeMarkMeta);
- return postAttendancePayload("/attendance/marcar/entrada-oficina", payload);
+ if (payloadHasBinary(payload)) {
+  return postAttendancePayload("/attendance/marcar/entrada-oficina", payload);
+ }
+ return postQueueableMark("/attendance/marcar/entrada-oficina", payload, "Entrada a oficina");
 };
 
 export const marcarSalidaCampo = async (location = null, description = null, markMeta = {}) => {
@@ -402,7 +413,10 @@ export const marcarSalidaCampo = async (location = null, description = null, mar
 
 export const marcarEntradaCampo = async (location = null, payloadOrMarkMeta = {}, maybeMarkMeta = {}) => {
  const payload = normalizeOperationalEndPayload(location, payloadOrMarkMeta, maybeMarkMeta);
- return postAttendancePayload("/attendance/marcar/entrada-campo", payload);
+ if (payloadHasBinary(payload)) {
+  return postAttendancePayload("/attendance/marcar/entrada-campo", payload);
+ }
+ return postQueueableMark("/attendance/marcar/entrada-campo", payload, "Entrada a campo");
 };
 
 export const marcarLlegadaDestino = async (location = null, markMeta = {}) => {
@@ -432,7 +446,10 @@ export const marcarCierreViaje = async (location = null, reason = null, markMeta
    ? { ...reason }
    : { closure_reason: reason };
  const payload = normalizeOperationalEndPayload(location, rawPayload, markMeta);
- return postAttendancePayload("/attendance/marcar/cierre-viaje", payload);
+ if (payloadHasBinary(payload)) {
+  return postAttendancePayload("/attendance/marcar/cierre-viaje", payload);
+ }
+ return postQueueableMark("/attendance/marcar/cierre-viaje", payload, "Cierre de viaje");
 };
 
 /**

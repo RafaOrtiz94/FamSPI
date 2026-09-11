@@ -26,7 +26,7 @@ import {
   getTiActaSignatureWorkflow,
   listTiFinancialDocs, uploadTiFinancialDoc, uploadTiActaSigned,
   getTiActaPdf, downloadTiAssetReport, downloadTiCollaboratorReport,
-  downloadTiMaintenanceReport, startTiActaSignatureWorkflow,
+  downloadTiMaintenanceReport, downloadTiActasReport, startTiActaSignatureWorkflow,
 } from "../../../core/api/tiAssetsApi";
 import { downloadSignatureWorkflowFinalPdf, validateSignerProfiles } from "../../../core/api/signatureWorkflowsApi";
 import { TiActaEditModal, TiWorkflowStartModal } from "../../ti/components/TiActaModals";
@@ -1691,6 +1691,7 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
   // Reports
   const [reportCollab, setReportCollab] = useState("");
   const [reportYear, setReportYear]     = useState(new Date().getFullYear());
+  const [reportActaCode, setReportActaCode] = useState("");
 
   const setField = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
 
@@ -2181,7 +2182,7 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
           <FiBarChart2 size={15} className="text-slate-400" />
           <span className="text-sm font-semibold text-slate-800">Reportes PDF</span>
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl border border-slate-200 p-4 space-y-3">
             <p className="text-xs font-semibold text-slate-700">Por equipo</p>
             <p className="text-xs text-slate-400">Historial, actas y depreciación de un activo.</p>
@@ -2219,6 +2220,17 @@ function TiAssetsTab({ tiAssets, users, onRefresh }) {
               onChange={(e) => setReportYear(Number(e.target.value || new Date().getFullYear()))}
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:outline-none" />
             <button type="button" onClick={() => downloadTiMaintenanceReport({ period_type: "annual", year: reportYear })}
+              className="flex items-center justify-center gap-2 w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors">
+              <FiDownload size={13} /> Descargar PDF
+            </button>
+          </div>
+          <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+            <p className="text-xs font-semibold text-slate-700">Actas de entrega-recepción</p>
+            <p className="text-xs text-slate-400">Todas las actas, ordenadas por N° de acta. Filtro opcional por número.</p>
+            <input type="text" value={reportActaCode} onChange={(e) => setReportActaCode(e.target.value)}
+              placeholder="N° de acta (opcional)"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:outline-none" />
+            <button type="button" onClick={() => downloadTiActasReport({ acta_code: reportActaCode || undefined })}
               className="flex items-center justify-center gap-2 w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors">
               <FiDownload size={13} /> Descargar PDF
             </button>

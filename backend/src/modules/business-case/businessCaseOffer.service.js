@@ -2,10 +2,12 @@ const fs = require("fs");
 const path = require("path");
 const { Readable } = require("stream");
 const PDFDocument = require("pdfkit");
+const { PDFDocument: PdfLibDocument } = require("pdf-lib");
 const XLSX = require("xlsx");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { drive, sheets } = require("../../config/google");
+const { downloadFileBuffer } = require("../../utils/drive");
 const { ensureBusinessCaseDriveFolderById } = require("./businessCaseDriveFolder.service");
 const { recordDocumentVersion } = require("./businessCaseSheetGeneration.service");
 const { loadTemplateDefinition, buildSheetPayloads } = require("./businessCaseSheetSyncLocal.service");
@@ -547,6 +549,14 @@ async function ensureOfferTable() {
       ON public.bc_offer_versions (business_case_id, offer_key, status, version_number DESC)
       WHERE business_case_id IS NOT NULL;
   `);
+
+  await db.query(`
+    ALTER TABLE public.bc_offer_versions
+      ADD COLUMN IF NOT EXISTS specific_proposal_file_id TEXT,
+      ADD COLUMN IF NOT EXISTS specific_proposal_url TEXT,
+      ADD COLUMN IF NOT EXISTS specific_proposal_uploaded_at timestamptz,
+      ADD COLUMN IF NOT EXISTS specific_proposal_uploaded_by integer;
+  `);
 }
 
 async function getBusinessCaseOfferContext(businessCaseId) {
@@ -1043,7 +1053,6 @@ async function buildOfferTemplatePayload(context, items, user) {
       : `OFERTA COMERCIAL PARA ${resolveOfferAreaLabel(equipmentPresentation?.category)}`,
     city: location.city,
     province: location.province,
-    isHematology: String(equipmentPresentation?.category || "").trim().toLowerCase() === "hematology",
     sections: grouped,
     layout_positions: computeCompactLayoutPositions(grouped),
   };
@@ -1352,11 +1361,16 @@ async function getJefeComercialName() {
        FROM users
       WHERE active = true
         AND lower(role) = ANY($1::text[])
+        AND lower(trim(fullname)) NOT IN ('prueba 5')
       ORDER BY id ASC
       LIMIT 1`,
     [["jefe_comercial"]],
   );
-  return rows[0]?.fullname || null;
+  if (!rows[0]?.fullname) {
+    logger.warn("No se encontro ningun usuario activo con rol jefe_comercial; el PDF de oferta usara el rotulo generico");
+    return null;
+  }
+  return rows[0].fullname;
 }
 
 // El footer solo se dibuja una vez, al final del documento (ver renderOfferPdfFooter,
@@ -1577,8 +1591,8 @@ function drawOfferSectionLabel(doc, title, startY) {
   doc.fillColor("#1D4ED8").font(OFFER_PDF_FONT_BOLD).fontSize(10).text(normalizePdfText(title).toUpperCase(), bounds.left + 14, startY + 8);
 }
 
-function shouldShowDeterminationPriceColumn(sectionKey, isHematology) {
-  return sectionKey === "reactivo" || isHematology === true;
+function shouldShowDeterminationPriceColumn(sectionKey) {
+  return sectionKey === "reactivo";
 }
 
 function drawOfferSectionTable(doc, title, rows = [], { showDeterminationPrice = true } = {}) {
@@ -1702,29 +1716,6 @@ function drawOfferSectionTable(doc, title, rows = [], { showDeterminationPrice =
   doc.y = tableY + 10;
 }
 
-async function resolveOfferIsHematology(templatePayload = {}) {
-  if (typeof templatePayload?.isHematology === "boolean") return templatePayload.isHematology;
-  const names = [...new Set(
-    Object.values(templatePayload?.sections || {})
-      .flat()
-      .map((row) => String(row?.equipmentName || "").trim())
-      .filter(Boolean),
-  )];
-  if (!names.length) return false;
-  try {
-    const { rows } = await db.query(
-      `SELECT equipment_name, category
-         FROM v_equipment_full_catalog
-        WHERE equipment_name = ANY($1::text[])`,
-      [names],
-    );
-    return rows.length === names.length && rows.every((row) => String(row?.category || "").trim().toLowerCase() === "hematology");
-  } catch (error) {
-    logger.warn({ error: error?.message || String(error), names }, "No se pudo resolver la categoria del equipo para el PDF de oferta");
-    return false;
-  }
-}
-
 function drawOfferEquipmentGroupHeader(doc, equipmentName, y) {
   const bounds = getOfferPdfBounds(doc);
   doc.save();
@@ -1738,7 +1729,7 @@ function drawOfferEquipmentGroupHeader(doc, equipmentName, y) {
   );
 }
 
-function renderOfferPdfFooter(doc, { jefeComercialName } = {}) {
+function renderOfferPdfFooter(doc, { jefeComercialName, clientName } = {}) {
   const bounds = getOfferPdfBounds(doc);
   const footerHeight = getOfferPdfFooterHeight();
   if (doc.y + footerHeight > bounds.bottom) {
@@ -1790,8 +1781,20 @@ function renderOfferPdfFooter(doc, { jefeComercialName } = {}) {
     lineBreak: false,
     ellipsis: true,
   });
-  doc.fillColor("#64748B").font(OFFER_PDF_FONT_REGULAR).fontSize(8.3).text("Jefe Comercial", leftLineStart, lineY + 32);
-  doc.text("Nombre y firma", rightLineStart, lineY + 20, { width: signatureGap + 30, align: "center" });
+  doc.fillColor("#64748B").font(OFFER_PDF_FONT_REGULAR).fontSize(8.3).text("Sales Manager", leftLineStart, lineY + 32);
+  // El nombre del cliente debe imprimirse aqui, igual que el de Jefe Comercial
+  // a la izquierda -- antes esta columna solo mostraba el rotulo estatico
+  // "Nombre y firma" sin ningun dato real del cliente.
+  doc.fillColor("#334155").font(OFFER_PDF_FONT_BOLD).fontSize(8.5).text(normalizePdfText(clientName || "Cliente"), rightLineStart, lineY + 20, {
+    width: rightLineEnd - rightLineStart,
+    align: "center",
+    lineBreak: false,
+    ellipsis: true,
+  });
+  doc.fillColor("#64748B").font(OFFER_PDF_FONT_REGULAR).fontSize(8.3).text("Nombre y firma", rightLineStart, lineY + 32, {
+    width: rightLineEnd - rightLineStart,
+    align: "center",
+  });
   doc.y = footerTop + footerHeight;
 }
 
@@ -1805,7 +1808,7 @@ async function buildFormalOfferPdfBuffer({ context, offer, templatePayload, pric
     ...templatePayload,
     sections: mergedSections,
   };
-  const isHematology = await resolveOfferIsHematology(normalizedPayload);
+  const clientName = normalizedPayload.clientName || context?.client_name || "";
 
   const jefeComercialName = await getJefeComercialName().catch((error) => {
     logger.warn({ error: error?.message || String(error) }, "No se pudo resolver el nombre de Jefe Comercial para el PDF de oferta");
@@ -1838,11 +1841,11 @@ async function buildFormalOfferPdfBuffer({ context, offer, templatePayload, pric
 
     getOfferSectionKeys(normalizedPayload.sections).forEach((key) => {
       drawOfferSectionTable(doc, labels[key], normalizedPayload.sections?.[key] || [], {
-        showDeterminationPrice: shouldShowDeterminationPriceColumn(key, isHematology),
+        showDeterminationPrice: shouldShowDeterminationPriceColumn(key),
       });
     });
 
-    renderOfferPdfFooter(doc, { jefeComercialName });
+    renderOfferPdfFooter(doc, { jefeComercialName, clientName });
 
     const range = doc.bufferedPageRange();
     for (let i = 0; i < range.count; i += 1) {
@@ -2530,6 +2533,11 @@ function deriveOfferPermissions(context, user, latestOffer) {
       isFeasibleBusinessCase(context) &&
       latestOffer &&
       OFFER_PUBLISHABLE_STATUSES.has(String(latestOffer.status || "").trim().toLowerCase()),
+    canSendSigned:
+      isManager &&
+      isFeasibleBusinessCase(context) &&
+      latestOffer &&
+      String(latestOffer.status || "").trim().toLowerCase() === "ready_to_send",
     canDecide:
       isCreatorCommercial &&
       isFeasibleBusinessCase(context) &&
@@ -2951,11 +2959,44 @@ async function createOfferDraftForContext(context, user, target = null) {
   return mapOfferRow(rows[0]);
 }
 
-async function publishOfferVersion(businessCaseId, offerId, user) {
+// Carpeta fija de Drive con la propuesta de valor institucional (unica, para
+// todas las ofertas). Va SIEMPRE primero en el PDF final publicado.
+const VALUE_PROPOSITION_FOLDER_ID = "1RAiU8BwtUleLrvipVq7h-rfqE_R1qIoH";
+
+async function getValuePropositionPdfBuffer() {
+  const { data } = await drive.files.list({
+    q: `'${VALUE_PROPOSITION_FOLDER_ID}' in parents and mimeType = 'application/pdf' and trashed = false`,
+    fields: "files(id, name)",
+    pageSize: 1,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+  const file = data?.files?.[0];
+  if (!file?.id) {
+    const error = new Error("No se encontro el PDF de propuesta de valor en la carpeta configurada de Drive.");
+    error.status = 409;
+    error.code = "BC_OFFER_VALUE_PROPOSITION_MISSING";
+    throw error;
+  }
+  return downloadFileBuffer(file.id);
+}
+
+// Concatena PDFs completos (todas las paginas) en el orden dado, en un solo buffer.
+async function mergeOfferPdfBuffers(buffers) {
+  const merged = await PdfLibDocument.create();
+  for (const buffer of buffers) {
+    const source = await PdfLibDocument.load(buffer);
+    const pages = await merged.copyPages(source, source.getPageIndices());
+    pages.forEach((page) => merged.addPage(page));
+  }
+  return Buffer.from(await merged.save());
+}
+
+async function publishOfferVersion(businessCaseId, offerId, user, specificProposalFile) {
   await ensureOfferTable();
   const context = await getBusinessCaseOfferContext(businessCaseId);
   assertOfferManager(context, user);
-  return publishOfferVersionForContext(context, offerId, user);
+  return publishOfferVersionForContext(context, offerId, user, specificProposalFile);
 }
 
 async function publishPrivatePurchaseOfferVersion(privatePurchaseId, offerId, user) {
@@ -2965,7 +3006,7 @@ async function publishPrivatePurchaseOfferVersion(privatePurchaseId, offerId, us
   return publishOfferVersionForContext(context, offerId, user);
 }
 
-async function publishOfferVersionForContext(context, offerId, user) {
+async function publishOfferVersionForContext(context, offerId, user, specificProposalFile) {
   const owner = resolveOfferOwner(context);
   const offer = await getOfferVersionById(context, offerId);
   const normalizedStatus = String(offer.status || "").trim().toLowerCase();
@@ -2981,14 +3022,24 @@ async function publishOfferVersionForContext(context, offerId, user) {
     error.code = "BC_OFFER_SHEET_REQUIRED";
     throw error;
   }
-
   const pricingPayload = await readPricingPayloadFromSheet(offer);
-  if (!pricingPayload?.summary?.is_complete) {
-    const error = new Error("No se puede publicar la oferta porque faltan precios en la hoja editable.");
-    error.status = 409;
-    error.code = "BC_OFFER_PRICING_INCOMPLETE";
-    error.details = pricingPayload?.summary || null;
-    throw error;
+  // La propuesta especifica solo se exige en el flujo de Business Case; el
+  // publish de compras privadas comparte esta funcion pero no tiene (aun)
+  // un paso de carga de archivo en su UI/ruta.
+  const isBusinessCaseOffer = context?.source_type !== "private_purchase";
+  if (isBusinessCaseOffer) {
+    if (!specificProposalFile?.buffer?.length) {
+      const error = new Error("Debes subir la propuesta especifica para publicar la oferta.");
+      error.status = 400;
+      error.code = "BC_OFFER_SPECIFIC_PROPOSAL_REQUIRED";
+      throw error;
+    }
+    if (String(specificProposalFile.mimetype || "").toLowerCase() !== "application/pdf") {
+      const error = new Error("La propuesta especifica debe ser un archivo PDF.");
+      error.status = 400;
+      error.code = "BC_OFFER_SPECIFIC_PROPOSAL_INVALID_TYPE";
+      throw error;
+    }
   }
   const leadTime = await readOfferPlazoFromSheet(offer.sheet_file_id);
   const driveContext = await ensureOfferDriveFolder(context);
@@ -2996,12 +3047,44 @@ async function publishOfferVersionForContext(context, offerId, user) {
   const offerTarget = getOfferTargetFromRow(offer);
   const targetLabel = offerTarget.offerKey === "default" ? "" : ` - ${offerTarget.offerLabel || offerTarget.targetEquipmentName || offerTarget.offerKey}`;
   const fileName = sanitizeFileName(`${context.client_name || "Cliente"} - Oferta ${sourceLabel}${targetLabel} V${offer.version_number}.pdf`);
-  const pdfBuffer = await buildFormalOfferPdfBuffer({
+  const offerTablesPdfBuffer = await buildFormalOfferPdfBuffer({
     context,
     offer,
     templatePayload: { ...toObject(offer.template_payload), leadTime },
     pricingPayload,
   });
+
+  let pdfBuffer = offerTablesPdfBuffer;
+  let uploadedSpecificProposal = null;
+  if (isBusinessCaseOffer) {
+    // Orden fijo del documento final: propuesta de valor (institucional,
+    // siempre primero) -> propuesta especifica (la que sube comercial) ->
+    // oferta generada con tablas de precios.
+    const valuePropositionPdfBuffer = await getValuePropositionPdfBuffer();
+    pdfBuffer = await mergeOfferPdfBuffers([
+      valuePropositionPdfBuffer,
+      specificProposalFile.buffer,
+      offerTablesPdfBuffer,
+    ]);
+
+    const specificProposalName = sanitizeFileName(
+      `${context.client_name || "Cliente"} - Propuesta especifica V${offer.version_number}.pdf`,
+    );
+    const { data: uploaded } = await drive.files.create({
+      supportsAllDrives: true,
+      requestBody: {
+        name: specificProposalName,
+        parents: driveContext.folderId ? [driveContext.folderId] : undefined,
+      },
+      media: {
+        mimeType: "application/pdf",
+        body: bufferToStream(specificProposalFile.buffer),
+      },
+      fields: "id,name,webViewLink",
+    });
+    uploadedSpecificProposal = uploaded;
+  }
+
   const { data: uploadedPdf } = await drive.files.create({
     supportsAllDrives: true,
     requestBody: {
@@ -3015,16 +3098,27 @@ async function publishOfferVersionForContext(context, offerId, user) {
     fields: "id,name,webViewLink",
   });
 
+  // BC: este paso solo genera y deja lista la vista previa/descarga del
+  // documento unido -- NO envia la oferta. El envio real ("sent") ocurre en
+  // sendSignedOfferForContext, cuando se sube el PDF ya firmado
+  // electronicamente fuera del SPI. Compra privada no tiene ese segundo paso
+  // todavia, asi que mantiene el comportamiento previo (publica = enviado).
+  const nextStatus = isBusinessCaseOffer ? "ready_to_send" : "sent";
+
   const { rows } = await db.query(
     `UPDATE bc_offer_versions
-        SET status = 'sent',
+        SET status = $9,
             pdf_file_id = $3,
             pdf_url = $4,
             pricing_payload = $5::jsonb,
-            sent_by = $6,
-            sent_at = NOW(),
+            sent_by = CASE WHEN $9 = 'sent' THEN $6 ELSE sent_by END,
+            sent_at = CASE WHEN $9 = 'sent' THEN NOW() ELSE sent_at END,
             updated_at = NOW(),
-            rejection_reason = NULL
+            rejection_reason = NULL,
+            specific_proposal_file_id = COALESCE($7, specific_proposal_file_id),
+            specific_proposal_url = COALESCE($8, specific_proposal_url),
+            specific_proposal_uploaded_at = CASE WHEN $7::text IS NOT NULL THEN NOW() ELSE specific_proposal_uploaded_at END,
+            specific_proposal_uploaded_by = CASE WHEN $7::text IS NOT NULL THEN $6 ELSE specific_proposal_uploaded_by END
       WHERE ${owner.idColumn} = $1
         AND id = $2
       RETURNING *`,
@@ -3042,8 +3136,15 @@ async function publishOfferVersionForContext(context, offerId, user) {
         },
       }),
       Number(user?.id) || null,
+      uploadedSpecificProposal?.id || null,
+      uploadedSpecificProposal?.webViewLink || null,
+      nextStatus,
     ],
   );
+
+  if (isBusinessCaseOffer) {
+    return mapOfferRow(rows[0]);
+  }
 
   if (context?.source_type === "private_purchase") {
     const privatePurchaseId = context.private_purchase_id || context.id;
@@ -3072,66 +3173,136 @@ async function publishOfferVersionForContext(context, offerId, user) {
         "No se pudo transicionar la compra privada tras publicar oferta",
       );
     }
-  } else {
-    await recordDocumentVersion({
+  }
+
+  return mapOfferRow(rows[0]);
+}
+
+async function sendSignedOfferVersion(businessCaseId, offerId, user, signedFile) {
+  await ensureOfferTable();
+  const context = await getBusinessCaseOfferContext(businessCaseId);
+  assertOfferManager(context, user);
+  return sendSignedOfferForContext(context, offerId, user, signedFile);
+}
+
+// Paso 2 (solo Business Case): sube el PDF ya firmado electronicamente fuera
+// del SPI y recien ahi la oferta se considera enviada de verdad -- dispara
+// todo lo que antes ocurria en el publish original (registro de version del
+// documento, sync a compras vinculadas, CRM, notificaciones).
+async function sendSignedOfferForContext(context, offerId, user, signedFile) {
+  const owner = resolveOfferOwner(context);
+  const offer = await getOfferVersionById(context, offerId);
+  const normalizedStatus = String(offer.status || "").trim().toLowerCase();
+  if (normalizedStatus !== "ready_to_send") {
+    const error = new Error("Primero genera el documento unido antes de subir la version firmada.");
+    error.status = 409;
+    error.code = "BC_OFFER_NOT_READY_FOR_SIGNATURE";
+    throw error;
+  }
+  if (!signedFile?.buffer?.length) {
+    const error = new Error("Debes subir el documento firmado para enviar la oferta.");
+    error.status = 400;
+    error.code = "BC_OFFER_SIGNED_DOCUMENT_REQUIRED";
+    throw error;
+  }
+  if (String(signedFile.mimetype || "").toLowerCase() !== "application/pdf") {
+    const error = new Error("El documento firmado debe ser un archivo PDF.");
+    error.status = 400;
+    error.code = "BC_OFFER_SIGNED_DOCUMENT_INVALID_TYPE";
+    throw error;
+  }
+
+  const driveContext = await ensureOfferDriveFolder(context);
+  const offerTarget = getOfferTargetFromRow(offer);
+  const targetLabel = offerTarget.offerKey === "default" ? "" : ` - ${offerTarget.offerLabel || offerTarget.targetEquipmentName || offerTarget.offerKey}`;
+  const fileName = sanitizeFileName(`${context.client_name || "Cliente"} - Oferta BC${targetLabel} V${offer.version_number} (firmada).pdf`);
+
+  const { data: uploadedPdf } = await drive.files.create({
+    supportsAllDrives: true,
+    requestBody: {
+      name: fileName,
+      parents: driveContext.folderId ? [driveContext.folderId] : undefined,
+    },
+    media: {
+      mimeType: "application/pdf",
+      body: bufferToStream(signedFile.buffer),
+    },
+    fields: "id,name,webViewLink",
+  });
+
+  const { rows } = await db.query(
+    `UPDATE bc_offer_versions
+        SET status = 'sent',
+            pdf_file_id = $3,
+            pdf_url = $4,
+            sent_by = $5,
+            sent_at = NOW(),
+            updated_at = NOW()
+      WHERE ${owner.idColumn} = $1
+        AND id = $2
+      RETURNING *`,
+    [owner.idValue, offerId, uploadedPdf.id, uploadedPdf.webViewLink || null, Number(user?.id) || null],
+  );
+
+  await recordDocumentVersion({
+    businessCaseId: context.id,
+    documentType: "offer_pdf",
+    documentUrl: uploadedPdf.webViewLink || null,
+    sheetId: uploadedPdf.id,
+    fileName,
+    canonicalState: context.canonical_state || null,
+    generatedBy: Number(user?.id) || null,
+    metadata: {
+      offer_version_id: Number(offerId),
+      offer_key: offerTarget.offerKey,
+      target_equipment_id: offerTarget.targetEquipmentId,
+      target_equipment_name: offerTarget.targetEquipmentName,
+      version_number: Number(offer.version_number),
+      source: "bc_offer_workspace",
+      signed_externally: true,
+    },
+  });
+
+  await updateOfferSummaryMetadata(context.id, {
+    current_offer_version_id: Number(offerId),
+    current_offer_status: "sent",
+    current_offer_version_number: Number(offer.version_number),
+    current_offer_pdf_file_id: uploadedPdf.id,
+    current_offer_sent_at: new Date().toISOString(),
+    current_offer_key: offerTarget.offerKey,
+    current_offer_target_equipment_id: offerTarget.targetEquipmentId,
+    current_offer_target_equipment_name: offerTarget.targetEquipmentName,
+  });
+
+  if (offerTarget.offerKey === "default") {
+    await syncPublishedOfferToLinkedPrivatePurchase({
       businessCaseId: context.id,
-      documentType: "offer_pdf",
-      documentUrl: uploadedPdf.webViewLink || null,
-      sheetId: uploadedPdf.id,
-      fileName,
-      canonicalState: context.canonical_state || null,
-      generatedBy: Number(user?.id) || null,
-      metadata: {
-        offer_version_id: Number(offerId),
-        offer_key: offerTarget.offerKey,
-        target_equipment_id: offerTarget.targetEquipmentId,
-        target_equipment_name: offerTarget.targetEquipmentName,
-        version_number: Number(offer.version_number),
-        source: "bc_offer_workspace",
-      },
+      pdfFileId: uploadedPdf.id,
+      user,
     });
-
-    await updateOfferSummaryMetadata(context.id, {
-      current_offer_version_id: Number(offerId),
-      current_offer_status: "sent",
-      current_offer_version_number: Number(offer.version_number),
-      current_offer_pdf_file_id: uploadedPdf.id,
-      current_offer_sent_at: new Date().toISOString(),
-      current_offer_key: offerTarget.offerKey,
-      current_offer_target_equipment_id: offerTarget.targetEquipmentId,
-      current_offer_target_equipment_name: offerTarget.targetEquipmentName,
-    });
-
-    if (offerTarget.offerKey === "default") {
-      await syncPublishedOfferToLinkedPrivatePurchase({
-        businessCaseId: context.id,
-        pdfFileId: uploadedPdf.id,
-        user,
-      });
-      await syncPublishedOfferToLinkedPublicPurchase({
-        businessCaseId: context.id,
-        pdfFileId: uploadedPdf.id,
-      });
-    }
-
-    try {
-      const crmPurchaseSyncService = require("../crm-fam/crmPurchaseSync.service");
-      await crmPurchaseSyncService.syncBusinessCaseOfferSent(context.id, user);
-    } catch (crmSyncError) {
-      logger.warn(
-        { crmSyncError: crmSyncError?.message || String(crmSyncError), businessCaseId: context.id },
-        "No se pudo sincronizar oferta enviada del business case con CRM",
-      );
-    }
-
-    await notifyOfferPublished({
+    await syncPublishedOfferToLinkedPublicPurchase({
       businessCaseId: context.id,
-      context,
-      offerVersionId: Number(offerId),
-      versionNumber: Number(offer.version_number),
-      creatorUserId: context.created_by || null,
+      pdfFileId: uploadedPdf.id,
     });
   }
+
+  try {
+    const crmPurchaseSyncService = require("../crm-fam/crmPurchaseSync.service");
+    await crmPurchaseSyncService.syncBusinessCaseOfferSent(context.id, user);
+  } catch (crmSyncError) {
+    logger.warn(
+      { crmSyncError: crmSyncError?.message || String(crmSyncError), businessCaseId: context.id },
+      "No se pudo sincronizar oferta enviada del business case con CRM",
+    );
+  }
+
+  await notifyOfferPublished({
+    businessCaseId: context.id,
+    context,
+    offerVersionId: Number(offerId),
+    versionNumber: Number(offer.version_number),
+    creatorUserId: context.created_by || null,
+  });
 
   return mapOfferRow(rows[0]);
 }
@@ -3150,8 +3321,20 @@ async function syncOfferPricingAndPdfInPlace(businessCaseId, offerId, user) {
   const owner = resolveOfferOwner(context);
   const offer = await getOfferVersionById(context, offerId);
   const status = String(offer.status || "").trim().toLowerCase();
+  const isBusinessCaseOffer = context?.source_type !== "private_purchase";
   if (!["draft", "rejected", "sent"].includes(status)) {
     const error = new Error("Solo se pueden sincronizar precios en una oferta draft, rejected o sent");
+    error.status = 409;
+    error.code = "BC_OFFER_PRICING_SYNC_STATE_INVALID";
+    throw error;
+  }
+  // BC: "ready_to_send" ya queda bloqueada por el chequeo de arriba (no esta
+  // en la lista). "sent" para BC ahora significa "ya firmado externamente y
+  // subido" -- sincronizar precios aqui reconstruiria SOLO las tablas de la
+  // oferta y sobreescribiria ese PDF firmado con una version sin fusionar.
+  // Compra privada no pasa por ese merge, conserva el comportamiento previo.
+  if (isBusinessCaseOffer && status === "sent") {
+    const error = new Error("No se puede sincronizar precios sobre el documento ya enviado; crea una nueva version de la oferta.");
     error.status = 409;
     error.code = "BC_OFFER_PRICING_SYNC_STATE_INVALID";
     throw error;
@@ -3234,8 +3417,19 @@ async function regenerateOfferVersionForContext(context, offerId, user) {
   const owner = resolveOfferOwner(context);
   const offer = await getOfferVersionById(context, offerId);
   const currentStatus = String(offer.status || "").trim().toLowerCase();
+  const isBusinessCaseOffer = context?.source_type !== "private_purchase";
   if (!["draft", "rejected", "sent"].includes(currentStatus)) {
     const error = new Error("Solo se puede regenerar una oferta en draft, rejected o sent");
+    error.status = 409;
+    error.code = "BC_OFFER_REGENERATE_STATE_INVALID";
+    throw error;
+  }
+  // BC: "sent" ahora significa "ya firmado externamente y subido" -- la
+  // rama de abajo reconstruye el PDF solo con las tablas (sin el merge de
+  // propuesta de valor + especifica), lo que sobreescribiria el documento
+  // firmado. Compra privada no pasa por ese merge y conserva su flujo.
+  if (isBusinessCaseOffer && currentStatus === "sent") {
+    const error = new Error("No se puede regenerar el documento ya enviado; crea una nueva version de la oferta.");
     error.status = 409;
     error.code = "BC_OFFER_REGENERATE_STATE_INVALID";
     throw error;
@@ -3475,6 +3669,7 @@ module.exports = {
   createPrivatePurchaseOfferDraft,
   publishOfferVersion,
   publishPrivatePurchaseOfferVersion,
+  sendSignedOfferVersion,
   decideOfferVersion,
   ensureOfferTable,
   regenerateOfferVersionInPlace,
@@ -3496,6 +3691,7 @@ module.exports = {
     mergePricingIntoSections,
     readPricingPayloadFromSheet,
     buildFormalOfferPdfBuffer,
+    mergeOfferPdfBuffers,
     readOfferPlazoFromSheet,
     normalizePrivatePurchaseEquipmentItems,
     buildOfferTargetsForContext,

@@ -1,4 +1,5 @@
 const db = require("../../config/db");
+const { PASSIVE_EMPLOYMENT_STATUSES } = require("../../utils/employmentStatus");
 const {
   buildAttendanceRangeQuery,
 } = require("./attendanceReports.service");
@@ -74,7 +75,12 @@ const buildCollaboratorWhereClause = ({
   const params = [];
 
   if (!includeInactive) {
-    where.push("u.active = true");
+    // Antes solo miraba users.active -- un colaborador desvinculado con
+    // estatus_empleado = "desvinculado" pero active aun en true (dato sin
+    // actualizar) seguia apareciendo en asistencia. "pasante" no esta en
+    // PASSIVE_EMPLOYMENT_STATUSES, asi que sigue contando como activo.
+    params.push(PASSIVE_EMPLOYMENT_STATUSES);
+    where.push(`u.active = true AND LOWER(TRIM(COALESCE(cp.profile->'laboral'->>'estatus_empleado', 'activo'))) <> ALL($${params.length}::text[])`);
   }
 
   if (search) {

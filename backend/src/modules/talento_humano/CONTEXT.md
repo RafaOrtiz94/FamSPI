@@ -23,7 +23,8 @@ Prefijo: `/api/v1/talento-humano`
 - `multer.memoryStorage()` para documentos
 
 ## 5. Base de datos
-- No verificado en DB
+- La fuente documental oficial verificada en Neon es `collaborator_documents`, enlazada por `user_id` con `users`.
+- El catalogo canonico esta en `backend/src/modules/shared/collaboratorDocumentCatalog.js`.
 
 ## 6. Relaciones
 - `users`: los empleados tienen cuenta de usuario en el sistema

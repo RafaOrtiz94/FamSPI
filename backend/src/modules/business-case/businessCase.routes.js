@@ -256,7 +256,15 @@ router.post(
   "/:id/offer-workspace/:offerId/publish",
   verifyToken,
   requireRole(["acp_comercial", "jefe_comercial"]),
+  upload.single("file"),
   ctrl.publishOfferVersion,
+);
+router.post(
+  "/:id/offer-workspace/:offerId/send-signed",
+  verifyToken,
+  requireRole(["acp_comercial", "jefe_comercial"]),
+  upload.single("file"),
+  ctrl.sendSignedOfferVersion,
 );
 router.post(
   "/:id/offer-workspace/:offerId/regenerate",

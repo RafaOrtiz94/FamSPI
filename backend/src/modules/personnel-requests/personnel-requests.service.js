@@ -2296,7 +2296,7 @@ async function hirePersonnelRequest(requestId, userId, options = {}) {
                 WHEN 'ACTA_MATRIMONIO'                THEN 'MARRIAGE_CERTIFICATE'
                 WHEN 'CERTIFICADO_NACIMIENTO_HIJOS'   THEN 'CHILD_BIRTH_CERTIFICATE'
                 WHEN 'CERTIFICADO_TRABAJO_ANTERIOR'   THEN 'LABOR_CERTIFICATE'
-                WHEN 'CONTRATO_TRABAJO'               THEN 'CONTRACT_MDT'
+                WHEN 'CONTRATO_TRABAJO'               THEN 'CONTRACT_FAM'
                 WHEN 'CONTRACT_FAM'                   THEN 'CONTRACT_FAM'
                 WHEN 'CONVENIO_CONFIDENCIALIDAD'      THEN 'CONFIDENTIALITY_AGREEMENT'
                 WHEN 'ALCANCE_LOPDP'                  THEN 'LOPDP_CONSENT'
@@ -2306,7 +2306,7 @@ async function hirePersonnelRequest(requestId, userId, options = {}) {
                 WHEN 'CRONOGRAMA_INDUCCION'           THEN 'INDUCTION_REGISTRY'
                 WHEN 'TITULOS_CURSOS'                 THEN 'SENESCYT_RECORD'
                 WHEN 'HOJA_VIDA'                      THEN 'HR_RESUME'
-                WHEN 'CURRICULUM_VITAE'               THEN 'HR_RESUME'
+                WHEN 'CURRICULUM_VITAE'               THEN 'CURRICULUM_VITAE'
                 WHEN 'HR_RESUME'                      THEN 'HR_RESUME'
               END,
               prd.drive_file_id,
@@ -2337,7 +2337,7 @@ async function hirePersonnelRequest(requestId, userId, options = {}) {
                     WHEN 'ACTA_MATRIMONIO'                THEN 'MARRIAGE_CERTIFICATE'
                     WHEN 'CERTIFICADO_NACIMIENTO_HIJOS'   THEN 'CHILD_BIRTH_CERTIFICATE'
                     WHEN 'CERTIFICADO_TRABAJO_ANTERIOR'   THEN 'LABOR_CERTIFICATE'
-                    WHEN 'CONTRATO_TRABAJO'               THEN 'CONTRACT_MDT'
+                    WHEN 'CONTRATO_TRABAJO'               THEN 'CONTRACT_FAM'
                     WHEN 'CONTRACT_FAM'                   THEN 'CONTRACT_FAM'
                     WHEN 'CONVENIO_CONFIDENCIALIDAD'      THEN 'CONFIDENTIALITY_AGREEMENT'
                     WHEN 'ALCANCE_LOPDP'                  THEN 'LOPDP_CONSENT'
@@ -2347,7 +2347,7 @@ async function hirePersonnelRequest(requestId, userId, options = {}) {
                     WHEN 'CRONOGRAMA_INDUCCION'           THEN 'INDUCTION_REGISTRY'
                     WHEN 'TITULOS_CURSOS'                 THEN 'SENESCYT_RECORD'
                     WHEN 'HOJA_VIDA'                      THEN 'HR_RESUME'
-                    WHEN 'CURRICULUM_VITAE'               THEN 'HR_RESUME'
+                    WHEN 'CURRICULUM_VITAE'               THEN 'CURRICULUM_VITAE'
                     WHEN 'HR_RESUME'                      THEN 'HR_RESUME'
                   END
               )

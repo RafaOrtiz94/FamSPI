@@ -1,54 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { FiRefreshCw, FiFileText, FiCheckCircle, FiClock, FiAlertTriangle, FiUnlock, FiXCircle, FiSlash, FiExternalLink, FiChevronDown, FiChevronUp } from "react-icons/fi";
+import { FiRefreshCw, FiFileText, FiCheckCircle, FiClock, FiAlertTriangle, FiUnlock, FiExternalLink, FiChevronDown, FiChevronUp } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useAuth } from "../../../../core/auth/AuthContext";
 import { useBusinessCaseWorkspaceOptional } from "./BusinessCaseWorkspaceContext";
+import { resolvePurchaseOrigin, getPurchaseOriginBadge, getFlowStateBadge, roleToLabel } from "../../../../core/utils/businessCaseFlowState";
+import { getSectionLabel } from "../../../../core/utils/businessCaseSections";
 
 const getNaturalErrorMessage = (err, fallback) => {
  const raw = String(err?.response?.data?.message || "").trim();
  return raw || fallback;
-};
-
-const resolvePurchaseOrigin = (guidance = {}) => {
- const businessCase = guidance?.businessCase || {};
- const metadata = guidance?.modern_bc_metadata || businessCase?.modern_bc_metadata || {};
- const candidates = [
-  guidance?.bc_purchase_type,
-  businessCase?.bc_purchase_type,
-  guidance?.purchase_type,
-  businessCase?.purchase_type,
-  metadata?.purchase_type,
-  metadata?.source_module,
-  metadata?.sourceModule,
-  metadata?.origin,
-  metadata?.workflow_origin,
-  metadata?.flow_origin,
- ]
-  .map((value) => String(value || "").trim().toLowerCase())
-  .filter(Boolean);
-
- const hasPublicSignal = candidates.some(
-  (value) =>
-   value.includes("public") ||
-   value.includes("publico") ||
-   value.includes("equipment_purchases") ||
-   value.includes("public_purchase"),
- );
- if (hasPublicSignal) return "publica";
-
- const hasPrivateSignal = candidates.some(
-  (value) =>
-   value.includes("private") ||
-   value.includes("privado") ||
-   value.includes("privada") ||
-   value.includes("private_purchases") ||
-   value.includes("private_purchase"),
- );
- if (hasPrivateSignal) return "privada";
-
- return "no_definida";
 };
 
 const resolveInitiator = (guidance = {}) => {
@@ -71,16 +33,6 @@ const resolveInitiator = (guidance = {}) => {
  null;
  const id = guidance?.created_by || guidance?.createdBy || bc?.created_by || bc?.createdBy || null;
  return name || email || (id ? `Usuario ${id}` : "No disponible");
-};
-
-const roleToLabel = (role) => {
- const normalized = String(role || "").toLowerCase();
- if (normalized === "acp_comercial") return "Analista de Compras Publicas";
- if (normalized === "backoffice_comercial") return "Backoffice Comercial";
- if (normalized === "jefe_servicio") return "Jefe de Servicio";
- if (normalized === "jefe_comercial") return "Jefe Comercial";
- if (normalized === "comercial") return "Comercial";
- return normalized || "N/D";
 };
 
 const formatDuration = (seconds) => {
@@ -111,8 +63,7 @@ const CaseHeader = ({ uiGuidance, onRefresh, onOpenReopenRequest, onOpenReopenDe
  const { user } = useAuth();
  const resolvedGuidance = uiGuidance || workspace?.uiGuidance || null;
  const resolvedRefresh = onRefresh || workspace?.onRefresh;
- const { businessCaseId, clientName, workflowState, sectionOwnership } = resolvedGuidance || {};
- const { currentState } = workflowState || {};
+ const { businessCaseId, clientName, sectionOwnership } = resolvedGuidance || {};
  const { completionSummary } = sectionOwnership || {};
  const preflow = resolvedGuidance?.preflow || null;
  const postStatisticsSla = preflow?.postStatisticsSla || null;
@@ -198,19 +149,15 @@ const CaseHeader = ({ uiGuidance, onRefresh, onOpenReopenRequest, onOpenReopenDe
   }
  }, [businessCaseId, resolvedRefresh, showToast]);
 
- const stateDisplay = {
- 'DRAFT_INICIAL':               { label: 'Borrador Inicial',      color: 'bg-gray-100 text-gray-700',      icon: FiClock },
- 'DATOS_BASE_COMPLETOS':        { label: 'Datos Completos',        color: 'bg-blue-100 text-blue-700',      icon: FiCheckCircle },
- 'EN_EVALUACION_VIABILIDAD':    { label: 'En Evaluación',          color: 'bg-yellow-100 text-yellow-700',  icon: FiAlertTriangle },
- 'OBSERVADO_POR_VIABILIDAD':    { label: 'Observado',              color: 'bg-orange-100 text-orange-700',  icon: FiAlertTriangle },
- 'VIABLE':                      { label: 'Viable',                 color: 'bg-green-100 text-green-700',    icon: FiCheckCircle },
- 'AJUSTES_OPERATIVOS':          { label: 'Ajustes Operativos',     color: 'bg-indigo-100 text-indigo-700',  icon: FiClock },
- 'CERRADO_PARA_APROBACION':     { label: 'Para Aprobación',        color: 'bg-purple-100 text-purple-700',  icon: FiFileText },
- 'RECHAZADO_POR_GERENCIA':      { label: 'Rechazado',              color: 'bg-red-100 text-red-700',        icon: FiXCircle },
- 'CANCELADO':                   { label: 'Cancelado',              color: 'bg-slate-100 text-slate-500',    icon: FiSlash },
- };
-
- const currentStateDisplay = stateDisplay[currentState] || stateDisplay['DRAFT_INICIAL'];
+ // Mismo badge de flow_state que ya usa BusinessCasePicker (una sola fuente
+ // de verdad legible en espanol) -- antes este header tenia su propio
+ // diccionario de los 9 estados crudos de la maquina de estados, alimentado
+ // por workflowState.currentState, que el backend nunca enviaba (siempre
+ // caia a "Borrador Inicial" sin importar el estado real del BC).
+ const flowStateBadge = useMemo(
+  () => getFlowStateBadge({ flow_state: resolvedGuidance?.flowState }),
+  [resolvedGuidance?.flowState],
+ );
  const serverNowOffsetMs = useMemo(() => {
  if (!preflow?.serverNow) return 0;
  const serverMs = new Date(preflow.serverNow).getTime();
@@ -300,20 +247,10 @@ const CaseHeader = ({ uiGuidance, onRefresh, onOpenReopenRequest, onOpenReopenDe
   serverNowOffsetMs,
  ]);
 
- const purchaseOrigin = useMemo(
- () => resolvePurchaseOrigin(resolvedGuidance || {}),
+ const purchaseOriginBadge = useMemo(
+ () => getPurchaseOriginBadge(resolvePurchaseOrigin(resolvedGuidance || {})),
  [resolvedGuidance],
  );
- const purchaseOriginBadge = purchaseOrigin === "publica"
- ? "bg-emerald-100 text-emerald-800"
- : purchaseOrigin === "privada"
- ? "bg-indigo-100 text-indigo-800"
- : "bg-slate-100 text-slate-700";
- const purchaseOriginLabel = purchaseOrigin === "publica"
- ? "Compra publica"
- : purchaseOrigin === "privada"
- ? "Compra privada"
- : "Origen no definido";
  const initiatorLabel = useMemo(() => resolveInitiator(resolvedGuidance), [resolvedGuidance]);
  const preflowActiveRoleLabel = useMemo(
  () => (hasActivePostStatisticsSla ? "Todos los participantes" : roleToLabel(preflow?.activeRole)),
@@ -350,12 +287,11 @@ const CaseHeader = ({ uiGuidance, onRefresh, onOpenReopenRequest, onOpenReopenDe
  <h2 className="text-lg sm:text-xl font-bold text-gray-900 truncate">{clientName}</h2>
  <p className="text-xs sm:text-sm text-gray-600 break-all">ID: {businessCaseId}</p>
  </div>
- <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs sm:text-sm font-semibold ${currentStateDisplay.color}`}>
- <currentStateDisplay.icon size={14} />
- {currentStateDisplay.label}
+ <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs sm:text-sm font-semibold ${flowStateBadge.className}`}>
+ {flowStateBadge.label}
  </div>
- <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs sm:text-sm font-semibold ${purchaseOriginBadge}`}>
- {purchaseOriginLabel}
+ <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs sm:text-sm font-semibold ${purchaseOriginBadge.className}`}>
+ {purchaseOriginBadge.label}
  </div>
  </div>
  <button
@@ -380,12 +316,10 @@ const CaseHeader = ({ uiGuidance, onRefresh, onOpenReopenRequest, onOpenReopenDe
  <>
  <FiExternalLink size={14} className="text-emerald-600 flex-shrink-0" />
  <span className="text-xs text-emerald-800 font-medium">Hoja de Sheets disponible</span>
+ {/* El aviso de SLA vencido vive en un solo lugar (bloque "Control de
+     reapertura" mas abajo, con contexto y accion) -- antes se repetia
+     aqui como badge suelto sin explicacion. */}
  <div className="ml-auto flex flex-wrap items-center gap-2">
- {technicalSlaExpired && (
- <span className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700">
- Aviso: SLA vencido
- </span>
- )}
  {canUpdateSheet && (
  <>
  <button
@@ -543,7 +477,7 @@ const CaseHeader = ({ uiGuidance, onRefresh, onOpenReopenRequest, onOpenReopenDe
  : "border-slate-200 bg-slate-50 text-slate-700"
  }`}
  >
- {sectionKey} · {completed ? "ok" : "pendiente"}
+ {getSectionLabel(sectionKey)} · {completed ? "Completo" : "Pendiente"}
  </span>
  );
  })}

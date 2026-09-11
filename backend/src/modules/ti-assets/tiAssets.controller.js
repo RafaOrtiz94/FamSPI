@@ -426,6 +426,8 @@ exports.listAllActas = asyncHandler(async (req, res) => {
     is_complete: req.query?.is_complete != null
       ? req.query.is_complete === "true"
       : null,
+    acta_code:   req.query?.acta_code   || null,
+    sort:        req.query?.sort        || "generated_at",
   });
   res.json({ ok: true, total: data.length, data });
 });
@@ -510,6 +512,17 @@ exports.downloadAssetLabel = asyncHandler(async (req, res) => {
   const { pdfBuffer, filename } = await svc.generateAssetLabelPdf(req.params.id);
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.send(pdfBuffer);
+});
+
+exports.downloadActasReport = asyncHandler(async (req, res) => {
+  const pdfBuffer = await svc.generateActasPdfReport({
+    tipo:        req.query?.tipo        || null,
+    is_complete: req.query?.is_complete != null ? req.query.is_complete === "true" : null,
+    acta_code:   req.query?.acta_code   || null,
+  });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", 'attachment; filename="Reporte-Actas-TI.pdf"');
   res.send(pdfBuffer);
 });
 

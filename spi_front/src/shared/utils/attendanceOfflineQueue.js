@@ -17,6 +17,7 @@ const QUEUE_STORAGE_KEY = "attendance_offline_queue";
 const QUEUE_CHANGED_EVENT = "attendance-offline-queue-changed";
 const QUEUE_STATUS_STORAGE_KEY = "attendance_offline_queue_status";
 const QUEUE_STATUS_CHANGED_EVENT = "attendance-offline-queue-status-changed";
+let flushInFlight = null;
 
 const buildDefaultStatus = () => ({
   pendingCount: 0,
@@ -85,12 +86,25 @@ export const hasQueuedMarkForEndpoint = (endpoint) =>
 
 export const enqueueOfflineMark = ({ endpoint, payload, label }) => {
   const items = readQueue();
+  const queuedAt = new Date().toISOString();
+  const suppliedOccurredAt = payload?.occurred_at || payload?.occurredAt;
+  const parsedOccurredAt = suppliedOccurredAt ? new Date(suppliedOccurredAt) : null;
+  const occurredAt = parsedOccurredAt && !Number.isNaN(parsedOccurredAt.getTime())
+    ? parsedOccurredAt.toISOString()
+    : queuedAt;
   const entry = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     endpoint,
-    payload,
+    // Preserve the original event envelope. The backend uses these values
+    // when replaying the mark after connectivity returns.
+    payload: {
+      ...(payload || {}),
+      occurred_at: occurredAt,
+      offline_sync: true,
+      offline_queued_at: queuedAt,
+    },
     label: label || endpoint,
-    queuedAt: new Date().toISOString(),
+    queuedAt,
   };
   items.push(entry);
   writeQueue(items);
@@ -125,7 +139,10 @@ export const onOfflineQueueStatusChanged = (handler) =>
  * SERVIDOR (409/400/etc, la marca ya no aplica) se descarta y se sigue,
  * porque reintentarla no va a cambiar el resultado.
  */
-export const flushOfflineQueue = async ({ post }) => {
+export const flushOfflineQueue = ({ post }) => {
+  if (flushInFlight) return flushInFlight;
+
+  flushInFlight = (async () => {
   const items = readQueue();
   if (!items.length) return { flushed: [], failed: [], stillQueued: 0 };
 
@@ -176,4 +193,9 @@ export const flushOfflineQueue = async ({ post }) => {
   });
 
   return { flushed, failed, stillQueued };
+  })().finally(() => {
+    flushInFlight = null;
+  });
+
+  return flushInFlight;
 };

@@ -1,6 +1,12 @@
 import { FiClock, FiUpload, FiCheck, FiX } from "react-icons/fi";
 
-const DATE_ONLY_REGEX = /^(\d{4})-(\d{2})-(\d{2})$/;
+// Sin ancla de fin: la API devuelve fecha_inicio/fecha_fin como timestamps
+// completos ("2026-08-24T05:00:00.000Z", medianoche Ecuador en UTC), no como
+// "YYYY-MM-DD" puro. Con "$" al final ese valor nunca matcheaba y caia al
+// fallback new Date(value) + toLocaleDateString sin timeZone, que corre la
+// fecha un dia segun el huso horario del dispositivo que la ve (bug real
+// reportado: 24-ago/11-sep aparecia como 23-ago/10-sept).
+const DATE_ONLY_REGEX = /^(\d{4})-(\d{2})-(\d{2})/;
 
 export const STATUS_META = {
   pending: { label: "Pendiente", color: "bg-amber-100 text-amber-800", icon: FiClock },
@@ -62,6 +68,53 @@ export const calculateInclusiveCalendarDays = (startValue, endValue) => {
   if (startMs === null || endMs === null) return 0;
   const diff = Math.round((endMs - startMs) / (1000 * 60 * 60 * 24));
   return diff >= 0 ? diff + 1 : 0;
+};
+
+const GUAYAQUIL_TZ = "America/Guayaquil";
+
+// fecha_inicio_hora/fecha_fin_hora llegan como timestamp UTC completo. Sin
+// fijar la zona horaria, toLocaleTimeString/getHours() usan el reloj del
+// dispositivo y corren la hora mostrada (y la clasificacion Manana/Tarde)
+// segun donde este el usuario.
+const getGuayaquilHourMinute = (date) => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: GUAYAQUIL_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const map = parts.reduce((acc, part) => {
+    if (part.type !== "literal") acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return { hour: Number(map.hour), minute: Number(map.minute) };
+};
+
+export const formatTimeRange = (solicitud = {}) => {
+  const start = solicitud?.fecha_inicio_hora || solicitud?.start_time || null;
+  const end = solicitud?.fecha_fin_hora || solicitud?.end_time || null;
+  if (!start || !end) return null;
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+  const fmt = (d) =>
+    new Intl.DateTimeFormat("es-EC", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: GUAYAQUIL_TZ }).format(d);
+  return `${fmt(startDate)} - ${fmt(endDate)}`;
+};
+
+export const getVacationShiftLabel = (solicitud = {}) => {
+  const start = solicitud?.start_time || solicitud?.fecha_inicio_hora || null;
+  const end = solicitud?.end_time || solicitud?.fecha_fin_hora || null;
+  if (!start || !end) return null;
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+  const { hour: startHour } = getGuayaquilHourMinute(startDate);
+  const { hour: endHour, minute: endMinute } = getGuayaquilHourMinute(endDate);
+  const endAsDecimal = endHour + endMinute / 60;
+  if (startHour < 13 && endAsDecimal <= 13) return "Mañana";
+  if (startHour >= 13) return "Tarde";
+  return "Horario mixto";
 };
 
 export const getTipoLabel = (solicitud = {}) => {

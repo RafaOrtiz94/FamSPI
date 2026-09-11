@@ -27,6 +27,7 @@ import {
   startPermissionEntry,
   finishPermissionExit,
   updateExceptionStatus,
+  flushAttendanceOfflineQueue,
 } from "../../../core/api/attendanceApi";
 import { getLocationForAction, readCachedLocation, startLocationPrewarm, stopLocationPrewarm } from "../../../shared/utils/attendanceLocationCache";
 import { fetchClients } from "../../../core/api/clientsApi";
@@ -1207,6 +1208,21 @@ const AttendanceAction = () => {
   useEffect(() => {
     startLocationPrewarm();
     return () => stopLocationPrewarm();
+  }, []);
+
+  // AttendanceAction can be opened directly, without mounting the dashboard
+  // widget that normally flushes the offline queue. Keep pending marks moving
+  // as soon as this flow loads or the connection returns.
+  useEffect(() => {
+    const flushPendingMarks = () => {
+      flushAttendanceOfflineQueue().catch(() => {
+        // The queue remains persisted and will retry on the next online event.
+      });
+    };
+
+    flushPendingMarks();
+    window.addEventListener("online", flushPendingMarks);
+    return () => window.removeEventListener("online", flushPendingMarks);
   }, []);
 
   const handleConfirmMark = useCallback(async (currentLoc, occurredAt) => {

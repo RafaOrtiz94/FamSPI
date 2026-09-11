@@ -66,10 +66,21 @@ describe("attendanceOfflineQueue", () => {
 
     const result = await flushOfflineQueue({ post });
 
-    expect(calls).toEqual([
-      ["/attendance/marcar/entrada", { a: 1 }],
-      ["/attendance/marcar/salida", { b: 2 }],
-    ]);
+    expect(calls).toHaveLength(2);
+    expect(calls[0][0]).toBe("/attendance/marcar/entrada");
+    expect(calls[0][1]).toEqual(expect.objectContaining({
+      a: 1,
+      occurred_at: expect.any(String),
+      offline_sync: true,
+      offline_queued_at: expect.any(String),
+    }));
+    expect(calls[1][0]).toBe("/attendance/marcar/salida");
+    expect(calls[1][1]).toEqual(expect.objectContaining({
+      b: 2,
+      occurred_at: expect.any(String),
+      offline_sync: true,
+      offline_queued_at: expect.any(String),
+    }));
     expect(result.flushed).toHaveLength(2);
     expect(result.stillQueued).toBe(0);
     expect(getQueueSize()).toBe(0);

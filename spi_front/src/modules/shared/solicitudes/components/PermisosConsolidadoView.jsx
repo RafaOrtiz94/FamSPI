@@ -22,6 +22,7 @@ import { getResumenColaboradores } from "../../../../core/api/permisosApi";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { formatVacationDaysHours } from "../utils/vacationDisplay";
+import { formatCalendarDate } from "../utils/solicitudesHelpers";
 import { generatePermisosCollaboratorReportPdf } from "../utils/permisosReportPdf";
 
 // ── Accessors (tolerantes a distintas formas del payload) ────────────────────
@@ -37,13 +38,28 @@ const getRemainingVacation = (r = {}) => Number(r?.vacaciones?.summary?.remainin
 
 const num = (v) => formatVacationDaysHours(Number(v) || 0).shortText;
 
+// yyyy-MM-dd en hora Ecuador -- toISOString() da la fecha en UTC, que se
+// adelanta un dia despues de las 19:00 hora local (Ecuador = UTC-5).
+function todayGuayaquil() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Guayaquil" }).format(new Date());
+}
+
 // Formatea fecha (+ hora si aplica, solo permisos) en un solo renglon compacto.
+//
+// fecha_inicio/fecha_fin son un dia calendario fijo (columna DATE en
+// Postgres), no un instante. Forzar timeZone en Intl.DateTimeFormat sobre
+// un Date construido con `new Date(value)` esta MAL aqui: un string
+// "YYYY-MM-DD" (o su timestamp a medianoche UTC) se interpreta como
+// medianoche UTC, y convertirlo a America/Guayaquil (UTC-5) lo corre al
+// dia anterior (19:00 del dia previo) -- exactamente el bug reportado
+// (24-ago mostrado como 23-ago). formatCalendarDate evita esto extrayendo
+// los componentes Y/M/D del string por regex y construyendo un Date local
+// con esos mismos componentes, sin ninguna conversion de zona horaria.
 function formatItemDateRange(item = {}) {
   const formatDate = (value) => {
     if (!value) return null;
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return String(value);
-    return new Intl.DateTimeFormat("es-EC", { day: "2-digit", month: "short" }).format(date);
+    const formatted = formatCalendarDate(value, { day: "2-digit", month: "short" });
+    return formatted === "N/A" ? null : formatted;
   };
   const start = formatDate(item.fecha_inicio);
   const end = formatDate(item.fecha_fin);
@@ -162,13 +178,14 @@ const PermisosConsolidadoView = () => {
   const [data, setData] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDepartment, setSelectedDepartment] = useState("all");
+  const [employmentStatus, setEmploymentStatus] = useState("active");
   const [expanded, setExpanded] = useState(null); // email de fila expandida
   const reportTableRef = useRef(null);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
     try {
-      const res = await getResumenColaboradores();
+      const res = await getResumenColaboradores({ employmentStatus });
       setData(Array.isArray(res?.data) ? res.data : []);
     } catch (err) {
       console.error("Error cargando informe consolidado:", err);
@@ -176,7 +193,7 @@ const PermisosConsolidadoView = () => {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [showToast]);
+  }, [employmentStatus, showToast]);
 
   useEffect(() => { loadData(); }, [loadData]);
   useScopedAutoUpdate(
@@ -229,7 +246,7 @@ const PermisosConsolidadoView = () => {
     const url = URL.createObjectURL(blob);
     const link = document.body.appendChild(document.createElement("a"));
     link.href = url;
-    link.download = `reporte_permisos_${new Date().toISOString().split("T")[0]}.csv`;
+    link.download = `reporte_permisos_${todayGuayaquil()}.csv`;
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
@@ -251,7 +268,7 @@ const PermisosConsolidadoView = () => {
       pdf.setFontSize(10);
       pdf.text(`Generado el: ${new Date().toLocaleString()}`, 10, 22);
       pdf.addImage(imgData, "PNG", 0, 30, canvas.width * ratio, canvas.height * ratio);
-      pdf.save(`reporte_permisos_${new Date().toISOString().split("T")[0]}.pdf`);
+      pdf.save(`reporte_permisos_${todayGuayaquil()}.pdf`);
       toast.success("Reporte PDF exportado");
     } catch (err) {
       console.error("Error generando PDF:", err);
@@ -350,9 +367,9 @@ const PermisosConsolidadoView = () => {
                   </p>
                   {(item.saldo_antes !== undefined && item.saldo_despues !== undefined) && (
                     <div className="mt-1.5 flex items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1 text-[11px]">
-                      <span className="font-mono font-semibold text-slate-600">{num(item.saldo_antes)}d</span>
+                      <span className="font-mono font-semibold text-slate-600">{num(item.saldo_antes)}</span>
                       <FiArrowRight size={10} className="text-slate-400" />
-                      <span className="font-mono font-semibold text-slate-800">{num(item.saldo_despues)}d</span>
+                      <span className="font-mono font-semibold text-slate-800">{num(item.saldo_despues)}</span>
                       <span className="ml-auto text-slate-400">saldo</span>
                     </div>
                   )}
@@ -380,7 +397,7 @@ const PermisosConsolidadoView = () => {
     <div className="space-y-5">
       {/* Toolbar: filtros + acciones */}
       <Card className="p-4 shadow-soft sm:p-5">
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto]">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_auto]">
           <div className="relative">
             <FiSearch className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
             <input
@@ -395,6 +412,18 @@ const PermisosConsolidadoView = () => {
             value={selectedDepartment}
             options={departments}
             onChange={(e) => setSelectedDepartment(e.target.value)}
+            includePlaceholder={false}
+            containerClassName="mb-0"
+            className="min-h-[44px]"
+          />
+          <Select
+            value={employmentStatus}
+            options={[
+              { label: "Activos", value: "active" },
+              { label: "Desvinculados", value: "passive" },
+              { label: "Todos", value: "all" },
+            ]}
+            onChange={(e) => setEmploymentStatus(e.target.value)}
             includePlaceholder={false}
             containerClassName="mb-0"
             className="min-h-[44px]"

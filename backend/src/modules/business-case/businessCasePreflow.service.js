@@ -164,9 +164,17 @@ function buildPreflowInfo(businessCase, ownershipRules = {}, now = new Date()) {
   const reviewDeadlineAt = metadata.preflow_review_deadline_at || null;
   const startedAt = activePhase === "review" ? reviewStartedAt : commercialStartedAt;
   const deadlineAt = activePhase === "review" ? reviewDeadlineAt : commercialDeadlineAt;
+  const activeStageCompletedAt = activePhase === "review"
+    ? metadata.preflow_review_completed_at || null
+    : metadata.preflow_commercial_completed_at || null;
   const deadlineTs = deadlineAt ? new Date(deadlineAt).getTime() : null;
   const nowTs = now.getTime();
-  const isExpired = Number.isFinite(deadlineTs) ? nowTs > deadlineTs : false;
+  // Una vez que la etapa activa se completo de verdad (a tiempo o no), el
+  // vencimiento del SLA deja de ser relevante -- de lo contrario isExpired se
+  // quedaba en true para siempre (calculado en vivo contra un deadline que ya
+  // nadie mueve), mostrando "Ventana vencida" y el badge "Preflow" en rojo en
+  // todas las secciones aunque el trabajo ya estuviera cerrado.
+  const isExpired = !activeStageCompletedAt && Number.isFinite(deadlineTs) ? nowTs > deadlineTs : false;
   const completedRequiredSections = requiredSections.filter(
     (sectionKey) => ownershipRules?.[sectionKey]?.isCompleted,
   );
@@ -337,106 +345,6 @@ async function withAdvisoryLock(lockKey, fn) {
   } finally {
     await db.query(`SELECT pg_advisory_unlock(hashtext($1))`, [key]);
   }
-}
-
-async function ensurePreflowStarted(businessCaseId, durationHours = DEFAULT_DURATION_HOURS) {
-  const bc = await businessCaseService.getBusinessCaseById(businessCaseId);
-  if (!isPreflowCase(bc)) return toObject(bc?.modern_bc_metadata);
-
-  const metadata = toObject(bc?.modern_bc_metadata);
-  if (metadata.preflow_started_at) return metadata;
-
-  const startedAt = new Date();
-  const deadlineAt = new Date(startedAt.getTime() + durationHours * 60 * 60 * 1000);
-  return updateBusinessCaseMetadata(businessCaseId, {
-    preflow_started_at: startedAt.toISOString(),
-    preflow_deadline_at: deadlineAt.toISOString(),
-    preflow_phase: "commercial",
-    preflow_commercial_role: "comercial",
-    preflow_commercial_started_at: startedAt.toISOString(),
-    preflow_commercial_deadline_at: deadlineAt.toISOString(),
-    preflow_status: "in_progress",
-  });
-}
-
-async function completeCommercialStageAndStartReview({
-  businessCaseId,
-  actorUser,
-  durationHours = DEFAULT_DURATION_HOURS,
-  reason = "stat_document_uploaded",
-}) {
-  return withAdvisoryLock(`${businessCaseId}:preflow:handoff`, async () => {
-    const bc = await businessCaseService.getBusinessCaseById(businessCaseId);
-    if (!isPreflowCase(bc)) return { skipped: true, reason: "not_preflow" };
-
-    const reviewRole = resolveReviewRoleForBusinessCase(bc);
-    if (!reviewRole) return { skipped: true, reason: "review_role_unresolved" };
-
-    const metadata = toObject(bc?.modern_bc_metadata);
-    if (metadata.preflow_review_started_at) {
-      return {
-        skipped: true,
-        reason: "review_already_started",
-        review_role: metadata.preflow_review_role || reviewRole,
-        review_started_at: metadata.preflow_review_started_at,
-      };
-    }
-
-    const now = new Date();
-    const commercialStartedAt = metadata.preflow_commercial_started_at || metadata.preflow_started_at || null;
-    const commercialStartTs = commercialStartedAt ? new Date(commercialStartedAt).getTime() : null;
-    const commercialElapsedSeconds = Number.isFinite(commercialStartTs)
-      ? Math.max(0, Math.floor((now.getTime() - commercialStartTs) / 1000))
-      : null;
-    const reviewDeadlineAt = new Date(now.getTime() + durationHours * 60 * 60 * 1000);
-    const actorUuid = resolveActorUuid(actorUser);
-    const actorRole = String(actorUser?.role || actorUser?.scope || actorUser?.role_name || "comercial").toLowerCase();
-
-    const nextMetadata = await updateBusinessCaseMetadata(businessCaseId, {
-      preflow_phase: "review",
-      preflow_status: "commercial_completed_review_in_progress",
-      preflow_commercial_completed_at: now.toISOString(),
-      preflow_commercial_completed_by_id: actorUser?.id ?? null,
-      preflow_commercial_completed_by_email: actorUser?.email || null,
-      preflow_commercial_elapsed_seconds: commercialElapsedSeconds,
-      preflow_commercial_close_reason: reason,
-      preflow_review_role: reviewRole,
-      preflow_review_started_at: now.toISOString(),
-      preflow_review_deadline_at: reviewDeadlineAt.toISOString(),
-      preflow_deadline_at: reviewDeadlineAt.toISOString(),
-      preflow_handoff_at: now.toISOString(),
-      preflow_handoff_by_email: actorUser?.email || null,
-      preflow_handoff_by_role: actorRole,
-    });
-
-    await db.query(
-      `INSERT INTO business_case_section_ownership_audit
-         (business_case_id, section_name, action, performed_by, performed_by_role, canonical_state, metadata, performed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [
-        businessCaseId,
-        "preflow",
-        "commercial_stage_completed",
-        actorUuid,
-        actorRole,
-        String(bc?.canonical_state || bc?.bc_stage || "draft"),
-        JSON.stringify({
-          reviewRole,
-          commercialElapsedSeconds,
-          reason,
-        }),
-        now,
-      ],
-    );
-
-    return {
-      updated: true,
-      review_role: reviewRole,
-      commercial_elapsed_seconds: commercialElapsedSeconds,
-      review_deadline_at: reviewDeadlineAt.toISOString(),
-      metadata: nextMetadata,
-    };
-  });
 }
 
 async function ensurePreflowWorkspaceProcess({ businessCaseId, actorUser, durationHours = DEFAULT_DURATION_HOURS }) {
@@ -1044,8 +952,6 @@ module.exports = {
   buildPreflowInfo,
   updateBusinessCaseMetadata,
   resolveReviewRoleForBusinessCase,
-  ensurePreflowStarted,
-  completeCommercialStageAndStartReview,
   ensurePreflowWorkspaceProcess,
   requestPreflowReopen,
   resolvePreflowReopen,

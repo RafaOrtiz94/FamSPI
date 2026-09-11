@@ -23,6 +23,7 @@ import {
 } from "../../../core/api/tiAssetsApi";
 import { downloadSignatureWorkflowFinalPdf, validateSignerProfiles } from "../../../core/api/signatureWorkflowsApi";
 import { getSignerCandidates } from "../../../core/api/usersApi";
+import { useDebounce } from "../../../core/hooks/useDebounce";
 
 const TIPO_CONFIG = {
   entrega: { label: "Entrega", bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-100" },
@@ -346,13 +347,16 @@ const TIActasPage = () => {
   const [savingWorkflow, setSavingWorkflow] = useState(false);
   const [filterTipo, setFilterTipo] = useState("");
   const [filterEstado, setFilterEstado] = useState("");
+  const [filterNumero, setFilterNumero] = useState("");
+  const debouncedFilterNumero = useDebounce(filterNumero, 400);
 
   const loadActas = useCallback(async () => {
     setLoading(true);
     try {
-      const params = {};
+      const params = { limit: 5000, sort: "acta_code" };
       if (filterTipo) params.tipo = filterTipo;
       if (filterEstado !== "") params.is_complete = filterEstado;
+      if (debouncedFilterNumero.trim()) params.acta_code = debouncedFilterNumero.trim();
       const rows = await listTiAllActas(params);
       setActas(Array.isArray(rows) ? rows : []);
     } catch {
@@ -360,7 +364,7 @@ const TIActasPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [filterEstado, filterTipo, showToast]);
+  }, [debouncedFilterNumero, filterEstado, filterTipo, showToast]);
 
   useEffect(() => {
     loadActas();
@@ -466,6 +470,7 @@ const TIActasPage = () => {
   const filteredActas = actas.filter((acta) => {
     if (filterTipo && acta.tipo !== filterTipo) return false;
     if (filterEstado !== "" && String(acta.is_complete) !== filterEstado) return false;
+    if (filterNumero.trim() && !String(acta.acta_code || "").toLowerCase().includes(filterNumero.trim().toLowerCase())) return false;
     return true;
   });
 
@@ -529,12 +534,20 @@ const TIActasPage = () => {
             <option value="true">Firmadas</option>
             <option value="false">Pendientes</option>
           </select>
-          {(filterTipo || filterEstado) && (
+          <input
+            type="text"
+            value={filterNumero}
+            onChange={(event) => setFilterNumero(event.target.value)}
+            placeholder="N° de acta (ej. ACTA-ET-2026-000001 o 000001)"
+            className="w-72 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-sky-500/20"
+          />
+          {(filterTipo || filterEstado || filterNumero) && (
             <button
               type="button"
               onClick={() => {
                 setFilterTipo("");
                 setFilterEstado("");
+                setFilterNumero("");
               }}
               className="text-xs text-slate-400 transition-colors hover:text-slate-700"
             >

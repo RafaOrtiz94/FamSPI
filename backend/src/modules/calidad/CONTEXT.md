@@ -79,9 +79,12 @@ Los siguientes sub-módulos siguen el mismo patrón (controller + repository + s
 - Todos los endpoints requieren `verifyToken`
 
 ## 5. Base de datos
+- La consulta de documentos RRHH usa la fuente oficial verificada `collaborator_documents`, compartida con Talento Humano mediante el catalogo canonico de colaboradores.
+- Calidad no consulta ni muestra `CONTRACT_MDT` por requerimiento operativo.
+- La vista separa `users.active = true` como activos y `users.active = false` como desvinculados, excluye el rol `pasante` y muestra titulos/certificados oficiales de `collaborator_qualifications`.
 - Migración `130_ca0101_temperature_control.sql` confirmada en código abierto
 - Migración `132_ca0104_pest_control.sql` confirmada en código abierto
-- No verificado en DB directamente
+- El esquema y los registros de documentos RRHH fueron verificados en Neon; las tablas GXP de los submodulos restantes requieren validacion independiente cuando se retomen.
 
 ## 6. Relaciones
 - `signature`: firma digital en documentos de calidad

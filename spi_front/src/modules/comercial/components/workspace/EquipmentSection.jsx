@@ -12,6 +12,7 @@ import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
 import SectionEditorBadge from "./SectionEditorBadge";
+import { getEquipmentAssets } from "../../../../core/api/equipmentManagementApi";
 
 // Mismos roles que ya autoriza el backend en POST /sections/:section/unlock.
 const EQUIPMENT_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial"]);
@@ -270,6 +271,46 @@ const EquipmentSection = ({
    showToast(err?.response?.data?.message || "No se pudo reabrir la sección.", "error");
   } finally {
    setReopening(false);
+  }
+ };
+
+ // Consulta de disponibilidad (equipment-management) para 1+ equipos ya
+ // seleccionados como principal en un grupo -- boton flotante, solo para
+ // quien edita esta seccion (acp_comercial/jefe_comercial, ya es lo que
+ // significa `canEdit` aqui). No reserva nada todavia: solo consulta.
+ const [selectedPairIds, setSelectedPairIds] = useState(() => new Set());
+ const [availabilityResults, setAvailabilityResults] = useState(null);
+ const [checkingAvailability, setCheckingAvailability] = useState(false);
+ const toggleAvailabilitySelection = (pairId) => {
+  setSelectedPairIds((prev) => {
+   const next = new Set(prev);
+   if (next.has(pairId)) next.delete(pairId);
+   else next.add(pairId);
+   return next;
+  });
+ };
+ const handleCheckAvailability = async () => {
+  if (!selectedPairIds.size || checkingAvailability) return;
+  setCheckingAvailability(true);
+  setAvailabilityResults(null);
+  try {
+   const targets = equipmentPairs
+    .filter((pair) => selectedPairIds.has(pair.id) && pair.primary?.id)
+    .map((pair) => ({ id: pair.primary.id, name: pair.primary.name }));
+   const results = await Promise.all(
+    targets.map(async (target) => {
+     try {
+      const assets = await getEquipmentAssets({ servicio_equipo_id: target.id, availability: "available" });
+      const list = Array.isArray(assets) ? assets : assets?.items || [];
+      return { ...target, available: list.length, error: null };
+     } catch (err) {
+      return { ...target, available: null, error: err?.response?.data?.message || "No se pudo consultar" };
+     }
+    }),
+   );
+   setAvailabilityResults(results);
+  } finally {
+   setCheckingAvailability(false);
   }
  };
 
@@ -847,6 +888,21 @@ const EquipmentSection = ({
  onToggle={() => togglePair(pair.id)}
  statusBadge={
  <div className="flex items-center gap-2 flex-wrap justify-end">
+ {canEdit && pair.primary?.id && (
+ <label
+ className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer"
+ onClick={(event) => event.stopPropagation()}
+ title="Marcar para consultar disponibilidad"
+ >
+ <input
+ type="checkbox"
+ checked={selectedPairIds.has(pair.id)}
+ onChange={() => toggleAvailabilitySelection(pair.id)}
+ className="h-3.5 w-3.5"
+ />
+ Consultar
+ </label>
+ )}
  {pair.primary_type && pair.primary && (
  <span className={`${UI.chip} bg-blue-50 text-blue-700`}>
  P: {EQUIPMENT_TYPE_OPTIONS.find((option) => option.value === normalizeEquipmentType(pair.primary_type))?.label || "Nuevo"}
@@ -1194,6 +1250,68 @@ const EquipmentSection = ({
  </button>
  </div>
  </div>
+
+ {selectedPairIds.size > 0 && (
+ <div className="fixed bottom-24 right-4 z-30 flex items-center gap-2 rounded-full bg-slate-900 text-white pl-4 pr-2 py-2 shadow-lg">
+ <span className="text-xs font-medium">
+ {selectedPairIds.size} equipo{selectedPairIds.size === 1 ? "" : "s"} seleccionado{selectedPairIds.size === 1 ? "" : "s"}
+ </span>
+ <button
+ type="button"
+ onClick={handleCheckAvailability}
+ disabled={checkingAvailability}
+ className="rounded-full bg-white text-slate-900 text-xs font-semibold px-3 py-1.5 hover:bg-slate-100 disabled:opacity-60"
+ >
+ {checkingAvailability ? "Consultando..." : "Ver disponibilidad"}
+ </button>
+ <button
+ type="button"
+ onClick={() => setSelectedPairIds(new Set())}
+ className="rounded-full p-1.5 hover:bg-white/10"
+ aria-label="Limpiar seleccion"
+ >
+ <FiX size={14} />
+ </button>
+ </div>
+ )}
+
+ {availabilityResults && (
+ <div className="fixed inset-0 z-[1200] bg-slate-900/45 backdrop-blur-[1px] flex items-center justify-center p-4">
+ <div className="w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-2xl p-5 space-y-4">
+ <div className="flex items-center justify-between">
+ <h3 className="text-base font-semibold text-slate-900">Disponibilidad de equipos</h3>
+ <button
+ type="button"
+ onClick={() => setAvailabilityResults(null)}
+ className="text-slate-400 hover:text-slate-600"
+ aria-label="Cerrar"
+ >
+ <FiX size={18} />
+ </button>
+ </div>
+ <div className="space-y-2">
+ {availabilityResults.map((result) => (
+ <div
+ key={result.id}
+ className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+ >
+ <span className="text-slate-700">{result.name}</span>
+ {result.error ? (
+ <span className="text-rose-600 text-xs font-semibold">{result.error}</span>
+ ) : result.available > 0 ? (
+ <span className="text-emerald-700 text-xs font-semibold">{result.available} disponible{result.available === 1 ? "" : "s"}</span>
+ ) : (
+ <span className="text-amber-600 text-xs font-semibold">Sin disponibilidad</span>
+ )}
+ </div>
+ ))}
+ </div>
+ <p className="text-xs text-slate-500">
+ Disponibilidad segun equipment-management (activos con estado negociable). No reserva el equipo.
+ </p>
+ </div>
+ </div>
+ )}
 
  {pendingDeletePairId && (
  <div className="fixed inset-0 z-[1200] bg-slate-900/45 backdrop-blur-[1px] flex items-center justify-center p-4">

@@ -15,6 +15,7 @@ import {
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
 import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
+import BusinessCasePendingWidget from "../../../../core/ui/widgets/BusinessCasePendingWidget";
 import StatsCard from "../shared/StatsCard";
 
 const quickAccessLinks = [
@@ -202,6 +203,10 @@ const JefeComercialView = ({ onRefresh, summaryData, summaryLoading, summaryErro
  </div>
  </div>
  </section>
+
+ <div className="mb-6">
+ <BusinessCasePendingWidget />
+ </div>
 
  {summaryError && (
  <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-sm">

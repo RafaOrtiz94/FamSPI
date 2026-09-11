@@ -94,7 +94,7 @@ const fetchAllVisibleCollaborators = async () => {
   let totalPages = 1;
 
   do {
-    const response = await listCollaborators({ page, pageSize });
+    const response = await listCollaborators({ page, pageSize, employment_status: "active" });
     const rows = Array.isArray(response?.data) ? response.data : [];
     allRows = [...allRows, ...rows];
     totalPages = Number(response?.pagination?.totalPages || 1);

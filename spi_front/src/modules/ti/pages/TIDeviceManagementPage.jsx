@@ -1041,8 +1041,14 @@ const TIDeviceManagementPage = () => {
     }
   };
 
-  const openAssignModal = () => {
+  const openAssignModal = async () => {
     if (!selected) return;
+    // No confiar en el estado `accessories`: se carga async al seleccionar
+    // el activo (loadAccessories, sin await) y si el usuario abre el modal
+    // de asignacion muy rapido, todavia puede tener los accesorios del
+    // activo anterior o estar vacio -- el acta salia entonces sin ellos.
+    // Se vuelve a pedir fresco para este activo antes de armar los items.
+    const freshAccessories = await listTiAccessories(selected.id).catch(() => []);
     const acItems = [
       {
         item_type: "equipo",
@@ -1054,7 +1060,7 @@ const TIDeviceManagementPage = () => {
         physical_condition: "",
         observations: "",
       },
-      ...accessories.map((acc) => ({
+      ...(Array.isArray(freshAccessories) ? freshAccessories : []).map((acc) => ({
         item_type: "accesorio",
         accessory_id: acc.id,
         name: acc.name,
@@ -1130,7 +1136,10 @@ const TIDeviceManagementPage = () => {
     }
     setSaving(true);
     try {
-      // Build acta items from selected assets with their state data
+      // Build acta items from selected assets with their state data. Los
+      // accesorios de cada equipo los agrega el backend (assignMultipleAssets
+      // siempre los vuelve a anexar por asset_id, incluso si ya vienen en
+      // acta_items) -- no duplicarlos aqui.
       const acta_items = Array.from(selectedAssets).map((assetId) => {
         const asset = assets.find((a) => a.id === assetId);
         const itemKey = `asset-${assetId}`;

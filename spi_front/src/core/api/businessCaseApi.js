@@ -16,6 +16,10 @@ export const normalizeUIGuidanceResponse = (response) => {
  return {
  businessCase,
  businessCaseId,
+ // Mismo estado legible en espanol que BusinessCasePicker (deriveBusinessCaseFlowState) -- ver getFlowStateBadge.
+ flowState: data.flowState || null,
+ // SLA general por canonical_state (businessCaseSla.service.getSlaStatus) -- antes se leia aqui pero el backend nunca lo enviaba.
+ slaStatus: data.slaStatus || null,
  workspaceData: data.workspaceData || null,
  sectionOwnership: {
  rules: data.sectionOwnership?.rules || {},
@@ -41,6 +45,13 @@ export const normalizeUIGuidanceResponse = (response) => {
    canViewOfferWorkspace: data.permissions?.canViewOfferWorkspace ?? false,
    canManageOfferWorkspace: data.permissions?.canManageOfferWorkspace ?? false,
    canDecideOfferWorkspace: data.permissions?.canDecideOfferWorkspace ?? false,
+  // BC-16/BC-17: el backend ya las calcula (businessCase.controller.js
+  // getUIGuidance) pero esta whitelist las descartaba -- el flujo de apelar
+  // un rechazo de viabilidad quedaba muerto en el workspace.
+  canAppealFeasibilityRejection: data.permissions?.canAppealFeasibilityRejection ?? false,
+  canResolveFeasibilityAppeal: data.permissions?.canResolveFeasibilityAppeal ?? false,
+  feasibilityAppeal: data.permissions?.feasibilityAppeal ?? null,
+  feasibilityIsDefinitivelyRejected: data.permissions?.feasibilityIsDefinitivelyRejected ?? false,
   workspaceClosed: data.permissions?.workspaceClosed ?? false,
  },
  featureFlags: {
@@ -59,6 +70,8 @@ export const normalizeUIGuidanceResponse = (response) => {
  console.error('Error normalizing UI guidance response:', error);
  return {
  businessCase: null,
+ flowState: null,
+ slaStatus: null,
  sectionOwnership: { rules: {} },
  permissions: {
  canEdit: true,
@@ -539,8 +552,40 @@ export const createBusinessCaseOfferDraft = async (businessCaseId) => {
  return data.data || data;
 };
 
-export const publishBusinessCaseOfferVersion = async (businessCaseId, offerId) => {
- const { data } = await api.post(`/business-case/${businessCaseId}/offer-workspace/${offerId}/publish`);
+export const publishBusinessCaseOfferVersion = async (businessCaseId, offerId, specificProposalFile) => {
+ const formData = new FormData();
+ formData.append("file", specificProposalFile);
+ const { data } = await api.post(
+   `/business-case/${businessCaseId}/offer-workspace/${offerId}/publish`,
+   formData,
+   { headers: { "Content-Type": "multipart/form-data" } },
+ );
+ return data.data || data;
+};
+
+// Descarga directa (Content-Disposition: attachment) en vez de abrir la
+// vista previa de Drive -- reutiliza el endpoint generico de archivos, que
+// solo exige estar autenticado (mismo criterio que el link "Abrir PDF").
+export const downloadBusinessCaseOfferPdf = async (fileId, filename = "oferta.pdf") => {
+ const { data } = await api.get(`/files/${fileId}/download`, { responseType: "blob" });
+ const url = URL.createObjectURL(data);
+ const link = document.createElement("a");
+ link.href = url;
+ link.download = filename;
+ document.body.appendChild(link);
+ link.click();
+ document.body.removeChild(link);
+ URL.revokeObjectURL(url);
+};
+
+export const sendSignedBusinessCaseOfferVersion = async (businessCaseId, offerId, signedFile) => {
+ const formData = new FormData();
+ formData.append("file", signedFile);
+ const { data } = await api.post(
+   `/business-case/${businessCaseId}/offer-workspace/${offerId}/send-signed`,
+   formData,
+   { headers: { "Content-Type": "multipart/form-data" } },
+ );
  return data.data || data;
 };
 

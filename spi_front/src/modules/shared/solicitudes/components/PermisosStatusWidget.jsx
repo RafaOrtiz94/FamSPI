@@ -18,6 +18,8 @@ import {
   STATUS_META,
   getTipoLabel,
   formatDateShort,
+  formatTimeRange,
+  getVacationShiftLabel,
   hasJustificantes,
   hasExternalCoordinationEvidence,
   JUSTIFICANTE_STATUS_META,
@@ -41,32 +43,6 @@ const formatDateTime = (value) => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "N/A";
   return parsed.toLocaleString();
-};
-
-const formatTimeRange = (solicitud = {}) => {
-  const start = solicitud?.fecha_inicio_hora || solicitud?.start_time || null;
-  const end = solicitud?.fecha_fin_hora || solicitud?.end_time || null;
-  if (!start || !end) return null;
-  const startDate = new Date(start);
-  const endDate = new Date(end);
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
-  const startLabel = startDate.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit", hour12: false });
-  const endLabel = endDate.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit", hour12: false });
-  return `${startLabel} - ${endLabel}`;
-};
-
-const getVacationShiftLabel = (solicitud = {}) => {
-  const start = solicitud?.start_time || solicitud?.fecha_inicio_hora || null;
-  const end = solicitud?.end_time || solicitud?.fecha_fin_hora || null;
-  if (!start || !end) return null;
-  const startDate = new Date(start);
-  const endDate = new Date(end);
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
-  const startHour = startDate.getHours();
-  const endAsDecimal = endDate.getHours() + endDate.getMinutes() / 60;
-  if (startHour < 13 && endAsDecimal <= 13) return "Mañana";
-  if (startHour >= 13) return "Tarde";
-  return "Horario mixto";
 };
 
 const normalizeDateOnly = (value) => {

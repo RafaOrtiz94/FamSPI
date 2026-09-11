@@ -17,6 +17,7 @@ import ActionCard from "../../core/ui/patterns/ActionCard";
 import PermisosStatusWidget from "../shared/solicitudes/components/PermisosStatusWidget";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
 import { useAuth } from "../../core/auth/AuthContext";
+import BusinessCasePendingWidget from "../../core/ui/widgets/BusinessCasePendingWidget";
 
 const DashboardFinanzas = () => {
     const navigate = useNavigate();
@@ -41,6 +42,10 @@ const DashboardFinanzas = () => {
                     </button>
                 }
             />
+
+            <div className="mb-6">
+                <BusinessCasePendingWidget />
+            </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <ActionCard

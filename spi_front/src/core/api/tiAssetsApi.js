@@ -347,6 +347,17 @@ export const downloadTiCollaboratorReport = async (userId) => {
  );
 };
 
+export const downloadTiActasReport = async ({ tipo, acta_code } = {}) => {
+ const params = new URLSearchParams();
+ if (tipo) params.set("tipo", tipo);
+ if (acta_code) params.set("acta_code", acta_code);
+ const qs = params.toString();
+ await triggerBlobDownload(
+   `/ti-assets/reports/actas${qs ? `?${qs}` : ""}`,
+   "Reporte-Actas-TI.pdf",
+ );
+};
+
 // ─── Acta recipient pre-fill ──────────────────────────────────────────────────
 
 export const getTiActaRecipientInfo = async (userId) => {

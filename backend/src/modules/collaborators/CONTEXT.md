@@ -24,7 +24,9 @@ Módulo de gestión de perfiles de colaboradores. Provee vista extendida del per
 - No hay `verifyToken` explícito en rutas — confiar en middleware global (riesgo potencial)
 
 ## 5. Base de datos
-- No verificado en DB
+- Verificado en Neon PostgreSQL: `users`, `collaborator_profiles` y `collaborator_documents`.
+- Fuente unica de documentos de colaboradores: `collaborator_documents`.
+- `backend/src/modules/shared/collaboratorDocumentCatalog.js` es la fuente de codigos canonicos y aliases.
 
 ## 6. Relaciones
 - `users`: extiende el perfil de un usuario del sistema
@@ -46,3 +48,9 @@ Módulo de gestión de perfiles de colaboradores. Provee vista extendida del per
 - Valores pasivos sincronizados: `pasivo`, `desvinculado`, `inactivo`, `en_desvinculacion`
 - Cambiar `estatus_empleado` a valor pasivo marca `users.active = false`
 - Cambiar `users.active` a `false` actualiza `estatus_empleado = 'inactivo'`
+
+## 10. Consulta documental de Calidad
+- Endpoint: `GET /api/v1/collaborators/documents/quality-hr`.
+- Rol: `jefe_calidad`.
+- La respuesta reutiliza la misma proyeccion normalizada del reporte documental de Talento Humano y limita la consulta a `CONTRACT_FAM`, `HR_RESUME`, `IMAGE_USE_AUTHORIZATION` y `SENESCYT_RECORD`.
+- Para Calidad, la proyeccion incluye activos y desvinculados, excluye `pasante` y solo incorpora cualificaciones de `collaborator_qualifications` (no `user_certifications`).

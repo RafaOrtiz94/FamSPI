@@ -121,6 +121,16 @@ const getDocumentsReport = async (req, res) => {
   }
 };
 
+const getQualityHrDocuments = async (req, res) => {
+  try {
+    const result = await service.getQualityHrDocuments(req.query.search || null);
+    return res.status(200).json({ ok: true, data: result });
+  } catch (err) {
+    console.error('Error obteniendo documentos de RRHH para Calidad:', err);
+    return res.status(500).json({ ok: false, message: 'Error obteniendo documentos de RRHH' });
+  }
+};
+
 const generateDocumentsConsolidated = async (req, res) => {
   try {
     const result = await consolidatedService.generateConsolidatedDocuments({
@@ -152,5 +162,6 @@ module.exports = {
   resolveCollaboratorQualificationPending,
   getCollaboratorStats,
   getDocumentsReport,
+  getQualityHrDocuments,
   generateDocumentsConsolidated,
 };

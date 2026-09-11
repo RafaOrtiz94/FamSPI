@@ -22,6 +22,7 @@ import { BusinessCaseWorkspaceProviders } from "../components/workspace/Business
 import Modal from "../../../core/ui/components/Modal";
 import Button from "../../../core/ui/components/Button";
 import { getVisibleSections } from "../components/workspace/roleSectionConfig";
+import { SECTION_LABELS, getSectionLabel } from "../../../core/utils/businessCaseSections";
 
 // BC-21: Orden canónico de secciones — incluye investment_values para roles que las ven
 // "Resumen" (consumption_export) va al final: no tiene estado propio (es
@@ -46,20 +47,6 @@ const WORKSPACE_SECTION_ORDER = [
  "consumption_export",
 ];
 const LEGACY_DEV_SECTIONS = new Set(["prices", "calculations", "rentability"]);
-const SECTION_LABELS = {
- general: "Datos Generales",
- lab: "Entorno Laboratorio",
- requirement: "Condiciones del BC",
- equipment: "Equipamiento",
- lis: "Integración LIS",
- determinations: "Determinaciones",
- investments: "Inversiones",
- investment_values: "Precios financieros y operativos",
- consumption_export: "Resumen",
- offer_workspace: "Oferta Comercial",
- dispatch_workspace: "Cantidades Máximas",
- feasibility: "Factibilidad",
-};
 
 // BC-21: Usa la función exportada del config para obtener secciones visibles por rol
 const getVisibleSectionsByRole = (role = "") => {
@@ -147,7 +134,7 @@ const BusinessCaseWorkspace = () => {
  }, [bcId]);
 
  const requestSectionConfirm = useCallback((section) => {
- const sectionLabel = String(section || "seccion").replace(/_/g, " ");
+ const sectionLabel = getSectionLabel(section);
  setConfirmState({ open: true, sectionLabel });
  return new Promise((resolve) => {
  confirmResolverRef.current = resolve;

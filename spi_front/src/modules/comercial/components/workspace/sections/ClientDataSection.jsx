@@ -5,7 +5,6 @@ import { useParams } from "react-router-dom";
 import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
 import { useAuth } from "../../../../../core/auth/AuthContext";
-import SectionObservationAlert from "../SectionObservationAlert";
 import SectionEditorBadge from "../SectionEditorBadge";
 import LocationManager from "../../LocationManager";
 import ProvinciaCiudadInput from "../../../../../components/ProvinciaCiudadInput";
@@ -177,7 +176,6 @@ const ClientDataSection = ({
  uiGuidance,
  permissions = {},
  ownership = {},
- observationData,
  onSave = () => {}
 }) => {
  const { id: bcId } = useParams();
@@ -619,11 +617,6 @@ const privateContractObjectOptions = useMemo(() => {
  ? resolveProvinceCityFromLocation(selectedLocationValue)
  : "";
 
- if (selected && clientLocations.length > 0 && !client_location_id) {
- showToast("Selecciona una sede de instalación para continuar.", "warning");
- return;
- }
-
  const finalClientType = startedAsPublic
  ? "persona_juridica"
  : normalizeClientType(formData.clientType);
@@ -780,12 +773,6 @@ const privateContractObjectOptions = useMemo(() => {
  )}
  </div>
  )}
-
- {/* Observation alert for this section */}
- <SectionObservationAlert
- sectionId="general"
- observationData={observationData}
- />
 
  <form className="space-y-5" onSubmit={handleSubmit(handleSave)}>
  <AccordionSection

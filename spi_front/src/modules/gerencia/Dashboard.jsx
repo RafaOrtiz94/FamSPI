@@ -19,6 +19,7 @@ import jsPDF from "jspdf";
 import Button from "../../core/ui/components/Button";
 import StatCard from "../../core/ui/patterns/StatCard";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
+import BusinessCasePendingWidget from "../../core/ui/widgets/BusinessCasePendingWidget";
 import { useUI } from "../../core/ui/useUI";
 import { logout } from "../../core/api";
 import { listPrivatePurchases, getPrivatePurchaseStats } from "../../core/api/privatePurchasesApi";
@@ -214,6 +215,10 @@ const Dashboard = () => {
 
  return (
  <DashboardLayout includeWidgets={false}>
+ {/* Fuera de reportRef a proposito: no debe aparecer en el PDF exportado. */}
+ <div className="mb-6">
+ <BusinessCasePendingWidget />
+ </div>
  <div ref={reportRef}>
  <DashboardHeader
  title="Dashboard Gerencial"

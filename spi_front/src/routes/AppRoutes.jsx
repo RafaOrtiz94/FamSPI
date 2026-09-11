@@ -116,6 +116,7 @@ const DeterminationsCatalog = lazy(() => import("../modules/operaciones/pages/De
 const AsistenciaReportes = lazy(() => import("../modules/talento/pages/AsistenciaReportes"));
 const TechnicalTestResponsiblePage = lazy(() => import("../modules/talento/pages/TechnicalTestResponsiblePage"));
 const DocumentosReportePage = lazy(() => import("../modules/talento/pages/DocumentosReportePage"));
+const QualityHrDocumentsPage = lazy(() => import("../modules/calidad/pages/QualityHrDocumentsPage"));
 const SuggestionBoxPublicPage = lazy(() => import("../modules/suggestion-box/pages/SuggestionBoxPublicPage"));
 const SuggestionBoxDashboardPage = lazy(() => import("../modules/suggestion-box/pages/SuggestionBoxDashboardPage"));
 
@@ -539,6 +540,9 @@ const AppRoutes = () => {
           <Route path="/dashboard/operaciones" element={<DashboardOperaciones />} />
           <Route path="/dashboard/logistica" element={<DashboardLogistica />} />
           <Route path="/dashboard/calidad" element={<DashboardCalidad />} />
+          <Route element={<ProtectedRoute allowedRoles={["jefe_calidad"]} strictRoles />}>
+            <Route path="/dashboard/calidad/documentos-rrhh" element={<QualityHrDocumentsPage />} />
+          </Route>
           <Route path="/dashboard/calidad/temperatura" element={<CA0101Workspace />} />
           <Route path="/dashboard/calidad/limpieza" element={<CA0102Workspace />} />
           <Route path="/dashboard/calidad/buenas-practicas" element={<CA0103Workspace />} />

@@ -695,16 +695,55 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  return merged;
  }, [clientes, assignedToMe, createdByMe]);
 
- const accessibleAlbumBase = useMemo(() => {
- if (!Array.isArray(registeredClients)) return [];
- if (canManageAllClients) return registeredClients;
- return registeredClients.filter((c) => {
+ const filterByAccess = useCallback((list) => {
+ if (!Array.isArray(list)) return [];
+ if (canManageAllClients) return list;
+ return list.filter((c) => {
  const assigned = normalizeAsignados(c.asignados);
  const isAssigned = assigned.some((mail) => (mail || "").toLowerCase?.() === currentEmail);
  const isCreator = (c.created_by || "").toLowerCase?.() === currentEmail;
  return isAssigned || isCreator;
  });
- }, [registeredClients, canManageAllClients, currentEmail]);
+ }, [canManageAllClients, currentEmail]);
+
+ const applySourceFilter = useCallback((list) => {
+ if (!Array.isArray(list)) return [];
+ if (clientSourceFilter === "odoo") return list.filter((c) => isClientFromOdoo(c));
+ if (clientSourceFilter === "spi") return list.filter((c) => !isClientFromOdoo(c));
+ return list;
+ }, [clientSourceFilter]);
+
+ const accessibleAlbumBase = useMemo(
+ () => filterByAccess(registeredClients),
+ [registeredClients, filterByAccess],
+ );
+
+ // La busqueda solo filtraba sobre `registeredClients`, que esta acotado por
+ // paginacion (CLIENTS_PAGE_SIZE). Reportado por jefe_operaciones y Lorena
+ // Loaiza: la barra de busqueda no encontraba clientes fuera de las primeras
+ // paginas cargadas. `fetchClients` con `q` ya busca en todo el universo de
+ // clientes accesibles en el backend, asi que se usa como fuente cuando hay
+ // texto de busqueda.
+ const [remoteSearchResults, setRemoteSearchResults] = useState(null);
+ const remoteSearchDebounceRef = useRef(null);
+ const activeSearchQuery = (albumSearch || allClientsSearch || "").trim();
+
+ useEffect(() => {
+ clearTimeout(remoteSearchDebounceRef.current);
+ if (activeSearchQuery.length < 2) {
+ setRemoteSearchResults(null);
+ return undefined;
+ }
+ remoteSearchDebounceRef.current = setTimeout(async () => {
+ try {
+ const result = await fetchClients({ q: activeSearchQuery, limit: 250 });
+ setRemoteSearchResults(filterByAccess(result.clients));
+ } catch {
+ setRemoteSearchResults(null);
+ }
+ }, 300);
+ return () => clearTimeout(remoteSearchDebounceRef.current);
+ }, [activeSearchQuery, filterByAccess]);
 
  const sourceTotals = useMemo(() => {
  const base = Array.isArray(accessibleAlbumBase) ? accessibleAlbumBase : [];
@@ -722,13 +761,11 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  }, [accessibleAlbumBase]);
 
  const albumClients = useMemo(() => {
- let base = Array.isArray(accessibleAlbumBase) ? [...accessibleAlbumBase] : [];
-
- if (clientSourceFilter === "odoo") {
- base = base.filter((c) => isClientFromOdoo(c));
- } else if (clientSourceFilter === "spi") {
- base = base.filter((c) => !isClientFromOdoo(c));
+ if (albumSearch.trim().length >= 2 && remoteSearchResults !== null) {
+ return applySourceFilter(remoteSearchResults);
  }
+
+ const base = applySourceFilter(accessibleAlbumBase);
 
  if (!albumSearch) return base.slice(0, 12);
  const q = albumSearch.toLowerCase();
@@ -736,17 +773,12 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  const haystack = `${c.nombre || ""} ${c.commercial_name || ""} ${c.identificador || ""} ${c.ruc_cedula || ""} ${c.shipping_contact_name || ""}`.toLowerCase();
  return haystack.includes(q);
  });
- }, [accessibleAlbumBase, clientSourceFilter, albumSearch]);
+ }, [accessibleAlbumBase, applySourceFilter, albumSearch, remoteSearchResults]);
 
- const allAlbumClients = useMemo(() => {
- let base = Array.isArray(accessibleAlbumBase) ? [...accessibleAlbumBase] : [];
- if (clientSourceFilter === "odoo") {
- base = base.filter((c) => isClientFromOdoo(c));
- } else if (clientSourceFilter === "spi") {
- base = base.filter((c) => !isClientFromOdoo(c));
- }
- return base;
- }, [accessibleAlbumBase, clientSourceFilter]);
+ const allAlbumClients = useMemo(
+ () => applySourceFilter(accessibleAlbumBase),
+ [accessibleAlbumBase, applySourceFilter],
+ );
 
   const advisorAssignmentBoard = useMemo(() => {
     if (!isJefeComercial) return [];
@@ -796,6 +828,9 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
   }, [allAlbumClients, isJefeComercial]);
 
  const filteredAllAlbumClients = useMemo(() => {
+ if (allClientsSearch.trim().length >= 2 && remoteSearchResults !== null) {
+ return applySourceFilter(remoteSearchResults);
+ }
  if (!Array.isArray(allAlbumClients)) return [];
  if (!allClientsSearch) return allAlbumClients;
  const q = allClientsSearch.toLowerCase();
@@ -803,7 +838,7 @@ const normalizeAssignmentDetails = (assignmentDetails) => {
  const haystack = `${c.nombre || ""} ${c.commercial_name || ""} ${c.identificador || ""} ${c.ruc_cedula || ""} ${c.shipping_contact_name || ""}`.toLowerCase();
  return haystack.includes(q);
  });
- }, [allAlbumClients, allClientsSearch]);
+ }, [allAlbumClients, allClientsSearch, applySourceFilter, remoteSearchResults]);
 
  const filteredAssignedList = useMemo(() => {
  let base = assignedToMe;
@@ -2073,6 +2108,7 @@ const renderAlbumCard = (cliente) => {
                       </p>
                     </div>
                   )}
+                  {renderLoadMoreClientsButton()}
                 </Card>
 
  <Modal

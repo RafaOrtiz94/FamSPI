@@ -21,6 +21,7 @@ import Modal from "../../../core/ui/components/Modal";
 import {
   createTiAsset,
   downloadTiActa,
+  downloadTiActasReport,
   downloadTiAssetReport,
   downloadTiCollaboratorReport,
   downloadTiMaintenanceReport,
@@ -126,6 +127,7 @@ const TIAssetsFinancieroPage = () => {
   // Reports panel
   const [reportCollab, setReportCollab] = useState("");
   const [reportYear, setReportYear]     = useState(new Date().getFullYear());
+  const [reportActaCode, setReportActaCode] = useState("");
 
   // ── Load data ───────────────────────────────────────────────────────────────
 
@@ -1050,7 +1052,7 @@ const TIAssetsFinancieroPage = () => {
           <FiBarChart2 size={15} className="text-slate-400" />
           <span className="text-sm font-semibold text-slate-800">Reportes PDF</span>
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
 
           {/* By equipment */}
           <div className="rounded-xl border border-slate-200 p-4 space-y-3">
@@ -1113,6 +1115,26 @@ const TIAssetsFinancieroPage = () => {
             <button
               type="button"
               onClick={() => downloadTiMaintenanceReport({ period_type: "annual", year: reportYear })}
+              className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors active:scale-[0.97] cursor-pointer w-full"
+            >
+              <FiDownload size={13} /> Descargar PDF
+            </button>
+          </div>
+
+          {/* Actas de entrega-recepcion */}
+          <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+            <p className="text-xs font-semibold text-slate-700">Actas de entrega-recepción</p>
+            <p className="text-xs text-slate-400">Todas las actas, ordenadas por N° de acta. Filtro opcional por número.</p>
+            <input
+              type="text"
+              value={reportActaCode}
+              onChange={(e) => setReportActaCode(e.target.value)}
+              placeholder="N° de acta (opcional)"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:outline-none focus:border-slate-400"
+            />
+            <button
+              type="button"
+              onClick={() => downloadTiActasReport({ acta_code: reportActaCode || undefined })}
               className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors active:scale-[0.97] cursor-pointer w-full"
             >
               <FiDownload size={13} /> Descargar PDF

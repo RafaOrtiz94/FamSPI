@@ -4,6 +4,7 @@ jest.mock("../../../config/logger", () => ({ info: jest.fn(), warn: jest.fn(), e
 const {
   computeProfileCompletion,
   _buildReportDocumentsByUser,
+  _selectQualityHrDocuments,
 } = require("../collaborators.service");
 
 describe("collaborators – computeProfileCompletion", () => {
@@ -55,5 +56,31 @@ describe("collaborators - buildReportDocumentsByUser", () => {
 
     expect(docsByUser[10].HR_RESUME.drive_file_id).toBe("hr-resume");
     expect(docsByUser[10].CURRICULUM_VITAE.drive_file_id).toBe("curriculum");
+  });
+});
+
+describe("collaborators - quality HR projection", () => {
+  it("uses the same canonical report documents and hides unrelated documents", () => {
+    const rows = _selectQualityHrDocuments([
+      {
+        user_id: 1,
+        documents: {
+          CONTRACT_FAM: { raw_doc_type: "CONTRATO_TRABAJO" },
+          HR_RESUME: { raw_doc_type: "HR_RESUME" },
+          IDENTITY_DOCUMENT: { raw_doc_type: "IDENTITY_DOCUMENT" },
+        },
+        qualifications: [{ title: "Titulo oficial" }],
+      },
+    ]);
+
+    expect(Object.keys(rows[0].documents)).toEqual([
+      "CONTRACT_FAM",
+      "HR_RESUME",
+      "IMAGE_USE_AUTHORIZATION",
+      "SENESCYT_RECORD",
+    ]);
+    expect(rows[0].documents.CONTRACT_FAM.raw_doc_type).toBe("CONTRATO_TRABAJO");
+    expect(rows[0].documents.IDENTITY_DOCUMENT).toBeUndefined();
+    expect(rows[0].qualifications).toEqual([{ title: "Titulo oficial" }]);
   });
 });

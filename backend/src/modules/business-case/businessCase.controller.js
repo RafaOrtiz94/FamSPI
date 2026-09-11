@@ -175,7 +175,12 @@ const offerDecisionSchema = Joi.object({
 
 const SECTION_ALIASES = {
   general: "general",
-  lab: "laboratory_environment",
+  // "lab" (no "laboratory_environment"): assertSectionEditable, el
+  // auto-lock tras guardar (saveLabEnvironment) y el loop de ownershipRules
+  // en getUIGuidance ya usan la clave corta "lab" sin alias -- con el alias
+  // divergente, un lock/unlock manual via /sections/lab/lock quedaba
+  // invisible para esos otros 3 puntos (y viceversa).
+  lab: "lab",
   equipment: "equipment",
   lis: "lis",
   determinations: "determinations",
@@ -222,7 +227,17 @@ const DETERMINATIONS_REACTIVO_PRIVATE_ROLES = new Set(["jefe_comercial", "backof
 // comercial puede solicitar inspección en cualquier tipo de BC; backoffice roles en privados
 const INSPECTION_REQUEST_ROLES = new Set(["comercial", "backoffice_comercial", "backoffice"]);
 // ing_servicio + jefe_servicio reemplazan a tecnico + jefe_tecnico para controls/calibrators/materials
-const DETERMINATIONS_TECH_EDIT_ROLES = new Set(["tecnico", "ing_servicio", "jefe_tecnico", "jefe_servicio"]);
+// "tecnico" e "ing_servicio" son roles legacy/de solo lectura en BC (ver
+// mismo criterio ya aplicado en businessCaseDeterminationsGate.service.js
+// getRoleConfig): ing_servicio/esp_app solo ven, jefe_servicio es quien
+// realmente edita controles/calibradores/materiales. Antes este set los
+// dejaba editar aqui aunque el gate service ya los excluia.
+// "jefe_servicio_tecnico" es el mismo puesto que jefe_servicio/jefe_tecnico
+// (ver ROLE_GROUPS.jefe_servicio en middlewares/roles.js) -- faltaba aqui
+// (esta comparacion es un Set literal, no pasa por
+// BusinessCasePermissions.normalizeRole), asi que ese usuario no podia
+// bloquear ninguna subseccion tecnica de Determinaciones.
+const DETERMINATIONS_TECH_EDIT_ROLES = new Set(["jefe_tecnico", "jefe_servicio", "jefe_servicio_tecnico"]);
 const DETERMINATIONS_TECH_WINDOW_NOTIFY_ROLES = ["tecnico", "ing_servicio", "jefe_tecnico", "jefe_servicio"];
 const DETERMINATIONS_SUBSECTIONS = new Set(["reactivos", "controles", "calibradores", "materiales"]);
 const DETERMINATIONS_SHEET_ITEM_TYPES = {
@@ -1443,11 +1458,26 @@ async function applyDeterminationsCompletionTransition({ businessCase, role, use
       completed_technical_by_role: role,
       completed_technical_by_email: user?.email || null,
       updated_at: now.toISOString(),
+      // La etapa ya se completo (a tiempo o no) -- "vencida" deja de ser
+      // informacion util una vez cerrado el trabajo. Sin esto, is_expired
+      // quedaba en true para siempre (solo se limpia en el flujo de
+      // reapertura aprobada), mostrando "Ventana vencida" de forma permanente
+      // aunque jefe_servicio ya hubiera bloqueado todo.
+      is_expired: false,
+      expired_at: null,
+      expired_notified_at: null,
     };
     // Patch minimo, solo determinations_gate (ver comentario equivalente en
-    // la rama "commercial" de esta misma funcion).
+    // la rama "commercial" de esta misma funcion). Tambien se marca
+    // preflow_review_completed_at, que buildPreflowInfo lee pero que hasta
+    // ahora ningun flujo escribia -- por eso la etapa "Revision" del preflow
+    // quedaba isActive:true/isExpired:true para siempre tras el cierre real.
     await businessCaseService.updateBusinessCase(businessCaseId, {
-      modern_bc_metadata: { determinations_gate: metadata.determinations_gate },
+      modern_bc_metadata: {
+        determinations_gate: metadata.determinations_gate,
+        preflow_review_completed_at: now.toISOString(),
+        preflow_status: "review_completed",
+      },
     });
     await BusinessCaseDataOwnership.lockSection(
       businessCaseId,
@@ -1979,7 +2009,7 @@ async function list(req, res) {
     logConsumptionDebug({ versionTag: 'TOISO_V1', ts: new Date().toISOString() }, '[WORKSPACE_DEBUG] business-case list handler hit');
 
     const { page, pageSize, status, client_name, q } = req.query;
-    const result = await businessCaseService.listBusinessCases({ page, pageSize, status, client_name, q });
+    const result = await businessCaseService.listBusinessCases({ page, pageSize, status, client_name, q }, req.user);
 
     // Log sample data transformation
     if (result.items && result.items.length > 0) {
@@ -3707,7 +3737,10 @@ async function getUIGuidance(req, res) {
     const ownershipInfo = await BusinessCaseDataOwnership.getOwnershipInfo(id);
     const ownershipSectionMap = {
       general: "general",
-      lab: "laboratory_environment",
+      // Ver comentario en SECTION_ALIASES (linea ~176): "lab" es la clave
+      // real usada por assertSectionEditable y el auto-lock, no
+      // "laboratory_environment".
+      lab: "lab",
       equipment: "equipment",
       lis: "lis",
       determinations: "determinations",
@@ -4197,6 +4230,33 @@ async function getUIGuidance(req, res) {
     };
     const autosaveFlags = await featureFlagsService.getAutosaveFlagsForRole(userRole);
 
+    // Mismo flow_state legible en espanol que ya usa BusinessCasePicker
+    // (deriveBusinessCaseFlowState) -- antes el workspace mostraba su propio
+    // badge de estado (canonical_state crudo, ademas roto: ver fix anterior
+    // de workflowState.currentState) mientras el Picker mostraba un estado
+    // distinto para el mismo BC. Una sola fuente de verdad para "que estado
+    // ve el usuario", reutilizada, no una maquina de estados nueva.
+    const { rows: flowStateInvestmentRows } = await db.query(
+      `SELECT business_case_id, selected, unit_price, unit_price_financial
+         FROM bc_investment_selections
+        WHERE business_case_id = $1`,
+      [id],
+    );
+    const flowState = businessCaseService.deriveBusinessCaseFlowState({
+      canonicalState: bc.canonical_state,
+      metadata: bc.modern_bc_metadata,
+      investments: flowStateInvestmentRows,
+    });
+
+    // businessCaseSla.service.getSlaStatus ya existe y funciona (dias
+    // habiles por canonical_state), pero el frontend leia slaStatus de un
+    // objeto que getUIGuidance nunca poblaba -- el badge "SLA general" nunca
+    // podia renderizar. Envuelto en try/catch porque es informativo, no
+    // debe tumbar el resto del workspace si falla.
+    const slaStatus = await require("./businessCaseSla.service")
+      .getSlaStatus(id)
+      .catch(() => null);
+
     const rawCurrentStage = bc.bc_stage || bc.current_stage || "draft";
     const visibleCurrentStage = hasFeasibilityDecision
       ? (feasibilityDecision?.is_feasible ? "factible" : "cerrado_no_factible")
@@ -4207,6 +4267,8 @@ async function getUIGuidance(req, res) {
     // Build UI guidance response
     const uiGuidance = {
       businessCase: bc,
+      flowState,
+      slaStatus,
       sectionOwnership,
       permissions,
       featureFlags: {
@@ -4229,6 +4291,10 @@ async function getUIGuidance(req, res) {
       workflowState: {
         currentStage: visibleCurrentStage,
         rawStage: rawCurrentStage,
+        // El frontend (CaseHeader.jsx) lee currentState para el badge de
+        // estado global -- nunca se enviaba, asi que siempre caia al
+        // fallback "Borrador Inicial" sin importar el estado real del BC.
+        currentState: bc.canonical_state || null,
         availableTransitions: ['promote', 'observe']
       },
       preflow,
@@ -4267,10 +4333,21 @@ async function createOfferDraft(req, res) {
 async function publishOfferVersion(req, res) {
   try {
     const offerId = Number(req.params.offerId);
-    const data = await businessCaseOfferService.publishOfferVersion(req.params.id, offerId, req.user);
+    const data = await businessCaseOfferService.publishOfferVersion(req.params.id, offerId, req.user, req.file);
     res.json({ ok: true, data });
   } catch (error) {
     logger.error({ error: error.message, businessCaseId: req.params.id, offerId: req.params.offerId }, "Error publishing BC offer version");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+async function sendSignedOfferVersion(req, res) {
+  try {
+    const offerId = Number(req.params.offerId);
+    const data = await businessCaseOfferService.sendSignedOfferVersion(req.params.id, offerId, req.user, req.file);
+    res.json({ ok: true, data });
+  } catch (error) {
+    logger.error({ error: error.message, businessCaseId: req.params.id, offerId: req.params.offerId }, "Error sending signed BC offer version");
     res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
   }
 }
@@ -6952,6 +7029,7 @@ module.exports = {
   getOfferWorkspace,
   createOfferDraft,
   publishOfferVersion,
+  sendSignedOfferVersion,
   regenerateOfferVersion,
   syncOfferPricingAndPdf,
   decideOfferVersion,

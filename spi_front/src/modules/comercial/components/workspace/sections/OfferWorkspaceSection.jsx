@@ -4,6 +4,7 @@ import {
   FiCheckCircle,
   FiClock,
   FiDatabase,
+  FiDownload,
   FiExternalLink,
   FiFileText,
   FiRefreshCw,
@@ -15,19 +16,27 @@ import {
 import {
   createBusinessCaseOfferDraft,
   decideBusinessCaseOfferVersion,
+  downloadBusinessCaseOfferPdf,
   getBusinessCaseOfferWorkspace,
   publishBusinessCaseOfferVersion,
+  sendSignedBusinessCaseOfferVersion,
   regenerateBusinessCaseOfferVersion,
   syncBusinessCaseOfferPricing,
   syncBusinessCaseConsumptionFromSheet,
 } from "../../../../../core/api/businessCaseApi";
 import { useUI } from "../../../../../core/ui/UIContext";
+import Modal from "../../../../../core/ui/components/Modal";
 
 const STATUS_META = {
   draft: {
     label: "Borrador",
     tone: "bg-slate-100 text-slate-700",
     icon: FiClock,
+  },
+  ready_to_send: {
+    label: "Lista para firmar",
+    tone: "bg-amber-100 text-amber-700",
+    icon: FiFileText,
   },
   sent: {
     label: "Enviada",
@@ -150,6 +159,16 @@ export default function OfferWorkspaceSection({ businessCase, permissions, owner
     }
   };
 
+  const handleDownloadPdf = async (offer) => {
+    if (!offer?.pdf_file_id) return;
+    try {
+      const filename = `${businessCase?.client_name || "Cliente"} - Oferta V${offer.version_number}.pdf`;
+      await downloadBusinessCaseOfferPdf(offer.pdf_file_id, filename);
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo descargar el PDF", "error");
+    }
+  };
+
   const handleRegenerate = async (offer = latestOffer) => {
     if (!offer?.id) return;
     setBusyAction(`regenerate:${offer.id}`);
@@ -180,16 +199,63 @@ export default function OfferWorkspaceSection({ businessCase, permissions, owner
     }
   };
 
-  const handlePublish = async (offer = latestOffer) => {
+  const [publishTarget, setPublishTarget] = useState(null);
+  const [specificProposalFile, setSpecificProposalFile] = useState(null);
+
+  const openPublishModal = (offer = latestOffer) => {
     if (!offer?.id) return;
+    setSpecificProposalFile(null);
+    setPublishTarget(offer);
+  };
+
+  const closePublishModal = () => {
+    setPublishTarget(null);
+    setSpecificProposalFile(null);
+  };
+
+  const handlePublish = async () => {
+    const offer = publishTarget;
+    if (!offer?.id || !specificProposalFile) return;
     setBusyAction(`publish:${offer.id}`);
     try {
-      await publishBusinessCaseOfferVersion(businessCaseId, offer.id);
-      showToast("La oferta fue publicada y su PDF quedó disponible", "success");
+      await publishBusinessCaseOfferVersion(businessCaseId, offer.id, specificProposalFile);
+      showToast("Documento unido generado. Descárgalo, fírmalo fuera del SPI y súbelo para poder enviarlo.", "success");
+      closePublishModal();
       await loadWorkspace();
       onSave?.({ markComplete: false });
     } catch (error) {
-      showToast(error?.response?.data?.message || "No se pudo publicar la oferta", "error");
+      showToast(error?.response?.data?.message || "No se pudo generar el documento de la oferta", "error");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const [signTarget, setSignTarget] = useState(null);
+  const [signedFile, setSignedFile] = useState(null);
+
+  const openSignModal = (offer = latestOffer) => {
+    if (!offer?.id) return;
+    setSignedFile(null);
+    setSignTarget(offer);
+  };
+
+  const closeSignModal = () => {
+    setSignTarget(null);
+    setSignedFile(null);
+  };
+
+  const handleSendSigned = async () => {
+    const offer = signTarget;
+    if (!offer?.id || !signedFile) return;
+    setBusyAction(`send-signed:${offer.id}`);
+    try {
+      await sendSignedBusinessCaseOfferVersion(businessCaseId, offer.id, signedFile);
+      showToast("La oferta firmada fue enviada", "success");
+      closeSignModal();
+      await loadWorkspace();
+      onSave?.({ markComplete: false });
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo enviar la oferta firmada", "error");
     } finally {
       setBusyAction("");
     }
@@ -435,7 +501,17 @@ export default function OfferWorkspaceSection({ businessCase, permissions, owner
                             PDF
                           </a>
                         )}
-                        {canManage && ["draft", "rejected", "sent"].includes(offer.status) && (
+                        {offer.pdf_file_id && (
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadPdf(offer)}
+                            className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            <FiDownload size={14} />
+                            Descargar
+                          </button>
+                        )}
+                        {canManage && ["draft", "rejected"].includes(offer.status) && (
                           <button
                             type="button"
                             onClick={() => handleSyncPricing(offer)}
@@ -447,7 +523,7 @@ export default function OfferWorkspaceSection({ businessCase, permissions, owner
                             Sincronizar precios
                           </button>
                         )}
-                        {canManage && ["draft", "rejected", "sent"].includes(offer.status) && (
+                        {canManage && ["draft", "rejected"].includes(offer.status) && (
                           <button
                             type="button"
                             onClick={() => handleRegenerate(offer)}
@@ -458,15 +534,26 @@ export default function OfferWorkspaceSection({ businessCase, permissions, owner
                             Regenerar
                           </button>
                         )}
-                        {canManage && offer.status !== "sent" && offer.status !== "accepted" && (
+                        {canManage && ["draft", "rejected"].includes(offer.status) && (
                           <button
                             type="button"
-                            onClick={() => handlePublish(offer)}
+                            onClick={() => openPublishModal(offer)}
                             disabled={busyAction !== ""}
                             className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
                           >
                             <FiSend size={14} />
-                            Publicar
+                            Generar documento
+                          </button>
+                        )}
+                        {canManage && offer.status === "ready_to_send" && (
+                          <button
+                            type="button"
+                            onClick={() => openSignModal(offer)}
+                            disabled={busyAction !== ""}
+                            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                          >
+                            <FiSend size={14} />
+                            Subir firmado y enviar
                           </button>
                         )}
                       </div>
@@ -570,7 +657,17 @@ export default function OfferWorkspaceSection({ businessCase, permissions, owner
                     Abrir PDF
                   </a>
                 )}
-                {canManage && ["draft", "rejected", "sent"].includes(latestOffer.status) && (
+                {latestOffer.pdf_file_id && (
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadPdf(latestOffer)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <FiDownload size={15} />
+                    Descargar
+                  </button>
+                )}
+                {canManage && ["draft", "rejected"].includes(latestOffer.status) && (
                   <button
                     type="button"
                     onClick={() => handleSyncPricing()}
@@ -582,7 +679,7 @@ export default function OfferWorkspaceSection({ businessCase, permissions, owner
                     Sincronizar precios y PDF
                   </button>
                 )}
-                {canManage && ["draft", "rejected", "sent"].includes(latestOffer.status) && (
+                {canManage && ["draft", "rejected"].includes(latestOffer.status) && (
                   <button
                     type="button"
                     onClick={() => handleRegenerate()}
@@ -596,20 +693,38 @@ export default function OfferWorkspaceSection({ businessCase, permissions, owner
                 )}
               </div>
 
-              {canManage && latestOffer.status !== "sent" && latestOffer.status !== "accepted" && (
+              {canManage && ["draft", "rejected"].includes(latestOffer.status) && (
                 <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <p className="text-sm leading-6 text-slate-600">
-                    Después de cargar los precios en la hoja, publica la versión para generar el PDF visible al
-                    comercial creador.
+                    Sube la propuesta específica para generar el documento unido (propuesta de valor + propuesta
+                    específica + oferta). Podrás verlo y descargarlo antes de enviarlo.
                   </p>
                   <button
                     type="button"
-                    onClick={() => handlePublish()}
+                    onClick={() => openPublishModal()}
                     disabled={busyAction !== ""}
                     className="mt-4 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
                   >
                     <FiSend size={15} />
-                    Generar PDF y enviar oferta
+                    Generar documento
+                  </button>
+                </div>
+              )}
+
+              {canManage && latestOffer.status === "ready_to_send" && (
+                <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="text-sm leading-6 text-amber-800">
+                    Descarga el documento unido de arriba ("Abrir PDF"), fírmalo electrónicamente fuera del SPI y
+                    súbelo aquí ya firmado. Recién entonces la oferta se considerará enviada.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => openSignModal()}
+                    disabled={busyAction !== ""}
+                    className="mt-4 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    <FiSend size={15} />
+                    Subir documento firmado y enviar
                   </button>
                 </div>
               )}
@@ -729,6 +844,99 @@ export default function OfferWorkspaceSection({ businessCase, permissions, owner
           </div>
         </div>
       )}
+
+      <Modal
+        open={Boolean(publishTarget)}
+        onClose={() => busyAction === "" && closePublishModal()}
+        title="Subir propuesta específica"
+        maxWidth="max-w-lg"
+        disableClose={busyAction !== ""}
+      >
+        <div className="space-y-4">
+          <p className="text-sm leading-6 text-slate-600">
+            El documento se arma uniendo, en este orden: la propuesta de valor institucional, la propuesta
+            específica que subas aquí, y la oferta con las tablas de precios. Podrás verlo y descargarlo antes
+            de enviarlo — para enviarlo despues deberás subirlo firmado electrónicamente.
+          </p>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-sm font-semibold text-slate-700">Propuesta específica (PDF)</span>
+            <input
+              type="file"
+              accept="application/pdf"
+              onChange={(event) => setSpecificProposalFile(event.target.files?.[0] || null)}
+              className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
+            />
+          </label>
+          {specificProposalFile && (
+            <p className="text-xs text-slate-500">Archivo seleccionado: {specificProposalFile.name}</p>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={closePublishModal}
+              disabled={busyAction !== ""}
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handlePublish}
+              disabled={busyAction !== "" || !specificProposalFile}
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
+            >
+              <FiSend size={15} />
+              Generar documento
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(signTarget)}
+        onClose={() => busyAction === "" && closeSignModal()}
+        title="Subir documento firmado"
+        maxWidth="max-w-lg"
+        disableClose={busyAction !== ""}
+      >
+        <div className="space-y-4">
+          <p className="text-sm leading-6 text-slate-600">
+            Descarga el documento unido, fírmalo electrónicamente fuera del SPI, y sube aquí el PDF ya firmado.
+            Esto reemplaza el documento visible y marca la oferta como enviada.
+          </p>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-sm font-semibold text-slate-700">Documento firmado (PDF)</span>
+            <input
+              type="file"
+              accept="application/pdf"
+              onChange={(event) => setSignedFile(event.target.files?.[0] || null)}
+              className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
+            />
+          </label>
+          {signedFile && (
+            <p className="text-xs text-slate-500">Archivo seleccionado: {signedFile.name}</p>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={closeSignModal}
+              disabled={busyAction !== ""}
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleSendSigned}
+              disabled={busyAction !== "" || !signedFile}
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+            >
+              <FiSend size={15} />
+              Enviar oferta firmada
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

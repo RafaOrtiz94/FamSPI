@@ -14,12 +14,12 @@ import ConsumptionExportSection from "./sections/ConsumptionExportSection";
 import DispatchWorkspaceSection from "./sections/DispatchWorkspaceSection";
 import FeasibilitySection from "./sections/FeasibilitySection";
 import OfferWorkspaceSection from "./sections/OfferWorkspaceSection";
+import { roleToLabel } from "../../../../core/utils/businessCaseFlowState";
 
 const SectionContent = ({
  selectedSection,
  businessCase,
  uiGuidance,
- observationData,
  onSectionSave
 }) => {
  const { showToast } = useUI();
@@ -42,7 +42,21 @@ const SectionContent = ({
  const isInvestments = selectedSection === "investments";
  const isInvestmentValues = selectedSection === "investment_values";
  const isOfferWorkspace = selectedSection === "offer_workspace";
- const hasOwnPermissionModel = isInvestments || isInvestmentValues || isOfferWorkspace;
+ // "determinations" tiene su propio sistema de permisos (determinations_gate
+ // .permissions.canEditDeterminations, ver businessCaseDeterminationsGate
+ // .service.js) totalmente independiente del flag generico permissions.canEdit
+ // -- faltaba aqui, asi que un rol como jefe_servicio (autorizado por el gate
+ // pero no por la matriz generica de canEdit) veia el banner falso "Tu rol no
+ // tiene permiso de edicion en esta seccion" aunque el gate ya lo autorizaba.
+ const isDeterminations = selectedSection === "determinations";
+ // "dispatch_workspace" tambien tiene reglas propias post-factibilidad en el
+ // backend (businessCase.controller.js: ownershipRules.dispatch_workspace.
+ // canUserEdit = isFeasibleDecision cuando el BC ya se cerro, o false si aun
+ // no hay decision) -- el propio backend ya agrupa esta seccion junto con
+ // investments/determinations como "las 3 con reglas propias", pero aqui
+ // faltaba, reproduciendo el mismo banner falso.
+ const isDispatchWorkspace = selectedSection === "dispatch_workspace";
+ const hasOwnPermissionModel = isInvestments || isInvestmentValues || isOfferWorkspace || isDeterminations || isDispatchWorkspace;
  const canLock = permissions.canBlockSections && !sectionRule.isLocked && !hasOwnPermissionModel;
  const canUnlock = permissions.canUnblockSections && sectionRule.isLocked && !hasOwnPermissionModel;
  const businessCaseId = businessCase?.id || uiGuidance?.businessCase?.id;
@@ -98,7 +112,7 @@ const SectionContent = ({
  const readOnlyReason = isTerminalState
   ? `BC en estado "${terminalStateLabel}" — edición deshabilitada`
   : isStateLocked
-  ? `Sección bloqueada por ${sectionRule.lockedByRole || 'un supervisor'} — Para modificar, solicitar desbloqueo a ${unlockAuthorizer}`
+  ? `Sección bloqueada por ${sectionRule.lockedByRole ? roleToLabel(sectionRule.lockedByRole) : 'un supervisor'} — Para modificar, solicitar desbloqueo a ${unlockAuthorizer}`
   : isPermissionLocked
   ? `Tu rol no tiene permiso de edición en esta sección`
   : null;

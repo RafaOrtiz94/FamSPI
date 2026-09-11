@@ -36,7 +36,7 @@ const formatDate = (value) => {
   if (!value) return "Sin fecha";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleDateString("es-EC", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return date.toLocaleDateString("es-EC", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "America/Guayaquil" });
 };
 
 const formatDateTime = (value) => {

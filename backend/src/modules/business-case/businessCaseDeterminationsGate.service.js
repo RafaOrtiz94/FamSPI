@@ -293,8 +293,12 @@ function buildGateInfo({
         resolutionNotes: entry.resolution_notes || "",
       }))
     : [];
-  const expiredByTime = Boolean(deadlineAt && deadlineAt.getTime() < now.getTime());
-  const expiredByFlag = Boolean(rawGate?.is_expired);
+  // Con la fase ya cerrada (quantities_locked), el SLA dejo de aplicar -- sin
+  // este corte, expiredByTime se recalculaba en vivo contra un deadline_at
+  // que ya nadie mueve y "Ventana vencida" quedaba en true para siempre
+  // aunque jefe_servicio ya hubiera bloqueado y cerrado determinaciones.
+  const expiredByTime = !quantitiesLocked && Boolean(deadlineAt && deadlineAt.getTime() < now.getTime());
+  const expiredByFlag = !quantitiesLocked && Boolean(rawGate?.is_expired);
   const expired = expiredByTime || expiredByFlag;
   const technicalSlaExpired = usesTechnicalPreflowSla && expired;
   const normalizedRole = BusinessCasePermissions.normalizeRole(String(role || "").toLowerCase());

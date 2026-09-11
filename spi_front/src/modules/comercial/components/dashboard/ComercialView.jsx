@@ -14,6 +14,7 @@ import {
  Filler,
 } from "chart.js";
 import Button from "../../../../core/ui/components/Button";
+import BusinessCasePendingWidget from "../../../../core/ui/widgets/BusinessCasePendingWidget";
 
 // Register Chart.js components
 ChartJS.register(
@@ -151,6 +152,10 @@ const ComercialView = ({ onRefresh, summaryData, summaryLoading, summaryError })
  >
  {summaryLoading ? 'Actualizando...' : 'Actualizar'}
  </Button>
+ </div>
+
+ <div className="mb-6">
+ <BusinessCasePendingWidget />
  </div>
 
  {/* iOS Style KPIs - Optimized for iPhone 13 */}

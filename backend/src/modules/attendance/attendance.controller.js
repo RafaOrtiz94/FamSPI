@@ -827,7 +827,23 @@ const resolveMarkTimestamp = (reqBody = {}, fallbackNow = new Date()) => {
 
   const deltaMs = fallbackNow.getTime() - parsed.getTime();
   if (deltaMs < -ATTENDANCE_OCCURRED_AT_MAX_FUTURE_MS) return fallbackNow;
-  if (deltaMs > ATTENDANCE_OCCURRED_AT_MAX_PAST_MS) return fallbackNow;
+
+  // Offline marks carry an envelope created by the client at the moment the
+  // action was taken. Allow the original time only when the queue timestamp
+  // is valid and the event precedes the enqueue time; ordinary API callers
+  // remain subject to the existing anti-backdating window.
+  const queuedAtRaw = reqBody?.offline_queued_at ?? reqBody?.offlineQueuedAt ?? null;
+  const queuedAt = queuedAtRaw ? new Date(queuedAtRaw) : null;
+  const isOfflineSync = reqBody?.offline_sync === true || reqBody?.offlineSync === true;
+  const offlineEnvelopeValid = Boolean(
+    isOfflineSync &&
+    queuedAt &&
+    !Number.isNaN(queuedAt.getTime()) &&
+    parsed.getTime() <= queuedAt.getTime() &&
+    queuedAt.getTime() <= fallbackNow.getTime() + ATTENDANCE_OCCURRED_AT_MAX_FUTURE_MS,
+  );
+
+  if (deltaMs > ATTENDANCE_OCCURRED_AT_MAX_PAST_MS && !offlineEnvelopeValid) return fallbackNow;
 
   return parsed;
 };

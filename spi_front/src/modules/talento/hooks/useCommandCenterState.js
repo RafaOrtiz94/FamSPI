@@ -342,6 +342,11 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
         page: 1,
         pageSize: 120,
         search: debouncedSearch || undefined,
+        // ponytail: fija "active" (incluye pasantes) para no mezclar
+        // desvinculados en el roster por defecto. Si se necesita un toggle
+        // Activos/Desvinculados/Todos visible aqui, agregar un select que
+        // pase employment_status y sume su valor al queryKey.
+        employment_status: "active",
       });
       return Array.isArray(response?.data) ? response.data : Array.isArray(response) ? response : [];
     },

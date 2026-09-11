@@ -343,10 +343,11 @@ async function listarResumenColaboradores(req, res) {
       return res.status(403).json({ ok: false, message: "No tienes permisos para ver este resumen" });
     }
 
-    const { department_id, year } = req.query;
+    const { department_id, year, employment_status } = req.query;
     const result = await permisosService.listarResumenColaboradores({
       departmentId: department_id ? Number(department_id) : null,
       year: year ? Number(year) : null,
+      employmentStatus: employment_status || "active",
     });
     const normalized = result.map((row) => ({
       ...row,

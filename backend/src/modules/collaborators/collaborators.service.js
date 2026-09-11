@@ -5,6 +5,7 @@ const { HASH_ALGORITHM, computeSha256HexFromBuffer, resolveExternalDriveIntegrit
 const { ensureFolder, uploadBase64File, drive } = require('../../utils/drive');
 const { PROFILE_SYNC_KEYS, collectNestedFields, shouldSyncUserActiveStatus } = require('../shared/profileSync');
 const {
+  COLLABORATOR_DOCUMENT_CATALOG,
   getCollaboratorDocumentDefinition,
   getRequiredCollaboratorDocumentCodes,
   normalizeCollaboratorDocumentType,
@@ -73,7 +74,7 @@ const REQUIRED_PROFILE_FIELDS = [
 ];
 
 const PROFILE_PATHS = REQUIRED_PROFILE_FIELDS.map((field) => field.split('.'));
-const PASSIVE_EMPLOYMENT_STATUSES = ["pasivo", "desvinculado", "inactivo"];
+const { PASSIVE_EMPLOYMENT_STATUSES } = require('../../utils/employmentStatus');
 const REQUIRED_DOC_TYPES = getRequiredCollaboratorDocumentCodes();
 const AUTOMATIC_INTEGRATED_DOC_TYPES = new Set([
   "DELIVERY_COMMUNICATION_TOOLS",
@@ -1292,7 +1293,14 @@ const getCollaboratorStats = async () => {
 const getDocumentsReport = async (filters = {}) => {
   await ensureCollaboratorTables();
 
-  const { doc_type = null, search = null } = filters;
+  const {
+    doc_type = null,
+    search = null,
+    document_types = null,
+    include_inactive = false,
+    exclude_roles = [],
+    include_legacy_qualifications = true,
+  } = filters;
   const canonicalDocType = doc_type
     ? normalizeCollaboratorDocumentType(doc_type) || String(doc_type).trim().toUpperCase()
     : null;
@@ -1303,20 +1311,31 @@ const getDocumentsReport = async (filters = {}) => {
     ? `AND (LOWER(u.fullname) LIKE $1 OR LOWER(u.email) LIKE $1)`
     : '';
   if (search) collaboratorParams.push(`%${String(search).toLowerCase()}%`);
+  const normalizedExcludedRoles = Array.isArray(exclude_roles)
+    ? exclude_roles.map((role) => String(role).trim().toLowerCase()).filter(Boolean)
+    : [];
+  const roleCondition = normalizedExcludedRoles.length
+    ? `AND LOWER(COALESCE(u.role, '')) <> ALL($${collaboratorParams.length + 1}::text[])`
+    : '';
+  if (normalizedExcludedRoles.length) collaboratorParams.push(normalizedExcludedRoles);
+  const activeCondition = include_inactive ? '' : 'AND u.active = true';
 
   const { rows: collaborators } = await db.query(
     `SELECT
        u.id AS user_id,
        u.fullname,
        u.email,
+       u.active,
+       u.role,
        cp.profile->'laboral'->>'cargo' AS cargo,
        cp.profile->'laboral'->>'area' AS area,
        cp.profile->'laboral'->>'estatus_empleado' AS estatus_empleado
      FROM users u
      LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
-     WHERE u.active = true
+     WHERE ${activeCondition ? activeCondition.slice(4) : 'TRUE'}
        AND (COALESCE(cp.profile->'extra'->>'applicant_source','') <> 'google_forms'
             AND COALESCE((cp.profile->'extra' ? 'preguntas_adicionales'), false) = false)
+       ${roleCondition}
        ${searchCondition}
      ORDER BY u.fullname`,
     collaboratorParams,
@@ -1326,6 +1345,23 @@ const getDocumentsReport = async (filters = {}) => {
 
   // Query 2: all documents for those users — normalize aliases in JS, but
   // prefer exact document types so HR_RESUME never resolves to a CV alias.
+  const scopedDocumentTypes = Array.isArray(document_types)
+    ? document_types
+      .map((type) => normalizeCollaboratorDocumentType(type))
+      .filter(Boolean)
+    : null;
+  const rawScopedDocumentTypes = scopedDocumentTypes
+    ? COLLABORATOR_DOCUMENT_CATALOG
+      .filter((definition) => scopedDocumentTypes.includes(definition.code))
+      .flatMap((definition) => [definition.code, ...(definition.aliases || [])])
+    : null;
+  const documentScopeCondition = rawScopedDocumentTypes
+    ? 'AND doc_type = ANY($2::text[])'
+    : '';
+  const documentParams = rawScopedDocumentTypes
+    ? [collaborators.map((c) => c.user_id), rawScopedDocumentTypes]
+    : [collaborators.map((c) => c.user_id)];
+
   const { rows: docs } = await db.query(
     `SELECT
        id,
@@ -1342,8 +1378,9 @@ const getDocumentsReport = async (filters = {}) => {
      FROM collaborator_documents
      WHERE user_id = ANY($1::int[])
        AND COALESCE(is_active, true) = true
+       ${documentScopeCondition}
      ORDER BY user_id, created_at DESC, id DESC`,
-    [collaborators.map((c) => c.user_id)],
+    documentParams,
   );
 
   const qualificationsByUser = {};
@@ -1376,10 +1413,11 @@ const getDocumentsReport = async (filters = {}) => {
     qualifications = result.rows;
   }
 
-  const legacyTableResult = await db.query(
-    `SELECT to_regclass('public.user_certifications') AS table_name`,
-  );
-  if (legacyTableResult.rows[0]?.table_name) {
+  if (include_legacy_qualifications) {
+    const legacyTableResult = await db.query(
+      `SELECT to_regclass('public.user_certifications') AS table_name`,
+    );
+    if (legacyTableResult.rows[0]?.table_name) {
     const legacyMigrationCondition = qualificationTableExists
       ? `AND NOT EXISTS (
            SELECT 1
@@ -1433,6 +1471,7 @@ const getDocumentsReport = async (filters = {}) => {
         description: qualification.description || null,
       })),
     );
+    }
   }
 
   qualifications.forEach((qualification) => {
@@ -1453,6 +1492,8 @@ const getDocumentsReport = async (filters = {}) => {
       user_id: c.user_id,
       fullname: c.fullname,
       email: c.email,
+      active: c.active,
+      role: c.role,
       cargo: c.cargo || null,
       area: c.area || null,
       estatus_empleado: c.estatus_empleado || null,
@@ -1460,6 +1501,37 @@ const getDocumentsReport = async (filters = {}) => {
       qualifications: qualificationsByUser[c.user_id] || [],
     };
   });
+};
+
+const QUALITY_HR_DOCUMENT_TYPES = [
+  'CONTRACT_FAM',
+  'HR_RESUME',
+  'IMAGE_USE_AUTHORIZATION',
+  'SENESCYT_RECORD',
+];
+
+const selectQualityHrDocuments = (reportRows = []) => reportRows.map((row) => {
+  const { qualifications: _qualifications, documents: reportDocuments, ...collaborator } = row;
+  return {
+    ...collaborator,
+    employment_segment: row.active ? 'active' : 'disassociated',
+    qualifications: row.qualifications || [],
+    documents: QUALITY_HR_DOCUMENT_TYPES.reduce((result, documentType) => {
+      result[documentType] = reportDocuments?.[documentType] || null;
+      return result;
+    }, {}),
+  };
+});
+
+const getQualityHrDocuments = async (search = null) => {
+  const reportRows = await getDocumentsReport({
+    search,
+    document_types: QUALITY_HR_DOCUMENT_TYPES,
+    include_inactive: true,
+    exclude_roles: ['pasante'],
+    include_legacy_qualifications: false,
+  });
+  return selectQualityHrDocuments(reportRows);
 };
 
 module.exports = {
@@ -1471,5 +1543,7 @@ module.exports = {
   resolvePendingLegacyQualification,
   getCollaboratorStats,
   getDocumentsReport,
+  getQualityHrDocuments,
+  _selectQualityHrDocuments: selectQualityHrDocuments,
   _buildReportDocumentsByUser: buildReportDocumentsByUser,
 };

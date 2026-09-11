@@ -38,6 +38,7 @@ router.get("/maintenance/diagnose",      requireRole(TI_READ_ROLES), ctrl.diagno
 router.get("/reports",                   requireRole(TI_READ_ROLES), ctrl.listReports);
 router.get("/reports/download",          requireRole(TI_READ_ROLES), ctrl.downloadReport);
 router.get("/reports/asset/:id",         requireRole(TI_READ_ROLES), ctrl.downloadAssetReport);
+router.get("/reports/actas",             requireRole(TI_READ_ROLES), ctrl.downloadActasReport);
 router.get("/reports/collaborator/:userId", requireRole(TI_READ_ROLES), ctrl.downloadCollaboratorReport);
 router.get("/actas",                     requireRole(TI_READ_ROLES), ctrl.listAllActas);
 router.get("/actas/:actaId",             requireRole(TI_READ_ROLES), ctrl.getActa);

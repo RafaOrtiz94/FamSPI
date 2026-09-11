@@ -456,7 +456,7 @@ function buildPersonalPendingTasks({ role, metadata = {}, consumptionItems = [],
     materiales: "materiales",
   };
 
-  if (normalizedRole === "jefe_servicio") {
+  if (normalizedRole === "jefe_servicio" || normalizedRole === "jefe_servicio_tecnico") {
     Object.entries(subsectionLabels).forEach(([subsection, label]) => {
       if (locks[subsection] === true) return;
       const items = consumptionItems.filter(
@@ -536,7 +536,7 @@ function isParticipantStageComplete({ role, metadata = {}, investments = [] }) {
     return locks.reactivos === true;
   }
 
-  if (normalizedRole === "jefe_servicio") {
+  if (normalizedRole === "jefe_servicio" || normalizedRole === "jefe_servicio_tecnico") {
     return ["controles", "calibradores", "materiales"]
       .every((section) => locks[section] === true);
   }

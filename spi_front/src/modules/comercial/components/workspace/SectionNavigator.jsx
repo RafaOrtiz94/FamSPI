@@ -1,6 +1,6 @@
 import React from "react";
 import {
- FiCheckCircle, FiClock, FiLock, FiAlertTriangle, FiUser, FiMessageSquare, FiChevronDown, FiEye,
+ FiCheckCircle, FiClock, FiLock, FiAlertTriangle, FiUser, FiChevronDown, FiEye,
  FiActivity, FiClipboard, FiHardDrive, FiLink2, FiBarChart2, FiDollarSign, FiCreditCard, FiFlag,
  FiSend, FiTruck, FiFileText,
 } from "react-icons/fi";
@@ -15,7 +15,6 @@ const SectionNavigator = ({
  selectedSection,
  uiGuidance,
  onSectionSelect,
- observationData,
  sectionCompleteness = {}
 }) => {
   const { user } = useAuth();
@@ -161,6 +160,16 @@ const SectionNavigator = ({
  || uiGuidance?.permissions?.canDecideOfferWorkspace === true
  );
  }
+ if (sectionId === "dispatch_workspace") {
+ // Mismo patron que investments/determinations/offer_workspace arriba:
+ // dispatch_workspace tiene reglas propias post-factibilidad en el
+ // backend (businessCase.controller.js: solo editable si isFeasibleDecision
+ // es true, y siempre false antes de decidir factibilidad) -- el mapa
+ // estatico de roleSectionConfig no sabe nada de eso, asi que sin este
+ // caso especial la barra lateral podia marcar la seccion como editable
+ // por rol aunque el BC ni siquiera tuviera decision de factibilidad.
+ return rules?.dispatch_workspace?.canUserEdit === true;
+ }
  return canRoleEditSection(roleConfig, sectionId);
  };
 
@@ -187,6 +196,18 @@ const SectionNavigator = ({
  if (sectionId === "consumption_export") {
  return { status: "info", icon: FiEye, color: "text-gray-400" };
  }
+ // Determinaciones tiene su propio lock por subseccion (reactivos/controles/
+ // calibradores/materiales, en determinations_gate.sectionLocks) ademas del
+ // lock de seccion completa de BusinessCaseDataOwnership -- este sidebar
+ // nunca lo leia, asi que un BC con 2 de 4 subsecciones bloqueadas se veia
+ // igual que uno sin ninguna ("En curso", sin mas detalle).
+ const determinationsSubsectionProgress = sectionId === "determinations" && determinationsGate?.sectionLocks
+ ? (() => {
+ const keys = ["reactivos", "controles", "calibradores", "materiales"];
+ const locked = keys.filter((key) => determinationsGate.sectionLocks[key]).length;
+ return locked > 0 && locked < keys.length ? `${locked}/${keys.length} subsecciones` : null;
+ })()
+ : null;
  const rule = sectionId === "investment_values"
  ? {
  ...(rules.investment_values_fin || {}),
@@ -197,31 +218,23 @@ const SectionNavigator = ({
  completedAt: rules.investment_values_fin?.completedAt || rules.investment_values_op?.completedAt || null,
  }
  : rules[sectionId];
- const isObserved = observationData?.observedSections?.includes(sectionId);
- const hasComment = observationData?.comments?.[sectionId];
  const isLocked = Boolean(rule?.isLocked);
 
- // Priority: locked > observed > completed > in-progress > pending
+ // Priority: locked > completed > in-progress > pending
+ // (el estado "observed" se elimino: dependia de observationData, que el
+ // backend siempre envia null -- ver getUIGuidance en businessCase.controller.js.
+ // No hay ningun flujo real que produzca observaciones por seccion hoy.)
  if (isLocked && !rule?.isCompleted) {
  return {
  status: "locked",
  icon: FiLock,
  color: "text-gray-400",
- isLocked: true
+ isLocked: true,
+ subsectionProgress: determinationsSubsectionProgress,
  };
  }
 
- if (isObserved) {
- return {
- status: "observed",
- icon: FiAlertTriangle,
- color: "text-amber-600",
- hasComment: Boolean(hasComment),
- isObserved: true
- };
- }
-
- if (!rule) return { status: "pending", icon: FiClock, color: "text-gray-400" };
+ if (!rule) return { status: "pending", icon: FiClock, color: "text-gray-400", subsectionProgress: determinationsSubsectionProgress };
 
  if (rule.isCompleted) {
  return {
@@ -238,16 +251,16 @@ const SectionNavigator = ({
  status: "in-progress",
  icon: FiAlertTriangle,
  color: "text-yellow-600",
- currentOwner: rule.currentOwner
+ currentOwner: rule.currentOwner,
+ subsectionProgress: determinationsSubsectionProgress,
  };
  }
 
-  return { status: "pending", icon: FiClock, color: "text-gray-400" };
+  return { status: "pending", icon: FiClock, color: "text-gray-400", subsectionProgress: determinationsSubsectionProgress };
   };
 
   const getStatusLabel = (status) => ({
   locked: "Bloqueado",
-  observed: "Observado",
   completed: "Completado",
   "in-progress": "En curso",
   pending: "Pendiente",
@@ -288,11 +301,7 @@ const SectionNavigator = ({
   className={`w-full min-w-0 rounded-xl p-3 text-left transition-all duration-200 ${status.isLocked
  ? "opacity-60 cursor-not-allowed bg-gray-50 border border-gray-100"
  : isSelected
- ? status.isObserved
- ? "bg-amber-50 border border-amber-200 shadow-sm ring-1 ring-amber-200"
- : "bg-blue-50 border border-blue-200 shadow-sm ring-1 ring-blue-200"
- : status.isObserved
- ? "hover:bg-amber-50 border border-transparent hover:shadow-sm"
+ ? "bg-blue-50 border border-blue-200 shadow-sm ring-1 ring-blue-200"
  : "hover:bg-gray-50 border border-transparent hover:shadow-sm"
  }`}
  >
@@ -310,13 +319,6 @@ const SectionNavigator = ({
  }`}>
  {section.label || section.title}
  </h4>
- {status.hasComment && (
- <FiMessageSquare
- size={12}
- className="text-amber-600 flex-shrink-0"
- title="Tiene comentario de observacion"
- />
- )}
  {(status.isLocked || isReadOnly) && (
   <span className="text-xs font-normal text-gray-400">
  {status.isLocked ? "(Bloqueado)" : "(Solo lectura)"}
@@ -400,6 +402,13 @@ const SectionNavigator = ({
  <div className="flex items-center gap-1.5 text-xs text-yellow-700 font-medium bg-yellow-50 px-2 py-0.5 rounded-full w-fit">
  <FiUser size={10} />
   <span className="break-words">Edit: {status.currentOwner}</span>
+ </div>
+ )}
+
+ {status.subsectionProgress && (
+ <div className="flex items-center gap-1.5 text-xs text-indigo-700 font-medium bg-indigo-50 px-2 py-0.5 rounded-full w-fit">
+ <FiLock size={10} />
+  <span className="break-words">{status.subsectionProgress} bloqueadas</span>
  </div>
  )}
  </div>

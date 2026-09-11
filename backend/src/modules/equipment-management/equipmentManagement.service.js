@@ -183,7 +183,7 @@ async function getModelDetail(modelId) {
   };
 }
 
-async function listAssets({ search = null, status = null, model_id = null, availability = null } = {}) {
+async function listAssets({ search = null, status = null, model_id = null, servicio_equipo_id = null, availability = null } = {}) {
   const params = [];
   const where = [];
 
@@ -208,6 +208,15 @@ async function listAssets({ search = null, status = null, model_id = null, avail
   if (model_id) {
     params.push(toIntOrNull(model_id));
     where.push(`ea.equipment_model_id = $${params.length}`);
+  }
+
+  // El Business Case selecciona equipo del catalogo servicio.equipos (id_equipo),
+  // no de equipment_models directamente -- equipment_models.servicio_equipo_id
+  // es el puente ya existente entre ambos catalogos (ver columna en el
+  // esquema), asi que se filtra por ahi en vez de duplicar el mapeo.
+  if (servicio_equipo_id) {
+    params.push(toIntOrNull(servicio_equipo_id));
+    where.push(`em.servicio_equipo_id = $${params.length}`);
   }
 
   if (availability === "available") {

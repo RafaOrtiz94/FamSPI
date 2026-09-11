@@ -7,6 +7,55 @@ const { PRIVATE_PURCHASE_STATES } = require("../private-purchases/privatePurchas
 const { ensureBusinessCaseDriveFolder } = require("./businessCaseDriveFolder.service");
 const { filterEquipmentPairsForSheet } = require("./businessCaseSheetEquipment.helper");
 const { ensurePurchaseWorkspaceForFeasibleBusinessCase } = require("./businessCasePurchaseHandoff.service");
+const { isParticipantStageComplete } = require("./businessCaseWorkflowSla.service");
+
+// Roles que ven TODOS los business case en el picker/listado. El resto solo
+// ve los propios (created_by) -- antes cualquier rol de businessCaseRoles
+// (incluye comercial base) recibia el listado completo sin filtro.
+const BUSINESS_CASE_LIST_ELEVATED_ROLES = new Set([
+  "jefe_comercial",
+  "jefe_ti",
+  "jefe_financiero",
+  "jefe_servicio",
+  "gerencia",
+  "gerencia_general",
+  "admin",
+  "administrador",
+]);
+
+// Estado de flujo legible para el picker: prioriza estados terminales/de
+// gerencia, luego decision de viabilidad, y solo despues el "de quien es el
+// turno" (comercial -> servicio -> financiero) usando la misma logica ya
+// probada de isParticipantStageComplete (businessCaseWorkflowSla.service.js)
+// en vez de reinventar el calculo de reactivos/calibradores-controles-
+// materiales/precio financiero.
+function deriveBusinessCaseFlowState({ canonicalState, metadata, investments }) {
+  const cs = String(canonicalState || "").trim().toUpperCase();
+  const meta = toObject(metadata);
+
+  if (cs === "CANCELADO") return { code: "cancelado", label: "Cancelado" };
+  if (cs === "RECHAZADO_POR_GERENCIA") return { code: "rechazado_gerencia", label: "Rechazado por Gerencia" };
+  if (cs === "CERRADO_PARA_APROBACION") return { code: "cerrado_aprobacion", label: "Cerrado para Aprobación" };
+  if (cs === "AJUSTES_OPERATIVOS") return { code: "ajustes_operativos", label: "En Ajustes Operativos" };
+
+  const decision = toObject(toObject(meta.feasibility).decision);
+  if (decision.is_feasible === false) return { code: "no_viable", label: "No Viable" };
+  if (decision.is_feasible === true) return { code: "viable", label: "Viable" };
+
+  if (cs === "DRAFT_INICIAL" || !cs) return { code: "borrador", label: "Borrador" };
+
+  const investmentRows = Array.isArray(investments) ? investments : [];
+  if (!isParticipantStageComplete({ role: "acp_comercial", metadata: meta, investments: investmentRows })) {
+    return { code: "pendiente_comercial", label: "Pendiente de Comercial" };
+  }
+  if (!isParticipantStageComplete({ role: "jefe_servicio", metadata: meta, investments: investmentRows })) {
+    return { code: "pendiente_servicio", label: "Pendiente de Servicio" };
+  }
+  if (!isParticipantStageComplete({ role: "jefe_financiero", metadata: meta, investments: investmentRows })) {
+    return { code: "pendiente_financiero", label: "Pendiente de Financiero" };
+  }
+  return { code: "en_evaluacion_viabilidad", label: "En Evaluación de Viabilidad" };
+}
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -653,7 +702,7 @@ async function getBusinessCaseById(id) {
   return mapped;
 }
 
-async function listBusinessCases(filters = {}) {
+async function listBusinessCases(filters = {}, user = null) {
   const { page = 1, pageSize = DEFAULT_PAGE_SIZE, status, client_name, q } = filters;
   const params = [];
   const clauses = [];
@@ -675,12 +724,25 @@ async function listBusinessCases(filters = {}) {
     );
   }
 
+  // Mitigacion: antes cualquier rol de businessCaseRoles (incluye comercial
+  // base) recibia TODOS los business case sin filtro. Solo los roles
+  // elevados ven todo; el resto solo ve lo que el mismo creo.
+  const normalizedRole = String(user?.role || "").trim().toLowerCase();
+  const isElevated = BUSINESS_CASE_LIST_ELEVATED_ROLES.has(normalizedRole);
+  if (user?.id && !isElevated) {
+    params.push(Number(user.id));
+    clauses.push(`created_by = $${params.length}`);
+  }
+
   const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 
   params.push(pageSize);
   params.push((page - 1) * pageSize);
 
   // Fix: Convert dates to ISO strings to prevent {} serialization
+  // v_business_cases_complete es superset de v_business_cases (mismas
+  // columnas + canonical_state, process_code, etc.) -- se cambia la fuente
+  // para poder calcular el estado de flujo del picker sin una vista nueva.
   const query = `
     SELECT
       v.business_case_id,
@@ -689,6 +751,7 @@ async function listBusinessCases(filters = {}) {
       v.bc_purchase_type,
       v.status,
       v.bc_stage,
+      v.canonical_state,
       v.bc_progress,
       v.bc_duration_years,
       v.bc_equipment_cost,
@@ -710,7 +773,7 @@ async function listBusinessCases(filters = {}) {
       v.uses_modern_system,
       v.bc_system_type,
       COUNT(*) OVER() AS total_count
-    FROM v_business_cases v
+    FROM v_business_cases_complete v
     LEFT JOIN users u ON u.id = v.created_by
     ${whereClause}
     ORDER BY v.created_at DESC
@@ -727,8 +790,37 @@ async function listBusinessCases(filters = {}) {
     updated_at_type: typeof rows[0]?.updated_at
   });
 
+  // Una sola query batch para las inversiones de todas las filas -- evita
+  // N+1 al calcular el estado de flujo (isParticipantStageComplete necesita
+  // las inversiones seleccionadas de cada BC).
+  const businessCaseIds = rows.map((row) => row.business_case_id).filter(Boolean);
+  const investmentsByBc = new Map();
+  if (businessCaseIds.length) {
+    const { rows: investmentRows } = await db.query(
+      `SELECT business_case_id, selected, unit_price, unit_price_financial
+         FROM bc_investment_selections
+        WHERE business_case_id = ANY($1::uuid[])`,
+      [businessCaseIds],
+    );
+    for (const inv of investmentRows) {
+      const list = investmentsByBc.get(inv.business_case_id) || [];
+      list.push(inv);
+      investmentsByBc.set(inv.business_case_id, list);
+    }
+  }
+
+  const items = rows.map((row) => {
+    const mapped = mapBusinessCase(row);
+    mapped.flow_state = deriveBusinessCaseFlowState({
+      canonicalState: row.canonical_state,
+      metadata: mapped.modern_bc_metadata,
+      investments: investmentsByBc.get(row.business_case_id) || [],
+    });
+    return mapped;
+  });
+
   return {
-    items: rows.map(mapBusinessCase),
+    items,
     pagination: {
       page: Number(page),
       pageSize: Number(pageSize),
@@ -2083,7 +2175,9 @@ module.exports = {
   isComodato,
   recordExcelExportAndMarkWaitingCalculations,
   saveFeasibilityDecision,
+  deriveBusinessCaseFlowState,
   __testables: {
     buildTemplateConsumptionSyncItems,
+    deriveBusinessCaseFlowState,
   },
 };

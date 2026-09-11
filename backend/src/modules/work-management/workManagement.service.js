@@ -1,5 +1,7 @@
 const db = require("../../config/db");
 const { ensureFolderPath, uploadFileToDrive } = require("../../utils/drive");
+const notificationManager = require("../notifications/notificationManager");
+const logger = require("../../config/logger");
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MANAGER_ROLES = new Set([
@@ -1525,6 +1527,8 @@ async function updateItemSupporters(itemId, payload, userId) {
   }
 
   const client = await db.getClient();
+  let project = null;
+  let newlyAddedIds = [];
   try {
     await client.query("BEGIN");
 
@@ -1534,6 +1538,8 @@ async function updateItemSupporters(itemId, payload, userId) {
         WHERE item_id = $1`,
       [itemId]
     );
+    const existingIds = new Set(existingSupporters.map((row) => Number(row.user_id)));
+    newlyAddedIds = supporterIds.filter((id) => !existingIds.has(id));
 
     await client.query(`DELETE FROM work_management.followers WHERE item_id = $1`, [itemId]);
 
@@ -1547,6 +1553,38 @@ async function updateItemSupporters(itemId, payload, userId) {
       );
     }
 
+    // Un usuario asignado como apoyo debe poder ABRIR el item (para eso hace
+    // falta ser miembro del workspace y del proyecto -- assertItemAccess lo
+    // exige, ver linea 381). Sin esto, quedaba en la tabla followers pero no
+    // podia ver el item ni el tablero. Se agrega como 'viewer' (rol minimo,
+    // no editor) y solo al workspace/proyecto de ESTE item -- no a otros.
+    if (newlyAddedIds.length) {
+      const { rows: projectRows } = await client.query(
+        `SELECT id, name, workspace_id FROM work_management.projects WHERE id = $1`,
+        [currentItem.project_id]
+      );
+      project = projectRows[0] || null;
+
+      for (const supporterId of newlyAddedIds) {
+        if (project?.workspace_id) {
+          await client.query(
+            `INSERT INTO work_management.workspace_members
+              (workspace_id, user_id, member_role, created_by)
+             VALUES ($1,$2,'viewer',$3)
+             ON CONFLICT (workspace_id, user_id) DO NOTHING`,
+            [project.workspace_id, supporterId, userId]
+          );
+        }
+        await client.query(
+          `INSERT INTO work_management.project_members
+            (project_id, user_id, member_role, created_by)
+           VALUES ($1,$2,'viewer',$3)
+           ON CONFLICT (project_id, user_id) DO NOTHING`,
+          [currentItem.project_id, supporterId, userId]
+        );
+      }
+    }
+
     await logActivity(client, {
       project_id: currentItem.project_id,
       board_id: currentItem.board_id,
@@ -1558,13 +1596,42 @@ async function updateItemSupporters(itemId, payload, userId) {
     });
 
     await client.query("COMMIT");
-    return { item_id: itemId, support_user_ids: supporterIds };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
   }
+
+  if (newlyAddedIds.length) {
+    await Promise.all(newlyAddedIds.map(async (supporterId) => {
+      try {
+        await notificationManager.sendNotification({
+          userId: supporterId,
+          customTitle: "Te asignaron como apoyo",
+          customMessage:
+            `Fuiste asignado como apoyo en "${currentItem.title}"` +
+            (project?.name ? ` del proyecto "${project.name}".` : "."),
+          email: true,
+          chat: false,
+          priority: 0,
+          source: "work_management.item.supporter_assigned",
+          meta: {
+            projectId: currentItem.project_id,
+            itemId: currentItem.id,
+            itemTitle: currentItem.title,
+          },
+        });
+      } catch (error) {
+        logger.warn(
+          { error: error?.message || String(error), supporterId, itemId },
+          "No se pudo enviar notificacion de apoyo asignado"
+        );
+      }
+    }));
+  }
+
+  return { item_id: itemId, support_user_ids: supporterIds };
 }
 
 async function createItemComment(itemId, payload, userId) {

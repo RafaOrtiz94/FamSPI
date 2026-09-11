@@ -65,10 +65,11 @@ export const getMisSolicitudes = async () => {
 /**
  * Resumen por colaborador (talento humano)
  */
-export const getResumenColaboradores = async ({ departmentId = null, year = null } = {}) => {
+export const getResumenColaboradores = async ({ departmentId = null, year = null, employmentStatus = "active" } = {}) => {
   const params = {};
   if (departmentId) params.department_id = departmentId;
   if (year) params.year = year;
+  if (employmentStatus) params.employment_status = employmentStatus;
   const response = await api.get("/permisos/resumen-colaboradores", { params });
   return response.data;
 };

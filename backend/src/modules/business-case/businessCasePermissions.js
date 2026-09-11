@@ -54,6 +54,13 @@ const ROLES = {
 // investments accesible, todo lo demas de solo lectura).
 const ROLE_CANONICAL_MAP = {
   jefe_servicio: 'jefe_tecnico',
+  // Mismo puesto que jefe_servicio/jefe_tecnico (ver ROLE_GROUPS.jefe_servicio
+  // en middlewares/roles.js, donde los 3 ya son alias reconocidos) -- sin
+  // este mapeo, un usuario con este rol exacto no podia cerrar/bloquear
+  // controles, calibradores ni materiales en Determinaciones (buildGateInfo
+  // normalizaba el rol pero lo dejaba tal cual, y no calzaba con
+  // technicalEditors: ["jefe_tecnico", "jefe_servicio"]).
+  jefe_servicio_tecnico: 'jefe_tecnico',
   asesor_comercial: 'comercial',
   analista_comercial: 'comercial',
   jefe_de_operaciones: 'jefe_operaciones',

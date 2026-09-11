@@ -130,7 +130,7 @@ describe("businessCaseOffer.service", () => {
     expect(payload.summary).toEqual(expect.objectContaining({ total_rows: 2, is_complete: true }));
   });
 
-  test("publishOfferVersion bloquea publicación cuando faltan precios en la hoja", async () => {
+  test("publishOfferVersion ya no bloquea por precios incompletos, pero si exige la propuesta especifica", async () => {
     db.query.mockImplementation((sql, params) => {
       const text = typeof sql === "string" ? sql : "";
       if (text.includes("CREATE TABLE IF NOT EXISTS public.bc_offer_versions")) {
@@ -190,14 +190,98 @@ describe("businessCaseOffer.service", () => {
       },
     });
 
+    // Sin precios en la hoja (fila sin kitPrice) y sin especificProposalFile:
+    // ya no debe rechazar por precios incompletos -- solo por faltar la
+    // propuesta especifica, que sigue siendo obligatoria.
     await expect(
       service.publishOfferVersion("bc-1", 21, { id: 9, role: "jefe_comercial", email: "jefe@demo.com" }),
     ).rejects.toMatchObject({
-      code: "BC_OFFER_PRICING_INCOMPLETE",
-      status: 409,
+      code: "BC_OFFER_SPECIFIC_PROPOSAL_REQUIRED",
+      status: 400,
     });
 
     expect(drive.files.export).not.toHaveBeenCalled();
+  });
+
+  test("sendSignedOfferVersion exige que la oferta este ready_to_send antes de aceptar el PDF firmado", async () => {
+    db.query.mockImplementation((sql) => {
+      const text = typeof sql === "string" ? sql : "";
+      if (text.includes("CREATE TABLE IF NOT EXISTS public.bc_offer_versions")) {
+        return Promise.resolve({ rows: [] });
+      }
+      if (text.includes("FROM v_business_cases_complete vc")) {
+        return Promise.resolve({
+          rows: [{
+            id: "bc-1",
+            client_name: "Cliente Demo",
+            created_by: 15,
+            canonical_state: "VIABLE",
+            bc_stage: "factible",
+            modern_bc_metadata: { feasibility: { decision: { decided_at: "2026-08-12T10:00:00.000Z", is_feasible: true } } },
+          }],
+        });
+      }
+      if (text.includes("FROM bc_offer_versions") && text.includes("AND id = $2")) {
+        return Promise.resolve({ rows: [{ id: 21, business_case_id: "bc-1", version_number: 3, status: "draft" }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    await expect(
+      service.sendSignedOfferVersion("bc-1", 21, { id: 9, role: "jefe_comercial", email: "jefe@demo.com" }, { buffer: Buffer.from("x"), mimetype: "application/pdf" }),
+    ).rejects.toMatchObject({
+      code: "BC_OFFER_NOT_READY_FOR_SIGNATURE",
+      status: 409,
+    });
+    expect(drive.files.create).not.toHaveBeenCalled();
+  });
+
+  test("sendSignedOfferVersion exige el archivo firmado cuando la oferta ya esta ready_to_send", async () => {
+    db.query.mockImplementation((sql) => {
+      const text = typeof sql === "string" ? sql : "";
+      if (text.includes("CREATE TABLE IF NOT EXISTS public.bc_offer_versions")) {
+        return Promise.resolve({ rows: [] });
+      }
+      if (text.includes("FROM v_business_cases_complete vc")) {
+        return Promise.resolve({
+          rows: [{
+            id: "bc-1",
+            client_name: "Cliente Demo",
+            created_by: 15,
+            canonical_state: "VIABLE",
+            bc_stage: "factible",
+            modern_bc_metadata: { feasibility: { decision: { decided_at: "2026-08-12T10:00:00.000Z", is_feasible: true } } },
+          }],
+        });
+      }
+      if (text.includes("FROM bc_offer_versions") && text.includes("AND id = $2")) {
+        return Promise.resolve({ rows: [{ id: 21, business_case_id: "bc-1", version_number: 3, status: "ready_to_send" }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    await expect(
+      service.sendSignedOfferVersion("bc-1", 21, { id: 9, role: "jefe_comercial", email: "jefe@demo.com" }, null),
+    ).rejects.toMatchObject({
+      code: "BC_OFFER_SIGNED_DOCUMENT_REQUIRED",
+      status: 400,
+    });
+    expect(drive.files.create).not.toHaveBeenCalled();
+  });
+
+  test("mergeOfferPdfBuffers une paginas de varios PDFs en un solo documento, en orden", async () => {
+    const { PDFDocument } = require("pdf-lib");
+    const makePdf = async (pageCount) => {
+      const doc = await PDFDocument.create();
+      for (let i = 0; i < pageCount; i += 1) doc.addPage();
+      return Buffer.from(await doc.save());
+    };
+    const [pdfA, pdfB, pdfC] = await Promise.all([makePdf(1), makePdf(2), makePdf(3)]);
+
+    const merged = await service.__testables.mergeOfferPdfBuffers([pdfA, pdfB, pdfC]);
+    const mergedDoc = await PDFDocument.load(merged);
+
+    expect(mergedDoc.getPageCount()).toBe(1 + 2 + 3);
   });
 
   test("decideOfferVersion exige motivo cuando la oferta es rechazada", async () => {
@@ -1145,13 +1229,14 @@ describe("businessCaseOffer.service", () => {
     })).toBe("electrolito");
   });
 
-  test("la columna de determinacion siempre se muestra en reactivos y solo en hematologia para las demas secciones", () => {
+  test("la columna US$ DET APROX* solo se muestra en la seccion de reactivos, para todas las ofertas", () => {
     const { shouldShowDeterminationPriceColumn } = service.__testables;
-    expect(shouldShowDeterminationPriceColumn("reactivo", false)).toBe(true);
-    expect(shouldShowDeterminationPriceColumn("consumible", false)).toBe(false);
-    expect(shouldShowDeterminationPriceColumn("calibrador", false)).toBe(false);
-    expect(shouldShowDeterminationPriceColumn("control", true)).toBe(true);
-    expect(shouldShowDeterminationPriceColumn("consumible", true)).toBe(true);
+    expect(shouldShowDeterminationPriceColumn("reactivo")).toBe(true);
+    expect(shouldShowDeterminationPriceColumn("consumible")).toBe(false);
+    expect(shouldShowDeterminationPriceColumn("calibrador")).toBe(false);
+    expect(shouldShowDeterminationPriceColumn("control")).toBe(false);
+    expect(shouldShowDeterminationPriceColumn("control_calibrador")).toBe(false);
+    expect(shouldShowDeterminationPriceColumn("electrolito")).toBe(false);
   });
 
   test("normaliza mojibake UTF-8 sin modificar texto Unicode valido", () => {

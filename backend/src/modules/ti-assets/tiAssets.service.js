@@ -2434,7 +2434,12 @@ async function updateActaPdf({ actaId, filename, sha256, driveUrl, driveFileId }
   );
 }
 
-async function listAllActas({ limit = 100, offset = 0, tipo = null, is_complete = null }) {
+const ACTAS_SORT_COLUMNS = {
+  acta_code: "a.acta_code ASC",
+  generated_at: "a.generated_at DESC",
+};
+
+async function listAllActas({ limit = 100, offset = 0, tipo = null, is_complete = null, acta_code = null, sort = "generated_at" }) {
   await ensureTiAssetsSchema();
   const params = [];
   const where  = ["a.active = true"];
@@ -2445,6 +2450,12 @@ async function listAllActas({ limit = 100, offset = 0, tipo = null, is_complete 
   if (is_complete !== null) {
     params.push(Boolean(is_complete));
     where.push(`a.is_complete = $${params.length}`);
+  }
+  if (acta_code) {
+    // Busca tanto el codigo completo (ej. "ACTA-ET-2026-000001") como solo
+    // el numero secuencial de 6 digitos (ej. "1" o "000001").
+    params.push(`%${String(acta_code).trim()}%`);
+    where.push(`a.acta_code ILIKE $${params.length}`);
   }
   params.push(Number(limit));
   params.push(Number(offset));
@@ -2464,7 +2475,7 @@ async function listAllActas({ limit = 100, offset = 0, tipo = null, is_complete 
        LEFT JOIN public.users    ur ON ur.id = a.recipient_user_id
        LEFT JOIN public.users    up ON up.id = a.previous_user_id
       WHERE ${where.join(" AND ")}
-      ORDER BY a.generated_at DESC
+      ORDER BY ${ACTAS_SORT_COLUMNS[sort] || ACTAS_SORT_COLUMNS.generated_at}
       LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params,
   );
@@ -3206,6 +3217,78 @@ async function generateAssetPdfReport(assetId) {
          .text(acta.is_complete ? "FIRMADA" : "PENDIENTE FIRMA", 380, ay + 4, { width: 100 });
       doc.y = ay + 24;
     });
+
+    const pCount = doc.bufferedPageRange().count;
+    for (let i = 0; i < pCount; i++) {
+      doc.switchToPage(i);
+      doc.fontSize(7).fillColor("#94a3b8").font("Helvetica")
+         .text(`Página ${i + 1} de ${pCount}  ·  FAM SPI Activos TI`, 40, 820, { width: W, align: "center" });
+    }
+    doc.end();
+  });
+}
+
+async function generateActasPdfReport({ tipo = null, is_complete = null, acta_code = null } = {}) {
+  const PDFDocument = require("pdfkit");
+  const actas = await listAllActas({ limit: 5000, offset: 0, tipo, is_complete, acta_code, sort: "acta_code" });
+
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 40, size: "A4", bufferPages: true });
+    const chunks = [];
+    doc.on("data", (c) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+    const W = 515;
+
+    doc.rect(40, 40, W, 60).fill("#1E293B");
+    doc.fillColor("#fff").fontSize(14).font("Helvetica-Bold")
+       .text("Reporte de Actas de Entrega-Recepción de Equipos Tecnológicos", 50, 50, { width: W - 10 });
+    doc.fontSize(9).font("Helvetica").fillColor("#94a3b8")
+       .text(`Total: ${actas.length} acta(s) · ordenado por N° de acta`, 50, 76);
+    doc.fillColor("#0f172a").moveDown(2.5);
+
+    const cols = [
+      { label: "N° Acta", x: 44, width: 160 },
+      { label: "Tipo", x: 208, width: 55 },
+      { label: "Colaborador", x: 267, width: 130 },
+      { label: "Fecha", x: 401, width: 55 },
+      { label: "Estado", x: 460, width: 65 },
+    ];
+    const drawHeader = () => {
+      doc.rect(40, doc.y, W, 16).fill("#e2e8f0");
+      const y = doc.y + 4;
+      cols.forEach((c) => doc.fontSize(7.5).font("Helvetica-Bold").fillColor("#334155").text(c.label, c.x, y, { width: c.width }));
+      doc.y += 18;
+    };
+    drawHeader();
+
+    actas.forEach((acta, idx) => {
+      if (doc.y > 760) {
+        doc.addPage();
+        drawHeader();
+      }
+      const ry = doc.y;
+      if (idx % 2 === 1) doc.rect(40, ry, W, 14).fill("#f8fafc");
+      const fecha = acta.acta_day && acta.acta_month && acta.acta_year
+        ? `${String(acta.acta_day).padStart(2, "0")}/${String(acta.acta_month).padStart(2, "0")}/${acta.acta_year}`
+        : String(acta.generated_at || "").slice(0, 10);
+      const vals = [
+        acta.acta_code || "-",
+        acta.tipo === "entrega" ? "Entrega" : "Retiro",
+        acta.collaborator_name || acta.recipient_nombre || "-",
+        fecha,
+        acta.is_complete ? "Firmada" : "Pendiente",
+      ];
+      vals.forEach((v, i) => {
+        doc.fontSize(7.5).font("Helvetica").fillColor("#1f2937")
+           .text(String(v), cols[i].x, ry + 2, { width: cols[i].width, lineBreak: false, ellipsis: true });
+      });
+      doc.y = ry + 14;
+    });
+
+    if (!actas.length) {
+      doc.fontSize(9).font("Helvetica").fillColor("#64748b").text("No hay actas que coincidan con el filtro.", 44, doc.y + 10);
+    }
 
     const pCount = doc.bufferedPageRange().count;
     for (let i = 0; i < pCount; i++) {
@@ -4159,6 +4242,7 @@ module.exports = {
   getActaSignatureWorkflow,
   // Reports
   generateAssetPdfReport,
+  generateActasPdfReport,
   generateAssetLabelPdf,
   generateCollaboratorPdfReport,
   // Financial docs

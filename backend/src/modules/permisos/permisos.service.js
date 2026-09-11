@@ -142,8 +142,8 @@ const PREFERRED_APPROVER_EMAILS = String(process.env.PREFERRED_APPROVER_EMAILS |
   .split(",")
   .map((value) => String(value || "").trim().toLowerCase())
   .filter(Boolean);
-const PASSIVE_EMPLOYMENT_STATUSES = new Set(["pasivo", "desvinculado", "inactivo"]);
-const PASSIVE_EMPLOYMENT_STATUS_VALUES = Array.from(PASSIVE_EMPLOYMENT_STATUSES);
+const { PASSIVE_EMPLOYMENT_STATUSES: PASSIVE_EMPLOYMENT_STATUS_VALUES } = require("../../utils/employmentStatus");
+const PASSIVE_EMPLOYMENT_STATUSES = new Set(PASSIVE_EMPLOYMENT_STATUS_VALUES);
 const GENERAL_UNAVAILABILITY_EMERGENCY_APPROVAL_WINDOW_HOURS = 4;
 const EXTERNAL_COORDINATION_ROLES = new Set(["ing_servicio_ext", "esp_app_ext"]);
 const EXTERNAL_COORDINATION_APPROVER_LABEL = "Coordinación externa";
@@ -5527,22 +5527,34 @@ function computeSpecialVacationAccrualFromOpening(hireDateValue, effectiveDateVa
   return roundToTwo(accrued);
 }
 
-async function listarResumenColaboradores({ departmentId = null, year = null } = {}) {
+async function listarResumenColaboradores({ departmentId = null, year = null, employmentStatus = "active" } = {}) {
   await ensureTable();
   await processExpiredPendingSolicitudes();
   const filterYear = year ? Number(year) : null;
   const filterDeptId = departmentId ? Number(departmentId) : null;
+  // Mismo patron de collaborators.service.js::listCollaborators -- "active"
+  // (default, incluye pasantes: solo excluye pasivo/desvinculado/inactivo),
+  // "passive"/"offboarded", o "all" sin filtrar.
+  const normalizedEmploymentStatus = String(employmentStatus || "active").trim().toLowerCase();
+  const employmentStatusClause =
+    normalizedEmploymentStatus === "active"
+      ? `AND u.active = true AND LOWER(TRIM(COALESCE(cp.profile->'laboral'->>'estatus_empleado', 'activo'))) <> ALL($2::text[])`
+      : normalizedEmploymentStatus === "passive" || normalizedEmploymentStatus === "offboarded"
+        ? `AND (u.active = false OR LOWER(TRIM(COALESCE(cp.profile->'laboral'->>'estatus_empleado', ''))) = ANY($2::text[]))`
+        : "";
   const usersResult = await db.query(
     `SELECT u.id, u.email, u.fullname, u.name, u.department_id,
             d.name AS department_name,
             cp.profile->'laboral'->>'fecha_ingreso' as fecha_ingreso,
+            cp.profile->'laboral'->>'estatus_empleado' as estatus_empleado,
             cp.profile->'extra'->>'applicant_source' as applicant_source
        FROM users u
        LEFT JOIN departments d ON d.id = u.department_id
        LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
       WHERE ($1::int IS NULL OR u.department_id = $1)
+        ${employmentStatusClause}
       ORDER BY COALESCE(NULLIF(u.fullname, ''), NULLIF(u.name, ''), u.email, CONCAT('Usuario #', u.id)) ASC`,
-    [filterDeptId]
+    [filterDeptId, PASSIVE_EMPLOYMENT_STATUS_VALUES]
   );
   const { rows } = await db.query(
     `SELECT
@@ -5645,9 +5657,13 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
   const collaborators = new Map();
   const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
   const buildKey = ({ userEmail = null, userId = null, fallbackId = null }) => {
+    // user_id primero: user_email en permisos_vacaciones queda denormalizado
+    // al crear la solicitud, asi que un cambio de correo despues deja
+    // solicitudes viejas con el email anterior. Priorizar email fragmentaba
+    // a ese colaborador en dos filas distintas del consolidado.
+    if (userId) return `user-${userId}`;
     const normalizedEmail = normalizeEmail(userEmail);
     if (normalizedEmail) return `email-${normalizedEmail}`;
-    if (userId) return `user-${userId}`;
     return `unknown-${fallbackId || "sin-id"}`;
   };
   const ensureCollaboratorRecord = ({
@@ -5785,8 +5801,12 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
       record.vacaciones.items.push({
         id: row.id,
         status,
-        fecha_inicio: row.fecha_inicio,
-        fecha_fin: row.fecha_fin,
+        // Date-only string ("YYYY-MM-DD") en vez del objeto Date crudo de pg
+        // (medianoche UTC): evita que un consumidor nuevo lo formatee con
+        // Intl/toLocaleDateString sin timeZone y corra el dia, como paso en
+        // el consolidado de Talento Humano.
+        fecha_inicio: normalizeDateOnly(row.fecha_inicio),
+        fecha_fin: normalizeDateOnly(row.fecha_fin),
         duracion_dias: days,
         created_at: row.created_at,
         source: "permisos_vacaciones",
@@ -5818,8 +5838,8 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
       id: row.id,
       status,
       tipo_permiso: row.tipo_permiso,
-      fecha_inicio: row.fecha_inicio,
-      fecha_fin: row.fecha_fin,
+      fecha_inicio: normalizeDateOnly(row.fecha_inicio),
+      fecha_fin: normalizeDateOnly(row.fecha_fin),
       fecha_inicio_hora: row.fecha_inicio_hora,
       fecha_fin_hora: row.fecha_fin_hora,
       duracion_horas: row.duracion_horas,
@@ -5873,8 +5893,8 @@ async function listarResumenColaboradores({ departmentId = null, year = null } =
     record.vacaciones.items.push({
       id: row.id,
       status: row.status,
-      fecha_inicio: row.start_date,
-      fecha_fin: row.end_date,
+      fecha_inicio: normalizeDateOnly(row.start_date),
+      fecha_fin: normalizeDateOnly(row.end_date),
       duracion_dias: days,
       created_at: row.created_at,
       source: "vacaciones_solicitudes",

@@ -7,6 +7,7 @@ import { useParams } from "react-router-dom";
 import { useAuth } from "../../../../core/auth/AuthContext";
 import { recordBusinessCaseTelemetry } from "../../../../core/utils/businessCaseTelemetry";
 import { promptDialog } from "../../../../core/ui/utils/promptDialog";
+import { formatDateTimeSafe } from "../../../../shared/utils/dateUtils";
 import SectionEditorBadge from "./SectionEditorBadge";
 import {
  getDeterminationsStatDocumentInfo,
@@ -21,7 +22,12 @@ const isAffirmative = (value) => {
 // Public BC: only acp_comercial. Private BC: only backoffice.
 const PUBLIC_BC_TYPES = new Set(["public", "comodato_publico"]);
 // Roles que ejecutan la parte técnica (inspección, actas, calibradores propios)
-const TECNICO_ROLES = new Set(["jefe_tecnico", "jefe_servicio"]);
+// "jefe_servicio_tecnico" es el mismo puesto que jefe_servicio/jefe_tecnico
+// (ver ROLE_GROUPS.jefe_servicio en backend/src/middlewares/roles.js) --
+// faltaba aqui, asi que ese usuario nunca veia el boton para bloquear
+// controles/calibradores/materiales aunque el backend hubiera dejado ya
+// listas las otras 3 subsecciones.
+const TECNICO_ROLES = new Set(["jefe_tecnico", "jefe_servicio", "jefe_servicio_tecnico"]);
 const ROW_WINDOW_STEP = 24;
 const DET_DEBUG_VERSION = "2026-05-13-det-save-v5";
 const DET_DEBUG_ENABLED = (() => {
@@ -342,25 +348,31 @@ const DETERMINATION_CATEGORY_CONFIG = [
  {
  key: "reactivos",
  title: "Reactivos",
- description: "Edita esta seccion con rol comercial / acp comercial / backoffice.",
+ // Edita Jefe Comercial siempre, mas ACP Comercial en BC publico o
+ // Backoffice Comercial en BC privado (nunca los tres a la vez) -- antes
+ // decia "comercial / acp comercial / backoffice" como si los 3 aplicaran
+ // simultaneamente.
+ description: "Edita Jefe Comercial y, segun el tipo de compra, ACP Comercial (publica) o Backoffice Comercial (privada).",
  types: new Set(["reactivo", "determinacion"]),
  },
  {
  key: "controles",
  title: "Controles",
- description: "Edita esta seccion con rol jefe tecnico / tecnico.",
+ // El rol real es jefe_servicio (alias jefe_tecnico/jefe_servicio_tecnico) --
+ // "jefe tecnico / tecnico" era un nombre de rol legacy que ya no existe.
+ description: "Edita Jefe de Servicio.",
  types: new Set(["control"]),
  },
  {
  key: "calibradores",
  title: "Calibradores",
- description: "Edita esta seccion con rol jefe tecnico / tecnico.",
+ description: "Edita Jefe de Servicio.",
  types: new Set(["calibrador"]),
  },
  {
  key: "materiales",
  title: "Materiales",
- description: "Edita esta seccion con rol jefe tecnico / tecnico.",
+ description: "Edita Jefe de Servicio.",
  types: new Set(["consumible", "material"]),
  },
 ];
@@ -509,35 +521,24 @@ const inspectionSummary = useMemo(() => {
 
  const isPublicBC = PUBLIC_BC_TYPES.has(businessCase?.bc_purchase_type);
 
- const loadEquipmentData = useCallback(async () => {
+ const loadEquipmentData = useCallback(() => {
  if (!bcId) return;
  // Solo el backup que se instala simultaneamente forma parte del equipo
  // operativo que debe aparecer en determinaciones y consumibles.
+ // Unica fuente real: businessCase.extra.equipment_details. Antes habia un
+ // fallback a GET /business-case/:id/equipment-details, pero esa ruta nunca
+ // existio en el backend (siempre 404 silencioso) -- quitado.
  const detailsFromExtra = businessCase?.extra?.equipment_details;
- if (Array.isArray(detailsFromExtra) && detailsFromExtra.length > 0) {
+ if (!Array.isArray(detailsFromExtra) || !detailsFromExtra.length) {
+ debugWarn("No hay equipment_details en el Business Case");
+ return;
+ }
  const ids = detailsFromExtra.flatMap((pair) => [
   pair?.primary_id,
   isAffirmative(pair?.backup_install_simultaneous) ? pair?.backup_id : null,
  ]).filter(Boolean);
  if (ids.length) {
  setEquipmentIds(Array.from(new Set(ids)));
- return;
- }
- }
- try {
- const res = await api.get(`/business-case/${bcId}/equipment-details`);
- const equipmentDetails = res.data?.data || [];
- if (equipmentDetails.length > 0) {
- const ids = equipmentDetails.flatMap((pair) => [
-  pair?.primary_id,
-  isAffirmative(pair?.backup_install_simultaneous ?? pair?.install_with_primary) ? pair?.backup_id : null,
- ]).filter(Boolean);
- if (ids.length) {
- setEquipmentIds(Array.from(new Set(ids)));
- }
- }
- } catch (err) {
- debugWarn("No se pudieron cargar datos de equipo", err.message);
  }
  }, [bcId, businessCase?.extra?.equipment_details]);
 
@@ -1079,28 +1080,37 @@ const expandRowWindow = (groupKey, tableType) => {
  });
 };
 
-const handleValidateSubsection = async (sectionKey, sectionTitle = "seccion") => {
+// Wrapper unico para las acciones del gate de determinaciones -- antes cada
+// handler repetia a mano el mismo guard/try/catch/finally (9 copias casi
+// identicas). Centraliza: guard de bcId/saving, el ciclo de refresco
+// (loadExisting opcional + loadGateInfo + onSave) y el toast de exito/error.
+const runGateAction = async (action, { successMsg, fallbackErrorMsg, refreshExisting = false } = {}) => {
  if (!bcId || saving) return;
  setSaving(true);
  try {
-  await api.post(`/business-case/${bcId}/determinations/lock-subsection`, {
-   subsection: sectionKey,
-  });
-  await loadExisting();
+  await action();
+  if (refreshExisting) await loadExisting();
   await loadGateInfo();
   onSave({ refresh: true, markComplete: false });
-  showToast(
-   sectionKey === "reactivos"
-    ? "Reactivos validados. Se notifico a Servicio para completar controles, calibradores y materiales."
-    : `${sectionTitle} validado y cerrado correctamente.`,
-   "success",
-  );
+  if (successMsg) showToast(successMsg, "success");
  } catch (err) {
-  showToast(getNaturalErrorMessage(err, `No se pudo validar ${sectionTitle.toLowerCase()}.`), "error");
+  showToast(getNaturalErrorMessage(err, fallbackErrorMsg), "error");
  } finally {
   setSaving(false);
  }
 };
+
+const handleValidateSubsection = (sectionKey, sectionTitle = "seccion") =>
+ runGateAction(
+  () => api.post(`/business-case/${bcId}/determinations/lock-subsection`, { subsection: sectionKey }),
+  {
+   refreshExisting: true,
+   successMsg: sectionKey === "reactivos"
+    ? "Reactivos validados. Se notifico a Servicio para completar controles, calibradores y materiales."
+    : `${sectionTitle} validado y cerrado correctamente.`,
+   fallbackErrorMsg: `No se pudo validar ${sectionTitle.toLowerCase()}.`,
+  },
+ );
 
 const handleValidateReactivos = async () => {
  if (!canValidateReactivos) return;
@@ -1111,41 +1121,31 @@ const handleValidateReactivos = async () => {
 // + materiales. NO cierra la seccion "Determinaciones" -- eso es una accion
 // explicita y separada (ver handleCloseDeterminationsSection), nunca un
 // efecto secundario automatico de este boton.
-const handleCloseAllTechnicalSubsections = async () => {
- if (!bcId || saving) return;
- setSaving(true);
- try {
-  await api.post(`/business-case/${bcId}/determinations/lock-all-technical-subsections`);
-  await loadExisting();
-  await loadGateInfo();
-  onSave({ refresh: true, markComplete: false });
-  showToast("Controles, calibradores y materiales bloqueados correctamente.", "success");
- } catch (err) {
-  showToast(getNaturalErrorMessage(err, "No se pudieron bloquear las subsecciones tecnicas."), "error");
- } finally {
-  setSaving(false);
- }
-};
+const handleCloseAllTechnicalSubsections = () =>
+ runGateAction(
+  () => api.post(`/business-case/${bcId}/determinations/lock-all-technical-subsections`),
+  {
+   refreshExisting: true,
+   successMsg: "Controles, calibradores y materiales bloqueados correctamente.",
+   fallbackErrorMsg: "No se pudieron bloquear las subsecciones tecnicas.",
+  },
+ );
 
 // Cierre EXPLICITO de la seccion "Determinaciones" completa, solo para
 // jefe_servicio, solo disponible cuando las 4 subsecciones ya estan
 // bloqueadas. Reutiliza el endpoint generico /ownership/complete (misma
 // logica de applyDeterminationsCompletionTransition que ya usan otras
 // secciones), habilitando avanzar a Inversiones.
-const handleCloseDeterminationsSection = async () => {
- if (!bcId || saving || !canCloseDeterminationsSection) return;
- setSaving(true);
- try {
-  await completeDeterminationsSection(bcId, "jefe_servicio_cierre_determinaciones");
-  await loadExisting();
-  await loadGateInfo();
-  onSave({ refresh: true, markComplete: false });
-  showToast("Determinaciones cerradas. Ya puedes continuar con Inversiones.", "success");
- } catch (err) {
-  showToast(getNaturalErrorMessage(err, "No se pudo cerrar la seccion de determinaciones."), "error");
- } finally {
-  setSaving(false);
- }
+const handleCloseDeterminationsSection = () => {
+ if (!canCloseDeterminationsSection) return undefined;
+ return runGateAction(
+  () => completeDeterminationsSection(bcId, "jefe_servicio_cierre_determinaciones"),
+  {
+   refreshExisting: true,
+   successMsg: "Determinaciones cerradas. Ya puedes continuar con Inversiones.",
+   fallbackErrorMsg: "No se pudo cerrar la seccion de determinaciones.",
+  },
+ );
 };
 
 const handleRequestUnlockSubsection = async (sectionKey) => {
@@ -1157,48 +1157,32 @@ const handleRequestUnlockSubsection = async (sectionKey) => {
   confirmText: "Enviar solicitud",
  });
  if (!reason || !reason.trim()) return;
- setSaving(true);
- try {
- await requestUnlockSubsection(bcId, sectionKey, reason.trim());
- await loadGateInfo();
- onSave({ refresh: true, markComplete: false });
- showToast(`Solicitud enviada a jefe_comercial para ${sectionKey}.`, "success");
- } catch (err) {
- showToast(getNaturalErrorMessage(err, `No se pudo solicitar desbloqueo para ${sectionKey}.`), "error");
- } finally {
- setSaving(false);
- }
+ await runGateAction(
+  () => requestUnlockSubsection(bcId, sectionKey, reason.trim()),
+  {
+   successMsg: `Solicitud enviada a Jefe Comercial para ${sectionKey}.`,
+   fallbackErrorMsg: `No se pudo solicitar desbloqueo para ${sectionKey}.`,
+  },
+ );
 };
 
-const handleRenewCommercialWindow = async () => {
- if (!bcId || saving) return;
- setSaving(true);
- try {
-  await api.post(`/business-case/${bcId}/determinations/renew-commercial-window`);
-  await loadGateInfo();
-  onSave({ refresh: true, markComplete: false });
-  showToast("Ventana comercial renovada por 48 horas.", "success");
- } catch (err) {
-  showToast(getNaturalErrorMessage(err, "No se pudo renovar la ventana comercial."), "error");
- } finally {
-  setSaving(false);
- }
-};
+const handleRenewCommercialWindow = () =>
+ runGateAction(
+  () => api.post(`/business-case/${bcId}/determinations/renew-commercial-window`),
+  {
+   successMsg: "Ventana comercial renovada por 48 horas.",
+   fallbackErrorMsg: "No se pudo renovar la ventana comercial.",
+  },
+ );
 
-const handleReopenCommercial = async () => {
- if (!bcId || saving) return;
- setSaving(true);
- try {
-  await api.post(`/business-case/${bcId}/determinations/reopen-commercial`);
-  await loadGateInfo();
-  onSave({ refresh: true, markComplete: false });
-  showToast("Fase comercial reabierta. El equipo comercial puede volver a editar.", "success");
- } catch (err) {
-  showToast(getNaturalErrorMessage(err, "No se pudo reabrir la fase comercial."), "error");
- } finally {
-  setSaving(false);
- }
-};
+const handleReopenCommercial = () =>
+ runGateAction(
+  () => api.post(`/business-case/${bcId}/determinations/reopen-commercial`),
+  {
+   successMsg: "Fase comercial reabierta. El equipo comercial puede volver a editar.",
+   fallbackErrorMsg: "No se pudo reabrir la fase comercial.",
+  },
+ );
 
 const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  if (!bcId || !requestEntry?.id || saving) return;
@@ -1212,22 +1196,15 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  showToast("Debes indicar el motivo de rechazo.", "warning");
  return;
  }
- setSaving(true);
- try {
- await resolveUnlockSubsection(bcId, requestEntry.id, approve, notes.trim());
- await loadGateInfo();
- onSave({ refresh: true, markComplete: false });
- showToast(
-  approve
-   ? `Desbloqueo aprobado para ${requestEntry.subsection}.`
-   : `Desbloqueo rechazado para ${requestEntry.subsection}.`,
-  "success",
+ await runGateAction(
+  () => resolveUnlockSubsection(bcId, requestEntry.id, approve, notes.trim()),
+  {
+   successMsg: approve
+    ? `Desbloqueo aprobado para ${requestEntry.subsection}.`
+    : `Desbloqueo rechazado para ${requestEntry.subsection}.`,
+   fallbackErrorMsg: "No se pudo resolver la solicitud.",
+  },
  );
- } catch (err) {
- showToast(getNaturalErrorMessage(err, "No se pudo resolver la solicitud."), "error");
- } finally {
- setSaving(false);
- }
 };
 
  const triggerAutoSheetSync = useCallback(async (caseId, options = {}) => {
@@ -1354,19 +1331,9 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  }
  };
 
- const formatGateDateTime = (value) => {
- if (!value) return "No definido";
- const parsed = new Date(value);
- if (Number.isNaN(parsed.getTime())) return "No definido";
- return parsed.toLocaleString("es-EC", {
- year: "numeric",
- month: "2-digit",
- day: "2-digit",
- hour: "2-digit",
- minute: "2-digit",
- hour12: false,
- });
- };
+ // Reusa el formatter compartido (zona horaria Ecuador real, no la del
+ // navegador) en vez de un toLocaleString local -- ver shared/utils/dateUtils.js.
+ const formatGateDateTime = (value) => formatDateTimeSafe(value, "dd/MM/yyyy HH:mm", "No definido");
 
  const gateSteps = useMemo(() => {
  const hasDoc = Boolean(gateInfo?.documentUploaded);
@@ -1418,6 +1385,44 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  </div>
  </div>
  </div>
+
+ {/* Acciones de cierre tecnico (jefe_servicio/jefe_tecnico) primero: son
+     la accion principal de esa fase y antes quedaban ~330 lineas mas abajo,
+     despues de todo el bloque de documento estadistico/inspeccion que a
+     esa fase ya no le compete (ver auditoria UX). */}
+ {canCloseAllTechnicalSubsections && (
+ <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+ <div className="text-xs text-emerald-800">
+ Cuando controles, calibradores y materiales ya tengan sus cantidades sincronizadas, puedes bloquearlos todos de una vez.
+ </div>
+ <button
+ type="button"
+ onClick={handleCloseAllTechnicalSubsections}
+ disabled={saving}
+ className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+ >
+ <FiCheck size={14} />
+ Bloquear controles, calibradores y materiales
+ </button>
+ </div>
+ )}
+
+ {canCloseDeterminationsSection && (
+ <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+ <div className="text-xs text-blue-800">
+ Reactivos, controles, calibradores y materiales ya estan bloqueados. Cierra Determinaciones para continuar con Inversiones.
+ </div>
+ <button
+ type="button"
+ onClick={handleCloseDeterminationsSection}
+ disabled={saving}
+ className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+ >
+ <FiCheck size={14} />
+ Cerrar Determinaciones y continuar con Inversiones
+ </button>
+ </div>
+ )}
 
  <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4 space-y-3">
  <div className="flex flex-col gap-1">
@@ -1751,40 +1756,6 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  )}
  </div>
 
- {canCloseAllTechnicalSubsections && (
- <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
- <div className="text-xs text-emerald-800">
- Cuando controles, calibradores y materiales ya tengan sus cantidades sincronizadas, puedes bloquearlos todos de una vez.
- </div>
- <button
- type="button"
- onClick={handleCloseAllTechnicalSubsections}
- disabled={saving}
- className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
- >
- <FiCheck size={14} />
- Bloquear controles, calibradores y materiales
- </button>
- </div>
- )}
-
- {canCloseDeterminationsSection && (
- <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
- <div className="text-xs text-blue-800">
- Reactivos, controles, calibradores y materiales ya estan bloqueados. Cierra Determinaciones para continuar con Inversiones.
- </div>
- <button
- type="button"
- onClick={handleCloseDeterminationsSection}
- disabled={saving}
- className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
- >
- <FiCheck size={14} />
- Cerrar Determinaciones y continuar con Inversiones
- </button>
- </div>
- )}
-
  {loading ? (
  <div className="flex justify-center py-12">
  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -2024,13 +1995,13 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
     </>
    )}
    {!saving && canReopenCommercial && (
-    <span className="text-amber-600 font-semibold">Sección cerrada por el equipo comercial — solo jefe_comercial puede reabrir.</span>
+    <span className="text-amber-600 font-semibold">Sección cerrada por el equipo comercial — solo Jefe Comercial puede reabrir.</span>
    )}
   </div>
 
   {needsReactivoSyncBeforeValidate && (
    <div className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 sm:text-right">
-    Aun no hay cantidades de reactivos sincronizadas. Usa "Sincronizar cantidades desde Sheet" en la parte superior para poder validar y enviar a Servicio.
+    Aun no hay cantidades de reactivos sincronizadas. Usa "Sincronizar cantidades desde Sheet" en el encabezado del Business Case (arriba de las pestañas) para poder validar y enviar a Servicio.
    </div>
   )}
 

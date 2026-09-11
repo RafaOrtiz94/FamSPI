@@ -17,6 +17,7 @@ import { useApi } from "../../../core/hooks/useApi";
 import RequestsListModal from "../../shared/solicitudes/components/RequestsListModal";
 import JefeTecnicoView from "../components/dashboard/JefeTecnicoView";
 import TecnicoView from "../components/dashboard/TecnicoView";
+import BusinessCasePendingWidget from "../../../core/ui/widgets/BusinessCasePendingWidget";
 // Dashboard es la puerta de entrada del area (primera ruta tras login para
 // roles de servicio) -- a diferencia de las otras paginas del modulo, nunca
 // importaba tokens.css, asi que si el usuario aterrizaba aqui sin pasar antes
@@ -289,6 +290,9 @@ const ServicioDashboard = () => {
 
   return (
     <DashboardLayout includeWidgets={false}>
+      <div className="mb-6">
+        <BusinessCasePendingWidget />
+      </div>
       {renderView()}
       <RequestsListModal
         open={requestsModalOpen}
