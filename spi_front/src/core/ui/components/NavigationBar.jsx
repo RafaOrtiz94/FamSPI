@@ -25,6 +25,7 @@ import {
  FiTarget,
  FiKey,
  FiMoreHorizontal,
+ FiChevronDown,
  FiX,
 } from "react-icons/fi";
 import clsx from "clsx";
@@ -98,10 +99,6 @@ const clientsManagementLink = {
 const comercialScopes = ["comercial", "jefe_comercial", "acp_comercial", "backoffice", "backoffice_comercial"];
 
 const crmFamLinks = [
-  { name: "CRM-FAM", icon: FiTarget, path: "/dashboard/crm-fam" },
-];
-
-const crmFamAdminLinks = [
   { name: "CRM-FAM", icon: FiTarget, path: "/dashboard/crm-fam" },
 ];
 
@@ -267,12 +264,6 @@ const capacitacionesLink = {
 
 const firmaLink = {
  name: "Firma Digital",
- icon: FiCheckSquare,
- path: "/dashboard/signatures/inbox",
-};
-
-const famSignLink = {
- name: "FamSign",
  icon: FiCheckSquare,
  path: "/dashboard/signatures/inbox",
 };
@@ -533,11 +524,7 @@ else if (["it", "ti", "jefe_ti", "admin_ti"].includes(scope)) {
  groups.secondary.push(viaticosLink);
  groups.secondary.push(workManagementLink);
  if (auditActive) groups.primary.push(auditPrepLink);
- if (["jefe_ti", "admin_ti"].includes(scope) || role.includes("jefe_ti") || role.includes("admin_ti")) {
-   groups.secondary.push(...crmFamAdminLinks);
- } else {
-   groups.secondary.push(...crmFamLinks);
- }
+ groups.secondary.push(...crmFamLinks);
  }
 
  // âš™ï¸ OPERACIONES - Procesos operativos
@@ -673,13 +660,13 @@ const NavButton = ({ link, variant = "primary", mobile = false, context = "nav",
    isChip ? "rounded-lg border px-2.5 py-1.5" : "rounded-md px-2 py-1.5"
  );
 
- const tierClasses = {
+ const navTierClasses = {
  critical: isChip
-   ? "border-[var(--border-control)] bg-[var(--surface)] text-[var(--text)] font-semibold shadow-sm hover:border-[var(--action)] hover:text-[var(--action)]"
-   : "text-[var(--text)] font-semibold hover:text-[var(--action)]",
- primary: "text-[var(--text)] hover:text-[var(--action)]",
- secondary: "text-[var(--text-secondary)] hover:text-[var(--text)]",
- admin: "text-[var(--text-secondary)]/70 hover:text-[var(--text-secondary)]",
+   ? "border-white/20 bg-white/5 text-[var(--nav-selected-text)] font-semibold shadow-sm hover:border-[var(--nav-marker)] hover:bg-[var(--nav-active)]"
+   : "text-[var(--nav-selected-text)] font-semibold hover:bg-[var(--nav-active)]",
+ primary: "text-[var(--nav-text)] hover:bg-[var(--nav-active)] hover:text-[var(--nav-selected-text)]",
+ secondary: "text-[var(--nav-text)]/80 hover:bg-[var(--nav-active)] hover:text-[var(--nav-selected-text)]",
+ admin: "text-[var(--nav-text)]/65 hover:bg-[var(--nav-active)] hover:text-[var(--nav-selected-text)]",
  };
  const popoverTierClasses = {
  critical: "text-[var(--text)] font-semibold hover:bg-[var(--surface-subtle)]",
@@ -703,7 +690,7 @@ const NavButton = ({ link, variant = "primary", mobile = false, context = "nav",
  className={({ isActive }) =>
  clsx(
  baseClasses,
- context === "popover" ? popoverTierClasses[variant] : tierClasses[variant],
+  context === "popover" ? popoverTierClasses[variant] : navTierClasses[variant],
  isActive && context === "popover" && "bg-[var(--selected)] text-[var(--action)] font-semibold",
  isActive && context === "nav" && !isChip && "text-[var(--action)] font-semibold",
  isActive && context === "nav" && isChip && "border-[var(--action)] text-[var(--action)]"
@@ -823,7 +810,7 @@ const MobileTabLink = ({ link, globalStatusMap }) => {
  );
 };
 
-const DesktopOverflowMenu = ({ links, globalStatusMap }) => {
+const DesktopOverflowMenu = ({ links, globalStatusMap, label = "Módulos" }) => {
  const [open, setOpen] = React.useState(false);
  const buttonRef = React.useRef(null);
  const menuRef = React.useRef(null);
@@ -833,12 +820,12 @@ const DesktopOverflowMenu = ({ links, globalStatusMap }) => {
  const updateMenuPosition = React.useCallback(() => {
  if (!buttonRef.current || typeof window === "undefined") return;
  const rect = buttonRef.current.getBoundingClientRect();
- const width = Math.min(360, window.innerWidth - 32);
- const left = Math.min(Math.max(16, rect.right - width), window.innerWidth - width - 16);
+  const width = Math.min(720, window.innerWidth - 32);
+  const left = Math.min(Math.max(16, rect.left), window.innerWidth - width - 16);
  setMenuStyle({ top: rect.bottom + 8, left, width });
  }, []);
 
- React.useEffect(() => {
+  React.useEffect(() => {
  setOpen(false);
  }, [location.pathname]);
 
@@ -846,7 +833,13 @@ const DesktopOverflowMenu = ({ links, globalStatusMap }) => {
  if (open) {
  updateMenuPosition();
  }
- }, [open, updateMenuPosition]);
+  }, [open, updateMenuPosition]);
+
+  const groupedLinks = React.useMemo(() => ({
+    primary: links.filter((link) => (link.navVariant || "primary") === "primary"),
+    secondary: links.filter((link) => link.navVariant === "secondary"),
+    admin: links.filter((link) => link.navVariant === "admin"),
+  }), [links]);
 
  React.useEffect(() => {
  if (!open) return undefined;
@@ -874,6 +867,7 @@ const DesktopOverflowMenu = ({ links, globalStatusMap }) => {
  }, [open, updateMenuPosition]);
 
  if (!links.length) return null;
+ const isModuleActive = links.some((link) => location.pathname === link.path || location.pathname.startsWith(`${link.path}/`));
 
  return (
  <div className="hidden md:block">
@@ -883,39 +877,43 @@ const DesktopOverflowMenu = ({ links, globalStatusMap }) => {
  onClick={() => setOpen((prev) => !prev)}
  className={clsx(
  "inline-flex min-h-10 items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors duration-150 lg:text-[13px]",
- open
+  open || isModuleActive
  ? "border-[var(--action)] bg-[var(--selected)] text-[var(--action)]"
  : "border-[var(--border-control)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--action)] hover:text-[var(--action)]",
  )}
- aria-haspopup="menu"
+ aria-haspopup="true"
  aria-expanded={open}
+  aria-label={`Abrir ${label}`}
  >
- <FiMoreHorizontal className="h-4 w-4 flex-shrink-0" />
- <span className="leading-none">Más</span>
+  <FiMoreHorizontal className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+  <span className="leading-none">{label}</span>
+  <FiChevronDown className={clsx("h-3.5 w-3.5 transition-transform duration-150", open && "rotate-180")} aria-hidden="true" />
  </button>
  {open && menuStyle ? createPortal(
  <div
  ref={menuRef}
  className="fixed z-[1000] rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-popover)]"
  style={menuStyle}
- role="menu"
- >
- <div className="mb-1 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
- Más módulos
- </div>
- <div className="flex flex-col gap-0.5">
- {links.map((link) => (
- <NavButton
- key={link.path}
- link={link}
- variant={link.navVariant || "secondary"}
- context="popover"
- mobile
- onClick={() => setOpen(false)}
- globalStatusMap={globalStatusMap}
- />
- ))}
- </div>
+  >
+  <div className="mb-1 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+  {label}
+  </div>
+  <div className="grid gap-4 p-1 sm:grid-cols-2 lg:grid-cols-3">
+  {[
+    ["Principales", groupedLinks.primary],
+    ["Herramientas", groupedLinks.secondary],
+    ["Administración", groupedLinks.admin],
+  ].map(([title, group]) => group.length > 0 && (
+  <section key={title} aria-labelledby={`nav-group-${title}`}>
+  <h3 id={`nav-group-${title}`} className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">{title}</h3>
+  <div className="flex flex-col gap-0.5">
+  {group.map((link) => (
+  <NavButton key={link.path} link={link} variant={link.navVariant || "secondary"} context="popover" mobile onClick={() => setOpen(false)} globalStatusMap={globalStatusMap} />
+  ))}
+  </div>
+  </section>
+  ))}
+  </div>
  </div>,
  document.body
  ) : null}
@@ -976,7 +974,7 @@ const DesktopAdaptiveNav = ({ criticalLinks, primaryLinks, secondaryLinks, admin
  // prioridad — es candidato a colapsar en "Más" según el espacio real
  // disponible. Antes solo secondary/admin colapsaban y primary quedaba fijo,
  // lo que producía scroll horizontal cuando un rol tenía muchos primary.
- const candidates = React.useMemo(
+  const candidates = React.useMemo(
  () => [
  ...primaryLinks.map((link) => ({ ...link, navVariant: "primary" })),
  ...secondaryLinks.map((link) => ({ ...link, navVariant: "secondary" })),
@@ -989,7 +987,7 @@ const DesktopAdaptiveNav = ({ criticalLinks, primaryLinks, secondaryLinks, admin
  [criticalLinks, candidates],
  );
  const [measuredWidths, setMeasuredWidths] = React.useState({});
- const [visibleCount, setVisibleCount] = React.useState(candidates.length);
+  const [, setVisibleCount] = React.useState(candidates.length);
 
  const handleMeasured = React.useCallback((map) => {
  setMeasuredWidths(map);
@@ -1037,10 +1035,7 @@ const DesktopAdaptiveNav = ({ criticalLinks, primaryLinks, secondaryLinks, admin
  return () => observer.disconnect();
  }, [candidates, criticalLinks, widthOf]);
 
- const visibleCandidates = candidates.slice(0, visibleCount);
- const overflowLinks = candidates.slice(visibleCount);
-
- return (
+  return (
  <div
  ref={containerRef}
  className="relative hidden h-10 min-w-0 flex-1 flex-nowrap items-center justify-start gap-1 overflow-x-clip overflow-y-hidden py-1 md:flex xl:gap-1.5"
@@ -1052,24 +1047,24 @@ const DesktopAdaptiveNav = ({ criticalLinks, primaryLinks, secondaryLinks, admin
  <div className="flex shrink-0 items-center justify-end gap-1 whitespace-nowrap">
  {renderGroup(criticalLinks, "critical", undefined, false, globalStatusMap)}
  </div>
- {(visibleCandidates.length > 0 || overflowLinks.length > 0) && (
- <>
- <GroupSeparator />
- <div className="flex min-w-0 shrink items-center justify-start gap-1 whitespace-nowrap">
- {visibleCandidates.map((link) => (
- <NavButton
- key={link.path}
- link={link}
- variant={link.navVariant}
- globalStatusMap={globalStatusMap}
- />
- ))}
- {overflowLinks.length > 0 && (
- <DesktopOverflowMenu links={overflowLinks} globalStatusMap={globalStatusMap} />
- )}
- </div>
- </>
- )}
+  {primaryLinks.length > 0 && (
+  <>
+  <GroupSeparator />
+  <DesktopOverflowMenu links={primaryLinks.map((link) => ({ ...link, navVariant: "primary" }))} label="Trabajo" globalStatusMap={globalStatusMap} />
+  </>
+  )}
+  {secondaryLinks.length > 0 && (
+  <>
+  <GroupSeparator />
+  <DesktopOverflowMenu links={secondaryLinks.map((link) => ({ ...link, navVariant: "secondary" }))} label="Herramientas" globalStatusMap={globalStatusMap} />
+  </>
+  )}
+  {adminLinks.length > 0 && (
+  <>
+  <GroupSeparator />
+  <DesktopOverflowMenu links={adminLinks.map((link) => ({ ...link, navVariant: "admin" }))} label="Administración" globalStatusMap={globalStatusMap} />
+  </>
+  )}
  </div>
  );
 };
@@ -1154,9 +1149,9 @@ const NavigationBar = () => {
      Header naval de arriba (identidad oscura / navegación clara). Sin
      border-b ni línea decorativa: solo la superficie clara marca el límite
      contra el canvas de la página. */}
- <nav className="hidden bg-[var(--surface)] md:block">
+ <nav className="hidden border-b border-white/10 bg-[var(--nav)] md:block">
  <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 lg:px-8">
- <div className="flex min-h-12 items-center justify-between gap-4 py-1.5">
+  <div className="flex min-h-12 items-center justify-between gap-4 py-1.5">
  <DesktopAdaptiveNav
  criticalLinks={priorityGroups.critical}
  primaryLinks={priorityGroups.primary}

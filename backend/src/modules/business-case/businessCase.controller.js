@@ -4929,13 +4929,13 @@ async function lockDeterminationsSubsection(req, res) {
           message: "No hay reactivos sincronizados con cantidad mayor a 0 para validar.",
         });
       }
-      const hasPending = scoped.some((item) => !hasRequiredDeterminationsQuantity(item, subsection));
-      if (subsection !== "reactivos" && hasPending) {
-        return res.status(409).json({
-          ok: false,
-          message: `La subseccion ${subsection} tiene items sin valor en PRODUCTO A ENTREGAR. Completa esos valores en el Sheet antes de bloquear.`,
-        });
-      }
+      // No se exige cantidad > 0 en TODOS los items de controles/calibradores/
+      // materiales para poder bloquear: a diferencia de reactivos (que se
+      // filtran y nunca quedan en 0), estas subsecciones catalogan items que
+      // pueden legitimamente no aplicar a un equipo/instalacion especifica
+      // (ej. un control o material que ese equipo simplemente no usa) --
+      // exigir 100% de items con valor bloqueaba el cierre para siempre en
+      // esos casos, sin ninguna forma de continuar.
 
       // Sin items no hay nada que sincronizar ni celdas que proteger --
       // proteger un rango vacio lanzaria "NO_ANNUAL_CELLS_FOUND" y bloquearia
@@ -5054,28 +5054,14 @@ async function lockAllDeterminationsTechnicalSubsections(req, res) {
       return res.status(409).json({ ok: false, message: "Determinaciones ya esta cerrada." });
     }
 
-    // Primero se sincroniza cada subseccion pendiente y se valida que no
-    // tenga cantidades en 0 -- sin persistir nada todavia, para que el
-    // cierre sea todo-o-nada.
-    const blocking = [];
+    // Sincroniza cada subseccion pendiente desde el Sheet antes de bloquear.
+    // No se exige cantidad > 0 en TODOS los items para permitir el cierre --
+    // algunos equipos legitimamente no usan ciertos controles/calibradores/
+    // materiales de su catalogo (quedan en 0 a proposito), y exigir 100% de
+    // items con valor bloqueaba el cierre para siempre en esos casos.
     for (const subsection of pendingSubsections) {
       await businessCaseService.syncConsumptionQuantitiesFromSheet(id, {
         itemTypes: DETERMINATIONS_SHEET_ITEM_TYPES[subsection],
-      });
-      const currentConsumption = await businessCaseService.getConsumptionItems(id);
-      const items = Array.isArray(currentConsumption?.items) ? currentConsumption.items : [];
-      const scoped = items.filter((item) => subsectionFromConsumptionType(item?.type) === subsection);
-      const hasPending = scoped.some((item) => !hasRequiredDeterminationsQuantity(item, subsection));
-      if (scoped.length && hasPending) {
-        blocking.push(subsection);
-      }
-    }
-
-    if (blocking.length) {
-      return res.status(409).json({
-        ok: false,
-        message: `Las siguientes subsecciones tienen items sin valor en PRODUCTO A ENTREGAR: ${blocking.join(", ")}. Completa esos valores en el Sheet antes de cerrar.`,
-        details: { blocking },
       });
     }
 

@@ -42,6 +42,16 @@ export const normalizeUIGuidanceResponse = (response) => {
   canRequestPreflowReopen: data.permissions?.canRequestPreflowReopen ?? false,
   canResolvePreflowReopen: data.permissions?.canResolvePreflowReopen ?? false,
   canDecideFeasibility: data.permissions?.canDecideFeasibility ?? false,
+  // Faltaban en esta whitelist -- igual que paso con las 4 de apelacion de
+  // factibilidad (ver comentario BC-16/BC-17 mas abajo), el backend ya las
+  // calculaba bien pero se descartaban aqui. Esto era la causa real de que
+  // jefe_servicio nunca pudiera editar Determinaciones pese a que el gate
+  // especifico (gateInfo, endpoint aparte) siempre dijo canEditDeterminations
+  // true: DeterminationsSection.jsx usa ESTE permissions.canEditDeterminations
+  // (via canEditBase) ademas del de gateInfo (via canEditByGate) -- con este
+  // en false, canEditFinal nunca podia dar true sin importar el estado real.
+  canEditDeterminations: data.permissions?.canEditDeterminations ?? false,
+  canEditInvestments: data.permissions?.canEditInvestments ?? false,
    canViewOfferWorkspace: data.permissions?.canViewOfferWorkspace ?? false,
    canManageOfferWorkspace: data.permissions?.canManageOfferWorkspace ?? false,
    canDecideOfferWorkspace: data.permissions?.canDecideOfferWorkspace ?? false,

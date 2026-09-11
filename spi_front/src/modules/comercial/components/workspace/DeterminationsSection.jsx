@@ -1386,44 +1386,6 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  </div>
  </div>
 
- {/* Acciones de cierre tecnico (jefe_servicio/jefe_tecnico) primero: son
-     la accion principal de esa fase y antes quedaban ~330 lineas mas abajo,
-     despues de todo el bloque de documento estadistico/inspeccion que a
-     esa fase ya no le compete (ver auditoria UX). */}
- {canCloseAllTechnicalSubsections && (
- <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
- <div className="text-xs text-emerald-800">
- Cuando controles, calibradores y materiales ya tengan sus cantidades sincronizadas, puedes bloquearlos todos de una vez.
- </div>
- <button
- type="button"
- onClick={handleCloseAllTechnicalSubsections}
- disabled={saving}
- className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
- >
- <FiCheck size={14} />
- Bloquear controles, calibradores y materiales
- </button>
- </div>
- )}
-
- {canCloseDeterminationsSection && (
- <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
- <div className="text-xs text-blue-800">
- Reactivos, controles, calibradores y materiales ya estan bloqueados. Cierra Determinaciones para continuar con Inversiones.
- </div>
- <button
- type="button"
- onClick={handleCloseDeterminationsSection}
- disabled={saving}
- className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
- >
- <FiCheck size={14} />
- Cerrar Determinaciones y continuar con Inversiones
- </button>
- </div>
- )}
-
  <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4 space-y-3">
  <div className="flex flex-col gap-1">
  <h3 className="text-sm font-semibold text-gray-900">Documento estadistico para determinaciones</h3>
@@ -1755,6 +1717,43 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  </div>
  )}
  </div>
+
+ {/* Acciones de cierre tecnico: van al final del bloque de estado/documento,
+     no arriba de todo -- no tiene sentido mostrar la accion de cierre antes
+     de que el usuario vea el estado del documento/inspeccion/ventana. */}
+ {canCloseAllTechnicalSubsections && (
+ <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+ <div className="text-xs text-emerald-800">
+ Cuando controles, calibradores y materiales ya tengan sus cantidades sincronizadas, puedes bloquearlos todos de una vez.
+ </div>
+ <button
+ type="button"
+ onClick={handleCloseAllTechnicalSubsections}
+ disabled={saving}
+ className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+ >
+ <FiCheck size={14} />
+ Bloquear controles, calibradores y materiales
+ </button>
+ </div>
+ )}
+
+ {canCloseDeterminationsSection && (
+ <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+ <div className="text-xs text-blue-800">
+ Reactivos, controles, calibradores y materiales ya estan bloqueados. Cierra Determinaciones para continuar con Inversiones.
+ </div>
+ <button
+ type="button"
+ onClick={handleCloseDeterminationsSection}
+ disabled={saving}
+ className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+ >
+ <FiCheck size={14} />
+ Cerrar Determinaciones y continuar con Inversiones
+ </button>
+ </div>
+ )}
 
  {loading ? (
  <div className="flex justify-center py-12">

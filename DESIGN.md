@@ -227,7 +227,7 @@ El indicador activo es horizontal, bajo el nombre del destino. No usar un marcad
 
 #### Desplegables y utilidades
 
-Agrupar módulos según la organización y permisos existentes. Usar «Más» cuando los destinos excedan el ancho disponible; mantener identificable el módulo actual. No forzar un número fijo de enlaces si sus etiquetas no caben.
+Agrupar módulos según la organización y permisos existentes. En escritorio, los accesos críticos del rol permanecen visibles y los demás se organizan en triggers directos como «Trabajo», «Herramientas» y «Administración», mostrados solo cuando contienen opciones autorizadas. Cada trigger abre un panel amplio tipo navigation-menu con enlaces agrupados y desplazamiento interno si hace falta. No forzar un número fijo de enlaces si sus etiquetas no caben.
 
 Los desplegables se abren por click, toque o teclado, no únicamente por hover. Usar botones para expandir y enlaces reales para navegar, dentro de `<nav aria-label="Navegación principal">`. Preferir el patrón disclosure con tabulación normal; no aplicar `role="menu"` a una lista de enlaces si no se implementa su interacción de teclado completa.
 
@@ -239,10 +239,10 @@ Búsqueda, notificaciones y perfil deben tener nombre accesible. Mostrar contado
 
 - **Escritorio:** marca, destinos y utilidades en la misma barra horizontal. Agrupar en «Más» según el espacio real disponible.
 - **Tablet:** conservar la barra superior; compactar utilidades y agrupar destinos. Si las etiquetas no caben, usar el mismo menú de navegación de móvil.
-- **Móvil:** marca a la izquierda y botón «Menú» a la derecha, más una utilidad prioritaria solo si cabe. El menú abre un panel desplegable anclado debajo de la barra, de ancho disponible, con enlaces apilados y utilidades. No ocupa una columna permanente.
+- **Móvil:** la marca permanece en la cabecera y los destinos prioritarios se presentan en un dock inferior fijo de 3–5 accesos. Si existen más destinos autorizados, el último espacio se convierte en «Más» y abre una hoja inferior desplazable con el resto de módulos y utilidades.
 - El menú móvil se limita al alto visible disponible y permite desplazarse; no exige que el usuario haga scroll horizontal. Al cambiar de breakpoint, limpiar estados abiertos incompatibles y conservar la ruta actual.
 
-No introducir sidebar ni navegación inferior como sustitutos de esta estructura. Los inspectores laterales de expedientes siguen siendo paneles de contenido contextual y no forman parte de la navegación principal.
+No introducir sidebar como sustituto de esta estructura. La navegación inferior móvil está permitida como adaptación táctil de la navbar superior, no como una columna permanente. Los inspectores laterales de expedientes siguen siendo paneles de contenido contextual y no forman parte de la navegación principal.
 
 ### 3.2 Cabecera de trabajo
 
@@ -620,8 +620,8 @@ No introducir refactorizaciones ajenas al diseño. Si una capacidad propuesta no
 
 - [ ] La primera vista deja clara la tarea principal y su siguiente acción.
 - [ ] Se reconocen navbar horizontal naval, jerarquía tipográfica y composición FamSPI.
-- [ ] No existe espacio lateral reservado para navegación ni una barra inferior añadida.
-- [ ] Destinos, «Más» y menú móvil funcionan con teclado, toque y etiquetas largas.
+- [ ] No existe espacio lateral reservado para navegación; en móvil, el dock inferior se reserva únicamente para los accesos prioritarios y «Más».
+- [ ] Destinos, grupos «Trabajo»/«Herramientas»/«Administración» y el dock móvil funcionan con teclado, toque y etiquetas largas.
 - [ ] El estado activo usa subrayado horizontal; el foco permanece visible al abrir y cerrar desplegables.
 - [ ] La trazabilidad aparece cuando existe un proceso que representar.
 - [ ] Los módulos comparten componentes sin repetir innecesariamente el mismo layout.
