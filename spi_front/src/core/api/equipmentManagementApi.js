@@ -40,6 +40,21 @@ export const reserveEquipmentAsset = async (id, payload) => {
   return response.data;
 };
 
+export const renewAssetReservation = async (reservationId, businessCaseId) => {
+  const response = await api.post(`/equipment-management/assets/reservations/${reservationId}/renew`, { business_case_id: businessCaseId });
+  return response.data;
+};
+
+export const releaseAssetReservation = async (reservationId, businessCaseId, reason) => {
+  const response = await api.post(`/equipment-management/assets/reservations/${reservationId}/release`, { business_case_id: businessCaseId, reason });
+  return response.data;
+};
+
+export const getActiveAssetReservation = async (businessCaseId) => {
+  const response = await api.get("/equipment-management/assets/reservations", { params: { business_case_id: businessCaseId } });
+  return response.data?.data || [];
+};
+
 export const installEquipmentAsset = async (id, payload) => {
   const response = await api.post(`/equipment-management/assets/${id}/install`, payload);
   return response.data;

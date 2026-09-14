@@ -47,6 +47,18 @@ exports.reserveAsset = asyncHandler(async (req, res) => {
   send(res, await service.reserveAsset(req.params.id, req.body || {}, req.user?.id || null), 201);
 });
 
+exports.renewAssetReservation = asyncHandler(async (req, res) => {
+  send(res, await service.renewAssetReservation(req.params.reservationId, req.body?.business_case_id, req.user?.id || null));
+});
+
+exports.releaseAssetReservation = asyncHandler(async (req, res) => {
+  send(res, await service.releaseAssetReservation(req.params.reservationId, req.body?.business_case_id, req.user?.id || null, req.body?.reason));
+});
+
+exports.getActiveReservation = asyncHandler(async (req, res) => {
+  send(res, await service.getActiveReservationForBusinessCase(req.query.business_case_id));
+});
+
 exports.installAsset = asyncHandler(async (req, res) => {
   if (!req.body?.client_id) {
     return res.status(400).json({ ok: false, message: "client_id es requerido" });

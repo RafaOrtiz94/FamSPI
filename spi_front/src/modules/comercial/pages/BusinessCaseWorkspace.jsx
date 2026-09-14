@@ -16,6 +16,7 @@ import { getApiErrorMessage } from "../../../core/utils/apiErrors";
 import CaseHeader from "../components/workspace/CaseHeader";
 import WorkspaceContent from "../components/workspace/WorkspaceContent";
 import UIGuidancePanel from "../components/workspace/UIGuidancePanel";
+import BusinessCaseToolsFab from "../components/workspace/BusinessCaseToolsFab";
 import BusinessCasePicker from "../components/BusinessCasePicker";
 import ErrorBoundary from "../../../core/ui/components/ErrorBoundary";
 import { BusinessCaseWorkspaceProviders } from "../components/workspace/BusinessCaseWorkspaceContext";
@@ -591,6 +592,14 @@ const BusinessCaseWorkspace = () => {
  businessCaseId={bcId}
  selectedSection={selectedSection}
  />
+ </ErrorBoundary>
+
+ <ErrorBoundary title="Herramientas del Business Case" message="Error en las herramientas flotantes.">
+ <BusinessCaseToolsFab />
+ </ErrorBoundary>
+
+ <ErrorBoundary title="Herramientas del Business Case" message="Error en las herramientas flotantes.">
+ <BusinessCaseToolsFab />
  </ErrorBoundary>
 
  <Modal

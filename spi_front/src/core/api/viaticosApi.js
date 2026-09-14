@@ -195,6 +195,16 @@ export const getViaticoConfigPolicy = async () => {
  return data?.data || {};
 };
 
+export const getViaticoKmSettlementPreview = async (period) => {
+ const { data } = await api.get("/viaticos/km-settlements", { params: { period } });
+ return data?.data || {};
+};
+
+export const applyViaticoKmSettlement = async (payload) => {
+ const { data } = await api.post("/viaticos/km-settlements", payload);
+ return data?.data || data;
+};
+
 export const updateViaticoWorkflow = async (viaticoId, payload) => {
  const { data } = await api.patch(`/viaticos/${viaticoId}/workflow`, payload);
  return data?.data || data;

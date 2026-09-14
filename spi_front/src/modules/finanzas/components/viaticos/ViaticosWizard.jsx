@@ -30,6 +30,7 @@ import ConsolidatedSummary from "./ConsolidatedSummary";
 
 const EXPENSE_CATEGORIES = [
   { value: "combustible", label: "COMBUSTIBLE" },
+  { value: "peaje", label: "PEAJE" },
   { value: "alimentacion", label: "ALIMENTACIÓN" },
   { value: "hospedaje", label: "HOSPEDAJE" },
   { value: "transporte", label: "TRANSPORTE" },

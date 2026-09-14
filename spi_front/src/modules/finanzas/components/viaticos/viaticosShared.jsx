@@ -172,6 +172,7 @@ export const ANTICIPO_META = {
 
 export const EXPENSE_CATEGORIES = [
   { value: "combustible", label: "Combustible" },
+  { value: "peaje", label: "Peaje" },
   { value: "alimentacion", label: "Alimentacion" },
   { value: "hospedaje", label: "Hospedaje" },
   { value: "transporte", label: "Transporte" },

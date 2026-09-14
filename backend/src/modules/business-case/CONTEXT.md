@@ -101,9 +101,11 @@ Prefijo: `/api/v1/business-case`
 | POST | `/:id/determinations/reopen-commercial` | `reopenDeterminationsCommercial` | jefe_comercial |
 | POST | `/:id/determinations/renew-commercial-window` | `renewDeterminationsCommercialWindow` | jefe_comercial |
 | POST | `/:id/determinations/parse-quantities-file` | `parseDeterminationsQuantitiesFile` | backoffice_comercial, jefe_comercial (multipart) |
-| POST | `/:id/determinations/inspection-request` | `requestEnvironmentInspection` | businessCaseRoles |
-| POST | `/:id/inspection-request/review` | `reviewEnvironmentInspectionRequest` | businessCaseRoles |
+| POST | `/:id/determinations/inspection-request` | `requestEnvironmentInspection` | businessCaseRoles (gate interno adicional: `INSPECTION_REQUEST_ROLES` = comercial/backoffice_comercial/backoffice, `businessCase.controller.js:228` — **distinto y más estricto** que `DETERMINATIONS_INSPECTION_REQUEST_ROLES` de `businessCaseDeterminationsGate.service.js:15` (comercial/jefe_comercial/acp_comercial/backoffice_comercial), que es lo que calcula `gateInfo.permissions.canRequestInspection` y lo que la UI usa para MOSTRAR el botón. Inconsistencia preexistente: `jefe_comercial`/`acp_comercial` ven el botón habilitado pero el endpoint podría rechazarlos con 403 — no se corrigió al extraer la UI al FAB, solo se preservó el comportamiento original) |
+| POST | `/:id/inspection-request/review` | `reviewEnvironmentInspectionRequest` | businessCaseRoles (gate interno adicional: `INSPECTION_REVIEW_ROLES` = jefe_servicio/jefe_servicio_tecnico/jefe_tecnico) |
 | POST | `/:id/inspection-request/result` | `registerEnvironmentInspectionResult` | businessCaseRoles |
+
+> **UI de este flujo (2026-09):** la solicitud (crear + ver estado) ya NO vive en la pestaña Determinaciones del workspace — se extrajo al botón flotante `BusinessCaseToolsFab.jsx` (herramienta "Inspección de ambiente"), accesible desde cualquier pestaña. `DeterminationsSection.jsx` solo muestra un badge de solo lectura con el estado (`gateInfo.inspectionRequest.status`: ausente=pendiente, `approved`, `rejected`). El estado sigue viviendo embebido en `modern_bc_metadata.environment_inspection_request` (JSON, sin tabla propia) — sin cambios de backend. La revisión (`review`)/resultado (`result`) NO están en este FAB; viven en un workspace separado del módulo `servicio` (`InspectionRequestsWorkspace.jsx`), sin relación de código con el workspace comercial de BC.
 | POST | `/:id/determinations` | `addDetermination` | businessCaseRoles + validateDeterminationEquipment + validateEquipmentCapacity |
 | PUT | `/:id/determinations/:detId` | `updateDetermination` | businessCaseRoles + validateDeterminationEquipment + validateEquipmentCapacity |
 | DELETE | `/:id/determinations/:detId` | `removeDetermination` | businessCaseRoles |
@@ -374,6 +376,7 @@ Ver `README_TABLE_STRUCTURE.md` para estructura completa.
 - `notifications`: cola de notificaciones via `businessCaseNotificationQueue.service.js`
 - `files` + Google Drive: carpeta por BC en `businessCaseDriveFolder.service.js`
 - Integración LIS: `bcLisIntegration.service.js`
+- **`requests` (NUEVO, 2026-09):** el botón flotante `BusinessCaseToolsFab.jsx` del workspace crea solicitudes formales de tipo `F.ST-23` ("Solicitud de disponibilidad de equipo") vía `POST /api/v1/requests` (módulo `backend/src/modules/requests/`, no `business-case`). El BC no tiene tabla propia para esto — el `business_case_id`/`servicio_equipo_id` viaja en el `payload` JSON de la solicitud genérica. Aprobador: `acp_comercial` (ve la solicitud en su bandeja de Solicitudes, widget "Solicitudes de Disponibilidad"). Ver `getRequestApproverRoles`/`resolveSchemaKey` en `requests.service.js` para la rama `F.ST-23`.
 
 ---
 
@@ -386,6 +389,12 @@ Ver `README_TABLE_STRUCTURE.md` para estructura completa.
 - `/dashboard/business-case/resumen` → `BusinessCaseQualitySummary` (NUEVO — página de solo lectura para `jefe_calidad`/`bc_quality_summary`, faltaba documentar)
 
 API client: `spi_front/src/core/api/businessCaseApi.js` (672 líneas) — todas las funciones de fetch del módulo viven aquí, no en `spi_front/src/modules/comercial/api/` (esa carpeta solo tiene `privatePurchasesApi.js` y `opportunitiesApi.js`, de otros módulos comerciales).
+
+**`BusinessCaseToolsFab.jsx`** (NUEVO, 2026-09, `components/workspace/`) — botón flotante tipo speed-dial montado en `BusinessCaseWorkspace.jsx` (hermano de `WorkspaceContent`, dentro de `BusinessCaseWorkspaceProviders`, persiste en todas las pestañas). Agrupa 2 herramientas:
+- **Disponibilidad de equipo**: consulta inventario (`getEquipmentAssets`, reuso de la misma función que `EquipmentSection.jsx`) y solicita disponibilidad a `acp_comercial` (crea request `F.ST-23`, ver sección 8).
+- **Inspección de ambiente**: crear/ver estado de la solicitud (extraído de `DeterminationsSection.jsx`, ver nota en sección 3).
+
+Posición: columna `right-4`, por encima de `NotificationBell.jsx` y `AttendanceWidget.jsx` (ambos ya ocupan esa columna más abajo, `z-90`/`z-49` respectivamente) — cualquier FAB nuevo que se agregue a esta columna debe verificar esos dos primero para no quedar tapado.
 
 ---
 
@@ -409,3 +418,5 @@ API client: `spi_front/src/core/api/businessCaseApi.js` (672 líneas) — todas 
 - Inversiones tienen audit logging adicional (REQ-BC-12) via `businessCaseSectionAccessAudit.service`
 - Tests en `__tests__/`: calculationEngine, exporters, consumptionVersionConflict (integration), preflow, businessCaseSheetGeneration (contract), businessCaseDeterminationsGate
 - `deliveryCeiling.service.js` fue eliminado (código muerto, sin callers reales en producción); ver skill `modulo-techos-entrega`
+- El módulo `requests` (fuera de `business-case`) tiene su propio catálogo `request_types` con labels tipo "F.ST-XX" que NO tienen relación de código con los endpoints `/determinations/inspection-request` de este módulo, a pesar de compartir el nombre "inspección de ambiente" en el título de `F.ST-20` — son dos sistemas distintos (uno genérico de solicitudes con AJV, otro embebido en `modern_bc_metadata` del BC). No asumir que tocar uno afecta al otro.
+- El `RequestsListModal`/`RequestStatWidget` compartido (`spi_front/src/modules/shared/solicitudes/`) filtra por defecto `mine: true` — cualquier widget nuevo en una bandeja de "aprobador" (no del propio creador de la solicitud) debe pasar `initialFilters: { mine: false }` explícito o no verá ninguna solicitud.

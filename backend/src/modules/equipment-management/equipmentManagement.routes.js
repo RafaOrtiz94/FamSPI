@@ -73,6 +73,7 @@ router.get("/assets", controller.listAssets);
 router.get("/assets/:id/timeline", controller.listAssetTimeline);
 router.get("/assets/:id/documents", controller.listAssetDocuments);
 router.get("/schedule", controller.listSchedule);
+router.get("/assets/reservations", controller.getActiveReservation);
 
 router.post("/assets", requireRole(ASSET_ROLES), controller.createAsset);
 router.patch("/assets/:id", requireRole(ASSET_ROLES), controller.updateAsset);
@@ -81,6 +82,8 @@ router.delete("/assets/:id/documents/:documentId", requireRole(ASSET_ROLES), con
 router.post("/assets/:id/status", requireRole(ASSET_ROLES), controller.changeAssetStatus);
 router.post("/assets/:id/reserve", requireRole(ASSET_ROLES), controller.reserveAsset);
 router.post("/assets/:id/install", requireRole(ASSET_ROLES), controller.installAsset);
+router.post("/assets/reservations/:reservationId/renew", requireRole(ASSET_ROLES), controller.renewAssetReservation);
+router.post("/assets/reservations/:reservationId/release", requireRole(ASSET_ROLES), controller.releaseAssetReservation);
 
 router.post("/procedures", requireRole(MODEL_ROLES), controller.createProcedure);
 router.post("/parts", requireRole(MODEL_ROLES), controller.createPart);

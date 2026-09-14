@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Dialog } from "@headlessui/react";
-import { FiActivity, FiCalendar, FiCheck, FiChevronDown, FiExternalLink, FiFileText, FiRefreshCw, FiUpload, FiX } from "react-icons/fi";
+import { FiActivity, FiCheck, FiChevronDown, FiExternalLink, FiFileText, FiRefreshCw, FiUpload } from "react-icons/fi";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
@@ -11,7 +10,6 @@ import { formatDateTimeSafe } from "../../../../shared/utils/dateUtils";
 import SectionEditorBadge from "./SectionEditorBadge";
 import {
  getDeterminationsStatDocumentInfo,
- requestBusinessCaseEnvironmentInspection,
  uploadDeterminationsStatDocument,
 } from "../../../../core/api/businessCaseApi";
 
@@ -404,17 +402,6 @@ const DeterminationsSection = ({
  const [sheetUrl, setSheetUrl] = useState(null);
  const [sheetSyncing, setSheetSyncing] = useState(false);
  const statDocumentInputRef = useRef(null);
- const [inspectionModal, setInspectionModal] = useState({
-  open: false,
-  minDate: "",
-  maxDate: "",
-  contactName: "",
-  contactPhone: "",
-  accessories: "",
-  annotations: "",
-  observations: "",
- });
- const [submittingInspectionRequest, setSubmittingInspectionRequest] = useState(false);
  const [savedItems, setSavedItems] = useState([]);
  const [excludedKeys, setExcludedKeys] = useState([]);
  const [loading, setLoading] = useState(false);
@@ -449,9 +436,6 @@ const DeterminationsSection = ({
  ? uploadReadiness.missingSections
  : [];
  const inspectionRequestInfo = gateInfo?.inspectionRequest || null;
- const inspectionDraft = gateInfo?.inspectionDraft?.draft || null;
- const inspectionMissingFields = gateInfo?.inspectionDraft?.missingFields || [];
- const canRequestInspection = (canEditBase || gateInfo?.permissions?.canRequestInspection) && gateInfo?.documentUploaded && !inspectionRequestInfo?.request_id;
  const selectedDocumentSummary = selectedDocument
  ? `${selectedDocument.name} (${formatSelectedFileSize(selectedDocument.size)})`
  : "Aun no has seleccionado un archivo.";
@@ -496,28 +480,6 @@ const DeterminationsSection = ({
   });
  return map;
 }, [gateInfo?.unlockRequests]);
-
-const inspectionSummary = useMemo(() => {
- // equipmentMeta tiene los nombres reales del catálogo ya cargados en este componente.
- // El draft del backend puede traer placeholders ("Equipo principal") cuando el
- // selectedEquipment no tiene nombre resuelto, por eso equipmentMeta tiene prioridad.
- const equipment = equipmentIds.length > 0
-  ? equipmentIds.map((id) => ({ nombre_equipo: equipmentMeta[id] || `Equipo ${id}` }))
-  : (Array.isArray(inspectionDraft?.equipos) && inspectionDraft.equipos.length > 0
-   ? inspectionDraft.equipos
-   : []);
- return {
-  clientName: inspectionDraft?.nombre_cliente || businessCase?.client_name || "Cliente pendiente",
-  processCode: businessCase?.process_code || "Sin numero de proceso",
-  address: inspectionDraft?.direccion_cliente || "Pendiente en datos del cliente",
-  contactName: inspectionDraft?.persona_contacto || "",
-  contactPhone: inspectionDraft?.celular_contacto || "",
-  accessories: inspectionDraft?.accesorios || "",
-  annotations: inspectionDraft?.anotaciones || "",
-  observations: inspectionDraft?.observaciones || "",
-  equipment,
- };
-}, [businessCase, inspectionDraft, equipmentIds, equipmentMeta]);
 
  const isPublicBC = PUBLIC_BC_TYPES.has(businessCase?.bc_purchase_type);
 
@@ -1288,49 +1250,6 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  }
  };
 
- const handleSubmitInspectionRequest = async () => {
- if (!bcId) return;
- const minDate = String(inspectionModal.minDate || "").trim();
- const maxDate = String(inspectionModal.maxDate || "").trim();
- if (!minDate || !maxDate) {
- showToast("Debes registrar el rango minimo y maximo de instalacion.", "warning");
- return;
- }
- if (minDate > maxDate) {
- showToast("La fecha minima no puede ser mayor que la fecha maxima.", "warning");
- return;
- }
- try {
- setSubmittingInspectionRequest(true);
- await requestBusinessCaseEnvironmentInspection(bcId, {
-  inspection_min_date: minDate,
-  inspection_max_date: maxDate,
-  persona_contacto: inspectionModal.contactName || undefined,
-  celular_contacto: inspectionModal.contactPhone || undefined,
-  accesorios: inspectionModal.accessories || undefined,
-  anotaciones: inspectionModal.annotations || undefined,
-  observaciones: inspectionModal.observations || undefined,
- });
- showToast("Solicitud de inspeccion de ambiente enviada correctamente.", "success");
- setInspectionModal({
- open: false,
- minDate: "",
- maxDate: "",
- contactName: "",
- contactPhone: "",
- accessories: "",
- annotations: "",
- observations: "",
- });
- await loadGateInfo();
- onSave({ refresh: true, markComplete: false });
- } catch (err) {
- showToast(getNaturalErrorMessage(err, "No se pudo solicitar la inspeccion de ambiente."), "error");
- } finally {
- setSubmittingInspectionRequest(false);
- }
- };
-
  // Reusa el formatter compartido (zona horaria Ecuador real, no la del
  // navegador) en vez de un toLocaleString local -- ver shared/utils/dateUtils.js.
  const formatGateDateTime = (value) => formatDateTimeSafe(value, "dd/MM/yyyy HH:mm", "No definido");
@@ -1598,91 +1517,33 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
   )}
 
  {gateInfo?.documentUploaded && (
- <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
- <div className="flex items-start justify-between gap-3">
- <div className="space-y-1">
+ <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+ <div className="flex items-center justify-between gap-3">
  <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
  <FiFileText size={13} />
- Solicitud tecnica
+ Inspeccion de ambiente por costos
  </div>
- <h4 className="text-sm font-semibold text-slate-900">Solicitar inspeccion de ambiente por costos</h4>
- <p className="text-xs text-slate-600">
- Registra el rango estimado para la inspeccion de ambiente por costos o factibilidad. El sistema llenara el F.ST-20 con la informacion ya guardada en las secciones previas del Business Case.
+ <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ${
+ inspectionRequestInfo?.status === "approved"
+ ? "bg-emerald-100 text-emerald-700"
+ : inspectionRequestInfo?.status === "rejected"
+ ? "bg-rose-100 text-rose-700"
+ : inspectionRequestInfo?.request_id
+ ? "bg-sky-100 text-sky-700"
+ : "bg-amber-100 text-amber-700"
+ }`}>
+ {inspectionRequestInfo?.status === "approved"
+ ? "Aprobada"
+ : inspectionRequestInfo?.status === "rejected"
+ ? "Rechazada"
+ : inspectionRequestInfo?.request_id
+ ? "Solicitada"
+ : "No solicitada"}
+ </span>
+ </div>
+ <p className="mt-2 text-xs text-slate-600">
+ Usa la herramienta flotante "Inspeccion de ambiente" (boton inferior derecho) para solicitarla o revisar su estado en detalle.
  </p>
- </div>
- {inspectionRequestInfo?.request_id ? (
- <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-semibold text-emerald-700">
- Solicitada
- </span>
- ) : (
- <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-[11px] font-semibold text-amber-700">
- Pendiente
- </span>
- )}
- </div>
-
- <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-700">
- <div className="rounded-lg bg-white border border-slate-200 px-3 py-2">
- <div className="font-semibold text-slate-900">Cliente</div>
- <div>{inspectionSummary.clientName}</div>
- </div>
- <div className="rounded-lg bg-white border border-slate-200 px-3 py-2">
- <div className="font-semibold text-slate-900">Proceso</div>
- <div>{inspectionSummary.processCode}</div>
- </div>
- <div className="rounded-lg bg-white border border-slate-200 px-3 py-2">
- <div className="font-semibold text-slate-900">Direccion</div>
- <div>{inspectionSummary.address}</div>
- </div>
- </div>
-
- {inspectionRequestInfo?.request_id ? (
- <div className="space-y-2 text-xs text-slate-700">
- <div><span className="font-semibold">Solicitud:</span> #{inspectionRequestInfo.request_id}</div>
- <div>
- <span className="font-semibold">Rango registrado:</span>{" "}
- {inspectionRequestInfo?.inspection_min_date || "Pendiente"} a {inspectionRequestInfo?.inspection_max_date || "Pendiente"}
- </div>
- {inspectionRequestInfo?.acta_document_link && (
- <a
- href={inspectionRequestInfo.acta_document_link}
- target="_blank"
- rel="noreferrer"
- className="inline-flex items-center gap-2 text-blue-700 hover:underline"
- >
- <FiFileText size={13} />
- Ver F.ST-20 por costos
- </a>
- )}
- <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sky-700">
- El departamento de servicio seleccionara la fecha exacta de inspeccion dentro del rango registrado.
- </div>
- </div>
- ) : (
- <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-3">
- <div className="text-xs text-slate-600">
- Despues de enviarla, el departamento de servicio podra escoger la fecha exacta dentro del rango indicado.
- </div>
- <button
- type="button"
- onClick={() => setInspectionModal({
- open: true,
- minDate: inspectionRequestInfo?.inspection_min_date || "",
- maxDate: inspectionRequestInfo?.inspection_max_date || "",
- contactName: inspectionSummary.contactName || "",
- contactPhone: inspectionSummary.contactPhone || "",
- accessories: inspectionSummary.accessories || "",
- annotations: inspectionSummary.annotations || "",
- observations: inspectionSummary.observations || "",
- })}
- disabled={!canRequestInspection}
- className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
- >
- <FiCalendar size={14} />
- Solicitar inspeccion
- </button>
- </div>
- )}
  </div>
  )}
 
@@ -2032,176 +1893,6 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
    )}
   </div>
  </div>
-
- {/* Modal de solicitud de inspeccion de ambiente — usa Dialog de Headless UI
-     para portal correcto, focus-trap, cierre con Escape y z-index DESIGN.md */}
- <Dialog
-  open={inspectionModal.open}
-  onClose={() => {
-   if (submittingInspectionRequest) return;
-   setInspectionModal({ open: false, minDate: "", maxDate: "", contactName: "", contactPhone: "", accessories: "", annotations: "", observations: "" });
-  }}
-  className="relative z-[40]"
- >
-  {/* Backdrop — z-index modalBackdrop=30 gestionado por Dialog */}
-  <div className="fixed inset-0 z-[30] bg-slate-950/40 backdrop-blur-sm" aria-hidden="true" />
-
-  <div className="fixed inset-0 z-[40] flex items-center justify-center px-4 py-6 overflow-y-auto">
-   <Dialog.Panel className="w-full max-w-xl overflow-hidden rounded-2xl border border-soft-border bg-white shadow-2xl">
-    {/* Header */}
-    <div className="flex items-start justify-between gap-3 border-b border-soft-border px-6 py-5">
-     <div>
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-warm-ash">Inspeccion por costos</p>
-      <Dialog.Title className="mt-0.5 text-lg font-semibold text-ink-slate">Solicitar F.ST-20 por costos</Dialog.Title>
-      <p className="mt-1 text-sm text-warm-ash">
-       Registra el rango estimado de la inspeccion por costos. Los datos del cliente, direccion y equipo se tomaran del Business Case.
-      </p>
-     </div>
-     <button
-      type="button"
-      onClick={() => !submittingInspectionRequest && setInspectionModal({ open: false, minDate: "", maxDate: "", contactName: "", contactPhone: "", accessories: "", annotations: "", observations: "" })}
-      className="rounded-lg p-2 text-warm-ash hover:bg-paper-white transition-colors"
-      aria-label="Cerrar modal"
-     >
-      <FiX size={16} />
-     </button>
-    </div>
-
-    {/* Body */}
-    <div className="space-y-5 px-6 py-5 max-h-[70vh] overflow-y-auto">
-     {inspectionMissingFields.length > 0 && (
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-caution-amber">
-        <span className="font-semibold">Faltan datos para F.ST-20 por costos:</span>{" "}
-       {inspectionMissingFields.join(", ")}.
-      </div>
-     )}
-
-     {/* Rango de instalacion */}
-     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      <label className="space-y-1.5">
-       <span className="text-xs font-semibold uppercase tracking-wide text-warm-ash">Fecha minima de instalacion <span className="text-alert-red">*</span></span>
-       <input
-        type="date"
-        value={inspectionModal.minDate}
-        onChange={(e) => setInspectionModal((prev) => ({ ...prev, minDate: e.target.value }))}
-        className="w-full rounded-[12px] border border-fog bg-white px-3 py-2 text-sm text-ink-slate focus:border-action-blue focus:outline-none focus:ring-2 focus:ring-sky-signal/20"
-       />
-      </label>
-      <label className="space-y-1.5">
-       <span className="text-xs font-semibold uppercase tracking-wide text-warm-ash">Fecha maxima de instalacion <span className="text-alert-red">*</span></span>
-       <input
-        type="date"
-        value={inspectionModal.maxDate}
-        min={inspectionModal.minDate || undefined}
-        onChange={(e) => setInspectionModal((prev) => ({ ...prev, maxDate: e.target.value }))}
-        className="w-full rounded-[12px] border border-fog bg-white px-3 py-2 text-sm text-ink-slate focus:border-action-blue focus:outline-none focus:ring-2 focus:ring-sky-signal/20"
-       />
-      </label>
-     </div>
-
-     {/* Datos de contacto */}
-     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      <label className="space-y-1.5">
-       <span className="text-xs font-semibold uppercase tracking-wide text-warm-ash">Persona de contacto</span>
-       <input
-        type="text"
-        value={inspectionModal.contactName}
-        onChange={(e) => setInspectionModal((prev) => ({ ...prev, contactName: e.target.value }))}
-        className="w-full rounded-[12px] border border-fog bg-white px-3 py-2 text-sm text-ink-slate focus:border-action-blue focus:outline-none focus:ring-2 focus:ring-sky-signal/20"
-        placeholder="Nombre del contacto"
-       />
-      </label>
-      <label className="space-y-1.5">
-       <span className="text-xs font-semibold uppercase tracking-wide text-warm-ash">Celular de contacto</span>
-       <input
-        type="text"
-        value={inspectionModal.contactPhone}
-        onChange={(e) => setInspectionModal((prev) => ({ ...prev, contactPhone: e.target.value }))}
-        className="w-full rounded-[12px] border border-fog bg-white px-3 py-2 text-sm text-ink-slate focus:border-action-blue focus:outline-none focus:ring-2 focus:ring-sky-signal/20"
-        placeholder="+593 9xx xxx xxxx"
-       />
-      </label>
-     </div>
-
-     {/* Resumen datos BC — solo lectura */}
-     <div className="rounded-[16px] border border-soft-border bg-paper-white p-4 space-y-2 text-sm text-ink-slate">
-      <p className="text-xs font-semibold uppercase tracking-wide text-warm-ash mb-2">Datos tomados del Business Case</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
-       <div><span className="font-semibold text-ink-slate">Cliente:</span>{" "}<span className="text-warm-ash">{inspectionSummary.clientName}</span></div>
-       <div><span className="font-semibold text-ink-slate">Proceso:</span>{" "}<span className="text-warm-ash">{inspectionSummary.processCode}</span></div>
-       <div className="sm:col-span-2"><span className="font-semibold text-ink-slate">Direccion:</span>{" "}<span className="text-warm-ash">{inspectionSummary.address}</span></div>
-       <div className="sm:col-span-2">
-        <span className="font-semibold text-ink-slate">Equipos:</span>{" "}
-        <span className="text-warm-ash">
-         {inspectionSummary.equipment.length
-          ? inspectionSummary.equipment.map((item) => item?.nombre_equipo || "Equipo").join(", ")
-          : <span className="italic">Pendiente — configura equipos en la seccion de equipos del BC</span>
-         }
-        </span>
-       </div>
-      </div>
-     </div>
-
-     {/* Accesorios */}
-     <label className="space-y-1.5">
-      <span className="text-xs font-semibold uppercase tracking-wide text-warm-ash">Accesorios</span>
-      <input
-       type="text"
-       value={inspectionModal.accessories}
-       onChange={(e) => setInspectionModal((prev) => ({ ...prev, accessories: e.target.value }))}
-       className="w-full rounded-[12px] border border-fog bg-white px-3 py-2 text-sm text-ink-slate focus:border-action-blue focus:outline-none focus:ring-2 focus:ring-sky-signal/20"
-       placeholder="Ej: mangueras, adaptadores..."
-      />
-     </label>
-
-     {/* Anotaciones */}
-     <label className="space-y-1.5">
-      <span className="text-xs font-semibold uppercase tracking-wide text-warm-ash">Anotaciones</span>
-      <textarea
-       rows={3}
-       value={inspectionModal.annotations}
-       onChange={(e) => setInspectionModal((prev) => ({ ...prev, annotations: e.target.value }))}
-       className="w-full rounded-[12px] border border-fog bg-white px-3 py-2 text-sm text-ink-slate focus:border-action-blue focus:outline-none focus:ring-2 focus:ring-sky-signal/20 resize-none"
-       placeholder="Notas adicionales para el tecnico..."
-      />
-     </label>
-
-     {/* Observaciones */}
-     <label className="space-y-1.5">
-      <span className="text-xs font-semibold uppercase tracking-wide text-warm-ash">Observaciones</span>
-      <textarea
-       rows={4}
-       value={inspectionModal.observations}
-       onChange={(e) => setInspectionModal((prev) => ({ ...prev, observations: e.target.value }))}
-       className="w-full rounded-[12px] border border-fog bg-white px-3 py-2 text-sm text-ink-slate focus:border-action-blue focus:outline-none focus:ring-2 focus:ring-sky-signal/20 resize-none"
-       placeholder="Observaciones del Business Case..."
-      />
-     </label>
-    </div>
-
-    {/* Footer */}
-    <div className="flex items-center justify-end gap-3 border-t border-soft-border bg-paper-white px-6 py-4">
-     <button
-      type="button"
-      onClick={() => setInspectionModal({ open: false, minDate: "", maxDate: "", contactName: "", contactPhone: "", accessories: "", annotations: "", observations: "" })}
-      disabled={submittingInspectionRequest}
-      className="rounded-[16px] border border-fog px-4 py-2 text-sm font-medium text-ink-slate hover:bg-white transition-colors disabled:opacity-50"
-     >
-      Cancelar
-     </button>
-     <button
-      type="button"
-      onClick={handleSubmitInspectionRequest}
-      disabled={submittingInspectionRequest}
-      className="inline-flex items-center gap-2 rounded-[16px] bg-action-blue px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 active:scale-[0.97] transition-all disabled:opacity-50"
-     >
-      <FiCheck size={15} />
-      {submittingInspectionRequest ? "Enviando..." : "Enviar solicitud"}
-     </button>
-    </div>
-   </Dialog.Panel>
-  </div>
- </Dialog>
 
  </div>
  );

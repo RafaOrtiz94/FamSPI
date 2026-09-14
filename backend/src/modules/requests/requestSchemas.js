@@ -92,6 +92,16 @@ module.exports = {
       observaciones: { type: "string" },
     },
   },
+  disponibilidad_equipo: {
+    type: "object",
+    required: ["business_case_id", "servicio_equipo_id"],
+    properties: {
+      business_case_id: { anyOf: [{ type: "string" }, { type: "number" }] },
+      servicio_equipo_id: { anyOf: [{ type: "string" }, { type: "number" }] },
+      equipment_name: { type: "string" },
+      notes: { type: "string" },
+    },
+  },
   cliente: {
     type: "object",
     required: ["nombre_cliente", "direccion_cliente", "persona_contacto"],

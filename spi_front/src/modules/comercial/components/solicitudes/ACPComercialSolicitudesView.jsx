@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { FiCreditCard, FiUserPlus, FiUsers, FiBriefcase, FiUser } from "react-icons/fi";
+import { FiCreditCard, FiUserPlus, FiUsers, FiBriefcase, FiUser, FiBox } from "react-icons/fi";
 import { getClientRequests } from "../../../../core/api/requestsApi";
 import Modal from "../../../../core/ui/components/Modal";
 import Button from "../../../../core/ui/components/Button";
@@ -82,6 +82,16 @@ const ACPComercialSolicitudesView = () => {
  color: 'orange',
  type: 'vacaciones',
  initialFilters: { mine: true }
+ },
+ {
+ id: 'disponibilidad_equipo',
+ title: 'Solicitudes de Disponibilidad',
+ icon: FiBox,
+ color: 'blue',
+ type: 'F.ST-23',
+ // mine:false -- estas solicitudes las crea comercial, no acp_comercial;
+ // el default del modal (mine:true) las ocultaria todas.
+ initialFilters: { mine: false }
  }
  ];
 

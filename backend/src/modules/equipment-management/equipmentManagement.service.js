@@ -28,6 +28,12 @@ const toDateOrNull = (value) => {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const toUuidOrNull = (value) => {
+  const text = toTextOrNull(value);
+  return text && UUID_RE.test(text) ? text : null;
+};
+
 const normalizeCondition = (value) => {
   const text = toTextOrNull(value);
   if (!text) return null;
@@ -509,23 +515,50 @@ async function reserveAsset(assetId, payload, userId = null) {
       throw error;
     }
 
-    const { rows: reservationRows } = await client.query(
-      `INSERT INTO public.equipment_asset_reservations (
-          asset_id, source_module, source_reference_id, reserved_for_client_id,
-          expires_at, notes, created_by
-        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
-      [
-        assetId,
-        toTextOrNull(payload.source_module) || "manual",
-        toIntOrNull(payload.source_reference_id),
-        toIntOrNull(payload.reserved_for_client_id),
-        payload.expires_at || null,
-        toTextOrNull(payload.notes),
-        userId,
-      ],
-    );
+    const sourceModule = toTextOrNull(payload.source_module) || "manual";
+    const businessCaseId = toUuidOrNull(payload.business_case_id);
+    if (sourceModule === "business_case" && !businessCaseId) {
+      const error = new Error("business_case_id es requerido para reservar desde un Business Case");
+      error.status = 400;
+      throw error;
+    }
+    // Reserva de BC: 1 mes calendario por defecto si no se especifica expiracion explicita.
+    let expiresAt = payload.expires_at || null;
+    if (!expiresAt && businessCaseId) {
+      const oneMonthOut = new Date();
+      oneMonthOut.setMonth(oneMonthOut.getMonth() + 1);
+      expiresAt = oneMonthOut.toISOString();
+    }
+
+    let reservationRows;
+    try {
+      ({ rows: reservationRows } = await client.query(
+        `INSERT INTO public.equipment_asset_reservations (
+            asset_id, source_module, source_reference_id, reserved_for_client_id,
+            business_case_id, previous_status, expires_at, notes, created_by
+          )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING *`,
+        [
+          assetId,
+          sourceModule,
+          toIntOrNull(payload.source_reference_id),
+          toIntOrNull(payload.reserved_for_client_id),
+          businessCaseId,
+          current.rows[0].current_status,
+          expiresAt,
+          toTextOrNull(payload.notes),
+          userId,
+        ],
+      ));
+    } catch (insertError) {
+      if (insertError.code === "23505") {
+        const error = new Error("Este equipo ya esta reservado.");
+        error.status = 409;
+        throw error;
+      }
+      throw insertError;
+    }
 
     await client.query(
       `UPDATE public.equipment_assets
@@ -536,7 +569,7 @@ async function reserveAsset(assetId, payload, userId = null) {
               updated_at = now()
         WHERE id = $4`,
       [
-        toTextOrNull(payload.source_module) || "manual",
+        sourceModule,
         toIntOrNull(payload.source_reference_id),
         userId,
         assetId,
@@ -546,7 +579,7 @@ async function reserveAsset(assetId, payload, userId = null) {
     await client.query(
       `INSERT INTO public.equipment_asset_events (asset_id, event_type, from_status, to_status, payload, created_by)
        VALUES ($1, 'reserved', $2, 'reserved', $3::jsonb, $4)`,
-      [assetId, current.rows[0].current_status, JSON.stringify({ reservation_id: reservationRows[0].id }), userId],
+      [assetId, current.rows[0].current_status, JSON.stringify({ reservation_id: reservationRows[0].id, business_case_id: businessCaseId }), userId],
     );
 
     await client.query("COMMIT");
@@ -557,6 +590,148 @@ async function reserveAsset(assetId, payload, userId = null) {
   } finally {
     client.release();
   }
+}
+
+async function renewAssetReservation(reservationId, businessCaseId, userId = null) {
+  const bcId = toUuidOrNull(businessCaseId);
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `SELECT * FROM public.equipment_asset_reservations WHERE id = $1 FOR UPDATE`,
+      [toIntOrNull(reservationId)],
+    );
+    const reservation = rows[0];
+    if (!reservation) {
+      const error = new Error("Reserva no encontrada");
+      error.status = 404;
+      throw error;
+    }
+    if (reservation.status !== "active") {
+      const error = new Error("Esta reserva ya no esta activa");
+      error.status = 409;
+      throw error;
+    }
+    if (!bcId || reservation.business_case_id !== bcId) {
+      const error = new Error("Esta reserva no pertenece a este Business Case");
+      error.status = 403;
+      throw error;
+    }
+    if (reservation.expires_at && new Date(reservation.expires_at) < new Date()) {
+      const error = new Error("La reserva ya vencio, no se puede renovar");
+      error.status = 409;
+      throw error;
+    }
+    if (reservation.renewal_count >= reservation.max_renewals) {
+      const error = new Error(`Ya se alcanzo el limite de ${reservation.max_renewals} renovaciones`);
+      error.status = 409;
+      throw error;
+    }
+
+    const { rows: updatedRows } = await client.query(
+      `UPDATE public.equipment_asset_reservations
+          SET expires_at = GREATEST(now(), expires_at) + interval '1 month',
+              renewal_count = renewal_count + 1,
+              updated_at = now()
+        WHERE id = $1
+        RETURNING *`,
+      [reservation.id],
+    );
+
+    await client.query(
+      `INSERT INTO public.equipment_asset_events (asset_id, event_type, from_status, to_status, payload, created_by)
+       VALUES ($1, 'renewed', 'reserved', 'reserved', $2::jsonb, $3)`,
+      [reservation.asset_id, JSON.stringify({ reservation_id: reservation.id, renewal_count: updatedRows[0].renewal_count }), userId],
+    );
+
+    await client.query("COMMIT");
+    return updatedRows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function releaseAssetReservation(reservationId, businessCaseId, userId = null, reason = null) {
+  const bcId = toUuidOrNull(businessCaseId);
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `SELECT * FROM public.equipment_asset_reservations WHERE id = $1 FOR UPDATE`,
+      [toIntOrNull(reservationId)],
+    );
+    const reservation = rows[0];
+    if (!reservation) {
+      const error = new Error("Reserva no encontrada");
+      error.status = 404;
+      throw error;
+    }
+    if (reservation.status !== "active") {
+      const error = new Error("Esta reserva ya no esta activa");
+      error.status = 409;
+      throw error;
+    }
+    if (!bcId || reservation.business_case_id !== bcId) {
+      const error = new Error("Esta reserva no pertenece a este Business Case");
+      error.status = 403;
+      throw error;
+    }
+
+    const { rows: updatedRows } = await client.query(
+      `UPDATE public.equipment_asset_reservations
+          SET status = 'released',
+              released_at = now(),
+              released_by = $1,
+              release_reason = $2,
+              updated_at = now()
+        WHERE id = $3
+        RETURNING *`,
+      [userId, toTextOrNull(reason), reservation.id],
+    );
+
+    await client.query(
+      `UPDATE public.equipment_assets
+          SET current_status = COALESCE($1, current_status),
+              negotiated_by_module = NULL,
+              negotiation_reference_id = NULL,
+              updated_by = $2,
+              updated_at = now()
+        WHERE id = $3 AND current_status = 'reserved'`,
+      [reservation.previous_status, userId, reservation.asset_id],
+    );
+
+    await client.query(
+      `INSERT INTO public.equipment_asset_events (asset_id, event_type, from_status, to_status, payload, created_by)
+       VALUES ($1, 'released', 'reserved', $2, $3::jsonb, $4)`,
+      [reservation.asset_id, reservation.previous_status || "reserved", JSON.stringify({ reservation_id: reservation.id, reason: toTextOrNull(reason) }), userId],
+    );
+
+    await client.query("COMMIT");
+    return updatedRows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function getActiveReservationForBusinessCase(businessCaseId) {
+  const bcId = toUuidOrNull(businessCaseId);
+  if (!bcId) return null;
+  const { rows } = await db.query(
+    `SELECT r.*, ea.serial_number, ea.internal_code, ea.asset_tag, em.name AS equipment_name
+       FROM public.equipment_asset_reservations r
+       JOIN public.equipment_assets ea ON ea.id = r.asset_id
+       JOIN public.equipment_models em ON em.id = ea.equipment_model_id
+      WHERE r.business_case_id = $1 AND r.status = 'active'
+      ORDER BY r.created_at DESC`,
+    [bcId],
+  );
+  return rows;
 }
 
 async function installAsset(assetId, payload, userId = null) {
@@ -964,6 +1139,9 @@ module.exports = {
   updateAsset,
   changeAssetStatus,
   reserveAsset,
+  renewAssetReservation,
+  releaseAssetReservation,
+  getActiveReservationForBusinessCase,
   installAsset,
   listAssetTimeline,
   listAssetDocuments,

@@ -38,6 +38,8 @@ router.get("/candidates", controller.listCandidates);
 router.get("/reports/summary", requireRole(FINANCE_REVIEWER_ROLES), controller.reportSummary);
 router.get("/ats/xml", requireRole(FINANCE_REVIEWER_ROLES), controller.atsXml);
 router.get("/config/policy", controller.getPolicy);
+router.get("/km-settlements", requireRole(["finanzas", "financiero", "jefe_financiero", "jefe_finanzas"]), controller.kmSettlementPreview);
+router.post("/km-settlements", requireRole(["finanzas", "financiero", "jefe_financiero", "jefe_finanzas"]), controller.applyKmSettlement);
 router.get("/", controller.list);
 router.post("/", controller.upsert);
 router.patch("/:id/status", requireRole(FINANCE_REVIEWER_ROLES), controller.updateStatus);

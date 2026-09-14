@@ -2,30 +2,36 @@ const fs = require("fs");
 const path = require("path");
 const { Readable } = require("stream");
 const PDFDocument = require("pdfkit");
-const { PDFDocument: PdfLibDocument } = require("pdf-lib");
 const XLSX = require("xlsx");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { drive, sheets } = require("../../config/google");
-const { downloadFileBuffer } = require("../../utils/drive");
+const { extractEmail } = require("../../utils/googleCredentials");
+
+// Misma cuenta de sistema usada para envio de correos (ver mismo gotcha
+// documentado en businessCaseWorkflowSla.service.js) -- el usuario de
+// pruebas "PRUEBA 5 PRUEBA 5" tiene rol jefe_comercial pero su email es
+// esta cuenta de sistema, no una persona real. Excluir por nombre es
+// fragil (el nombre real tiene "PRUEBA 5" repetido), excluir por email es
+// exacto y ya es el criterio usado en el resto del modulo.
+const SYSTEM_NOTIFICATION_EMAIL = extractEmail(
+  process.env.SYSTEM_MAIL_ADDRESS ||
+  process.env.NOTIFICATION_MAIL_ADDRESS ||
+  process.env.GMAIL_SERVICE_ACCOUNT_SENDER ||
+  process.env.SMTP_FROM ||
+  "",
+).toLowerCase();
 const { ensureBusinessCaseDriveFolderById } = require("./businessCaseDriveFolder.service");
 const { recordDocumentVersion } = require("./businessCaseSheetGeneration.service");
 const { loadTemplateDefinition, buildSheetPayloads } = require("./businessCaseSheetSyncLocal.service");
 const notificationManager = require("../notifications/notificationManager");
 
 const OFFER_TEMPLATE_PATH = path.resolve(__dirname, "../../../Mapeador_Sheets/formato oferta.xlsx");
-// Antes apuntaba a docs/validation/assets/ -- fuera de backend/, excluido
-// por .dockerignore ("docs"), asi que en produccion fs.existsSync siempre
-// daba false y la marca de agua/logo nunca se renderizaba en el PDF real
-// (solo funcionaba corriendo local desde el checkout completo del repo).
+
 const OFFER_PDF_LOGO_PATH = path.resolve(__dirname, "../../assets/logo_famproject.png");
-const OFFER_PDF_FONT_REGULAR_PATH = path.resolve(__dirname, "../../assets/fonts/NotoSans-Regular.ttf");
-const OFFER_PDF_FONT_BOLD_PATH = path.resolve(__dirname, "../../assets/fonts/NotoSans-Bold.ttf");
-const OFFER_PDF_FONT_REGULAR = "OfferNotoSans";
-const OFFER_PDF_FONT_BOLD = "OfferNotoSansBold";
 const VIEWER_COMMERCIAL_ROLES = new Set(["comercial", "asesor_comercial", "analista_comercial"]);
-const MANAGER_ROLES = new Set(["acp_comercial", "jefe_comercial"]);
-const PRIVATE_OFFER_MANAGER_ROLES = new Set(["acp_comercial", "jefe_comercial", "gerencia", "gerencia_general"]);
+const MANAGER_ROLES = new Set(["acp_comercial", "jefe_comercial", "jefe_de_comercial"]);
+const PRIVATE_OFFER_MANAGER_ROLES = new Set(["acp_comercial", "jefe_comercial", "jefe_de_comercial", "gerencia", "gerencia_general"]);
 const OFFER_CREATOR_ALLOWED_STATUSES = new Set(["accepted", "rejected"]);
 const OFFER_PUBLISHABLE_STATUSES = new Set(["draft", "rejected"]);
 const ELECTROLYTE_KEYWORDS = ["electrol", "ise", "electrodo", "reference electrode"];
@@ -72,6 +78,7 @@ function toObject(value) {
 
 function normalizeRole(role) {
   const normalized = String(role || "").trim().toLowerCase();
+  if (normalized === "jefe_de_comercial") return "jefe_comercial";
   if (normalized === "asesor_comercial") return "comercial";
   if (normalized === "analista_comercial") return "comercial";
   return normalized;
@@ -193,16 +200,6 @@ function normalizeOfferText(value) {
     .replace(/[\u0300-\u036f]/g, "")
     .trim()
     .toLowerCase();
-}
-
-function normalizePdfText(value) {
-  const raw = String(value ?? "");
-  // Repair only the byte patterns typical of UTF-8 decoded as Latin-1. This
-  // keeps stored data intact while preventing old catalog values from reaching
-  // the document with mojibake.
-  if (!/[\u00c2\u00c3\u00e2]/.test(raw)) return raw;
-  const repaired = Buffer.from(raw, "latin1").toString("utf8");
-  return repaired.includes("\uFFFD") ? raw : repaired;
 }
 
 function normalizeOfferProductId(value) {
@@ -548,14 +545,6 @@ async function ensureOfferTable() {
     CREATE INDEX IF NOT EXISTS bc_offer_versions_business_case_offer_status_idx
       ON public.bc_offer_versions (business_case_id, offer_key, status, version_number DESC)
       WHERE business_case_id IS NOT NULL;
-  `);
-
-  await db.query(`
-    ALTER TABLE public.bc_offer_versions
-      ADD COLUMN IF NOT EXISTS specific_proposal_file_id TEXT,
-      ADD COLUMN IF NOT EXISTS specific_proposal_url TEXT,
-      ADD COLUMN IF NOT EXISTS specific_proposal_uploaded_at timestamptz,
-      ADD COLUMN IF NOT EXISTS specific_proposal_uploaded_by integer;
   `);
 }
 
@@ -1320,7 +1309,7 @@ function summarizeOfferSections(sections = {}) {
 }
 
 function createOfferPdfDocument() {
-  const doc = new PDFDocument({
+  return new PDFDocument({
     size: "A4",
     layout: "landscape",
     margin: 42,
@@ -1331,9 +1320,6 @@ function createOfferPdfDocument() {
       Subject: "Oferta comercial Business Case",
     },
   });
-  doc.registerFont(OFFER_PDF_FONT_REGULAR, OFFER_PDF_FONT_REGULAR_PATH);
-  doc.registerFont(OFFER_PDF_FONT_BOLD, OFFER_PDF_FONT_BOLD_PATH);
-  return doc;
 }
 
 function getOfferPdfBounds(doc) {
@@ -1361,10 +1347,10 @@ async function getJefeComercialName() {
        FROM users
       WHERE active = true
         AND lower(role) = ANY($1::text[])
-        AND lower(trim(fullname)) NOT IN ('prueba 5')
+        AND ($2 = '' OR lower(email) <> $2)
       ORDER BY id ASC
       LIMIT 1`,
-    [["jefe_comercial"]],
+    [["jefe_comercial", "jefe_de_comercial"], SYSTEM_NOTIFICATION_EMAIL],
   );
   if (!rows[0]?.fullname) {
     logger.warn("No se encontro ningun usuario activo con rol jefe_comercial; el PDF de oferta usara el rotulo generico");
@@ -1418,14 +1404,14 @@ function addOfferPdfPage(doc) {
 function renderOfferPdfHeader(doc, { context, offer, templatePayload, pricingPayload }) {
   void offer;
   void pricingPayload;
-  const clientName = normalizePdfText(templatePayload.clientName || context?.client_name || "");
-  const equipmentName = normalizePdfText(templatePayload.equipmentName || "Equipo no definido").toUpperCase();
-  const advisorName = normalizePdfText(templatePayload.advisorName || "");
-  const city = normalizePdfText(templatePayload.city || "");
-  const province = normalizePdfText(templatePayload.province || "");
+  const clientName = templatePayload.clientName || context?.client_name || "";
+  const equipmentName = String(templatePayload.equipmentName || "Equipo no definido").toUpperCase();
+  const advisorName = templatePayload.advisorName || "";
+  const city = templatePayload.city || "";
+  const province = templatePayload.province || "";
   const validUntil = templatePayload.validUntil ? formatOfferDate(templatePayload.validUntil) : "";
-  const leadTime = normalizePdfText(templatePayload.leadTime || "");
-  const title = normalizePdfText(templatePayload.title || "OFERTA COMERCIAL").toUpperCase();
+  const leadTime = templatePayload.leadTime || "";
+  const title = String(templatePayload.title || "OFERTA COMERCIAL").toUpperCase();
   const bounds = getOfferPdfBounds(doc);
   const headerLeft = bounds.left;
   const headerTop = bounds.top;
@@ -1437,7 +1423,7 @@ function renderOfferPdfHeader(doc, { context, offer, templatePayload, pricingPay
   const titleY = headerTop + 18;
   const titleX = headerLeft + headerPaddingX;
   const titleWidth = headerWidth - (headerPaddingX * 2) - logoWidth - logoGap;
-  doc.font(OFFER_PDF_FONT_BOLD).fontSize(24);
+  doc.font("Helvetica-Bold").fontSize(24);
   const titleMeasureHeight = doc.heightOfString(title, {
     width: titleWidth,
     align: "center",
@@ -1464,17 +1450,17 @@ function renderOfferPdfHeader(doc, { context, offer, templatePayload, pricingPay
   let leftY = metaTop;
   let rightY = metaTop;
 
-  const measureTextHeight = (text, width, font = OFFER_PDF_FONT_REGULAR, fontSize = 11) => {
+  const measureTextHeight = (text, width, font = "Helvetica", fontSize = 11) => {
     doc.font(font).fontSize(fontSize);
     return Math.max(fontSize + 2, Math.ceil(doc.heightOfString(String(text || ""), { width, align: "left" })));
   };
 
   const leftRowHeights = [
-    { label: "CLIENTE:", value: clientName, font: OFFER_PDF_FONT_REGULAR, fontSize: 11 },
-    { label: "EQUIPO:", value: equipmentName, font: OFFER_PDF_FONT_BOLD, fontSize: 12 },
-    { label: "Ciudad Matriz:", value: city, font: OFFER_PDF_FONT_REGULAR, fontSize: 11 },
-    { label: "Provincia:", value: province, font: OFFER_PDF_FONT_REGULAR, fontSize: 11 },
-    { label: "Vigencia de la oferta:", value: validUntil, font: OFFER_PDF_FONT_REGULAR, fontSize: 11 },
+    { label: "CLIENTE:", value: clientName, font: "Helvetica", fontSize: 11 },
+    { label: "EQUIPO:", value: equipmentName, font: "Helvetica-Bold", fontSize: 12 },
+    { label: "Ciudad Matriz:", value: city, font: "Helvetica", fontSize: 11 },
+    { label: "Provincia:", value: province, font: "Helvetica", fontSize: 11 },
+    { label: "Vigencia de la oferta:", value: validUntil, font: "Helvetica", fontSize: 11 },
   ];
   const rightRowHeights = [
     { label: "Fecha:", value: formatOfferDate() },
@@ -1514,20 +1500,20 @@ function renderOfferPdfHeader(doc, { context, offer, templatePayload, pricingPay
     }
   }
 
-  doc.fillColor("#0F172A").font(OFFER_PDF_FONT_BOLD).fontSize(24).text(title, titleX, titleY, {
+  doc.fillColor("#0F172A").font("Helvetica-Bold").fontSize(24).text(title, titleX, titleY, {
     width: titleWidth,
     align: "center",
   });
-  doc.fillColor("#475569").font(OFFER_PDF_FONT_REGULAR).fontSize(12).text("FAMPROJECT CIA. LTDA", titleX, companyY, {
+  doc.fillColor("#475569").font("Helvetica").fontSize(12).text("FAMPROJECT CIA. LTDA", titleX, companyY, {
     width: titleWidth,
     align: "center",
   });
 
   const writeLeftLine = (label, value, valueOptions = {}) => {
-    const valueFont = valueOptions.bold ? OFFER_PDF_FONT_BOLD : OFFER_PDF_FONT_REGULAR;
+    const valueFont = valueOptions.bold ? "Helvetica-Bold" : "Helvetica";
     const valueSize = valueOptions.fontSize || 11;
     const rowHeight = Math.max(18, measureTextHeight(value, leftValueWidth, valueFont, valueSize));
-    doc.fillColor("#0F172A").font(OFFER_PDF_FONT_BOLD).fontSize(11).text(label, headerLeft + headerPaddingX, leftY, {
+    doc.fillColor("#0F172A").font("Helvetica-Bold").fontSize(11).text(label, headerLeft + headerPaddingX, leftY, {
       width: leftLabelWidth - 10,
     });
     doc.fillColor("#1F2937").font(valueFont).fontSize(valueSize).text(
@@ -1546,10 +1532,10 @@ function renderOfferPdfHeader(doc, { context, offer, templatePayload, pricingPay
 
   const writeRightDynamicLine = (label, value) => {
     const rowHeight = Math.max(18, measureTextHeight(value, rightValueWidth));
-    doc.fillColor("#0F172A").font(OFFER_PDF_FONT_BOLD).fontSize(11).text(label, rightBlockX, rightY, {
+    doc.fillColor("#0F172A").font("Helvetica-Bold").fontSize(11).text(label, rightBlockX, rightY, {
       width: rightLabelWidth,
     });
-    doc.fillColor("#1F2937").font(OFFER_PDF_FONT_REGULAR).fontSize(11).text(value || "", rightValueX, rightY, {
+    doc.fillColor("#1F2937").font("Helvetica").fontSize(11).text(value || "", rightValueX, rightY, {
       width: rightValueWidth,
       align: "left",
     });
@@ -1575,7 +1561,7 @@ function drawOfferTableHeader(doc, columns, startY) {
   doc.restore();
   let x = bounds.left + 10;
   columns.forEach((column) => {
-    doc.fillColor("#0F172A").font(OFFER_PDF_FONT_BOLD).fontSize(9).text(column.label, x, startY + 8, {
+    doc.fillColor("#0F172A").font("Helvetica-Bold").fontSize(9).text(column.label, x, startY + 8, {
       width: column.width - 10,
       align: column.align || "left",
     });
@@ -1588,7 +1574,7 @@ function drawOfferSectionLabel(doc, title, startY) {
   doc.save();
   doc.roundedRect(bounds.left, startY, 196, 24, 10).fill("#DBEAFE");
   doc.restore();
-  doc.fillColor("#1D4ED8").font(OFFER_PDF_FONT_BOLD).fontSize(10).text(normalizePdfText(title).toUpperCase(), bounds.left + 14, startY + 8);
+  doc.fillColor("#1D4ED8").font("Helvetica-Bold").fontSize(10).text(String(title || "").toUpperCase(), bounds.left + 14, startY + 8);
 }
 
 function shouldShowDeterminationPriceColumn(sectionKey) {
@@ -1659,14 +1645,13 @@ function drawOfferSectionTable(doc, title, rows = [], { showDeterminationPrice =
   equipmentGroups.forEach((group) => {
     if (showEquipmentHeaders) {
       ensureGroupHeaderRoom();
-      drawOfferEquipmentGroupHeader(doc, normalizePdfText(group.equipmentName), tableY);
+      drawOfferEquipmentGroupHeader(doc, group.equipmentName, tableY);
       tableY += 22;
     }
 
     group.items.forEach((row) => {
       const baseHeight = 21;
-      const product = normalizePdfText(row.product || "");
-      const productHeight = doc.heightOfString(product, {
+      const productHeight = doc.heightOfString(String(row.product || ""), {
         width: nameWidth - 12,
         align: "left",
       });
@@ -1679,7 +1664,7 @@ function drawOfferSectionTable(doc, title, rows = [], { showDeterminationPrice =
         drawOfferTableHeader(doc, columns, tableY);
         tableY += 28;
         if (showEquipmentHeaders) {
-          drawOfferEquipmentGroupHeader(doc, normalizePdfText(group.equipmentName), tableY);
+          drawOfferEquipmentGroupHeader(doc, group.equipmentName, tableY);
           tableY += 22;
         }
       }
@@ -1693,7 +1678,7 @@ function drawOfferSectionTable(doc, title, rows = [], { showDeterminationPrice =
 
       const cells = [
         String(row.code || "-"),
-        product || "-",
+        String(row.product || "-"),
         formatCurrency(row.kitPrice),
         ...(showDeterminationPrice ? [formatCurrency(row.determinationPrice)] : []),
       ];
@@ -1701,7 +1686,7 @@ function drawOfferSectionTable(doc, title, rows = [], { showDeterminationPrice =
       let x = bounds.left + 10;
       cells.forEach((cell, cellIndex) => {
         const column = columns[cellIndex];
-        doc.fillColor("#1F2937").font(cellIndex === 0 ? OFFER_PDF_FONT_BOLD : OFFER_PDF_FONT_REGULAR).fontSize(8.7).text(cell, x, tableY + 6, {
+        doc.fillColor("#1F2937").font(cellIndex === 0 ? "Helvetica-Bold" : "Helvetica").fontSize(8.7).text(cell, x, tableY + 6, {
           width: column.width - 10,
           align: column.align || "left",
         });
@@ -1721,8 +1706,8 @@ function drawOfferEquipmentGroupHeader(doc, equipmentName, y) {
   doc.save();
   doc.rect(bounds.left, y, bounds.width, 20).fill("#EEF2FF");
   doc.restore();
-  doc.fillColor("#3730A3").font(OFFER_PDF_FONT_BOLD).fontSize(8.5).text(
-    normalizePdfText(equipmentName || "Equipo no definido").toUpperCase(),
+  doc.fillColor("#3730A3").font("Helvetica-Bold").fontSize(8.5).text(
+    (equipmentName || "Equipo no definido").toUpperCase(),
     bounds.left + 10,
     y + 5,
     { width: bounds.width - 20, align: "left" },
@@ -1755,8 +1740,8 @@ function renderOfferPdfFooter(doc, { jefeComercialName, clientName } = {}) {
   doc.save();
   doc.roundedRect(bounds.left, footerTop, bounds.width, disclaimerHeight, 14).fill("#F8FAFC").stroke("#E5E7EB");
   doc.restore();
-  doc.fillColor("#0F172A").font(OFFER_PDF_FONT_BOLD).fontSize(10).text("* PRECIOS NO INCLUYE IVA", bounds.left + 18, footerTop + 12);
-  doc.fillColor("#64748B").font(OFFER_PDF_FONT_REGULAR).fontSize(8.3).text(
+  doc.fillColor("#0F172A").font("Helvetica-Bold").fontSize(10).text("* PRECIOS NO INCLUYE IVA", bounds.left + 18, footerTop + 12);
+  doc.fillColor("#64748B").font("Helvetica").fontSize(8.3).text(
     "Oferta sujeta a validacion comercial final, disponibilidad y condiciones vigentes al momento de la aceptacion.",
     bounds.left + 18,
     footerTop + 26,
@@ -1771,27 +1756,27 @@ function renderOfferPdfFooter(doc, { jefeComercialName, clientName } = {}) {
 
   doc.moveTo(leftLineStart, lineY).lineTo(leftLineEnd, lineY).strokeColor("#94A3B8").lineWidth(1).stroke();
   doc.moveTo(rightLineStart, lineY).lineTo(rightLineEnd, lineY).strokeColor("#94A3B8").lineWidth(1).stroke();
-  doc.fillColor("#0F172A").font(OFFER_PDF_FONT_BOLD).fontSize(10).text("FAMPROJECT. CIA. LTDA", leftLineStart, lineY + 6);
+  doc.fillColor("#0F172A").font("Helvetica-Bold").fontSize(10).text("FAMPROJECT. CIA. LTDA", leftLineStart, lineY + 6);
   doc.text("ACEPTACION CLIENTE", rightLineStart, lineY + 6, { width: signatureGap + 30, align: "center" });
   // width + ellipsis: un nombre largo no debe envolver a una segunda linea,
   // porque eso empujaria el renglon de abajo ("Jefe Comercial") fuera del
   // presupuesto de altura del footer sin que el chequeo de espacio lo note.
-  doc.fillColor("#334155").font(OFFER_PDF_FONT_BOLD).fontSize(8.5).text(normalizePdfText(jefeComercialName || "Jefe Comercial"), leftLineStart, lineY + 20, {
+  doc.fillColor("#334155").font("Helvetica-Bold").fontSize(8.5).text(jefeComercialName || "Jefe Comercial", leftLineStart, lineY + 20, {
     width: leftLineEnd - leftLineStart,
     lineBreak: false,
     ellipsis: true,
   });
-  doc.fillColor("#64748B").font(OFFER_PDF_FONT_REGULAR).fontSize(8.3).text("Sales Manager", leftLineStart, lineY + 32);
+  doc.fillColor("#64748B").font("Helvetica").fontSize(8.3).text("Sales Manager", leftLineStart, lineY + 32);
   // El nombre del cliente debe imprimirse aqui, igual que el de Jefe Comercial
-  // a la izquierda -- antes esta columna solo mostraba el rotulo estatico
+  // a la izquierda -- sin esto la columna solo mostraba el rotulo estatico
   // "Nombre y firma" sin ningun dato real del cliente.
-  doc.fillColor("#334155").font(OFFER_PDF_FONT_BOLD).fontSize(8.5).text(normalizePdfText(clientName || "Cliente"), rightLineStart, lineY + 20, {
+  doc.fillColor("#334155").font("Helvetica-Bold").fontSize(8.5).text(clientName || "Cliente", rightLineStart, lineY + 20, {
     width: rightLineEnd - rightLineStart,
     align: "center",
     lineBreak: false,
     ellipsis: true,
   });
-  doc.fillColor("#64748B").font(OFFER_PDF_FONT_REGULAR).fontSize(8.3).text("Nombre y firma", rightLineStart, lineY + 32, {
+  doc.fillColor("#64748B").font("Helvetica").fontSize(8.3).text("Nombre y firma", rightLineStart, lineY + 32, {
     width: rightLineEnd - rightLineStart,
     align: "center",
   });
@@ -1859,7 +1844,7 @@ async function buildFormalOfferPdfBuffer({ context, offer, templatePayload, pric
       // duplicando el total de hojas del PDF (4 -> 8). Confirmado reproduciendo
       // el bug de forma aislada: un doc de 1 pagina pasaba a tener 2 objetos
       // /Type /Page reales en el PDF final.
-      doc.fillColor("#94A3B8").font(OFFER_PDF_FONT_REGULAR).fontSize(8).text(
+      doc.fillColor("#94A3B8").font("Helvetica").fontSize(8).text(
         `Pagina ${i + 1} de ${range.count}`,
         bounds.left,
         pageNumberY,
@@ -2469,7 +2454,7 @@ async function getManagerUserIds() {
        FROM users
       WHERE active = true
         AND lower(role) = ANY($1::text[])`,
-    [["acp_comercial", "jefe_comercial"]],
+    [["acp_comercial", "jefe_comercial", "jefe_de_comercial"]],
   );
   return rows.map((row) => Number(row.id)).filter((value) => Number.isInteger(value) && value > 0);
 }
@@ -2533,11 +2518,6 @@ function deriveOfferPermissions(context, user, latestOffer) {
       isFeasibleBusinessCase(context) &&
       latestOffer &&
       OFFER_PUBLISHABLE_STATUSES.has(String(latestOffer.status || "").trim().toLowerCase()),
-    canSendSigned:
-      isManager &&
-      isFeasibleBusinessCase(context) &&
-      latestOffer &&
-      String(latestOffer.status || "").trim().toLowerCase() === "ready_to_send",
     canDecide:
       isCreatorCommercial &&
       isFeasibleBusinessCase(context) &&
@@ -2959,44 +2939,11 @@ async function createOfferDraftForContext(context, user, target = null) {
   return mapOfferRow(rows[0]);
 }
 
-// Carpeta fija de Drive con la propuesta de valor institucional (unica, para
-// todas las ofertas). Va SIEMPRE primero en el PDF final publicado.
-const VALUE_PROPOSITION_FOLDER_ID = "1RAiU8BwtUleLrvipVq7h-rfqE_R1qIoH";
-
-async function getValuePropositionPdfBuffer() {
-  const { data } = await drive.files.list({
-    q: `'${VALUE_PROPOSITION_FOLDER_ID}' in parents and mimeType = 'application/pdf' and trashed = false`,
-    fields: "files(id, name)",
-    pageSize: 1,
-    supportsAllDrives: true,
-    includeItemsFromAllDrives: true,
-  });
-  const file = data?.files?.[0];
-  if (!file?.id) {
-    const error = new Error("No se encontro el PDF de propuesta de valor en la carpeta configurada de Drive.");
-    error.status = 409;
-    error.code = "BC_OFFER_VALUE_PROPOSITION_MISSING";
-    throw error;
-  }
-  return downloadFileBuffer(file.id);
-}
-
-// Concatena PDFs completos (todas las paginas) en el orden dado, en un solo buffer.
-async function mergeOfferPdfBuffers(buffers) {
-  const merged = await PdfLibDocument.create();
-  for (const buffer of buffers) {
-    const source = await PdfLibDocument.load(buffer);
-    const pages = await merged.copyPages(source, source.getPageIndices());
-    pages.forEach((page) => merged.addPage(page));
-  }
-  return Buffer.from(await merged.save());
-}
-
-async function publishOfferVersion(businessCaseId, offerId, user, specificProposalFile) {
+async function publishOfferVersion(businessCaseId, offerId, user) {
   await ensureOfferTable();
   const context = await getBusinessCaseOfferContext(businessCaseId);
   assertOfferManager(context, user);
-  return publishOfferVersionForContext(context, offerId, user, specificProposalFile);
+  return publishOfferVersionForContext(context, offerId, user);
 }
 
 async function publishPrivatePurchaseOfferVersion(privatePurchaseId, offerId, user) {
@@ -3006,7 +2953,7 @@ async function publishPrivatePurchaseOfferVersion(privatePurchaseId, offerId, us
   return publishOfferVersionForContext(context, offerId, user);
 }
 
-async function publishOfferVersionForContext(context, offerId, user, specificProposalFile) {
+async function publishOfferVersionForContext(context, offerId, user) {
   const owner = resolveOfferOwner(context);
   const offer = await getOfferVersionById(context, offerId);
   const normalizedStatus = String(offer.status || "").trim().toLowerCase();
@@ -3022,24 +2969,14 @@ async function publishOfferVersionForContext(context, offerId, user, specificPro
     error.code = "BC_OFFER_SHEET_REQUIRED";
     throw error;
   }
+
   const pricingPayload = await readPricingPayloadFromSheet(offer);
-  // La propuesta especifica solo se exige en el flujo de Business Case; el
-  // publish de compras privadas comparte esta funcion pero no tiene (aun)
-  // un paso de carga de archivo en su UI/ruta.
-  const isBusinessCaseOffer = context?.source_type !== "private_purchase";
-  if (isBusinessCaseOffer) {
-    if (!specificProposalFile?.buffer?.length) {
-      const error = new Error("Debes subir la propuesta especifica para publicar la oferta.");
-      error.status = 400;
-      error.code = "BC_OFFER_SPECIFIC_PROPOSAL_REQUIRED";
-      throw error;
-    }
-    if (String(specificProposalFile.mimetype || "").toLowerCase() !== "application/pdf") {
-      const error = new Error("La propuesta especifica debe ser un archivo PDF.");
-      error.status = 400;
-      error.code = "BC_OFFER_SPECIFIC_PROPOSAL_INVALID_TYPE";
-      throw error;
-    }
+  if (!pricingPayload?.summary?.is_complete) {
+    const error = new Error("No se puede publicar la oferta porque faltan precios en la hoja editable.");
+    error.status = 409;
+    error.code = "BC_OFFER_PRICING_INCOMPLETE";
+    error.details = pricingPayload?.summary || null;
+    throw error;
   }
   const leadTime = await readOfferPlazoFromSheet(offer.sheet_file_id);
   const driveContext = await ensureOfferDriveFolder(context);
@@ -3047,44 +2984,12 @@ async function publishOfferVersionForContext(context, offerId, user, specificPro
   const offerTarget = getOfferTargetFromRow(offer);
   const targetLabel = offerTarget.offerKey === "default" ? "" : ` - ${offerTarget.offerLabel || offerTarget.targetEquipmentName || offerTarget.offerKey}`;
   const fileName = sanitizeFileName(`${context.client_name || "Cliente"} - Oferta ${sourceLabel}${targetLabel} V${offer.version_number}.pdf`);
-  const offerTablesPdfBuffer = await buildFormalOfferPdfBuffer({
+  const pdfBuffer = await buildFormalOfferPdfBuffer({
     context,
     offer,
     templatePayload: { ...toObject(offer.template_payload), leadTime },
     pricingPayload,
   });
-
-  let pdfBuffer = offerTablesPdfBuffer;
-  let uploadedSpecificProposal = null;
-  if (isBusinessCaseOffer) {
-    // Orden fijo del documento final: propuesta de valor (institucional,
-    // siempre primero) -> propuesta especifica (la que sube comercial) ->
-    // oferta generada con tablas de precios.
-    const valuePropositionPdfBuffer = await getValuePropositionPdfBuffer();
-    pdfBuffer = await mergeOfferPdfBuffers([
-      valuePropositionPdfBuffer,
-      specificProposalFile.buffer,
-      offerTablesPdfBuffer,
-    ]);
-
-    const specificProposalName = sanitizeFileName(
-      `${context.client_name || "Cliente"} - Propuesta especifica V${offer.version_number}.pdf`,
-    );
-    const { data: uploaded } = await drive.files.create({
-      supportsAllDrives: true,
-      requestBody: {
-        name: specificProposalName,
-        parents: driveContext.folderId ? [driveContext.folderId] : undefined,
-      },
-      media: {
-        mimeType: "application/pdf",
-        body: bufferToStream(specificProposalFile.buffer),
-      },
-      fields: "id,name,webViewLink",
-    });
-    uploadedSpecificProposal = uploaded;
-  }
-
   const { data: uploadedPdf } = await drive.files.create({
     supportsAllDrives: true,
     requestBody: {
@@ -3098,27 +3003,16 @@ async function publishOfferVersionForContext(context, offerId, user, specificPro
     fields: "id,name,webViewLink",
   });
 
-  // BC: este paso solo genera y deja lista la vista previa/descarga del
-  // documento unido -- NO envia la oferta. El envio real ("sent") ocurre en
-  // sendSignedOfferForContext, cuando se sube el PDF ya firmado
-  // electronicamente fuera del SPI. Compra privada no tiene ese segundo paso
-  // todavia, asi que mantiene el comportamiento previo (publica = enviado).
-  const nextStatus = isBusinessCaseOffer ? "ready_to_send" : "sent";
-
   const { rows } = await db.query(
     `UPDATE bc_offer_versions
-        SET status = $9,
+        SET status = 'sent',
             pdf_file_id = $3,
             pdf_url = $4,
             pricing_payload = $5::jsonb,
-            sent_by = CASE WHEN $9 = 'sent' THEN $6 ELSE sent_by END,
-            sent_at = CASE WHEN $9 = 'sent' THEN NOW() ELSE sent_at END,
+            sent_by = $6,
+            sent_at = NOW(),
             updated_at = NOW(),
-            rejection_reason = NULL,
-            specific_proposal_file_id = COALESCE($7, specific_proposal_file_id),
-            specific_proposal_url = COALESCE($8, specific_proposal_url),
-            specific_proposal_uploaded_at = CASE WHEN $7::text IS NOT NULL THEN NOW() ELSE specific_proposal_uploaded_at END,
-            specific_proposal_uploaded_by = CASE WHEN $7::text IS NOT NULL THEN $6 ELSE specific_proposal_uploaded_by END
+            rejection_reason = NULL
       WHERE ${owner.idColumn} = $1
         AND id = $2
       RETURNING *`,
@@ -3136,15 +3030,8 @@ async function publishOfferVersionForContext(context, offerId, user, specificPro
         },
       }),
       Number(user?.id) || null,
-      uploadedSpecificProposal?.id || null,
-      uploadedSpecificProposal?.webViewLink || null,
-      nextStatus,
     ],
   );
-
-  if (isBusinessCaseOffer) {
-    return mapOfferRow(rows[0]);
-  }
 
   if (context?.source_type === "private_purchase") {
     const privatePurchaseId = context.private_purchase_id || context.id;
@@ -3173,136 +3060,66 @@ async function publishOfferVersionForContext(context, offerId, user, specificPro
         "No se pudo transicionar la compra privada tras publicar oferta",
       );
     }
-  }
-
-  return mapOfferRow(rows[0]);
-}
-
-async function sendSignedOfferVersion(businessCaseId, offerId, user, signedFile) {
-  await ensureOfferTable();
-  const context = await getBusinessCaseOfferContext(businessCaseId);
-  assertOfferManager(context, user);
-  return sendSignedOfferForContext(context, offerId, user, signedFile);
-}
-
-// Paso 2 (solo Business Case): sube el PDF ya firmado electronicamente fuera
-// del SPI y recien ahi la oferta se considera enviada de verdad -- dispara
-// todo lo que antes ocurria en el publish original (registro de version del
-// documento, sync a compras vinculadas, CRM, notificaciones).
-async function sendSignedOfferForContext(context, offerId, user, signedFile) {
-  const owner = resolveOfferOwner(context);
-  const offer = await getOfferVersionById(context, offerId);
-  const normalizedStatus = String(offer.status || "").trim().toLowerCase();
-  if (normalizedStatus !== "ready_to_send") {
-    const error = new Error("Primero genera el documento unido antes de subir la version firmada.");
-    error.status = 409;
-    error.code = "BC_OFFER_NOT_READY_FOR_SIGNATURE";
-    throw error;
-  }
-  if (!signedFile?.buffer?.length) {
-    const error = new Error("Debes subir el documento firmado para enviar la oferta.");
-    error.status = 400;
-    error.code = "BC_OFFER_SIGNED_DOCUMENT_REQUIRED";
-    throw error;
-  }
-  if (String(signedFile.mimetype || "").toLowerCase() !== "application/pdf") {
-    const error = new Error("El documento firmado debe ser un archivo PDF.");
-    error.status = 400;
-    error.code = "BC_OFFER_SIGNED_DOCUMENT_INVALID_TYPE";
-    throw error;
-  }
-
-  const driveContext = await ensureOfferDriveFolder(context);
-  const offerTarget = getOfferTargetFromRow(offer);
-  const targetLabel = offerTarget.offerKey === "default" ? "" : ` - ${offerTarget.offerLabel || offerTarget.targetEquipmentName || offerTarget.offerKey}`;
-  const fileName = sanitizeFileName(`${context.client_name || "Cliente"} - Oferta BC${targetLabel} V${offer.version_number} (firmada).pdf`);
-
-  const { data: uploadedPdf } = await drive.files.create({
-    supportsAllDrives: true,
-    requestBody: {
-      name: fileName,
-      parents: driveContext.folderId ? [driveContext.folderId] : undefined,
-    },
-    media: {
-      mimeType: "application/pdf",
-      body: bufferToStream(signedFile.buffer),
-    },
-    fields: "id,name,webViewLink",
-  });
-
-  const { rows } = await db.query(
-    `UPDATE bc_offer_versions
-        SET status = 'sent',
-            pdf_file_id = $3,
-            pdf_url = $4,
-            sent_by = $5,
-            sent_at = NOW(),
-            updated_at = NOW()
-      WHERE ${owner.idColumn} = $1
-        AND id = $2
-      RETURNING *`,
-    [owner.idValue, offerId, uploadedPdf.id, uploadedPdf.webViewLink || null, Number(user?.id) || null],
-  );
-
-  await recordDocumentVersion({
-    businessCaseId: context.id,
-    documentType: "offer_pdf",
-    documentUrl: uploadedPdf.webViewLink || null,
-    sheetId: uploadedPdf.id,
-    fileName,
-    canonicalState: context.canonical_state || null,
-    generatedBy: Number(user?.id) || null,
-    metadata: {
-      offer_version_id: Number(offerId),
-      offer_key: offerTarget.offerKey,
-      target_equipment_id: offerTarget.targetEquipmentId,
-      target_equipment_name: offerTarget.targetEquipmentName,
-      version_number: Number(offer.version_number),
-      source: "bc_offer_workspace",
-      signed_externally: true,
-    },
-  });
-
-  await updateOfferSummaryMetadata(context.id, {
-    current_offer_version_id: Number(offerId),
-    current_offer_status: "sent",
-    current_offer_version_number: Number(offer.version_number),
-    current_offer_pdf_file_id: uploadedPdf.id,
-    current_offer_sent_at: new Date().toISOString(),
-    current_offer_key: offerTarget.offerKey,
-    current_offer_target_equipment_id: offerTarget.targetEquipmentId,
-    current_offer_target_equipment_name: offerTarget.targetEquipmentName,
-  });
-
-  if (offerTarget.offerKey === "default") {
-    await syncPublishedOfferToLinkedPrivatePurchase({
+  } else {
+    await recordDocumentVersion({
       businessCaseId: context.id,
-      pdfFileId: uploadedPdf.id,
-      user,
+      documentType: "offer_pdf",
+      documentUrl: uploadedPdf.webViewLink || null,
+      sheetId: uploadedPdf.id,
+      fileName,
+      canonicalState: context.canonical_state || null,
+      generatedBy: Number(user?.id) || null,
+      metadata: {
+        offer_version_id: Number(offerId),
+        offer_key: offerTarget.offerKey,
+        target_equipment_id: offerTarget.targetEquipmentId,
+        target_equipment_name: offerTarget.targetEquipmentName,
+        version_number: Number(offer.version_number),
+        source: "bc_offer_workspace",
+      },
     });
-    await syncPublishedOfferToLinkedPublicPurchase({
+
+    await updateOfferSummaryMetadata(context.id, {
+      current_offer_version_id: Number(offerId),
+      current_offer_status: "sent",
+      current_offer_version_number: Number(offer.version_number),
+      current_offer_pdf_file_id: uploadedPdf.id,
+      current_offer_sent_at: new Date().toISOString(),
+      current_offer_key: offerTarget.offerKey,
+      current_offer_target_equipment_id: offerTarget.targetEquipmentId,
+      current_offer_target_equipment_name: offerTarget.targetEquipmentName,
+    });
+
+    if (offerTarget.offerKey === "default") {
+      await syncPublishedOfferToLinkedPrivatePurchase({
+        businessCaseId: context.id,
+        pdfFileId: uploadedPdf.id,
+        user,
+      });
+      await syncPublishedOfferToLinkedPublicPurchase({
+        businessCaseId: context.id,
+        pdfFileId: uploadedPdf.id,
+      });
+    }
+
+    try {
+      const crmPurchaseSyncService = require("../crm-fam/crmPurchaseSync.service");
+      await crmPurchaseSyncService.syncBusinessCaseOfferSent(context.id, user);
+    } catch (crmSyncError) {
+      logger.warn(
+        { crmSyncError: crmSyncError?.message || String(crmSyncError), businessCaseId: context.id },
+        "No se pudo sincronizar oferta enviada del business case con CRM",
+      );
+    }
+
+    await notifyOfferPublished({
       businessCaseId: context.id,
-      pdfFileId: uploadedPdf.id,
+      context,
+      offerVersionId: Number(offerId),
+      versionNumber: Number(offer.version_number),
+      creatorUserId: context.created_by || null,
     });
   }
-
-  try {
-    const crmPurchaseSyncService = require("../crm-fam/crmPurchaseSync.service");
-    await crmPurchaseSyncService.syncBusinessCaseOfferSent(context.id, user);
-  } catch (crmSyncError) {
-    logger.warn(
-      { crmSyncError: crmSyncError?.message || String(crmSyncError), businessCaseId: context.id },
-      "No se pudo sincronizar oferta enviada del business case con CRM",
-    );
-  }
-
-  await notifyOfferPublished({
-    businessCaseId: context.id,
-    context,
-    offerVersionId: Number(offerId),
-    versionNumber: Number(offer.version_number),
-    creatorUserId: context.created_by || null,
-  });
 
   return mapOfferRow(rows[0]);
 }
@@ -3321,20 +3138,8 @@ async function syncOfferPricingAndPdfInPlace(businessCaseId, offerId, user) {
   const owner = resolveOfferOwner(context);
   const offer = await getOfferVersionById(context, offerId);
   const status = String(offer.status || "").trim().toLowerCase();
-  const isBusinessCaseOffer = context?.source_type !== "private_purchase";
   if (!["draft", "rejected", "sent"].includes(status)) {
     const error = new Error("Solo se pueden sincronizar precios en una oferta draft, rejected o sent");
-    error.status = 409;
-    error.code = "BC_OFFER_PRICING_SYNC_STATE_INVALID";
-    throw error;
-  }
-  // BC: "ready_to_send" ya queda bloqueada por el chequeo de arriba (no esta
-  // en la lista). "sent" para BC ahora significa "ya firmado externamente y
-  // subido" -- sincronizar precios aqui reconstruiria SOLO las tablas de la
-  // oferta y sobreescribiria ese PDF firmado con una version sin fusionar.
-  // Compra privada no pasa por ese merge, conserva el comportamiento previo.
-  if (isBusinessCaseOffer && status === "sent") {
-    const error = new Error("No se puede sincronizar precios sobre el documento ya enviado; crea una nueva version de la oferta.");
     error.status = 409;
     error.code = "BC_OFFER_PRICING_SYNC_STATE_INVALID";
     throw error;
@@ -3417,19 +3222,8 @@ async function regenerateOfferVersionForContext(context, offerId, user) {
   const owner = resolveOfferOwner(context);
   const offer = await getOfferVersionById(context, offerId);
   const currentStatus = String(offer.status || "").trim().toLowerCase();
-  const isBusinessCaseOffer = context?.source_type !== "private_purchase";
   if (!["draft", "rejected", "sent"].includes(currentStatus)) {
     const error = new Error("Solo se puede regenerar una oferta en draft, rejected o sent");
-    error.status = 409;
-    error.code = "BC_OFFER_REGENERATE_STATE_INVALID";
-    throw error;
-  }
-  // BC: "sent" ahora significa "ya firmado externamente y subido" -- la
-  // rama de abajo reconstruye el PDF solo con las tablas (sin el merge de
-  // propuesta de valor + especifica), lo que sobreescribiria el documento
-  // firmado. Compra privada no pasa por ese merge y conserva su flujo.
-  if (isBusinessCaseOffer && currentStatus === "sent") {
-    const error = new Error("No se puede regenerar el documento ya enviado; crea una nueva version de la oferta.");
     error.status = 409;
     error.code = "BC_OFFER_REGENERATE_STATE_INVALID";
     throw error;
@@ -3669,7 +3463,6 @@ module.exports = {
   createPrivatePurchaseOfferDraft,
   publishOfferVersion,
   publishPrivatePurchaseOfferVersion,
-  sendSignedOfferVersion,
   decideOfferVersion,
   ensureOfferTable,
   regenerateOfferVersionInPlace,
@@ -3678,7 +3471,6 @@ module.exports = {
   __testables: {
     parseOfferPricingRows,
     extractOfferSectionsFromSheetRows,
-    shouldShowDeterminationPriceColumn,
     buildOfferTemplatePayload,
     loadConsumptionItemsForOffer,
     orderOfferItemsByBusinessCaseTemplate,
@@ -3691,13 +3483,11 @@ module.exports = {
     mergePricingIntoSections,
     readPricingPayloadFromSheet,
     buildFormalOfferPdfBuffer,
-    mergeOfferPdfBuffers,
     readOfferPlazoFromSheet,
     normalizePrivatePurchaseEquipmentItems,
     buildOfferTargetsForContext,
     expandComboOfferTarget,
     extractModelNumberTokens,
     buildOfferItemTemplateOrder,
-    normalizePdfText,
   },
 };

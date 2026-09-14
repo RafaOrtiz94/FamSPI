@@ -12,6 +12,9 @@ export default function ConsolidatedSummary({ allowance = {} }) {
   const manual = Number(allowance.total_manual_notes) || 0;
   const purchases = Number(allowance.total_purchases_no_invoice) || 0;
   const consolidated = Number(allowance.total_consolidated) || 0;
+  const excludedKmExpenses = Number(allowance.excluded_km_expense_amount) || 0;
+  const kmReimbursement = Number(allowance.km_reimbursement_amount) || 0;
+  const payable = Number(allowance.amount) || 0;
   const deducible = Number(allowance.deducible_10_percent) || 0;
   const isEmpty = sri === 0 && manual === 0 && purchases === 0;
 
@@ -43,9 +46,16 @@ export default function ConsolidatedSummary({ allowance = {} }) {
 
           <div className="my-4 border-t border-slate-100" />
 
+          {(excludedKmExpenses > 0 || kmReimbursement > 0) && (
+            <div className="mb-4 space-y-2 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2.5">
+              {excludedKmExpenses > 0 && <div className="flex items-center justify-between"><span className="text-xs font-medium text-amber-800">Combustible y peajes excluidos</span><span className="font-mono text-sm font-semibold text-amber-700">− {toMoney(excludedKmExpenses)}</span></div>}
+              {kmReimbursement > 0 && <div className="flex items-center justify-between"><span className="text-xs font-medium text-indigo-800">Liquidacion por kilometraje</span><span className="font-mono text-sm font-semibold text-indigo-700">+ {toMoney(kmReimbursement)}</span></div>}
+            </div>
+          )}
+
           <div className="flex items-baseline justify-between">
-            <span className="text-sm font-semibold text-slate-900">Total consolidado</span>
-            <span className="font-mono text-xl font-bold text-slate-900">{toMoney(consolidated)}</span>
+            <span className="text-sm font-semibold text-slate-900">Total liquidable</span>
+            <span className="font-mono text-xl font-bold text-slate-900">{toMoney(payable || consolidated)}</span>
           </div>
 
           {deducible > 0 && (

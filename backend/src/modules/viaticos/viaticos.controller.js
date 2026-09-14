@@ -718,6 +718,32 @@ async function batchPay(req, res) {
   }
 }
 
+async function kmSettlementPreview(req, res) {
+  try {
+    const data = await service.listMonthlyKmSettlementPreview({
+      period: req.query?.period,
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo preparar la liquidacion por kilometraje");
+  }
+}
+
+async function applyKmSettlement(req, res) {
+  try {
+    const data = await service.applyMonthlyKmSettlement({
+      period: req.body?.period,
+      ratePerKm: req.body?.rate_per_km,
+      notes: req.body?.notes,
+      actorUser: req.user,
+    });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudo aplicar la liquidacion por kilometraje");
+  }
+}
+
 async function exportMonthPdf(req, res) {
   try {
     const { buffer, fileName } = await service.exportExpedienteMonthPdf({
@@ -739,6 +765,8 @@ module.exports = {
    updateStatus,
    approveSegment,
    batchPay,
+   kmSettlementPreview,
+   applyKmSettlement,
    exportMonthPdf,
    submitMonth,
    requestCorrection,

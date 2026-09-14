@@ -3,6 +3,7 @@ import {
   FiRefreshCw, FiCheckCircle, FiAlertTriangle, FiChevronDown,
   FiChevronUp, FiDownload, FiUsers, FiCheck, FiX, FiDollarSign,
   FiFileText,
+  FiTruck,
 } from "react-icons/fi";
 import {
   listViaticosFinanceReview,
@@ -11,7 +12,10 @@ import {
   requestViaticoCorrection,
   exportViaticosUserReport,
   getViaticoConfigPolicy,
+  getViaticoKmSettlementPreview,
+  applyViaticoKmSettlement,
 } from "../../../core/api/viaticosApi";
+import { useAuth } from "../../../core/auth/AuthContext";
 import { useUI } from "../../../core/ui/UIContext";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../core/api";
 import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
@@ -329,8 +333,60 @@ function CollaboratorRow({ collab, selectedMonth, policy, showToast, showLoader,
 
 // ── Main: ViaticosRevisionFinanzas ─────────────────────────────────────────────
 
+function KmMonthlySettlementPanel({ period, showToast, showLoader, hideLoader, onApplied }) {
+  const [preview, setPreview] = useState(null);
+  const [rate, setRate] = useState("");
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [applying, setApplying] = useState(false);
+
+  const loadPreview = useCallback(async () => {
+    setLoadingPreview(true);
+    try { setPreview((await getViaticoKmSettlementPreview(period)) || {}); }
+    catch (err) { setPreview(null); showToast(err?.response?.data?.message || "No se pudo cargar la liquidacion por kilometraje", "error"); }
+    finally { setLoadingPreview(false); }
+  }, [period, showToast]);
+
+  useEffect(() => { loadPreview(); }, [loadPreview]);
+  const summary = preview?.summary || {};
+  const alreadyApplied = Boolean(preview?.settlement);
+  const parsedRate = Number(rate);
+  const projected = Number(summary.total_km || 0) * (Number.isFinite(parsedRate) ? parsedRate : 0);
+
+  const apply = async () => {
+    if (!Number.isFinite(parsedRate) || parsedRate < 0) { showToast("Ingresa una tarifa por km valida", "warning"); return; }
+    if (!window.confirm("Aplicar la tarifa por kilometro a las salidas operacionales pendientes? Esta liquidacion quedara bloqueada para auditoria.")) return;
+    setApplying(true); showLoader("Aplicando liquidacion mensual por kilometraje...");
+    try {
+      await applyViaticoKmSettlement({ period, rate_per_km: parsedRate });
+      showToast("Liquidacion por kilometraje aplicada y facturas excluidas", "success");
+      await loadPreview(); onApplied?.();
+    } catch (err) { showToast(err?.response?.data?.message || "No se pudo aplicar la liquidacion", "error"); }
+    finally { setApplying(false); hideLoader(); }
+  };
+
+  return (
+    <section className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.04)]">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div><div className="flex items-center gap-2 text-indigo-900"><FiTruck size={16} /><h2 className="text-sm font-bold">Liquidacion mensual por kilometraje</h2></div><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-600">Aplica una tarifa unica a las salidas operacionales pendientes. Las facturas de combustible y peaje se conservan como evidencia, pero se excluyen del valor liquidable.</p></div>
+        <button onClick={loadPreview} disabled={loadingPreview || applying} className={BTN_SECONDARY}>{loadingPreview ? <Spinner size={13} /> : <FiRefreshCw size={13} />} Actualizar vista previa</button>
+      </div>
+      {loadingPreview ? <div className="mt-4 text-xs text-slate-500">Calculando salidas elegibles...</div> : alreadyApplied ? (
+        <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-900"><p className="font-semibold">Liquidacion aplicada</p><p className="mt-1 text-xs">Tarifa: {toMoney(preview.settlement.rate_per_km)} / km · {Number(preview.settlement.total_km || 0).toFixed(2)} km · Total: {toMoney(preview.settlement.reimbursement_total)}.</p></div>
+      ) : (
+        <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_180px_auto] lg:items-end">
+          <div className="grid grid-cols-3 gap-2 rounded-xl bg-white p-3 ring-1 ring-slate-200"><div><p className="text-[10px] uppercase tracking-wide text-slate-400">Salidas</p><p className="mt-0.5 font-mono text-sm font-bold text-slate-900">{summary.allowance_count || 0}</p></div><div><p className="text-[10px] uppercase tracking-wide text-slate-400">Km recorridos</p><p className="mt-0.5 font-mono text-sm font-bold text-slate-900">{Number(summary.total_km || 0).toFixed(2)}</p></div><div><p className="text-[10px] uppercase tracking-wide text-slate-400">Facturas a excluir</p><p className="mt-0.5 font-mono text-sm font-bold text-amber-700">{toMoney(summary.excluded_candidate_amount)}</p></div></div>
+          <label className="block"><span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Valor por km (USD)</span><input type="number" min="0" step="0.0001" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="0.0000" className={[CONTROL, "w-full", "font-mono"].join(" ")} /></label>
+          <button onClick={apply} disabled={applying || !summary.allowance_count || !rate} className={BTN_PRIMARY}><FiCheck size={14} /> Aplicar {toMoney(projected)}</button>
+        </div>
+      )}
+      {!loadingPreview && !alreadyApplied && preview && Number(summary.allowance_count || 0) === 0 && <p className="mt-3 text-xs text-slate-500">No hay salidas operacionales pendientes con kilometraje registrado para este mes.</p>}
+    </section>
+  );
+}
+
 const ViaticosRevisionFinanzas = () => {
   const { showToast, showLoader, hideLoader } = useUI();
+  const { user } = useAuth();
 
   const MONTH_OPTIONS = useMemo(() => buildMonthOptions(), []);
   const [selectedMonth, setSelectedMonth] = useState(currentMonthKey());
@@ -339,6 +395,11 @@ const ViaticosRevisionFinanzas = () => {
   const [policy, setPolicy] = useState({ km_rate_per_km: 0.12 });
 
   const { start, end } = useMemo(() => monthRange(selectedMonth), [selectedMonth]);
+  const canSettleKm = useMemo(() => {
+    const roles = user?.roles ?? user?.role_name ?? user?.role ?? [];
+    return (Array.isArray(roles) ? roles : [roles])
+      .some((role) => ["finanzas", "financiero", "jefe_financiero", "jefe_finanzas"].includes(String(role || "").toLowerCase().trim()));
+  }, [user]);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -445,6 +506,16 @@ const ViaticosRevisionFinanzas = () => {
           </div>
         </div>
       </div>
+
+      {canSettleKm && (
+        <KmMonthlySettlementPanel
+          period={selectedMonth}
+          showToast={showToast}
+          showLoader={showLoader}
+          hideLoader={hideLoader}
+          onApplied={() => loadData({ silent: true })}
+        />
+      )}
 
       {/* Collaborator list */}
       {loading ? (

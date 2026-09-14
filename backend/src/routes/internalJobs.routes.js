@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/db');
 const { runOnce: runMantenimiento } = require('../modules/mantenimientos/mantenimiento.scheduler');
 const { runOnce: runExpiredReservations } = require('../jobs/checkExpiredReservations');
+const { runOnce: runExpiredAssetReservations } = require('../jobs/checkExpiredAssetReservations');
 const { runOnce: processAttendanceOvertime } = require('../jobs/attendanceOvertimeScheduler');
 const { runOnce: runContractReminderEmails } = require('../jobs/equipmentContractReminderEmails');
 const { runOnce: runNotificationDispatchQueue } = require('../jobs/processNotificationDispatchQueue');
@@ -51,6 +52,17 @@ router.post('/equipment/reservations/expired', async (req, res) => {
     } catch (error) {
         console.error('Error en job de reservas expiradas:', error);
         res.status(500).json({ error: 'Falló el procesamiento de reservas' });
+    }
+});
+
+// Endpoint para reservas de equipo (equipment-management) expiradas
+router.post('/equipment/asset-reservations/expired', async (_req, res) => {
+    try {
+        const result = await runExpiredAssetReservations();
+        res.json({ success: true, message: 'Reservas de equipo expiradas procesadas', data: result });
+    } catch (error) {
+        console.error('Error en job de reservas de equipo expiradas:', error);
+        res.status(500).json({ error: 'Falló el procesamiento de reservas de equipo' });
     }
 });
 

@@ -92,6 +92,7 @@ const OPERATIONAL_WORKFLOW_STATUSES = new Set([
 ]);
 const ALLOWED_EXPENSE_CATEGORIES = new Set([
   "combustible",
+  "peaje",
   "alimentacion",
   "hospedaje",
   "transporte",
@@ -175,6 +176,14 @@ function isFinanceApprover(user = {}) {
 function assertFinanceApprover(user = {}) {
   if (!isFinanceApprover(user)) {
     const error = new Error("Solo finanzas o jefe_financiero puede aprobar/procesar viaticos");
+    error.status = 403;
+    throw error;
+  }
+}
+
+function assertKmSettlementApprover(user = {}) {
+  if (!isFinanceApprover(user)) {
+    const error = new Error("Solo financiero o jefe_financiero puede liquidar kilometraje mensual");
     error.status = 403;
     throw error;
   }
@@ -485,7 +494,7 @@ async function ensureSchema() {
       active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      CHECK (category IN ('alimentacion', 'combustible', 'hospedaje', 'transporte', 'movilidad', 'materiales'))
+      CHECK (category IN ('alimentacion', 'combustible', 'peaje', 'hospedaje', 'transporte', 'movilidad', 'materiales'))
     );
   `);
 
@@ -496,7 +505,7 @@ async function ensureSchema() {
   await db.query(`
     ALTER TABLE travel_allowance_provider_catalog
     ADD CONSTRAINT travel_allowance_provider_catalog_category_check
-    CHECK (category IN ('alimentacion', 'combustible', 'hospedaje', 'transporte', 'movilidad', 'materiales'));
+    CHECK (category IN ('alimentacion', 'combustible', 'peaje', 'hospedaje', 'transporte', 'movilidad', 'materiales'));
   `);
 
   await db.query(`
@@ -761,6 +770,50 @@ async function ensureSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+
+  await db.query(`
+    ALTER TABLE travel_allowance_invoices
+      ADD COLUMN IF NOT EXISTS excluded_from_km_settlement BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS km_settlement_exclusion_reason TEXT,
+      ADD COLUMN IF NOT EXISTS km_settlement_id BIGINT;
+  `);
+
+  await db.query(`
+    ALTER TABLE travel_allowances
+      ADD COLUMN IF NOT EXISTS km_reimbursement_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS excluded_km_expense_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS travel_allowance_km_settlements (
+      id BIGSERIAL PRIMARY KEY,
+      period_start DATE NOT NULL UNIQUE,
+      rate_per_km NUMERIC(12,4) NOT NULL CHECK (rate_per_km >= 0),
+      total_km NUMERIC(12,2) NOT NULL DEFAULT 0,
+      reimbursement_total NUMERIC(12,2) NOT NULL DEFAULT 0,
+      excluded_expense_total NUMERIC(12,2) NOT NULL DEFAULT 0,
+      allowance_count INTEGER NOT NULL DEFAULT 0,
+      applied_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      notes TEXT
+    );
+    CREATE TABLE IF NOT EXISTS travel_allowance_km_settlement_items (
+      id BIGSERIAL PRIMARY KEY,
+      settlement_id BIGINT NOT NULL REFERENCES travel_allowance_km_settlements(id) ON DELETE CASCADE,
+      allowance_id BIGINT NOT NULL UNIQUE REFERENCES travel_allowances(id) ON DELETE RESTRICT,
+      distance_km NUMERIC(12,2) NOT NULL DEFAULT 0,
+      rate_per_km NUMERIC(12,4) NOT NULL,
+      reimbursement_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      excluded_expense_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE travel_allowance_invoices
+      ADD CONSTRAINT travel_allowance_invoices_km_settlement_id_fkey
+      FOREIGN KEY (km_settlement_id) REFERENCES travel_allowance_km_settlements(id) ON DELETE SET NULL;
+  `).catch(async (error) => {
+    // La FK puede existir si la migracion formal ya fue ejecutada.
+    if (error?.code !== "42710") throw error;
+  });
   })().catch((error) => {
     schemaReadyPromise = null;
     throw error;
@@ -835,7 +888,8 @@ function detectCategoryFromKeywords(value) {
     { category: "combustible", words: ["combustible", "gasolina", "diesel", "diÃ©sel", "extra", "super"] },
     { category: "hospedaje", words: ["hospedaje", "hotel", "habitacion", "habitaciÃ³n"] },
     { category: "alimentacion", words: ["desayuno", "almuerzo", "cena", "alimentacion", "alimentaciÃ³n", "restaurante"] },
-    { category: "transporte", words: ["taxi", "uber", "cabify", "pasaje", "transporte", "bus", "terminal", "peaje"] },
+    { category: "peaje", words: ["peaje", "toll"] },
+    { category: "transporte", words: ["taxi", "uber", "cabify", "pasaje", "transporte", "bus", "terminal"] },
     { category: "movilidad", words: ["movilidad", "estacionamiento", "parqueadero", "metro", "trole"] },
     { category: "materiales", words: ["material", "materiales", "insumo", "repuesto", "herramienta", "papeleria", "suministro"] },
   ];
@@ -1412,6 +1466,7 @@ async function computeAllowanceModeTotals(allowanceId) {
         FROM travel_allowance_invoices
         WHERE allowance_id = $1
           AND COALESCE(status, '') <> 'rechazada'
+          AND COALESCE(excluded_from_km_settlement, FALSE) = FALSE
         UNION ALL
         SELECT expense_mode, total
         FROM travel_allowance_purchases_no_invoice
@@ -1423,7 +1478,13 @@ async function computeAllowanceModeTotals(allowanceId) {
   );
 
   const row = rows[0] || {};
-  const totalWithCard = Number(row.total_with_card || 0);
+  const { rows: allowanceRows } = await db.query(
+    `SELECT COALESCE(km_reimbursement_amount, 0) AS km_reimbursement_amount
+       FROM travel_allowances WHERE id = $1`,
+    [allowanceId]
+  );
+  // El valor de kilometraje siempre se procesa por Finanzas, no por Talento.
+  const totalWithCard = Number(row.total_with_card || 0) + Number(allowanceRows[0]?.km_reimbursement_amount || 0);
   const totalWithoutCard = Number(row.total_without_card || 0);
   return {
     totalWithCard,
@@ -1896,6 +1957,7 @@ async function upsertAllowance({ actorUser, payload }) {
     );
 
     if (existing.rows[0]?.id) {
+      await assertKmSettlementUnlocked(existing.rows[0].id);
       const { rows } = await db.query(
         `
           UPDATE travel_allowances
@@ -2978,6 +3040,7 @@ async function uploadSriXmlInvoice({ allowanceId, actorUser, xmlText, documentId
      throw error;
    }
    assertAllowanceRequester(allowance, actorUser);
+   await assertKmSettlementUnlocked(allowanceId);
 
    await ensureWellFormedXml(xmlText);
    const { rawXml, parsed } = parseSriInvoiceXml(xmlText);
@@ -3533,6 +3596,17 @@ async function updateInvoiceClassification({ invoiceId, category, includeInAts, 
   await ensureSchema();
   assertFinanceApprover(actorUser);
 
+  const { rows: invoiceRows } = await db.query(
+    "SELECT allowance_id FROM travel_allowance_invoices WHERE id = $1 LIMIT 1",
+    [invoiceId]
+  );
+  if (!invoiceRows[0]) {
+    const error = new Error("Factura no encontrada");
+    error.status = 404;
+    throw error;
+  }
+  await assertKmSettlementUnlocked(invoiceRows[0].allowance_id);
+
   const normalizedCategory = category ? normalizeText(category) : null;
   if (normalizedCategory && !ALLOWED_EXPENSE_CATEGORIES.has(normalizedCategory)) {
     const error = new Error("Categoria no permitida");
@@ -3695,6 +3769,185 @@ async function updatePolicy({ payload, actorUser }) {
   return rows[0];
 }
 
+async function assertKmSettlementUnlocked(allowanceId) {
+  const { rows } = await db.query(
+    "SELECT s.id, s.period_start FROM travel_allowance_km_settlement_items i JOIN travel_allowance_km_settlements s ON s.id = i.settlement_id WHERE i.allowance_id = $1 LIMIT 1",
+    [allowanceId]
+  );
+  if (rows[0]) {
+    const error = new Error("El viatico ya fue liquidado por kilometraje para " + String(rows[0].period_start).slice(0, 7) + " y no admite cambios de gastos");
+    error.status = 409;
+    throw error;
+  }
+}
+
+function normalizeSettlementPeriod(period) {
+  const value = String(period || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(value)) {
+    const error = new Error("period debe tener formato YYYY-MM");
+    error.status = 400;
+    throw error;
+  }
+  const [year, month] = value.split("-").map(Number);
+  if (month < 1 || month > 12) {
+    const error = new Error("period contiene un mes invalido");
+    error.status = 400;
+    throw error;
+  }
+  return `${value}-01`;
+}
+
+async function listMonthlyKmSettlementPreview({ period, actorUser }) {
+  await ensureSchema();
+  assertKmSettlementApprover(actorUser);
+  const periodStart = normalizeSettlementPeriod(period);
+  const { rows: settlements } = await db.query(
+    `SELECT * FROM travel_allowance_km_settlements WHERE period_start = $1::date LIMIT 1`,
+    [periodStart]
+  );
+  const { rows: allowances } = await db.query(
+    `SELECT ta.id, ta.requester_email, u.fullname AS requester_name, ta.visit_date, ta.city,
+            ta.distance_km, ta.amount, ta.status, ta.workflow_status,
+            COALESCE(SUM(i.total) FILTER (WHERE i.category IN ('combustible', 'peaje')
+              AND COALESCE(i.status, '') <> 'rechazada'), 0) AS excluded_candidate_amount
+       FROM travel_allowances ta
+       LEFT JOIN users u ON u.id = ta.requester_user_id
+       LEFT JOIN travel_allowance_invoices i ON i.allowance_id = ta.id
+      WHERE ta.source_type = 'operational_exit'
+        AND ta.visit_date >= $1::date
+        AND ta.visit_date < ($1::date + INTERVAL '1 month')
+        AND ta.status = 'pending'
+        AND COALESCE(ta.processing_state, '') <> 'anulado'
+        AND COALESCE(ta.distance_km, 0) > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM travel_allowance_km_settlement_items si WHERE si.allowance_id = ta.id
+        )
+      GROUP BY ta.id, u.fullname
+      ORDER BY ta.requester_email, ta.visit_date, ta.id`,
+    [periodStart]
+  );
+  const totalKm = allowances.reduce((sum, row) => sum + Number(row.distance_km || 0), 0);
+  const excludedCandidateAmount = allowances.reduce((sum, row) => sum + Number(row.excluded_candidate_amount || 0), 0);
+  return {
+    period: String(periodStart).slice(0, 10),
+    settlement: settlements[0] || null,
+    allowances,
+    summary: {
+      allowance_count: allowances.length,
+      total_km: Number(totalKm.toFixed(2)),
+      excluded_candidate_amount: Number(excludedCandidateAmount.toFixed(2)),
+    },
+  };
+}
+
+async function applyMonthlyKmSettlement({ period, ratePerKm, notes, actorUser }) {
+  await ensureSchema();
+  assertKmSettlementApprover(actorUser);
+  const periodStart = normalizeSettlementPeriod(period);
+  const rate = Number(ratePerKm);
+  if (!Number.isFinite(rate) || rate < 0 || rate > 1000) {
+    const error = new Error("rate_per_km debe ser un valor entre 0 y 1000");
+    error.status = 400;
+    throw error;
+  }
+
+  const preview = await listMonthlyKmSettlementPreview({ period, actorUser });
+  if (preview.settlement) {
+    const error = new Error("El kilometraje de este mes ya fue liquidado y no puede modificarse");
+    error.status = 409;
+    throw error;
+  }
+  if (!preview.allowances.length) {
+    const error = new Error("No hay salidas operacionales pendientes con kilometraje para este mes");
+    error.status = 400;
+    throw error;
+  }
+
+  const client = await db.getClient();
+  let settlement;
+  try {
+    await client.query("BEGIN");
+    const totalKm = preview.summary.total_km;
+    const reimbursementTotal = Number((totalKm * rate).toFixed(2));
+    const inserted = await client.query(
+      `INSERT INTO travel_allowance_km_settlements
+        (period_start, rate_per_km, total_km, reimbursement_total, allowance_count, applied_by_user_id, notes)
+       VALUES ($1::date, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [periodStart, rate, totalKm, reimbursementTotal, preview.allowances.length, actorUser.id || null, String(notes || "").trim() || null]
+    );
+    settlement = inserted.rows[0];
+
+    for (const allowance of preview.allowances) {
+      const distanceKm = Number(allowance.distance_km || 0);
+      const reimbursement = Number((distanceKm * rate).toFixed(2));
+      await client.query(
+        `INSERT INTO travel_allowance_km_settlement_items
+          (settlement_id, allowance_id, distance_km, rate_per_km, reimbursement_amount, excluded_expense_amount)
+         VALUES ($1, $2, $3, $4, $5, 0)`,
+        [settlement.id, allowance.id, distanceKm, rate, reimbursement]
+      );
+      await client.query(
+        `UPDATE travel_allowances
+            SET km_reimbursement_amount = $2, updated_at = NOW()
+          WHERE id = $1`,
+        [allowance.id, reimbursement]
+      );
+    }
+
+    const allowanceIds = preview.allowances.map((row) => row.id);
+    const excluded = await client.query(
+      `UPDATE travel_allowance_invoices
+          SET excluded_from_km_settlement = TRUE,
+              km_settlement_exclusion_reason = 'Cubierta por liquidacion mensual de kilometraje',
+              km_settlement_id = $2,
+              updated_at = NOW()
+        WHERE allowance_id = ANY($1::bigint[])
+          AND category IN ('combustible', 'peaje')
+          AND COALESCE(status, '') <> 'rechazada'
+        RETURNING allowance_id, total`,
+      [allowanceIds, settlement.id]
+    );
+    const excludedByAllowance = new Map();
+    for (const invoice of excluded.rows) {
+      const current = Number(excludedByAllowance.get(invoice.allowance_id) || 0);
+      excludedByAllowance.set(invoice.allowance_id, current + Number(invoice.total || 0));
+    }
+    for (const allowance of preview.allowances) {
+      await client.query(
+        `UPDATE travel_allowance_km_settlement_items
+            SET excluded_expense_amount = $3
+          WHERE settlement_id = $1 AND allowance_id = $2`,
+        [settlement.id, allowance.id, Number(excludedByAllowance.get(allowance.id) || 0)]
+      );
+    }
+    const excludedTotal = Array.from(excludedByAllowance.values()).reduce((sum, amount) => sum + amount, 0);
+    await client.query(
+      `UPDATE travel_allowance_km_settlements
+          SET excluded_expense_total = $2
+        WHERE id = $1`,
+      [settlement.id, Number(excludedTotal.toFixed(2))]
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  for (const allowance of preview.allowances) {
+    await recalculateAllowanceTotals(allowance.id);
+    await appendSegmentEvent({
+      allowanceId: allowance.id,
+      eventType: "km_monthly_settlement_applied",
+      actorUserId: actorUser.id || null,
+      metadata: { settlement_id: settlement.id, period: String(periodStart).slice(0, 7), rate_per_km: rate },
+    });
+  }
+  return listMonthlyKmSettlementPreview({ period, actorUser });
+}
+
 async function buildFinanceSummaryReport({ actorUser, startDate, endDate, groupBy = "usuario" }) {
   await ensureSchema();
   assertFinanceApprover(actorUser);
@@ -3817,6 +4070,7 @@ async function uploadSriTxtInvoices({ allowanceId, actorUser, txtContent, catego
     throw err;
   }
   assertAllowanceAccess(allowance, actorUser);
+  await assertKmSettlementUnlocked(allowanceId);
   assertWizardProcessingFlow({ allowance, actorUser, viaWizard, actionLabel: "cargar facturas SRI" });
 
   const lines = String(txtContent || "").split(/\r?\n/).filter(Boolean);
@@ -4130,6 +4384,7 @@ async function uploadSriTxtInvoices({ allowanceId, actorUser, txtContent, catego
   }
 
   const allowanceId = invoice.allowance_id;
+  await assertKmSettlementUnlocked(allowanceId);
 
   await db.query(`DELETE FROM travel_allowance_invoices WHERE id = $1`, [invoiceId]);
 
@@ -4167,6 +4422,7 @@ async function createManualNote({
     throw err;
   }
   assertAllowanceAccess(allowance, actorUser);
+  await assertKmSettlementUnlocked(allowanceId);
   assertWizardProcessingFlow({ allowance, actorUser, viaWizard, actionLabel: "registrar notas manuales" });
 
   const normalizedExpenseMode = normalizeExpenseMode(expenseMode);
@@ -4175,23 +4431,29 @@ async function createManualNote({
     err.status = 400;
     throw err;
   }
+  const normalizedCategory = normalizeText(expenseDescription);
+  if (!ALLOWED_EXPENSE_CATEGORIES.has(normalizedCategory)) {
+    const err = new Error("Debes indicar una categoria valida para la nota");
+    err.status = 400;
+    throw err;
+  }
 
   const { rows } = await db.query(
     `INSERT INTO travel_allowance_invoices (
       allowance_id, document_type, issue_date, supplier_ruc, supplier_name,
-      subtotal_12, subtotal_0, iva, total, details_text,
+      subtotal_12, subtotal_0, iva, total, details_text, category, allowed_category, category_source,
       document_state, emission_point, sequential,
       expense_mode,
       drive_file_id, drive_link, validation_notes,
       status, created_by_user_id, created_at, updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, TRUE, 'manual_user', $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW(), NOW())
     RETURNING *`,
     [
       allowanceId, 'nota_venta_manual', issueDate, supplierRuc, supplierName,
-      subtotal12, subtotal0, iva, total, expenseDescription,
+      subtotal12, subtotal0, iva, total, expenseDescription, normalizedCategory,
       documentState, emissionPoint, sequential, normalizedExpenseMode,
       driveFileId, driveLink, notes,
-      'pendiente_clasificacion', actorUser.id
+      'clasificada', actorUser.id
     ]
   );
 
@@ -4247,6 +4509,7 @@ async function updateManualNote({
 
   const { allowance_id: allowanceId, requester_email } = noteRows[0];
   const allowance = await getAllowanceById(allowanceId);
+  await assertKmSettlementUnlocked(allowanceId);
   assertWizardProcessingFlow({ allowance, actorUser, viaWizard, actionLabel: "editar notas manuales" });
 
   if (!isFinanceUser(actorUser) && String(actorUser?.email || '').toLowerCase() !== String(requester_email || '').toLowerCase()) {
@@ -4261,16 +4524,23 @@ async function updateManualNote({
     err.status = 400;
     throw err;
   }
+  const normalizedCategory = normalizeText(expenseDescription);
+  if (!ALLOWED_EXPENSE_CATEGORIES.has(normalizedCategory)) {
+    const err = new Error("Debes indicar una categoria valida para la nota");
+    err.status = 400;
+    throw err;
+  }
 
   const { rows } = await db.query(
     `UPDATE travel_allowance_invoices SET
       issue_date = $1, supplier_ruc = $2, supplier_name = $3,
       subtotal_12 = $4, subtotal_0 = $5, iva = $6, total = $7,
-      details_text = $8, document_state = $9, emission_point = $10,
-      sequential = $11, validation_notes = $12, expense_mode = $13, updated_at = NOW()
-     WHERE id = $14 AND document_type = 'nota_venta_manual'
+      details_text = $8, category = $9, allowed_category = TRUE, category_source = 'manual_user',
+      document_state = $10, emission_point = $11,
+      sequential = $12, validation_notes = $13, expense_mode = $14, updated_at = NOW()
+     WHERE id = $15 AND document_type = 'nota_venta_manual'
      RETURNING *`,
-    [issueDate, supplierRuc, supplierName, subtotal12, subtotal0, iva, total, expenseDescription, documentState, emissionPoint, sequential, notes, normalizedExpenseMode, noteId]
+    [issueDate, supplierRuc, supplierName, subtotal12, subtotal0, iva, total, expenseDescription, normalizedCategory, documentState, emissionPoint, sequential, notes, normalizedExpenseMode, noteId]
   );
 
   await recalculateAllowanceTotals(allowanceId);
@@ -4296,6 +4566,7 @@ async function deleteManualNote({ noteId, actorUser, viaWizard }) {
 
   const { allowance_id: allowanceId, requester_email } = rows[0];
   const allowance = await getAllowanceById(allowanceId);
+  await assertKmSettlementUnlocked(allowanceId);
   assertWizardProcessingFlow({ allowance, actorUser, viaWizard, actionLabel: "eliminar notas manuales" });
 
   if (!isFinanceUser(actorUser) && String(actorUser?.email || '').toLowerCase() !== String(requester_email || '').toLowerCase()) {
@@ -4332,6 +4603,7 @@ async function createPurchaseNoInvoice({
     throw err;
   }
   assertAllowanceAccess(allowance, actorUser);
+  await assertKmSettlementUnlocked(allowanceId);
   assertWizardProcessingFlow({ allowance, actorUser, viaWizard, actionLabel: "registrar compras sin factura" });
 
   const normalizedExpenseMode = normalizeExpenseMode(expenseMode);
@@ -4417,13 +4689,21 @@ async function approvePurchaseNoInvoice({
 
 async function recalculateAllowanceTotals(allowanceId) {
   const { rows: sriTotal } = await db.query(
-    `SELECT COALESCE(SUM(total), 0) as total FROM travel_allowance_invoices
+    `SELECT
+       COALESCE(SUM(total), 0) AS total,
+       COALESCE(SUM(total) FILTER (WHERE COALESCE(excluded_from_km_settlement, FALSE) = FALSE), 0) AS eligible_total,
+       COALESCE(SUM(total) FILTER (WHERE COALESCE(excluded_from_km_settlement, FALSE) = TRUE), 0) AS excluded_total
+     FROM travel_allowance_invoices
      WHERE allowance_id = $1 AND document_type = 'factura_sri' AND status != 'rechazada'`,
     [allowanceId]
   );
 
   const { rows: manualTotal } = await db.query(
-    `SELECT COALESCE(SUM(total), 0) as total FROM travel_allowance_invoices
+    `SELECT
+       COALESCE(SUM(total), 0) AS total,
+       COALESCE(SUM(total) FILTER (WHERE COALESCE(excluded_from_km_settlement, FALSE) = FALSE), 0) AS eligible_total,
+       COALESCE(SUM(total) FILTER (WHERE COALESCE(excluded_from_km_settlement, FALSE) = TRUE), 0) AS excluded_total
+     FROM travel_allowance_invoices
      WHERE allowance_id = $1 AND document_type = 'nota_venta_manual' AND status != 'rechazada'`,
     [allowanceId]
   );
@@ -4440,7 +4720,16 @@ async function recalculateAllowanceTotals(allowanceId) {
   // calcula solo. Pero "amount" es una columna normal que el frontend usa en
   // todos lados (listados, stats de finanzas/talento) y nadie la escribia --
   // se quedaba en 0 aunque total_consolidated ya reflejara el total real.
-  const amount = Number(sriTotal[0].total || 0) + Number(manualTotal[0].total || 0) + Number(purchasesTotal[0].total || 0);
+  const { rows: allowanceRows } = await db.query(
+    `SELECT COALESCE(km_reimbursement_amount, 0) AS km_reimbursement_amount
+       FROM travel_allowances WHERE id = $1`,
+    [allowanceId]
+  );
+  const kmReimbursement = Number(allowanceRows[0]?.km_reimbursement_amount || 0);
+  const amount = Number(sriTotal[0].eligible_total || 0)
+    + Number(manualTotal[0].eligible_total || 0)
+    + Number(purchasesTotal[0].total || 0)
+    + kmReimbursement;
 
   await db.query(
     `UPDATE travel_allowances SET
@@ -4452,8 +4741,9 @@ async function recalculateAllowanceTotals(allowanceId) {
       requires_finance_approval = $6,
       requires_talento_approval = $7,
       amount = $8,
+      excluded_km_expense_amount = $9,
       updated_at = NOW()
-     WHERE id = $9`,
+     WHERE id = $10`,
     [
       sriTotal[0].total,
       manualTotal[0].total,
@@ -4463,6 +4753,7 @@ async function recalculateAllowanceTotals(allowanceId) {
       modeTotals.requiresFinanceApproval,
       modeTotals.requiresTalentoApproval,
       amount,
+      Number(sriTotal[0].excluded_total || 0) + Number(manualTotal[0].excluded_total || 0),
       allowanceId,
     ]
   );
@@ -6332,6 +6623,8 @@ module.exports = {
   listFixedProfiles,
   updatePolicy,
   getPolicyPublic,
+  listMonthlyKmSettlementPreview,
+  applyMonthlyKmSettlement,
   buildFinanceSummaryReport,
   generateAtsXml,
   buildAllowanceReport,

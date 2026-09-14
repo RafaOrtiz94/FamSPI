@@ -58,6 +58,7 @@ const REQUEST_TYPE_LABELS = {
   "F.ST-20": "Solicitud de inspección de ambiente",
   "F.ST-21": "Solicitud de retiro de equipo",
   "F.ST-22": "Registro de nuevo cliente",
+  "F.ST-23": "Solicitud de disponibilidad de equipo",
   "F.VE-02": "Solicitud de credito",
 };
 
@@ -69,6 +70,7 @@ const DEFAULT_REQUEST_TYPES = [
   { code: "F.ST-20", title: "Solicitud de inspección de ambiente" },
   { code: "F.ST-21", title: "Solicitud de retiro de equipo" },
   { code: "F.ST-22", title: "Registro de nuevo cliente" },
+  { code: "F.ST-23", title: "Solicitud de disponibilidad de equipo" },
   { code: "F.VE-02", title: "Solicitud de credito" },
 ];
 
@@ -480,6 +482,7 @@ function getRequestApproverRoles(typeCode) {
   const normalized = String(typeCode || "").toUpperCase();
   if (normalized === "F.ST-22") return ["backoffice_comercial"];
   if (normalized === "F.VE-02") return ["jefe_financiero"];
+  if (normalized === "F.ST-23") return ["acp_comercial"];
   if (["F.ST-20", "F.ST-21"].includes(normalized)) {
     return [
       "jefe_servicio",
@@ -1049,6 +1052,7 @@ function resolveSchemaKey(code) {
   if (normalized === "F.ST-20") return "inspection";
   if (normalized === "F.ST-21") return "retiro";
   if (normalized === "F.ST-19") return "compra";
+  if (normalized === "F.ST-23") return "disponibilidad_equipo";
   if (normalized === "F.VE-02") return "credito";
   return "cliente";
 }
@@ -2584,7 +2588,7 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
   const approverUsers = approverRoles.length ? await getUsersByRoles(approverRoles) : [];
   const approverEmails = approverUsers.map((user) => user.email).filter(Boolean);
   const fallbackEmail = getFallbackNotificationEmail();
-  const dashboardLink = String(requestType?.code || "").toUpperCase() === "F.VE-02"
+  const dashboardLink = ["F.VE-02", "F.ST-23"].includes(String(requestType?.code || "").toUpperCase())
     ? `${FRONTEND_URL}/dashboard/comercial/solicitudes`
     : `${FRONTEND_URL}/dashboard/servicio-tecnico`;
   const detailLink = `${dashboardLink}?request=${request.id}`;
