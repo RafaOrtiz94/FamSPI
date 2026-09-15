@@ -3403,7 +3403,7 @@ async function aprobarParcial({ id, approver, meta }) {
     err.status = 400;
     throw err;
   }
-  if (!canApprove({ approverRole: solicitud.approver_role, approverUserId: solicitud.approver_user_id, approver })) {
+  if (!isTalentoHumanoOrAdmin(approver) && !canApprove({ approverRole: solicitud.approver_role, approverUserId: solicitud.approver_user_id, approver })) {
     const err = new Error("No autorizado para aprobar esta solicitud");
     err.status = 403;
     throw err;
@@ -4111,7 +4111,7 @@ async function aprobarFinal({ id, approver, meta }) {
     throw err;
   }
 
-  if (!isUrgentTHApproval && !canApprove({ approverRole: solicitud.approver_role, approverUserId: solicitud.approver_user_id, approver })) {
+  if (!isActorTH && !canApprove({ approverRole: solicitud.approver_role, approverUserId: solicitud.approver_user_id, approver })) {
     const err = new Error("No autorizado para aprobar esta solicitud");
     err.status = 403;
     throw err;
@@ -4385,7 +4385,7 @@ async function rechazar({ id, approver, observaciones, meta }) {
   const current = await db.query(`SELECT * FROM permisos_vacaciones WHERE id = $1 LIMIT 1`, [id]);
   const solicitud = current.rows[0];
   if (!solicitud) throw new Error("Solicitud no encontrada");
-  if (!canApprove({ approverRole: solicitud.approver_role, approverUserId: solicitud.approver_user_id, approver })) {
+  if (!isTalentoHumanoOrAdmin(approver) && !canApprove({ approverRole: solicitud.approver_role, approverUserId: solicitud.approver_user_id, approver })) {
     const err = new Error("No autorizado para rechazar esta solicitud");
     err.status = 403;
     throw err;
@@ -5247,11 +5247,10 @@ async function listarPendientes({ stage, approver }) {
             : [normalizedStatusFilter];
   const roleCandidates = getApproverRoleCandidates(approver);
 
-  // TH/Admin see all solicitudes for stages they supervise:
-  // - pending_final: review justificantes and approve urgent cases
-  // - approved/rejected/cancelled: oversight and reporting
-  // They do NOT see pending (parcial approval) — that belongs to jefe inmediato → gerencia_general escalation
-  const TH_VISIBLE_STAGES = new Set(["pending_final", "approved", "rejected", "cancelled"]);
+  // TH/Admin ahora es aprobador alterno en cualquier etapa (aprueba/rechaza igual que el jefe
+  // inmediato, sin escalamiento), asi que debe ver "pending" (parcial) ademas de pending_final
+  // y las etapas de supervision (approved/rejected/cancelled).
+  const TH_VISIBLE_STAGES = new Set(["pending", "pending_final", "approved", "rejected", "cancelled"]);
   if (isTalentoHumanoOrAdmin(approver) && TH_VISIBLE_STAGES.has(normalizedStatusFilter)) {
     const { rows: thRows } = await db.query(
       `SELECT * FROM permisos_vacaciones

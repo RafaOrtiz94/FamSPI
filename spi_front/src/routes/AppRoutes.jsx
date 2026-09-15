@@ -726,6 +726,7 @@ const AppRoutes = () => {
           >
             <Route path="/dashboard/backoffice/client-requests" element={<ClientRequests />} />
             <Route path="/dashboard/backoffice/client-request/:id" element={<ClientRequestReview />} />
+            <Route path="/dashboard/backoffice/clientes" element={<ClientesPage />} />
             <Route
               element={(
                 <ProtectedRoute

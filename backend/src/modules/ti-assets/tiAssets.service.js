@@ -775,7 +775,7 @@ async function listAssets({ status, q, custodyType, clientId, warehouseCode, pub
       OR LOWER(COALESCE(fd.invoice_number,'')) LIKE $${params.length}
       OR LOWER(COALESCE(u.fullname, u.name, u.email, '')) LIKE $${params.length}
       OR LOWER(COALESCE(u.email, '')) LIKE $${params.length}
-      OR LOWER(COALESCE(c.razon_social, c.nombre_comercial, '')) LIKE $${params.length}
+      OR LOWER(COALESCE(c.commercial_name, '')) LIKE $${params.length}
       OR LOWER(COALESCE(a.warehouse_code, '')) LIKE $${params.length}
       OR LOWER(COALESCE(a.location_label, '')) LIKE $${params.length}
       OR LOWER(COALESCE(a.client_location_label, '')) LIKE $${params.length}
@@ -803,13 +803,13 @@ async function listAssets({ status, q, custodyType, clientId, warehouseCode, pub
     `SELECT a.*,
             u.email AS assigned_to_email,
             COALESCE(u.fullname, u.name, u.email) AS assigned_to_name,
-            COALESCE(c.razon_social, c.nombre_comercial) AS custody_client_name,
+            c.commercial_name AS custody_client_name,
             cu.email AS custodian_user_email,
             COALESCE(cu.fullname, cu.name, cu.email) AS custodian_user_name,
             fd.invoice_number
        FROM public.ti_assets a
        LEFT JOIN public.users u ON u.id = a.assigned_to_user_id
-       LEFT JOIN public.clients c ON c.id = a.client_id
+       LEFT JOIN public.client_requests c ON c.id = a.client_id
        LEFT JOIN public.users cu ON cu.id = a.custodian_user_id
        LEFT JOIN LATERAL (
          SELECT d.invoice_number
@@ -865,14 +865,14 @@ async function getPublicAssetByCode(assetCode, { publicBaseUrl } = {}) {
             a.client_location_label,
             a.updated_at,
             COALESCE(u.fullname, u.name, u.email) AS custodian_user_name,
-            COALESCE(c.razon_social, c.nombre_comercial) AS custody_client_name,
-            c.direccion AS custody_client_address,
-            c.ciudad AS custody_client_city,
-            c.provincia AS custody_client_province,
-            c.pais AS custody_client_country
+            c.commercial_name AS custody_client_name,
+            c.shipping_address AS custody_client_address,
+            c.shipping_city AS custody_client_city,
+            c.shipping_province AS custody_client_province,
+            NULL::text AS custody_client_country
        FROM public.ti_assets a
        LEFT JOIN public.users u ON u.id = COALESCE(a.custodian_user_id, a.assigned_to_user_id)
-       LEFT JOIN public.clients c ON c.id = a.client_id
+       LEFT JOIN public.client_requests c ON c.id = a.client_id
       WHERE a.asset_code = $1
         AND a.active = true
       LIMIT 1`,
@@ -982,17 +982,20 @@ async function listCustodySummary() {
 async function listAssetClients({ q, limit = 50 }) {
   const safeLimit = Math.min(100, Math.max(1, Number(limit) || 50));
   const params = [];
-  let where = "WHERE COALESCE(c.estado, 'activo') = 'activo'";
+  let where = "WHERE c.status = 'approved'";
   if (q && String(q).trim()) {
     params.push(`%${String(q).trim().toLowerCase()}%`);
-    where += ` AND (LOWER(c.razon_social) LIKE $1 OR LOWER(COALESCE(c.nombre_comercial, '')) LIKE $1 OR LOWER(c.ruc) LIKE $1)`;
+    where += ` AND (LOWER(COALESCE(c.commercial_name, '')) LIKE $1 OR LOWER(COALESCE(c.ruc_cedula, '')) LIKE $1 OR CAST(c.id AS TEXT) LIKE $1)`;
   }
   params.push(safeLimit);
   const { rows } = await db.query(
-    `SELECT c.id, c.razon_social, c.nombre_comercial, c.ruc
-       FROM public.clients c
+    `SELECT c.id,
+            c.commercial_name AS razon_social,
+            NULL::text AS nombre_comercial,
+            c.ruc_cedula AS ruc
+       FROM public.client_requests c
        ${where}
-      ORDER BY c.razon_social ASC
+      ORDER BY c.commercial_name ASC, c.id ASC
       LIMIT $${params.length}`,
     params,
   );
@@ -1007,14 +1010,14 @@ async function listAssetCustodyHistory(assetId) {
             COALESCE(fu.fullname, fu.name, fu.email) AS from_user_name,
             tu.email AS to_user_email,
             COALESCE(tu.fullname, tu.name, tu.email) AS to_user_name,
-            fc.razon_social AS from_client_name,
-            tc.razon_social AS to_client_name,
+            fc.commercial_name AS from_client_name,
+            tc.commercial_name AS to_client_name,
             COALESCE(cb.fullname, cb.name, cb.email) AS created_by_name
        FROM public.ti_asset_custody_movements m
        LEFT JOIN public.users fu ON fu.id = m.from_user_id
        LEFT JOIN public.users tu ON tu.id = m.to_user_id
-       LEFT JOIN public.clients fc ON fc.id = m.from_client_id
-       LEFT JOIN public.clients tc ON tc.id = m.to_client_id
+       LEFT JOIN public.client_requests fc ON fc.id = m.from_client_id
+       LEFT JOIN public.client_requests tc ON tc.id = m.to_client_id
        LEFT JOIN public.users cb ON cb.id = m.created_by
       WHERE m.asset_id = $1
       ORDER BY m.created_at DESC, m.id DESC`,
@@ -1079,7 +1082,10 @@ async function moveAssetCustody({
     }
     const current = currentQ.rows[0];
     if (targetClientId) {
-      const clientQ = await client.query("SELECT id FROM public.clients WHERE id = $1 LIMIT 1", [targetClientId]);
+      const clientQ = await client.query(
+        "SELECT id FROM public.client_requests WHERE id = $1 AND status = 'approved' LIMIT 1",
+        [targetClientId],
+      );
       if (!clientQ.rows.length) {
         const err = new Error("Cliente no encontrado");
         err.status = 404;
@@ -3307,10 +3313,10 @@ async function generateAssetLabelPdf(assetId) {
   const { rows } = await db.query(
     `SELECT a.*,
             COALESCE(u.fullname, u.name, u.email) AS custodian_user_name,
-            COALESCE(c.razon_social, c.nombre_comercial) AS custody_client_name
+            c.commercial_name AS custody_client_name
        FROM public.ti_assets a
        LEFT JOIN public.users u ON u.id = COALESCE(a.custodian_user_id, a.assigned_to_user_id)
-       LEFT JOIN public.clients c ON c.id = a.client_id
+       LEFT JOIN public.client_requests c ON c.id = a.client_id
       WHERE a.id = $1
         AND a.active = true
       LIMIT 1`,

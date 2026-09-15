@@ -417,6 +417,16 @@ async function findApprover(targetRole) {
   return rows[0]?.id || null;
 }
 
+async function findTalentoHumanoUsers() {
+  const { rows } = await db.query(
+    `SELECT id FROM users
+      WHERE LOWER(COALESCE(role, '')) IN ('talento_humano', 'jefe_talento_humano')
+        AND COALESCE(active, true) = true
+      LIMIT 20`
+  );
+  return rows;
+}
+
 async function resolveApproverAssignment(preferredRole) {
   const normalizedPreferredRole = String(preferredRole || "").trim().toLowerCase();
   const primaryApproverId = await findApprover(normalizedPreferredRole);
@@ -1087,6 +1097,30 @@ async function createVacationRequest(payload, userId) {
     logger.warn({ notifyError, solicitudId: rows[0]?.id }, "No se pudo enviar notificacion de vacaciones");
   }
 
+  try {
+    const thUsers = await findTalentoHumanoUsers();
+    for (const thUser of thUsers) {
+      if (Number(thUser.id) === Number(userId)) continue;
+      if (Number(thUser.id) === Number(approverId)) continue;
+      await notificationManager.sendNotification({
+        userId: thUser.id,
+        customTitle: "Nueva solicitud de vacaciones registrada",
+        customMessage: `${user.fullname || user.email} envió una solicitud de vacaciones.`,
+        type: "info",
+        source: "vacaciones",
+        priority: 0,
+        email: false,
+        meta: {
+          solicitud_id: rows[0].id,
+          solicitante: user.email,
+          target_path: `/dashboard/talento-humano/permisos?tab=all&solicitudId=${rows[0].id}`,
+        },
+      });
+    }
+  } catch (thNotifyError) {
+    logger.warn({ thNotifyError, solicitudId: rows[0]?.id }, "No se pudo notificar a Talento Humano sobre nueva solicitud de vacaciones");
+  }
+
   const warnings = [overlapWarning, balanceWarningMessage].filter(Boolean);
   return {
     ...rows[0],
@@ -1112,11 +1146,15 @@ async function listVacationRequests(params = {}, user) {
 
   const canSeeAll = HR_ROLES.includes(role) || MGMT_ROLES.includes(role);
   if (scope === "pending") {
-    const roleCandidates = getApproverRoleCandidates(user);
     where.push(`status = 'pendiente'`);
-    where.push(`(approver_id = $${idx} OR (approver_id IS NULL AND LOWER(COALESCE(approver_role, '')) = ANY($${idx + 1})))`);
-    values.push(user.id, roleCandidates);
-    idx += 2;
+    // Talento Humano/gerencia ven todas las solicitudes pendientes: son aprobador
+    // alterno en cualquier etapa, no solo las que le fueron asignadas por rol.
+    if (!HR_ROLES.includes(role)) {
+      const roleCandidates = getApproverRoleCandidates(user);
+      where.push(`(approver_id = $${idx} OR (approver_id IS NULL AND LOWER(COALESCE(approver_role, '')) = ANY($${idx + 1})))`);
+      values.push(user.id, roleCandidates);
+      idx += 2;
+    }
   } else if (!canSeeAll || scope === "mine") {
     where.push(`requester_id = $${idx++}`);
     values.push(user.id);
@@ -1147,7 +1185,9 @@ async function updateVacationStatus(id, status, user) {
   if (!current) throw new Error("Solicitud no encontrada");
 
   const roleCandidates = getApproverRoleCandidates(user);
+  const isActorHR = roleCandidates.some((candidate) => HR_ROLES.includes(candidate));
   const canApprove =
+    isActorHR ||
     current.approver_id === user.id ||
     (current.approver_id == null &&
       current.approver_role &&

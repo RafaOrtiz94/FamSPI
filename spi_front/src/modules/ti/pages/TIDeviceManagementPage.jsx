@@ -535,6 +535,8 @@ const TIDeviceManagementPage = () => {
   const [custodyHistory, setCustodyHistory] = useState([]);
   const [custodyClients, setCustodyClients] = useState([]);
   const [custodyClientSearch, setCustodyClientSearch] = useState("");
+  const [custodyClientsLoading, setCustodyClientsLoading] = useState(false);
+  const [custodyClientsError, setCustodyClientsError] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
   const [year] = useState(new Date().getFullYear());
   const [search, setSearch] = useState("");
@@ -634,6 +636,23 @@ const TIDeviceManagementPage = () => {
     observaciones: "",
   });
 
+  const loadCustodyClients = useCallback(async (params = {}) => {
+    setCustodyClientsLoading(true);
+    setCustodyClientsError("");
+    try {
+      const rows = await listTiAssetClients(params);
+      const safeRows = Array.isArray(rows) ? rows : [];
+      setCustodyClients(safeRows);
+      return safeRows;
+    } catch (error) {
+      setCustodyClients([]);
+      setCustodyClientsError(error?.response?.data?.message || "No se pudo cargar el listado de clientes.");
+      return [];
+    } finally {
+      setCustodyClientsLoading(false);
+    }
+  }, []);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -641,7 +660,7 @@ const TIDeviceManagementPage = () => {
         listTiAssets(custodyFilter === "all" ? {} : { custody_type: custodyFilter }),
         getUsers(),
         listTiMaintenance({ year }),
-        listTiAssetClients({ limit: 100 }),
+        loadCustodyClients({ limit: 100 }),
       ]);
       setAssets(Array.isArray(assetsRows) ? assetsRows : []);
       setUsers(Array.isArray(usersRows) ? usersRows : []);
@@ -661,7 +680,7 @@ const TIDeviceManagementPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [custodyFilter, showToast, year]);
+  }, [custodyFilter, loadCustodyClients, showToast, year]);
 
   useEffect(() => {
     loadAll();
@@ -686,15 +705,10 @@ const TIDeviceManagementPage = () => {
   useEffect(() => {
     if (custodyForm.custody_type !== "client") return undefined;
     const timer = window.setTimeout(async () => {
-      try {
-        const rows = await listTiAssetClients({ q: custodyClientSearch, limit: 100 });
-        setCustodyClients(Array.isArray(rows) ? rows : []);
-      } catch (_e) {
-        setCustodyClients([]);
-      }
+      await loadCustodyClients({ q: custodyClientSearch, limit: 100 });
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [custodyClientSearch, custodyForm.custody_type]);
+  }, [custodyClientSearch, custodyForm.custody_type, loadCustodyClients]);
 
   const selected = useMemo(
     () => assets.find((a) => String(a.id) === String(selectedId || "")) || null,
@@ -2629,12 +2643,14 @@ const TIDeviceManagementPage = () => {
                   {custodyForm.custody_type === "client" && (
                     <div>
                       <Label required>Cliente custodio</Label>
-                      <input value={custodyClientSearch} onChange={(e) => setCustodyClientSearch(e.target.value)} placeholder="Buscar por razón social, nombre o RUC" className="mb-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none" />
-                      <select value={custodyForm.client_id} onChange={(e) => setCustodyForm((p) => ({ ...p, client_id: e.target.value }))} disabled={!canWrite} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none disabled:opacity-60">
+                      <input value={custodyClientSearch} onChange={(e) => setCustodyClientSearch(e.target.value)} placeholder="Buscar por razón social, nombre o RUC" disabled={!canWrite} className="mb-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none disabled:opacity-60" />
+                      <select value={custodyForm.client_id} onChange={(e) => setCustodyForm((p) => ({ ...p, client_id: e.target.value }))} disabled={!canWrite || custodyClientsLoading} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:bg-white focus:outline-none disabled:opacity-60">
                         <option value="">Selecciona un cliente</option>
                         {custodyClients.map((c) => <option key={c.id} value={c.id}>{c.razon_social || c.nombre_comercial} {c.ruc ? `(${c.ruc})` : ""}</option>)}
                       </select>
-                      {!custodyClients.length && <p className="mt-1 text-[11px] text-amber-600">No hay clientes activos que coincidan con la búsqueda.</p>}
+                      {custodyClientsLoading && <p className="mt-1 text-[11px] text-slate-500">Cargando clientes...</p>}
+                      {!custodyClientsLoading && custodyClientsError && <p className="mt-1 text-[11px] text-rose-600">{custodyClientsError}</p>}
+                      {!custodyClientsLoading && !custodyClientsError && !custodyClients.length && <p className="mt-1 text-[11px] text-amber-600">No hay clientes aprobados que coincidan con la búsqueda.</p>}
                     </div>
                   )}
                   <FieldInput label="Ubicación / sede" value={custodyForm.custody_type === "client" ? custodyForm.client_location_label : custodyForm.location_label} onChange={(e) => setCustodyForm((p) => custodyForm.custody_type === "client" ? ({ ...p, client_location_label: e.target.value }) : ({ ...p, location_label: e.target.value }))} />

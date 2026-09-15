@@ -1986,6 +1986,41 @@ async function updateClient({ clientId, user, rawData = {}, rawFiles = {} }) {
   const { rows: updatedRows } = await db.query(query, values);
   const updated = updatedRows[0];
 
+  // Los Business Case guardan un snapshot de client_name en creacion (ver
+  // businessCase.service.js/privatePurchases.service.js) que nunca se
+  // volvia a sincronizar si el nombre comercial del cliente cambiaba despues
+  // -- la tarjeta del BC quedaba mostrando el nombre viejo indefinidamente.
+  const nameFieldsChanged = [
+    "commercial_name",
+    "establishment_name",
+    "legal_person_business_name",
+    "natural_person_firstname",
+    "natural_person_lastname",
+  ].some((field) => data[field] !== undefined);
+  if (nameFieldsChanged) {
+    try {
+      const resolvedName =
+        updated.commercial_name ||
+        updated.establishment_name ||
+        updated.legal_person_business_name ||
+        `${updated.natural_person_firstname || ""} ${updated.natural_person_lastname || ""}`.trim() ||
+        updated.ruc_cedula;
+      if (resolvedName) {
+        await db.query(
+          `UPDATE equipment_purchase_requests
+              SET client_name = $1, updated_at = now()
+            WHERE client_id = $2 AND client_name IS DISTINCT FROM $1`,
+          [resolvedName, clientId],
+        );
+      }
+    } catch (syncError) {
+      logger.warn(
+        { syncError: syncError.message, clientId },
+        "No se pudo sincronizar client_name en Business Cases vinculados",
+      );
+    }
+  }
+
   if (
     canEditFull &&
     (data.shipping_address !== undefined ||
