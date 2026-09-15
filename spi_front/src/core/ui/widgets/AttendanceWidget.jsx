@@ -425,7 +425,6 @@ const AttendanceWidget = () => {
   const [operationalDetail, setOperationalDetail] = useState("");
   const [teleworkRequestDate, setTeleworkRequestDate] = useState(() => getLocalDateKey());
   const [operationalDestinationCity, setOperationalDestinationCity] = useState("");
-  const [operationalCitySuggestionsOpen, setOperationalCitySuggestionsOpen] = useState(false);
   const [operationalDestination, setOperationalDestination] = useState("");
   const [operationalVehicleMode, setOperationalVehicleMode] = useState("company");
   const [operationalStartKm, setOperationalStartKm] = useState("");
@@ -1064,50 +1063,18 @@ const AttendanceWidget = () => {
   ]);
 
   const renderOperationalCityPicker = ({ value, onChange } = {}) => {
-    const normalizedValue = normalizeClientSearchValue(value);
-    const suggestions = operationalCityOptions
-      .filter((city) => !normalizedValue || normalizeClientSearchValue(city).includes(normalizedValue))
-      .slice(0, 8);
+    const selectedCity = operationalCityOptions.find(
+      (city) => normalizeClientSearchValue(city) === normalizeClientSearchValue(value),
+    ) || "";
 
     return (
       <label className="flex flex-col gap-2">
         <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Ciudad</span>
-        <div className="relative">
-          <input
-            type="text"
-            value={value || ""}
-            onFocus={() => setOperationalCitySuggestionsOpen(true)}
-            onBlur={() => setOperationalCitySuggestionsOpen(false)}
-            onChange={(event) => {
-              setOperationalCitySuggestionsOpen(true);
-              onChange(event.target.value);
-            }}
-            placeholder="Escribe para buscar una ciudad"
-            className={CONTROL_INPUT_SUBTLE_CLASS}
-            aria-label="Ciudad de la salida"
-            autoComplete="off"
-          />
-          {operationalCitySuggestionsOpen && normalizedValue && suggestions.length > 0 ? (
-            <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-lg" role="listbox" aria-label="Ciudades sugeridas">
-              {suggestions.map((city) => (
-                <button
-                  key={city}
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => {
-                    onChange(city);
-                    setOperationalCitySuggestionsOpen(false);
-                  }}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-900"
-                  role="option"
-                  aria-selected={value === city}
-                >
-                  {city}
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
+        <select value={selectedCity} onChange={(event) => onChange(event.target.value)} className={CONTROL_INPUT_SUBTLE_CLASS} aria-label="Ciudad de la salida">
+          <option value="">Selecciona una ciudad</option>
+          {operationalCityOptions.map((city) => <option key={city} value={city}>{city}</option>)}
+        </select>
+        <span className="text-[11px] text-slate-500">Selecciona una ciudad estandarizada del listado.</span>
       </label>
     );
   };
@@ -1206,7 +1173,10 @@ const AttendanceWidget = () => {
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setFieldClientId(String(item.id))}
+                  onClick={() => {
+                    setFieldClientId(String(item.id));
+                    setOperationalDestinationCity(String(item.city || "").trim());
+                  }}
                   aria-pressed={active}
                   className={`min-h-[104px] rounded-xl border px-3 py-3 text-left transition sm:min-h-[112px] ${
                     active
@@ -1472,6 +1442,15 @@ const AttendanceWidget = () => {
       }
     }
 
+    const destinationCity = String(
+      operationalDestinationCity
+      || activeException?.operational_destination_city
+      || selectedAgendaClient?.city
+      || selectedLeadDestination?.city
+      || "",
+    ).trim();
+    if (destinationCity) payload.operational_destination_city = destinationCity;
+
     return payload;
   };
 
@@ -1544,7 +1523,6 @@ const AttendanceWidget = () => {
     setTeleworkRequestDate(getLocalDateKey());
     setOperationalDestination("");
     setOperationalDestinationCity("");
-    setOperationalCitySuggestionsOpen(false);
     setOperationalVehicleMode("company");
     setOperationalStartKm("");
     setOperationalEndKm("");

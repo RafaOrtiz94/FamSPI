@@ -531,6 +531,14 @@ const normalizeOperationalDestinationText = (value) => {
   return text ? text.slice(0, 255) : null;
 };
 
+const normalizeOperationalDestinationCity = (value) => {
+  const text = normalizeOperationalDestinationText(value);
+  if (!text) return null;
+  return text
+    .toLocaleLowerCase("es-EC")
+    .replace(/(^|[\s-])(\p{L})/gu, (_match, prefix, letter) => `${prefix}${letter.toLocaleUpperCase("es-EC")}`);
+};
+
 const resolveOperationalJourneyPayload = async ({
   req,
   phase,
@@ -569,7 +577,7 @@ const resolveOperationalJourneyPayload = async ({
     || req.body?.destinationLabel
     || req.body?.destination
   );
-  const destinationCity = normalizeOperationalDestinationText(
+  const destinationCity = normalizeOperationalDestinationCity(
     req.body?.operational_destination_city
     || req.body?.operationalDestinationCity
     || req.body?.destination_city
@@ -4042,7 +4050,7 @@ const getLivePresence = async (req, res) => {
               THEN COALESCE(NULLIF(ao.operational_destination_city, ''), 'Sin ciudad')
             WHEN ao.operational_status = 'ACTIVE'
               THEN COALESCE(NULLIF(ao.operational_destination_city, ''), NULLIF(NULLIF(fv.city_name, ''), 'Sin ciudad'), 'Sin ciudad')
-            ELSE COALESCE(NULLIF(NULLIF(fv.city_name, ''), 'Sin ciudad'), NULLIF(ao.operational_destination_city, ''), 'Sin ciudad')
+            ELSE COALESCE(NULLIF(ao.operational_destination_city, ''), NULLIF(NULLIF(fv.city_name, ''), 'Sin ciudad'), 'Sin ciudad')
           END AS city_label,
         COALESCE(fv.visit_entry_time, ao.start_time, ao.created_at) AS activity_at
       FROM active_operational ao
@@ -4122,7 +4130,7 @@ const getLivePresence = async (req, res) => {
           visit_scope: row.visit_scope || null,
           description: row.description || null,
           destination_label: row.destination_label || "Salida operacional",
-          city_label: row.city_label || "Sin ciudad",
+          city_label: normalizeOperationalDestinationCity(row.city_label) || "Sin ciudad",
           status_label: statusLabel,
           status_key: statusKey,
           activity_at: row.activity_at || null,
@@ -5047,7 +5055,7 @@ const clockInField = async (req, res) => {
     const { id: userId, email, role } = req.user || {};
     const { client_id, prospect_name, observations } = req.body;
     const normalizedProspectName = String(prospect_name || "").trim();
-    const normalizedDestinationCity = normalizeOperationalDestinationText(
+    const normalizedDestinationCity = normalizeOperationalDestinationCity(
       req.body?.destination_city
       || req.body?.destinationCity
       || req.body?.operational_destination_city

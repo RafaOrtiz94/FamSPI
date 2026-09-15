@@ -112,6 +112,7 @@ const CapacitacionesWorkspace = lazy(() => import("../modules/capacitaciones/pag
 const CapacitacionDetailPage  = lazy(() => import("../modules/capacitaciones/pages/CapacitacionDetailPage"));
 
 const ExtUserDashboard = lazy(() => import("../modules/ext-users/pages/ExtUserDashboard"));
+const PasanteDashboard = lazy(() => import("../modules/pasantes/pages/PasanteDashboard"));
 
 const CrmDashboardPage     = lazy(() => import("../modules/crm-fam/pages/CrmDashboardPage"));
 const AccountsPage         = lazy(() => import("../modules/crm-fam/pages/AccountsPage"));
@@ -379,6 +380,11 @@ const AppRoutes = () => {
             element={<ProtectedRoute allowedRoles={["ing_servicio_ext", "esp_app_ext"]} strictRoles />}
           >
             <Route path="/dashboard/ext" element={<ExtUserDashboard />} />
+          </Route>
+
+          {/* Dashboard pasantes (login local, sin OAuth) */}
+          <Route element={<ProtectedRoute allowedRoles={["pasante"]} strictRoles />}>
+            <Route path="/dashboard/pasante" element={<PasanteDashboard />} />
           </Route>
 
           <Route path="/dashboard/servicio-tecnico" element={<DashboardServicio />} />

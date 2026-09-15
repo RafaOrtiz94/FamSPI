@@ -300,7 +300,6 @@ const AttendanceAction = () => {
   const [teleworkRequestMode, setTeleworkRequestMode] = useState("approved");
   const [operationalDestination, setOperationalDestination] = useState("");
   const [operationalDestinationCity, setOperationalDestinationCity] = useState("");
-  const [operationalCitySuggestionsOpen, setOperationalCitySuggestionsOpen] = useState(false);
   const [usesPersonalVehicle, setUsesPersonalVehicle] = useState("no");
   const [startOdometerKm, setStartOdometerKm] = useState("");
   const [endOdometerKm, setEndOdometerKm] = useState("");
@@ -773,63 +772,23 @@ const AttendanceAction = () => {
     teleworkRequestMode,
   ]);
   const renderOperationalCityField = ({ value, onChange } = {}) => {
-    const normalizedValue = normalizeText(value);
-    const suggestions = operationalCityOptions
-      .filter((city) => !normalizedValue || normalizeText(city).includes(normalizedValue))
-      .slice(0, 8);
+    const selectedCity = operationalCityOptions.find(
+      (city) => normalizeText(city) === normalizeText(value),
+    ) || "";
 
     return (
       <label className="flex flex-col gap-2">
         <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Ciudad</span>
-        <div className="relative">
-          <input
-            type="text"
-            value={value || ""}
-            onFocus={() => setOperationalCitySuggestionsOpen(true)}
-            onBlur={() => setOperationalCitySuggestionsOpen(false)}
-            onChange={(e) => {
-              setOperationalCitySuggestionsOpen(true);
-              onChange(e.target.value);
-            }}
-            placeholder="Escribe para buscar una ciudad"
-            className="min-h-[44px] w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 pr-10 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
-            autoComplete="off"
-          />
-          {value ? (
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                onChange("");
-                setOperationalCitySuggestionsOpen(false);
-              }}
-              className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-              aria-label="Limpiar ciudad"
-            >
-              x
-            </button>
-          ) : null}
-          {operationalCitySuggestionsOpen && normalizedValue && suggestions.length > 0 ? (
-            <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-lg" role="listbox" aria-label="Ciudades sugeridas">
-              {suggestions.map((city) => (
-                <button
-                  key={city}
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => {
-                    onChange(city);
-                    setOperationalCitySuggestionsOpen(false);
-                  }}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-900"
-                  role="option"
-                  aria-selected={value === city}
-                >
-                  {city}
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
+        <select
+          value={selectedCity}
+          onChange={(event) => onChange(event.target.value)}
+          className="min-h-[44px] w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-[#2563EB] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+          aria-label="Ciudad de la salida"
+        >
+          <option value="">Selecciona una ciudad</option>
+          {operationalCityOptions.map((city) => <option key={city} value={city}>{city}</option>)}
+        </select>
+        <span className="text-[11px] text-slate-500">Selecciona una ciudad estandarizada del listado.</span>
       </label>
     );
   };
@@ -1133,7 +1092,6 @@ const AttendanceAction = () => {
       setTeleworkRequestMode("approved");
       setOperationalDestination("");
       setOperationalDestinationCity("");
-      setOperationalCitySuggestionsOpen(false);
       setUsesPersonalVehicle("no");
       setStartOdometerKm("");
       setEndOdometerKm("");
