@@ -32,6 +32,10 @@ export const getModelos = async (params = {}) => {
  const response = await api.get("/inventario/modelos", { params });
  return response.data?.data || [];
 };
+export const updateModelo = async (modeloId, data) => {
+ const response = await api.put(`/inventario/modelos/${modeloId}`, data);
+ return response.data;
+};
 
 // Alias for legacy imports
 export const getEquipmentModels = getModelos;
@@ -66,6 +70,10 @@ export const assignUnidad = async (unidadId, data) => {
 export const cambiarEstadoUnidad = async (unidadId, data) => {
  const response = await api.post(`/inventario/equipos-unidad/${unidadId}/cambiar-estado`, data);
  return response.data;
+};
+export const getUnidadHistorial = async (unidadId) => {
+ const response = await api.get(`/inventario/equipos-unidad/${unidadId}/historial`);
+ return response.data?.data || [];
 };
 
 // ======================================================

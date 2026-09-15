@@ -29,6 +29,12 @@ const PRIVATE_PURCHASE_STATES = {
     ACP_AVAILABILITY_CONFIRMED: 'acp_availability_confirmed',
     ACP_AVAILABILITY_REJECTED: 'acp_availability_rejected',
 
+    // Intermediate availability states — require client approval before continuing
+    // CU: equipo disponible en condición de uso → comercial obtiene aprobación del cliente
+    ACP_AVAILABILITY_CU_PENDING: 'acp_availability_cu_pending',
+    // Import: equipo solo disponible vía importación → cliente debe comprometerse (irreversible)
+    ACP_AVAILABILITY_IMPORT_PENDING: 'acp_availability_import_pending',
+
     // Contract workflow
     PENDING_CONTRACT_CLIENT_SIGNATURE: 'pending_contract_client_signature',
     PENDING_CONTRACT_APPROVAL: 'pending_contract_approval',
@@ -118,6 +124,7 @@ const PRIVATE_PURCHASE_TRANSITIONS = {
 
     [PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED]: [
         PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED,
+        PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_CLIENT_SIGNATURE,
         PRIVATE_PURCHASE_STATES.SENT_TO_ACP,
         PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_REQUESTED,
         PRIVATE_PURCHASE_STATES.REJECTED
@@ -139,7 +146,21 @@ const PRIVATE_PURCHASE_TRANSITIONS = {
     [PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_REQUESTED]: [
         PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CONFIRMED,
         PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_REJECTED,
+        PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CU_PENDING,
+        PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_IMPORT_PENDING,
         PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE,
+        PRIVATE_PURCHASE_STATES.REJECTED
+    ],
+
+    // CU pending → client approves (flow continues) or rejects (closed)
+    [PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CU_PENDING]: [
+        PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CONFIRMED,
+        PRIVATE_PURCHASE_STATES.REJECTED
+    ],
+
+    // Import pending → client gives binding approval (continues) or rejects (closed)
+    [PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_IMPORT_PENDING]: [
+        PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CONFIRMED,
         PRIVATE_PURCHASE_STATES.REJECTED
     ],
 
@@ -170,6 +191,8 @@ const PRIVATE_PURCHASE_TRANSITIONS = {
 
     [PRIVATE_PURCHASE_STATES.CONTRACT_REJECTED]: [
         PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_CLIENT_SIGNATURE,
+        PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED, // reinicio de contrato — backoffice sube nuevo borrador
+        PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED,    // reinicio para comodato sin inspección
         PRIVATE_PURCHASE_STATES.REJECTED
     ],
 

@@ -33,3 +33,4 @@ cd backend && npm run lint src/modules/approvals/
 
 ## Handoff
 - Notificaciones -> `.agents/skills/notifications-skill.md`
+

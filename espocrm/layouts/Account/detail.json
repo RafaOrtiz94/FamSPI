@@ -1,0 +1,12 @@
+[
+  {
+    "rows": [
+      [{"name":"name"}, {"name":"website"}],
+      [{"name":"emailAddress"}, {"name":"phoneNumber"}],
+      [{"name":"billingAddressCity"}, {"name":"billingAddressState"}],
+      [{"name":"cFamspiClientId"}, {"name":"cFamspiRuc"}],
+      [{"name":"cClientType"}, {"name":"cAssignedAdvisorEmail"}],
+      [{"name":"description"}, false]
+    ]
+  }
+]

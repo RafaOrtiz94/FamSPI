@@ -133,10 +133,10 @@ class BusinessCaseStateMachine {
     try {
       await client.query('BEGIN');
 
-      // Update canonical state
+      // Update canonical state and record entry timestamp for SLA tracking
       const updateResult = await client.query(
         `UPDATE equipment_purchase_requests
-         SET canonical_state = $1, updated_at = NOW()
+         SET canonical_state = $1, entered_state_at = NOW(), updated_at = NOW()
          WHERE id = $2`,
         [toState, businessCaseId]
       );
@@ -156,40 +156,31 @@ class BusinessCaseStateMachine {
 
       await client.query('COMMIT');
 
-      // NOTIFICACIONES: Enviar notificaciones después de transición exitosa
+      // NOTIFICACIONES: Encolar en tabla persistente con reintentos (REQ-BC-09)
       setImmediate(async () => {
         try {
           const recipients = await this._getTransitionRecipients(businessCaseId, fromState, toState, businessCase);
-          const notificationManager = require('../notifications/notificationManager');
-
-          for (const recipient of recipients) {
-            await notificationManager.sendNotification({
-              userId: recipient.userId,
-              template: 'bc_state_transition',
-              data: {
-                business_case_id: businessCaseId,
-                client_name: businessCase.client_name || 'Cliente no especificado',
-                from_state: this._getStateFriendlyName(fromState),
-                to_state: this._getStateFriendlyName(toState),
-                extra_info: recipient.extraInfo || '',
-                transitioned_by: userId,
-                reason: reason || 'Sin motivo especificado'
-              },
-              email: recipient.sendEmail,
-              chat: recipient.sendChat,
-              priority: this._getTransitionPriority(toState),
-              source: 'business_case.state_transition',
-              meta: {
-                businessCaseId,
-                fromState,
-                toState,
-                transitionedBy: userId
-              }
-            });
-          }
+          const notificationQueue = require('./businessCaseNotificationQueue.service');
+          const payload = {
+            business_case_id: businessCaseId,
+            client_name: businessCase.client_name || 'Cliente no especificado',
+            from_state: this._getStateFriendlyName(fromState),
+            to_state: this._getStateFriendlyName(toState),
+            transitioned_by: userId,
+            reason: reason || 'Sin motivo especificado'
+          };
+          await notificationQueue.enqueueBatch(recipients.map(r => ({
+            businessCaseId,
+            userId: r.userId,
+            template: 'bc_state_transition',
+            payload: { ...payload, extra_info: r.extraInfo || '' },
+            sendEmail: r.sendEmail,
+            sendChat: r.sendChat,
+            priority: this._getTransitionPriority(toState),
+            source: 'business_case.state_transition'
+          })));
         } catch (notificationError) {
-          logger.warn({ notificationError, businessCaseId }, 'Error enviando notificaciones de transición BC');
-          // No lanzamos error para no afectar la transición exitosa
+          logger.warn({ notificationError, businessCaseId }, 'Error encolando notificaciones de transición BC');
         }
       });
 
@@ -219,6 +210,103 @@ class BusinessCaseStateMachine {
         userId,
         error: error.message
       }, 'Business case state transition failed');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Execute an emergency state transition bypassing readiness checks.
+   * Restricted to gerencia_general. Requires non-empty reason.
+   * Creates an enhanced audit entry flagged as emergency=true.
+   * @param {string} businessCaseId
+   * @param {string} toState - Any valid canonical state
+   * @param {string} userId
+   * @param {string} reason - Mandatory justification
+   * @returns {object} Transition result
+   */
+  static async emergencyTransition(businessCaseId, toState, userId, reason) {
+    if (!businessCaseId || !toState || !userId) {
+      throw Object.assign(new Error('businessCaseId, toState, and userId are required'), { status: 400 });
+    }
+    if (!reason || !reason.trim()) {
+      throw Object.assign(new Error('Motivo obligatorio para transición de emergencia'), { status: 400, code: 'REASON_REQUIRED' });
+    }
+    if (!this.isValidState(toState)) {
+      throw Object.assign(new Error(`Estado inválido: ${toState}`), { status: 400, code: 'INVALID_STATE' });
+    }
+
+    const fromState = await this.getCurrentState(businessCaseId);
+
+    if (fromState === toState) {
+      throw Object.assign(new Error(`No-op: ya está en ${toState}`), { status: 400, code: 'NO_OP_TRANSITION' });
+    }
+
+    const client = await db.getClient();
+    try {
+      await client.query('BEGIN');
+
+      await client.query(
+        `UPDATE equipment_purchase_requests SET canonical_state = $1, updated_at = NOW() WHERE id = $2`,
+        [toState, businessCaseId]
+      );
+
+      await client.query(
+        `INSERT INTO business_case_state_transitions
+           (business_case_id, from_state, to_state, transition_reason, transitioned_by, metadata, transitioned_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+        [businessCaseId, fromState, toState, reason.trim(), userId, JSON.stringify({ emergency: true })]
+      );
+
+      await client.query('COMMIT');
+
+      logger.warn({ businessCaseId, fromState, toState, userId }, 'Emergency BC state transition executed');
+
+      // Notify all stakeholders asynchronously
+      setImmediate(async () => {
+        try {
+          const { rows } = await db.query(
+            `SELECT * FROM v_business_cases_complete WHERE business_case_id = $1`,
+            [businessCaseId]
+          );
+          if (!rows.length) return;
+          const businessCase = rows[0];
+          const notifyRoles = ['jefe_comercial', 'gerencia', 'gerencia_general', 'backoffice_comercial'];
+          const notifyUsers = await this._getUsersByRole(notifyRoles);
+          if (businessCase.created_by) {
+            notifyUsers.push({ id: businessCase.created_by });
+          }
+          const notificationManager = require('../notifications/notificationManager');
+          for (const u of notifyUsers) {
+            await notificationManager.sendNotification({
+              userId: u.id,
+              template: 'bc_emergency_transition',
+              data: {
+                business_case_id: businessCaseId,
+                client_name: businessCase.client_name || 'N/D',
+                from_state: this._getStateFriendlyName(fromState),
+                to_state: this._getStateFriendlyName(toState),
+                reason: reason.trim(),
+                transitioned_by: userId
+              },
+              email: true,
+              chat: true,
+              priority: 3,
+              source: 'business_case.emergency_transition',
+              meta: { businessCaseId, fromState, toState, emergency: true }
+            });
+          }
+        } catch (err) {
+          logger.warn({ err, businessCaseId }, 'Error notificando transición de emergencia BC');
+        }
+      });
+
+      return { success: true, businessCaseId, fromState, toState, emergency: true, transitionedAt: new Date(), transitionedBy: userId };
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      logger.error({ businessCaseId, fromState, toState, userId, error: error.message }, 'Emergency BC transition failed');
       throw error;
     } finally {
       client.release();
@@ -282,9 +370,9 @@ class BusinessCaseStateMachine {
 
     // Notificar según estado destino
     switch (toState) {
-      case STATES.EN_EVALUACION_VIABILIDAD:
-        // Notificar a equipo de viabilidad
-        const viabilityTeam = await this._getUsersByRole('viabilidad');
+      case STATES.EN_EVALUACION_VIABILIDAD: {
+        // acp_comercial y jefe_comercial son responsables de evaluar viabilidad
+        const viabilityTeam = await this._getUsersByRole(['acp_comercial', 'jefe_comercial']);
         recipients.push(...viabilityTeam.map(u => ({
           userId: u.id,
           sendEmail: true,
@@ -292,6 +380,7 @@ class BusinessCaseStateMachine {
           extraInfo: 'Revisión de viabilidad requerida'
         })));
         break;
+      }
 
       case STATES.OBSERVADO_POR_VIABILIDAD:
         // Notificar al comercial (creador)
@@ -320,9 +409,9 @@ class BusinessCaseStateMachine {
         })));
         break;
 
-      case STATES.CERRADO_PARA_APROBACION:
+      case STATES.CERRADO_PARA_APROBACION: {
         // Notificar a gerencia
-        const management = await this._getUsersByRole('gerencia');
+        const management = await this._getUsersByRole(['gerencia', 'gerencia_general']);
         recipients.push(...management.map(u => ({
           userId: u.id,
           sendEmail: true,
@@ -330,20 +419,47 @@ class BusinessCaseStateMachine {
           extraInfo: 'Aprobación final requerida'
         })));
         break;
+      }
+
+      case STATES.RECHAZADO_POR_GERENCIA: {
+        // Notificar al creador y jefe comercial del rechazo
+        const jefeComercialRejected = await this._getUsersByRole('jefe_comercial');
+        recipients.push(...jefeComercialRejected.map(u => ({
+          userId: u.id,
+          sendEmail: true,
+          sendChat: false,
+          extraInfo: 'Business Case rechazado por gerencia'
+        })));
+        break;
+      }
+
+      case STATES.CANCELADO: {
+        // Notificar a jefe comercial y backoffice de la cancelación
+        const cancelNotify = await this._getUsersByRole(['jefe_comercial', 'backoffice_comercial']);
+        recipients.push(...cancelNotify.map(u => ({
+          userId: u.id,
+          sendEmail: true,
+          sendChat: false,
+          extraInfo: 'Business Case cancelado'
+        })));
+        break;
+      }
     }
 
     return recipients;
   }
 
   /**
-   * Get users by role
+   * Get users by role or array of roles.
+   * Accepts a single role string or an array of role strings.
    * @private
    */
   static async _getUsersByRole(role) {
     try {
+      const roles = Array.isArray(role) ? role : [role];
       const { rows } = await db.query(
-        'SELECT id, email, fullname FROM users WHERE role = $1 AND active = true',
-        [role]
+        'SELECT id, email, fullname FROM users WHERE role = ANY($1::text[]) AND active = true',
+        [roles]
       );
       return rows;
     } catch (error) {
@@ -364,7 +480,9 @@ class BusinessCaseStateMachine {
       [STATES.OBSERVADO_POR_VIABILIDAD]: 'Observado por Viabilidad',
       [STATES.VIABLE]: 'Viable',
       [STATES.AJUSTES_OPERATIVOS]: 'Ajustes Operativos',
-      [STATES.CERRADO_PARA_APROBACION]: 'Cerrado para Aprobación'
+      [STATES.CERRADO_PARA_APROBACION]: 'Cerrado para Aprobación',
+      [STATES.RECHAZADO_POR_GERENCIA]: 'Rechazado por Gerencia',
+      [STATES.CANCELADO]: 'Cancelado'
     };
     return names[state] || state;
   }
@@ -374,8 +492,13 @@ class BusinessCaseStateMachine {
    * @private
    */
   static _getTransitionPriority(toState) {
-    // Prioridad alta para estados críticos
-    if ([STATES.OBSERVADO_POR_VIABILIDAD, STATES.CERRADO_PARA_APROBACION].includes(toState)) {
+    // Prioridad alta para estados críticos y terminales negativos
+    if ([
+      STATES.OBSERVADO_POR_VIABILIDAD,
+      STATES.CERRADO_PARA_APROBACION,
+      STATES.RECHAZADO_POR_GERENCIA,
+      STATES.CANCELADO
+    ].includes(toState)) {
       return 3;
     }
     return 2;

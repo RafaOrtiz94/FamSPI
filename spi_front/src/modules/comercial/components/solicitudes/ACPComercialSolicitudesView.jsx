@@ -1,5 +1,5 @@
-import React, { useState, useContext } from "react";
-import { FiCreditCard, FiUserPlus, FiUsers, FiBriefcase, FiUser } from "react-icons/fi";
+import React, { useState } from "react";
+import { FiCreditCard, FiUserPlus, FiUsers, FiBriefcase, FiUser, FiBox } from "react-icons/fi";
 import { getClientRequests } from "../../../../core/api/requestsApi";
 import Modal from "../../../../core/ui/components/Modal";
 import Button from "../../../../core/ui/components/Button";
@@ -8,12 +8,10 @@ import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVaca
 import RequestStatWidget from "../../../shared/solicitudes/components/RequestStatWidget";
 import RequestsListModal from "../../../shared/solicitudes/components/RequestsListModal";
 import BaseSolicitudesView from "../../../shared/solicitudes/BaseSolicitudesView";
-import { useUI } from "../../../../core/ui/useUI";
-import { AuthContext } from "../../../../core/auth/AuthContext";
 
 const ACPComercialSolicitudesView = () => {
  // UI States
- const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
+ const [, setShowPurchaseHandoff] = useState(false);
  const [showPermisoModal, setShowPermisoModal] = useState(false);
  const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
 
@@ -84,6 +82,16 @@ const ACPComercialSolicitudesView = () => {
  color: 'orange',
  type: 'vacaciones',
  initialFilters: { mine: true }
+ },
+ {
+ id: 'disponibilidad_equipo',
+ title: 'Solicitudes de Disponibilidad',
+ icon: FiBox,
+ color: 'blue',
+ type: 'F.ST-23',
+ // mine:false -- estas solicitudes las crea comercial, no acp_comercial;
+ // el default del modal (mine:true) las ocultaria todas.
+ initialFilters: { mine: false }
  }
  ];
 

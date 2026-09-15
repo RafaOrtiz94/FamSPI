@@ -44,11 +44,13 @@ async function selectEquipment(businessCaseId, equipmentId, isPrimary = true, us
 
 async function getSelectedEquipment(businessCaseId) {
   await assertModernBusinessCase(businessCaseId);
+  // bc_equipment_selection.equipment_id referencia servicio.equipos (id_equipo),
+  // no public.equipment_models (tabla huerfana sin FK real, ver v_equipment_full_catalog).
   const query = `
-    SELECT bes.*, eq.name AS equipment_name, eq.code AS equipment_code, eq.manufacturer AS manufacturer,
-           eq.model AS model, eq.capacity_per_hour, eq.max_daily_capacity, eq.base_price
+    SELECT bes.*, eq.nombre AS equipment_name, eq.code AS equipment_code, eq.fabricante AS manufacturer,
+           eq.modelo AS model, eq.capacity_per_hour, eq.max_daily_capacity, eq.base_price
     FROM bc_equipment_selection bes
-    JOIN public.equipment_models eq ON eq.id = bes.equipment_id
+    JOIN servicio.equipos eq ON eq.id_equipo = bes.equipment_id
     WHERE bes.business_case_id = $1 AND bes.is_primary = true;
   `;
 

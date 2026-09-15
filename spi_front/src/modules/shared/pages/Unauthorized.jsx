@@ -1,12 +1,11 @@
 import React from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { FiLock } from "react-icons/fi";
 import { useAuth } from "../../../core/auth/useAuth";
 
 const Unauthorized = () => {
  const { user, loading } = useAuth();
- const navigate = useNavigate();
 
  // Roles que se consideran "activos" en el sistema.
  // Si el usuario tiene uno de estos roles, ve la pantalla de "Acceso Denegado" (candado)

@@ -338,63 +338,107 @@ describe("deliveryRequests.service", () => {
     const client = buildClient();
     db.getClient.mockResolvedValue(client);
 
-    client.query
-      .mockResolvedValueOnce({ rows: [] }) // BEGIN
-      .mockResolvedValueOnce({
-        rows: [
-          {
-            id: 77,
-            delivery_ceiling_id: 31,
-            status: "pending",
-            requested_by: 5,
-            confirmed_by: null,
-            notes: "pedido parcial",
-            requested_at: "2026-04-11T00:00:00.000Z",
-            confirmed_at: null,
-            created_at: "2026-04-11T00:00:00.000Z",
-            updated_at: "2026-04-11T00:00:00.000Z",
-          },
-        ],
-      }) // request FOR UPDATE
-      .mockResolvedValueOnce({ rows: [{ id: 31, status: "active", purchase_type: "private" }] }) // ceiling FOR UPDATE
-      .mockResolvedValueOnce({
-        rows: [
-          {
-            id: 701,
-            delivery_request_id: 77,
-            delivery_ceiling_line_id: 501,
-            requested_qty: "4.000",
-            created_at: "2026-04-11T00:00:00.000Z",
-            updated_at: "2026-04-11T00:00:00.000Z",
-            max_quantity: "10.000",
-            delivered_qty: "3.000",
-          },
-        ],
-      }) // request lines + ceiling lines FOR UPDATE
-      .mockResolvedValueOnce({ rows: [] }) // open reservations excluding current request
-      .mockResolvedValueOnce({
-        rows: [{ id: 501, delivered_qty: "7.000", max_quantity: "10.000" }],
-      }) // UPDATE delivery_ceiling_line
-      .mockResolvedValueOnce({
-        rows: [
-          {
-            id: 77,
-            delivery_ceiling_id: 31,
-            status: "confirmed",
-            requested_by: 5,
-            confirmed_by: 12,
-            notes: "pedido parcial",
-            requested_at: "2026-04-11T00:00:00.000Z",
-            confirmed_at: "2026-04-11T02:00:00.000Z",
-            created_at: "2026-04-11T00:00:00.000Z",
-            updated_at: "2026-04-11T02:00:00.000Z",
-          },
-        ],
-      }) // UPDATE request
-      .mockResolvedValueOnce({
-        rows: [{ id: 7002, created_at: "2026-04-11T02:00:00.000Z" }],
-      }) // enqueue outbox confirmed
-      .mockResolvedValueOnce({ rows: [] }); // COMMIT
+    // Mock por texto de SQL: el flujo de confirmacion crece (gate
+    // ops_approved, registro delivery_dispatch/_line, recheck de ceiling),
+    // por lo que emparejar por orden es fragil. Se responde por consulta.
+    client.query.mockImplementation((sql) => {
+      const text = typeof sql === "string" ? sql : "";
+      if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(text)) {
+        return Promise.resolve({ rows: [] });
+      }
+      // request FOR UPDATE — solo se confirma si esta aprobado por operaciones
+      if (
+        text.includes("FROM public.delivery_request")
+        && text.includes("WHERE id = $1")
+        && text.includes("FOR UPDATE")
+      ) {
+        return Promise.resolve({
+          rows: [
+            {
+              id: 77,
+              delivery_ceiling_id: 31,
+              status: "ops_approved",
+              requested_by: 5,
+              confirmed_by: null,
+              notes: "pedido parcial",
+              requested_at: "2026-04-11T00:00:00.000Z",
+              confirmed_at: null,
+              created_at: "2026-04-11T00:00:00.000Z",
+              updated_at: "2026-04-11T00:00:00.000Z",
+            },
+          ],
+        });
+      }
+      // ceiling FOR UPDATE
+      if (
+        text.includes("FROM public.delivery_ceiling")
+        && text.includes("FOR UPDATE")
+        && !text.includes("delivery_ceiling_line")
+      ) {
+        return Promise.resolve({ rows: [{ id: 31, status: "active", purchase_type: "private" }] });
+      }
+      // request lines + ceiling lines FOR UPDATE
+      if (text.includes("INNER JOIN public.delivery_ceiling_line cl")) {
+        return Promise.resolve({
+          rows: [
+            {
+              id: 701,
+              delivery_request_id: 77,
+              delivery_ceiling_line_id: 501,
+              requested_qty: "4.000",
+              max_quantity: "10.000",
+              delivered_qty: "3.000",
+            },
+          ],
+        });
+      }
+      // reservas abiertas excluyendo la solicitud actual
+      if (text.includes("COALESCE(SUM(rl.requested_qty)")) {
+        return Promise.resolve({ rows: [] });
+      }
+      // UPDATE delivery_ceiling_line (aplica el despacho)
+      if (text.includes("UPDATE public.delivery_ceiling_line")) {
+        return Promise.resolve({
+          rows: [{ id: 501, delivered_qty: "7.000", max_quantity: "10.000" }],
+        });
+      }
+      // UPDATE delivery_request -> confirmed
+      if (text.includes("UPDATE public.delivery_request")) {
+        return Promise.resolve({
+          rows: [
+            {
+              id: 77,
+              delivery_ceiling_id: 31,
+              status: "confirmed",
+              requested_by: 5,
+              confirmed_by: 12,
+              notes: "pedido parcial",
+              requested_at: "2026-04-11T00:00:00.000Z",
+              confirmed_at: "2026-04-11T02:00:00.000Z",
+              created_at: "2026-04-11T00:00:00.000Z",
+              updated_at: "2026-04-11T02:00:00.000Z",
+            },
+          ],
+        });
+      }
+      // INSERT delivery_dispatch_line (evaluar antes que delivery_dispatch)
+      if (text.includes("INSERT INTO public.delivery_dispatch_line")) {
+        return Promise.resolve({ rows: [] });
+      }
+      // INSERT delivery_dispatch (registro de despacho para trazabilidad)
+      if (text.includes("INSERT INTO public.delivery_dispatch")) {
+        return Promise.resolve({ rows: [{ id: 900, created_at: "2026-04-11T02:00:00.000Z" }] });
+      }
+      // recheck de ceiling para avance de compra publica (privado: no avanza)
+      if (text.includes("business_case_id, purchase_type FROM public.delivery_ceiling")) {
+        return Promise.resolve({ rows: [{ business_case_id: null, purchase_type: "private" }] });
+      }
+      // enqueue de evento de integracion
+      if (text.includes("integration_outbox")) {
+        return Promise.resolve({ rows: [{ id: 7002, created_at: "2026-04-11T02:00:00.000Z" }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
 
     const result = await service.confirmDeliveryRequest({
       requestId: 77,

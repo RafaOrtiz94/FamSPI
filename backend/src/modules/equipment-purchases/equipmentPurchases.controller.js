@@ -6,6 +6,7 @@ const { logAction } = require("../../utils/audit");
 const { normalizeDatesDeep } = require("../../utils/date.serializer");
 const { broadcastPurchaseUpdate } = require("./purchaseEvents");
 const logger = require("../../config/logger");
+const deliveryRequestsService = require("../delivery-requests/deliveryRequests.service");
 
 const respondAndBroadcast = ({
   res,
@@ -40,10 +41,11 @@ exports.upload = upload;
 
 exports.getMeta = async (req, res, next) => {
   try {
-    const [clients, equipment, acpUsers, providerContacts] = await Promise.all([
+    const [clients, equipment, acpUsers, technicalUsers, providerContacts] = await Promise.all([
       service.getApprovedClients(),
       service.getEquipmentCatalog(),
       service.getAcpCommercialUsers(),
+      service.getTechnicalInspectionUsers(),
       service.listProviderContacts({ user: req.user, limit: 50 }),
     ]);
 
@@ -61,6 +63,7 @@ exports.getMeta = async (req, res, next) => {
         clients,
         equipment,
         acp_users: acpUsers,
+        technical_users: technicalUsers,
         provider_contacts: providerContacts,
       },
     });
@@ -266,6 +269,53 @@ exports.saveProviderResponse = async (req, res, next) => {
       req,
       payload: normalizedUpdated,
       action: "provider_response",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.confirmAcpImportAwareness = async (req, res, next) => {
+  try {
+    const { expected_updated_at } = req.body || {};
+    const updated = await service.confirmAcpImportAwareness({
+      id: req.params.id,
+      user: req.user,
+      expected_updated_at,
+    });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at'],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: 'acp_import_awareness_confirmed',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.confirmCuAvailability = async (req, res, next) => {
+  try {
+    const { decision, expected_updated_at } = req.body || {};
+    const updated = await service.confirmCuAvailability({
+      id: req.params.id,
+      user: req.user,
+      decision,
+      expected_updated_at,
+    });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at'],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: decision === 'approve' ? 'cu_availability_approved' : 'cu_availability_rejected',
     });
   } catch (error) {
     next(error);
@@ -511,6 +561,47 @@ exports.completeDelivery = async (req, res, next) => {
   }
 };
 
+exports.getFreedReservations = async (req, res, next) => {
+  try {
+    const data = await service.getFreedReservations({ user: req.user });
+    res.json({ ok: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getActiveReservations = async (req, res, next) => {
+  try {
+    const data = await service.getActiveReservations({ user: req.user });
+    res.json({ ok: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.transferReservation = async (req, res, next) => {
+  try {
+    const { from_id } = req.body || {};
+    const updated = await service.transferReservation({
+      fromId: from_id,
+      toId: req.params.id,
+      user: req.user,
+    });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at', 'reservation_email_sent_at', 'reservation_expires_at'],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: 'reservation_transferred',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.renewReservation = async (req, res, next) => {
   try {
     const updated = await service.renewReservation({
@@ -622,12 +713,13 @@ exports.requestInspectionEnvironment = async (req, res, next) => {
 
 exports.coordinateInspectionDate = async (req, res, next) => {
   try {
-    const { inspection_date, notes, expected_updated_at } = req.body || {};
+    const { inspection_date, notes, assigned_technician_id, expected_updated_at } = req.body || {};
     const updated = await service.coordinateInspectionDate({
       id: req.params.id,
       user: req.user,
       inspection_date,
       notes,
+      assigned_technician_id,
       expected_updated_at,
     });
     const normalizedUpdated = normalizeDatesDeep(updated, {
@@ -818,6 +910,411 @@ exports.registerPublicPortalOutcome = async (req, res, next) => {
       action: "public_portal_outcome_registered",
       meta: { outcome: String(outcome || "").toLowerCase() || null },
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.updateSercop = async (req, res, next) => {
+  try {
+    const updated = await service.updateSercop({
+      id: req.params.id,
+      user: req.user,
+      fields: req.body || {},
+    });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: "equipment_purchases",
+      keysToNormalize: ["created_at", "updated_at"],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: "sercop_updated",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getTimeline = async (req, res, next) => {
+  try {
+    const result = await service.getTimeline({ id: req.params.id, user: req.user });
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// WORKFLOW ALIGNMENT — Parte 2
+
+exports.registerParticipationDecision = async (req, res, next) => {
+  try {
+    const updated = await service.registerParticipationDecision({
+      id: req.params.id,
+      user: req.user,
+      decision: req.body?.decision,
+      notes: req.body?.notes,
+      expected_updated_at: req.body?.expected_updated_at,
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizeDatesDeep(updated),
+      action: "participation_decision_registered",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.registerSerial = async (req, res, next) => {
+  try {
+    const updated = await service.registerSerialPublic({
+      id: req.params.id,
+      user: req.user,
+      serialNumber: req.body?.serial_number,
+      unitId: req.body?.unit_id,
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizeDatesDeep(updated),
+      action: "serial_registered",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// WORKFLOW ALIGNMENT — Nuevos endpoints
+exports.setPurchaseType = async (req, res, next) => {
+  try {
+    const updated = await service.setPurchaseType({
+      id: req.params.id,
+      user: req.user,
+      purchaseType: req.body?.purchase_type,
+      expected_updated_at: req.body?.expected_updated_at,
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizeDatesDeep(updated),
+      action: "purchase_type_set",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.setPrivateModality = async (req, res, next) => {
+  try {
+    const updated = await service.setPrivateModality({
+      id: req.params.id,
+      user: req.user,
+      privateModality: req.body?.private_modality,
+      expected_updated_at: req.body?.expected_updated_at,
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizeDatesDeep(updated),
+      action: "private_modality_set",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.setAvailability = async (req, res, next) => {
+  try {
+    const updated = await service.setAvailability({
+      id: req.params.id,
+      user: req.user,
+      availabilitySource: req.body?.availability_source,
+      availabilityStatus: req.body?.availability_status,
+      expected_updated_at: req.body?.expected_updated_at,
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizeDatesDeep(updated),
+      action: "availability_set",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.activateSupplyControl = async (req, res, next) => {
+  try {
+    const updated = await service.activateSupplyControl({
+      id: req.params.id,
+      user: req.user,
+      supplyControlType: req.body?.supply_control_type,
+      expected_updated_at: req.body?.expected_updated_at,
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizeDatesDeep(updated),
+      action: "supply_control_activated",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.requestSupply = async (req, res, next) => {
+  try {
+    const payload = req.body || {};
+    const data = await deliveryRequestsService.createDeliveryRequest({
+      ceilingId: payload.ceiling_id || payload.ceilingId,
+      privatePurchaseId: payload.private_purchase_id || payload.privatePurchaseId || null,
+      asOfDate: payload.as_of_date || payload.asOfDate || null,
+      lines: payload.lines || [],
+      notes: payload.notes || null,
+      actorUser: req.user || null,
+    });
+    res.status(201).json({ ok: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.opsApproveSupply = async (req, res, next) => {
+  try {
+    const payload = req.body || {};
+    const data = await deliveryRequestsService.opsApproveRequest({
+      requestId: payload.delivery_request_id || payload.deliveryRequestId,
+      actorUser: req.user || null,
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.registerDispatch = async (req, res, next) => {
+  try {
+    const payload = req.body || {};
+    const data = await deliveryRequestsService.confirmDeliveryRequest({
+      requestId: payload.delivery_request_id || payload.deliveryRequestId,
+      actorUser: req.user || null,
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ================================================
+// UNIFIED PURCHASES — CONTROLLERS DEL FLUJO ESENCIAL
+// ================================================
+
+const unifiedFlowService = require('./unifiedPurchases.flow.service');
+const { UnifiedPurchaseStateMachine, UNIFIED_PURCHASE_STATES } = require('./unifiedPurchaseStateMachine');
+
+exports.transitionState = async (req, res, next) => {
+  try {
+    const { to_state, reason, metadata } = req.body || {};
+    const result = await UnifiedPurchaseStateMachine.transition(
+      req.params.id,
+      to_state,
+      req.user?.id,
+      reason,
+      metadata
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getAllowedTransitions = async (req, res, next) => {
+  try {
+    const currentState = await UnifiedPurchaseStateMachine.getCurrentState(req.params.id);
+    const allowed = UnifiedPurchaseStateMachine.getAllowedTransitions(currentState);
+    res.json({ ok: true, data: { currentState, allowedTransitions: allowed } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.forwardToAcp = async (req, res, next) => {
+  try {
+    const result = await unifiedFlowService.forwardToAcp(req.params.id, req.user);
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.confirmAcpAvailability = async (req, res, next) => {
+  try {
+    const { confirmed, notes } = req.body || {};
+    const result = await unifiedFlowService.confirmAcpAvailability(
+      req.params.id,
+      req.user,
+      confirmed !== false,
+      notes
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.returnToBackoffice = async (req, res, next) => {
+  try {
+    const { notes } = req.body || {};
+    const result = await unifiedFlowService.returnToBackoffice(
+      req.params.id,
+      req.user,
+      notes
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.startBusinessCase = async (req, res, next) => {
+  try {
+    const result = await unifiedFlowService.startBusinessCase(req.params.id, req.user);
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.sendOffer = async (req, res, next) => {
+  try {
+    const { offer_document_id } = req.body || {};
+    const result = await unifiedFlowService.sendOffer(
+      req.params.id,
+      req.user,
+      offer_document_id
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Subir oferta firmada por el cliente (requisito para contrato)
+exports.uploadSignedOffer = async (req, res, next) => {
+  try {
+    const { signed_offer_base64, file_name, mime_type, file_id } = req.body || {};
+    const result = await unifiedFlowService.uploadSignedOffer(
+      req.params.id,
+      {
+        signedOfferBase64: signed_offer_base64,
+        fileName: file_name,
+        mimeType: mime_type,
+        fileId: file_id
+      },
+      req.user
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Obtener configuración de visibilidad dinámica por usuario y solicitud
+exports.getVisibilityConfig = async (req, res, next) => {
+  try {
+    const config = await unifiedFlowService.getVisibilityConfig(
+      req.params.id,
+      req.user
+    );
+    res.json({ ok: true, data: config });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ================================================
+// UNIFIED PURCHASES — CONTROLLERS NUEVOS (Parte 3)
+// ================================================
+
+// Marcar equipo interno como listo
+exports.setEquipmentReady = async (req, res, next) => {
+  try {
+    const result = await unifiedFlowService.setEquipmentReady(
+      req.params.id,
+      req.user
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Actualizar checklist del portal público
+exports.updatePublicPortalChecklist = async (req, res, next) => {
+  try {
+    const { checklist, evidence_url, due_date, responsible_id } = req.body || {};
+    const result = await unifiedFlowService.updatePublicPortalChecklist(
+      req.params.id,
+      req.user,
+      {
+        checklist,
+        evidenceUrl: evidence_url,
+        dueDate: due_date,
+        responsibleId: responsible_id
+      }
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Iniciar control operativo
+exports.startControlOperativo = async (req, res, next) => {
+  try {
+    const { max_quantity, requested_quantity } = req.body || {};
+    const result = await unifiedFlowService.startControlOperativo(
+      req.params.id,
+      req.user,
+      {
+        maxQuantity: max_quantity,
+        requestedQuantity: requested_quantity
+      }
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Registrar entrega (fuente de verdad: Logística)
+exports.registerDelivery = async (req, res, next) => {
+  try {
+    const { delivered_quantity } = req.body || {};
+    const result = await unifiedFlowService.registerDelivery(
+      req.params.id,
+      req.user,
+      {
+        deliveredQuantity: delivered_quantity
+      }
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Completar control operativo manualmente
+exports.completeControlOperativo = async (req, res, next) => {
+  try {
+    const result = await unifiedFlowService.completeControlOperativo(
+      req.params.id,
+      req.user
+    );
+    res.json({ ok: true, data: result });
   } catch (error) {
     next(error);
   }

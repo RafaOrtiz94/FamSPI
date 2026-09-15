@@ -9,6 +9,12 @@ export const getUsers = async (params = {}) => {
   return data.data;
 };
 
+/** Usuarios elegibles como firmantes (excluye pasivos y en desvinculación) */
+export const getSignerCandidates = async (params = {}) => {
+  const { data } = await api.get("/users", { params: { ...params, for_signers: true } });
+  return data.data;
+};
+
 /**
  * Crear usuario manualmente
  */

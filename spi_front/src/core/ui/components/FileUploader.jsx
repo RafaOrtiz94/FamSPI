@@ -16,7 +16,7 @@ const FileUploader = ({
  };
 
  return (
- <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 bg-gray-50 dark:bg-gray-800/40 text-center">
+ <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center sm:p-6">
  <input
  type="file"
  multiple={multiple}
@@ -25,17 +25,15 @@ const FileUploader = ({
  className="hidden"
  onChange={handleFiles}
  />
- <FiUpload className="text-gray-500 dark:text-gray-300 text-3xl mx-auto mb-2" />
+ <FiUpload className="mx-auto mb-2 text-3xl text-slate-500" />
  <button
  type="button"
  onClick={() => inputRef.current?.click()}
- className="text-blue-600 dark:text-blue-400 font-semibold hover:underline"
+ className="rounded-lg px-2 py-1 text-sm font-semibold text-blue-700 transition hover:bg-blue-50"
  >
  {label}
  </button>
- {helper && (
- <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{helper}</p>
- )}
+ {helper && <p className="mt-1 break-words text-xs text-slate-500">{helper}</p>}
  </div>
  );
 };

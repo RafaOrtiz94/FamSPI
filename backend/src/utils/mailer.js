@@ -7,6 +7,7 @@
 
 const { google } = require("googleapis");
 const nodemailer = require("nodemailer");
+const { randomUUID } = require("crypto");
 const logger = require("../config/logger");
 const { gmail, createDelegatedJwtClient } = require("../config/google");
 const gmailService = require("../services/gmail.service");
@@ -195,7 +196,35 @@ const encodeAddressHeader = (value) => {
   return `${encodeHeaderValue(displayName)} <${email}>`;
 };
 
-const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo }) => {
+const MESSAGE_ID_DOMAIN = "fam-project.com";
+
+const generateMessageId = () => `<${randomUUID()}@${MESSAGE_ID_DOMAIN}>`;
+
+async function getLastThreadMessageId(gmailClient, threadId) {
+  if (!gmailClient?.users?.threads?.get || !threadId) return null;
+  try {
+    const response = await gmailClient.users.threads.get({
+      userId: "me",
+      id: threadId,
+      format: "metadata",
+      metadataHeaders: ["Message-ID"],
+    });
+    const messages = Array.isArray(response?.data?.messages) ? response.data.messages : [];
+    const lastMessage = messages[messages.length - 1];
+    const header = lastMessage?.payload?.headers?.find(
+      (item) => String(item?.name || "").toLowerCase() === "message-id",
+    );
+    return header?.value || null;
+  } catch (error) {
+    logger.warn(
+      { threadId, error: error?.message || String(error) },
+      "[MAILER] No se pudo recuperar el Message-ID del hilo existente",
+    );
+    return null;
+  }
+}
+
+const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo, messageId, inReplyTo, references }) => {
   const lines = [
     `From: ${encodeAddressHeader(from)}`,
     `To: ${Array.isArray(to) ? to.map((item) => normalizeEmailAddress(item)).join(", ") : normalizeEmailAddress(to)}`,
@@ -204,6 +233,11 @@ const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo }) => {
   if (cc) lines.push(`Cc: ${Array.isArray(cc) ? cc.map((item) => normalizeEmailAddress(item)).join(", ") : normalizeEmailAddress(cc)}`);
   if (bcc) lines.push(`Bcc: ${Array.isArray(bcc) ? bcc.map((item) => normalizeEmailAddress(item)).join(", ") : normalizeEmailAddress(bcc)}`);
   if (replyTo) lines.push(`Reply-To: ${encodeAddressHeader(replyTo)}`);
+  if (messageId) lines.push(`Message-ID: ${messageId}`);
+  // In-Reply-To/References son lo que Gmail usa para agrupar el hilo -- el
+  // threadId de la API por si solo no basta si estos headers no coinciden.
+  if (inReplyTo) lines.push(`In-Reply-To: ${inReplyTo}`);
+  if (references) lines.push(`References: ${references}`);
 
   lines.push(`Subject: ${encodeHeaderValue(subject)}`);
   lines.push("MIME-Version: 1.0");
@@ -229,10 +263,16 @@ async function sendViaServiceAccount({
   from,
   delegatedUser,
   threadId = null,
+  inReplyTo = null,
+  references = null,
 }) {
+  // resolveDelegatedUser cae a GOOGLE_SUBJECT (administrador) cuando el candidato
+  // es invalido -- nunca retorna falsy. Sin el guard `delegatedUser &&`, el primer
+  // eslabon (casi siempre undefined, ningun caller de compras lo pasa) ya resolvia
+  // a administrador y el "||" nunca llegaba a evaluar `from` (el remitente real).
   const delegatedFrom =
-    resolveDelegatedUser(delegatedUser) ||
-    resolveDelegatedUser(from) ||
+    (delegatedUser && resolveDelegatedUser(delegatedUser)) ||
+    (from && resolveDelegatedUser(from)) ||
     SYSTEM_MAIL_DELEGATED_USER ||
     resolveDelegatedUser(process.env.GMAIL_SERVICE_ACCOUNT_SENDER) ||
     resolveDelegatedUser(process.env.GMAIL_DELEGATED_USER) ||
@@ -267,7 +307,12 @@ async function sendViaServiceAccount({
     throw new Error(`${baseMessage}: ${err.message}`);
   }
 
-  const raw = encodeMessage({
+  const messageId = generateMessageId();
+  const delegatedGmail = google.gmail({ version: "v1", auth: delegatedAuth });
+  const previousMessageId =
+    inReplyTo || (threadId ? await getLastThreadMessageId(delegatedGmail, threadId) : null);
+  const previousReferences = references || previousMessageId || null;
+  const threadedRaw = encodeMessage({
     from: fromHeader,
     to,
     subject,
@@ -276,12 +321,13 @@ async function sendViaServiceAccount({
     cc,
     bcc,
     replyTo: replyTo || delegatedFrom,
+    messageId,
+    inReplyTo: previousMessageId || undefined,
+    references: previousReferences || undefined,
   });
-
-  const delegatedGmail = google.gmail({ version: "v1", auth: delegatedAuth });
   let response;
   try {
-    const requestBody = { raw };
+    const requestBody = { raw: threadedRaw };
     if (threadId) {
       requestBody.threadId = threadId;
     }
@@ -312,6 +358,7 @@ async function sendViaServiceAccount({
     response,
     providerThreadId: response?.data?.threadId || null,
     providerMessageId: response?.data?.id || null,
+    rfc822MessageId: messageId,
   };
 }
 
@@ -324,6 +371,8 @@ async function sendViaSmtp({
   bcc,
   replyTo,
   from,
+  inReplyTo,
+  references,
 }) {
   const transporter = getSmtpTransporter();
   const info = await transporter.sendMail({
@@ -335,6 +384,10 @@ async function sendViaSmtp({
     cc,
     bcc,
     replyTo,
+    headers: {
+      ...(inReplyTo ? { "In-Reply-To": inReplyTo } : {}),
+      ...(references ? { References: references } : {}),
+    },
   });
 
   logger.info("[MAILER] Email enviado por SMTP", {
@@ -350,6 +403,7 @@ async function sendViaSmtp({
     response: info,
     providerThreadId: null,
     providerMessageId: info?.messageId || null,
+    rfc822MessageId: info?.messageId || null,
   };
 }
 
@@ -394,6 +448,8 @@ async function sendMail({
   gmailUserId = null,
   source = null,
   threadId = null,
+  inReplyTo = null,
+  references = null,
 } = {}) {
   if (!to || !subject || (!html && !text)) {
     return { delivered: false, via: "none", reason: "missing_fields" };
@@ -445,6 +501,8 @@ async function sendMail({
       from: fromAddress || delegatedUser || undefined,
       delegatedUser: delegatedUser || undefined,
       threadId,
+      inReplyTo,
+      references,
     });
   } catch (serviceAccountError) {
     logger.warn(
@@ -468,6 +526,8 @@ async function sendMail({
         bcc,
         replyTo: resolvedReplyTo,
         from: fromAddress || undefined,
+        inReplyTo,
+        references,
       });
     } catch (smtpError) {
       logger.error(

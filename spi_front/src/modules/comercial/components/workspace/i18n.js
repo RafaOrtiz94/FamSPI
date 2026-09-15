@@ -41,7 +41,7 @@ export const WORKSPACE_TEXTS = {
       ]
     },
     requirement: {
-      title: 'Requerimiento del BC',
+      title: 'Condiciones del BC',
       description: 'Plazos, entregas y observaciones clave antes del calculo',
       tips: [
         'Registre el plazo y la proyeccion de plazo solicitados',
@@ -124,33 +124,23 @@ export const WORKSPACE_TEXTS = {
       warnings: ['El analisis financiero es clave para aprobacion']
     },
     consumption_export: {
-      title: 'Sincronizacion de Business Case',
-      description: 'Vista previa y sincronizacion del formato oficial en Google Sheets',
+      title: 'Exportacion de Reactivos',
+      description: 'Salida ordenada para Excel o Google Sheets',
       tips: [
-        'Revise la vista previa antes de sincronizar',
-        'Confirme que campos e inversiones esten completos para evitar reprocesos'
+        'Use este reporte temporal para enviar consumos',
+        'Revise que los equipos y cantidades anuales esten completos'
       ],
-      warnings: ['La sincronizacion genera el documento oficial en Drive y Sheets']
+      warnings: ['Solo disponible para Jefe Comercial y ACP Comercial']
     },
     dispatch_workspace: {
-      title: 'Cantidades Maximas',
-      description: 'Definicion comercial de cantidades maximas y control operativo de elementos a despachar',
+      title: 'Workspace de Despacho',
+      description: 'Plan comercial de cantidades y control operativo de elementos a despachar',
       tips: [
-        'Jefe Comercial define la cantidad maxima por elemento',
+        'Jefe Comercial define cantidad objetivo y precio por elemento',
         'Jefe Operaciones registra cantidades a despachar y avance despachado',
         'Use observaciones para trazabilidad de cambios en cada item'
       ],
       warnings: ['Debe existir consumo anual para que los elementos aparezcan en este workspace']
-    },
-    feasibility: {
-      title: 'Factibilidad',
-      description: 'Decision final del Business Case para cierre y continuidad en compras',
-      tips: [
-        'Sincronice primero el Sheet oficial desde la seccion de Sincronizacion',
-        'ACP Comercial o Jefe Comercial deben registrar la decision final',
-        'Si no es factible, seleccione la alternativa comercial que continuara en compras'
-      ],
-      warnings: ['La decision de factibilidad cierra el Business Case y bloquea nuevas ediciones']
     }
   },
 

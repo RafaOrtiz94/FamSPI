@@ -105,6 +105,18 @@ async function getDeterminations(req, res) {
          status
        FROM catalog_determinations
        WHERE equipment_id = $1
+         AND COALESCE(lower(status), 'active') IN ('active', 'activo')
+         AND NOT EXISTS (
+           SELECT 1
+           FROM catalog_equipment_consumables ec
+           JOIN catalog_consumables c ON c.id = ec.consumable_id
+           WHERE ec.equipment_id = catalog_determinations.equipment_id
+             AND COALESCE(lower(c.status), 'active') IN ('active', 'activo')
+             AND (
+               (catalog_determinations.roche_code IS NOT NULL AND c.supplier_code = catalog_determinations.roche_code)
+               OR lower(trim(c.name)) = lower(trim(catalog_determinations.name))
+             )
+         )
        ORDER BY name`,
       [equipmentId],
     );
@@ -135,6 +147,7 @@ async function getConsumables(req, res) {
        JOIN catalog_consumables c ON c.id = ec.consumable_id
        LEFT JOIN catalog_determinations d ON d.id = ec.determination_id
        WHERE ec.equipment_id = $1
+       AND COALESCE(lower(c.status), 'active') IN ('active', 'activo')
        ${typeClause}
        ORDER BY c.name`,
       params,

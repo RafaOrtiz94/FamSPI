@@ -8,10 +8,12 @@ const {
   getAllInventario,
   registrarMovimiento,
   listModelos,
+  updateModelo,
   createUnidad,
   captureSerial,
   assignUnidad,
   cambiarEstadoUnidad,
+  getUnidadHistorial,
 } = require("./inventario.service");
 const { asyncHandler } = require("../../middlewares/asyncHandler");
 const logger = require("../../config/logger");
@@ -88,6 +90,22 @@ exports.listModelos = asyncHandler(async (req, res) => {
   const { q } = req.query;
   const modelos = await listModelos({ search: q });
   res.status(200).json({ ok: true, data: modelos });
+});
+
+exports.updateModelo = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user?.id || null;
+  const { nombre = null, fabricante = null, modelo = null, categoria = null, caracteristicas = null } = req.body || {};
+  const result = await updateModelo({
+    modelo_id: id,
+    nombre,
+    fabricante,
+    modelo,
+    categoria,
+    caracteristicas,
+    user_id: userId,
+  });
+  res.status(200).json({ ok: true, data: result });
 });
 
 exports.createUnidad = asyncHandler(async (req, res) => {
@@ -174,6 +192,12 @@ exports.cambiarEstadoUnidad = asyncHandler(async (req, res) => {
   });
 
   res.status(200).json({ ok: true, data: result });
+});
+
+exports.getUnidadHistorial = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const data = await getUnidadHistorial(id);
+  res.status(200).json({ ok: true, total: data.length, data });
 });
 
 /* ============================================================

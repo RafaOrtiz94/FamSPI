@@ -96,6 +96,21 @@ export const saveProviderResponse = async (id, payload) => {
  return data.data;
 };
 
+export const confirmAcpImportAwareness = async (id, { expected_updated_at } = {}) => {
+ const { data } = await api.post(`/equipment-purchases/${id}/confirm-import-awareness`, {
+   expected_updated_at,
+ });
+ return data.data;
+};
+
+export const confirmCuAvailability = async (id, { decision, expected_updated_at } = {}) => {
+ const { data } = await api.post(`/equipment-purchases/${id}/confirm-cu-availability`, {
+   decision,
+   expected_updated_at,
+ });
+ return data.data;
+};
+
 export const registerPublicPortalOutcome = async (id, payload) => {
  const { data } = await api.patch(`/equipment-purchases/${id}/public-portal-outcome`, payload);
  return data.data;
@@ -167,7 +182,7 @@ export const requestDeliveryDates = async (id, { notes, expected_updated_at } = 
 
 export const submitDeliveryDates = async (
  id,
- { delivery_start_at, delivery_end_at, notes, expected_updated_at },
+ { delivery_start_at, delivery_end_at, notes, expected_updated_at } = {},
 ) => {
  const { data } = await api.post(`/equipment-purchases/${id}/submit-delivery-dates`, {
  delivery_start_at,
@@ -204,7 +219,25 @@ export const completeDelivery = async (id, { notes, expected_updated_at } = {}) 
 
 export const renewReservation = async (id, expected_updated_at) => {
  const { data } = await api.post(`/equipment-purchases/${id}/renew-reservation`, {
- expected_updated_at,
+   expected_updated_at,
+ });
+ return data.data;
+};
+
+export const getFreedReservations = async () => {
+ const { data } = await api.get('/equipment-purchases/freed-reservations');
+ return data.data;
+};
+
+export const getEquipmentPurchaseActiveReservations = async () => {
+ const { data } = await api.get('/equipment-purchases/active-reservations');
+ return data.data || [];
+};
+
+export const transferReservation = async (id, { from_id, expected_updated_at } = {}) => {
+ const { data } = await api.post(`/equipment-purchases/${id}/transfer-reservation`, {
+   from_id,
+   expected_updated_at,
  });
  return data.data;
 };
@@ -247,10 +280,14 @@ export const requestPublicPurchaseInspection = async (
  return data.data;
 };
 
-export const coordinateInspectionDate = async (id, { inspection_date, notes, expected_updated_at }) => {
+export const coordinateInspectionDate = async (
+ id,
+ { inspection_date, notes, assigned_technician_id, expected_updated_at },
+) => {
  const { data } = await api.patch(`/equipment-purchases/${id}/coordinate-inspection-date`, {
  inspection_date,
  notes,
+ assigned_technician_id,
  expected_updated_at,
  });
  return data.data;
@@ -302,6 +339,17 @@ export const updatePublicPurchaseInstallationWorkflow = async (
  });
  return data.data;
 };
+
+export const updateSercop = async (id, fields) => {
+ const { data } = await api.patch(`/equipment-purchases/${id}/sercop`, fields);
+ return data.data;
+};
+
+export const getEquipmentPurchaseTimeline = async (id) => {
+ const { data } = await api.get(`/equipment-purchases/${id}/timeline`);
+ return data.data;
+};
+
 export const getEquipmentPurchaseById = async (id) => {
  const { data } = await api.get(`/equipment-purchases/${id}`);
  return data.data;
@@ -312,4 +360,96 @@ export const getPublicPurchaseTechnicalSchedule = async ({ from, to }) => {
  params: { from, to },
  });
  return data.data || { days: [] };
+};
+
+export const registerParticipationDecision = async (id, { decision, notes, expected_updated_at } = {}) => {
+ const { data } = await api.post(`/equipment-purchases/${id}/register-participation-decision`, {
+ decision,
+ notes,
+ expected_updated_at,
+ });
+ return data.data;
+};
+
+export const registerEquipmentPurchaseSerial = async (id, { serialNumber, unitId = null, expected_updated_at } = {}) => {
+ const { data } = await api.post(`/equipment-purchases/${id}/register-serial`, {
+ serial_number: serialNumber,
+ unit_id: unitId,
+ expected_updated_at,
+ });
+ return data.data;
+};
+
+export const setPurchaseType = async (id, { purchaseType, expected_updated_at } = {}) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/set-purchase-type`, {
+    purchase_type: purchaseType,
+    expected_updated_at,
+  });
+  return data.data;
+};
+
+export const setPrivateModality = async (id, { privateModality, expected_updated_at } = {}) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/set-private-modality`, {
+    private_modality: privateModality,
+    expected_updated_at,
+  });
+  return data.data;
+};
+
+export const setAvailability = async (id, { availabilitySource, availabilityStatus, expected_updated_at } = {}) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/set-availability`, {
+    availability_source: availabilitySource,
+    availability_status: availabilityStatus,
+    expected_updated_at,
+  });
+  return data.data;
+};
+
+export const updatePublicPortalChecklist = async (
+  id,
+  { checklist = [], evidence_url = null, due_date = null, responsible_id = null } = {},
+) => {
+  const { data } = await api.patch(`/equipment-purchases/${id}/portal-checklist`, {
+    checklist,
+    evidence_url,
+    due_date,
+    responsible_id,
+  });
+  return data.data;
+};
+
+export const activateSupplyControl = async (id, { supplyControlType, expected_updated_at } = {}) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/activate-supply-control`, {
+    supply_control_type: supplyControlType,
+    expected_updated_at,
+  });
+  return data.data;
+};
+
+export const requestSupply = async (
+  id,
+  { ceiling_id, private_purchase_id = null, as_of_date = null, lines = [], notes = null } = {},
+) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/request-supply`, {
+    ceiling_id,
+    private_purchase_id,
+    as_of_date,
+    lines,
+    notes,
+  });
+  return data.data;
+};
+
+export const opsApproveSupply = async (id, { delivery_request_id } = {}) => {
+  const { data } = await api.patch(`/equipment-purchases/${id}/ops-approve-supply`, {
+    delivery_request_id,
+  });
+  return data.data;
+};
+
+export const registerDispatch = async (id, { delivery_request_id } = {}) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/register-dispatch`, {
+    delivery_request_id,
+  });
+  return data.data;
 };

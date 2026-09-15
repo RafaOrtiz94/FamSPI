@@ -12,7 +12,7 @@ const { PDFDocument, StandardFonts } = require("pdf-lib");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
-const { securePdfForm } = require("../../utils/pdfFormSecurity");
+const { securePdfForm, setFieldFontSizeSafe } = require("../../utils/pdfFormSecurity");
 const { registerFst05TrainingDocument } = require("./trainingWorkflow.service");
 
 const TEMPLATE_PATH = path.join(
@@ -138,7 +138,7 @@ const generateAttendanceListPDF = async (attendanceData) => {
     const templateBytes = fs.readFileSync(TEMPLATE_PATH);
     const pdfDoc = await PDFDocument.load(templateBytes);
     const form = pdfDoc.getForm();
-    const baseFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const baseFont = await pdfDoc.embedFont(StandardFonts.TimesRoman);
     console.log("[Attendance PDF] PDF template loaded successfully");
 
     // 1. DATOS GENERALES DEL ENTRENAMIENTO
@@ -172,18 +172,18 @@ const generateAttendanceListPDF = async (attendanceData) => {
     }
 
 
-    try {
-        form.getFields().forEach((field) => {
+    // Por campo: un campo sin /DA (default appearance) en la plantilla no
+    // debe abortar el resto (mismo bug que rompia F.ST-20 entero).
+    form.getFields().forEach((field) => {
+        setFieldFontSizeSafe(field, 10);
+        try {
             if (typeof field.updateAppearances === "function") {
                 field.updateAppearances(baseFont);
             }
-            if (typeof field.setFontSize === "function") {
-                field.setFontSize(10);
-            }
-        });
-    } catch (appearanceErr) {
-        logger.warn({ appearanceErr }, "No se pudieron ajustar apariencias de campos de asistencia");
-    }
+        } catch (appearanceErr) {
+            logger.warn({ fieldName: field.getName?.(), appearanceErr }, "No se pudo ajustar apariencia de campo de asistencia");
+        }
+    });
 
     securePdfForm(form);
 

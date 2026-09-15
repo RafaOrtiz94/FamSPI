@@ -2,6 +2,8 @@ import React, { useMemo, useState } from "react";
 import { FiAlertTriangle, FiPackage, FiMail, FiMapPin, FiTruck, FiShield, FiTrendingUp, FiActivity } from "react-icons/fi";
 import { useAuth } from "../../../core/auth/useAuth";
 import CA0106Stepper from "../components/CA0106Stepper";
+import Modal from "../../../core/ui/components/Modal";
+import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
 
 const laneCards = [
   { key: "traceability", title: "Trazabilidad", description: "Lotes affectedos, distribución y rastreo.", accent: "from-orange-500 to-amber-600", icon: FiPackage },
@@ -29,7 +31,7 @@ export default function CA0106Workspace() {
   const handleExpandRecord = (record) => setExpandedRecord(record?.id === expandedRecord?.id ? null : record);
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50">
+    <div className={WORKSPACE_PAGE_CLASS}>
       <header className="bg-white border-b border-gray-200 px-6 py-4">
         <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
           <FiAlertTriangle className="text-orange-600" />
@@ -86,13 +88,9 @@ export default function CA0106Workspace() {
           </div>
         )}
 
-        {expandedRecord && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-              <CA0106Stepper record={expandedRecord} onClose={() => handleExpandRecord(null)} />
-            </div>
-          </div>
-        )}
+        <Modal open={Boolean(expandedRecord)} onClose={() => handleExpandRecord(null)} maxWidth="max-w-2xl">
+          {expandedRecord && <CA0106Stepper record={expandedRecord} onClose={() => handleExpandRecord(null)} />}
+        </Modal>
       </div>
     </div>
   );

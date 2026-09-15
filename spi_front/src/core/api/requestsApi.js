@@ -137,6 +137,20 @@ export const cancelRequest = async (id) => {
  return response.data?.result || response.data;
 };
 
+/** Registrar resultado F.ST-07 de una inspección independiente */
+export const processCreditRequestDecision = async (id, action, payload = {}) => {
+ const response = await api.post(`/requests/${id}/credit-decision`, {
+ action,
+ payload,
+ });
+ return response.data?.data || response.data;
+};
+
+export const registerInspectionResult = async (id, payload = {}) => {
+ const response = await api.post(`/requests/${id}/inspection-result`, payload);
+ return response.data;
+};
+
 /** Crear solicitud de nuevo cliente */
 export const createClientRequest = async (formData = {}, files = {}) => {
  const data = new FormData();

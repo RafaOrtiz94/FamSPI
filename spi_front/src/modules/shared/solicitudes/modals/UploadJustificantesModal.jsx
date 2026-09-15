@@ -14,6 +14,9 @@ const UploadJustificantesModal = ({ open, onClose, solicitud, onSuccess }) => {
  const [files, setFiles] = useState([]);
  const [uploading, setUploading] = useState(false);
 
+ const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB — debe coincidir con el límite de multer en el backend
+ const ALLOWED_EXT = [".pdf", ".jpg", ".jpeg", ".png"];
+
  const justificantesRequeridos = solicitud?.justificacion_requerida || [];
  const normalizedStatus = String(solicitud?.status || "").toLowerCase();
  const normalizedTipoPermiso = String(solicitud?.tipo_permiso || "").toLowerCase();
@@ -34,6 +37,18 @@ const UploadJustificantesModal = ({ open, onClose, solicitud, onSuccess }) => {
  };
 
  const handleFileChange = (tipo, file) => {
+ if (file) {
+ const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+ if (!ALLOWED_EXT.includes(ext)) {
+ showToast("Formato no permitido. Solo PDF, JPG o PNG.", "warning");
+ return;
+ }
+ if (file.size > MAX_FILE_BYTES) {
+ const mb = (file.size / (1024 * 1024)).toFixed(1);
+ showToast(`El archivo pesa ${mb} MB y supera el máximo de 10 MB. Comprímelo o sube uno más liviano.`, "warning");
+ return;
+ }
+ }
  setFiles((prev) => {
  const filtered = prev.filter((f) => f.tipo !== tipo);
  if (file) {

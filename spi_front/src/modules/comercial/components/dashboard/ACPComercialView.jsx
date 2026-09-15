@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { FiPhone, FiUserCheck, FiFileText, FiClipboard } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
+import BusinessCasePendingWidget from "../../../../core/ui/widgets/BusinessCasePendingWidget";
 
 const ACPComercialView = ({ onRefresh }) => {
   const navigate = useNavigate();
@@ -21,6 +22,10 @@ const ACPComercialView = ({ onRefresh }) => {
           </button>
         }
       />
+
+      <div className="mb-6">
+        <BusinessCasePendingWidget />
+      </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card

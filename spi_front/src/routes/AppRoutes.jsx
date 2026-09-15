@@ -1,36 +1,27 @@
 import React, { Suspense, lazy } from "react";
 import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 
-
-// 🧠 Contextos y protecciones
 import { ProtectedRoute } from "../core/auth/ProtectedRoute";
 import { RoleRedirect } from "../core/auth/ProtectedRoute";
 
-// 🏠 Layouts
 import PublicLayout from "../core/layout/PublicLayout";
 import DashboardLayout from "../core/layout/DashboardLayout";
 
-// 🪪 Páginas públicas
 import Login from "../modules/shared/pages/Login";
 import LoginCallback from "../modules/shared/pages/LoginCallback";
-import FirstLoginSignature from "../modules/shared/pages/FirstLoginSignature";
 import NotFound from "../modules/shared/pages/NotFound";
 import Unauthorized from "../modules/shared/pages/Unauthorized";
 import RolePending from "../modules/shared/pages/RolePending";
 import AttendanceAction from "../modules/shared/pages/AttendanceAction";
+import MobileShortcuts from "../modules/shared/pages/MobileShortcuts";
 
-// 🧭 Dashboards por rol
 import LinksInteres from "../modules/shared/pages/LinksInteres";
 
-// 🛒 Workspace de Compras Unificado
-import PurchasesWorkspace from "../modules/shared/purchases-workspace/PurchasesWorkspace";
-
-// 📋 Páginas de Talento Humano
 import PermisosPage from "../modules/shared/solicitudes/pages/PermisosPage";
+import BirthdayBenefitRedeemPage from "../modules/talento/pages/BirthdayBenefitRedeemPage";
 import CollaboratorCommandCenter from "../modules/talento/pages/CollaboratorCommandCenter";
 import PeopleAdminHub from "../modules/talento/pages/PeopleAdminHub";
 
-// 🧾 Páginas compartidas
 import RequestsPage from "../modules/RequestsPage";
 import MantenimientosPage from "../modules/MantenimientosPage";
 import DocumentsPage from "../modules/DocumentsPage";
@@ -40,13 +31,12 @@ import MyProfilePage from "../modules/profile/MyProfilePage";
 import AuditPrepPage from "../modules/audit-prep/AuditPrepPage";
 import Modal from "../core/ui/components/Modal";
 
-// 📝 Sistema de Firma Digital
 import DocumentSigner from "../modules/signature/components/DocumentSigner";
 import DocumentVerification from "../modules/signature/pages/DocumentVerification";
 import SignatureDashboard from "../modules/signature/pages/SignatureDashboard";
+import SignatureWorkflowVerificationPage from "../modules/signature/pages/SignatureWorkflowVerificationPage";
 
-
-// Lazy loaded components
+const PurchasesWorkspace = lazy(() => import("../modules/shared/purchases-workspace/PurchasesWorkspace"));
 const DashboardGerencia = lazy(() => import("../modules/gerencia/Dashboard"));
 const PurchasesAlbumPage = lazy(() => import("../modules/gerencia/PurchasesAlbumPage"));
 const DashboardFinanzas = lazy(() => import("../modules/finanzas/Dashboard"));
@@ -55,12 +45,15 @@ const DashboardComercial = lazy(() => import("../modules/comercial/pages/Dashboa
 const SolicitudesPage = lazy(() => import("../modules/comercial/pages/Solicitudes"));
 const ClientesPage = lazy(() => import("../modules/comercial/pages/Clientes"));
 const NewClientRequest = lazy(() => import("../modules/comercial/pages/NewClientRequest"));
-const EquipmentPurchasesPage = lazy(() => import("../modules/comercial/pages/EquipmentPurchases"));
 const DeliveryCeilingsPage = lazy(() => import("../modules/comercial/pages/DeliveryCeilings"));
-const ACPEquipmentPurchasesPage = lazy(() => import("../modules/comercial/pages/ACPEquipmentPurchases"));
 const BusinessCaseWorkspace = lazy(() => import("../modules/comercial/pages/BusinessCaseWorkspace"));
 const BusinessCaseObservabilityDashboard = lazy(() => import("../modules/comercial/pages/BusinessCaseObservabilityDashboard"));
+const OpportunitiesPage = lazy(() => import("../modules/comercial/pages/OpportunitiesPage"));
+const OpportunityWorkspace = lazy(() => import("../modules/comercial/pages/OpportunityWorkspace"));
+const FamSheetsDashboardPage = lazy(() => import("../modules/comercial/pages/FamSheetsDashboardPage"));
+const EquipmentWorkspace = lazy(() => import("../modules/equipment/pages/EquipmentWorkspace"));
 const PlanificacionMensual = lazy(() => import("../modules/comercial/pages/PlanificacionMensual"));
+const ClientesPlanShell    = lazy(() => import("../modules/comercial/pages/ClientesPlanShell"));
 const AprobacionCronogramas = lazy(() => import("../modules/comercial/pages/AprobacionCronogramas"));
 const DashboardServicio = lazy(() => import("../modules/servicio/pages/Dashboard"));
 const ServicioMantenimientos = lazy(() => import("../modules/servicio/pages/Mantenimientos"));
@@ -68,19 +61,26 @@ const ServicioSolicitudes = lazy(() => import("../modules/servicio/pages/Solicit
 const ServicioDisponibilidad = lazy(() => import("../modules/servicio/pages/Disponibilidad"));
 const ServicioCapacitaciones = lazy(() => import("../modules/servicio/pages/Capacitaciones"));
 const ServicioEquipos = lazy(() => import("../modules/servicio/pages/Equipos"));
-const ServicioAprobaciones = lazy(() => import("../modules/servicio/pages/Aprobaciones"));
+// TODO: modules/servicio/pages/Aprobaciones.jsx aun no existe en el repo -- ruta
+// comentada temporalmente para no romper el build. Reactivar cuando el archivo
+// este creado (ver Route mas abajo, tambien comentada).
+// const ServicioAprobaciones = lazy(() => import("../modules/servicio/pages/Aprobaciones"));
 const ServicioAplicaciones = lazy(() => import("../modules/servicio/pages/Aplicaciones"));
 const ServicioDesinfeccion = lazy(() => import("../modules/servicio/pages/Desinfeccion"));
 const ServicioAsistencia = lazy(() => import("../modules/servicio/pages/Asistencia"));
 const ServicioVerificacionEquipos = lazy(() => import("../modules/servicio/pages/VerificacionEquipos"));
-const ServicioTechnicalProcedureWorkspace = lazy(() => import("../modules/servicio/pages/TechnicalProcedureWorkspace"));
 const ServicioExternalCasesWorkspace = lazy(() => import("../modules/servicio/pages/ExternalCasesWorkspace"));
-const ServicioPrivatePurchaseDeliveries = lazy(() => import("../modules/servicio/pages/PrivatePurchaseDeliveries"));
-const ServicioRetiroEquipos = lazy(() => import("../modules/servicio/pages/RetiroEquipos"));
-const TecnicoPrivatePurchases = lazy(() => import("../modules/servicio/pages/TecnicoPrivatePurchases"));
 const DashboardTalento = lazy(() => import("../modules/talento/Dashboard"));
 const DashboardTI = lazy(() => import("../modules/talento/DashboardTI"));
 const TicketsWorkspace = lazy(() => import("../modules/ti/pages/TicketsWorkspace"));
+const TIDeviceManagementPage = lazy(() => import("../modules/ti/pages/TIDeviceManagementPage"));
+const TIModuleAccessPage = lazy(() => import("../modules/ti/pages/TIModuleAccessPage"));
+const TIShortcutTokenPage = lazy(() => import("../modules/ti/pages/TIShortcutTokenPage"));
+const TIAssetsFinancieroPage = lazy(() => import("../modules/ti/pages/TIAssetsFinancieroPage"));
+const CollabDeliveriesFinancieroPage = lazy(() => import("../modules/collab/pages/CollabDeliveriesFinancieroPage"));
+const CollabDeliveriesGerenciaPage   = lazy(() => import("../modules/collab/pages/CollabDeliveriesGerenciaPage"));
+const TIActasPage = lazy(() => import("../modules/ti/pages/TIActasPage"));
+const SignatureWorkflowDetailPage = lazy(() => import("../modules/signature/pages/SignatureWorkflowDetailPage"));
 const DashboardOperaciones = lazy(() => import("../modules/operaciones/Dashboard"));
 const DashboardCalidad = lazy(() => import("../modules/calidad/Dashboard"));
 const CA0101Workspace = lazy(() => import("../modules/calidad/pages/CA0101Workspace"));
@@ -103,11 +103,38 @@ const CA0117Workspace = lazy(() => import("../modules/calidad/pages/CA0117Worksp
 const DashboardLogistica = lazy(() => import("../modules/logistica/Dashboard"));
 const ClientRequests = lazy(() => import("../modules/backoffice/pages/ClientRequests"));
 const ClientRequestReview = lazy(() => import("../modules/backoffice/pages/ClientRequestReview"));
-const PrivatePurchasesPage = lazy(() => import("../modules/backoffice/pages/PrivatePurchases"));
 const DeterminationsCatalog = lazy(() => import("../modules/operaciones/pages/DeterminationsCatalog"));
-const OperacionesPrivatePurchases = lazy(() => import("../modules/operaciones/pages/OperacionesPrivatePurchases"));
-const LogisticaPrivatePurchases = lazy(() => import("../modules/logistica/pages/LogisticaPrivatePurchases"));
 const AsistenciaReportes = lazy(() => import("../modules/talento/pages/AsistenciaReportes"));
+const TechnicalTestResponsiblePage = lazy(() => import("../modules/talento/pages/TechnicalTestResponsiblePage"));
+const DocumentosReportePage = lazy(() => import("../modules/talento/pages/DocumentosReportePage"));
+
+const CapacitacionesWorkspace = lazy(() => import("../modules/capacitaciones/pages/CapacitacionesWorkspace"));
+const CapacitacionDetailPage  = lazy(() => import("../modules/capacitaciones/pages/CapacitacionDetailPage"));
+
+const ExtUserDashboard = lazy(() => import("../modules/ext-users/pages/ExtUserDashboard"));
+
+const CrmDashboardPage     = lazy(() => import("../modules/crm-fam/pages/CrmDashboardPage"));
+const AccountsPage         = lazy(() => import("../modules/crm-fam/pages/AccountsPage"));
+const AccountDetailPage    = lazy(() => import("../modules/crm-fam/pages/AccountDetailPage"));
+const ContactsPage         = lazy(() => import("../modules/crm-fam/pages/ContactsPage"));
+const LeadsPage            = lazy(() => import("../modules/crm-fam/pages/LeadsPage"));
+const CrmOpportunitiesPage = lazy(() => import("../modules/crm-fam/pages/OpportunitiesPage"));
+const OpportunityDetailPage= lazy(() => import("../modules/crm-fam/pages/OpportunityDetailPage"));
+const BlueSheetPage        = lazy(() => import("../modules/crm-fam/pages/BlueSheetPage"));
+const CrmActivitiesPage    = lazy(() => import("../modules/crm-fam/pages/CrmActivitiesPage"));
+const CrmReportsPage       = lazy(() => import("../modules/crm-fam/pages/CrmReportsPage"));
+const CrmSettingsPage      = lazy(() => import("../modules/crm-fam/pages/CrmSettingsPage"));
+const CrmShell             = lazy(() => import("../modules/crm-fam/pages/CrmShell"));
+const WorkManagementPage   = lazy(() => import("../modules/work-management/pages/WorkManagementPage"));
+
+const AllNotificationsPage    = lazy(() => import("../modules/notifications/pages/AllNotificationsPage"));
+const KickoffPage             = lazy(() => import("../modules/kickoff/pages/KickoffPage"));
+const KickoffPresentationPage = lazy(() => import("../modules/kickoff/pages/KickoffPresentationPage"));
+const KickoffQuestionRoomPage = lazy(() => import("../modules/kickoff/pages/KickoffQuestionRoomPage"));
+const KickoffQREntryPage      = lazy(() => import("../modules/kickoff/pages/KickoffQREntryPage"));
+const FamDaysPage             = lazy(() => import("../modules/famdays/pages/FamDaysPage"));
+const FamDaysQREntryPage      = lazy(() => import("../modules/famdays/pages/FamDaysQREntryPage"));
+const WorldCup2026PortalPage  = lazy(() => import("../modules/world-cup-2026/pages/WorldCup2026PortalPage"));
 
 const routeFallback = (
   <div className="flex justify-center items-center min-h-[50vh]">
@@ -127,15 +154,31 @@ const commercialDashboardRoles = [
 ];
 
 const peopleNavigationRoles = [
-  "talento_humano",
-  "jefe_talento_humano",
-  "gerencia",
   "ti",
   "jefe_ti",
-  "admin_ti",
-  "admin",
-  "administrador",
 ];
+
+// Las paginas legacy de compras (equipment-purchases, acp-compras,
+// backoffice|logistica|operaciones/private-purchases) redirigen al panel
+// unificado. Traduce el param legacy de id (requestId para publicas,
+// purchaseId para privadas) al requestId/requestType que PurchasesWorkspace
+// usa para el deep-link, para que abrir un enlace de notificacion siga
+// llevando al expediente correcto en vez de solo a la lista general.
+const makeLegacyPurchaseRedirect = (purchaseType, legacyIdParam) => () => {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const legacyId = params.get(legacyIdParam);
+  params.delete(legacyIdParam);
+  params.set("tab", purchaseType);
+  if (legacyId) {
+    params.set("requestId", legacyId);
+    params.set("requestType", purchaseType);
+  }
+  return <Navigate to={`/dashboard/purchases/workspace?${params.toString()}`} replace />;
+};
+
+const LegacyPublicPurchaseRedirect = makeLegacyPurchaseRedirect("public", "requestId");
+const LegacyPrivatePurchaseRedirect = makeLegacyPurchaseRedirect("private", "purchaseId");
 
 const AppRoutes = () => {
   const location = useLocation();
@@ -164,23 +207,25 @@ const AppRoutes = () => {
   return (
     <Suspense fallback={routeFallback}>
       <Routes location={backgroundLocation || location}>
-      {/* Ruta directa para /registro-en-proceso (fallback duro) */}
-      <Route path="/registro-en-proceso" element={<RolePending />} />
-      {/* =======================================
-          🌐 RUTAS PÚBLICAS
-      ======================================= */}
+      {}
       <Route element={<PublicLayout />}>
         <Route path="/login" element={<Login />} />
         <Route path="/login/callback" element={<LoginCallback />} />
         <Route path="/unauthorized" element={<Unauthorized />} />
         <Route path="/registro-en-proceso" element={<RolePending />} />
+        <Route path="/predicciones/mundial-2026" element={<WorldCup2026PortalPage />} />
 
-        {/* 📝 Verificación pública de documentos firmados */}
+        {}
         <Route path="/verificar/:token" element={<DocumentVerification />} />
+        <Route path="/verificar/famsign/:token" element={<SignatureWorkflowVerificationPage />} />
+        {}
+        <Route path="/kickoff/sala/:token" element={<KickoffQREntryPage />} />
+        <Route path="/famdays/sala/:token" element={<FamDaysQREntryPage />} />
+        <Route path="/cumpleanos/canje/:token" element={<BirthdayBenefitRedeemPage />} />
       </Route>
 
       {/* =======================================
-          🔒 RUTAS PRIVADAS (requieren token JWT)
+          ðŸ”’ RUTAS PRIVADAS (requieren token JWT)
       ======================================= */}
       <Route
         element={
@@ -198,13 +243,20 @@ const AppRoutes = () => {
               "acp_comercial",
               "servicio_tecnico",
               "jefe_tecnico",
+              "jefe_servicio",
               "jefe_servicio_tecnico",
+              "tecnico",
+              "ing_servicio",
+              "esp_app",
+              "ing_servicio_ext",
+              "esp_app_ext",
               "talento_humano",
               "ti",
               "jefe_ti",
               "admin_ti",
               "operaciones",
               "jefe_operaciones",
+              "jefe_de_operaciones",
               "logistica",
               "jefe_logistica",
               "calidad",
@@ -213,10 +265,12 @@ const AppRoutes = () => {
           />
         }
       >
-        {/* Redirección automática según rol */}
+        {/* RedirecciÃ³n automÃ¡tica segÃºn rol */}
         <Route path="/dashboard" element={<RoleRedirect />} />
 
-        {/* 📱 Atajos de asistencia (requiere login previo) */}
+        {/* ðŸ“± Atajos de asistencia (requiere login previo) */}
+        <Route path="/mobile-shortcuts" element={<MobileShortcuts />} />
+        <Route path="/asistencia/mobile-shortcuts" element={<MobileShortcuts />} />
         <Route path="/asistencia/marcar/:action" element={<AttendanceAction />} />
 
         {/* Layout principal */}
@@ -239,15 +293,22 @@ const AppRoutes = () => {
             }
           >
             <Route path="/dashboard/comercial/solicitudes" element={<SolicitudesPage />} />
-            <Route path="/dashboard/comercial/clientes" element={<ClientesPage />} />
+            <Route element={<ClientesPlanShell />}>
+              <Route path="/dashboard/comercial/clientes" element={<ClientesPage />} />
+              <Route path="/dashboard/comercial/planificacion" element={<PlanificacionMensual />} />
+            </Route>
             <Route path="/dashboard/comercial/new-client-request" element={<NewClientRequest />} />
-            <Route path="/dashboard/comercial/equipment-purchases" element={<EquipmentPurchasesPage />} />
+            <Route path="/dashboard/comercial/equipment-purchases" element={<LegacyPublicPurchaseRedirect />} />
             <Route path="/dashboard/comercial/delivery-ceilings" element={<DeliveryCeilingsPage />} />
-            <Route path="/dashboard/comercial/planificacion" element={<PlanificacionMensual />} />
+            <Route path="/dashboard/comercial/famsheets" element={<OpportunitiesPage />} />
+            <Route path="/dashboard/comercial/famsheets/dashboard" element={<FamSheetsDashboardPage />} />
+            <Route path="/dashboard/comercial/famsheets/:id" element={<OpportunityWorkspace />} />
+            <Route path="/dashboard/comercial/opportunities" element={<Navigate to="/dashboard/comercial/famsheets" replace />} />
+            <Route path="/dashboard/comercial/opportunities/:id" element={<OpportunityWorkspace />} />
           </Route>
 
           <Route element={<ProtectedRoute allowedRoles={["acp_comercial"]} />}>
-            <Route path="/dashboard/comercial/acp-compras" element={<ACPEquipmentPurchasesPage />} />
+            <Route path="/dashboard/comercial/acp-compras" element={<LegacyPublicPurchaseRedirect />} />
           </Route>
 
           <Route element={<ProtectedRoute allowedRoles={["jefe_comercial", "gerencia", "gerencia_general", "admin", "administrador"]} />}>
@@ -258,16 +319,31 @@ const AppRoutes = () => {
             element={
               <ProtectedRoute
                 allowedRoles={[
+                  // Debe coincidir con businessCaseRoles del backend
+                  // (ver CONTEXT.md del modulo business-case) -- mantener
+                  // sincronizado para no bloquear a un rol que el backend
+                  // si autoriza.
                   "comercial",
+                  "asesor_comercial",
+                  "analista_comercial",
                   "acp_comercial",
+                  "backoffice",
+                  "backoffice_comercial",
                   "jefe_comercial",
+                  "jefe_de_comercial",
                   "gerencia",
                   "gerencia_general",
                   "operaciones",
                   "jefe_operaciones",
+                  "jefe_de_operaciones",
                   "servicio_tecnico",
                   "jefe_tecnico",
+                  "jefe_servicio",
                   "jefe_servicio_tecnico",
+                  "ing_servicio",
+                  "esp_app",
+                  "jefe_financiero",
+                  "jefe_ti",
                 ]}
               />
             }
@@ -298,22 +374,65 @@ const AppRoutes = () => {
             />
           </Route>
 
+          {/* Dashboard usuarios externos (ing_servicio_ext / esp_app_ext) */}
+          <Route
+            element={<ProtectedRoute allowedRoles={["ing_servicio_ext", "esp_app_ext"]} strictRoles />}
+          >
+            <Route path="/dashboard/ext" element={<ExtUserDashboard />} />
+          </Route>
+
           <Route path="/dashboard/servicio-tecnico" element={<DashboardServicio />} />
+          <Route path="/dashboard/servicio-tecnico/cronograma" element={<ServicioDisponibilidad mode="cronograma" />} />
+          <Route path="/dashboard/servicio-tecnico/inspecciones" element={<Navigate to="/dashboard/servicio-tecnico/solicitudes" replace />} />
+          <Route path="/dashboard/servicio-tecnico/correctivos" element={<ServicioMantenimientos initialTab="corrective" />} />
           <Route path="/dashboard/servicio-tecnico/mantenimientos" element={<ServicioMantenimientos />} />
           <Route path="/dashboard/servicio-tecnico/solicitudes" element={<ServicioSolicitudes />} />
           <Route path="/dashboard/servicio-tecnico/disponibilidad" element={<ServicioDisponibilidad />} />
           <Route path="/dashboard/servicio-tecnico/capacitaciones" element={<ServicioCapacitaciones />} />
           <Route path="/dashboard/servicio-tecnico/equipos" element={<ServicioEquipos />} />
-          <Route path="/dashboard/servicio-tecnico/aprobaciones" element={<ServicioAprobaciones />} />
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "comercial",
+                  "jefe_comercial",
+                  "backoffice_comercial",
+                  "acp_comercial",
+                  "servicio_tecnico",
+                  "tecnico",
+                  "ing_servicio",
+                  "esp_app",
+                  "jefe_tecnico",
+                  "jefe_servicio",
+                  "jefe_servicio_tecnico",
+                  "operaciones",
+                  "jefe_operaciones",
+                  "logistica",
+                  "jefe_logistica",
+                  "gerencia",
+                  "gerencia_general",
+                  "ti",
+                  "admin_ti",
+                  "admin",
+                  "administrador",
+                ]}
+              />
+            }
+          >
+            <Route path="/dashboard/equipos" element={<EquipmentWorkspace />} />
+            <Route path="/dashboard/equipos/activos" element={<EquipmentWorkspace />} />
+          </Route>
+          {/* TODO: reactivar junto con ServicioAprobaciones arriba cuando exista Aprobaciones.jsx */}
+          {/* <Route path="/dashboard/servicio-tecnico/aprobaciones" element={<ServicioAprobaciones />} /> */}
           <Route path="/dashboard/servicio-tecnico/aplicaciones" element={<ServicioAplicaciones />} />
           <Route path="/dashboard/servicio-tecnico/desinfeccion" element={<ServicioDesinfeccion />} />
           <Route path="/dashboard/servicio-tecnico/asistencia" element={<ServicioAsistencia />} />
           <Route path="/dashboard/servicio-tecnico/verificacion" element={<ServicioVerificacionEquipos />} />
           <Route
-            element={<ProtectedRoute allowedRoles={["servicio_tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "tecnico"]} />}
+            element={<ProtectedRoute allowedRoles={["servicio_tecnico", "jefe_tecnico", "jefe_servicio", "jefe_servicio_tecnico", "tecnico", "ing_servicio", "esp_app"]} />}
           >
-            <Route path="/dashboard/servicio-tecnico/workspace-procedimiento" element={<ServicioTechnicalProcedureWorkspace />} />
-            <Route path="/dashboard/servicio-tecnico/retiros" element={<ServicioRetiroEquipos />} />
+            <Route path="/dashboard/servicio-tecnico/workspace-procedimiento" element={<Navigate to="/dashboard/purchases/workspace?tab=public&subtab=tecnica" replace />} />
+            <Route path="/dashboard/servicio-tecnico/retiros" element={<Navigate to="/dashboard/servicio-tecnico/solicitudes" replace />} />
           </Route>
           <Route
             element={
@@ -321,7 +440,10 @@ const AppRoutes = () => {
                 allowedRoles={[
                   "servicio_tecnico",
                   "tecnico",
+                  "ing_servicio",
+                  "esp_app",
                   "jefe_tecnico",
+                  "jefe_servicio",
                   "jefe_servicio_tecnico",
                   "ti",
                   "jefe_ti",
@@ -336,10 +458,9 @@ const AppRoutes = () => {
             <Route path="/dashboard/ti/casos-externos" element={<ServicioExternalCasesWorkspace />} />
           </Route>
           <Route
-            element={<ProtectedRoute allowedRoles={["jefe_tecnico", "jefe_servicio_tecnico", "tecnico"]} />}
+            element={<ProtectedRoute allowedRoles={["jefe_tecnico", "jefe_servicio", "jefe_servicio_tecnico", "tecnico", "ing_servicio"]} />}
           >
-            <Route path="/dashboard/servicio-tecnico/entregas-privadas" element={<ServicioPrivatePurchaseDeliveries />} />
-            <Route path="/dashboard/servicio-tecnico/compras-privadas" element={<TecnicoPrivatePurchases />} />
+            <Route path="/dashboard/servicio-tecnico/entregas-privadas" element={<Navigate to="/dashboard/purchases/workspace?tab=private" replace />} />
           </Route>
           <Route
             element={
@@ -354,6 +475,26 @@ const AppRoutes = () => {
           <Route element={<ProtectedRoute allowedRoles={["ti", "jefe_ti", "admin_ti"]} />}>
             <Route path="/dashboard/ti" element={<DashboardTI />} />
             <Route path="/dashboard/ti/workspace" element={<TicketsWorkspace />} />
+            <Route path="/dashboard/ti/dispositivos" element={<TIDeviceManagementPage />} />
+            <Route path="/dashboard/ti/actas" element={<TIActasPage />} />
+            <Route path="/dashboard/ti/mantenimientos" element={<Navigate to="/dashboard/ti/dispositivos" replace />} />
+            <Route path="/dashboard/ti/shortcut-token" element={<TIShortcutTokenPage />} />
+          </Route>
+          <Route element={<ProtectedRoute allowedRoles={["jefe_ti", "admin_ti"]} />}>
+            <Route path="/dashboard/ti/modulos" element={<TIModuleAccessPage />} />
+            <Route path="/dashboard/ti/modulos/*" element={<TIModuleAccessPage />} />
+          </Route>
+          <Route element={<ProtectedRoute allowedRoles={[
+            "financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador",
+            "ti", "jefe_ti", "admin_ti", "gerencia", "gerencia_general",
+          ]} />}>
+            <Route path="/dashboard/ti/activos" element={<TIAssetsFinancieroPage />} />
+          </Route>
+          <Route element={<ProtectedRoute allowedRoles={["financiero", "jefe_financiero", "talento_humano", "jefe_tecnico", "jefe_servicio"]} />}>
+            <Route path="/dashboard/collab/entregas" element={<CollabDeliveriesFinancieroPage />} />
+          </Route>
+          <Route element={<ProtectedRoute allowedRoles={["gerencia_general", "gerencia"]} />}>
+            <Route path="/dashboard/collab/resumen" element={<CollabDeliveriesGerenciaPage />} />
           </Route>
           <Route path="/dashboard/operaciones" element={<DashboardOperaciones />} />
           <Route path="/dashboard/logistica" element={<DashboardLogistica />} />
@@ -375,22 +516,57 @@ const AppRoutes = () => {
           <Route path="/dashboard/calidad/auditorias" element={<CA0115Workspace />} />
           <Route path="/dashboard/calidad/muestreo" element={<CA0116Workspace />} />
           <Route path="/dashboard/calidad/tecnovigilancia" element={<CA0117Workspace />} />
-          <Route path="/dashboard/clientes" element={<ClientesPage />} />
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "comercial",
+                  "jefe_comercial",
+                  "backoffice_comercial",
+                  "acp_comercial",
+                  "gerencia",
+                  "gerencia_general",
+                  "operaciones",
+                  "jefe_operaciones",
+                  "jefe_de_operaciones",
+                  "admin",
+                  "administrador",
+                  "ti",
+                ]}
+              />
+            }
+          >
+            <Route path="/dashboard/clientes" element={<ClientesPage />} />
+          </Route>
           <Route path="/dashboard/operaciones/determinaciones" element={<DeterminationsCatalog />} />
           <Route path="/dashboard/links-interes" element={<LinksInteres />} />
 
           {/* Subrutas Operaciones - Compras Privadas */}
-          <Route element={<ProtectedRoute allowedRoles={["jefe_operaciones"]} />}>
-            <Route path="/dashboard/operaciones/private-purchases" element={<OperacionesPrivatePurchases />} />
+          <Route element={<ProtectedRoute allowedRoles={["jefe_operaciones", "jefe_de_operaciones"]} />}>
+            <Route path="/dashboard/operaciones/clientes" element={<ClientesPage />} />
+            <Route path="/dashboard/operaciones/private-purchases" element={<LegacyPrivatePurchaseRedirect />} />
           </Route>
 
-          {/* Subrutas Logística - Compras Privadas */}
+          {/* Subrutas LogÃ­stica - Compras Privadas */}
           <Route element={<ProtectedRoute allowedRoles={["jefe_logistica"]} />}>
-            <Route path="/dashboard/logistica/private-purchases" element={<LogisticaPrivatePurchases />} />
+            <Route path="/dashboard/logistica/private-purchases" element={<LegacyPrivatePurchaseRedirect />} />
           </Route>
+
+          {/* Pruebas tÃ©cnicas asignadas â€” accesible para cualquier usuario autenticado */}
+          <Route path="/dashboard/talento-humano/pruebas-tecnicas" element={<TechnicalTestResponsiblePage />} />
+
+          {/* Capacitaciones */}
+          <Route path="/dashboard/capacitaciones" element={<CapacitacionesWorkspace />} />
+          <Route path="/dashboard/capacitaciones/:id" element={<CapacitacionDetailPage />} />
 
           {/* Subrutas Talento Humano */}
+          <Route
+            element={<ProtectedRoute allowedRoles={["talento_humano", "gerencia_general"]} />}
+          >
+            <Route path="/dashboard/talento-humano/reporte-documentacion" element={<DocumentosReportePage />} />
+          </Route>
           <Route path="/dashboard/talento-humano/command-center" element={<CollaboratorCommandCenter />} />
+          <Route path="/dashboard/talento-humano/command-center/:kind" element={<CollaboratorCommandCenter />} />
           <Route path="/dashboard/talento-humano/command-center/:kind/:id" element={<CollaboratorCommandCenter />} />
           <Route path="/dashboard/talento-humano/colaboradores" element={<CollaboratorCommandCenter initialView="colaboradores" />} />
           <Route path="/dashboard/talento-humano/colaboradores/:id" element={<CollaboratorCommandCenter initialView="colaboradores" />} />
@@ -456,8 +632,17 @@ const AppRoutes = () => {
                   "backoffice_comercial",
                   "servicio_tecnico",
                   "tecnico",
+                  "ing_servicio",
+                  "esp_app",
                   "jefe_tecnico",
+                  "jefe_servicio",
                   "jefe_servicio_tecnico",
+                  "ti",
+                  "jefe_ti",
+                  "talento_humano",
+                  "jefe_talento_humano",
+                  "ing_servicio_ext",
+                  "esp_app_ext",
                 ]}
               />
             }
@@ -466,7 +651,7 @@ const AppRoutes = () => {
           </Route>
           <Route path="/dashboard/talento-humano/permisos" element={<PermisosPage />} />
 
-          {/* Auditoría (solo Gerencia y TI) */}
+          {/* AuditorÃ­a (solo Gerencia y TI) */}
           <Route element={<ProtectedRoute allowedRoles={["gerencia", "gerencia_general", "gerente_general", "ti"]} />}>
             <Route path="/dashboard/auditoria" element={<Auditoria />} />
           </Route>
@@ -501,29 +686,27 @@ const AppRoutes = () => {
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/configuration" element={<ConfigurationPage />} />
           <Route path="/dashboard/mi-perfil" element={backgroundLocation ? null : profileModalElement} />
-          <Route path="/first-login-signature" element={<FirstLoginSignature />} />
+          <Route path="/dashboard/notificaciones" element={<AllNotificationsPage />} />
 
-          {/* 📝 Sistema de Firma Digital */}
+          {/* ðŸš€ Kick Off 2026 â€” acceso controlado por backend (whitelist + is_open) */}
+          <Route element={<ProtectedRoute />}>
+            <Route path="/dashboard/kickoff" element={<KickoffPage />} />
+            <Route path="/dashboard/kickoff/presentacion/:presentationId" element={<KickoffPresentationPage />} />
+            <Route path="/dashboard/kickoff/sala/:presentationId" element={<KickoffQuestionRoomPage />} />
+            <Route path="/dashboard/famdays" element={<FamDaysPage />} />
+          </Route>
+
+          {/* ðŸ“ Sistema de Firma Digital â€” transversal: cualquier rol activo puede ser firmante */}
           <Route
-            element={
-              <ProtectedRoute
-                allowedRoles={[
-                  "gerencia",
-                  "gerencia_general",
-                  "ti",
-                  "jefe_ti",
-                  "admin_ti",
-                  "comercial",
-                  "jefe_comercial",
-                  "talento_humano",
-                  "finanzas",
-                  "calidad"
-                ]}
-              />
-            }
+            element={<ProtectedRoute allowedRoles={[]} />}
           >
-            <Route path="/dashboard/signatures" element={<SignatureDashboard />} />
+            <Route path="/dashboard/signatures" element={<Navigate to="/dashboard/signatures/inbox" replace />} />
+            <Route path="/dashboard/signatures/inbox" element={<SignatureDashboard />} />
+            <Route path="/dashboard/signatures/created" element={<SignatureDashboard />} />
+            <Route path="/dashboard/signatures/completed" element={<SignatureDashboard />} />
+            <Route path="/dashboard/signatures/all" element={<SignatureDashboard />} />
             <Route path="/dashboard/signatures/:documentId/sign" element={<DocumentSigner />} />
+            <Route path="/dashboard/signatures/workflows/:workflowId" element={<SignatureWorkflowDetailPage />} />
           </Route>
           {/* Subrutas Backoffice */}
           <Route
@@ -556,11 +739,40 @@ const AppRoutes = () => {
                 />
               )}
             >
-              <Route path="/dashboard/backoffice/private-purchases" element={<PrivatePurchasesPage />} />
+              <Route path="/dashboard/backoffice/private-purchases" element={<LegacyPrivatePurchaseRedirect />} />
             </Route>
           </Route>
 
-          {/* 🛒 Workspace de Compras Unificado */}
+          {/* â”€â”€ CRM-Fam â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "comercial","jefe_comercial","jefe_de_comercial",
+                  "backoffice_comercial","asesor_comercial","analista_comercial",
+                  "acp_comercial","backoffice",
+                  "gerencia","gerencia_general","gerente_general","director","gerente",
+                  "jefe_ti","jefe_de_ti",
+                ]}
+              />
+            }
+          >
+            <Route element={<CrmShell />}>
+              <Route path="/dashboard/crm-fam"                               element={<CrmDashboardPage />} />
+              <Route path="/dashboard/crm-fam/accounts"                     element={<AccountsPage />} />
+              <Route path="/dashboard/crm-fam/accounts/:id"                 element={<AccountDetailPage />} />
+              <Route path="/dashboard/crm-fam/contacts"                     element={<ContactsPage />} />
+              <Route path="/dashboard/crm-fam/leads"                        element={<LeadsPage />} />
+              <Route path="/dashboard/crm-fam/opportunities"                element={<CrmOpportunitiesPage />} />
+              <Route path="/dashboard/crm-fam/opportunities/:id"            element={<OpportunityDetailPage />} />
+              <Route path="/dashboard/crm-fam/opportunities/:opportunityId/blue-sheet" element={<BlueSheetPage />} />
+              <Route path="/dashboard/crm-fam/activities"                   element={<CrmActivitiesPage />} />
+              <Route path="/dashboard/crm-fam/reports"                      element={<CrmReportsPage />} />
+              <Route path="/dashboard/crm-fam/settings"                     element={<CrmSettingsPage />} />
+            </Route>
+          </Route>
+
+          {/* ðŸ›’ Workspace de Compras Unificado */}
           <Route
             element={(
               <ProtectedRoute
@@ -571,10 +783,14 @@ const AppRoutes = () => {
                   "gerencia",
                   "gerencia_general",
                   "jefe_tecnico",
+                  "jefe_servicio",
                   "jefe_servicio_tecnico",
                   "tecnico",
+                  "ing_servicio",
                   "jefe_operaciones",
+                  "operaciones",
                   "jefe_logistica",
+                  "logistica",
                   "backoffice_comercial",
                 ]}
               />
@@ -582,12 +798,50 @@ const AppRoutes = () => {
           >
             <Route path="/dashboard/purchases/workspace" element={<PurchasesWorkspace />} />
           </Route>
+
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "comercial",
+                  "jefe_comercial",
+                  "backoffice_comercial",
+                  "asesor_comercial",
+                  "analista_comercial",
+                  "acp_comercial",
+                  "backoffice",
+                  "gerencia",
+                  "gerencia_general",
+                  "gerente_general",
+                  "director",
+                  "gerente",
+                  "jefe_ti",
+                  "jefe_de_ti",
+                  "admin",
+                  "administrador",
+                  "jefe_servicio",
+                  "jefe_servicio_tecnico",
+                  "jefe_tecnico",
+                  "ing_servicio",
+                  "esp_app",
+                  "tecnico",
+                  "operaciones",
+                  "jefe_operaciones",
+                  "logistica",
+                  "jefe_logistica",
+                ]}
+              />
+            }
+          >
+            <Route path="/dashboard/work-management" element={<WorkManagementPage />} />
+            <Route path="/dashboard/work-management/projects/:projectId" element={<WorkManagementPage />} />
+          </Route>
         </Route>
 
       </Route>
 
       {/* =======================================
-          🔁 REDIRECCIONES Y ERRORES
+          ðŸ” REDIRECCIONES Y ERRORES
       ======================================= */}
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="*" element={<NotFound />} />

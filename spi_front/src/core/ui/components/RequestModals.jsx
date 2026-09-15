@@ -588,7 +588,13 @@ export const PrivatePurchaseRequestModal = ({
  }, [isOpen, showToast]);
 
  useEffect(() => {
- if (!isOpen) {
+ // Se aplica al ABRIR (no al cerrar): el modal se monta una sola vez en la
+ // página y initialOfferKind solo llega como prop actualizado después de
+ // que el usuario elige el subtipo en el selector de 2 pasos. Resetear en
+ // el cierre dejaba "venta" pegado del montaje inicial sin importar lo
+ // elegido -- el tipo (alquiler / alquiler con transferencia de dominio)
+ // debe reflejarse siempre, no solo cuando coincide con el default.
+ if (isOpen) {
  setFormData({
  client_id: "",
  client_snapshot: {

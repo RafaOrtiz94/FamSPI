@@ -1,112 +1,93 @@
 import React from "react";
-import {
- FiMapPin,
- FiCheckCircle,
- FiClock,
- FiNavigation,
- FiUsers,
-} from "react-icons/fi";
+import { FiMapPin, FiCheckCircle, FiClock, FiNavigation, FiUsers } from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
 
-const ProgressBar = ({ value }) => (
- <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
- <div
- className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-500 transition-all"
- style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
- />
- </div>
+const StatPill = ({ label, value, chipClass }) => (
+  <div className="flex flex-col gap-0.5">
+    <span className="text-xs font-medium text-[#6B7280]">{label}</span>
+    <span className={`font-mono text-2xl font-bold text-[#1F2937]`}>{value}</span>
+    {chipClass && (
+      <span className={`inline-flex w-fit rounded-full px-2 py-[2px] text-[10px] font-semibold ${chipClass}`}>
+        {value === 0 ? "Sin visitas" : value === 1 ? "1 visita" : `${value} visitas`}
+      </span>
+    )}
+  </div>
 );
 
-const StatPill = ({ label, value, accent }) => (
- <div className="flex flex-col rounded-2xl bg-white/70 backdrop-blur px-4 py-3 border border-gray-100 shadow-sm">
- <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
- {label}
- </span>
- <span className={`mt-1 text-2xl font-bold ${accent}`}>{value}</span>
- </div>
-);
-
-/**
- * Widget de cabecera para el módulo de clientes comerciales.
- * Muestra el estado diario de visitas y resalta la acción principal
- * de check‑in / check‑out, sin secciones de documentación ni solicitudes.
- */
 const MyClientRequestsWidget = ({ total, visited, pending, onFilterChange }) => {
- const progress = total ? Math.round((visited / total) * 100) : 0;
+  const progress = total ? Math.round((visited / total) * 100) : 0;
 
- return (
- <Card className="relative overflow-hidden border-0 bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-600 text-white">
- {/* halo decorativo */}
- <div className="pointer-events-none absolute inset-0 opacity-30">
- <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/20 blur-3xl" />
- <div className="absolute -left-10 bottom-0 h-32 w-32 rounded-full bg-emerald-400/30 blur-3xl" />
- </div>
+  return (
+    <Card className="border border-[#E5E7EB] bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)] sm:p-5">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-1">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-[#F3F4F6] px-3 py-1 text-xs font-semibold text-[#1F2937]">
+            <FiNavigation size={11} />
+            Ruta comercial · Check-in diario
+          </div>
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-[#1F2937]">
+            <FiUsers size={18} className="text-[#1E293B]" />
+            Tu tablero de visitas
+          </h2>
+          <p className="max-w-sm text-sm text-[#6B7280]">
+            Registra tus visitas en campo, valida ubicación y haz seguimiento de lo visitado y lo que falta.
+          </p>
+        </div>
 
- <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
- <div className="space-y-2">
- <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold">
- <FiNavigation className="h-4 w-4" />
- Ruta comercial · Check‑in diario
- </div>
- <h2 className="text-xl font-semibold flex items-center gap-2">
- <FiUsers className="h-5 w-5" />
- Tu tablero de visitas de clientes
- </h2>
- <p className="text-sm text-blue-50 max-w-md">
- Registra tus visitas en campo con un solo clic, valida ubicación
- y haz seguimiento claro de lo que ya visitaste y lo que falta.
- </p>
- </div>
+        <div className="flex flex-1 flex-col gap-4 md:max-w-sm">
+          <div className="grid grid-cols-3 gap-3 border-b border-[#E5E7EB] pb-4">
+            <StatPill label="Del día" value={total} />
+            <StatPill label="Visitados" value={visited} chipClass={visited > 0 ? "bg-[#DCFCE7] text-[#16A34A]" : undefined} />
+            <StatPill label="Pendientes" value={pending} chipClass={pending > 0 ? "bg-[#FEF3C7] text-[#D97706]" : undefined} />
+          </div>
 
- <div className="flex flex-1 flex-col gap-3 md:max-w-md">
- <div className="grid grid-cols-3 gap-3 text-gray-900">
- <StatPill label="Clientes del día" value={total} accent="text-white" />
- <StatPill label="Visitados" value={visited} accent="text-emerald-300" />
- <StatPill label="Pendientes" value={pending} accent="text-amber-200" />
- </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs text-[#6B7280]">
+              <span className="inline-flex items-center gap-1">
+                <FiClock size={11} />
+                Progreso de hoy
+              </span>
+              <span className="font-mono font-semibold text-[#1F2937]">{progress}%</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#E5E7EB]">
+              <div
+                className="h-1.5 rounded-full bg-[#2563EB] transition-all duration-300"
+                style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+              />
+            </div>
+          </div>
 
- <div className="space-y-1">
- <div className="flex items-center justify-between text-[11px] text-blue-50">
- <span className="inline-flex items-center gap-1">
- <FiClock className="h-3 w-3" />
- Progreso de la ruta de hoy
- </span>
- <span>{progress}% completado</span>
- </div>
- <ProgressBar value={progress} />
- </div>
-
- {typeof onFilterChange === "function" && (
- <div className="flex flex-wrap gap-2 text-[11px]">
- <button
- type="button"
- onClick={() => onFilterChange("all")}
- className="rounded-full bg-white/10 px-3 py-1 font-medium text-blue-50 hover:bg-white/20 transition"
- >
- Ver todos
- </button>
- <button
- type="button"
- onClick={() => onFilterChange("pending")}
- className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 px-3 py-1 font-medium text-amber-100 hover:bg-amber-400/30 transition"
- >
- <FiMapPin className="h-3 w-3" />
- Solo pendientes
- </button>
- <button
- type="button"
- onClick={() => onFilterChange("visited")}
- className="inline-flex items-center gap-1 rounded-full bg-emerald-400/20 px-3 py-1 font-medium text-emerald-100 hover:bg-emerald-400/30 transition"
- >
- <FiCheckCircle className="h-3 w-3" />
- Solo visitados
- </button>
- </div>
- )}
- </div>
- </div>
- </Card>
- );
+          {typeof onFilterChange === "function" && (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onFilterChange("all")}
+                className="cursor-pointer rounded-full bg-[#F3F4F6] px-3 py-1 text-[11px] font-semibold text-[#1F2937] transition-colors hover:bg-[#E5E7EB]"
+              >
+                Ver todos
+              </button>
+              <button
+                type="button"
+                onClick={() => onFilterChange("pending")}
+                className="inline-flex cursor-pointer items-center gap-1 rounded-full bg-[#FEF3C7] px-3 py-1 text-[11px] font-semibold text-[#D97706] transition-colors hover:bg-[#FDE68A]"
+              >
+                <FiMapPin size={10} />
+                Pendientes
+              </button>
+              <button
+                type="button"
+                onClick={() => onFilterChange("visited")}
+                className="inline-flex cursor-pointer items-center gap-1 rounded-full bg-[#DCFCE7] px-3 py-1 text-[11px] font-semibold text-[#16A34A] transition-colors hover:bg-[#BBF7D0]"
+              >
+                <FiCheckCircle size={10} />
+                Visitados
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
 };
 
 export default MyClientRequestsWidget;
