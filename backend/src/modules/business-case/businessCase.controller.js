@@ -246,7 +246,6 @@ const DETERMINATIONS_SHEET_ITEM_TYPES = {
   calibradores: ["calibrador"],
   materiales: ["consumible", "material"],
 };
-const DETERMINATIONS_UNLOCK_DECIDER_ROLES = new Set(["jefe_comercial"]);
 const INVESTMENT_VALUES_OP_ROLES = new Set([
   "jefe_operaciones",
   "jefe_de_operaciones",
@@ -478,6 +477,17 @@ function normalizePurchaseTypeForGate(value = "") {
 
 function isPublicBusinessCase(value = "") {
   return normalizePurchaseTypeForGate(value) === "public";
+}
+
+// En BC publico, acp_comercial ejerce las funciones de jefe_comercial (no hay
+// jefe_comercial dedicado a compras publicas). Se usa donde jefe_comercial
+// tiene autoridad exclusiva (decidir desbloqueos, reabrir fase comercial,
+// renovar ventana, resolver apelacion de factibilidad) para que esa autoridad
+// tambien aplique a acp_comercial cuando el BC es publico.
+function resolveComercialLeadRoles(bcPurchaseType) {
+  const roles = ["jefe_comercial"];
+  if (isPublicBusinessCase(bcPurchaseType)) roles.push("acp_comercial");
+  return roles;
 }
 
 function resolveBusinessCaseSmartObjective(businessCase = {}) {
@@ -4194,7 +4204,7 @@ async function getUIGuidance(req, res) {
       existingAppeal?.status !== "pending",
     );
     const canResolveFeasibilityAppeal = Boolean(
-      FEASIBILITY_APPEAL_RESOLVER_ROLES.has(userRole) &&
+      resolveFeasibilityAppealResolverRoles(bc?.bc_purchase_type).includes(userRole) &&
       existingAppeal?.status === "pending",
     );
 
@@ -5188,7 +5198,7 @@ async function requestDeterminationsSubsectionUnlock(req, res) {
     });
 
     try {
-      const targets = await getUsersByRoles(["jefe_comercial"]);
+      const targets = await getUsersByRoles(resolveComercialLeadRoles(businessCase?.bc_purchase_type));
       await Promise.all(
         targets.map((target) =>
           notificationManager.sendNotification({
@@ -5229,8 +5239,9 @@ async function resolveDeterminationsSubsectionUnlock(req, res) {
   try {
     const { id } = req.params;
     const role = resolveRequestRole(req);
-    if (!DETERMINATIONS_UNLOCK_DECIDER_ROLES.has(role)) {
-      return res.status(403).json({ ok: false, message: "Solo jefe_comercial puede decidir solicitudes de desbloqueo." });
+    const businessCase = await businessCaseService.getBusinessCaseById(id);
+    if (!resolveComercialLeadRoles(businessCase?.bc_purchase_type).includes(role)) {
+      return res.status(403).json({ ok: false, message: "Solo jefe_comercial (o acp_comercial en BC publico) puede decidir solicitudes de desbloqueo." });
     }
     const requestId = String(req.body?.request_id || req.body?.requestId || "").trim();
     const approve = Boolean(req.body?.approve === true || String(req.body?.decision || "").toLowerCase() === "approve");
@@ -5239,7 +5250,6 @@ async function resolveDeterminationsSubsectionUnlock(req, res) {
       return res.status(400).json({ ok: false, message: "request_id es obligatorio." });
     }
 
-    const businessCase = await businessCaseService.getBusinessCaseById(id);
     const metadata = preflowService.toObject(businessCase?.modern_bc_metadata);
     const currentGate = metadata?.determinations_gate && typeof metadata.determinations_gate === "object"
       ? { ...metadata.determinations_gate }
@@ -5331,10 +5341,10 @@ async function reopenDeterminationsCommercial(req, res) {
   try {
     const { id } = req.params;
     const role = resolveRequestRole(req);
-    if (!DETERMINATIONS_UNLOCK_DECIDER_ROLES.has(role)) {
-      return res.status(403).json({ ok: false, message: "Solo jefe_comercial puede reabrir la fase comercial de determinaciones." });
-    }
     const businessCase = await businessCaseService.getBusinessCaseById(id);
+    if (!resolveComercialLeadRoles(businessCase?.bc_purchase_type).includes(role)) {
+      return res.status(403).json({ ok: false, message: "Solo jefe_comercial (o acp_comercial en BC publico) puede reabrir la fase comercial de determinaciones." });
+    }
     const metadata = preflowService.toObject(businessCase?.modern_bc_metadata);
     const currentGate = metadata?.determinations_gate && typeof metadata.determinations_gate === "object"
       ? { ...metadata.determinations_gate }
@@ -5395,10 +5405,10 @@ async function renewDeterminationsCommercialWindow(req, res) {
   try {
     const { id } = req.params;
     const role = resolveRequestRole(req);
-    if (role !== "jefe_comercial") {
-      return res.status(403).json({ ok: false, message: "Solo jefe_comercial puede renovar la ventana comercial de determinaciones." });
-    }
     const businessCase = await businessCaseService.getBusinessCaseById(id);
+    if (!resolveComercialLeadRoles(businessCase?.bc_purchase_type).includes(role)) {
+      return res.status(403).json({ ok: false, message: "Solo jefe_comercial (o acp_comercial en BC publico) puede renovar la ventana comercial de determinaciones." });
+    }
     const currentDocument = await determinationsGateService.getCurrentDocument(id);
     const gate = determinationsGateService.buildGateInfo({ businessCase, role, currentDocument });
     if (gate.phase !== "commercial_input") {
@@ -6084,7 +6094,9 @@ async function resolvePreflowReopen(req, res) {
 // BC-16: Roles que pueden solicitar apelación de factibilidad rechazada
 const FEASIBILITY_APPEAL_REQUESTER_ROLES = new Set(["comercial", "asesor_comercial", "analista_comercial"]);
 // BC-16: Roles que pueden resolver (aprobar/rechazar) una apelación
-const FEASIBILITY_APPEAL_RESOLVER_ROLES = new Set(["jefe_comercial", "gerencia", "gerencia_general"]);
+function resolveFeasibilityAppealResolverRoles(bcPurchaseType) {
+  return [...resolveComercialLeadRoles(bcPurchaseType), "gerencia", "gerencia_general"];
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // BC-17: Helpers para pausar/desbloquear/cancelar expedientes vinculados al BC
@@ -6287,11 +6299,11 @@ async function requestFeasibilityAppeal(req, res) {
     // BC-17: Pausar los expedientes vinculados mientras la apelación está pendiente
     await pauseLinkedExpedients(id);
 
-    // Notificar a jefe_comercial y gerencia
+    // Notificar a jefe_comercial (o acp_comercial en BC publico) y gerencia
     try {
       const managers = await db.query(
         `SELECT id FROM users WHERE active = true AND lower(role) = ANY($1::text[])`,
-        [["jefe_comercial", "gerencia", "gerencia_general"]],
+        [resolveFeasibilityAppealResolverRoles(bc?.bc_purchase_type)],
       );
       for (const mgr of managers.rows) {
         notificationManager.sendNotification({
@@ -6329,12 +6341,12 @@ async function resolveFeasibilityAppeal(req, res) {
     const { approved, notes } = req.body || {};
     const userRole = String(req.user?.role || "").toLowerCase();
 
-    if (!FEASIBILITY_APPEAL_RESOLVER_ROLES.has(userRole)) {
-      return res.status(403).json({ ok: false, message: "No tienes permisos para resolver apelaciones de factibilidad." });
-    }
-
     const bc = await businessCaseService.getBusinessCaseById(id);
     if (!bc) return res.status(404).json({ ok: false, message: "Business Case no encontrado." });
+
+    if (!resolveFeasibilityAppealResolverRoles(bc?.bc_purchase_type).includes(userRole)) {
+      return res.status(403).json({ ok: false, message: "No tienes permisos para resolver apelaciones de factibilidad." });
+    }
 
     const metadata = preflowService.toObject(bc?.modern_bc_metadata);
     const appeal = metadata?.feasibility_appeal;

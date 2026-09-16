@@ -1396,16 +1396,22 @@ function getOfferPdfFooterHeight() {
   return 170;
 }
 
-async function getJefeComercialName() {
+async function getJefeComercialName(isPublicBc = false) {
+  // En BC publico acp_comercial ejerce las funciones de jefe_comercial (no
+  // hay jefe_comercial dedicado a compras publicas) -- debe poder aparecer
+  // como firmante en el PDF de oferta igual que jefe_comercial.
+  const roles = isPublicBc
+    ? ["jefe_comercial", "jefe_de_comercial", "acp_comercial"]
+    : ["jefe_comercial", "jefe_de_comercial"];
   const { rows } = await db.query(
     `SELECT fullname
        FROM users
       WHERE active = true
         AND lower(role) = ANY($1::text[])
         AND ($2 = '' OR lower(email) <> $2)
-      ORDER BY id ASC
+      ORDER BY CASE WHEN $3::boolean AND lower(role) = 'acp_comercial' THEN 0 ELSE 1 END, id ASC
       LIMIT 1`,
-    [["jefe_comercial", "jefe_de_comercial"], SYSTEM_NOTIFICATION_EMAIL],
+    [roles, SYSTEM_NOTIFICATION_EMAIL, isPublicBc],
   );
   if (!rows[0]?.fullname) {
     logger.warn("No se encontro ningun usuario activo con rol jefe_comercial; el PDF de oferta usara el rotulo generico");
@@ -1850,7 +1856,8 @@ async function buildFormalOfferPdfBuffer({ context, offer, templatePayload, pric
   };
   const clientName = normalizedPayload.clientName || context?.client_name || "";
 
-  const jefeComercialName = await getJefeComercialName().catch((error) => {
+  const isPublicBc = String(context?.bc_purchase_type || "").toLowerCase() === "public";
+  const jefeComercialName = await getJefeComercialName(isPublicBc).catch((error) => {
     logger.warn({ error: error?.message || String(error) }, "No se pudo resolver el nombre de Jefe Comercial para el PDF de oferta");
     return null;
   });

@@ -80,11 +80,26 @@ async function findFolder(name, parentId) {
   }
 }
 
+// ponytail: ensureFolderPath resuelve rutas de varios niveles (ej. 4 niveles
+// de asistencia = hasta 8 llamadas a la API de Drive por request, siempre,
+// sin cache) -- bajo carga esto dispara el rate-limit de Google (que a veces
+// responde con HTML de bloqueo "automated queries" en vez de un error JSON).
+// La mayoria de esas rutas son las mismas carpetas repetidas (mismo dia,
+// mismo usuario) entre requests consecutivos, asi que un cache corto en
+// memoria evita la mayoria de las llamadas redundantes.
+const ENSURE_FOLDER_CACHE_TTL_MS = 5 * 60 * 1000;
+const ensureFolderCache = new Map(); // `${parentId}::${name}` -> { folder, expiresAt }
+
 /** ♻️ Obtiene o crea carpeta dentro de un parent */
 async function ensureFolder(name, parentId) {
+  const cacheKey = `${parentId}::${name}`;
+  const cached = ensureFolderCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.folder;
+
   const existing = await findFolder(name, parentId);
-  if (existing) return existing;
-  return createFolder(name, parentId);
+  const folder = existing || (await createFolder(name, parentId));
+  ensureFolderCache.set(cacheKey, { folder, expiresAt: Date.now() + ENSURE_FOLDER_CACHE_TTL_MS });
+  return folder;
 }
 
 async function ensureFolderPath(names = [], rootId) {

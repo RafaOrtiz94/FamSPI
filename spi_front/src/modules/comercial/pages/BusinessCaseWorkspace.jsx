@@ -598,10 +598,6 @@ const BusinessCaseWorkspace = () => {
  <BusinessCaseToolsFab />
  </ErrorBoundary>
 
- <ErrorBoundary title="Herramientas del Business Case" message="Error en las herramientas flotantes.">
- <BusinessCaseToolsFab />
- </ErrorBoundary>
-
  <Modal
  open={confirmState.open}
  onClose={() => resolveSectionConfirm(false)}

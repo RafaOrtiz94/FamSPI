@@ -729,9 +729,18 @@ async function listBusinessCases(filters = {}, user = null) {
   // elevados ven todo; el resto solo ve lo que el mismo creo.
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const isElevated = BUSINESS_CASE_LIST_ELEVATED_ROLES.has(normalizedRole);
+  // acp_comercial ejerce las funciones de jefe_comercial en BC publico (no
+  // hay jefe_comercial dedicado a compras publicas) -- ve todos los BC
+  // publicos ademas de los propios, pero no los privados (esos siguen siendo
+  // de jefe_comercial/backoffice_comercial).
+  const isAcpComercial = normalizedRole === "acp_comercial";
   if (user?.id && !isElevated) {
     params.push(Number(user.id));
-    clauses.push(`created_by = $${params.length}`);
+    clauses.push(
+      isAcpComercial
+        ? `(created_by = $${params.length} OR bc_purchase_type = 'public')`
+        : `created_by = $${params.length}`,
+    );
   }
 
   const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";

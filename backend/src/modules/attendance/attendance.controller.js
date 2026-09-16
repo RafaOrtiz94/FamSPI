@@ -626,24 +626,40 @@ const resolveOperationalJourneyPayload = async ({
 
   const storePhoto = async (file, suffix) => {
     if (!file) return { driveFileId: null, driveUrl: null };
-    const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_ID || null;
-    let folderId = null;
-    if (rootFolderId) {
-      const identityToken = sanitizeOperationalFileToken(userEmail || `user-${userId}`, `user-${userId}`);
-      const folder = await ensureFolderPath(["Asistencia", "Salidas operacionales", businessDate, identityToken], rootFolderId);
-      folderId = folder?.id || null;
-    }
+    try {
+      const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_ID || null;
+      let folderId = null;
+      if (rootFolderId) {
+        const identityToken = sanitizeOperationalFileToken(userEmail || `user-${userId}`, `user-${userId}`);
+        const folder = await ensureFolderPath(["Asistencia", "Salidas operacionales", businessDate, identityToken], rootFolderId);
+        folderId = folder?.id || null;
+      }
 
-    const extension = String(file.originalname || "").split(".").pop()?.toLowerCase();
-    const safeExtension = extension && extension.length <= 6
-      ? extension
-      : (String(file.mimetype || "").includes("png") ? "png" : String(file.mimetype || "").includes("webp") ? "webp" : "jpg");
-    const fileName = `operacional_${userId}_${businessDate}_${suffix}.${safeExtension}`;
-    const uploaded = await uploadFileToDrive(file, fileName, folderId || undefined, { makeAnyoneReader: true });
-    return {
-      driveFileId: uploaded?.id || null,
-      driveUrl: uploaded?.webContentLink || uploaded?.webViewLink || null,
-    };
+      const extension = String(file.originalname || "").split(".").pop()?.toLowerCase();
+      const safeExtension = extension && extension.length <= 6
+        ? extension
+        : (String(file.mimetype || "").includes("png") ? "png" : String(file.mimetype || "").includes("webp") ? "webp" : "jpg");
+      const fileName = `operacional_${userId}_${businessDate}_${suffix}.${safeExtension}`;
+      const uploaded = await uploadFileToDrive(file, fileName, folderId || undefined, { makeAnyoneReader: true });
+      return {
+        driveFileId: uploaded?.id || null,
+        driveUrl: uploaded?.webContentLink || uploaded?.webViewLink || null,
+      };
+    } catch (driveErr) {
+      // Google Drive puede responder con HTML crudo (pagina de bloqueo por
+      // "automated queries") en vez de un error JSON cuando hay rate-limit --
+      // ese HTML no debe llegar nunca al usuario (antes se mostraba literal
+      // en pantalla via err.message). Se normaliza a un mensaje seguro y se
+      // trata como error transitorio (503) para que el frontend pueda
+      // reintentar en vez de fallar duro.
+      logger.error(
+        { err: driveErr?.message || String(driveErr), userId, suffix },
+        "No se pudo subir la foto de kilometraje a Drive",
+      );
+      const err = new Error("No se pudo guardar la foto en este momento. Intenta de nuevo en unos segundos.");
+      err.status = 503;
+      throw err;
+    }
   };
 
   const startReferenceKm = parseOperationalDecimal(activeOperational?.odometer_start_km, "Kilometraje inicial");

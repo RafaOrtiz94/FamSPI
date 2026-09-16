@@ -37,7 +37,7 @@ describe("business case investment pricing sync", () => {
     expect(sheetGenerationSource).toContain('"SmartObjective"');
     expect(sheetSyncSource).toContain("normalizeSheetWriteValue");
     expect(sheetSyncSource).toContain("value.toUpperCase()");
-    expect(sheetSyncSource).toContain("bestSheetByRecordId");
+    expect(sheetSyncSource).toContain("matchedSheetsByRecordId");
     expect(sheetSyncSource).toContain("directNameMatch");
     expect(sheetSyncSource).toContain('fieldCells.SmartObjective = pickWritableCell(ws, row, 2, 5)');
     expect(sheetSyncSource).toContain('normalizedLabel.includes("porque es importante ganar este proceso")');
