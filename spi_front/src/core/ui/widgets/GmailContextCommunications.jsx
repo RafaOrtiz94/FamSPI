@@ -22,10 +22,27 @@ const PROCESS_TYPES = [
   { value: "private_purchase", label: "Compra privada" },
 ];
 
+const ENTITY_TYPE_LABELS = {
+  business_case: "Business Case",
+  public_purchase: "Compra pública",
+  private_purchase: "Compra privada",
+};
+
+const STATUS_TONE_BY_KEYWORD = [
+  { match: /rechaz|cancel|discard/i, tone: "bg-red-soft text-alert-red" },
+  { match: /aprob|accept|complet|entreg|linked|activ/i, tone: "bg-green-soft text-operative-green" },
+  { match: /pend|revis|borrador|draft/i, tone: "bg-amber-soft text-caution-amber" },
+];
+
+const statusTone = (status) => {
+  const found = STATUS_TONE_BY_KEYWORD.find((entry) => entry.match.test(String(status || "")));
+  return found?.tone || "bg-slate-100 text-warm-ash";
+};
+
 const dateTime = (value) => {
   if (!value) return "Sin fecha";
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "Sin fecha" : parsed.toLocaleString("es-EC");
+  return Number.isNaN(parsed.getTime()) ? "Sin fecha" : parsed.toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" });
 };
 
 export default function GmailContextCommunications({ initialCommunicationId = null }) {
@@ -56,6 +73,14 @@ export default function GmailContextCommunications({ initialCommunicationId = nu
   const { startPreflow } = usePreflowPurchaseStart({ navigate, showToast, showLoader, hideLoader });
 
   const pendingItems = useMemo(() => items.filter((item) => item.status === "pending_link"), [items]);
+  const isSearchingProcess = processQuery.trim().length >= 2;
+  const visibleProcesses = isSearchingProcess ? processMatches : processCandidates;
+  const visibleProcessesLoading = isSearchingProcess ? searching : loadingProcessCandidates;
+  const visibleProcessesLabel = isSearchingProcess
+    ? "Resultados de búsqueda"
+    : selectedClient
+      ? `Procesos de ${selectedClient.nombre || selectedClient.label || "este cliente"}`
+      : "Procesos disponibles";
 
   const load = async () => {
     setLoading(true);
@@ -221,7 +246,7 @@ export default function GmailContextCommunications({ initialCommunicationId = nu
       <header className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2 text-slate-900">
-            <FiInbox className="text-teal-700" />
+            <FiInbox className="text-action-blue" />
             <h2 className="text-lg font-semibold">Comunicaciones de Gmail</h2>
           </div>
           <p className="mt-1 text-sm text-slate-600">Categoriza los correos registrados desde Gmail y vincúlalos al proceso correcto.</p>
@@ -239,7 +264,7 @@ export default function GmailContextCommunications({ initialCommunicationId = nu
         <div className="grid divide-y divide-slate-200 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:divide-x lg:divide-y-0">
           <div className="max-h-[36rem] overflow-y-auto">
             {pendingItems.map((item) => (
-              <button key={item.id} type="button" onClick={() => selectCommunication(item)} className={`block w-full border-l-4 px-5 py-4 text-left transition hover:bg-slate-50 ${selected?.id === item.id ? "border-teal-600 bg-teal-50/60" : "border-transparent"}`}>
+              <button key={item.id} type="button" onClick={() => selectCommunication(item)} className={`block w-full border-l-4 px-5 py-4 text-left transition hover:bg-slate-50 ${selected?.id === item.id ? "border-action-blue bg-action-blue/5" : "border-transparent"}`}>
                 <div className="flex items-start justify-between gap-3"><p className="line-clamp-1 font-medium text-slate-900">{item.subject || "Sin asunto"}</p><FiChevronRight className="mt-1 shrink-0 text-slate-400" /></div>
                 <p className="mt-1 line-clamp-1 text-sm text-slate-600">{item.sender_email || "Remitente no disponible"}</p>
                 <p className="mt-2 text-xs text-slate-500">{dateTime(item.received_at || item.created_at)}</p>
@@ -251,18 +276,111 @@ export default function GmailContextCommunications({ initialCommunicationId = nu
             {!selected ? <div className="flex h-full items-center justify-center text-center text-sm text-slate-500">Selecciona una comunicación para decidir su cliente y proceso.</div> : (
               <div className="space-y-4">
                 <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Correo seleccionado</p><h3 className="mt-1 font-semibold text-slate-900">{selected.subject || "Sin asunto"}</h3><p className="mt-1 text-sm text-slate-600">{selected.sender_email || "Remitente no disponible"}</p></div>
-                <label className="block"><span className="text-sm font-medium text-slate-800">Cliente relacionado <span className="font-normal text-slate-500">(opcional)</span></span><div className="relative mt-1"><FiSearch className="absolute left-3 top-3 text-slate-400" /><input value={clientQuery} onChange={(event) => { setClientQuery(event.target.value); setClientId(null); }} placeholder="Busca por nombre, correo o RUC" className="min-h-10 w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-100" /></div></label>
+                <label className="block">
+                  <span className="text-sm font-medium text-slate-800">Cliente relacionado <span className="font-normal text-slate-500">(opcional)</span></span>
+                  <div className="relative mt-1">
+                    <FiSearch className="absolute left-3 top-3 text-slate-400" />
+                    <input
+                      value={clientQuery}
+                      onChange={(event) => { setClientQuery(event.target.value); setClientId(null); }}
+                      placeholder="Busca por nombre, correo o RUC"
+                      className="min-h-10 w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm outline-none focus:border-action-blue focus:ring-2 focus:ring-action-blue/15"
+                    />
+                  </div>
+                </label>
+
                 {loadingSuggestions ? <p className="text-xs text-slate-500">Detectando coincidencias verificables de cliente…</p> : null}
-                {clientSuggestions.length > 0 ? <div className="rounded-lg border border-teal-200 bg-teal-50/60 p-3"><p className="mb-2 text-xs font-semibold uppercase tracking-wide text-teal-800">Coincidencias detectadas en el correo</p>{clientSuggestions.map((client) => <button key={client.id} type="button" onClick={() => selectClient(client)} className={`block w-full rounded-md px-2 py-2 text-left text-sm hover:bg-white ${clientId === client.id ? "bg-white ring-1 ring-teal-500" : ""}`}><span className="font-medium text-slate-800">{client.label}</span><span className="ml-2 text-xs text-slate-500">{client.evidence.join(" · ")}</span></button>)}</div> : null}
-                {clientMatches.length > 0 ? <div className="rounded-lg border border-slate-200">{clientMatches.map((client) => <button key={client.id} type="button" onClick={() => selectClient(client)} className={`block w-full border-b border-slate-100 px-3 py-2 text-left text-sm last:border-0 hover:bg-slate-50 ${clientId === client.id ? "bg-teal-50" : ""}`}><span className="font-medium text-slate-800">{client.label}</span><span className="ml-2 text-xs text-slate-500">{client.ruc_cedula || client.client_email || ""}</span></button>)}</div> : null}
-                {clientId && loadingProcessCandidates ? <p className="text-xs text-slate-500">Consultando procesos disponibles del cliente…</p> : null}
-                {clientId && !loadingProcessCandidates && processCandidates.length > 0 ? <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-3"><p className="mb-2 text-xs font-semibold uppercase tracking-wide text-sky-800">Procesos del cliente</p>{processCandidates.map((process) => <button key={`${process.entity_type}-${process.entity_id}`} type="button" onClick={() => setSelectedProcess(process)} className={`block w-full rounded-md px-2 py-2 text-left text-sm hover:bg-white ${selectedProcess?.entity_id === process.entity_id && selectedProcess?.entity_type === process.entity_type ? "bg-white ring-1 ring-sky-500" : ""}`}><span className="font-medium text-slate-800">{process.label}</span><span className="ml-2 text-xs text-slate-500">{process.entity_type === "public_purchase" ? "Compra pública" : "Compra privada"}{process.status ? ` · ${process.status}` : ""}</span></button>)}</div> : null}
-                {clientId && !loadingProcessCandidates && processCandidates.length === 0 ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="text-sm font-medium text-amber-900">Este cliente no tiene un proceso de compra disponible.</p><p className="mt-1 text-xs text-amber-800">Puedes iniciar una solicitud de compra y el correo quedará vinculado al nuevo expediente.</p><button type="button" onClick={() => setPurchaseSelectorOpen(true)} className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-lg bg-amber-700 px-3 text-sm font-semibold text-white transition hover:bg-amber-800"><FiShoppingCart /> Crear solicitud de compra</button></div> : null}
-                <div className="grid gap-3 sm:grid-cols-3"><label className="sm:col-span-1"><span className="text-sm font-medium text-slate-800">Tipo de proceso</span><select value={entityType} onChange={(event) => setEntityType(event.target.value)} className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 px-2 text-sm outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-100">{PROCESS_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label><label className="sm:col-span-2"><span className="text-sm font-medium text-slate-800">Proceso autorizado</span><input value={processQuery} onChange={(event) => setProcessQuery(event.target.value)} placeholder="Busca por cliente o identificador" className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-100" /></label></div>
-                {processMatches.length > 0 ? <div className="rounded-lg border border-slate-200">{processMatches.map((process) => <button key={`${process.entity_type}-${process.entity_id}`} type="button" onClick={() => setSelectedProcess(process)} className={`block w-full border-b border-slate-100 px-3 py-2 text-left text-sm last:border-0 hover:bg-slate-50 ${selectedProcess?.entity_id === process.entity_id && selectedProcess?.entity_type === process.entity_type ? "bg-teal-50" : ""}`}><span className="font-medium text-slate-800">{process.label}</span><span className="ml-2 text-xs text-slate-500">{process.status || "Sin estado"}</span></button>)}</div> : null}
-                <button type="button" onClick={link} disabled={!selectedProcess || saving} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-4 text-sm font-semibold text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300"><FiLink />{saving ? "Vinculando…" : "Vincular y registrar en notas"}</button>
-                {searching ? <p className="text-xs text-slate-500">Buscando resultados autorizados…</p> : null}
-                {selectedProcess ? <p className="inline-flex items-center gap-1 text-xs text-emerald-700"><FiCheck /> Se vinculará a {selectedProcess.label}.</p> : null}
+                {clientSuggestions.length > 0 ? (
+                  <div className="rounded-lg border border-action-blue/20 bg-action-blue/5 p-3">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-action-blue">Coincidencias detectadas en el correo</p>
+                    {clientSuggestions.map((client) => (
+                      <button key={client.id} type="button" onClick={() => selectClient(client)} className={`block w-full rounded-md px-2 py-2 text-left text-sm hover:bg-white ${clientId === client.id ? "bg-white ring-1 ring-action-blue" : ""}`}>
+                        <span className="font-medium text-slate-800">{client.label}</span>
+                        <span className="ml-2 text-xs text-slate-500">{client.evidence.join(" · ")}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {clientMatches.length > 0 ? (
+                  <div className="rounded-lg border border-slate-200">
+                    {clientMatches.map((client) => (
+                      <button key={client.id} type="button" onClick={() => selectClient(client)} className={`block w-full border-b border-slate-100 px-3 py-2 text-left text-sm last:border-0 hover:bg-slate-50 ${clientId === client.id ? "bg-action-blue/5" : ""}`}>
+                        <span className="font-medium text-slate-800">{client.label}</span>
+                        <span className="ml-2 text-xs text-slate-500">{client.ruc_cedula || client.client_email || ""}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {clientId && !loadingProcessCandidates && processCandidates.length === 0 && !isSearchingProcess ? (
+                  <div className="rounded-lg border border-caution-amber/30 bg-amber-soft p-3">
+                    <p className="text-sm font-medium text-caution-amber">Este cliente no tiene un proceso de compra disponible.</p>
+                    <p className="mt-1 text-xs text-caution-amber">Puedes iniciar una solicitud de compra y el correo quedará vinculado al nuevo expediente.</p>
+                    <button type="button" onClick={() => setPurchaseSelectorOpen(true)} className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-lg bg-caution-amber px-3 text-sm font-semibold text-white transition hover:opacity-90">
+                      <FiShoppingCart /> Crear solicitud de compra
+                    </button>
+                  </div>
+                ) : null}
+
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className="sm:col-span-1">
+                    <span className="text-sm font-medium text-slate-800">Tipo de proceso</span>
+                    <select value={entityType} onChange={(event) => setEntityType(event.target.value)} className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 px-2 text-sm outline-none focus:border-action-blue focus:ring-2 focus:ring-action-blue/15">
+                      {PROCESS_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="sm:col-span-2">
+                    <span className="text-sm font-medium text-slate-800">Buscar otro proceso autorizado</span>
+                    <input
+                      value={processQuery}
+                      onChange={(event) => setProcessQuery(event.target.value)}
+                      placeholder="Busca por cliente o identificador"
+                      className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-action-blue focus:ring-2 focus:ring-action-blue/15"
+                    />
+                  </label>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{visibleProcessesLabel}</p>
+                  {visibleProcessesLoading ? (
+                    <p className="text-xs text-slate-500">Consultando procesos autorizados…</p>
+                  ) : visibleProcesses.length > 0 ? (
+                    <div className="rounded-lg border border-slate-200">
+                      {visibleProcesses.map((process) => {
+                        const isSelected = selectedProcess?.entity_id === process.entity_id && selectedProcess?.entity_type === process.entity_type;
+                        return (
+                          <button
+                            key={`${process.entity_type}-${process.entity_id}`}
+                            type="button"
+                            onClick={() => setSelectedProcess(process)}
+                            className={`flex w-full items-start justify-between gap-3 border-b border-slate-100 px-3 py-2.5 text-left text-sm last:border-0 hover:bg-slate-50 ${isSelected ? "bg-action-blue/5 ring-1 ring-inset ring-action-blue" : ""}`}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate font-medium text-slate-800">{process.label}</span>
+                              <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+                                <span>{ENTITY_TYPE_LABELS[process.entity_type] || process.entity_type}</span>
+                                <span aria-hidden="true">·</span>
+                                <span>{dateTime(process.created_at)}</span>
+                              </span>
+                            </span>
+                            <span className={`inline-flex shrink-0 rounded-sm px-2 py-0.5 text-[11px] font-semibold ${statusTone(process.status)}`}>
+                              {process.status || "Sin estado"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-xs text-slate-500">
+                      {isSearchingProcess ? "Sin resultados para esa búsqueda." : "Selecciona un cliente o busca un proceso directamente para ver opciones aquí."}
+                    </p>
+                  )}
+                </div>
+
+                <button type="button" onClick={link} disabled={!selectedProcess || saving} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-action-blue px-4 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:bg-slate-300">
+                  <FiLink />{saving ? "Vinculando…" : "Vincular y registrar en notas"}
+                </button>
+                {selectedProcess ? <p className="inline-flex items-center gap-1 text-xs text-operative-green"><FiCheck /> Se vinculará a {selectedProcess.label}.</p> : null}
               </div>
             )}
           </div>
