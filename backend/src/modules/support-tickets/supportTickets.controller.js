@@ -1,4 +1,5 @@
 const service = require("./supportTickets.service");
+const kpiService = require("./supportTicketsKpi.service");
 
 const handleError = (res, error, fallbackMessage) => {
   const status = error?.status || 500;
@@ -10,9 +11,14 @@ const handleError = (res, error, fallbackMessage) => {
 
 async function create(req, res) {
   try {
+    const evidencePhotos = [
+      ...(req.files?.evidence_photos || []),
+      ...(req.files?.evidence_photo || []),
+    ];
     const ticket = await service.createTicket({
       requester: req.user,
       payload: req.body || {},
+      evidencePhotos,
     });
     return res.status(201).json({ ok: true, data: ticket });
   } catch (error) {
@@ -29,12 +35,30 @@ async function listMy(req, res) {
   }
 }
 
+async function getEvidenceFile(req, res) {
+  try {
+    const file = await service.getTicketEvidenceFile({
+      attachmentId: req.params.attachmentId,
+      actorUser: req.user,
+    });
+    const safeFilename = String(file.filename || "evidencia-ticket.jpg").replace(/[\r\n"]/g, "_");
+    res.setHeader("Content-Type", file.mimeType || "image/jpeg");
+    res.setHeader("Content-Disposition", `inline; filename="${safeFilename}"`);
+    res.setHeader("Cache-Control", "private, max-age=300");
+    return res.send(file.buffer);
+  } catch (error) {
+    return handleError(res, error, "No se pudo obtener la evidencia");
+  }
+}
+
 async function listWorkspace(req, res) {
   try {
     const tickets = await service.listWorkspaceTickets({
       status: req.query.status,
       ticket_type: req.query.ticket_type,
       q: req.query.q,
+      priority: req.query.priority,
+      assigned_ti_user_id: req.query.assigned_ti_user_id,
     });
     return res.status(200).json({ ok: true, data: tickets });
   } catch (error) {
@@ -48,10 +72,21 @@ async function kpiWorkspace(req, res) {
       status: req.query.status,
       ticket_type: req.query.ticket_type,
       q: req.query.q,
+      priority: req.query.priority,
+      assigned_ti_user_id: req.query.assigned_ti_user_id,
     });
     return res.status(200).json({ ok: true, data });
   } catch (error) {
     return handleError(res, error, "No se pudieron calcular los KPI de tickets");
+  }
+}
+
+async function listWorkspaceKpiDefinitions(req, res) {
+  try {
+    const data = await kpiService.listKpiDefinitionsWithValues({ workspaceOnly: true });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudieron calcular los KPI configurados");
   }
 }
 
@@ -156,8 +191,10 @@ async function rateSatisfaction(req, res) {
 module.exports = {
   create,
   listMy,
+  getEvidenceFile,
   listWorkspace,
   kpiWorkspace,
+  listWorkspaceKpiDefinitions,
   listEvents,
   listComments,
   addComment,

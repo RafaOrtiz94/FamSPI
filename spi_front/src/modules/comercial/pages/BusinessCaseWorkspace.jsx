@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect, useRef } from "react";
+import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { FiAlertTriangle } from "react-icons/fi";
 import {
@@ -16,13 +16,20 @@ import { getApiErrorMessage } from "../../../core/utils/apiErrors";
 import CaseHeader from "../components/workspace/CaseHeader";
 import WorkspaceContent from "../components/workspace/WorkspaceContent";
 import UIGuidancePanel from "../components/workspace/UIGuidancePanel";
+import BusinessCaseToolsFab from "../components/workspace/BusinessCaseToolsFab";
+import ProcessNotesFab from "../../../core/ui/components/ProcessNotesFab";
 import BusinessCasePicker from "../components/BusinessCasePicker";
 import ErrorBoundary from "../../../core/ui/components/ErrorBoundary";
 import { BusinessCaseWorkspaceProviders } from "../components/workspace/BusinessCaseWorkspaceContext";
 import Modal from "../../../core/ui/components/Modal";
 import Button from "../../../core/ui/components/Button";
-import { resolveRoleSectionConfig } from "../components/workspace/roleSectionConfig";
+import { getVisibleSections } from "../components/workspace/roleSectionConfig";
+import { SECTION_LABELS, getSectionLabel } from "../../../core/utils/businessCaseSections";
 
+// BC-21: Orden canónico de secciones — incluye investment_values para roles que las ven
+// "Resumen" (consumption_export) va al final: no tiene estado propio (es
+// solo lectura, no un formulario a completar), asi que debe quedar despues
+// de todo lo demas en vez de intercalado entre secciones editables.
 const WORKSPACE_SECTION_ORDER = [
  "general",
  "lab",
@@ -31,45 +38,100 @@ const WORKSPACE_SECTION_ORDER = [
  "lis",
  "determinations",
  "investments",
- "consumption_export",
- "dispatch_workspace",
+ "investment_values",
  "feasibility",
+ // offer_workspace faltaba aqui (ver skill bc-workspace-tabs): si aparece en
+ // el tab pero no en esta lista, se rompe el auto-avance ("siguiente
+ // seccion") y la reapertura de esa seccion para los roles que si la tienen
+ // habilitada (comercial, jefe_comercial, acp_comercial).
+ "offer_workspace",
+ "dispatch_workspace",
+ "consumption_export",
 ];
 const LEGACY_DEV_SECTIONS = new Set(["prices", "calculations", "rentability"]);
-const SECTION_LABELS = {
- general: "Datos Generales",
- lab: "Entorno Laboratorio",
- requirement: "Condiciones del BC",
- equipment: "Equipamiento",
- lis: "Integracion LIS",
- determinations: "Determinaciones",
- investments: "Inversiones",
- consumption_export: "Sincronizacion",
- dispatch_workspace: "Cantidades Maximas",
- feasibility: "Factibilidad",
+
+// Un BC puede crear o estar vinculado a un expediente de compras publico o
+// privado. Las notas pertenecen al proceso operativo comun, sin copiar ni
+// mezclar cadenas.
+// compras. En ese caso las notas pertenecen al proceso operativo comun: se
+// usa la misma entidad que el Workspace de Compras, sin copiar ni mezclar
+// cadenas de notas. Se conservan las notas propias de BC cuando no existe un
+// enlace publico verificable.
+const resolveProcessNotesScope = (businessCase, businessCaseId) => {
+ const metadata = businessCase?.modern_bc_metadata || {};
+ const workspace = metadata.purchase_workspace || {};
+ const workspaceType = String(workspace.type || "").trim().toLowerCase();
+ const preflowType = String(metadata.preflow_process_type || "").trim().toLowerCase();
+ const linkedPublicPurchaseId =
+  (["public", "public_purchase"].includes(workspaceType) && workspace.purchase_id) ||
+  (preflowType === "public_purchase" && metadata.preflow_process_id) ||
+  null;
+ const linkedPrivatePurchaseId =
+  (["private", "private_purchase", "private_comodato"].includes(workspaceType) && workspace.purchase_id) ||
+  (["private_purchase", "private_comodato", "comodato_privado"].includes(preflowType) && metadata.preflow_process_id) ||
+  metadata.private_purchase_id ||
+  null;
+
+ if (linkedPublicPurchaseId) {
+  return {
+   entityType: "public_purchase",
+   entityId: linkedPublicPurchaseId,
+   title: "Notas del proceso de compra",
+  };
+ }
+
+ if (linkedPrivatePurchaseId) {
+  return {
+   entityType: "private_purchase",
+   entityId: linkedPrivatePurchaseId,
+   title: "Notas del proceso de compra",
+  };
+ }
+
+ return {
+  entityType: "business_case",
+  entityId: businessCaseId,
+  title: "Notas del Business Case",
+ };
 };
 
+// BC-21: Usa la función exportada del config para obtener secciones visibles por rol
 const getVisibleSectionsByRole = (role = "") => {
- const config = resolveRoleSectionConfig(String(role || "").toLowerCase());
- if (config?.visible === "all") return WORKSPACE_SECTION_ORDER;
- if (Array.isArray(config?.visible) && config.visible.length) {
- return config.visible.filter((section) => WORKSPACE_SECTION_ORDER.includes(section));
- }
- return WORKSPACE_SECTION_ORDER;
+ return getVisibleSections(role, WORKSPACE_SECTION_ORDER);
 };
+
+const normalizeWorkspaceSection = (sectionId = "") => (
+ sectionId === "investment_values_op" || sectionId === "investment_values_fin"
+  ? "investment_values"
+  : sectionId
+);
 
 const getNextSectionId = (currentSection, role = "") => {
  const visible = getVisibleSectionsByRole(role);
- const currentIndex = visible.indexOf(currentSection);
+ const currentIndex = visible.indexOf(normalizeWorkspaceSection(currentSection));
  if (currentIndex < 0) return null;
  if (currentIndex >= visible.length - 1) return null;
  return visible[currentIndex + 1] || null;
 };
 
+// BC-21: Roles que ven inversiones después de determinaciones
+// (ampliado con analista_comercial, asesor_comercial, jefe_ti)
+const ROLE_FORCE_INVESTMENTS_AFTER_DETERMINATIONS = new Set([
+ "comercial",
+ "asesor_comercial",
+ "analista_comercial",
+ "acp_comercial",
+ "backoffice",
+ "backoffice_comercial",
+ "jefe_ti",
+]);
+
 const BusinessCaseWorkspace = () => {
  const { id: bcId } = useParams();
  const { showToast } = useUI();
  const [selectedSection, setSelectedSection] = useState("general");
+ const [autoEditSection, setAutoEditSection] = useState(null);
+ const autoEditInitialized = useRef(false);
  const [businessCase, setBusinessCase] = useState(null);
  const [uiGuidance, setUiGuidance] = useState(null);
  const [loading, setLoading] = useState(true);
@@ -91,12 +153,16 @@ const BusinessCaseWorkspace = () => {
  sections: [],
  submitting: false,
  });
- const workspaceShellClass = "min-h-screen bg-gray-50 px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-6";
+ const workspaceShellClass = "px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-6";
  const workspaceContainerClass = "mx-auto w-full max-w-[1440px] space-y-5 lg:space-y-6";
 
  // Autosave manager ref
  const autosaveManagerRef = useRef(null);
  const confirmResolverRef = useRef(null);
+ const processNotesScope = useMemo(
+  () => resolveProcessNotesScope(businessCase, bcId),
+  [businessCase, bcId],
+ );
 
  const handleSectionSelect = (sectionId) => {
  if (LEGACY_DEV_SECTIONS.has(sectionId)) {
@@ -119,7 +185,7 @@ const BusinessCaseWorkspace = () => {
  }, [bcId]);
 
  const requestSectionConfirm = useCallback((section) => {
- const sectionLabel = String(section || "seccion").replace(/_/g, " ");
+ const sectionLabel = getSectionLabel(section);
  setConfirmState({ open: true, sectionLabel });
  return new Promise((resolve) => {
  confirmResolverRef.current = resolve;
@@ -140,6 +206,11 @@ const BusinessCaseWorkspace = () => {
 
  const startedAt = Date.now();
  try {
+ console.log("[BC_AUDIT][FE][WORKSPACE_SAVE_START]", {
+ bcId,
+ options,
+ selectedSection,
+ });
  let sectionCompleted = false;
  const shouldMarkComplete = options?.markComplete !== false;
  if (bcId && options?.section && shouldMarkComplete) {
@@ -154,9 +225,25 @@ const BusinessCaseWorkspace = () => {
  const normalizedUIGuidance = await refreshWorkspaceState();
  if (sectionCompleted && options?.section) {
  const userRole = normalizedUIGuidance?.permissions?.userRole || "comercial";
- const nextSection = getNextSectionId(options.section, userRole);
+ const visible = getVisibleSectionsByRole(userRole);
+ let nextSection = getNextSectionId(options.section, userRole);
+ if (
+ options.section === "determinations" &&
+ ROLE_FORCE_INVESTMENTS_AFTER_DETERMINATIONS.has(String(userRole || "").toLowerCase()) &&
+ visible.includes("investments")
+ ) {
+ nextSection = "investments";
+ }
+ console.log("[BC_AUDIT][FE][WORKSPACE_SECTION_COMPLETE]", {
+ bcId,
+ section: options.section,
+ userRole,
+ visible,
+ nextSection,
+ });
  if (nextSection) {
  setSelectedSection(nextSection);
+ setAutoEditSection(nextSection);
  }
  }
  showToast("Seccion guardada y datos actualizados", "success");
@@ -176,6 +263,7 @@ const BusinessCaseWorkspace = () => {
  success: false,
  });
  }
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [bcId, refreshWorkspaceState, requestSectionConfirm, showToast, uiGuidance]);
 
  // Initialize autosave manager and fetch data on mount and when bcId changes
@@ -203,13 +291,27 @@ const BusinessCaseWorkspace = () => {
  // Normalize UI guidance response
  const normalizedUIGuidance = normalizeUIGuidanceResponse(uiGuidanceData);
  const userRole = normalizedUIGuidance?.permissions?.userRole || "comercial";
- const visibleSections = getVisibleSectionsByRole(userRole);
- if (!visibleSections.includes(selectedSection)) {
+ // BC cerrado no factible: solo el Resumen queda accesible, ninguna otra
+ // seccion (edicion no tiene sentido sobre un caso ya descartado).
+ const isClosedNoFactible = normalizedUIGuidance?.workflowState?.currentStage === "cerrado_no_factible";
+ const visibleSections = isClosedNoFactible ? ["consumption_export"] : getVisibleSectionsByRole(userRole);
+ const normalizedSelectedSection = normalizeWorkspaceSection(selectedSection);
+ if (normalizedSelectedSection !== selectedSection && visibleSections.includes(normalizedSelectedSection)) {
+ setSelectedSection(normalizedSelectedSection);
+ } else if (!visibleSections.includes(normalizedSelectedSection)) {
  setSelectedSection(visibleSections[0] || "general");
  }
 
  setBusinessCase(businessCaseData);
  setUiGuidance(normalizedUIGuidance);
+
+ if (!autoEditInitialized.current) {
+ autoEditInitialized.current = true;
+ const sectionDetails = normalizedUIGuidance?.sectionOwnership?.completionSummary?.sectionDetails || {};
+ const firstIncomplete = visibleSections.find((s) => !sectionDetails[s]?.completed);
+ setAutoEditSection(firstIncomplete || null);
+ }
+
  recordBusinessCaseTelemetry({
  section: "workspace",
  type: "initial_load_success",
@@ -229,6 +331,7 @@ const BusinessCaseWorkspace = () => {
  } finally {
  setLoading(false);
  }
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [bcId, showToast]);
 
  useEffect(() => {
@@ -272,16 +375,25 @@ const BusinessCaseWorkspace = () => {
 
  const visibleSections = getVisibleSectionsByRole(uiGuidance?.permissions?.userRole || "comercial");
  const pendingReopenRequest = uiGuidance?.preflow?.extensionRequest || null;
+ const isTechnicalReviewExpired = Boolean(
+  uiGuidance?.preflow?.isActive &&
+  String(uiGuidance?.preflow?.activePhase || "").toLowerCase() === "review" &&
+  String(uiGuidance?.preflow?.activeRole || "").toLowerCase() === "jefe_servicio" &&
+  uiGuidance?.preflow?.isExpired,
+ );
+ const reopenSectionOptions = isTechnicalReviewExpired ? ["determinations"] : visibleSections;
 
  const openReopenRequestModal = useCallback(() => {
- const defaultSections = visibleSections.includes(selectedSection) ? [selectedSection] : [];
+ const defaultSections = isTechnicalReviewExpired
+  ? ["determinations"]
+  : (visibleSections.includes(selectedSection) ? [selectedSection] : []);
  setReopenRequestState({
  open: true,
  reason: "",
  sections: defaultSections,
  submitting: false,
  });
- }, [selectedSection, visibleSections]);
+ }, [isTechnicalReviewExpired, selectedSection, visibleSections]);
 
  const closeReopenRequestModal = useCallback(() => {
  setReopenRequestState({ open: false, reason: "", sections: [], submitting: false });
@@ -290,12 +402,12 @@ const BusinessCaseWorkspace = () => {
  const openReopenDecisionModal = useCallback(() => {
  setReopenDecisionState({
  open: true,
- additionalHours: "",
+ additionalHours: isTechnicalReviewExpired ? "24" : "",
  notes: "",
  sections: Array.isArray(pendingReopenRequest?.sections) ? pendingReopenRequest.sections : [],
  submitting: false,
  });
- }, [pendingReopenRequest?.sections]);
+ }, [isTechnicalReviewExpired, pendingReopenRequest?.sections]);
 
  const closeReopenDecisionModal = useCallback(() => {
  setReopenDecisionState({ open: false, additionalHours: "", notes: "", sections: [], submitting: false });
@@ -341,8 +453,10 @@ const BusinessCaseWorkspace = () => {
  setReopenDecisionState((prev) => ({ ...prev, submitting: true }));
  try {
  await resolveBusinessCasePreflowReopen(bcId, {
- approved,
- additional_hours: approved ? reopenDecisionState.additionalHours : 0,
+  approved,
+  additional_hours: approved
+   ? (isTechnicalReviewExpired ? 24 : reopenDecisionState.additionalHours)
+   : 0,
  notes: reopenDecisionState.notes,
  sections: reopenDecisionState.sections,
  });
@@ -353,7 +467,7 @@ const BusinessCaseWorkspace = () => {
  setReopenDecisionState((prev) => ({ ...prev, submitting: false }));
  showToast(getApiErrorMessage(err, "No se pudo resolver la solicitud"), "error");
  }
- }, [bcId, closeReopenDecisionModal, refreshWorkspaceState, reopenDecisionState.additionalHours, reopenDecisionState.notes, reopenDecisionState.sections, showToast]);
+ }, [bcId, closeReopenDecisionModal, isTechnicalReviewExpired, refreshWorkspaceState, reopenDecisionState.additionalHours, reopenDecisionState.notes, reopenDecisionState.sections, showToast]);
 
  // Show picker when no bcId is provided
  if (!bcId) {
@@ -455,6 +569,8 @@ const BusinessCaseWorkspace = () => {
  uiGuidance,
  onSectionSave: handleSectionSave,
  onRefresh: handleRefresh,
+ autoEditSection,
+ clearAutoEdit: () => setAutoEditSection(null),
  };
 
  const documentsContextValue = {
@@ -528,6 +644,14 @@ const BusinessCaseWorkspace = () => {
  />
  </ErrorBoundary>
 
+ <ErrorBoundary title="Herramientas del Business Case" message="Error en las herramientas flotantes.">
+ <BusinessCaseToolsFab />
+ </ErrorBoundary>
+
+ <ErrorBoundary title="Notas del Business Case" message="Error en las notas del proceso.">
+ <ProcessNotesFab {...processNotesScope} />
+ </ErrorBoundary>
+
  <Modal
  open={confirmState.open}
  onClose={() => resolveSectionConfirm(false)}
@@ -571,7 +695,9 @@ const BusinessCaseWorkspace = () => {
  >
  <div className="space-y-4">
  <p className="text-sm text-slate-600">
- La solicitud se enviara a Jefe Comercial para decidir si amplia la ventana y que secciones quedaran nuevamente editables.
+ {isTechnicalReviewExpired
+  ? "El SLA de Jefe de Servicio vencio. Solicita a Jefe Comercial una prorroga fija de 24 horas para completar calibradores, controles y materiales."
+  : "La solicitud se enviara a Jefe Comercial para decidir si amplia la ventana y que secciones quedaran nuevamente editables."}
  </p>
  <div>
  <label className="mb-2 block text-sm font-medium text-slate-700">Motivo</label>
@@ -584,9 +710,11 @@ const BusinessCaseWorkspace = () => {
  />
  </div>
  <div>
- <p className="mb-2 text-sm font-medium text-slate-700">Secciones a reabrir</p>
+ <p className="mb-2 text-sm font-medium text-slate-700">
+ {isTechnicalReviewExpired ? "Apartado técnico a reabrir" : "Secciones a reabrir"}
+ </p>
  <div className="grid gap-2 sm:grid-cols-2">
- {visibleSections.map((sectionId) => (
+ {reopenSectionOptions.map((sectionId) => (
  <label key={sectionId} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
  <input
  type="checkbox"
@@ -626,15 +754,22 @@ const BusinessCaseWorkspace = () => {
  <p className="mt-1"><span className="font-semibold">Motivo:</span> {pendingReopenRequest?.reason || "Sin detalle"}</p>
  </div>
  <div>
- <label className="mb-2 block text-sm font-medium text-slate-700">Horas adicionales</label>
+ <label className="mb-2 block text-sm font-medium text-slate-700">
+ {isTechnicalReviewExpired ? "Prorroga asignada" : "Horas adicionales"}
+ </label>
  <input
  type="number"
  min="1"
  value={reopenDecisionState.additionalHours}
  onChange={(event) => setReopenDecisionState((prev) => ({ ...prev, additionalHours: event.target.value }))}
+ readOnly={isTechnicalReviewExpired}
+ disabled={isTechnicalReviewExpired}
  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
- placeholder="Ej. 12"
+ placeholder={isTechnicalReviewExpired ? "24 horas" : "Ej. 12"}
  />
+ {isTechnicalReviewExpired && (
+ <p className="mt-1 text-xs text-slate-500">Para esta etapa la prorroga esta definida en 24 horas.</p>
+ )}
  </div>
  <div>
  <label className="mb-2 block text-sm font-medium text-slate-700">Notas</label>
@@ -647,9 +782,11 @@ const BusinessCaseWorkspace = () => {
  />
  </div>
  <div>
- <p className="mb-2 text-sm font-medium text-slate-700">Secciones a reabrir</p>
+ <p className="mb-2 text-sm font-medium text-slate-700">
+ {isTechnicalReviewExpired ? "Apartado técnico a reabrir" : "Secciones a reabrir"}
+ </p>
  <div className="grid gap-2 sm:grid-cols-2">
- {visibleSections.map((sectionId) => (
+ {reopenSectionOptions.map((sectionId) => (
  <label key={sectionId} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
  <input
  type="checkbox"

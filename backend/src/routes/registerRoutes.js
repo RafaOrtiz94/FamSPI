@@ -14,8 +14,11 @@ const technicalApplicationsRoutes = require("../modules/technical-applications/t
 const departmentsRoutes = require("../modules/departments/departments.routes");
 const usersRoutes = require("../modules/users/users.routes");
 const inventarioRoutes = require("../modules/inventario/inventario.routes");
+const equipmentManagementRoutes = require("../modules/equipment-management/equipmentManagement.routes");
 const attendanceRoutes = require("../modules/attendance/attendance.routes");
 const gmailRoutes = require("../modules/gmail/gmail.routes");
+const gmailContextRoutes = require("../modules/gmail-context/gmailContext.routes");
+const gmailContextAddonRoutes = require("../modules/gmail-context/gmailContextAddon.routes");
 const equipmentPurchaseRoutes = require("../modules/equipment-purchases/equipmentPurchases.routes");
 const personnelRequestsRoutes = require("../modules/personnel-requests/personnel-requests.routes");
 const permisosRoutes = require("../modules/permisos/permisos.routes");
@@ -26,7 +29,11 @@ const privatePurchasesRoutes = require("../modules/private-purchases/privatePurc
 const deliveryRequestsRoutes = require("../modules/delivery-requests/deliveryRequests.routes");
 const deliveryCeilingsRoutes = require("../modules/delivery-ceilings/deliveryCeilings.routes");
 const publicDeliveryPlansRoutes = require("../modules/public-delivery-plans/publicDeliveryPlans.routes");
+const consumableFilesRoutes = require("../modules/consumable-files/consumableFiles.routes");
 const applicantsRoutes = require("../modules/applicants/applicants.routes");
+// LEGACY (2026-08-12): Mundial 2026 termino, modulo desactivado. Codigo
+// intacto en modules/world-cup-2026 por si se reutiliza en el futuro.
+// const worldCup2026Routes = require("../modules/world-cup-2026/worldCup2026.routes");
 const {
   businessCaseRoutes,
   equipmentCatalogRoutes,
@@ -40,11 +47,15 @@ const collaboratorsRoutes = require("../modules/collaborators/collaborators.rout
 const offboardingRoutes = require("../modules/offboarding/offboarding.routes");
 const signatureRoutes = require("../modules/signature/signature.routes");
 const signatureV1Routes = require("../modules/signature/signature.v1.routes");
+const signatureWorkflowsRoutes = require("../modules/signature-workflows/signatureWorkflows.routes");
+const processNotesRoutes = require("../modules/process-notes/processNotes.routes");
+const businessCaseTemplateVersionsRoutes = require("../modules/business-case/businessCaseTemplateVersions.routes");
 const dashboardRoutes = require("../modules/dashboard/dashboard.routes");
 const supportTicketsRoutes = require("../modules/support-tickets/supportTickets.routes");
 const viaticosRoutes = require("../modules/viaticos/viaticos.routes");
 const mantenimientosRoutes = require("../modules/mantenimientos/mantenimientos.routes");
 const integrationsRoutes = require("../modules/integrations/integrations.routes");
+const crmWebhookRoutes = require("../modules/integrations/crmWebhook.routes");
 const externalCasesRoutes = require("../modules/servicio/externalCases.routes");
 const calidadRoutes = require("../modules/calidad/ca0101.routes");
 const calidadCleaningRoutes = require("../modules/calidad/ca0102.routes");
@@ -63,10 +74,32 @@ const calidadAuditRoutes = require("../modules/calidad/ca0115.routes");
 const calidadSamplingRoutes = require("../modules/calidad/ca0116.routes");
 const calidadTecnoRoutes = require("../modules/calidad/ca0117.routes");
 const internalJobsRouter = require("./internalJobs.routes");
+const tiAssetsRoutes = require("../modules/ti-assets/tiAssets.routes");
+const tiAssetsPublicRoutes = require("../modules/ti-assets/tiAssets.public.routes");
+const collabDeliveriesRoutes = require("../modules/collab-deliveries/collabDeliveries.routes");
+const moduleAccessRoutes = require("../modules/module-access/moduleAccess.routes");
+const kickoffRoutes = require("../modules/kickoff/kickoff.routes");
+const famdaysRoutes = require("../modules/famdays/famdays.routes");
+const opportunitiesRoutes = require("../modules/opportunities/opportunities.routes");
+const hiringPipelineRoutes = require("../modules/hiring-pipeline/hiring-pipeline.routes");
+const trainingsRoutes = require("../modules/trainings/trainings.routes");
+const crmFamRoutes = require("../modules/crm-fam/crm.routes");
+const workManagementRoutes = require("../modules/work-management/workManagement.routes");
+const suggestionBoxPublicRoutes = require("../modules/suggestion-box/suggestionBox.public.routes");
+const suggestionBoxRoutes = require("../modules/suggestion-box/suggestionBox.routes");
 
 function mountPublicRoutes(app) {
   app.use("/api/v1/auth", authRoutes);
+  // El Add-on no usa JWT de navegador: verifica su propio ID token Google en
+  // gmailContextAddonAuth antes de aceptar cualquier dato del correo abierto.
+  app.use("/api/v1/gmail-context/addon", gmailContextAddonRoutes);
+  app.use("/api/v1/suggestion-box/public", suggestionBoxPublicRoutes);
+  app.use("/api/v1/ti-assets/public", tiAssetsPublicRoutes);
   app.use("/api/applicants", applicantsRoutes);
+  // LEGACY (2026-08-12): Mundial 2026 termino, endpoint desactivado (ver require arriba).
+  // app.use("/api/v1/world-cup-2026", worldCup2026Routes);
+  // Webhook público de EspoCRM — sin JWT, validado por X-Hook-Secret
+  app.use("/api/v1/integrations/crm/webhook", crmWebhookRoutes);
 }
 
 function mountPrivateRoutes(app) {
@@ -83,6 +116,11 @@ function mountPrivateRoutes(app) {
   app.use("/api/v1/files", filesRoutes);
   app.use("/api/v1/servicio", servicioRoutes);
   app.use("/api/v1/technical-applications", technicalApplicationsRoutes);
+  // Debe montarse ANTES de /api/v1/business-case: ese router tiene una ruta
+  // GET /:id que espera un UUID -- si va primero, intercepta
+  // "/business-case/template-versions" tratando "template-versions" como id
+  // y revienta con "invalid input syntax for type uuid".
+  app.use("/api/v1/business-case/template-versions", businessCaseTemplateVersionsRoutes);
   app.use("/api/v1/business-case", businessCaseRoutes);
   app.use("/api/v1/equipment-catalog", equipmentCatalogRoutes);
   app.use("/api/v1/determinations-catalog", determinationsCatalogRoutes);
@@ -111,15 +149,18 @@ app.use("/api/v1/calidad/capa", calidadCapaRoutes);
   app.use("/api/v1/collaborators", collaboratorsRoutes);
   app.use("/api/v1/offboarding", offboardingRoutes);
   app.use("/api/v1/inventario", inventarioRoutes);
+  app.use("/api/v1/equipment-management", equipmentManagementRoutes);
   app.use("/api/v1/attendance", attendanceRoutes);
   // Alias for iPhone shortcuts and Spanish-speaking users
   app.use("/asistencia", attendanceRoutes);
   app.use("/api/v1/gmail", gmailRoutes);
+  app.use("/api/v1/gmail-context", gmailContextRoutes);
   app.use("/api/v1/equipment-purchases", equipmentPurchaseRoutes);
   app.use("/api/v1/private-purchases", privatePurchasesRoutes);
   app.use("/api/v1/delivery-ceilings", deliveryCeilingsRoutes);
   app.use("/api/v1/delivery-requests", deliveryRequestsRoutes);
   app.use("/api/v1/public-delivery-plans", publicDeliveryPlansRoutes);
+  app.use("/api/v1/consumable-files", consumableFilesRoutes);
   app.use("/api/v1/personnel-requests", personnelRequestsRoutes);
   app.use("/api/v1/permisos", permisosRoutes);
   app.use("/api/v1/vacaciones", vacacionesRoutes);
@@ -128,11 +169,25 @@ app.use("/api/v1/calidad/capa", calidadCapaRoutes);
   app.use("/api/v1/notifications", notificationsRoutes);
   app.use("/api/v1/dashboard", dashboardRoutes);
   app.use("/api/v1/support-tickets", supportTicketsRoutes);
+  app.use("/api/v1/ti-assets", tiAssetsRoutes);
+  app.use("/api/v1/collab-deliveries", collabDeliveriesRoutes);
+  app.use("/api/v1/module-access", moduleAccessRoutes);
+  app.use("/api/v1/kickoff", kickoffRoutes);
+  app.use("/api/v1/famdays", famdaysRoutes);
+  app.use("/api/v1/famsheets", opportunitiesRoutes);
+  app.use("/api/v1/opportunities", opportunitiesRoutes);
+  app.use("/api/v1/hiring-pipeline", hiringPipelineRoutes);
+  app.use("/api/v1/trainings", trainingsRoutes);
+  app.use("/api/v1/crm-fam", crmFamRoutes);
+  app.use("/api/v1/work-management", workManagementRoutes);
+  app.use("/api/v1/suggestion-box", suggestionBoxRoutes);
   app.use("/api/v1/viaticos", viaticosRoutes);
   app.use("/internal/jobs", internalJobsRouter);
   app.use("/api/v1/users/me/profile", userProfileRoutes);
   app.use("/api/v1/users", userCertificationsRoutes);
   app.use("/api/v1/signature", signatureV1Routes);
+  app.use("/api/v1/signature-workflows", signatureWorkflowsRoutes);
+  app.use("/api/v1/process-notes", processNotesRoutes);
   app.use("/api", signatureRoutes);
 }
 

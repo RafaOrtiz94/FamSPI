@@ -37,6 +37,14 @@ const scopes = [
   "https://www.googleapis.com/auth/calendar",
 ];
 
+// Se usa unicamente al responder un correo ya vinculado desde Gmail. Mantener
+// este scope fuera del cliente compartido evita ampliar permisos de Drive,
+// documentos o los demas envios del sistema.
+const gmailThreadScopes = [
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/gmail.metadata",
+];
+
 if (!googleDelegatedUser) {
   logger.warn("GOOGLE_SUBJECT no definido. La delegacion de dominio para Google APIs no funcionara.");
 }
@@ -67,6 +75,15 @@ function createDelegatedJwtClient(subject) {
   });
 }
 
+function createDelegatedGmailThreadClient(subject) {
+  return new google.auth.JWT({
+    email: key.client_email,
+    key: key.private_key.replace(/\\n/g, "\n"),
+    scopes: gmailThreadScopes,
+    subject,
+  });
+}
+
 const drive = google.drive({ version: "v3", auth: jwtClient });
 const docs = google.docs({ version: "v1", auth: jwtClient });
 const gmail = google.gmail({ version: "v1", auth: jwtClient });
@@ -88,4 +105,4 @@ if (process.env.ENABLE_GOOGLE_SELF_TEST === "true") {
   logger.info("testGoogleAuth deshabilitado");
 }
 
-module.exports = { drive, docs, gmail, calendar, sheets, jwtClient, createDelegatedJwtClient };
+module.exports = { drive, docs, gmail, calendar, sheets, jwtClient, createDelegatedJwtClient, createDelegatedGmailThreadClient };

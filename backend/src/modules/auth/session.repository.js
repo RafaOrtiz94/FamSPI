@@ -29,13 +29,14 @@ async function createSession({ email, ip, userAgent, refreshToken }) {
  * Retorna el número de filas afectadas.
  */
 async function updateSessionRefreshToken({ email, previousToken, newToken }) {
-  const { rowCount } = await db.query(
+  const { rowCount, rows } = await db.query(
     `
     UPDATE user_sessions
     SET refresh_token = $1
     WHERE user_email = $2
       AND refresh_token = $3
       AND logout_time IS NULL
+    RETURNING id
     `,
     [newToken, email, previousToken]
   );
@@ -44,6 +45,13 @@ async function updateSessionRefreshToken({ email, previousToken, newToken }) {
     logger.warn("[AUTH] No se encontró la sesión a refrescar", {
       email,
       previousTokenFragment: previousToken?.slice(0, 8),
+    });
+  } else {
+    logger.info("[AUTH] Refresh token rotado en sesion activa", {
+      email,
+      sessionId: rows[0]?.id || null,
+      previousTokenFragment: previousToken?.slice(0, 8),
+      newTokenFragment: newToken?.slice(0, 8),
     });
   }
   return rowCount;

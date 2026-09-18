@@ -16,6 +16,10 @@ export const normalizeUIGuidanceResponse = (response) => {
  return {
  businessCase,
  businessCaseId,
+ // Mismo estado legible en espanol que BusinessCasePicker (deriveBusinessCaseFlowState) -- ver getFlowStateBadge.
+ flowState: data.flowState || null,
+ // SLA general por canonical_state (businessCaseSla.service.getSlaStatus) -- antes se leia aqui pero el backend nunca lo enviaba.
+ slaStatus: data.slaStatus || null,
  workspaceData: data.workspaceData || null,
  sectionOwnership: {
  rules: data.sectionOwnership?.rules || {},
@@ -28,33 +32,56 @@ export const normalizeUIGuidanceResponse = (response) => {
  }
  },
  permissions: {
- userRole: data.permissions?.userRole ?? 'comercial',
- canEdit: data.permissions?.canEdit ?? true,
- canCompleteSections: data.permissions?.canCompleteSections ?? true,
- canPromoteStage: data.permissions?.canPromoteStage ?? true,
- canAddObservations: data.permissions?.canAddObservations ?? true,
- canBlockSections: data.permissions?.canBlockSections ?? false,
- canUnblockSections: data.permissions?.canUnblockSections ?? false,
- canRequestPreflowReopen: data.permissions?.canRequestPreflowReopen ?? false,
- canResolvePreflowReopen: data.permissions?.canResolvePreflowReopen ?? false,
- canDecideFeasibility: data.permissions?.canDecideFeasibility ?? false,
- workspaceClosed: data.permissions?.workspaceClosed ?? false,
+  userRole: data.permissions?.userRole ?? 'comercial',
+  canEdit: data.permissions?.canEdit ?? true,
+  canCompleteSections: data.permissions?.canCompleteSections ?? true,
+  canPromoteStage: data.permissions?.canPromoteStage ?? true,
+  canAddObservations: data.permissions?.canAddObservations ?? true,
+  canBlockSections: data.permissions?.canBlockSections ?? false,
+  canUnblockSections: data.permissions?.canUnblockSections ?? false,
+  canRequestPreflowReopen: data.permissions?.canRequestPreflowReopen ?? false,
+  canResolvePreflowReopen: data.permissions?.canResolvePreflowReopen ?? false,
+  canDecideFeasibility: data.permissions?.canDecideFeasibility ?? false,
+  // Faltaban en esta whitelist -- igual que paso con las 4 de apelacion de
+  // factibilidad (ver comentario BC-16/BC-17 mas abajo), el backend ya las
+  // calculaba bien pero se descartaban aqui. Esto era la causa real de que
+  // jefe_servicio nunca pudiera editar Determinaciones pese a que el gate
+  // especifico (gateInfo, endpoint aparte) siempre dijo canEditDeterminations
+  // true: DeterminationsSection.jsx usa ESTE permissions.canEditDeterminations
+  // (via canEditBase) ademas del de gateInfo (via canEditByGate) -- con este
+  // en false, canEditFinal nunca podia dar true sin importar el estado real.
+  canEditDeterminations: data.permissions?.canEditDeterminations ?? false,
+  canEditInvestments: data.permissions?.canEditInvestments ?? false,
+   canViewOfferWorkspace: data.permissions?.canViewOfferWorkspace ?? false,
+   canManageOfferWorkspace: data.permissions?.canManageOfferWorkspace ?? false,
+   canDecideOfferWorkspace: data.permissions?.canDecideOfferWorkspace ?? false,
+  // BC-16/BC-17: el backend ya las calcula (businessCase.controller.js
+  // getUIGuidance) pero esta whitelist las descartaba -- el flujo de apelar
+  // un rechazo de viabilidad quedaba muerto en el workspace.
+  canAppealFeasibilityRejection: data.permissions?.canAppealFeasibilityRejection ?? false,
+  canResolveFeasibilityAppeal: data.permissions?.canResolveFeasibilityAppeal ?? false,
+  feasibilityAppeal: data.permissions?.feasibilityAppeal ?? null,
+  feasibilityIsDefinitivelyRejected: data.permissions?.feasibilityIsDefinitivelyRejected ?? false,
+  workspaceClosed: data.permissions?.workspaceClosed ?? false,
  },
  featureFlags: {
  autosave: data.featureFlags?.autosave || {},
  },
  preflow: data.preflow || null,
  observationData: data.observationData || null,
- workflowState: {
- currentStage: data.workflowState?.currentStage || 'draft',
- currentState: data.workflowState?.currentState || data.workflowState?.canonicalState || data.workflowState?.state || null,
- availableTransitions: data.workflowState?.availableTransitions || []
- }
+  workflowState: {
+  currentStage: data.workflowState?.currentStage || 'draft',
+  rawStage: data.workflowState?.rawStage || null,
+  currentState: data.workflowState?.currentState || data.workflowState?.canonicalState || data.workflowState?.state || null,
+  availableTransitions: data.workflowState?.availableTransitions || []
+  }
  };
  } catch (error) {
  console.error('Error normalizing UI guidance response:', error);
  return {
  businessCase: null,
+ flowState: null,
+ slaStatus: null,
  sectionOwnership: { rules: {} },
  permissions: {
  canEdit: true,
@@ -70,8 +97,8 @@ export const normalizeUIGuidanceResponse = (response) => {
  },
  featureFlags: { autosave: {} },
  observationData: null,
- workflowState: { currentStage: 'draft', availableTransitions: [] }
- };
+  workflowState: { currentStage: 'draft', rawStage: null, availableTransitions: [] }
+  };
  }
 };
 
@@ -335,6 +362,17 @@ export const createAutosaveManager = (businessCaseId) => {
  * @param {Object} params - Filters (page, pageSize, status, client_name, q)
  * @returns {Promise<Object>} List response
  */
+// Vista de solo-lectura para jefe_calidad / lorena.loaiza@fam-project.com.
+export const getBusinessCaseQualitySummaryList = async () => {
+  const { data } = await api.get("/business-case/quality-summary");
+  return data?.items || [];
+};
+
+export const getBusinessCaseQualitySummaryItems = async (businessCaseId) => {
+  const { data } = await api.get(`/business-case/${businessCaseId}/quality-summary/items`);
+  return data?.items || [];
+};
+
 export const listBusinessCases = async (params = {}) => {
  const startTime = Date.now();
  const { page = 1, pageSize = 20, status, client_name, q } = params;
@@ -498,8 +536,91 @@ export const submitBusinessCaseFeasibilityDecision = async (businessCaseId, payl
  return data.data || data;
 };
 
+// BC-16: Apelación de factibilidad rechazada
+export const requestBusinessCaseFeasibilityAppeal = async (businessCaseId, payload = {}) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/feasibility/appeal`, payload);
+ return data.data || data;
+};
+
+export const resolveBusinessCaseFeasibilityAppeal = async (businessCaseId, payload = {}) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/feasibility/appeal/resolve`, payload);
+ return data.data || data;
+};
+
 export const getBusinessCaseDispatchWorkspace = async (businessCaseId) => {
  const { data } = await api.get(`/business-case/${businessCaseId}/dispatch-workspace`);
+ return data.data || data;
+};
+
+export const getBusinessCaseOfferWorkspace = async (businessCaseId) => {
+ const { data } = await api.get(`/business-case/${businessCaseId}/offer-workspace`);
+ return data.data || data;
+};
+
+export const createBusinessCaseOfferDraft = async (businessCaseId) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/offer-workspace/draft`);
+ return data.data || data;
+};
+
+export const publishBusinessCaseOfferVersion = async (businessCaseId, offerId, specificProposalFile) => {
+ const formData = new FormData();
+ formData.append("file", specificProposalFile);
+ const { data } = await api.post(
+   `/business-case/${businessCaseId}/offer-workspace/${offerId}/publish`,
+   formData,
+   { headers: { "Content-Type": "multipart/form-data" } },
+ );
+ return data.data || data;
+};
+
+// Descarga directa (Content-Disposition: attachment) en vez de abrir la
+// vista previa de Drive -- reutiliza el endpoint generico de archivos, que
+// solo exige estar autenticado (mismo criterio que el link "Abrir PDF").
+export const downloadBusinessCaseOfferPdf = async (fileId, filename = "oferta.pdf") => {
+ const { data } = await api.get(`/files/${fileId}/download`, { responseType: "blob" });
+ const url = URL.createObjectURL(data);
+ const link = document.createElement("a");
+ link.href = url;
+ link.download = filename;
+ document.body.appendChild(link);
+ link.click();
+ document.body.removeChild(link);
+ URL.revokeObjectURL(url);
+};
+
+export const sendSignedBusinessCaseOfferVersion = async (businessCaseId, offerId, signedFile) => {
+ const formData = new FormData();
+ formData.append("file", signedFile);
+ const { data } = await api.post(
+   `/business-case/${businessCaseId}/offer-workspace/${offerId}/send-signed`,
+   formData,
+   { headers: { "Content-Type": "multipart/form-data" } },
+ );
+ return data.data || data;
+};
+
+export const regenerateBusinessCaseOfferVersion = async (businessCaseId, offerId) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/offer-workspace/${offerId}/regenerate`);
+ return data.data || data;
+};
+
+export const syncBusinessCaseOfferPricing = async (businessCaseId, offerId) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/offer-workspace/${offerId}/sync-pricing`);
+ return data.data || data;
+};
+
+export const syncBusinessCaseConsumptionFromSheet = async (businessCaseId) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/consumption-items/sync-from-sheet`);
+ return data.data || data;
+};
+
+export const decideBusinessCaseOfferVersion = async (businessCaseId, offerId, payload = {}) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/offer-workspace/${offerId}/decision`, payload);
+ return data.data || data;
+};
+
+export const getBusinessCaseSheetPreview = async (businessCaseId) => {
+ const { data } = await api.get(`/business-case/${businessCaseId}/sheets/preview`);
  return data.data || data;
 };
 
@@ -531,6 +652,29 @@ export const uploadDeterminationsStatDocument = async (businessCaseId, file) => 
  return data.data || data;
 };
 
+export const parseDeterminationsQuantitiesFile = async (businessCaseId, file, section = null) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (section) formData.append("section", section);
+  const { data } = await api.post(
+    `/business-case/${businessCaseId}/determinations/parse-quantities-file`,
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return data.data || data;
+};
+
+export const requestBusinessCaseEnvironmentInspection = async (
+ businessCaseId,
+ payload = {},
+) => {
+ const { data } = await api.post(
+  `/business-case/${businessCaseId}/determinations/inspection-request`,
+  payload,
+ );
+ return data.data || data;
+};
+
 export const getBusinessCaseObservabilityDashboard = async () => {
  const { data } = await api.get("/business-case/observability/dashboard");
  return data.data || data;
@@ -545,4 +689,39 @@ export const getAutosaveFeatureFlags = async (role = null) => {
 export const updateAutosaveFeatureFlags = async (payload) => {
  const { data } = await api.put("/business-case/feature-flags/autosave", payload);
  return data.data || data;
+};
+
+export const getBusinessCaseStateHistory = async (businessCaseId) => {
+ const { data } = await api.get(`/business-case/${businessCaseId}/state-history`);
+ return data;
+};
+
+export const getBusinessCaseSlaStatus = async (businessCaseId) => {
+ const { data } = await api.get(`/business-case/${businessCaseId}/sla`);
+ return data;
+};
+
+export const getBusinessCaseSectionCompleteness = async (businessCaseId) => {
+ const { data } = await api.get(`/business-case/${businessCaseId}/section-completeness`);
+ return data;
+};
+
+export const emergencyTransition = async (businessCaseId, toState, reason) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/orchestrator/emergency-transition`, { toState, reason });
+ return data;
+};
+
+export const getBusinessCaseDocumentVersions = async (businessCaseId, limit = 20) => {
+ const { data } = await api.get(`/business-cases/${businessCaseId}/sheets/document-versions`, { params: { limit } });
+ return data;
+};
+
+export const reviewBcInspectionRequest = async (businessCaseId, payload = {}) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/inspection-request/review`, payload);
+ return data;
+};
+
+export const registerBcInspectionResult = async (businessCaseId, payload = {}) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/inspection-request/result`, payload);
+ return data;
 };

@@ -1,89 +1,339 @@
 # MATRIZ DE TRAZABILIDAD DEL SISTEMA SPI
 
-| URS-ID | FRS-ID | ARCHIVO | FUNCION |
+Matriz elaborada por el Departamento de Tecnologias de la Informacion y Comunicacion (TICS) de FamSPI. Relaciona cada requisito del sistema con su evidencia de prueba de verificacion o, cuando no existe prueba directa, con el analisis de riesgo correspondiente. Corte: 22 de julio de 2026.
+
+| Requisito | Modulo | Evidencia | Estado |
 |---|---|---|---|
-| REQ-AUTH-001 | FRS-AUTH-001 | backend/src/modules/auth/auth.controller.js | requiere validacion funcional |
-| REQ-AUTH-002 | FRS-AUTH-002 | backend/src/modules/auth/auth.controller.js | requiere validacion funcional |
-| REQ-AUTH-003 | FRS-AUTH-003 | backend/src/modules/auth/auth.controller.js | requiere validacion funcional |
-| REQ-AUTH-004 | FRS-AUTH-004 | backend/src/modules/auth/auth.controller.js | requiere validacion funcional |
-| REQ-AUTH-005 | FRS-AUTH-005 | backend/src/modules/auth/auth.controller.js | requiere validacion funcional |
-| REQ-AUTH-006 | FRS-AUTH-006 | backend/src/modules/auth/auth.controller.js | requiere validacion funcional |
-| REQ-AUTH-007 | FRS-AUTH-007 | backend/src/modules/auth/auth.controller.js | requiere validacion funcional |
-| REQ-AUTH-008 | FRS-AUTH-001 | backend/src/modules/auth/auth.controller.js | requiere validacion funcional |
-| REQ-AUTH-009 | FRS-AUTH-002 | backend/src/modules/auth/auth.controller.js | requiere validacion funcional |
-| REQ-AUTH-010 | FRS-AUTH-003 | backend/src/modules/auth/auth.controller.js | requiere validacion funcional |
-| REQ-AUTH-011 | FRS-AUTH-004 | backend/src/modules/auth/auth.controller.js | requiere validacion funcional |
-| REQ-AUTH-012 | FRS-AUTH-005 | backend/src/modules/auth/auth.controller.js | requiere validacion funcional |
-| REQ-USR-001 | FRS-USR-001 | backend/src/modules/users/users.controller.js | requiere validacion funcional |
-| REQ-USR-002 | FRS-USR-002 | backend/src/modules/users/users.controller.js | requiere validacion funcional |
-| REQ-USR-003 | FRS-USR-003 | backend/src/modules/users/users.controller.js | requiere validacion funcional |
-| REQ-USR-004 | FRS-USR-004 | backend/src/modules/users/users.controller.js | requiere validacion funcional |
-| REQ-USR-005 | FRS-USR-005 | backend/src/modules/users/users.controller.js | requiere validacion funcional |
-| REQ-USR-006 | FRS-USR-001 | backend/src/modules/users/users.controller.js | requiere validacion funcional |
-| REQ-USR-007 | FRS-USR-002 | backend/src/modules/users/users.controller.js | requiere validacion funcional |
-| REQ-USR-008 | FRS-USR-003 | backend/src/modules/users/users.controller.js | requiere validacion funcional |
-| REQ-USR-009 | FRS-USR-004 | backend/src/modules/users/users.controller.js | requiere validacion funcional |
-| REQ-USR-010 | FRS-USR-005 | backend/src/modules/users/users.controller.js | requiere validacion funcional |
-| REQ-USR-011 | FRS-USR-001 | backend/src/modules/users/users.controller.js | requiere validacion funcional |
-| REQ-USR-012 | FRS-USR-002 | backend/src/modules/users/users.controller.js | requiere validacion funcional |
-| REQ-USR-013 | FRS-USR-003 | backend/src/modules/users/users.controller.js | requiere validacion funcional |
-| REQ-COM-001 | FRS-COM-001 | backend/src/modules/requests/requests.controller.js | requiere validacion funcional |
-| REQ-COM-002 | FRS-COM-002 | backend/src/modules/requests/requests.controller.js | requiere validacion funcional |
-| REQ-COM-003 | FRS-COM-003 | backend/src/modules/requests/requests.controller.js | requiere validacion funcional |
-| REQ-COM-004 | FRS-COM-004 | backend/src/modules/requests/requests.controller.js | requiere validacion funcional |
-| REQ-COM-005 | FRS-COM-005 | backend/src/modules/requests/requests.controller.js | requiere validacion funcional |
-| REQ-COM-006 | FRS-COM-006 | backend/src/modules/requests/requests.controller.js | requiere validacion funcional |
-| REQ-BC-001 | FRS-BC-001 | backend/src/modules/business-case/businessCase.controller.js | requiere validacion funcional |
-| REQ-BC-002 | FRS-BC-002 | backend/src/modules/business-case/businessCase.controller.js | requiere validacion funcional |
-| REQ-BC-003 | FRS-BC-003 | backend/src/modules/business-case/businessCase.controller.js | requiere validacion funcional |
-| REQ-BC-004 | FRS-BC-004 | backend/src/modules/business-case/businessCase.controller.js | requiere validacion funcional |
-| REQ-BC-005 | FRS-BC-005 | backend/src/modules/business-case/businessCase.controller.js | requiere validacion funcional |
-| REQ-TH-001 | FRS-TH-001 | backend/src/modules/talento_humano/hr.controller.js | requiere validacion funcional |
-| REQ-TH-002 | FRS-TH-002 | backend/src/modules/talento_humano/hr.controller.js | requiere validacion funcional |
-| REQ-TH-003 | FRS-TH-003 | backend/src/modules/talento_humano/hr.controller.js | requiere validacion funcional |
-| REQ-TH-004 | FRS-TH-004 | backend/src/modules/talento_humano/hr.controller.js | requiere validacion funcional |
-| REQ-TH-005 | FRS-TH-005 | backend/src/modules/talento_humano/hr.controller.js | requiere validacion funcional |
-| REQ-TH-006 | FRS-TH-006 | backend/src/modules/talento_humano/hr.controller.js | requiere validacion funcional |
-| REQ-SER-001 | FRS-STM-001 | backend/src/modules/servicio/servicio.controller.js | requiere validacion funcional |
-| REQ-SER-002 | FRS-STM-002 | backend/src/modules/servicio/servicio.controller.js | requiere validacion funcional |
-| REQ-SER-003 | FRS-STM-003 | backend/src/modules/servicio/servicio.controller.js | requiere validacion funcional |
-| REQ-SER-004 | FRS-STM-004 | backend/src/modules/servicio/servicio.controller.js | requiere validacion funcional |
-| REQ-SER-005 | FRS-STM-005 | backend/src/modules/servicio/servicio.controller.js | requiere validacion funcional |
-| REQ-INV-001 | FRS-INV-001 | backend/src/modules/inventario/inventario.controller.js | requiere validacion funcional |
-| REQ-INV-002 | FRS-INV-002 | backend/src/modules/inventario/inventario.controller.js | requiere validacion funcional |
-| REQ-INV-003 | FRS-INV-003 | backend/src/modules/inventario/inventario.controller.js | requiere validacion funcional |
-| REQ-INV-004 | FRS-INV-004 | backend/src/modules/inventario/inventario.controller.js | requiere validacion funcional |
-| REQ-INV-005 | FRS-INV-005 | backend/src/modules/inventario/inventario.controller.js | requiere validacion funcional |
-| REQ-INV-006 | FRS-INV-006 | backend/src/modules/inventario/inventario.controller.js | requiere validacion funcional |
-| REQ-INV-007 | FRS-INV-007 | backend/src/modules/inventario/inventario.controller.js | requiere validacion funcional |
-| REQ-INV-008 | FRS-INV-001 | backend/src/modules/inventario/inventario.controller.js | requiere validacion funcional |
-| REQ-INV-009 | FRS-INV-002 | backend/src/modules/inventario/inventario.controller.js | requiere validacion funcional |
-| REQ-INV-010 | FRS-INV-003 | backend/src/modules/inventario/inventario.controller.js | requiere validacion funcional |
-| REQ-FAC-001 | FRS-FIN-001 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-002 | FRS-FIN-002 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-003 | FRS-FIN-003 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-004 | FRS-FIN-004 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-005 | FRS-FIN-005 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-006 | FRS-FIN-006 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-007 | FRS-FIN-007 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-008 | FRS-FIN-001 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-009 | FRS-FIN-002 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-010 | FRS-FIN-003 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-011 | FRS-FIN-004 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-FAC-012 | FRS-FIN-005 | backend/src/modules/finanzas/finanzas.controller.js | requiere validacion funcional |
-| REQ-DOC-001 | FRS-DOC-001 | backend/src/modules/documents/documents.controller.js | requiere validacion funcional |
-| REQ-DOC-002 | FRS-DOC-002 | backend/src/modules/documents/documents.controller.js | requiere validacion funcional |
-| REQ-DOC-003 | FRS-DOC-003 | backend/src/modules/documents/documents.controller.js | requiere validacion funcional |
-| REQ-DOC-004 | FRS-DOC-004 | backend/src/modules/documents/documents.controller.js | requiere validacion funcional |
-| REQ-DOC-005 | FRS-DOC-005 | backend/src/modules/documents/documents.controller.js | requiere validacion funcional |
-| REQ-NOT-001 | FRS-NTF-001 | backend/src/modules/notifications/notifications.controller.js | requiere validacion funcional |
-| REQ-NOT-002 | FRS-NTF-002 | backend/src/modules/notifications/notifications.controller.js | requiere validacion funcional |
-| REQ-NOT-003 | FRS-NTF-003 | backend/src/modules/notifications/notifications.controller.js | requiere validacion funcional |
-| REQ-NOT-004 | FRS-NTF-004 | backend/src/modules/notifications/notifications.controller.js | requiere validacion funcional |
-| REQ-NOT-005 | FRS-NTF-005 | backend/src/modules/notifications/notifications.controller.js | requiere validacion funcional |
-| REQ-TI-001 | FRS-SUP-001 | backend/src/modules/support-tickets/supportTickets.controller.js | requiere validacion funcional |
-| REQ-TI-002 | FRS-SUP-002 | backend/src/modules/support-tickets/supportTickets.controller.js | requiere validacion funcional |
-| REQ-TI-003 | FRS-SUP-003 | backend/src/modules/support-tickets/supportTickets.controller.js | requiere validacion funcional |
-| REQ-TI-004 | FRS-SUP-004 | backend/src/modules/support-tickets/supportTickets.controller.js | requiere validacion funcional |
-| REQ-TI-005 | FRS-SUP-005 | backend/src/modules/support-tickets/supportTickets.controller.js | requiere validacion funcional |
-| R | FRS-RPT-001 | backend/src/modules/dashboard/dashboard.controller.js | requiere validacion funcional |
+| REQ-APPLICANTS-001 | applicants | `backend/src/modules/applicants/__tests__/applicants.helpers.test.js` (linea 10) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-APPLICANTS-002 | applicants | `backend/src/modules/applicants/__tests__/applicants.helpers.test.js` (linea 14) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-APPLICANTS-003 | applicants | `backend/src/modules/applicants/__tests__/applicants.helpers.test.js` (linea 21) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-APPROVALS-001 | approvals | `backend/src/modules/approvals/__tests__/approvals.service.test.js` (linea 27) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-001 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 39) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-002 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 62) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-003 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 92) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-004 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 141) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-005 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 178) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-006 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 214) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-007 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 259) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-008 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 285) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-009 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 314) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-010 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 352) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-011 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 379) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-012 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 413) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-013 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 435) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-014 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 455) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-015 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 483) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-016 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 511) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-017 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 533) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-018 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 555) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-019 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 592) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-020 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 610) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-021 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 631) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-022 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 654) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-023 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 674) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-024 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 692) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-025 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 723) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-026 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 756) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-027 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 796) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-028 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 835) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-029 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 872) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-030 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 898) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-031 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 921) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-032 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 955) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-033 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 996) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-034 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 1031) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-035 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 1053) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-036 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 1093) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-037 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 1147) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-038 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 1190) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-039 | attendance | `backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js` (linea 1222) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-040 | attendance | `backend/src/modules/attendance/__tests__/attendance.service.test.js` (linea 29) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-041 | attendance | `backend/src/modules/attendance/__tests__/attendance.service.test.js` (linea 52) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-042 | attendance | `backend/src/modules/attendance/__tests__/attendance.service.test.js` (linea 68) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-043 | attendance | `backend/src/modules/attendance/__tests__/attendanceReports.service.test.js` (linea 14) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-044 | attendance | `backend/src/modules/attendance/__tests__/attendanceReports.service.test.js` (linea 41) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-045 | attendance | `backend/src/modules/attendance/__tests__/attendanceReports.service.test.js` (linea 61) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-046 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 58) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-047 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 71) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-048 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 80) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-049 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 90) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-050 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 101) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-051 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 111) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-052 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 119) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-053 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 141) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-054 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 155) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-055 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 170) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-056 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 185) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-057 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 198) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-058 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 213) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-059 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 226) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-060 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 244) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-061 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 253) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-062 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 265) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-063 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 280) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-064 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 289) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-065 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 311) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-066 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 330) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-067 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 350) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-068 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 362) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-069 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 373) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-070 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 382) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-071 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 390) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-072 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 425) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-073 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 443) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-074 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 452) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-075 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 456) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-076 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 460) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-077 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 466) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-078 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 471) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-079 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 482) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-080 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 491) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-081 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 506) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-082 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 513) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-ATTENDANCE-083 | attendance | `backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js` (linea 519) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-AUDIT-PREP-001 | audit-prep | `backend/src/modules/audit-prep/__tests__/auditPrep.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-AUDIT-PREP-002 | audit-prep | `backend/src/modules/audit-prep/__tests__/auditPrep.helpers.test.js` (linea 11) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-AUDIT-PREP-003 | audit-prep | `backend/src/modules/audit-prep/__tests__/auditPrep.helpers.test.js` (linea 17) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-AUDITORIA-001 | auditoria | `backend/src/modules/auditoria/__tests__/auditoria.service.test.js` (linea 15) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-AUDITORIA-002 | auditoria | `backend/src/modules/auditoria/__tests__/auditoria.service.test.js` (linea 33) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-AUTH-001 | auth | `backend/src/modules/auth/__tests__/session.repository.test.js` (linea 18) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-AUTH-002 | auth | `backend/src/modules/auth/__tests__/session.repository.test.js` (linea 29) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-AUTH-003 | auth | `backend/src/modules/auth/__tests__/session.repository.test.js` (linea 40) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-AUTH-004 | auth | `backend/src/modules/auth/__tests__/session.repository.test.js` (linea 49) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-AUTH-005 | auth | `backend/src/modules/auth/__tests__/session.repository.test.js` (linea 55) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-001 | business-case | `backend/src/modules/business-case/__tests__/businessCaseDeterminationsGate.service.test.js` (linea 4) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-002 | business-case | `backend/src/modules/business-case/__tests__/businessCaseDeterminationsGate.service.test.js` (linea 32) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-003 | business-case | `backend/src/modules/business-case/__tests__/businessCaseDeterminationsGate.service.test.js` (linea 60) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-004 | business-case | `backend/src/modules/business-case/__tests__/businessCaseDeterminationsGate.service.test.js` (linea 71) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-005 | business-case | `backend/src/modules/business-case/__tests__/businessCaseSheetEquipment.helper.test.js` (linea 8) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-006 | business-case | `backend/src/modules/business-case/__tests__/businessCaseSheetEquipment.helper.test.js` (linea 20) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-007 | business-case | `backend/src/modules/business-case/__tests__/businessCaseSheetGeneration.contract.test.js` (linea 10) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-008 | business-case | `backend/src/modules/business-case/__tests__/businessCaseSheetGeneration.contract.test.js` (linea 22) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-009 | business-case | `backend/src/modules/business-case/__tests__/businessCaseSheetGeneration.contract.test.js` (linea 32) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-010 | business-case | `backend/src/modules/business-case/__tests__/businessCaseSheetVersioning.helper.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-011 | business-case | `backend/src/modules/business-case/__tests__/businessCaseSheetVersioning.helper.test.js` (linea 21) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-012 | business-case | `backend/src/modules/business-case/__tests__/businessCaseSheetVersioning.helper.test.js` (linea 38) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-013 | business-case | `backend/src/modules/business-case/__tests__/businessCaseSheetVersioning.helper.test.js` (linea 63) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-014 | business-case | `backend/src/modules/business-case/__tests__/calculationEngine.test.js` (linea 10) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-015 | business-case | `backend/src/modules/business-case/__tests__/calculationEngine.test.js` (linea 15) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-016 | business-case | `backend/src/modules/business-case/__tests__/calculationEngine.test.js` (linea 23) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-017 | business-case | `backend/src/modules/business-case/__tests__/calculationEngine.test.js` (linea 31) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-018 | business-case | `backend/src/modules/business-case/__tests__/calculationEngine.test.js` (linea 39) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-019 | business-case | `backend/src/modules/business-case/__tests__/calculationEngine.test.js` (linea 64) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-020 | business-case | `backend/src/modules/business-case/__tests__/calculationEngine.test.js` (linea 84) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-021 | business-case | `backend/src/modules/business-case/__tests__/calculationEngine.test.js` (linea 104) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-022 | business-case | `backend/src/modules/business-case/__tests__/calculationEngine.test.js` (linea 129) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-023 | business-case | `backend/src/modules/business-case/__tests__/calculationEngine.test.js` (linea 133) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-024 | business-case | `backend/src/modules/business-case/__tests__/calculationEngine.test.js` (linea 137) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-025 | business-case | `backend/src/modules/business-case/__tests__/calculationEngine.test.js` (linea 146) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-026 | business-case | `backend/src/modules/business-case/__tests__/calculationEngine.test.js` (linea 152) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-027 | business-case | `backend/src/modules/business-case/__tests__/calculationEngine.test.js` (linea 158) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-028 | business-case | `backend/src/modules/business-case/__tests__/consumptionVersionConflict.integration.test.js` (linea 111) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-029 | business-case | `backend/src/modules/business-case/__tests__/consumptionVersionConflict.integration.test.js` (linea 127) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-030 | business-case | `backend/src/modules/business-case/__tests__/consumptionVersionConflict.integration.test.js` (linea 142) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-031 | business-case | `backend/src/modules/business-case/__tests__/consumptionVersionConflict.integration.test.js` (linea 164) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-032 | business-case | `backend/src/modules/business-case/__tests__/deliveryCeiling.service.test.js` (linea 24) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-033 | business-case | `backend/src/modules/business-case/__tests__/deliveryCeiling.service.test.js` (linea 121) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-034 | business-case | `backend/src/modules/business-case/__tests__/deliveryCeiling.service.test.js` (linea 196) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-035 | business-case | `backend/src/modules/business-case/__tests__/exporters.test.js` (linea 75) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-036 | business-case | `backend/src/modules/business-case/__tests__/exporters.test.js` (linea 81) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-037 | business-case | `backend/src/modules/business-case/__tests__/investments.depreciation.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-038 | business-case | `backend/src/modules/business-case/__tests__/preflow.service.test.js` (linea 25) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-039 | business-case | `backend/src/modules/business-case/__tests__/preflow.service.test.js` (linea 48) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-040 | business-case | `backend/src/modules/business-case/__tests__/preflow.service.test.js` (linea 52) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-BUSINESS-CASE-041 | business-case | `backend/src/modules/business-case/__tests__/syncConsumptionFromSheet.creates.test.js` (linea 15) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CALENDAR-001 | calendar | `backend/src/modules/calendar/__tests__/calendar.service.test.js` (linea 8) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CALENDAR-002 | calendar | `backend/src/modules/calendar/__tests__/calendar.service.test.js` (linea 15) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CALIDAD-001 | calidad | `backend/src/modules/calidad/__tests__/ca0110.rpn.test.js` (linea 11) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CLIENTS-001 | clients | `backend/src/modules/clients/__tests__/clients.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-COLLAB-DELIVERIES-001 | collab-deliveries | `backend/src/modules/collab-deliveries/__tests__/collabDeliveries.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-COLLAB-DELIVERIES-002 | collab-deliveries | `backend/src/modules/collab-deliveries/__tests__/collabDeliveries.helpers.test.js` (linea 12) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-COLLAB-DELIVERIES-003 | collab-deliveries | `backend/src/modules/collab-deliveries/__tests__/collabDeliveries.helpers.test.js` (linea 17) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-COLLABORATORS-001 | collaborators | `backend/src/modules/collaborators/__tests__/collaborators.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-COLLABORATORS-002 | collaborators | `backend/src/modules/collaborators/__tests__/collaborators.helpers.test.js` (linea 14) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CONSUMABLE-FILES-001 | consumable-files | `backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js` (linea 10) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CONSUMABLE-FILES-002 | consumable-files | `backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js` (linea 18) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CONSUMABLE-FILES-003 | consumable-files | `backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js` (linea 21) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CONSUMABLE-FILES-004 | consumable-files | `backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js` (linea 24) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CONSUMABLE-FILES-005 | consumable-files | `backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js` (linea 30) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CONSUMABLE-FILES-006 | consumable-files | `backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js` (linea 37) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CONSUMABLE-FILES-007 | consumable-files | `backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js` (linea 42) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CONSUMABLE-FILES-008 | consumable-files | `backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js` (linea 49) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CONSUMABLE-FILES-009 | consumable-files | `backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js` (linea 53) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-001 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 10) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-002 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 11) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-003 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 12) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-004 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 16) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-005 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 17) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-006 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 18) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-007 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 19) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-008 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 20) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-009 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 28) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-010 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 29) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-011 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 33) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-012 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 51) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-013 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 53) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-014 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 61) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-015 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 69) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-016 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 96) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-017 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 106) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-CRM-FAM-018 | crm-fam | `backend/src/modules/crm-fam/__tests__/crm.calculators.test.js` (linea 122) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DASHBOARD-001 | dashboard | `backend/src/modules/dashboard/__tests__/dashboard.helpers.test.js` (linea 4) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DASHBOARD-002 | dashboard | `backend/src/modules/dashboard/__tests__/dashboard.helpers.test.js` (linea 8) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DASHBOARD-003 | dashboard | `backend/src/modules/dashboard/__tests__/dashboard.helpers.test.js` (linea 13) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DASHBOARD-004 | dashboard | `backend/src/modules/dashboard/__tests__/dashboard.helpers.test.js` (linea 18) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DELIVERY-CEILINGS-001 | delivery-ceilings | `backend/src/modules/delivery-ceilings/__tests__/deliveryCeilings.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DELIVERY-CEILINGS-002 | delivery-ceilings | `backend/src/modules/delivery-ceilings/__tests__/deliveryCeilings.helpers.test.js` (linea 11) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DELIVERY-REQUESTS-001 | delivery-requests | `backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js` (linea 24) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DELIVERY-REQUESTS-002 | delivery-requests | `backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js` (linea 47) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DELIVERY-REQUESTS-003 | delivery-requests | `backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js` (linea 81) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DELIVERY-REQUESTS-004 | delivery-requests | `backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js` (linea 113) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DELIVERY-REQUESTS-005 | delivery-requests | `backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js` (linea 147) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DELIVERY-REQUESTS-006 | delivery-requests | `backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js` (linea 181) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DELIVERY-REQUESTS-007 | delivery-requests | `backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js` (linea 261) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DELIVERY-REQUESTS-008 | delivery-requests | `backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js` (linea 300) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DELIVERY-REQUESTS-009 | delivery-requests | `backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js` (linea 337) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DEPARTMENTS-001 | departments | `backend/src/modules/departments/__tests__/departments.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DEPARTMENTS-002 | departments | `backend/src/modules/departments/__tests__/departments.helpers.test.js` (linea 12) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DOCUMENTS-001 | documents | `backend/src/modules/documents/__tests__/document.service.test.js` (linea 10) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-DOCUMENTS-002 | documents | `backend/src/modules/documents/__tests__/document.service.test.js` (linea 14) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-EQUIPMENT-MANAGEMENT-001 | equipment-management | `backend/src/modules/equipment-management/__tests__/equipmentManagement.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-EQUIPMENT-MANAGEMENT-002 | equipment-management | `backend/src/modules/equipment-management/__tests__/equipmentManagement.helpers.test.js` (linea 14) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-EQUIPMENT-PURCHASES-001 | equipment-purchases | `backend/src/modules/equipment-purchases/__tests__/unifiedPurchaseVisibility.test.js` (linea 11) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-EQUIPMENT-PURCHASES-002 | equipment-purchases | `backend/src/modules/equipment-purchases/__tests__/unifiedPurchaseVisibility.test.js` (linea 15) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-EQUIPMENT-PURCHASES-003 | equipment-purchases | `backend/src/modules/equipment-purchases/__tests__/unifiedPurchaseVisibility.test.js` (linea 19) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-EQUIPMENT-PURCHASES-004 | equipment-purchases | `backend/src/modules/equipment-purchases/__tests__/unifiedPurchaseVisibility.test.js` (linea 25) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-FILES-001 | files | `backend/src/modules/files/__tests__/file.service.test.js` (linea 19) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-FILES-002 | files | `backend/src/modules/files/__tests__/file.service.test.js` (linea 28) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-FILES-003 | files | `backend/src/modules/files/__tests__/file.service.test.js` (linea 40) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-FINANZAS-001 | finanzas | `backend/src/modules/finanzas/__tests__/finanzas.controller.test.js` (linea 22) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-FINANZAS-002 | finanzas | `backend/src/modules/finanzas/__tests__/finanzas.controller.test.js` (linea 33) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-FINANZAS-003 | finanzas | `backend/src/modules/finanzas/__tests__/finanzas.controller.test.js` (linea 40) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-FINANZAS-004 | finanzas | `backend/src/modules/finanzas/__tests__/finanzas.controller.test.js` (linea 47) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-FINANZAS-005 | finanzas | `backend/src/modules/finanzas/__tests__/finanzas.controller.test.js` (linea 55) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-GMAIL-001 | gmail | `backend/src/modules/gmail/__tests__/gmail.controller.test.js` (linea 27) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-GMAIL-002 | gmail | `backend/src/modules/gmail/__tests__/gmail.controller.test.js` (linea 35) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-GMAIL-003 | gmail | `backend/src/modules/gmail/__tests__/gmail.controller.test.js` (linea 46) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-HIRING-PIPELINE-001 | hiring-pipeline | `backend/src/modules/hiring-pipeline/__tests__/hiringPipeline.helpers.test.js` (linea 11) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-HIRING-PIPELINE-002 | hiring-pipeline | `backend/src/modules/hiring-pipeline/__tests__/hiringPipeline.helpers.test.js` (linea 15) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-HIRING-PIPELINE-003 | hiring-pipeline | `backend/src/modules/hiring-pipeline/__tests__/hiringPipeline.helpers.test.js` (linea 22) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-HIRING-PIPELINE-004 | hiring-pipeline | `backend/src/modules/hiring-pipeline/__tests__/hiringPipeline.helpers.test.js` (linea 25) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-HIRING-PIPELINE-005 | hiring-pipeline | `backend/src/modules/hiring-pipeline/__tests__/hiringPipeline.helpers.test.js` (linea 28) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-INTEGRATIONS-001 | integrations | `backend/src/modules/integrations/__tests__/integrationOutbox.service.test.js` (linea 13) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-INTEGRATIONS-002 | integrations | `backend/src/modules/integrations/__tests__/integrationOutbox.service.test.js` (linea 52) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-INTEGRATIONS-003 | integrations | `backend/src/modules/integrations/__tests__/integrationOutboxWorker.service.test.js` (linea 25) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-INTEGRATIONS-004 | integrations | `backend/src/modules/integrations/__tests__/integrationOutboxWorker.service.test.js` (linea 52) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-INTEGRATIONS-005 | integrations | `backend/src/modules/integrations/__tests__/integrationOutboxWorker.service.test.js` (linea 95) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-INTEGRATIONS-006 | integrations | `backend/src/modules/integrations/__tests__/productMap.service.test.js` (linea 13) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-INTEGRATIONS-007 | integrations | `backend/src/modules/integrations/__tests__/productMap.service.test.js` (linea 56) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-INTEGRATIONS-008 | integrations | `backend/src/modules/integrations/__tests__/productMap.service.test.js` (linea 97) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-INVENTARIO-001 | inventario | `backend/src/modules/inventario/__tests__/inventario.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-INVENTARIO-002 | inventario | `backend/src/modules/inventario/__tests__/inventario.helpers.test.js` (linea 11) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-MANAGEMENT-001 | management | `backend/src/modules/management/__tests__/management.service.test.js` (linea 13) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-MANAGEMENT-002 | management | `backend/src/modules/management/__tests__/management.service.test.js` (linea 34) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-MANAGEMENT-003 | management | `backend/src/modules/management/__tests__/management.service.test.js` (linea 45) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-MANTENIMIENTOS-001 | mantenimientos | `backend/src/modules/mantenimientos/__tests__/mantenimientos.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-MANTENIMIENTOS-002 | mantenimientos | `backend/src/modules/mantenimientos/__tests__/mantenimientos.helpers.test.js` (linea 16) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-MANTENIMIENTOS-003 | mantenimientos | `backend/src/modules/mantenimientos/__tests__/mantenimientos.helpers.test.js` (linea 20) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-MANTENIMIENTOS-004 | mantenimientos | `backend/src/modules/mantenimientos/__tests__/mantenimientos.helpers.test.js` (linea 28) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-MODULE-ACCESS-001 | module-access | `backend/src/modules/module-access/__tests__/moduleAccess.service.test.js` (linea 12) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-MODULE-ACCESS-002 | module-access | `backend/src/modules/module-access/__tests__/moduleAccess.service.test.js` (linea 25) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-MODULE-ACCESS-003 | module-access | `backend/src/modules/module-access/__tests__/moduleAccess.service.test.js` (linea 33) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-NOTIFICATIONS-001 | notifications | `backend/src/modules/notifications/__tests__/notifications.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-NOTIFICATIONS-002 | notifications | `backend/src/modules/notifications/__tests__/notifications.helpers.test.js` (linea 18) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-OFFBOARDING-001 | offboarding | `backend/src/modules/offboarding/__tests__/offboarding.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-OFFBOARDING-002 | offboarding | `backend/src/modules/offboarding/__tests__/offboarding.helpers.test.js` (linea 11) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-OPPORTUNITIES-001 | opportunities | `backend/src/modules/opportunities/__tests__/opportunities.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-OPPORTUNITIES-002 | opportunities | `backend/src/modules/opportunities/__tests__/opportunities.helpers.test.js` (linea 11) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-PERMISOS-001 | permisos | `backend/src/modules/permisos/__tests__/permisos.validation.test.js` (linea 14) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-PERMISOS-002 | permisos | `backend/src/modules/permisos/__tests__/permisos.validation.test.js` (linea 17) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-PERMISOS-003 | permisos | `backend/src/modules/permisos/__tests__/permisos.validation.test.js` (linea 29) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-PERMISOS-004 | permisos | `backend/src/modules/permisos/__tests__/permisos.validation.test.js` (linea 33) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-PERMISOS-005 | permisos | `backend/src/modules/permisos/__tests__/permisos.validation.test.js` (linea 38) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-PERMISOS-006 | permisos | `backend/src/modules/permisos/__tests__/permisos.validation.test.js` (linea 42) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-PERMISOS-007 | permisos | `backend/src/modules/permisos/__tests__/permisos.validation.test.js` (linea 48) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-PERMISOS-008 | permisos | `backend/src/modules/permisos/__tests__/permisos.validation.test.js` (linea 60) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-PERMISOS-009 | permisos | `backend/src/modules/permisos/__tests__/permisos.validation.test.js` (linea 69) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-PERSONNEL-REQUESTS-001 | personnel-requests | `backend/src/modules/personnel-requests/__tests__/personnelRequests.addComment.test.js` (linea 19) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-PERSONNEL-REQUESTS-002 | personnel-requests | `backend/src/modules/personnel-requests/__tests__/personnelRequests.addComment.test.js` (linea 23) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-PERSONNEL-REQUESTS-003 | personnel-requests | `backend/src/modules/personnel-requests/__tests__/personnelRequests.addComment.test.js` (linea 29) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-PRIVATE-PURCHASES-001 | private-purchases | `backend/src/modules/private-purchases/__tests__/privatePurchases.roles.test.js` (linea 11) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-PRIVATE-PURCHASES-002 | private-purchases | `backend/src/modules/private-purchases/__tests__/privatePurchases.roles.test.js` (linea 15) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-REQUESTS-001 | requests | `backend/src/modules/requests/__tests__/sendConsentEmailToken.test.js` (linea 25) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SCHEDULES-001 | schedules | `backend/src/modules/schedules/__tests__/schedules.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SCHEDULES-002 | schedules | `backend/src/modules/schedules/__tests__/schedules.helpers.test.js` (linea 12) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SCHEDULES-003 | schedules | `backend/src/modules/schedules/__tests__/schedules.helpers.test.js` (linea 22) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SECURITY-001 | security | `backend/src/modules/security/__tests__/security.helpers.test.js` (linea 21) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SECURITY-002 | security | `backend/src/modules/security/__tests__/security.helpers.test.js` (linea 26) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SECURITY-003 | security | `backend/src/modules/security/__tests__/security.helpers.test.js` (linea 36) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SECURITY-004 | security | `backend/src/modules/security/__tests__/security.helpers.test.js` (linea 41) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SECURITY-005 | security | `backend/src/modules/security/__tests__/security.helpers.test.js` (linea 45) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SECURITY-006 | security | `backend/src/modules/security/__tests__/security.helpers.test.js` (linea 50) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SECURITY-007 | security | `backend/src/modules/security/__tests__/security.helpers.test.js` (linea 57) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SECURITY-008 | security | `backend/src/modules/security/__tests__/security.helpers.test.js` (linea 61) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SECURITY-009 | security | `backend/src/modules/security/__tests__/security.helpers.test.js` (linea 66) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SECURITY-010 | security | `backend/src/modules/security/__tests__/security.helpers.test.js` (linea 74) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SECURITY-011 | security | `backend/src/modules/security/__tests__/security.helpers.test.js` (linea 84) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SECURITY-012 | security | `backend/src/modules/security/__tests__/security.helpers.test.js` (linea 90) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SECURITY-013 | security | `backend/src/modules/security/__tests__/security.helpers.test.js` (linea 96) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SECURITY-014 | security | `backend/src/modules/security/__tests__/security.helpers.test.js` (linea 102) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SERVICIO-001 | servicio | `backend/src/modules/servicio/__tests__/externalCases.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SERVICIO-002 | servicio | `backend/src/modules/servicio/__tests__/externalCases.helpers.test.js` (linea 11) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SHARED-001 | shared | `backend/src/modules/shared/__tests__/profileSync.test.js` (linea 11) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SHARED-002 | shared | `backend/src/modules/shared/__tests__/profileSync.test.js` (linea 16) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SHARED-003 | shared | `backend/src/modules/shared/__tests__/profileSync.test.js` (linea 24) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-001 | signature | `backend/src/modules/signature/__tests__/signature.validation.test.js` (linea 17) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-002 | signature | `backend/src/modules/signature/__tests__/signature.validation.test.js` (linea 21) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-003 | signature | `backend/src/modules/signature/__tests__/signature.validation.test.js` (linea 26) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-004 | signature | `backend/src/modules/signature/__tests__/signature.validation.test.js` (linea 31) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-005 | signature | `backend/src/modules/signature/__tests__/signature.validation.test.js` (linea 36) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-WORKFLOWS-001 | signature-workflows | `backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js` (linea 25) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-WORKFLOWS-002 | signature-workflows | `backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js` (linea 32) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-WORKFLOWS-003 | signature-workflows | `backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js` (linea 40) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-WORKFLOWS-004 | signature-workflows | `backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js` (linea 51) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-WORKFLOWS-005 | signature-workflows | `backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js` (linea 57) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-WORKFLOWS-006 | signature-workflows | `backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js` (linea 63) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-WORKFLOWS-007 | signature-workflows | `backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js` (linea 69) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-WORKFLOWS-008 | signature-workflows | `backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js` (linea 75) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-WORKFLOWS-009 | signature-workflows | `backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js` (linea 83) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-WORKFLOWS-010 | signature-workflows | `backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js` (linea 88) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-WORKFLOWS-011 | signature-workflows | `backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js` (linea 92) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SIGNATURE-WORKFLOWS-012 | signature-workflows | `backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js` (linea 99) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SUPPORT-TICKETS-001 | support-tickets | `backend/src/modules/support-tickets/__tests__/supportTickets.helpers.test.js` (linea 10) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SUPPORT-TICKETS-002 | support-tickets | `backend/src/modules/support-tickets/__tests__/supportTickets.helpers.test.js` (linea 13) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SUPPORT-TICKETS-003 | support-tickets | `backend/src/modules/support-tickets/__tests__/supportTickets.helpers.test.js` (linea 17) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SUPPORT-TICKETS-004 | support-tickets | `backend/src/modules/support-tickets/__tests__/supportTickets.helpers.test.js` (linea 20) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SUPPORT-TICKETS-005 | support-tickets | `backend/src/modules/support-tickets/__tests__/supportTickets.helpers.test.js` (linea 23) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-SUPPORT-TICKETS-006 | support-tickets | `backend/src/modules/support-tickets/__tests__/supportTickets.helpers.test.js` (linea 29) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-TALENTO-HUMANO-001 | talento_humano | `backend/src/modules/talento_humano/__tests__/hr.controller.test.js` (linea 22) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-TALENTO-HUMANO-002 | talento_humano | `backend/src/modules/talento_humano/__tests__/hr.controller.test.js` (linea 30) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-TALENTO-HUMANO-003 | talento_humano | `backend/src/modules/talento_humano/__tests__/hr.controller.test.js` (linea 46) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-TECHNICAL-APPLICATIONS-001 | technical-applications | `backend/src/modules/technical-applications/__tests__/technicalApplications.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-TI-ASSETS-001 | ti-assets | `backend/src/modules/ti-assets/__tests__/tiAssets.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-TI-ASSETS-002 | ti-assets | `backend/src/modules/ti-assets/__tests__/tiAssets.helpers.test.js` (linea 19) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-TI-ASSETS-003 | ti-assets | `backend/src/modules/ti-assets/__tests__/tiAssets.helpers.test.js` (linea 24) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-TRAININGS-001 | trainings | `backend/src/modules/trainings/__tests__/trainings.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-TRAININGS-002 | trainings | `backend/src/modules/trainings/__tests__/trainings.helpers.test.js` (linea 11) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-TRAININGS-003 | trainings | `backend/src/modules/trainings/__tests__/trainings.helpers.test.js` (linea 18) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-USER-CERTIFICATIONS-001 | user-certifications | `backend/src/modules/user-certifications/__tests__/userCertifications.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-USER-CERTIFICATIONS-002 | user-certifications | `backend/src/modules/user-certifications/__tests__/userCertifications.helpers.test.js` (linea 12) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-USER-PROFILE-001 | user-profile | `backend/src/modules/user-profile/__tests__/userProfile.helpers.test.js` (linea 7) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-USER-PROFILE-002 | user-profile | `backend/src/modules/user-profile/__tests__/userProfile.helpers.test.js` (linea 12) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-USER-PROFILE-003 | user-profile | `backend/src/modules/user-profile/__tests__/userProfile.helpers.test.js` (linea 17) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-USER-PROFILE-004 | user-profile | `backend/src/modules/user-profile/__tests__/userProfile.helpers.test.js` (linea 24) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-USER-PROFILE-005 | user-profile | `backend/src/modules/user-profile/__tests__/userProfile.helpers.test.js` (linea 27) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-USERS-001 | users | `backend/src/modules/users/__tests__/users.helpers.test.js` (linea 12) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-USERS-002 | users | `backend/src/modules/users/__tests__/users.helpers.test.js` (linea 19) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-USERS-003 | users | `backend/src/modules/users/__tests__/users.helpers.test.js` (linea 27) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-USERS-004 | users | `backend/src/modules/users/__tests__/users.helpers.test.js` (linea 33) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-USERS-005 | users | `backend/src/modules/users/__tests__/users.helpers.test.js` (linea 42) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-VACACIONES-001 | vacaciones | `backend/src/modules/vacaciones/__tests__/vacaciones.service.test.js` (linea 11) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-VACACIONES-002 | vacaciones | `backend/src/modules/vacaciones/__tests__/vacaciones.service.test.js` (linea 16) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-VACACIONES-003 | vacaciones | `backend/src/modules/vacaciones/__tests__/vacaciones.service.test.js` (linea 22) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-VACACIONES-004 | vacaciones | `backend/src/modules/vacaciones/__tests__/vacaciones.service.test.js` (linea 29) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-VIATICOS-001 | viaticos | `backend/src/modules/viaticos/__tests__/viaticos.access.test.js` (linea 10) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-VIATICOS-002 | viaticos | `backend/src/modules/viaticos/__tests__/viaticos.access.test.js` (linea 16) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-VIATICOS-003 | viaticos | `backend/src/modules/viaticos/__tests__/viaticos.access.test.js` (linea 23) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-VIATICOS-004 | viaticos | `backend/src/modules/viaticos/__tests__/viaticos.access.test.js` (linea 28) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-WORK-MANAGEMENT-001 | work-management | `backend/src/modules/work-management/__tests__/workManagement.helpers.test.js` (linea 10) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |
+| REQ-WORK-MANAGEMENT-002 | work-management | `backend/src/modules/work-management/__tests__/workManagement.helpers.test.js` (linea 13) | Verificado — resultado registrado en la calificacion OQ/PQ vigente |

@@ -59,8 +59,8 @@ const UserRequestsView = ({ onCreateNew }) => {
  const isACP = roleName.includes('acp');
  const isJefeComercial = roleName.includes("jefe_comercial") || roleName.includes("jefe comercial");
 
- const baseActions = ["cliente", "compra", "permisos"];
- const acpActions = ["cliente", "compra", "permisos"];
+ const baseActions = ["cliente", "compra", "credito", "permisos"];
+ const acpActions = ["cliente", "compra", "credito", "permisos"];
  const fullActions = ["inspection", "retiro", ...baseActions];
 
  let availableActionIds = isACP ? acpActions : fullActions;
@@ -79,6 +79,7 @@ const UserRequestsView = ({ onCreateNew }) => {
  const organized = {
  cliente: [],
  compra: [],
+ credito: [],
  inspection: [],
  retiro: [],
  permisos: [],
@@ -94,39 +95,27 @@ const UserRequestsView = ({ onCreateNew }) => {
  status: request.status,
  created_at: request.created_at,
  description: `Registro de cliente: ${request.client_name || request.commercial_name}`,
+ rejectionReason: request.rejection_reason || null,
  data: request
  });
  });
 
- // Procesar solicitudes generales
- requests.forEach(request => {
- let type = 'compra'; // default
- let title = 'Solicitud';
- let description = '';
+ // Procesar solicitudes generales -- request_type_id llega como el codigo
+ // real del tipo (F.ST-19/20/21/22), no como 'compra'/'inspection'/etc.
+ // El switch anterior comparaba contra esos alias en ingles, que nunca
+ // coincidian, asi que todo caia al default 'compra'.
+ const TYPE_CODE_MAP = {
+ 'F.ST-19': { type: 'compra', title: 'Requerimiento de Compra' },
+ 'F.ST-20': { type: 'inspection', title: 'Inspección Técnica' },
+ 'F.ST-21': { type: 'retiro', title: 'Retiro de Equipo' },
+ 'F.ST-22': { type: 'cliente', title: 'Registro de Cliente' },
+    'F.VE-02': { type: 'credito', title: 'Solicitud de Credito' },
+ };
 
- // Determinar tipo basado en el request_type_id o payload
- if (request.request_type_id) {
- switch (request.request_type_id) {
- case 'cliente':
- type = 'cliente';
- title = 'Registro de Cliente';
- break;
- case 'compra':
- type = 'compra';
- title = 'Requerimiento de Compra';
- break;
- case 'inspection':
- type = 'inspection';
- title = 'Inspección Técnica';
- break;
- case 'retiro':
- type = 'retiro';
- title = 'Retiro de Equipo';
- break;
- default:
- type = 'compra';
- }
- }
+ requests.forEach(request => {
+ const mapped = TYPE_CODE_MAP[request.type_code] || { type: 'compra', title: request.type_title || 'Solicitud' };
+ const { type, title } = mapped;
+ let description = '';
 
  // Extraer información del payload si existe
  if (request.payload) {
@@ -151,6 +140,7 @@ const UserRequestsView = ({ onCreateNew }) => {
  status: request.status,
  created_at: request.created_at,
  description,
+ rejectionReason: request.rejection_reason || null,
  data: request
  });
  });
@@ -308,6 +298,11 @@ const UserRequestsView = ({ onCreateNew }) => {
  {request.description && (
  <p className="text-[11px] sm:text-xs text-slate-600 truncate mb-1">
  {request.description}
+ </p>
+ )}
+ {request.rejectionReason && (
+ <p className="text-[11px] sm:text-xs text-red-600 mb-1">
+ <span className="font-semibold">Motivo de rechazo:</span> {request.rejectionReason}
  </p>
  )}
  <p className="text-[11px] sm:text-xs text-slate-500">

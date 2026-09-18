@@ -20,27 +20,32 @@ const buildRequestFilters = ({ status, area }) => {
 };
 
 const getStats = async () => {
-  const [countAll, countApproved, countRejected, avgTime] = await Promise.all([
-    db.query("SELECT COUNT(*) FROM requests"),
-    db.query("SELECT COUNT(*) FROM requests WHERE status='aprobado'"),
-    db.query("SELECT COUNT(*) FROM requests WHERE status='rechazado'"),
-    db.query("SELECT ROUND(AVG(EXTRACT(EPOCH FROM (updated_at - created_at))/3600),2) AS avg_hours FROM requests WHERE status IN ('aprobado')"),
+  const [summary, perType] = await Promise.all([
+    db.query(`
+      SELECT
+        COUNT(*) AS total,
+        COUNT(*) FILTER (WHERE status = 'aprobado') AS aprobadas,
+        COUNT(*) FILTER (WHERE status = 'rechazado') AS rechazadas,
+        ROUND(AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) / 3600)
+          FILTER (WHERE status = 'aprobado'), 2) AS avg_hours
+      FROM requests
+    `),
+    db.query(`
+      SELECT rt.code, rt.title, COUNT(r.id) AS total
+      FROM requests r
+      JOIN request_types rt ON r.request_type_id = rt.id
+      GROUP BY rt.code, rt.title
+      ORDER BY total DESC
+    `),
   ]);
-
-  const perType = await db.query(`
-    SELECT rt.code, rt.title, COUNT(r.id) AS total
-    FROM requests r
-    JOIN request_types rt ON r.request_type_id = rt.id
-    GROUP BY rt.code, rt.title
-    ORDER BY total DESC
-  `);
+  const row = summary.rows[0];
 
   return {
     resumen: {
-      total: Number(countAll.rows[0].count),
-      aprobadas: Number(countApproved.rows[0].count),
-      rechazadas: Number(countRejected.rows[0].count),
-      tiempo_promedio_horas: avgTime.rows[0].avg_hours || 0,
+      total: Number(row.total),
+      aprobadas: Number(row.aprobadas),
+      rechazadas: Number(row.rechazadas),
+      tiempo_promedio_horas: row.avg_hours || 0,
     },
     por_tipo: perType.rows,
   };
@@ -54,7 +59,6 @@ const listRequests = async ({ page, pageSize, status, area }) => {
     FROM requests r
     ${where}
   `;
-  const countResult = await db.query(countQuery, params);
   const listParams = [...params, pageSize, offset];
   const limitParam = `$${listParams.length - 1}`;
   const offsetParam = `$${listParams.length}`;
@@ -67,7 +71,10 @@ const listRequests = async ({ page, pageSize, status, area }) => {
     ORDER BY r.created_at DESC
     LIMIT ${limitParam} OFFSET ${offsetParam}
   `;
-  const data = await db.query(query, listParams);
+  const [countResult, data] = await Promise.all([
+    db.query(countQuery, params),
+    db.query(query, listParams),
+  ]);
   return { rows: data.rows, total: Number(countResult.rows[0]?.total || 0) };
 };
 

@@ -30,10 +30,10 @@ El area centraliza los controles transversales de acceso, cumplimiento y trazabi
 - Registro de eventos criticos para auditoria.
 - Gestion de aprobaciones de solicitudes y transacciones internas.
 - Gestion de firmas para cierre formal de procesos.
-- [Funcionalidad detectada en el sistema] Preparacion y consolidacion de evidencia para revisiones de control.
+- Preparacion y consolidacion de evidencia para revisiones de control.
 
 ## 7. Requerimientos funcionales de alto nivel
-- REQ-GSC-001: El sistema debe autenticar usuarios internos antes de permitir acceso a modulos de negocio.
+- REQ-GSC-001: El sistema debe autenticar usuarios internos antes de permitir acceso a los otros modulos.
 - REQ-GSC-002: El sistema debe controlar sesiones activas, renovacion de token y cierre de sesion seguro.
 - REQ-GSC-003: El sistema debe autorizar operaciones segun rol, perfil y permiso configurado.
 - REQ-GSC-004: El sistema debe registrar eventos de seguridad y auditoria con usuario, fecha, accion y contexto.

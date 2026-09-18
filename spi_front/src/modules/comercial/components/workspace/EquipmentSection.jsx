@@ -11,6 +11,11 @@ import {
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
+import SectionEditorBadge from "./SectionEditorBadge";
+import { getEquipmentAssets } from "../../../../core/api/equipmentManagementApi";
+
+// Mismos roles que ya autoriza el backend en POST /sections/:section/unlock.
+const EQUIPMENT_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial"]);
 
 const generateLocalId = () => {
  if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -26,6 +31,9 @@ const DEFAULT_EQUIPMENT_PAIR = () => ({
  backup: null,
  backup_type: "new_available",
  requiresBackup: false,
+ installation_location: "",
+ requiresComplementary: false,
+ complementary_test_purpose: "",
 });
 
 const EQUIPMENT_TYPE_OPTIONS = [
@@ -247,6 +255,64 @@ const EquipmentSection = ({
  const { id: bcId } = useParams();
  const { showToast, showLoader, hideLoader } = useUI();
  const canEdit = permissions.canEdit !== false && ownership?.canUserEdit !== false;
+ // Reabrir "equipment" tras el auto-bloqueo al guardar comercial (ver
+ // saveEquipmentDetailsV2 en businessCase.controller.js). Mismos roles que
+ // ya autoriza el backend en POST /sections/:section/unlock.
+ const canReopenEquipment = ownership?.isLocked === true && EQUIPMENT_REOPEN_ROLES.has(permissions?.userRole || "");
+ const [reopening, setReopening] = useState(false);
+ const handleReopenEquipment = async () => {
+  if (!bcId || reopening) return;
+  setReopening(true);
+  try {
+   await api.post(`/business-case/${bcId}/sections/equipment/unlock`);
+   onSave();
+   showToast("Sección reabierta para edición.", "success");
+  } catch (err) {
+   showToast(err?.response?.data?.message || "No se pudo reabrir la sección.", "error");
+  } finally {
+   setReopening(false);
+  }
+ };
+
+ // Consulta de disponibilidad (equipment-management) para 1+ equipos ya
+ // seleccionados como principal en un grupo -- boton flotante, solo para
+ // quien edita esta seccion (acp_comercial/jefe_comercial, ya es lo que
+ // significa `canEdit` aqui). No reserva nada todavia: solo consulta.
+ const [selectedPairIds, setSelectedPairIds] = useState(() => new Set());
+ const [availabilityResults, setAvailabilityResults] = useState(null);
+ const [checkingAvailability, setCheckingAvailability] = useState(false);
+ const toggleAvailabilitySelection = (pairId) => {
+  setSelectedPairIds((prev) => {
+   const next = new Set(prev);
+   if (next.has(pairId)) next.delete(pairId);
+   else next.add(pairId);
+   return next;
+  });
+ };
+ const handleCheckAvailability = async () => {
+  if (!selectedPairIds.size || checkingAvailability) return;
+  setCheckingAvailability(true);
+  setAvailabilityResults(null);
+  try {
+   const targets = equipmentPairs
+    .filter((pair) => selectedPairIds.has(pair.id) && pair.primary?.id)
+    .map((pair) => ({ id: pair.primary.id, name: pair.primary.name }));
+   const results = await Promise.all(
+    targets.map(async (target) => {
+     try {
+      const assets = await getEquipmentAssets({ servicio_equipo_id: target.id, availability: "available" });
+      const list = Array.isArray(assets) ? assets : assets?.items || [];
+      return { ...target, available: list.length, error: null };
+     } catch (err) {
+      return { ...target, available: null, error: err?.response?.data?.message || "No se pudo consultar" };
+     }
+    }),
+   );
+   setAvailabilityResults(results);
+  } finally {
+   setCheckingAvailability(false);
+  }
+ };
 
  const [items, setItems] = useState([]);
  const [loadingCatalog, setLoadingCatalog] = useState(false);
@@ -276,6 +342,9 @@ const EquipmentSection = ({
  id: detail.id || generateLocalId() || String(index + 1),
  primary_type: normalizeEquipmentType(detail.primary_type || detail.primary?.type),
  requiresBackup: detail.requires_backup ?? detail.requiresBackup ?? Boolean(detail.backup),
+ installation_location: detail.installation_location || "",
+ requiresComplementary: Boolean(detail.requires_complementary),
+ complementary_test_purpose: detail.complementary_test_purpose || "",
  primary: detail.primary
  ? {
  id: detail.primary.id,
@@ -690,6 +759,9 @@ const EquipmentSection = ({
  requires_backup: Boolean(pair.requiresBackup),
  backup_id: pair.requiresBackup ? Number(pair.backup?.id || null) : null,
  backup_install_simultaneous: pair.requiresBackup && pair.backup ? Boolean(pair.backup.install_with_primary) : false,
+ installation_location: pair.installation_location || null,
+ requires_complementary: Boolean(pair.requiresComplementary),
+ complementary_test_purpose: pair.requiresComplementary ? (pair.complementary_test_purpose || null) : null,
  })),
  };
 
@@ -734,6 +806,9 @@ const EquipmentSection = ({
  <div>
  <h2 className={UI.title}>Seleccion de equipos</h2>
  <p className={UI.subtitle}>Define principal y backup por grupo.</p>
+ <div className="mt-2">
+ <SectionEditorBadge ownership={ownership} />
+ </div>
  </div>
  <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
  <button
@@ -758,8 +833,22 @@ const EquipmentSection = ({
  </div>
 
  {!canEdit && (
- <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-700">
- Esta seccion esta en modo solo lectura para tu rol.
+ <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+ <span>
+ {ownership?.isLocked
+  ? "Comercial ya guardó esta sección y quedó en solo lectura."
+  : "Esta seccion esta en modo solo lectura para tu rol."}
+ </span>
+ {canReopenEquipment && (
+ <button
+  type="button"
+  onClick={handleReopenEquipment}
+  disabled={reopening}
+  className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 w-full sm:w-auto"
+ >
+  Reabrir para edición
+ </button>
+ )}
  </div>
  )}
 
@@ -799,6 +888,21 @@ const EquipmentSection = ({
  onToggle={() => togglePair(pair.id)}
  statusBadge={
  <div className="flex items-center gap-2 flex-wrap justify-end">
+ {canEdit && pair.primary?.id && (
+ <label
+ className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer"
+ onClick={(event) => event.stopPropagation()}
+ title="Marcar para consultar disponibilidad"
+ >
+ <input
+ type="checkbox"
+ checked={selectedPairIds.has(pair.id)}
+ onChange={() => toggleAvailabilitySelection(pair.id)}
+ className="h-3.5 w-3.5"
+ />
+ Consultar
+ </label>
+ )}
  {pair.primary_type && pair.primary && (
  <span className={`${UI.chip} bg-blue-50 text-blue-700`}>
  P: {EQUIPMENT_TYPE_OPTIONS.find((option) => option.value === normalizeEquipmentType(pair.primary_type))?.label || "Nuevo"}
@@ -892,6 +996,20 @@ const EquipmentSection = ({
  </select>
  </div>
 
+ <div className="w-full sm:max-w-sm">
+ <label className="mb-1 block text-xs font-semibold text-gray-600 uppercase tracking-wide">
+ Ubicacion de instalacion
+ </label>
+ <input
+ type="text"
+ placeholder="Ej: Laboratorio central, piso 2"
+ value={pair.installation_location || ""}
+ onChange={(event) => updatePair(pair.id, { installation_location: event.target.value })}
+ disabled={!canEdit}
+ className={INPUT_CLASS}
+ />
+ </div>
+
  <button
  type="button"
  aria-label="Cambiar equipo principal"
@@ -914,6 +1032,7 @@ const EquipmentSection = ({
  </div>
 
  {pair.primary && (
+ <>
  <div className="space-y-3 border-t border-slate-200 pt-4 rounded-xl">
  <div className="flex justify-between items-center">
  <div>
@@ -1046,6 +1165,29 @@ const EquipmentSection = ({
  </>
  )}
  </div>
+
+ <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+ <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
+ <input
+ type="checkbox"
+ checked={Boolean(pair.requiresComplementary)}
+ onChange={(event) => updatePair(pair.id, { requiresComplementary: event.target.checked })}
+ disabled={!canEdit}
+ />
+ Requiere equipo complementario
+ </label>
+ {pair.requiresComplementary && (
+ <input
+ type="text"
+ placeholder="Proposito del equipo complementario"
+ value={pair.complementary_test_purpose || ""}
+ onChange={(event) => updatePair(pair.id, { complementary_test_purpose: event.target.value })}
+ disabled={!canEdit}
+ className={INPUT_CLASS}
+ />
+ )}
+ </div>
+ </>
  )}
 
  <div className="pt-4 flex justify-end border-t border-slate-200">
@@ -1065,9 +1207,10 @@ const EquipmentSection = ({
  <div className="px-2 pb-2">
  <button
  type="button"
- className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+ className={`${UI.actionSecondary} w-full cursor-pointer gap-1.5 active:scale-[0.97] transition-transform duration-150`}
  onClick={() => increaseVisibleRows(pair.id, "primary")}
  >
+ <FiChevronDown size={14} />
  Mostrar mas equipos ({filteredPrimaryItems.length - visiblePrimaryItems.length} restantes)
  </button>
  </div>
@@ -1076,9 +1219,10 @@ const EquipmentSection = ({
  <div className="px-2 pb-2">
  <button
  type="button"
- className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+ className={`${UI.actionSecondary} w-full cursor-pointer gap-1.5 active:scale-[0.97] transition-transform duration-150`}
  onClick={() => increaseVisibleRows(pair.id, "backup")}
  >
+ <FiChevronDown size={14} />
  Mostrar mas backups ({compatibleCandidates.length - visibleBackupCandidates.length} restantes)
  </button>
  </div>
@@ -1106,6 +1250,68 @@ const EquipmentSection = ({
  </button>
  </div>
  </div>
+
+ {selectedPairIds.size > 0 && (
+ <div className="fixed bottom-24 right-4 z-30 flex items-center gap-2 rounded-full bg-slate-900 text-white pl-4 pr-2 py-2 shadow-lg">
+ <span className="text-xs font-medium">
+ {selectedPairIds.size} equipo{selectedPairIds.size === 1 ? "" : "s"} seleccionado{selectedPairIds.size === 1 ? "" : "s"}
+ </span>
+ <button
+ type="button"
+ onClick={handleCheckAvailability}
+ disabled={checkingAvailability}
+ className="rounded-full bg-white text-slate-900 text-xs font-semibold px-3 py-1.5 hover:bg-slate-100 disabled:opacity-60"
+ >
+ {checkingAvailability ? "Consultando..." : "Ver disponibilidad"}
+ </button>
+ <button
+ type="button"
+ onClick={() => setSelectedPairIds(new Set())}
+ className="rounded-full p-1.5 hover:bg-white/10"
+ aria-label="Limpiar seleccion"
+ >
+ <FiX size={14} />
+ </button>
+ </div>
+ )}
+
+ {availabilityResults && (
+ <div className="fixed inset-0 z-[1200] bg-slate-900/45 backdrop-blur-[1px] flex items-center justify-center p-4">
+ <div className="w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-2xl p-5 space-y-4">
+ <div className="flex items-center justify-between">
+ <h3 className="text-base font-semibold text-slate-900">Disponibilidad de equipos</h3>
+ <button
+ type="button"
+ onClick={() => setAvailabilityResults(null)}
+ className="text-slate-400 hover:text-slate-600"
+ aria-label="Cerrar"
+ >
+ <FiX size={18} />
+ </button>
+ </div>
+ <div className="space-y-2">
+ {availabilityResults.map((result) => (
+ <div
+ key={result.id}
+ className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+ >
+ <span className="text-slate-700">{result.name}</span>
+ {result.error ? (
+ <span className="text-rose-600 text-xs font-semibold">{result.error}</span>
+ ) : result.available > 0 ? (
+ <span className="text-emerald-700 text-xs font-semibold">{result.available} disponible{result.available === 1 ? "" : "s"}</span>
+ ) : (
+ <span className="text-amber-600 text-xs font-semibold">Sin disponibilidad</span>
+ )}
+ </div>
+ ))}
+ </div>
+ <p className="text-xs text-slate-500">
+ Disponibilidad segun equipment-management (activos con estado negociable). No reserva el equipo.
+ </p>
+ </div>
+ </div>
+ )}
 
  {pendingDeletePairId && (
  <div className="fixed inset-0 z-[1200] bg-slate-900/45 backdrop-blur-[1px] flex items-center justify-center p-4">
