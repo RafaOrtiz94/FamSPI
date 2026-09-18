@@ -275,6 +275,7 @@ async function getProcessCandidates({ id, user, clientRequestId }) {
         entity_id: row.entity_id,
         label: row.label || "Proceso sin cliente visible",
         status: row.status || null,
+        created_at: row.created_at || null,
       });
     } catch (error) {
       if (error?.status !== 403) throw error;
@@ -319,6 +320,7 @@ async function searchProcesses({ user, entityType, q }) {
       entity_id: item.business_case_id,
       label: item.client_name || `Business Case ${item.business_case_id}`,
       status: item.canonical_state || item.status || null,
+      created_at: item.bc_created_at || item.created_at || null,
     }));
   }
 
@@ -339,6 +341,7 @@ async function searchProcesses({ user, entityType, q }) {
     entity_id: row.entity_id,
     label: row.client_name || `${entityType} ${row.entity_id}`,
     status: row.status || null,
+    created_at: row.created_at || null,
   }));
 }
 
