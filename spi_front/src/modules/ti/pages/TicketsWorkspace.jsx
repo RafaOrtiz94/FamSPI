@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { DndContext, PointerSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { FiBarChart2, FiRefreshCw, FiSearch, FiX } from "react-icons/fi";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -288,6 +289,12 @@ const TicketsWorkspace = () => {
   };
 
   const applyStatusChange = async (ticketId, nextStatus, comment = "") => {
+    // Actualizacion optimista: mueve la tarjeta a su columna nueva de
+    // inmediato (relevante para el arrastre en el kanban, que si no se
+    // sentiria como si la tarjeta "rebotara" hasta que el servidor responda)
+    // y revierte si la llamada falla.
+    const previousTickets = tickets;
+    setTickets((prev) => prev.map((t) => (t.id === ticketId ? { ...t, status: nextStatus } : t)));
     setBusyId(ticketId);
     try {
       await updateSupportTicketStatus(ticketId, { status: nextStatus, comment });
@@ -299,6 +306,7 @@ const TicketsWorkspace = () => {
       });
       await loadTickets();
     } catch (error) {
+      setTickets(previousTickets);
       showToast(error?.response?.data?.message || "No se pudo actualizar estado", "error");
     } finally {
       setBusyId(null);
@@ -318,6 +326,28 @@ const TicketsWorkspace = () => {
     const { ticketId, nextStatus } = pendingStatusChange;
     setPendingStatusChange(null);
     await applyStatusChange(ticketId, nextStatus, reason);
+  };
+
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } })
+  );
+
+  const handleKanbanDragEnd = (event) => {
+    const { active, over } = event;
+    if (!over) return;
+    const ticketId = Number(active.id);
+    const nextStatus = String(over.id);
+    const ticket = tickets.find((t) => t.id === ticketId);
+    if (!ticket) return;
+    const currentStatus = String(ticket.status || "").trim().toLowerCase();
+    if (currentStatus === nextStatus) return;
+    const allowed = ALLOWED_STATUS_TRANSITIONS[currentStatus];
+    if (!allowed || !allowed.has(nextStatus)) {
+      showToast("Esa transicion de estado no esta permitida", "warning");
+      return;
+    }
+    handleStatusChangeRequest(ticketId, nextStatus);
   };
 
   const getStatusOptionsForTicket = (currentStatus) => {
@@ -464,7 +494,9 @@ const TicketsWorkspace = () => {
       {loading ? (
         <div className="px-5 py-8 text-sm" style={{ color: "var(--ti-text-muted)" }}>Cargando tickets...</div>
       ) : (
-        <TicketKanbanBoard columns={kanbanColumns} selectedId={selectedTicketId} onSelectTicket={openInspector} />
+        <DndContext sensors={dndSensors} onDragEnd={handleKanbanDragEnd}>
+          <TicketKanbanBoard columns={kanbanColumns} selectedId={selectedTicketId} onSelectTicket={openInspector} />
+        </DndContext>
       )}
 
       <TicketInspector

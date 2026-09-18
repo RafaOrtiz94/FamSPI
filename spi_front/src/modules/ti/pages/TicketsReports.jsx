@@ -117,6 +117,7 @@ const TicketsReports = () => {
 
   useEffect(() => {
     loadKpiDefinitions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleExport = async (format) => {
