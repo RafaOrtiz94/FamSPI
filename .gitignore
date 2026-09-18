@@ -46,6 +46,7 @@ backend/backups/
 *.sql.gz
 !backend/migrations/20260901_add_collab_policy_delivery_category.sql
 !backend/migrations/296_business_case_purchase_canonical_link.sql
+!backend/migrations/297_support_tickets_kpi_reports.sql
 
 # Optional local assets
 
