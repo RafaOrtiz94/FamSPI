@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { FiAlertTriangle, FiBarChart2, FiRefreshCw } from "react-icons/fi";
+import { FiBarChart2, FiRefreshCw, FiSearch, FiX } from "react-icons/fi";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   addSupportTicketComment,
@@ -15,10 +15,10 @@ import {
 import { useAuth } from "../../../core/auth/AuthContext";
 import { useUI } from "../../../core/ui/UIContext";
 import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
-import { formatDurationMinutes, toStatusLabel } from "../../../core/utils/workflowUi";
+import { formatDurationMinutes } from "../../../core/utils/workflowUi";
 import Button from "../../../core/ui/components/Button";
 import "../design/tokens.css";
-import { TicketBadge, TicketInspector, TicketMetric, TicketStatusChangeModal, statusToTone } from "../design";
+import { TicketInspector, TicketKanbanBoard, TicketMetric, TicketStatusChangeModal } from "../design";
 
 const STATUS_OPTIONS = [
   { value: "abierto", label: "Abierto" },
@@ -70,23 +70,33 @@ const EMPTY_KPI = {
 
 const isJefeTi = (user) => ["jefe_ti", "jefe_de_ti"].includes(String(user?.role || "").trim().toLowerCase());
 
-function FilterField({ label, children }) {
+// Filtro compacto tipo "chip" (estilo Linear/GitHub Issues): un select nativo
+// con apariencia de pastilla, que se resalta con el color de accion solo
+// cuando tiene un valor activo. Reemplaza la grilla de 5 campos con label
+// encima que se sentia pesada -- el estado ya no es un filtro aparte, lo
+// comunican las columnas del tablero.
+function ChipSelect({ value, onChange, options, "aria-label": ariaLabel }) {
+  const isActive = Boolean(value);
   return (
-    <label className="flex min-w-0 flex-col gap-1.5 text-sm">
-      <span className="text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--ti-text-muted)" }}>{label}</span>
-      {children}
-    </label>
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      aria-label={ariaLabel}
+      className="px-3 py-1.5 text-xs font-semibold outline-none transition"
+      style={{
+        minHeight: "36px",
+        borderRadius: "9999px",
+        border: `1px solid ${isActive ? "var(--ti-accent)" : "var(--ti-border-control)"}`,
+        background: isActive ? "var(--ti-selected)" : "var(--ti-surface)",
+        color: isActive ? "var(--ti-accent)" : "var(--ti-text-muted)",
+      }}
+    >
+      {options.map((option) => (
+        <option key={option.value || "all"} value={option.value}>{option.label}</option>
+      ))}
+    </select>
   );
 }
-
-const selectClass = "w-full px-3 py-2 text-sm outline-none transition";
-const selectStyle = {
-  minHeight: "var(--ti-control-height)",
-  borderRadius: "var(--ti-radius-control)",
-  border: "1px solid var(--ti-border-control)",
-  background: "var(--ti-surface)",
-  color: "var(--ti-text)",
-};
 
 const TicketsWorkspace = () => {
   const navigate = useNavigate();
@@ -109,12 +119,13 @@ const TicketsWorkspace = () => {
   const [pendingStatusChange, setPendingStatusChange] = useState(null);
 
   const filters = useMemo(() => ({
-    status: searchParams.get("status") || "",
     ticket_type: searchParams.get("ticket_type") || "",
     priority: searchParams.get("priority") || "",
     assigned_ti_user_id: searchParams.get("assigned_ti_user_id") || "",
     q: searchParams.get("q") || "",
   }), [searchParams]);
+
+  const hasActiveFilters = Boolean(filters.ticket_type || filters.priority || filters.assigned_ti_user_id || filters.q);
 
   const selectedTicketId = searchParams.get("ticketId") ? Number(searchParams.get("ticketId")) : null;
 
@@ -130,7 +141,6 @@ const TicketsWorkspace = () => {
   }, [setSearchParams]);
 
   const remoteFilters = useMemo(() => ({
-    status: filters.status || undefined,
     ticket_type: filters.ticket_type || undefined,
     priority: filters.priority || undefined,
     assigned_ti_user_id: filters.assigned_ti_user_id || undefined,
@@ -182,6 +192,16 @@ const TicketsWorkspace = () => {
     });
     return Array.from(seen.entries()).map(([id, name]) => ({ value: String(id), label: name }));
   }, [tickets]);
+
+  const kanbanColumns = useMemo(() => {
+    const buckets = new Map(STATUS_OPTIONS.map((option) => [option.value, []]));
+    filteredTickets.forEach((ticket) => {
+      const key = String(ticket.status || "").trim().toLowerCase();
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(ticket);
+    });
+    return STATUS_OPTIONS.map((option) => ({ key: option.value, label: option.label, tickets: buckets.get(option.value) || [] }));
+  }, [filteredTickets]);
 
   const selectedTicket = useMemo(
     () => tickets.find((ticket) => ticket.id === selectedTicketId) || null,
@@ -402,130 +422,50 @@ const TicketsWorkspace = () => {
         </p>
       ) : null}
 
-      <section
-        className="grid gap-3 md:grid-cols-2 xl:grid-cols-5"
-        style={{ background: "var(--ti-surface)", border: "1px solid var(--ti-border)", borderRadius: "var(--ti-radius-panel)", padding: "16px" }}
-      >
-        <FilterField label="Estado">
-          <select value={filters.status} onChange={(e) => updateSearchParams({ status: e.target.value })} className={selectClass} style={selectStyle}>
-            <option value="">Todos los estados</option>
-            {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </FilterField>
-
-        <FilterField label="Tipo">
-          <select value={filters.ticket_type} onChange={(e) => updateSearchParams({ ticket_type: e.target.value })} className={selectClass} style={selectStyle}>
-            {TYPE_OPTIONS.map((option) => <option key={option.value || "all"} value={option.value}>{option.label}</option>)}
-          </select>
-        </FilterField>
-
-        <FilterField label="Prioridad">
-          <select value={filters.priority} onChange={(e) => updateSearchParams({ priority: e.target.value })} className={selectClass} style={selectStyle}>
-            {PRIORITY_OPTIONS.map((option) => <option key={option.value || "all"} value={option.value}>{option.label}</option>)}
-          </select>
-        </FilterField>
-
-        <FilterField label="Asignado">
-          <select value={filters.assigned_ti_user_id} onChange={(e) => updateSearchParams({ assigned_ti_user_id: e.target.value })} className={selectClass} style={selectStyle}>
-            <option value="">Todos los tecnicos</option>
-            {technicianOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </FilterField>
-
-        <FilterField label="Buscar">
+      <section className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[220px] flex-1">
+          <FiSearch size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--ti-text-muted)" }} />
           <input
             value={filters.q}
             onChange={(e) => updateSearchParams({ q: e.target.value })}
-            placeholder="Codigo, titulo o solicitante"
-            className={selectClass}
-            style={selectStyle}
+            placeholder="Buscar por codigo, titulo o solicitante"
+            className="w-full py-1.5 pl-8 pr-3 text-sm outline-none transition"
+            style={{
+              minHeight: "36px",
+              borderRadius: "9999px",
+              border: "1px solid var(--ti-border-control)",
+              background: "var(--ti-surface)",
+              color: "var(--ti-text)",
+            }}
           />
-        </FilterField>
+        </div>
+
+        <ChipSelect aria-label="Filtrar por tipo" value={filters.ticket_type} onChange={(value) => updateSearchParams({ ticket_type: value })} options={TYPE_OPTIONS} />
+        <ChipSelect aria-label="Filtrar por prioridad" value={filters.priority} onChange={(value) => updateSearchParams({ priority: value })} options={PRIORITY_OPTIONS} />
+        <ChipSelect
+          aria-label="Filtrar por tecnico asignado"
+          value={filters.assigned_ti_user_id}
+          onChange={(value) => updateSearchParams({ assigned_ti_user_id: value })}
+          options={[{ value: "", label: "Todos los tecnicos" }, ...technicianOptions]}
+        />
+
+        {hasActiveFilters ? (
+          <button
+            type="button"
+            onClick={() => updateSearchParams({ ticket_type: null, priority: null, assigned_ti_user_id: null, q: null })}
+            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold transition"
+            style={{ color: "var(--ti-text-muted)" }}
+          >
+            <FiX size={12} /> Limpiar filtros
+          </button>
+        ) : null}
       </section>
 
-      <section style={{ background: "var(--ti-surface)", border: "1px solid var(--ti-border)", borderRadius: "var(--ti-radius-panel)" }}>
-        {loading ? (
-          <div className="px-5 py-8 text-sm" style={{ color: "var(--ti-text-muted)" }}>Cargando tickets...</div>
-        ) : filteredTickets.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
-            <FiAlertTriangle size={28} style={{ color: "var(--ti-text-muted)" }} />
-            <div className="space-y-1">
-              <p className="text-sm font-semibold" style={{ color: "var(--ti-text)" }}>No hay tickets con los filtros seleccionados</p>
-              <p className="text-xs leading-relaxed" style={{ color: "var(--ti-text-muted)" }}>Prueba con otro estado, tipo o texto de busqueda.</p>
-            </div>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[880px] border-collapse text-sm">
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--ti-border)" }}>
-                  {["Ticket", "Solicitante", "Estado", "Prioridad / SLA", "Asignado", "Acciones"].map((label) => (
-                    <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.06em]" style={{ color: "var(--ti-text-muted)" }}>
-                      {label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTickets.map((ticket) => {
-                  const normalizedStatus = String(ticket.status || "").trim().toLowerCase();
-                  const isSelected = ticket.id === selectedTicketId;
-                  return (
-                    <tr
-                      key={ticket.id}
-                      aria-selected={isSelected}
-                      onClick={() => openInspector(ticket.id)}
-                      className="cursor-pointer transition"
-                      style={{
-                        minHeight: "var(--ti-row-height)",
-                        background: isSelected ? "var(--ti-selected)" : "transparent",
-                        borderBottom: "1px solid var(--ti-border)",
-                      }}
-                    >
-                      <td className="px-4 py-3 align-top">
-                        <div className="flex flex-col gap-1">
-                          <span className="font-mono text-xs font-semibold" style={{ color: "var(--ti-text-muted)" }}>{ticket.code}</span>
-                          <span className="max-w-[260px] truncate font-semibold" style={{ color: "var(--ti-text)" }}>{ticket.title}</span>
-                          <span className="text-xs capitalize" style={{ color: "var(--ti-text-muted)" }}>{toStatusLabel(ticket.ticket_type, "Sin tipo")}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 align-top text-xs" style={{ color: "var(--ti-text-muted)" }}>
-                        {ticket.requester_name || ticket.requester_email}
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <TicketBadge tone={statusToTone(normalizedStatus)}>{toStatusLabel(ticket.status)}</TicketBadge>
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-xs font-semibold capitalize" style={{ color: "var(--ti-text)" }}>{ticket.priority}</span>
-                          {ticket.sla_response_overdue ? <TicketBadge tone="warning">SLA resp.</TicketBadge> : null}
-                          {ticket.sla_resolution_overdue ? <TicketBadge tone="danger">SLA resol.</TicketBadge> : null}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 align-top text-xs" style={{ color: "var(--ti-text-muted)" }}>
-                        {ticket.assigned_ti_name || "Sin asignar"}
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={busyId === ticket.id}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openInspector(ticket.id);
-                          }}
-                        >
-                          Ver detalle
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      {loading ? (
+        <div className="px-5 py-8 text-sm" style={{ color: "var(--ti-text-muted)" }}>Cargando tickets...</div>
+      ) : (
+        <TicketKanbanBoard columns={kanbanColumns} selectedId={selectedTicketId} onSelectTicket={openInspector} />
+      )}
 
       <TicketInspector
         ticket={selectedTicket}
