@@ -83,8 +83,12 @@ describe("computeCatalogDiff", () => {
         {
           name: "e402 e801",
           aliases: ["e402", "e801", "cobaspure402"],
+          // 2 filas con tipos distintos -- la pestaña SI expresa tipo de
+          // forma confiable (a diferencia de XP 300/XN-L/etc, que solo
+          // traen "reactivo" siempre), asi que el match debe ser type+nombre.
           rows: [
             { itemId: "1", label: "tsh", rawLabel: "TSH Elecsys", itemType: "reactivo" },
+            { itemId: "2", label: "ftsh calset", rawLabel: "FTSH CalSet", itemType: "calibrador" },
           ],
         },
       ],
@@ -109,7 +113,10 @@ describe("computeCatalogDiff", () => {
     const equipmentIds = diff.equipment.map((e) => e.equipment_id).sort();
     expect(equipmentIds).toEqual([13, 14]);
     diff.equipment.forEach((e) => {
-      expect(e.added).toEqual([{ name: "TSH Elecsys", type: "reactivo" }]);
+      expect(e.added).toEqual([
+        { name: "TSH Elecsys", type: "reactivo" },
+        { name: "FTSH CalSet", type: "calibrador" },
+      ]);
     });
   });
 
@@ -240,5 +247,71 @@ describe("computeCatalogDiff", () => {
     const diff = await computeCatalogDiff();
     expect(diff.equipment).toEqual([]);
     expect(diff.has_changes).toBe(false);
+  });
+
+  // Bug real confirmado contra el archivo activo: pestañas como "XP 300"/
+  // "XN-L"/"XN 1000"/"t411 h232"/"AVL 9180"/"b123"/"b101" organizan sus
+  // filas por parametro clinico y NUNCA traen un encabezado CONTROLES/
+  // CALIBRADORES/MATERIALES -- itemType siempre cae al default "reactivo".
+  // Comparar por type+nombre ahi generaba falsos "agregar como Reactivo +
+  // quitar el Control/Material real" para el MISMO producto ya curado en
+  // el catalogo. Debe compararse solo por nombre cuando la pestaña nunca
+  // demuestra tener mas de un tipo real.
+  test("pestaña sin encabezados de tipo (todo 'reactivo' por defecto): compara solo por nombre, no marca cambio falso de tipo", async () => {
+    sheetSync.loadTemplateDefinition.mockReturnValue({
+      equipmentSheets: [
+        {
+          name: "XP 300",
+          aliases: ["xp300"],
+          rows: [
+            { itemId: "1", label: "eight check-3wp xtra", rawLabel: "EIGHT CHECK-3WP XTRA", itemType: "reactivo" },
+          ],
+        },
+      ],
+    });
+    db.query.mockImplementation((sql) => {
+      if (sql.includes("FROM servicio.equipos")) {
+        return Promise.resolve({ rows: [{ id: 1, code: "3145611001", name: "XP 300", manufacturer: "Sysmex", model: "XP 300" }] });
+      }
+      if (sql.includes("catalog_equipment_consumables")) {
+        // El catalogo ya tiene este producto pero clasificado como Control
+        // (curado a mano) -- la hoja no puede expresar ese tipo.
+        return Promise.resolve({ rows: [{ equipment_id: 1, consumable_id: 200, name: "EIGHT CHECK-3WP XTRA", type: "control" }] });
+      }
+      throw new Error(`query inesperada: ${sql}`);
+    });
+
+    const diff = await computeCatalogDiff();
+
+    expect(diff.equipment).toEqual([]);
+    expect(diff.has_changes).toBe(false);
+  });
+
+  test("pestaña sin encabezados de tipo: un producto genuinamente nuevo se marca con type_uncertain", async () => {
+    sheetSync.loadTemplateDefinition.mockReturnValue({
+      equipmentSheets: [
+        {
+          name: "XP 300",
+          aliases: ["xp300"],
+          rows: [
+            { itemId: "1", label: "producto nuevo", rawLabel: "Producto Nuevo", itemType: "reactivo" },
+          ],
+        },
+      ],
+    });
+    db.query.mockImplementation((sql) => {
+      if (sql.includes("FROM servicio.equipos")) {
+        return Promise.resolve({ rows: [{ id: 1, code: "3145611001", name: "XP 300", manufacturer: "Sysmex", model: "XP 300" }] });
+      }
+      if (sql.includes("catalog_equipment_consumables")) return Promise.resolve({ rows: [] });
+      throw new Error(`query inesperada: ${sql}`);
+    });
+
+    const diff = await computeCatalogDiff();
+
+    expect(diff.equipment).toHaveLength(1);
+    expect(diff.equipment[0].added).toEqual([
+      { name: "Producto Nuevo", type: "reactivo", type_uncertain: true },
+    ]);
   });
 });

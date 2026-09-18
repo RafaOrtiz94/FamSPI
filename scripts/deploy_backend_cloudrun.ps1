@@ -129,7 +129,11 @@ try {
     "--set-env-vars", "DB_USER=neondb_owner",
     "--set-env-vars", "DB_NAME=neondb",
     "--set-env-vars", "GOOGLE_CLIENT_ID=18376271129-1v6irnav4n49298sspaij02qjnigeln3.apps.googleusercontent.com",
+    # Audiencia OIDC del proyecto de Apps Script del complemento de Gmail. Debe
+    # permanecer aqui porque --set-env-vars reemplaza el conjunto completo.
+    "--set-env-vars", "GMAIL_CONTEXT_ADDON_AUDIENCE=669746596764-qeb081v9ni8tbdierp6oopilinn1ob0c.apps.googleusercontent.com",
     "--set-env-vars", "DRIVE_ROOT_FOLDER_ID=0AILKwXtcdfRFUk9PVA",
+    "--set-env-vars", "BC_TEMPLATE_DRIVE_FOLDER_ID=1RAiU8BwtUleLrvipVq7h-rfqE_R1qIoH",  # carpeta Drive donde se sube cada nueva version de la plantilla base del Business Case (businessCaseTemplateVersions.service.js) -- si falta, subir un archivo nuevo responde "No hay carpeta de Drive configurada". Este script usa --set-env-vars (reemplaza todo el set), asi que cualquier var agregada a mano con "gcloud run services update --update-env-vars" fuera de este archivo se pierde en el siguiente deploy si no queda tambien aqui.
     "--set-env-vars", "GMAIL_SERVICE_ACCOUNT_CLIENT_EMAIL=spi-cuenta-servicio@dashboard-spi.iam.gserviceaccount.com",
     "--set-env-vars", "GMAIL_DELEGATED_USER=administrador@fam-project.com",
     "--set-env-vars", "GOOGLE_SUBJECT=administrador@fam-project.com",

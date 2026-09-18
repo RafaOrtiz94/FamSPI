@@ -82,6 +82,11 @@ const ExpedienteTimelineTab = ({ timeline }) => {
                     <div className="flex items-center gap-2">
                       <FiGitCommit size={13} className="text-action-blue" />
                       <p className="text-sm font-semibold text-ink-slate">{toSpanishAction(event)}</p>
+                      {event.source === 'business_case' && (
+                        <span className="rounded-full border border-action-blue/20 bg-action-blue/5 px-2 py-0.5 text-[10px] font-semibold text-action-blue">
+                          Business Case
+                        </span>
+                      )}
                     </div>
                     <p className="text-[11px] text-warm-ash mt-1">{toTime(getEventTime(event))}</p>
                   </div>
@@ -101,4 +106,3 @@ const ExpedienteTimelineTab = ({ timeline }) => {
 };
 
 export default ExpedienteTimelineTab;
-

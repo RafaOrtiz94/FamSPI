@@ -36,12 +36,13 @@ export const listProcessNoteMentionCandidates = async (entityType, entityId) => 
   return data?.data ?? [];
 };
 
-export const sendProcessNoteEmail = async (entityType, entityId, { to, cc, subject, body, files }) => {
+export const sendProcessNoteEmail = async (entityType, entityId, { to, cc, subject, body, replyToNoteId, files }) => {
   const form = new FormData();
   form.append("to", to);
   if (cc) form.append("cc", cc);
   form.append("subject", subject);
   form.append("body", body);
+  if (replyToNoteId) form.append("reply_to_note_id", replyToNoteId);
   (files || []).forEach((file) => form.append("files", file));
   const { data } = await api.post(`${base}/${entityType}/${entityId}/email`, form, {
     headers: { "Content-Type": "multipart/form-data" },

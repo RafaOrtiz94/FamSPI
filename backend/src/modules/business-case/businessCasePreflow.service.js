@@ -395,12 +395,23 @@ async function ensurePreflowWorkspaceProcess({ businessCaseId, actorUser, durati
         `SELECT id
            FROM equipment_purchase_requests
           WHERE request_type = 'purchase'
-            AND extra->>'business_case_id' = $1
+            AND (business_case_id = $1 OR extra->>'business_case_id' = $1::text)
           LIMIT 1`,
         [businessCaseId],
       );
       processId = existingRows?.[0]?.id || null;
       processType = "public_purchase";
+
+      if (processId) {
+        await db.query(
+          `UPDATE equipment_purchase_requests
+              SET business_case_id = $1,
+                  status_unified = COALESCE(status_unified, 'business_case_in_progress'::equipment_purchase_status),
+                  updated_at = NOW()
+            WHERE id = $2`,
+          [businessCaseId, processId],
+        );
+      }
 
       if (!processId) {
         const acpUser = await getDefaultAcpUser();
@@ -420,6 +431,7 @@ async function ensurePreflowWorkspaceProcess({ businessCaseId, actorUser, durati
             preflow_kind: metadata.preflow_kind || null,
           },
           requestType: "purchase",
+          businessCaseId,
         });
         processId = created?.id || null;
       }

@@ -288,6 +288,40 @@ function normalizeEmailList(value) {
   return [...new Set(clean.map((email) => email.toLowerCase()))];
 }
 
+function replySubject(subject) {
+  const clean = String(subject || "").trim();
+  return /^re\s*:/i.test(clean) ? clean : `Re: ${clean}`;
+}
+
+async function getGmailReplyContext({ entityType, entityId, replyToNoteId }) {
+  const noteId = Number(replyToNoteId);
+  if (!Number.isInteger(noteId) || noteId <= 0) {
+    const err = new Error("La nota de correo a responder no es valida.");
+    err.status = 400;
+    throw err;
+  }
+
+  const { rows } = await db.query(
+    `SELECT n.id, c.mailbox_email, c.gmail_thread_id, c.sender_email, c.subject
+       FROM process_notes n
+       JOIN gmail_context_communications c ON c.id = n.source_communication_id
+      WHERE n.id = $1
+        AND n.entity_type = $2
+        AND n.entity_id = $3
+        AND n.note_type = 'email'
+      LIMIT 1`,
+    [noteId, entityType, String(entityId)],
+  );
+  const context = rows[0];
+  if (!context?.gmail_thread_id || !context?.mailbox_email || !context?.sender_email || !context?.subject) {
+    const err = new Error("Esta nota no proviene de un correo de Gmail vinculado que se pueda responder.");
+    err.status = 409;
+    err.code = "PROCESS_NOTE_GMAIL_REPLY_UNAVAILABLE";
+    throw err;
+  }
+  return context;
+}
+
 async function uploadAttachmentToDrive({ entityType, entityId, attachment }) {
   const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_ID || null;
   if (!rootFolderId) return null;
@@ -319,9 +353,13 @@ function escapeHtml(value) {
 // notas de un proceso y deja constancia como nota tipo 'email' -- misma
 // cadena de hash e igual de inmutable que cualquier otra nota. El archivo
 // adjunto solo viaja en el correo, no se duplica en almacenamiento propio.
-async function sendProcessEmail({ entityType, entityId, author, to, cc = [], subject, body, attachments = [] }) {
+async function sendProcessEmail({ entityType, entityId, author, to, cc = [], subject, body, replyToNoteId = null, attachments = [] }) {
   assertValidEntityType(entityType);
-  const trimmedSubject = String(subject || "").trim();
+  const isGmailReply = Boolean(replyToNoteId);
+  const replyContext = isGmailReply
+    ? await getGmailReplyContext({ entityType, entityId, replyToNoteId })
+    : null;
+  const trimmedSubject = isGmailReply ? replySubject(replyContext.subject) : String(subject || "").trim();
   const trimmedBody = String(body || "").trim();
   if (!trimmedSubject) {
     const err = new Error("El correo necesita un asunto.");
@@ -334,7 +372,10 @@ async function sendProcessEmail({ entityType, entityId, author, to, cc = [], sub
     throw err;
   }
 
-  const recipients = normalizeEmailList(to);
+  // En una respuesta de Gmail el destinatario procede exclusivamente de la
+  // comunicación vinculada. El cliente no puede sustituirlo con un valor del
+  // formulario y convertir una respuesta en un correo diferente.
+  const recipients = normalizeEmailList(isGmailReply ? replyContext.sender_email : to);
   if (!recipients.length) {
     const err = new Error("Debes indicar al menos un destinatario.");
     err.status = 400;
@@ -357,16 +398,31 @@ async function sendProcessEmail({ entityType, entityId, author, to, cc = [], sub
     <p style="font-size:11px;color:#9ca3af;">Enviado por ${escapeHtml(author.fullname || author.email)} desde FamSPI — ${escapeHtml(entityLabel?.label || "proceso")}.</p>
   `;
 
-  const result = await sendMail({
-    to: recipients,
-    cc: ccList.length ? ccList : undefined,
-    subject: trimmedSubject,
-    html: htmlBody,
-    replyTo: author.email,
-    senderName: author.fullname || undefined,
-    source: "process_notes.email",
-    attachments,
-  });
+  let result;
+  try {
+    result = await sendMail({
+      to: recipients,
+      cc: ccList.length ? ccList : undefined,
+      subject: trimmedSubject,
+      html: htmlBody,
+      replyTo: isGmailReply ? replyContext.mailbox_email : author.email,
+      from: isGmailReply ? replyContext.mailbox_email : undefined,
+      delegatedUser: isGmailReply ? replyContext.mailbox_email : undefined,
+      senderName: isGmailReply ? undefined : author.fullname || undefined,
+      source: "process_notes.email",
+      threadId: isGmailReply ? replyContext.gmail_thread_id : null,
+      requireThreading: isGmailReply,
+      attachments,
+    });
+  } catch (error) {
+    if (error?.code === "MAIL_THREAD_CONTEXT_UNAVAILABLE") {
+      const err = new Error("No se pudo validar el hilo de Gmail. La respuesta no fue enviada para evitar crear un correo fuera de la conversación.");
+      err.status = 503;
+      err.code = error.code;
+      throw err;
+    }
+    throw error;
+  }
 
   if (!result?.delivered) {
     const err = new Error("No se pudo enviar el correo. Intenta de nuevo en unos minutos.");
@@ -383,10 +439,14 @@ async function sendProcessEmail({ entityType, entityId, author, to, cc = [], sub
   );
 
   const emailMeta = {
+    direction: "outbound",
     to: recipients,
     cc: ccList,
     subject: trimmedSubject,
     delivered_via: result.via,
+    reply_to_note_id: isGmailReply ? Number(replyToNoteId) : null,
+    gmail_thread_id: isGmailReply ? (result.providerThreadId || replyContext.gmail_thread_id) : null,
+    rfc822_message_id: result.rfc822MessageId || null,
     attachments: attachments.map((att, idx) => ({
       filename: att.filename,
       content_type: att.contentType || null,
@@ -405,6 +465,7 @@ async function sendProcessEmail({ entityType, entityId, author, to, cc = [], sub
 
   const note = await _appendNote({
     entityType, entityId, author, body: noteBody, noteType: "email", emailMeta,
+    parentNoteId: isGmailReply ? Number(replyToNoteId) : null,
   });
 
   notifyParticipants({

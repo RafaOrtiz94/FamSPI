@@ -31,6 +31,7 @@ const {
   markRequestCompleted,
 } = require("../requests/requests.service");
 const crmPurchaseSyncService = require("../crm-fam/crmPurchaseSync.service");
+const { buildGate: buildBusinessCaseGate } = require("../business-case/businessCasePurchaseGate.service");
 
 const DEFAULT_ROOT_ENV_KEYS = ["DRIVE_ROOT_FOLDER_ID", "DRIVE_FOLDER_ID"];
 const ROOT_FOLDER_NAME = process.env.EQUIPMENT_PURCHASE_ROOT_FOLDER || "Solicitudes de compra de equipos";
@@ -1004,13 +1005,18 @@ async function enrichRequestsWithAutoBusinessCaseStatus(requests = []) {
       auto_business_case_stage: null,
       auto_business_case_status: null,
       auto_business_case_resolved_factible: false,
+      business_case_gate: buildBusinessCaseGate({
+        business_case_id: request.business_case_id || null,
+        requires_business_case: request.requires_business_case,
+        business_case_exists: false,
+      }),
     }));
   }
 
   let rows = [];
   try {
     const queryResult = await db.query(
-      `SELECT id, status, bc_stage
+      `SELECT id, status, bc_stage, modern_bc_metadata
          FROM equipment_purchase_requests
         WHERE id = ANY($1::uuid[])
           AND COALESCE(request_type, 'purchase') = 'business_case'`,
@@ -1033,6 +1039,13 @@ async function enrichRequestsWithAutoBusinessCaseStatus(requests = []) {
       auto_business_case_stage: bc?.bc_stage || null,
       auto_business_case_status: bc?.status || null,
       auto_business_case_resolved_factible: stage === "factible",
+      business_case_gate: buildBusinessCaseGate({
+        business_case_id: bcId,
+        requires_business_case: request.requires_business_case,
+        business_case_exists: Boolean(bc),
+        business_case_stage: bc?.bc_stage || null,
+        modern_bc_metadata: bc?.modern_bc_metadata || null,
+      }),
     };
   });
 }
@@ -2528,6 +2541,7 @@ async function createPurchaseRequest({
   notes,
   extra,
   requestType = "purchase",
+  businessCaseId = null,
 }) {
   await ensureTables();
   const normalizedClientName = String(clientName || clientBusinessName || "").trim();
@@ -2566,8 +2580,9 @@ async function createPurchaseRequest({
     `INSERT INTO equipment_purchase_requests (
         id, created_by, created_by_email, assigned_to, assigned_to_email, assigned_to_name,
         client_id, client_name, client_email, notes, provider_email,
-        equipment, status, availability_email_sent_at, availability_email_file_id, drive_folder_id, extra, request_type
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+        equipment, status, availability_email_sent_at, availability_email_file_id, drive_folder_id, extra, request_type,
+        business_case_id, status_unified
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
      RETURNING *`,
     [
       id,
@@ -2588,6 +2603,8 @@ async function createPurchaseRequest({
       folderId,
       JSON.stringify(extraPayload || {}),
       requestType || "purchase",
+      businessCaseId || null,
+      businessCaseId ? "business_case_in_progress" : null,
     ],
   );
 

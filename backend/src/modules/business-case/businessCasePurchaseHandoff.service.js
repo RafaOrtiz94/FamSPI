@@ -138,7 +138,7 @@ async function findLinkedPurchase(businessCaseId, type) {
   const { rows } = await db.query(
     `SELECT id
        FROM equipment_purchase_requests
-      WHERE business_case_id = $1
+      WHERE (business_case_id = $1 OR extra->>'business_case_id' = $1::text)
         AND COALESCE(request_type, 'purchase') <> 'business_case'
       ORDER BY created_at DESC
       LIMIT 1`,
@@ -208,6 +208,7 @@ async function createPublicPurchase({ businessCase, equipment, user }) {
       source: "business_case.feasibility",
       business_case_id: businessCase.id,
     },
+    businessCaseId: businessCase.id,
   });
   const purchaseId = created?.id;
   if (!purchaseId) throw new Error("La compra publica creada desde el BC no tiene identificador");
@@ -215,6 +216,7 @@ async function createPublicPurchase({ businessCase, equipment, user }) {
   await db.query(
     `UPDATE equipment_purchase_requests
         SET business_case_id = $1,
+            status_unified = 'business_case_feasibility_approved'::equipment_purchase_status,
             updated_at = NOW()
       WHERE id = $2`,
     [businessCase.id, purchaseId],
@@ -243,6 +245,16 @@ async function ensurePurchaseWorkspaceForFeasibleBusinessCase({ businessCaseId, 
   const existingPurchaseId = await findLinkedPurchase(businessCaseId, type);
   if (existingPurchaseId) {
     await syncLinkedPurchaseEquipment({ type, purchaseId: existingPurchaseId, equipment });
+    if (type === "public") {
+      await db.query(
+        `UPDATE equipment_purchase_requests
+            SET business_case_id = $1,
+                status_unified = 'business_case_feasibility_approved'::equipment_purchase_status,
+                updated_at = NOW()
+          WHERE id = $2`,
+        [businessCaseId, existingPurchaseId],
+      );
+    }
     await persistHandoffMetadata({ businessCaseId, metadata, type, purchaseId: existingPurchaseId, user });
     return { created: false, type, purchase_id: existingPurchaseId };
   }

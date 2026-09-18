@@ -70,6 +70,7 @@ exports.sendEmail = asyncHandler(async (req, res) => {
     cc: req.body?.cc,
     subject: req.body?.subject,
     body: req.body?.body,
+    replyToNoteId: req.body?.reply_to_note_id || null,
     attachments: filesToAttachments(req.files),
   });
   res.status(201).json({ ok: true, data: note });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { FiPlus, FiTrash2, FiCheckCircle } from "react-icons/fi";
 import Button from "./Button";
 import Modal from "./Modal";
@@ -468,7 +468,7 @@ export const PrivatePurchaseRequestModal = ({
 
  const canSubmit = validationIssues.length === 0 && !loading;
 
- const handleClientSelect = (client) => {
+ const handleClientSelect = useCallback((client) => {
  if (!client) {
  return;
  }
@@ -498,12 +498,12 @@ export const PrivatePurchaseRequestModal = ({
  client_name: "",
  client_identifier: "",
  }));
- };
+ }, []);
 
  useEffect(() => {
  if (!isOpen || !initialClient) return;
  handleClientSelect(initialClient);
- }, [isOpen, initialClient]);
+ }, [isOpen, initialClient, handleClientSelect]);
 
  const handleClientSearchChange = (value) => {
  setClientSearchTerm(value);

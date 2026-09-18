@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   FiCheckCircle, FiGlobe, FiFileText,
@@ -887,6 +888,7 @@ function ErrorState({ message, onRetry }) {
 }
 
 const PurchaseExpedienteDetail = ({ id, type }) => {
+  const navigate       = useNavigate();
   const { user }     = useAuth();
   const userRoles    = useMemo(() => normalizeRoles(user), [user]);
   const hasRole      = (token) => userRoles.some((r) => r === token || r.includes(token));
@@ -904,11 +906,31 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
     return canViewAudit ? filtered : filtered.filter((t) => t.id !== 'auditoria');
   }, [type, canViewAudit, userRoles, isManager]);
   const pendingTabs = useMemo(() => computePendingTabs(purchase, type, userRoles), [purchase, type, userRoles]);
-  const { locked: lockedTabs, done: doneTabs } = useMemo(
+  const { locked: stageLockedTabs, done: doneTabs } = useMemo(
     () => computeTabStates(purchase, type),
     [purchase, type],
   );
-  const nextAction    = useMemo(() => computeNextAction(purchase, type, userRoles),    [purchase, type, userRoles]);
+  const businessCaseGate = purchase?.business_case_gate || null;
+  const businessCaseBlocked = Boolean(businessCaseGate?.required && !businessCaseGate?.open);
+  const lockedTabs = useMemo(() => {
+    const next = new Set(stageLockedTabs);
+    if (!businessCaseBlocked) return next;
+
+    const allowed = new Set([
+      'resumen',
+      'timeline',
+      'auditoria',
+      type === 'private' ? 'flujo_comercial' : 'comercial',
+    ]);
+    tabs.forEach((tab) => {
+      if (!allowed.has(tab.id)) next.add(tab.id);
+    });
+    return next;
+  }, [stageLockedTabs, businessCaseBlocked, tabs, type]);
+  const nextAction = useMemo(
+    () => businessCaseBlocked ? null : computeNextAction(purchase, type, userRoles),
+    [businessCaseBlocked, purchase, type, userRoles],
+  );
   const waitingState  = useMemo(() => computeWaitingState(purchase, type, userRoles),  [purchase, type, userRoles]);
 
   // If the active tab is locked (stage not reached yet) or not visible for this
@@ -984,6 +1006,48 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
       </div>
 
       {/* ── Panel "Próxima acción" / "En espera" ───────────────────── */}
+      {businessCaseBlocked && (
+        <div className={`flex-shrink-0 border-b px-4 py-3 sm:px-6 ${
+          businessCaseGate.status === 'rejected'
+            ? 'border-red-200 bg-red-50'
+            : 'border-amber-200 bg-amber-50'
+        }`}>
+          <div className="mx-auto flex max-w-[1440px] flex-col gap-3 sm:flex-row sm:items-center">
+            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+              businessCaseGate.status === 'rejected'
+                ? 'bg-red-100 text-alert-red'
+                : 'bg-amber-100 text-amber-700'
+            }`}>
+              <FiShield size={17} aria-hidden="true" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-ink-slate">
+                {businessCaseGate.status === 'rejected'
+                  ? 'Business Case no factible'
+                  : 'Compras bloqueadas hasta aprobar el Business Case'}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-600">
+                {businessCaseGate.status === 'link_missing'
+                  ? 'El expediente requiere Business Case, pero el vínculo no está configurado. Actualiza o reporta este expediente.'
+                  : businessCaseGate.status === 'rejected'
+                  ? 'No se pueden ejecutar etapas operativas con una factibilidad rechazada.'
+                  : 'Puedes consultar el expediente y sus notas; las acciones operativas se habilitarán automáticamente al aprobar la factibilidad.'}
+              </p>
+            </div>
+            {businessCaseGate.business_case_id && (
+              <button
+                type="button"
+                onClick={() => navigate(`/dashboard/business-case/workspace/${businessCaseGate.business_case_id}`)}
+                className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-ink-slate px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-action-blue/40"
+              >
+                Abrir Business Case
+                <FiArrowRight size={13} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <AnimatePresence>
         {/* ── Acción disponible para el usuario ────────────────────── */}
         {nextAction && activeTab !== nextAction.tabId && (
@@ -1048,7 +1112,7 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
         )}
 
         {/* ── En espera: otro rol está actuando ────────────────────── */}
-        {!nextAction && waitingState && (
+        {!businessCaseBlocked && !nextAction && waitingState && (
           <motion.div
             key="waiting"
             initial={{ opacity: 0, height: 0 }}

@@ -6,6 +6,17 @@ jest.mock("../../../config/db", () => ({
     if (sql.includes("SELECT id, fullname, email, role FROM users")) {
       return { rows: [{ id: 99, fullname: "Mencionado Uno", email: "m1@fam-project.com", role: "acp_comercial" }] };
     }
+    if (sql.includes("JOIN gmail_context_communications c ON c.id = n.source_communication_id")) {
+      return {
+        rows: [{
+          id: params[0],
+          mailbox_email: "administrador@fam-project.com",
+          gmail_thread_id: "gmail-thread-1",
+          sender_email: "cliente@externo.com",
+          subject: "Seguimiento comercial",
+        }],
+      };
+    }
     if (sql.startsWith("SELECT id, author_id, author_name_snapshot FROM process_notes")) {
       const parent = global.__mockNotes.find((n) => n.id === params[0]);
       return { rows: parent ? [parent] : [] };
@@ -136,6 +147,28 @@ describe("process-notes service", () => {
       }),
     ).rejects.toMatchObject({ status: 400 });
     expect(mockSendMail).not.toHaveBeenCalled();
+  });
+
+  test("replies to a linked Gmail communication in its original thread and records it as a child note", async () => {
+    const author = { id: 1, fullname: "Autor Uno", role: "acp_comercial", email: "autor@fam-project.com" };
+    const reply = await service.sendProcessEmail({
+      entityType: "public_purchase",
+      entityId: "abc-123",
+      author,
+      to: "no-debe-usarse@externo.com",
+      subject: "Asunto alterado",
+      body: "Respuesta enviada desde SPI.",
+      replyToNoteId: 81,
+    });
+
+    const sentArgs = mockSendMail.mock.calls[0][0];
+    expect(sentArgs.to).toEqual(["cliente@externo.com"]);
+    expect(sentArgs.subject).toBe("Re: Seguimiento comercial");
+    expect(sentArgs.threadId).toBe("gmail-thread-1");
+    expect(sentArgs.delegatedUser).toBe("administrador@fam-project.com");
+    expect(sentArgs.requireThreading).toBe(true);
+    expect(reply.parent_note_id).toBe(81);
+    expect(reply.email_meta.reply_to_note_id).toBe(81);
   });
 
   test("surfaces a clean error when the mailer fails to deliver", async () => {

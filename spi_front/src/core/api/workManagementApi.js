@@ -20,6 +20,29 @@ export const fetchWorkspaces = () =>
 export const createWorkspace = (payload) =>
   api.post("/work-management/workspaces", payload).then((response) => response.data?.data);
 
+export const updateWorkspace = (workspaceId, payload) =>
+  api
+    .patch(`/work-management/workspaces/${workspaceId}`, payload)
+    .then((response) => response.data?.data);
+
+export const fetchWorkspaceMembers = (workspaceId) =>
+  api
+    .get(`/work-management/workspaces/${workspaceId}/members`)
+    .then((response) => response.data?.data || []);
+
+export const addWorkspaceMember = (workspaceId, userId, memberRole = "member") =>
+  api
+    .post(`/work-management/workspaces/${workspaceId}/members`, { user_id: userId, member_role: memberRole })
+    .then((response) => response.data?.data || []);
+
+export const removeWorkspaceMember = (workspaceId, memberUserId) =>
+  api
+    .delete(`/work-management/workspaces/${workspaceId}/members/${memberUserId}`)
+    .then((response) => response.data?.data || []);
+
+export const deleteWorkspace = (workspaceId) =>
+  api.delete(`/work-management/workspaces/${workspaceId}`).then((response) => response.data?.data);
+
 export const fetchWorkspaceProjects = (workspaceId) =>
   api
     .get(`/work-management/workspaces/${workspaceId}/projects`)
@@ -29,6 +52,9 @@ export const createProject = (workspaceId, payload) =>
   api
     .post(`/work-management/workspaces/${workspaceId}/projects`, payload)
     .then((response) => response.data?.data);
+
+export const deleteProject = (projectId) =>
+  api.delete(`/work-management/projects/${projectId}`).then((response) => response.data?.data);
 
 export const createProjectFromOpportunity = (opportunityId, payload) =>
   api
@@ -118,6 +144,9 @@ export const reorderItem = (itemId, payload) =>
     .post(`/work-management/items/${itemId}/reorder`, payload)
     .then((response) => response.data?.data);
 
+export const deleteItem = (itemId) =>
+  api.delete(`/work-management/items/${itemId}`).then((response) => response.data?.data);
+
 const workManagementApi = {
   fetchWorkManagementHealth,
   fetchMyWork,
@@ -125,8 +154,14 @@ const workManagementApi = {
   fetchWorkManagementCollaborators,
   fetchWorkspaces,
   createWorkspace,
+  updateWorkspace,
+  fetchWorkspaceMembers,
+  addWorkspaceMember,
+  removeWorkspaceMember,
+  deleteWorkspace,
   fetchWorkspaceProjects,
   createProject,
+  deleteProject,
   createProjectFromOpportunity,
   fetchProject,
   fetchProjectBoards,
@@ -144,6 +179,7 @@ const workManagementApi = {
   deleteChecklistItem,
   uploadItemAttachment,
   reorderItem,
+  deleteItem,
 };
 
 export default workManagementApi;

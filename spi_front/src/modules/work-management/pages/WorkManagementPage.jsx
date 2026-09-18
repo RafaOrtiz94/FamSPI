@@ -17,6 +17,8 @@ import {
   FiPlus,
   FiRefreshCw,
   FiSearch,
+  FiSettings,
+  FiTrash2,
   FiTarget,
   FiUsers,
   FiUserPlus,
@@ -30,6 +32,10 @@ import {
   createItem,
   createProject,
   createWorkspace,
+  updateWorkspace,
+  fetchWorkspaceMembers,
+  addWorkspaceMember,
+  removeWorkspaceMember,
   fetchAssigneeOptions,
   fetchMyWork,
   fetchPortfolioSummary,
@@ -40,6 +46,9 @@ import {
   fetchWorkspaces,
   fetchWorkManagementCollaborators,
   deleteChecklistItem,
+  deleteWorkspace,
+  deleteProject,
+  deleteItem,
   updateItem,
   updateItemAssignees,
   updateChecklistItem,
@@ -50,6 +59,15 @@ import { useAuth } from "../../../core/auth/AuthContext";
 import Modal from "../../../core/ui/components/Modal";
 import { useUI } from "../../../core/ui/UIContext";
 import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
+
+// Mismo set que MANAGER_ROLES en backend/src/modules/work-management/workManagement.service.js --
+// gatea solo la UI (el backend revalida en cada endpoint, esto es solo para no mostrar
+// controles que igual el servidor rechazaria).
+const WORK_MANAGEMENT_MANAGER_ROLES = new Set([
+  "jefe_ti", "jefe_de_ti", "admin", "administrador",
+  "gerencia", "gerencia_general", "gerente_general",
+  "director", "gerente", "jefe_comercial",
+]);
 
 const EMPTY_WORKSPACE_FORM = {
   name: "",
@@ -313,7 +331,7 @@ const MondayPill = ({ label, tone }) => (
   </span>
 );
 
-const WorkspaceCard = ({ workspace, active, onClick }) => (
+const WorkspaceCard = ({ workspace, active, onClick, canManage, onManage }) => (
   <button
     type="button"
     onClick={onClick}
@@ -331,9 +349,34 @@ const WorkspaceCard = ({ workspace, active, onClick }) => (
           {workspace.project_count || 0} proyectos
         </p>
       </div>
-      <SectionBadge tone={active ? "neutral" : "info"}>
-        {workspace.access_role || "member"}
-      </SectionBadge>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <SectionBadge tone={active ? "neutral" : "info"}>
+          {workspace.access_role || "member"}
+        </SectionBadge>
+        {canManage && (
+          <span
+            role="button"
+            tabIndex={0}
+            title="Administrar workspace"
+            onClick={(event) => {
+              event.stopPropagation();
+              onManage(workspace);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.stopPropagation();
+                event.preventDefault();
+                onManage(workspace);
+              }
+            }}
+            className={`inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors ${
+              active ? "text-white/80 hover:bg-white/20" : "text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            }`}
+          >
+            <FiSettings className="h-3.5 w-3.5" aria-hidden="true" />
+          </span>
+        )}
+      </div>
     </div>
   </button>
 );
@@ -1064,6 +1107,15 @@ const WorkManagementPage = () => {
   const { showToast } = useUI();
 
   const userId = Number(user?.id || 0);
+  const isWorkManagementManager = WORK_MANAGEMENT_MANAGER_ROLES.has(String(user?.role || "").trim().toLowerCase());
+
+  const [manageWorkspaceOpen, setManageWorkspaceOpen] = useState(false);
+  const [manageWorkspaceTarget, setManageWorkspaceTarget] = useState(null);
+  const [manageWorkspaceName, setManageWorkspaceName] = useState("");
+  const [manageWorkspaceMembers, setManageWorkspaceMembers] = useState([]);
+  const [manageWorkspaceLoading, setManageWorkspaceLoading] = useState(false);
+  const [manageWorkspaceSaving, setManageWorkspaceSaving] = useState(false);
+  const [manageWorkspaceAddMemberId, setManageWorkspaceAddMemberId] = useState("");
 
   const [workspaces, setWorkspaces] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -1507,6 +1559,142 @@ const WorkManagementPage = () => {
 
   const clearWorkspaceMembers = () => {
     setWorkspaceForm((current) => ({ ...current, member_user_ids: [] }));
+  };
+
+  const canManageWorkspace = (workspace) =>
+    isWorkManagementManager || ["owner", "admin"].includes(workspace?.access_role);
+
+  const openManageWorkspace = async (workspace) => {
+    setManageWorkspaceTarget(workspace);
+    setManageWorkspaceName(workspace.name);
+    setManageWorkspaceAddMemberId("");
+    setManageWorkspaceOpen(true);
+    setManageWorkspaceLoading(true);
+    try {
+      const members = await fetchWorkspaceMembers(workspace.id);
+      setManageWorkspaceMembers(members);
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudieron cargar los integrantes.", "error");
+    } finally {
+      setManageWorkspaceLoading(false);
+    }
+  };
+
+  const handleSaveWorkspaceName = async () => {
+    if (!manageWorkspaceTarget) return;
+    const nextName = manageWorkspaceName.trim();
+    if (!nextName) {
+      showToast("El nombre del workspace es obligatorio.", "error");
+      return;
+    }
+    setManageWorkspaceSaving(true);
+    try {
+      const updated = await updateWorkspace(manageWorkspaceTarget.id, { name: nextName });
+      setWorkspaces((current) => current.map((w) => (w.id === updated.id ? { ...w, ...updated } : w)));
+      setManageWorkspaceTarget((current) => (current ? { ...current, name: updated.name } : current));
+      showToast("Workspace renombrado.", "success");
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo renombrar el workspace.", "error");
+    } finally {
+      setManageWorkspaceSaving(false);
+    }
+  };
+
+  const handleAddManageMember = async () => {
+    if (!manageWorkspaceTarget || !manageWorkspaceAddMemberId) return;
+    setManageWorkspaceSaving(true);
+    try {
+      const members = await addWorkspaceMember(manageWorkspaceTarget.id, manageWorkspaceAddMemberId);
+      setManageWorkspaceMembers(members);
+      setManageWorkspaceAddMemberId("");
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo agregar al integrante.", "error");
+    } finally {
+      setManageWorkspaceSaving(false);
+    }
+  };
+
+  const handleRemoveManageMember = async (memberUserId) => {
+    if (!manageWorkspaceTarget) return;
+    setManageWorkspaceSaving(true);
+    try {
+      const members = await removeWorkspaceMember(manageWorkspaceTarget.id, memberUserId);
+      setManageWorkspaceMembers(members);
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo quitar al integrante.", "error");
+    } finally {
+      setManageWorkspaceSaving(false);
+    }
+  };
+
+  const handleDeleteWorkspace = async () => {
+    if (!manageWorkspaceTarget) return;
+    if (
+      !window.confirm(
+        `¿Eliminar el workspace "${manageWorkspaceTarget.name}"? Se eliminaran tambien todos sus proyectos, tableros e items. Esta accion no se puede deshacer.`
+      )
+    ) {
+      return;
+    }
+    setManageWorkspaceSaving(true);
+    try {
+      await deleteWorkspace(manageWorkspaceTarget.id);
+      setWorkspaces((current) => current.filter((w) => w.id !== manageWorkspaceTarget.id));
+      if (workspaceId === manageWorkspaceTarget.id) {
+        setWorkspaceId("");
+        setProjects([]);
+        setSelectedProjectId("");
+        setProjectDetail(null);
+        setBoards([]);
+        setItems([]);
+      }
+      setManageWorkspaceOpen(false);
+      setManageWorkspaceTarget(null);
+      showToast("Workspace eliminado.", "success");
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo eliminar el workspace.", "error");
+    } finally {
+      setManageWorkspaceSaving(false);
+    }
+  };
+
+  const handleDeleteProject = async () => {
+    if (!selectedProjectId || !selectedProject) return;
+    if (
+      !window.confirm(
+        `¿Eliminar el proyecto "${selectedProject.name}"? Se eliminaran tambien todos sus tableros e items. Esta accion no se puede deshacer.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await deleteProject(selectedProjectId);
+      setProjects((current) => current.filter((project) => project.id !== selectedProjectId));
+      setSelectedProjectId("");
+      setProjectDetail(null);
+      setBoards([]);
+      setItems([]);
+      navigate("/dashboard/work-management", { replace: true });
+      showToast("Proyecto eliminado.", "success");
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo eliminar el proyecto.", "error");
+    }
+  };
+
+  const handleDeleteItem = async (itemId) => {
+    const item = items.find((current) => current.id === itemId);
+    if (!window.confirm(`¿Eliminar "${item?.title || "este item"}"? Esta accion no se puede deshacer.`)) {
+      return;
+    }
+    try {
+      await deleteItem(itemId);
+      await loadProjectData(selectedProjectId);
+      await loadOverview();
+      setItemDetailOpen(false);
+      showToast("Item eliminado.", "success");
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo eliminar el item.", "error");
+    }
   };
 
   const handleCreateWorkspace = async () => {
@@ -2106,6 +2294,8 @@ const WorkManagementPage = () => {
                         workspace={workspace}
                         active={workspace.id === workspaceId}
                         onClick={() => handleWorkspaceSelect(workspace.id)}
+                        canManage={canManageWorkspace(workspace)}
+                        onManage={openManageWorkspace}
                       />
                     ))
                   ) : (
@@ -2174,6 +2364,17 @@ const WorkManagementPage = () => {
                     </p>
                   </div>
 
+                  {selectedProject && canManageWorkspace(selectedWorkspace) ? (
+                    <button
+                      type="button"
+                      onClick={handleDeleteProject}
+                      title="Eliminar proyecto"
+                      className="inline-flex min-h-9 shrink-0 cursor-pointer items-center gap-1.5 self-start rounded-2xl border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50"
+                    >
+                      <FiTrash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      Eliminar proyecto
+                    </button>
+                  ) : null}
                 </div>
 
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -2768,22 +2969,36 @@ const WorkManagementPage = () => {
               </label>
             </div>
           </div>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              onClick={closeItemDetail}
-              className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-2xl border border-slate-300 px-4 text-sm font-medium text-slate-700 transition-all duration-150 hover:bg-slate-50 active:scale-[0.97]"
-            >
-              Cerrar
-            </button>
-            <button
-              type="button"
-              onClick={handleSaveItemDetail}
-              disabled={savingFieldKey === "item-detail"}
-              className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-2xl bg-[#2563EB] px-4 text-sm font-semibold text-white transition-all duration-150 hover:bg-[#1D4ED8] active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
-            >
-              {savingFieldKey === "item-detail" ? "Guardando..." : "Guardar cambios"}
-            </button>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+            {itemDetailDraft?.id ? (
+              <button
+                type="button"
+                onClick={() => handleDeleteItem(itemDetailDraft.id)}
+                className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-2xl border border-rose-200 bg-white px-4 text-sm font-semibold text-rose-600 transition-colors hover:bg-rose-50"
+              >
+                <FiTrash2 className="h-4 w-4" aria-hidden="true" />
+                Eliminar
+              </button>
+            ) : (
+              <span />
+            )}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={closeItemDetail}
+                className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-2xl border border-slate-300 px-4 text-sm font-medium text-slate-700 transition-all duration-150 hover:bg-slate-50 active:scale-[0.97]"
+              >
+                Cerrar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveItemDetail}
+                disabled={savingFieldKey === "item-detail"}
+                className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-2xl bg-[#2563EB] px-4 text-sm font-semibold text-white transition-all duration-150 hover:bg-[#1D4ED8] active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+              >
+                {savingFieldKey === "item-detail" ? "Guardando..." : "Guardar cambios"}
+              </button>
+            </div>
           </div>
         </div>
       </Modal>
@@ -2942,6 +3157,121 @@ const WorkManagementPage = () => {
               {submitting === "workspace" ? "Guardando..." : "Crear workspace"}
             </button>
           </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={manageWorkspaceOpen}
+        onClose={() => {
+          if (manageWorkspaceSaving) return;
+          setManageWorkspaceOpen(false);
+          setManageWorkspaceTarget(null);
+          setManageWorkspaceMembers([]);
+        }}
+        title="Administrar workspace"
+        maxWidth="max-w-2xl"
+      >
+        <div className="space-y-5">
+          <label className="space-y-2">
+            <span className="text-xs font-medium text-slate-700">Nombre</span>
+            <div className="flex gap-2">
+              <input
+                value={manageWorkspaceName}
+                onChange={(event) => setManageWorkspaceName(event.target.value)}
+                className="min-h-11 w-full rounded-2xl border border-slate-300 px-3 text-sm text-slate-900 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
+              />
+              <button
+                type="button"
+                onClick={handleSaveWorkspaceName}
+                disabled={manageWorkspaceSaving || !manageWorkspaceName.trim() || manageWorkspaceName.trim() === manageWorkspaceTarget?.name}
+                className="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-[#2563EB] px-4 text-sm font-semibold text-white transition-all duration-150 hover:bg-[#1D4ED8] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Guardar
+              </button>
+            </div>
+          </label>
+
+          <section className="rounded-3xl border border-cyan-100 bg-cyan-50/60 p-4">
+            <p className="text-sm font-black text-slate-900">Integrantes</p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-600">
+              Agrega o quita quien puede ver y participar en este workspace.
+            </p>
+
+            {manageWorkspaceLoading ? (
+              <p className="mt-3 text-xs text-slate-500">Cargando integrantes...</p>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {manageWorkspaceMembers.map((member) => (
+                  <div
+                    key={member.user_id}
+                    className="flex items-center justify-between gap-3 rounded-2xl border border-white bg-white px-3 py-2 shadow-sm"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#6161FF] text-[11px] font-black text-white">
+                        {(member.fullname || member.email || "?").charAt(0).toUpperCase()}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-bold text-slate-900">{member.fullname || member.email}</span>
+                        <span className="block truncate text-xs text-slate-500">{member.member_role}</span>
+                      </span>
+                    </div>
+                    {member.member_role !== "owner" && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveManageMember(member.user_id)}
+                        disabled={manageWorkspaceSaving}
+                        title="Quitar del workspace"
+                        className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <FiTrash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="mt-4 flex gap-2">
+              <select
+                value={manageWorkspaceAddMemberId}
+                onChange={(event) => setManageWorkspaceAddMemberId(event.target.value)}
+                className="min-h-11 w-full rounded-2xl border border-white bg-white px-3 text-sm text-slate-900 shadow-sm focus:border-[#6161FF] focus:outline-none focus:ring-2 focus:ring-[#6161FF]/20"
+              >
+                <option value="">Selecciona un colaborador...</option>
+                {collaboratorOptions
+                  .filter((option) => !manageWorkspaceMembers.some((member) => member.user_id === option.id))
+                  .map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.fullname || option.email} — {option.role || "colaborador"}
+                    </option>
+                  ))}
+              </select>
+              <button
+                type="button"
+                onClick={handleAddManageMember}
+                disabled={manageWorkspaceSaving || !manageWorkspaceAddMemberId}
+                className="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-[#00C875] px-4 text-sm font-semibold text-white transition-all duration-150 hover:bg-[#00A863] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Agregar
+              </button>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-rose-200 bg-rose-50/60 p-4">
+            <p className="text-sm font-black text-rose-900">Zona de peligro</p>
+            <p className="mt-1 text-xs leading-relaxed text-rose-700">
+              Eliminar este workspace tambien elimina todos sus proyectos, tableros e items. No se puede deshacer.
+            </p>
+            <button
+              type="button"
+              onClick={handleDeleteWorkspace}
+              disabled={manageWorkspaceSaving}
+              className="mt-3 inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-2xl border border-rose-300 bg-white px-4 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <FiTrash2 className="h-4 w-4" aria-hidden="true" />
+              Eliminar workspace
+            </button>
+          </section>
         </div>
       </Modal>
 

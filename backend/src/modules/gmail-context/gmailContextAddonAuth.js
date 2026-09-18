@@ -2,6 +2,11 @@ const { OAuth2Client } = require("google-auth-library");
 const db = require("../../config/db");
 
 const verifier = new OAuth2Client();
+// Audience emitido por el proyecto OAuth del Add-on FamSPI. El valor de
+// entorno conserva prioridad para permitir una rotacion controlada; el
+// respaldo evita dejar inutilizable el canal si un despliegue omite esta
+// variable no secreta.
+const DEFAULT_ADDON_AUDIENCE = "669746596764-qeb081v9ni8tbdierp6oopilinn1ob0c.apps.googleusercontent.com";
 
 function sendAuthError(res, status, code, message) {
   return res.status(status).json({ ok: false, code, message });
@@ -10,7 +15,7 @@ function sendAuthError(res, status, code, message) {
 // El audience no se infiere: lo asigna Google al proyecto del Add-on y se
 // configura en Cloud Run. Sin ese valor el canal permanece cerrado.
 async function verifyAddonIdentity(req, res, next) {
-  const audience = String(process.env.GMAIL_CONTEXT_ADDON_AUDIENCE || "").trim();
+  const audience = String(process.env.GMAIL_CONTEXT_ADDON_AUDIENCE || DEFAULT_ADDON_AUDIENCE).trim();
   if (!audience) {
     return sendAuthError(res, 503, "GMAIL_CONTEXT_ADDON_NOT_CONFIGURED", "La identidad del Add-on aun no esta configurada.");
   }

@@ -9,7 +9,7 @@ const { google } = require("googleapis");
 const nodemailer = require("nodemailer");
 const { randomUUID } = require("crypto");
 const logger = require("../config/logger");
-const { gmail, createDelegatedJwtClient } = require("../config/google");
+const { gmail, createDelegatedJwtClient, createDelegatedGmailThreadClient } = require("../config/google");
 const gmailService = require("../services/gmail.service");
 const { resolveDelegatedUser } = require("./googleCredentials");
 const { htmlToText, sendChatMessage } = require("./googleChat");
@@ -200,7 +200,14 @@ const MESSAGE_ID_DOMAIN = "fam-project.com";
 
 const generateMessageId = () => `<${randomUUID()}@${MESSAGE_ID_DOMAIN}>`;
 
-async function getLastThreadMessageId(gmailClient, threadId) {
+function threadContextError(cause) {
+  const error = new Error("No se pudo recuperar el contexto del hilo de Gmail.");
+  error.code = "MAIL_THREAD_CONTEXT_UNAVAILABLE";
+  error.cause = cause;
+  return error;
+}
+
+async function getLastThreadMessageId(gmailClient, threadId, { required = false } = {}) {
   if (!gmailClient?.users?.threads?.get || !threadId) return null;
   try {
     const response = await gmailClient.users.threads.get({
@@ -220,6 +227,7 @@ async function getLastThreadMessageId(gmailClient, threadId) {
       { threadId, error: error?.message || String(error) },
       "[MAILER] No se pudo recuperar el Message-ID del hilo existente",
     );
+    if (required) throw threadContextError(error);
     return null;
   }
 }
@@ -292,6 +300,7 @@ async function sendViaServiceAccount({
   inReplyTo = null,
   references = null,
   attachments = [],
+  requireThreading = false,
 }) {
   // resolveDelegatedUser cae a GOOGLE_SUBJECT (administrador) cuando el candidato
   // es invalido -- nunca retorna falsy. Sin el guard `delegatedUser &&`, el primer
@@ -310,7 +319,9 @@ async function sendViaServiceAccount({
     throw new Error("No hay remitente delegado configurado para el envío de correos");
   }
 
-  const delegatedAuth = createDelegatedJwtClient(delegatedFrom);
+  const delegatedAuth = requireThreading
+    ? createDelegatedGmailThreadClient(delegatedFrom)
+    : createDelegatedJwtClient(delegatedFrom);
   try {
     await delegatedAuth.authorize();
   } catch (err) {
@@ -337,7 +348,10 @@ async function sendViaServiceAccount({
   const messageId = generateMessageId();
   const delegatedGmail = google.gmail({ version: "v1", auth: delegatedAuth });
   const previousMessageId =
-    inReplyTo || (threadId ? await getLastThreadMessageId(delegatedGmail, threadId) : null);
+    inReplyTo || (threadId ? await getLastThreadMessageId(delegatedGmail, threadId, { required: requireThreading }) : null);
+  if (requireThreading && (!threadId || !previousMessageId)) {
+    throw threadContextError();
+  }
   const previousReferences = references || previousMessageId || null;
   const threadedRaw = encodeMessage({
     from: fromHeader,
@@ -485,6 +499,7 @@ async function sendMail({
   inReplyTo = null,
   references = null,
   attachments = [],
+  requireThreading = false,
 } = {}) {
   if (!to || !subject || (!html && !text)) {
     return { delivered: false, via: "none", reason: "missing_fields" };
@@ -539,6 +554,7 @@ async function sendMail({
       inReplyTo,
       references,
       attachments,
+      requireThreading,
     });
   } catch (serviceAccountError) {
     logger.warn(
@@ -549,6 +565,9 @@ async function sendMail({
       },
       "[MAILER] Fallo service account; intentando SMTP",
     );
+    // SMTP y Google Chat no pueden garantizar que la respuesta siga el hilo
+    // Gmail solicitado. En este caso es preferible no enviar nada.
+    if (requireThreading) throw serviceAccountError;
   }
 
   if (canUseSmtp()) {

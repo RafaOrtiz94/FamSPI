@@ -27,6 +27,7 @@ import MantenimientosPage from "../modules/MantenimientosPage";
 import DocumentsPage from "../modules/DocumentsPage";
 import Auditoria from "../modules/gerencia/Auditoria";
 import ConfigurationPage from "../pages/ConfigurationPage";
+import GmailContextPage from "../pages/GmailContextPage";
 import MyProfilePage from "../modules/profile/MyProfilePage";
 import AuditPrepPage from "../modules/audit-prep/AuditPrepPage";
 import Modal from "../core/ui/components/Modal";
@@ -696,6 +697,7 @@ const AppRoutes = () => {
           <Route path="/mantenimientos" element={<MantenimientosPage />} />
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/configuration" element={<ConfigurationPage />} />
+          <Route path="/gmail-context" element={<GmailContextPage />} />
           <Route path="/dashboard/mi-perfil" element={backgroundLocation ? null : profileModalElement} />
           <Route path="/dashboard/notificaciones" element={<AllNotificationsPage />} />
 

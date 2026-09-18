@@ -17,6 +17,7 @@ const { sendAndArchive } = require("../../utils/emailArchive");
 const { renderProviderEmail } = require("../../utils/emailTemplate");
 const { generateDeliveryActPdf } = require("./privatePurchases.acta");
 const businessCaseService = require('../business-case/businessCase.service');
+const { getPurchaseBusinessCaseGate } = require('../business-case/businessCasePurchaseGate.service');
 const {
   SITE_INSPECTION_RESULT,
   SITE_INSPECTION_STATUS,
@@ -1281,6 +1282,7 @@ class PrivatePurchasesService {
     await this._autoResolveClientRegistration([purchase], user);
     await this._ensureArrivalStates([purchase], user);
     await this._attachChecklistState([purchase]);
+    purchase.business_case_gate = await getPurchaseBusinessCaseGate({ purchaseId: id, type: 'private' });
 
     // Verificar permisos bà¸£à¸sicos (por ahora todos pueden ver, pero se puede restringir)
     return purchase;

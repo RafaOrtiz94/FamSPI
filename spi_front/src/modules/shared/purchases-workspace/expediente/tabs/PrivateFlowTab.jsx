@@ -699,7 +699,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
           <WorkflowStep
             stepNumber={3}
             title="Respuesta del cliente a la oferta"
-            actor="Asesor Comercial"
+            actor="Comercial o Jefe Comercial"
             status={roleStepStatus(
               Boolean(purchase?.offer_signed_document_id),
               OFFER_SIGN_STATES.includes(status),
@@ -723,7 +723,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
               />
             ) : (
               <div className="space-y-3">
-                <RoleGatedAction allowedRoles={['comercial']} userRoles={userRoles}>
+                <RoleGatedAction allowedRoles={['comercial', 'jefe_comercial']} userRoles={userRoles}>
                   <FileUploadZone
                     id="signed-offer-file"
                     accept=".pdf,.doc,.docx"

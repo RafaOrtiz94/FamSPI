@@ -14,8 +14,8 @@
       "name": "FamSPI",
       "logoUrl": "https://fam-spi-front.web.app/logo192.png",
       "layoutProperties": {
-        "primaryColor": "#1E293B",
-        "secondaryColor": "#0F766E"
+        "primaryColor": "#182838",
+        "secondaryColor": "#2458D3"
       },
       "homepageTrigger": {
         "runFunction": "onHomepage"

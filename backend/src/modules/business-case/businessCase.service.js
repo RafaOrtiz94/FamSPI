@@ -353,7 +353,18 @@ async function saveFeasibilityDecision(
     client.release();
   }
 
-  const privatePurchaseId = metadata?.private_purchase_id || null;
+  let privatePurchaseId = metadata?.private_purchase_id || null;
+  if (!privatePurchaseId) {
+    const { rows: linkedPrivateRows } = await db.query(
+      `SELECT id
+         FROM private_purchase_requests
+        WHERE business_case_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [businessCaseId],
+    );
+    privatePurchaseId = linkedPrivateRows[0]?.id || null;
+  }
   if (privatePurchaseId) {
     const { rows: privateRows } = await db.query(
       `SELECT id, status, offer_kind, extra
@@ -457,6 +468,19 @@ async function saveFeasibilityDecision(
       }
     }
   }
+
+  await db.query(
+    `UPDATE equipment_purchase_requests
+        SET business_case_id = $1,
+            status_unified = $2::equipment_purchase_status,
+            updated_at = NOW()
+      WHERE COALESCE(request_type, 'purchase') = 'purchase'
+        AND (business_case_id = $1 OR extra->>'business_case_id' = $1::text)`,
+    [
+      businessCaseId,
+      is_feasible ? "business_case_feasibility_approved" : "business_case_rejected",
+    ],
+  );
 
   if (is_feasible) {
     await ensurePurchaseWorkspaceForFeasibleBusinessCase({ businessCaseId, user });

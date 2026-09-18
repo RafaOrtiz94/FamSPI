@@ -130,6 +130,20 @@ describe("businessCaseOffer.service", () => {
     expect(payload.summary).toEqual(expect.objectContaining({ total_rows: 2, is_complete: true }));
   });
 
+  test("extractOfferSectionsFromSheetRows reconoce el header real 'SISTEMA PARA ELECTROLITOS(-ISE)' como seccion, no como item", () => {
+    const payload = service.__testables.extractOfferSectionsFromSheetRows([
+      ["SISTEMA PARA ELECTROLITOS"],
+      ["Modulo ISE", "ISE-1", "", "", "1", "", "$500", "$500"],
+      ["SISTEMA PARA ELECTROLITOS-ISE"],
+      ["Modulo ISE 2", "ISE-2", "", "", "1", "", "$600", "$600"],
+    ]);
+
+    expect(payload.sections.electrolito).toEqual([
+      expect.objectContaining({ product: "Modulo ISE", itemType: "electrolito" }),
+      expect.objectContaining({ product: "Modulo ISE 2", itemType: "electrolito" }),
+    ]);
+  });
+
   test("publishOfferVersion ya no bloquea por precios incompletos, pero si exige la propuesta especifica", async () => {
     db.query.mockImplementation((sql, params) => {
       const text = typeof sql === "string" ? sql : "";

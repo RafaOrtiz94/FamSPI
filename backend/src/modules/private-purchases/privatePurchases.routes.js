@@ -11,6 +11,7 @@ const router = express.Router();
 // Middleware de autenticación y roles
 const { verifyToken, requireRole } = require('../../middlewares/auth');
 const { streamPrivatePurchaseUpdates } = require('./privatePurchaseEvents');
+const { requirePurchaseBusinessCaseGate } = require('../business-case/businessCasePurchaseGate.service');
 
 const managerRoles = ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial'];
 
@@ -98,6 +99,7 @@ router.get('/by-role/:role', requireRole(viewerRoles), controller.listByRole);
 router.get('/technician-schedule', requireRole(['jefe_tecnico', 'jefe_servicio', 'jefe_servicio_tecnico', 'comercial', 'backoffice', 'backoffice_comercial', ...managerRoles]), controller.getTechnicianSchedule);
 // Reservas activas — debe ir ANTES de /:id
 router.get('/active-reservations', requireRole(['acp_comercial', ...managerRoles]), controller.getActiveReservations);
+router.use('/:id', requirePurchaseBusinessCaseGate('private'));
 router.get('/:id', requireRole(viewerRoles), controller.getOne);
 
 // Transiciones de estado - validación por rol en state machine

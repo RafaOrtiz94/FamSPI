@@ -5,6 +5,7 @@ const ctrl = require("./equipmentPurchases.controller");
 const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
 const { streamPurchaseUpdates } = require("./purchaseEvents");
+const { requirePurchaseBusinessCaseGate } = require("../business-case/businessCasePurchaseGate.service");
 
 const managerRoles = ["acp_comercial", "gerencia", "gerencia_general", "jefe_comercial"];
 
@@ -83,6 +84,7 @@ router.get("/:id/timeline", verifyToken, requireRole(viewerRoles), ctrl.getTimel
 
 router.post("/", verifyToken, requireRole(creatorRoles), ctrl.create);
 router.post("/provider-contacts", verifyToken, requireRole(managerRoles), ctrl.saveProviderContact);
+router.use("/:id", verifyToken, requirePurchaseBusinessCaseGate("public"));
 router.post("/:id/start-availability", verifyToken, requireRole(managerRoles), ctrl.startAvailability);
 router.post("/:id/provider-response", verifyToken, requireRole(managerRoles), ctrl.saveProviderResponse);
 // CU (condición de uso) approval — comercial + managers aprueban/rechazan en nombre del cliente

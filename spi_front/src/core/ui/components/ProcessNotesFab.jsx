@@ -37,6 +37,21 @@ function formatBytes(bytes) {
   return kb < 1024 ? `${kb.toFixed(0)} KB` : `${(kb / 1024).toFixed(1)} MB`;
 }
 
+function replySubject(subject) {
+  const clean = String(subject || "").trim();
+  return /^re\s*:/i.test(clean) ? clean : `Re: ${clean}`;
+}
+
+function isGmailInboundNote(note) {
+  return Boolean(
+    note?.note_type === "email"
+    && note?.source_communication_id
+    && note?.email_meta?.direction === "inbound"
+    && note?.email_meta?.gmail_thread_id
+    && note?.email_meta?.from,
+  );
+}
+
 function getAttachmentOpenUrl(attachment) {
   if (attachment?.drive_url) return attachment.drive_url;
   return attachment?.drive_file_id
@@ -137,6 +152,7 @@ export default function ProcessNotesFab({ entityType, entityId, title = "Notas d
   const [emailTo, setEmailTo] = useState("");
   const [emailCc, setEmailCc] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
+  const [emailReplyToNote, setEmailReplyToNote] = useState(null);
   const [composeFiles, setComposeFiles] = useState([]);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -240,7 +256,20 @@ export default function ProcessNotesFab({ entityType, entityId, title = "Notas d
     setEmailTo("");
     setEmailCc("");
     setEmailSubject("");
+    setEmailReplyToNote(null);
     setComposeFiles([]);
+  };
+
+  const startGmailReply = (note) => {
+    setMode("email");
+    setReplyingTo(null);
+    setEmailReplyToNote(note);
+    setEmailTo(note.email_meta.from);
+    setEmailCc("");
+    setEmailSubject(replySubject(note.email_meta.subject));
+    setBody("");
+    setComposeFiles([]);
+    setTimeout(() => textareaRef.current?.focus(), 0);
   };
 
   const handleSendNote = async () => {
@@ -276,6 +305,7 @@ export default function ProcessNotesFab({ entityType, entityId, title = "Notas d
         cc: emailCc.trim() || undefined,
         subject: emailSubject.trim(),
         body: body.trim(),
+        replyToNoteId: emailReplyToNote?.id || null,
         files: composeFiles,
       });
       setNotes((prev) => [...prev, created]);
@@ -345,7 +375,8 @@ export default function ProcessNotesFab({ entityType, entityId, title = "Notas d
 
                     {isEmail && note.email_meta ? (
                       <div className="mt-1.5 space-y-1 rounded-lg bg-white/70 p-2 text-xs text-slate-600">
-                        <p><span className="font-semibold">Para:</span> {note.email_meta.to?.join(", ")}</p>
+                        {note.email_meta.direction === "inbound" ? <p><span className="font-semibold">De:</span> {note.email_meta.from || "Remitente no disponible"}</p> : <p><span className="font-semibold">Para:</span> {note.email_meta.to?.join(", ")}</p>}
+                        {note.email_meta.direction === "inbound" && note.email_meta.to?.length ? <p><span className="font-semibold">Para:</span> {note.email_meta.to.join(", ")}</p> : null}
                         {note.email_meta.cc?.length ? <p><span className="font-semibold">CC:</span> {note.email_meta.cc.join(", ")}</p> : null}
                         <p><span className="font-semibold">Asunto:</span> {note.email_meta.subject}</p>
                         <AttachmentCards attachments={note.email_meta.attachments} tone="emerald" />
@@ -415,6 +446,15 @@ export default function ProcessNotesFab({ entityType, entityId, title = "Notas d
                         >
                           <FiCornerUpLeft size={12} /> Responder
                         </button>
+                        {isGmailInboundNote(note) ? (
+                          <button
+                            type="button"
+                            onClick={() => startGmailReply(note)}
+                            className="inline-flex items-center gap-1 font-medium text-emerald-700 hover:text-emerald-800"
+                          >
+                            <FiMail size={12} /> Responder por correo
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -433,7 +473,7 @@ export default function ProcessNotesFab({ entityType, entityId, title = "Notas d
             </button>
             <button
               type="button"
-              onClick={() => { setMode("email"); setReplyingTo(null); setComposeFiles([]); }}
+              onClick={() => { setMode("email"); setReplyingTo(null); setEmailReplyToNote(null); setComposeFiles([]); }}
               className={`flex-1 rounded-lg py-1.5 transition ${mode === "email" ? "bg-white text-emerald-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
             >
               <FiMail className="mr-1 inline" size={13} /> Correo
@@ -451,11 +491,17 @@ export default function ProcessNotesFab({ entityType, entityId, title = "Notas d
 
           {mode === "email" ? (
             <div className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
+              {emailReplyToNote ? (
+                <div className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs text-emerald-800">
+                  Respuesta en el hilo de Gmail de <strong>{emailReplyToNote.email_meta.from}</strong>. El destinatario y asunto de origen no se pueden modificar.
+                </div>
+              ) : null}
               <input
                 type="text"
                 value={emailTo}
                 onChange={(e) => setEmailTo(e.target.value)}
                 placeholder="Para: correos separados por coma (internos o externos)"
+                disabled={Boolean(emailReplyToNote)}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
               />
               <input
@@ -470,6 +516,7 @@ export default function ProcessNotesFab({ entityType, entityId, title = "Notas d
                 value={emailSubject}
                 onChange={(e) => setEmailSubject(e.target.value)}
                 placeholder="Asunto"
+                disabled={Boolean(emailReplyToNote)}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
               />
             </div>

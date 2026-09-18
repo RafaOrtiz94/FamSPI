@@ -2,25 +2,24 @@ const SPI_API_PROPERTY = "SPI_GMAIL_CONTEXT_API_ORIGIN";
 
 function onHomepage() {
   return buildInfoCard_(
-    "Registrar correo en SPI",
-    "Abre un correo y selecciona FamSPI para registrar la comunicación. No se crea ningún cliente ni proceso automáticamente."
+    "FamSPI · Comunicaciones",
+    "Abre un correo para registrarlo y, cuando sea necesario, categorizarlo en SPI."
   );
 }
 
 function onGmailMessageOpen(event) {
   try {
     const message = getCurrentMessage_(event);
-    const section = CardService.newCardSection()
-      .addWidget(CardService.newKeyValue().setTopLabel("Remitente").setContent(message.sender_email || "No disponible"))
-      .addWidget(CardService.newKeyValue().setTopLabel("Asunto").setContent(message.subject || "Sin asunto"))
+    const section = buildMessageSummarySection_(message)
+      .setHeader("CORREO ABIERTO")
       .addWidget(
         CardService.newTextButton()
-          .setText("Registrar como comunicación pendiente")
+          .setText("Registrar en SPI")
           .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
           .setOnClickAction(CardService.newAction().setFunctionName("registerOpenMessage"))
       );
     return CardService.newCardBuilder()
-      .setHeader(CardService.newCardHeader().setTitle("FamSPI"))
+      .setHeader(CardService.newCardHeader().setTitle("FamSPI").setSubtitle("Gestión de comunicaciones"))
       .addSection(section)
       .build();
   } catch (error) {
@@ -34,6 +33,7 @@ function registerOpenMessage(event) {
     const response = callSpi_("/api/v1/gmail-context/addon/communications", "post", message);
     const result = response.data || {};
     const communication = result.communication || {};
+    const workspaceUrl = result.workspace_url || "";
     let autoLinked = null;
     let autoLinkMessage = "";
     if (communication.id) {
@@ -54,25 +54,37 @@ function registerOpenMessage(event) {
         // aún no exponga las sugerencias; la vinculación manual sigue disponible.
       }
     }
-    const detail = autoLinked && autoLinked.status === "linked"
-      ? "Cliente y proceso vinculados automáticamente en SPI."
+    const linked = autoLinked && autoLinked.status === "linked";
+    const state = linked
+      ? "Vinculada automáticamente"
+      : "Requiere categorización";
+    const detail = linked
+      ? "El correo ya quedó registrado en las notas del proceso."
       : result.created
-        ? "La comunicación quedó registrada, pero no se vinculó automáticamente."
-        : "Este correo ya estaba registrado; se reutilizó el registro existente.";
-    const card = CardService.newCardBuilder()
-      .setHeader(CardService.newCardHeader().setTitle("Comunicación registrada"))
-      .addSection(
-        CardService.newCardSection()
+        ? "El correo quedó registrado. Selecciona el proceso correcto en SPI."
+        : "Este correo ya estaba registrado; puedes continuar su categorización.";
+    const section = CardService.newCardSection()
+          .setHeader("RESULTADO")
+          .addWidget(CardService.newKeyValue().setTopLabel("ESTADO").setContent(state))
           .addWidget(CardService.newTextParagraph().setText(detail))
-          .addWidget(CardService.newKeyValue().setTopLabel("ID SPI").setContent(String(communication.id || "No disponible")))
           .addWidget(CardService.newKeyValue()
             .setTopLabel("Cliente detectado")
             .setContent(suggestions.length ? String(suggestions[0].label || "Coincidencia disponible") : "Sin coincidencia verificable")
             .setBottomLabel(suggestions.length ? String((suggestions[0].evidence || []).join(" · ") || "Coincidencia verificada") : "Incluye el nombre o identificador exacto del cliente en el correo"))
           .addWidget(autoLinked && autoLinked.status === "linked"
             ? CardService.newKeyValue().setTopLabel("Proceso vinculado").setContent(processLabel_(autoLinked.linked_entity_type))
-            : CardService.newTextParagraph().setText(autoLinkMessage || "Se requiere una coincidencia única de cliente y proceso para vincular automáticamente."))
-      )
+            : CardService.newTextParagraph().setText(autoLinkMessage || "Continúa en SPI para elegir el proceso o crear una solicitud de compra."));
+    if (!autoLinked && workspaceUrl) {
+      section.addWidget(
+        CardService.newTextButton()
+          .setText("Abrir categorización en SPI")
+          .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+          .setOpenLink(CardService.newOpenLink().setUrl(workspaceUrl))
+      );
+    }
+    const card = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader().setTitle("Comunicación registrada").setSubtitle(linked ? "Proceso actualizado" : "Siguiente paso disponible"))
+      .addSection(section)
       .build();
     return CardService.newActionResponseBuilder()
       .setNavigation(CardService.newNavigation().updateCard(card))
@@ -82,6 +94,16 @@ function registerOpenMessage(event) {
       .setNotification(CardService.newNotification().setText(safeErrorMessage_(error)))
       .build();
   }
+}
+
+function buildMessageSummarySection_(message) {
+  return CardService.newCardSection()
+    .addWidget(CardService.newKeyValue()
+      .setTopLabel("ASUNTO")
+      .setContent(message.subject || "Sin asunto"))
+    .addWidget(CardService.newKeyValue()
+      .setTopLabel("REMITENTE")
+      .setContent(message.sender_email || "No disponible"));
 }
 
 function processLabel_(entityType) {
@@ -149,8 +171,8 @@ function parseRecipients_(value) {
 
 function buildInfoCard_(title, message) {
   return CardService.newCardBuilder()
-    .setHeader(CardService.newCardHeader().setTitle(title))
-    .addSection(CardService.newCardSection().addWidget(CardService.newTextParagraph().setText(message)))
+    .setHeader(CardService.newCardHeader().setTitle(title).setSubtitle("Flujo operativo FamSPI"))
+    .addSection(CardService.newCardSection().setHeader("ACCIÓN REQUERIDA").addWidget(CardService.newTextParagraph().setText(message)))
     .build();
 }
 

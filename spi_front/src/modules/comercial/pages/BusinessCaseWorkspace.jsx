@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect, useRef } from "react";
+import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { FiAlertTriangle } from "react-icons/fi";
 import {
@@ -49,6 +49,51 @@ const WORKSPACE_SECTION_ORDER = [
  "consumption_export",
 ];
 const LEGACY_DEV_SECTIONS = new Set(["prices", "calculations", "rentability"]);
+
+// Un BC puede crear o estar vinculado a un expediente de compras publico o
+// privado. Las notas pertenecen al proceso operativo comun, sin copiar ni
+// mezclar cadenas.
+// compras. En ese caso las notas pertenecen al proceso operativo comun: se
+// usa la misma entidad que el Workspace de Compras, sin copiar ni mezclar
+// cadenas de notas. Se conservan las notas propias de BC cuando no existe un
+// enlace publico verificable.
+const resolveProcessNotesScope = (businessCase, businessCaseId) => {
+ const metadata = businessCase?.modern_bc_metadata || {};
+ const workspace = metadata.purchase_workspace || {};
+ const workspaceType = String(workspace.type || "").trim().toLowerCase();
+ const preflowType = String(metadata.preflow_process_type || "").trim().toLowerCase();
+ const linkedPublicPurchaseId =
+  (["public", "public_purchase"].includes(workspaceType) && workspace.purchase_id) ||
+  (preflowType === "public_purchase" && metadata.preflow_process_id) ||
+  null;
+ const linkedPrivatePurchaseId =
+  (["private", "private_purchase", "private_comodato"].includes(workspaceType) && workspace.purchase_id) ||
+  (["private_purchase", "private_comodato", "comodato_privado"].includes(preflowType) && metadata.preflow_process_id) ||
+  metadata.private_purchase_id ||
+  null;
+
+ if (linkedPublicPurchaseId) {
+  return {
+   entityType: "public_purchase",
+   entityId: linkedPublicPurchaseId,
+   title: "Notas del proceso de compra",
+  };
+ }
+
+ if (linkedPrivatePurchaseId) {
+  return {
+   entityType: "private_purchase",
+   entityId: linkedPrivatePurchaseId,
+   title: "Notas del proceso de compra",
+  };
+ }
+
+ return {
+  entityType: "business_case",
+  entityId: businessCaseId,
+  title: "Notas del Business Case",
+ };
+};
 
 // BC-21: Usa la función exportada del config para obtener secciones visibles por rol
 const getVisibleSectionsByRole = (role = "") => {
@@ -114,6 +159,10 @@ const BusinessCaseWorkspace = () => {
  // Autosave manager ref
  const autosaveManagerRef = useRef(null);
  const confirmResolverRef = useRef(null);
+ const processNotesScope = useMemo(
+  () => resolveProcessNotesScope(businessCase, bcId),
+  [businessCase, bcId],
+ );
 
  const handleSectionSelect = (sectionId) => {
  if (LEGACY_DEV_SECTIONS.has(sectionId)) {
@@ -600,7 +649,7 @@ const BusinessCaseWorkspace = () => {
  </ErrorBoundary>
 
  <ErrorBoundary title="Notas del Business Case" message="Error en las notas del proceso.">
- <ProcessNotesFab entityType="business_case" entityId={bcId} title="Notas del Business Case" />
+ <ProcessNotesFab {...processNotesScope} />
  </ErrorBoundary>
 
  <Modal

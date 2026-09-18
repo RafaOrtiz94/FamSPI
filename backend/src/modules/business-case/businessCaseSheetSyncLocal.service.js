@@ -469,6 +469,14 @@ function parseEquipmentSheetDefinition(name, ws) {
     const normalizedId = normalizeProductId(idValue);
     const normalizedLabel = normalizeText(labelValue);
     if (!normalizedId && !normalizedLabel) continue;
+    // Bug real (pestaña "t411 h232"): combina 2 equipos apilados en una
+    // sola pestaña, cada uno con su propio mini-encabezado repetido
+    // ("EQUIPO"/"cobas h 232" en fila 31, "I.D"/"REACTIVO"/"DET/KIT" en
+    // fila 33) -- sin este filtro, esas filas se colaban como productos
+    // falsos ("cobas h 232", "REACTIVO"). La columna de ID nunca es
+    // literalmente "EQUIPO"/"I.D"/"ID" en una fila de producto real.
+    const rawIdLabel = normalizeText(idValue);
+    if (rawIdLabel === "equipo" || rawIdLabel === "i d" || rawIdLabel === "id") continue;
     // Bug real (pestaña "c311"): sus encabezados de seccion viven en la
     // columna de DESCRIPCION en vez de en la de ID (ver inferItemTypeByRow
     // arriba) -- sin este filtro, "CALIBRADORES"/"CONTROLES"/"CONSUMIBLES"

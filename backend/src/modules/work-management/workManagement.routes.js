@@ -17,10 +17,16 @@ router.get("/portfolio-summary", controller.getPortfolioSummary);
 router.get("/collaborators", controller.listCollaborators);
 router.get("/workspaces", controller.listWorkspaces);
 router.post("/workspaces", controller.createWorkspace);
+router.patch("/workspaces/:workspaceId", controller.updateWorkspace);
+router.get("/workspaces/:workspaceId/members", controller.listWorkspaceMembers);
+router.post("/workspaces/:workspaceId/members", controller.addWorkspaceMember);
+router.delete("/workspaces/:workspaceId/members/:memberUserId", controller.removeWorkspaceMember);
+router.delete("/workspaces/:workspaceId", controller.deleteWorkspace);
 router.get("/workspaces/:workspaceId/projects", controller.listProjectsByWorkspace);
 router.post("/workspaces/:workspaceId/projects", controller.createProject);
 router.post("/projects/from-opportunity/:opportunityId", controller.createProjectFromOpportunity);
 router.get("/projects/:projectId", controller.getProject);
+router.delete("/projects/:projectId", controller.deleteProject);
 router.get("/projects/:projectId/boards", controller.listBoardsByProject);
 router.get("/projects/:projectId/items", controller.listItemsByProject);
 router.get("/projects/:projectId/assignee-options", controller.listAssigneeOptions);
@@ -36,5 +42,6 @@ router.patch("/checklist-items/:checklistItemId", controller.updateChecklistItem
 router.delete("/checklist-items/:checklistItemId", controller.deleteChecklistItem);
 router.post("/items/:itemId/attachments", upload.single("file"), controller.uploadItemAttachment);
 router.post("/items/:itemId/reorder", controller.reorderItem);
+router.delete("/items/:itemId", controller.deleteItem);
 
 module.exports = router;

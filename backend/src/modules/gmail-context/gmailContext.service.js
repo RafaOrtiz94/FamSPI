@@ -231,7 +231,8 @@ async function findUniqueAutomaticProcess(clientRequestId) {
      UNION ALL
      SELECT entity_type, entity_id, label
        FROM (
-         SELECT 'private_purchase'::text AS entity_type, id::text AS entity_id, client_name AS label
+         SELECT 'private_purchase'::text AS entity_type, id::text AS entity_id,
+                COALESCE(client_snapshot->>'commercial_name', client_snapshot->>'name', 'Compra privada') AS label
            FROM private_purchase_requests
           WHERE client_request_id = $1
           LIMIT 2
@@ -256,7 +257,8 @@ async function getProcessCandidates({ id, user, clientRequestId }) {
       WHERE purchase_type = 'public' AND client_id = $1
      UNION ALL
      SELECT 'private_purchase'::text AS entity_type, id::text AS entity_id,
-            client_name AS label, status::text AS status, created_at
+            COALESCE(client_snapshot->>'commercial_name', client_snapshot->>'name', 'Compra privada') AS label,
+            status::text AS status, created_at
        FROM private_purchase_requests
       WHERE client_request_id = $1
       ORDER BY created_at DESC
@@ -321,13 +323,13 @@ async function searchProcesses({ user, entityType, q }) {
   }
 
   const config = entityType === "public_purchase"
-    ? { table: "equipment_purchase_requests", typeFilter: "purchase_type = 'public'" }
-    : { table: "private_purchase_requests", typeFilter: "TRUE" };
+    ? { table: "equipment_purchase_requests", typeFilter: "purchase_type = 'public'", clientName: "client_name" }
+    : { table: "private_purchase_requests", typeFilter: "TRUE", clientName: "COALESCE(client_snapshot->>'commercial_name', client_snapshot->>'name', '')" };
   const { rows } = await db.query(
-    `SELECT id::text AS entity_id, client_name, status::text AS status, created_at
+    `SELECT id::text AS entity_id, ${config.clientName} AS client_name, status::text AS status, created_at
        FROM ${config.table}
       WHERE ${config.typeFilter}
-        AND ($1 = '' OR lower(coalesce(client_name, '')) LIKE lower($2) OR id::text ILIKE $2)
+        AND ($1 = '' OR lower(${config.clientName}) LIKE lower($2) OR id::text ILIKE $2)
       ORDER BY created_at DESC
       LIMIT 25`,
     [query, `%${query}%`],

@@ -135,11 +135,11 @@ async function recalculateChecklistProgress(client, itemId) {
   return { total, done, completion_pct: completionPct };
 }
 
-async function getChecklistForItem(itemId, userId) {
+async function getChecklistForItem(itemId, userId, role) {
   if (!isUuid(itemId)) {
     throw mkErr("itemId invalido", 400);
   }
-  await assertItemAccess(itemId, userId);
+  await assertItemAccess(itemId, userId, role);
 
   const { rows } = await db.query(
     `SELECT c.id,
@@ -201,7 +201,7 @@ async function getChecklistForItem(itemId, userId) {
   };
 }
 
-async function assertChecklistItemAccess(checklistItemId, userId) {
+async function assertChecklistItemAccess(checklistItemId, userId, role) {
   if (!isUuid(checklistItemId)) {
     throw mkErr("checklistItemId invalido", 400);
   }
@@ -223,7 +223,7 @@ async function assertChecklistItemAccess(checklistItemId, userId) {
     throw mkErr("Elemento de checklist no encontrado", 404);
   }
 
-  await assertItemAccess(rows[0].item_id, userId);
+  await assertItemAccess(rows[0].item_id, userId, role);
   return rows[0];
 }
 
@@ -268,7 +268,7 @@ async function addLink(client, payload) {
   );
 }
 
-async function assertWorkspaceAccess(workspaceId, userId) {
+async function assertWorkspaceAccess(workspaceId, userId, role) {
   const { rows } = await db.query(
     `SELECT w.*,
             wm.member_role,
@@ -288,6 +288,7 @@ async function assertWorkspaceAccess(workspaceId, userId) {
 
   const workspace = rows[0];
   const canAccess =
+    isManager({ role }) ||
     workspace.owner_user_id === userId ||
     (workspace.membership_active && workspace.member_role);
 
@@ -298,7 +299,7 @@ async function assertWorkspaceAccess(workspaceId, userId) {
   return workspace;
 }
 
-async function assertProjectAccess(projectId, userId) {
+async function assertProjectAccess(projectId, userId, role) {
   const { rows } = await db.query(
     `SELECT p.*,
             pm.member_role,
@@ -317,8 +318,9 @@ async function assertProjectAccess(projectId, userId) {
   }
 
   const project = rows[0];
-  const workspace = await assertWorkspaceAccess(project.workspace_id, userId);
+  const workspace = await assertWorkspaceAccess(project.workspace_id, userId, role);
   const canAccess =
+    isManager({ role }) ||
     project.owner_user_id === userId ||
     (project.membership_active && project.member_role) ||
     workspace.owner_user_id === userId ||
@@ -331,7 +333,7 @@ async function assertProjectAccess(projectId, userId) {
   return project;
 }
 
-async function assertBoardAccess(boardId, userId) {
+async function assertBoardAccess(boardId, userId, role) {
   const { rows } = await db.query(
     `SELECT b.*
        FROM work_management.boards b
@@ -343,11 +345,11 @@ async function assertBoardAccess(boardId, userId) {
     throw mkErr("Board no encontrado", 404);
   }
   const board = rows[0];
-  await assertProjectAccess(board.project_id, userId);
+  await assertProjectAccess(board.project_id, userId, role);
   return board;
 }
 
-async function assertGroupAccess(groupId, userId) {
+async function assertGroupAccess(groupId, userId, role) {
   const { rows } = await db.query(
     `SELECT g.*, b.project_id
        FROM work_management.board_groups g
@@ -360,11 +362,11 @@ async function assertGroupAccess(groupId, userId) {
     throw mkErr("Grupo no encontrado", 404);
   }
   const group = rows[0];
-  await assertProjectAccess(group.project_id, userId);
+  await assertProjectAccess(group.project_id, userId, role);
   return group;
 }
 
-async function assertItemAccess(itemId, userId) {
+async function assertItemAccess(itemId, userId, role) {
   const { rows } = await db.query(
     `SELECT i.*,
             g.name AS group_name,
@@ -380,7 +382,7 @@ async function assertItemAccess(itemId, userId) {
     throw mkErr("Item no encontrado", 404);
   }
   const item = rows[0];
-  await assertProjectAccess(item.project_id, userId);
+  await assertProjectAccess(item.project_id, userId, role);
   return item;
 }
 
@@ -728,10 +730,18 @@ async function listCollaborators({ search = "", limit = 120 } = {}) {
   return rows;
 }
 
-async function listWorkspaces(userId) {
+async function listWorkspaces(userId, role) {
+  // jefe_comercial y demas MANAGER_ROLES deben ver TODOS los workspaces del
+  // modulo, no solo los propios/donde son miembro -- antes ni siquiera
+  // admin/administrador tenia bypass aqui (el filtro de membresia aplicaba
+  // a todos por igual).
+  const bypass = isManager({ role });
   const { rows } = await db.query(
     `SELECT w.*,
-            COALESCE(wm.member_role, CASE WHEN w.owner_user_id = $1 THEN 'owner' ELSE NULL END) AS access_role,
+            COALESCE(
+              wm.member_role,
+              CASE WHEN w.owner_user_id = $1 THEN 'owner' WHEN $2 THEN 'admin' ELSE NULL END
+            ) AS access_role,
             (
               SELECT COUNT(*)::int
                 FROM work_management.projects p
@@ -743,11 +753,12 @@ async function listWorkspaces(userId) {
          ON wm.workspace_id = w.id
         AND wm.user_id = $1
         AND wm.is_active = true
-      WHERE w.owner_user_id = $1
+      WHERE $2 = true
+         OR w.owner_user_id = $1
          OR wm.user_id = $1
       ORDER BY w.created_at DESC`
     ,
-    [userId]
+    [userId, bypass]
   );
 
   return rows;
@@ -852,11 +863,174 @@ async function createWorkspace(payload, userId) {
   }
 }
 
-async function listProjectsByWorkspace(workspaceId, userId) {
+// Solo isManager (incluye jefe_comercial) o un miembro con member_role
+// 'owner'/'admin' DENTRO de ese workspace puede editar/renombrar o
+// administrar miembros -- nunca un 'member'/'viewer' comun.
+function assertWorkspaceManageAccess(workspace, userId, role) {
+  const isOwnerOrAdmin =
+    workspace.owner_user_id === userId ||
+    (workspace.membership_active && ["owner", "admin"].includes(workspace.member_role));
+  if (!isManager({ role }) && !isOwnerOrAdmin) {
+    throw mkErr("No tienes permisos para administrar este workspace", 403);
+  }
+}
+
+async function updateWorkspace(workspaceId, payload, userId, role) {
   if (!isUuid(workspaceId)) {
     throw mkErr("workspaceId invalido", 400);
   }
-  await assertWorkspaceAccess(workspaceId, userId);
+  const workspace = await assertWorkspaceAccess(workspaceId, userId, role);
+  assertWorkspaceManageAccess(workspace, userId, role);
+
+  const fields = [];
+  const params = [workspaceId];
+  const setField = (column, value) => {
+    params.push(value);
+    fields.push(`${column} = $${params.length}`);
+  };
+  if (payload.name !== undefined) {
+    if (!String(payload.name || "").trim()) {
+      throw mkErr("El nombre del workspace es obligatorio", 400);
+    }
+    setField("name", String(payload.name).trim());
+  }
+  if (payload.description !== undefined) setField("description", payload.description || null);
+  if (payload.visibility !== undefined) setField("visibility", payload.visibility || "private");
+  if (payload.color !== undefined) setField("color", payload.color || null);
+  if (payload.icon !== undefined) setField("icon", payload.icon || null);
+  if (!fields.length) return workspace;
+
+  params.push(userId);
+  const { rows } = await db.query(
+    `UPDATE work_management.workspaces
+        SET ${fields.join(", ")}, updated_by = $${params.length}, updated_at = now()
+      WHERE id = $1
+      RETURNING *`,
+    params
+  );
+
+  await logActivity(db, {
+    workspace_id: workspaceId,
+    actor_user_id: userId,
+    event_type: "workspace.updated",
+    old_data: { name: workspace.name, description: workspace.description },
+    new_data: { name: rows[0].name, description: rows[0].description },
+  });
+
+  return rows[0];
+}
+
+async function listWorkspaceMembers(workspaceId, userId, role) {
+  if (!isUuid(workspaceId)) {
+    throw mkErr("workspaceId invalido", 400);
+  }
+  await assertWorkspaceAccess(workspaceId, userId, role);
+
+  const { rows } = await db.query(
+    `SELECT wm.user_id,
+            wm.member_role,
+            COALESCE(NULLIF(u.fullname, ''), NULLIF(u.name, ''), u.email, CONCAT('Usuario #', u.id)) AS fullname,
+            u.email,
+            u.role
+       FROM work_management.workspace_members wm
+       JOIN public.users u ON u.id = wm.user_id
+      WHERE wm.workspace_id = $1
+        AND wm.is_active = true
+      ORDER BY (wm.member_role = 'owner') DESC, fullname ASC`,
+    [workspaceId]
+  );
+  return rows;
+}
+
+async function addWorkspaceMember(workspaceId, memberUserId, memberRole, userId, role) {
+  if (!isUuid(workspaceId)) {
+    throw mkErr("workspaceId invalido", 400);
+  }
+  const targetUserId = Number(memberUserId);
+  if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+    throw mkErr("Usuario invalido", 400);
+  }
+  const safeMemberRole = ["owner", "admin", "member", "viewer"].includes(memberRole) ? memberRole : "member";
+
+  const workspace = await assertWorkspaceAccess(workspaceId, userId, role);
+  assertWorkspaceManageAccess(workspace, userId, role);
+
+  await db.query(
+    `INSERT INTO work_management.workspace_members
+      (workspace_id, user_id, member_role, is_active, created_by)
+     VALUES ($1,$2,$3,true,$4)
+     ON CONFLICT (workspace_id, user_id)
+     DO UPDATE SET member_role = $3, is_active = true`,
+    [workspaceId, targetUserId, safeMemberRole, userId]
+  );
+
+  await logActivity(db, {
+    workspace_id: workspaceId,
+    actor_user_id: userId,
+    event_type: "workspace.member_added",
+    new_data: { user_id: targetUserId, member_role: safeMemberRole },
+  });
+
+  return listWorkspaceMembers(workspaceId, userId, role);
+}
+
+async function removeWorkspaceMember(workspaceId, memberUserId, userId, role) {
+  if (!isUuid(workspaceId)) {
+    throw mkErr("workspaceId invalido", 400);
+  }
+  const targetUserId = Number(memberUserId);
+  if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+    throw mkErr("Usuario invalido", 400);
+  }
+
+  const workspace = await assertWorkspaceAccess(workspaceId, userId, role);
+  assertWorkspaceManageAccess(workspace, userId, role);
+
+  if (targetUserId === workspace.owner_user_id) {
+    throw mkErr("No se puede quitar al dueño del workspace", 400);
+  }
+
+  await db.query(
+    `UPDATE work_management.workspace_members
+        SET is_active = false
+      WHERE workspace_id = $1 AND user_id = $2`,
+    [workspaceId, targetUserId]
+  );
+
+  await logActivity(db, {
+    workspace_id: workspaceId,
+    actor_user_id: userId,
+    event_type: "workspace.member_removed",
+    old_data: { user_id: targetUserId },
+  });
+
+  return listWorkspaceMembers(workspaceId, userId, role);
+}
+
+async function deleteWorkspace(workspaceId, userId, role) {
+  if (!isUuid(workspaceId)) {
+    throw mkErr("workspaceId invalido", 400);
+  }
+  const workspace = await assertWorkspaceAccess(workspaceId, userId, role);
+  assertWorkspaceManageAccess(workspace, userId, role);
+
+  // Se registra ANTES de borrar y sin workspace_id: work_activity_log.workspace_id
+  // tiene ON DELETE CASCADE -- si se pusiera aqui, el DELETE de abajo
+  // borraria tambien este mismo registro de auditoria.
+  await logActivity(db, {
+    actor_user_id: userId,
+    event_type: "workspace.deleted",
+    old_data: { id: workspace.id, name: workspace.name },
+  });
+  await db.query(`DELETE FROM work_management.workspaces WHERE id = $1`, [workspaceId]);
+  return { id: workspaceId };
+}
+
+async function listProjectsByWorkspace(workspaceId, userId, role) {
+  if (!isUuid(workspaceId)) {
+    throw mkErr("workspaceId invalido", 400);
+  }
+  await assertWorkspaceAccess(workspaceId, userId, role);
 
   const { rows } = await db.query(
     `SELECT p.*,
@@ -880,11 +1054,11 @@ async function listProjectsByWorkspace(workspaceId, userId) {
   return rows;
 }
 
-async function createProject(workspaceId, payload, userId) {
+async function createProject(workspaceId, payload, userId, role) {
   if (!isUuid(workspaceId)) {
     throw mkErr("workspaceId invalido", 400);
   }
-  await assertWorkspaceAccess(workspaceId, userId);
+  await assertWorkspaceAccess(workspaceId, userId, role);
 
   if (!String(payload.name || "").trim()) {
     throw mkErr("El nombre del proyecto es obligatorio", 400);
@@ -971,6 +1145,43 @@ async function createProject(workspaceId, payload, userId) {
   }
 }
 
+// Solo isManager, el owner/admin del proyecto (project_members), o el
+// owner/admin del workspace que lo contiene puede eliminarlo -- un
+// member/viewer comun del proyecto NO puede borrarlo aunque pueda editar
+// items dentro de el.
+function assertProjectManageAccess(project, workspace, userId, role) {
+  const isProjectOwnerOrAdmin =
+    project.owner_user_id === userId ||
+    (project.membership_active && ["owner", "admin"].includes(project.member_role));
+  const isWorkspaceOwnerOrAdmin =
+    workspace.owner_user_id === userId ||
+    (workspace.membership_active && ["owner", "admin"].includes(workspace.member_role));
+  if (!isManager({ role }) && !isProjectOwnerOrAdmin && !isWorkspaceOwnerOrAdmin) {
+    throw mkErr("No tienes permisos para eliminar este proyecto", 403);
+  }
+}
+
+async function deleteProject(projectId, userId, role) {
+  if (!isUuid(projectId)) {
+    throw mkErr("projectId invalido", 400);
+  }
+  const project = await assertProjectAccess(projectId, userId, role);
+  const workspace = await assertWorkspaceAccess(project.workspace_id, userId, role);
+  assertProjectManageAccess(project, workspace, userId, role);
+
+  // Sin project_id (ON DELETE CASCADE en work_activity_log borraria este
+  // mismo registro al eliminar el proyecto) -- el workspace padre sobrevive,
+  // asi que si se conserva workspace_id.
+  await logActivity(db, {
+    workspace_id: project.workspace_id,
+    actor_user_id: userId,
+    event_type: "project.deleted",
+    old_data: { id: project.id, name: project.name },
+  });
+  await db.query(`DELETE FROM work_management.projects WHERE id = $1`, [projectId]);
+  return { id: projectId };
+}
+
 async function createProjectFromOpportunity(opportunityId, payload, user) {
   if (!isUuid(opportunityId)) {
     throw mkErr("opportunityId invalido", 400);
@@ -1044,11 +1255,11 @@ async function createProjectFromOpportunity(opportunityId, payload, user) {
   );
 }
 
-async function getProject(projectId, userId) {
+async function getProject(projectId, userId, role) {
   if (!isUuid(projectId)) {
     throw mkErr("projectId invalido", 400);
   }
-  await assertProjectAccess(projectId, userId);
+  await assertProjectAccess(projectId, userId, role);
 
   const { rows } = await db.query(
     `SELECT p.*,
@@ -1076,11 +1287,11 @@ async function getProject(projectId, userId) {
   return rows[0];
 }
 
-async function listBoardsByProject(projectId, userId) {
+async function listBoardsByProject(projectId, userId, role) {
   if (!isUuid(projectId)) {
     throw mkErr("projectId invalido", 400);
   }
-  await assertProjectAccess(projectId, userId);
+  await assertProjectAccess(projectId, userId, role);
 
   const { rows } = await db.query(
     `SELECT b.*,
@@ -1115,11 +1326,11 @@ async function listBoardsByProject(projectId, userId) {
   return rows;
 }
 
-async function listItemsByProject(projectId, userId) {
+async function listItemsByProject(projectId, userId, role) {
   if (!isUuid(projectId)) {
     throw mkErr("projectId invalido", 400);
   }
-  await assertProjectAccess(projectId, userId);
+  await assertProjectAccess(projectId, userId, role);
 
   const { rows } = await db.query(
     `SELECT i.*,
@@ -1276,12 +1487,12 @@ async function listItemsByProject(projectId, userId) {
   return rows;
 }
 
-async function listAssigneeOptions(projectId, userId) {
+async function listAssigneeOptions(projectId, userId, role) {
   if (!isUuid(projectId)) {
     throw mkErr("projectId invalido", 400);
   }
 
-  const project = await assertProjectAccess(projectId, userId);
+  const project = await assertProjectAccess(projectId, userId, role);
 
   const { rows } = await db.query(
     `SELECT u.id,
@@ -1323,12 +1534,12 @@ async function listAssigneeOptions(projectId, userId) {
   return unique;
 }
 
-async function updateItem(itemId, payload, userId) {
+async function updateItem(itemId, payload, userId, role) {
   if (!isUuid(itemId)) {
     throw mkErr("itemId invalido", 400);
   }
 
-  const currentItem = await assertItemAccess(itemId, userId);
+  const currentItem = await assertItemAccess(itemId, userId, role);
   let nextGroup = null;
   const sets = [];
   const values = [];
@@ -1373,7 +1584,7 @@ async function updateItem(itemId, payload, userId) {
     if (!payload.group_id) {
       throw mkErr("group_id invalido", 400);
     }
-    nextGroup = await assertGroupAccess(payload.group_id, userId);
+    nextGroup = await assertGroupAccess(payload.group_id, userId, role);
     if (nextGroup.project_id !== currentItem.project_id) {
       throw mkErr("El grupo destino no pertenece al mismo proyecto", 400);
     }
@@ -1452,12 +1663,12 @@ async function updateItem(itemId, payload, userId) {
   }
 }
 
-async function updateItemAssignees(itemId, payload, userId) {
+async function updateItemAssignees(itemId, payload, userId, role) {
   if (!isUuid(itemId)) {
     throw mkErr("itemId invalido", 400);
   }
 
-  const currentItem = await assertItemAccess(itemId, userId);
+  const currentItem = await assertItemAccess(itemId, userId, role);
   const assigneeIds = normalizeUserIds(payload.assignee_user_ids);
   await assertWorkspaceAssigneeIds(currentItem.project_id, assigneeIds);
 
@@ -1503,12 +1714,12 @@ async function updateItemAssignees(itemId, payload, userId) {
   }
 }
 
-async function updateItemSupporters(itemId, payload, userId) {
+async function updateItemSupporters(itemId, payload, userId, role) {
   if (!isUuid(itemId)) {
     throw mkErr("itemId invalido", 400);
   }
 
-  const currentItem = await assertItemAccess(itemId, userId);
+  const currentItem = await assertItemAccess(itemId, userId, role);
   const supporterIds = normalizeUserIds(payload.support_user_ids || payload.supporter_user_ids);
 
   if (supporterIds.length) {
@@ -1634,12 +1845,12 @@ async function updateItemSupporters(itemId, payload, userId) {
   return { item_id: itemId, support_user_ids: supporterIds };
 }
 
-async function createItemComment(itemId, payload, userId) {
+async function createItemComment(itemId, payload, userId, role) {
   if (!isUuid(itemId)) {
     throw mkErr("itemId invalido", 400);
   }
 
-  const currentItem = await assertItemAccess(itemId, userId);
+  const currentItem = await assertItemAccess(itemId, userId, role);
   const body = normalizeCommentBody(payload.body);
   if (!body) {
     throw mkErr("El comentario no puede estar vacio", 400);
@@ -1694,7 +1905,7 @@ async function createItemComment(itemId, payload, userId) {
   }
 }
 
-async function createChecklistItem(itemId, payload, userId) {
+async function createChecklistItem(itemId, payload, userId, role) {
   if (!isUuid(itemId)) {
     throw mkErr("itemId invalido", 400);
   }
@@ -1704,7 +1915,7 @@ async function createChecklistItem(itemId, payload, userId) {
     throw mkErr("Debes ingresar el texto del checklist", 400);
   }
 
-  const currentItem = await assertItemAccess(itemId, userId);
+  const currentItem = await assertItemAccess(itemId, userId, role);
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
@@ -1740,7 +1951,7 @@ async function createChecklistItem(itemId, payload, userId) {
     });
 
     await client.query("COMMIT");
-    return getChecklistForItem(itemId, userId);
+    return getChecklistForItem(itemId, userId, role);
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -1749,8 +1960,8 @@ async function createChecklistItem(itemId, payload, userId) {
   }
 }
 
-async function updateChecklistItem(checklistItemId, payload, userId) {
-  const currentChecklistItem = await assertChecklistItemAccess(checklistItemId, userId);
+async function updateChecklistItem(checklistItemId, payload, userId, role) {
+  const currentChecklistItem = await assertChecklistItemAccess(checklistItemId, userId, role);
   const sets = [];
   const values = [];
   let paramIndex = 1;
@@ -1821,7 +2032,7 @@ async function updateChecklistItem(checklistItemId, payload, userId) {
     });
 
     await client.query("COMMIT");
-    return getChecklistForItem(currentChecklistItem.item_id, userId);
+    return getChecklistForItem(currentChecklistItem.item_id, userId, role);
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -1830,8 +2041,8 @@ async function updateChecklistItem(checklistItemId, payload, userId) {
   }
 }
 
-async function deleteChecklistItem(checklistItemId, userId) {
-  const currentChecklistItem = await assertChecklistItemAccess(checklistItemId, userId);
+async function deleteChecklistItem(checklistItemId, userId, role) {
+  const currentChecklistItem = await assertChecklistItemAccess(checklistItemId, userId, role);
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
@@ -1860,7 +2071,7 @@ async function deleteChecklistItem(checklistItemId, userId) {
     });
 
     await client.query("COMMIT");
-    return getChecklistForItem(currentChecklistItem.item_id, userId);
+    return getChecklistForItem(currentChecklistItem.item_id, userId, role);
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -1869,7 +2080,7 @@ async function deleteChecklistItem(checklistItemId, userId) {
   }
 }
 
-async function uploadItemAttachment(itemId, file, userId) {
+async function uploadItemAttachment(itemId, file, userId, role) {
   if (!isUuid(itemId)) {
     throw mkErr("itemId invalido", 400);
   }
@@ -1877,7 +2088,7 @@ async function uploadItemAttachment(itemId, file, userId) {
     throw mkErr("Debes adjuntar un documento", 400);
   }
 
-  const currentItem = await assertItemAccess(itemId, userId);
+  const currentItem = await assertItemAccess(itemId, userId, role);
   const rootFolderId = process.env.DRIVE_WORK_MANAGEMENT_FOLDER_ID
     || process.env.DRIVE_ROOT_FOLDER_ID
     || process.env.DRIVE_FOLDER_ID
@@ -1951,12 +2162,12 @@ async function uploadItemAttachment(itemId, file, userId) {
   }
 }
 
-async function reorderItem(itemId, payload, userId) {
+async function reorderItem(itemId, payload, userId, role) {
   if (!isUuid(itemId)) {
     throw mkErr("itemId invalido", 400);
   }
 
-  const currentItem = await assertItemAccess(itemId, userId);
+  const currentItem = await assertItemAccess(itemId, userId, role);
   const targetGroupId = payload.target_group_id || currentItem.group_id || null;
   const targetIndexRaw = Number(payload.target_index);
   if (!Number.isInteger(targetIndexRaw) || targetIndexRaw < 0) {
@@ -1965,7 +2176,7 @@ async function reorderItem(itemId, payload, userId) {
 
   let targetGroup = null;
   if (targetGroupId) {
-    targetGroup = await assertGroupAccess(targetGroupId, userId);
+    targetGroup = await assertGroupAccess(targetGroupId, userId, role);
     if (targetGroup.project_id !== currentItem.project_id) {
       throw mkErr("El grupo destino no pertenece al mismo proyecto", 400);
     }
@@ -2059,11 +2270,34 @@ async function reorderItem(itemId, payload, userId) {
   }
 }
 
-async function createBoard(projectId, payload, userId) {
+async function deleteItem(itemId, userId, role) {
+  if (!isUuid(itemId)) {
+    throw mkErr("itemId invalido", 400);
+  }
+  // Mismo criterio que updateItem/assertItemAccess -- cualquiera con acceso
+  // al proyecto (miembro, owner, o manager) puede eliminar un item, igual
+  // que ya puede editarlo.
+  const item = await assertItemAccess(itemId, userId, role);
+
+  // Sin item_id (ON DELETE CASCADE en work_activity_log borraria este mismo
+  // registro al eliminar el item) -- project_id/board_id (los padres) si
+  // sobreviven.
+  await logActivity(db, {
+    project_id: item.project_id,
+    board_id: item.board_id,
+    actor_user_id: userId,
+    event_type: "item.deleted",
+    old_data: { id: item.id, title: item.title },
+  });
+  await db.query(`DELETE FROM work_management.items WHERE id = $1`, [itemId]);
+  return { id: itemId };
+}
+
+async function createBoard(projectId, payload, userId, role) {
   if (!isUuid(projectId)) {
     throw mkErr("projectId invalido", 400);
   }
-  await assertProjectAccess(projectId, userId);
+  await assertProjectAccess(projectId, userId, role);
   if (!String(payload.name || "").trim()) {
     throw mkErr("El nombre del board es obligatorio", 400);
   }
@@ -2126,11 +2360,11 @@ async function createBoard(projectId, payload, userId) {
   }
 }
 
-async function createGroup(boardId, payload, userId) {
+async function createGroup(boardId, payload, userId, role) {
   if (!isUuid(boardId)) {
     throw mkErr("boardId invalido", 400);
   }
-  const board = await assertBoardAccess(boardId, userId);
+  const board = await assertBoardAccess(boardId, userId, role);
   if (!String(payload.name || "").trim()) {
     throw mkErr("El nombre del grupo es obligatorio", 400);
   }
@@ -2157,11 +2391,11 @@ async function createGroup(boardId, payload, userId) {
   return rows[0];
 }
 
-async function createItem(groupId, payload, userId) {
+async function createItem(groupId, payload, userId, role) {
   if (!isUuid(groupId)) {
     throw mkErr("groupId invalido", 400);
   }
-  const group = await assertGroupAccess(groupId, userId);
+  const group = await assertGroupAccess(groupId, userId, role);
   // Defensa dura contra el bug real reportado (item creado en el proyecto
   // equivocado por un group_id obsoleto en el frontend, ver
   // WorkManagementPage.jsx): si el cliente informa a que proyecto CREE que
@@ -2295,8 +2529,14 @@ module.exports = {
   listCollaborators,
   listWorkspaces,
   createWorkspace,
+  updateWorkspace,
+  listWorkspaceMembers,
+  addWorkspaceMember,
+  removeWorkspaceMember,
+  deleteWorkspace,
   listProjectsByWorkspace,
   createProject,
+  deleteProject,
   createProjectFromOpportunity,
   getProject,
   listBoardsByProject,
@@ -2311,6 +2551,7 @@ module.exports = {
   deleteChecklistItem,
   uploadItemAttachment,
   reorderItem,
+  deleteItem,
   createBoard,
   createGroup,
   createItem,

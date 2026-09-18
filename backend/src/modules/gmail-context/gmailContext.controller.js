@@ -144,7 +144,13 @@ async function link(req, res) {
   const { error, value } = linkSchema.validate(req.body, { abortEarly: false, convert: true });
   if (error) return validationError(res, error);
   try {
-    const data = await service.linkCommunication({ id: req.params.id, user: req.user, ...value });
+    const data = await service.linkCommunication({
+      id: req.params.id,
+      user: req.user,
+      entityType: value.entity_type,
+      entityId: value.entity_id,
+      clientRequestId: value.client_request_id,
+    });
     await logAction({
       user_id: req.user.id,
       module: "gmail_context",

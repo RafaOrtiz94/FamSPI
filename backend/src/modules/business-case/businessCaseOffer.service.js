@@ -2401,7 +2401,12 @@ function normalizeOfferSectionHeader(value) {
   if (normalized === "calibradores") return "calibrador";
   if (normalized === "controles") return "control";
   if (normalized.startsWith("consumibles")) return "consumible";
-  if (normalized.startsWith("electrolitos")) return "electrolito";
+  // El header real de esta seccion en la plantilla de oferta es "SISTEMA
+  // PARA ELECTROLITOS" (a veces con sufijo "-ISE" segun el equipo), nunca
+  // "ELECTROLITOS..." solo -- por eso el startsWith("electrolitos") original
+  // nunca matcheaba y la fila de encabezado se releia como si fuera un item
+  // normal (quedaba como producto suelto dentro de la seccion anterior).
+  if (normalized.includes("electrolitos")) return "electrolito";
   return null;
 }
 

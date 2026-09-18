@@ -355,7 +355,12 @@ function normalizeCatalogText(value) {
     .replace(MULTIPLICATION_SIGN, "x")
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, " ");
+    .replace(/\s+/g, " ")
+    // "( 4 X 2 ML)" vs "(4 X 2 ML)" -- mismo producto, espacio extra al
+    // tipear despues del parentesis (confirmado: "EIGHT CHECK-3WP XTRA"
+    // en XP 300 solo difiere en esto).
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+\)/g, ")");
 }
 
 // catalog_consumables.type acepta "consumible" y "material" como el mismo
@@ -368,6 +373,15 @@ function normalizeCatalogItemType(type) {
 function buildCatalogItemKey(type, name) {
   return `${normalizeCatalogItemType(type)}::${normalizeCatalogText(name)}`;
 }
+
+// Terminos genericos de insumo de laboratorio (identificables por nombre,
+// sin ambiguedad, con terminologia clinica estandar) usados solo en
+// pestañas que no pueden expresar tipo por su propia estructura (ver
+// hasReliableTypeInfo) -- para no dejarlos con type_uncertain cuando en
+// realidad se sabe con certeza que son Material.
+const KNOWN_MATERIAL_ITEM_NAMES = new Set(
+  ["sample cup", "tubo tapa verde", "ampolla de agua bidestilada"].map(normalizeCatalogText),
+);
 
 // Palabras que distinguen variantes de licenciamiento/config de un MISMO
 // equipo fisico (confirmado con comercial: comparten reactivos/
@@ -588,27 +602,51 @@ async function computeCatalogDiff() {
       return;
     }
 
+    // Varias pestañas (ej. XP 300, XN-L, XN 1000, t411 h232, AVL 9180, b123,
+    // b101 -- confirmado contra el archivo real) organizan sus filas por
+    // parametro clinico ("Biometria basica", "Reticulocitos"...) y NUNCA
+    // traen un encabezado de seccion CONTROLES/CALIBRADORES/MATERIALES --
+    // itemTypeByRow.get(row) nunca cambia de su default "reactivo" para
+    // ninguna fila de esas pestañas. Comparar por type::nombre ahi generaba
+    // falsos "agregar como Reactivo + quitar el Control/Material real" para
+    // el MISMO producto, porque la pestaña simplemente no puede expresar el
+    // tipo. Se detecta por pestaña (¿aparece algun tipo distinto de
+    // "reactivo" en alguna fila?) y, si no, se compara SOLO por nombre,
+    // respetando el tipo que ya tiene curado el catalogo.
+    const hasReliableTypeInfo = (sheetDefinition.rows || []).some((row) => row.itemType && row.itemType !== "reactivo");
+    const buildMatchKey = (type, name) => (hasReliableTypeInfo ? buildCatalogItemKey(type, name) : normalizeCatalogText(name));
+
     const sheetItemsByKey = new Map();
     (sheetDefinition.rows || []).forEach((row) => {
       const displayName = String(row.rawLabel || row.label || "").trim();
       if (!displayName || !row.itemType) return;
-      const key = buildCatalogItemKey(row.itemType, displayName);
+      const key = buildMatchKey(row.itemType, displayName);
       if (!sheetItemsByKey.has(key)) {
-        sheetItemsByKey.set(key, { name: displayName, type: normalizeCatalogItemType(row.itemType) });
+        // Terminos genericos de insumo de laboratorio (vasitos, tubos de
+        // recoleccion, agua destilada) son identificables por nombre sin
+        // ambiguedad aunque la pestaña no tenga encabezado de seccion --
+        // se confirman como Material en vez de dejarlos con el default
+        // "reactivo" sin certeza.
+        const knownMaterial = !hasReliableTypeInfo && KNOWN_MATERIAL_ITEM_NAMES.has(normalizeCatalogText(displayName));
+        sheetItemsByKey.set(key, {
+          name: displayName,
+          type: knownMaterial ? "material" : normalizeCatalogItemType(row.itemType),
+          ...(hasReliableTypeInfo || knownMaterial ? {} : { type_uncertain: true }),
+        });
       }
     });
 
     matchedEquipos.forEach((equipment) => {
       const existingItems = existingByEquipment.get(equipment.id) || [];
       const existingByKey = new Map(
-        existingItems.map((row) => [buildCatalogItemKey(row.type, row.name), row]),
+        existingItems.map((row) => [buildMatchKey(row.type, row.name), row]),
       );
 
       const added = Array.from(sheetItemsByKey.entries())
         .filter(([key]) => !existingByKey.has(key))
         .map(([, item]) => item);
       const removed = existingItems
-        .filter((row) => !sheetItemsByKey.has(buildCatalogItemKey(row.type, row.name)))
+        .filter((row) => !sheetItemsByKey.has(buildMatchKey(row.type, row.name)))
         .map((row) => ({ consumable_id: row.consumable_id, name: row.name, type: normalizeCatalogItemType(row.type) }));
 
       if (added.length || removed.length) {
