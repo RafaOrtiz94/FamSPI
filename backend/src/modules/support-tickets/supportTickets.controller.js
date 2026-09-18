@@ -1,4 +1,5 @@
 const service = require("./supportTickets.service");
+const kpiService = require("./supportTicketsKpi.service");
 
 const handleError = (res, error, fallbackMessage) => {
   const status = error?.status || 500;
@@ -73,6 +74,15 @@ async function kpiWorkspace(req, res) {
     return res.status(200).json({ ok: true, data });
   } catch (error) {
     return handleError(res, error, "No se pudieron calcular los KPI de tickets");
+  }
+}
+
+async function listWorkspaceKpiDefinitions(req, res) {
+  try {
+    const data = await kpiService.listKpiDefinitionsWithValues({ workspaceOnly: true });
+    return res.status(200).json({ ok: true, data });
+  } catch (error) {
+    return handleError(res, error, "No se pudieron calcular los KPI configurados");
   }
 }
 
@@ -180,6 +190,7 @@ module.exports = {
   getEvidenceFile,
   listWorkspace,
   kpiWorkspace,
+  listWorkspaceKpiDefinitions,
   listEvents,
   listComments,
   addComment,

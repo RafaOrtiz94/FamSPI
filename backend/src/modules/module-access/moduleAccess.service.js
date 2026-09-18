@@ -5,6 +5,7 @@ const MODULE_CATALOG = [
   { key: "kickoff_2026",  label: "Kick Off 2026",   path_prefixes: ["/dashboard/kickoff"] },
   { key: "famdays",       label: "FamDays",         path_prefixes: ["/dashboard/famdays"] },
   { key: "ti_workspace", label: "TI Workspace", path_prefixes: ["/dashboard/ti/workspace"] },
+  { key: "ti_reportes", label: "TI Reportes y KPIs", path_prefixes: ["/dashboard/ti/workspace/reportes"] },
   { key: "ti_dispositivos", label: "TI Dispositivos", path_prefixes: ["/dashboard/ti/dispositivos"] },
   { key: "ti_modulos", label: "TI Modulos por Usuario", path_prefixes: ["/dashboard/ti/modulos"] },
   { key: "ti_casos_externos", label: "TI Casos Externos", path_prefixes: ["/dashboard/ti/casos-externos"] },

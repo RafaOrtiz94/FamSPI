@@ -2,6 +2,7 @@ export const MODULE_PATH_PREFIXES = [
   { key: "kickoff_2026",  prefixes: ["/dashboard/kickoff"] },
   { key: "famdays",  prefixes: ["/dashboard/famdays"] },
   { key: "ti_workspace",  prefixes: ["/dashboard/ti/workspace"] },
+  { key: "ti_reportes",  prefixes: ["/dashboard/ti/workspace/reportes"] },
   { key: "ti_dispositivos", prefixes: ["/dashboard/ti/dispositivos"] },
   { key: "ti_modulos", prefixes: ["/dashboard/ti/modulos"] },
   { key: "ti_casos_externos", prefixes: ["/dashboard/ti/casos-externos"] },

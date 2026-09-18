@@ -2,23 +2,13 @@ const db = require("../../config/db");
 const notificationsService = require("../notifications/notifications.service");
 const notificationManager = require("../notifications/notificationManager");
 const { ensureFolderPath, uploadFileToDrive, downloadFileBuffer } = require("../../utils/drive");
+const { ROLE_GROUPS } = require("../../middlewares/roles");
 
 const TICKET_TYPES = new Set(["fallo", "implementacion", "requerimiento", "problema"]);
 const TICKET_PRIORITIES = new Set(["baja", "media", "alta", "critica"]);
 const TICKET_STATUSES = new Set(["abierto", "triage", "en_progreso", "en_espera", "resuelto", "cerrado", "reabierto"]);
-const TI_ROLES = [
-  "ti",
-  "jefe_ti",
-  "admin_ti",
-  "jefe_de_ti",
-  "tecnico",
-  "ing_servicio",
-  "esp_app",
-  "jefe_tecnico",
-  "jefe_servicio",
-  "servicio_tecnico",
-  "jefe_servicio_tecnico",
-];
+// Fuente unica de verdad: backend/src/middlewares/roles.js (ROLE_GROUPS.support_ti).
+const TI_ROLES = ROLE_GROUPS.support_ti;
 // Roles que reciben notificaciones de tickets — solo personal de TI directo
 const TI_NOTIFICATION_ROLES = ["ti", "jefe_ti"];
 const STATUS_ALIASES = {
@@ -702,7 +692,7 @@ function workspaceBaseSelect(whereClause = "", extraOrder = "") {
   `;
 }
 
-function buildWorkspaceFilters({ status, ticket_type, q }) {
+function buildWorkspaceFilters({ status, ticket_type, q, priority, assigned_ti_user_id }) {
   const filters = [];
   const values = [];
 
@@ -715,6 +705,17 @@ function buildWorkspaceFilters({ status, ticket_type, q }) {
   if (ticket_type && TICKET_TYPES.has(normalize(ticket_type))) {
     values.push(normalize(ticket_type));
     filters.push(`t.ticket_type = $${values.length}`);
+  }
+
+  if (priority && TICKET_PRIORITIES.has(normalize(priority))) {
+    values.push(normalize(priority));
+    filters.push(`t.priority = $${values.length}`);
+  }
+
+  const normalizedAssignedId = Number(assigned_ti_user_id);
+  if (Number.isInteger(normalizedAssignedId) && normalizedAssignedId > 0) {
+    values.push(normalizedAssignedId);
+    filters.push(`t.assigned_ti_user_id = $${values.length}`);
   }
 
   if (q && String(q).trim()) {
@@ -1392,6 +1393,7 @@ module.exports = {
   TICKET_TYPES: Array.from(TICKET_TYPES),
   TICKET_PRIORITIES: Array.from(TICKET_PRIORITIES),
   TICKET_STATUSES: Array.from(TICKET_STATUSES),
+  ALLOWED_LVL: Array.from(ALLOWED_LVL),
   TI_ROLES,
   isTIUser,
   derivePriority,

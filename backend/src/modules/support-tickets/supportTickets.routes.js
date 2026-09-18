@@ -29,7 +29,14 @@ router.post("/:id/satisfaction", controller.rateSatisfaction);
 // Workspace y gestión exclusiva TI.
 router.get("/workspace/list", requireRole(TI_ROLES), controller.listWorkspace);
 router.get("/workspace/kpi", requireRole(TI_ROLES), controller.kpiWorkspace);
+// Solo lectura del catalogo de KPI configurados por jefe_ti (crear/editar/
+// eliminar KPIs es exclusivo de jefe_ti, ver supportTicketsAdmin.routes.js).
+router.get("/workspace/kpi-definitions", requireRole(TI_ROLES), controller.listWorkspaceKpiDefinitions);
 router.patch("/:id/assign-self", requireRole(TI_ROLES), controller.assignSelf);
 router.patch("/:id/status", requireRole(TI_ROLES), controller.updateStatus);
+
+// Reportes mensuales y configuracion de KPIs -- exclusivo jefe_ti (gateado
+// dentro del propio router).
+router.use("/admin", require("./supportTicketsAdmin.routes"));
 
 module.exports = router;

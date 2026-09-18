@@ -57,6 +57,24 @@ const ROLE_GROUPS = {
   ],
   calidad: ["calidad", "jefe_calidad"],
   ti: ["ti", "jefe_ti", "jefe_de_ti", "desarrollador", "soporte"],
+  // Roles con acceso operativo al workspace de tickets de soporte TI
+  // (support-tickets). Es un conjunto mas amplio que "ti": incluye tambien
+  // toda la familia de servicio tecnico y admin_ti, que historicamente
+  // atienden tickets internos de TI. Fuente unica de verdad para
+  // supportTickets.service.js -- antes esta lista vivia duplicada ahi.
+  support_ti: [
+    "ti",
+    "jefe_ti",
+    "admin_ti",
+    "jefe_de_ti",
+    "tecnico",
+    "ing_servicio",
+    "esp_app",
+    "jefe_tecnico",
+    "jefe_servicio",
+    "servicio_tecnico",
+    "jefe_servicio_tecnico",
+  ],
   admin: ["admin", "administrador"],
   talento_humano: [
     "talento_humano",

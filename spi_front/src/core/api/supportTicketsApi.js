@@ -119,3 +119,58 @@ export const rateSupportTicket = async (ticketId, payload) => {
  const { data } = await api.post(`/support-tickets/${ticketId}/satisfaction`, payload);
  return data?.data || data;
 };
+
+// ── KPIs configurables (jefe_ti) ────────────────────────────────────────
+
+export const listSupportTicketWorkspaceKpiDefinitions = async () => {
+ const { data } = await api.get("/support-tickets/workspace/kpi-definitions");
+ return data?.data || [];
+};
+
+export const listTiKpiDefinitions = async () => {
+ const { data } = await api.get("/support-tickets/admin/kpi-definitions");
+ return data?.data || [];
+};
+
+export const getTiKpiMetricCatalog = async () => {
+ const { data } = await api.get("/support-tickets/admin/kpi-definitions/metric-catalog");
+ return data?.data || { metrics: [], filterableFields: [] };
+};
+
+export const createTiKpiDefinition = async (payload) => {
+ const { data } = await api.post("/support-tickets/admin/kpi-definitions", payload);
+ return data?.data || data;
+};
+
+export const updateTiKpiDefinition = async (id, payload) => {
+ const { data } = await api.put(`/support-tickets/admin/kpi-definitions/${id}`, payload);
+ return data?.data || data;
+};
+
+export const deleteTiKpiDefinition = async (id) => {
+ const { data } = await api.delete(`/support-tickets/admin/kpi-definitions/${id}`);
+ return data?.data || data;
+};
+
+export const reorderTiKpiDefinitions = async (items) => {
+ const { data } = await api.patch("/support-tickets/admin/kpi-definitions/reorder", items);
+ return data?.data || [];
+};
+
+// ── Reportes mensuales (jefe_ti) ────────────────────────────────────────
+
+export const getTiMonthlyReport = async ({ year, month }) => {
+ const { data } = await api.get("/support-tickets/admin/reports/monthly", { params: { year, month } });
+ return data?.data || null;
+};
+
+export const exportTiMonthlyReport = async ({ year, month, format }) => {
+ const response = await api.get("/support-tickets/admin/reports/monthly/export", {
+  params: { year, month, format },
+  responseType: "blob",
+ });
+ const filename =
+  (response.headers["content-disposition"] || "").match(/filename="?([^"]+)"?/)?.[1] ||
+  `reporte-ti-${year}-${String(month).padStart(2, "0")}.${format}`;
+ return { blob: response.data, filename };
+};
