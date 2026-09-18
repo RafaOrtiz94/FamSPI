@@ -57,6 +57,8 @@ async function listWorkspace(req, res) {
       status: req.query.status,
       ticket_type: req.query.ticket_type,
       q: req.query.q,
+      priority: req.query.priority,
+      assigned_ti_user_id: req.query.assigned_ti_user_id,
     });
     return res.status(200).json({ ok: true, data: tickets });
   } catch (error) {
@@ -70,6 +72,8 @@ async function kpiWorkspace(req, res) {
       status: req.query.status,
       ticket_type: req.query.ticket_type,
       q: req.query.q,
+      priority: req.query.priority,
+      assigned_ti_user_id: req.query.assigned_ti_user_id,
     });
     return res.status(200).json({ ok: true, data });
   } catch (error) {

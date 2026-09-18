@@ -75,6 +75,8 @@ const ServicioExternalCasesWorkspace = lazy(() => import("../modules/servicio/pa
 const DashboardTalento = lazy(() => import("../modules/talento/Dashboard"));
 const DashboardTI = lazy(() => import("../modules/talento/DashboardTI"));
 const TicketsWorkspace = lazy(() => import("../modules/ti/pages/TicketsWorkspace"));
+const TicketsReports = lazy(() => import("../modules/ti/pages/TicketsReports"));
+const TicketKpiForm = lazy(() => import("../modules/ti/pages/TicketKpiForm"));
 const TIDeviceManagementPage = lazy(() => import("../modules/ti/pages/TIDeviceManagementPage"));
 const TIModuleAccessPage = lazy(() => import("../modules/ti/pages/TIModuleAccessPage"));
 const TIShortcutTokenPage = lazy(() => import("../modules/ti/pages/TIShortcutTokenPage"));
@@ -495,6 +497,14 @@ const AppRoutes = () => {
           <Route element={<ProtectedRoute allowedRoles={["jefe_ti", "admin_ti"]} />}>
             <Route path="/dashboard/ti/modulos" element={<TIModuleAccessPage />} />
             <Route path="/dashboard/ti/modulos/*" element={<TIModuleAccessPage />} />
+          </Route>
+          {/* Reportes mensuales y configuracion de KPIs del workspace de tickets:
+              exclusivo jefe_ti (decision explicita del rework -- no incluye
+              admin_ti, a diferencia del resto de paneles admin de TI arriba). */}
+          <Route element={<ProtectedRoute allowedRoles={["jefe_ti"]} strictRoles />}>
+            <Route path="/dashboard/ti/workspace/reportes" element={<TicketsReports />} />
+            <Route path="/dashboard/ti/workspace/reportes/kpis/nuevo" element={<TicketKpiForm />} />
+            <Route path="/dashboard/ti/workspace/reportes/kpis/:id/editar" element={<TicketKpiForm />} />
           </Route>
           <Route element={<ProtectedRoute allowedRoles={[
             "financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador",

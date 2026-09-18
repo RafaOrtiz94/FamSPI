@@ -1,30 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  FiAlertTriangle,
-  FiClock,
-  FiExternalLink,
-  FiImage,
-  FiMessageSquare,
-  FiRefreshCw,
-  FiUserCheck,
-} from "react-icons/fi";
-import { useNavigate } from "react-router-dom";
+import { FiAlertTriangle, FiBarChart2, FiRefreshCw } from "react-icons/fi";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   addSupportTicketComment,
   assignSupportTicketToMe,
   getSupportTicketEvidenceFile,
-  getSupportTicketsWorkspaceKpi,
   listSupportTicketComments,
   listSupportTicketEvents,
   listSupportTicketsWorkspace,
+  listSupportTicketWorkspaceKpiDefinitions,
+  getSupportTicketsWorkspaceKpi,
   updateSupportTicketStatus,
 } from "../../../core/api/supportTicketsApi";
-import Button from "../../../core/ui/components/Button";
-import Card from "../../../core/ui/components/Card";
-import Modal from "../../../core/ui/components/Modal";
+import { useAuth } from "../../../core/auth/AuthContext";
 import { useUI } from "../../../core/ui/UIContext";
 import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
 import { formatDurationMinutes, toStatusLabel } from "../../../core/utils/workflowUi";
+import Button from "../../../core/ui/components/Button";
+import "../design/tokens.css";
+import { TicketBadge, TicketInspector, TicketMetric, TicketStatusChangeModal, statusToTone } from "../design";
 
 const STATUS_OPTIONS = [
   { value: "abierto", label: "Abierto" },
@@ -47,11 +41,19 @@ const ALLOWED_STATUS_TRANSITIONS = {
 };
 
 const TYPE_OPTIONS = [
-  { value: "", label: "Todos" },
+  { value: "", label: "Todos los tipos" },
   { value: "fallo", label: "Fallos" },
   { value: "implementacion", label: "Implementaciones" },
   { value: "requerimiento", label: "Requerimientos" },
   { value: "problema", label: "Problemas" },
+];
+
+const PRIORITY_OPTIONS = [
+  { value: "", label: "Todas las prioridades" },
+  { value: "critica", label: "Critica" },
+  { value: "alta", label: "Alta" },
+  { value: "media", label: "Media" },
+  { value: "baja", label: "Baja" },
 ];
 
 const EMPTY_KPI = {
@@ -63,70 +65,79 @@ const EMPTY_KPI = {
   terminados: 0,
   response_overdue: 0,
   resolution_overdue: 0,
-  avg_response_minutes: null,
   avg_cycle_minutes: null,
-  avg_delivery_minutes: null,
 };
 
-const STATUS_BADGE_CLASS = {
-  abierto: "bg-[#FEF3C7] text-[#B45309]",
-  triage: "bg-[#DBEAFE] text-[#1D4ED8]",
-  en_progreso: "bg-[#DBEAFE] text-[#1D4ED8]",
-  en_espera: "bg-[#FEF3C7] text-[#B45309]",
-  resuelto: "bg-[#DCFCE7] text-[#166534]",
-  cerrado: "bg-[#F3F4F6] text-[#475569]",
-  reabierto: "bg-[#FEE2E2] text-[#B91C1C]",
-};
+const isJefeTi = (user) => ["jefe_ti", "jefe_de_ti"].includes(String(user?.role || "").trim().toLowerCase());
 
 function FilterField({ label, children }) {
   return (
-    <label className="flex min-w-0 flex-col gap-2 text-sm text-[#334155]">
-      <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748B]">{label}</span>
+    <label className="flex min-w-0 flex-col gap-1.5 text-sm">
+      <span className="text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--ti-text-muted)" }}>{label}</span>
       {children}
     </label>
   );
 }
 
-function KpiBox({ label, value, tone = "neutral", helper }) {
-  const toneClass =
-    tone === "amber"
-      ? "border-[#FCD34D] bg-[#FFFBEB]"
-      : tone === "red"
-        ? "border-[#FECACA] bg-[#FEF2F2]"
-        : "border-[#E5E7EB] bg-white";
-  const valueClass =
-    tone === "amber" ? "text-[#B45309]" : tone === "red" ? "text-[#B91C1C]" : "text-[#0F172A]";
-
-  return (
-    <div className={`rounded-2xl border p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)] ${toneClass}`}>
-      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748B]">{label}</p>
-      <p className={`mt-3 text-2xl font-semibold leading-none ${valueClass}`}>{value}</p>
-      {helper ? <p className="mt-2 text-xs leading-relaxed text-[#64748B]">{helper}</p> : null}
-    </div>
-  );
-}
+const selectClass = "w-full px-3 py-2 text-sm outline-none transition";
+const selectStyle = {
+  minHeight: "var(--ti-control-height)",
+  borderRadius: "var(--ti-radius-control)",
+  border: "1px solid var(--ti-border-control)",
+  background: "var(--ti-surface)",
+  color: "var(--ti-text)",
+};
 
 const TicketsWorkspace = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { showToast } = useUI();
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const [tickets, setTickets] = useState([]);
   const [kpi, setKpi] = useState(EMPTY_KPI);
+  const [kpiDefinitions, setKpiDefinitions] = useState([]);
   const [eventsByTicket, setEventsByTicket] = useState({});
   const [commentsByTicket, setCommentsByTicket] = useState({});
   const [commentDrafts, setCommentDrafts] = useState({});
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
-  const [selectedEvidence, setSelectedEvidence] = useState(null);
+  const [inspectorTab, setInspectorTab] = useState("detalle");
   const [evidencePreviewUrls, setEvidencePreviewUrls] = useState({});
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [evidenceError, setEvidenceError] = useState("");
-  const [filters, setFilters] = useState({
-    status: "",
-    ticket_type: "",
-    q: "",
-  });
+  const [pendingStatusChange, setPendingStatusChange] = useState(null);
 
-  const loadTickets = useCallback(async (remoteFilters = {}) => {
+  const filters = useMemo(() => ({
+    status: searchParams.get("status") || "",
+    ticket_type: searchParams.get("ticket_type") || "",
+    priority: searchParams.get("priority") || "",
+    assigned_ti_user_id: searchParams.get("assigned_ti_user_id") || "",
+    q: searchParams.get("q") || "",
+  }), [searchParams]);
+
+  const selectedTicketId = searchParams.get("ticketId") ? Number(searchParams.get("ticketId")) : null;
+
+  const updateSearchParams = useCallback((patch) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      Object.entries(patch).forEach(([key, value]) => {
+        if (value === null || value === undefined || value === "") next.delete(key);
+        else next.set(key, String(value));
+      });
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const remoteFilters = useMemo(() => ({
+    status: filters.status || undefined,
+    ticket_type: filters.ticket_type || undefined,
+    priority: filters.priority || undefined,
+    assigned_ti_user_id: filters.assigned_ti_user_id || undefined,
+    q: filters.q || undefined,
+  }), [filters]);
+
+  const loadTickets = useCallback(async () => {
     setLoading(true);
     try {
       const [data, kpiData] = await Promise.all([
@@ -140,18 +151,45 @@ const TicketsWorkspace = () => {
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [remoteFilters, showToast]);
 
   useEffect(() => {
-    loadTickets({
-      status: filters.status || undefined,
-      ticket_type: filters.ticket_type || undefined,
-      q: filters.q || undefined,
+    loadTickets();
+  }, [loadTickets]);
+
+  useEffect(() => {
+    listSupportTicketWorkspaceKpiDefinitions()
+      .then((data) => setKpiDefinitions(Array.isArray(data) ? data : []))
+      .catch(() => setKpiDefinitions([]));
+  }, []);
+
+  const filteredTickets = useMemo(() => {
+    if (!filters.q.trim()) return tickets;
+    const query = filters.q.trim().toLowerCase();
+    return tickets.filter((ticket) =>
+      [ticket.code, ticket.title, ticket.requester_name, ticket.requester_email]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query))
+    );
+  }, [filters.q, tickets]);
+
+  const technicianOptions = useMemo(() => {
+    const seen = new Map();
+    tickets.forEach((ticket) => {
+      if (ticket.assigned_ti_user_id && !seen.has(ticket.assigned_ti_user_id)) {
+        seen.set(ticket.assigned_ti_user_id, ticket.assigned_ti_name || ticket.assigned_ti_email || `Usuario ${ticket.assigned_ti_user_id}`);
+      }
     });
-  }, [filters.q, filters.status, filters.ticket_type, loadTickets]);
+    return Array.from(seen.entries()).map(([id, name]) => ({ value: String(id), label: name }));
+  }, [tickets]);
+
+  const selectedTicket = useMemo(
+    () => tickets.find((ticket) => ticket.id === selectedTicketId) || null,
+    [tickets, selectedTicketId]
+  );
 
   useEffect(() => {
-    const attachments = selectedEvidence?.evidence_photos || [];
+    const attachments = selectedTicket?.evidence_photos || [];
     if (!attachments.length) {
       setEvidencePreviewUrls({});
       setEvidenceError("");
@@ -186,28 +224,42 @@ const TicketsWorkspace = () => {
       active = false;
       objectUrls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [selectedEvidence]);
+  }, [selectedTicket]);
 
-  const filteredTickets = useMemo(() => {
-    if (!filters.q.trim()) return tickets;
-    const query = filters.q.trim().toLowerCase();
-    return tickets.filter((ticket) =>
-      [ticket.code, ticket.title, ticket.requester_name, ticket.requester_email]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(query))
-    );
-  }, [filters.q, tickets]);
+  useEffect(() => {
+    if (!selectedTicketId) return;
+    if (inspectorTab === "historial" && !eventsByTicket[selectedTicketId]) {
+      listSupportTicketEvents(selectedTicketId)
+        .then((events) => setEventsByTicket((prev) => ({ ...prev, [selectedTicketId]: events })))
+        .catch((error) => showToast(error?.response?.data?.message || "No se pudieron cargar eventos", "error"));
+    }
+    if (inspectorTab === "comentarios" && !commentsByTicket[selectedTicketId]) {
+      listSupportTicketComments(selectedTicketId)
+        .then((comments) => setCommentsByTicket((prev) => ({ ...prev, [selectedTicketId]: comments })))
+        .catch((error) => showToast(error?.response?.data?.message || "No se pudieron cargar comentarios", "error"));
+    }
+  }, [selectedTicketId, inspectorTab, eventsByTicket, commentsByTicket, showToast]);
+
+  const openInspector = (ticketId, tab = "detalle") => {
+    setInspectorTab(tab);
+    updateSearchParams({ ticketId });
+  };
+
+  const closeInspector = () => {
+    updateSearchParams({ ticketId: null });
+  };
 
   const handleAssignToMe = async (ticketId) => {
     setBusyId(ticketId);
     try {
       await assignSupportTicketToMe(ticketId);
       showToast("Ticket asignado", "success");
-      await loadTickets({
-        status: filters.status || undefined,
-        ticket_type: filters.ticket_type || undefined,
-        q: filters.q || undefined,
+      setEventsByTicket((prev) => {
+        const next = { ...prev };
+        delete next[ticketId];
+        return next;
       });
+      await loadTickets();
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo asignar", "error");
     } finally {
@@ -215,25 +267,37 @@ const TicketsWorkspace = () => {
     }
   };
 
-  const handleStatusChange = async (ticketId, nextStatus) => {
+  const applyStatusChange = async (ticketId, nextStatus, comment = "") => {
     setBusyId(ticketId);
     try {
-      let comment = "";
-      if (nextStatus === "en_espera") {
-        comment = window.prompt("Motivo de espera (obligatorio)") || "";
-      }
       await updateSupportTicketStatus(ticketId, { status: nextStatus, comment });
       showToast("Estado actualizado", "success");
-      await loadTickets({
-        status: filters.status || undefined,
-        ticket_type: filters.ticket_type || undefined,
-        q: filters.q || undefined,
+      setEventsByTicket((prev) => {
+        const next = { ...prev };
+        delete next[ticketId];
+        return next;
       });
+      await loadTickets();
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo actualizar estado", "error");
     } finally {
       setBusyId(null);
     }
+  };
+
+  const handleStatusChangeRequest = (ticketId, nextStatus) => {
+    if (nextStatus === "en_espera") {
+      setPendingStatusChange({ ticketId, nextStatus });
+      return;
+    }
+    applyStatusChange(ticketId, nextStatus);
+  };
+
+  const handleConfirmStatusChange = async (reason) => {
+    if (!pendingStatusChange) return;
+    const { ticketId, nextStatus } = pendingStatusChange;
+    setPendingStatusChange(null);
+    await applyStatusChange(ticketId, nextStatus, reason);
   };
 
   const getStatusOptionsForTicket = (currentStatus) => {
@@ -243,65 +307,17 @@ const TicketsWorkspace = () => {
     return STATUS_OPTIONS.filter((option) => option.value === normalizedCurrent || allowed.has(option.value));
   };
 
-  const handleToggleEvents = async (ticketId) => {
-    if (eventsByTicket[ticketId]) {
-      setEventsByTicket((prev) => {
-        const next = { ...prev };
-        delete next[ticketId];
-        return next;
-      });
-      return;
-    }
-
-    setBusyId(ticketId);
-    try {
-      const events = await listSupportTicketEvents(ticketId);
-      setEventsByTicket((prev) => ({ ...prev, [ticketId]: events }));
-    } catch (error) {
-      showToast(error?.response?.data?.message || "No se pudieron cargar eventos", "error");
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleToggleComments = async (ticketId) => {
-    if (commentsByTicket[ticketId]) {
-      setCommentsByTicket((prev) => {
-        const next = { ...prev };
-        delete next[ticketId];
-        return next;
-      });
-      return;
-    }
-
-    setBusyId(ticketId);
-    try {
-      const comments = await listSupportTicketComments(ticketId);
-      setCommentsByTicket((prev) => ({ ...prev, [ticketId]: comments }));
-    } catch (error) {
-      showToast(error?.response?.data?.message || "No se pudieron cargar comentarios", "error");
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleCommentDraft = (ticketId, value) => {
+  const handleCommentDraftChange = (ticketId, value) => {
     setCommentDrafts((prev) => ({
       ...prev,
-      [ticketId]: {
-        text: value,
-        visibility: prev[ticketId]?.visibility || "internal",
-      },
+      [ticketId]: { text: value, visibility: prev[ticketId]?.visibility || "internal" },
     }));
   };
 
-  const handleCommentVisibility = (ticketId, value) => {
+  const handleCommentVisibilityChange = (ticketId, value) => {
     setCommentDrafts((prev) => ({
       ...prev,
-      [ticketId]: {
-        text: prev[ticketId]?.text || "",
-        visibility: value,
-      },
+      [ticketId]: { text: prev[ticketId]?.text || "", visibility: value },
     }));
   };
 
@@ -314,22 +330,12 @@ const TicketsWorkspace = () => {
 
     setBusyId(ticketId);
     try {
-      await addSupportTicketComment(ticketId, {
-        message: draft.text,
-        visibility: draft.visibility,
-      });
+      await addSupportTicketComment(ticketId, { message: draft.text, visibility: draft.visibility });
       showToast("Comentario guardado", "success");
       const comments = await listSupportTicketComments(ticketId);
       setCommentsByTicket((prev) => ({ ...prev, [ticketId]: comments }));
-      setCommentDrafts((prev) => ({
-        ...prev,
-        [ticketId]: { text: "", visibility: prev[ticketId]?.visibility || "internal" },
-      }));
-      await loadTickets({
-        status: filters.status || undefined,
-        ticket_type: filters.ticket_type || undefined,
-        q: filters.q || undefined,
-      });
+      setCommentDrafts((prev) => ({ ...prev, [ticketId]: { text: "", visibility: prev[ticketId]?.visibility || "internal" } }));
+      await loadTickets();
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo guardar comentario", "error");
     } finally {
@@ -337,369 +343,221 @@ const TicketsWorkspace = () => {
     }
   };
 
+  const combinedOpen = (kpi.abiertos || 0) + (kpi.triage || 0);
+  const combinedSlaOverdue = (kpi.response_overdue || 0) + (kpi.resolution_overdue || 0);
+
   return (
-    <div className={`${WORKSPACE_PAGE_CLASS} gap-5`}>
-      <section className="rounded-[28px] border border-[#E5E7EB] bg-white p-5 shadow-[0_15px_35px_rgba(15,23,42,0.08)] sm:p-6">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#64748B]">Workspace TI</p>
-            <h1 className="mt-2 text-[clamp(1.5rem,3vw,2rem)] font-bold leading-tight tracking-[-0.02em] text-[#0F172A]">
-              Tickets de soporte interno
-            </h1>
-            <p className="mt-2 text-sm leading-relaxed text-[#64748B]">
-              Prioriza incidencias, revisa evidencia fotográfica y conserva el hilo operativo entre solicitante y TI.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={() => navigate("/dashboard/ti/casos-externos")}
-            >
-              Casos externos ST-01-04
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="primary"
-              icon={FiRefreshCw}
-              onClick={() => loadTickets({
-                status: filters.status || undefined,
-                ticket_type: filters.ticket_type || undefined,
-                q: filters.q || undefined,
-              })}
-            >
-              Recargar
-            </Button>
-          </div>
+    <div className={`${WORKSPACE_PAGE_CLASS} ti-scope gap-5`}>
+      <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+        <div className="max-w-3xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--ti-text-muted)" }}>Workspace TI</p>
+          <h1 className="mt-1 text-[clamp(1.5rem,3vw,2rem)] font-bold leading-tight tracking-[-0.02em]" style={{ color: "var(--ti-text)" }}>
+            Tickets de soporte interno
+          </h1>
+          <p className="mt-1 text-sm leading-relaxed" style={{ color: "var(--ti-text-muted)" }}>
+            Prioriza incidencias, revisa evidencia fotografica y conserva el hilo operativo entre solicitante y TI.
+          </p>
         </div>
+
+        <div className="flex flex-wrap gap-3">
+          {isJefeTi(user) ? (
+            <Button type="button" size="sm" variant="secondary" icon={FiBarChart2} onClick={() => navigate("/dashboard/ti/workspace/reportes")}>
+              Reportes y KPIs
+            </Button>
+          ) : null}
+          <Button type="button" size="sm" variant="secondary" onClick={() => navigate("/dashboard/ti/casos-externos")}>
+            Casos externos ST-01-04
+          </Button>
+          <Button type="button" size="sm" variant="primary" icon={FiRefreshCw} onClick={loadTickets}>
+            Recargar
+          </Button>
+        </div>
+      </header>
+
+      <section className="flex flex-wrap gap-3">
+        <TicketMetric label="Abiertos + triage" value={combinedOpen} />
+        <TicketMetric label="SLA vencido" value={combinedSlaOverdue} tone={combinedSlaOverdue > 0 ? "danger" : "neutral"} />
+        <TicketMetric label="Ciclo promedio" value={formatDurationMinutes(kpi.avg_cycle_minutes)} helper="Creacion a cierre tecnico" />
       </section>
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
-        <KpiBox label="Abiertos" value={kpi.abiertos || 0} />
-        <KpiBox label="Triage" value={kpi.triage || 0} />
-        <KpiBox label="En progreso" value={kpi.en_progreso || 0} />
-        <KpiBox label="En espera" value={kpi.en_espera || 0} />
-        <KpiBox label="Terminados" value={kpi.terminados || 0} />
-        <KpiBox label="SLA resp. vencido" value={kpi.response_overdue || 0} tone="amber" />
-        <KpiBox label="SLA resol. vencido" value={kpi.resolution_overdue || 0} tone="red" />
-        <KpiBox label="Total" value={kpi.total || 0} />
+      {kpiDefinitions.length > 0 ? (
+        <section className="flex flex-wrap gap-3">
+          {kpiDefinitions.map((def) => (
+            <TicketMetric
+              key={def.id}
+              label={def.name}
+              value={def.value === null || def.value === undefined ? "-" : def.value}
+              unit={def.unit}
+              tone={def.meets_goal === false ? "warning" : def.meets_goal === true ? "success" : "neutral"}
+              helper={def.goal_value !== null && def.goal_value !== undefined ? `Meta: ${def.goal_value} ${def.unit || ""}` : undefined}
+            />
+          ))}
+        </section>
+      ) : isJefeTi(user) ? (
+        <p className="text-xs" style={{ color: "var(--ti-text-muted)" }}>
+          Aun no configuras KPIs propios.{" "}
+          <button type="button" className="font-semibold underline" style={{ color: "var(--ti-accent)" }} onClick={() => navigate("/dashboard/ti/workspace/reportes")}>
+            Configurar en Reportes y KPIs
+          </button>
+        </p>
+      ) : null}
+
+      <section
+        className="grid gap-3 md:grid-cols-2 xl:grid-cols-5"
+        style={{ background: "var(--ti-surface)", border: "1px solid var(--ti-border)", borderRadius: "var(--ti-radius-panel)", padding: "16px" }}
+      >
+        <FilterField label="Estado">
+          <select value={filters.status} onChange={(e) => updateSearchParams({ status: e.target.value })} className={selectClass} style={selectStyle}>
+            <option value="">Todos los estados</option>
+            {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </FilterField>
+
+        <FilterField label="Tipo">
+          <select value={filters.ticket_type} onChange={(e) => updateSearchParams({ ticket_type: e.target.value })} className={selectClass} style={selectStyle}>
+            {TYPE_OPTIONS.map((option) => <option key={option.value || "all"} value={option.value}>{option.label}</option>)}
+          </select>
+        </FilterField>
+
+        <FilterField label="Prioridad">
+          <select value={filters.priority} onChange={(e) => updateSearchParams({ priority: e.target.value })} className={selectClass} style={selectStyle}>
+            {PRIORITY_OPTIONS.map((option) => <option key={option.value || "all"} value={option.value}>{option.label}</option>)}
+          </select>
+        </FilterField>
+
+        <FilterField label="Asignado">
+          <select value={filters.assigned_ti_user_id} onChange={(e) => updateSearchParams({ assigned_ti_user_id: e.target.value })} className={selectClass} style={selectStyle}>
+            <option value="">Todos los tecnicos</option>
+            {technicianOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </FilterField>
+
+        <FilterField label="Buscar">
+          <input
+            value={filters.q}
+            onChange={(e) => updateSearchParams({ q: e.target.value })}
+            placeholder="Codigo, titulo o solicitante"
+            className={selectClass}
+            style={selectStyle}
+          />
+        </FilterField>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
-        <Card className="rounded-2xl border border-[#E5E7EB] bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)] sm:p-5">
-          <div className="grid gap-4 md:grid-cols-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748B]">Primera respuesta</p>
-              <p className="mt-2 text-xl font-semibold text-[#0F172A]">{formatDurationMinutes(kpi.avg_response_minutes)}</p>
-              <p className="mt-1 text-xs text-[#64748B]">Creación a primera acción de TI.</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748B]">Ciclo total</p>
-              <p className="mt-2 text-xl font-semibold text-[#0F172A]">{formatDurationMinutes(kpi.avg_cycle_minutes)}</p>
-              <p className="mt-1 text-xs text-[#64748B]">Creación a cierre técnico.</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748B]">Entrega TI</p>
-              <p className="mt-2 text-xl font-semibold text-[#0F172A]">{formatDurationMinutes(kpi.avg_delivery_minutes)}</p>
-              <p className="mt-1 text-xs text-[#64748B]">En progreso a resolución.</p>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="rounded-2xl border border-[#E5E7EB] bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)] sm:p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <FiClock className="text-[#2563EB]" />
-            <h2 className="text-base font-semibold text-[#0F172A]">Filtros operativos</h2>
-          </div>
-
-          <div className="grid gap-4">
-            <FilterField label="Estado">
-              <select
-                value={filters.status}
-                onChange={(event) => setFilters((prev) => ({ ...prev, status: event.target.value }))}
-                className="min-h-[44px] w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
-              >
-                <option value="">Todos</option>
-                {STATUS_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </FilterField>
-
-            <FilterField label="Tipo">
-              <select
-                value={filters.ticket_type}
-                onChange={(event) => setFilters((prev) => ({ ...prev, ticket_type: event.target.value }))}
-                className="min-h-[44px] w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
-              >
-                {TYPE_OPTIONS.map((option) => (
-                  <option key={option.value || "all"} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </FilterField>
-
-            <FilterField label="Buscar">
-              <input
-                value={filters.q}
-                onChange={(event) => setFilters((prev) => ({ ...prev, q: event.target.value }))}
-                placeholder="Código, título o solicitante"
-                className="min-h-[44px] w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] outline-none transition placeholder:text-[#94A3B8] focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
-              />
-            </FilterField>
-          </div>
-        </Card>
-      </section>
-
-      <section className="space-y-4">
+      <section style={{ background: "var(--ti-surface)", border: "1px solid var(--ti-border)", borderRadius: "var(--ti-radius-panel)" }}>
         {loading ? (
-          <div className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-8 text-sm text-[#64748B] shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
-            Cargando tickets...
-          </div>
+          <div className="px-5 py-8 text-sm" style={{ color: "var(--ti-text-muted)" }}>Cargando tickets...</div>
         ) : filteredTickets.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-[#D1D5DB] bg-white px-6 py-12 text-center shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
-            <FiAlertTriangle size={28} className="text-[#94A3B8]" />
+          <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+            <FiAlertTriangle size={28} style={{ color: "var(--ti-text-muted)" }} />
             <div className="space-y-1">
-              <p className="text-sm font-semibold text-[#0F172A]">No hay tickets con los filtros seleccionados</p>
-              <p className="text-xs leading-relaxed text-[#64748B]">Prueba con otro estado, tipo o texto de búsqueda.</p>
+              <p className="text-sm font-semibold" style={{ color: "var(--ti-text)" }}>No hay tickets con los filtros seleccionados</p>
+              <p className="text-xs leading-relaxed" style={{ color: "var(--ti-text-muted)" }}>Prueba con otro estado, tipo o texto de busqueda.</p>
             </div>
           </div>
         ) : (
-          filteredTickets.map((ticket) => {
-            const draft = commentDrafts[ticket.id] || { text: "", visibility: "internal" };
-            const normalizedStatus = String(ticket.status || "").trim().toLowerCase();
-
-            return (
-              <article key={ticket.id} className="rounded-2xl border border-[#E5E7EB] bg-white p-4 shadow-[0_2px_10px_rgba(0,0,0,0.06)] sm:p-5">
-                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                  <div className="min-w-0 space-y-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-xs font-semibold text-[#64748B]">{ticket.code}</span>
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize ${STATUS_BADGE_CLASS[normalizedStatus] || "bg-[#F3F4F6] text-[#475569]"}`}>
-                        {toStatusLabel(ticket.status)}
-                      </span>
-                      <span className="inline-flex rounded-full bg-[#F8FAFC] px-2.5 py-1 text-[11px] font-semibold capitalize text-[#475569]">
-                        {toStatusLabel(ticket.ticket_type, "Sin tipo")}
-                      </span>
-                      {ticket.evidence_photos?.length ? (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedEvidence(ticket)}
-                          className="inline-flex min-h-[32px] cursor-pointer items-center gap-1 rounded-full bg-[#DBEAFE] px-2.5 py-1 text-[11px] font-semibold text-[#1D4ED8] transition hover:bg-[#BFDBFE]"
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[880px] border-collapse text-sm">
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--ti-border)" }}>
+                  {["Ticket", "Solicitante", "Estado", "Prioridad / SLA", "Asignado", "Acciones"].map((label) => (
+                    <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.06em]" style={{ color: "var(--ti-text-muted)" }}>
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredTickets.map((ticket) => {
+                  const normalizedStatus = String(ticket.status || "").trim().toLowerCase();
+                  const isSelected = ticket.id === selectedTicketId;
+                  return (
+                    <tr
+                      key={ticket.id}
+                      aria-selected={isSelected}
+                      onClick={() => openInspector(ticket.id)}
+                      className="cursor-pointer transition"
+                      style={{
+                        minHeight: "var(--ti-row-height)",
+                        background: isSelected ? "var(--ti-selected)" : "transparent",
+                        borderBottom: "1px solid var(--ti-border)",
+                      }}
+                    >
+                      <td className="px-4 py-3 align-top">
+                        <div className="flex flex-col gap-1">
+                          <span className="font-mono text-xs font-semibold" style={{ color: "var(--ti-text-muted)" }}>{ticket.code}</span>
+                          <span className="max-w-[260px] truncate font-semibold" style={{ color: "var(--ti-text)" }}>{ticket.title}</span>
+                          <span className="text-xs capitalize" style={{ color: "var(--ti-text-muted)" }}>{toStatusLabel(ticket.ticket_type, "Sin tipo")}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 align-top text-xs" style={{ color: "var(--ti-text-muted)" }}>
+                        {ticket.requester_name || ticket.requester_email}
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <TicketBadge tone={statusToTone(normalizedStatus)}>{toStatusLabel(ticket.status)}</TicketBadge>
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-semibold capitalize" style={{ color: "var(--ti-text)" }}>{ticket.priority}</span>
+                          {ticket.sla_response_overdue ? <TicketBadge tone="warning">SLA resp.</TicketBadge> : null}
+                          {ticket.sla_resolution_overdue ? <TicketBadge tone="danger">SLA resol.</TicketBadge> : null}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 align-top text-xs" style={{ color: "var(--ti-text-muted)" }}>
+                        {ticket.assigned_ti_name || "Sin asignar"}
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busyId === ticket.id}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openInspector(ticket.id);
+                          }}
                         >
-                          <FiImage size={12} />
-                          {ticket.evidence_photos.length} evidencia{ticket.evidence_photos.length !== 1 ? "s" : ""}
-                        </button>
-                      ) : null}
-                    </div>
-
-                    <div className="space-y-2">
-                      <h3 className="text-lg font-semibold leading-tight text-[#0F172A]">{ticket.title}</h3>
-                      <p className="max-w-4xl text-sm leading-relaxed text-[#334155]">{ticket.description}</p>
-                    </div>
-
-                    <div className="grid gap-2 text-sm text-[#475569] md:grid-cols-2 xl:grid-cols-3">
-                      <p><span className="font-semibold text-[#0F172A]">Solicitante:</span> {ticket.requester_name || ticket.requester_email}</p>
-                      <p><span className="font-semibold text-[#0F172A]">Asignado TI:</span> {ticket.assigned_ti_name || "Sin asignar"}</p>
-                      <p><span className="font-semibold text-[#0F172A]">Prioridad:</span> {ticket.priority}</p>
-                      <p><span className="font-semibold text-[#0F172A]">Impacto:</span> {ticket.impact || "medio"}</p>
-                      <p><span className="font-semibold text-[#0F172A]">Urgencia:</span> {ticket.urgency || "medio"}</p>
-                      <p><span className="font-semibold text-[#0F172A]">Comentarios:</span> {ticket.comments_count || 0}</p>
-                    </div>
-
-                    <div className="grid gap-2 text-xs text-[#64748B] md:grid-cols-3">
-                      <p><span className="font-semibold text-[#334155]">Tiempo respuesta:</span> {formatDurationMinutes(ticket.response_minutes)}</p>
-                      <p><span className="font-semibold text-[#334155]">Ciclo total:</span> {formatDurationMinutes(ticket.cycle_minutes)}</p>
-                      <p><span className="font-semibold text-[#334155]">Entrega TI:</span> {formatDurationMinutes(ticket.delivery_minutes)}</p>
-                    </div>
-
-                    {(ticket.sla_response_overdue || ticket.sla_resolution_overdue) ? (
-                      <div className="flex flex-wrap gap-2 text-xs">
-                        {ticket.sla_response_overdue ? (
-                          <span className="rounded-full bg-[#FEF3C7] px-2.5 py-1 font-semibold text-[#B45309]">SLA respuesta vencido</span>
-                        ) : null}
-                        {ticket.sla_resolution_overdue ? (
-                          <span className="rounded-full bg-[#FEE2E2] px-2.5 py-1 font-semibold text-[#B91C1C]">SLA resolución vencido</span>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="flex w-full flex-col gap-3 xl:w-[240px]">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      icon={FiUserCheck}
-                      onClick={() => handleAssignToMe(ticket.id)}
-                      disabled={busyId === ticket.id}
-                    >
-                      Asignarme
-                    </Button>
-
-                    <select
-                      value={ticket.status}
-                      disabled={busyId === ticket.id}
-                      onChange={(event) => handleStatusChange(ticket.id, event.target.value)}
-                      className="min-h-[40px] w-full rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
-                    >
-                      {getStatusOptionsForTicket(ticket.status).map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-
-                    {ticket.evidence_photos?.length ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={FiImage}
-                        onClick={() => setSelectedEvidence(ticket)}
-                      >
-                        Ver evidencias
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="mt-4 flex flex-wrap items-center gap-3">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => handleToggleEvents(ticket.id)}
-                    disabled={busyId === ticket.id}
-                  >
-                    {eventsByTicket[ticket.id] ? "Ocultar historial" : "Ver historial"}
-                  </Button>
-
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    icon={FiMessageSquare}
-                    onClick={() => handleToggleComments(ticket.id)}
-                    disabled={busyId === ticket.id}
-                  >
-                    {commentsByTicket[ticket.id] ? "Ocultar comentarios" : "Ver comentarios"}
-                  </Button>
-                </div>
-
-                {eventsByTicket[ticket.id] ? (
-                  <div className="mt-4 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] p-3">
-                    {eventsByTicket[ticket.id].length === 0 ? (
-                      <p className="text-xs text-[#64748B]">Sin eventos registrados.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {eventsByTicket[ticket.id].map((event) => (
-                          <div key={event.id} className="rounded-xl border border-[#E5E7EB] bg-white px-3 py-2 text-xs text-[#475569]">
-                            <span className="font-semibold text-[#0F172A]">{event.event_type}</span>
-                            {event.old_status || event.new_status
-                              ? ` (${toStatusLabel(event.old_status)} -> ${toStatusLabel(event.new_status)})`
-                              : ""}
-                            {" · "}
-                            {event.actor_name || "Sistema"}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-
-                {commentsByTicket[ticket.id] ? (
-                  <div className="mt-4 rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] p-4">
-                    <div className="space-y-2">
-                      {commentsByTicket[ticket.id].length === 0 ? (
-                        <p className="text-xs text-[#64748B]">Sin comentarios.</p>
-                      ) : (
-                        commentsByTicket[ticket.id].map((comment) => (
-                          <div key={comment.id} className="rounded-xl border border-[#E5E7EB] bg-white px-3 py-2">
-                            <p className="text-[11px] text-[#64748B]">
-                              <span className="font-semibold text-[#0F172A]">{comment.author_name || comment.author_email || "Usuario"}</span>
-                              {" · "}
-                              {comment.visibility}
-                            </p>
-                            <p className="mt-1 text-sm leading-relaxed text-[#334155]">{comment.message}</p>
-                          </div>
-                        ))
-                      )}
-                    </div>
-
-                    <div className="mt-4 grid gap-2 lg:grid-cols-[160px_minmax(0,1fr)_120px]">
-                      <select
-                        value={draft.visibility}
-                        onChange={(event) => handleCommentVisibility(ticket.id, event.target.value)}
-                        className="min-h-[40px] rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] outline-none transition focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
-                      >
-                        <option value="internal">Interno TI</option>
-                        <option value="public">Público</option>
-                      </select>
-
-                      <input
-                        value={draft.text}
-                        onChange={(event) => handleCommentDraft(ticket.id, event.target.value)}
-                        placeholder="Agregar comentario operativo..."
-                        className="min-h-[40px] rounded-xl border border-[#D1D5DB] px-3 py-2 text-sm text-[#1F2937] outline-none transition placeholder:text-[#94A3B8] focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20"
-                      />
-
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        disabled={busyId === ticket.id}
-                        onClick={() => handleSubmitComment(ticket.id)}
-                      >
-                        Publicar
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-              </article>
-            );
-          })
+                          Ver detalle
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
 
-      <Modal open={Boolean(selectedEvidence)} onClose={() => setSelectedEvidence(null)} title="Evidencia del ticket" maxWidth="max-w-4xl">
-        {selectedEvidence?.evidence_photos?.length ? (
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] p-4">
-              <p className="font-mono text-xs font-semibold text-[#64748B]">{selectedEvidence.code}</p>
-              <h3 className="mt-2 text-lg font-semibold text-[#0F172A]">{selectedEvidence.title}</h3>
-              <p className="mt-1 text-sm text-[#64748B]">
-                {selectedEvidence.evidence_photos.length} evidencia{selectedEvidence.evidence_photos.length !== 1 ? "s" : ""} adjunta{selectedEvidence.evidence_photos.length !== 1 ? "s" : ""}
-              </p>
-            </div>
+      <TicketInspector
+        ticket={selectedTicket}
+        open={Boolean(selectedTicket)}
+        activeTab={inspectorTab}
+        onTabChange={setInspectorTab}
+        onClose={closeInspector}
+        statusOptions={selectedTicket ? getStatusOptionsForTicket(selectedTicket.status) : []}
+        onStatusChange={(nextStatus) => selectedTicket && handleStatusChangeRequest(selectedTicket.id, nextStatus)}
+        busy={busyId === selectedTicket?.id}
+        onAssignToMe={() => selectedTicket && handleAssignToMe(selectedTicket.id)}
+        events={selectedTicketId ? eventsByTicket[selectedTicketId] || [] : []}
+        eventsLoading={inspectorTab === "historial" && selectedTicketId && !eventsByTicket[selectedTicketId]}
+        comments={selectedTicketId ? commentsByTicket[selectedTicketId] || [] : []}
+        commentsLoading={inspectorTab === "comentarios" && selectedTicketId && !commentsByTicket[selectedTicketId]}
+        commentDraft={selectedTicketId ? commentDrafts[selectedTicketId] || { text: "", visibility: "internal" } : { text: "", visibility: "internal" }}
+        onCommentDraftChange={(value) => selectedTicketId && handleCommentDraftChange(selectedTicketId, value)}
+        onCommentVisibilityChange={(value) => selectedTicketId && handleCommentVisibilityChange(selectedTicketId, value)}
+        onSubmitComment={() => selectedTicketId && handleSubmitComment(selectedTicketId)}
+        evidencePreviewUrls={evidencePreviewUrls}
+        evidenceLoading={evidenceLoading}
+        evidenceError={evidenceError}
+      />
 
-            <div className="min-h-56 rounded-2xl border border-[#E5E7EB] bg-white p-3">
-              {evidenceLoading ? <p className="text-sm text-[#64748B]">Cargando evidencia...</p> : null}
-              {!evidenceLoading && evidenceError ? <p className="px-5 text-center text-sm text-[#DC2626]">{evidenceError}</p> : null}
-              {!evidenceLoading && !evidenceError ? (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {selectedEvidence.evidence_photos.map((attachment, index) => (
-                    <a
-                      key={attachment.id}
-                      href={evidencePreviewUrls[attachment.id] || undefined}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="group overflow-hidden rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] transition hover:border-[#93C5FD]"
-                    >
-                      {evidencePreviewUrls[attachment.id] ? (
-                        <img
-                          src={evidencePreviewUrls[attachment.id]}
-                          alt={`Evidencia ${index + 1} del ticket ${selectedEvidence.code}`}
-                          className="h-64 w-full bg-white object-contain"
-                        />
-                      ) : null}
-                      <div className="flex items-center justify-between gap-3 px-3 py-2 text-xs">
-                        <span className="truncate font-medium text-[#334155]">{attachment.file_name || `Evidencia ${index + 1}`}</span>
-                        <FiExternalLink size={13} className="shrink-0 text-[#2563EB]" />
-                      </div>
-                    </a>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-      </Modal>
+      <TicketStatusChangeModal
+        open={Boolean(pendingStatusChange)}
+        ticketCode={tickets.find((t) => t.id === pendingStatusChange?.ticketId)?.code}
+        nextStatus={pendingStatusChange?.nextStatus}
+        onCancel={() => setPendingStatusChange(null)}
+        onConfirm={handleConfirmStatusChange}
+        submitting={busyId === pendingStatusChange?.ticketId}
+      />
     </div>
   );
 };

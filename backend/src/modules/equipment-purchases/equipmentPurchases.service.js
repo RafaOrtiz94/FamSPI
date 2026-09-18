@@ -2058,6 +2058,31 @@ async function ensureAutoBusinessCaseForPurchase({ purchaseRequest, user, inspec
     [bcId, purchaseRequest.id],
   );
 
+  // Notificar al creador que se ha generado el Business Case
+  setImmediate(async () => {
+    try {
+      await notificationManager.sendNotification({
+        userId: purchaseRequest.created_by,
+        template: 'bc_created',
+        data: {
+          business_case_id: bcId,
+          client_name: purchaseRequest.client_name || 'Cliente no especificado'
+        },
+        email: false,
+        chat: false,
+        priority: 1,
+        source: 'business_case.created',
+        meta: {
+          businessCaseId: bcId,
+          createdBy: purchaseRequest.created_by,
+          clientName: purchaseRequest.client_name
+        }
+      });
+    } catch (notificationError) {
+      logger.warn({ notificationError, businessCaseId: bcId }, 'Error enviando notificación de creación BC');
+    }
+  });
+
   return bcId;
 }
 
@@ -3375,20 +3400,7 @@ async function submitSignedProformaWithInspection({
       inspectionId: null,
     });
     if (autoBusinessCaseId) {
-      await notifyUsers({
-        userIds: [signedResult?.created_by, signedResult?.assigned_to],
-        title: "Business Case creado automaticamente",
-        message: `Se creo el BC ${autoBusinessCaseId} para ${signedResult?.client_name || "cliente"}. La inspeccion de ambiente se gestiona en el BC.`,
-        type: "task",
-        source: "equipment_purchases",
-        priority: 1,
-        meta: {
-          request_id: signedResult?.id,
-          business_case_id: autoBusinessCaseId,
-          auto_created: true,
-          inspection_source: "business_case",
-        },
-      });
+      // La notificación de creación de BC se envía dentro de ensureAutoBusinessCaseForPurchase
     }
   } catch (bcError) {
     logger.error({ bcError, requestId: signedResult?.id }, "No se pudo crear BC automatico para compra publica");
@@ -3551,19 +3563,7 @@ async function requestInspectionEnvironment({
       inspectionId,
     });
     if (autoBusinessCaseId) {
-      await notifyUsers({
-        userIds: [updated?.created_by, updated?.assigned_to],
-        title: "Business Case creado automÃ¡ticamente",
-        message: `Se creÃ³ el BC ${autoBusinessCaseId} para ${updated?.client_name || "cliente"}.`,
-        type: "task",
-        source: "equipment_purchases",
-        priority: 1,
-        meta: {
-          request_id: updated?.id,
-          business_case_id: autoBusinessCaseId,
-          auto_created: true,
-        },
-      });
+      // La notificación de creación de BC se envía dentro de ensureAutoBusinessCaseForPurchase
     }
   } catch (bcError) {
     logger.error({ bcError, requestId: updated?.id }, "No se pudo crear BC automÃ¡tico al solicitar inspecciÃ³n");

@@ -907,6 +907,31 @@ class PrivatePurchasesService {
         [bcId, purchaseId]
       );
 
+      // Notificar al creador que se ha generado el Business Case
+      setImmediate(async () => {
+        try {
+          await notificationManager.sendNotification({
+            userId: row.created_by,
+            template: 'bc_created',
+            data: {
+              business_case_id: bcId,
+              client_name: row.client_snapshot?.commercial_name || row.client_snapshot?.name || 'Cliente no especificado'
+            },
+            email: false,
+            chat: false,
+            priority: 1,
+            source: 'business_case.created',
+            meta: {
+              businessCaseId: bcId,
+              createdBy: row.created_by,
+              clientName: row.client_snapshot?.commercial_name || row.client_snapshot?.name
+            }
+          });
+        } catch (notificationError) {
+          logger.warn({ notificationError, businessCaseId: bcId }, 'Error enviando notificación de creación BC');
+        }
+      });
+
       try {
         if (row.status !== PRIVATE_PURCHASE_STATES.BUSINESS_CASE_IN_PROGRESS) {
           await this.transitionState(
