@@ -3,6 +3,8 @@
 node_modules/
 logs/
 uploads/
+backups/
+*.sql.gz
 .git/
 .env
 .env.*

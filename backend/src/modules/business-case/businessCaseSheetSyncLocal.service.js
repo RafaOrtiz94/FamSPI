@@ -356,13 +356,26 @@ function parseBCDefinition(ws) {
   const range = decodeRange(ws);
   const fieldCells = {};
   const objectiveRows = new Map();
+  // objectiveRows solo guarda numero de fila (lo que ya consumen
+  // resolveObjectiveRow/buildBusinessCaseRanges) -- este mapa paralelo
+  // guarda el texto CRUDO de cada renglon de "inversiones adicionales" (sin
+  // normalizeText, que baja a minusculas y quita tildes/puntuacion) para
+  // poder mostrar/crear items de catalogo con su capitalizacion real (ver
+  // businessCaseTemplateVersions.service.js: computeInvestmentCatalogDiff).
+  const investmentLabels = new Map();
   let inInvestmentBlock = false;
 
   for (let row = range.s.r + 1; row <= range.e.r + 1; row += 1) {
     const label = String(getCellValue(ws, `A${row}`) || "").trim();
     if (!label) continue;
     const normalizedLabel = normalizeText(label);
-    if (normalizedLabel.includes("inversiones adicionales")) {
+    // Bug real confirmado: la fila "ANEXO II DECLARACION JURAMENTADA a la
+    // tabla de BC en inversiones adicionales" tambien contiene la frase
+    // "inversiones adicionales" dentro de una oracion larga -- sin el tope
+    // de longitud, se interpretaba como OTRO encabezado de seccion (el real
+    // es corto: "*Inversiones adicionales", fila 57) y la fila se saltaba
+    // por completo (nunca llegaba a investmentLabels/objectiveRows).
+    if (normalizedLabel.includes("inversiones adicionales") && normalizedLabel.length <= 40) {
       inInvestmentBlock = true;
       continue;
     }
@@ -384,6 +397,7 @@ function parseBCDefinition(ws) {
     }
     if (inInvestmentBlock) {
       objectiveRows.set(normalizedLabel, row);
+      investmentLabels.set(normalizedLabel, label);
     }
   }
 
@@ -401,7 +415,7 @@ function parseBCDefinition(ws) {
   fieldCells.DeterminacionEfectiva = pickWritableCell(ws, 54, 2, 5);
   fieldCells.Observaciones = pickWritableCell(ws, 55, 2, 5);
 
-  return { fieldCells, objectiveRows };
+  return { fieldCells, objectiveRows, investmentLabels };
 }
 
 function parseEquipmentSheetDefinition(name, ws) {
@@ -455,12 +469,23 @@ function parseEquipmentSheetDefinition(name, ws) {
     const normalizedId = normalizeProductId(idValue);
     const normalizedLabel = normalizeText(labelValue);
     if (!normalizedId && !normalizedLabel) continue;
+    // Bug real (pestaña "c311"): sus encabezados de seccion viven en la
+    // columna de DESCRIPCION en vez de en la de ID (ver inferItemTypeByRow
+    // arriba) -- sin este filtro, "CALIBRADORES"/"CONTROLES"/"CONSUMIBLES"
+    // se colaban como si fueran productos reales (sin id, con ese texto
+    // como nombre), ensuciando el catalogo con 3 filas falsas por equipo.
+    if (!normalizedId && inferItemTypeFromSectionLabel(labelValue)) continue;
     const detKitValue = detKitColumn ? getCellValue(ws, `${columnLetter(detKitColumn)}${row}`) : "";
     const parsedDetKit = parseNumberFromSheetValue(detKitValue);
     rows.push({
       rowNumber: row,
       itemId: normalizedId,
       label: normalizedLabel,
+      // Version sin pasar por normalizeText (que baja a minusculas y quita
+      // tildes/puntuacion) -- necesaria para poder mostrar/crear nombres de
+      // catalogo con su capitalizacion real (ver businessCaseTemplateVersions
+      // .service.js: computeCatalogDiff), normalizedLabel solo sirve para matchear.
+      rawLabel: String(labelValue || "").trim(),
       itemType: itemTypeByRow.get(row) || "reactivo",
       offerSection: offerSectionByRow.get(row) || null,
       detKit: parsedDetKit === null ? null : parsedDetKit,
@@ -547,10 +572,18 @@ function inferItemTypeByRow(ws, range, sheetName = "") {
 
   for (let row = range.s.r + 1; row <= range.e.r + 1; row += 1) {
     const labelA = getCellValue(ws, `A${row}`);
-    const sectionType = inferItemTypeFromSectionLabel(labelA);
+    // Bug real confirmado en la pestaña "c311": sus 3 encabezados de seccion
+    // ("CALIBRADORES"/"CONTROLES"/"CONSUMIBLES", filas 75/95/113) estan en
+    // columna B con columna A vacia -- todas las demas pestañas los traen
+    // en A. Sin este fallback, currentType nunca cambiaba para c311 y TODO
+    // calibrador/control/consumible de ese equipo quedaba clasificado como
+    // "reactivo" (confirmado: mismo problema en el archivo viejo Y el
+    // nuevo, no es un cambio de la plantilla -- bug preexistente).
+    const sectionLabelSource = String(labelA || "").trim() ? labelA : getCellValue(ws, `B${row}`);
+    const sectionType = inferItemTypeFromSectionLabel(sectionLabelSource);
     if (sectionType) {
       currentType = sectionType;
-      const normalizedLabel = normalizeText(labelA);
+      const normalizedLabel = normalizeText(sectionLabelSource);
       const wasAmbiguous = currentSectionAmbiguous;
       currentSectionAmbiguous = normalizedLabel.includes("control") && normalizedLabel.includes("calibrador");
       // Alerta permanente: si aparece un encabezado control+calibrador
@@ -561,7 +594,7 @@ function inferItemTypeByRow(ws, range, sheetName = "") {
       // audita toda la plantilla real).
       if (currentSectionAmbiguous && !wasAmbiguous) {
         logger.warn(
-          { sheetName, row, label: labelA },
+          { sheetName, row, label: sectionLabelSource },
           "BC sheet sync: encabezado de seccion ambiguo (control+calibrador fusionados) -- desambiguando por nombre de fila",
         );
       }
@@ -1355,6 +1388,45 @@ function buildRecordAliases(record = {}) {
   return Array.from(aliases);
 }
 
+// Alias tecnicos que las pestañas del Excel usan (nomenclatura interna de
+// modulo Roche/fabricante) pero que NO aparecen como substring literal en el
+// nombre comercial del equipo -- ej. la pestaña "c303 c503" nombra los
+// modulos Roche c303/c503, pero el catalogo dice "cobas Pure <303>"/"cobas
+// Pro <503> ISE" (confirmado con comercial: un cobas Pure real = modulo
+// e402 + modulo c303; un cobas Pro real = modulo e801 + modulo c503). Sin
+// este alias explicito, extractModelFamilyAliases saca basura sin relacion
+// (ej. "e303" de "purE303") que nunca coincide con el alias real de la
+// pestaña. Distinto de equipment_aliases.json (ese archivo mezcla ids de
+// mas de una tabla de equipos, ver historial) -- este mapa es SOLO por
+// nombre, para no depender de a que tabla/espacio de ids pertenece el id
+// del registro que se este matcheando.
+const EXTRA_EQUIPMENT_NAME_ALIASES = new Map([
+  ["cobaspure303", ["c303"]],
+  ["cobaspure402", ["e402"]],
+  ["cobaspro503ise", ["c503"]],
+  ["cobas8000801", ["e801"]],
+  ["cobas6500", ["u6500"]],
+  // El tab "AVL 9180" usa el prefijo del fabricante (AVL); el catalogo
+  // describe el mismo equipo como "SYSTEM, GENERIC, 9180".
+  ["systemgeneric9180", ["avl9180"]],
+]);
+
+// Version de buildRecordAliases pensada para matchear un equipo contra una
+// pestaña de Excel (buildSheetPayloads / verificacion de mapeo): a
+// diferencia de buildRecordAliases, NO usa `code` (numero de parte del
+// fabricante -- son numeros largos que generan digitos de 3-4 cifras sin
+// relacion con el numero de modelo real, confirmado: causaba que dos
+// equipos con numero de modelo distinto pero code largo compitieran por el
+// mismo token numerico, ej. "e411"/"t411"/"cobas U 411" por "411") y suma
+// los alias tecnicos curados arriba.
+function buildEquipmentMatchAliases(record = {}) {
+  const extra = EXTRA_EQUIPMENT_NAME_ALIASES.get(normalizeCompact(record.name || "")) || [];
+  return [
+    ...buildRecordAliases({ name: record.name, model: record.model, id: record.id }),
+    ...extra,
+  ];
+}
+
 function extractNumericAliasTokens(values = []) {
   const tokens = new Set();
   (Array.isArray(values) ? values : []).forEach((value) => {
@@ -1386,11 +1458,29 @@ function buildValueRange(range, values) {
   return { range, values: [[normalizeSheetWriteValue(values)]] };
 }
 
+// La version activa (si jefe_comercial subio y activo una) manda sobre el ID
+// fijo de codigo -- ver businessCaseTemplateVersions.service.js. db se
+// requiere aqui (no en el top del archivo) para evitar dependencia circular
+// con modulos que ya importan este archivo antes de que db este listo.
+async function resolveActiveTemplateSpreadsheetId() {
+  try {
+    const db = require("../../config/db");
+    const { rows } = await db.query(
+      `SELECT sheet_drive_file_id FROM business_case_template_versions WHERE status = 'active' LIMIT 1`,
+    );
+    return rows[0]?.sheet_drive_file_id || TEMPLATE_SPREADSHEET_ID;
+  } catch (error) {
+    logger.warn({ error: error?.message }, "No se pudo resolver la version activa de la plantilla BC, se usa el ID por defecto");
+    return TEMPLATE_SPREADSHEET_ID;
+  }
+}
+
 async function createSpreadsheetFromTemplate({ outputFolderId, businessCaseName }) {
   const name = businessCaseName || `BC-${Date.now()}`;
+  const activeTemplateId = await resolveActiveTemplateSpreadsheetId();
 
   const { data } = await drive.files.copy({
-    fileId: TEMPLATE_SPREADSHEET_ID,
+    fileId: activeTemplateId,
     supportsAllDrives: true,
     requestBody: {
       name,
@@ -1807,12 +1897,15 @@ function resolveCurrentDateValue() {
 
 function buildSheetPayloads({ template, equipmentRecords = [], payload = {} }) {
   const selectedSheets = [];
-  const recordsWithAliases = equipmentRecords.map((record) => ({
-    ...record,
-    aliases: buildRecordAliases(record),
-    numericAliases: extractNumericAliasTokens(buildRecordAliases(record)),
-    modelAliases: extractModelFamilyAliases(buildRecordAliases(record)),
-  }));
+  const recordsWithAliases = equipmentRecords.map((record) => {
+    const aliases = buildEquipmentMatchAliases(record);
+    return {
+      ...record,
+      aliases,
+      numericAliases: extractNumericAliasTokens(aliases),
+      modelAliases: extractModelFamilyAliases(aliases),
+    };
+  });
   const matchedSheetsByRecordId = new Map();
 
   if (!equipmentRecords.length) {
@@ -1823,10 +1916,21 @@ function buildSheetPayloads({ template, equipmentRecords = [], payload = {} }) {
     const recordKey = Number(record.id) || `idx:${index}`;
     const candidates = template.equipmentSheets
       .map((sheetDefinition) => {
-        const score = scoreAliases(record.aliases, sheetDefinition.aliases);
+        // OJO: la señal de la pestaña se toma SOLO de su nombre de tab, NUNCA
+        // de sheetDefinition.aliases completo. Ese array tambien incluye
+        // texto escaneado de las primeras 8 filas x 9 columnas de contenido
+        // de la hoja (collectSheetAliases) -- un numero de 3 digitos suelto
+        // en cualquier celda (codigo, cantidad, etc.) puede coincidir por
+        // pura casualidad con el numero de modelo de un equipo no
+        // relacionado. Confirmado en produccion: la pestaña "b101" scoreaba
+        // 100 contra "cobas b 123 POC system" (un "123" perdido en una
+        // celda interna de esa pestaña), mezclando el catalogo de ambos
+        // equipos al generar su Sheet real.
+        const sheetNameOnlyAliases = [normalizeCompact(sheetDefinition.name)];
+        const score = scoreAliases(record.aliases, sheetNameOnlyAliases);
         const sheetNameAlias = normalizeCompact(sheetDefinition.name);
-        const sheetNumericAliases = extractNumericAliasTokens(sheetDefinition.aliases);
-        const sheetModelAliases = extractModelFamilyAliases(sheetDefinition.aliases);
+        const sheetNumericAliases = extractNumericAliasTokens(sheetNameOnlyAliases);
+        const sheetModelAliases = extractModelFamilyAliases(sheetNameOnlyAliases);
         return {
           sheetDefinition,
           score,
@@ -1859,13 +1963,14 @@ function buildSheetPayloads({ template, equipmentRecords = [], payload = {} }) {
     // pestana es la correcta. El numero de modelo es una senal mucho mas
     // confiable que el desempate alfabetico y debe ganar siempre que sea
     // inequivoco (exactamente una pestana con numero compartido).
+    // A single-model record such as e411 must not match t411 merely by
+    // sharing 411. Combo records intentionally carry multiple model
+    // numbers (for example 303 + 402), so each matching model tab remains
+    // eligible even though their family prefixes differ.
+    const isSingleModelRecord = record.numericAliases.length === 1;
+
     const numericMatchedCandidates = candidates.filter((candidate) => {
       if (!candidate.sharedNumericAliases.length) return false;
-      // A single-model record such as e411 must not match t411 merely by
-      // sharing 411. Combo records intentionally carry multiple model
-      // numbers (for example 303 + 402), so each matching model tab remains
-      // eligible even though their family prefixes differ.
-      const isSingleModelRecord = record.numericAliases.length === 1;
       return !isSingleModelRecord || !candidate.hasModelFamilyConflict;
     });
     if (numericMatchedCandidates.length > 1) {
@@ -1877,7 +1982,21 @@ function buildSheetPayloads({ template, equipmentRecords = [], payload = {} }) {
       return;
     }
 
-    const exactMatches = candidates
+    // Bug real: si NINGUNA pestaña pasa el match numerico sin conflicto
+    // (ej. "cobas U 411 analyser" comparte el numero "411" con las
+    // pestañas "e411"/"t411 h232" pero su propio prefijo de familia "u411"
+    // choca con ambas), el fallback de abajo (score/alfabetico) antes
+    // ignoraba ese conflicto y terminaba adivinando una pestaña de un
+    // equipo no relacionado. Si el equipo tiene un numero de modelo unico,
+    // se descartan las candidatas en conflicto de familia ANTES del
+    // fallback -- si eso deja la lista vacia, no hay pestaña segura y el
+    // equipo queda sin mapear en vez de adivinar.
+    const nonConflictingCandidates = isSingleModelRecord
+      ? candidates.filter((candidate) => !candidate.hasModelFamilyConflict)
+      : candidates;
+    if (!nonConflictingCandidates.length) return;
+
+    const exactMatches = nonConflictingCandidates
       .filter((candidate) => candidate.score === 100)
       .map((candidate) => candidate.sheetDefinition.name);
 
@@ -1886,7 +2005,7 @@ function buildSheetPayloads({ template, equipmentRecords = [], payload = {} }) {
       return;
     }
 
-    matchedSheetsByRecordId.set(recordKey, [candidates[0].sheetDefinition.name]);
+    matchedSheetsByRecordId.set(recordKey, [nonConflictingCandidates[0].sheetDefinition.name]);
   });
 
   template.equipmentSheets.forEach((sheetDefinition) => {
@@ -2002,7 +2121,11 @@ module.exports = {
   findColumnForRowByTargetHeader,
   loadTemplateDefinition,
   buildRecordAliases,
+  buildEquipmentMatchAliases,
   scoreAliases,
+  extractNumericAliasTokens,
+  extractModelFamilyAliases,
+  normalizeCompact,
   buildSheetPayloads,
   pullMaximumQuantitiesFromGoogleSheet,
   pullAnnualQuantitiesFromGoogleSheet,
@@ -2013,4 +2136,5 @@ module.exports = {
   protectSpreadsheetAfterMaximumQuantitiesSync,
   syncBusinessCaseToGoogleSheet,
   clearSheetCaches,
+  resolveTemplatePath,
 };

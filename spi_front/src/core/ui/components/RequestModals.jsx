@@ -371,6 +371,7 @@ export const PrivatePurchaseRequestModal = ({
  onSuccess,
  initialOfferKind = "venta",
  hideOfferKindSelector = false,
+ initialClient = null,
 }) => {
  const TYPE_CHIPS = {
  new_available: "bg-emerald-100 text-emerald-800 border-emerald-200",
@@ -498,6 +499,11 @@ export const PrivatePurchaseRequestModal = ({
  client_identifier: "",
  }));
  };
+
+ useEffect(() => {
+ if (!isOpen || !initialClient) return;
+ handleClientSelect(initialClient);
+ }, [isOpen, initialClient]);
 
  const handleClientSearchChange = (value) => {
  setClientSearchTerm(value);

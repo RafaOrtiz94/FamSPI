@@ -224,7 +224,11 @@ async function getLastThreadMessageId(gmailClient, threadId) {
   }
 }
 
-const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo, messageId, inReplyTo, references }) => {
+// Parte cada linea base64 a 76 caracteres (RFC 2045) -- Gmail suele tolerar
+// lineas mas largas, pero otros clientes/relays en el camino no siempre.
+const wrapBase64 = (value) => String(value || "").replace(/(.{1,76})/g, "$1\r\n").trim();
+
+const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo, messageId, inReplyTo, references, attachments = [] }) => {
   const lines = [
     `From: ${encodeAddressHeader(from)}`,
     `To: ${Array.isArray(to) ? to.map((item) => normalizeEmailAddress(item)).join(", ") : normalizeEmailAddress(to)}`,
@@ -241,9 +245,31 @@ const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo, messag
 
   lines.push(`Subject: ${encodeHeaderValue(subject)}`);
   lines.push("MIME-Version: 1.0");
-  lines.push("Content-Type: text/html; charset=utf-8");
-  lines.push("");
-  lines.push(normalizeHumanText(html || text || ""));
+
+  const body = normalizeHumanText(html || text || "");
+
+  if (!attachments.length) {
+    lines.push("Content-Type: text/html; charset=utf-8");
+    lines.push("");
+    lines.push(body);
+  } else {
+    const boundary = `famspi_${randomUUID().replace(/-/g, "")}`;
+    lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+    lines.push("");
+    lines.push(`--${boundary}`);
+    lines.push("Content-Type: text/html; charset=utf-8");
+    lines.push("");
+    lines.push(body);
+    for (const attachment of attachments) {
+      lines.push(`--${boundary}`);
+      lines.push(`Content-Type: ${attachment.contentType || "application/octet-stream"}; name="${attachment.filename}"`);
+      lines.push("Content-Transfer-Encoding: base64");
+      lines.push(`Content-Disposition: attachment; filename="${attachment.filename}"`);
+      lines.push("");
+      lines.push(wrapBase64(attachment.contentBase64));
+    }
+    lines.push(`--${boundary}--`);
+  }
 
   return Buffer.from(lines.join("\r\n"))
     .toString("base64")
@@ -265,6 +291,7 @@ async function sendViaServiceAccount({
   threadId = null,
   inReplyTo = null,
   references = null,
+  attachments = [],
 }) {
   // resolveDelegatedUser cae a GOOGLE_SUBJECT (administrador) cuando el candidato
   // es invalido -- nunca retorna falsy. Sin el guard `delegatedUser &&`, el primer
@@ -324,6 +351,7 @@ async function sendViaServiceAccount({
     messageId,
     inReplyTo: previousMessageId || undefined,
     references: previousReferences || undefined,
+    attachments,
   });
   let response;
   try {
@@ -373,6 +401,7 @@ async function sendViaSmtp({
   from,
   inReplyTo,
   references,
+  attachments = [],
 }) {
   const transporter = getSmtpTransporter();
   const info = await transporter.sendMail({
@@ -384,6 +413,11 @@ async function sendViaSmtp({
     cc,
     bcc,
     replyTo,
+    attachments: attachments.map((attachment) => ({
+      filename: attachment.filename,
+      content: Buffer.from(attachment.contentBase64, "base64"),
+      contentType: attachment.contentType || undefined,
+    })),
     headers: {
       ...(inReplyTo ? { "In-Reply-To": inReplyTo } : {}),
       ...(references ? { References: references } : {}),
@@ -450,6 +484,7 @@ async function sendMail({
   threadId = null,
   inReplyTo = null,
   references = null,
+  attachments = [],
 } = {}) {
   if (!to || !subject || (!html && !text)) {
     return { delivered: false, via: "none", reason: "missing_fields" };
@@ -503,6 +538,7 @@ async function sendMail({
       threadId,
       inReplyTo,
       references,
+      attachments,
     });
   } catch (serviceAccountError) {
     logger.warn(
@@ -528,6 +564,7 @@ async function sendMail({
         from: fromAddress || undefined,
         inReplyTo,
         references,
+        attachments,
       });
     } catch (smtpError) {
       logger.error(

@@ -20,7 +20,9 @@ const BusinessCasePendingWidget = ({ maxItems = 4 }) => {
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
     try {
-      const { data } = await api.get("/business-case");
+      // pageSize explicito: el backend pagina a 20 por defecto -- sin esto un
+      // BC pendiente mas antiguo que los 20 mas recientes nunca aparece aqui.
+      const { data } = await api.get("/business-case", { params: { pageSize: 500 } });
       const items = Array.isArray(data?.items) ? data.items : [];
       setPending(items.filter((bc) => isPendingForUser(bc, role)));
     } catch (error) {

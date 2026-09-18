@@ -429,25 +429,31 @@ const CreateRequestModal = ({
  }
  }, [type, returnToType]);
 
- useEffect(() => {
+useEffect(() => {
  if (!open) return;
+ let cancelled = false;
 
  const fetchModels = async () => {
  setLoadingModels(true);
  setModelsError("");
  try {
- const models = await getEquipmentModels();
- setEquipmentModels(models);
+ const models = await getEquipmentModels({
+ scope: type === "retiro" ? "retirement" : "general",
+ });
+ if (!cancelled) setEquipmentModels(models);
  } catch (err) {
  const message = err?.response?.data?.message || err.message || "No se pudieron cargar los modelos";
- setModelsError(message);
+ if (!cancelled) setModelsError(message);
  } finally {
- setLoadingModels(false);
+ if (!cancelled) setLoadingModels(false);
  }
  };
 
  fetchModels();
- }, [open]);
+ return () => {
+ cancelled = true;
+ };
+ }, [open, type]);
 
  // ✅ Validar formulario
  const validateForm = () => {
@@ -547,7 +553,7 @@ const CreateRequestModal = ({
  setEquipmentError("");
  try {
  if (usesEquipmentModels) {
- const models = await getEquipmentModels();
+ const models = await getEquipmentModels({ scope: "general" });
  const normalized = Array.isArray(models)
  ? models.map((model) => ({
  id: model.id,
@@ -721,10 +727,10 @@ const CreateRequestModal = ({
  serial: registerSerial,
  cliente_id: selectedClientId || undefined,
  });
- const unidadId = created.id || created.unidad_id || created;
- updateEquipo(registerModalIndex, "unidad_id", unidadId);
- updateEquipo(registerModalIndex, "equipo_id", unidadId);
- updateEquipo(registerModalIndex, "serial", registerSerial);
+ const unidadId = created?.id || created?.unidad_id;
+ if (!unidadId) {
+ throw new Error("El equipo fue registrado, pero no se recibió su identificador para seleccionarlo.");
+ }
  const selectedModel = equipmentModels.find(
  (model) =>
  `${model.id || model.equipment_id}` === `${registerModelId}`,
@@ -734,6 +740,24 @@ const CreateRequestModal = ({
  selectedModel?.modelo ||
  selectedModel?.name ||
  "";
+ setEquipmentOptions((current) => {
+ if (current.some((option) => `${option.id || option.unidad_id}` === `${unidadId}`)) {
+ return current;
+ }
+ return [
+ ...current,
+ {
+ id: unidadId,
+ unidad_id: unidadId,
+ nombre: modelName || "Equipo registrado",
+ serial: created?.serial || registerSerial,
+ estado: created?.estado || null,
+ },
+ ];
+ });
+ updateEquipo(registerModalIndex, "unidad_id", unidadId);
+ updateEquipo(registerModalIndex, "equipo_id", unidadId);
+ updateEquipo(registerModalIndex, "serial", created?.serial || registerSerial);
  if (modelName) {
  updateEquipo(registerModalIndex, "nombre_equipo", modelName);
  }

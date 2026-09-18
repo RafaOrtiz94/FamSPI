@@ -46,6 +46,7 @@ const SolicitudesPage = lazy(() => import("../modules/comercial/pages/Solicitude
 const ClientesPage = lazy(() => import("../modules/comercial/pages/Clientes"));
 const NewClientRequest = lazy(() => import("../modules/comercial/pages/NewClientRequest"));
 const DeliveryCeilingsPage = lazy(() => import("../modules/comercial/pages/DeliveryCeilings"));
+const BusinessCaseTemplatePage = lazy(() => import("../modules/comercial/pages/BusinessCaseTemplatePage"));
 const BusinessCaseWorkspace = lazy(() => import("../modules/comercial/pages/BusinessCaseWorkspace"));
 const BusinessCaseObservabilityDashboard = lazy(() => import("../modules/comercial/pages/BusinessCaseObservabilityDashboard"));
 const OpportunitiesPage = lazy(() => import("../modules/comercial/pages/OpportunitiesPage"));
@@ -310,6 +311,10 @@ const AppRoutes = () => {
 
           <Route element={<ProtectedRoute allowedRoles={["acp_comercial"]} />}>
             <Route path="/dashboard/comercial/acp-compras" element={<LegacyPublicPurchaseRedirect />} />
+          </Route>
+
+          <Route element={<ProtectedRoute allowedRoles={["jefe_comercial"]} strictRoles />}>
+            <Route path="/dashboard/comercial/plantilla-bc" element={<BusinessCaseTemplatePage />} />
           </Route>
 
           <Route element={<ProtectedRoute allowedRoles={["jefe_comercial", "gerencia", "gerencia_general", "admin", "administrador"]} />}>

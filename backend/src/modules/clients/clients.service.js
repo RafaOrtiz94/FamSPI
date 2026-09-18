@@ -564,8 +564,8 @@ async function getClientOrThrow(clientId) {
   return rows[0];
 }
 
-async function ensureClientAccess({ clientId, user }) {
-  if (isManager(user) || canAssignClients(user)) return;
+async function ensureClientAccess({ clientId, user, bypass = false }) {
+  if (bypass || isManager(user) || canAssignClients(user)) return;
 
   const { rows } = await db.query(
     `SELECT 1 FROM client_requests cr
@@ -627,7 +627,7 @@ async function geocodeLocationIfNeeded(location) {
   };
 }
 
-async function getClientDetail({ clientId, user }) {
+async function getClientDetail({ clientId, user, bypassAccessCheck = false }) {
   await ensureTables();
 
   const { rows } = await db.query(
@@ -681,7 +681,7 @@ async function getClientDetail({ clientId, user }) {
     throw error;
   }
 
-  await ensureClientAccess({ clientId, user });
+  await ensureClientAccess({ clientId, user, bypass: bypassAccessCheck });
 
   let asignados = request.asignados;
   if (typeof asignados === "string") {
@@ -1309,6 +1309,7 @@ async function listAccessibleClients({
   scheduleWindow = null,
   page = 1,
   limit = null,
+  mustIncludeClientId = null,
 }) {
   await ensureTables();
   const dateParam = visitDate || new Date().toISOString().slice(0, 10);
@@ -1815,6 +1816,22 @@ async function listAccessibleClients({
       scheduled_info,
     };
   });
+
+  // Un cliente ya vinculado a un BC (mustIncludeClientId) puede quedar fuera
+  // de la pagina por antiguedad (ORDER BY created_at DESC LIMIT) -- se
+  // resuelve aparte por id, sin importar donde caiga en el orden/pagina.
+  if (mustIncludeClientId && !clients.some((c) => String(c.id) === String(mustIncludeClientId))) {
+    try {
+      const mustIncludeClient = await getClientDetail({
+        clientId: Number(mustIncludeClientId),
+        user,
+        bypassAccessCheck: includeAllForBusinessCase || canBypassAssignmentScope,
+      });
+      if (mustIncludeClient) clients.unshift(mustIncludeClient);
+    } catch (error) {
+      // Cliente inexistente/no aprobado/sin acceso -- se omite, el resto de la lista sigue funcionando.
+    }
+  }
 
   // Also fetch prospect visits for this user and date
   const visitedCount = clients.filter((c) => (c.visit_status || "").toLowerCase() === "visited").length;

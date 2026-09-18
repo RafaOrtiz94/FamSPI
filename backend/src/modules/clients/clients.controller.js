@@ -12,6 +12,7 @@ const listClients = async (req, res) => {
       schedule_window,
       page,
       limit,
+      must_include_client_id,
     } = req.query;
     const { clients, prospects, leads, scheduleMeta, pagination } = await clientsService.listAccessibleClients({
       user: req.user,
@@ -24,6 +25,7 @@ const listClients = async (req, res) => {
       scheduleWindow: schedule_window || null,
       page: page || 1,
       limit: limit || null,
+      mustIncludeClientId: must_include_client_id || null,
     });
 
     const summary = scheduleMeta || { total: clients.length, visited: 0, pending: clients.length };

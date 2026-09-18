@@ -14,7 +14,7 @@ const TYPE_CHIPS = {
 
 const sanitizeDigits = (value, max) => String(value || "").replace(/\D/g, "").slice(0, max);
 
-export const NewPublicPurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
+export const NewPublicPurchaseRequestModal = ({ isOpen, onClose, onSuccess, initialClient = null }) => {
  const { showToast } = useUI();
 
  const [formData, setFormData] = useState({
@@ -151,6 +151,11 @@ export const NewPublicPurchaseRequestModal = ({ isOpen, onClose, onSuccess }) =>
 
  setErrors((prev) => ({ ...prev, client_name: "", client_identifier: "" }));
  };
+
+ useEffect(() => {
+ if (!isOpen || !initialClient) return;
+ handleClientSelect(initialClient);
+ }, [isOpen, initialClient]);
 
  const handleClientSearchChange = (value) => {
  setClientSearchTerm(value);

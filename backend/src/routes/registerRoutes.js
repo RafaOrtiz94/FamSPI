@@ -17,6 +17,8 @@ const inventarioRoutes = require("../modules/inventario/inventario.routes");
 const equipmentManagementRoutes = require("../modules/equipment-management/equipmentManagement.routes");
 const attendanceRoutes = require("../modules/attendance/attendance.routes");
 const gmailRoutes = require("../modules/gmail/gmail.routes");
+const gmailContextRoutes = require("../modules/gmail-context/gmailContext.routes");
+const gmailContextAddonRoutes = require("../modules/gmail-context/gmailContextAddon.routes");
 const equipmentPurchaseRoutes = require("../modules/equipment-purchases/equipmentPurchases.routes");
 const personnelRequestsRoutes = require("../modules/personnel-requests/personnel-requests.routes");
 const permisosRoutes = require("../modules/permisos/permisos.routes");
@@ -46,6 +48,8 @@ const offboardingRoutes = require("../modules/offboarding/offboarding.routes");
 const signatureRoutes = require("../modules/signature/signature.routes");
 const signatureV1Routes = require("../modules/signature/signature.v1.routes");
 const signatureWorkflowsRoutes = require("../modules/signature-workflows/signatureWorkflows.routes");
+const processNotesRoutes = require("../modules/process-notes/processNotes.routes");
+const businessCaseTemplateVersionsRoutes = require("../modules/business-case/businessCaseTemplateVersions.routes");
 const dashboardRoutes = require("../modules/dashboard/dashboard.routes");
 const supportTicketsRoutes = require("../modules/support-tickets/supportTickets.routes");
 const viaticosRoutes = require("../modules/viaticos/viaticos.routes");
@@ -86,6 +90,9 @@ const suggestionBoxRoutes = require("../modules/suggestion-box/suggestionBox.rou
 
 function mountPublicRoutes(app) {
   app.use("/api/v1/auth", authRoutes);
+  // El Add-on no usa JWT de navegador: verifica su propio ID token Google en
+  // gmailContextAddonAuth antes de aceptar cualquier dato del correo abierto.
+  app.use("/api/v1/gmail-context/addon", gmailContextAddonRoutes);
   app.use("/api/v1/suggestion-box/public", suggestionBoxPublicRoutes);
   app.use("/api/v1/ti-assets/public", tiAssetsPublicRoutes);
   app.use("/api/applicants", applicantsRoutes);
@@ -109,6 +116,11 @@ function mountPrivateRoutes(app) {
   app.use("/api/v1/files", filesRoutes);
   app.use("/api/v1/servicio", servicioRoutes);
   app.use("/api/v1/technical-applications", technicalApplicationsRoutes);
+  // Debe montarse ANTES de /api/v1/business-case: ese router tiene una ruta
+  // GET /:id que espera un UUID -- si va primero, intercepta
+  // "/business-case/template-versions" tratando "template-versions" como id
+  // y revienta con "invalid input syntax for type uuid".
+  app.use("/api/v1/business-case/template-versions", businessCaseTemplateVersionsRoutes);
   app.use("/api/v1/business-case", businessCaseRoutes);
   app.use("/api/v1/equipment-catalog", equipmentCatalogRoutes);
   app.use("/api/v1/determinations-catalog", determinationsCatalogRoutes);
@@ -142,6 +154,7 @@ app.use("/api/v1/calidad/capa", calidadCapaRoutes);
   // Alias for iPhone shortcuts and Spanish-speaking users
   app.use("/asistencia", attendanceRoutes);
   app.use("/api/v1/gmail", gmailRoutes);
+  app.use("/api/v1/gmail-context", gmailContextRoutes);
   app.use("/api/v1/equipment-purchases", equipmentPurchaseRoutes);
   app.use("/api/v1/private-purchases", privatePurchasesRoutes);
   app.use("/api/v1/delivery-ceilings", deliveryCeilingsRoutes);
@@ -174,6 +187,7 @@ app.use("/api/v1/calidad/capa", calidadCapaRoutes);
   app.use("/api/v1/users", userCertificationsRoutes);
   app.use("/api/v1/signature", signatureV1Routes);
   app.use("/api/v1/signature-workflows", signatureWorkflowsRoutes);
+  app.use("/api/v1/process-notes", processNotesRoutes);
   app.use("/api", signatureRoutes);
 }
 

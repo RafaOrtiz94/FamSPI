@@ -45,7 +45,7 @@ export const getEquipmentModels = getModelos;
 // ======================================================
 export const createUnidad = async (data) => {
  const response = await api.post("/inventario/equipos-unidad", data);
- return response.data;
+ return response.data?.data || response.data;
 };
 
 // ======================================================

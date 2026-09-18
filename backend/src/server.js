@@ -57,6 +57,14 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
   logger.info(`SPI FAM API running on port ${PORT} [${ENV}]`);
   logger.info({ job_execution_mode: JOB_EXECUTION_MODE }, "Modo de ejecucion de jobs");
 
+  // Se corre en TODA instancia (no solo la jobs-runner): cada instancia de
+  // Cloud Run tiene su propio filesystem efimero, asi que cada una necesita
+  // su propia copia local de la plantilla base al arrancar si hay una
+  // version activa distinta a la empaquetada en el build.
+  require("./modules/business-case/businessCaseTemplateVersions.service")
+    .ensureLocalTemplateMatchesActiveVersion()
+    .catch(() => {});
+
   if (ENABLE_JOBS && IS_JOBS_RUNNER_INSTANCE) {
     logger.info("Jobs internos habilitados");
     startOffHoursCoordinator();

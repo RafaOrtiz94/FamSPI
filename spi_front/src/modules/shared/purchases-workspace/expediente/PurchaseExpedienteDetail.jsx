@@ -23,6 +23,7 @@ import ConsumableFilesTab   from './tabs/ConsumableFilesTab';
 import ExpedienteTimelineTab from './tabs/ExpedienteTimelineTab';
 import ExpedienteAuditTab   from './tabs/ExpedienteAuditTab';
 import { hasRole, hasAnyRole, isManager as isManagerRole } from '../purchaseRoleGroups';
+import ProcessNotesFab from '../../../../core/ui/components/ProcessNotesFab';
 
 const EASE_OUT = [0.23, 1, 0.32, 1];
 
@@ -1195,6 +1196,12 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
           </motion.div>
         </AnimatePresence>
       </div>
+
+      <ProcessNotesFab
+        entityType={type === 'public' ? 'public_purchase' : 'private_purchase'}
+        entityId={id}
+        title={`Notas del expediente${clientName && clientName !== '—' ? ` — ${clientName}` : ''}`}
+      />
     </div>
   );
 };

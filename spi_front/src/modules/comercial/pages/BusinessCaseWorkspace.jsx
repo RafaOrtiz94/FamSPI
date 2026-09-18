@@ -17,6 +17,7 @@ import CaseHeader from "../components/workspace/CaseHeader";
 import WorkspaceContent from "../components/workspace/WorkspaceContent";
 import UIGuidancePanel from "../components/workspace/UIGuidancePanel";
 import BusinessCaseToolsFab from "../components/workspace/BusinessCaseToolsFab";
+import ProcessNotesFab from "../../../core/ui/components/ProcessNotesFab";
 import BusinessCasePicker from "../components/BusinessCasePicker";
 import ErrorBoundary from "../../../core/ui/components/ErrorBoundary";
 import { BusinessCaseWorkspaceProviders } from "../components/workspace/BusinessCaseWorkspaceContext";
@@ -596,6 +597,10 @@ const BusinessCaseWorkspace = () => {
 
  <ErrorBoundary title="Herramientas del Business Case" message="Error en las herramientas flotantes.">
  <BusinessCaseToolsFab />
+ </ErrorBoundary>
+
+ <ErrorBoundary title="Notas del Business Case" message="Error en las notas del proceso.">
+ <ProcessNotesFab entityType="business_case" entityId={bcId} title="Notas del Business Case" />
  </ErrorBoundary>
 
  <Modal

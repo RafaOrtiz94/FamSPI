@@ -1,12 +1,14 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiSearch, FiCalendar, FiUser, FiGrid, FiLogIn, FiHome, FiBell, FiCheckCircle, FiClock } from 'react-icons/fi';
+import { FiSearch, FiCalendar, FiUser, FiGrid, FiLogIn, FiHome, FiBell, FiCheckCircle, FiClock, FiUploadCloud } from 'react-icons/fi';
 import api from '../../../core/api';
 import { useAuth } from '../../../core/auth/useAuth';
 
 import { formatDateSafe } from '../../../shared/utils/dateUtils';
 import { isPendingForUser, getFlowStateBadge, resolvePurchaseOrigin, getPurchaseOriginBadge } from '../../../core/utils/businessCaseFlowState';
 import { DashboardLayout, DashboardHeader } from '../../../core/ui/layouts/DashboardLayout';
+import Modal from '../../../core/ui/components/Modal';
+import BusinessCaseTemplatePage from '../pages/BusinessCaseTemplatePage';
 
 // Normalizador robusto para diferentes wrappers de respuesta del backend
 const normalizeBusinessCases = (payload) => {
@@ -129,6 +131,7 @@ const BusinessCasePicker = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState('todos');
   const [error, setError] = useState(null);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
 
   // Fetch business cases on mount
   useEffect(() => {
@@ -138,7 +141,11 @@ const BusinessCasePicker = () => {
         setError(null);
 
         // Use the authenticated API client (with automatic token injection via interceptor)
-        const response = await api.get('/business-case');
+        // pageSize explicito: el backend por defecto pagina a 20 y este picker
+        // no tiene UI de paginacion -- sin esto, cualquier BC mas antiguo que
+        // los 20 mas recientes queda invisible aunque el usuario tenga acceso
+        // (el buscador de arriba solo filtra sobre lo ya cargado, no re-consulta).
+        const response = await api.get('/business-case', { params: { pageSize: 500 } });
 
         // Normalize API response to get the array safely
         const bcList = normalizeBusinessCases(response.data);
@@ -311,7 +318,28 @@ const BusinessCasePicker = () => {
 
   return (
     <DashboardLayout includeWidgets={false}>
-      <DashboardHeader title="Selecciona un Business Case" subtitle="Elige el caso en el que vas a trabajar" />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <DashboardHeader title="Selecciona un Business Case" subtitle="Elige el caso en el que vas a trabajar" />
+        {role === 'jefe_comercial' && (
+          <button
+            type="button"
+            onClick={() => setShowTemplateModal(true)}
+            className="flex shrink-0 items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-indigo-700"
+          >
+            <FiUploadCloud className="h-4 w-4" />
+            Actualizar plantilla base
+          </button>
+        )}
+      </div>
+
+      <Modal
+        open={showTemplateModal}
+        onClose={() => setShowTemplateModal(false)}
+        title="Plantilla base del Business Case"
+        maxWidth="max-w-3xl"
+      >
+        <BusinessCaseTemplatePage />
+      </Modal>
 
       {/* Resumen rapido: cuantos son realmente tu turno hoy */}
       {totalPendingForUser > 0 && (

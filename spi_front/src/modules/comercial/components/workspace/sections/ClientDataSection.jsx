@@ -202,7 +202,6 @@ const ClientDataSection = ({
  const fallbackBusinessCase = useMemo(() => uiGuidance?.businessCase || null, [uiGuidance?.businessCase]);
  const bcPurchaseType = businessCase?.bc_purchase_type || fallbackBusinessCase?.bc_purchase_type || "";
  const startedAsPublic = isPublicPurchaseType(bcPurchaseType);
- const isPrivateBusinessCase = !startedAsPublic;
  const originLabel = startedAsPublic ? "Compra publica" : "Compra privada";
 
  const defaultValues = useMemo(() => ({}), []);
@@ -412,8 +411,14 @@ const privateContractObjectOptions = useMemo(() => {
  const fetchClients = async () => {
  setLoadingClients(true);
  try {
+ // must_include_client_id: el cliente ya guardado en el BC puede quedar
+ // fuera de la pagina por defecto (backend ordena por mas reciente) --
+ // se pide explicito para que siempre resuelva, sin importar su antiguedad.
  const res = await api.get("/clients", {
- params: { include_all_for_business_case: true },
+ params: {
+ include_all_for_business_case: true,
+ must_include_client_id: businessCase?.client_id || undefined,
+ },
  });
  const payload = res.data?.data ?? res.data;
  const parsedClients = Array.isArray(payload?.items)
@@ -434,7 +439,7 @@ const privateContractObjectOptions = useMemo(() => {
  };
 
  fetchClients();
- }, []);
+ }, [businessCase?.client_id]);
 
  // Resolve selected client when both client list and saved values are available
  useEffect(() => {
@@ -504,6 +509,31 @@ const privateContractObjectOptions = useMemo(() => {
  .slice(0, 8);
  setFilteredClients(matches);
  setShowClientDropdown(isClientInputFocused && !exact && matches.length > 0);
+
+ // La lista inicial solo trae los clientes mas recientes (paginada) -- si
+ // no hay match local, se busca en el backend (que si consulta la tabla
+ // completa por nombre/ruc/id) para no dejar invisibles clientes antiguos.
+ if (matches.length === 0 && term.length >= 3) {
+ const timer = setTimeout(async () => {
+ try {
+ const res = await api.get("/clients", {
+ params: { include_all_for_business_case: true, q: watchClient },
+ });
+ const payload = res.data?.data ?? res.data;
+ const found = Array.isArray(payload) ? payload : [];
+ if (found.length) {
+ setClients((prev) => {
+ const existingIds = new Set(prev.map((c) => String(c.id)));
+ const toAdd = found.filter((c) => !existingIds.has(String(c.id)));
+ return toAdd.length ? [...prev, ...toAdd] : prev;
+ });
+ }
+ } catch (err) {
+ console.warn("No se pudo buscar clientes en el servidor", err.message);
+ }
+ }, 300);
+ return () => clearTimeout(timer);
+ }
  }, [watchClient, clients, setValue, findClientByInput, selectedClientLabel, isClientInputFocused]);
 
  useEffect(() => {
@@ -984,15 +1014,12 @@ const privateContractObjectOptions = useMemo(() => {
  <label className="flex flex-col gap-1.5">
  <div className="flex items-center justify-between">
  <span className="text-sm font-bold text-gray-700">Objeto de contratación</span>
- {!isPrivateBusinessCase && renderNAButton("contractObject")}
  </div>
- {isPrivateBusinessCase ? (
  <select
- className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-gray-900 outline-none transition-all focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100 disabled:text-gray-500"
+ className={naInputClass("contractObject")}
  disabled={!isEditing}
  {...register("contractObject", {
   validate: (value) => {
-   if (!isPrivateBusinessCase) return true;
    if (String(value || "").trim()) return true;
    return "El objeto de contratación es obligatorio";
   },
@@ -1005,14 +1032,6 @@ const privateContractObjectOptions = useMemo(() => {
   </option>
  ))}
  </select>
- ) : (
- <input
- type="text"
- className={naInputClass("contractObject")}
- disabled={isNA("contractObject") || !isEditing}
- {...register("contractObject")}
- />
- )}
  {errors.contractObject && <p className="ml-1 text-xs font-medium text-rose-500">{errors.contractObject.message}</p>}
  </label>
  <label className="flex flex-col gap-1.5 md:col-span-2">

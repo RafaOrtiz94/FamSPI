@@ -143,6 +143,15 @@ const businessCaseLink = {
   category: "ventas",
 };
 
+// Solo jefe_comercial administra la plantilla base del BC (ver
+// businessCaseTemplateVersions.routes.js, requireRole(["jefe_comercial"])).
+const bcTemplateLink = {
+  name: "Plantilla base BC",
+  icon: FiFileText,
+  path: "/dashboard/comercial/plantilla-bc",
+  category: "ventas",
+};
+
 const famSheetsLink = {
   name: "FamSheets",
   icon: FiBookOpen,
@@ -488,6 +497,9 @@ const getPriorityGroups = (scope, role, auditActive, extraRoles = []) => {
       permisosLink,
       linksInteresLink
     );
+    if (scope === "jefe_comercial") {
+      groups.primary.push(bcTemplateLink);
+    }
   }
 
   // 💼 COMERCIAL - Roles de apoyo (acp_comercial, backoffice, backoffice_comercial).

@@ -572,7 +572,8 @@ async function getBusinessCaseOfferContext(businessCaseId) {
             vc.canonical_state,
             vc.drive_folder_id,
             vc.modern_bc_metadata,
-            vc.bc_purchase_type
+            vc.bc_purchase_type,
+            vc.contract_object
        FROM v_business_cases_complete vc
        LEFT JOIN users u ON u.id = vc.created_by
       WHERE vc.business_case_id = $1
@@ -1638,16 +1639,31 @@ function drawOfferSectionLabel(doc, title, startY) {
   doc.fillColor("#1D4ED8").font("Helvetica-Bold").fontSize(10).text(String(title || "").toUpperCase(), bounds.left + 14, startY + 8);
 }
 
-function shouldShowDeterminationPriceColumn(sectionKey) {
-  return sectionKey === "reactivo";
+// Requerimiento: si el objeto de contratacion (Datos Generales) es
+// "determinacion" o "determinacion efectiva" (texto libre, ej. "Comodato por
+// determinacion", "Adquisicion de determinaciones efectivas..."), la oferta
+// de reactivos debe mostrar SOLO "US$ DET APROX*" (oculta "US$ KIT*") --
+// en cualquier otro objeto de contratacion se mantiene el comportamiento
+// actual (reactivos muestra ambas columnas de precio). Controles/
+// calibradores/materiales nunca muestran "US$ DET APROX*", solo "US$ KIT*".
+function isDeterminationContractObject(contractObject) {
+  return normalizeOfferText(contractObject).includes("determinacion");
 }
 
-function drawOfferSectionTable(doc, title, rows = [], { showDeterminationPrice = true } = {}) {
+function getOfferPriceColumnVisibility(sectionKey, contractObject) {
+  if (sectionKey !== "reactivo") return { showKitPrice: true, showDeterminationPrice: false };
+  if (isDeterminationContractObject(contractObject)) {
+    return { showKitPrice: false, showDeterminationPrice: true };
+  }
+  return { showKitPrice: true, showDeterminationPrice: true };
+}
+
+function drawOfferSectionTable(doc, title, rows = [], { showKitPrice = true, showDeterminationPrice = true } = {}) {
   const cleanRows = rows.filter((row) => String(row?.product || row?.code || "").trim());
   if (!cleanRows.length) return;
   const bounds = getOfferPdfBounds(doc);
   const codeWidth = 95;
-  const kitWidth = 88;
+  const kitWidth = showKitPrice ? 88 : 0;
   // "US$ DET APROX*" es mas corto que el label viejo ("US$ DETERMINACIONES*")
   // que dimensionaba este ancho -- se libera espacio de vuelta a NOMBRE
   // (la columna que mas lo necesita, nombres de reactivos largos).
@@ -1676,7 +1692,7 @@ function drawOfferSectionTable(doc, title, rows = [], { showDeterminationPrice =
   const columns = [
     { label: "CODIGO", width: codeWidth },
     { label: "NOMBRE", width: nameWidth },
-    { label: "US$ KIT*", width: kitWidth, align: "right" },
+    ...(showKitPrice ? [{ label: "US$ KIT*", width: kitWidth, align: "right" }] : []),
     ...(showDeterminationPrice ? [{ label: "US$ DET APROX*", width: determinationWidth, align: "right" }] : []),
   ];
 
@@ -1740,7 +1756,7 @@ function drawOfferSectionTable(doc, title, rows = [], { showDeterminationPrice =
       const cells = [
         String(row.code || "-"),
         String(row.product || "-"),
-        formatCurrency(row.kitPrice),
+        ...(showKitPrice ? [formatCurrency(row.kitPrice)] : []),
         ...(showDeterminationPrice ? [formatCurrency(row.determinationPrice)] : []),
       ];
 
@@ -1888,7 +1904,7 @@ async function buildFormalOfferPdfBuffer({ context, offer, templatePayload, pric
 
     getOfferSectionKeys(normalizedPayload.sections).forEach((key) => {
       drawOfferSectionTable(doc, labels[key], normalizedPayload.sections?.[key] || [], {
-        showDeterminationPrice: shouldShowDeterminationPriceColumn(key),
+        ...getOfferPriceColumnVisibility(key, context?.contract_object),
       });
     });
 
@@ -3695,7 +3711,8 @@ module.exports = {
   syncOfferPricingAndPdfInPlace,
   regeneratePrivatePurchaseOfferVersionInPlace,
   __testables: {
-    shouldShowDeterminationPriceColumn,
+    getOfferPriceColumnVisibility,
+    isDeterminationContractObject,
     resolveOfferClientLocation,
     normalizePdfText,
     mergeOfferPdfBuffers,

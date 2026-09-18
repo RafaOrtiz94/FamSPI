@@ -1230,13 +1230,44 @@ describe("businessCaseOffer.service", () => {
   });
 
   test("la columna US$ DET APROX* solo se muestra en la seccion de reactivos, para todas las ofertas", () => {
-    const { shouldShowDeterminationPriceColumn } = service.__testables;
-    expect(shouldShowDeterminationPriceColumn("reactivo")).toBe(true);
-    expect(shouldShowDeterminationPriceColumn("consumible")).toBe(false);
-    expect(shouldShowDeterminationPriceColumn("calibrador")).toBe(false);
-    expect(shouldShowDeterminationPriceColumn("control")).toBe(false);
-    expect(shouldShowDeterminationPriceColumn("control_calibrador")).toBe(false);
-    expect(shouldShowDeterminationPriceColumn("electrolito")).toBe(false);
+    const { getOfferPriceColumnVisibility } = service.__testables;
+    expect(getOfferPriceColumnVisibility("reactivo")).toEqual({ showKitPrice: true, showDeterminationPrice: true });
+    expect(getOfferPriceColumnVisibility("consumible")).toEqual({ showKitPrice: true, showDeterminationPrice: false });
+    expect(getOfferPriceColumnVisibility("calibrador")).toEqual({ showKitPrice: true, showDeterminationPrice: false });
+    expect(getOfferPriceColumnVisibility("control")).toEqual({ showKitPrice: true, showDeterminationPrice: false });
+    expect(getOfferPriceColumnVisibility("control_calibrador")).toEqual({ showKitPrice: true, showDeterminationPrice: false });
+    expect(getOfferPriceColumnVisibility("electrolito")).toEqual({ showKitPrice: true, showDeterminationPrice: false });
+  });
+
+  test("si el objeto de contratacion es por determinacion (o determinacion efectiva), reactivos oculta US$ KIT* y muestra solo US$ DET APROX*", () => {
+    const { getOfferPriceColumnVisibility, isDeterminationContractObject } = service.__testables;
+
+    expect(isDeterminationContractObject("Comodato por determinacion")).toBe(true);
+    expect(isDeterminationContractObject("Comodato por Determinación")).toBe(true);
+    expect(isDeterminationContractObject(
+      "ADQUISICION DE DETERMINACIONES EFECTIVAS CON APOYO TECNOLÓGICO PARA BIOQUÍMICA",
+    )).toBe(true);
+    expect(isDeterminationContractObject("Comodato todo comprado")).toBe(false);
+    expect(isDeterminationContractObject("TODO COMPRADO")).toBe(false);
+    expect(isDeterminationContractObject(null)).toBe(false);
+    expect(isDeterminationContractObject(undefined)).toBe(false);
+
+    // Reactivos: si el objeto de contratacion es por determinacion, se
+    // oculta US$ KIT* y se muestra solo US$ DET APROX* -- en cualquier otro
+    // caso se mantiene el comportamiento actual (se muestran ambas).
+    expect(getOfferPriceColumnVisibility("reactivo", "Comodato por determinacion"))
+      .toEqual({ showKitPrice: false, showDeterminationPrice: true });
+    expect(getOfferPriceColumnVisibility("reactivo", "ADQUISICION DE DETERMINACIONES EFECTIVAS..."))
+      .toEqual({ showKitPrice: false, showDeterminationPrice: true });
+    expect(getOfferPriceColumnVisibility("reactivo", "Comodato todo comprado"))
+      .toEqual({ showKitPrice: true, showDeterminationPrice: true });
+    expect(getOfferPriceColumnVisibility("reactivo"))
+      .toEqual({ showKitPrice: true, showDeterminationPrice: true });
+
+    // El resto de secciones nunca muestra esta columna y solo muestra
+    // US$ KIT*, sin importar el objeto de contratacion.
+    expect(getOfferPriceColumnVisibility("calibrador", "Comodato por determinacion"))
+      .toEqual({ showKitPrice: true, showDeterminationPrice: false });
   });
 
   test("normaliza mojibake UTF-8 sin modificar texto Unicode valido", () => {

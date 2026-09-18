@@ -60,7 +60,7 @@ describe("Escenarios de seguridad — listBusinessCases filtra por created_by se
         if (sql.includes("FROM bc_investment_selections")) return Promise.resolve({ rows: [] });
         return Promise.resolve({ rows: [mockListRow()] });
       });
-      // eslint-disable-next-line no-await-in-loop
+       
       await listBusinessCases({}, { id: 1, role });
       const [sql] = db.query.mock.calls[0];
       expect(sql).not.toMatch(/created_by = \$/);

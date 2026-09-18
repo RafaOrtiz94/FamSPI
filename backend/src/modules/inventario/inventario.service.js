@@ -31,15 +31,23 @@ const normalizeDetalleValue = (value) => {
   }
 };
 
-async function listModelos({ search } = {}) {
+async function listModelos({ search, scope } = {}) {
   try {
     const params = [];
-    let where = "";
+    const conditions = [];
 
     if (search) {
       params.push(`%${String(search).toLowerCase()}%`);
-      where = `WHERE LOWER(nombre) LIKE $1 OR LOWER(modelo) LIKE $1 OR LOWER(fabricante) LIKE $1`;
+      conditions.push(`(LOWER(nombre) LIKE $${params.length} OR LOWER(modelo) LIKE $${params.length} OR LOWER(fabricante) LIKE $${params.length})`);
     }
+
+    // Los modelos exclusivos de retiro no deben alimentar compras, inspecciones
+    // ni otros selectores que consumen el catálogo por defecto.
+    if (String(scope || "").toLowerCase() !== "retirement") {
+      conditions.push("COALESCE(solo_retiro, FALSE) = FALSE");
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
     const { rows } = await db.query(
       `SELECT id, sku, nombre, fabricante, modelo, categoria
