@@ -376,7 +376,7 @@ Ver `README_TABLE_STRUCTURE.md` para estructura completa.
 - `notifications`: cola de notificaciones via `businessCaseNotificationQueue.service.js`
 - `files` + Google Drive: carpeta por BC en `businessCaseDriveFolder.service.js`
 - Integración LIS: `bcLisIntegration.service.js`
-- **`requests` (NUEVO, 2026-09):** el botón flotante `BusinessCaseToolsFab.jsx` del workspace crea solicitudes formales de tipo `F.ST-23` ("Solicitud de disponibilidad de equipo") vía `POST /api/v1/requests` (módulo `backend/src/modules/requests/`, no `business-case`). El BC no tiene tabla propia para esto — el `business_case_id`/`servicio_equipo_id` viaja en el `payload` JSON de la solicitud genérica. Aprobador: `acp_comercial` (ve la solicitud en su bandeja de Solicitudes, widget "Solicitudes de Disponibilidad"). Ver `getRequestApproverRoles`/`resolveSchemaKey` en `requests.service.js` para la rama `F.ST-23`.
+- **`bc-availability` (NUEVO, 2026-09):** el botón flotante `BusinessCaseToolsFab.jsx` del workspace crea solicitudes de disponibilidad de equipo vía `POST /api/v1/bc-availability` (módulo `backend/src/modules/bc-availability/`, tablas `bc_availability_requests` y `bc_availability_supplier_queries`, migración 298). `acp_comercial` las trabaja desde el widget "Solicitudes de Disponibilidad" en Solicitudes: consulta a varios proveedores por correo, registra cada respuesta y cierra con un resultado. No genera ningún formulario F.ST ni solicitud genérica en `requests`.
 
 ---
 
@@ -391,7 +391,7 @@ Ver `README_TABLE_STRUCTURE.md` para estructura completa.
 API client: `spi_front/src/core/api/businessCaseApi.js` (672 líneas) — todas las funciones de fetch del módulo viven aquí, no en `spi_front/src/modules/comercial/api/` (esa carpeta solo tiene `privatePurchasesApi.js` y `opportunitiesApi.js`, de otros módulos comerciales).
 
 **`BusinessCaseToolsFab.jsx`** (NUEVO, 2026-09, `components/workspace/`) — botón flotante tipo speed-dial montado en `BusinessCaseWorkspace.jsx` (hermano de `WorkspaceContent`, dentro de `BusinessCaseWorkspaceProviders`, persiste en todas las pestañas). Agrupa 2 herramientas:
-- **Disponibilidad de equipo**: consulta inventario (`getEquipmentAssets`, reuso de la misma función que `EquipmentSection.jsx`) y solicita disponibilidad a `acp_comercial` (crea request `F.ST-23`, ver sección 8).
+- **Disponibilidad de equipo**: consulta inventario (`getEquipmentAssets`, reuso de la misma función que `EquipmentSection.jsx`) y solicita disponibilidad a `acp_comercial` (crea una solicitud en `bc_availability_requests`, módulo `bc-availability`; no genera formulario F.ST).
 - **Inspección de ambiente**: crear/ver estado de la solicitud (extraído de `DeterminationsSection.jsx`, ver nota en sección 3).
 
 Posición: columna `right-4`, por encima de `NotificationBell.jsx` y `AttendanceWidget.jsx` (ambos ya ocupan esa columna más abajo, `z-90`/`z-49` respectivamente) — cualquier FAB nuevo que se agregue a esta columna debe verificar esos dos primero para no quedar tapado.

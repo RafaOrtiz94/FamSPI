@@ -81,7 +81,7 @@ async function list({ user, businessCaseId, status }) {
   return rows;
 }
 
-// Comercial solicita. F.ST-23 se crea solo como registro para continuar el flujo (no genera documento) y guarda el id de esta solicitud.
+// Comercial solicita; no genera ningun formulario ni solicitud generica (no existe procedimiento F.ST para esto).
 async function create({ user, businessCaseId, servicioEquipoId, equipmentName, notes }) {
   const bc = await db.query("SELECT id FROM public.equipment_purchase_requests WHERE id = $1", [businessCaseId]);
   if (!bc.rows[0]) throw httpError("Business Case no encontrado", 404, "BC_NOT_FOUND");
@@ -102,27 +102,6 @@ async function create({ user, businessCaseId, servicioEquipoId, equipmentName, n
     [businessCaseId, String(servicioEquipoId), equipmentName || null, notes || null, user.id],
   );
   const created = rows[0];
-
-  try {
-    const requestsService = require("../requests/requests.service");
-    const { request } = await requestsService.createRequest({
-      requester_id: user.id,
-      requester_email: user.email,
-      requester_name: user.fullname || user.name || user.email,
-      request_type_id: "F.ST-23",
-      payload: {
-        business_case_id: businessCaseId,
-        servicio_equipo_id: String(servicioEquipoId),
-        equipment_name: equipmentName || undefined,
-        notes: notes || undefined,
-        availability_id: created.id,
-      },
-    });
-    await db.query("UPDATE public.bc_availability_requests SET request_id = $1 WHERE id = $2", [request.id, created.id]);
-    created.request_id = request.id;
-  } catch (err) {
-    logger.warn({ err, availabilityId: created.id }, "No se pudo crear el puntero F.ST-23");
-  }
 
   await notifyUsers(await getAcpUserIds(), {
     title: "Nueva solicitud de disponibilidad de equipo",

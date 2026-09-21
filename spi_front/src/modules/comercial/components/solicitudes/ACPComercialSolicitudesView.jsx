@@ -91,11 +91,7 @@ const ACPComercialSolicitudesView = () => {
  id: 'disponibilidad_equipo',
  title: 'Solicitudes de Disponibilidad',
  icon: FiBox,
- color: 'blue',
- type: 'F.ST-23',
- // mine:false -- estas solicitudes las crea comercial, no acp_comercial;
- // el default del modal (mine:true) las ocultaria todas.
- initialFilters: { mine: false }
+ color: 'blue'
  }
  ];
 
