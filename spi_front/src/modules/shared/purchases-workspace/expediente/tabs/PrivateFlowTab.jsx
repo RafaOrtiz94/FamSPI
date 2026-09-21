@@ -594,11 +594,11 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
           <WorkflowStep
             stepNumber={1}
             title="Solicitar disponibilidad a ACP"
-            actor="Backoffice Comercial"
+            actor="Asesor Comercial"
             status={roleStepStatus(
               Boolean(purchase?.forwarded_to_acp_at),
               status === 'pending_backoffice',
-              ['backoffice_comercial','acp_comercial','gerencia','gerencia_general','jefe_comercial'],
+              ['comercial','asesor_comercial','analista_comercial','acp_comercial','gerencia','gerencia_general','jefe_comercial'],
             )}
             completedAt={purchase?.forwarded_to_acp_at}
           >
@@ -612,7 +612,7 @@ const PrivateFlowTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
               </div>
             ) : (
               <RoleGatedAction
-                allowedRoles={['backoffice_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial']}
+                allowedRoles={['comercial', 'asesor_comercial', 'analista_comercial', 'acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial']}
                 userRoles={userRoles}
               >
                 <button

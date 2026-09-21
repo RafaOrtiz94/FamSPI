@@ -120,7 +120,8 @@ router.post('/:id/offer-workspace/:offerId/publish', requireRole(['backoffice', 
 router.post('/:id/offer-workspace/:offerId/regenerate', requireRole(['backoffice', 'backoffice_comercial', ...managerRoles]), controller.regenerateOfferVersion);
 router.post('/:id/offer', requireRole(comercialAndBackofficeRoles), controller.sendOffer);
 router.post('/:id/offer/signed', requireRole(['comercial', ...managerRoles]), controller.uploadSignedOffer);
-router.post('/:id/send-to-acp', requireRole(comercialAndBackofficeRoles), controller.forwardToAcp);
+// Backoffice ya no interviene en disponibilidad: solo comercial y managers reenvian a ACP
+router.post('/:id/send-to-acp', requireRole(creatorRoles), controller.forwardToAcp);
 router.post('/:id/start-availability', requireRole(managerRoles), controller.startAvailability);
 router.post(
   '/:id/start-business-case',

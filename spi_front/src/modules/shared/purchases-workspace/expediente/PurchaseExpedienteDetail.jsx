@@ -80,7 +80,7 @@ function computePendingTabs(purchase, type, userRoles = []) {
 
     // ── Tab: FLUJO_COMERCIAL ────────────────────────────────────────────
     // backoffice reviews and sends to ACP (the "solicitar disponibilidad a ACP" action)
-    mark('flujo_comercial', status === 'pending_backoffice'          && isBkOrMgr);
+    mark('flujo_comercial', status === 'pending_backoffice'          && isComercialOrMgr);
     // El expediente de comodato queda suspendido en BC hasta resolver factibilidad.
     mark(
       'flujo_comercial',
@@ -388,11 +388,11 @@ function computeNextAction(purchase, type, userRoles = []) {
       actor: 'Asesor Comercial',
       when: status === 'pending_commercial' && (isComercial || isManager) },
 
-    // ── Backoffice → enviar a ACP ───────────────────────────────────
+    // ── Comercial → enviar a ACP (fallback: normalmente se envia solo al crear) ──
     { tabId: 'flujo_comercial',
       description: 'Solicita disponibilidad a ACP Comercial para preparar la oferta.',
-      actor: 'Backoffice Comercial',
-      when: status === 'pending_backoffice' && (isBackoffice || isManager) },
+      actor: 'Asesor Comercial',
+      when: status === 'pending_backoffice' && (isComercial || isManager) },
 
     // ── ACP → verificar disponibilidad ─────────────────────────────
     { tabId: 'disponibilidad',
@@ -637,9 +637,9 @@ function computeWaitingState(purchase, type, userRoles = []) {
 
   const checks = type === 'private' ? [
 
-    { waitingFor: 'Backoffice Comercial',
-      description: 'Está revisando la solicitud y la enviará a ACP para verificar disponibilidad.',
-      when: status === 'pending_backoffice' && (isComercial || isAcp) },
+    { waitingFor: 'Asesor Comercial',
+      description: 'Debe enviar la solicitud a ACP para verificar disponibilidad.',
+      when: status === 'pending_backoffice' && isAcp },
 
     { waitingFor: 'ACP Comercial',
       description: 'Está verificando disponibilidad del equipo en inventario interno o con el proveedor.',

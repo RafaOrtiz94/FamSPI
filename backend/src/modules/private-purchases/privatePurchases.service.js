@@ -1152,11 +1152,10 @@ class PrivatePurchasesService {
         logger.error('[PRIVATE_PURCHASE] Error enviando notificacià¸£à¸“n de creacià¸£à¸“n:', error);
       }
 
-      // Notificar a backoffice y jefe_comercial (cualquiera de los dos puede
-      // solicitar disponibilidad a ACP -- ver Paso 1 de PrivateFlowTab.jsx)
+      // Notificar a ACP y jefe_comercial: la solicitud de disponibilidad llega directo a ACP
       try {
         const recipientGroups = await Promise.all(
-          ['backoffice_comercial', 'jefe_comercial'].map((role) =>
+          ['acp_comercial', 'jefe_comercial'].map((role) =>
             PrivatePurchaseStateMachine._getUsersByRole(role)),
         );
         const recipients = Array.from(
@@ -1191,19 +1190,23 @@ class PrivatePurchasesService {
         logger.warn({ error, purchaseId }, 'No se pudo notificar a backoffice de nueva solicitud');
       }
 
-      if (normalizedOfferKind === 'comodato' && !businessCaseId) {
-        await this.ensureBusinessCaseForComodato(purchaseId, user, {
-          business_case_id: null,
-          offer_kind: normalizedOfferKind,
-          client_snapshot: clientData,
-          drive_folder_id: null,
-          status: PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE
-        });
+      // La solicitud va directo a ACP (backoffice ya no interviene en disponibilidad).
+      // Con businessCaseId el handoff del BC maneja el estado, asi que no se reenvia.
+      if (!businessCaseId) {
+        if (normalizedOfferKind === 'comodato') {
+          await this.ensureBusinessCaseForComodato(purchaseId, user, {
+            business_case_id: null,
+            offer_kind: normalizedOfferKind,
+            client_snapshot: clientData,
+            drive_folder_id: null,
+            status: PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE
+          });
+        }
 
         try {
           await this.forwardToAcp(purchaseId, user);
         } catch (forwardError) {
-          logger.warn({ forwardError, purchaseId }, 'No se pudo enviar automÃ¡ticamente a ACP para comodato');
+          logger.warn({ forwardError, purchaseId }, 'No se pudo enviar automÃ¡ticamente a ACP');
         }
       }
 

@@ -1165,10 +1165,10 @@ exports.confirmAcpAvailability = async (req, res, next) => {
   }
 };
 
-exports.returnToBackoffice = async (req, res, next) => {
+exports.returnToCommercial = async (req, res, next) => {
   try {
     const { notes } = req.body || {};
-    const result = await unifiedFlowService.returnToBackoffice(
+    const result = await unifiedFlowService.returnToCommercial(
       req.params.id,
       req.user,
       notes

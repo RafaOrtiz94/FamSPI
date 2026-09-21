@@ -106,10 +106,10 @@ class UnifiedPurchasesFlowService {
   }
 
   /**
-   * Volver a backoffice desde ACP
+   * Devolver al comercial desde ACP (permite reenviar a ACP despues de corregir)
    */
-  static async returnToBackoffice(purchaseId, user, notes = '') {
-    logger.debug('[UNIFIED_PURCHASE][BE][ACP_RETURN_TO_BACKOFFICE]', {
+  static async returnToCommercial(purchaseId, user, notes = '') {
+    logger.debug('[UNIFIED_PURCHASE][BE][ACP_RETURN_TO_COMMERCIAL]', {
       requestId: purchaseId,
       userId: user?.id,
       notes
@@ -117,10 +117,15 @@ class UnifiedPurchasesFlowService {
 
     await UnifiedPurchaseStateMachine.transition(
       purchaseId,
-      UNIFIED_PURCHASE_STATES.PENDING_BACKOFFICE,
+      UNIFIED_PURCHASE_STATES.PENDING_COMMERCIAL,
       user?.id,
-      `Volviendo a backoffice desde ACP: ${notes || 'Sin notas'}`,
+      `Devuelta al comercial desde ACP: ${notes || 'Sin notas'}`,
       { notes }
+    );
+    // forwardToAcp rechaza reenvios si forwarded_to_acp_at ya esta seteado
+    await db.query(
+      'UPDATE equipment_purchase_requests SET forwarded_to_acp_at = NULL, updated_at = NOW() WHERE id = $1',
+      [purchaseId]
     );
 
     return { returned: true, notes };

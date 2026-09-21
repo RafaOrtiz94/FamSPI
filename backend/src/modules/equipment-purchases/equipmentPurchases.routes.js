@@ -302,7 +302,7 @@ router.post(
 );
 
 // ================================================
-// UNIFIED PURCHASES — FLUJO ESENCIAL (comercial → backoffice → ACP)
+// UNIFIED PURCHASES — FLUJO ESENCIAL (comercial → ACP)
 // ================================================
 
 // Transiciones de estado
@@ -320,11 +320,11 @@ router.get(
   ctrl.getAllowedTransitions,
 );
 
-// Flujo comercial → backoffice → ACP
+// Flujo comercial → ACP (backoffice ya no interviene en disponibilidad)
 router.post(
   "/:id/send-to-acp",
   verifyToken,
-  requireRole(comercialAndBackofficeRoles),
+  requireRole(["comercial", "asesor_comercial", "analista_comercial", ...managerRoles]),
   ctrl.forwardToAcp,
 );
 
@@ -337,10 +337,10 @@ router.post(
 );
 
 router.post(
-  "/:id/return-to-backoffice",
+  "/:id/return-to-commercial",
   verifyToken,
   requireRole(acpRoles),
-  ctrl.returnToBackoffice,
+  ctrl.returnToCommercial,
 );
 
 // Business Case y oferta
