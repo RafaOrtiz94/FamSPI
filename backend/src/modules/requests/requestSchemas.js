@@ -100,6 +100,7 @@ module.exports = {
       servicio_equipo_id: { anyOf: [{ type: "string" }, { type: "number" }] },
       equipment_name: { type: "string" },
       notes: { type: "string" },
+      availability_id: { anyOf: [{ type: "string" }, { type: "number" }] },
     },
   },
   cliente: {

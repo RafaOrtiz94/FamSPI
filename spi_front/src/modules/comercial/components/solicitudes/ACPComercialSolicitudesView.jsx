@@ -8,12 +8,14 @@ import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVaca
 import RequestStatWidget from "../../../shared/solicitudes/components/RequestStatWidget";
 import RequestsListModal from "../../../shared/solicitudes/components/RequestsListModal";
 import BaseSolicitudesView from "../../../shared/solicitudes/BaseSolicitudesView";
+import BcAvailabilityPanel from "./BcAvailabilityPanel";
 
 const ACPComercialSolicitudesView = () => {
  // UI States
  const [, setShowPurchaseHandoff] = useState(false);
  const [showPermisoModal, setShowPermisoModal] = useState(false);
  const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
+ const [showAvailabilityPanel, setShowAvailabilityPanel] = useState(false);
 
  // View Modal State
  const [viewType, setViewType] = useState(null);
@@ -32,7 +34,9 @@ const ACPComercialSolicitudesView = () => {
 
  const handleWidgetClick = (widget) => {
  console.log('FASE6: handleWidgetClick called with widget:', widget.id);
- if (widget.id === 'compras') {
+ if (widget.id === 'disponibilidad_equipo') {
+ setShowAvailabilityPanel(true);
+ } else if (widget.id === 'compras') {
  console.log('FASE6: Opening NEW purchase type modal for compras widget');
  // ✅ NUEVO: Usar la nueva funcionalidad del dashboard
  setShowPurchaseTypeModal(true);
@@ -195,6 +199,8 @@ const ACPComercialSolicitudesView = () => {
  open={showPermisoModal}
  onClose={() => setShowPermisoModal(false)}
  />
+
+ <BcAvailabilityPanel open={showAvailabilityPanel} onClose={() => setShowAvailabilityPanel(false)} />
 
  {/* MODAL LISTADO DE SOLICITUDES */}
  <RequestsListModal

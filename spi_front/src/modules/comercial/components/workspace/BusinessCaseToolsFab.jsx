@@ -13,7 +13,7 @@ import {
  renewAssetReservation,
  reserveEquipmentAsset,
 } from "../../../../core/api/equipmentManagementApi";
-import { createRequest } from "../../../../core/api/requestsApi";
+import { createBcAvailability, listBcAvailability } from "../../../../core/api/bcAvailabilityApi";
 import {
  getDeterminationsStatDocumentInfo,
  requestBusinessCaseEnvironmentInspection,
@@ -22,6 +22,14 @@ import {
 // Roles replicados de los gates del backend (privados a sus respectivos
 // archivos, no exportables) — el backend re-valida igual, esto solo evita
 // mostrar botones que van a fallar.
+const BC_AVAILABILITY_STATUS_LABELS = {
+ requested: "Solicitada a ACP",
+ in_progress: "ACP consultando proveedores",
+ confirmed: "Confirmada",
+ rejected: "No disponible",
+ cu_pending: "Disponible en CU (aprobación del cliente)",
+ import_pending: "Solo importación (compromiso del cliente)",
+};
 const AVAILABILITY_REQUEST_ROLES = new Set(["comercial", "jefe_comercial", "backoffice_comercial"]);
 // Replica ASSET_ROLES de equipmentManagement.routes.js -- reservar/renovar/
 // liberar inventario fisico es una accion operativa (acp/backoffice/tecnico/
@@ -130,6 +138,16 @@ export default function BusinessCaseToolsFab() {
  }
  }, [bcId]);
 
+ const [bcAvailabilityRequests, setBcAvailabilityRequests] = useState([]);
+ const loadBcAvailabilityRequests = useCallback(async () => {
+ if (!bcId) return;
+ try {
+ setBcAvailabilityRequests(await listBcAvailability({ business_case_id: bcId }));
+ } catch {
+ setBcAvailabilityRequests([]);
+ }
+ }, [bcId]);
+
  const openAvailabilityTool = () => {
  setExpanded(false);
  setActiveTool("availability");
@@ -137,6 +155,7 @@ export default function BusinessCaseToolsFab() {
  setAvailabilityNotes("");
  loadEquipmentOptions();
  loadActiveReservations();
+ loadBcAvailabilityRequests();
  };
 
  const handleCheckAvailability = async () => {
@@ -212,17 +231,15 @@ export default function BusinessCaseToolsFab() {
  const equipmentName = equipmentOptions.find((eq) => String(eq.id) === String(selectedEquipmentId))?.name || "";
  setRequestingAvailability(true);
  try {
- await createRequest({
- request_type_id: "F.ST-23",
- payload: {
+ await createBcAvailability({
  business_case_id: bcId,
  servicio_equipo_id: selectedEquipmentId,
  equipment_name: equipmentName,
  notes: availabilityNotes || undefined,
- },
  });
  showToast("Solicitud de disponibilidad enviada a ACP Comercial.", "success");
  setAvailabilityNotes("");
+ await loadBcAvailabilityRequests();
  } catch (err) {
  showToast(err?.response?.data?.message || "No se pudo enviar la solicitud.", "error");
  } finally {
@@ -472,6 +489,16 @@ export default function BusinessCaseToolsFab() {
  <p className="text-xs text-slate-600">
  Si necesitas confirmar disponibilidad o pedir que se reserve, envia una solicitud formal a ACP Comercial.
  </p>
+ {bcAvailabilityRequests.length > 0 && (
+ <ul className="space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+ {bcAvailabilityRequests.map((r) => (
+ <li key={r.id} className="flex items-center justify-between gap-2">
+ <span>{r.equipment_name || `Equipo ${r.servicio_equipo_id}`}</span>
+ <span className="font-semibold">{BC_AVAILABILITY_STATUS_LABELS[r.status] || r.status}</span>
+ </li>
+ ))}
+ </ul>
+ )}
  <label className="space-y-1.5 block">
  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Notas (opcional)</span>
  <textarea
