@@ -2,6 +2,7 @@ import api from "./index";
 
 const unwrap = (res) => res.data?.data ?? res.data;
 
+// El backend normaliza business_case_id <-> businessCaseId (apiNormalization): usar siempre businessCaseId.
 export const listBcAvailability = async (params = {}) => unwrap(await api.get("/bc-availability", { params }));
 export const getBcAvailability = async (id) => unwrap(await api.get(`/bc-availability/${id}`));
 export const createBcAvailability = async (payload) => unwrap(await api.post("/bc-availability", payload));

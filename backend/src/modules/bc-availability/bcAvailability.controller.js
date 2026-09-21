@@ -2,7 +2,8 @@ const Joi = require("joi");
 const service = require("./bcAvailability.service");
 
 const createSchema = Joi.object({
-  business_case_id: Joi.string().uuid().required(),
+  // normalizeApiPayloads renombra business_case_id -> businessCaseId antes de llegar aqui
+  businessCaseId: Joi.string().uuid().required(),
   servicio_equipo_id: Joi.alternatives(Joi.string().trim(), Joi.number()).required(),
   equipment_name: Joi.string().trim().allow("", null).max(300),
   notes: Joi.string().trim().allow("", null).max(2000),
@@ -36,13 +37,13 @@ const handle = (schema, fn) => async (req, res) => {
 };
 
 exports.list = handle(null, (req) =>
-  service.list({ user: req.user, businessCaseId: req.query.business_case_id, status: req.query.status }),
+  service.list({ user: req.user, businessCaseId: req.query.businessCaseId, status: req.query.status }),
 );
 exports.get = handle(null, (req) => service.getById(req.params.id, req.user));
 exports.create = handle(createSchema, (req, b) =>
   service.create({
     user: req.user,
-    businessCaseId: b.business_case_id,
+    businessCaseId: b.businessCaseId,
     servicioEquipoId: b.servicio_equipo_id,
     equipmentName: b.equipment_name,
     notes: b.notes,

@@ -81,7 +81,7 @@ async function list({ user, businessCaseId, status }) {
   return rows;
 }
 
-// Comercial solicita. F.ST-23 se crea como puntero (historial en Solicitudes) y guarda el id de esta solicitud.
+// Comercial solicita. F.ST-23 se crea solo como registro para continuar el flujo (no genera documento) y guarda el id de esta solicitud.
 async function create({ user, businessCaseId, servicioEquipoId, equipmentName, notes }) {
   const bc = await db.query("SELECT id FROM public.equipment_purchase_requests WHERE id = $1", [businessCaseId]);
   if (!bc.rows[0]) throw httpError("Business Case no encontrado", 404, "BC_NOT_FOUND");

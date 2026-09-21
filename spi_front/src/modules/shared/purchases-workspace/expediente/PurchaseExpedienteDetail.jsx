@@ -911,9 +911,14 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
     [purchase, type],
   );
   const businessCaseGate = purchase?.business_case_gate || null;
-  const businessCaseBlocked = Boolean(businessCaseGate?.required && !businessCaseGate?.open);
+  const businessCasePending = Boolean(businessCaseGate?.required && !businessCaseGate?.open);
+  // BC rechazado: se cierra todo el flujo operativo. BC pendiente: solo se bloquea el tab Contrato;
+  // el resto del expediente continua mientras se desarrolla el Business Case.
+  const businessCaseBlocked = businessCasePending && businessCaseGate?.status === 'rejected';
+  const contractBlockedByBc = businessCasePending && !businessCaseBlocked;
   const lockedTabs = useMemo(() => {
     const next = new Set(stageLockedTabs);
+    if (contractBlockedByBc) next.add('contrato');
     if (!businessCaseBlocked) return next;
 
     const allowed = new Set([
@@ -926,7 +931,7 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
       if (!allowed.has(tab.id)) next.add(tab.id);
     });
     return next;
-  }, [stageLockedTabs, businessCaseBlocked, tabs, type]);
+  }, [stageLockedTabs, businessCaseBlocked, contractBlockedByBc, tabs, type]);
   const nextAction = useMemo(
     () => businessCaseBlocked ? null : computeNextAction(purchase, type, userRoles),
     [businessCaseBlocked, purchase, type, userRoles],
@@ -1006,7 +1011,7 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
       </div>
 
       {/* ── Panel "Próxima acción" / "En espera" ───────────────────── */}
-      {businessCaseBlocked && (
+      {businessCasePending && (
         <div className={`flex-shrink-0 border-b px-4 py-3 sm:px-6 ${
           businessCaseGate.status === 'rejected'
             ? 'border-red-200 bg-red-50'
@@ -1024,14 +1029,14 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
               <p className="text-sm font-semibold text-ink-slate">
                 {businessCaseGate.status === 'rejected'
                   ? 'Business Case no factible'
-                  : 'Compras bloqueadas hasta aprobar el Business Case'}
+                  : 'Contrato bloqueado hasta aprobar el Business Case'}
               </p>
               <p className="mt-0.5 text-xs text-slate-600">
                 {businessCaseGate.status === 'link_missing'
                   ? 'El expediente requiere Business Case, pero el vínculo no está configurado. Actualiza o reporta este expediente.'
                   : businessCaseGate.status === 'rejected'
                   ? 'No se pueden ejecutar etapas operativas con una factibilidad rechazada.'
-                  : 'Puedes consultar el expediente y sus notas; las acciones operativas se habilitarán automáticamente al aprobar la factibilidad.'}
+                  : 'El resto del expediente puede continuar mientras se desarrolla el Business Case. El tab Contrato se habilitará automáticamente al aprobar la factibilidad.'}
               </p>
             </div>
             {businessCaseGate.business_case_id && (

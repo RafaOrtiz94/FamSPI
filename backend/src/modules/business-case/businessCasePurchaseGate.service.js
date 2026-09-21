@@ -98,6 +98,16 @@ async function getPurchaseBusinessCaseGate({ purchaseId, type }) {
   return buildGate(rows[0] || null);
 }
 
+// El expediente de compras es el modulo padre: mientras el BC se desarrolla, todo el flujo
+// (disponibilidad, inspeccion, oferta, etc.) puede continuar. La factibilidad solo bloquea el
+// tab Contrato: submit-contract, upload-contract, contract/* y provider-contract/*.
+const CONTRACT_ACTION_RE = /\/(submit-contract|upload-contract|contract|provider-contract)(\/|$)/;
+
+function isContractAction(req) {
+  const path = String(req.originalUrl || req.url || "").split("?")[0];
+  return CONTRACT_ACTION_RE.test(path);
+}
+
 function getActionName(req) {
   const segments = String(req.originalUrl || req.url || "")
     .split("?")[0]
@@ -113,7 +123,9 @@ function requirePurchaseBusinessCaseGate(type) {
       if (ALWAYS_ALLOWED_ACTIONS.has(getActionName(req))) return next();
 
       const gate = await getPurchaseBusinessCaseGate({ purchaseId: req.params.id, type });
-      if (!gate || gate.open) {
+      // Factibilidad pendiente o vinculo faltante: solo se bloquea el contrato.
+      // Un BC rechazado (no factible) mantiene cerrado todo el flujo operativo.
+      if (!gate || gate.open || (gate.status !== "rejected" && !isContractAction(req))) {
         req.businessCaseGate = gate;
         return next();
       }
@@ -124,7 +136,7 @@ function requirePurchaseBusinessCaseGate(type) {
         message:
           gate.status === "rejected"
             ? "El Business Case fue declarado no factible. El flujo operativo de compras permanece cerrado."
-            : "Completa y aprueba la factibilidad del Business Case antes de continuar con compras.",
+            : "El contrato se habilita cuando el Business Case sea aprobado como factible.",
         business_case_gate: gate,
       });
     } catch (error) {
@@ -134,6 +146,7 @@ function requirePurchaseBusinessCaseGate(type) {
 }
 
 module.exports = {
+  isContractAction,
   buildGate,
   getPurchaseBusinessCaseGate,
   requirePurchaseBusinessCaseGate,

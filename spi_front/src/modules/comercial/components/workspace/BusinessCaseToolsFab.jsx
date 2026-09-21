@@ -142,7 +142,7 @@ export default function BusinessCaseToolsFab() {
  const loadBcAvailabilityRequests = useCallback(async () => {
  if (!bcId) return;
  try {
- setBcAvailabilityRequests(await listBcAvailability({ business_case_id: bcId }));
+ setBcAvailabilityRequests(await listBcAvailability({ businessCaseId: bcId }));
  } catch {
  setBcAvailabilityRequests([]);
  }
@@ -232,7 +232,7 @@ export default function BusinessCaseToolsFab() {
  setRequestingAvailability(true);
  try {
  await createBcAvailability({
- business_case_id: bcId,
+ businessCaseId: bcId,
  servicio_equipo_id: selectedEquipmentId,
  equipment_name: equipmentName,
  notes: availabilityNotes || undefined,
