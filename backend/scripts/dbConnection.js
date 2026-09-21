@@ -3,7 +3,9 @@
 require("dotenv").config();
 
 // MIGRACION 2026-07-21: wispy-moon agoto cuota de compute, se migro a muddy-sun (sin pooler).
-const DEFAULT_DB_HOST = "ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech";
+// MIGRACION 2026-09-18: confirmado contra el DB_HOST real de Cloud Run (spi-backend) -- muddy-sun
+// tambien quedo obsoleto, el host vigente es lucky-bar.
+const DEFAULT_DB_HOST = "ep-lucky-bar-aw5wr0cn.c-12.us-east-1.aws.neon.tech";
 
 function getSslConfig() {
   const enabled = String(process.env.DB_SSL || "true") === "true";

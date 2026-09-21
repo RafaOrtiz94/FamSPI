@@ -1,13 +1,22 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { FiAlertCircle, FiRefreshCw } from "react-icons/fi";
+import { FiAlertCircle, FiRefreshCw, FiX } from "react-icons/fi";
 import { useLeads } from "../hooks/useCrmLeads";
 import { createLead, updateLead, disqualifyLead } from "../../../core/api/crmFamApi";
 import { getUsers } from "../../../core/api/usersApi";
+import { useAuth } from "../../../core/auth/AuthContext";
 import Modal from "../../../core/ui/components/Modal";
 import ECUADOR_LOCATIONS from "../../../data/ecuadorGeography";
 
 const ADVISOR_ROLES = new Set([
   "comercial", "acp_comercial", "backoffice_comercial", "asesor_comercial", "analista_comercial", "backoffice",
+]);
+// Mismo criterio que MANAGER_ROLES en backend/crm.service.js -- solo estos
+// roles pueden filtrar leads de un asesor distinto de si mismos (el backend
+// ya lo exige; esto solo evita mostrar un selector que el servidor ignoraria).
+const MANAGER_ROLES = new Set([
+  "jefe_ti", "jefe_de_ti", "admin", "administrador",
+  "gerencia", "gerencia_general", "gerente_general",
+  "director", "gerente", "jefe_comercial",
 ]);
 const normalizeRoleToken = (value) => String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 const normalizeText = (value) =>
@@ -143,19 +152,15 @@ function StatusBadge({ status }) {
   );
 }
 
-function Skeleton() {
+function Skeleton({ cols = 7 }) {
   const p = <div className="h-4 bg-gray-200 rounded w-3/4" />;
   return (
     <>
       {Array.from({ length: 5 }).map((_, i) => (
         <tr key={i} className="animate-pulse">
-          <td className="px-4 py-3">{p}</td>
-          <td className="px-4 py-3 hidden sm:table-cell">{p}</td>
-          <td className="px-4 py-3 hidden sm:table-cell">{p}</td>
-          <td className="px-4 py-3">{p}</td>
-          <td className="px-4 py-3 hidden sm:table-cell">{p}</td>
-          <td className="px-4 py-3 hidden sm:table-cell">{p}</td>
-          <td className="px-4 py-3">{p}</td>
+          {Array.from({ length: cols }).map((__, colIdx) => (
+            <td key={colIdx} className={`px-4 py-3 ${colIdx === 0 || colIdx === 3 ? "" : "hidden sm:table-cell"}`}>{p}</td>
+          ))}
         </tr>
       ))}
     </>
@@ -421,14 +426,49 @@ function LeadModal({ lead, onClose, onSaved }) {
   );
 }
 
+const EMPTY_FILTERS = {
+  ownerUserId: '',
+  priority: '',
+  source: '',
+  city: '',
+  createdFrom: '',
+  createdTo: '',
+};
+
 export default function LeadsPage() {
+  const { user } = useAuth();
+  const isManager = MANAGER_ROLES.has(normalizeRoleToken(user?.role));
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [advisors, setAdvisors] = useState([]);
   const [offset, setOffset] = useState(0);
   const [modal, setModal] = useState(null); // null | { type: 'new'|'edit', lead? }
   const [successMsg, setSuccessMsg] = useState(null);
 
-  const params = { q: q || undefined, status: status || undefined, limit: LIMIT, offset };
+  useEffect(() => {
+    if (!isManager) return;
+    getUsers()
+      .then((users) => setAdvisors(normalizeUserList(users).filter((u) => ADVISOR_ROLES.has(normalizeRoleToken(u.role)))))
+      .catch(() => setAdvisors([]));
+  }, [isManager]);
+
+  const setFilter = (key) => (e) => { setFilters((f) => ({ ...f, [key]: e.target.value })); setOffset(0); };
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
+  const clearFilters = () => { setFilters(EMPTY_FILTERS); setOffset(0); };
+
+  const params = {
+    q: q || undefined,
+    status: status || undefined,
+    owner_user_id: filters.ownerUserId || undefined,
+    priority: filters.priority || undefined,
+    source: filters.source || undefined,
+    city: filters.city || undefined,
+    created_from: filters.createdFrom || undefined,
+    created_to: filters.createdTo || undefined,
+    limit: LIMIT,
+    offset,
+  };
   const { data, loading, error, refresh } = useLeads(params);
 
   const rows = Array.isArray(data) ? data : (data?.data ?? []);
@@ -487,7 +527,7 @@ export default function LeadsPage() {
       )}
 
       {/* Filtros */}
-      <div className="flex gap-3 mb-4 flex-wrap">
+      <div className="flex flex-wrap gap-3 mb-4">
         <input
           className="border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] bg-white focus:outline-none focus:border-[#2563EB] w-64"
           placeholder="Buscar lead..."
@@ -504,6 +544,79 @@ export default function LeadsPage() {
             <option key={val} value={val}>{label}</option>
           ))}
         </select>
+        {isManager && (
+          <select
+            className="border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] bg-white focus:outline-none focus:border-[#2563EB]"
+            value={filters.ownerUserId}
+            onChange={setFilter('ownerUserId')}
+            aria-label="Filtrar por asesor"
+          >
+            <option value="">Todos los asesores</option>
+            {advisors.map((a) => (
+              <option key={a.id} value={a.id}>{a.fullname || a.email}</option>
+            ))}
+          </select>
+        )}
+        <select
+          className="border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] bg-white focus:outline-none focus:border-[#2563EB]"
+          value={filters.priority}
+          onChange={setFilter('priority')}
+          aria-label="Filtrar por prioridad"
+        >
+          <option value="">Toda prioridad</option>
+          {PRIORITY_OPTIONS.map((p) => (
+            <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>
+          ))}
+        </select>
+        <select
+          className="border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] bg-white focus:outline-none focus:border-[#2563EB]"
+          value={filters.source}
+          onChange={setFilter('source')}
+          aria-label="Filtrar por fuente"
+        >
+          <option value="">Toda fuente</option>
+          {SOURCE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+        <select
+          className="border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] bg-white focus:outline-none focus:border-[#2563EB]"
+          value={filters.city}
+          onChange={setFilter('city')}
+          aria-label="Filtrar por ciudad"
+        >
+          <option value="">Toda ciudad</option>
+          {ECUADOR_CITY_OPTIONS.map((city) => (
+            <option key={city} value={city}>{city}</option>
+          ))}
+        </select>
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs text-[#6B7280]" htmlFor="lead-created-from">Desde</label>
+          <input
+            id="lead-created-from"
+            type="date"
+            className="border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] bg-white focus:outline-none focus:border-[#2563EB]"
+            value={filters.createdFrom}
+            onChange={setFilter('createdFrom')}
+          />
+          <label className="text-xs text-[#6B7280]" htmlFor="lead-created-to">Hasta</label>
+          <input
+            id="lead-created-to"
+            type="date"
+            className="border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] bg-white focus:outline-none focus:border-[#2563EB]"
+            value={filters.createdTo}
+            onChange={setFilter('createdTo')}
+          />
+        </div>
+        {activeFilterCount > 0 && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-[#E5E7EB] px-3 py-2 text-sm text-[#6B7280] hover:bg-gray-50"
+          >
+            <FiX size={14} /> Limpiar filtros ({activeFilterCount})
+          </button>
+        )}
       </div>
 
       {/* Error */}
@@ -522,6 +635,9 @@ export default function LeadsPage() {
               <th className="px-4 py-3 text-left text-xs font-semibold text-white uppercase tracking-wide hidden sm:table-cell">Empresa</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-white uppercase tracking-wide hidden sm:table-cell">Email</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-white uppercase tracking-wide">Estado</th>
+              {isManager && (
+                <th className="px-4 py-3 text-left text-xs font-semibold text-white uppercase tracking-wide hidden sm:table-cell">Asesor</th>
+              )}
               <th className="px-4 py-3 text-left text-xs font-semibold text-white uppercase tracking-wide hidden sm:table-cell">Prioridad</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-white uppercase tracking-wide hidden sm:table-cell">Fecha</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-white uppercase tracking-wide">Acciones</th>
@@ -529,10 +645,10 @@ export default function LeadsPage() {
           </thead>
           <tbody className="divide-y divide-[#E5E7EB]">
             {loading ? (
-              <Skeleton />
+              <Skeleton cols={isManager ? 8 : 7} />
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-sm text-[#6B7280]">
+                <td colSpan={isManager ? 8 : 7} className="px-4 py-8 text-center text-sm text-[#6B7280]">
                   Sin leads
                 </td>
               </tr>
@@ -547,6 +663,9 @@ export default function LeadsPage() {
                   <td className="px-4 py-3">
                     <StatusBadge status={lead.status} />
                   </td>
+                  {isManager && (
+                    <td className="px-4 py-3 text-[#6B7280] hidden sm:table-cell">{lead.owner_name || '—'}</td>
+                  )}
                   <td className="px-4 py-3 text-[#6B7280] hidden sm:table-cell">{PRIORITY_LABELS[lead.priority] || lead.priority || '—'}</td>
                   <td className="px-4 py-3 text-[#6B7280] hidden sm:table-cell">
                     {lead.created_at ? new Date(lead.created_at).toLocaleDateString('es-CO') : '—'}

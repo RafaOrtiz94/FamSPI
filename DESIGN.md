@@ -413,7 +413,7 @@ Una única familia de iconos lineales, preferentemente la ya instalada. Tamaños
 
 `DashboardLayout` proporciona fondo, scroll principal y padding responsive. No añade `max-width`, `mx-auto`, tarjeta, borde, sombra ni radio global. Root de módulo: `WORKSPACE_PAGE_CLASS`, equivalente a `flex min-w-0 flex-col`.
 
-Conservar el espacio operativo: `px-2 py-2`, `sm:px-4 sm:py-4`, `lg:px-6 lg:py-6`, `2xl:px-8`. El espaciado adicional corresponde al contenido del módulo. Prohibir márgenes negativos compensatorios en `WORKSPACE_2COL_CLASS` y `WORKSPACE_3COL_CLASS`.
+Conservar el espacio operativo: `px-4 py-4`, `sm:px-6 sm:py-6`, `lg:px-8 lg:py-8`, `2xl:px-12` (revisado 2026-09-18: el gutter anterior, `px-2`/`sm:px-4`/`lg:px-6`/`2xl:px-8`, dejaba varios módulos visualmente pegados al borde, sobre todo en móvil). El espaciado adicional corresponde al contenido del módulo. Prohibir márgenes negativos compensatorios en `WORKSPACE_2COL_CLASS` y `WORKSPACE_3COL_CLASS`.
 
 | Ancho disponible | Composición |
 |---|---|

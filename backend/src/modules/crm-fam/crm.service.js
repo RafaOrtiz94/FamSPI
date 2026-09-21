@@ -557,7 +557,10 @@ const resolveLeadOwnerId = async (client, ownerUserId, user) => {
   return owner.id;
 };
 
-const listLeads = async ({ status, owner_user_id, q, priority, limit = 50, offset = 0, user } = {}) => {
+const listLeads = async ({
+  status, owner_user_id, q, priority, source, city, created_from, created_to,
+  limit = 50, offset = 0, user,
+} = {}) => {
   const conditions = ['l.deleted_at IS NULL'];
   const params = [];
 
@@ -576,6 +579,25 @@ const listLeads = async ({ status, owner_user_id, q, priority, limit = 50, offse
   if (priority) {
     params.push(priority);
     conditions.push(`l.priority = $${params.length}`);
+  }
+  if (source) {
+    params.push(source);
+    conditions.push(`l.source = $${params.length}`);
+  }
+  if (city) {
+    params.push(city.trim().toLowerCase());
+    conditions.push(`LOWER(TRIM(l.city)) = $${params.length}`);
+  }
+  if (created_from) {
+    params.push(created_from);
+    conditions.push(`l.created_at >= $${params.length}`);
+  }
+  if (created_to) {
+    // created_to llega como fecha (YYYY-MM-DD) del <input type="date">, sin hora
+    // -- sumar un dia y comparar con "<" incluye todo el dia seleccionado en vez
+    // de cortar a medianoche.
+    params.push(created_to);
+    conditions.push(`l.created_at < ($${params.length}::date + INTERVAL '1 day')`);
   }
   if (q) {
     params.push(`%${q}%`);

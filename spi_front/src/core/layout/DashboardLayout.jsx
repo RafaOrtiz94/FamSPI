@@ -47,7 +47,7 @@ export default function DashboardLayout() {
         <GoogleMapsProvider>
           <main className="flex min-h-[calc(100vh-4rem)] flex-col">
             {/* pb-20: despeja el dock de navegación inferior fijo (móvil, <768px) */}
-            <div className="flex-1 overflow-y-auto px-2 py-2 pb-20 sm:px-4 sm:py-4 md:pb-4 lg:px-6 lg:py-6 2xl:px-8">
+            <div className="flex-1 overflow-y-auto px-4 py-4 pb-20 sm:px-6 sm:py-6 md:pb-4 lg:px-8 lg:py-8 2xl:px-12">
               <div className="w-full min-w-0 bg-transparent">
                 <Outlet />
               </div>

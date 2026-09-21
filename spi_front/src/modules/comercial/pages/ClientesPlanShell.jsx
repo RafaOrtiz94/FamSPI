@@ -18,8 +18,8 @@ export default function ClientesPlanShell() {
 
   return (
     <div className="flex flex-col">
-      <div className="bg-white border-b border-[#E5E7EB] sm:-mx-6 sm:-mt-6">
-        <div className="overflow-x-auto sm:px-6" style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}>
+      <div className="bg-white border-b border-[#E5E7EB] sm:-mx-6 sm:-mt-6 lg:-mx-8">
+        <div className="overflow-x-auto sm:px-6 lg:px-8" style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}>
           <div className="flex min-w-max">
             {tabs.map(tab => {
               const active = location.pathname.startsWith(tab.path);

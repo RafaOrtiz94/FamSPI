@@ -9,11 +9,11 @@ const path = require("path");
 
 const SQL = fs.readFileSync(path.join(__dirname, "../migrations/212_signature_placement.sql"), "utf8");
 
-const DB_HOST = process.env.DB_HOST || "ep-wispy-moon-aqszgsal-pooler.c-8.us-east-1.aws.neon.tech";
+const DB_HOST = process.env.DB_HOST || "ep-lucky-bar-aw5wr0cn.c-12.us-east-1.aws.neon.tech";
 const DB_PORT = Number(process.env.DB_PORT || 5432);
 const DB_USER = process.env.DB_USER || "neondb_owner";
 const DB_PASSWORD = process.env.DB_PASSWORD || "";
-const DB_NAME = process.env.DB_NAME || "FamSPI";
+const DB_NAME = process.env.DB_NAME || "neondb";
 
 console.log(`[MIGRACIÓN 212] Host: ${DB_HOST}`);
 

@@ -2,6 +2,9 @@
   "timeZone": "America/Guayaquil",
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8",
+  "urlFetchWhitelist": [
+    "https://spi-backend-dp23x4filq-uc.a.run.app/"
+  ],
   "oauthScopes": [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
@@ -31,3 +34,5 @@
     }
   }
 }
+
+
