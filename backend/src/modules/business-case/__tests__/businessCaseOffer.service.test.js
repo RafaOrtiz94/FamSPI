@@ -1243,14 +1243,14 @@ describe("businessCaseOffer.service", () => {
     })).toBe("electrolito");
   });
 
-  test("la columna US$ DET APROX* solo se muestra en la seccion de reactivos, para todas las ofertas", () => {
+  test("la columna US$ DET APROX* se muestra en reactivos (sin objeto de contratacion) y NO en el resto de secciones", () => {
     const { getOfferPriceColumnVisibility } = service.__testables;
     expect(getOfferPriceColumnVisibility("reactivo")).toEqual({ showKitPrice: true, showDeterminationPrice: true });
+    expect(getOfferPriceColumnVisibility("electrolito")).toEqual({ showKitPrice: true, showDeterminationPrice: false });
     expect(getOfferPriceColumnVisibility("consumible")).toEqual({ showKitPrice: true, showDeterminationPrice: false });
     expect(getOfferPriceColumnVisibility("calibrador")).toEqual({ showKitPrice: true, showDeterminationPrice: false });
     expect(getOfferPriceColumnVisibility("control")).toEqual({ showKitPrice: true, showDeterminationPrice: false });
     expect(getOfferPriceColumnVisibility("control_calibrador")).toEqual({ showKitPrice: true, showDeterminationPrice: false });
-    expect(getOfferPriceColumnVisibility("electrolito")).toEqual({ showKitPrice: true, showDeterminationPrice: false });
   });
 
   test("si el objeto de contratacion es por determinacion (o determinacion efectiva), reactivos oculta US$ KIT* y muestra solo US$ DET APROX*", () => {
@@ -1281,6 +1281,27 @@ describe("businessCaseOffer.service", () => {
     // El resto de secciones nunca muestra esta columna y solo muestra
     // US$ KIT*, sin importar el objeto de contratacion.
     expect(getOfferPriceColumnVisibility("calibrador", "Comodato por determinacion"))
+      .toEqual({ showKitPrice: true, showDeterminationPrice: false });
+  });
+
+  test("electrolitos solo muestra US$ DET APROX* junto a US$ KIT* cuando el objeto de contratacion es 'todo comprado'", () => {
+    const { getOfferPriceColumnVisibility, isTodoCompradoContractObject } = service.__testables;
+
+    expect(isTodoCompradoContractObject("Comodato todo comprado")).toBe(true);
+    expect(isTodoCompradoContractObject("TODO COMPRADO")).toBe(true);
+    expect(isTodoCompradoContractObject("Comodato por determinacion")).toBe(false);
+    expect(isTodoCompradoContractObject(null)).toBe(false);
+    expect(isTodoCompradoContractObject(undefined)).toBe(false);
+
+    expect(getOfferPriceColumnVisibility("electrolito", "Comodato todo comprado"))
+      .toEqual({ showKitPrice: true, showDeterminationPrice: true });
+    expect(getOfferPriceColumnVisibility("electrolito", "TODO COMPRADO"))
+      .toEqual({ showKitPrice: true, showDeterminationPrice: true });
+    // A diferencia de reactivos, "determinacion" NO le da a electrolitos
+    // US$ DET APROX* -- se queda con el comportamiento default (solo KIT).
+    expect(getOfferPriceColumnVisibility("electrolito", "Comodato por determinacion"))
+      .toEqual({ showKitPrice: true, showDeterminationPrice: false });
+    expect(getOfferPriceColumnVisibility("electrolito"))
       .toEqual({ showKitPrice: true, showDeterminationPrice: false });
   });
 

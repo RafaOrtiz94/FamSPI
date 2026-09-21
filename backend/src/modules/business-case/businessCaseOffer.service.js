@@ -50,8 +50,12 @@ const OFFER_SECTION_LAYOUT = {
   consumible: { headerRow: 117, templateRow: 118, endRow: 132 },
   electrolito: { headerRow: 136, templateRow: 137, endRow: 147 },
 };
-const OFFER_SECTION_KEYS = ["reactivo", "control_calibrador", "consumible", "electrolito"];
-const OFFER_SPLIT_CONTROL_SECTION_KEYS = ["reactivo", "calibrador", "control", "consumible", "electrolito"];
+// Orden de secciones en la oferta (Excel y PDF comparten este orden via
+// getOfferSectionKeys): Reactivos, Electrolitos, Controles/calibradores,
+// Consumibles -- pedido explicito de Comercial (caso ASOGALENICA) para que
+// Electrolitos quede debajo de Reactivos y antes de Controles.
+const OFFER_SECTION_KEYS = ["reactivo", "electrolito", "control_calibrador", "consumible"];
+const OFFER_SPLIT_CONTROL_SECTION_KEYS = ["reactivo", "electrolito", "calibrador", "control", "consumible"];
 const COMBINED_CONTROL_CALIBRATOR_EQUIPMENT_ID = 9; // cobas Pure <303>
 const OFFER_FOOTER_START_ROW = 150;
 const OFFER_FOOTER_END_ROW = 162;
@@ -1644,18 +1648,32 @@ function drawOfferSectionLabel(doc, title, startY) {
 // determinacion", "Adquisicion de determinaciones efectivas..."), la oferta
 // de reactivos debe mostrar SOLO "US$ DET APROX*" (oculta "US$ KIT*") --
 // en cualquier otro objeto de contratacion se mantiene el comportamiento
-// actual (reactivos muestra ambas columnas de precio). Controles/
-// calibradores/materiales nunca muestran "US$ DET APROX*", solo "US$ KIT*".
+// actual (reactivos muestra ambas columnas de precio).
+// Electrolitos NO sigue esta misma regla de "determinacion": pedido
+// Comercial (caso ASOGALENICA) es mas acotado -- Electrolitos solo muestra
+// "US$ DET APROX*" junto a "US$ KIT*" cuando el objeto de contratacion es
+// especificamente "todo comprado"; en cualquier otro caso (determinacion u
+// otro texto) se queda con el comportamiento default (solo "US$ KIT*"),
+// igual que Controles/calibradores/materiales.
 function isDeterminationContractObject(contractObject) {
   return normalizeOfferText(contractObject).includes("determinacion");
 }
 
+function isTodoCompradoContractObject(contractObject) {
+  return normalizeOfferText(contractObject).includes("todo comprado");
+}
+
 function getOfferPriceColumnVisibility(sectionKey, contractObject) {
-  if (sectionKey !== "reactivo") return { showKitPrice: true, showDeterminationPrice: false };
-  if (isDeterminationContractObject(contractObject)) {
-    return { showKitPrice: false, showDeterminationPrice: true };
+  if (sectionKey === "reactivo") {
+    if (isDeterminationContractObject(contractObject)) {
+      return { showKitPrice: false, showDeterminationPrice: true };
+    }
+    return { showKitPrice: true, showDeterminationPrice: true };
   }
-  return { showKitPrice: true, showDeterminationPrice: true };
+  if (sectionKey === "electrolito" && isTodoCompradoContractObject(contractObject)) {
+    return { showKitPrice: true, showDeterminationPrice: true };
+  }
+  return { showKitPrice: true, showDeterminationPrice: false };
 }
 
 function drawOfferSectionTable(doc, title, rows = [], { showKitPrice = true, showDeterminationPrice = true } = {}) {
@@ -3718,6 +3736,7 @@ module.exports = {
   __testables: {
     getOfferPriceColumnVisibility,
     isDeterminationContractObject,
+    isTodoCompradoContractObject,
     resolveOfferClientLocation,
     normalizePdfText,
     mergeOfferPdfBuffers,
