@@ -20,7 +20,29 @@ const TYPE_LABELS = {
   demo: "Demo",
   propuesta: "Propuesta",
   seguimiento: "Seguimiento",
+  tarea: "Tarea",
 };
+
+// Origen de la actividad: viene de un campo estructurado nuevo
+// (source_module) para actividades creadas desde Work Management o
+// cronograma. Las visitas de cronograma creadas ANTES de que existiera esa
+// columna quedan con source_module NULL, asi que se conserva el fallback
+// viejo (activity_type==='visita' && is_scheduled_visit) para no perder el
+// badge en filas historicas -- no requiere backfill de datos.
+const ORIGIN_LABELS = {
+  work_management: "Work Management",
+  schedule: "Cronograma",
+};
+
+function getActivityOrigin(activity) {
+  if (activity?.source_module && ORIGIN_LABELS[activity.source_module]) {
+    return ORIGIN_LABELS[activity.source_module];
+  }
+  if (activity?.activity_type === "visita" && activity?.is_scheduled_visit) {
+    return ORIGIN_LABELS.schedule;
+  }
+  return "CRM";
+}
 
 const STATUS_COLORS = {
   scheduled: { bg: "#EFF6FF", text: "#1D4ED8" },
@@ -92,6 +114,17 @@ function StatusBadge({ status }) {
       style={{ background: colors.bg, color: colors.text }}
     >
       {STATUS_LABELS[status] ?? status}
+    </span>
+  );
+}
+
+function OriginBadge({ activity }) {
+  return (
+    <span
+      className="inline-block px-2 py-0.5 rounded-[6px] text-xs font-medium"
+      style={{ background: "#EEF2FF", color: "#4338CA" }}
+    >
+      {getActivityOrigin(activity)}
     </span>
   );
 }
@@ -535,6 +568,7 @@ export default function CrmActivitiesPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <TypeBadge type={a.activity_type} />
                       <StatusBadge status={a.status} />
+                      <OriginBadge activity={a} />
                       {needsFollowup && (
                         <span className="rounded-full bg-[#FFFBEB] px-2.5 py-1 text-xs font-semibold text-[#B45309]">
                           Pendiente de cierre comercial

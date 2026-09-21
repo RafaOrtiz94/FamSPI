@@ -3,7 +3,7 @@
 ## 1. Descripción
 CRM interno de FamSPI para el área comercial, con metodología **Blue Sheet (Miller Heiman Strategic Selling)**. Cubre todo el ciclo: Leads → Cuentas/Contactos → Oportunidades (embudo de 6 fases) → Blue Sheet (calificación estratégica de la venta: objetivos, influencias de compra, competidores, fortalezas, red flags, scorecard, action items) → cierre ganado/perdido. Incluye dashboard, forecast, reportes y auditoría propia.
 
-**Estado real (no confundir con el README viejo del módulo):** el módulo NO está en "Etapa 1 — esqueleto / 501 Not Implemented". `crm.service.js` (2475 líneas) tiene lógica de negocio completa para las 24 tablas del esquema `crm`: CRUD con visibilidad por rol, conversión de leads, ciclo de vida de Blue Sheet (draft → in_progress → ready_for_review → approved/observed → needs_update), cálculo de completitud/scorecard/health score, notificaciones internas y auditoría. Está en **producción** con rutas montadas y frontend completo.
+**Estado real (no confundir con el README viejo del módulo):** el módulo NO está en "Etapa 1 — esqueleto / 501 Not Implemented". `crm.service.js` (2237 líneas) tiene lógica de negocio completa para las 24 tablas del esquema `crm`: CRUD con visibilidad por rol, conversión de leads, ciclo de vida de Blue Sheet (draft → in_progress → ready_for_review → approved/observed → needs_update), cálculo de completitud/scorecard/health score, notificaciones internas y auditoría. Está en **producción** con rutas montadas y frontend completo.
 
 Controller: `crm.controller.js` (thin, patrón `respond()` uniforme). Service: `crm.service.js`. Calculadoras puras: `crm.calculators.js`. Sincronización cruzada con Business Case / compras: `crmPurchaseSync.service.js`.
 
@@ -158,6 +158,8 @@ Esquema dedicado `crm` (no `public`). Migraciones: `231_crm_schema_init.sql` (24
 
 Tablas (24): `crm_pipeline_stages`, `crm_accounts`, `crm_contacts`, `crm_leads`, `crm_opportunities`, `crm_opportunity_products`, `crm_blue_sheets`, `crm_blue_sheet_versions`, `crm_buying_influences`, `crm_win_results`, `crm_competitors`, `crm_competitive_preferences`, `crm_strengths`, `crm_red_flags`, `crm_scorecard_criteria`, `crm_scorecard_answers`, `crm_action_items`, `crm_activities`, `crm_documents`, `crm_notes`, `crm_review_comments`, `crm_lost_reasons`, `crm_audit_log`, `crm_integration_outbox`.
 
+`crm_activities.source_module` (texto nullable, migración `298_work_management_crm_activity_sync.sql`) marca de forma estructurada quién generó la actividad: `'work_management'` (items de Work Management, ver `backend/src/modules/work-management/CONTEXT.md` §6) o `'schedule'` (visitas de cronograma, `schedules.service.js#upsertCrmFamActivityForScheduledVisit`). Filas anteriores a esta migración quedan con `source_module IS NULL` — el frontend (`CrmActivitiesPage.jsx#getActivityOrigin`) conserva como fallback la heurística vieja (`activity_type==='visita' && is_scheduled_visit`) para esas filas históricas, así que no hace falta backfill.
+
 PK: `uuid DEFAULT gen_random_uuid()`. FK a usuarios: `integer references public.users(id)` (cruza esquemas). Soft delete vía `deleted_at` en casi todas las entidades operativas.
 
 Columnas puente agregadas fuera del esquema `crm` (para enlazar procesos externos a una oportunidad CRM-Fam):
@@ -168,6 +170,8 @@ Columnas puente agregadas fuera del esquema `crm` (para enlazar procesos externo
 
 ## 7. Relaciones con otros módulos
 - `business-case`, `private-purchases`, `equipment-purchases`: auto-crean/enlazan `crm.crm_opportunities` vía `crmPurchaseSync.service.js` (ver §2).
+- `work-management`: escribe (no solo lee) en `crm.crm_activities` vía `syncCrmActivityForItem` cuando un item pertenece a un proyecto con `crm_opportunity_id`/`crm_account_id` — `activity_type='tarea'`, `source_module='work_management'`. Dirección única (WM → CRM); un cambio hecho directamente en la actividad CRM no se propaga de vuelta al item. Ver `backend/src/modules/work-management/CONTEXT.md` §6.
+- `schedules`: crea/actualiza `crm.crm_activities` (`activity_type='visita'`, `source_module='schedule'`) al aprobar visitas de cronograma vía `upsertCrmFamActivityForScheduledVisit`.
 - `notifications`: notificaciones de Blue Sheet (envío/observación/aprobación) y red flags críticas.
 - `files` + Google Drive: `uploadDocumentFile` sube a Drive vía `utils/drive`.
 - `integrations/crmWebhook.*`: sistema paralelo, NO usa las tablas de este módulo (ver §2).
@@ -184,10 +188,10 @@ Todo bajo `spi_front/src/modules/crm-fam/`, montado en `CrmShell.jsx` (tabs: Das
 | `/dashboard/crm-fam/accounts/:id` | `AccountDetailPage.jsx` |
 | `/dashboard/crm-fam/contacts` | `ContactsPage.jsx` |
 | `/dashboard/crm-fam/leads` | `LeadsPage.jsx` |
-| `/dashboard/crm-fam/opportunities` | `OpportunitiesPage.jsx` (1735 líneas — la página más grande del módulo) |
+| `/dashboard/crm-fam/opportunities` | `OpportunitiesPage.jsx` (1631 líneas — la página más grande del módulo) |
 | `/dashboard/crm-fam/opportunities/:id` | `OpportunityDetailPage.jsx` |
-| `/dashboard/crm-fam/opportunities/:opportunityId/blue-sheet` | `BlueSheetPage.jsx` (1146 líneas) |
-| `/dashboard/crm-fam/activities` | `CrmActivitiesPage.jsx` |
+| `/dashboard/crm-fam/opportunities/:opportunityId/blue-sheet` | `BlueSheetPage.jsx` (1055 líneas) |
+| `/dashboard/crm-fam/activities` | `CrmActivitiesPage.jsx` (incluye `OriginBadge`/`getActivityOrigin` — badge de origen genérico leyendo `source_module`, con fallback a la heurística de `is_scheduled_visit` para filas históricas; `TYPE_LABELS` incluye `tarea` para actividades creadas desde Work Management) |
 | `/dashboard/crm-fam/reports` | `CrmReportsPage.jsx` |
 | `/dashboard/crm-fam/settings` | `CrmSettingsPage.jsx` (solo jefe_ti/admin — catálogos) |
 

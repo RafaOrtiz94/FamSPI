@@ -207,6 +207,9 @@ describe("deleteWorkspace / deleteProject / deleteItem", () => {
       .mockResolvedValueOnce({ rows: [itemRow] }) // assertItemAccess: SELECT item
       .mockResolvedValueOnce({ rows: [projectRow] }) // assertProjectAccess interno
       .mockResolvedValueOnce({ rows: [workspaceRow] }) // assertWorkspaceAccess interno
+      // getProjectCrmLinkInfo (syncCrmActivityForItem): proyecto sin
+      // crm_opportunity_id/crm_account_id => no-op, no toca crm.crm_activities.
+      .mockResolvedValueOnce({ rows: [{ ...projectRow, crm_opportunity_id: null, crm_account_id: null }] })
       .mockResolvedValueOnce({ rows: [] }) // logActivity
       .mockResolvedValueOnce({ rows: [] }); // DELETE
 

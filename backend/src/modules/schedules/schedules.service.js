@@ -952,6 +952,7 @@ async function upsertCrmFamActivityForScheduledVisit({ schedule, visit, ownerUse
                 WHEN status IN ('visited_pending_followup', 'completed', 'cancelled') THEN status
                 ELSE 'scheduled'
               END,
+              source_module = COALESCE(source_module, 'schedule'),
               updated_by = $5,
               updated_at = NOW()
         WHERE id = $1
@@ -972,10 +973,11 @@ async function upsertCrmFamActivityForScheduledVisit({ schedule, visit, ownerUse
         scheduled_at,
         owner_user_id,
         status,
+        source_module,
         created_by,
         updated_by
       )
-      VALUES (NULL, NULL, NULL, 'visita', $1, $2, $3, $4, 'scheduled', $4, $4)
+      VALUES (NULL, NULL, NULL, 'visita', $1, $2, $3, $4, 'scheduled', 'schedule', $4, $4)
       RETURNING id`,
     [subject, description, scheduledAt, ownerUserId],
   );

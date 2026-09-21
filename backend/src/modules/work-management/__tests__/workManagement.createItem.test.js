@@ -47,7 +47,16 @@ function setupHappyPathMocks() {
     }
     if (sql.includes("INSERT INTO work_management.items")) {
       return Promise.resolve({
-        rows: [{ id: "item-1", project_id: GROUP_PROJECT_ID, group_id: GROUP_ID, title: "Nuevo item" }],
+        rows: [{ id: "item-1", project_id: GROUP_PROJECT_ID, group_id: GROUP_ID, title: "Nuevo item", crm_activity_id: null }],
+      });
+    }
+    // getProjectCrmLinkInfo (sync de actividad CRM, ver syncCrmActivityForItem):
+    // proyecto sin crm_opportunity_id/crm_account_id => no-op, no crea nada
+    // en crm.crm_activities. No confundir con la query de assertProjectAccess
+    // (esa usa db.query con alias "p", no client.query).
+    if (sql.includes("FROM work_management.projects")) {
+      return Promise.resolve({
+        rows: [{ id: GROUP_PROJECT_ID, name: "Proyecto de prueba", crm_opportunity_id: null, crm_account_id: null }],
       });
     }
     if (sql.includes("INSERT INTO work_management.work_activity_log")) {

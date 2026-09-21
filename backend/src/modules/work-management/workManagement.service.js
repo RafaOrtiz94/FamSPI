@@ -268,6 +268,98 @@ async function addLink(client, payload) {
   );
 }
 
+async function getProjectCrmLinkInfo(client, projectId) {
+  const { rows } = await client.query(
+    `SELECT id, name, crm_opportunity_id, crm_account_id
+       FROM work_management.projects
+      WHERE id = $1`,
+    [projectId]
+  );
+  return rows[0] || null;
+}
+
+// Sincroniza (una sola direccion: Work Management -> CRM-Fam, nunca al reves)
+// un item como actividad de crm.crm_activities cuando su proyecto ya tiene
+// una oportunidad/cuenta CRM vinculada (crm_opportunity_id/crm_account_id,
+// llenados por createProject/createProjectFromOpportunity). Si el proyecto
+// no tiene ninguno de los dos, es un no-op silencioso e intencional -- no se
+// inventa un vinculo CRM donde no existe. Nunca debe bloquear la operacion
+// de Work Management: cualquier fallo queda en logger.warn, igual que el
+// criterio ya usado en crmPurchaseSync.service.js para nombres de etapa no
+// encontrados.
+async function syncCrmActivityForItem(client, { item, project, action, actorUserId }) {
+  try {
+    if (!project || (!project.crm_opportunity_id && !project.crm_account_id)) {
+      return;
+    }
+
+    if (action === "cancel") {
+      if (!item.crm_activity_id) return;
+      await client.query(
+        `UPDATE crm.crm_activities SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`,
+        [item.crm_activity_id]
+      );
+      return;
+    }
+
+    const subject = String(item.title || "").trim().slice(0, 250) || "Item de Work Management";
+    const description = [
+      "Origen: Work Management",
+      project.name ? `Proyecto: ${project.name}` : null,
+      `Item ID: ${item.id}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const status = item.status === "done" ? "completed" : "scheduled";
+    const scheduledAt = item.planned_end_at || null;
+
+    if (item.crm_activity_id) {
+      await client.query(
+        `UPDATE crm.crm_activities
+            SET subject = $2,
+                description = $3,
+                status = $4,
+                scheduled_at = $5,
+                updated_by = $6,
+                updated_at = now()
+          WHERE id = $1
+            AND deleted_at IS NULL`,
+        [item.crm_activity_id, subject, description, status, scheduledAt, actorUserId]
+      );
+      return;
+    }
+
+    const { rows } = await client.query(
+      `INSERT INTO crm.crm_activities
+        (opportunity_id, account_id, activity_type, subject, description,
+         scheduled_at, owner_user_id, status, source_module, created_by, updated_by)
+       VALUES ($1,$2,'tarea',$3,$4,$5,$6,$7,'work_management',$6,$6)
+       RETURNING id`,
+      [
+        project.crm_opportunity_id || null,
+        project.crm_account_id || null,
+        subject,
+        description,
+        scheduledAt,
+        actorUserId,
+        status,
+      ]
+    );
+    const activityId = rows[0]?.id;
+    if (activityId) {
+      await client.query(
+        `UPDATE work_management.items SET crm_activity_id = $1 WHERE id = $2`,
+        [activityId, item.id]
+      );
+      item.crm_activity_id = activityId;
+    }
+  } catch (error) {
+    logger.warn(
+      `[work-management] No se pudo sincronizar actividad CRM para item ${item?.id}: ${error.message}`
+    );
+  }
+}
+
 async function assertWorkspaceAccess(workspaceId, userId, role) {
   const { rows } = await db.query(
     `SELECT w.*,
@@ -1622,6 +1714,16 @@ async function updateItem(itemId, payload, userId, role) {
 
     const updatedItem = rows[0];
 
+    if (payload.status !== undefined || payload.title !== undefined || payload.planned_end_at !== undefined) {
+      const crmLinkProject = await getProjectCrmLinkInfo(client, currentItem.project_id);
+      await syncCrmActivityForItem(client, {
+        item: updatedItem,
+        project: crmLinkProject,
+        action: "upsert",
+        actorUserId: userId,
+      });
+    }
+
     await logActivity(client, {
       project_id: currentItem.project_id,
       board_id: currentItem.board_id,
@@ -2279,6 +2381,14 @@ async function deleteItem(itemId, userId, role) {
   // que ya puede editarlo.
   const item = await assertItemAccess(itemId, userId, role);
 
+  const crmLinkProject = await getProjectCrmLinkInfo(db, item.project_id);
+  await syncCrmActivityForItem(db, {
+    item,
+    project: crmLinkProject,
+    action: "cancel",
+    actorUserId: userId,
+  });
+
   // Sin item_id (ON DELETE CASCADE en work_activity_log borraria este mismo
   // registro al eliminar el item) -- project_id/board_id (los padres) si
   // sobreviven.
@@ -2494,6 +2604,14 @@ async function createItem(groupId, payload, userId, role) {
       source_entity_type: payload.source_entity_type,
       source_entity_id: payload.source_entity_id,
       created_by: userId,
+    });
+
+    const crmLinkProject = await getProjectCrmLinkInfo(client, group.project_id);
+    await syncCrmActivityForItem(client, {
+      item,
+      project: crmLinkProject,
+      action: "upsert",
+      actorUserId: userId,
     });
 
     await logActivity(client, {
