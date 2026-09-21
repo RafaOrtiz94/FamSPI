@@ -42,7 +42,6 @@ atajo/
 
 # Backups locales de base de datos (datos de produccion, nunca a git)
 backend/backups/
-*.sql
 *.sql.gz
 !backend/migrations/20260901_add_collab_policy_delivery_category.sql
 !backend/migrations/296_business_case_purchase_canonical_link.sql
