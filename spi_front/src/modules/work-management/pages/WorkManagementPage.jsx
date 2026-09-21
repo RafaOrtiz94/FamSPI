@@ -52,7 +52,8 @@ import {
   updateItem,
   updateItemAssignees,
   updateChecklistItem,
-  updateItemSupporters,
+  addItemSupporter,
+  removeItemSupporter,
   uploadItemAttachment,
 } from "../../../core/api/workManagementApi";
 import { useAuth } from "../../../core/auth/AuthContext";
@@ -425,7 +426,7 @@ const BoardHeaderRow = ({ showGroupColumn, boardGridClass }) => (
   </div>
 );
 
-const SupportCell = ({ item, collaboratorOptions, saving, onChange }) => {
+const SupportCell = ({ item, collaboratorOptions, saving, onAddClick, onChipClick, onRemove }) => {
   const supporters = Array.isArray(item.supporters) ? item.supporters : [];
   const supporterIds = supporters
     .map((supporter) => Number(supporter.user_id))
@@ -433,10 +434,6 @@ const SupportCell = ({ item, collaboratorOptions, saving, onChange }) => {
   const availableOptions = collaboratorOptions.filter(
     (option) => !supporterIds.includes(Number(option.id))
   );
-
-  const updateSupporters = (nextIds) => {
-    onChange(item.id, nextIds);
-  };
 
   return (
     <div className="rounded-2xl border border-cyan-100 bg-gradient-to-br from-cyan-50/80 to-white p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
@@ -454,8 +451,17 @@ const SupportCell = ({ item, collaboratorOptions, saving, onChange }) => {
           supporters.map((supporter) => (
             <span
               key={supporter.user_id}
-              className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-white bg-white px-2 py-1 text-[11px] font-bold text-cyan-900 shadow-sm"
-              title={supporter.email || supporter.fullname}
+              onClick={() => onChipClick(item, supporter)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onChipClick(item, supporter);
+                }
+              }}
+              className="inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-full border border-white bg-white px-2 py-1 text-[11px] font-bold text-cyan-900 shadow-sm transition-colors hover:border-cyan-200"
+              title={`Ver contexto del apoyo · ${supporter.email || supporter.fullname}`}
             >
               <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 text-[9px] font-black text-white shadow-sm">
                 {getInitials(supporter.fullname)}
@@ -463,11 +469,10 @@ const SupportCell = ({ item, collaboratorOptions, saving, onChange }) => {
               <span className="max-w-[110px] truncate">{supporter.fullname}</span>
               <button
                 type="button"
-                onClick={() =>
-                  updateSupporters(
-                    supporterIds.filter((userId) => userId !== Number(supporter.user_id))
-                  )
-                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRemove(item.id, Number(supporter.user_id));
+                }}
                 disabled={saving}
                 className="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full text-cyan-700 transition-colors hover:bg-cyan-100 disabled:cursor-wait disabled:opacity-50"
                 aria-label={`Quitar apoyo ${supporter.fullname}`}
@@ -486,7 +491,9 @@ const SupportCell = ({ item, collaboratorOptions, saving, onChange }) => {
         value=""
         onChange={(event) => {
           const userId = Number(event.target.value);
-          if (Number.isFinite(userId)) updateSupporters([...supporterIds, userId]);
+          const option = collaboratorOptions.find((candidate) => Number(candidate.id) === userId);
+          if (Number.isFinite(userId) && option) onAddClick(item, option);
+          event.target.value = "";
         }}
         disabled={saving || !availableOptions.length}
         className={`${boardSelectClass} mt-2 border-cyan-100 bg-white/90 text-cyan-900`}
@@ -787,7 +794,9 @@ const BoardItemRow = ({
   onOpenDetail,
   onFieldChange,
   onAssigneeChange,
-  onSupportChange,
+  onAddSupportClick,
+  onSupportChipClick,
+  onRemoveSupport,
   onChecklistAdd,
   onChecklistToggle,
   onChecklistRename,
@@ -909,7 +918,9 @@ const BoardItemRow = ({
         item={item}
         collaboratorOptions={collaboratorOptions}
         saving={savingFieldKey === `${item.id}:supporters`}
-        onChange={onSupportChange}
+        onAddClick={onAddSupportClick}
+        onChipClick={onSupportChipClick}
+        onRemove={onRemoveSupport}
       />
     </div>
     <div className="border-r border-slate-200 px-4 py-3">
@@ -962,7 +973,7 @@ const BoardItemRow = ({
   </div>
 );
 
-const MobileItemCard = ({ item, onOpenProject }) => (
+const MobileItemCard = ({ item, onOpenProject, onSupportChipClick }) => (
   <article className="relative overflow-hidden rounded-[28px] border border-white bg-white p-4 shadow-[0_16px_34px_rgba(15,23,42,0.10)] ring-1 ring-slate-900/5 md:hidden">
     <span className={`absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b ${statusAccent(item.status)}`} />
     <div className="flex items-start justify-between gap-3">
@@ -999,8 +1010,11 @@ const MobileItemCard = ({ item, onOpenProject }) => (
           {item.supporters.slice(0, 4).map((supporter) => (
             <span
               key={supporter.user_id}
-              className="inline-flex items-center gap-1.5 rounded-full bg-white px-2 py-1 text-[11px] font-bold text-cyan-900 shadow-sm"
-              title={supporter.email || supporter.fullname}
+              onClick={() => onSupportChipClick?.(item, supporter)}
+              role="button"
+              tabIndex={0}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-white px-2 py-1 text-[11px] font-bold text-cyan-900 shadow-sm"
+              title={`Ver contexto del apoyo · ${supporter.email || supporter.fullname}`}
             >
               <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 text-[9px] font-black text-white">
                 {getInitials(supporter.fullname)}
@@ -1160,6 +1174,11 @@ const WorkManagementPage = () => {
   const [submitting, setSubmitting] = useState("");
   const [savingFieldKey, setSavingFieldKey] = useState("");
   const [itemDetailDraft, setItemDetailDraft] = useState(null);
+
+  const [addSupportTarget, setAddSupportTarget] = useState(null);
+  const [addSupportContext, setAddSupportContext] = useState("");
+  const [addSupportSubmitting, setAddSupportSubmitting] = useState(false);
+  const [supportContextModal, setSupportContextModal] = useState(null);
 
   const selectedWorkspace = useMemo(
     () => workspaces.find((workspace) => workspace.id === workspaceId) || null,
@@ -1879,51 +1898,82 @@ const WorkManagementPage = () => {
     }
   };
 
-  const handleInlineSupportChange = async (itemId, supportUserIds = []) => {
-    const previousItems = items;
-    const supporterIds = Array.from(
-      new Set(
-        (Array.isArray(supportUserIds) ? supportUserIds : [supportUserIds])
-          .map((userId) => Number(userId))
-          .filter((userId) => Number.isFinite(userId))
-      )
-    );
-    const selectedSupporters = collaboratorOptions.filter((option) =>
-      supporterIds.includes(Number(option.id))
-    );
+  const openAddSupportModal = (item, option) => {
+    setAddSupportTarget({ item, option });
+    setAddSupportContext("");
+  };
 
+  const closeAddSupportModal = () => {
+    if (addSupportSubmitting) return;
+    setAddSupportTarget(null);
+    setAddSupportContext("");
+  };
+
+  const handleConfirmAddSupport = async () => {
+    if (!addSupportTarget) return;
+    const context = addSupportContext.trim();
+    if (!context) return;
+    const { item, option } = addSupportTarget;
+    const itemId = item.id;
+
+    setAddSupportSubmitting(true);
+    setSavingFieldKey(`${itemId}:supporters`);
+    try {
+      await addItemSupporter(itemId, {
+        supporter_user_id: Number(option.id),
+        context,
+      });
+      showToast("Apoyo agregado.", "success");
+      setAddSupportTarget(null);
+      setAddSupportContext("");
+      await Promise.all([loadProjectData(selectedProjectId), loadOverview()]);
+    } catch (error) {
+      showToast(
+        error?.response?.data?.message || "No se pudo agregar el apoyo.",
+        "error"
+      );
+    } finally {
+      setAddSupportSubmitting(false);
+      setSavingFieldKey("");
+    }
+  };
+
+  const handleRemoveSupporter = async (itemId, supporterUserId) => {
+    const previousItems = items;
     setSavingFieldKey(`${itemId}:supporters`);
     setItems((current) =>
       current.map((item) =>
         item.id === itemId
           ? {
               ...item,
-              supporters: selectedSupporters.map((supporter) => ({
-                user_id: supporter.id,
-                fullname: supporter.fullname,
-                email: supporter.email,
-              })),
+              supporters: (item.supporters || []).filter(
+                (supporter) => Number(supporter.user_id) !== Number(supporterUserId)
+              ),
             }
           : item
       )
     );
 
     try {
-      await updateItemSupporters(itemId, {
-        support_user_ids: supporterIds,
-      });
-      showToast("Apoyo actualizado.", "success");
+      await removeItemSupporter(itemId, supporterUserId);
+      showToast("Apoyo removido.", "success");
       await Promise.all([loadProjectData(selectedProjectId), loadOverview()]);
     } catch (error) {
       setItems(previousItems);
       showToast(
-        error?.response?.data?.message || "No se pudo actualizar el apoyo.",
+        error?.response?.data?.message || "No se pudo quitar el apoyo.",
         "error"
       );
     } finally {
       setSavingFieldKey("");
     }
   };
+
+  const openSupportContextModal = (item, supporter) => {
+    setSupportContextModal({ item, supporter });
+  };
+
+  const closeSupportContextModal = () => setSupportContextModal(null);
 
   const applyChecklistToItem = (itemId, checklist) => {
     setItems((current) =>
@@ -2517,7 +2567,9 @@ const WorkManagementPage = () => {
                                 onOpenDetail={openItemDetail}
                                 onFieldChange={handleInlineFieldChange}
                                 onAssigneeChange={handleInlineAssigneeChange}
-                                onSupportChange={handleInlineSupportChange}
+                                onAddSupportClick={openAddSupportModal}
+                                onSupportChipClick={openSupportContextModal}
+                                onRemoveSupport={handleRemoveSupporter}
                                 onChecklistAdd={handleChecklistAdd}
                                 onChecklistToggle={handleChecklistToggle}
                                 onChecklistRename={handleChecklistRename}
@@ -2542,6 +2594,7 @@ const WorkManagementPage = () => {
                                 key={item.id}
                                 item={item}
                                 onOpenProject={setSelectedProjectId}
+                                onSupportChipClick={openSupportContextModal}
                               />
                             ))
                           ) : (
@@ -3611,6 +3664,110 @@ const WorkManagementPage = () => {
             </button>
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(addSupportTarget)}
+        onClose={closeAddSupportModal}
+        title="Agregar persona de apoyo"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <div>
+            <p className="text-xs font-medium text-slate-500">Persona</p>
+            <p className="text-sm font-bold text-slate-900">{addSupportTarget?.option?.fullname}</p>
+            {addSupportTarget?.option?.email ? (
+              <p className="text-xs text-slate-500">{addSupportTarget.option.email}</p>
+            ) : null}
+          </div>
+          <label className="space-y-2">
+            <span className="text-xs font-medium text-slate-700">
+              Contexto del apoyo solicitado <span className="text-rose-600">*</span>
+            </span>
+            <textarea
+              value={addSupportContext}
+              onChange={(event) => setAddSupportContext(event.target.value)}
+              rows={4}
+              placeholder="Describe que necesitas de esta persona (ej. revisar un documento, apoyar en una visita, validar un calculo...)"
+              className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
+            />
+            <span className="block text-[11px] text-slate-500">
+              Obligatorio: la persona vera este contexto en la notificacion que recibe.
+            </span>
+          </label>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={closeAddSupportModal}
+              disabled={addSupportSubmitting}
+              className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-2xl border border-slate-300 px-4 text-sm font-medium text-slate-700 transition-all duration-150 hover:bg-slate-50 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmAddSupport}
+              disabled={addSupportSubmitting || !addSupportContext.trim()}
+              className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-2xl bg-[#2563EB] px-4 text-sm font-semibold text-white transition-all duration-150 hover:bg-[#1D4ED8] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {addSupportSubmitting ? "Agregando..." : "Agregar"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(supportContextModal)}
+        onClose={closeSupportContextModal}
+        title="Detalle del apoyo"
+        maxWidth="max-w-md"
+      >
+        {supportContextModal ? (
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs font-medium text-slate-500">Persona</p>
+              <p className="text-sm font-bold text-slate-900">{supportContextModal.supporter.fullname}</p>
+              {supportContextModal.supporter.email ? (
+                <p className="text-xs text-slate-500">{supportContextModal.supporter.email}</p>
+              ) : null}
+            </div>
+            <div>
+              <p className="text-xs font-medium text-slate-500">Item</p>
+              <p className="text-sm text-slate-900">{supportContextModal.item?.title}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs font-medium text-slate-500">Solicitado por</p>
+                <p className="text-sm text-slate-900">
+                  {supportContextModal.supporter.assigned_by_name || "Sin datos"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-slate-500">Fecha</p>
+                <p className="text-sm text-slate-900">
+                  {supportContextModal.supporter.created_at
+                    ? formatDateTime(supportContextModal.supporter.created_at)
+                    : "Sin datos"}
+                </p>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-slate-500">Contexto solicitado</p>
+              <p className="mt-1 whitespace-pre-wrap rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800">
+                {supportContextModal.supporter.context || "Sin contexto registrado."}
+              </p>
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={closeSupportContextModal}
+                className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-2xl border border-slate-300 px-4 text-sm font-medium text-slate-700 transition-all duration-150 hover:bg-slate-50 active:scale-[0.97]"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        ) : null}
       </Modal>
     </main>
   );

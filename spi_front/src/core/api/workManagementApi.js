@@ -104,9 +104,14 @@ export const updateItemAssignees = (itemId, payload) =>
     .put(`/work-management/items/${itemId}/assignees`, payload)
     .then((response) => response.data?.data);
 
-export const updateItemSupporters = (itemId, payload) =>
+export const addItemSupporter = (itemId, payload) =>
   api
-    .put(`/work-management/items/${itemId}/supporters`, payload)
+    .post(`/work-management/items/${itemId}/supporters`, payload)
+    .then((response) => response.data?.data);
+
+export const removeItemSupporter = (itemId, supporterUserId) =>
+  api
+    .delete(`/work-management/items/${itemId}/supporters/${supporterUserId}`)
     .then((response) => response.data?.data);
 
 export const createItemComment = (itemId, payload) =>
@@ -172,7 +177,8 @@ const workManagementApi = {
   createItem,
   updateItem,
   updateItemAssignees,
-  updateItemSupporters,
+  addItemSupporter,
+  removeItemSupporter,
   createItemComment,
   createChecklistItem,
   updateChecklistItem,

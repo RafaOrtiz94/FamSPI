@@ -152,9 +152,15 @@ async function updateItemAssignees(req, res) {
   );
 }
 
-async function updateItemSupporters(req, res) {
+async function addItemSupporter(req, res) {
   return handle(res, () =>
-    service.updateItemSupporters(req.params.itemId, req.body || {}, getUserId(req), req.user?.role)
+    service.addItemSupporter(req.params.itemId, req.body || {}, getUserId(req), req.user?.role)
+  );
+}
+
+async function removeItemSupporter(req, res) {
+  return handle(res, () =>
+    service.removeItemSupporter(req.params.itemId, req.params.supporterUserId, getUserId(req), req.user?.role)
   );
 }
 
@@ -234,7 +240,8 @@ module.exports = {
   listAssigneeOptions,
   updateItem,
   updateItemAssignees,
-  updateItemSupporters,
+  addItemSupporter,
+  removeItemSupporter,
   createItemComment,
   createChecklistItem,
   updateChecklistItem,

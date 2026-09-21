@@ -1444,12 +1444,17 @@ async function listItemsByProject(projectId, userId, role) {
                     'user_id', f.user_id,
                     'fullname', COALESCE(NULLIF(su.fullname, ''), NULLIF(su.name, ''), su.email, CONCAT('Usuario #', su.id)),
                     'email', su.email,
-                    'role', su.role
+                    'role', su.role,
+                    'context', f.context,
+                    'assigned_by', f.assigned_by,
+                    'assigned_by_name', COALESCE(NULLIF(au.fullname, ''), NULLIF(au.name, ''), au.email),
+                    'created_at', f.created_at
                   )
                   ORDER BY LOWER(COALESCE(NULLIF(su.fullname, ''), NULLIF(su.name, ''), su.email, CONCAT('Usuario #', su.id))) ASC
                 )
                   FROM work_management.followers f
                   JOIN public.users su ON su.id = f.user_id
+                  LEFT JOIN public.users au ON au.id = f.assigned_by
                  WHERE f.item_id = i.id
               ),
               '[]'::json
@@ -1816,86 +1821,89 @@ async function updateItemAssignees(itemId, payload, userId, role) {
   }
 }
 
-async function updateItemSupporters(itemId, payload, userId, role) {
+// Agrega UNA persona de apoyo (context obligatorio -- el pedido es que quien
+// se agrega como apoyo sepa exactamente que se le esta solicitando). Antes
+// existia un unico updateItemSupporters que reemplazaba TODA la lista de
+// apoyos en cada llamada (DELETE + re-INSERT); se reemplazo por
+// addItemSupporter/removeItemSupporter (uno a la vez) porque una vez que
+// cada apoyo tiene datos propios (context/assigned_by/created_at), reemplazar
+// toda la lista exige un merge fragil para no perder esos datos de los que ya
+// estaban, y abre una condicion de carrera real entre dos usuarios guardando
+// al mismo tiempo con una copia local desactualizada.
+async function addItemSupporter(itemId, payload, userId, role) {
   if (!isUuid(itemId)) {
     throw mkErr("itemId invalido", 400);
   }
 
-  const currentItem = await assertItemAccess(itemId, userId, role);
-  const supporterIds = normalizeUserIds(payload.support_user_ids || payload.supporter_user_ids);
+  const supporterId = Number(payload.supporter_user_id ?? payload.user_id);
+  if (!Number.isInteger(supporterId) || supporterId <= 0) {
+    throw mkErr("supporter_user_id invalido", 400);
+  }
 
-  if (supporterIds.length) {
-    const { rows: activeUsers } = await db.query(
-      `SELECT id
-         FROM public.users
-        WHERE id = ANY($1::int[])
-          AND COALESCE(active, true) = true`,
-      [supporterIds]
-    );
-    const activeIds = new Set(activeUsers.map((row) => Number(row.id)));
-    const invalidIds = supporterIds.filter((id) => !activeIds.has(id));
-    if (invalidIds.length) {
-      throw mkErr("Solo puedes asignar usuarios activos como apoyo", 400);
-    }
+  const context = String(payload.context || "").trim();
+  if (!context) {
+    throw mkErr("El contexto del apoyo solicitado es obligatorio", 400);
+  }
+
+  const currentItem = await assertItemAccess(itemId, userId, role);
+
+  const { rows: activeUsers } = await db.query(
+    `SELECT id
+       FROM public.users
+      WHERE id = $1
+        AND COALESCE(active, true) = true`,
+    [supporterId]
+  );
+  if (!activeUsers.length) {
+    throw mkErr("Solo puedes asignar usuarios activos como apoyo", 400);
   }
 
   const client = await db.getClient();
   let project = null;
-  let newlyAddedIds = [];
+  let isNewSupporter = false;
   try {
     await client.query("BEGIN");
 
-    const { rows: existingSupporters } = await client.query(
-      `SELECT user_id
-         FROM work_management.followers
-        WHERE item_id = $1`,
-      [itemId]
+    const { rows: insertRows } = await client.query(
+      `INSERT INTO work_management.followers
+        (item_id, user_id, context, assigned_by)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (item_id, user_id)
+       DO UPDATE SET context = EXCLUDED.context
+       RETURNING (xmax = 0) AS inserted`,
+      [itemId, supporterId, context, userId]
     );
-    const existingIds = new Set(existingSupporters.map((row) => Number(row.user_id)));
-    newlyAddedIds = supporterIds.filter((id) => !existingIds.has(id));
-
-    await client.query(`DELETE FROM work_management.followers WHERE item_id = $1`, [itemId]);
-
-    for (const supporterId of supporterIds) {
-      await client.query(
-        `INSERT INTO work_management.followers
-          (item_id, user_id)
-         VALUES ($1,$2)
-         ON CONFLICT (item_id, user_id) DO NOTHING`,
-        [itemId, supporterId]
-      );
-    }
+    isNewSupporter = Boolean(insertRows[0]?.inserted);
 
     // Un usuario asignado como apoyo debe poder ABRIR el item (para eso hace
     // falta ser miembro del workspace y del proyecto -- assertItemAccess lo
     // exige, ver linea 381). Sin esto, quedaba en la tabla followers pero no
     // podia ver el item ni el tablero. Se agrega como 'viewer' (rol minimo,
     // no editor) y solo al workspace/proyecto de ESTE item -- no a otros.
-    if (newlyAddedIds.length) {
+    // Solo si es realmente nuevo -- si ya era apoyo, ya tiene la membresia.
+    if (isNewSupporter) {
       const { rows: projectRows } = await client.query(
         `SELECT id, name, workspace_id FROM work_management.projects WHERE id = $1`,
         [currentItem.project_id]
       );
       project = projectRows[0] || null;
 
-      for (const supporterId of newlyAddedIds) {
-        if (project?.workspace_id) {
-          await client.query(
-            `INSERT INTO work_management.workspace_members
-              (workspace_id, user_id, member_role, created_by)
-             VALUES ($1,$2,'viewer',$3)
-             ON CONFLICT (workspace_id, user_id) DO NOTHING`,
-            [project.workspace_id, supporterId, userId]
-          );
-        }
+      if (project?.workspace_id) {
         await client.query(
-          `INSERT INTO work_management.project_members
-            (project_id, user_id, member_role, created_by)
+          `INSERT INTO work_management.workspace_members
+            (workspace_id, user_id, member_role, created_by)
            VALUES ($1,$2,'viewer',$3)
-           ON CONFLICT (project_id, user_id) DO NOTHING`,
-          [currentItem.project_id, supporterId, userId]
+           ON CONFLICT (workspace_id, user_id) DO NOTHING`,
+          [project.workspace_id, supporterId, userId]
         );
       }
+      await client.query(
+        `INSERT INTO work_management.project_members
+          (project_id, user_id, member_role, created_by)
+         VALUES ($1,$2,'viewer',$3)
+         ON CONFLICT (project_id, user_id) DO NOTHING`,
+        [currentItem.project_id, supporterId, userId]
+      );
     }
 
     await logActivity(client, {
@@ -1903,9 +1911,8 @@ async function updateItemSupporters(itemId, payload, userId, role) {
       board_id: currentItem.board_id,
       item_id: currentItem.id,
       actor_user_id: userId,
-      event_type: "item.supporters_updated",
-      old_data: { support_user_ids: existingSupporters.map((row) => row.user_id) },
-      new_data: { support_user_ids: supporterIds },
+      event_type: "item.supporter_added",
+      new_data: { supporter_user_id: supporterId, context, is_new: isNewSupporter },
     });
 
     await client.query("COMMIT");
@@ -1916,35 +1923,66 @@ async function updateItemSupporters(itemId, payload, userId, role) {
     client.release();
   }
 
-  if (newlyAddedIds.length) {
-    await Promise.all(newlyAddedIds.map(async (supporterId) => {
-      try {
-        await notificationManager.sendNotification({
-          userId: supporterId,
-          customTitle: "Te asignaron como apoyo",
-          customMessage:
-            `Fuiste asignado como apoyo en "${currentItem.title}"` +
-            (project?.name ? ` del proyecto "${project.name}".` : "."),
-          email: true,
-          chat: false,
-          priority: 0,
-          source: "work_management.item.supporter_assigned",
-          meta: {
-            projectId: currentItem.project_id,
-            itemId: currentItem.id,
-            itemTitle: currentItem.title,
-          },
-        });
-      } catch (error) {
-        logger.warn(
-          { error: error?.message || String(error), supporterId, itemId },
-          "No se pudo enviar notificacion de apoyo asignado"
-        );
-      }
-    }));
+  if (isNewSupporter) {
+    try {
+      await notificationManager.sendNotification({
+        userId: supporterId,
+        customTitle: "Te asignaron como apoyo",
+        customMessage:
+          `Fuiste asignado como apoyo en "${currentItem.title}"` +
+          (project?.name ? ` del proyecto "${project.name}".` : ".") +
+          `\n\nContexto solicitado: ${context}`,
+        email: true,
+        chat: false,
+        priority: 0,
+        source: "work_management.item.supporter_assigned",
+        meta: {
+          projectId: currentItem.project_id,
+          itemId: currentItem.id,
+          itemTitle: currentItem.title,
+          target_path: `/dashboard/work-management/projects/${currentItem.project_id}`,
+          cta_label: "Abrir en Work Management",
+        },
+      });
+    } catch (error) {
+      logger.warn(
+        { error: error?.message || String(error), supporterId, itemId },
+        "No se pudo enviar notificacion de apoyo asignado"
+      );
+    }
   }
 
-  return { item_id: itemId, support_user_ids: supporterIds };
+  return { item_id: itemId, supporter_user_id: supporterId, context, is_new: isNewSupporter };
+}
+
+async function removeItemSupporter(itemId, supporterUserId, userId, role) {
+  if (!isUuid(itemId)) {
+    throw mkErr("itemId invalido", 400);
+  }
+  const supporterId = Number(supporterUserId);
+  if (!Number.isInteger(supporterId) || supporterId <= 0) {
+    throw mkErr("supporterUserId invalido", 400);
+  }
+
+  const currentItem = await assertItemAccess(itemId, userId, role);
+
+  // Solo borra la fila de ESTA persona -- a diferencia del viejo
+  // updateItemSupporters, nunca toca el resto de los apoyos del item.
+  await db.query(
+    `DELETE FROM work_management.followers WHERE item_id = $1 AND user_id = $2`,
+    [itemId, supporterId]
+  );
+
+  await logActivity(db, {
+    project_id: currentItem.project_id,
+    board_id: currentItem.board_id,
+    item_id: currentItem.id,
+    actor_user_id: userId,
+    event_type: "item.supporter_removed",
+    old_data: { supporter_user_id: supporterId },
+  });
+
+  return { item_id: itemId, supporter_user_id: supporterId };
 }
 
 async function createItemComment(itemId, payload, userId, role) {
@@ -2662,7 +2700,8 @@ module.exports = {
   listAssigneeOptions,
   updateItem,
   updateItemAssignees,
-  updateItemSupporters,
+  addItemSupporter,
+  removeItemSupporter,
   createItemComment,
   createChecklistItem,
   updateChecklistItem,

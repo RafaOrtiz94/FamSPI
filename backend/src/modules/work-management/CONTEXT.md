@@ -60,7 +60,8 @@ Prefijo: `/api/v1/work-management`. Todos requieren JWT (`verifyToken`) + `modul
 | POST | `/groups/:groupId/items` | `createItem` |
 | PATCH | `/items/:itemId` | `updateItem` |
 | PUT | `/items/:itemId/assignees` | `updateItemAssignees` (valida que pertenezcan al workspace) |
-| PUT | `/items/:itemId/supporters` | `updateItemSupporters` (usuarios activos globales del SPI, sin restricción de workspace) |
+| POST | `/items/:itemId/supporters` | `addItemSupporter` (agrega UNA persona; `context` obligatorio; usuarios activos globales del SPI, sin restricción de workspace) |
+| DELETE | `/items/:itemId/supporters/:supporterUserId` | `removeItemSupporter` (quita solo esa persona, no toca al resto) |
 | POST | `/items/:itemId/comments` | `createItemComment` |
 | POST | `/items/:itemId/checklist-items` | `createChecklistItem` |
 | PATCH | `/checklist-items/:checklistItemId` | `updateChecklistItem` |
@@ -75,6 +76,7 @@ Prefijo: `/api/v1/work-management`. Todos requieren JWT (`verifyToken`) + `modul
 2. Dentro del workspace crea uno o más **proyectos** (`POST /workspaces/:workspaceId/projects`). `createDefaultBoard` + `insertDefaultGroups` generan automáticamente un tablero "General" con grupos por defecto al crear el proyecto.
 3. Alternativamente, un proyecto se origina desde una **oportunidad de CRM-Fam** (`POST /projects/from-opportunity/:opportunityId`, ver §6) — no duplica datos de la oportunidad, solo guarda `origin_entity_type='opportunity'`, `origin_entity_id`, `crm_account_id`, `crm_opportunity_id` y reutiliza nombre/descripción/fecha de cierre estimada. Antes de crear, verifica si ya existe un proyecto originado por esa misma oportunidad (evita duplicados).
 4. Dentro de un board, se crean **grupos** (`board_groups`) y dentro de cada grupo, **items** (`POST /groups/:groupId/items`) — tareas con responsable principal (`item_assignees`), apoyo/seguidores (`followers`), checklist (`checklists`/`checklist_items`, se crea un checklist por defecto al primer uso), comentarios/actualizaciones (`comments`) y adjuntos a Drive (`attachments`).
+   - **Apoyo (`followers`)**: `addItemSupporter` agrega una persona a la vez y exige `context` (texto no vacío) — qué se le está pidiendo. Guarda `assigned_by`/`created_at` en la misma fila. Si la persona es nueva (no tenía membresía), la enrola como `viewer` del workspace/proyecto y le manda una notificación por correo con el contexto incluido en el mensaje y un botón CTA (`meta.target_path = /dashboard/work-management/projects/:projectId`, reusa el mecanismo genérico de `notificationManager.js#generateEmailHTML`) — no re-notifica si ya era apoyo. `removeItemSupporter` borra solo esa fila (no re-escribe la lista completa, evita perder el `context` de los demás por una condición de carrera).
 5. Cada cambio de checklist recalcula `items.completion_pct` (`recalculateChecklistProgress`).
 6. Los items se pueden **reordenar** (`POST /items/:itemId/reorder`) dentro del mismo grupo o moviéndolos a otro, reescribiendo `sort_order` de forma transaccional (`rewriteItemSortOrders`).
 7. Toda mutación relevante queda en `work_management.work_activity_log` vía `logActivity` (no confundir con el `comments` de "actualizaciones" del usuario — son dos bitácoras distintas: una es de negocio/usuario, otra es de sistema).
@@ -84,7 +86,7 @@ Prefijo: `/api/v1/work-management`. Todos requieren JWT (`verifyToken`) + `modul
 
 **No existe ningún archivo en `backend/migrations/` que cree el schema `work_management` base ni la mayoría de sus tablas.** Las tablas (`workspaces`, `workspace_members`, `projects`, `project_members`, `boards`, `board_groups`, `items`, `item_assignees`, `followers`, `checklists`, `checklist_items`, `comments`, `attachments`, `work_activity_log`, entre otras referenciadas en `workManagement.service.js`) existen directamente en Neon, aparentemente creadas fuera del flujo de migraciones versionadas del repo. **Antes de tocar cualquier columna nueva o de aprovisionar un ambiente nuevo, confirmar el esquema real contra Neon (`information_schema`) — no asumir que `backend/migrations/` es la fuente completa de verdad para este módulo**, a diferencia del resto del sistema.
 
-`backend/migrations/298_work_management_crm_activity_sync.sql` es la **primera** migración versionada que toca este schema (agrega `items.crm_activity_id`, aditivo/nullable) — no reconstruye el resto del esquema, solo ese incremento puntual. No asumir que aplicar las migraciones del repo desde cero en un ambiente nuevo reproduce `work_management` completo.
+`backend/migrations/298_work_management_crm_activity_sync.sql` (agrega `items.crm_activity_id`) y `299_work_management_followers_context.sql` (agrega `followers.context`/`assigned_by`/`created_at`) son las únicas migraciones versionadas que tocan este schema — incrementos puntuales, no reconstruyen el resto del esquema. No asumir que aplicar las migraciones del repo desde cero en un ambiente nuevo reproduce `work_management` completo.
 
 Relaciones externas verificadas (documentadas ya antes de esta actualización, siguen vigentes):
 - `public.users(id)`
@@ -116,7 +118,7 @@ API client: `spi_front/src/core/api/workManagementApi.js` (6.4 KB — mucho más
 
 ## 8. Tests
 
-`backend/src/modules/work-management/__tests__/`: `workManagement.helpers.test.js`, `workManagement.createItem.test.js`, `workManagement.updateItemSupporters.test.js`, `workManagement.portfolio.test.js`, `workManagement.workspaceManagerAccess.test.js`, `workManagement.crmActivitySync.test.js` (cubre `syncCrmActivityForItem` vía `createItem`/`updateItem`/`deleteItem`, incluido el caso de fallo silencioso). Cobertura parcial — no hay tests para `createProjectFromOpportunity`, checklist, comments, attachments ni reorder.
+`backend/src/modules/work-management/__tests__/`: `workManagement.helpers.test.js`, `workManagement.createItem.test.js`, `workManagement.itemSupporters.test.js` (cubre `addItemSupporter`/`removeItemSupporter`; reemplaza al viejo `workManagement.updateItemSupporters.test.js`, eliminado junto con la función), `workManagement.portfolio.test.js`, `workManagement.workspaceManagerAccess.test.js`, `workManagement.crmActivitySync.test.js` (cubre `syncCrmActivityForItem` vía `createItem`/`updateItem`/`deleteItem`, incluido el caso de fallo silencioso). Cobertura parcial — no hay tests para `createProjectFromOpportunity`, checklist, comments, attachments ni reorder.
 
 ## 9. Riesgos y notas técnicas
 
@@ -126,3 +128,5 @@ API client: `spi_front/src/core/api/workManagementApi.js` (6.4 KB — mucho más
 - **`board_type` es un campo persistido pero sin efecto visual** (ver §7) — confirmado en código, no en documentación de terceros.
 - **Gran distancia entre la URS/plan de la raíz del repo y el código real**: sprints, backlog ágil, historias de usuario, Gantt, calendario, automatizaciones, registro de tiempo, WIP limits, plantillas versionadas y el outbox de integración con SPI (`INT-SPI-*`) están descritos en detalle en `Requerimientos_CRM_Work_Management_SPI.md` pero **no implementados**. Tratar esos documentos como backlog/visión, no como documentación del estado actual.
 - `followers`/"Apoyo" no está restringido a miembros del workspace (a diferencia de `item_assignees`/"Responsable", que sí valida pertenencia en `assertWorkspaceAssigneeIds`) — es asimétrico a propósito según el código, pero vale confirmarlo como decisión de producto antes de "corregirlo" como si fuera inconsistencia.
+- `followers.context`/`assigned_by`/`created_at` (migración 299) son nullable — filas creadas antes de esa migración quedan con los tres campos en `NULL`; el frontend (`SupportContextModal` en `WorkManagementPage.jsx`) muestra "Sin contexto registrado"/"Sin datos" para esos casos, no se hizo backfill.
+- Quitar un apoyo (`removeItemSupporter`) no revoca la membresía `viewer` que quedó en `workspace_members`/`project_members` al agregarlo — comportamiento heredado del `updateItemSupporters` original, no introducido por el split a endpoints granulares.
