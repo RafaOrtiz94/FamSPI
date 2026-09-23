@@ -17,7 +17,11 @@ const EDIT_ROLES = new Set([
   "jefe_operaciones",
   "jefe_servicio",
   "jefe_logistica",
+  "jefe_ti", // BC-10: puede ver y agregar items al carrito
 ]);
+
+const isSameEmail = (a, b) =>
+  Boolean(a && b && String(a).trim().toLowerCase() === String(b).trim().toLowerCase());
 
 const getNaturalErrorMessage = (err, fallback) => {
   const raw = String(err?.response?.data?.message || "").trim();
@@ -46,7 +50,7 @@ const buildInvestmentBlocker = ({ permissions = {}, ownership = {}, requiresStat
     return {
       code: "INVESTMENT_ROLE_REQUIRED",
       title: "Tu rol no edita inversiones",
-      message: "Solo ACP Comercial, Jefe Comercial, Jefe de Operaciones, Jefe de Servicio y Jefe de Logistica pueden editar la lista.",
+      message: "Solo ACP Comercial, Jefe Comercial, Jefe de Operaciones, Jefe de Servicio, Jefe de Logistica y Jefe de TI pueden editar la lista.",
       detail: "Puedes ver la lista en modo lectura.",
     };
   }
@@ -517,6 +521,15 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
               <> — cantidad actual: <span className="font-semibold text-slate-900">{Number(qtyModal.item?.quantity)}</span></>
             )}
           </p>
+          {isSameEmail(qtyModal.item?.owner_email, user?.email) ? (
+            <p className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+              Agregaste esta inversion: puedes aumentarla, disminuirla o dejarla en 0.
+            </p>
+          ) : Number(qtyModal.item?.quantity) > 0 ? (
+            <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+              Solo quien agrego esta inversion puede disminuirla — vos solo podes aumentarla.
+            </p>
+          ) : null}
           <div className="space-y-2">
             <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Cantidad</label>
             <input

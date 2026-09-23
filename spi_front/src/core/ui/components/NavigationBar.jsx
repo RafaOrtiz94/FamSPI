@@ -582,6 +582,14 @@ const getPriorityGroups = (scope, role, auditActive, extraRoles = []) => {
     groups.secondary.push(workManagementLink);
     if (auditActive) groups.primary.push(auditPrepLink);
     groups.secondary.push(...crmFamLinks);
+    // jefe_ti (BC-10): puede ver y agregar items al carrito de inversiones
+    // adicionales del Business Case (ver businessCaseRoles/INVESTMENT_EDIT_ROLES
+    // en backend/src/modules/business-case). No se extiende a "ti"/"admin_ti":
+    // esos roles no estan en businessCaseRoles del backend, mostrarles el link
+    // los mandaria a un 403.
+    if (["jefe_ti"].includes(scope) || role.includes("jefe_ti")) {
+      groups.secondary.push(businessCaseLink);
+    }
   }
 
   // âš™ï¸ OPERACIONES - Procesos operativos

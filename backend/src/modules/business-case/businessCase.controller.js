@@ -260,6 +260,7 @@ const INVESTMENT_EDIT_ROLES = new Set([
   "jefe_operaciones",
   "jefe_servicio",
   "jefe_logistica",
+  "jefe_ti", // BC-10: puede ver y agregar items al carrito
 ]);
 const INVESTMENT_COMPLETE_ROLES = new Set([
   "acp_comercial",

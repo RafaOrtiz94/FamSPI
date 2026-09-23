@@ -48,4 +48,40 @@ describe("investment selection quantity can go up or down, including 0", () => {
 
     expect(result.quantity).toBe(10);
   });
+
+  it("rejects a lower quantity from someone other than the owner, even with an edit-enabled role", async () => {
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: 1, quantity: 5, owner_email: "comercial@fam-project.com" }],
+    });
+
+    await expect(
+      investments.upsertInvestmentSelection(
+        "bc-1",
+        { catalog_id: 42, quantity: 2, characteristics: "x" },
+        { role: "jefe_logistica", email: "logistica@fam-project.com" },
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "INVESTMENT_QUANTITY_CANNOT_DECREASE",
+    });
+
+    expect(db.query).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows the owner (whoever added the investment) to decrease the quantity, even down to 0", async () => {
+    db.query
+      .mockResolvedValueOnce({
+        rows: [{ id: 1, quantity: 5, owner_email: "comercial@fam-project.com" }],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: 1, catalog_id: 42, quantity: 0, selected: false }] });
+
+    const result = await investments.upsertInvestmentSelection(
+      "bc-1",
+      { catalog_id: 42, quantity: 0, characteristics: "x" },
+      { role: "comercial", email: "Comercial@Fam-Project.com" }, // case-insensitive on purpose
+    );
+
+    expect(result.quantity).toBe(0);
+    expect(db.query).toHaveBeenCalledTimes(2);
+  });
 });

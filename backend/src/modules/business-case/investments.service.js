@@ -188,7 +188,7 @@ async function createInvestmentCatalogItem(payload) {
 
 async function getInvestmentSelections(businessCaseId) {
     const { rows } = await db.query(
-        `SELECT catalog_id, selected, notes, quantity, characteristics, unit_price, unit_price_financial, depreciation_percentage, updated_by_role, updated_by_email
+        `SELECT catalog_id, selected, notes, quantity, characteristics, unit_price, unit_price_financial, depreciation_percentage, updated_by_role, updated_by_email, owner_email, owner_role
          FROM bc_investment_selections
          WHERE business_case_id = $1`,
         [businessCaseId]
@@ -207,7 +207,9 @@ async function getCatalogWithSelections(businessCaseId) {
                 s.unit_price_financial,
                 s.depreciation_percentage,
                 s.updated_by_role,
-                s.updated_by_email
+                s.updated_by_email,
+                s.owner_email,
+                s.owner_role
          FROM bc_investment_catalog c
          LEFT JOIN bc_investment_selections s
            ON s.catalog_id = c.id
