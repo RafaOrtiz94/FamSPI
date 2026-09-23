@@ -29,6 +29,7 @@
  *   BC-12: investment_values → solo jefe_operaciones y jefe_financiero; resto fuera de visible
  *   BC-14: feasibility → jefe_financiero y jefe_ti ven el resultado
  *   BC-15: emergency-transition → gerencia y gerencia_general tienen mismo nivel
+ *   BC-16: investment_values → jefe_ti ve y edita precios financieros y operativos (ambas clases)
  */
 
 export const ROLE_SECTION_CONFIG = {
@@ -268,10 +269,13 @@ export const ROLE_SECTION_CONFIG = {
   jefe_ti: {
     visible: [
       "general", "lab", "equipment", "lis", "determinations",
-      "investments", "feasibility",
+      "investments",
+      "investment_values",  // acceso a precios financieros y operativos
+      "feasibility",
     ],
     canEdit: [
-      "investments",  // BC-10: puede agregar ítems al carrito
+      "investments",        // BC-10: puede agregar ítems al carrito
+      "investment_values",  // edita valores operativos y financieros (ambas clases)
     ],
   },
 

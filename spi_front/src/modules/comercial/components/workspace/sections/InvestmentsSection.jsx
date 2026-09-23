@@ -19,6 +19,11 @@ const EDIT_ROLES = new Set([
   "jefe_logistica",
   "jefe_ti", // BC-10: puede ver y agregar items al carrito
 ]);
+// Capacidad puntual otorgada a un usuario especifico via extra_roles del JWT
+// (mismo patron que "bc_quality_summary" para lorena.loaiza) sin cambiar su
+// rol principal ni extender EDIT_ROLES a todo su rol. Debe coincidir con
+// INVESTMENT_EDIT_EXTRA_ROLE en businessCase.controller.js.
+const EDIT_EXTRA_ROLE = "bc_investment_edit";
 
 const isSameEmail = (a, b) =>
   Boolean(a && b && String(a).trim().toLowerCase() === String(b).trim().toLowerCase());
@@ -104,7 +109,8 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
   const requiresStatDocument = ownership?.metadata?.requires_stat_document === true;
   const statDocumentUploaded = ownership?.metadata?.stat_document_uploaded === true;
   const currentRole = String(user?.role || user?.scope || user?.role_name || "").trim().toLowerCase();
-  const canEditRole = EDIT_ROLES.has(currentRole);
+  const canEditRole = EDIT_ROLES.has(currentRole)
+    || (Array.isArray(user?.extra_roles) && user.extra_roles.includes(EDIT_EXTRA_ROLE));
   const explicitCanEditInvestments = permissions.canEditInvestments;
   const canEdit = canEditRole
     && ownership?.canUserEdit !== false

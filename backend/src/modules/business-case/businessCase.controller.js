@@ -249,19 +249,13 @@ const DETERMINATIONS_SHEET_ITEM_TYPES = {
 const INVESTMENT_VALUES_OP_ROLES = new Set([
   "jefe_operaciones",
   "jefe_de_operaciones",
+  "jefe_ti",
 ]);
-const INVESTMENT_VALUES_FIN_ROLES = new Set(["jefe_financiero"]);
+const INVESTMENT_VALUES_FIN_ROLES = new Set(["jefe_financiero", "jefe_ti"]);
 // Edicion en paralelo de la lista de inversiones (sin carrito ni dueno por
 // item): estos son los unicos roles que pueden agregar items o cambiar
 // cantidades/caracteristicas.
-const INVESTMENT_EDIT_ROLES = new Set([
-  "acp_comercial",
-  "jefe_comercial",
-  "jefe_operaciones",
-  "jefe_servicio",
-  "jefe_logistica",
-  "jefe_ti", // BC-10: puede ver y agregar items al carrito
-]);
+const { INVESTMENT_EDIT_ROLES, hasInvestmentEditRole } = require("./investmentEditAccess");
 const INVESTMENT_COMPLETE_ROLES = new Set([
   "acp_comercial",
   "jefe_comercial",
@@ -444,7 +438,7 @@ function resolveRequestRole(req) {
 // Carrito eliminado: acp_comercial, jefe_comercial,
 // jefe_operaciones, jefe_servicio y jefe_logistica editan la lista de
 // inversiones en paralelo, sin dueno por item ni confirmacion que bloquee.
-async function assertInvestmentsEditable(businessCase, role = "unknown") {
+async function assertInvestmentsEditable(businessCase, role = "unknown", extraRoles = []) {
   const currentDocument = businessCase?.id
     ? await determinationsGateService.getCurrentDocument(businessCase.id)
     : null;
@@ -459,7 +453,7 @@ async function assertInvestmentsEditable(businessCase, role = "unknown") {
     error.code = "INVESTMENT_STAT_DOCUMENT_REQUIRED";
     throw error;
   }
-  if (!INVESTMENT_EDIT_ROLES.has(role)) {
+  if (!hasInvestmentEditRole(role, extraRoles)) {
     const error = new Error("No tienes permisos para editar la lista de inversiones.");
     error.status = 403;
     error.code = "INVESTMENT_ROLE_REQUIRED";
@@ -2562,7 +2556,7 @@ async function saveInvestmentSelection(req, res) {
     await businessCaseService.assertModernBusinessCase(id);
     const bc = await businessCaseService.getBusinessCaseById(id);
     const role = resolveRequestRole(req);
-    await assertInvestmentsEditable(bc, role);
+    await assertInvestmentsEditable(bc, role, req.user?.extra_roles);
     const canEditPrice = ["jefe_operaciones", "jefe_de_operaciones"].includes(role);
     const isBatch = Array.isArray(req.body?.selections);
     const payload = isBatch
@@ -2717,7 +2711,7 @@ async function createInvestmentCatalogItem(req, res) {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
     const bc = await businessCaseService.getBusinessCaseById(id);
-    await assertInvestmentsEditable(bc, resolveRequestRole(req));
+    await assertInvestmentsEditable(bc, resolveRequestRole(req), req.user?.extra_roles);
     const catalog = await investmentsService.createInvestmentCatalogItem(req.body);
     let selection = null;
     if (req.body?.selected !== false) {
@@ -3981,7 +3975,9 @@ async function getUIGuidance(req, res) {
       currentDocument: currentStatDocument,
     });
     const canEditInvestments = Boolean(
-      determinationsGate.documentUploaded && INVESTMENT_EDIT_ROLES.has(userRole) && isPublicBusinessCaseFlow,
+      determinationsGate.documentUploaded
+      && hasInvestmentEditRole(userRole, req.user?.extra_roles)
+      && isPublicBusinessCaseFlow,
     );
     const canEditDeterminations = Boolean(determinationsGate.permissions.canEditDeterminations);
     const offerGroups = Array.isArray(offerWorkspace?.offer_groups) ? offerWorkspace.offer_groups : [];
