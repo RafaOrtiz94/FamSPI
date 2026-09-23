@@ -24,9 +24,17 @@ gerencia, gerencia_general
 `investmentRoles = businessCaseRoles` (mismo array, por referencia) — ya NO es un
 subconjunto propio como documentaba esta sección antes. Todos los participantes
 del BC ven la lista de inversiones; quién puede *editarla en paralelo* (sin
-carrito) lo filtra el controller vía `INVESTMENT_EDIT_ROLES` (acp_comercial,
-jefe_comercial, jefe_operaciones, jefe_servicio,
-jefe_logistica), no el middleware de rutas.
+carrito) lo filtra el controller vía `hasInvestmentEditRole` (`investmentEditAccess.js`,
+extraído de `businessCase.controller.js` porque este último arrastra una cadena
+de requires que rompe bajo Jest por un problema preexistente de `uuid`/ESM en
+`equipmentPurchases.service.js` — ver `__tests__/investmentEditAccess.test.js`).
+`INVESTMENT_EDIT_ROLES` (acp_comercial, jefe_comercial, jefe_operaciones,
+jefe_servicio, jefe_logistica, jefe_ti) cubre el caso normal. Además, un
+usuario puntual sin ninguno de esos roles puede recibir la misma capacidad vía
+`extra_roles=["bc_investment_edit"]` en el JWT (mismo mecanismo que
+`bc_quality_summary` abajo) — usado para alexandra.molina (jefe_financiero).
+El frontend espeja esta misma lógica en `InvestmentsSection.jsx`
+(`EDIT_ROLES` + `EDIT_EXTRA_ROLE`).
 
 ### bc_quality_summary (vista de solo-lectura del resumen del BC)
 `GET /quality-summary` y `GET /:id/quality-summary/items` — roles
@@ -37,9 +45,14 @@ Da acceso de solo lectura al resumen, no al workspace completo.
 
 ### investmentValuesRoles (ver/guardar valores de inversión)
 ```
-jefe_operaciones, jefe_de_operaciones, jefe_financiero,
+jefe_operaciones, jefe_de_operaciones, jefe_financiero, jefe_ti,
 gerencia, gerencia_general, jefe_comercial
 ```
+`jefe_ti` es el único rol con acceso a **ambas** clases (`INVESTMENT_VALUES_OP_ROLES`
+y `INVESTMENT_VALUES_FIN_ROLES` incluyen `jefe_ti`) — jefe_operaciones y
+jefe_financiero solo editan la suya. Espejo en frontend: `OPERATIONAL_ROLES`/
+`FINANCIAL_ROLES` en `InvestmentValuesUnifiedSection.jsx` y `roleSectionConfig.js#jefe_ti`
+(sección `investment_values` agregada a `visible`/`canEdit`).
 
 ### adminRoles (operaciones de catálogo/admin)
 ```

@@ -6,8 +6,10 @@ import { useAuth } from "../../../../../core/auth/AuthContext";
 import { useUI } from "../../../../../core/ui/UIContext";
 import SectionEditorBadge from "../SectionEditorBadge";
 
-const OPERATIONAL_ROLES = new Set(["jefe_operaciones", "jefe_de_operaciones"]);
-const FINANCIAL_ROLES = new Set(["jefe_financiero"]);
+// jefe_ti tiene acceso a ambas clases de precios (financieros y operativos),
+// a diferencia de jefe_operaciones/jefe_financiero que solo editan la suya.
+const OPERATIONAL_ROLES = new Set(["jefe_operaciones", "jefe_de_operaciones", "jefe_ti"]);
+const FINANCIAL_ROLES = new Set(["jefe_financiero", "jefe_ti"]);
 
 const money = (value) =>
   Number(value || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });

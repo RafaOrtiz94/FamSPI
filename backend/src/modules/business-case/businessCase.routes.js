@@ -47,6 +47,7 @@ const investmentValuesRoles = [
   "jefe_operaciones",
   "jefe_de_operaciones",
   "jefe_financiero",
+  "jefe_ti",              // acceso a precios financieros y operativos (ambas clases)
   "gerencia",
   "gerencia_general",
   "jefe_comercial",       // BC-12: puede VER valores (no guardar — validar en servicio)
