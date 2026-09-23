@@ -6,13 +6,37 @@
 const db = require('../../config/db');
 const logger = require('../../config/logger');
 
-// Edicion en paralelo sin dueno por item: cualquier rol habilitado puede
-// subir o bajar la cantidad, incluido 0 (retiro la restriccion anterior
-// de "solo aumentar" a pedido explicito de negocio -- 2026-09-22). Sigue
-// existiendo el riesgo de que dos ediciones concurrentes se pisen entre
-// si porque el guardado es un upsert que reemplaza la cantidad completa;
-// no se agrego control de concurrencia (expected_updated_at) porque no
-// se pidio.
+// Edicion en paralelo sin dueno por item: la proteccion contra pisar el
+// trabajo de otro es que la cantidad nunca puede bajar, solo subir --
+// EXCEPTO para quien agrego esa inversion originalmente (bc_investment_
+// selections.owner_email, seteado en el primer INSERT y preservado en cada
+// UPDATE posterior via COALESCE). Esa persona si puede disminuirla o
+// dejarla en 0; cualquier otro rol habilitado solo puede aumentarla.
+//
+// NOTA: esta funcion y su uso en upsertInvestmentSelection/
+// upsertInvestmentSelectionsBatch habian sido eliminados por completo en un
+// cambio anterior (comentario que decia "retirado a pedido de negocio,
+// 2026-09-22") dejando solo el aviso visual en el frontend sin ningun
+// bloqueo real detras. Se restauro a pedido explicito del usuario
+// (2026-09-23): el mensaje debe bloquear de verdad, no solo mostrarse.
+function assertQuantityCanOnlyIncrease(existingQuantity, incomingQuantity, catalogId, { ownerEmail, actingUser } = {}) {
+    const existing = Number(existingQuantity ?? 0);
+    const incoming = Number(incomingQuantity ?? 0);
+    if (existing <= 0 || incoming >= existing) return;
+
+    const isOwner = Boolean(
+        ownerEmail
+        && actingUser?.email
+        && String(ownerEmail).trim().toLowerCase() === String(actingUser.email).trim().toLowerCase(),
+    );
+    if (isOwner) return;
+
+    const error = new Error("Solo quien agregó esta inversión puede disminuirla, usted solo puede aumentarla.");
+    error.status = 409;
+    error.code = "INVESTMENT_QUANTITY_CANNOT_DECREASE";
+    error.detail = `catalog_id=${catalogId}, actual=${existing}, enviado=${incoming}`;
+    throw error;
+}
 
 function calculateFinancialDepreciation({ unitPrice, percentage, projectedMonths }) {
     const base = Number(unitPrice);
@@ -230,6 +254,17 @@ async function upsertInvestmentSelection(businessCaseId, data, user) {
         throw error;
     }
 
+    const { rows: existingRows } = await db.query(
+        `SELECT id, quantity, owner_email
+         FROM bc_investment_selections
+         WHERE business_case_id = $1
+           AND catalog_id = $2
+         LIMIT 1`,
+        [businessCaseId, catalog_id]
+    );
+    const existing = existingRows[0] || null;
+    assertQuantityCanOnlyIncrease(existing?.quantity, quantity, catalog_id, { ownerEmail: existing?.owner_email, actingUser: user });
+
     // Edicion en paralelo: sin carrito ni dueno por item -- cualquier rol
     // habilitado puede tocar cualquier inversion. "Seleccionada" se deriva
     // de la cantidad, no de un checkbox manual.
@@ -289,6 +324,16 @@ async function upsertInvestmentSelectionsBatch(businessCaseId, selections = [], 
                 throw error;
             }
 
+            const { rows: existingRows } = await client.query(
+                `SELECT id, quantity, owner_email
+                 FROM bc_investment_selections
+                 WHERE business_case_id = $1
+                   AND catalog_id = $2
+                 LIMIT 1`,
+                [businessCaseId, catalog_id]
+            );
+            const existing = existingRows[0] || null;
+            assertQuantityCanOnlyIncrease(existing?.quantity, quantity, catalog_id, { ownerEmail: existing?.owner_email, actingUser: user });
             const selected = Number(quantity) > 0;
 
             const { rows } = await client.query(

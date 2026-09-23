@@ -4,41 +4,38 @@ jest.mock("../../../config/logger", () => ({ info: jest.fn(), warn: jest.fn(), e
 const db = require("../../../config/db");
 const investments = require("../investments.service");
 
-// La cantidad puede subir o bajar libremente, incluido 0 (se retiro la
-// restriccion de "solo aumentar" a pedido explicito de negocio, 2026-09-22).
-describe("investment selection quantity can go up or down, including 0", () => {
+// Sin carrito ni dueno por item: la proteccion contra pisar el trabajo de
+// otro es que la cantidad nunca puede bajar, solo subir -- EXCEPTO para
+// quien agrego esa inversion originalmente (owner_email), que si puede
+// disminuirla o dejarla en 0. Esta restriccion habia sido eliminada por
+// completo en un cambio anterior (dejando solo el aviso visual sin bloqueo
+// real); se restauro a pedido explicito del usuario (2026-09-23).
+describe("investment selection quantity is monotonic except for its owner", () => {
   beforeEach(() => {
     db.query.mockReset();
   });
 
-  it("allows lowering a quantity that was already saved", async () => {
-    db.query.mockResolvedValueOnce({ rows: [{ id: 1, catalog_id: 42, quantity: 3, selected: true }] }); // upsert result
+  it("rejects a lower quantity than the one already saved, from a non-owner", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: 1, quantity: 5, owner_email: null }] }); // existing row
 
-    const result = await investments.upsertInvestmentSelection(
-      "bc-1",
-      { catalog_id: 42, quantity: 3, characteristics: "x" },
-      { role: "jefe_logistica", email: "logistica@fam-project.com" },
-    );
+    await expect(
+      investments.upsertInvestmentSelection(
+        "bc-1",
+        { catalog_id: 42, quantity: 3, characteristics: "x" },
+        { role: "jefe_logistica", email: "logistica@fam-project.com" },
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "INVESTMENT_QUANTITY_CANNOT_DECREASE",
+    });
 
-    expect(result.quantity).toBe(3);
-    expect(db.query).toHaveBeenCalledTimes(1); // sin lookup previo, upsert directo
-  });
-
-  it("allows setting the quantity to 0", async () => {
-    db.query.mockResolvedValueOnce({ rows: [{ id: 1, catalog_id: 42, quantity: 0, selected: false }] });
-
-    const result = await investments.upsertInvestmentSelection(
-      "bc-1",
-      { catalog_id: 42, quantity: 0, characteristics: null },
-      { role: "jefe_logistica", email: "logistica@fam-project.com" },
-    );
-
-    expect(result.quantity).toBe(0);
-    expect(result.selected).toBe(false);
+    expect(db.query).toHaveBeenCalledTimes(1); // never reached the INSERT
   });
 
   it("allows a higher quantity than the one already saved", async () => {
-    db.query.mockResolvedValueOnce({ rows: [{ id: 1, catalog_id: 42, quantity: 10, selected: true }] });
+    db.query
+      .mockResolvedValueOnce({ rows: [{ id: 1, quantity: 5, owner_email: null }] }) // existing row
+      .mockResolvedValueOnce({ rows: [{ id: 1, catalog_id: 42, quantity: 10, selected: true }] }); // upsert result
 
     const result = await investments.upsertInvestmentSelection(
       "bc-1",
@@ -47,6 +44,7 @@ describe("investment selection quantity can go up or down, including 0", () => {
     );
 
     expect(result.quantity).toBe(10);
+    expect(db.query).toHaveBeenCalledTimes(2);
   });
 
   it("rejects a lower quantity from someone other than the owner, even with an edit-enabled role", async () => {

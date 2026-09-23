@@ -161,12 +161,18 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
 
   const submitQtyModal = () => {
     if (!qtyModal.item) return;
+    const isOwner = isSameEmail(qtyModal.item.owner_email, user?.email);
+    const currentQty = Number(qtyModal.item.quantity ?? 0);
     const nextQty = Number(qtyModal.quantity);
-    if (!Number.isFinite(nextQty) || nextQty < 0) {
+    if (!Number.isFinite(nextQty) || nextQty < 0 || (!isOwner && nextQty <= 0)) {
       showToast("Ingresa una cantidad valida.", "warning");
       return;
     }
-    // Cantidad 0 es valida: retira el item de la lista (selected pasa a false en el backend).
+    if (!isOwner && currentQty > 0 && nextQty < currentQty) {
+      showToast("Solo quien agregó esta inversión puede disminuirla, usted solo puede aumentarla.", "warning");
+      return;
+    }
+    // Cantidad 0 es valida (solo para el dueno): retira el item de la lista (selected pasa a false en el backend).
     const characteristics = qtyModal.characteristics.trim();
     if (nextQty > 0 && !characteristics) {
       showToast("Ingresa las caracteristicas de la inversion.", "warning");
@@ -174,7 +180,7 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
     }
     const targetId = qtyModal.item.id;
     setItems((prev) => prev.map((row) => (row.id === targetId
-      ? { ...row, quantity: nextQty, characteristics, notes: qtyModal.notes.trim() || null, selected: true }
+      ? { ...row, quantity: nextQty, characteristics, notes: qtyModal.notes.trim() || null, selected: nextQty > 0 }
       : row)));
     markDirty(targetId);
     setQtyModal({ open: false, item: null, quantity: "", characteristics: "", notes: "", submitting: false });
@@ -527,14 +533,14 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
             </p>
           ) : Number(qtyModal.item?.quantity) > 0 ? (
             <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
-              Solo quien agrego esta inversion puede disminuirla — vos solo podes aumentarla.
+              Solo quien agregó esta inversión puede disminuirla, usted solo puede aumentarla.
             </p>
           ) : null}
           <div className="space-y-2">
             <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Cantidad</label>
             <input
               type="number"
-              min={0}
+              min={isSameEmail(qtyModal.item?.owner_email, user?.email) ? 0 : Number(qtyModal.item?.quantity ?? 0)}
               value={qtyModal.quantity}
               onChange={(event) => setQtyModal((prev) => ({ ...prev, quantity: event.target.value }))}
               className="min-h-[44px] w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:ring-2 focus:ring-sky-200"
