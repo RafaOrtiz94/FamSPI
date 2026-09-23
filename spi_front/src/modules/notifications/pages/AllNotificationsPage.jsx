@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { getNotificationCtaLabel, resolveNotificationTargetPath } from "../../../core/ui/notificationTarget";
 import {
   FiBell,
   FiCheckCircle,
@@ -10,6 +11,7 @@ import {
   FiCalendar,
   FiFileText,
   FiZap,
+  FiArrowRight,
   FiX,
   FiCheck,
   FiTrash2,
@@ -119,24 +121,7 @@ export default function AllNotificationsPage() {
   const unreadCount = useMemo(() => allNotifs.filter((n) => !n.cleared_at && n.status !== "read").length, [allNotifs]);
   const clearedCount = useMemo(() => allNotifs.filter((n) => n.cleared_at).length, [allNotifs]);
 
-  const resolveTargetPath = (notification) => {
-    const metaPath = getMetaValue(notification, ["target_path", "targetPath", "url", "path", "redirect_to"]);
-    if (metaPath) return metaPath;
-    const source = normalizeSource(notification?.source);
-    // La alerta de SLA vencido solo informa el incumplimiento; no debe
-    // ofrecer acceso directo al BC. El responsable entra mediante la
-    // solicitud de prorroga cuando corresponda.
-    if (source === "business_case.preflow.expiry") return null;
-    const purchaseId = getMetaValue(notification, ["purchase_id", "purchaseId"]);
-    const requestId = getMetaValue(notification, ["request_id", "requestId"]);
-    const solicitudId = getMetaValue(notification, ["solicitud_id", "solicitudId"]);
-    const bcId = getMetaValue(notification, ["business_case_id", "businessCaseId", "bc_id"]);
-    if (source.startsWith("private_purchase") && purchaseId) return `/dashboard/purchases/workspace?tab=private&requestId=${purchaseId}&requestType=private`;
-    if (source.startsWith("equipment_purchase") && requestId) return `/dashboard/purchases/workspace?tab=public&requestId=${requestId}&requestType=public`;
-    if ((source.startsWith("permisos_vacaciones") || source.startsWith("vacaciones")) && solicitudId) return `/dashboard/talento-humano/permisos?solicitudId=${solicitudId}`;
-    if (source.startsWith("business_case") && bcId) return `/dashboard/business-case/workspace/${bcId}`;
-    return null;
-  };
+  const resolveTargetPath = resolveNotificationTargetPath;
 
   const handleItemClick = async (notification) => {
     if (notification.cleared_at) return;
@@ -388,6 +373,19 @@ export default function AllNotificationsPage() {
                     <p className={`mt-0.5 text-xs line-clamp-2 ${isCleared ? "text-[#D1D5DB]" : "text-[#6B7280]"}`}>
                       {notif.message}
                     </p>
+                  )}
+                  {hasTarget && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleItemClick(notif);
+                      }}
+                      className="mt-2 inline-flex min-h-[32px] cursor-pointer items-center gap-1 rounded-lg bg-[#1F2937] px-3 py-1 text-xs font-semibold text-white transition hover:bg-[#374151]"
+                    >
+                      {getNotificationCtaLabel(notif)}
+                      <FiArrowRight size={12} />
+                    </button>
                   )}
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     <p className="font-mono text-[11px] text-[#9CA3AF]">{fmt(notif.created_at)}</p>

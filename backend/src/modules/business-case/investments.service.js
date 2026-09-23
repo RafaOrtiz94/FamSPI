@@ -6,21 +6,13 @@
 const db = require('../../config/db');
 const logger = require('../../config/logger');
 
-// Edicion en paralelo sin dueno por item: la unica proteccion contra
-// pisar el trabajo de otro es que la cantidad nunca puede bajar, solo
-// subir. Quitar/reducir una inversion queda fuera de este flujo.
-function assertQuantityCanOnlyIncrease(existingQuantity, incomingQuantity, catalogId) {
-    const existing = Number(existingQuantity ?? 0);
-    const incoming = Number(incomingQuantity ?? 0);
-    if (existing > 0 && incoming < existing) {
-        const error = new Error(
-            `La cantidad no puede disminuir (catalog_id=${catalogId}): actual ${existing}, enviado ${incoming}. Solo se puede aumentar.`,
-        );
-        error.status = 409;
-        error.code = "INVESTMENT_QUANTITY_CANNOT_DECREASE";
-        throw error;
-    }
-}
+// Edicion en paralelo sin dueno por item: cualquier rol habilitado puede
+// subir o bajar la cantidad, incluido 0 (retiro la restriccion anterior
+// de "solo aumentar" a pedido explicito de negocio -- 2026-09-22). Sigue
+// existiendo el riesgo de que dos ediciones concurrentes se pisen entre
+// si porque el guardado es un upsert que reemplaza la cantidad completa;
+// no se agrego control de concurrencia (expected_updated_at) porque no
+// se pidio.
 
 function calculateFinancialDepreciation({ unitPrice, percentage, projectedMonths }) {
     const base = Number(unitPrice);
@@ -236,16 +228,6 @@ async function upsertInvestmentSelection(businessCaseId, data, user) {
         throw error;
     }
 
-    const { rows: existingRows } = await db.query(
-        `SELECT id, quantity
-         FROM bc_investment_selections
-         WHERE business_case_id = $1
-           AND catalog_id = $2
-         LIMIT 1`,
-        [businessCaseId, catalog_id]
-    );
-    const existing = existingRows[0] || null;
-    assertQuantityCanOnlyIncrease(existing?.quantity, quantity, catalog_id);
     // Edicion en paralelo: sin carrito ni dueno por item -- cualquier rol
     // habilitado puede tocar cualquier inversion. "Seleccionada" se deriva
     // de la cantidad, no de un checkbox manual.
@@ -305,16 +287,6 @@ async function upsertInvestmentSelectionsBatch(businessCaseId, selections = [], 
                 throw error;
             }
 
-            const { rows: existingRows } = await client.query(
-                `SELECT id, quantity
-                 FROM bc_investment_selections
-                 WHERE business_case_id = $1
-                   AND catalog_id = $2
-                 LIMIT 1`,
-                [businessCaseId, catalog_id]
-            );
-            const existing = existingRows[0] || null;
-            assertQuantityCanOnlyIncrease(existing?.quantity, quantity, catalog_id);
             const selected = Number(quantity) > 0;
 
             const { rows } = await client.query(

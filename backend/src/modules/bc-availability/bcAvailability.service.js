@@ -106,7 +106,12 @@ async function create({ user, businessCaseId, servicioEquipoId, equipmentName, n
   await notifyUsers(await getAcpUserIds(), {
     title: "Nueva solicitud de disponibilidad de equipo",
     message: `${equipmentName || "Equipo"} — Business Case ${businessCaseId}`,
-    meta: { availability_id: created.id, business_case_id: businessCaseId },
+    meta: {
+      availability_id: created.id,
+      business_case_id: businessCaseId,
+      target_path: `/dashboard/comercial/solicitudes?disponibilidad=${created.id}`,
+      cta_label: "Atender solicitud",
+    },
   });
   return created;
 }
@@ -193,7 +198,13 @@ async function close({ id, user, status, notes }) {
   await notifyUsers([request.requested_by], {
     title: "Disponibilidad de equipo respondida",
     message: `${request.equipment_name || "Equipo"}: ${labels[status]}${notes ? ` — ${notes}` : ""}`,
-    meta: { availability_id: id, business_case_id: request.business_case_id, status },
+    meta: {
+      availability_id: id,
+      business_case_id: request.business_case_id,
+      status,
+      target_path: `/dashboard/business-case/workspace/${request.business_case_id}`,
+      cta_label: "Abrir Business Case",
+    },
   });
   return getById(id, user);
 }

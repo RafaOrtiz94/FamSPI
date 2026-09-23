@@ -157,18 +157,14 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
 
   const submitQtyModal = () => {
     if (!qtyModal.item) return;
-    const currentQty = Number(qtyModal.item.quantity ?? 0);
     const nextQty = Number(qtyModal.quantity);
-    if (!Number.isFinite(nextQty) || nextQty <= 0) {
+    if (!Number.isFinite(nextQty) || nextQty < 0) {
       showToast("Ingresa una cantidad valida.", "warning");
       return;
     }
-    if (currentQty > 0 && nextQty < currentQty) {
-      showToast("La cantidad no puede disminuir, solo aumentar.", "warning");
-      return;
-    }
+    // Cantidad 0 es valida: retira el item de la lista (selected pasa a false en el backend).
     const characteristics = qtyModal.characteristics.trim();
-    if (!characteristics) {
+    if (nextQty > 0 && !characteristics) {
       showToast("Ingresa las caracteristicas de la inversion.", "warning");
       return;
     }
@@ -339,7 +335,7 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
           <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Inversiones adicionales</h2>
           <p className="text-sm text-gray-500">
             Lista completa de inversiones. ACP Comercial, Jefe Comercial, Jefe de Operaciones, Jefe de Servicio y
-            Jefe de Logistica pueden editarla en paralelo — la cantidad de cada item solo puede aumentar.
+            Jefe de Logistica pueden editarla en paralelo — la cantidad de cada item puede subir o bajar, incluido 0.
           </p>
           <div className="mt-2">
             <SectionEditorBadge ownership={ownership} />
@@ -387,6 +383,17 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
         El catalogo de inversiones es fijo. Si necesitas registrar algo que no aparece en la lista, usa el item
         <span className="font-bold"> Otros</span> y detalla las caracteristicas.
       </div>
+
+      {canEdit && (
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+          <FiAlertTriangle className="mt-0.5 shrink-0" size={18} />
+          <p>
+            Edita <span className="font-bold">un item a la vez</span> y guarda antes de continuar con el siguiente.
+            Varios roles pueden editar esta lista al mismo tiempo; si dos personas cambian el mismo item sin guardar
+            entre medio, el ultimo guardado sobrescribe al anterior.
+          </p>
+        </div>
+      )}
 
       {canCloseWithoutItems && (
         <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
@@ -514,7 +521,7 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
             <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Cantidad</label>
             <input
               type="number"
-              min={Number(qtyModal.item?.quantity ?? 0)}
+              min={0}
               value={qtyModal.quantity}
               onChange={(event) => setQtyModal((prev) => ({ ...prev, quantity: event.target.value }))}
               className="min-h-[44px] w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:ring-2 focus:ring-sky-200"

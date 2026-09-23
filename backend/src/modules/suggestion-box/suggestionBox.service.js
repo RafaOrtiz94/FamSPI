@@ -19,6 +19,7 @@ const MANAGER_ROLES = [
   "admin_ti",
   "admin",
   "administrador",
+  "talento_humano",
 ];
 
 function error(message, status = 400) {
@@ -54,12 +55,33 @@ function referenceCode() {
   return `BQ-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
 }
 
+function normalizeSource(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (!["external", "internal"].includes(normalized)) throw error("Origen no permitido");
+  return normalized;
+}
+
+// reporter_user_id se guarda siempre para un envio interno (constraint de BD, control
+// de abuso), pero si el usuario pidio anonimato no debe salir en la respuesta -- de ahi
+// se podria identificar a alguien que pidio explicitamente no ser identificado.
+function sanitizeRow(row) {
+  if (!row || !row.is_anonymous) return row;
+  const { reporter_user_id, ...rest } = row;
+  return rest;
+}
+
 async function createSubmission(payload = {}, { source, user = null } = {}) {
   const submissionType = normalizeType(payload.submission_type);
-  if (bool(payload.is_anonymous)) {
-    throw error("El envio anonimo no esta disponible");
+  // El canal externo siempre queda identificado (no hay forma de contactar a un
+  // anonimo fuera del sistema). El interno si puede pedir anonimato: el registro
+  // sigue ligado a reporter_user_id para trazabilidad/control de abuso (constraint
+  // de BD lo exige para source='internal'), pero el nombre/correo no se guardan y
+  // getSubmission/listSubmissions ocultan ese id en la respuesta -- ver sanitizeRow.
+  if (source === "external" && bool(payload.is_anonymous)) {
+    throw error("El envio anonimo no esta disponible en el canal externo");
   }
-  const isAnonymous = false;
+  const isAnonymous = source === "internal" && bool(payload.is_anonymous);
   const subject = text(payload.subject, { required: true, max: 160, field: "Asunto" });
   const message = text(payload.message, { required: true, max: 5000, field: "Mensaje" });
   const reporterName = isAnonymous ? null : text(source === "internal" ? (user?.fullname || user?.name) : payload.reporter_name, { max: 160, field: "Nombre" });
@@ -67,7 +89,7 @@ async function createSubmission(payload = {}, { source, user = null } = {}) {
   const reporterPhone = isAnonymous ? null : text(payload.reporter_phone, { max: 50, field: "Teléfono" });
 
   if (!isAnonymous && source === "external" && !reporterName && !reporterEmail) {
-    throw error("Indica tu nombre o correo, o selecciona envío anónimo");
+    throw error("Indica tu nombre o correo");
   }
   if (reporterEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(reporterEmail)) throw error("Correo no válido");
   if (text(payload.website, { max: 0 }) !== null) throw error("No se pudo registrar el mensaje");
@@ -98,11 +120,13 @@ async function createSubmission(payload = {}, { source, user = null } = {}) {
   }
 }
 
-async function listSubmissions({ status, submissionType, q, limit = 100 } = {}) {
+async function listSubmissions({ status, submissionType, source, q, limit = 100 } = {}) {
   const params = [];
   const where = [];
   if (status) { params.push(normalizeStatus(status)); where.push(`s.status = $${params.length}`); }
   if (submissionType) { params.push(normalizeType(submissionType)); where.push(`s.submission_type = $${params.length}`); }
+  const normalizedSource = normalizeSource(source);
+  if (normalizedSource) { params.push(normalizedSource); where.push(`s.source = $${params.length}`); }
   if (q && String(q).trim()) {
     params.push(`%${String(q).trim().toLowerCase()}%`);
     where.push(`(LOWER(s.reference_code) LIKE $${params.length} OR LOWER(s.subject) LIKE $${params.length} OR LOWER(COALESCE(s.reporter_name,'')) LIKE $${params.length} OR LOWER(COALESCE(s.reporter_email,'')) LIKE $${params.length})`);
@@ -118,7 +142,7 @@ async function listSubmissions({ status, submissionType, q, limit = 100 } = {}) 
       LIMIT $${params.length}`,
     params,
   );
-  return rows;
+  return rows.map(sanitizeRow);
 }
 
 async function getSubmission(submissionId) {
@@ -138,7 +162,7 @@ async function getSubmission(submissionId) {
       ORDER BY e.created_at ASC, e.id ASC`,
     [submissionId],
   );
-  return { ...rows[0], events: events.rows };
+  return { ...sanitizeRow(rows[0]), events: events.rows };
 }
 
 async function updateStatus(submissionId, payload = {}, userId) {

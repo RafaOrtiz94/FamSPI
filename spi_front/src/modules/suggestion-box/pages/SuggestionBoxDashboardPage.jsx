@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { FiCheck, FiClock, FiInbox, FiRefreshCw, FiSearch, FiSend } from "react-icons/fi";
+import { FiCheck, FiClock, FiEyeOff, FiGlobe, FiInbox, FiRefreshCw, FiSearch, FiSend, FiUsers } from "react-icons/fi";
 import { useAuth } from "../../../core/auth/AuthContext";
 import { useUI } from "../../../core/ui/UIContext";
 import Button from "../../../core/ui/components/Button";
@@ -11,6 +11,9 @@ import {
   updateSuggestionBoxSubmissionStatus,
 } from "../../../core/api/suggestionBoxApi";
 
+// Quien puede ver los reportes (tabs "Externos"/"Internos"). Espejo de MANAGER_ROLES
+// en suggestionBox.service.js (backend) -- ese es el que realmente autoriza la API;
+// esta lista solo decide que se muestra en pantalla.
 const MANAGER_ROLES = new Set([
   "calidad",
   "jefe_calidad",
@@ -28,9 +31,10 @@ const MANAGER_ROLES = new Set([
   "administrador",
   "desarrollador",
   "soporte",
+  "talento_humano",
 ]);
 
-const EMPTY_FORM = { submission_type: "suggestion", subject: "", message: "" };
+const EMPTY_FORM = { submission_type: "suggestion", subject: "", message: "", is_anonymous: false };
 const FIELD_CLASS = "w-full min-h-11 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2.5 text-sm text-[#1F2937] outline-none transition-colors duration-150 focus:border-[#2563EB] focus:ring-2 focus:ring-[#0EA5E9]/20";
 const STATUS_LABELS = { received: "Recibido", in_review: "En revision", resolved: "Resuelto", closed: "Cerrado" };
 const TYPE_LABELS = { suggestion: "Sugerencia", complaint: "Queja" };
@@ -45,6 +49,11 @@ const statusClass = (status) => ({
 const collectRoles = (user) => [user?.role, user?.scope, ...(user?.extra_roles || [])]
   .filter(Boolean)
   .map((value) => String(value).trim().toLowerCase());
+
+const REPORT_TABS = [
+  { id: "external", label: "Externos", icon: FiGlobe },
+  { id: "internal", label: "Internos", icon: FiUsers },
+];
 
 export default function SuggestionBoxDashboardPage() {
   const { user } = useAuth();
@@ -62,22 +71,25 @@ export default function SuggestionBoxDashboardPage() {
   const [saving, setSaving] = useState(false);
   const [filters, setFilters] = useState({ status: "", q: "" });
 
+  const isReportTab = tab === "external" || tab === "internal";
+
   const load = useCallback(async () => {
-    if (!canManage) return;
+    if (!canManage || !isReportTab) return;
     setLoading(true);
     try {
-      const result = await listSuggestionBoxSubmissions(filters);
+      const result = await listSuggestionBoxSubmissions({ ...filters, source: tab });
       setRows(result?.data || []);
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo cargar el buzon", "error");
     } finally {
       setLoading(false);
     }
-  }, [canManage, filters, showToast]);
+  }, [canManage, isReportTab, tab, filters, showToast]);
 
   useEffect(() => {
-    if (tab === "manage") load();
-  }, [load, tab]);
+    setSelected(null);
+    if (isReportTab) load();
+  }, [load, tab, isReportTab]);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -126,25 +138,28 @@ export default function SuggestionBoxDashboardPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs font-medium text-[#D1D5DB]">Canal interno</p>
-            <h1 className="mt-1 text-2xl font-bold leading-tight">Buzon de sugerencias y quejas</h1>
+            <h1 className="mt-1 text-2xl font-bold leading-tight">Buzón de sugerencias</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-[#D1D5DB]">
-              Registra mejoras y da seguimiento a mensajes recibidos por el canal publico e interno.
+              Registra una sugerencia o queja. Los reportes de personas externas y de colaboradores se
+              revisan por separado.
             </p>
           </div>
-          <div className="grid w-full grid-cols-3 overflow-hidden rounded-2xl border border-white/15 text-center text-xs lg:w-auto">
-            <div className="px-4 py-3">
-              <p className="font-mono text-lg font-semibold">{rows.length}</p>
-              <p className="text-[#D1D5DB]">Cargados</p>
+          {isReportTab && (
+            <div className="grid w-full grid-cols-3 overflow-hidden rounded-2xl border border-white/15 text-center text-xs lg:w-auto">
+              <div className="px-4 py-3">
+                <p className="font-mono text-lg font-semibold">{rows.length}</p>
+                <p className="text-[#D1D5DB]">Cargados</p>
+              </div>
+              <div className="border-x border-white/15 px-4 py-3">
+                <p className="font-mono text-lg font-semibold">{rows.filter((row) => row.status === "received").length}</p>
+                <p className="text-[#D1D5DB]">Nuevos</p>
+              </div>
+              <div className="px-4 py-3">
+                <p className="font-mono text-lg font-semibold">{rows.filter((row) => row.status === "in_review").length}</p>
+                <p className="text-[#D1D5DB]">En revision</p>
+              </div>
             </div>
-            <div className="border-x border-white/15 px-4 py-3">
-              <p className="font-mono text-lg font-semibold">{rows.filter((row) => row.status === "received").length}</p>
-              <p className="text-[#D1D5DB]">Nuevos</p>
-            </div>
-            <div className="px-4 py-3">
-              <p className="font-mono text-lg font-semibold">{rows.filter((row) => row.status === "in_review").length}</p>
-              <p className="text-[#D1D5DB]">En revision</p>
-            </div>
-          </div>
+          )}
         </div>
       </header>
 
@@ -154,17 +169,19 @@ export default function SuggestionBoxDashboardPage() {
           onClick={() => setTab("send")}
           className={`min-h-11 cursor-pointer border-b-2 px-4 text-sm font-semibold transition-colors ${tab === "send" ? "border-[#2563EB] text-[#2563EB]" : "border-transparent text-[#6B7280] hover:text-[#1F2937]"}`}
         >
-          Enviar mensaje
+          Registrar
         </button>
-        {canManage && (
+        {canManage && REPORT_TABS.map(({ id, label, icon: Icon }) => (
           <button
+            key={id}
             type="button"
-            onClick={() => setTab("manage")}
-            className={`min-h-11 cursor-pointer border-b-2 px-4 text-sm font-semibold transition-colors ${tab === "manage" ? "border-[#2563EB] text-[#2563EB]" : "border-transparent text-[#6B7280] hover:text-[#1F2937]"}`}
+            onClick={() => setTab(id)}
+            className={`inline-flex min-h-11 cursor-pointer items-center gap-1.5 border-b-2 px-4 text-sm font-semibold transition-colors ${tab === id ? "border-[#2563EB] text-[#2563EB]" : "border-transparent text-[#6B7280] hover:text-[#1F2937]"}`}
           >
-            Gestionar buzon
+            <Icon size={14} />
+            {label}
           </button>
-        )}
+        ))}
       </div>
 
       {tab === "send" && (
@@ -187,13 +204,29 @@ export default function SuggestionBoxDashboardPage() {
             <textarea required maxLength={5000} value={form.message} onChange={(event) => setForm((current) => ({ ...current, message: event.target.value }))} className={`${FIELD_CLASS} mt-1.5 min-h-40 resize-y`} />
             <span className="mt-1 block text-right text-xs font-normal text-[#6B7280]">{form.message.length}/5000</span>
           </label>
+
+          <label className="mt-5 flex items-start gap-2.5 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-3.5 text-sm text-[#1F2937]">
+            <input
+              type="checkbox"
+              checked={form.is_anonymous}
+              onChange={(event) => setForm((current) => ({ ...current, is_anonymous: event.target.checked }))}
+              className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
+            />
+            <span>
+              <span className="font-semibold">Enviar de forma anónima</span>
+              <span className="mt-0.5 block text-xs leading-5 text-[#6B7280]">
+                Quien revise el buzón no vera tu nombre ni tu correo.
+              </span>
+            </span>
+          </label>
+
           <div className="mt-5 flex justify-end">
             <Button type="submit" icon={FiSend} loading={sending}>Enviar al buzon</Button>
           </div>
         </form>
       )}
 
-      {tab === "manage" && (
+      {isReportTab && (
         <section className="grid min-h-0 gap-5 lg:grid-cols-[0.9fr_1.1fr]">
           <div className="min-w-0 rounded-2xl border border-[#E5E7EB] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)]">
             <div className="border-b border-[#E5E7EB] p-4">
@@ -233,7 +266,14 @@ export default function SuggestionBoxDashboardPage() {
                       <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusClass(row.status)}`}>{STATUS_LABELS[row.status]}</span>
                     </div>
                     <p className="mt-2 truncate text-sm font-semibold text-[#1F2937]">{row.subject}</p>
-                    <p className="mt-1 text-xs text-[#6B7280]">{TYPE_LABELS[row.submission_type]}, {new Date(row.created_at).toLocaleString("es-EC")}</p>
+                    <p className="mt-1 flex items-center gap-1.5 text-xs text-[#6B7280]">
+                      {TYPE_LABELS[row.submission_type]}, {new Date(row.created_at).toLocaleString("es-EC")}
+                      {row.is_anonymous && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[#F3F4F6] px-1.5 py-0.5 text-[10px] font-semibold text-[#6B7280]">
+                          <FiEyeOff size={10} /> Anónimo
+                        </span>
+                      )}
+                    </p>
                   </button>
                 ))}
               </div>
@@ -259,12 +299,20 @@ export default function SuggestionBoxDashboardPage() {
 
                 <dl className="mt-5 grid gap-3 rounded-xl bg-[#F9FAFB] p-4 text-sm sm:grid-cols-2">
                   <div>
-                    <dt className="text-xs text-[#6B7280]">Origen</dt>
-                    <dd className="font-medium text-[#1F2937]">{selected.source === "internal" ? "Interno" : "Externo"}</dd>
+                    <dt className="text-xs text-[#6B7280]">Tipo</dt>
+                    <dd className="font-medium text-[#1F2937]">{TYPE_LABELS[selected.submission_type]}</dd>
                   </div>
                   <div>
                     <dt className="text-xs text-[#6B7280]">Remitente</dt>
-                    <dd className="font-medium text-[#1F2937]">{selected.reporter_name || selected.reporter_email || "No indicado"}</dd>
+                    <dd className="font-medium text-[#1F2937]">
+                      {selected.is_anonymous ? (
+                        <span className="inline-flex items-center gap-1 text-[#6B7280]">
+                          <FiEyeOff size={12} /> Anónimo
+                        </span>
+                      ) : (
+                        selected.reporter_name || selected.reporter_email || "No indicado"
+                      )}
+                    </dd>
                   </div>
                 </dl>
 

@@ -81,6 +81,9 @@ const TIDeviceManagementPage = lazy(() => import("../modules/ti/pages/TIDeviceMa
 const TIModuleAccessPage = lazy(() => import("../modules/ti/pages/TIModuleAccessPage"));
 const TIShortcutTokenPage = lazy(() => import("../modules/ti/pages/TIShortcutTokenPage"));
 const TIAssetsFinancieroPage = lazy(() => import("../modules/ti/pages/TIAssetsFinancieroPage"));
+const TIAssetPublicLookupPage = lazy(() => import("../modules/ti/pages/TIAssetPublicLookupPage"));
+const SuggestionBoxPublicPage = lazy(() => import("../modules/suggestion-box/pages/SuggestionBoxPublicPage"));
+const SuggestionBoxDashboardPage = lazy(() => import("../modules/suggestion-box/pages/SuggestionBoxDashboardPage"));
 const CollabDeliveriesFinancieroPage = lazy(() => import("../modules/collab/pages/CollabDeliveriesFinancieroPage"));
 const CollabDeliveriesGerenciaPage   = lazy(() => import("../modules/collab/pages/CollabDeliveriesGerenciaPage"));
 const TIActasPage = lazy(() => import("../modules/ti/pages/TIActasPage"));
@@ -104,6 +107,7 @@ const CA0114Workspace = lazy(() => import("../modules/calidad/pages/CA0114Worksp
 const CA0115Workspace = lazy(() => import("../modules/calidad/pages/CA0115Workspace"));
 const CA0116Workspace = lazy(() => import("../modules/calidad/pages/CA0116Workspace"));
 const CA0117Workspace = lazy(() => import("../modules/calidad/pages/CA0117Workspace"));
+const QualityHrDocumentsPage = lazy(() => import("../modules/calidad/pages/QualityHrDocumentsPage"));
 const DashboardLogistica = lazy(() => import("../modules/logistica/Dashboard"));
 const ClientRequests = lazy(() => import("../modules/backoffice/pages/ClientRequests"));
 const ClientRequestReview = lazy(() => import("../modules/backoffice/pages/ClientRequestReview"));
@@ -227,6 +231,10 @@ const AppRoutes = () => {
         <Route path="/kickoff/sala/:token" element={<KickoffQREntryPage />} />
         <Route path="/famdays/sala/:token" element={<FamDaysQREntryPage />} />
         <Route path="/cumpleanos/canje/:token" element={<BirthdayBenefitRedeemPage />} />
+        {}
+        <Route path="/activos-ti/:assetCode" element={<TIAssetPublicLookupPage />} />
+        {}
+        <Route path="/buzon-sugerencias" element={<SuggestionBoxPublicPage />} />
       </Route>
 
       {/* =======================================
@@ -538,6 +546,17 @@ const AppRoutes = () => {
           <Route path="/dashboard/calidad/auditorias" element={<CA0115Workspace />} />
           <Route path="/dashboard/calidad/muestreo" element={<CA0116Workspace />} />
           <Route path="/dashboard/calidad/tecnovigilancia" element={<CA0117Workspace />} />
+          <Route element={<ProtectedRoute allowedRoles={["jefe_calidad"]} strictRoles />}>
+            <Route path="/dashboard/calidad/documentos-rrhh" element={<QualityHrDocumentsPage />} />
+          </Route>
+          {/* Panel interno del Buzon de sugerencias -- ruta abierta a todos los usuarios internos
+              (cualquiera puede "Registrar", incluso de forma anonima; el backend solo exige
+              verifyToken en POST /suggestion-box/submissions). Los tabs "Externos"/"Internos"
+              (ver todos los registros, reportados por separado) quedan restringidos a jefe_ti y
+              talento_humano: lo decide el MANAGER_ROLES local de SuggestionBoxDashboardPage.jsx,
+              espejo de MANAGER_ROLES en suggestionBox.service.js (backend), que es quien realmente
+              autoriza GET /submissions. */}
+          <Route path="/dashboard/buzon-sugerencias" element={<SuggestionBoxDashboardPage />} />
           <Route
             element={
               <ProtectedRoute

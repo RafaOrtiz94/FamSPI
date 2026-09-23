@@ -64,7 +64,7 @@ export default function SuggestionBoxPublicPage() {
             <div className="min-w-0">
               <img src={famLogo} alt="FamProject" className="h-8 w-auto" />
               <p className="mt-5 text-xs font-medium text-[#D1D5DB]">Canal publico de mejora</p>
-              <h1 className="mt-2 text-2xl font-bold leading-tight sm:text-3xl">Buzon de sugerencias y quejas</h1>
+              <h1 className="mt-2 text-2xl font-bold leading-tight sm:text-3xl">Buzón de sugerencias</h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-[#D1D5DB]">
                 Registra una situacion, queja o propuesta de mejora. El seguimiento requiere datos de contacto.
               </p>

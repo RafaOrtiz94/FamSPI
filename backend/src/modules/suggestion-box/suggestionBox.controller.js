@@ -12,7 +12,13 @@ exports.createInternalSubmission = asyncHandler(async (req, res) => {
 });
 
 exports.listSubmissions = asyncHandler(async (req, res) => {
-  const data = await service.listSubmissions({ status: req.query?.status, submissionType: req.query?.submission_type, q: req.query?.q, limit: req.query?.limit });
+  const data = await service.listSubmissions({
+    status: req.query?.status,
+    submissionType: req.query?.submission_type,
+    source: req.query?.source,
+    q: req.query?.q,
+    limit: req.query?.limit,
+  });
   res.json({ ok: true, total: data.length, data });
 });
 

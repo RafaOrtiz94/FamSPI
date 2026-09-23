@@ -1,6 +1,7 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const NotificationManager = require('./notificationManager');
+const { withDefaultTarget } = require('./notificationTargets');
 
 const TI_OFFHOURS_ROLES = ["jefe_ti"];
 
@@ -63,13 +64,16 @@ const createNotification = async (payload) => {
 
   if (!user_id || !title) throw new Error("user_id y title son requeridos");
 
+  // Toda notificacion lleva destino (boton "Abrir"): si el emisor no lo definio, se deduce de source/meta.
+  const metaWithTarget = withDefaultTarget({ source, meta });
+
   const { rows } = await db.query(
     `
     INSERT INTO notifications (user_id, title, message, type, source, status, priority, meta, created_at)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
     RETURNING id, user_id, title, message, type, source, status, priority, meta, created_at, read_at
     `,
-    [user_id, title, message, type, source, status, priority, meta]
+    [user_id, title, message, type, source, status, priority, metaWithTarget]
   );
 
   return mapNotificationRow(rows[0]);

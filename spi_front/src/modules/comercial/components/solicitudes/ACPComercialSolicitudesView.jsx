@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { FiCreditCard, FiUserPlus, FiUsers, FiBriefcase, FiUser, FiBox } from "react-icons/fi";
 import { getClientRequests } from "../../../../core/api/requestsApi";
 import Modal from "../../../../core/ui/components/Modal";
@@ -16,6 +17,12 @@ const ACPComercialSolicitudesView = () => {
  const [showPermisoModal, setShowPermisoModal] = useState(false);
  const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
  const [showAvailabilityPanel, setShowAvailabilityPanel] = useState(false);
+ const [searchParams] = useSearchParams();
+
+ // Enlace de la notificacion a ACP (?disponibilidad=<id>) abre el panel directo
+ useEffect(() => {
+ if (searchParams.get('disponibilidad')) setShowAvailabilityPanel(true);
+ }, [searchParams]);
 
  // View Modal State
  const [viewType, setViewType] = useState(null);

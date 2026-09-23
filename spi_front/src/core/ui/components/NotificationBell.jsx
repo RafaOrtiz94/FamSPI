@@ -11,8 +11,10 @@ import {
  FiPackage,
  FiCalendar,
  FiFileText,
+ FiArrowRight,
 } from "react-icons/fi";
 import { useNotifications } from "../NotificationContext";
+import { getNotificationCtaLabel, resolveNotificationTargetPath } from "../notificationTarget";
 
 const typeIcon = {
  alert: <FiAlertTriangle className="text-amber-500" />,
@@ -107,44 +109,7 @@ export default function NotificationBell() {
  return sorted.slice(0, 6);
  }, [notifications]);
 
- const resolveFallbackTargetPath = (notification) => {
- const source = normalizeSource(notification?.source);
- const purchaseId = getMetaValue(notification, ["purchase_id", "purchaseId"]);
- const publicRequestId = getMetaValue(notification, ["request_id", "requestId"]);
- const solicitudId = getMetaValue(notification, ["solicitud_id", "solicitudId"]);
- const businessCaseId = getMetaValue(notification, ["business_case_id", "businessCaseId", "bc_id", "bcId"]);
-
- if (source.startsWith("private_purchase") && purchaseId) {
- return `/dashboard/purchases/workspace?tab=private&requestId=${purchaseId}&requestType=private`;
- }
-
- if ((source.startsWith("equipment_purchase") || source.startsWith("equipment_purchases")) && publicRequestId) {
- return `/dashboard/purchases/workspace?tab=public&requestId=${publicRequestId}&requestType=public`;
- }
-
- if ((source.startsWith("permisos_vacaciones") || source.startsWith("vacaciones")) && solicitudId) {
- return `/dashboard/talento-humano/permisos?solicitudId=${solicitudId}`;
- }
-
- if (source.startsWith("business_case") && businessCaseId) {
- return `/dashboard/business-case/workspace/${businessCaseId}`;
- }
-
- return null;
- };
-
- const resolveTargetPath = (notification) => {
- const metaTargetPath = getMetaValue(notification, [
- "target_path",
- "targetPath",
- "url",
- "path",
- "redirect_to",
- "redirectTo",
- ]);
- if (metaTargetPath) return metaTargetPath;
- return resolveFallbackTargetPath(notification);
- };
+ const resolveTargetPath = resolveNotificationTargetPath;
 
  const handleItemClick = async (notification) => {
  if (!notification) return;
@@ -236,6 +201,19 @@ export default function NotificationBell() {
  <p className="text-xs text-slate-600 line-clamp-2">{notif.message}</p>
  )}
  <p className="text-[11px] text-slate-400 mt-1">{formatDate(notif.created_at)}</p>
+ {resolveTargetPath(notif) && (
+ <button
+ type="button"
+ onClick={(event) => {
+ event.stopPropagation();
+ handleItemClick(notif);
+ }}
+ className="mt-2 inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-slate-700"
+ >
+ {getNotificationCtaLabel(notif)}
+ <FiArrowRight size={12} />
+ </button>
+ )}
  </div>
  <button
  onClick={(event) => {
