@@ -210,6 +210,18 @@ const SignatureWorkflowDetailPage = () => {
     ["pending", "available", "opened"].includes(String(mySigner.status || "").toLowerCase())
       ? mySigner
       : null;
+  // El backend intenta ubicar sola la fila del firmante (ver signatureAutoPlacement.service.js
+  // en el backend) y deja el resultado en actionableSigner.signature_placement antes de que
+  // nadie firme. Si vino prellenado, se usa directo -- el firmante ya no necesita hacer clic,
+  // aunque PdfSignerViewer lo sigue dejando corregir con un clic si no es correcto.
+  const autoPlacementDetected = Boolean(actionableSigner?.meta?.auto_placement);
+
+  useEffect(() => {
+    if (actionableSigner?.signature_placement && !placement) {
+      setPlacement(actionableSigner.signature_placement);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actionableSigner?.id, actionableSigner?.signature_placement]);
 
   useEffect(() => {
     let cancelled = false;
@@ -687,9 +699,19 @@ const SignatureWorkflowDetailPage = () => {
                   </div>
 
                   <div>
-                    <p className="mb-2 text-xs font-semibold text-slate-500">
+                    <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-500">
                       Ubicar firma en el documento
+                      {autoPlacementDetected && (
+                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                          Detectada automáticamente
+                        </span>
+                      )}
                     </p>
+                    {autoPlacementDetected && (
+                      <p className="mb-2 text-[11px] text-slate-500">
+                        Ubicamos tu fila en el documento. Si no es correcta, haz clic en la posición correcta.
+                      </p>
+                    )}
                     {pdfLoading ? (
                       <div className="flex h-32 items-center justify-center rounded-xl border border-slate-200 bg-slate-50">
                         <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
@@ -1044,9 +1066,19 @@ const SignatureWorkflowDetailPage = () => {
                   </div>
 
                   <div>
-                    <p className="mb-2 text-xs font-semibold text-slate-500">
+                    <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-500">
                       Ubicar firma en el documento
+                      {autoPlacementDetected && (
+                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                          Detectada automáticamente
+                        </span>
+                      )}
                     </p>
+                    {autoPlacementDetected && (
+                      <p className="mb-2 text-[11px] text-slate-500">
+                        Ubicamos tu fila en el documento. Si no es correcta, haz clic en la posición correcta.
+                      </p>
+                    )}
                     {pdfLoading ? (
                       <div className="flex h-32 items-center justify-center rounded-xl border border-slate-200 bg-slate-50">
                         <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />

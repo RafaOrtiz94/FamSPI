@@ -27,6 +27,7 @@ import {
   FiMoreHorizontal,
   FiChevronDown,
   FiX,
+  FiMessageSquare,
 } from "react-icons/fi";
 import clsx from "clsx";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
@@ -393,6 +394,13 @@ const famDaysLink = {
   category: "herramientas",
 };
 
+const suggestionBoxLink = {
+  name: "Buzón de sugerencias",
+  icon: FiMessageSquare,
+  path: "/dashboard/buzon-sugerencias",
+  category: "herramientas",
+};
+
 const tiDevicesLink = {
   name: "Dispositivos TI",
   icon: FiCpu,
@@ -663,6 +671,11 @@ const getPriorityGroups = (scope, role, auditActive, extraRoles = []) => {
   if (!groups.primary.includes(pruebasTecnicasLink) && !groups.secondary.includes(pruebasTecnicasLink)) {
     groups.secondary.push(pruebasTecnicasLink);
   }
+
+  // El panel permite a cualquier usuario interno autenticado registrar una
+  // sugerencia o queja; por eso el acceso debe estar disponible sin depender
+  // de su área. La gestión de registros permanece restringida por la API.
+  groups.secondary.push(suggestionBoxLink);
 
   // extra_roles: capacidad de backoffice_comercial otorgada a un usuario
   // puntual sin cambiar su rol/scope principal (ver migrations/276_users_extra_roles.sql,

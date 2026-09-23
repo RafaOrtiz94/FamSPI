@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const { PDFDocument } = require("pdf-lib");
 const db = require("../../config/db");
 const { appendSignatureBlock } = require("./signatureWorkflows.pdf");
+const { detectPlacementsForDocument } = require("./signatureAutoPlacement.service");
 const { uploadBase64File, ensureFolder } = require("../../utils/drive");
 const logger = require("../../config/logger");
 const notificationManager = require("../notifications/notificationManager");
@@ -789,6 +790,33 @@ async function getWorkflow(workflowId, user) {
   return hydrateWorkflow(workflowId, user);
 }
 
+// Fase 1 de mapeo automatico de firma: intenta ubicar solo la fila de cada firmante
+// (ver signatureAutoPlacement.service.js) y prellena signature_placement antes de que
+// nadie firme. Nunca es obligatorio ni bloquea el envio -- si falla la extraccion o
+// no se encuentra el nombre con confianza, el firmante sigue el flujo manual de
+// siempre (signStep preserva lo que el frontend mande, o lo que ya haya aqui).
+async function autoDetectAndFillPlacements(client, { workflowId, document, signers }) {
+  if (!document?.source_pdf_base64) return 0;
+  const pending = signers.filter((signer) => !signer.signature_placement);
+  if (!pending.length) return 0;
+
+  const pdfBytes = Buffer.from(document.source_pdf_base64, "base64");
+  const detected = await detectPlacementsForDocument(pdfBytes, pending);
+
+  let placed = 0;
+  for (const [signerId, placement] of detected) {
+    await client.query(
+      `UPDATE signature_workflow_signers
+          SET signature_placement = $2::jsonb,
+              meta = meta || '{"auto_placement": true}'::jsonb
+        WHERE id = $1`,
+      [signerId, JSON.stringify(placement)],
+    );
+    placed += 1;
+  }
+  return placed;
+}
+
 async function sendWorkflow(workflowId, user) {
   const client = await db.getClient();
   let notificationPayload = null;
@@ -821,12 +849,18 @@ async function sendWorkflow(workflowId, user) {
       [workflowId, SIGNER_STATUS.AVAILABLE, SIGNER_STATUS.PENDING]
     );
 
+    const autoPlacedCount = await autoDetectAndFillPlacements(client, {
+      workflowId,
+      document: data.documents[0] || null,
+      signers: data.signers,
+    });
+
     await appendEvent(client, {
       workflowId,
       documentId: data.documents[0]?.id || null,
       eventType: "workflow_sent",
       eventDescription: "Workflow enviado a firma",
-      eventData: { signing_mode: "parallel", signers_available: data.signers.length },
+      eventData: { signing_mode: "parallel", signers_available: data.signers.length, auto_placed: autoPlacedCount },
       createdBy: user.id,
     });
 
@@ -1531,4 +1565,5 @@ module.exports = {
   resolveSignerSnapshot,
   resolveRecipientOrThrow,
   validateSignerProfiles,
+  autoDetectAndFillPlacements,
 };

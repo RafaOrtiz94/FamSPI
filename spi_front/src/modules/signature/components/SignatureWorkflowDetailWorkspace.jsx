@@ -156,6 +156,14 @@ export default function SignatureWorkflowDetailWorkspace({
               )}
             </div>
 
+            {actionableSigner?.meta?.auto_placement && (
+              <p className="mb-2 flex items-center gap-1.5 text-xs text-slate-500">
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                  Detectada automáticamente
+                </span>
+                Ubicamos tu fila en el documento. Si no es correcta, haz clic en la posición correcta.
+              </p>
+            )}
             {pdfLoading ? (
               <div className="flex min-h-[48vh] items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 sm:min-h-[560px]">
                 <FiRefreshCw size={24} className="animate-spin text-blue-500" />
