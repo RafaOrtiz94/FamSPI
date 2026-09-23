@@ -6,20 +6,30 @@
 const db = require('../../config/db');
 const logger = require('../../config/logger');
 
-// Edicion en paralelo sin dueno por item: la unica proteccion contra
-// pisar el trabajo de otro es que la cantidad nunca puede bajar, solo
-// subir. Quitar/reducir una inversion queda fuera de este flujo.
-function assertQuantityCanOnlyIncrease(existingQuantity, incomingQuantity, catalogId) {
+// Edicion en paralelo sin dueno por item: la proteccion contra pisar el
+// trabajo de otro es que la cantidad nunca puede bajar, solo subir --
+// EXCEPTO para quien agrego esa inversion originalmente (bc_investment_
+// selections.owner_email, seteado en el primer INSERT y preservado en cada
+// UPDATE posterior via COALESCE). Esa persona si puede disminuirla o
+// dejarla en 0; cualquier otro rol habilitado solo puede aumentarla.
+function assertQuantityCanOnlyIncrease(existingQuantity, incomingQuantity, catalogId, { ownerEmail, actingUser } = {}) {
     const existing = Number(existingQuantity ?? 0);
     const incoming = Number(incomingQuantity ?? 0);
-    if (existing > 0 && incoming < existing) {
-        const error = new Error(
-            `La cantidad no puede disminuir (catalog_id=${catalogId}): actual ${existing}, enviado ${incoming}. Solo se puede aumentar.`,
-        );
-        error.status = 409;
-        error.code = "INVESTMENT_QUANTITY_CANNOT_DECREASE";
-        throw error;
-    }
+    if (existing <= 0 || incoming >= existing) return;
+
+    const isOwner = Boolean(
+        ownerEmail
+        && actingUser?.email
+        && String(ownerEmail).trim().toLowerCase() === String(actingUser.email).trim().toLowerCase(),
+    );
+    if (isOwner) return;
+
+    const error = new Error(
+        `La cantidad no puede disminuir (catalog_id=${catalogId}): actual ${existing}, enviado ${incoming}. Solo quien agrego esta inversion puede disminuirla.`,
+    );
+    error.status = 409;
+    error.code = "INVESTMENT_QUANTITY_CANNOT_DECREASE";
+    throw error;
 }
 
 function calculateFinancialDepreciation({ unitPrice, percentage, projectedMonths }) {
@@ -196,7 +206,7 @@ async function createInvestmentCatalogItem(payload) {
 
 async function getInvestmentSelections(businessCaseId) {
     const { rows } = await db.query(
-        `SELECT catalog_id, selected, notes, quantity, characteristics, unit_price, unit_price_financial, depreciation_percentage, updated_by_role, updated_by_email
+        `SELECT catalog_id, selected, notes, quantity, characteristics, unit_price, unit_price_financial, depreciation_percentage, updated_by_role, updated_by_email, owner_email, owner_role
          FROM bc_investment_selections
          WHERE business_case_id = $1`,
         [businessCaseId]
@@ -215,7 +225,9 @@ async function getCatalogWithSelections(businessCaseId) {
                 s.unit_price_financial,
                 s.depreciation_percentage,
                 s.updated_by_role,
-                s.updated_by_email
+                s.updated_by_email,
+                s.owner_email,
+                s.owner_role
          FROM bc_investment_catalog c
          LEFT JOIN bc_investment_selections s
            ON s.catalog_id = c.id
@@ -237,7 +249,7 @@ async function upsertInvestmentSelection(businessCaseId, data, user) {
     }
 
     const { rows: existingRows } = await db.query(
-        `SELECT id, quantity
+        `SELECT id, quantity, owner_email
          FROM bc_investment_selections
          WHERE business_case_id = $1
            AND catalog_id = $2
@@ -245,7 +257,7 @@ async function upsertInvestmentSelection(businessCaseId, data, user) {
         [businessCaseId, catalog_id]
     );
     const existing = existingRows[0] || null;
-    assertQuantityCanOnlyIncrease(existing?.quantity, quantity, catalog_id);
+    assertQuantityCanOnlyIncrease(existing?.quantity, quantity, catalog_id, { ownerEmail: existing?.owner_email, actingUser: user });
     // Edicion en paralelo: sin carrito ni dueno por item -- cualquier rol
     // habilitado puede tocar cualquier inversion. "Seleccionada" se deriva
     // de la cantidad, no de un checkbox manual.
@@ -306,7 +318,7 @@ async function upsertInvestmentSelectionsBatch(businessCaseId, selections = [], 
             }
 
             const { rows: existingRows } = await client.query(
-                `SELECT id, quantity
+                `SELECT id, quantity, owner_email
                  FROM bc_investment_selections
                  WHERE business_case_id = $1
                    AND catalog_id = $2
@@ -314,7 +326,7 @@ async function upsertInvestmentSelectionsBatch(businessCaseId, selections = [], 
                 [businessCaseId, catalog_id]
             );
             const existing = existingRows[0] || null;
-            assertQuantityCanOnlyIncrease(existing?.quantity, quantity, catalog_id);
+            assertQuantityCanOnlyIncrease(existing?.quantity, quantity, catalog_id, { ownerEmail: existing?.owner_email, actingUser: user });
             const selected = Number(quantity) > 0;
 
             const { rows } = await client.query(

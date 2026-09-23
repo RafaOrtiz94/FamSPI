@@ -17,7 +17,11 @@ const EDIT_ROLES = new Set([
   "jefe_operaciones",
   "jefe_servicio",
   "jefe_logistica",
+  "jefe_ti", // BC-10: puede ver y agregar items al carrito
 ]);
+
+const isSameEmail = (a, b) =>
+  Boolean(a && b && String(a).trim().toLowerCase() === String(b).trim().toLowerCase());
 
 const getNaturalErrorMessage = (err, fallback) => {
   const raw = String(err?.response?.data?.message || "").trim();
@@ -46,7 +50,7 @@ const buildInvestmentBlocker = ({ permissions = {}, ownership = {}, requiresStat
     return {
       code: "INVESTMENT_ROLE_REQUIRED",
       title: "Tu rol no edita inversiones",
-      message: "Solo ACP Comercial, Jefe Comercial, Jefe de Operaciones, Jefe de Servicio y Jefe de Logistica pueden editar la lista.",
+      message: "Solo ACP Comercial, Jefe Comercial, Jefe de Operaciones, Jefe de Servicio, Jefe de Logistica y Jefe de TI pueden editar la lista.",
       detail: "Puedes ver la lista en modo lectura.",
     };
   }
@@ -157,14 +161,15 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
 
   const submitQtyModal = () => {
     if (!qtyModal.item) return;
+    const isOwner = isSameEmail(qtyModal.item.owner_email, user?.email);
     const currentQty = Number(qtyModal.item.quantity ?? 0);
     const nextQty = Number(qtyModal.quantity);
-    if (!Number.isFinite(nextQty) || nextQty <= 0) {
+    if (!Number.isFinite(nextQty) || nextQty < 0 || (!isOwner && nextQty <= 0)) {
       showToast("Ingresa una cantidad valida.", "warning");
       return;
     }
-    if (currentQty > 0 && nextQty < currentQty) {
-      showToast("La cantidad no puede disminuir, solo aumentar.", "warning");
+    if (!isOwner && currentQty > 0 && nextQty < currentQty) {
+      showToast("La cantidad no puede disminuir, solo aumentar. Solo quien agrego esta inversion puede reducirla.", "warning");
       return;
     }
     const characteristics = qtyModal.characteristics.trim();
@@ -338,8 +343,9 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
         <div>
           <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Inversiones adicionales</h2>
           <p className="text-sm text-gray-500">
-            Lista completa de inversiones. ACP Comercial, Jefe Comercial, Jefe de Operaciones, Jefe de Servicio y
-            Jefe de Logistica pueden editarla en paralelo — la cantidad de cada item solo puede aumentar.
+            Lista completa de inversiones. ACP Comercial, Jefe Comercial, Jefe de Operaciones, Jefe de Servicio,
+            Jefe de Logistica y Jefe de TI pueden editarla en paralelo — la cantidad de cada item solo puede
+            aumentar, salvo para quien la agrego, que tambien puede disminuirla o dejarla en 0.
           </p>
           <div className="mt-2">
             <SectionEditorBadge ownership={ownership} />
@@ -510,11 +516,20 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
               <> — cantidad actual: <span className="font-semibold text-slate-900">{Number(qtyModal.item?.quantity)}</span></>
             )}
           </p>
+          {isSameEmail(qtyModal.item?.owner_email, user?.email) ? (
+            <p className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+              Agregaste esta inversion: puedes aumentarla, disminuirla o dejarla en 0.
+            </p>
+          ) : Number(qtyModal.item?.quantity) > 0 ? (
+            <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+              Solo quien agrego esta inversion puede disminuirla — vos solo podes aumentarla.
+            </p>
+          ) : null}
           <div className="space-y-2">
             <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Cantidad</label>
             <input
               type="number"
-              min={Number(qtyModal.item?.quantity ?? 0)}
+              min={isSameEmail(qtyModal.item?.owner_email, user?.email) ? 0 : Number(qtyModal.item?.quantity ?? 0)}
               value={qtyModal.quantity}
               onChange={(event) => setQtyModal((prev) => ({ ...prev, quantity: event.target.value }))}
               className="min-h-[44px] w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:ring-2 focus:ring-sky-200"
