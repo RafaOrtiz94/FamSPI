@@ -7,6 +7,7 @@ const { PRIVATE_PURCHASE_STATES } = require("../private-purchases/privatePurchas
 const { ensureBusinessCaseDriveFolder } = require("./businessCaseDriveFolder.service");
 const { filterEquipmentPairsForSheet } = require("./businessCaseSheetEquipment.helper");
 const { ensurePurchaseWorkspaceForFeasibleBusinessCase } = require("./businessCasePurchaseHandoff.service");
+const { releaseAllForBusinessCase: releaseAllTiAssetReservations } = require("./bcInvestmentTiAssetReservations.service");
 const { isParticipantStageComplete } = require("./businessCaseWorkflowSla.service");
 
 // Roles que ven TODOS los business case en el picker/listado. El resto solo
@@ -351,6 +352,20 @@ async function saveFeasibilityDecision(
     throw error;
   } finally {
     client.release();
+  }
+
+  // BC declarado no factible: libera cualquier activo TI reservado en sus
+  // inversiones adicionales. Nunca debe tumbar la decision de factibilidad ya
+  // guardada -- si falla, queda un warning y TI libera a mano desde su modulo.
+  if (is_feasible === false) {
+    try {
+      await releaseAllTiAssetReservations(businessCaseId, { reason: "bc_not_feasible" });
+    } catch (releaseError) {
+      logger.warn(
+        { error: releaseError.message, businessCaseId },
+        "No se pudieron liberar automaticamente las reservas de activos TI al declarar el BC no factible",
+      );
+    }
   }
 
   let privatePurchaseId = metadata?.private_purchase_id || null;

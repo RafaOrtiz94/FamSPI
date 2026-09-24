@@ -325,6 +325,32 @@ router.post(
   requireRole([...new Set([...investmentRoles, ...investmentValuesRoles])]),
   ctrl.closeInvestmentsWithoutAdditionalItems,
 );
+// Vincular activos TI concretos (por serie) a una linea de inversion -- solo jefe_ti
+// reserva/libera; cualquiera con acceso a inversiones puede ver que esta reservado.
+router.get(
+  "/:id/investments/catalog/:catalogId/ti-asset-search",
+  verifyToken,
+  requireRole(["jefe_ti"]),
+  ctrl.searchReservableTiAssets,
+);
+router.get(
+  "/:id/investments/catalog/:catalogId/ti-asset-reservations",
+  verifyToken,
+  requireRole(investmentRoles),
+  ctrl.getTiAssetReservations,
+);
+router.post(
+  "/:id/investments/catalog/:catalogId/ti-asset-reservations",
+  verifyToken,
+  requireRole(["jefe_ti"]),
+  ctrl.reserveTiAsset,
+);
+router.delete(
+  "/:id/investments/catalog/:catalogId/ti-asset-reservations/:reservationId",
+  verifyToken,
+  requireRole(["jefe_ti"]),
+  ctrl.releaseTiAssetReservation,
+);
 router.get("/:id/investments/values", verifyToken, requireRole(investmentValuesRoles), ctrl.getInvestmentValues);
 router.post("/:id/investments/values", verifyToken, requireRole(investmentValuesRoles), ctrl.saveInvestmentValues);
 router.get("/:id/investments/values/assignees", verifyToken, requireRole(investmentValuesRoles), ctrl.getInvestmentQuotationAssignees);

@@ -14,13 +14,17 @@ const INVESTMENT_EDIT_ROLES = new Set([
   "jefe_servicio",
   "jefe_logistica",
   "jefe_ti", // BC-10: puede ver y agregar items al carrito
+  // 2026-09-23: se decidio abrir el rol completo (antes solo alexandra.molina
+  // tenia el permiso puntual INVESTMENT_EDIT_EXTRA_ROLE de abajo). Cualquier
+  // usuario con rol jefe_financiero, actual o futuro, edita inversiones.
+  "jefe_financiero",
 ]);
 
 // Capacidad puntual otorgada a un usuario especifico sin cambiar su rol
 // principal (mismo patron que "bc_quality_summary" para lorena.loaiza, ver
-// migrations/276_users_extra_roles.sql). alexandra.molina (jefe_financiero)
-// necesita agregar inversiones adicionales sin que TODO jefe_financiero
-// gane esa capacidad.
+// migrations/276_users_extra_roles.sql). Mecanismo generico para el proximo
+// caso de "esta persona puntual necesita el permiso, no todo su rol" --
+// jefe_financiero ya no lo necesita, ver INVESTMENT_EDIT_ROLES arriba.
 const INVESTMENT_EDIT_EXTRA_ROLE = "bc_investment_edit";
 
 function hasInvestmentEditRole(role, extraRoles = []) {

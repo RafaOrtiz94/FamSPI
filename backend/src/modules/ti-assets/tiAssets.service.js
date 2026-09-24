@@ -26,6 +26,11 @@ const ALLOWED_STATUSES = new Set([
   "damaged",
   "in_maintenance",
   "retired",
+  // Reservado para una inversion adicional de un Business Case (ver
+  // bcInvestmentTiAssetReservations.service.js). No se asigna a un usuario
+  // interno como 'assigned' -- queda apartado hasta que se libere (BC no
+  // factible) o se entregue (pasa a custodia de cliente via moveAssetCustody).
+  "reserved",
 ]);
 
 const TI_ROLES = ["ti", "jefe_ti", "admin_ti", "gerencia"];

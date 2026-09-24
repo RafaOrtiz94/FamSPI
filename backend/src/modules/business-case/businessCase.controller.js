@@ -256,6 +256,7 @@ const INVESTMENT_VALUES_FIN_ROLES = new Set(["jefe_financiero", "jefe_ti"]);
 // item): estos son los unicos roles que pueden agregar items o cambiar
 // cantidades/caracteristicas.
 const { INVESTMENT_EDIT_ROLES, hasInvestmentEditRole } = require("./investmentEditAccess");
+const bcInvestmentTiAssetReservationsService = require("./bcInvestmentTiAssetReservations.service");
 const INVESTMENT_COMPLETE_ROLES = new Set([
   "acp_comercial",
   "jefe_comercial",
@@ -2702,6 +2703,74 @@ async function closeInvestmentsWithoutAdditionalItems(req, res) {
     });
   } catch (error) {
     logger.error({ error: error.message }, "Error closing investments without additional items");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+// ===== RESERVA DE ACTIVOS TI PARA INVERSIONES ADICIONALES =====
+// Solo jefe_ti busca/reserva/libera (ver businessCase.routes.js); el resto de
+// roles con acceso a inversiones solo puede leer que esta reservado.
+async function searchReservableTiAssets(req, res) {
+  try {
+    const { id } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const rows = await bcInvestmentTiAssetReservationsService.searchReservableAssets({ q: req.query?.q });
+    res.json({ ok: true, data: rows });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error searching reservable TI assets");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+async function getTiAssetReservations(req, res) {
+  try {
+    const { id, catalogId } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const rows = await bcInvestmentTiAssetReservationsService.listReservationsForSelection({
+      businessCaseId: id,
+      catalogId: Number(catalogId),
+    });
+    res.json({ ok: true, data: rows });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error listing TI asset reservations");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+async function reserveTiAsset(req, res) {
+  try {
+    const { id, catalogId } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const tiAssetId = Number(req.body?.ti_asset_id);
+    if (!Number.isInteger(tiAssetId) || tiAssetId <= 0) {
+      return res.status(400).json({ ok: false, message: "ti_asset_id es requerido" });
+    }
+    const rows = await bcInvestmentTiAssetReservationsService.reserveAsset({
+      businessCaseId: id,
+      catalogId: Number(catalogId),
+      tiAssetId,
+      user: req.user,
+    });
+    res.json({ ok: true, data: rows });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error reserving TI asset");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+async function releaseTiAssetReservation(req, res) {
+  try {
+    const { id, reservationId } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const rows = await bcInvestmentTiAssetReservationsService.releaseReservation({
+      reservationId: Number(reservationId),
+      businessCaseId: id,
+      user: req.user,
+      reason: "manual",
+    });
+    res.json({ ok: true, data: rows });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error releasing TI asset reservation");
     res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
   }
 }
@@ -7002,6 +7071,10 @@ module.exports = {
   createInvestmentCatalogItem,
   saveInvestmentSelection,
   closeInvestmentsWithoutAdditionalItems,
+  searchReservableTiAssets,
+  getTiAssetReservations,
+  reserveTiAsset,
+  releaseTiAssetReservation,
   getInvestmentValues,
   getInvestmentQuotationAssignees,
   assignInvestmentQuotation,

@@ -251,6 +251,26 @@ class PrivatePurchaseStateMachine {
                 logger.warn({ eventError, purchaseId }, 'No se pudo emitir evento de compra privada');
             }
 
+            // Entrega completada: si el expediente viene de un Business Case, sus
+            // reservas de activos TI (inversiones adicionales) pasan a entregadas y
+            // el activo se mueve a custodia de cliente. Nunca debe tumbar la entrega
+            // ya confirmada -- solo se registra un warning si falla.
+            if (toState === PRIVATE_PURCHASE_STATES.DELIVERED) {
+                try {
+                    const { rows: bcRows } = await db.query(
+                        'SELECT business_case_id FROM private_purchase_requests WHERE id = $1',
+                        [purchaseId],
+                    );
+                    const businessCaseId = bcRows[0]?.business_case_id || null;
+                    if (businessCaseId) {
+                        const { markDeliveredForBusinessCase } = require('../business-case/bcInvestmentTiAssetReservations.service');
+                        await markDeliveredForBusinessCase(businessCaseId, { user: { id: userId }, reason: 'private_purchase_delivered' });
+                    }
+                } catch (tiReservationError) {
+                    logger.warn({ tiReservationError, purchaseId }, 'No se pudieron actualizar las reservas de activos TI al entregar');
+                }
+            }
+
             // NOTIFICACIONES: Enviar notificaciones después de transición exitosa
             setImmediate(async () => {
                 try {
