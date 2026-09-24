@@ -5,6 +5,7 @@ import api from "../../../../../core/api";
 import { useAuth } from "../../../../../core/auth/AuthContext";
 import { useUI } from "../../../../../core/ui/UIContext";
 import SectionEditorBadge from "../SectionEditorBadge";
+import TiAssetReservationPanel from "./TiAssetReservationPanel";
 
 // jefe_ti tiene acceso a ambas clases de precios (financieros y operativos),
 // a diferencia de jefe_operaciones/jefe_financiero que solo editan la suya.
@@ -525,6 +526,15 @@ const InvestmentValuesUnifiedSection = ({
                         </button>
                       </div>
                     </div>
+                  )}
+
+                  {role === "jefe_ti" && (
+                    <TiAssetReservationPanel
+                      bcId={bcId}
+                      catalogId={item.catalog_id}
+                      quantity={item.quantity}
+                      showToast={showToast}
+                    />
                   )}
 
                   {dirtyMap[`${item.catalog_id}:operativa`] || dirtyMap[`${item.catalog_id}:financiera`] ? (

@@ -2128,6 +2128,8 @@ module.exports = {
   ANNUAL_QUANTITY_HEADERS,
   findColumnForRowByTargetHeader,
   loadTemplateDefinition,
+  resolveObjectiveRow,
+  normalizeText,
   buildRecordAliases,
   buildEquipmentMatchAliases,
   scoreAliases,

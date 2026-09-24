@@ -73,6 +73,22 @@ const isAdminLike = (user = {}) => {
   return roles.has("admin") || roles.has("administrador");
 };
 
+// Finanzas ya tiene acceso de lectura al módulo de entregas a colaboradores.
+// Para sus actas firmadas, debe poder consultar el workflow y descargar el
+// PDF final aunque el workflow haya sido iniciado por otra área. El alcance
+// queda limitado al origen exacto de actas de entrega; no abre workflows de
+// otros módulos ni concede permisos para firmar o administrar el proceso.
+const canViewCollabDeliveryActaWorkflow = (workflow = {}, user = {}) => {
+  if (
+    normalizeRoleName(workflow.source_module) !== "collab_deliveries" ||
+    normalizeRoleName(workflow.source_entity) !== "acta"
+  ) {
+    return false;
+  }
+  const roles = collectUserRoles(user);
+  return roles.has("financiero") || roles.has("jefe_financiero");
+};
+
 const buildWorkflowCode = () =>
   `FSW-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
 
@@ -563,7 +579,7 @@ function ensureCanViewWorkflow(workflowData, user) {
     error.status = 404;
     throw error;
   }
-  if (isAdminLike(user)) return;
+  if (isAdminLike(user) || canViewCollabDeliveryActaWorkflow(workflowData.workflow, user)) return;
 
   const userId = Number(user?.id || 0);
   const email = String(user?.email || "").trim().toLowerCase();

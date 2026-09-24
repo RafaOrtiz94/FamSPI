@@ -248,9 +248,34 @@ function pickFirst(...values) {
   return null;
 }
 
+// Campos que alimentan formulas/calculos en el Sheet (dotacion de laboratorio,
+// plazos, presupuesto). Si se les escribe el texto "N/A" en vez de omitirlos,
+// cualquier formula que sume/multiplique esa celda pasa a #VALUE! y arrastra el
+// error a las hojas que dependen de ella -- por eso estos siguen omitiendose
+// (celda queda como estaba) cuando no hay valor, en vez de forzar "N/A".
+const NUMERIC_FIELD_KEYS = new Set([
+  "DiasLaboratorio",
+  "TurnosPorDia",
+  "HorasPorTurno",
+  "ControlesCalidadPorTurno",
+  "NumeroPacientesMensual",
+  "Plazo",
+  "ProyeccionPlazo",
+  "PresupuestoReferencial",
+  "PorcentajeMaximoCanje",
+]);
+
+// Requerimiento 2026-09-24: una celda de texto/etiqueta sin dato debe quedar
+// explicitamente en "N/A", no vacia -- una celda vacia en el Sheet generado
+// se confundia con "todavia no se genero" o quedaba con el valor de una
+// version anterior del BC si el campo antes tenia dato y ahora no.
 function setFieldIfPresent(target, key, value) {
-  if (!hasValue(value)) return;
-  target[key] = value;
+  if (hasValue(value)) {
+    target[key] = value;
+    return;
+  }
+  if (NUMERIC_FIELD_KEYS.has(key)) return;
+  target[key] = "N/A";
 }
 
 function normalizePurchaseTypeLabel(value) {
@@ -486,9 +511,15 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   const equipmentPairs = Array.isArray(extra?.equipment_details) ? extra.equipment_details : [];
   const primaryPair = equipmentPairs.find((pair) => Number(pair?.primary_id) > 0) || equipmentPairs[0] || null;
   const sheetEquipmentPairs = filterEquipmentPairsForSheet(equipmentPairs);
-  const includePrimaryBackup = shouldIncludeBackupInSheet(primaryPair || {});
   const primaryId = Number(primaryPair?.primary_id) || null;
-  const backupId = includePrimaryBackup ? Number(primaryPair?.backup_id) || null : null;
+  // Bug reportado 2026-09-24: el nombre y estado del equipo backup dejaban de
+  // llegar al Sheet cuando backup_install_simultaneous no era afirmativo,
+  // porque backupId (y por tanto el nombre/estado) solo se resolvia si
+  // shouldIncludeBackupInSheet() era true. Esa bandera responde una pregunta
+  // distinta -- "se instala junto al principal" (campo InstalarJuntoPrincipal,
+  // mas abajo) -- no si existe backup. Un equipo backup seleccionado (con o
+  // sin instalacion simultanea) siempre debe mostrar su nombre y estado.
+  const backupId = Number(primaryPair?.backup_id) || null;
 
   const [
     labEnvironment,
@@ -549,14 +580,12 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     primaryPair?.equipment_status,
     normalizeEquipmentTypeLabel(primaryPair?.primary_type),
   ));
-  if (includePrimaryBackup) {
-    setFieldIfPresent(fields, "NombreEquipoBackUp", equipmentNamesMap.get(backupId));
-    setFieldIfPresent(fields, "EstadoEquipoBackUp", pickFirst(
-      primaryPair?.backup_status,
-      normalizeEquipmentTypeLabel(primaryPair?.backup_type),
-    ));
-    setFieldIfPresent(fields, "InstalarJuntoPrincipal", normalizeBool(primaryPair?.backup_install_simultaneous));
-  }
+  setFieldIfPresent(fields, "NombreEquipoBackUp", equipmentNamesMap.get(backupId));
+  setFieldIfPresent(fields, "EstadoEquipoBackUp", pickFirst(
+    primaryPair?.backup_status,
+    normalizeEquipmentTypeLabel(primaryPair?.backup_type),
+  ));
+  setFieldIfPresent(fields, "InstalarJuntoPrincipal", normalizeBool(primaryPair?.backup_install_simultaneous));
   setFieldIfPresent(fields, "UbicacionEquipos", primaryPair?.installation_location);
   setFieldIfPresent(fields, "RequiereEquipoComplementario", normalizeBool(primaryPair?.requires_complementary));
   setFieldIfPresent(fields, "EquipoComplementarioPrueba", primaryPair?.complementary_test_purpose);
@@ -1602,4 +1631,5 @@ module.exports = {
   getDocumentVersions,
   filterEquipmentPairsForSheet,
   shouldIncludeBackupInSheet,
+  buildAutoGenerationInput,
 };
