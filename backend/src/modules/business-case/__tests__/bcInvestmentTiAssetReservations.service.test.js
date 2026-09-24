@@ -29,10 +29,9 @@ function fakeClient(responses) {
 beforeEach(() => jest.clearAllMocks());
 
 describe("reserveAsset", () => {
-  test("reserva el activo cuando hay disponibilidad de cantidad y el activo esta libre", async () => {
+  test("reserva el activo cuando esta libre", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ quantity: 2 }] }); // selection
     const client = fakeClient([
-      { match: "count(*)", result: { rows: [{ n: 0 }] } },
       { match: "SELECT * FROM public.ti_assets", result: { rows: [{ id: 7, status: "available", asset_code: "TI-007" }] } },
       { match: "INSERT INTO public.bc_investment_ti_asset_reservations", result: { rows: [{ id: 100 }] } },
       { match: "UPDATE public.ti_assets", result: { rows: [] } },
@@ -50,24 +49,31 @@ describe("reserveAsset", () => {
     expect(updateCall.params[0]).toBe(7);
   });
 
-  test("rechaza si ya se reservaron tantos activos como la cantidad del item", async () => {
+  // Una sola unidad de la inversion puede requerir varios activos TI (ej.
+  // "Computadores x2" -> CPU + monitor + teclado + mouse por cada uno): ya no
+  // hay tope de cantidad, se puede reservar mas activos que la cantidad del item.
+  test("permite reservar mas activos que la cantidad del item (sin tope)", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ quantity: 1 }] });
     const client = fakeClient([
-      { match: "count(*)", result: { rows: [{ n: 1 }] } },
+      { match: "SELECT * FROM public.ti_assets", result: { rows: [{ id: 9, status: "unassigned", asset_code: "TI-009" }] } },
+      { match: "INSERT INTO public.bc_investment_ti_asset_reservations", result: { rows: [{ id: 101 }] } },
+      { match: "UPDATE public.ti_assets", result: { rows: [] } },
+      { match: "INSERT INTO public.ti_asset_events", result: { rows: [] } },
       { match: "BEGIN", result: {} },
-      { match: "ROLLBACK", result: {} },
+      { match: "COMMIT", result: {} },
     ]);
     db.getClient.mockResolvedValue(client);
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: 100, ti_asset_id: 7 }, { id: 101, ti_asset_id: 9 }], // ya habia 1, se agrega un segundo
+    });
 
-    await expect(
-      service.reserveAsset({ businessCaseId: BC_ID, catalogId: CATALOG_ID, tiAssetId: 7, user }),
-    ).rejects.toMatchObject({ code: "QUANTITY_LIMIT_REACHED" });
+    const result = await service.reserveAsset({ businessCaseId: BC_ID, catalogId: CATALOG_ID, tiAssetId: 9, user });
+    expect(result).toHaveLength(2);
   });
 
   test("rechaza si el activo no esta disponible (ya reservado/asignado/danado)", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ quantity: 5 }] });
     const client = fakeClient([
-      { match: "count(*)", result: { rows: [{ n: 0 }] } },
       { match: "SELECT * FROM public.ti_assets", result: { rows: [{ id: 7, status: "reserved", asset_code: "TI-007" }] } },
       { match: "BEGIN", result: {} },
       { match: "ROLLBACK", result: {} },
@@ -85,6 +91,24 @@ describe("reserveAsset", () => {
       service.reserveAsset({ businessCaseId: BC_ID, catalogId: CATALOG_ID, tiAssetId: 7, user }),
     ).rejects.toMatchObject({ code: "SELECTION_NOT_FOUND" });
     expect(db.getClient).not.toHaveBeenCalled();
+  });
+});
+
+describe("listReservationsForBusinessCase", () => {
+  test("devuelve las reservas activas de todo el BC, agrupables por catalog_id", async () => {
+    db.query.mockResolvedValueOnce({
+      rows: [
+        { id: 100, catalog_id: 15, ti_asset_id: 7, name: "Laptop Dell" },
+        { id: 101, catalog_id: 15, ti_asset_id: 9, name: "Monitor LG" },
+        { id: 102, catalog_id: 21, ti_asset_id: 12, name: "Impresora Zebra" },
+      ],
+    });
+
+    const rows = await service.listReservationsForBusinessCase(BC_ID);
+
+    expect(rows).toHaveLength(3);
+    expect(rows.filter((r) => r.catalog_id === 15)).toHaveLength(2);
+    expect(db.query.mock.calls[0][0]).toContain("status = 'reserved'");
   });
 });
 

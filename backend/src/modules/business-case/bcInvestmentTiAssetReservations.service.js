@@ -72,6 +72,24 @@ async function listReservationsForSelection({ businessCaseId, catalogId }) {
   return rows;
 }
 
+// Todas las reservas activas del BC, agrupadas por catalog_id. La usan:
+// - el resto de usuarios con acceso a inversiones (no solo jefe_ti) para VER
+//   que quedo reservado en cada item, sin tener que abrir uno por uno.
+// - la pantalla de precios/cotizacion, para saber si un item ya esta cubierto
+//   por inventario TI y por tanto ya no necesita cotizacion.
+async function listReservationsForBusinessCase(businessCaseId) {
+  const { rows } = await db.query(
+    `SELECT r.id, r.catalog_id, r.status, r.reserved_at,
+            a.id AS ti_asset_id, a.asset_code, a.name, a.brand, a.model, a.serial_number, a.characteristics
+       FROM public.bc_investment_ti_asset_reservations r
+       JOIN public.ti_assets a ON a.id = r.ti_asset_id
+      WHERE r.business_case_id = $1 AND r.status = 'reserved'
+      ORDER BY r.catalog_id, r.reserved_at ASC`,
+    [businessCaseId],
+  );
+  return rows;
+}
+
 async function reserveAsset({ businessCaseId, catalogId, tiAssetId, user }) {
   const selection = await db.query(
     `SELECT quantity FROM public.bc_investment_selections WHERE business_case_id = $1 AND catalog_id = $2 AND selected = true`,
@@ -80,21 +98,14 @@ async function reserveAsset({ businessCaseId, catalogId, tiAssetId, user }) {
   if (!selection.rows.length) {
     throw httpError("Primero agrega este item a la lista de inversiones (con cantidad) antes de reservar un activo.", 409, "SELECTION_NOT_FOUND");
   }
-  const quantity = Number(selection.rows[0].quantity) || 0;
 
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
 
-    const currentCount = await client.query(
-      `SELECT count(*)::int AS n FROM public.bc_investment_ti_asset_reservations
-        WHERE business_case_id = $1 AND catalog_id = $2 AND status = 'reserved'`,
-      [businessCaseId, catalogId],
-    );
-    if (currentCount.rows[0].n >= quantity) {
-      throw httpError(`Ya hay ${quantity} activo(s) reservado(s), igual a la cantidad de este item. Sube la cantidad para reservar otro.`, 409, "QUANTITY_LIMIT_REACHED");
-    }
-
+    // Sin tope de cantidad: una sola unidad de la inversion (ej. "Computadores x2")
+    // puede requerir varios activos TI distintos cada una (CPU, monitor, teclado,
+    // mouse...), asi que la cantidad del item es solo una referencia, no un limite.
     const assetRows = await client.query(`SELECT * FROM public.ti_assets WHERE id = $1 FOR UPDATE`, [tiAssetId]);
     const asset = assetRows.rows[0];
     if (!asset) throw httpError("Activo TI no encontrado", 404, "ASSET_NOT_FOUND");
@@ -241,6 +252,7 @@ async function markDeliveredForBusinessCase(businessCaseId, { user = null, reaso
 module.exports = {
   searchReservableAssets,
   listReservationsForSelection,
+  listReservationsForBusinessCase,
   reserveAsset,
   releaseReservation,
   releaseAllForBusinessCase,

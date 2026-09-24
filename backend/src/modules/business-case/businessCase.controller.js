@@ -2722,6 +2722,18 @@ async function searchReservableTiAssets(req, res) {
   }
 }
 
+async function getAllTiAssetReservations(req, res) {
+  try {
+    const { id } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const rows = await bcInvestmentTiAssetReservationsService.listReservationsForBusinessCase(id);
+    res.json({ ok: true, data: rows });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error listing all TI asset reservations for BC");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
 async function getTiAssetReservations(req, res) {
   try {
     const { id, catalogId } = req.params;
@@ -7072,6 +7084,7 @@ module.exports = {
   saveInvestmentSelection,
   closeInvestmentsWithoutAdditionalItems,
   searchReservableTiAssets,
+  getAllTiAssetReservations,
   getTiAssetReservations,
   reserveTiAsset,
   releaseTiAssetReservation,

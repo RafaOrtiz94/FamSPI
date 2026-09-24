@@ -339,6 +339,14 @@ router.get(
   requireRole(investmentRoles),
   ctrl.getTiAssetReservations,
 );
+// Todas las reservas del BC de una vez -- la usan tanto la lista de inversiones
+// como precios/cotizacion (para saber si un item ya esta cubierto con inventario TI).
+router.get(
+  "/:id/investments/ti-asset-reservations",
+  verifyToken,
+  requireRole([...new Set([...investmentRoles, ...investmentValuesRoles])]),
+  ctrl.getAllTiAssetReservations,
+);
 router.post(
   "/:id/investments/catalog/:catalogId/ti-asset-reservations",
   verifyToken,

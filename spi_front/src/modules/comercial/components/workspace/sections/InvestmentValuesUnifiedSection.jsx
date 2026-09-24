@@ -6,6 +6,7 @@ import { useAuth } from "../../../../../core/auth/AuthContext";
 import { useUI } from "../../../../../core/ui/UIContext";
 import SectionEditorBadge from "../SectionEditorBadge";
 import TiAssetReservationPanel from "./TiAssetReservationPanel";
+import { listAllTiAssetReservations } from "../../../../../core/api/bcInvestmentTiAssetsApi";
 
 // jefe_ti tiene acceso a ambas clases de precios (financieros y operativos),
 // a diferencia de jefe_operaciones/jefe_financiero que solo editan la suya.
@@ -103,6 +104,7 @@ const InvestmentValuesUnifiedSection = ({
   const { showToast } = useUI();
   const [items, setItems] = useState([]);
   const [pricingContext, setPricingContext] = useState(null);
+  const [tiAssetCountsByCatalogId, setTiAssetCountsByCatalogId] = useState({});
   const [syncStatus, setSyncStatus] = useState(null);
   const [assignees, setAssignees] = useState([]);
   const [assigneeDrafts, setAssigneeDrafts] = useState({});
@@ -124,11 +126,18 @@ const InvestmentValuesUnifiedSection = ({
     if (!bcId) return;
     try {
       setLoading(true);
-      const [operationalRes, financialRes, assigneesRes] = await Promise.all([
+      const [operationalRes, financialRes, assigneesRes, tiReservations] = await Promise.all([
         api.get(`/business-case/${bcId}/investments/values`, { params: { class: "operativa" } }),
         api.get(`/business-case/${bcId}/investments/values`, { params: { class: "financiera" } }),
         api.get(`/business-case/${bcId}/investments/values/assignees`),
+        listAllTiAssetReservations(bcId).catch(() => []),
       ]);
+      const countsByCatalogId = {};
+      (Array.isArray(tiReservations) ? tiReservations : []).forEach((reservation) => {
+        const key = String(reservation.catalog_id);
+        countsByCatalogId[key] = (countsByCatalogId[key] || 0) + 1;
+      });
+      setTiAssetCountsByCatalogId(countsByCatalogId);
       const operationalPayload = operationalRes?.data?.data || {};
       const financialPayload = financialRes?.data?.data || {};
       const merged = mergeInvestmentRows(operationalPayload.items || [], financialPayload.items || []);
@@ -389,6 +398,8 @@ const InvestmentValuesUnifiedSection = ({
           <div className="divide-y divide-gray-100">
             {items.map((item) => {
               const qty = Number(item.quantity || 1);
+              const reservedTiAssetCount = tiAssetCountsByCatalogId[String(item.catalog_id)] || 0;
+              const coveredByTiInventory = reservedTiAssetCount > 0 && reservedTiAssetCount >= Number(item.quantity || 0);
               const depreciation = calculateFinancialDepreciation(
                 item.financial_unit_price,
                 item.depreciation_percentage,
@@ -420,8 +431,22 @@ const InvestmentValuesUnifiedSection = ({
                           Cotizacion solicitada
                         </span>
                       )}
+                      {coveredByTiInventory && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700">
+                          <FiCheckCircle size={11} />
+                          Cubierto con inventario TI ({reservedTiAssetCount}/{item.quantity})
+                        </span>
+                      )}
                     </div>
                   </div>
+
+                  <TiAssetReservationPanel
+                    bcId={bcId}
+                    catalogId={item.catalog_id}
+                    quantity={item.quantity}
+                    showToast={showToast}
+                    canManage={role === "jefe_ti"}
+                  />
 
                   <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
                     <label className="flex flex-col gap-1">
@@ -487,7 +512,13 @@ const InvestmentValuesUnifiedSection = ({
                     <span>Valor residual unitario: <strong>${money(depreciation.net)}</strong></span>
                   </div>
 
-                  {canEditAny && (
+                  {coveredByTiInventory && (
+                    <p className="rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700">
+                      Este item ya esta cubierto con {reservedTiAssetCount} activo(s) de inventario TI reservados — no requiere cotizacion.
+                    </p>
+                  )}
+
+                  {canEditAny && !coveredByTiInventory && (
                     <div className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
                       <label className="flex flex-col gap-1">
                         <span className="text-xs font-semibold text-gray-500">Responsable de cotizacion</span>
@@ -526,15 +557,6 @@ const InvestmentValuesUnifiedSection = ({
                         </button>
                       </div>
                     </div>
-                  )}
-
-                  {role === "jefe_ti" && (
-                    <TiAssetReservationPanel
-                      bcId={bcId}
-                      catalogId={item.catalog_id}
-                      quantity={item.quantity}
-                      showToast={showToast}
-                    />
                   )}
 
                   {dirtyMap[`${item.catalog_id}:operativa`] || dirtyMap[`${item.catalog_id}:financiera`] ? (

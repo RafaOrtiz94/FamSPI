@@ -13,3 +13,9 @@ export const reserveTiAsset = async (businessCaseId, catalogId, tiAssetId) =>
 
 export const releaseTiAssetReservation = async (businessCaseId, catalogId, reservationId) =>
   unwrap(await api.delete(`/business-case/${businessCaseId}/investments/catalog/${catalogId}/ti-asset-reservations/${reservationId}`));
+
+// Todas las reservas del BC de una vez (sin filtrar por item) -- para mostrar
+// visibilidad a cualquier usuario con acceso a inversiones y para saber, en
+// precios/cotizacion, si un item ya esta cubierto por inventario TI.
+export const listAllTiAssetReservations = async (businessCaseId) =>
+  unwrap(await api.get(`/business-case/${businessCaseId}/investments/ti-asset-reservations`));
