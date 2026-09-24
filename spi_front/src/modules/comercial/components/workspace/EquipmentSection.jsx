@@ -32,6 +32,7 @@ const DEFAULT_EQUIPMENT_PAIR = () => ({
  backup_type: "new_available",
  requiresBackup: false,
  installation_location: "",
+ allowsProvisional: false,
  requiresComplementary: false,
  complementary_test_purpose: "",
 });
@@ -343,6 +344,7 @@ const EquipmentSection = ({
  primary_type: normalizeEquipmentType(detail.primary_type || detail.primary?.type),
  requiresBackup: detail.requires_backup ?? detail.requiresBackup ?? Boolean(detail.backup),
  installation_location: detail.installation_location || "",
+ allowsProvisional: Boolean(detail.allows_provisional),
  requiresComplementary: Boolean(detail.requires_complementary),
  complementary_test_purpose: detail.complementary_test_purpose || "",
  primary: detail.primary
@@ -760,6 +762,7 @@ const EquipmentSection = ({
  backup_id: pair.requiresBackup ? Number(pair.backup?.id || null) : null,
  backup_install_simultaneous: pair.requiresBackup && pair.backup ? Boolean(pair.backup.install_with_primary) : false,
  installation_location: pair.installation_location || null,
+ allows_provisional: Boolean(pair.allowsProvisional),
  requires_complementary: Boolean(pair.requiresComplementary),
  complementary_test_purpose: pair.requiresComplementary ? (pair.complementary_test_purpose || null) : null,
  })),
@@ -1008,6 +1011,21 @@ const EquipmentSection = ({
  disabled={!canEdit}
  className={INPUT_CLASS}
  />
+ </div>
+
+ <div className="w-full sm:max-w-xs">
+ <label className="mb-1 block text-xs font-semibold text-gray-600 uppercase tracking-wide">
+ Permite equipo provisional
+ </label>
+ <select
+ value={pair.allowsProvisional ? "si" : "no"}
+ onChange={(event) => updatePair(pair.id, { allowsProvisional: event.target.value === "si" })}
+ disabled={!canEdit}
+ className={INPUT_CLASS}
+ >
+ <option value="no">No</option>
+ <option value="si">Si</option>
+ </select>
  </div>
 
  <button

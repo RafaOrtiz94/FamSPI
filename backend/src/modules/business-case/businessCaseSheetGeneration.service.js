@@ -587,6 +587,7 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   ));
   setFieldIfPresent(fields, "InstalarJuntoPrincipal", normalizeBool(primaryPair?.backup_install_simultaneous));
   setFieldIfPresent(fields, "UbicacionEquipos", primaryPair?.installation_location);
+  setFieldIfPresent(fields, "PermiteEquipoProvisional", normalizeBool(primaryPair?.allows_provisional));
   setFieldIfPresent(fields, "RequiereEquipoComplementario", normalizeBool(primaryPair?.requires_complementary));
   setFieldIfPresent(fields, "EquipoComplementarioPrueba", primaryPair?.complementary_test_purpose);
 
@@ -607,6 +608,14 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   setFieldIfPresent(fields, "IncluyeHadwareLIS", normalizeBool(lisIntegration?.includes_hardware));
   setFieldIfPresent(fields, "NumeroPacientesMensual", lisIntegration?.monthly_patients);
   setFieldIfPresent(fields, "InterfazSistemaActual", normalizeBool(requiresInterface));
+  // Bug reportado 2026-09-24: estas 3 celdas (filas 37-39 de la plantilla,
+  // bloque "sistema actual" del cliente al que hay que interfasear) nunca se
+  // escribian -- quedaban vacias en vez de N/A porque no habia
+  // setFieldIfPresent para ellas, aunque el dato ya se capturaba en LIS
+  // Integration (current_system_name/provider/hardware).
+  setFieldIfPresent(fields, "NombreSistema", lisIntegration?.current_system_name);
+  setFieldIfPresent(fields, "ProveedorSistemaActual", lisIntegration?.current_system_provider);
+  setFieldIfPresent(fields, "IncluyeHadwareSistemaActual", normalizeBool(lisIntegration?.current_system_hardware));
   setFieldIfPresent(fields, "ModeloProveedor1", lisInterfaces[0]?.model || lisInterfaces[0]?.provider);
   setFieldIfPresent(fields, "ModeloProveedor2", lisInterfaces[1]?.model || lisInterfaces[1]?.provider);
   setFieldIfPresent(fields, "ModeloProveedor3", lisInterfaces[2]?.model || lisInterfaces[2]?.provider);

@@ -20,6 +20,7 @@ const SECTION_FIELDS = {
  "processCode",
  "contractObject",
  "smartObjective",
+ "referentialBudget",
  "notes",
  ],
 };
@@ -303,6 +304,12 @@ const privateContractObjectOptions = useMemo(() => {
  metadata.smartObjective ||
  metadataGeneral.smart_objective ||
  metadataGeneral.smartObjective ||
+ "",
+ referentialBudget:
+ metadata.referential_budget ??
+ metadataGeneral.referential_budget ??
+ businessCase?.bc_equipment_cost ??
+ fallbackBusinessCase?.bc_equipment_cost ??
  "",
  notes:
  businessCase?.notes ||
@@ -653,12 +660,18 @@ const privateContractObjectOptions = useMemo(() => {
  const normalizedSmartObjective = String(formData.smartObjective || "").trim();
  const finalContractingEntity = startedAsPublic ? String(formData.contractingEntity || "").trim() : null;
  const finalProcessCode = startedAsPublic ? String(formData.processCode || "").trim() || null : null;
+ const normalizedReferentialBudget =
+ formData.referentialBudget === "" || formData.referentialBudget === null || formData.referentialBudget === undefined
+ ? null
+ : Number(formData.referentialBudget);
+ const finalReferentialBudget = Number.isFinite(normalizedReferentialBudget) ? normalizedReferentialBudget : null;
 
  const metadata = {
  notes: formData.notes,
  clientType: finalClientType,
  contractingEntity: finalContractingEntity,
  provinceCity: formData.provinceCity || locationProvinceCity || "",
+ referential_budget: finalReferentialBudget,
  client_location_id,
  client_location_name,
  installation_address: selectedLocationValue?.address || null,
@@ -673,6 +686,7 @@ const privateContractObjectOptions = useMemo(() => {
  clientType: finalClientType,
  contractingEntity: finalContractingEntity,
  provinceCity: formData.provinceCity || locationProvinceCity || "",
+ referential_budget: finalReferentialBudget,
  client_location_id,
  client_location_name,
  installation_address: selectedLocationValue?.address || null,
@@ -1034,6 +1048,25 @@ const privateContractObjectOptions = useMemo(() => {
  </select>
  {errors.contractObject && <p className="ml-1 text-xs font-medium text-rose-500">{errors.contractObject.message}</p>}
  </label>
+ <label className="flex flex-col gap-1.5">
+ <div className="flex items-center justify-between">
+ <span className="text-sm font-bold text-gray-700">Presupuesto Referencial del proceso</span>
+ </div>
+ <input
+ type="number"
+ min={0}
+ step="0.01"
+ inputMode="decimal"
+ className="w-full border rounded-xl px-4 py-2.5 transition-all outline-none bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900 placeholder-gray-400 disabled:bg-gray-100 disabled:text-gray-500"
+ placeholder="Solo numeros"
+ disabled={!isEditing}
+ {...register("referentialBudget", {
+ min: { value: 0, message: "El presupuesto no puede ser negativo" },
+ })}
+ />
+ {errors.referentialBudget && <p className="text-xs text-rose-500 font-medium ml-1">{errors.referentialBudget.message}</p>}
+ </label>
+
  <label className="flex flex-col gap-1.5 md:col-span-2">
  <div className="flex items-center justify-between">
  <span className="text-sm font-bold text-gray-700">Objetivo SMART</span>

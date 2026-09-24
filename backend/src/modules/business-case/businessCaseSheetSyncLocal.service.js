@@ -119,7 +119,12 @@ const BC_LABEL_FIELD_MAP = new Map([
   ["horas por turno", "HorasPorTurno"],
   ["controles de calidad por turno", "ControlesCalidadPorTurno"],
   ["niveles de control", "NivelesDeControl"],
+  // La plantilla vigente (actualizada 2026-09-10) le agrego "semanal" al
+  // label de esta fila ("Frecuencia de controles de calidad semanal
+  // (Rutina)"); se deja tambien la variante corta por si una plantilla
+  // anterior/otra pestana usa el texto sin "semanal".
   ["frecuencia de controles de calidad rutina", "FrecuenciaControlesRutina"],
+  ["frecuencia de controles de calidad semanal rutina", "FrecuenciaControlesRutina"],
   ["pruebas especiales", "PruebasEspeciales"],
   ["frecuencia de controles de calidad pruebas especiales", "FrecuenciaControlesEspeciales"],
   ["nombre de equipo principal", "NombreEquipoPrincipal"],
@@ -129,6 +134,7 @@ const BC_LABEL_FIELD_MAP = new Map([
   ["estado de equipo back up nuevo usado ano de fabricacion", "EstadoEquipoBackUp"],
   ["se debe instalar a la par del equipo principal si no", "InstalarJuntoPrincipal"],
   ["ubicacion de los equipos a instalar", "UbicacionEquipos"],
+  ["permite equipo provisional", "PermiteEquipoProvisional"],
   ["requiere equipo complementario si no", "RequiereEquipoComplementario"],
   ["equipo complementario para que prueba", "EquipoComplementarioPrueba"],
   ["incluye lis si no", "IncluyeLIS"],
