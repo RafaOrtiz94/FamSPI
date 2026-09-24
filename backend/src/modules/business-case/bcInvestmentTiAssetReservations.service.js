@@ -15,12 +15,23 @@
 
 const db = require("../../config/db");
 const logger = require("../../config/logger");
-const { moveAssetCustody } = require("../ti-assets/tiAssets.service");
+const { moveAssetCustody, buildInitialConditionPhotos } = require("../ti-assets/tiAssets.service");
 
 const RESERVABLE_STATUSES = new Set(["available", "unassigned"]);
 
+// Columnas de fotos del estado inicial del activo (las mismas que usa el
+// modulo ti-assets) -- se necesitan para que jefe_ti pueda ver el activo
+// antes de reservarlo, no solo nombre/serie.
+const ASSET_PHOTO_COLUMNS = `
+  a.initial_condition_photo_1_url, a.initial_condition_photo_1_sha256,
+  a.initial_condition_photo_2_url, a.initial_condition_photo_2_sha256`;
+
 function httpError(message, status = 400, code = "BC_TI_RESERVATION_ERROR") {
   return Object.assign(new Error(message), { status, code });
+}
+
+function withPhotos(row, publicBaseUrl) {
+  return { ...row, initial_condition_photos: buildInitialConditionPhotos(row, publicBaseUrl) };
 }
 
 async function appendAssetEvent(dbOrClient, { assetId, eventType, payload, userId }) {
@@ -32,7 +43,7 @@ async function appendAssetEvent(dbOrClient, { assetId, eventType, payload, userI
 }
 
 // Activos disponibles para reservar (busqueda por nombre/marca/modelo/serie/caracteristicas).
-async function searchReservableAssets({ q, limit = 30 }) {
+async function searchReservableAssets({ q, limit = 30, publicBaseUrl }) {
   const params = [];
   const where = ["a.active = true", "a.status = ANY($1::text[])"];
   params.push(Array.from(RESERVABLE_STATUSES));
@@ -49,27 +60,29 @@ async function searchReservableAssets({ q, limit = 30 }) {
   const safeLimit = Math.min(100, Math.max(1, Number(limit) || 30));
   params.push(safeLimit);
   const { rows } = await db.query(
-    `SELECT a.id, a.asset_code, a.name, a.brand, a.model, a.serial_number, a.characteristics, a.status
+    `SELECT a.id, a.asset_code, a.name, a.brand, a.model, a.serial_number, a.characteristics, a.status,
+            ${ASSET_PHOTO_COLUMNS}
        FROM public.ti_assets a
       WHERE ${where.join(" AND ")}
       ORDER BY a.name ASC
       LIMIT $${params.length}`,
     params,
   );
-  return rows;
+  return rows.map((row) => withPhotos(row, publicBaseUrl));
 }
 
-async function listReservationsForSelection({ businessCaseId, catalogId }) {
+async function listReservationsForSelection({ businessCaseId, catalogId, publicBaseUrl }) {
   const { rows } = await db.query(
     `SELECT r.id, r.status, r.reserved_at, r.released_at, r.released_reason,
-            a.id AS ti_asset_id, a.asset_code, a.name, a.brand, a.model, a.serial_number, a.characteristics
+            a.id AS ti_asset_id, a.asset_code, a.name, a.brand, a.model, a.serial_number, a.characteristics, a.status AS asset_status,
+            ${ASSET_PHOTO_COLUMNS}
        FROM public.bc_investment_ti_asset_reservations r
        JOIN public.ti_assets a ON a.id = r.ti_asset_id
       WHERE r.business_case_id = $1 AND r.catalog_id = $2 AND r.status = 'reserved'
       ORDER BY r.reserved_at ASC`,
     [businessCaseId, catalogId],
   );
-  return rows;
+  return rows.map((row) => withPhotos(row, publicBaseUrl));
 }
 
 // Todas las reservas activas del BC, agrupadas por catalog_id. La usan:
@@ -77,20 +90,21 @@ async function listReservationsForSelection({ businessCaseId, catalogId }) {
 //   que quedo reservado en cada item, sin tener que abrir uno por uno.
 // - la pantalla de precios/cotizacion, para saber si un item ya esta cubierto
 //   por inventario TI y por tanto ya no necesita cotizacion.
-async function listReservationsForBusinessCase(businessCaseId) {
+async function listReservationsForBusinessCase(businessCaseId, { publicBaseUrl } = {}) {
   const { rows } = await db.query(
     `SELECT r.id, r.catalog_id, r.status, r.reserved_at,
-            a.id AS ti_asset_id, a.asset_code, a.name, a.brand, a.model, a.serial_number, a.characteristics
+            a.id AS ti_asset_id, a.asset_code, a.name, a.brand, a.model, a.serial_number, a.characteristics, a.status AS asset_status,
+            ${ASSET_PHOTO_COLUMNS}
        FROM public.bc_investment_ti_asset_reservations r
        JOIN public.ti_assets a ON a.id = r.ti_asset_id
       WHERE r.business_case_id = $1 AND r.status = 'reserved'
       ORDER BY r.catalog_id, r.reserved_at ASC`,
     [businessCaseId],
   );
-  return rows;
+  return rows.map((row) => withPhotos(row, publicBaseUrl));
 }
 
-async function reserveAsset({ businessCaseId, catalogId, tiAssetId, user }) {
+async function reserveAsset({ businessCaseId, catalogId, tiAssetId, user, publicBaseUrl }) {
   const selection = await db.query(
     `SELECT quantity FROM public.bc_investment_selections WHERE business_case_id = $1 AND catalog_id = $2 AND selected = true`,
     [businessCaseId, catalogId],
@@ -133,7 +147,7 @@ async function reserveAsset({ businessCaseId, catalogId, tiAssetId, user }) {
     });
 
     await client.query("COMMIT");
-    return listReservationsForSelection({ businessCaseId, catalogId });
+    return listReservationsForSelection({ businessCaseId, catalogId, publicBaseUrl });
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -142,7 +156,7 @@ async function reserveAsset({ businessCaseId, catalogId, tiAssetId, user }) {
   }
 }
 
-async function releaseReservation({ reservationId, businessCaseId, user, reason = "manual" }) {
+async function releaseReservation({ reservationId, businessCaseId, user, reason = "manual", publicBaseUrl }) {
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
@@ -175,7 +189,7 @@ async function releaseReservation({ reservationId, businessCaseId, user, reason 
     });
 
     await client.query("COMMIT");
-    return listReservationsForSelection({ businessCaseId, catalogId: reservation.catalog_id });
+    return listReservationsForSelection({ businessCaseId, catalogId: reservation.catalog_id, publicBaseUrl });
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;

@@ -1,6 +1,9 @@
 jest.mock("../../../config/db", () => ({ query: jest.fn(), getClient: jest.fn() }));
 jest.mock("../../../config/logger", () => ({ warn: jest.fn(), info: jest.fn(), error: jest.fn() }));
-jest.mock("../../ti-assets/tiAssets.service", () => ({ moveAssetCustody: jest.fn() }));
+jest.mock("../../ti-assets/tiAssets.service", () => ({
+  moveAssetCustody: jest.fn(),
+  buildInitialConditionPhotos: jest.fn(() => []),
+}));
 
 const db = require("../../../config/db");
 const { moveAssetCustody } = require("../../ti-assets/tiAssets.service");

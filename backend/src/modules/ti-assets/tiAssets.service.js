@@ -4191,6 +4191,7 @@ function isMobileAsset(asset = {}) {
 
 module.exports = {
   buildTiActaItemsBlock,
+  buildInitialConditionPhotos,
   TI_ROLES,
   TI_LEGACY_ACTA_UPLOAD_ROLES,
   TI_READ_ROLES,

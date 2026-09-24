@@ -2710,11 +2710,20 @@ async function closeInvestmentsWithoutAdditionalItems(req, res) {
 // ===== RESERVA DE ACTIVOS TI PARA INVERSIONES ADICIONALES =====
 // Solo jefe_ti busca/reserva/libera (ver businessCase.routes.js); el resto de
 // roles con acceso a inversiones solo puede leer que esta reservado.
+function resolvePublicBaseUrlForRequest(req) {
+  const proto = req.get("x-forwarded-proto") || req.protocol || "https";
+  const host = req.get("x-forwarded-host") || req.get("host") || "";
+  return host ? `${proto}://${host}` : "";
+}
+
 async function searchReservableTiAssets(req, res) {
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
-    const rows = await bcInvestmentTiAssetReservationsService.searchReservableAssets({ q: req.query?.q });
+    const rows = await bcInvestmentTiAssetReservationsService.searchReservableAssets({
+      q: req.query?.q,
+      publicBaseUrl: resolvePublicBaseUrlForRequest(req),
+    });
     res.json({ ok: true, data: rows });
   } catch (error) {
     logger.error({ error: error.message }, "Error searching reservable TI assets");
@@ -2726,7 +2735,9 @@ async function getAllTiAssetReservations(req, res) {
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
-    const rows = await bcInvestmentTiAssetReservationsService.listReservationsForBusinessCase(id);
+    const rows = await bcInvestmentTiAssetReservationsService.listReservationsForBusinessCase(id, {
+      publicBaseUrl: resolvePublicBaseUrlForRequest(req),
+    });
     res.json({ ok: true, data: rows });
   } catch (error) {
     logger.error({ error: error.message }, "Error listing all TI asset reservations for BC");
@@ -2741,6 +2752,7 @@ async function getTiAssetReservations(req, res) {
     const rows = await bcInvestmentTiAssetReservationsService.listReservationsForSelection({
       businessCaseId: id,
       catalogId: Number(catalogId),
+      publicBaseUrl: resolvePublicBaseUrlForRequest(req),
     });
     res.json({ ok: true, data: rows });
   } catch (error) {
@@ -2762,6 +2774,7 @@ async function reserveTiAsset(req, res) {
       catalogId: Number(catalogId),
       tiAssetId,
       user: req.user,
+      publicBaseUrl: resolvePublicBaseUrlForRequest(req),
     });
     res.json({ ok: true, data: rows });
   } catch (error) {
@@ -2779,6 +2792,7 @@ async function releaseTiAssetReservation(req, res) {
       businessCaseId: id,
       user: req.user,
       reason: "manual",
+      publicBaseUrl: resolvePublicBaseUrlForRequest(req),
     });
     res.json({ ok: true, data: rows });
   } catch (error) {
