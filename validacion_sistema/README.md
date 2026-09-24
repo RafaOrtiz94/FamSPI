@@ -1,4 +1,6 @@
-# VALIDACION DEL SISTEMA
+# VALIDACION DEL SISTEMA (LEGADO)
+
+> **Este arbol quedo marcado como legado.** La generacion de documentos de validacion (URS/FRS/DS/RTM, DQ/IQ/OQ/PQ) vigente y con evidencia real esta en [`docs/validation/`](../docs/validation/README.md), no aqui. `URS/`, `FRS/` y `DDS/` en esta carpeta no se regeneran ni se usan como fuente para nueva documentacion — quedan solo como archivo historico. Los `informes/*.md` de incidentes/ajustes conservan valor como bitacora de cambios y se mantienen sin modificar.
 
 Base documental para revision, trazabilidad y validacion del SPI.
 

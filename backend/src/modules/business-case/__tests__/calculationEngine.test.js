@@ -3,9 +3,49 @@
  * =====================================
  */
 
+jest.mock('../../../config/db', () => ({ query: jest.fn() }));
+
+const db = require('../../../config/db');
 const calculationEngine = require('../calculationEngine.service');
 
 describe('Calculation Engine', () => {
+    describe('resolveVariables', () => {
+        beforeEach(() => {
+            jest.clearAllMocks();
+        });
+
+        it('resolves independent lookup variables in parallel and keeps each result correct', async () => {
+            db.query.mockImplementation(async (query, params) => {
+                if (query.includes('FROM catalog_a')) return { rows: [{ volume: 10 }] };
+                if (query.includes('FROM catalog_b')) return { rows: [{ price: 25 }] };
+                throw new Error(`unexpected query: ${query}`);
+            });
+
+            const resolved = await calculationEngine.resolveVariables({
+                a: { source: 'lookup', table: 'catalog_a', key: 'id', value: 'volume', default: 0 },
+                b: { source: 'lookup', table: 'catalog_b', key: 'id', value: 'price', default: 0 },
+            }, { id: 1 });
+
+            expect(db.query).toHaveBeenCalledTimes(2);
+            expect(resolved).toEqual({ a: 10, b: 25 });
+        });
+
+        it('falls back to default when a lookup fails, without affecting other variables', async () => {
+            db.query.mockImplementation(async (query) => {
+                if (query.includes('FROM catalog_ok')) return { rows: [{ volume: 5 }] };
+                throw new Error('boom');
+            });
+
+            const resolved = await calculationEngine.resolveVariables({
+                ok: { source: 'lookup', table: 'catalog_ok', key: 'id', value: 'volume', default: 0 },
+                broken: { source: 'lookup', table: 'catalog_broken', key: 'id', value: 'x', default: 99 },
+            }, { id: 1 });
+
+            expect(resolved).toEqual({ ok: 5, broken: 99 });
+        });
+    });
+
+
     describe('evaluateExpression', () => {
         it('should evaluate simple arithmetic', () => {
             const result = calculationEngine.evaluateExpression('2 + 3 * 4', {});

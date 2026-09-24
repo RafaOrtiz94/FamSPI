@@ -169,6 +169,17 @@ exports.exportPdf = asyncHandler(async (req, res) => {
   res.json({ ok: true, result });
 });
 
+exports.generateAnnualScheduleForTi = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const result = await svc.generateAnnualScheduleForTi({
+    year: payload.year,
+    responsable: payload.responsable || "TI",
+    createdBy: req.user?.id || null,
+    dryRun: Boolean(payload.dry_run),
+  });
+  res.status(201).json({ ok: true, data: result });
+});
+
 exports.signAdvanced = asyncHandler(async (req, res) => {
   const id = req.params.id;
   const {

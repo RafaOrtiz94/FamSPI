@@ -4,8 +4,11 @@ import { FiCheckCircle, FiChevronDown, FiUsers } from "react-icons/fi";
 import { useParams } from "react-router-dom";
 import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
-import SectionObservationAlert from "../SectionObservationAlert";
+import { useAuth } from "../../../../../core/auth/AuthContext";
+import SectionEditorBadge from "../SectionEditorBadge";
 import LocationManager from "../../LocationManager";
+import ProvinciaCiudadInput from "../../../../../components/ProvinciaCiudadInput";
+import { useAutoEditSection } from "../BusinessCaseWorkspaceContext";
 
 const SECTION_FIELDS = {
  general: [
@@ -16,11 +19,23 @@ const SECTION_FIELDS = {
  "provinceCity",
  "processCode",
  "contractObject",
+ "smartObjective",
+ "referentialBudget",
  "notes",
  ],
 };
 
 const SECTION_ORDER = ["general"];
+
+// Mismos roles que ya autoriza el backend en POST /sections/:section/unlock
+// (businessCase.routes.js) -- unico camino para reabrir "general" una vez
+// que comercial guardo y quedo bloqueada automaticamente.
+const GENERAL_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial"]);
+const PRIVATE_CONTRACT_OBJECT_OPTIONS = [
+ { value: "TODO COMPRADO", label: "TODO COMPRADO" },
+ { value: "DETERMINACION", label: "DETERMINACION" },
+ { value: "DETERMINACION EFECTIVA", label: "DETERMINACION EFECTIVA" },
+];
 
 const normalizeText = (value) => String(value || "").trim().toLowerCase();
 
@@ -33,6 +48,33 @@ const getClientLabel = (client) =>
  client?.identificador ||
  client?.id ||
  "Cliente";
+
+const getClientAssignmentSummary = (client, currentUserEmail) => {
+ const details = Array.isArray(client?.assignment_details) ? client.assignment_details : [];
+ const activeDetails = details.filter((item) => item && item.is_active !== false);
+ if (!activeDetails.length) {
+ return { label: "Sin asignar", tone: "slate" };
+ }
+
+ const myEmail = String(currentUserEmail || "").trim().toLowerCase();
+ const isAssignedToMe = myEmail && activeDetails.some(
+ (item) => String(item?.assigned_to_email || "").toLowerCase() === myEmail,
+ );
+
+ if (isAssignedToMe) {
+ return { label: "Tu cliente", tone: "emerald" };
+ }
+
+ const names = activeDetails
+ .map((item) => item?.assigned_to_name || item?.assigned_to_email || "")
+ .map((value) => String(value || "").trim())
+ .filter(Boolean);
+
+ return {
+ label: names.length ? `Asignado a ${names[0]}` : "Asignado",
+ tone: "amber",
+ };
+};
 
 const toCleanText = (value) => {
  const normalized = String(value || "").trim();
@@ -64,6 +106,14 @@ const resolveProvinceCityFromLocation = (location) => {
  return [province, city].filter(Boolean).join(", ");
 };
 
+const getLocationLabel = (location) => {
+ if (!location || typeof location !== "object") return "";
+ const provinceCity = resolveProvinceCityFromLocation(location);
+ const name = toCleanText(location?.name);
+ if (name && provinceCity) return `${name} - ${provinceCity}`;
+ return name || provinceCity || toCleanText(location?.address) || "Sede";
+};
+
 const normalizeClientType = (value) => {
  const normalized = String(value || "").trim().toLowerCase();
  if (["persona_natural", "natural", "pn"].includes(normalized)) return "persona_natural";
@@ -77,6 +127,9 @@ const isPublicPurchaseType = (value) => {
  const normalized = String(value || "").trim().toLowerCase();
  return normalized.includes("public");
 };
+
+const isKnownPrivateContractObject = (value) =>
+ PRIVATE_CONTRACT_OBJECT_OPTIONS.some((option) => option.value === String(value || "").trim());
 
 const AccordionSection = ({
  id,
@@ -124,18 +177,23 @@ const ClientDataSection = ({
  uiGuidance,
  permissions = {},
  ownership = {},
- observationData,
  onSave = () => {}
 }) => {
  const { id: bcId } = useParams();
  const { showToast, showLoader, hideLoader } = useUI();
+ const { user: currentUser } = useAuth();
  const [clients, setClients] = useState([]);
  const [loadingClients, setLoadingClients] = useState(false);
  const [saving, setSaving] = useState(false);
  const [loading, setLoading] = useState(true);
+ const [isEditing, setIsEditing] = useState(false);
+ useAutoEditSection("general", () => setIsEditing(true));
 
  const [showClientDropdown, setShowClientDropdown] = useState(false);
  const [filteredClients, setFilteredClients] = useState([]);
+ const [isClientInputFocused, setIsClientInputFocused] = useState(false);
+ const [, setShowLocationDropdown] = useState(false);
+ const [, setFilteredLocations] = useState([]);
  const [isNewClient, setIsNewClient] = useState(false);
  const [clientLocations, setClientLocations] = useState([]);
  const [selectedLocation, setSelectedLocation] = useState(null);
@@ -159,12 +217,25 @@ const ClientDataSection = ({
  } = useForm({ defaultValues });
 
  const [naFields, setNaFields] = useState({});
- const watchClient = watch("client");
- const watchLocationId = watch("locationId");
- const watchClientType = watch("clientType");
+const watchClient = watch("client");
+const watchLocationId = watch("locationId");
+const watchClientType = watch("clientType");
+const watchProvinceCity = watch("provinceCity");
+const watchContractObject = watch("contractObject");
+const privateContractObjectOptions = useMemo(() => {
+ const currentValue = String(watchContractObject || "").trim();
+ if (!currentValue || isKnownPrivateContractObject(currentValue)) {
+ return PRIVATE_CONTRACT_OBJECT_OPTIONS;
+ }
+ return [
+  ...PRIVATE_CONTRACT_OBJECT_OPTIONS,
+  { value: currentValue, label: `Valor actual: ${currentValue}` },
+ ];
+}, [watchContractObject]);
+ const selectedClientLabel = selectedClient ? normalizeText(getClientLabel(selectedClient)) : "";
  const [openSections, setOpenSections] = useState(() =>
  SECTION_ORDER.reduce((acc, id) => {
- acc[id] = id === "general";
+ acc[id] = true;
  return acc;
  }, {}),
  );
@@ -225,6 +296,20 @@ const ClientDataSection = ({
  businessCase?.contract_object ||
  fallbackBusinessCase?.contractObject ||
  fallbackBusinessCase?.contract_object ||
+ "",
+ smartObjective:
+ businessCase?.smart_objective ||
+ fallbackBusinessCase?.smart_objective ||
+ metadata.smart_objective ||
+ metadata.smartObjective ||
+ metadataGeneral.smart_objective ||
+ metadataGeneral.smartObjective ||
+ "",
+ referentialBudget:
+ metadata.referential_budget ??
+ metadataGeneral.referential_budget ??
+ businessCase?.bc_equipment_cost ??
+ fallbackBusinessCase?.bc_equipment_cost ??
  "",
  notes:
  businessCase?.notes ||
@@ -333,7 +418,15 @@ const ClientDataSection = ({
  const fetchClients = async () => {
  setLoadingClients(true);
  try {
- const res = await api.get("/clients");
+ // must_include_client_id: el cliente ya guardado en el BC puede quedar
+ // fuera de la pagina por defecto (backend ordena por mas reciente) --
+ // se pide explicito para que siempre resuelva, sin importar su antiguedad.
+ const res = await api.get("/clients", {
+ params: {
+ include_all_for_business_case: true,
+ must_include_client_id: businessCase?.client_id || undefined,
+ },
+ });
  const payload = res.data?.data ?? res.data;
  const parsedClients = Array.isArray(payload?.items)
  ? payload.items
@@ -353,7 +446,7 @@ const ClientDataSection = ({
  };
 
  fetchClients();
- }, []);
+ }, [businessCase?.client_id]);
 
  // Resolve selected client when both client list and saved values are available
  useEffect(() => {
@@ -393,11 +486,62 @@ const ClientDataSection = ({
  setSelectedClient(exact);
  setIsNewClient(Boolean(term) && !exact);
 
+ const exactLabel = exact ? normalizeText(getClientLabel(exact)) : "";
+ if (exact && term === exactLabel && (!selectedClientLabel || selectedClientLabel === exactLabel)) {
+ setFilteredClients([]);
+ setShowClientDropdown(false);
+ return;
+ }
+
+ if (term.length < 2) {
+ setFilteredClients([]);
+ setShowClientDropdown(false);
+ return;
+ }
+
  const matches = clients
- .filter((client) => normalizeText(getClientLabel(client)).includes(term))
+ .filter((client) => {
+ const haystack = [
+ getClientLabel(client),
+ client?.identificador,
+ client?.client_email,
+ client?.shipping_city,
+ client?.shipping_province,
+ ]
+ .map((value) => normalizeText(value))
+ .filter(Boolean)
+ .join(" ");
+ return haystack.includes(term);
+ })
  .slice(0, 8);
  setFilteredClients(matches);
- }, [watchClient, clients, setValue, findClientByInput]);
+ setShowClientDropdown(isClientInputFocused && !exact && matches.length > 0);
+
+ // La lista inicial solo trae los clientes mas recientes (paginada) -- si
+ // no hay match local, se busca en el backend (que si consulta la tabla
+ // completa por nombre/ruc/id) para no dejar invisibles clientes antiguos.
+ if (matches.length === 0 && term.length >= 3) {
+ const timer = setTimeout(async () => {
+ try {
+ const res = await api.get("/clients", {
+ params: { include_all_for_business_case: true, q: watchClient },
+ });
+ const payload = res.data?.data ?? res.data;
+ const found = Array.isArray(payload) ? payload : [];
+ if (found.length) {
+ setClients((prev) => {
+ const existingIds = new Set(prev.map((c) => String(c.id)));
+ const toAdd = found.filter((c) => !existingIds.has(String(c.id)));
+ return toAdd.length ? [...prev, ...toAdd] : prev;
+ });
+ }
+ } catch (err) {
+ console.warn("No se pudo buscar clientes en el servidor", err.message);
+ }
+ }, 300);
+ return () => clearTimeout(timer);
+ }
+ }, [watchClient, clients, setValue, findClientByInput, selectedClientLabel, isClientInputFocused]);
 
  useEffect(() => {
  if (!selectedClient) return;
@@ -418,47 +562,76 @@ const ClientDataSection = ({
  }, [selectedClient, clientLocations, watchLocationId, setValue]);
 
  useEffect(() => {
- const naClientType = Boolean(naFields.clientType);
- const naProvinceCity = Boolean(naFields.provinceCity);
-
  if (startedAsPublic) {
  setValue("clientType", "persona_juridica", { shouldDirty: true });
- }
-
- if (!selectedClient) {
- if (!naClientType && !startedAsPublic) setValue("clientType", "", { shouldDirty: true });
- // Preserve stored province/city when no client match is resolved.
  return;
  }
 
- const provinceCity = selectedLocation
- ? resolveProvinceCityFromLocation(selectedLocation)
- : resolveProvinceCityFromClient(selectedClient);
+ if (!selectedClient) return;
 
- if (!naClientType && !startedAsPublic) {
- setValue(
- "clientType",
- normalizeClientType(
+ const currentType = normalizeClientType(watchClientType);
+ if (currentType) return;
+
+ const suggestedType = normalizeClientType(
  selectedClient?.client_type ||
  selectedClient?.person_type ||
- selectedClient?.tipo_persona ||
- watchClientType,
- ),
- { shouldDirty: true },
+ selectedClient?.tipo_persona,
  );
- }
- if (!naProvinceCity) {
- setValue("provinceCity", provinceCity || "", { shouldDirty: false });
+ if (suggestedType) {
+ setValue("clientType", suggestedType, { shouldDirty: false });
  }
  }, [
  selectedClient,
- selectedLocation,
  setValue,
- naFields.clientType,
- naFields.provinceCity,
  startedAsPublic,
  watchClientType
  ]);
+
+ useEffect(() => {
+ const term = normalizeText(watchProvinceCity);
+ if (!selectedClient || !clientLocations.length) {
+ setFilteredLocations([]);
+ setShowLocationDropdown(false);
+ return;
+ }
+
+ if (!term) {
+ setFilteredLocations(clientLocations.slice(0, 8));
+ return;
+ }
+
+ const matches = clientLocations
+ .filter((location) => {
+ const haystack = [
+ getLocationLabel(location),
+ location?.address,
+ location?.city,
+ location?.province,
+ ]
+ .map((value) => normalizeText(value))
+ .filter(Boolean)
+ .join(" ");
+ return haystack.includes(term);
+ })
+ .slice(0, 8);
+ setFilteredLocations(matches);
+ }, [clientLocations, selectedClient, watchProvinceCity]);
+
+ useEffect(() => {
+ if (Boolean(naFields.provinceCity)) return;
+
+ if (selectedLocation) {
+ setValue("provinceCity", getLocationLabel(selectedLocation), { shouldDirty: false, shouldValidate: true });
+ return;
+ }
+
+ if (selectedClient && !clientLocations.length) {
+ const fallbackProvinceCity = resolveProvinceCityFromClient(selectedClient);
+ if (fallbackProvinceCity) {
+ setValue("provinceCity", fallbackProvinceCity, { shouldDirty: false, shouldValidate: false });
+ }
+ }
+ }, [clientLocations.length, selectedClient, selectedLocation, setValue, naFields.provinceCity]);
 
  const handleSave = async (formData) => {
  if (!bcId) {
@@ -481,20 +654,24 @@ const ClientDataSection = ({
  ? resolveProvinceCityFromLocation(selectedLocationValue)
  : "";
 
- if (selected && clientLocations.length > 0 && !client_location_id) {
- showToast("Selecciona una sede de instalación para continuar.", "warning");
- return;
- }
-
  const finalClientType = startedAsPublic
  ? "persona_juridica"
  : normalizeClientType(formData.clientType);
+ const normalizedSmartObjective = String(formData.smartObjective || "").trim();
+ const finalContractingEntity = startedAsPublic ? String(formData.contractingEntity || "").trim() : null;
+ const finalProcessCode = startedAsPublic ? String(formData.processCode || "").trim() || null : null;
+ const normalizedReferentialBudget =
+ formData.referentialBudget === "" || formData.referentialBudget === null || formData.referentialBudget === undefined
+ ? null
+ : Number(formData.referentialBudget);
+ const finalReferentialBudget = Number.isFinite(normalizedReferentialBudget) ? normalizedReferentialBudget : null;
 
  const metadata = {
  notes: formData.notes,
  clientType: finalClientType,
- contractingEntity: formData.contractingEntity,
+ contractingEntity: finalContractingEntity,
  provinceCity: formData.provinceCity || locationProvinceCity || "",
+ referential_budget: finalReferentialBudget,
  client_location_id,
  client_location_name,
  installation_address: selectedLocationValue?.address || null,
@@ -504,9 +681,12 @@ const ClientDataSection = ({
  installation_lng: selectedLocationValue?.lng ?? null,
  general_data: {
  notes: formData.notes,
+ smart_objective: normalizedSmartObjective,
+ smartObjective: normalizedSmartObjective,
  clientType: finalClientType,
- contractingEntity: formData.contractingEntity,
+ contractingEntity: finalContractingEntity,
  provinceCity: formData.provinceCity || locationProvinceCity || "",
+ referential_budget: finalReferentialBudget,
  client_location_id,
  client_location_name,
  installation_address: selectedLocationValue?.address || null,
@@ -525,14 +705,13 @@ const ClientDataSection = ({
  await api.put(`/business-case/${bcId}`, {
  client_id,
  client_name,
- process_code: formData.processCode || null,
+ process_code: finalProcessCode,
  contract_object: formData.contractObject || null,
  modern_bc_metadata: metadata,
  });
 
  showToast("Datos del cliente guardados correctamente", "success");
-
- // Trigger UI guidance refresh
+ setIsEditing(false);
  onSave();
 
  } catch (error) {
@@ -549,7 +728,7 @@ const ClientDataSection = ({
  // Check permissions based on role
  const canEdit = () => {
  const role = permissions?.userRole || "comercial";
- return [
+ const hasRoleAccess = [
  "comercial",
  "acp_comercial",
  "backoffice_comercial",
@@ -557,6 +736,27 @@ const ClientDataSection = ({
  "jefe_tecnico",
  "jefe_operaciones",
  ].includes(role);
+ return hasRoleAccess && permissions?.canEdit !== false && ownership?.canUserEdit !== false;
+ };
+
+ // Reabrir "general" tras el auto-bloqueo al guardar comercial (ver
+ // update() en businessCase.controller.js). Reutiliza el endpoint generico
+ // de bloqueo/desbloqueo por seccion, ya restringido a estos mismos roles
+ // en el backend -- no hace falta flujo de "solicitar desbloqueo".
+ const canReopenGeneral = ownership?.isLocked === true && GENERAL_REOPEN_ROLES.has(permissions?.userRole || "");
+
+ const handleReopenGeneral = async () => {
+ if (!bcId || saving) return;
+ setSaving(true);
+ try {
+  await api.post(`/business-case/${bcId}/sections/general/unlock`);
+  onSave();
+  showToast("Sección reabierta para edición.", "success");
+ } catch (err) {
+  showToast(err?.response?.data?.message || "No se pudo reabrir la sección.", "error");
+ } finally {
+  setSaving(false);
+ }
  };
 
  if (loading) {
@@ -588,28 +788,35 @@ const ClientDataSection = ({
  Captura lo necesario para que operaciones pueda continuar con el Business Case.
  {!canEdit() && " (Solo lectura)"}
  </p>
- <div className="mt-2 inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+ <div className="mt-2 flex flex-wrap items-center gap-2">
+ <div className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
  Origen del flujo: {originLabel}
+ </div>
+ <SectionEditorBadge ownership={ownership} />
  </div>
  </div>
  </div>
 
  {/* Permission warning */}
  {!canEdit() && (
- <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 shadow-sm">
- <div className="flex items-center gap-2 text-amber-800 font-medium">
- <span className="text-sm">
- No tienes permisos para editar datos del cliente en el estado actual.
+ <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+ <span className="text-sm text-amber-800 font-medium">
+ {ownership?.isLocked
+ ? "Comercial ya guardó esta sección y quedó en solo lectura."
+ : "No tienes permisos para editar datos del cliente en el estado actual."}
  </span>
- </div>
+ {canReopenGeneral && (
+ <button
+  type="button"
+  onClick={handleReopenGeneral}
+  disabled={saving}
+  className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 w-full sm:w-auto"
+ >
+  Reabrir para edición
+ </button>
+ )}
  </div>
  )}
-
- {/* Observation alert for this section */}
- <SectionObservationAlert
- sectionId="general"
- observationData={observationData}
- />
 
  <form className="space-y-5" onSubmit={handleSubmit(handleSave)}>
  <AccordionSection
@@ -625,7 +832,7 @@ const ClientDataSection = ({
 
  <label className="flex flex-col gap-1.5">
  <span className="text-sm font-bold text-gray-700 flex items-center gap-2">
- <FiUsers className="text-gray-400" /> Cliente
+ <FiUsers className="text-gray-400" /> Nombre del cliente
  </span>
  <div className="relative">
  <input
@@ -634,15 +841,19 @@ const ClientDataSection = ({
  selectedClient ? "bg-emerald-50" : isNewClient ? "bg-blue-50" : ""
  }`}
  placeholder={loadingClients ? "Cargando clientes..." : "Escribe o selecciona un cliente"}
- disabled={!canEdit()}
+ disabled={!isEditing}
  {...register("client", { required: "El cliente es obligatorio" })}
  onChange={(event) => {
  setValue("client", event.target.value, { shouldDirty: true, shouldValidate: true });
  }}
  onFocus={() => {
- if (filteredClients.length > 0) setShowClientDropdown(true);
+ setIsClientInputFocused(true);
+ if (!selectedClient && filteredClients.length > 0) setShowClientDropdown(true);
  }}
- onBlur={() => setTimeout(() => setShowClientDropdown(false), 120)}
+ onBlur={() => setTimeout(() => {
+ setIsClientInputFocused(false);
+ setShowClientDropdown(false);
+ }, 120)}
  />
  {selectedClient && (
  <span className="absolute right-2 top-2 rounded bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-800">
@@ -656,7 +867,9 @@ const ClientDataSection = ({
  )}
  {showClientDropdown && filteredClients.length > 0 && (
  <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
- {filteredClients.map((client) => (
+ {filteredClients.map((client) => {
+ const assignment = getClientAssignmentSummary(client, currentUser?.email);
+ return (
  <button
  key={client.id}
  type="button"
@@ -668,14 +881,34 @@ const ClientDataSection = ({
  setSelectedClient(client);
  setClientLocations([]);
  setSelectedLocation(null);
+ setValue("provinceCity", "", { shouldDirty: true, shouldValidate: true });
  setValue("locationId", "", { shouldDirty: true, shouldValidate: true });
  setIsNewClient(false);
  setShowClientDropdown(false);
  }}
  >
+ <div className="flex items-start justify-between gap-3">
+ <div>
  <p className="text-sm font-medium text-slate-900">{getClientLabel(client)}</p>
+ <p className="text-xs text-slate-500">
+ {[client?.identificador, client?.shipping_city, client?.shipping_province].filter(Boolean).join(" • ") || "Cliente registrado"}
+ </p>
+ </div>
+ <span
+ className={`rounded-full px-2 py-1 text-[10px] font-semibold flex-shrink-0 ${
+ assignment.tone === "emerald"
+ ? "bg-emerald-100 text-emerald-800"
+ : assignment.tone === "amber"
+ ? "bg-amber-100 text-amber-800"
+ : "bg-slate-100 text-slate-600"
+ }`}
+ >
+ {assignment.label}
+ </span>
+ </div>
  </button>
- ))}
+ );
+ })}
  </div>
  )}
  </div>
@@ -688,12 +921,12 @@ const ClientDataSection = ({
  {selectedClient ? (
  <LocationManager
  clientId={selectedClient.id}
- canEdit={canEdit()}
+ canEdit={isEditing}
  selectedLocationId={watchLocationId}
  onSelectLocation={(location) => {
  setSelectedLocation(location || null);
  setValue("locationId", location?.id ? String(location.id) : "", { shouldDirty: true, shouldValidate: true });
- const autoProvinceCity = resolveProvinceCityFromLocation(location);
+ const autoProvinceCity = getLocationLabel(location);
  if (!naFields.provinceCity && autoProvinceCity) {
  setValue("provinceCity", autoProvinceCity, { shouldDirty: true, shouldValidate: false });
  }
@@ -702,6 +935,14 @@ const ClientDataSection = ({
  setClientLocations(Array.isArray(locations) ? locations : []);
  }}
  />
+ ) : isNewClient ? (
+ <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-4 text-sm">
+ <p className="font-semibold text-blue-900 mb-1">Cliente nuevo</p>
+ <p className="text-blue-700">
+ Las sedes de instalación se registran desde el módulo de Clientes una vez creado el cliente.
+ Completa Provincia / Ciudad manualmente para continuar.
+ </p>
+ </div>
  ) : (
  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">
  Selecciona primero un cliente para gestionar sus sedes de instalación.
@@ -716,7 +957,7 @@ const ClientDataSection = ({
  <select
  className="w-full border rounded-xl px-4 py-2.5 transition-all outline-none bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900 disabled:bg-gray-100 disabled:text-gray-500"
  {...register("clientType", { required: "El tipo de cliente es obligatorio" })}
- disabled={!canEdit() || startedAsPublic}
+ disabled={!isEditing ||startedAsPublic}
  >
  <option value="">Selecciona tipo</option>
  <option value="persona_natural">Persona natural</option>
@@ -730,6 +971,7 @@ const ClientDataSection = ({
  {errors.clientType && <p className="text-xs text-rose-500 font-medium ml-1">{errors.clientType.message}</p>}
  </label>
 
+ {startedAsPublic && (
  <label className="flex flex-col gap-1.5">
  <div className="flex items-center justify-between">
  <span className="text-sm font-bold text-gray-700">Entidad contratante</span>
@@ -738,24 +980,37 @@ const ClientDataSection = ({
  <input
  type="text"
  className={naInputClass("contractingEntity")}
- disabled={isNA("contractingEntity") || !canEdit()}
+ disabled={isNA("contractingEntity") || !isEditing}
  {...register("contractingEntity")}
  />
  </label>
+ )}
 
  <label className="flex flex-col gap-1.5">
  <div className="flex items-center justify-between">
  <span className="text-sm font-bold text-gray-700">Provincia / Ciudad</span>
- {renderNAButton("provinceCity")}
  </div>
- <input
- type="text"
- className={naInputClass("provinceCity")}
- readOnly={Boolean(selectedClient) || isNA("provinceCity")}
- {...register("provinceCity")}
- disabled={!canEdit()}
+ <ProvinciaCiudadInput
+ value={watchProvinceCity || ""}
+ disabled={!isEditing}
+ onChange={(text) => {
+   setValue("provinceCity", text, { shouldDirty: true, shouldValidate: true });
+   if (selectedLocation && normalizeText(getLocationLabel(selectedLocation)) !== normalizeText(text)) {
+     setSelectedLocation(null);
+     setValue("locationId", "", { shouldDirty: true, shouldValidate: true });
+   }
+ }}
+ onSelect={(loc) => {
+   setValue("provinceCity", loc.label, { shouldDirty: true, shouldValidate: true });
+ }}
  />
  </label>
+ {selectedClient && clientLocations.length > 0 && !watchLocationId && (
+ <p className="text-xs text-amber-600 -mt-2 md:col-span-2">
+ Selecciona una sede de instalación desde el selector de sedes.
+ </p>
+ )}
+ {startedAsPublic && (
  <label className="flex flex-col gap-1.5">
  <div className="flex items-center justify-between">
  <span className="text-sm font-bold text-gray-700">Código del proceso</span>
@@ -764,22 +1019,66 @@ const ClientDataSection = ({
  <input
  type="text"
  className={naInputClass("processCode")}
- disabled={isNA("processCode") || !canEdit()}
+ disabled={isNA("processCode") || !isEditing}
  {...register("processCode")}
  />
  </label>
+ )}
 
  <label className="flex flex-col gap-1.5">
  <div className="flex items-center justify-between">
  <span className="text-sm font-bold text-gray-700">Objeto de contratación</span>
- {renderNAButton("contractObject")}
+ </div>
+ <select
+ className={naInputClass("contractObject")}
+ disabled={!isEditing}
+ {...register("contractObject", {
+  validate: (value) => {
+   if (String(value || "").trim()) return true;
+   return "El objeto de contratación es obligatorio";
+  },
+ })}
+ >
+ <option value="">Selecciona una opción</option>
+ {privateContractObjectOptions.map((option) => (
+  <option key={option.value} value={option.value}>
+   {option.label}
+  </option>
+ ))}
+ </select>
+ {errors.contractObject && <p className="ml-1 text-xs font-medium text-rose-500">{errors.contractObject.message}</p>}
+ </label>
+ <label className="flex flex-col gap-1.5">
+ <div className="flex items-center justify-between">
+ <span className="text-sm font-bold text-gray-700">Presupuesto Referencial del proceso</span>
  </div>
  <input
- type="text"
- className={naInputClass("contractObject")}
- disabled={isNA("contractObject") || !canEdit()}
- {...register("contractObject")}
+ type="number"
+ min={0}
+ step="0.01"
+ inputMode="decimal"
+ className="w-full border rounded-xl px-4 py-2.5 transition-all outline-none bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900 placeholder-gray-400 disabled:bg-gray-100 disabled:text-gray-500"
+ placeholder="Solo numeros"
+ disabled={!isEditing}
+ {...register("referentialBudget", {
+ min: { value: 0, message: "El presupuesto no puede ser negativo" },
+ })}
  />
+ {errors.referentialBudget && <p className="text-xs text-rose-500 font-medium ml-1">{errors.referentialBudget.message}</p>}
+ </label>
+
+ <label className="flex flex-col gap-1.5 md:col-span-2">
+ <div className="flex items-center justify-between">
+ <span className="text-sm font-bold text-gray-700">Objetivo SMART</span>
+ </div>
+ <textarea
+ rows={3}
+ className="w-full border rounded-xl px-4 py-2.5 transition-all outline-none bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900 placeholder-gray-400 disabled:bg-gray-100 disabled:text-gray-500"
+ disabled={!isEditing}
+ placeholder="Ejemplo: Incrementar cobertura diagnostica en 20% en 12 meses con trazabilidad mensual."
+ {...register("smartObjective", { required: "El objetivo SMART es obligatorio" })}
+ />
+ {errors.smartObjective && <p className="text-xs text-rose-500 font-medium ml-1">{errors.smartObjective.message}</p>}
  </label>
  <label className="flex flex-col gap-1.5 md:col-span-2">
  <div className="flex items-center justify-between">
@@ -789,7 +1088,7 @@ const ClientDataSection = ({
  <textarea
  rows={3}
  className={naInputClass("notes")}
- disabled={isNA("notes") || !canEdit()}
+ disabled={isNA("notes") || !isEditing}
  {...register("notes")}
  />
  </label>
@@ -799,14 +1098,35 @@ const ClientDataSection = ({
  {/* Section Actions */}
  {canEdit() && (
  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-100">
- <p className="text-xs text-gray-400 font-medium">Los cambios se guardan automáticamente al enviar el formulario.</p>
- <button
- type="submit"
- disabled={saving}
- className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-60 disabled:scale-100 w-full sm:w-auto"
- >
- {saving ? "Guardando..." : "Guardar Datos del Cliente"}
- </button>
+ <p className="text-xs text-gray-400 font-medium">
+  {isEditing ? "Los cambios se guardan al presionar Guardar." : "Sección en modo solo lectura."}
+ </p>
+ {isEditing ? (
+  <div className="flex gap-2 sm:justify-end">
+  <button
+  type="button"
+  onClick={() => { initializeForm(); setIsEditing(false); }}
+  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all w-full sm:w-auto"
+  >
+  Cancelar
+  </button>
+  <button
+  type="submit"
+  disabled={saving}
+  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-60 disabled:scale-100 w-full sm:w-auto"
+  >
+  {saving ? "Guardando..." : "Guardar"}
+  </button>
+  </div>
+ ) : (
+  <button
+  type="button"
+  onClick={() => setIsEditing(true)}
+  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-gray-300 bg-white text-gray-700 text-sm font-semibold hover:bg-gray-50 transition-all w-full sm:w-auto"
+  >
+  Editar
+  </button>
+ )}
  </div>
  )}
  </form>

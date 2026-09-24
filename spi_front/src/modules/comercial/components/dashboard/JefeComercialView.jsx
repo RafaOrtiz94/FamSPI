@@ -15,6 +15,7 @@ import {
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
 import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
+import BusinessCasePendingWidget from "../../../../core/ui/widgets/BusinessCasePendingWidget";
 import StatsCard from "../shared/StatsCard";
 
 const quickAccessLinks = [
@@ -78,7 +79,7 @@ const quickAccessLinks = [
  label: "Compras Privadas",
  description: "Supervisión",
  icon: FiLayers,
- path: "/dashboard/backoffice/private-purchases",
+ path: "/dashboard/purchases/workspace?tab=private",
  gradient: "from-fuchsia-500 to-fuchsia-700",
  color: "fuchsia",
  },
@@ -203,9 +204,13 @@ const JefeComercialView = ({ onRefresh, summaryData, summaryLoading, summaryErro
  </div>
  </section>
 
+ <div className="mb-6">
+ <BusinessCasePendingWidget />
+ </div>
+
  {summaryError && (
  <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-sm">
- No se pudieron cargar los KPIs en este momento. Reintenta con “Actualizar”.
+ No se pudieron cargar los KPIs en este momento. Reintenta con "Actualizar".
  </div>
  )}
 

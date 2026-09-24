@@ -13,6 +13,15 @@ module.exports = {
       unidad_id: { anyOf: [{ type: "string" }, { type: "number" }] },
       serial: { type: "string" },
       serial_pendiente: { type: "boolean" },
+      // Etiqueta elegida antes del formulario (normal | costos) para
+      // solicitudes independientes, o fija segun el flujo para las
+      // generadas automaticamente desde business_case/compras. No cambia
+      // ningun otro campo de la solicitud, solo la clasifica.
+      tipo_inspeccion: { type: "string", enum: ["normal", "costos"] },
+      // Origen de la solicitud cuando se genera automaticamente desde otro
+      // flujo (business_case | compras). Ausente en solicitudes independientes
+      // creadas directamente desde el formulario.
+      origen: { type: "string", enum: ["business_case", "compras"] },
       equipos: {
         type: "array",
         items: {
@@ -95,6 +104,77 @@ module.exports = {
       observaciones: { type: "string" },
     },
   },
+  credito: {
+    type: "object",
+    required: [
+      "razon_social",
+      "ruc_id",
+      "telefono_contacto",
+      "correo_electronico",
+      "cupo_credito_sugerido",
+      "plazo_pago_acordado",
+      "direccion_fisica",
+      "ciudad",
+      "provincia",
+      "telefono_celular",
+      "ruc_ci_firmante",
+    ],
+    properties: {
+      asesor_comercial: { type: "string" },
+      fecha_solicitud: { type: "string" },
+      razon_social: { type: "string", minLength: 2 },
+      ruc_id: { type: "string", minLength: 6 },
+      telefono_contacto: { type: "string", minLength: 6 },
+      correo_electronico: { type: "string", format: "email" },
+      cupo_credito_sugerido: { anyOf: [{ type: "number" }, { type: "string", minLength: 1 }] },
+      plazo_pago_acordado: { anyOf: [{ type: "number" }, { type: "string", minLength: 1 }] },
+      activos: { anyOf: [{ type: "number" }, { type: "string" }] },
+      pasivos: { anyOf: [{ type: "number" }, { type: "string" }] },
+      patrimonio: { anyOf: [{ type: "number" }, { type: "string" }] },
+      ingresos_negocio: { anyOf: [{ type: "number" }, { type: "string" }] },
+      egresos_negocio: { anyOf: [{ type: "number" }, { type: "string" }] },
+      ingresos_relacion_dependencia: { anyOf: [{ type: "number" }, { type: "string" }] },
+      gastos_familiares: { anyOf: [{ type: "number" }, { type: "string" }] },
+      otros_ingresos: { anyOf: [{ type: "number" }, { type: "string" }] },
+      prestamos_obligaciones: { anyOf: [{ type: "number" }, { type: "string" }] },
+      total_ingresos: { anyOf: [{ type: "number" }, { type: "string" }] },
+      total_egresos: { anyOf: [{ type: "number" }, { type: "string" }] },
+      justificacion_otros_ingresos: { type: "string" },
+      utilidad_perdida_neta: { anyOf: [{ type: "number" }, { type: "string" }] },
+      banco_1: { type: "string" },
+      banco_2: { type: "string" },
+      cuenta_corriente_1: { type: "string" },
+      cuenta_corriente_2: { type: "string" },
+      cuenta_ahorros_1: { type: "string" },
+      cuenta_ahorros_2: { type: "string" },
+      proveedor_1: { type: "string" },
+      proveedor_2: { type: "string" },
+      contacto_proveedor_1: { type: "string" },
+      contacto_proveedor_2: { type: "string" },
+      telefono_proveedor_1: { type: "string" },
+      telefono_proveedor_2: { type: "string" },
+      ref_personal_nombre_1: { type: "string" },
+      ref_personal_nombre_2: { type: "string" },
+      ref_personal_parentesco_1: { type: "string" },
+      ref_personal_parentesco_2: { type: "string" },
+      ref_personal_telefono_1: { type: "string" },
+      ref_personal_telefono_2: { type: "string" },
+      nombre_responsable_cobros: { type: "string" },
+      direccion_fisica: { type: "string", minLength: 3 },
+      ciudad: { type: "string", minLength: 2 },
+      provincia: { type: "string", minLength: 2 },
+      telefono_fijo: { type: "string" },
+      telefono_celular: { type: "string", minLength: 6 },
+      ruc_ci_firmante: { type: "string", minLength: 6 },
+      monto_sugerido_jefe_comercial: { anyOf: [{ type: "number" }, { type: "string" }] },
+      validacion_referencias: { type: "string" },
+      decision_solicitud: { type: "string" },
+      monto_credito_autorizado: { anyOf: [{ type: "number" }, { type: "string" }] },
+      plazo_credito_autorizado: { anyOf: [{ type: "number" }, { type: "string" }] },
+      fecha_resolucion: { type: "string" },
+      observaciones_validacion: { type: "string" },
+    },
+  },
   newClient: {
     type: "object",
     required: [
@@ -116,11 +196,6 @@ module.exports = {
       "shipping_province",
       "shipping_reference",
       "shipping_cellphone",
-      "legal_rep_name",
-      "legal_rep_position",
-      "legal_rep_id_document",
-      "legal_rep_cellphone",
-      "legal_rep_email",
     ],
     properties: {
       data_processing_consent: { type: "boolean", const: true },
@@ -267,6 +342,18 @@ module.exports = {
         },
         then: {
           required: ["nationality"],
+        },
+      },
+      {
+        // El formulario solo pide/muestra representante legal para persona_juridica
+        // y sub_distribuidor -- para persona_natural estos campos quedan vacios y
+        // el frontend ni siquiera los envia, así que exigirlos siempre rechazaba
+        // toda solicitud de persona natural.
+        if: {
+          properties: { client_type: { enum: ["persona_juridica", "sub_distribuidor"] } },
+        },
+        then: {
+          required: ["legal_rep_name", "legal_rep_position", "legal_rep_id_document", "legal_rep_cellphone", "legal_rep_email"],
         },
       },
       {

@@ -31,9 +31,9 @@ const PersonnelRequestComments = ({
  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
  <div className="mb-4 flex items-center justify-between gap-3">
  <div>
- <h3 className="text-lg font-semibold text-slate-900">Comentarios trazables</h3>
+ <h3 className="text-lg font-semibold text-slate-900">Trazabilidad de comentarios operativos</h3>
  <p className="text-sm text-slate-500">
- Cada comentario queda asociado al usuario, fecha y visibilidad.
+ Cada comentario queda registrado con autor, fecha y nivel de visibilidad para mantener seguimiento operativo y evidencia del flujo.
  </p>
  </div>
  <FiMessageSquare className="text-slate-400" size={20} title="Icono de comentarios" />
@@ -41,8 +41,8 @@ const PersonnelRequestComments = ({
 
  <form className="space-y-3" onSubmit={handleCommentSubmit}>
  <textarea
- className="min-h-[120px] w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
- placeholder="Escribe un comentario operativo o una nota interna"
+className="min-h-[120px] w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+ placeholder="Escribe una observacion operativa, una instruccion de seguimiento o una nota interna del expediente"
  value={commentText}
  onChange={(e) => handleCommentTextChange?.(e.target.value)}
  aria-label="Campo para registrar comentario operativo"
@@ -57,15 +57,15 @@ const PersonnelRequestComments = ({
  aria-label="Marcar comentario como interno"
  />
  <FiLock size={14} title="Icono de comentario interno" />
- Comentario interno
+ Marcar como comentario interno
  </label>
  ) : (
  <div className="text-xs text-slate-500">
- Los comentarios externos quedan visibles en el flujo del solicitante.
+ Los comentarios registrados aqui quedan visibles segun la configuracion del flujo y su tipo de visibilidad.
  </div>
  )}
  <Button type="submit" variant="primary" disabled={saving || !String(commentText || "").trim()} aria-label="Agregar comentario al flujo de solicitud">
- {saving ? "Guardando..." : "Agregar comentario"}
+ {saving ? "Guardando..." : "Registrar comentario"}
  </Button>
  </div>
  </form>
@@ -74,7 +74,7 @@ const PersonnelRequestComments = ({
  <div className="space-y-3">
  {comments.length === 0 ? (
  <div className="rounded-xl border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-500">
- No hay comentarios registrados.
+ Aun no existen comentarios registrados para este expediente.
  </div>
  ) : (
  comments.map((comment) => (

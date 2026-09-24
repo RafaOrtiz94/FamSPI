@@ -1,0 +1,13 @@
+# Sin esto, gcloud builds submit sube node_modules (368MB) + logs + uploads
+# en cada deploy. El Dockerfile hace npm ci adentro; nada de esto se necesita.
+node_modules/
+logs/
+uploads/
+backups/
+*.sql.gz
+.git/
+.env
+.env.*
+*.log
+__tests__/
+docs/

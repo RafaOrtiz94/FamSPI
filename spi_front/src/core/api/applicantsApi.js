@@ -27,7 +27,19 @@ export const getApplicantById = async (id) => {
  return data;
 };
 
-export default {
+export const syncApplicantsFromSheet = async () => {
+ const { data } = await axios.post(
+ `${resolveApplicantsBase()}/sync-from-sheet`,
+ {},
+ { headers: getAuthHeaders() },
+ );
+ return data;
+};
+
+const applicantsApi = {
  getApplicants,
  getApplicantById,
+ syncApplicantsFromSheet,
 };
+
+export default applicantsApi;

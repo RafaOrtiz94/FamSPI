@@ -16,7 +16,12 @@ exports.listPending = asyncHandler(async (req, res) => {
 exports.approve = asyncHandler(async (req, res) => {
   const request_id = parseInt(req.params.id, 10);
   const approver_id = req.user.id;
-  const result = await service.approve(request_id, approver_id);
+  const { assigned_user_id, inspection_date, notes } = req.body || {};
+  const result = await service.approve(request_id, approver_id, {
+    assigned_user_id,
+    inspection_date,
+    notes,
+  });
   res.json({ ok: true, result });
 });
 

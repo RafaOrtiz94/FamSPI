@@ -10,7 +10,6 @@ const steps = [
 ];
 
 export default function CA0107Stepper({ record, onClose }) {
-  const [currentStep, setCurrentStep] = useState(0);
   const [notes, setNotes] = useState("");
   const currentStatus = useMemo(() => record?.status || "submitted", [record]);
   const activeStepIndex = useMemo(() => steps.findIndex(s => s.key === currentStatus), [currentStatus]);

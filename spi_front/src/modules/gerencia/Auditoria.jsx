@@ -11,7 +11,7 @@ import {
  FiChevronRight,
 } from "react-icons/fi";
 import toast from "react-hot-toast";
-import { getAuditoria, exportAuditoriaCSV } from "../../core/api/auditoriaApi";
+import { getAuditoria } from "../../core/api/auditoriaApi";
 import api from "../../core/api";
 import Card from "../../core/ui/components/Card";
 import Button from "../../core/ui/components/Button";
@@ -99,6 +99,7 @@ export default function Auditoria() {
  useEffect(() => {
  fetchAuditoria(1);
  loadSessions();
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, []);
 
  // ============================================================

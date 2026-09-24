@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { FiAlertCircle } from "react-icons/fi";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { FiAlertCircle, FiUpload, FiFile, FiX } from "react-icons/fi";
 import { useUI } from "../../../core/ui/useUI";
 import {
  createClientRequest,
@@ -8,11 +8,7 @@ import {
  verifyConsentEmailToken,
 } from "../../../core/api/requestsApi";
 import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
-import {
- getCityOptions,
- getCountryOptions,
- getProvinceOptions,
-} from "../constants/locationOptions";
+import { getCountryOptions, getProvinceOptions, getCityOptions } from "../constants/locationOptions";
 
 const COMMON_REQUIRED_FIELDS = [
  "commercial_name",
@@ -124,6 +120,7 @@ const initialFormState = {
  legal_rep_id_document: "",
  legal_rep_cellphone: "",
  legal_rep_email: "",
+ shipping_same_as_establishment: false,
  shipping_contact_name: "",
  shipping_country: "Ecuador",
  shipping_address: "",
@@ -147,6 +144,39 @@ const initialFilesState = {
  bpadt_certification_file: null,
  operating_permit_file: null,
  consent_evidence_file: null,
+};
+
+// Borrador local: los archivos no se persisten (no serializables en localStorage),
+// solo los campos de texto/selección para poder recuperar el formulario si el
+// usuario sale por error antes de enviar la solicitud.
+const DRAFT_STORAGE_KEY = "spi_new_client_request_draft";
+
+const isFormEffectivelyEmpty = (data) =>
+ Object.keys(initialFormState).every((key) => {
+ const value = data[key];
+ const initial = initialFormState[key];
+ if (typeof initial === "boolean") return value === initial;
+ return !value || value === initial;
+ });
+
+const saveDraftToStorage = (formData) => {
+ try {
+ localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(formData));
+ } catch {}
+};
+
+const loadDraftFromStorage = () => {
+ try {
+ const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+ if (!raw) return null;
+ const parsed = JSON.parse(raw);
+ if (isFormEffectivelyEmpty(parsed)) return null;
+ return parsed;
+ } catch { return null; }
+};
+
+const clearDraftFromStorage = () => {
+ try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch {}
 };
 
 const requiredFilesByType = (type, clientSector, consentMethod) => {
@@ -181,18 +211,20 @@ const NewClientRequestForm = ({
  isEditing = false,
 }) => {
  const { showToast } = useUI();
- const [formData, setFormData] = useState(
- initialData
- ? {
+ const [formData, setFormData] = useState(() => {
+ if (initialData) {
+ return {
  ...initialFormState,
  ...initialData,
  natural_person_document_type:
  initialData?.natural_person_document_type
  || (String(initialData?.ruc_cedula || "").trim().length === 13 ? "ruc" : "cedula"),
  data_processing_consent: true,
- } // Asumimos consentimiento si ya existe (o se debe volver a pedir?)
- : initialFormState
- );
+ }; // Asumimos consentimiento si ya existe (o se debe volver a pedir?)
+ }
+ const draft = loadDraftFromStorage();
+ return draft ? { ...initialFormState, ...draft } : initialFormState;
+ });
  const [files, setFiles] = useState(initialFilesState);
  const [errors, setErrors] = useState({});
  const [loading, setLoading] = useState(false);
@@ -247,6 +279,50 @@ const NewClientRequestForm = ({
  ],
  [],
  );
+
+ // Aviso de borrador recuperado (una sola vez al montar, solo si es registro nuevo).
+ useEffect(() => {
+ if (initialData) return;
+ if (loadDraftFromStorage()) {
+ showToast("Recuperamos el borrador que dejaste pendiente.", "info");
+ }
+ // eslint-disable-next-line react-hooks/exhaustive-deps
+ }, []);
+
+ // Autoguardado del borrador en cada cambio (solo para registro nuevo, no edición).
+ useEffect(() => {
+ if (initialData || isEditing) return;
+ saveDraftToStorage(formData);
+ }, [formData, initialData, isEditing]);
+
+ // Mientras "mismos datos que el establecimiento" esté marcado, cualquier edición
+ // posterior en los campos del establecimiento se refleja también en envío.
+ useEffect(() => {
+ if (!formData.shipping_same_as_establishment) return;
+ setFormData((prev) => {
+ if (!prev.shipping_same_as_establishment) return prev;
+ const synced = {
+ ...prev,
+ shipping_country: prev.establishment_country,
+ shipping_province: prev.establishment_province,
+ shipping_city: prev.establishment_city,
+ shipping_address: prev.establishment_address,
+ shipping_reference: prev.establishment_reference,
+ shipping_cellphone: prev.establishment_cellphone,
+ };
+ const unchanged = ["shipping_country", "shipping_province", "shipping_city", "shipping_address", "shipping_reference", "shipping_cellphone"]
+ .every((key) => synced[key] === prev[key]);
+ return unchanged ? prev : synced;
+ });
+ }, [
+ formData.shipping_same_as_establishment,
+ formData.establishment_country,
+ formData.establishment_province,
+ formData.establishment_city,
+ formData.establishment_address,
+ formData.establishment_reference,
+ formData.establishment_cellphone,
+ ]);
 
  useEffect(() => {
  if (!initialData?.consent_email_token_id) return;
@@ -322,6 +398,17 @@ const NewClientRequestForm = ({
 
  if (name === "shipping_province") {
  nextState.shipping_city = "";
+ }
+
+ // Copia los datos del establecimiento a envío al marcar la casilla, y los
+ // mantiene sincronizados mientras siga marcada (ver useEffect más abajo).
+ if (name === "shipping_same_as_establishment" && nextValue) {
+ nextState.shipping_country = prev.establishment_country;
+ nextState.shipping_province = prev.establishment_province;
+ nextState.shipping_city = prev.establishment_city;
+ nextState.shipping_address = prev.establishment_address;
+ nextState.shipping_reference = prev.establishment_reference;
+ nextState.shipping_cellphone = prev.establishment_cellphone;
  }
 
  if (name === "has_specific_delivery_schedule" && !nextValue) {
@@ -579,6 +666,7 @@ const NewClientRequestForm = ({
  setFiles({ ...initialFilesState });
  setErrors({});
  resetConsentTokenFlow();
+ clearDraftFromStorage();
  };
 
  const handleSubmit = async (e) => {
@@ -1013,19 +1101,19 @@ const NewClientRequestForm = ({
  value={formData.establishment_province}
  onChange={handleChange}
  options={establishmentProvinceOptions}
+ disabled={!formData.establishment_country}
  required
  error={errors.establishment_province}
  />
  <SelectField
  name="establishment_city"
- label="Ciudad"
+ label="Ciudad / Cantón"
  value={formData.establishment_city}
  onChange={handleChange}
  options={establishmentCityOptions}
+ disabled={!formData.establishment_province}
  required
  error={errors.establishment_city}
- disabled={!formData.establishment_province}
- placeholder="Selecciona primero una provincia"
  />
  <InputField
  name="establishment_address"
@@ -1099,6 +1187,18 @@ const NewClientRequestForm = ({
  </Section>
  )}
  <Section title="Datos para el envío de mercadería">
+ <div className="md:col-span-2">
+ <label className="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-100">
+ <input
+ type="checkbox"
+ name="shipping_same_as_establishment"
+ checked={Boolean(formData.shipping_same_as_establishment)}
+ onChange={handleChange}
+ className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+ />
+ Los datos de envío son los mismos que el establecimiento
+ </label>
+ </div>
  <InputField
  name="shipping_contact_name"
  label="Nombre del encargado"
@@ -1113,6 +1213,7 @@ const NewClientRequestForm = ({
  value={formData.shipping_address}
  onChange={handleChange}
  required
+ disabled={formData.shipping_same_as_establishment}
  error={errors.shipping_address}
  />
  <SelectField
@@ -1122,6 +1223,7 @@ const NewClientRequestForm = ({
  onChange={handleChange}
  options={countryOptions}
  required
+ disabled={formData.shipping_same_as_establishment}
  error={errors.shipping_country}
  />
  <SelectField
@@ -1130,19 +1232,19 @@ const NewClientRequestForm = ({
  value={formData.shipping_province}
  onChange={handleChange}
  options={shippingProvinceOptions}
+ disabled={formData.shipping_same_as_establishment || !formData.shipping_country}
  required
  error={errors.shipping_province}
  />
  <SelectField
  name="shipping_city"
- label="Ciudad"
+ label="Ciudad / Cantón"
  value={formData.shipping_city}
  onChange={handleChange}
  options={shippingCityOptions}
+ disabled={formData.shipping_same_as_establishment || !formData.shipping_province}
  required
  error={errors.shipping_city}
- disabled={!formData.shipping_province}
- placeholder="Selecciona primero una provincia"
  />
  <InputField
  name="shipping_reference"
@@ -1150,6 +1252,7 @@ const NewClientRequestForm = ({
  value={formData.shipping_reference}
  onChange={handleChange}
  required
+ disabled={formData.shipping_same_as_establishment}
  error={errors.shipping_reference}
  />
  <InputField
@@ -1158,6 +1261,7 @@ const NewClientRequestForm = ({
  value={formData.shipping_cellphone}
  onChange={handleChange}
  required
+ disabled={formData.shipping_same_as_establishment}
  error={errors.shipping_cellphone}
  />
  <div className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40">
@@ -1232,6 +1336,7 @@ const NewClientRequestForm = ({
  name={key}
  label={resolvedMeta.label}
  helper={resolvedMeta.helper}
+ file={files[key]}
  onChange={handleFileChange}
  required={requiredFiles.includes(key)}
  error={errors.files?.[key]}
@@ -1339,22 +1444,105 @@ const TextAreaField = ({ label, name, value, onChange, required = false, error, 
  </label>
 );
 
-const FileInput = ({ label, name, onChange, required, helper, error, disabled }) => (
- <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
- {label} {required && <span className="text-red-500">*</span>}
+const humanFileSize = (bytes) => {
+ if (!bytes) return "";
+ if (bytes < 1024) return `${bytes} B`;
+ if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+ return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const FileInput = ({ label, name, file, onChange, required, helper, error, disabled }) => {
+ const inputRef = useRef(null);
+ const [dragging, setDragging] = useState(false);
+ const isInteractive = !disabled;
+
+ const emitFiles = (fileList) => {
+ onChange?.({ target: { name, files: fileList } });
+ };
+
+ const handleDrop = (e) => {
+ e.preventDefault();
+ setDragging(false);
+ if (!isInteractive) return;
+ if (e.dataTransfer.files?.length) emitFiles(e.dataTransfer.files);
+ };
+
+ const handleDragOver = (e) => {
+ e.preventDefault();
+ if (isInteractive) setDragging(true);
+ };
+
+ return (
+ <div>
+ <label className="text-sm font-medium text-ink-slate dark:text-gray-200">
+ {label} {required && <span className="text-alert-red">*</span>}
+ </label>
+
+ {file ? (
+ <div className={`mt-2 flex items-center gap-3 rounded-xl border p-3 transition-colors ${
+ error ? "border-alert-red bg-red-50" : "border-soft-border bg-paper-white"
+ }`}>
+ <div className="shrink-0 rounded-xl bg-action-blue/10 p-2 text-action-blue">
+ <FiFile size={16} />
+ </div>
+ <div className="min-w-0 flex-1">
+ <p className="truncate text-sm font-medium leading-tight text-ink-slate">{file.name}</p>
+ <p className="mt-0.5 text-[11px] text-warm-ash">{humanFileSize(file.size)}</p>
+ </div>
+ {!disabled && (
+ <button
+ type="button"
+ onClick={() => emitFiles(new DataTransfer().files)}
+ className="shrink-0 cursor-pointer rounded-lg p-1.5 text-warm-ash transition-colors hover:bg-red-50 hover:text-alert-red"
+ title="Quitar archivo"
+ >
+ <FiX size={14} />
+ </button>
+ )}
+ </div>
+ ) : (
+ <div
+ onDrop={handleDrop}
+ onDragOver={handleDragOver}
+ onDragLeave={() => setDragging(false)}
+ onClick={() => isInteractive && inputRef.current?.click()}
+ className={`
+ relative mt-2 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed
+ px-4 py-6 text-center transition-all duration-150
+ ${isInteractive ? "cursor-pointer" : "cursor-not-allowed opacity-60"}
+ ${dragging
+ ? "border-action-blue bg-blue-50"
+ : error
+ ? "border-alert-red bg-red-50"
+ : isInteractive
+ ? "border-fog bg-paper-white hover:border-action-blue hover:bg-blue-50/40"
+ : "border-fog bg-paper-white text-warm-ash/50"
+ }
+ `}
+ >
  <input
+ ref={inputRef}
  type="file"
  name={name}
  accept="application/pdf"
- onChange={onChange}
- disabled={disabled}
- className={`mt-2 w-full cursor-pointer rounded-xl border border-dashed px-3 py-2 text-sm text-gray-700 transition hover:border-blue-400 dark:border-gray-600 dark:text-gray-200 ${error ? "border-red-400" : "border-gray-300"
- } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+ onChange={(e) => emitFiles(e.target.files)}
+ disabled={!isInteractive}
+ className="hidden"
  />
- <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{helper}</p>
- {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
- </label>
-);
+ <div className={`rounded-xl p-2 transition-colors ${dragging ? "bg-action-blue/10 text-action-blue" : "bg-fog text-warm-ash"}`}>
+ <FiUpload size={18} />
+ </div>
+ <p className={`text-xs font-medium transition-colors ${dragging ? "text-action-blue" : "text-ink-slate"}`}>
+ {dragging ? "Suelta el archivo aquí" : "Arrastrá o hacé clic para seleccionar"}
+ </p>
+ </div>
+ )}
+
+ {helper && <p className="mt-1 text-xs text-warm-ash">{helper}</p>}
+ {error && <p className="mt-1 text-xs text-alert-red">{error}</p>}
+ </div>
+ );
+};
 
 const RadioGroup = ({ name, value, onChange, options }) => (
  <div className="flex flex-wrap gap-4">

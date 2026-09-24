@@ -86,8 +86,8 @@ const SECTION_OWNERSHIP = {
   },
   [SECTIONS.LABORATORY_ENVIRONMENT]: {
     primaryOwner: 'jefe_tecnico',
-    canCorrect: ['jefe_tecnico', 'jefe_comercial'],
-    canLock: ['jefe_tecnico'],
+    canCorrect: ['jefe_tecnico', 'jefe_servicio', 'jefe_comercial'],
+    canLock: ['jefe_tecnico', 'jefe_servicio'],
     description: 'Configuración del ambiente de laboratorio'
   },
   [SECTIONS.EQUIPMENT]: {
@@ -97,15 +97,15 @@ const SECTION_OWNERSHIP = {
     description: 'Selección y configuración de equipos'
   },
   [SECTIONS.LIS]: {
-    primaryOwner: 'backoffice',
-    canCorrect: ['backoffice', 'jefe_tecnico'],
-    canLock: ['jefe_tecnico'],
+    primaryOwner: 'jefe_tecnico',
+    canCorrect: ['backoffice', 'jefe_tecnico', 'jefe_servicio'],
+    canLock: ['jefe_tecnico', 'jefe_servicio'],
     description: 'Integración con sistemas LIS'
   },
   [SECTIONS.DETERMINATIONS]: {
     primaryOwner: 'jefe_tecnico',
-    canCorrect: ['jefe_tecnico', 'backoffice'],
-    canLock: ['jefe_tecnico'],
+    canCorrect: ['jefe_tecnico', 'jefe_servicio', 'backoffice'],
+    canLock: ['jefe_tecnico', 'jefe_servicio'],
     description: 'Determinaciones técnicas y validaciones'
   },
   [SECTIONS.INVESTMENTS]: {
@@ -130,19 +130,19 @@ const STATE_OWNERSHIP_TRANSITIONS = {
     [SECTIONS.LABORATORY_ENVIRONMENT]: 'comercial'
   },
   [STATES.DATOS_BASE_COMPLETOS]: {
-    [SECTIONS.DETERMINATIONS]: 'jefe_tecnico',
+    [SECTIONS.DETERMINATIONS]: 'jefe_servicio',
     [SECTIONS.LIS]: 'backoffice',
-    [SECTIONS.LABORATORY_ENVIRONMENT]: 'jefe_tecnico'
+    [SECTIONS.LABORATORY_ENVIRONMENT]: 'jefe_servicio'
   },
   [STATES.EN_EVALUACION_VIABILIDAD]: {
     [SECTIONS.INVESTMENTS]: 'jefe_operaciones',
-    [SECTIONS.DETERMINATIONS]: 'jefe_tecnico',
-    [SECTIONS.LIS]: 'jefe_tecnico'
+    [SECTIONS.DETERMINATIONS]: 'jefe_servicio',
+    [SECTIONS.LIS]: 'jefe_servicio'
   },
   [STATES.OBSERVADO_POR_VIABILIDAD]: {
     [SECTIONS.GENERAL]: 'jefe_comercial',
     [SECTIONS.EQUIPMENT]: 'jefe_comercial',
-    [SECTIONS.DETERMINATIONS]: 'jefe_tecnico'
+    [SECTIONS.DETERMINATIONS]: 'jefe_servicio'
   },
   [STATES.VIABLE]: {
     [SECTIONS.INVESTMENTS]: 'jefe_operaciones',

@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
 import { useAuth } from "../../../core/auth/useAuth";
 import { useGetActiveAlarms } from "../hooks/useCa0101Queries";
 import CA0101Stepper from "../components/CA0101Stepper";

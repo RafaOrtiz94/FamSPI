@@ -3,6 +3,13 @@ const logger = require("../../config/logger");
 const { logAction } = require("../../utils/audit");
 const { HASH_ALGORITHM, computeSha256HexFromBase64 } = require("../../utils/documentHash");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
+const { sheets } = require("../../config/google");
+
+// Hoja de respuestas del formulario de Google de postulantes (talento humano).
+// Mismo SPREADSHEET_ID/SHEET_NAME que el Apps Script del formulario (Config.gs) --
+// deben apuntar siempre a la misma hoja.
+const APPLICANTS_FORM_SPREADSHEET_ID = "1fyPpESJjvqE1_WA-FwxUQ8MHAN4J848h7v7nHKY0yqE";
+const APPLICANTS_FORM_SHEET_NAME = "Respuestas de formulario 1";
 
 const metrics = {
   success: 0,
@@ -21,6 +28,11 @@ const ensureApplicantsTables = async () => {
       created_at TIMESTAMPTZ DEFAULT now(),
       updated_at TIMESTAMPTZ DEFAULT now()
     );
+  `);
+
+  await db.query(`
+    ALTER TABLE applicants
+    ADD COLUMN IF NOT EXISTS personnel_request_id INTEGER;
   `);
 
   // Normalized Tables (New Structure)
@@ -171,6 +183,54 @@ const ensureApplicantsTables = async () => {
     CREATE UNIQUE INDEX IF NOT EXISTS applicant_documents_unique
     ON applicant_documents(applicant_id, doc_type);
   `);
+};
+
+const normalizeApplicantPositionText = (value = "") =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\btcis\b/g, "tics")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const resolvePersonnelRequestIdByCargo = async (client, cargo = "") => {
+  const normalizedCargo = normalizeApplicantPositionText(cargo);
+  if (!normalizedCargo) return null;
+
+  const { rows } = await client.query(
+    `
+    SELECT id
+    FROM personnel_requests
+    WHERE TRIM(LOWER(
+        REGEXP_REPLACE(
+          REGEXP_REPLACE(
+            TRANSLATE(COALESCE(position_title, ''), 'ÁÉÍÓÚÜÑáéíóúüñ', 'AEIOUUNaeiouun'),
+            '\\yTCIS\\y',
+            'TICS',
+            'gi'
+          ),
+          '[^a-zA-Z0-9]+',
+          ' ',
+          'g'
+        )
+      )) = $1
+    ORDER BY
+      CASE status
+        WHEN 'en_proceso' THEN 1
+        WHEN 'aprobada' THEN 2
+        WHEN 'pendiente' THEN 3
+        ELSE 4
+      END,
+      updated_at DESC NULLS LAST,
+      id DESC
+    LIMIT 1
+    `,
+    [normalizedCargo]
+  );
+
+  return rows[0]?.id || null;
 };
 
 const sanitizePayload = (input, depth = 0) => {
@@ -870,12 +930,20 @@ const importApplicant = async (payload = {}, context = {}) => {
     };
     const incomingStatus = normalizeString(pick(keyMap, ["estado", "status"])).toLowerCase();
     const finalStatus = statusMapping[incomingStatus] || "applied";
+    const resolvedPersonnelRequestId = await resolvePersonnelRequestIdByCargo(
+      client,
+      profile?.laboral?.cargo
+    );
 
     const applicantUpsert = `
-      INSERT INTO applicants (email, fullname, profile, status, updated_at)
-      VALUES ($1, $2, $3, $4, NOW())
+      INSERT INTO applicants (email, fullname, profile, status, personnel_request_id, updated_at)
+      VALUES ($1, $2, $3, $4, $5, NOW())
       ON CONFLICT (email)
-      DO UPDATE SET fullname = EXCLUDED.fullname, profile = EXCLUDED.profile, updated_at = NOW()
+      DO UPDATE SET
+        fullname = EXCLUDED.fullname,
+        profile = EXCLUDED.profile,
+        personnel_request_id = COALESCE(EXCLUDED.personnel_request_id, applicants.personnel_request_id),
+        updated_at = NOW()
       RETURNING id, email, fullname
     `;
     const applicantResult = await client.query(applicantUpsert, [
@@ -883,6 +951,7 @@ const importApplicant = async (payload = {}, context = {}) => {
       normalized.fullname,
       profile,
       finalStatus,
+      resolvedPersonnelRequestId,
     ]);
     const applicantId = applicantResult.rows[0].id;
 
@@ -1128,25 +1197,19 @@ const listApplicants = async ({
   const where = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
   const dataQuery = `
-    SELECT 
-      a.id, a.email, a.fullname, a.profile, a.updated_at,
-      p.cedula, p.telefono, p.lugar_residencia
+    SELECT
+      a.id, a.email, a.fullname, a.profile, a.personnel_request_id, a.created_at, a.updated_at,
+      p.cedula, p.telefono, p.lugar_residencia,
+      COUNT(*) OVER()::int AS total_count
     FROM applicants a
     LEFT JOIN applicant_personal_data p ON a.id = p.applicant_id
     ${where}
     ORDER BY a.updated_at DESC
     LIMIT $${params.length + 1} OFFSET $${params.length + 2}
   `;
-  const { rows } = await db.query(dataQuery, [...params, pageSize, offset]);
-
-  const countQuery = `
-    SELECT COUNT(*)::int AS total
-    FROM applicants a
-    LEFT JOIN applicant_personal_data p ON a.id = p.applicant_id
-    ${where}
-  `;
-  const countResult = await db.query(countQuery, params);
-  const total = countResult.rows[0]?.total || 0;
+  const { rows: rawRows } = await db.query(dataQuery, [...params, pageSize, offset]);
+  const total = rawRows.length > 0 ? rawRows[0].total_count : 0;
+  const rows = rawRows.map(({ total_count, ...row }) => row);
 
   return {
     data: rows,
@@ -1165,7 +1228,7 @@ const getApplicantById = async (id) => {
   const { rows } = await db.query(
     `
     SELECT 
-      a.id, a.email, a.fullname, a.profile, a.status, a.updated_at,
+      a.id, a.email, a.fullname, a.profile, a.personnel_request_id, a.status, a.created_at, a.updated_at,
       p.nombres, p.apellidos, p.edad, p.telefono, p.cedula, p.pasaporte, p.nacionalidad, 
       p.genero, p.tipo_sangre, p.estado_civil, p.fecha_nacimiento, p.lugar_nacimiento, 
       p.lugar_residencia, p.vive_con, p.dependientes, p.numero_hijos,
@@ -1226,12 +1289,88 @@ const deleteApplicant = async (id) => {
   return rowCount > 0;
 };
 
+// Red de seguridad para cuando el POST /import (disparado externamente por
+// Apps Script en cada respuesta del formulario) falla o se pierde: lee la
+// hoja de respuestas directamente y da de alta a cualquier postulante cuyo
+// email todavia no exista en `applicants`. No reimporta a los que ya
+// existen (importApplicant igual seria idempotente por email, pero asi
+// evitamos escrituras innecesarias en un sync que puede correr seguido).
+const syncApplicantsFromSheet = async (spreadsheetId = APPLICANTS_FORM_SPREADSHEET_ID) => {
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const sheetTitles = (meta.data?.sheets || []).map((s) => s?.properties?.title).filter(Boolean);
+  const sheetTitle = sheetTitles.includes(APPLICANTS_FORM_SHEET_NAME)
+    ? APPLICANTS_FORM_SHEET_NAME
+    : sheetTitles[0];
+  if (!sheetTitle) {
+    const err = new Error("No se pudo leer la hoja de respuestas del formulario.");
+    err.status = 502;
+    throw err;
+  }
+
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `'${sheetTitle}'`,
+  });
+  const rows = data.values || [];
+  if (rows.length < 2) {
+    return { totalRows: 0, imported: 0, skipped: 0, errors: [] };
+  }
+
+  const headers = rows[0];
+  const dataRows = rows.slice(1);
+
+  await ensureApplicantsTables();
+  const { rows: existingRows } = await db.query(`SELECT LOWER(email) AS email FROM applicants`);
+  const existingEmails = new Set(existingRows.map((row) => row.email));
+
+  let imported = 0;
+  let skipped = 0;
+  const errors = [];
+
+  for (const row of dataRows) {
+    const payload = {};
+    headers.forEach((header, index) => {
+      if (header) payload[header] = row[index] ?? "";
+    });
+
+    const keyMap = buildKeyMap(payload);
+    const email = normalizeString(
+      pick(keyMap, [
+        "direccion_de_correo_electronico",
+        "correo_electronico",
+        "email",
+        "e_mail",
+        "mail",
+      ]),
+    ).toLowerCase();
+
+    if (!email || existingEmails.has(email)) {
+      skipped += 1;
+      continue;
+    }
+
+    try {
+      await importApplicant(payload, { source: "google_sheet_sync" });
+      existingEmails.add(email);
+      imported += 1;
+    } catch (error) {
+      errors.push({ email, message: error.message });
+    }
+  }
+
+  return { totalRows: dataRows.length, imported, skipped, errors };
+};
+
 module.exports = {
   importApplicant,
+  syncApplicantsFromSheet,
   normalizeApplicantPayload,
   mapApplicantToProfile,
   listApplicants,
   getApplicantById,
   deleteApplicant,
   ensureApplicantsTables,
+  // Helpers puros expuestos para pruebas de verificacion.
+  calculateAge,
+  normalizePhone,
 };

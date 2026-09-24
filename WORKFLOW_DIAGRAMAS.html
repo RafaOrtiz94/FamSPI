@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FamSPI — Diagramas de Flujo UML</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #F8FAFC;
+    color: #0F172A;
+    margin: 0;
+    padding: 0;
+  }
+  header {
+    background: #0F172A;
+    color: white;
+    padding: 20px 40px;
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+  }
+  header h1 { margin: 0; font-size: 1.15rem; font-weight: 700; }
+  header span { color: #94A3B8; font-size: 0.85rem; }
+  .tabs {
+    display: flex;
+    gap: 2px;
+    background: #E2E8F0;
+    padding: 8px 40px 0;
+    overflow-x: auto;
+  }
+  .tab-btn {
+    padding: 10px 18px;
+    border: none;
+    background: transparent;
+    color: #64748B;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .tab-btn:hover { background: #F1F5F9; color: #334155; }
+  .tab-btn.active { background: #FFFFFF; color: #0F172A; }
+  .tab-btn .num {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    line-height: 20px;
+    text-align: center;
+    border-radius: 50%;
+    font-size: 0.7rem;
+    margin-right: 8px;
+    background: #E2E8F0;
+    color: #64748B;
+  }
+  .tab-btn.active .num { background: #0F172A; color: white; }
+  .content {
+    padding: 32px 40px;
+    min-height: calc(100vh - 120px);
+  }
+  .diagram-section {
+    visibility: hidden;
+    position: absolute;
+    top: -9999px;
+    left: 0;
+    width: calc(100vw - 80px);
+    pointer-events: none;
+  }
+  .diagram-section.active {
+    visibility: visible;
+    position: static;
+    top: auto;
+    width: auto;
+    pointer-events: auto;
+  }
+  .diagram-title {
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 0 0 6px;
+    color: #0F172A;
+  }
+  .diagram-desc {
+    font-size: 0.85rem;
+    color: #64748B;
+    margin: 0 0 24px;
+    line-height: 1.5;
+  }
+  .diagram-wrap {
+    background: white;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 24px;
+    overflow-x: auto;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  }
+  .mermaid {
+    display: flex;
+    justify-content: center;
+  }
+  .legend {
+    margin-top: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 0.78rem;
+    color: #64748B;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>FamSPI — Diagramas de Flujo UML</h1>
+  <span>Ciclo integral: Compras → Entrega → Instalación → Entrenamiento</span>
+</header>
+
+<div class="tabs">
+  <button class="tab-btn active" onclick="showTab(0)"><span class="num">1</span>Visión General</button>
+  <button class="tab-btn" onclick="showTab(1)"><span class="num">2</span>Business Case</button>
+  <button class="tab-btn" onclick="showTab(2)"><span class="num">3</span>Compra Pública (SERCOP)</button>
+  <button class="tab-btn" onclick="showTab(3)"><span class="num">4</span>Compra Privada</button>
+  <button class="tab-btn" onclick="showTab(4)"><span class="num">5</span>Post-Arrival · Instalación</button>
+</div>
+
+<div class="content">
+
+  <!-- TAB 1: Visión General -->
+  <div class="diagram-section active" id="tab-0">
+    <p class="diagram-title">Visión General — Ciclo completo de compras</p>
+    <p class="diagram-desc">Los 4 tipos de compra y su ruta hasta el cierre del expediente. Compra pública y comodato requieren Business Case. Directa y rental van directo a la fase comercial.</p>
+    <div class="diagram-wrap">
+      <div class="mermaid">
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#DBEAFE', 'primaryTextColor': '#1E3A8A', 'primaryBorderColor': '#2563EB', 'lineColor': '#64748B', 'secondaryColor': '#F1F5F9', 'tertiaryColor': '#DCFCE7'}}}%%
+flowchart TD
+    START(["🏁 Oportunidad de negocio"])
+
+    START --> TIPO{"¿Tipo de compra?"}
+
+    TIPO -->|"Pública\nSERCOP"| BC_R1["Requiere Business Case"]
+    TIPO -->|"Privada\nComodato"| BC_R2["Requiere Business Case"]
+    TIPO -->|"Privada\nDirecta"| SINBC1["Sin Business Case"]
+    TIPO -->|"Rental /\nArriendo"| SINBC2["Sin Business Case"]
+
+    BC_R1 --> BC["BUSINESS CASE\nDraft → Evaluación → Viable → Aprobación"]
+    BC_R2 --> BC
+
+    BC -->|"No factible\no rechazado"| FIN_BC(["❌ Proceso termina"])
+    BC -->|"bc_stage =\nfactible"| FORK{"¿Qué tipo?"}
+
+    FORK -->|Pública| SOCE_F["Proceso SOCE\nPuja / Adjudicación\nOrden de Compra"]
+    FORK -->|Comodato| COM_F["Fase Comercial\nOferta · Firmas · Contrato"]
+
+    SINBC1 --> PRIV_F["Fase Comercial\nOferta · Firmas · Contrato"]
+    SINBC2 --> PRIV_F
+
+    SOCE_F -->|Perdido| FIN_SOCE(["❌ Expediente cancelado"])
+    SOCE_F -->|Ganado| CONTRATO["Sub-tab CONTRATO\nOrden de Compra / Contrato firmado"]
+    COM_F --> CONTRATO
+    PRIV_F --> CONTRATO
+
+    CONTRATO --> LOG["Sub-tab LOGÍSTICA\nDespacho · F.ST-14 recepción visual"]
+    LOG --> TEC["Sub-tab TÉCNICA\nF.ST-07 · F.ST-09 · Verificación · F.ST-10"]
+    TEC --> ENT["Sub-tab ENTRENAMIENTO\nF.ST-04 · F.ST-05 · Certificado"]
+    ENT --> CIERRE{"Closure Gate\n¿Bloqueos resueltos?"}
+    CIERRE -->|"Pendientes"| TEC
+    CIERRE -->|"Todo OK"| DONE(["✅ Expediente cerrado"])
+
+    classDef bc fill:#FFF7ED,stroke:#EA580C,color:#9A3412,font-weight:bold
+    classDef soce fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
+    classDef priv fill:#E0E7FF,stroke:#4338CA,color:#312E81
+    classDef log fill:#FEF3C7,stroke:#D97706,color:#78350F
+    classDef tec fill:#FEE2E2,stroke:#DC2626,color:#7F1D1D
+    classDef train fill:#DCFCE7,stroke:#16A34A,color:#14532D
+    classDef ok fill:#DCFCE7,stroke:#16A34A,color:#14532D,font-weight:bold
+    classDef err fill:#FEE2E2,stroke:#DC2626,color:#7F1D1D
+    classDef decision fill:#FEF3C7,stroke:#D97706,color:#78350F
+
+    class BC,BC_R1,BC_R2 bc
+    class SOCE_F,CONTRATO soce
+    class COM_F,PRIV_F,SINBC1,SINBC2 priv
+    class LOG log
+    class TEC tec
+    class ENT train
+    class DONE ok
+    class FIN_BC,FIN_SOCE err
+    class TIPO,FORK,CIERRE decision
+      </div>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#FFF7ED;border:1px solid #EA580C;"></div> Business Case</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#DBEAFE;border:1px solid #2563EB;"></div> Compra Pública / Contrato</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#E0E7FF;border:1px solid #4338CA;"></div> Compra Privada</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#FEF3C7;border:1px solid #D97706;"></div> Logística</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#FEE2E2;border:1px solid #DC2626;"></div> Técnica</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#DCFCE7;border:1px solid #16A34A;"></div> Entrenamiento / OK</div>
+    </div>
+  </div>
+
+  <!-- TAB 2: Business Case -->
+  <div class="diagram-section" id="tab-1">
+    <p class="diagram-title">Business Case — Flujo completo</p>
+    <p class="diagram-desc">Aplica a compra pública y compra privada comodato. Tiene 6 estados principales, 2 caminos de rechazo y el resultado "factible" que habilita el expediente de compra.</p>
+    <div class="diagram-wrap">
+      <div class="mermaid">
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#FFF7ED', 'primaryTextColor': '#9A3412', 'primaryBorderColor': '#EA580C', 'lineColor': '#92400E', 'secondaryColor': '#FEF3C7'}}}%%
+flowchart TD
+    START(["🏁 BC creado<br/><i>compra pública o comodato</i>"])
+
+    START --> D1
+
+    D1["<b>DRAFT_INICIAL</b><br/>——<br/>Roles: comercial · acp_comercial<br/>backoffice · jefe_comercial · jefe_operaciones<br/>——<br/>Elaborar: datos generales, equipo,<br/>laboratorio, LIS, determinaciones,<br/>inversiones"]
+
+    D1 --> D2
+
+    D2["<b>DATOS_BASE_COMPLETOS</b><br/>——<br/>Roles: jefe_comercial · jefe_operaciones<br/>——<br/>BC listo para revisión de viabilidad"]
+
+    D2 --> D3
+
+    D3{"<b>EN_EVALUACION_VIABILIDAD</b><br/>——<br/>Roles: acp_comercial · jefe_comercial<br/>——<br/>¿Es técnica y financieramente viable?"}
+
+    D3 -->|"Emite observaciones"| D4
+    D4["<b>OBSERVADO_POR_VIABILIDAD</b><br/>——<br/>Roles: comercial · jefe_comercial<br/>——<br/>Corregir observaciones en<br/>todas las secciones"]
+    D4 -->|"Reenvía a evaluación"| D3
+
+    D3 -->|"<b>No viable</b><br/>Requiere propuesta alternativa"| NF
+    NF(["❌ cerrado_no_factible<br/>Alternativa: venta / alquiler /<br/>alquiler con transferencia de dominio"])
+
+    D3 -->|"Viable"| D5
+
+    D5["<b>VIABLE</b><br/>——<br/>Rol: jefe_operaciones<br/>——<br/>Planificar inversiones operacionales"]
+
+    D5 --> D6
+
+    D6["<b>AJUSTES_OPERATIVOS</b><br/>——<br/>Rol: jefe_operaciones<br/>——<br/>Finalizar plan operacional<br/>Ajustar inversiones"]
+
+    D6 --> D7
+
+    D7{"<b>CERRADO_PARA_APROBACION</b><br/>——<br/>Roles: gerencia · gerencia_general<br/>——<br/>¿Aprueba el Business Case?"}
+
+    D7 -->|"Rechazado"| REJ
+    REJ(["❌ RECHAZADO_POR_GERENCIA<br/>Notifica a jefe_comercial<br/>Estado terminal"])
+
+    D7 -->|"Aprobado"| FAC
+
+    FAC["<b>bc_stage = 'factible'</b><br/>——<br/>• Reserva de inventario<br/>• Notifica a jefe_comercial<br/>• Habilita expediente de compra<br/>• Para comodato: avanza a oferta"]
+
+    FAC --> END(["✅ BUSINESS CASE FACTIBLE<br/>Continúa al flujo de compra"])
+
+    classDef state fill:#FFF7ED,stroke:#FDBA74,color:#7C2D12
+    classDef decision fill:#FEF3C7,stroke:#D97706,color:#78350F
+    classDef ok fill:#DCFCE7,stroke:#16A34A,color:#14532D,font-weight:bold
+    classDef err fill:#FEE2E2,stroke:#DC2626,color:#7F1D1D
+    classDef factible fill:#D1FAE5,stroke:#16A34A,color:#065F46,font-weight:bold
+
+    class D1,D2,D4,D5,D6 state
+    class D3,D7 decision
+    class FAC factible
+    class END ok
+    class NF,REJ err
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3: Compra Pública -->
+  <div class="diagram-section" id="tab-2">
+    <p class="diagram-title">Compra Pública — Proceso SERCOP (Ecuador)</p>
+    <p class="diagram-desc">FamSPI actúa como <b>proveedor</b>. Dos pistas paralelas: interna (preparación técnica) y externa (portal SOCE). Se sincronizan en el Gate de convergencia antes de subir el contrato.</p>
+    <div class="diagram-wrap">
+      <div class="mermaid">
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#DBEAFE', 'primaryTextColor': '#1E3A8A', 'primaryBorderColor': '#2563EB', 'lineColor': '#1E3A8A'}}}%%
+flowchart TD
+    BC_OK(["✅ BC factible<br/>Inicio compra pública"])
+
+    BC_OK --> CREATE
+    BC_OK --> CONV
+
+    subgraph PISTA_INT["🏢 PISTA INTERNA — FamSPI"]
+        direction TB
+        CREATE["<b>pending_provider_assignment</b><br/>Rol: comercial<br/>Crear expediente · Registrar código SOCE"]
+        CREATE --> ASIGN["Rol: jefe_comercial<br/>Asignar ACP responsable"]
+        ASIGN --> AVAIL["<b>waiting_provider_response</b><br/>Rol: acp_comercial<br/>Verificar disponibilidad con fabricante"]
+        AVAIL -->|"Sin stock"| NOSTOCK(["❌ no_stock<br/>Cierra o busca alternativa"])
+        AVAIL --> PROF["<b>waiting_proforma</b><br/>Rol: acp_comercial<br/>Solicitar proforma interna<br/>(referencia de costo para BC)"]
+        PROF --> RESERVA["<b>proforma_received</b><br/>Rol: acp_comercial<br/>Reservar equipo con fabricante"]
+        RESERVA --> SIGNED["<b>waiting_signed_proforma</b><br/>Rol: acp_comercial<br/>Subir proforma firmada<br/>+ definir ventana de inspección<br/>→ BC auto-creado · F.ST-20 solicitado"]
+        SIGNED --> FST07{"F.ST-07<br/>Rol: servicio_tecnico<br/>Inspección de sitio<br/>¿ready_for_installation?"}
+        FST07 -->|"No listo<br/>Observaciones"| FST07_R["Coordinar nueva<br/>fecha de inspección"]
+        FST07_R --> FST07
+    end
+
+    subgraph PISTA_SOCE["🌐 PISTA EXTERNA — Portal SOCE (compraspublicas.gob.ec)"]
+        direction TB
+        CONV["Entidad contratante publica<br/><b>Convocatoria y Pliegos</b><br/>Tipo: SIE · Cotización · Licitación…"]
+        CONV --> OFERTA["FamSPI presenta<br/><b>Oferta Técnica</b> en SOCE<br/>Documentos de cumplimiento"]
+        OFERTA --> CALIF{"Entidad <b>Califica</b><br/>¿Cumple requisitos<br/>técnicos?"}
+        CALIF -->|"No califica"| PERD1(["❌ FamSPI descalificada<br/>Proceso termina"])
+        CALIF --> PUJA["<b>Puja electrónica</b> (SIE)<br/>o Negociación directa<br/>FamSPI presenta precios decrecientes"]
+        PUJA -->|"Perdido"| PERD2(["❌ outcome = lost<br/>Expediente cancelado"])
+        PUJA -->|"Precio más bajo válido"| GANADO["✅ <b>GANADO</b><br/>outcome = won<br/>FamSPI adjudicada provisionalmente"]
+        GANADO --> ADJ["Entidad emite<br/><b>Resolución de Adjudicación</b><br/>Número · Fecha · PDF oficial"]
+        ADJ --> OC["Entidad emite<br/><b>Orden de Compra</b> o Contrato<br/>Firma electrónica en SOCE"]
+        OC --> GAR["FamSPI entrega<br/><b>Garantía de Fiel Cumplimiento</b><br/>5% del valor adjudicado"]
+    end
+
+    GATE{"GATE DE CONVERGENCIA<br/>4 condiciones simultáneas"}
+    FST07 -->|"Sitio listo"| GATE
+    GAR --> GATE
+
+    GATE -->|"✓ portal ganado<br/>✓ BC factible<br/>✓ cliente registrado<br/>✓ F.ST-20 solicitado"| PCONTRATO
+
+    PCONTRATO["<b>pending_contract</b><br/>Rol: acp_comercial<br/>Registrar resultado SOCE<br/>Número de Resolución de Adjudicación<br/>· Rol: backoffice registra cliente F.ST-22"]
+
+    PCONTRATO --> CAVAIL["<b>contract_available</b><br/>Rol: acp_comercial<br/>Subir Orden de Compra / Contrato<br/>y Resolución de Adjudicación"]
+
+    CAVAIL --> FECHAS["Rol: jefe_operaciones<br/>Solicitar y confirmar<br/>fechas de entrega · Google Calendar"]
+
+    FECHAS --> END(["Continúa → Sub-tab LOGÍSTICA"])
+
+    classDef int_node fill:#DBEAFE,stroke:#93C5FD,color:#1E3A8A
+    classDef soce_node fill:#EFF6FF,stroke:#3B82F6,color:#1D4ED8
+    classDef gate fill:#FEF3C7,stroke:#D97706,color:#78350F,font-weight:bold
+    classDef ok fill:#DCFCE7,stroke:#16A34A,color:#14532D
+    classDef err fill:#FEE2E2,stroke:#DC2626,color:#7F1D1D
+    classDef ganado fill:#D1FAE5,stroke:#16A34A,color:#065F46,font-weight:bold
+    classDef contrato fill:#E0E7FF,stroke:#4338CA,color:#312E81
+
+    class CREATE,ASIGN,AVAIL,PROF,RESERVA,SIGNED int_node
+    class CONV,OFERTA,PUJA,ADJ,OC,GAR soce_node
+    class GANADO ganado
+    class GATE,CALIF,FST07 gate
+    class PCONTRATO,CAVAIL,FECHAS contrato
+    class END ok
+    class NOSTOCK,PERD1,PERD2 err
+      </div>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#DBEAFE;border:1px solid #2563EB;"></div> Pista interna FamSPI</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#EFF6FF;border:1px solid #3B82F6;"></div> Pista externa SOCE</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#E0E7FF;border:1px solid #4338CA;"></div> Convergencia / Contrato</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#FEF3C7;border:1px solid #D97706;"></div> Decisión / Gate</div>
+    </div>
+  </div>
+
+  <!-- TAB 4: Compra Privada -->
+  <div class="diagram-section" id="tab-3">
+    <p class="diagram-title">Compra Privada — Comodato · Directa · Rental</p>
+    <p class="diagram-desc">Comodato requiere Business Case (factible) antes de enviar la oferta. Directa y rental inician directamente en la fase comercial. Las tres rutas convergen en la firma del contrato.</p>
+    <div class="diagram-wrap">
+      <div class="mermaid">
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#E0E7FF', 'primaryTextColor': '#312E81', 'primaryBorderColor': '#4338CA', 'lineColor': '#4338CA'}}}%%
+flowchart TD
+    TIPO{"¿Subtipo de compra privada?"}
+
+    TIPO -->|"Comodato"| BC_OK
+    TIPO -->|"Directa\ndirect_purchase"| STEP1_D
+    TIPO -->|"Rental /\nArriendo"| STEP1_D
+
+    BC_OK(["✅ BC factible\n(ver diagrama 2)"])
+    BC_OK --> STEP1_COM
+
+    subgraph COMODATO["📋 RUTA COMODATO — con Business Case"]
+        direction TB
+        STEP1_COM["<b>pending_commercial</b><br/>Rol: comercial<br/>Crear oportunidad / solicitud"]
+        STEP1_COM --> STEP2_COM["<b>pending_backoffice</b><br/>Rol: comercial → backoffice<br/>Enviar a backoffice comercial"]
+        STEP2_COM --> STEP3_COM["<b>offer_sent</b><br/>Rol: backoffice_comercial<br/>Elaborar y enviar oferta al cliente"]
+        STEP3_COM --> STEP4_COM["<b>pending_manager_signature</b><br/>Rol: gerencia_general<br/>Firmar oferta internamente"]
+        STEP4_COM --> STEP5_COM{"<b>pending_client_signature</b><br/>Rol: cliente_externo<br/>¿Acepta la oferta?"}
+        STEP5_COM -->|"Rechaza"| REJ_COM{"¿Mejora de precio?"}
+        REJ_COM -->|"Sí"| MEJORA["<b>price_improvement_requested</b><br/>backoffice ajusta oferta"]
+        MEJORA --> STEP3_COM
+        REJ_COM -->|"No<br/>Rechazo definitivo"| FIN_COM(["❌ offer_rejected\nFin del proceso"])
+        STEP5_COM -->|"Acepta"| SIGNED_COM["<b>offer_signed</b><br/>Oferta firmada por cliente"]
+    end
+
+    subgraph DIRECTA["🤝 RUTA DIRECTA / RENTAL — sin Business Case"]
+        direction TB
+        STEP1_D["<b>pending_commercial</b><br/>Rol: comercial<br/>Crear oportunidad / solicitud"]
+        STEP1_D --> STEP2_D["<b>pending_backoffice</b><br/>Rol: comercial → backoffice<br/>Enviar a backoffice comercial"]
+        STEP2_D --> STEP3_D["<b>offer_sent</b><br/>Rol: backoffice_comercial<br/>Elaborar y enviar oferta al cliente"]
+        STEP3_D --> STEP4_D["<b>pending_manager_signature</b><br/>Rol: gerencia_general<br/>Firmar oferta internamente"]
+        STEP4_D --> STEP5_D{"<b>pending_client_signature</b><br/>Rol: cliente_externo<br/>¿Acepta la oferta?"}
+        STEP5_D -->|"Rechaza"| REJ_D{"¿Mejora de precio?"}
+        REJ_D -->|"Sí"| MEJORA_D["<b>price_improvement_requested</b><br/>backoffice ajusta oferta"]
+        MEJORA_D --> STEP3_D
+        REJ_D -->|"No<br/>Rechazo definitivo"| FIN_D(["❌ offer_rejected\nFin del proceso"])
+        STEP5_D -->|"Acepta"| SIGNED_D["<b>offer_signed</b><br/>Oferta firmada por cliente"]
+    end
+
+    SIGNED_COM --> PRE_CONTRATO
+    SIGNED_D --> PRE_CONTRATO
+
+    PRE_CONTRATO["<b>Coordinación pre-contrato</b><br/>Rol: backoffice_comercial<br/>• Registrar cliente F.ST-22<br/>• Solicitar F.ST-20 + F.ST-07 inspección sitio<br/>• Enviar a ACP para confirmar disponibilidad"]
+
+    PRE_CONTRATO --> ACP{"<b>ACP confirma disponibilidad</b><br/>Rol: acp_comercial<br/>¿Proveedor tiene el equipo?"}
+
+    ACP -->|"Rechaza<br/>(solo comodato)"| BC_RETRY["Reevaluar Business Case"]
+    BC_RETRY --> BC_OK
+
+    ACP -->|"Confirma"| CLICONTRATO["<b>pending_contract_client_signature</b><br/>Rol: cliente_externo<br/>Cliente firma contrato"]
+
+    CLICONTRATO --> GATE_GER{"<b>Gate de gerencia</b><br/>9 documentos obligatorios<br/>¿Completos?"}
+
+    GATE_GER -->|"Faltan documentos"| DOCS["Completar documentos\nfaltantes"]
+    DOCS --> GATE_GER
+
+    GATE_GER -->|"Completos"| GER{"<b>pending_contract_approval</b><br/>Rol: gerencia_general<br/>¿Aprueba el contrato?"}
+
+    GER -->|"Rechazado<br/>Razón obligatoria"| RECH_CONT(["❌ contract_rejected\nNotifica al equipo"])
+    GER -->|"Aprobado"| CAVAIL["<b>contract_available</b><br/>Contrato disponible y vigente"]
+
+    CAVAIL --> FECHAS["Rol: jefe_operaciones<br/>Solicitar fechas de entrega<br/>+ Google Calendar"]
+
+    FECHAS --> END(["Continúa → Sub-tab LOGÍSTICA"])
+
+    classDef comodato fill:#FFF7ED,stroke:#FED7AA,color:#9A3412
+    classDef directa fill:#E0E7FF,stroke:#C4B5FD,color:#312E81
+    classDef convergencia fill:#F1F5F9,stroke:#94A3B8,color:#334155
+    classDef contrato fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
+    classDef ok fill:#DCFCE7,stroke:#16A34A,color:#14532D
+    classDef err fill:#FEE2E2,stroke:#DC2626,color:#7F1D1D
+    classDef decision fill:#FEF3C7,stroke:#D97706,color:#78350F
+
+    class STEP1_COM,STEP2_COM,STEP3_COM,STEP4_COM,SIGNED_COM,MEJORA comodato
+    class STEP1_D,STEP2_D,STEP3_D,STEP4_D,SIGNED_D,MEJORA_D directa
+    class PRE_CONTRATO,BC_RETRY convergencia
+    class CLICONTRATO,DOCS,CAVAIL,FECHAS contrato
+    class END ok
+    class FIN_COM,FIN_D,RECH_CONT err
+    class TIPO,STEP5_COM,REJ_COM,STEP5_D,REJ_D,ACP,GATE_GER,GER decision
+      </div>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#FFF7ED;border:1px solid #FED7AA;"></div> Ruta comodato</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#E0E7FF;border:1px solid #4338CA;"></div> Ruta directa / rental</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#DBEAFE;border:1px solid #2563EB;"></div> Contrato (convergencia)</div>
+    </div>
+  </div>
+
+  <!-- TAB 5: Post-Arrival -->
+  <div class="diagram-section" id="tab-4">
+    <p class="diagram-title">Fase Post-Arrival — Instalación y Entrenamiento (común a todos los tipos)</p>
+    <p class="diagram-desc">Aplica a compra pública y privada una vez el equipo llega físicamente. El flujo CU se activa si el equipo no cumple la verificación técnica.</p>
+    <div class="diagram-wrap">
+      <div class="mermaid">
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#FEE2E2', 'primaryTextColor': '#7F1D1D', 'primaryBorderColor': '#DC2626', 'lineColor': '#374151'}}}%%
+flowchart TD
+    START(["📦 Equipo en bodega<br/>waiting_dispatch"])
+
+    START --> DESP["<b>Solicitud de despacho</b><br/>Rol: logística<br/>Preparar y validar guía de envío<br/>vs. proforma de compra"]
+
+    DESP --> DISPATCH["<b>dispatch_ready</b><br/>Rol: jefe_logistica<br/>Despacho confirmado y listo"]
+
+    DISPATCH --> FST14["<b>F.ST-14 — Recepción visual</b><br/>Rol: técnico<br/>Inspección de empaque:<br/>• Guía vs. proforma<br/>• Integridad del empaque<br/>• Indicadores de inclinación/manejo<br/>• Número de serie · Accesorios"]
+
+    FST14 --> FST14_R{"¿Recepción aprobada?"}
+    FST14_R -->|"Falla"| FST14_FAIL["Registrar no conformidad<br/>Coordinar con logística"]
+    FST14_FAIL --> FST14_R
+    FST14_R -->|"Pasa"| FST07
+
+    FST07["<b>F.ST-07 — Inspección de sitio</b><br/>Rol: técnico<br/>Verificar condiciones del ambiente:<br/>área eléctrica · agua · red · espacio"]
+
+    FST07 --> FST07_R{"¿Sitio listo para<br/>instalación?"}
+    FST07_R -->|"No listo"| FST07_WAIT["Coordinar mejoras<br/>en el sitio del cliente"]
+    FST07_WAIT --> FST07_R
+    FST07_R -->|"ready_for_installation"| DEC
+
+    DEC{"<b>F.ST-09 — Decisión de verificación</b><br/>Rol: jefe_tecnico decide<br/>¿Equipo aplica verificación directa<br/>o requiere flujo CU?"}
+
+    DEC -->|"Aplica verificación\ndirecta"| VERIF
+    DEC -->|"Requiere CU\n(no cumple)"| CU_FLOW
+
+    VERIF["<b>Verificación técnica</b><br/>Rol: técnico<br/>Verificar funcionamiento del equipo<br/>(multi-intento hasta pasar)"]
+    VERIF --> VERIF_R{"¿Verificación\naprobada?"}
+    VERIF_R -->|"Falla<br/>Nuevo intento"| VERIF
+    VERIF_R -->|"Pasa"| FST10
+
+    subgraph CU_FLOW["🔧 FLUJO CU — Equipo no cumple"]
+        direction TB
+        CU1["<b>Solicitud de partes</b><br/>Rol: técnico<br/>Identificar repuestos necesarios<br/>Estado: pending → requested → received"]
+        CU1 --> CU2["<b>F.ST-02 — Desinfección</b><br/>Rol: técnico<br/>Desinfectar instrumento o pieza<br/>antes de devolución al proveedor"]
+        CU2 --> CU3["<b>Reporte del proveedor</b><br/>Rol: proveedor externo<br/>Entregar reporte de reparación<br/>Archivo obligatorio"]
+        CU3 --> CU4{"¿Proveedor resolvió\nel problema?"}
+        CU4 -->|"No"| CU1
+        CU4 -->|"Sí"| VERIF_CU["<b>Re-verificación</b><br/>Rol: técnico<br/>Verificar equipo post-reparación"]
+        VERIF_CU --> VERIF_CU_R{"¿Pasa verificación?"}
+        VERIF_CU_R -->|"Falla"| CU1
+        VERIF_CU_R -->|"Pasa"| CU_OK(["CU resuelto ✅"])
+    end
+
+    CU_OK --> FST10
+
+    FST10["<b>F.ST-10 — Acta de entrega</b><br/>Rol técnico: sube acta<br/>Rol logística: firma acta<br/>Rol gerencia: legaliza acta<br/>PDF generado a partir de plantilla oficial"]
+
+    FST10 --> TRAIN_PLAN
+
+    subgraph ENTRENAMIENTO["🎓 ENTRENAMIENTO"]
+        direction TB
+        TRAIN_PLAN["<b>F.ST-04 — Planificación</b><br/>Rol: jefe_tecnico<br/>Definir fechas · asistentes · objetivos"]
+        TRAIN_PLAN --> TRAIN_EXE["<b>F.ST-05 — Asistencia</b><br/>Rol: técnico<br/>Registrar asistencia (hasta 7 personas)"]
+        TRAIN_EXE --> TRAIN_CONF["<b>Conformidad y evaluación</b><br/>Rol: técnico + cliente<br/>Evaluar satisfacción del entrenamiento"]
+        TRAIN_CONF --> CERT["<b>Certificado de entrenamiento</b><br/>Emitido por jefe_tecnico"]
+    end
+
+    CERT --> CLOSURE
+
+    CLOSURE{"<b>CLOSURE GATE</b><br/>¿Todos los bloqueos resueltos?<br/>——<br/>• F.ST-14 aprobado<br/>• F.ST-07 sitio listo<br/>• Verificación pasada<br/>• CU completado si aplica<br/>• Proveedor reportó<br/>• F.ST-10 firmado por todos<br/>• Entrenamiento certificado"}
+
+    CLOSURE -->|"Bloqueos pendientes"| BLOQ["🔴 Sub-tab indica<br/>bloqueo activo<br/>con detalle del problema"]
+    BLOQ --> CLOSURE
+
+    CLOSURE -->|"Todo resuelto"| DONE(["✅ delivery_act_generated<br/>Expediente completamente cerrado"])
+
+    classDef log fill:#FEF3C7,stroke:#D97706,color:#78350F
+    classDef tec fill:#FEE2E2,stroke:#DC2626,color:#7F1D1D
+    classDef cu fill:#F3E8FF,stroke:#7C3AED,color:#4C1D95
+    classDef train fill:#DCFCE7,stroke:#16A34A,color:#14532D
+    classDef decision fill:#FEF3C7,stroke:#D97706,color:#78350F
+    classDef ok fill:#DCFCE7,stroke:#16A34A,color:#14532D,font-weight:bold
+    classDef bloq fill:#FEE2E2,stroke:#DC2626,color:#7F1D1D
+
+    class DESP,DISPATCH log
+    class FST14,FST14_FAIL,FST07,FST07_WAIT,DEC,VERIF,FST10 tec
+    class CU1,CU2,CU3,VERIF_CU tec
+    class TRAIN_PLAN,TRAIN_EXE,TRAIN_CONF,CERT train
+    class FST14_R,FST07_R,VERIF_R,CU4,VERIF_CU_R,CLOSURE decision
+    class DONE,CU_OK ok
+    class BLOQ bloq
+      </div>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#FEF3C7;border:1px solid #D97706;"></div> Logística</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#FEE2E2;border:1px solid #DC2626;"></div> Técnica (F.ST)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#F3E8FF;border:1px solid #7C3AED;"></div> Flujo CU</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#DCFCE7;border:1px solid #16A34A;"></div> Entrenamiento / OK</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    flowchart: {
+      useMaxWidth: false,
+      htmlLabels: true,
+      curve: 'linear'
+    },
+    securityLevel: 'loose'
+  });
+
+  function showTab(index) {
+    document.querySelectorAll('.diagram-section').forEach((s, i) => {
+      s.classList.toggle('active', i === index);
+    });
+    document.querySelectorAll('.tab-btn').forEach((b, i) => {
+      b.classList.toggle('active', i === index);
+    });
+  }
+</script>
+</body>
+</html>

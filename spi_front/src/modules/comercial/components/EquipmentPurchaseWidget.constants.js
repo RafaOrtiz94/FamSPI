@@ -90,28 +90,6 @@ export const STATUS_CONFIG = {
  badgeBg: "bg-emerald-100",
  badgeText: "text-emerald-800"
  },
- delivery_dates_requested: {
- label: "Pendiente fechas de entrega",
- iconName: "FiClock",
- ledColor: "bg-cyan-500",
- ledGlow: "shadow-lg shadow-cyan-500/50",
- cardBg: "bg-gradient-to-br from-white via-cyan-50 to-white",
- cardBorder: "border-l-4 border-cyan-400",
- cardShadow: "shadow-cyan-200/60",
- badgeBg: "bg-cyan-100",
- badgeText: "text-cyan-800"
- },
- delivery_dates_submitted: {
- label: "Fechas de entrega registradas",
- iconName: "FiCalendar",
- ledColor: "bg-blue-500",
- ledGlow: "shadow-lg shadow-blue-500/50",
- cardBg: "bg-gradient-to-br from-white via-blue-50 to-white",
- cardBorder: "border-l-4 border-blue-400",
- cardShadow: "shadow-blue-200/60",
- badgeBg: "bg-blue-100",
- badgeText: "text-blue-800"
- },
  waiting_dispatch: {
  label: "Esperando despacho",
  iconName: "FiPackage",

@@ -171,11 +171,15 @@ router.get(
     "acp_comercial",
     "backoffice_comercial",
     "tecnico",
+    "ing_servicio",
+    "esp_app",
     "finanzas",
+    "jefe_financiero",
     "calidad",
     "jefe_calidad",
     "jefe_servicio_tecnico",
     "jefe_tecnico",
+    "jefe_servicio",
     "operaciones",
     "jefe_operaciones",
     "ti",
@@ -184,6 +188,13 @@ router.get(
     "jefe_talento_humano",
   ]),
   ctrl.listRequests
+);
+
+router.post(
+  "/:id/credit-decision",
+  verifyToken,
+  requireRole(["jefe_financiero"]),
+  ctrl.processCreditDecision
 );
 
 /* ============================================================
@@ -200,11 +211,15 @@ router.get(
     "acp_comercial",
     "backoffice_comercial",
     "tecnico",
+    "ing_servicio",
+    "esp_app",
     "finanzas",
+    "jefe_financiero",
     "calidad",
     "jefe_calidad",
     "jefe_servicio_tecnico",
     "jefe_tecnico",
+    "jefe_servicio",
     "operaciones",
     "jefe_operaciones",
     "ti",
@@ -237,6 +252,18 @@ router.post(
   verifyToken,
   requireRole(["jefe_comercial"]),
   ctrl.cancel
+);
+
+/* ============================================================
+   📋 REGISTRAR RESULTADO F.ST-07 (inspecciones independientes)
+   ------------------------------------------------------------
+   Roles: jefe_servicio (mismo coordinador que aprueba tecnico/fecha)
+============================================================ */
+router.post(
+  "/:id/inspection-result",
+  verifyToken,
+  requireRole(["jefe_tecnico", "jefe_servicio", "jefe_servicio_tecnico"]),
+  ctrl.registerInspectionResult
 );
 
 module.exports = router;

@@ -18,6 +18,7 @@ const BACKUP_TZ =
 const BACKUP_INTERVAL_HOURS = Math.max(1, Number(process.env.DB_BACKUP_INTERVAL_HOURS || 24));
 const BACKUP_AUTO_ENABLED =
   String(process.env.DB_BACKUP_AUTO_ENABLED || "false").trim().toLowerCase() === "true";
+const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
 
 let backupInterval = null;
 
@@ -236,9 +237,11 @@ function startDatabaseBackupJob() {
     "[DB_BACKUP] Scheduler interno habilitado",
   );
 
-  runOnce().catch((error) => {
-    logger.error({ error: error?.message }, "[DB_BACKUP] Error en respaldo inicial");
-  });
+  if (SHOULD_RUN_ON_START) {
+    runOnce().catch((error) => {
+      logger.error({ error: error?.message }, "[DB_BACKUP] Error en respaldo inicial");
+    });
+  }
 
   backupInterval = setInterval(() => {
     runOnce().catch((error) => {

@@ -9,7 +9,6 @@ const steps = [
 ];
 
 export default function CA0106Stepper({ record, onClose }) {
-  const [currentStep, setCurrentStep] = useState(0);
   const [notes, setNotes] = useState("");
 
   const currentStatus = useMemo(() => record?.status || "pending", [record]);

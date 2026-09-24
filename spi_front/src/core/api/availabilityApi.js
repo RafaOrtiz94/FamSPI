@@ -26,6 +26,20 @@ export const getTechnicalActivities = async ({ from, to }) => {
  return unwrapRows(data);
 };
 
+export const getTechnicalScheduleFeed = async ({ from, to, scope } = {}) => {
+ const { data } = await api.get("/servicio/cronograma/feed", {
+ params: { from, to, scope },
+ });
+ return {
+  rows: Array.isArray(data?.rows) ? data.rows : [],
+  backlog: Array.isArray(data?.backlog) ? data.backlog : [],
+  summary: data?.summary || {},
+  scope: data?.scope || scope || "mine",
+  from: data?.from || from || null,
+  to: data?.to || to || null,
+ };
+};
+
 export const createTechnicalActivity = async ({ activity_date, title, notes = "", status = "programado", user_id } = {}) => {
  const { data } = await api.post("/servicio/actividades", {
  activity_date,
