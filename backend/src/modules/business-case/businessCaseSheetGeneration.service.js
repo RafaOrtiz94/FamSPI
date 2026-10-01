@@ -473,9 +473,32 @@ function buildInversionesPayload(investments = [], options = {}) {
         precio_operativo: normalizeInvestmentNumber(item?.unit_price) ?? 0,
         precio_financiero: normalizeInvestmentNumber(item?.unit_price_financial) ?? null,
         descripcion: String(item?.characteristics || item?.notes || name || "").trim(),
+        activos_reservados: options.reservedAssetsByCatalog?.get(Number(item?.id)) || [],
       };
     });
   return out;
+}
+
+// Activos TI existentes reservados (o ya entregados) para cubrir cada item de
+// inversiones: Map catalog_id -> ["MONITOR LG 20MK400H (S/N ...)", ...].
+async function getReservedTiAssetsByCatalog(businessCaseId) {
+  const { rows } = await db.query(
+    `SELECT r.catalog_id, a.name, a.brand, a.model, a.serial_number
+       FROM public.bc_investment_ti_asset_reservations r
+       JOIN public.ti_assets a ON a.id = r.ti_asset_id
+      WHERE r.business_case_id = $1 AND r.status IN ('reserved', 'delivered')
+      ORDER BY r.catalog_id, r.reserved_at ASC`,
+    [businessCaseId],
+  );
+  const map = new Map();
+  rows.forEach((row) => {
+    const model = String(row.model || "").trim().toUpperCase() === "N/A" ? null : row.model;
+    const label = [row.name, row.brand, model].filter(hasValue).join(" ")
+      + (hasValue(row.serial_number) ? ` (S/N ${row.serial_number})` : "");
+    const key = Number(row.catalog_id);
+    map.set(key, [...(map.get(key) || []), label]);
+  });
+  return map;
 }
 
 async function getMaximumQuantitiesByBusinessCaseId(businessCaseId) {
@@ -560,6 +583,7 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     equipmentNamesMap,
     equipmentCatalogMap,
     maximumQuantities,
+    reservedAssetsByCatalog,
   ] = await Promise.all([
     bcLabEnvironmentService.getLabEnvironment(businessCaseId),
     bcLisIntegrationService.getLisIntegration(businessCaseId),
@@ -571,6 +595,7 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
       sheetEquipmentPairs.flatMap((pair) => [pair?.primary_id, pair?.backup_id]),
     ),
     getMaximumQuantitiesByBusinessCaseId(businessCaseId),
+    getReservedTiAssetsByCatalog(businessCaseId),
   ]);
 
   const lisInterfaces = lisIntegration?.id
@@ -765,7 +790,10 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     fields,
     inversiones: hasManualInversiones
       ? input.inversiones
-      : buildInversionesPayload(investments, { projectedMonths: sheetContext.projected_deadline_months }),
+      : buildInversionesPayload(investments, {
+        projectedMonths: sheetContext.projected_deadline_months,
+        reservedAssetsByCatalog,
+      }),
     max_quantities: preparedMaximumQuantities,
     equipment_tabs: equipmentTabs,
     sheet_context: sheetContext,
@@ -1673,14 +1701,15 @@ async function syncInvestmentValuesToSheet(businessCaseId, { backup = false } = 
   const sheetId = lastSheet?.provider === "google_sheets_local" ? lastSheet.sheet_id || null : null;
   if (!sheetId) return { synced: false, reason: "no_sheet" };
 
-  const [requirements, investments] = await Promise.all([
+  const [requirements, investments, reservedAssetsByCatalog] = await Promise.all([
     bcRequirementsService.getRequirements(businessCaseId),
     investmentsService.getCatalogWithSelections(businessCaseId),
+    getReservedTiAssetsByCatalog(businessCaseId),
   ]);
   const projectedMonths = pickFirst(requirements?.projected_deadline_months, bcRow?.projected_deadline_months);
   const result = await syncInvestmentsToGoogleSheet({
     sheetId,
-    inversiones: buildInversionesPayload(investments, { projectedMonths }),
+    inversiones: buildInversionesPayload(investments, { projectedMonths, reservedAssetsByCatalog }),
     backup,
   });
   return { synced: true, ...result };

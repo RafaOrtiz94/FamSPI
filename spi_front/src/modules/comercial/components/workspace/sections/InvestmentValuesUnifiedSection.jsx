@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { FiAlertCircle, FiCheckCircle, FiClock, FiLayers, FiMail, FiPercent, FiRefreshCw, FiSave, FiUserPlus } from "react-icons/fi";
+import { FiAlertCircle, FiCheckCircle, FiClock, FiLayers, FiMail, FiPaperclip, FiPercent, FiRefreshCw, FiSave, FiTrash2, FiUpload, FiUserPlus } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useAuth } from "../../../../../core/auth/AuthContext";
 import { useUI } from "../../../../../core/ui/UIContext";
@@ -63,6 +63,111 @@ function PricingContextHeader({ context = {} }) {
   );
 }
 
+// Cotizaciones (archivos) de un item: el cotizador asignado las sube y
+// jefe_financiero las revisa para registrar el valor.
+function QuotationFilesPanel({ bcId, item, canUpload, showToast, onChanged }) {
+  const [uploading, setUploading] = useState(false);
+  const [removingId, setRemovingId] = useState(null);
+  const files = Array.isArray(item.quotation_files) ? item.quotation_files : [];
+
+  const handleUpload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      setUploading(true);
+      const formData = new FormData();
+      formData.append("file", file);
+      await api.post(`/business-case/${bcId}/investments/values/${item.catalog_id}/quotation-files`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120000,
+      });
+      showToast("Cotización subida. Se notificó a Jefe Financiero para registrar el valor.", "success");
+      await onChanged();
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo subir la cotización", "error");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleRemove = async (file) => {
+    if (!window.confirm(`¿Quitar la cotización "${file.file_name}"?`)) return;
+    try {
+      setRemovingId(file.id);
+      await api.delete(`/business-case/${bcId}/investments/values/quotation-files/${file.id}`);
+      showToast("Cotización quitada", "success");
+      await onChanged();
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo quitar la cotización", "error");
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
+  if (!files.length && !canUpload) return null;
+
+  return (
+    <div className="rounded-2xl border border-violet-100 bg-violet-50/60 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-violet-800">
+          <FiPaperclip size={13} />
+          Cotizaciones ({files.length})
+        </span>
+        {canUpload && (
+          <label className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-violet-700 ${uploading ? "pointer-events-none opacity-60" : ""}`}>
+            <FiUpload size={13} />
+            {uploading ? "Subiendo..." : "Subir cotización"}
+            <input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.docx,.doc"
+              className="hidden"
+              onChange={handleUpload}
+              disabled={uploading}
+            />
+          </label>
+        )}
+      </div>
+      {files.length ? (
+        <ul className="mt-2 space-y-1.5">
+          {files.map((file) => (
+            <li key={file.id} className="flex items-center justify-between gap-2 rounded-xl border border-violet-100 bg-white px-3 py-1.5">
+              <a
+                href={file.drive_url || "#"}
+                target="_blank"
+                rel="noreferrer"
+                className="min-w-0 truncate text-xs font-semibold text-violet-700 hover:underline"
+                title={file.file_name}
+              >
+                {file.file_name}
+              </a>
+              <span className="flex shrink-0 items-center gap-2 text-[11px] text-slate-500">
+                {file.uploaded_by_email || ""}
+                {file.uploaded_at ? ` · ${new Date(file.uploaded_at).toLocaleDateString("es-EC")}` : ""}
+                {canUpload && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(file)}
+                    disabled={removingId === file.id}
+                    title="Quitar cotización"
+                    className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                  >
+                    <FiTrash2 size={12} />
+                  </button>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-xs text-violet-700/80">
+          Sube aquí la(s) cotización(es) del proveedor (PDF, imagen, Excel o Word). Jefe Financiero las revisará y registrará el valor.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function mergeInvestmentRows(operationalRows = [], financialRows = []) {
   const rowsById = new Map();
   operationalRows.forEach((row) => {
@@ -119,12 +224,12 @@ const InvestmentValuesUnifiedSection = ({
   const role = String(user?.role || user?.scope || user?.role_name || "").toLowerCase();
   const canEditAssignedQuotation = Boolean(permissions.canEditAssignedInvestmentValues);
   const canManageQuotations = OPERATIONAL_ROLES.has(role) || FINANCIAL_ROLES.has(role);
+  // El cotizador asignado solo sube cotizaciones (QuotationFilesPanel); los
+  // precios los registran unicamente los roles de valores.
   const canEditOperational =
-    (canEditAssignedQuotation && !operationalOwnership?.isLocked) ||
-    (OPERATIONAL_ROLES.has(role) && permissions.canEdit !== false && operationalOwnership?.canUserEdit !== false);
+    OPERATIONAL_ROLES.has(role) && permissions.canEdit !== false && operationalOwnership?.canUserEdit !== false;
   const canEditFinancial =
-    (canEditAssignedQuotation && !financialOwnership?.isLocked) ||
-    (FINANCIAL_ROLES.has(role) && permissions.canEdit !== false && financialOwnership?.canUserEdit !== false);
+    FINANCIAL_ROLES.has(role) && permissions.canEdit !== false && financialOwnership?.canUserEdit !== false;
   const canEditAny = canEditOperational || canEditFinancial;
 
   const load = useCallback(async () => {
@@ -469,6 +574,12 @@ const InvestmentValuesUnifiedSection = ({
                           Cotizacion solicitada
                         </span>
                       )}
+                      {item.quotation_status === "received" && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-1 text-xs font-semibold text-violet-700">
+                          <FiPaperclip size={11} />
+                          Cotizacion recibida
+                        </span>
+                      )}
                       {coveredByTiInventory && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700">
                           <FiCheckCircle size={11} />
@@ -485,6 +596,16 @@ const InvestmentValuesUnifiedSection = ({
                     showToast={showToast}
                     canManage={role === "jefe_ti"}
                   />
+
+                  {!coveredByTiInventory && (
+                    <QuotationFilesPanel
+                      bcId={bcId}
+                      item={item}
+                      canUpload={canManageQuotations || canEditAssignedQuotation}
+                      showToast={showToast}
+                      onChanged={load}
+                    />
+                  )}
 
                   <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
                     <label className="flex flex-col gap-1">
@@ -587,7 +708,7 @@ const InvestmentValuesUnifiedSection = ({
                         <button
                           type="button"
                           onClick={() => handleRequestQuotation(item)}
-                          disabled={saving || quotationRequestingId === item.catalog_id || !item.quotation_assignee_id || item.quotation_status === "requested"}
+                          disabled={saving || quotationRequestingId === item.catalog_id || !item.quotation_assignee_id || ["requested", "received"].includes(item.quotation_status)}
                           className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500"
                         >
                           <FiMail size={14} />

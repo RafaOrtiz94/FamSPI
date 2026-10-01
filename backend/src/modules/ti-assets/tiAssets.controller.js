@@ -510,9 +510,7 @@ exports.downloadAssetReport = asyncHandler(async (req, res) => {
 });
 
 exports.downloadAssetTechSpec = asyncHandler(async (req, res) => {
-  const { pdfBuffer, filename } = await generateAssetTechSpecPdf(req.params.id, {
-    generatedByName: req.user?.fullname || req.user?.name || req.user?.email || null,
-  });
+  const { pdfBuffer, filename } = await generateAssetTechSpecPdf(req.params.id);
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.send(pdfBuffer);
@@ -522,7 +520,6 @@ exports.publishTechSpecs = asyncHandler(async (req, res) => {
   const data = await publishStoredTechSpecs({
     dryRun: req.body?.dry_run !== false,
     assetIds: req.body?.asset_ids || null,
-    generatedByName: req.user?.fullname || req.user?.name || req.user?.email || null,
   });
   res.json({ ok: true, data });
 });

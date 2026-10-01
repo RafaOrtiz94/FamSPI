@@ -22,6 +22,8 @@ const generationRequestSchema = Joi.object({
         precio_operativo: Joi.alternatives().try(Joi.number().min(0).optional(), Joi.allow(null)),
         precio_financiero: Joi.alternatives().try(Joi.number().min(0).optional(), Joi.allow(null)),
         descripcion: Joi.string().allow("").optional(),
+        // Activos TI existentes reservados para cubrir este item (columna "Estado").
+        activos_reservados: Joi.array().items(Joi.string().allow("")).optional(),
       }).required(),
     )
     .default({}),

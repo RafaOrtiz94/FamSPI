@@ -409,6 +409,9 @@ router.delete(
 router.get("/:id/investments/values", verifyToken, ctrl.getInvestmentValues);
 router.post("/:id/investments/values", verifyToken, ctrl.saveInvestmentValues);
 router.post("/:id/investments/values/sync-sheet", verifyToken, ctrl.syncInvestmentValuesSheet);
+// Cotizaciones por item (archivo): cotizador asignado o roles de valores; el controller valida.
+router.post("/:id/investments/values/:catalogId/quotation-files", verifyToken, upload.single("file"), ctrl.uploadInvestmentQuotationFile);
+router.delete("/:id/investments/values/quotation-files/:fileId", verifyToken, ctrl.removeInvestmentQuotationFile);
 router.get("/:id/investments/values/assignees", verifyToken, requireRole(investmentValuesRoles), ctrl.getInvestmentQuotationAssignees);
 router.post("/:id/investments/values/assignment", verifyToken, requireRole(investmentValuesRoles), ctrl.assignInvestmentQuotation);
 router.post("/:id/investments/values/request-quotation", verifyToken, requireRole(investmentValuesRoles), ctrl.requestInvestmentQuotation);

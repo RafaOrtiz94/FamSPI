@@ -1,11 +1,13 @@
 /**
- * Especificacion tecnica de un activo TI (PDF, descarga de un clic).
+ * Ficha tecnica de producto de un activo TI (PDF, descarga de un clic).
  *
- * Flujo: datos REGISTRADOS del activo (ti_assets + accesorios + responsable)
- * -> redaccion con Claude (salida JSON estructurada) -> PDF con pdfkit.
- * La IA solo redacta/organiza lo registrado: no debe agregar especificaciones.
- * Si no hay credenciales de Anthropic o la llamada falla, el documento se
- * genera igual con redaccion de plantilla (el clic nunca queda sin PDF).
+ * Es la ficha del fabricante para el modelo del equipo + las fotos reales de
+ * la unidad. NO lleva informacion interna (codigo de activo, estado,
+ * asignacion, ubicacion, fechas, precios, mantenimiento, evaluaciones).
+ *
+ * Contenido (orden de prioridad): redaccion guardada (ti_assets.tech_spec_narrative)
+ * -> redaccion con Claude por API (si hay credenciales) -> plantilla con las
+ * caracteristicas registradas. El clic nunca queda sin PDF.
  */
 const PDFDocument = require("pdfkit");
 const db = require("../../config/db");
@@ -13,42 +15,13 @@ const logger = require("../../config/logger");
 
 const SPEC_MODEL = "claude-opus-5-5";
 const AI_TIMEOUT_MS = 75000;
-
-const STATUS_LABELS = {
-  assigned: "Asignado",
-  unassigned: "Disponible (sin asignar)",
-  available: "Disponible",
-  maintenance: "En mantenimiento",
-  damaged: "Dañado",
-  retired: "Dado de baja",
-  inactive: "Inactivo",
-  reserved: "Reservado para Business Case",
-};
-const OWNERSHIP_LABELS = { company: "Propiedad de la empresa", client: "Propiedad del cliente", leased: "Arrendado" };
-const USAGE_LABELS = {
-  internal: "Uso interno",
-  customer_site: "Instalado en sitio del cliente",
-  loan: "Préstamo",
-  spare: "Equipo de respaldo",
-  demo: "Demostración",
-};
+const PHOTO_COLUMNS = [
+  "initial_condition_photo_1_drive_file_id",
+  "initial_condition_photo_2_drive_file_id",
+];
 
 function hasText(value) {
   return value !== null && value !== undefined && String(value).trim() !== "";
-}
-
-// dateOnly: columnas DATE (pg las entrega a medianoche UTC) -- formatear en UTC
-// para no correrlas un dia al pasar a hora de Ecuador.
-function fmtDate(value, { dateOnly = false } = {}) {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
-  return date.toLocaleDateString("es-EC", {
-    timeZone: dateOnly ? "UTC" : "America/Guayaquil",
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
 }
 
 // characteristics es JSONB, pero la UI guarda texto libre ("RAM, disco...");
@@ -63,17 +36,13 @@ function characteristicsToText(value) {
   return String(value);
 }
 
+function productTitle(asset) {
+  return [asset.brand, asset.model].filter((v) => hasText(v) && String(v).trim().toUpperCase() !== "N/A").join(" ");
+}
+
 async function loadAssetFacts(assetId) {
   const { rows } = await db.query(
-    `SELECT a.*,
-            COALESCE(u.fullname, u.name, u.email) AS assigned_to_name,
-            u.email AS assigned_to_email,
-            COALESCE(c.fullname, c.name, c.email) AS custodian_name
-       FROM public.ti_assets a
-       LEFT JOIN public.users u ON u.id = a.assigned_to_user_id
-       LEFT JOIN public.users c ON c.id = a.custodian_user_id
-      WHERE a.id = $1 AND a.active IS NOT FALSE
-      LIMIT 1`,
+    `SELECT * FROM public.ti_assets WHERE id = $1 AND active IS NOT FALSE LIMIT 1`,
     [assetId],
   );
   const asset = rows[0];
@@ -82,72 +51,51 @@ async function loadAssetFacts(assetId) {
     error.status = 404;
     throw error;
   }
-
-  const { rows: accessories } = await db.query(
-    `SELECT name, brand, model, serial_number, imei, is_new, physical_condition, observations
-       FROM public.ti_asset_accessories
-      WHERE asset_id = $1 AND active = true
-      ORDER BY created_at ASC`,
-    [assetId],
-  );
-
-  const frequency = Number(asset.maintenance_frequency_months) || 12;
-  let nextMaintenance = null;
-  if (asset.last_maintenance_at) {
-    const next = new Date(asset.last_maintenance_at);
-    next.setUTCMonth(next.getUTCMonth() + frequency);
-    nextMaintenance = fmtDate(next, { dateOnly: true });
-  }
-
-  // Solo pares con valor: lo que no esta registrado no se envia (y la IA no
-  // debe inventarlo).
-  const identification = [
-    ["Nombre del activo", asset.name],
-    ["Código de activo", asset.asset_code],
-    ["Marca", asset.brand],
-    ["Modelo", asset.model],
-    ["Número de serie", asset.serial_number],
-    ["IMEI", asset.imei],
-    ["Estado", STATUS_LABELS[asset.status] || asset.status],
-    ["Tipo de propiedad", OWNERSHIP_LABELS[asset.ownership_type] || asset.ownership_type],
-    ["Contexto de uso", USAGE_LABELS[asset.usage_context] || asset.usage_context],
-    ["Fecha de compra", fmtDate(asset.purchase_date, { dateOnly: true })],
-    ["Categoría de valor", asset.value_category === "asset" ? "Activo fijo" : asset.value_category === "control_item" ? "Bien de control" : null],
-    ["Estado físico inicial", asset.physical_condition_score ? `${asset.physical_condition_score}/10` : null],
-    ["Estado funcional inicial", asset.functional_condition_score ? `${asset.functional_condition_score}/10` : null],
-    ["Asignado a", asset.assigned_to_name],
-    ["Fecha de asignación", fmtDate(asset.assigned_at)],
-    ["Custodio", asset.custodian_name],
-    ["Ubicación", asset.location_label || asset.client_location_label],
-    ["Bodega", [asset.warehouse_code, asset.warehouse_section, asset.warehouse_shelf].filter(hasText).join(" / ") || null],
-    ["Frecuencia de mantenimiento", `${frequency} meses`],
-    ["Último mantenimiento", fmtDate(asset.last_maintenance_at, { dateOnly: true })],
-    ["Próximo mantenimiento estimado", nextMaintenance],
-  ].filter(([, value]) => hasText(value));
-
   return {
     asset,
-    identification,
+    // Solo datos del producto: nada interno.
+    product: [
+      ["Tipo de equipo", asset.name],
+      ["Marca", asset.brand],
+      ["Modelo", asset.model],
+      ["Número de serie", asset.serial_number],
+      ["IMEI", asset.imei],
+    ].filter(([, value]) => hasText(value)),
     characteristicsText: characteristicsToText(asset.characteristics),
-    accessories: accessories.map((acc) => ({
-      nombre: acc.name,
-      marca: acc.brand || null,
-      modelo: acc.model || null,
-      serie: acc.serial_number || null,
-      nuevo: acc.is_new === true,
-      estado_fisico: acc.physical_condition ? `${acc.physical_condition}/10` : null,
-      observaciones: acc.observations || null,
-    })),
+    photoFileIds: PHOTO_COLUMNS.map((column) => asset[column]).filter(hasText),
   };
 }
 
-// ─── Redaccion con Claude ────────────────────────────────────────────────────
+// pdfkit solo incrusta JPEG y PNG: cualquier otra foto (HEIC, WebP) se omite.
+function isEmbeddableImage(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return false;
+  const isJpeg = buffer[0] === 0xff && buffer[1] === 0xd8;
+  const isPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+  return isJpeg || isPng;
+}
+
+async function loadProductPhotos(facts) {
+  if (!facts.photoFileIds.length) return [];
+  const { downloadFileBuffer } = require("../../utils/drive");
+  const photos = [];
+  for (const fileId of facts.photoFileIds) {
+    try {
+      const buffer = await downloadFileBuffer(fileId);
+      if (isEmbeddableImage(buffer)) photos.push(buffer);
+      else logger.warn({ assetId: facts.asset.id, fileId }, "[TI_SPEC] Foto en formato no soportado por el PDF; se omite");
+    } catch (error) {
+      logger.warn({ assetId: facts.asset.id, fileId, error: error?.message }, "[TI_SPEC] No se pudo descargar la foto; se omite");
+    }
+  }
+  return photos;
+}
+
+// ─── Redaccion (IA por API o guardada) ───────────────────────────────────────
 
 const NARRATIVE_SCHEMA = {
   type: "object",
   properties: {
-    resumen: { type: "string" },
-    descripcion_general: { type: "string" },
+    descripcion_producto: { type: "string" },
     especificaciones: {
       type: "array",
       items: {
@@ -155,42 +103,30 @@ const NARRATIVE_SCHEMA = {
         properties: {
           componente: { type: "string" },
           valor: { type: "string" },
-          // "fabricante": ficha tecnica del modelo; "registro": inventario SPI.
+          // "fabricante": ficha tecnica del modelo; "registro": caracteristicas
+          // registradas (equipos sin modelo comercial, p. ej. clones).
           fuente: { type: "string", enum: ["fabricante", "registro"] },
         },
         required: ["componente", "valor", "fuente"],
         additionalProperties: false,
       },
     },
-    estado_y_condicion: { type: "string" },
-    accesorios_y_complementos: { type: "string" },
-    uso_y_asignacion: { type: "string" },
-    mantenimiento_y_cuidados: { type: "string" },
-    justificacion_tecnica: { type: "string" },
-    datos_no_registrados: { type: "array", items: { type: "string" } },
+    caracteristicas_destacadas: { type: "array", items: { type: "string" } },
+    aplicaciones: { type: "string" },
   },
-  required: [
-    "resumen",
-    "descripcion_general",
-    "especificaciones",
-    "estado_y_condicion",
-    "accesorios_y_complementos",
-    "uso_y_asignacion",
-    "mantenimiento_y_cuidados",
-    "justificacion_tecnica",
-    "datos_no_registrados",
-  ],
+  required: ["descripcion_producto", "especificaciones", "caracteristicas_destacadas", "aplicaciones"],
   additionalProperties: false,
 };
 
-const SYSTEM_PROMPT = `Redactas documentos de especificacion tecnica de equipos tecnologicos para el Departamento de TI de una empresa en Ecuador. Escribes en espanol formal, claro y bien argumentado, en tercera persona.
+const SYSTEM_PROMPT = `Redactas fichas tecnicas de producto de equipos tecnologicos, en espanol formal y claro. La ficha describe el producto en si, como la ficha tecnica del fabricante: nunca incluye informacion interna de la empresa (codigos de inventario, estado, asignacion, ubicacion, fechas, precios ni mantenimiento).
 
-Fuente de las especificaciones: cuando la marca y el modelo identifican un producto comercial concreto, las especificaciones tecnicas son las de la ficha del fabricante para ese modelo (fuente "fabricante"): tamano, resolucion, tecnologia, conectividad, rendimiento, etc. Incluye solo valores de los que estes seguro para ese modelo exacto; si un valor depende de la variante o version (por ejemplo, un sufijo de modelo que no se registro), indicalo asi en lugar de elegir una. Los datos de identificacion y estado (serie, IMEI, estado fisico, asignacion) y las caracteristicas de equipos sin modelo comercial (por ejemplo, ensamblados o clones con modelo "N/A") vienen del registro (fuente "registro"). Si el texto registrado contradice la ficha del fabricante, usa el valor del fabricante y menciona la diferencia en "datos_no_registrados" para que se corrija el registro. Nunca completes un equipo sin modelo comercial con valores supuestos: lo que falte va en "datos_no_registrados".
+Fuente de las especificaciones: cuando la marca y el modelo identifican un producto comercial concreto, las especificaciones son las de la ficha del fabricante para ese modelo (fuente "fabricante"). Incluye solo valores de los que estes seguro para ese modelo exacto; si un valor depende de una variante o version que no se indico (por ejemplo, un sufijo de modelo), indicalo asi en lugar de elegir una. Si el equipo no tiene modelo comercial (ensamblado o clon, modelo "N/A"), usa solo las caracteristicas registradas (fuente "registro") y no completes con valores supuestos.
 
-Como organizar la informacion:
-- "especificaciones": filas componente/valor/fuente (por ejemplo "Procesador", "Memoria RAM", "Resolucion"). Incluye tambien marca, modelo, serie e IMEI si existen (fuente "registro").
-- Las secciones de texto explican y argumentan a partir de los datos y de la ficha del modelo: que es el equipo y para que sirve segun su tipo, en que estado se encuentra, que accesorios lo acompanan, a quien esta asignado y como se gestiona su mantenimiento. "justificacion_tecnica" argumenta por que el equipo es adecuado (o que limitaciones tiene) para su uso. Puedes dar recomendaciones generales de cuidado propias del tipo de equipo, sin presentarlas como datos del activo.
-- Cada seccion de texto tiene uno o dos parrafos. Si una seccion no tiene datos (por ejemplo, sin accesorios), dilo en una frase breve.`;
+Contenido:
+- "descripcion_producto": uno o dos parrafos sobre que es el producto, su categoria y sus capacidades principales.
+- "especificaciones": filas componente/valor/fuente (por ejemplo "Tamano de pantalla", "Resolucion", "Procesador"). No repitas marca, modelo ni numero de serie, que ya se muestran en la ficha.
+- "caracteristicas_destacadas": entre tres y seis frases cortas con las ventajas tecnicas del producto.
+- "aplicaciones": un parrafo con los usos para los que el producto es adecuado y, si las tiene, sus limitaciones.`;
 
 let anthropicClient = null;
 function getAnthropicClient() {
@@ -202,11 +138,17 @@ function getAnthropicClient() {
   return anthropicClient;
 }
 
+// Lo que recibe quien redacta: solo datos del producto.
+function buildNarrativeInput(facts) {
+  return {
+    producto: Object.fromEntries(facts.product.filter(([label]) => label !== "Número de serie" && label !== "IMEI")),
+    caracteristicas_registradas: facts.characteristicsText || null,
+  };
+}
+
 async function generateNarrativeWithAI(facts) {
   const client = getAnthropicClient();
   if (!client) return null;
-
-  const payload = buildNarrativeInput(facts);
 
   const response = await client.beta.messages.create({
     model: SPEC_MODEL,
@@ -221,7 +163,7 @@ async function generateNarrativeWithAI(facts) {
     messages: [
       {
         role: "user",
-        content: `Datos registrados del activo (JSON):\n${JSON.stringify(payload, null, 2)}\n\nRedacta la especificacion tecnica de este activo.`,
+        content: `Datos del producto (JSON):\n${JSON.stringify(buildNarrativeInput(facts), null, 2)}\n\nRedacta la ficha tecnica de este producto.`,
       },
     ],
   });
@@ -233,50 +175,36 @@ async function generateNarrativeWithAI(facts) {
   return JSON.parse(text);
 }
 
-// Redaccion de respaldo sin IA: mismas secciones, solo con datos registrados.
+// Respaldo sin redaccion: caracteristicas registradas, sin datos internos.
 function buildTemplateNarrative(facts) {
-  const { asset, characteristicsText, accessories } = facts;
-  const brandModel = [asset.brand, asset.model].filter(hasText).join(" ");
-  const specs = [
-    ["Marca", asset.brand],
-    ["Modelo", asset.model],
-    ["Número de serie", asset.serial_number],
-    ["IMEI", asset.imei],
-  ].filter(([, v]) => hasText(v)).map(([componente, valor]) => ({ componente, valor: String(valor), fuente: "registro" }));
+  const { asset, characteristicsText } = facts;
+  const title = productTitle(asset);
+  const specs = [];
   if (characteristicsText) {
-    characteristicsText.split(/[;,\n]+/).map((part) => part.trim()).filter(Boolean).forEach((part) => {
+    characteristicsText.split(/[;,/\n]+/).map((part) => part.trim()).filter(Boolean).forEach((part) => {
       const [label, ...rest] = part.split(":");
-      specs.push(rest.length ? { componente: label.trim(), valor: rest.join(":").trim(), fuente: "registro" } : { componente: "Característica", valor: part, fuente: "registro" });
+      specs.push(rest.length
+        ? { componente: label.trim(), valor: rest.join(":").trim(), fuente: "registro" }
+        : { componente: "Característica", valor: part, fuente: "registro" });
     });
   }
-  const missing = [];
-  if (!characteristicsText) missing.push("Características técnicas (procesador, memoria, almacenamiento, etc.)");
-  if (!hasText(asset.serial_number)) missing.push("Número de serie");
-  if (!asset.purchase_date) missing.push("Fecha de compra");
-
   return {
-    resumen: `El presente documento describe las especificaciones técnicas del activo "${asset.name}"${brandModel ? ` (${brandModel})` : ""}${asset.asset_code ? `, identificado con el código ${asset.asset_code}` : ""}, con base en la información registrada en el sistema de activos de TI.`,
-    descripcion_general: `El activo corresponde a ${asset.name}${brandModel ? ` de marca/modelo ${brandModel}` : ""}. Su estado actual en el inventario es "${STATUS_LABELS[asset.status] || asset.status || "sin estado"}".`,
+    descripcion_producto: `${asset.name || "Equipo"}${title ? ` ${title}` : ""}.`,
     especificaciones: specs,
-    estado_y_condicion: asset.physical_condition_score || asset.functional_condition_score
-      ? `Al momento de su registro se evaluó con un estado físico de ${asset.physical_condition_score || "-"}/10 y un estado funcional de ${asset.functional_condition_score || "-"}/10.`
-      : "No se registró una evaluación de condición física o funcional.",
-    accesorios_y_complementos: accessories.length
-      ? `El activo se entrega con ${accessories.length} accesorio(s): ${accessories.map((a) => a.nombre).join(", ")}.`
-      : "No se registraron accesorios asociados a este activo.",
-    uso_y_asignacion: asset.assigned_to_name
-      ? `El equipo se encuentra asignado a ${asset.assigned_to_name}${asset.assigned_at ? ` desde el ${fmtDate(asset.assigned_at)}` : ""}.`
-      : "El equipo no tiene un colaborador asignado actualmente.",
-    mantenimiento_y_cuidados: `El activo tiene definida una frecuencia de mantenimiento preventivo de ${Number(asset.maintenance_frequency_months) || 12} meses${asset.last_maintenance_at ? `; el último mantenimiento registrado fue el ${fmtDate(asset.last_maintenance_at, { dateOnly: true })}` : ""}.`,
-    justificacion_tecnica: "Las características detalladas en este documento corresponden a la información registrada del activo y sustentan su identificación, control y uso dentro de la organización.",
-    datos_no_registrados: missing,
+    caracteristicas_destacadas: [],
+    aplicaciones: "",
   };
+}
+
+function isValidNarrative(value) {
+  return Boolean(value && typeof value === "object" && hasText(value.descripcion_producto) && Array.isArray(value.especificaciones));
 }
 
 // ─── PDF ─────────────────────────────────────────────────────────────────────
 
-function renderSpecPdf({ facts, narrative, aiGenerated, generatedByName }) {
-  const { asset, identification, accessories } = facts;
+function renderSpecPdf({ facts, narrative, photos }) {
+  const { asset, product } = facts;
+  const title = productTitle(asset);
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 40, size: "A4", bufferPages: true });
     const chunks = [];
@@ -289,12 +217,12 @@ function renderSpecPdf({ facts, narrative, aiGenerated, generatedByName }) {
     const ensureSpace = (needed) => {
       if (doc.y + needed > 780) doc.addPage();
     };
-    const sectionTitle = (title) => {
+    const sectionTitle = (text) => {
       ensureSpace(80); // titulo + primeras lineas juntos (sin titulos huerfanos)
       doc.moveDown(0.8);
       const y = doc.y;
       doc.rect(LEFT, y, 3, 14).fill("#2563EB");
-      doc.fontSize(11).font("Helvetica-Bold").fillColor("#0f172a").text(title, LEFT + 10, y + 1, { width: W - 10 });
+      doc.fontSize(11).font("Helvetica-Bold").fillColor("#0f172a").text(text, LEFT + 10, y + 1, { width: W - 10 });
       doc.moveDown(0.4);
     };
     const paragraph = (text) => {
@@ -315,83 +243,72 @@ function renderSpecPdf({ facts, narrative, aiGenerated, generatedByName }) {
       });
     };
 
-    // Encabezado
-    doc.rect(LEFT, 40, W, 70).fill("#1E293B");
-    doc.fillColor("#ffffff").fontSize(15).font("Helvetica-Bold").text("Especificación Técnica de Activo TI", LEFT + 12, 52, { width: W - 24 });
-    doc.fontSize(10).font("Helvetica").fillColor("#cbd5e1")
-      .text(`${asset.name}${asset.asset_code ? `  ·  Código ${asset.asset_code}` : ""}`, LEFT + 12, 74, { width: W - 24 });
-    doc.fontSize(8).fillColor("#94a3b8")
-      .text(`Emitido el ${fmtDate(new Date())}${generatedByName ? `  ·  Por ${generatedByName}` : ""}`, LEFT + 12, 92, { width: W - 24 });
-    doc.y = 124;
+    // Encabezado: solo el producto.
+    doc.rect(LEFT, 40, W, 62).fill("#1E293B");
+    doc.fillColor("#94a3b8").fontSize(9).font("Helvetica").text("FICHA TÉCNICA", LEFT + 12, 50, { width: W - 24, characterSpacing: 1 });
+    doc.fillColor("#ffffff").fontSize(16).font("Helvetica-Bold").text(title || asset.name || "Equipo", LEFT + 12, 63, { width: W - 24 });
+    if (title && hasText(asset.name)) {
+      doc.fontSize(9.5).font("Helvetica").fillColor("#cbd5e1").text(String(asset.name), LEFT + 12, 84, { width: W - 24 });
+    }
+    doc.y = 116;
 
-    sectionTitle("1. Resumen");
-    paragraph(narrative.resumen);
+    sectionTitle("Producto");
+    keyValueTable(product);
 
-    sectionTitle("2. Identificación del activo");
-    keyValueTable(identification);
+    if (photos.length) {
+      sectionTitle("Fotografías del equipo");
+      const gap = 15;
+      const boxW = photos.length > 1 ? (W - gap) / 2 : W;
+      const boxH = 165;
+      ensureSpace(boxH + 10);
+      const y = doc.y;
+      photos.slice(0, 2).forEach((buffer, index) => {
+        const x = LEFT + index * (boxW + gap);
+        doc.rect(x, y, boxW, boxH).fill("#f8fafc");
+        try {
+          doc.image(buffer, x + 4, y + 4, { fit: [boxW - 8, boxH - 8], align: "center", valign: "center" });
+        } catch (error) {
+          logger.warn({ assetId: asset.id, error: error?.message }, "[TI_SPEC] Foto no se pudo incrustar");
+        }
+      });
+      doc.y = y + boxH + 4;
+    }
 
-    sectionTitle("3. Descripción general");
-    paragraph(narrative.descripcion_general);
+    sectionTitle("Descripción");
+    paragraph(narrative.descripcion_producto);
 
-    sectionTitle("4. Especificaciones técnicas");
+    sectionTitle("Especificaciones técnicas");
     const specs = Array.isArray(narrative.especificaciones) ? narrative.especificaciones : [];
     const fromManufacturer = (s) => s?.fuente === "fabricante";
+    const mixedSources = specs.some(fromManufacturer) && specs.some((s) => !fromManufacturer(s));
     if (specs.length) {
-      keyValueTable(specs.map((s) => [fromManufacturer(s) ? `${s.componente} *` : s.componente, s.valor]));
-      if (specs.some(fromManufacturer)) {
-        doc.moveDown(0.3);
-        doc.fontSize(7.5).font("Helvetica-Oblique").fillColor("#64748b").text(
-          `* Especificación según la ficha técnica del fabricante para el modelo ${[asset.brand, asset.model].filter(hasText).join(" ")}. `
-            + "Las filas sin asterisco provienen del registro de inventario del activo.",
-          LEFT, doc.y, { width: W },
-        );
-      }
-    } else {
-      paragraph("No hay especificaciones técnicas registradas para este activo.");
-    }
-
-    sectionTitle("5. Estado y condición");
-    paragraph(narrative.estado_y_condicion);
-
-    sectionTitle("6. Accesorios y complementos");
-    paragraph(narrative.accesorios_y_complementos);
-    if (accessories.length) {
-      doc.moveDown(0.4);
-      keyValueTable(accessories.map((acc) => [
-        acc.nombre,
-        [
-          [acc.marca, acc.modelo].filter(hasText).join(" "),
-          acc.serie ? `Serie ${acc.serie}` : null,
-          acc.estado_fisico ? `Estado físico ${acc.estado_fisico}` : null,
-          acc.nuevo ? "Nuevo" : null,
-          acc.observaciones,
-        ].filter(hasText).join(" · ") || "-",
-      ]));
-    }
-
-    sectionTitle("7. Uso y asignación");
-    paragraph(narrative.uso_y_asignacion);
-
-    sectionTitle("8. Mantenimiento y cuidados");
-    paragraph(narrative.mantenimiento_y_cuidados);
-
-    sectionTitle("9. Justificación técnica");
-    paragraph(narrative.justificacion_tecnica);
-
-    const missing = Array.isArray(narrative.datos_no_registrados) ? narrative.datos_no_registrados.filter(hasText) : [];
-    if (missing.length) {
-      sectionTitle("10. Información pendiente en el registro");
-      paragraph("Los siguientes datos no constan en el registro del activo o difieren de la ficha del fabricante, y deberían completarse o corregirse:");
+      keyValueTable(specs.map((s) => [mixedSources && fromManufacturer(s) ? `${s.componente} *` : s.componente, s.valor]));
       doc.moveDown(0.3);
-      missing.forEach((item) => {
+      const sourceNote = !specs.some(fromManufacturer)
+        ? "Equipo sin modelo comercial: especificaciones según los componentes del equipo."
+        : mixedSources
+          ? `* Según la ficha técnica del fabricante para el modelo ${title}.`
+          : `Especificaciones según la ficha técnica del fabricante para el modelo ${title}.`;
+      doc.fontSize(7.5).font("Helvetica-Oblique").fillColor("#64748b").text(sourceNote, LEFT, doc.y, { width: W });
+    } else {
+      paragraph("Sin especificaciones técnicas disponibles para este equipo.");
+    }
+
+    const highlights = Array.isArray(narrative.caracteristicas_destacadas) ? narrative.caracteristicas_destacadas.filter(hasText) : [];
+    if (highlights.length) {
+      sectionTitle("Características destacadas");
+      highlights.forEach((item) => {
         ensureSpace(16);
-        doc.fontSize(9).font("Helvetica").fillColor("#1f2937").text(`•  ${item}`, LEFT + 8, doc.y, { width: W - 8 });
+        doc.fontSize(9.5).font("Helvetica").fillColor("#1f2937").text(`•  ${item}`, LEFT + 8, doc.y, { width: W - 8, lineGap: 2 });
       });
     }
 
-    const note = aiGenerated
-      ? "Redacción asistida por IA con datos del registro y de la ficha del fabricante del modelo. Verifique los datos antes de usarlo en procesos formales."
-      : "Documento generado a partir de los datos registrados del activo.";
+    if (hasText(narrative.aplicaciones)) {
+      sectionTitle("Aplicaciones");
+      paragraph(narrative.aplicaciones);
+    }
+
+    const footer = `${title || asset.name || "Equipo"}  ·  Ficha técnica`;
     const pageCount = doc.bufferedPageRange().count;
     for (let i = 0; i < pageCount; i += 1) {
       doc.switchToPage(i);
@@ -399,49 +316,39 @@ function renderSpecPdf({ facts, narrative, aiGenerated, generatedByName }) {
       // pagina en blanco por cada pie escrito.
       doc.page.margins.bottom = 0;
       doc.fontSize(7).font("Helvetica").fillColor("#94a3b8")
-        .text(`${note}  ·  Página ${i + 1} de ${pageCount}  ·  FAM SPI Activos TI`, LEFT, 805, { width: W, align: "center", lineBreak: false });
+        .text(`${footer}  ·  Página ${i + 1} de ${pageCount}`, LEFT, 805, { width: W, align: "center", lineBreak: false });
     }
     doc.end();
   });
 }
 
-// Datos que recibe quien redacta (IA por API o redaccion guardada a mano).
-function buildNarrativeInput(facts) {
-  return {
-    identificacion: Object.fromEntries(facts.identification),
-    caracteristicas_registradas: facts.characteristicsText || null,
-    accesorios: facts.accessories,
-  };
+function safeFilePart(value) {
+  return String(value || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-function isValidNarrative(value) {
-  return Boolean(value && typeof value === "object" && hasText(value.resumen) && Array.isArray(value.especificaciones));
-}
-
-// Orden: redaccion guardada (tech_spec_narrative) -> IA por API -> plantilla.
-async function generateAssetTechSpecPdf(assetId, { generatedByName = null } = {}) {
+async function generateAssetTechSpecPdf(assetId) {
   const facts = await loadAssetFacts(assetId);
   let narrative = isValidNarrative(facts.asset.tech_spec_narrative) ? facts.asset.tech_spec_narrative : null;
-  let aiGenerated = Boolean(narrative);
   if (!narrative) {
     try {
       narrative = await generateNarrativeWithAI(facts);
-      aiGenerated = Boolean(narrative);
     } catch (error) {
       logger.warn({ assetId, error: error?.message }, "[TI_SPEC] Redaccion IA fallo; se usa plantilla");
     }
   }
   if (!narrative) narrative = buildTemplateNarrative(facts);
 
-  const pdfBuffer = await renderSpecPdf({ facts, narrative, aiGenerated, generatedByName });
-  const code = facts.asset.asset_code || String(facts.asset.id).padStart(6, "0");
-  return { pdfBuffer, filename: `Especificacion-Tecnica-${code}.pdf`, aiGenerated };
+  const photos = await loadProductPhotos(facts);
+  const pdfBuffer = await renderSpecPdf({ facts, narrative, photos });
+  const name = [productTitle(facts.asset) || facts.asset.name, facts.asset.serial_number || facts.asset.id]
+    .map(safeFilePart).filter(Boolean).join("-");
+  return { pdfBuffer, filename: `Ficha-Tecnica-${name}.pdf`, photosIncluded: photos.length };
 }
 
-// Publica en Drive el PDF de cada activo con redaccion guardada:
-// Activos TI / Especificaciones Tecnicas / <codigo> / Especificacion-Tecnica-<codigo>.pdf
+// Publica en Drive la ficha de cada activo con redaccion guardada:
+// Activos TI / Especificaciones Tecnicas / <codigo> / Ficha-Tecnica-<...>.pdf
 // Corre en Cloud Run (credenciales de Drive). dryRun=true solo lista.
-async function publishStoredTechSpecs({ dryRun = true, assetIds = null, generatedByName = null } = {}) {
+async function publishStoredTechSpecs({ dryRun = true, assetIds = null } = {}) {
   const { ensureFolder, uploadBase64File } = require("../../utils/drive");
   const ids = Array.isArray(assetIds) && assetIds.length ? assetIds.map(Number).filter(Number.isInteger) : null;
   const { rows } = await db.query(
@@ -471,7 +378,7 @@ async function publishStoredTechSpecs({ dryRun = true, assetIds = null, generate
         specsRootId = (await ensureFolder("Especificaciones Técnicas", activosRoot.id)).id;
       }
       const assetFolder = await ensureFolder(String(row.asset_code || row.id), specsRootId);
-      const { pdfBuffer, filename } = await generateAssetTechSpecPdf(row.id, { generatedByName });
+      const { pdfBuffer, filename, photosIncluded } = await generateAssetTechSpecPdf(row.id);
       const uploaded = await uploadBase64File(filename, pdfBuffer.toString("base64"), "application/pdf", assetFolder.id);
       const fileId = uploaded?.id || null;
       const url = uploaded?.webViewLink || (fileId ? `https://drive.google.com/file/d/${fileId}/view` : null);
@@ -479,7 +386,7 @@ async function publishStoredTechSpecs({ dryRun = true, assetIds = null, generate
         `UPDATE public.ti_assets SET tech_spec_drive_file_id = $2, tech_spec_drive_url = $3 WHERE id = $1`,
         [row.id, fileId, url],
       );
-      results.push({ asset_id: row.id, asset_code: row.asset_code, published: true, drive_url: url });
+      results.push({ asset_id: row.id, asset_code: row.asset_code, published: true, photos: photosIncluded, drive_url: url });
     } catch (error) {
       logger.warn({ assetId: row.id, error: error?.message }, "[TI_SPEC] No se pudo publicar en Drive");
       results.push({ asset_id: row.id, asset_code: row.asset_code, published: false, error: error?.message || String(error) });
@@ -503,4 +410,5 @@ module.exports = {
   NARRATIVE_SCHEMA,
   buildTemplateNarrative,
   characteristicsToText,
+  isEmbeddableImage,
 };

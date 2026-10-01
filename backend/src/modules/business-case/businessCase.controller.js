@@ -1577,7 +1577,7 @@ async function notifyInvestmentQuotationRequested({ businessCaseId, actor, selec
         `Codigo: ${itemCode}. Categoria: ${category}. Cantidad requerida: ${quantity}. ` +
         `Caracteristicas: ${characteristics}. Observaciones: ${observations}. ` +
         "Debes gestionar tres cotizaciones de proveedores diferentes o una cotizacion de un proveedor validado. " +
-        "Registra en el Business Case únicamente los valores de esta cotización asignada; no tendrás acceso a otros ítems ni secciones.",
+        "Sube la(s) cotización(es) en el Business Case, en el ítem asignado (Precios financieros y operativos); Jefe Financiero registrará el valor. No tendrás acceso a otros ítems ni secciones.",
       data: {
         business_case_id: businessCaseId,
         target_path: targetPath,
@@ -2805,6 +2805,17 @@ async function getTiAssetReservations(req, res) {
   }
 }
 
+// Reservar/liberar un activo TI se refleja en la columna "Estado" del bloque de
+// inversiones de la hoja BC. Best-effort: un fallo de Sheets no revierte la reserva.
+async function syncReservationsToSheet(businessCaseId) {
+  try {
+    return await sheetGenerationService.syncInvestmentValuesToSheet(businessCaseId);
+  } catch (error) {
+    logger.warn({ error: error?.message, businessCaseId }, "No se pudo reflejar la reserva de activo TI en Sheets");
+    return { synced: false, error: error?.message || "No se pudo sincronizar la hoja" };
+  }
+}
+
 async function reserveTiAsset(req, res) {
   try {
     const { id, catalogId } = req.params;
@@ -2820,7 +2831,8 @@ async function reserveTiAsset(req, res) {
       user: req.user,
       publicBaseUrl: resolvePublicBaseUrlForRequest(req),
     });
-    res.json({ ok: true, data: rows });
+    const sheetSync = await syncReservationsToSheet(id);
+    res.json({ ok: true, data: rows, sheet_sync: sheetSync });
   } catch (error) {
     logger.error({ error: error.message }, "Error reserving TI asset");
     res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
@@ -2838,7 +2850,8 @@ async function releaseTiAssetReservation(req, res) {
       reason: "manual",
       publicBaseUrl: resolvePublicBaseUrlForRequest(req),
     });
-    res.json({ ok: true, data: rows });
+    const sheetSync = await syncReservationsToSheet(id);
+    res.json({ ok: true, data: rows, sheet_sync: sheetSync });
   } catch (error) {
     logger.error({ error: error.message }, "Error releasing TI asset reservation");
     res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
@@ -6833,11 +6846,18 @@ async function getInvestmentValues(req, res) {
     if (!isValueRole && !hasAssignedQuotation) {
       return res.status(403).json({ ok: false, message: "No tienes una cotización asignada en este Business Case." });
     }
-    const rows = await investmentsService.getInvestmentValuesByClass(
-      id,
-      investmentClass,
-      hasAssignedQuotation ? { assigneeId: userId } : undefined,
-    );
+    const [valueRows, quotationFilesByCatalog] = await Promise.all([
+      investmentsService.getInvestmentValuesByClass(
+        id,
+        investmentClass,
+        hasAssignedQuotation ? { assigneeId: userId } : undefined,
+      ),
+      investmentsService.listQuotationFilesByCatalog(id),
+    ]);
+    const rows = (valueRows || []).map((row) => ({
+      ...row,
+      quotation_files: quotationFilesByCatalog.get(Number(row.catalog_id)) || [],
+    }));
     const pricingContext = await investmentsService.getInvestmentPricingContext(id);
 
     // Precios en tiempo real: sin deadline ni cierre, cualquier item con
@@ -6975,6 +6995,82 @@ async function syncInvestmentValuesSheet(req, res) {
   }
 }
 
+// Cotizaciones por item: sube el cotizador asignado a ESE item, o un rol de
+// valores (operativo/financiero). Lo demas -> 403.
+async function assertCanManageItemQuotation(req, businessCaseId, catalogId) {
+  const role = resolveRequestRole(req);
+  if (INVESTMENT_VALUES_OP_ROLES.has(role) || INVESTMENT_VALUES_FIN_ROLES.has(role)) return;
+  await investmentsService.assertInvestmentQuotationAssignments(businessCaseId, resolveRequestUserId(req), [catalogId]);
+}
+
+async function notifyQuotationUploaded({ businessCaseId, itemName, actorEmail }) {
+  const { rows: recipients } = await db.query(
+    `SELECT id FROM users WHERE active = true AND LOWER(role) = 'jefe_financiero'`,
+  );
+  if (!recipients.length) return { sent: false, reason: "no_recipients" };
+  const businessCase = await businessCaseService.getBusinessCaseById(businessCaseId);
+  const clientName = businessCase?.client_name || "cliente sin nombre";
+  const targetPath = `/dashboard/business-case/workspace/${businessCaseId}`;
+  let sent = 0;
+  for (const recipient of recipients) {
+    try {
+      await notificationManager.sendNotification({
+        userId: recipient.id,
+        template: "custom_html",
+        customTitle: `Cotización recibida: ${itemName}`,
+        customMessage:
+          `${actorEmail || "El cotizador asignado"} subió la cotización de ${itemName} para el Business Case de ${clientName}. ` +
+          "Revisa el archivo en Precios financieros y operativos y registra el valor.",
+        data: {
+          business_case_id: businessCaseId,
+          target_path: targetPath,
+          cta_label: "Revisar cotización",
+          email_subject: `Cotización recibida - ${itemName}`,
+        },
+      });
+      sent += 1;
+    } catch (error) {
+      logger.warn({ error: error?.message, businessCaseId, userId: recipient.id }, "No se pudo notificar cotizacion recibida");
+    }
+  }
+  return { sent: sent > 0, recipients: sent };
+}
+
+async function uploadInvestmentQuotationFile(req, res) {
+  try {
+    const { id, catalogId } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    await assertCanManageItemQuotation(req, id, Number(catalogId));
+    const { file, itemName } = await investmentsService.addQuotationFile({
+      businessCaseId: id,
+      catalogId,
+      file: req.file,
+      user: req.user,
+    });
+    const notification = await notifyQuotationUploaded({ businessCaseId: id, itemName, actorEmail: req.user?.email || null })
+      .catch((error) => ({ sent: false, error: error?.message }));
+    res.status(201).json({ ok: true, data: { file, notification } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error uploading investment quotation file");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+async function removeInvestmentQuotationFile(req, res) {
+  try {
+    const { id, fileId } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const catalogId = await investmentsService.getQuotationFileCatalogId(id, fileId);
+    if (catalogId === null) return res.status(404).json({ ok: false, message: "Cotización no encontrada" });
+    await assertCanManageItemQuotation(req, id, Number(catalogId));
+    const data = await investmentsService.removeQuotationFile({ businessCaseId: id, fileId, user: req.user });
+    res.json({ ok: true, data });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error removing investment quotation file");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
 async function saveInvestmentValues(req, res) {
   try {
     const { id } = req.params;
@@ -7009,12 +7105,14 @@ async function saveInvestmentValues(req, res) {
       return res.status(400).json({ ok: false, message: 'values es requerido' });
     }
 
+    // El cotizador asignado ya no registra precios: solo sube la cotizacion
+    // (uploadInvestmentQuotationFile). Los valores son solo de los roles por clase.
     if (!isValueEditor) {
-      await investmentsService.assertInvestmentQuotationAssignments(
-        id,
-        resolveRequestUserId(req),
-        values.map((item) => item?.catalog_id),
-      );
+      return res.status(403).json({
+        ok: false,
+        message: "Solo el rol responsable de valores puede registrar precios. Como cotizador, sube la cotización del ítem.",
+        code: "INVESTMENT_VALUES_ROLE_REQUIRED",
+      });
     }
 
     const normalizedValues = values.map((item) => {
@@ -7172,6 +7270,8 @@ module.exports = {
   requestInvestmentQuotation,
   saveInvestmentValues,
   syncInvestmentValuesSheet,
+  uploadInvestmentQuotationFile,
+  removeInvestmentQuotationFile,
   getConsumptionItems,
   saveConsumptionItems,
   patchConsumptionItem,

@@ -8,7 +8,8 @@
  *
  *   node scripts/ti_tech_specs.js apply <redacciones.json> [--dry-run]
  *     Guarda cada redaccion en ti_assets.tech_spec_narrative. Formato:
- *     { "<asset_id>": { resumen, descripcion_general, especificaciones[], ... } }
+ *     { "<asset_id>": { descripcion_producto, especificaciones[{componente, valor, fuente}],
+ *                       caracteristicas_destacadas[], aplicaciones } }
  *     Valida contra el mismo esquema de secciones del PDF antes de escribir.
  *
  * Conexion a produccion: DB_PASSWORD desde gcloud Secret Manager (famspi-sbox).
@@ -53,7 +54,7 @@ function validateNarrative(narrative) {
     || narrative.especificaciones.some((row) => !row?.componente || !row?.valor)) {
     errors.push("especificaciones debe ser [{ componente, valor }]");
   }
-  if (!isValidNarrative(narrative)) errors.push("resumen vacio");
+  if (!isValidNarrative(narrative)) errors.push("descripcion_producto vacia");
   return errors;
 }
 

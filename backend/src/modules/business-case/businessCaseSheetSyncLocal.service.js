@@ -413,6 +413,7 @@ function parseBCDefinition(ws) {
       // para restaurar una fila deseleccionada en vez de dejarla vacia.
       investmentRowDefaults.set(row, {
         B: getCellValue(ws, `B${row}`),
+        C: getCellValue(ws, `C${row}`),
         D: getCellValue(ws, `D${row}`),
         E: getCellValue(ws, `E${row}`),
         F: getCellValue(ws, `F${row}`),
@@ -1771,6 +1772,17 @@ function buildBusinessCaseRanges(template, payload) {
 // su contenido original de plantilla las filas que SPI habia llenado antes y
 // ya no estan seleccionadas. Las filas dinamicas (131+) estan vacias en la
 // plantilla y son exclusivas de SPI, por eso esas si se limpian.
+const RESERVED_ASSETS_PREFIX = "Activo TI reservado";
+
+function formatReservedAssets(labels) {
+  return `${RESERVED_ASSETS_PREFIX}${labels.length > 1 ? "s" : ""}: ${labels.join("; ")}`;
+}
+
+// buildValueRange escribe en mayusculas: comparar sin distinguir.
+function isReservedAssetsText(value) {
+  return String(value || "").trim().toLowerCase().startsWith(RESERVED_ASSETS_PREFIX.toLowerCase());
+}
+
 function buildInvestmentRanges(template, inversiones, { currentRows = null } = {}) {
   const updates = [];
   const clears = [];
@@ -1797,8 +1809,10 @@ function buildInvestmentRanges(template, inversiones, { currentRows = null } = {
       firstQuantity: "",
       firstPrice: "",
       strategies: new Set(),
+      reservedAssets: [],
     };
     current.names.push(name);
+    current.reservedAssets.push(...(Array.isArray(investment?.activos_reservados) ? investment.activos_reservados.filter(Boolean) : []));
     // Sin caracteristicas/observaciones no se pisa la descripcion de la plantilla.
     current.descriptions.push(String(investment?.caracteristicas || investment?.observaciones || investment?.notes || "").trim());
     current.quantitySum += safeCantidad;
@@ -1839,18 +1853,27 @@ function buildInvestmentRanges(template, inversiones, { currentRows = null } = {
     updates.push(buildValueRange(`BC!E${rowNumber}`, price));
     // Total = cantidad x precio (valor residual unitario).
     updates.push(buildValueRange(`BC!F${rowNumber}`, Number(entry.totalValue.toFixed(2))));
+    // Columna "Estado": activos TI existentes que se ocuparan para cubrir el item.
+    // Solo se borra un texto de reserva que SPI escribio antes (reserva liberada).
+    if (entry.reservedAssets.length) {
+      updates.push(buildValueRange(`BC!C${rowNumber}`, formatReservedAssets(entry.reservedAssets)));
+    } else if (isReservedAssetsText(currentRows?.get(rowNumber)?.C)) {
+      updates.push(buildValueRange(`BC!C${rowNumber}`, ""));
+    }
   });
 
-  // Fila no seleccionada que SPI habia llenado (cantidad distinta de 0 en la
-  // hoja): vuelve a su contenido original de plantilla, sin normalizar a
-  // mayusculas. Las filas nunca usadas no se tocan.
+  // Fila no seleccionada que SPI habia llenado (cantidad distinta de 0 o texto
+  // de reserva en la hoja): vuelve a su contenido original de plantilla, sin
+  // normalizar a mayusculas. Las filas nunca usadas no se tocan.
   if (currentRows) {
     objectiveRows.forEach((rowNumber) => {
       if (rowPayloads.has(rowNumber)) return;
-      const quantity = String(currentRows.get(rowNumber)?.D ?? "").trim();
-      if (!quantity || Number(quantity.replace(",", ".")) === 0) return;
+      const current = currentRows.get(rowNumber) || {};
+      const quantity = String(current.D ?? "").trim();
+      const filledBySpi = (quantity && Number(quantity.replace(",", ".")) !== 0) || isReservedAssetsText(current.C);
+      if (!filledBySpi) return;
       const defaults = rowDefaults.get(rowNumber) || {};
-      ["B", "D", "E", "F"].forEach((column) => {
+      ["B", "C", "D", "E", "F"].forEach((column) => {
         updates.push({ range: `BC!${column}${rowNumber}`, values: [[defaults[column] ?? ""]] });
       });
     });
@@ -1867,7 +1890,8 @@ function buildInvestmentRanges(template, inversiones, { currentRows = null } = {
     ).trim();
     updates.push(buildValueRange(`BC!A${rowNumber}`, investment?.nombre || name));
     updates.push(buildValueRange(`BC!B${rowNumber}`, description));
-    updates.push(buildValueRange(`BC!C${rowNumber}`, investment?.categoria || ""));
+    const reserved = Array.isArray(investment?.activos_reservados) ? investment.activos_reservados.filter(Boolean) : [];
+    updates.push(buildValueRange(`BC!C${rowNumber}`, reserved.length ? formatReservedAssets(reserved) : investment?.categoria || ""));
     updates.push(buildValueRange(`BC!D${rowNumber}`, investment?.cantidad ?? ""));
     updates.push(buildValueRange(`BC!E${rowNumber}`, investment?.precio ?? ""));
     const total = Number(investment?.cantidad ?? 0) * Number(investment?.precio ?? 0);
@@ -2237,7 +2261,7 @@ async function syncInvestmentsToGoogleSheet({ sheetId, inversiones = {}, backup 
   const mismatches = [];
   objectiveRows.forEach((rowNumber, expectedLabel) => {
     const row = values[rowNumber - firstRow] || [];
-    currentRows.set(rowNumber, { A: row[0], D: row[3] });
+    currentRows.set(rowNumber, { A: row[0], C: row[2], D: row[3] });
     if (normalizeText(String(row[0] || "")) !== expectedLabel) {
       mismatches.push({ row: rowNumber, expected: expectedLabel, found: row[0] || "" });
     }

@@ -58,6 +58,37 @@ describe("business case investment pricing sync", () => {
     expect(clears.every((range) => /^BC!A131:F205$/.test(range))).toBe(true);
   });
 
+  it("writes reserved TI assets in the Estado column and cleans only SPI text", () => {
+    const { buildInvestmentRanges } = require("../businessCaseSheetSyncLocal.service");
+    const template = {
+      bc: {
+        objectiveRows: new Map([["computadores", 72], ["impresora", 74], ["servidor", 71], ["ups equipo", 62]]),
+        investmentRowDefaults: new Map([[62, { B: "", C: "", D: 0, E: "", F: "$ -" }]]),
+      },
+    };
+    const { updates } = buildInvestmentRanges(
+      template,
+      {
+        Computadores: { cantidad: 2, precio: 10, activos_reservados: ["CPU FAM-CLON (S/N EQCP-0075)", "MONITOR LG 20MK400H (S/N 1)"] },
+        Impresora: { cantidad: 1, precio: 10, activos_reservados: [] },
+        Servidor: { cantidad: 1, precio: 10 },
+      },
+      {
+        currentRows: new Map([
+          [74, { C: "ACTIVO TI RESERVADO: IMPRESORA ZEBRA ZD230 (S/N X)", D: "1" }], // reserva liberada
+          [71, { C: "texto manual", D: "1" }], // texto ajeno: no se toca
+          [62, { C: "ACTIVO TI RESERVADO: UPS (S/N Y)", D: "0" }], // fila deseleccionada con reserva previa
+        ]),
+      },
+    );
+    const cell = (range) => updates.find((u) => u.range === range)?.values[0][0];
+    expect(cell("BC!C72")).toBe("ACTIVO TI RESERVADOS: CPU FAM-CLON (S/N EQCP-0075); MONITOR LG 20MK400H (S/N 1)");
+    expect(cell("BC!C74")).toBe("");
+    expect(cell("BC!C71")).toBeUndefined();
+    expect(cell("BC!C62")).toBe("");
+    expect(cell("BC!F62")).toBe("$ -");
+  });
+
   it("loads financial investment values for automatic Sheet generation", () => {
     expect(investmentsSource).toMatch(/getCatalogWithSelections[\s\S]*s\.unit_price_financial/);
     expect(investmentsSource).toMatch(/getInvestmentSelections[\s\S]*unit_price_financial/);

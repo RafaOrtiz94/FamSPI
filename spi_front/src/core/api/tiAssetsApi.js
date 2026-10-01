@@ -333,7 +333,7 @@ export const downloadTiAssetTechSpec = async (assetId, assetCode = "") => {
  const url = URL.createObjectURL(new Blob([response.data], { type: "application/pdf" }));
  const a = document.createElement("a");
  a.href = url;
- a.download = `Especificacion-Tecnica-${assetCode || String(assetId).padStart(6, "0")}.pdf`;
+ a.download = `Ficha-Tecnica-${assetCode || String(assetId).padStart(6, "0")}.pdf`;
  document.body.appendChild(a);
  a.click();
  document.body.removeChild(a);

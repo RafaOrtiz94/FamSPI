@@ -741,7 +741,8 @@ async function requestInvestmentQuotation(businessCaseId, catalogId, user) {
         error.code = 'INVESTMENT_QUOTATION_ASSIGNEE_REQUIRED';
         throw error;
     }
-    if (selection.quotation_status === 'requested' && selection.quotation_requested_at) {
+    // 'received' (ya subio archivo) tampoco se re-solicita: no regresa a 'requested'.
+    if (['requested', 'received'].includes(selection.quotation_status) && selection.quotation_requested_at) {
         return { selection, assignee: {
             id: selection.quotation_assignee_id,
             email: selection.quotation_assignee_email,
@@ -774,7 +775,175 @@ async function requestInvestmentQuotation(businessCaseId, catalogId, user) {
     };
 }
 
+// ─── Archivos de cotizacion por item ────────────────────────────────────────
+// El cotizador asignado (o un rol de valores) sube 1..n cotizaciones por item;
+// jefe_financiero las revisa y registra el valor. Borrado logico (active=false):
+// el archivo sigue en Drive.
+
+const QUOTATION_MAX_BYTES = 15 * 1024 * 1024;
+const QUOTATION_ALLOWED_MIME = /^(application\/pdf|image\/(jpeg|png|webp)|application\/vnd\.openxmlformats-officedocument\.(spreadsheetml\.sheet|wordprocessingml\.document)|application\/vnd\.ms-excel|application\/msword)$/;
+
+let quotationFilesSchemaPromise = null;
+function ensureQuotationFilesTable() {
+    if (!quotationFilesSchemaPromise) {
+        quotationFilesSchemaPromise = db.query(`
+            CREATE TABLE IF NOT EXISTS public.bc_investment_quotation_files (
+              id                BIGSERIAL PRIMARY KEY,
+              business_case_id  UUID        NOT NULL REFERENCES public.equipment_purchase_requests(id) ON DELETE CASCADE,
+              catalog_id        INTEGER     NOT NULL REFERENCES public.bc_investment_catalog(id) ON DELETE CASCADE,
+              file_name         TEXT        NOT NULL,
+              mime_type         TEXT,
+              size_bytes        INTEGER,
+              drive_file_id     TEXT        NOT NULL,
+              drive_url         TEXT,
+              uploaded_by       INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+              uploaded_by_email TEXT,
+              uploaded_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+              active            BOOLEAN     NOT NULL DEFAULT true,
+              removed_at        TIMESTAMPTZ,
+              removed_by_email  TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_bc_investment_quotation_files_item
+              ON public.bc_investment_quotation_files (business_case_id, catalog_id) WHERE active = true;
+        `).catch((error) => {
+            quotationFilesSchemaPromise = null;
+            throw error;
+        });
+    }
+    return quotationFilesSchemaPromise;
+}
+
+// Map catalog_id -> [archivos activos], para adjuntar a cada item de la UI.
+async function listQuotationFilesByCatalog(businessCaseId) {
+    await ensureQuotationFilesTable();
+    const { rows } = await db.query(
+        `SELECT id, catalog_id, file_name, mime_type, size_bytes, drive_url, uploaded_by_email, uploaded_at
+           FROM public.bc_investment_quotation_files
+          WHERE business_case_id = $1 AND active = true
+          ORDER BY uploaded_at ASC`,
+        [businessCaseId],
+    );
+    const map = new Map();
+    rows.forEach((row) => {
+        const key = Number(row.catalog_id);
+        map.set(key, [...(map.get(key) || []), row]);
+    });
+    return map;
+}
+
+async function addQuotationFile({ businessCaseId, catalogId, file, user }) {
+    await ensureQuotationFilesTable();
+    const normalizedCatalogId = Number(catalogId);
+    if (!file?.buffer?.length) {
+        const error = new Error('Adjunta el archivo de la cotización');
+        error.status = 400;
+        throw error;
+    }
+    if (file.size > QUOTATION_MAX_BYTES) {
+        const error = new Error('El archivo supera el máximo de 15 MB');
+        error.status = 400;
+        throw error;
+    }
+    if (!QUOTATION_ALLOWED_MIME.test(String(file.mimetype || ''))) {
+        const error = new Error('Formato no permitido. Usa PDF, imagen (JPG/PNG/WebP), Excel o Word');
+        error.status = 400;
+        throw error;
+    }
+
+    const { rows: selectionRows } = await db.query(
+        `SELECT s.id, c.name
+           FROM public.bc_investment_selections s
+           JOIN public.bc_investment_catalog c ON c.id = s.catalog_id
+          WHERE s.business_case_id = $1 AND s.catalog_id = $2 AND s.selected = true
+          LIMIT 1`,
+        [businessCaseId, normalizedCatalogId],
+    );
+    if (!selectionRows.length) {
+        const error = new Error('El item no está seleccionado en este Business Case');
+        error.status = 404;
+        throw error;
+    }
+    const itemName = selectionRows[0].name;
+
+    const { ensureBusinessCaseDriveFolderById } = require('./businessCaseDriveFolder.service');
+    const { ensureFolder, uploadBase64File } = require('../../utils/drive');
+    const bcFolder = await ensureBusinessCaseDriveFolderById(businessCaseId);
+    const quotationsFolder = await ensureFolder('Cotizaciones inversiones', bcFolder.folderId);
+    const itemFolder = await ensureFolder(String(itemName || normalizedCatalogId), quotationsFolder.id);
+    const fileName = String(file.originalname || 'cotizacion').trim();
+    const uploaded = await uploadBase64File(fileName, file.buffer.toString('base64'), file.mimetype, itemFolder.id);
+    const driveUrl = uploaded?.webViewLink || (uploaded?.id ? `https://drive.google.com/file/d/${uploaded.id}/view` : null);
+
+    const { rows } = await db.query(
+        `INSERT INTO public.bc_investment_quotation_files
+           (business_case_id, catalog_id, file_name, mime_type, size_bytes, drive_file_id, drive_url, uploaded_by, uploaded_by_email)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING id, catalog_id, file_name, mime_type, size_bytes, drive_url, uploaded_by_email, uploaded_at`,
+        [
+            businessCaseId,
+            normalizedCatalogId,
+            fileName,
+            file.mimetype || null,
+            file.size || file.buffer.length,
+            uploaded.id,
+            driveUrl,
+            Number.isInteger(Number(user?.id)) ? Number(user.id) : null,
+            user?.email || null,
+        ],
+    );
+    await db.query(
+        `UPDATE public.bc_investment_selections
+            SET quotation_status = 'received', updated_at = now()
+          WHERE business_case_id = $1 AND catalog_id = $2 AND selected = true`,
+        [businessCaseId, normalizedCatalogId],
+    );
+    logger.info({ businessCaseId, catalogId: normalizedCatalogId, fileId: rows[0].id }, 'Quotation file uploaded');
+    return { file: rows[0], itemName };
+}
+
+async function removeQuotationFile({ businessCaseId, fileId, user }) {
+    await ensureQuotationFilesTable();
+    const { rows } = await db.query(
+        `UPDATE public.bc_investment_quotation_files
+            SET active = false, removed_at = now(), removed_by_email = $3
+          WHERE id = $1 AND business_case_id = $2 AND active = true
+          RETURNING id, catalog_id`,
+        [Number(fileId), businessCaseId, user?.email || null],
+    );
+    if (!rows.length) {
+        const error = new Error('Cotización no encontrada');
+        error.status = 404;
+        throw error;
+    }
+    const catalogId = rows[0].catalog_id;
+    // Sin archivos restantes, la cotizacion vuelve a "solicitada".
+    await db.query(
+        `UPDATE public.bc_investment_selections s
+            SET quotation_status = 'requested', updated_at = now()
+          WHERE s.business_case_id = $1 AND s.catalog_id = $2 AND s.quotation_status = 'received'
+            AND NOT EXISTS (
+              SELECT 1 FROM public.bc_investment_quotation_files f
+               WHERE f.business_case_id = $1 AND f.catalog_id = $2 AND f.active = true
+            )`,
+        [businessCaseId, catalogId],
+    );
+    return { id: rows[0].id, catalog_id: catalogId };
+}
+
+async function getQuotationFileCatalogId(businessCaseId, fileId) {
+    await ensureQuotationFilesTable();
+    const { rows } = await db.query(
+        `SELECT catalog_id FROM public.bc_investment_quotation_files WHERE id = $1 AND business_case_id = $2 AND active = true`,
+        [Number(fileId), businessCaseId],
+    );
+    return rows[0]?.catalog_id ?? null;
+}
+
 module.exports = {
+    listQuotationFilesByCatalog,
+    addQuotationFile,
+    removeQuotationFile,
+    getQuotationFileCatalogId,
     addInvestment,
     getInvestments,
     getInvestmentTotals,
