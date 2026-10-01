@@ -106,18 +106,6 @@ const formatSelectedFileSize = (bytes) => {
  return `${Math.max(1, Math.round(size / 1024))} KB`;
 };
 
-const completeDeterminationsSection = async (bcId, reason = "determinaciones_finalizadas_workspace") => {
- const payload = { section: "determinations", reason };
- console.log("[BC_AUDIT][FE][COMPLETE_SECTION][REQUEST]", { bcId, payload });
- const response = await api.post(`/business-case/${bcId}/ownership/complete`, payload);
- console.log("[BC_AUDIT][FE][COMPLETE_SECTION][RESPONSE]", {
-  bcId,
-  status: response?.status || null,
-  data: response?.data || null,
- });
- return response?.data || null;
-};
-
 const requestUnlockSubsection = async (bcId, subsection, reason) => {
  const payload = { subsection, reason };
  console.log("[BC_AUDIT][FE][REQUEST_UNLOCK][REQUEST]", { bcId, payload });
@@ -398,6 +386,7 @@ const DeterminationsSection = ({
  const [gateInfo, setGateInfo] = useState(null);
  const [gateLoading, setGateLoading] = useState(false);
  const [uploadingDocument, setUploadingDocument] = useState(false);
+ const [documentUploadProgress, setDocumentUploadProgress] = useState(null);
  const [selectedDocument, setSelectedDocument] = useState(null);
  const [sheetUrl, setSheetUrl] = useState(null);
  const [sheetSyncing, setSheetSyncing] = useState(false);
@@ -459,17 +448,6 @@ const DeterminationsSection = ({
  gatePhase === "technical_review" &&
  !quantitiesLocked &&
  !allSubsectionsLocked;
- // Cierre EXPLICITO de la seccion "Determinaciones" -- nunca automatico.
- // Solo aparece cuando las 4 subsecciones (incluyendo reactivos) ya estan
- // bloqueadas; el usuario debe hacer click a proposito para avanzar a
- // Inversiones, no ocurre como efecto secundario de bloquear la ultima
- // subseccion.
- const canCloseDeterminationsSection =
- canEditFinal &&
- isTechnicalRole &&
- gatePhase === "technical_review" &&
- !quantitiesLocked &&
- allSubsectionsLocked;
  const pendingUnlockBySubsection = useMemo(() => {
  const map = {};
  (gateInfo?.unlockRequests || [])
@@ -1093,23 +1071,6 @@ const handleCloseAllTechnicalSubsections = () =>
   },
  );
 
-// Cierre EXPLICITO de la seccion "Determinaciones" completa, solo para
-// jefe_servicio, solo disponible cuando las 4 subsecciones ya estan
-// bloqueadas. Reutiliza el endpoint generico /ownership/complete (misma
-// logica de applyDeterminationsCompletionTransition que ya usan otras
-// secciones), habilitando avanzar a Inversiones.
-const handleCloseDeterminationsSection = () => {
- if (!canCloseDeterminationsSection) return undefined;
- return runGateAction(
-  () => completeDeterminationsSection(bcId, "jefe_servicio_cierre_determinaciones"),
-  {
-   refreshExisting: true,
-   successMsg: "Determinaciones cerradas. Ya puedes continuar con Inversiones.",
-   fallbackErrorMsg: "No se pudo cerrar la seccion de determinaciones.",
-  },
- );
-};
-
 const handleRequestUnlockSubsection = async (sectionKey) => {
  if (!bcId || saving) return;
  const reason = await promptDialog({
@@ -1236,7 +1197,14 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  }
  try {
  setUploadingDocument(true);
- await uploadDeterminationsStatDocument(bcId, selectedDocument);
+ setDocumentUploadProgress(0);
+ await uploadDeterminationsStatDocument(bcId, selectedDocument, {
+ onUploadProgress: (event) => {
+  if (!event.total) return;
+  setDocumentUploadProgress(Math.min(100, Math.round((event.loaded * 100) / event.total)));
+ },
+ });
+ setDocumentUploadProgress(100);
  showToast("Documento estadístico cargado. Generando hoja de Sheets...", "success");
  setSelectedDocument(null);
  if (statDocumentInputRef.current) statDocumentInputRef.current.value = "";
@@ -1247,6 +1215,7 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  showToast(getNaturalErrorMessage(err, "No se pudo cargar el documento"), "error");
  } finally {
  setUploadingDocument(false);
+ setDocumentUploadProgress(null);
  }
  };
 
@@ -1449,6 +1418,7 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
   accept=".pdf,.doc,.docx,.xlsx,.xls,.csv,.png,.jpg,.jpeg"
   onChange={(e) => setSelectedDocument(e.target.files?.[0] || null)}
   className="hidden"
+  disabled={uploadingDocument}
   />
   <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-4">
   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1460,6 +1430,7 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
   <button
   type="button"
   onClick={() => statDocumentInputRef.current?.click()}
+  disabled={uploadingDocument}
   className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
   >
   <FiFileText size={14} />
@@ -1476,6 +1447,18 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
   </button>
   </div>
   </div>
+  {uploadingDocument && (
+  <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-3" role="status" aria-live="polite">
+  <div className="flex items-center justify-between gap-3 text-xs font-semibold text-blue-800">
+  <span className="inline-flex items-center gap-2"><FiRefreshCw size={14} className="animate-spin" />Subiendo documento estadístico…</span>
+  <span>{documentUploadProgress === null ? "Preparando" : `${documentUploadProgress}%`}</span>
+  </div>
+  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-blue-100">
+  <div className="h-full rounded-full bg-blue-600 transition-all duration-200" style={{ width: `${documentUploadProgress ?? 5}%` }} />
+  </div>
+  <p className="mt-2 text-[11px] text-blue-700">No cierres esta pantalla hasta recibir la confirmación.</p>
+  </div>
+  )}
   </div>
   </div>
   )}
@@ -1595,23 +1578,6 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  >
  <FiCheck size={14} />
  Bloquear controles, calibradores y materiales
- </button>
- </div>
- )}
-
- {canCloseDeterminationsSection && (
- <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
- <div className="text-xs text-blue-800">
- Reactivos, controles, calibradores y materiales ya estan bloqueados. Cierra Determinaciones para continuar con Inversiones.
- </div>
- <button
- type="button"
- onClick={handleCloseDeterminationsSection}
- disabled={saving}
- className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
- >
- <FiCheck size={14} />
- Cerrar Determinaciones y continuar con Inversiones
  </button>
  </div>
  )}

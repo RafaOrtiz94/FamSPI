@@ -2,6 +2,8 @@ const db = require("../../config/db");
 const calculators = require("./crm.calculators");
 const notificationsService = require("../notifications/notifications.service");
 const { ensureFolderPath, uploadFileToDrive } = require("../../utils/drive");
+const { MANAGER_OR_ADMIN_ROLES } = require("./crm.constants");
+const { ensureLinkColumns } = require("./crmPurchaseSync.service");
 
 const notImplemented = (name) => Promise.reject(Object.assign(new Error(`${name}: Not implemented`), { status: 501 }));
 
@@ -16,12 +18,126 @@ const sanitizeFileToken = (value, fallback = "documento") => {
 };
 
 // ─── Visibility helpers ───────────────────────────────────────────────────────
-const MANAGER_ROLES = new Set([
-  'jefe_ti','jefe_de_ti','admin','administrador',
-  'gerencia','gerencia_general','gerente_general',
-  'director','gerente','jefe_comercial',
-]);
+// Fuente unica en crm.constants.js -- antes esta lista vivia duplicada aqui
+// y en crm.routes.js (managerRoles + adminRoles), riesgo senalado en el
+// skill modulo-crm-fam.
+const MANAGER_ROLES = new Set(MANAGER_OR_ADMIN_ROLES);
 const isManager = (user) => MANAGER_ROLES.has(user.role);
+
+let calendarSyncSchemaReady = false;
+async function ensureCalendarSyncSchema() {
+  if (calendarSyncSchemaReady) return;
+  await db.query(`
+    ALTER TABLE crm.crm_activities
+      ADD COLUMN IF NOT EXISTS calendar_event_id TEXT,
+      ADD COLUMN IF NOT EXISTS calendar_event_url TEXT
+  `);
+  calendarSyncSchemaReady = true;
+}
+
+// Crea un evento real en el Calendar compartido de FAM para una actividad
+// programada. Reusa el mismo cliente delegado que ya usa el resto de FamSPI
+// (config/google.js) -- no se pide ningun scope ni delegacion nueva. Nunca
+// bloquea la creacion/edicion de la actividad: si Calendar falla, se loguea
+// y se sigue (mismo criterio de resiliencia que createPipelineMeetingEvent
+// en calendar.service.js).
+async function syncActivityToCalendar(activityId) {
+  try {
+    await ensureCalendarSyncSchema();
+    const { rows } = await db.query(
+      `SELECT a.id, a.subject, a.description, a.scheduled_at, a.duration_minutes,
+              a.calendar_event_id,
+              u.email AS owner_email,
+              c.email AS contact_email, c.full_name AS contact_name,
+              acc.account_name
+         FROM crm.crm_activities a
+         LEFT JOIN public.users u ON u.id = a.owner_user_id
+         LEFT JOIN crm.crm_contacts c ON c.id = a.contact_id
+         LEFT JOIN crm.crm_accounts acc ON acc.id = a.account_id
+        WHERE a.id = $1 AND a.deleted_at IS NULL`,
+      [activityId],
+    );
+    const activity = rows[0];
+    if (!activity || !activity.scheduled_at) return null;
+
+    const { calendar } = require("../../config/google");
+    if (!calendar) return null;
+
+    const start = new Date(activity.scheduled_at);
+    const durationMinutes = Number(activity.duration_minutes) > 0 ? Number(activity.duration_minutes) : 60;
+    const end = new Date(start.getTime() + durationMinutes * 60000);
+    const attendees = [activity.owner_email, activity.contact_email].filter(Boolean).map((email) => ({ email }));
+    const summary = [activity.subject, activity.account_name].filter(Boolean).join(" — ");
+    const description = [
+      activity.description,
+      activity.contact_name ? `Contacto: ${activity.contact_name}` : null,
+    ].filter(Boolean).join("\n");
+
+    const resource = {
+      summary,
+      description,
+      start: { dateTime: start.toISOString(), timeZone: "America/Guayaquil" },
+      end: { dateTime: end.toISOString(), timeZone: "America/Guayaquil" },
+      attendees,
+      reminders: { useDefault: false, overrides: [{ method: "popup", minutes: 30 }] },
+      extendedProperties: { private: { source: "crm_fam_activity", crm_activity_id: String(activityId) } },
+    };
+
+    // Si ya existe un evento (re-sync por cambio de fecha/duracion), lo
+    // actualiza en vez de crear uno nuevo -- insert() aqui hubiera dejado
+    // eventos duplicados/huerfanos en el calendario compartido.
+    const response = activity.calendar_event_id
+      ? await calendar.events.patch({
+          calendarId: process.env.GOOGLE_CALENDAR_ID || "primary",
+          eventId: activity.calendar_event_id,
+          resource,
+          sendUpdates: "none",
+        })
+      : await calendar.events.insert({
+          calendarId: process.env.GOOGLE_CALENDAR_ID || "primary",
+          resource,
+          sendUpdates: "none",
+        });
+
+    await db.query(
+      `UPDATE crm.crm_activities SET calendar_event_id = $2, calendar_event_url = $3, updated_at = now() WHERE id = $1`,
+      [activityId, response.data.id, response.data.htmlLink],
+    );
+
+    return { calendar_event_id: response.data.id, calendar_event_url: response.data.htmlLink };
+  } catch (err) {
+    console.warn("[CRM_FAM][CALENDAR] No se pudo sincronizar la actividad al calendario:", err.message);
+    return null;
+  }
+}
+
+async function cancelActivityCalendarEvent(activityId, calendarEventId) {
+  try {
+    const { calendar } = require("../../config/google");
+    if (!calendar) return;
+    await calendar.events.delete({
+      calendarId: process.env.GOOGLE_CALENDAR_ID || "primary",
+      eventId: calendarEventId,
+      sendUpdates: "none",
+    });
+    await db.query(
+      `UPDATE crm.crm_activities SET calendar_event_id = NULL, calendar_event_url = NULL WHERE id = $1`,
+      [activityId],
+    );
+  } catch (err) {
+    // Si el evento ya no existe en Calendar (borrado a mano) Google
+    // responde 410/404 -- igual limpia la referencia local, no es un error real.
+    const status = err?.code || err?.response?.status;
+    if (status === 404 || status === 410) {
+      await db.query(
+        `UPDATE crm.crm_activities SET calendar_event_id = NULL, calendar_event_url = NULL WHERE id = $1`,
+        [activityId],
+      ).catch(() => null);
+      return;
+    }
+    console.warn("[CRM_FAM][CALENDAR] No se pudo cancelar el evento:", err.message);
+  }
+}
 
 async function ensureActivityFollowupSchema() {
   await db.query(`
@@ -166,7 +282,17 @@ async function notifyAssignment(opportunity, newOwnerUserId, assigner) {
 
 // ─── Accounts ────────────────────────────────────────────────────────────────
 
-const listAccounts = async ({ q, status, owner_user_id, limit = 50, offset = 0, user } = {}) => {
+const ACCOUNT_CLASSIFICATIONS = new Set(['oro', 'plata', 'bronce', 'normal']);
+const assertValidClassification = (value) => {
+  if (value === undefined || value === null || value === '') return;
+  if (!ACCOUNT_CLASSIFICATIONS.has(value)) {
+    const e = new Error("Clasificación inválida (debe ser oro, plata, bronce o normal)");
+    e.status = 400;
+    throw e;
+  }
+};
+
+const listAccounts = async ({ q, status, owner_user_id, classification, limit = 50, offset = 0, user } = {}) => {
   const conditions = ['a.deleted_at IS NULL'];
   const params = [];
 
@@ -178,6 +304,10 @@ const listAccounts = async ({ q, status, owner_user_id, limit = 50, offset = 0, 
   if (status) {
     params.push(status);
     conditions.push(`a.status = $${params.length}`);
+  }
+  if (classification) {
+    params.push(classification);
+    conditions.push(`a.classification = $${params.length}`);
   }
   if (owner_user_id) {
     params.push(owner_user_id);
@@ -251,6 +381,8 @@ const getAccountById = async (id, user) => {
 };
 
 const createAccount = async (data, user) => {
+  assertValidClassification(data.classification);
+
   // RUC duplicate check (blocking)
   if (data.ruc) {
     const { rows: dup } = await db.query(
@@ -276,8 +408,8 @@ const createAccount = async (data, user) => {
     `INSERT INTO crm.crm_accounts
       (account_name, legal_name, ruc, account_type, industry, employee_count_range, annual_revenue_range,
        country, province, city, address, website, phone, email, linkedin_url,
-       status, visibility, owner_user_id, notes, created_by, updated_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20)
+       status, visibility, owner_user_id, notes, classification, sales_target_amount, created_by, updated_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$22)
      RETURNING *`,
     [
       data.account_name, data.legal_name || null, data.ruc || null,
@@ -287,7 +419,8 @@ const createAccount = async (data, user) => {
       data.address || null, data.website || null, data.phone || null,
       data.email || null, data.linkedin_url || null,
       data.status || 'active', data.visibility || 'company',
-      owner, data.notes || null, user.id,
+      owner, data.notes || null, data.classification || null,
+      data.sales_target_amount ?? null, user.id,
     ]
   );
 
@@ -295,6 +428,8 @@ const createAccount = async (data, user) => {
 };
 
 const updateAccount = async (id, data, user) => {
+  assertValidClassification(data.classification);
+
   // Existence + access
   const acct = (await getAccountById(id, user)); // throws 404/403
 
@@ -321,6 +456,7 @@ const updateAccount = async (id, data, user) => {
     'employee_count_range','annual_revenue_range','country','province',
     'city','address','website','phone','email','linkedin_url',
     'status','visibility','owner_user_id','notes',
+    'classification','sales_target_amount',
   ];
 
   const sets = [];
@@ -365,12 +501,19 @@ const getAccountTimeline = async (id, user) => {
   // Access check
   await getAccountById(id, user); // throws 404/403
 
+  // Las columnas puente (opportunity_id) las crea crmPurchaseSync en
+  // runtime la primera vez que se necesitan -- si todavia no corrio ninguna
+  // sincronizacion en este entorno, la columna puede no existir aun.
+  await ensureLinkColumns();
+
   const [
     { rows: leads },
     { rows: opportunities },
     { rows: activities },
     { rows: notes },
     { rows: documents },
+    { rows: businessCases },
+    { rows: privatePurchases },
   ] = await Promise.all([
     db.query(
       `SELECT id, lead_code, full_name, status, created_at FROM crm.crm_leads WHERE converted_account_id = $1 ORDER BY created_at DESC LIMIT 10`,
@@ -392,9 +535,180 @@ const getAccountTimeline = async (id, user) => {
       `SELECT id, document_name, document_type, drive_file_url, created_at FROM crm.crm_documents WHERE account_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 10`,
       [id]
     ),
+    // Business Case / compras publicas vinculadas a alguna oportunidad de
+    // esta cuenta (ver crmPurchaseSync.service.js -- el vinculo es por
+    // opportunity_id, guardado en equipment_purchase_requests).
+    db.query(
+      `SELECT epr.id, epr.process_code, epr.canonical_state, epr.contract_object, epr.created_at, epr.updated_at
+         FROM public.equipment_purchase_requests epr
+         JOIN crm.crm_opportunities o ON o.id = epr.opportunity_id
+        WHERE o.account_id = $1 AND o.deleted_at IS NULL
+        ORDER BY epr.updated_at DESC LIMIT 10`,
+      [id]
+    ),
+    // Compras privadas vinculadas por el mismo mecanismo.
+    db.query(
+      `SELECT ppr.id, ppr.status, ppr.created_at, ppr.updated_at
+         FROM public.private_purchase_requests ppr
+         JOIN crm.crm_opportunities o ON o.id = ppr.opportunity_id
+        WHERE o.account_id = $1 AND o.deleted_at IS NULL
+        ORDER BY ppr.updated_at DESC LIMIT 10`,
+      [id]
+    ),
   ]);
 
-  return { leads, opportunities, activities, notes, documents };
+  return { leads, opportunities, activities, notes, documents, business_cases: businessCases, private_purchases: privatePurchases };
+};
+
+// Estadisticas de ventas por cuenta -- para proyecciones comerciales
+// (independiente de la clasificacion oro/plata/bronce/normal, ver
+// requerimiento explicito del usuario: "fuera de la clasificacion").
+// Se basa en crm.crm_opportunities.status ('open'/'won'/'lost'/'cancelled')
+// y en el monto de meta guardado en crm_accounts.sales_target_amount.
+const getAccountSalesStats = async (id, user) => {
+  const account = await getAccountById(id, user); // throws 404/403
+
+  const { rows } = await db.query(
+    `SELECT status, COUNT(*)::int AS count,
+            COALESCE(SUM(estimated_amount), 0)::numeric AS estimated_total,
+            COALESCE(SUM(won_amount), 0)::numeric AS won_total
+       FROM crm.crm_opportunities
+      WHERE account_id = $1 AND deleted_at IS NULL
+      GROUP BY status`,
+    [id]
+  );
+
+  const byStatus = Object.fromEntries(rows.map((r) => [r.status, r]));
+  const openCount = Number(byStatus.open?.count || 0);
+  const wonCount = Number(byStatus.won?.count || 0);
+  const lostCount = Number(byStatus.lost?.count || 0);
+  const cancelledCount = Number(byStatus.cancelled?.count || 0);
+  const totalOpportunities = openCount + wonCount + lostCount + cancelledCount;
+
+  const totalEstimatedAmount = rows.reduce((sum, r) => sum + Number(r.estimated_total || 0), 0);
+  // won_amount puede quedar NULL si se cerro como ganada sin especificar
+  // monto final -- se usa el estimado de esa misma oportunidad como respaldo.
+  const wonAmount = Number(byStatus.won?.won_total || 0) || Number(byStatus.won?.estimated_total || 0);
+
+  const decidedCount = wonCount + lostCount; // oportunidades ya cerradas (ganadas o perdidas)
+  const winRatePct = decidedCount > 0 ? Number(((wonCount / decidedCount) * 100).toFixed(1)) : null;
+  const lossRatePct = decidedCount > 0 ? Number(((lostCount / decidedCount) * 100).toFixed(1)) : null;
+
+  const salesTargetAmount = account.sales_target_amount != null ? Number(account.sales_target_amount) : null;
+
+  // Tamaño de negocio promedio: preferir el promedio de lo ya ganado (dato
+  // real); si todavia no hay nada ganado, usar el promedio de todas las
+  // oportunidades generadas como mejor estimacion disponible.
+  const avgDealSize = wonCount > 0
+    ? wonAmount / wonCount
+    : (totalOpportunities > 0 ? totalEstimatedAmount / totalOpportunities : null);
+
+  let remainingToTarget = null;
+  let opportunitiesNeededForTarget = null;
+  if (salesTargetAmount != null) {
+    remainingToTarget = Math.max(0, salesTargetAmount - wonAmount);
+    opportunitiesNeededForTarget = (remainingToTarget > 0 && avgDealSize > 0)
+      ? Math.ceil(remainingToTarget / avgDealSize)
+      : 0;
+  }
+
+  return {
+    classification: account.classification || null,
+    sales_target_amount: salesTargetAmount,
+    total_opportunities: totalOpportunities,
+    open_opportunities: openCount,
+    won_opportunities: wonCount,
+    lost_opportunities: lostCount,
+    cancelled_opportunities: cancelledCount,
+    total_estimated_amount: totalEstimatedAmount,
+    won_amount: wonAmount,
+    remaining_to_target: remainingToTarget,
+    avg_deal_size: avgDealSize,
+    opportunities_needed_for_target: opportunitiesNeededForTarget,
+    win_rate_pct: winRatePct,
+    loss_rate_pct: lossRatePct,
+  };
+};
+
+// Fusiona una cuenta duplicada (source) dentro de la cuenta correcta
+// (target): reasigna contactos, oportunidades, leads convertidos,
+// actividades, notas y documentos, y da de baja logica a source. Solo
+// managers -- es una operacion destructiva sobre datos de otros usuarios.
+const mergeAccounts = async (targetId, sourceId, user) => {
+  if (targetId === sourceId) {
+    const e = new Error('No se puede fusionar una cuenta consigo misma'); e.status = 400; throw e;
+  }
+  if (!isManager(user)) {
+    const e = new Error('Acceso denegado'); e.status = 403; throw e;
+  }
+
+  // Existencia (lanza 404 si alguna no existe; getAccountById ya filtra
+  // deleted_at IS NULL, asi que tambien evita fusionar dos veces la misma).
+  const [target, source] = await Promise.all([
+    getAccountById(targetId, user),
+    getAccountById(sourceId, user),
+  ]);
+
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    const reassign = async (table, column) => {
+      const { rowCount } = await client.query(
+        `UPDATE crm.${table} SET ${column} = $1 WHERE ${column} = $2`,
+        [targetId, sourceId],
+      );
+      return rowCount;
+    };
+
+    const counts = {
+      contacts: await reassign('crm_contacts', 'account_id'),
+      opportunities: await reassign('crm_opportunities', 'account_id'),
+      leads: await reassign('crm_leads', 'converted_account_id'),
+      activities: await reassign('crm_activities', 'account_id'),
+      notes: await reassign('crm_notes', 'account_id'),
+      documents: await reassign('crm_documents', 'account_id'),
+    };
+
+    await client.query(
+      `UPDATE crm.crm_accounts SET deleted_at = now(), updated_by = $2,
+              notes = COALESCE(notes, '') || $3
+        WHERE id = $1`,
+      [sourceId, user.id, `\n[Fusionada con ${target.account_name} el ${new Date().toISOString().slice(0, 10)}]`],
+    );
+
+    await client.query('COMMIT');
+
+    await crmAuditLog({
+      entity_name: 'crm_accounts', entity_id: targetId, action: 'merge',
+      old_data: { source_id: sourceId, source_name: source.account_name },
+      new_data: { counts },
+      reason: `Fusion de cuenta duplicada ${source.account_name} -> ${target.account_name}`,
+      user,
+    });
+
+    return { target_id: targetId, source_id: sourceId, reassigned: counts };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// Candidatos a duplicado de una cuenta ya existente (mismo mecanismo de
+// createAccount, expuesto ahora tambien bajo demanda desde el detalle de
+// cuenta -- antes el aviso de "nombre parecido" solo aparecia al crear).
+const getAccountDuplicateCandidates = async (id, user) => {
+  const acct = await getAccountById(id, user); // 404/403
+  const { rows } = await db.query(
+    `SELECT id, account_name, ruc, city FROM crm.crm_accounts
+      WHERE id != $1 AND deleted_at IS NULL
+        AND (account_name ILIKE $2 OR (ruc IS NOT NULL AND ruc = $3))
+      LIMIT 5`,
+    [id, `%${acct.account_name}%`, acct.ruc || null],
+  );
+  return rows;
 };
 
 // ─── Contacts ────────────────────────────────────────────────────────────────
@@ -1330,11 +1644,21 @@ const createBlueSheet = async (opportunityId, data, user) => {
   );
   if (existing.length) throw mkErr('Ya existe un Blue Sheet para esta oportunidad', 409);
 
-  // 4. INSERT
+  // 4. INSERT -- acepta campos de texto iniciales (data.sales_objective_text,
+  // etc.) para poder prellenar desde una plantilla ligera en el frontend; si
+  // no se pasan, queda igual que antes (Blue Sheet en blanco).
   const { rows } = await db.query(
-    `INSERT INTO crm.crm_blue_sheets (opportunity_id, version_number, status, created_by, updated_by)
-     VALUES ($1, 1, 'draft', $2, $2) RETURNING *`,
-    [opportunityId, user.id]
+    `INSERT INTO crm.crm_blue_sheets (
+       opportunity_id, version_number, status, created_by, updated_by,
+       sales_objective_text, customer_situation_current, customer_situation_desired
+     )
+     VALUES ($1, 1, 'draft', $2, $2, $3, $4, $5) RETURNING *`,
+    [
+      opportunityId, user.id,
+      data?.sales_objective_text || null,
+      data?.customer_situation_current || null,
+      data?.customer_situation_desired || null,
+    ]
   );
 
   // 5. Mark opportunity health gray
@@ -1560,6 +1884,52 @@ const getBlueSheetVersions = async (id, user) => {
   return rows;
 };
 
+// El comercial nunca podia ver por que se observo su Blue Sheet -- el
+// backend ya guardaba los comentarios (observeBlueSheet) pero no habia forma
+// de leerlos de vuelta.
+const listReviewComments = async (blueSheetId, user) => {
+  await _getBsWithAccess(blueSheetId, user);
+
+  const { rows } = await db.query(
+    `SELECT rc.*, u.fullname as created_by_name
+       FROM crm.crm_review_comments rc
+       LEFT JOIN public.users u ON u.id = rc.created_by
+      WHERE rc.blue_sheet_id = $1
+      ORDER BY rc.created_at DESC`,
+    [blueSheetId],
+  );
+  return rows;
+};
+
+// Comentario suelto en cualquier momento (no solo al Observar) -- item Pro
+// "comentarios por seccion, no solo al observar". Cualquiera con acceso al
+// Blue Sheet puede dejar uno (no solo managers, a diferencia de observar).
+const createReviewComment = async (blueSheetId, data, user) => {
+  await _getBsWithAccess(blueSheetId, user);
+  if (!data?.comment_text?.trim()) throw mkErr('El comentario no puede estar vacío', 400);
+
+  const { rows } = await db.query(
+    `INSERT INTO crm.crm_review_comments (blue_sheet_id, section_name, comment_text, severity, requires_correction, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+    [blueSheetId, data.section_name || null, data.comment_text.trim(), data.severity || 'info', Boolean(data.requires_correction), user.id],
+  );
+  return rows[0];
+};
+
+const resolveReviewComment = async (id, user) => {
+  const { rows: cur } = await db.query(
+    `SELECT blue_sheet_id FROM crm.crm_review_comments WHERE id=$1`, [id],
+  );
+  if (!cur.length) throw mkErr('Comentario no encontrado', 404);
+  await _getBsWithAccess(cur[0].blue_sheet_id, user);
+
+  const { rows } = await db.query(
+    `UPDATE crm.crm_review_comments SET is_resolved=true, resolved_at=now(), resolved_by=$2 WHERE id=$1 RETURNING *`,
+    [id, user.id],
+  );
+  return rows[0];
+};
+
 const getBlueSheetCompleteness = async (id, user) => {
   const bs = await _getBsWithAccess(id, user);
 
@@ -1579,7 +1949,7 @@ const getBlueSheetCompleteness = async (id, user) => {
     db.query(`SELECT * FROM crm.crm_scorecard_answers WHERE blue_sheet_id=$1`, [id]),
   ]);
 
-  const score = calculators.calculateCompletenessScore({
+  const { score, items } = calculators.getCompletenessBreakdown({
     blueSheet: bs,
     buyingInfluences,
     winResults,
@@ -1594,7 +1964,58 @@ const getBlueSheetCompleteness = async (id, user) => {
     [id, score]
   );
 
-  return { completeness_score: score, blue_sheet_id: id };
+  return { completeness_score: score, blue_sheet_id: id, checklist: items };
+};
+
+// Todo el contenido de un Blue Sheet en una sola llamada -- lo consume el
+// generador de PDF (crmBlueSheetPdf.service.js) para exportar. Reusa las
+// mismas 6 queries que ya hace getBlueSheetCompleteness, mas datos de
+// cuenta/contacto/criterios de scorecard para que el PDF tenga nombres, no
+// solo IDs.
+const getBlueSheetFullData = async (id, user) => {
+  const bs = await _getBsWithAccess(id, user);
+
+  const [
+    { rows: buyingInfluences },
+    { rows: winResults },
+    { rows: competitors },
+    { rows: strengths },
+    { rows: redFlags },
+    { rows: scorecardRows },
+    { rows: actionItems },
+    { rows: accountRows },
+  ] = await Promise.all([
+    db.query(`SELECT * FROM crm.crm_buying_influences WHERE blue_sheet_id=$1 AND deleted_at IS NULL ORDER BY created_at ASC`, [id]),
+    db.query(`SELECT * FROM crm.crm_win_results WHERE blue_sheet_id=$1 AND deleted_at IS NULL`, [id]),
+    db.query(`SELECT * FROM crm.crm_competitors WHERE blue_sheet_id=$1 AND deleted_at IS NULL`, [id]),
+    db.query(`SELECT * FROM crm.crm_strengths WHERE blue_sheet_id=$1 AND deleted_at IS NULL`, [id]),
+    db.query(`SELECT * FROM crm.crm_red_flags WHERE blue_sheet_id=$1 AND deleted_at IS NULL ORDER BY severity DESC`, [id]),
+    db.query(
+      `SELECT sa.*, sc.name as criterion_name FROM crm.crm_scorecard_answers sa
+         JOIN crm.crm_scorecard_criteria sc ON sc.id = sa.criterion_id
+        WHERE sa.blue_sheet_id=$1 ORDER BY sc.name ASC`,
+      [id],
+    ),
+    db.query(`SELECT * FROM crm.crm_action_items WHERE blue_sheet_id=$1 AND deleted_at IS NULL ORDER BY due_date ASC NULLS LAST`, [id]),
+    db.query(
+      `SELECT a.account_name FROM crm.crm_opportunities o
+         LEFT JOIN crm.crm_accounts a ON a.id = o.account_id
+        WHERE o.id = $1`,
+      [bs.opportunity_id],
+    ),
+  ]);
+
+  return {
+    blueSheet: bs,
+    accountName: accountRows[0]?.account_name || null,
+    buyingInfluences,
+    winResults,
+    competitors,
+    strengths,
+    redFlags,
+    scorecardAnswers: scorecardRows,
+    actionItems,
+  };
 };
 
 // ─── BS child-entity access helper ───────────────────────────────────────────
@@ -1828,6 +2249,73 @@ const createRedFlag = async (blueSheetId, data, user) => {
     if (opp.length) await notifyRedFlagCritical(rows[0], opp[0], user).catch(() => null);
   }
   return rows[0];
+};
+
+// Red flags "rapidas": un icono de marcar/desmarcar directamente sobre cada
+// elemento del Blue Sheet donde Miller Heiman define red flags clasicas
+// (influenciador sin rol claro, competidor de riesgo, respuesta baja de
+// scorecard, tarea vencida) -- en vez de obligar a abrir la pestana de Red
+// Flags y escribir una descripcion libre para cada una.
+const ELEMENT_RED_FLAG_TYPES = new Set(['buying_influence', 'competitor', 'scorecard_criterion', 'action_item']);
+const ELEMENT_RED_FLAG_DEFAULT_SEVERITY = {
+  buying_influence: 'high',
+  competitor: 'medium',
+  scorecard_criterion: 'medium',
+  action_item: 'medium',
+};
+
+const listElementRedFlags = async (blueSheetId, user) => {
+  await _bsAccess(blueSheetId, user);
+  const { rows } = await db.query(
+    `SELECT id, related_entity_type, related_entity_id, severity, status
+       FROM crm.crm_red_flags
+      WHERE blue_sheet_id=$1 AND deleted_at IS NULL AND related_entity_id IS NOT NULL`,
+    [blueSheetId],
+  );
+  return rows;
+};
+
+// Idempotente: si ya hay una red flag activa para ese elemento la quita
+// (deleted_at=now()), si no existe la crea con los defaults del tipo. El
+// frontend solo necesita mandar el tipo/id del elemento y una etiqueta
+// legible -- la severidad/categoria las resuelve el backend.
+const toggleElementRedFlag = async ({ blue_sheet_id, related_entity_type, related_entity_id, label } = {}, user) => {
+  if (!ELEMENT_RED_FLAG_TYPES.has(related_entity_type)) throw mkErr('Tipo de elemento invalido', 400);
+  if (!related_entity_id) throw mkErr('related_entity_id es requerido', 400);
+  await _bsAccess(blue_sheet_id, user);
+
+  const { rows: existing } = await db.query(
+    `SELECT id FROM crm.crm_red_flags
+      WHERE blue_sheet_id=$1 AND related_entity_type=$2 AND related_entity_id=$3 AND deleted_at IS NULL
+      LIMIT 1`,
+    [blue_sheet_id, related_entity_type, related_entity_id],
+  );
+
+  if (existing.length) {
+    await db.query(
+      `UPDATE crm.crm_red_flags SET deleted_at=now(), status='resolved', updated_by=$2, updated_at=now() WHERE id=$1`,
+      [existing[0].id, user.id],
+    );
+    return { active: false };
+  }
+
+  const severity = ELEMENT_RED_FLAG_DEFAULT_SEVERITY[related_entity_type] || 'medium';
+  const { rows } = await db.query(
+    `INSERT INTO crm.crm_red_flags
+       (blue_sheet_id, flag_title, flag_category, severity, status, related_entity_type, related_entity_id, created_by, updated_by)
+     VALUES ($1,$2,$3,$4,'open',$5,$6,$7,$7) RETURNING *`,
+    [blue_sheet_id, label || 'Red flag', related_entity_type, severity, related_entity_type, related_entity_id, user.id],
+  );
+
+  if (severity === 'critical') {
+    const { rows: opp } = await db.query(
+      `SELECT o.id, o.name, o.owner_user_id FROM crm.crm_opportunities o JOIN crm.crm_blue_sheets bs ON bs.opportunity_id=o.id WHERE bs.id=$1`,
+      [blue_sheet_id],
+    );
+    if (opp.length) await notifyRedFlagCritical(rows[0], opp[0], user).catch(() => null);
+  }
+
+  return { active: true, id: rows[0].id, severity };
 };
 
 const updateRedFlag = async (id, data, user) => {
@@ -2067,7 +2555,25 @@ const createActivity = async (data, user) => {
      data.subject, data.description||null, data.scheduled_at||null, data.duration_minutes||null,
      data.owner_user_id||user.id, data.visit_log_id || null, user.id]
   );
-  return rows[0];
+  const activity = rows[0];
+  if (activity.scheduled_at) {
+    const calendarSync = await syncActivityToCalendar(activity.id);
+    if (calendarSync) Object.assign(activity, calendarSync);
+  }
+  return activity;
+};
+
+// Re-sincroniza manualmente una actividad ya existente (creada antes de este
+// feature, o cuya primera sincronizacion fallo de forma transitoria).
+const syncActivityCalendar = async (id, user) => {
+  const { rows } = await db.query(
+    `SELECT owner_user_id FROM crm.crm_activities WHERE id=$1 AND deleted_at IS NULL`, [id],
+  );
+  if (!rows.length) throw mkErr('Actividad no encontrada', 404);
+  if (!isManager(user) && rows[0].owner_user_id !== user.id) throw mkErr('Acceso denegado', 403);
+  const result = await syncActivityToCalendar(id);
+  if (!result) throw mkErr('No se pudo sincronizar con Calendar (revisa que la actividad tenga fecha programada)', 422);
+  return result;
 };
 
 const updateActivity = async (id, data, user) => {
@@ -2096,7 +2602,18 @@ const updateActivity = async (id, data, user) => {
     `UPDATE crm.crm_activities SET ${sets}, updated_by=$${fields.length+2}, updated_at=now() WHERE id=$1 RETURNING *`,
     [id, ...fields.map(f => data[f]), user.id]
   );
-  return rows[0];
+  const activity = rows[0];
+  if (data.status === 'cancelled' && activity.calendar_event_id) {
+    // No deja el evento "confirmado" huerfano en el calendario compartido
+    // despues de cancelar la actividad en el CRM.
+    await cancelActivityCalendarEvent(activity.id, activity.calendar_event_id);
+  } else if (fields.includes('scheduled_at') || fields.includes('duration_minutes')) {
+    // Si se cambio la fecha/duracion (o la actividad ya tenia fecha y aun no
+    // se habia sincronizado), refleja el cambio en el evento de Calendar.
+    const calendarSync = await syncActivityToCalendar(activity.id);
+    if (calendarSync) Object.assign(activity, calendarSync);
+  }
+  return activity;
 };
 
 const completeActivity = async (id, { outcome_notes, outcome_rating, outcome, next_step } = {}, user) => {
@@ -2441,9 +2958,50 @@ const getRedFlagsReport = async ({ severity, status: rfStatus } = {}, user) => {
   return rows;
 };
 
+// Win/loss patterns: compara Blue Sheets de oportunidades ganadas vs. perdidas
+// en las señales que el equipo ya captura (completitud, scorecard, red flags,
+// compradores mapeados) -- para responder "qué hacen distinto los que ganan"
+// sin depender de un modelo de IA, solo agregando lo que ya existe en la BD.
+const getWinLossPatternsReport = async ({ date_from, date_to } = {}, user) => {
+  if (!isManager(user)) throw mkErr('Acceso denegado', 403);
+  const conditions = [`o.status IN ('won','lost')`, `o.deleted_at IS NULL`, `bs.deleted_at IS NULL`];
+  const params = [];
+  if (date_from) { params.push(date_from); conditions.push(`o.actual_close_date >= $${params.length}`); }
+  if (date_to) { params.push(date_to); conditions.push(`o.actual_close_date <= $${params.length}`); }
+
+  const { rows: summary } = await db.query(`
+    SELECT
+      o.status,
+      COUNT(*) as opportunities,
+      AVG(bs.completeness_score) as avg_completeness,
+      AVG(bs.scorecard_score) as avg_scorecard,
+      AVG(bs.health_score) as avg_health,
+      AVG((SELECT COUNT(*) FROM crm.crm_buying_influences bi WHERE bi.blue_sheet_id=bs.id AND bi.deleted_at IS NULL)) as avg_buyers_mapped,
+      AVG((SELECT COUNT(*) FROM crm.crm_buying_influences bi WHERE bi.blue_sheet_id=bs.id AND bi.deleted_at IS NULL AND bi.influence_role='economic_buyer')) as avg_economic_buyers,
+      AVG((SELECT COUNT(*) FROM crm.crm_red_flags rf WHERE rf.blue_sheet_id=bs.id AND rf.deleted_at IS NULL AND rf.status='open')) as avg_open_red_flags,
+      AVG((SELECT COUNT(*) FROM crm.crm_win_results wr JOIN crm.crm_buying_influences bi2 ON bi2.id=wr.buying_influence_id WHERE bi2.blue_sheet_id=bs.id AND wr.deleted_at IS NULL AND wr.result_type='win')) as avg_wins_per_bs
+    FROM crm.crm_opportunities o
+    JOIN crm.crm_blue_sheets bs ON bs.opportunity_id=o.id
+    WHERE ${conditions.join(' AND ')}
+    GROUP BY o.status
+  `, params);
+
+  const { rows: byReceptivity } = await db.query(`
+    SELECT o.status, bi.receptivity, COUNT(*) as count
+    FROM crm.crm_opportunities o
+    JOIN crm.crm_blue_sheets bs ON bs.opportunity_id=o.id
+    JOIN crm.crm_buying_influences bi ON bi.blue_sheet_id=bs.id AND bi.deleted_at IS NULL
+    WHERE ${conditions.join(' AND ')}
+    GROUP BY o.status, bi.receptivity
+  `, params);
+
+  return { summary, byReceptivity };
+};
+
 module.exports = {
   // Accounts
   listAccounts, getAccountById, createAccount, updateAccount, softDeleteAccount, getAccountTimeline,
+  getAccountSalesStats, mergeAccounts, getAccountDuplicateCandidates,
   // Contacts
   listContacts, getContactById, createContact, updateContact, softDeleteContact,
   // Leads
@@ -2463,7 +3021,8 @@ module.exports = {
   createBlueSheet, getBlueSheetByOpportunity, getBlueSheetById,
   updateBlueSheetGeneral, updateBlueSheetBuyingProcess, updateBlueSheetStrategy,
   submitBlueSheetForReview, approveBlueSheet, observeBlueSheet, reopenBlueSheet,
-  getBlueSheetVersions, getBlueSheetCompleteness,
+  getBlueSheetVersions, getBlueSheetCompleteness, getBlueSheetFullData,
+  listReviewComments, createReviewComment, resolveReviewComment,
   // Buying Influences
   listBuyingInfluences, createBuyingInfluence, updateBuyingInfluence, softDeleteBuyingInfluence,
   // Win-Results
@@ -2476,6 +3035,7 @@ module.exports = {
   listStrengths, createStrength, updateStrength, softDeleteStrength,
   // Red Flags
   listRedFlags, createRedFlag, updateRedFlag, softDeleteRedFlag, acceptRedFlag,
+  listElementRedFlags, toggleElementRedFlag,
   // Scorecard
   listScorecardCriteria, createScorecardCriterion, updateScorecardCriterion,
   getBlueSheetScorecard, saveBlueSheetScorecard,
@@ -2483,6 +3043,7 @@ module.exports = {
   listActionItems, createActionItem, updateActionItem, completeActionItem, softDeleteActionItem,
   // Activities
   listActivities, createActivity, updateActivity, completeActivity, softDeleteActivity,
+  syncActivityCalendar,
   // Documents
   listDocuments, createDocument, uploadDocumentFile, softDeleteDocument,
   // Notes
@@ -2491,5 +3052,5 @@ module.exports = {
   listLostReasons, createLostReason, updateLostReason,
   // Dashboard
   getDashboardSummary, getPipelineByStage, getForecast, getBlueSheetKpis,
-  getLostReasonsReport, getRedFlagsReport,
+  getLostReasonsReport, getRedFlagsReport, getWinLossPatternsReport,
 };

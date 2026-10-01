@@ -93,7 +93,11 @@ async function ensureTiAssetsSchema() {
           ADD COLUMN IF NOT EXISTS initial_condition_photo_1_sha256 TEXT,
           ADD COLUMN IF NOT EXISTS initial_condition_photo_2_drive_file_id TEXT,
           ADD COLUMN IF NOT EXISTS initial_condition_photo_2_url TEXT,
-          ADD COLUMN IF NOT EXISTS initial_condition_photo_2_sha256 TEXT
+          ADD COLUMN IF NOT EXISTS initial_condition_photo_2_sha256 TEXT,
+          ADD COLUMN IF NOT EXISTS tech_spec_narrative JSONB,
+          ADD COLUMN IF NOT EXISTS tech_spec_narrative_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS tech_spec_drive_file_id TEXT,
+          ADD COLUMN IF NOT EXISTS tech_spec_drive_url TEXT
       `);
       await db.query(`
         ALTER TABLE public.ti_asset_actas

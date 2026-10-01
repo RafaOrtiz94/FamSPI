@@ -13,6 +13,8 @@ Ya paso 3 veces:
 - 2026-08-11: `muddy-sun` -> `wispy-moon` (a la inversa)
 - 2026-08-20: `wispy-moon` -> `lucky-bar` (migracion completa proactiva, no
   reactiva — ver "Pool de instancias" abajo)
+- 2026-09-28: `lucky-bar/neondb` -> `muddy-sun/FamSPI` (respaldo final con
+  origen en solo lectura, restauracion verificada y corte de Cloud Run)
 
 Es razonable esperar que se repita otra vez, contra cualquiera de las 3.
 
@@ -25,13 +27,15 @@ el activo agota su cuota de CU-hrs. Cada uno tiene su propio ciclo de
 facturacion independiente, asi que cuando uno se suspende los otros dos
 siguen con cuota disponible (o se recuperan en fechas distintas).
 
-| Alias | Host (endpoint directo, SIN `-pooler`) | Estado a 2026-08-20 |
+| Alias | Host (endpoint directo, SIN `-pooler`) | Estado a 2026-09-28 |
 |---|---|---|
-| `wispy-moon` | `ep-wispy-moon-aqszgsal.c-8.us-east-1.aws.neon.tech` | activo hasta el 20-ago, ahora en reserva |
-| `muddy-sun` | `ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech` | en reserva |
-| `lucky-bar` | `ep-lucky-bar-aw5wr0cn.c-12.us-east-1.aws.neon.tech` | **activo (produccion actual)** |
+| `wispy-moon` | `ep-wispy-moon-aqszgsal.c-8.us-east-1.aws.neon.tech` | en reserva |
+| `muddy-sun` | `ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech` | **activo: base `FamSPI` (produccion actual)** |
+| `lucky-bar` | `ep-lucky-bar-aw5wr0cn.c-12.us-east-1.aws.neon.tech` | reserva/rollback: base `neondb` congelada en solo lectura |
 
-Todos usan `DB_PORT=5432`, `DB_USER=neondb_owner`, `DB_NAME=neondb`. Las
+Todos usan `DB_PORT=5432` y `DB_USER=neondb_owner`. El nombre de base activo
+debe verificarse por instancia: desde 2026-09-28 produccion usa `DB_NAME=FamSPI`
+en `muddy-sun`; el rollback `lucky-bar` conserva `neondb`. Las
 contrasenas de cada proyecto son independientes entre si — la version
 `latest` del secret `DB_PASSWORD` en Secret Manager (`famspi-sbox`)
 siempre corresponde al host que este activo en ese momento; las

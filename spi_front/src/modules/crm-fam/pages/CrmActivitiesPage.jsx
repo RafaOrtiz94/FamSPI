@@ -578,6 +578,19 @@ export default function CrmActivitiesPage() {
                     <h2 className="mt-2 break-words text-lg font-semibold text-[#0F172A]">{a.subject}</h2>
                     <p className="mt-1 text-sm text-[#64748B]">
                       {customerLabel} · {formatDate(visitDate)}
+                      {a.calendar_event_url && (
+                        <>
+                          {" · "}
+                          <a
+                            href={a.calendar_event_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[#2563EB] hover:underline"
+                          >
+                            Ver en Calendar
+                          </a>
+                        </>
+                      )}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">

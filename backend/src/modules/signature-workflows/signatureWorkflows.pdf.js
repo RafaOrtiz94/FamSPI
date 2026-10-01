@@ -67,6 +67,15 @@ function draw(page, text, opts) {
   page.drawText(t, { x: opts.x, y: opts.y, font: opts.font, size: opts.size, color: opts.color });
 }
 
+// Una asignacion reemplazada se conserva en DB para no romper la cadena de
+// auditoria, pero no debe volver a dibujarse ni aparecer como firmante vigente
+// en una nueva version corregida del documento.
+function isSignerExcludedFromDocument(signer = {}) {
+  const status = String(signer.status || "").trim().toLowerCase();
+  const meta = signer.meta && typeof signer.meta === "object" ? signer.meta : {};
+  return status === "replaced" || meta.exclude_from_document === true;
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 async function appendSignatureBlock({
   sourcePdfBase64,
@@ -85,7 +94,9 @@ async function appendSignatureBlock({
     const sigW = 110;
     const sigH = 36;
 
-    for (const signer of signers) {
+    const documentSigners = signers.filter((signer) => !isSignerExcludedFromDocument(signer));
+
+    for (const signer of documentSigners) {
       if (!signer.signature_visual_base64 || !signer.signature_placement) continue;
       try {
         const { page_number, x_pct, y_pct } = signer.signature_placement;
@@ -204,7 +215,7 @@ async function appendSignatureBlock({
     draw(page, "FIRMANTES", { x: M, y, font: bold, size: FS_BODY, color: C_NAVY });
     y -= 15;
 
-    const sorted = [...signers].sort((a, b) => Number(a.sequence_order || 0) - Number(b.sequence_order || 0));
+    const sorted = [...documentSigners].sort((a, b) => Number(a.sequence_order || 0) - Number(b.sequence_order || 0));
 
     // Un firmante puede ocupar hasta ~106pt (nombre+badge, cargo, fecha, imagen
     // de firma, hash, separador). Antes, si no cabia en la pagina, el loop
@@ -313,4 +324,4 @@ async function appendSignatureBlock({
   }
 }
 
-module.exports = { appendSignatureBlock };
+module.exports = { appendSignatureBlock, isSignerExcludedFromDocument };

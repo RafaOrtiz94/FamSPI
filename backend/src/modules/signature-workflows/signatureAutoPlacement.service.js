@@ -22,6 +22,14 @@ const logger = require("../../config/logger");
 const PAGE_MARGIN_PT = 48;
 // sigW/sigH de appendSignatureBlock -- el sello mide esto en puntos PDF.
 const SIG_W = 110;
+// Altura aproximada de una fila de texto (en puntos), usada solo para dibujar
+// el rectangulo de resaltado en el frontend -- no tenemos la metrica real de
+// fuente de pdf.js aqui, asi que es una banda generosa alrededor de la
+// baseline, no un calculo exacto de ascent/descent.
+const LINE_HIGHLIGHT_PT = 14;
+// Maximo de filas candidatas a surfacear cuando el nombre matchea mas de una
+// fila (evita listas interminables si el PDF tiene nombres muy repetidos).
+const MAX_AMBIGUOUS_CANDIDATES = 5;
 
 function stripAccents(value) {
   return String(value || "")
@@ -80,19 +88,18 @@ async function extractPages(pdfBytes) {
   return pages;
 }
 
-// Busca, entre todas las lineas de todas las paginas, la que contiene el nombre
-// completo del firmante (orden de palabras y acentos no importan -- el PDF suele
-// imprimir "Apellidos Nombres" y el sistema guarda "Nombres Apellidos", o viceversa).
-// Exige que TODAS las palabras del nombre aparezcan en la linea, y que ninguna otra
-// linea del documento tenga el mismo puntaje perfecto (evita falsos positivos con
-// nombres parecidos/repetidos).
-function findBestLine(pages, nameSnapshot) {
+// Recorre todas las lineas de todas las paginas y puntua cuantas palabras del
+// nombre del firmante aparecen en cada una (orden y acentos no importan -- el
+// PDF suele imprimir "Apellidos Nombres" y el sistema guarda "Nombres
+// Apellidos", o viceversa). Devuelve el mejor puntaje encontrado y TODAS las
+// lineas que lo alcanzaron con match perfecto (score === 1), para que quien
+// llama decida que hacer con un empate en vez de perder esa informacion.
+function scoreAllLines(pages, nameSnapshot) {
   const nameTokens = new Set(normalizeTokens(nameSnapshot));
   if (nameTokens.size < 2) return null; // nombre muy corto para matchear con confianza
 
-  let best = null;
   let bestScore = 0;
-  let tiesAtBest = 0;
+  const perfectMatches = [];
 
   for (const page of pages) {
     for (const line of page.lines) {
@@ -100,22 +107,36 @@ function findBestLine(pages, nameSnapshot) {
       const lineTokens = new Set(normalizeTokens(lineText));
       const matched = [...nameTokens].filter((token) => lineTokens.has(token)).length;
       const score = matched / nameTokens.size;
-      if (score > bestScore) {
-        bestScore = score;
-        best = { page, line };
-        tiesAtBest = 1;
-      } else if (score === bestScore && score > 0) {
-        tiesAtBest += 1;
-      }
+      if (score > bestScore) bestScore = score;
+      if (score === 1) perfectMatches.push({ page, line });
     }
   }
 
-  if (bestScore < 1 || tiesAtBest > 1) return null;
-  return best;
+  return { bestScore, perfectMatches };
+}
+
+// Version "todo o nada": exige match perfecto y sin ambiguedad (una sola fila
+// con score 1). Se mantiene igual que antes -- la usa detectSignerPlacement,
+// el helper de un solo firmante, donde no hay forma de surfacear candidatos.
+function findBestLine(pages, nameSnapshot) {
+  const result = scoreAllLines(pages, nameSnapshot);
+  if (!result || result.bestScore < 1 || result.perfectMatches.length !== 1) return null;
+  return result.perfectMatches[0];
+}
+
+// Version que SI distingue un empate de un "no encontrado": la usa
+// detectPlacementsForDocument para poder ofrecer las filas candidatas en vez
+// de descartar la deteccion en silencio (ver Fase 1 del plan de mejoras).
+function findLineMatches(pages, nameSnapshot) {
+  const result = scoreAllLines(pages, nameSnapshot);
+  if (!result || result.bestScore < 1) return null;
+  if (result.perfectMatches.length === 1) return { type: "unique", ...result.perfectMatches[0] };
+  return { type: "ambiguous", matches: result.perfectMatches.slice(0, MAX_AMBIGUOUS_CANDIDATES) };
 }
 
 function computePlacementFromLine({ page, line }) {
   const rowRightEdge = Math.max(...line.items.map((item) => item.x + item.width));
+  const rowLeftEdge = Math.min(...line.items.map((item) => item.x));
   const pageRightContentEdge = page.width - PAGE_MARGIN_PT;
   // El sello se centra a medio camino entre donde termina el texto de la fila y el
   // margen derecho de la pagina -- ahi suele estar la celda de firma vacia en un
@@ -129,7 +150,25 @@ function computePlacementFromLine({ page, line }) {
   // y_pct se mide desde ARRIBA (misma convencion que signStep/appendSignatureBlock).
   const yPct = Math.min(1, Math.max(0, 1 - line.y / page.height));
 
-  return { page_number: page.pageNumber, x_pct: xPct, y_pct: yPct };
+  // Banda de resaltado (aproximada, ver LINE_HIGHLIGHT_PT) para que el
+  // frontend pueda dibujar un rectangulo sobre la fila detectada -- asi el
+  // firmante confirma visualmente "esta es mi fila" en vez de confiar a
+  // ciegas en el sello ya puesto.
+  const highlight = {
+    x_min_pct: Math.min(1, Math.max(0, rowLeftEdge / page.width)),
+    x_max_pct: Math.min(1, Math.max(0, pageRightContentEdge / page.width)),
+    y_pct: Math.min(1, Math.max(0, 1 - (line.y + LINE_HIGHLIGHT_PT * 0.8) / page.height)),
+    height_pct: Math.min(1, (LINE_HIGHLIGHT_PT * 1.15) / page.height),
+  };
+
+  const linePreview = line.items
+    .map((item) => item.text)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 70);
+
+  return { page_number: page.pageNumber, x_pct: xPct, y_pct: yPct, line_preview: linePreview, highlight };
 }
 
 /**
@@ -156,9 +195,18 @@ async function detectSignerPlacement(pdfBytes, nameSnapshot) {
  * necesidad la transaccion de sendWorkflow, que mantiene bloqueada la fila del
  * workflow (FOR UPDATE) mientras corre.
  *
+ * A diferencia de detectSignerPlacement, esta version SI distingue un empate
+ * (nombre encontrado en 2+ filas) de un "no encontrado": en vez de descartar
+ * la deteccion, devuelve las filas candidatas para que el firmante elija entre
+ * un puñado de opciones en vez de buscar a ciegas en todo el documento.
+ *
  * @param {Buffer|Uint8Array} pdfBytes
  * @param {Array<{id:number, name_snapshot:string}>} signers
- * @returns {Promise<Map<number, {page_number:number,x_pct:number,y_pct:number}>>} placements por signer.id (solo los detectados)
+ * @returns {Promise<Map<number, DetectionResult>>} resultado por signer.id (solo los que tuvieron algun match perfecto)
+ *
+ * DetectionResult =
+ *   { type: 'unique', page_number, x_pct, y_pct, line_preview, highlight }
+ *   | { type: 'ambiguous', candidates: Array<{page_number,x_pct,y_pct,line_preview,highlight}> }
  */
 async function detectPlacementsForDocument(pdfBytes, signers) {
   const results = new Map();
@@ -171,8 +219,16 @@ async function detectPlacementsForDocument(pdfBytes, signers) {
   }
   for (const signer of signers) {
     try {
-      const best = findBestLine(pages, signer.name_snapshot);
-      if (best) results.set(signer.id, computePlacementFromLine(best));
+      const found = findLineMatches(pages, signer.name_snapshot);
+      if (!found) continue;
+      if (found.type === "unique") {
+        results.set(signer.id, { type: "unique", ...computePlacementFromLine(found) });
+      } else {
+        results.set(signer.id, {
+          type: "ambiguous",
+          candidates: found.matches.map((match) => computePlacementFromLine(match)),
+        });
+      }
     } catch (err) {
       logger.warn({ err: err.message, signerId: signer.id }, "[signatureAutoPlacement] fallo con un firmante, se usara ubicacion manual para el");
     }

@@ -4,7 +4,12 @@ import {
   FiCalendar,
   FiCheckCircle,
   FiClock,
+  FiFileText,
+  FiHash,
+  FiMail,
+  FiMapPin,
   FiPackage,
+  FiPhone,
   FiRefreshCw,
   FiSearch,
   FiTruck,
@@ -368,8 +373,38 @@ const RetiroEquipos = () => {
       <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
         <DetailLine icon={FiCalendar} label="Fecha de retiro" value={formatDate(selectedRequest.payload?.fecha_retiro)} />
         <DetailLine icon={FiUser} label="Contacto" value={selectedRequest.payload?.persona_contacto} />
-        <DetailLine icon={FiPackage} label="Equipo" value={selectedRequest.payload?.equipos?.[0]?.nombre_equipo} />
+        <DetailLine icon={FiPhone} label="Teléfono contacto" value={selectedRequest.payload?.celular_contacto} />
         <DetailLine icon={FiCheckCircle} label="Asignado a" value={selectedWorkflow?.workflow_state?.work_order?.assigned_to} />
+        <DetailLine icon={FiMapPin} label="Dirección" value={selectedRequest.payload?.direccion_cliente} />
+        <DetailLine icon={FiMail} label="Solicitado por" value={selectedRequest.requester_email} />
+        <DetailLine icon={FiClock} label="Fecha de solicitud" value={formatDate(selectedRequest.created_at)} />
+        <DetailLine icon={FiHash} label="Estado solicitud" value={selectedRequest.status} />
+      </div>
+
+      <ServicioCard className="p-5" style={{ background: "var(--st-surface-sunken)" }}>
+        <h4 className="text-sm font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--st-text-faint)" }}>Equipos a retirar</h4>
+        {(selectedRequest.payload?.equipos || []).length === 0 ? (
+          <p className="mt-3 text-sm" style={{ color: "var(--st-text-muted)" }}>
+            {selectedRequest.payload?.serial ? `Serial: ${selectedRequest.payload.serial}` : "Sin equipos registrados."}
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {selectedRequest.payload.equipos.map((eq, idx) => (
+              <li key={`${eq.serial || eq.equipo_id || idx}`} className="flex flex-wrap items-center gap-2 text-sm" style={{ color: "var(--st-text)" }}>
+                <FiPackage size={14} style={{ color: "var(--st-text-muted)" }} />
+                <span className="font-semibold">{eq.nombre_equipo || "Equipo"}</span>
+                <span style={{ color: "var(--st-text-muted)" }}>
+                  Serial: {eq.serial_pendiente ? "Pendiente" : eq.serial || "N/D"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </ServicioCard>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <DetailLine icon={FiFileText} label="Observaciones" value={selectedRequest.payload?.observaciones} />
+        <DetailLine icon={FiFileText} label="Anotaciones" value={selectedRequest.payload?.anotaciones} />
       </div>
 
       <WithdrawalStepper workflow={selectedWorkflow} onAction={runWorkflowAction} onEmitFst11={handleEmitFst11} busyAction={busyAction} busyEmit={busyEmit} />

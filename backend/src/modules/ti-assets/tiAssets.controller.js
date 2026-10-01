@@ -1,6 +1,7 @@
 const { asyncHandler } = require("../../middlewares/asyncHandler");
 const svc = require("./tiAssets.service");
 const reportSvc = require("./tiAssets.report");
+const { generateAssetTechSpecPdf, publishStoredTechSpecs } = require("./tiAssets.spec");
 const { TI_ROLES } = require("./tiAssets.service");
 const { uploadFileToDrive, ensureFolderPath } = require("../../utils/drive");
 
@@ -506,6 +507,24 @@ exports.downloadAssetReport = asyncHandler(async (req, res) => {
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.send(pdfBuffer);
+});
+
+exports.downloadAssetTechSpec = asyncHandler(async (req, res) => {
+  const { pdfBuffer, filename } = await generateAssetTechSpecPdf(req.params.id, {
+    generatedByName: req.user?.fullname || req.user?.name || req.user?.email || null,
+  });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.send(pdfBuffer);
+});
+
+exports.publishTechSpecs = asyncHandler(async (req, res) => {
+  const data = await publishStoredTechSpecs({
+    dryRun: req.body?.dry_run !== false,
+    assetIds: req.body?.asset_ids || null,
+    generatedByName: req.user?.fullname || req.user?.name || req.user?.email || null,
+  });
+  res.json({ ok: true, data });
 });
 
 exports.downloadAssetLabel = asyncHandler(async (req, res) => {

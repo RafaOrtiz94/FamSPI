@@ -271,6 +271,7 @@ export const ROLE_SECTION_CONFIG = {
       "general", "lab", "equipment", "lis", "determinations",
       "investments",
       "investment_values",  // acceso a precios financieros y operativos
+      "pricing_lab",        // laboratorio paralelo en construccion, exclusivo TI
       "feasibility",
     ],
     canEdit: [
@@ -304,6 +305,7 @@ export function resolveRoleSectionConfig(role = "") {
   const roleAliases = {
     "backoffice_comercial": "backoffice",
     "administrador": "admin",
+    "jefe_de_ti": "jefe_ti",
     // gerencia y gerencia_general ya están definidos por separado con configs idénticas
   };
 

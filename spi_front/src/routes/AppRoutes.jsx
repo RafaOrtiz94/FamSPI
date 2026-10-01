@@ -49,6 +49,7 @@ const NewClientRequest = lazy(() => import("../modules/comercial/pages/NewClient
 const DeliveryCeilingsPage = lazy(() => import("../modules/comercial/pages/DeliveryCeilings"));
 const BusinessCaseTemplatePage = lazy(() => import("../modules/comercial/pages/BusinessCaseTemplatePage"));
 const BusinessCaseWorkspace = lazy(() => import("../modules/comercial/pages/BusinessCaseWorkspace"));
+const BusinessCaseQualitySummary = lazy(() => import("../modules/comercial/pages/BusinessCaseQualitySummary"));
 const BusinessCaseObservabilityDashboard = lazy(() => import("../modules/comercial/pages/BusinessCaseObservabilityDashboard"));
 const OpportunitiesPage = lazy(() => import("../modules/comercial/pages/OpportunitiesPage"));
 const OpportunityWorkspace = lazy(() => import("../modules/comercial/pages/OpportunityWorkspace"));
@@ -361,6 +362,7 @@ const AppRoutes = () => {
                   "esp_app",
                   "jefe_financiero",
                   "jefe_ti",
+                  "jefe_logistica",
                 ]}
               />
             }
@@ -369,6 +371,9 @@ const AppRoutes = () => {
             <Route path="/dashboard/comercial/business-case" element={<BusinessCaseWorkspace />} />
             <Route path="/dashboard/business-case/workspace" element={<BusinessCaseWorkspace />} />
             <Route path="/dashboard/business-case/workspace/:id" element={<BusinessCaseWorkspace />} />
+          </Route>
+          <Route element={<ProtectedRoute allowedRoles={["jefe_calidad", "bc_quality_summary"]} strictRoles />}>
+            <Route path="/dashboard/business-case/resumen" element={<BusinessCaseQualitySummary />} />
           </Route>
           <Route
             element={
@@ -498,9 +503,19 @@ const AppRoutes = () => {
             <Route path="/dashboard/ti" element={<DashboardTI />} />
             <Route path="/dashboard/ti/workspace" element={<TicketsWorkspace />} />
             <Route path="/dashboard/ti/dispositivos" element={<TIDeviceManagementPage />} />
-            <Route path="/dashboard/ti/actas" element={<TIActasPage />} />
             <Route path="/dashboard/ti/mantenimientos" element={<Navigate to="/dashboard/ti/dispositivos" replace />} />
             <Route path="/dashboard/ti/shortcut-token" element={<TIShortcutTokenPage />} />
+          </Route>
+          {/* Financiero necesita ver (solo lectura/reportes) las actas de
+              entrega-retiro, igual que ya puede ver /dashboard/ti/activos --
+              separado del bloque de arriba para no exponerle workspace de
+              tickets, dispositivos ni el token de atajo. */}
+          <Route element={<ProtectedRoute allowedRoles={[
+            "ti", "jefe_ti", "admin_ti",
+            "financiero", "jefe_financiero", "finanzas", "jefe_finanzas", "contador",
+            "gerencia", "gerencia_general",
+          ]} />}>
+            <Route path="/dashboard/ti/actas" element={<TIActasPage />} />
           </Route>
           <Route element={<ProtectedRoute allowedRoles={["jefe_ti", "admin_ti"]} />}>
             <Route path="/dashboard/ti/modulos" element={<TIModuleAccessPage />} />

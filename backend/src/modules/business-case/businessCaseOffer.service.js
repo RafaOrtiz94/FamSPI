@@ -1085,6 +1085,13 @@ async function buildOfferTemplatePayload(context, items, user) {
     delete grouped.control;
   }
 
+  const determinationOnly = isDeterminationOnlyContractObject(context?.contract_object);
+  if (determinationOnly) {
+    Object.keys(grouped).forEach((key) => {
+      if (key !== "reactivo") grouped[key] = [];
+    });
+  }
+
   const equipmentPresentation = await loadEquipmentCategoryPresentation(items);
   const location = await resolveOfferClientLocation(context);
   const isComodato = String(context?.bc_purchase_type || "").toLowerCase().includes("comodato");
@@ -1104,6 +1111,7 @@ async function buildOfferTemplatePayload(context, items, user) {
     province: location.province,
     sections: grouped,
     layout_positions: computeCompactLayoutPositions(grouped),
+    determination_only: determinationOnly,
   };
 }
 
@@ -1204,12 +1212,22 @@ function copyTemplateRow(sourceWs, targetWs, sourceRow, targetRow) {
   }
 }
 
-function fillOfferItemRow(ws, targetRow, row) {
+function fillOfferItemRow(ws, targetRow, row, { determinationOnly = false } = {}) {
   setWorksheetCell(ws, `B${targetRow}`, row.product || "");
   setWorksheetCell(ws, `C${targetRow}`, row.code || "");
   const hasDetKit = row.detPerKit !== null && row.detPerKit !== undefined && row.detPerKit !== "";
   const hasKitPrice = row.kitPrice !== null && row.kitPrice !== undefined && row.kitPrice !== "";
   setWorksheetCell(ws, `F${targetRow}`, hasDetKit ? row.detPerKit : "");
+  if (determinationOnly) {
+    // Sin columna de kit: US$ DET es la celda de ingreso directo. Un precio de
+    // kit previo se convierte a precio por determinacion para no perderlo.
+    const detKit = toNullableNumber(row.detPerKit);
+    const fromKit = hasKitPrice && detKit > 0 ? Number((toNullableNumber(row.kitPrice) / detKit).toFixed(4)) : null;
+    const detPrice = toNullableNumber(row.determinationPrice) ?? fromKit;
+    setWorksheetCell(ws, `H${targetRow}`, "");
+    setWorksheetCell(ws, `I${targetRow}`, detPrice ?? "");
+    return;
+  }
   setWorksheetCell(ws, `H${targetRow}`, hasKitPrice ? row.kitPrice : "");
   const hasManualDeterminationPrice = row.determinationPrice !== null
     && row.determinationPrice !== undefined
@@ -1232,7 +1250,7 @@ function fillOfferEquipmentGroupHeaderRow(ws, targetRow, equipmentName) {
   ["C", "D", "E", "F", "G", "H", "I"].forEach((col) => setWorksheetCell(ws, `${col}${targetRow}`, ""));
 }
 
-function appendSectionRows({ sourceWs, targetWs, sectionKey, rows, nextRow }) {
+function appendSectionRows({ sourceWs, targetWs, sectionKey, rows, nextRow, determinationOnly = false }) {
   const layout = OFFER_SECTION_LAYOUT[sectionKey];
   const safeRows = Array.isArray(rows) ? rows.filter((row) => String(row?.product || row?.code || "").trim()) : [];
   if (!safeRows.length) return nextRow;
@@ -1273,7 +1291,7 @@ function appendSectionRows({ sourceWs, targetWs, sectionKey, rows, nextRow }) {
     }
     group.items.forEach((row) => {
       copyTemplateRow(sourceWs, targetWs, layout.templateRow, cursor);
-      fillOfferItemRow(targetWs, cursor, row);
+      fillOfferItemRow(targetWs, cursor, row, { determinationOnly });
       cursor += 1;
     });
   });
@@ -1310,6 +1328,12 @@ function buildOfferWorkbookBuffer(templatePayload) {
   setWorksheetCell(ws, "C9", templatePayload.validUntil || "");
   setWorksheetCell(ws, "H9", templatePayload.leadTime || "");
 
+  const determinationOnly = Boolean(templatePayload.determination_only);
+  if (determinationOnly) {
+    setWorksheetCell(ws, "H11", "");
+    setWorksheetCell(ws, "I11", "US$ DET");
+  }
+
   let nextRow = OFFER_HEADER_END_ROW + 1;
   getOfferSectionKeys(templatePayload.sections).forEach((sectionKey) => {
     nextRow = appendSectionRows({
@@ -1318,6 +1342,7 @@ function buildOfferWorkbookBuffer(templatePayload) {
       sectionKey,
       rows: getOfferSectionRows(templatePayload.sections, sectionKey),
       nextRow,
+      determinationOnly,
     });
   });
 
@@ -1344,6 +1369,10 @@ function buildOfferWorkbookBuffer(templatePayload) {
     });
 
   ws["!cols"] = sourceWs["!cols"] ? JSON.parse(JSON.stringify(sourceWs["!cols"])) : undefined;
+  if (determinationOnly) {
+    ws["!cols"] = ws["!cols"] || [];
+    ws["!cols"][7] = { ...(ws["!cols"][7] || {}), hidden: true }; // H = US$ KIT*
+  }
   ws["!rows"] = sourceWs["!rows"] ? JSON.parse(JSON.stringify(sourceWs["!rows"])) : undefined;
   const finalLastRow = footerStartRow + (OFFER_FOOTER_END_ROW - OFFER_FOOTER_START_ROW);
   ws["!ref"] = `B2:I${finalLastRow}`;
@@ -1659,6 +1688,16 @@ function isDeterminationContractObject(contractObject) {
   return normalizeOfferText(contractObject).includes("determinacion");
 }
 
+// Valor exacto del selector de objeto de contratacion (no el texto libre de
+// licitaciones publicas, ej. "determinaciones para gases y electrolitos"):
+// la oferta (hoja y PDF) muestra SOLO reactivos, con precio por
+// determinacion ("US$ DET") y sin columna de kit.
+const DETERMINATION_ONLY_CONTRACT_OBJECTS = new Set(["determinacion", "determinacion efectiva"]);
+
+function isDeterminationOnlyContractObject(contractObject) {
+  return DETERMINATION_ONLY_CONTRACT_OBJECTS.has(normalizeOfferText(contractObject));
+}
+
 function isTodoCompradoContractObject(contractObject) {
   return normalizeOfferText(contractObject).includes("todo comprado");
 }
@@ -1676,7 +1715,11 @@ function getOfferPriceColumnVisibility(sectionKey, contractObject) {
   return { showKitPrice: true, showDeterminationPrice: false };
 }
 
-function drawOfferSectionTable(doc, title, rows = [], { showKitPrice = true, showDeterminationPrice = true } = {}) {
+function drawOfferSectionTable(doc, title, rows = [], {
+  showKitPrice = true,
+  showDeterminationPrice = true,
+  determinationLabel = "US$ DET APROX*",
+} = {}) {
   const cleanRows = rows.filter((row) => String(row?.product || row?.code || "").trim());
   if (!cleanRows.length) return;
   const bounds = getOfferPdfBounds(doc);
@@ -1711,7 +1754,7 @@ function drawOfferSectionTable(doc, title, rows = [], { showKitPrice = true, sho
     { label: "CODIGO", width: codeWidth },
     { label: "NOMBRE", width: nameWidth },
     ...(showKitPrice ? [{ label: "US$ KIT*", width: kitWidth, align: "right" }] : []),
-    ...(showDeterminationPrice ? [{ label: "US$ DET APROX*", width: determinationWidth, align: "right" }] : []),
+    ...(showDeterminationPrice ? [{ label: determinationLabel, width: determinationWidth, align: "right" }] : []),
   ];
 
   let tableY = doc.y;
@@ -1920,9 +1963,12 @@ async function buildFormalOfferPdfBuffer({ context, offer, templatePayload, pric
       electrolito: "Electrolitos",
     };
 
+    const determinationOnly = isDeterminationOnlyContractObject(context?.contract_object);
     getOfferSectionKeys(normalizedPayload.sections).forEach((key) => {
+      if (determinationOnly && key !== "reactivo") return;
       drawOfferSectionTable(doc, labels[key], normalizedPayload.sections?.[key] || [], {
         ...getOfferPriceColumnVisibility(key, context?.contract_object),
+        ...(determinationOnly ? { determinationLabel: "US$ DET" } : {}),
       });
     });
 
@@ -2744,13 +2790,22 @@ function extractModelNumberTokens(value) {
 // ninguna de las 2 ofertas resultantes.
 function expandComboOfferTarget(target) {
   const { tabMap } = buildOfferItemTemplateOrder(target.items);
+  // Mismo filtro que la oferta de un solo equipo: sin esto, fallbacks
+  // sheet_template obsoletos y SKUs de catalogo ya cubiertos por la plantilla
+  // terminaban en una oferta extra "productos sin mapeo".
+  const visibleKeys = new Set(
+    orderOfferItemsByBusinessCaseTemplate(target.items).map((item) => String(item.item_key || "")),
+  );
   const byTab = new Map();
   const unmatchedItems = [];
   target.items.forEach((item) => {
     const itemKey = String(item.item_key || "");
     const tabName = tabMap.get(itemKey);
     if (!tabName) {
-      unmatchedItems.push(item);
+      // Un SKU de catalogo fuera de la plantilla y sin consumo no justifica
+      // una oferta aparte.
+      const unusedCatalogItem = String(item.source || "").toLowerCase() === "catalog" && !(Number(item.annual_qty) > 0);
+      if (visibleKeys.has(itemKey) && !unusedCatalogItem) unmatchedItems.push(item);
       return;
     }
     if (!byTab.has(tabName)) byTab.set(tabName, []);

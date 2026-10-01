@@ -383,7 +383,7 @@ async function upsertInvestmentSelectionsBatch(businessCaseId, selections = [], 
  * Get selected investments with prices. Both value roles price the complete
  * selected cart; each role writes to its own price column.
  */
-async function getInvestmentValuesByClass(businessCaseId, investmentClass) {
+async function getInvestmentValuesByClass(businessCaseId, investmentClass, { assigneeId = null } = {}) {
     const validClasses = ['operativa', 'financiera'];
     if (!validClasses.includes(investmentClass)) {
         const error = new Error(`Clase de inversión inválida: ${investmentClass}`);
@@ -392,6 +392,13 @@ async function getInvestmentValuesByClass(businessCaseId, investmentClass) {
     }
 
     const priceColumn = investmentClass === 'operativa' ? 's.unit_price' : 's.unit_price_financial';
+    const normalizedAssigneeId = assigneeId == null ? null : Number(assigneeId);
+    if (normalizedAssigneeId !== null && (!Number.isInteger(normalizedAssigneeId) || normalizedAssigneeId <= 0)) {
+        const error = new Error("Usuario asignado inválido");
+        error.status = 400;
+        throw error;
+    }
+
     const { rows } = await db.query(
         `SELECT
            c.id AS catalog_id,
@@ -424,10 +431,10 @@ async function getInvestmentValuesByClass(businessCaseId, investmentClass) {
            ON s.catalog_id = c.id
           AND s.business_case_id = $1
           AND s.selected = true
-          WHERE c.is_active = true
-             OR s.selected = true
+          WHERE (c.is_active = true OR s.selected = true)
+            AND ($2::integer IS NULL OR s.quotation_assignee_id = $2)
          ORDER BY c.display_order NULLS LAST, c.name`,
-        [businessCaseId]
+        [businessCaseId, normalizedAssigneeId]
     );
     if (investmentClass !== 'financiera') return rows;
 
@@ -462,6 +469,48 @@ async function getInvestmentValuesByClass(businessCaseId, investmentClass) {
             depreciated_unit_price: depreciation.net,
         };
     });
+}
+
+async function hasInvestmentQuotationAssignment(businessCaseId, userId) {
+    const normalizedUserId = Number(userId);
+    if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) return false;
+
+    const { rows } = await db.query(
+        `SELECT 1
+           FROM bc_investment_selections
+          WHERE business_case_id = $1
+            AND selected = true
+            AND quotation_assignee_id = $2
+          LIMIT 1`,
+        [businessCaseId, normalizedUserId],
+    );
+    return rows.length > 0;
+}
+
+async function assertInvestmentQuotationAssignments(businessCaseId, userId, catalogIds = []) {
+    const normalizedUserId = Number(userId);
+    const normalizedCatalogIds = [...new Set((catalogIds || []).map(Number))];
+    if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0 || !normalizedCatalogIds.length || normalizedCatalogIds.some((id) => !Number.isInteger(id) || id <= 0)) {
+        const error = new Error("La cotización asignada no es válida");
+        error.status = 403;
+        throw error;
+    }
+
+    const { rows } = await db.query(
+        `SELECT catalog_id
+           FROM bc_investment_selections
+          WHERE business_case_id = $1
+            AND selected = true
+            AND quotation_assignee_id = $2
+            AND catalog_id = ANY($3::integer[])`,
+        [businessCaseId, normalizedUserId, normalizedCatalogIds],
+    );
+    if (rows.length !== normalizedCatalogIds.length) {
+        const error = new Error("Solo puedes registrar valores de las cotizaciones que te fueron asignadas");
+        error.status = 403;
+        error.code = "INVESTMENT_QUOTATION_ASSIGNMENT_REQUIRED";
+        throw error;
+    }
 }
 
 /**
@@ -738,6 +787,8 @@ module.exports = {
     upsertInvestmentSelection,
     upsertInvestmentSelectionsBatch,
     getInvestmentValuesByClass,
+    hasInvestmentQuotationAssignment,
+    assertInvestmentQuotationAssignments,
     saveInvestmentValuesBatch,
     getInvestmentPricingContext,
     calculateFinancialDepreciation,

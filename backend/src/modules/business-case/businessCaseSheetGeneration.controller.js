@@ -127,6 +127,19 @@ async function getLatestSheetGenerationJobStatus(req, res) {
   }
 }
 
+// POST /sheets/sync-investments  { dry_run?: boolean (default true), business_case_ids?: [] }
+async function syncInvestmentValuesBackfill(req, res) {
+  try {
+    const data = await sheetGenerationService.syncInvestmentValuesForAllBusinessCases({
+      dryRun: req.body?.dry_run !== false,
+      businessCaseIds: req.body?.business_case_ids || null,
+    });
+    return res.json({ ok: true, data });
+  } catch (error) {
+    return sendError(res, error, "No se pudo sincronizar precios de inversiones a Sheets");
+  }
+}
+
 async function getSheetGenerationMetrics(_req, res) {
   try {
     const response = await sheetGenerationService.getQueueMetrics();
@@ -188,6 +201,7 @@ module.exports = {
   getSheetGenerationJobStatus,
   getLatestSheetGenerationJobStatus,
   getSheetGenerationMetrics,
+  syncInvestmentValuesBackfill,
   downloadFallbackExcel,
   getDocumentVersionHistory,
 };

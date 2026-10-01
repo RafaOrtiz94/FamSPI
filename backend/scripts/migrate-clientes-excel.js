@@ -160,7 +160,7 @@ async function main() {
     port: Number(process.env.DB_PORT || 5432),
     user: process.env.DB_USER || "neondb_owner",
     password: process.env.DB_PASS,
-    database: process.env.DB_NAME || "neondb",
+    database: process.env.DB_NAME || "FamSPI",
     ssl: { rejectUnauthorized: false },
   });
 

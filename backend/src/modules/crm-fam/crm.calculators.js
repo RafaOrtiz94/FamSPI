@@ -1,21 +1,69 @@
-function calculateCompletenessScore({ blueSheet, buyingInfluences, winResults, competitors, strengths, redFlags, scorecardAnswers }) {
-  let score = 0;
-  if (blueSheet.sales_objective_text?.trim().length > 30) score += 10;
-  if (blueSheet.customer_situation_current?.trim().length > 20) score += 8;
-  if (blueSheet.customer_situation_desired?.trim().length > 20) score += 8;
-  if (blueSheet.buying_process_description?.trim().length > 20) score += 8;
-  if (blueSheet.strategy_summary?.trim().length > 50) score += 10;
-  const hasEconomicBuyer = buyingInfluences.some(i => i.influence_role === 'economic_buyer' && !i.deleted_at);
-  if (hasEconomicBuyer) score += 12;
-  const hasCoach = buyingInfluences.some(i => i.influence_role === 'coach' && !i.deleted_at);
-  if (hasCoach) score += 8;
-  const activeBIs = buyingInfluences.filter(i => !i.deleted_at);
-  const hasWinResults = activeBIs.length > 0 && activeBIs.every(bi => winResults.some(wr => wr.buying_influence_id === bi.id && !wr.deleted_at));
-  if (hasWinResults && winResults.filter(wr => !wr.deleted_at).length > 0) score += 10;
-  if (competitors.filter(c => !c.deleted_at).length > 0) score += 6;
-  if (strengths.filter(s => !s.deleted_at).length > 0) score += 6;
-  if (scorecardAnswers.length >= 5) score += 8;
-  return Math.min(100, Math.round(score));
+// Cada criterio que aporta al completeness score, con su etiqueta en
+// espanol -- se usa tanto para calcular el score (suma de puntos de los
+// criterios cumplidos) como para exponer un checklist visual en el frontend
+// (getCompletenessBreakdown), sin duplicar la logica en dos lugares.
+const COMPLETENESS_CRITERIA = [
+  {
+    key: 'sales_objective', label: 'Objetivo de venta definido (mínimo 30 caracteres)', points: 10,
+    check: (ctx) => (ctx.blueSheet.sales_objective_text?.trim().length ?? 0) > 30,
+  },
+  {
+    key: 'situation_current', label: 'Situación actual del cliente descrita', points: 8,
+    check: (ctx) => (ctx.blueSheet.customer_situation_current?.trim().length ?? 0) > 20,
+  },
+  {
+    key: 'situation_desired', label: 'Situación deseada del cliente descrita', points: 8,
+    check: (ctx) => (ctx.blueSheet.customer_situation_desired?.trim().length ?? 0) > 20,
+  },
+  {
+    key: 'buying_process', label: 'Proceso de compra descrito', points: 8,
+    check: (ctx) => (ctx.blueSheet.buying_process_description?.trim().length ?? 0) > 20,
+  },
+  {
+    key: 'strategy_summary', label: 'Resumen de estrategia definido (mínimo 50 caracteres)', points: 10,
+    check: (ctx) => (ctx.blueSheet.strategy_summary?.trim().length ?? 0) > 50,
+  },
+  {
+    key: 'economic_buyer', label: 'Comprador económico identificado', points: 12,
+    check: (ctx) => ctx.buyingInfluences.some((i) => i.influence_role === 'economic_buyer' && !i.deleted_at),
+  },
+  {
+    key: 'coach', label: 'Coach identificado', points: 8,
+    check: (ctx) => ctx.buyingInfluences.some((i) => i.influence_role === 'coach' && !i.deleted_at),
+  },
+  {
+    key: 'win_results', label: 'Resultado de venta (Win Result) registrado para cada influenciador', points: 10,
+    check: (ctx) => {
+      const activeBIs = ctx.buyingInfluences.filter((i) => !i.deleted_at);
+      const hasWinResults = activeBIs.length > 0
+        && activeBIs.every((bi) => ctx.winResults.some((wr) => wr.buying_influence_id === bi.id && !wr.deleted_at));
+      return hasWinResults && ctx.winResults.filter((wr) => !wr.deleted_at).length > 0;
+    },
+  },
+  {
+    key: 'competitors', label: 'Al menos un competidor registrado', points: 6,
+    check: (ctx) => ctx.competitors.filter((c) => !c.deleted_at).length > 0,
+  },
+  {
+    key: 'strengths', label: 'Al menos una fortaleza registrada', points: 6,
+    check: (ctx) => ctx.strengths.filter((s) => !s.deleted_at).length > 0,
+  },
+  {
+    key: 'scorecard', label: 'Al menos 5 respuestas de scorecard', points: 8,
+    check: (ctx) => ctx.scorecardAnswers.length >= 5,
+  },
+];
+
+function getCompletenessBreakdown(ctx) {
+  const items = COMPLETENESS_CRITERIA.map((c) => ({
+    key: c.key, label: c.label, points: c.points, met: Boolean(c.check(ctx)),
+  }));
+  const score = Math.min(100, Math.round(items.reduce((sum, i) => sum + (i.met ? i.points : 0), 0)));
+  return { score, items };
+}
+
+function calculateCompletenessScore(ctx) {
+  return getCompletenessBreakdown(ctx).score;
 }
 
 function calculateScorecardScore(criteria, answers) {
@@ -64,6 +112,7 @@ function getWeightedAmount(estimatedAmount, probabilityPct) {
 
 module.exports = {
   calculateCompletenessScore,
+  getCompletenessBreakdown,
   calculateScorecardScore,
   calculateHealthScore,
   getHealthStatus,

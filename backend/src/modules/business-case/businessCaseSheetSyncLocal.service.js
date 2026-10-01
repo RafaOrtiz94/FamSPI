@@ -108,6 +108,10 @@ const GENERIC_SHEET_TOKENS = new Set([
 ]);
 
 const BC_LABEL_FIELD_MAP = new Map([
+  // Fila 3: "FECHA MAXIMA PARA CALCULO DE CONSUMIBLES (NO MENOR A 48 HORAS)"
+  // -- se calcula en businessCaseSheetGeneration.service.js (inicio del BC +
+  // 48h habiles, sin fines de semana), no la llena el usuario.
+  ["fecha maxima para calculo de consumibles no menor a 48 horas", "FechaMaximaCalculoConsumibles"],
   ["tipo de cliente", "TipoDeCliente"],
   ["entidad contratante", "EntidadContratante"],
   ["cliente", "Cliente"],
@@ -369,6 +373,7 @@ function parseBCDefinition(ws) {
   // poder mostrar/crear items de catalogo con su capitalizacion real (ver
   // businessCaseTemplateVersions.service.js: computeInvestmentCatalogDiff).
   const investmentLabels = new Map();
+  const investmentRowDefaults = new Map();
   let inInvestmentBlock = false;
 
   for (let row = range.s.r + 1; row <= range.e.r + 1; row += 1) {
@@ -404,6 +409,14 @@ function parseBCDefinition(ws) {
     if (inInvestmentBlock) {
       objectiveRows.set(normalizedLabel, row);
       investmentLabels.set(normalizedLabel, label);
+      // Contenido original de la plantilla (descripcion/precio de referencia)
+      // para restaurar una fila deseleccionada en vez de dejarla vacia.
+      investmentRowDefaults.set(row, {
+        B: getCellValue(ws, `B${row}`),
+        D: getCellValue(ws, `D${row}`),
+        E: getCellValue(ws, `E${row}`),
+        F: getCellValue(ws, `F${row}`),
+      });
     }
   }
 
@@ -421,7 +434,7 @@ function parseBCDefinition(ws) {
   fieldCells.DeterminacionEfectiva = pickWritableCell(ws, 54, 2, 5);
   fieldCells.Observaciones = pickWritableCell(ws, 55, 2, 5);
 
-  return { fieldCells, objectiveRows, investmentLabels };
+  return { fieldCells, objectiveRows, investmentLabels, investmentRowDefaults };
 }
 
 function parseEquipmentSheetDefinition(name, ws) {
@@ -1032,10 +1045,10 @@ async function pullColumnQuantitiesFromGoogleSheet({ sheetId, equipmentTabs = []
   const availableSheetNames = new Set(
     (spreadsheet?.sheets || []).map((sheet) => String(sheet?.properties?.title || "").trim()).filter(Boolean),
   );
-  const validTargets = targets.filter((target) => availableSheetNames.has(target.sheetName));
+  const validTargets = targets.filter((target) => availableSheetNames.has(String(target.sheetName).trim()));
   const missingSheetNames = [...new Set(
     targets
-      .filter((target) => !availableSheetNames.has(target.sheetName))
+      .filter((target) => !availableSheetNames.has(String(target.sheetName).trim()))
       .map((target) => target.sheetName),
   )];
   if (missingSheetNames.length) {
@@ -1739,14 +1752,32 @@ function buildBusinessCaseRanges(template, payload) {
     updates.push(buildValueRange(`BC!${cell}`, payload.fields?.[fieldKey] ?? ""));
   });
 
+  const investmentRanges = buildInvestmentRanges(template, payload.inversiones);
+  clears.push(...investmentRanges.clears);
+  updates.push(...investmentRanges.updates);
+
+  if (payload.fields?.SmartObjective !== undefined) {
+    clears.push(`BC!${smartObjectiveCell}`);
+    updates.push(buildValueRange(`BC!${smartObjectiveCell}`, payload.fields.SmartObjective || ""));
+  }
+
+  return { updates, clears };
+}
+
+// Solo el bloque "inversiones adicionales" de la pestana BC. Lo usa la
+// generacion completa y la sync puntual al guardar precios.
+// No borra filas de la plantilla: solo escribe las filas de inversiones
+// seleccionadas, y (si se pasa currentRows, leido de la hoja real) restaura a
+// su contenido original de plantilla las filas que SPI habia llenado antes y
+// ya no estan seleccionadas. Las filas dinamicas (131+) estan vacias en la
+// plantilla y son exclusivas de SPI, por eso esas si se limpian.
+function buildInvestmentRanges(template, inversiones, { currentRows = null } = {}) {
+  const updates = [];
+  const clears = [];
   const objectiveRows = template.bc.objectiveRows || new Map();
-  objectiveRows.forEach((rowNumber) => {
-    clears.push(`BC!B${rowNumber}`);
-    clears.push(`BC!D${rowNumber}`);
-    clears.push(`BC!E${rowNumber}`);
-  });
+  const rowDefaults = template.bc.investmentRowDefaults || new Map();
   clears.push(
-    `BC!A${DYNAMIC_INVESTMENTS_START_ROW}:E${DYNAMIC_INVESTMENTS_START_ROW + DYNAMIC_INVESTMENTS_CLEAR_ROWS - 1}`,
+    `BC!A${DYNAMIC_INVESTMENTS_START_ROW}:F${DYNAMIC_INVESTMENTS_START_ROW + DYNAMIC_INVESTMENTS_CLEAR_ROWS - 1}`,
   );
 
   const unmatchedInvestments = [];
@@ -1768,7 +1799,8 @@ function buildBusinessCaseRanges(template, payload) {
       strategies: new Set(),
     };
     current.names.push(name);
-    current.descriptions.push(String(investment?.descripcion || investment?.observaciones || investment?.notes || name || "").trim());
+    // Sin caracteristicas/observaciones no se pisa la descripcion de la plantilla.
+    current.descriptions.push(String(investment?.caracteristicas || investment?.observaciones || investment?.notes || "").trim());
     current.quantitySum += safeCantidad;
     current.totalValue += safeCantidad * safePrecio;
     if (current.firstQuantity === "") current.firstQuantity = investment?.cantidad ?? "";
@@ -1777,7 +1809,7 @@ function buildBusinessCaseRanges(template, payload) {
     rowPayloads.set(rowNumber, current);
   };
 
-  Object.entries(payload.inversiones || {}).forEach(([name, investment]) => {
+  Object.entries(inversiones || {}).forEach(([name, investment]) => {
     const match = resolveObjectiveRow(objectiveRows, name);
     if (!match?.rowNumber) {
       unmatchedInvestments.push({ name, investment });
@@ -1798,16 +1830,31 @@ function buildBusinessCaseRanges(template, payload) {
 
   rowPayloads.forEach((entry, rowNumber) => {
     const isGrouped = entry.names.length > 1;
-    const displayValues = (entry.descriptions.length ? entry.descriptions : entry.names)
-      .map((value) => String(value || "").trim())
-      .filter(Boolean);
-    const label = isGrouped ? displayValues.join("; ") : (displayValues[0] || entry.names[0]);
+    const displayValues = entry.descriptions.filter(Boolean);
+    const label = displayValues.join("; ");
     const quantity = isGrouped ? (entry.totalValue > 0 ? 1 : entry.quantitySum) : entry.firstQuantity;
     const price = isGrouped ? (entry.totalValue > 0 ? entry.totalValue : entry.firstPrice) : entry.firstPrice;
-    updates.push(buildValueRange(`BC!B${rowNumber}`, label));
+    if (label) updates.push(buildValueRange(`BC!B${rowNumber}`, label));
     updates.push(buildValueRange(`BC!D${rowNumber}`, quantity));
     updates.push(buildValueRange(`BC!E${rowNumber}`, price));
+    // Total = cantidad x precio (valor residual unitario).
+    updates.push(buildValueRange(`BC!F${rowNumber}`, Number(entry.totalValue.toFixed(2))));
   });
+
+  // Fila no seleccionada que SPI habia llenado (cantidad distinta de 0 en la
+  // hoja): vuelve a su contenido original de plantilla, sin normalizar a
+  // mayusculas. Las filas nunca usadas no se tocan.
+  if (currentRows) {
+    objectiveRows.forEach((rowNumber) => {
+      if (rowPayloads.has(rowNumber)) return;
+      const quantity = String(currentRows.get(rowNumber)?.D ?? "").trim();
+      if (!quantity || Number(quantity.replace(",", ".")) === 0) return;
+      const defaults = rowDefaults.get(rowNumber) || {};
+      ["B", "D", "E", "F"].forEach((column) => {
+        updates.push({ range: `BC!${column}${rowNumber}`, values: [[defaults[column] ?? ""]] });
+      });
+    });
+  }
 
   unmatchedInvestments.forEach(({ name, investment }, index) => {
     const rowNumber = DYNAMIC_INVESTMENTS_START_ROW + index;
@@ -1823,12 +1870,9 @@ function buildBusinessCaseRanges(template, payload) {
     updates.push(buildValueRange(`BC!C${rowNumber}`, investment?.categoria || ""));
     updates.push(buildValueRange(`BC!D${rowNumber}`, investment?.cantidad ?? ""));
     updates.push(buildValueRange(`BC!E${rowNumber}`, investment?.precio ?? ""));
+    const total = Number(investment?.cantidad ?? 0) * Number(investment?.precio ?? 0);
+    updates.push(buildValueRange(`BC!F${rowNumber}`, Number.isFinite(total) ? Number(total.toFixed(2)) : ""));
   });
-
-  if (payload.fields?.SmartObjective !== undefined) {
-    clears.push(`BC!${smartObjectiveCell}`);
-    updates.push(buildValueRange(`BC!${smartObjectiveCell}`, payload.fields.SmartObjective || ""));
-  }
 
   if (fuzzyMatchedInvestments.length) {
     logger.info({ matches: fuzzyMatchedInvestments }, "[SheetGen] inversiones mapeadas con normalizacion tolerante");
@@ -2124,6 +2168,95 @@ async function syncBusinessCaseToGoogleSheet({ businessCase, outputFolderId, pay
   };
 }
 
+// Sync puntual de precios: escribe solo el bloque de inversiones en la hoja
+// ya existente. No crea, recrea ni poda pestanas, ni toca otros campos.
+function syncGuardError(message, code, details = null) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = 409;
+  error.retryable = false;
+  error.details = details;
+  return error;
+}
+
+// Copia el archivo COMPLETO (todas las pestanas) en su misma carpeta y
+// comprueba que la copia tenga exactamente las mismas pestanas que el original.
+async function backupSpreadsheet(sheetId) {
+  const [{ data: original }, originalMeta] = await Promise.all([
+    drive.files.get({ fileId: sheetId, supportsAllDrives: true, fields: "name,parents" }),
+    getSpreadsheetMeta(sheetId),
+  ]);
+  const { data: copy } = await drive.files.copy({
+    fileId: sheetId,
+    supportsAllDrives: true,
+    requestBody: {
+      name: `RESPALDO precios - ${new Date().toISOString()} - ${original?.name || sheetId}`,
+      parents: original?.parents || undefined,
+    },
+    fields: "id,name,webViewLink",
+  });
+  const copyMeta = await getSpreadsheetMeta(copy.id);
+  const originalTabs = [...originalMeta.sheetMap.keys()].sort();
+  const copyTabs = [...copyMeta.sheetMap.keys()].sort();
+  if (originalTabs.join("\n") !== copyTabs.join("\n")) {
+    throw syncGuardError(
+      "La copia de respaldo no tiene las mismas pestanas que la hoja original; no se escribio nada",
+      "SHEET_BACKUP_INCOMPLETE",
+      { original_tabs: originalTabs, backup_tabs: copyTabs, backup_id: copy.id },
+    );
+  }
+  return { ...copy, tabs: copyTabs };
+}
+
+// Sync puntual de precios: escribe solo el bloque de inversiones de la pestana
+// BC en la hoja ya existente. No crea, recrea ni poda pestanas.
+// Garantias antes de escribir (si alguna falla, no se escribe nada):
+//  - las etiquetas de columna A de la hoja real coinciden fila a fila con la
+//    plantilla (si alguien inserto/borro filas, escribir desplazado pisaria
+//    otros datos);
+//  - backup=true: copia completa del archivo verificada (todas las pestanas).
+async function syncInvestmentsToGoogleSheet({ sheetId, inversiones = {}, backup = false }) {
+  if (!jwtClient) {
+    const error = new Error("Google JWT Client no inicializado para sincronizar Business Case a Sheets");
+    error.code = "GOOGLE_AUTH_UNAVAILABLE";
+    error.status = 500;
+    throw error;
+  }
+  const template = loadTemplateDefinition();
+  const objectiveRows = template.bc.objectiveRows || new Map();
+  const rowNumbers = [...objectiveRows.values()];
+  const firstRow = Math.min(...rowNumbers);
+  const lastRow = Math.max(...rowNumbers);
+
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `BC!A${firstRow}:F${lastRow}`,
+  });
+  const values = data?.values || [];
+  const currentRows = new Map();
+  const mismatches = [];
+  objectiveRows.forEach((rowNumber, expectedLabel) => {
+    const row = values[rowNumber - firstRow] || [];
+    currentRows.set(rowNumber, { A: row[0], D: row[3] });
+    if (normalizeText(String(row[0] || "")) !== expectedLabel) {
+      mismatches.push({ row: rowNumber, expected: expectedLabel, found: row[0] || "" });
+    }
+  });
+  if (mismatches.length) {
+    throw syncGuardError(
+      "La hoja no coincide con la plantilla (filas de inversiones desplazadas o distintas); no se escribio nada",
+      "SHEET_TEMPLATE_LAYOUT_MISMATCH",
+      { mismatches: mismatches.slice(0, 10), total_mismatches: mismatches.length },
+    );
+  }
+
+  const backupFile = backup ? await backupSpreadsheet(sheetId) : null;
+  const { updates, clears } = buildInvestmentRanges(template, inversiones, { currentRows });
+  await clearRanges(sheetId, clears);
+  await writeRanges(sheetId, updates);
+  return { sheetId, updated_ranges: updates.length, backup: backupFile };
+}
+
 function clearSheetCaches() {
   templateCache = null;
   mappingCache = null;
@@ -2151,6 +2284,8 @@ module.exports = {
   unprotectAnnualQuantityCellsForSubsection,
   protectSpreadsheetAfterMaximumQuantitiesSync,
   syncBusinessCaseToGoogleSheet,
+  syncInvestmentsToGoogleSheet,
+  buildInvestmentRanges,
   clearSheetCaches,
   resolveTemplatePath,
 };

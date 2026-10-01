@@ -326,6 +326,20 @@ export const downloadTiAssetReport = async (assetId) => {
  );
 };
 
+// Especificacion tecnica (redaccion asistida por IA en el backend): puede
+// tardar mas que el timeout global de 15 s, por eso timeout propio.
+export const downloadTiAssetTechSpec = async (assetId, assetCode = "") => {
+ const response = await api.get(`/ti-assets/${assetId}/tech-spec`, { responseType: "arraybuffer", timeout: 120000 });
+ const url = URL.createObjectURL(new Blob([response.data], { type: "application/pdf" }));
+ const a = document.createElement("a");
+ a.href = url;
+ a.download = `Especificacion-Tecnica-${assetCode || String(assetId).padStart(6, "0")}.pdf`;
+ document.body.appendChild(a);
+ a.click();
+ document.body.removeChild(a);
+ URL.revokeObjectURL(url);
+};
+
 export const downloadTiAssetLabel = async (assetId, assetCode = "") => {
  await triggerBlobDownload(
    `/ti-assets/${assetId}/label`,
@@ -347,10 +361,13 @@ export const downloadTiCollaboratorReport = async (userId) => {
  );
 };
 
-export const downloadTiActasReport = async ({ tipo, acta_code } = {}) => {
+export const downloadTiActasReport = async ({ tipo, acta_code, is_complete } = {}) => {
  const params = new URLSearchParams();
  if (tipo) params.set("tipo", tipo);
  if (acta_code) params.set("acta_code", acta_code);
+ // Backend acepta is_complete como string "true"/"false" (ver
+ // tiAssets.controller.js downloadActasReport) -- ausente = sin filtrar por estado.
+ if (is_complete === true || is_complete === false) params.set("is_complete", String(is_complete));
  const qs = params.toString();
  await triggerBlobDownload(
    `/ti-assets/reports/actas${qs ? `?${qs}` : ""}`,

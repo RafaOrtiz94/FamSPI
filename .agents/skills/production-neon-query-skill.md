@@ -15,11 +15,11 @@ Usar este skill cuando se necesite:
 ## Parametros de conexion verificados
 
 - **Proyecto GCP**: `famspi-sbox`
-- **Secret name**: `DB_PASSWORD` (version 5+, actualizada en la migracion 2026-07-21)
-- **Host**: `ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech` — **SIN** `-pooler`: esta instancia se migro el 2026-07-21 (la anterior, `wispy-moon`, agoto su cuota mensual de compute); su endpoint pooled NO honra `ALTER ROLE ... SET search_path`, usar siempre el endpoint directo
+- **Secret name**: `DB_PASSWORD` (version 8, promovida en la migracion 2026-09-28)
+- **Host**: `ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech` — **SIN** `-pooler`: produccion se migro a esta instancia el 2026-09-28 desde `lucky-bar/neondb`; usar siempre el endpoint directo
 - **Puerto**: `5432`
 - **Usuario**: `neondb_owner`
-- **Base**: `neondb`
+- **Base**: `FamSPI`
 - **SSL**: requerido (`rejectUnauthorized: false`)
 - **pg binario**: `./backend/node_modules/pg` (no requiere instalacion global)
 
@@ -74,7 +74,7 @@ const client = new Client({
   port: 5432,
   user: "neondb_owner",
   password: process.env.DB_PASS,
-  database: "neondb",
+  database: "FamSPI",
   ssl: { rejectUnauthorized: false },
 });
 ```
@@ -89,7 +89,7 @@ const client = new Client({
   host: 'ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech',
   port: 5432, user: 'neondb_owner',
   password: process.env.DB_PASS,
-  database: 'neondb',
+  database: 'FamSPI',
   ssl: { rejectUnauthorized: false }
 });
 (async () => {
@@ -113,7 +113,7 @@ const client = new Client({
   host: 'ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech',
   port: 5432, user: 'neondb_owner',
   password: process.env.DB_PASS,
-  database: 'neondb',
+  database: 'FamSPI',
   ssl: { rejectUnauthorized: false }
 });
 (async () => {
@@ -127,7 +127,7 @@ const client = new Client({
 
 Resultado esperado:
 ```
-Conectado: { ahora: 2026-06-23T..., db: 'neondb' }
+Conectado: { ahora: 2026-09-28T..., db: 'FamSPI' }
 ```
 
 ---
@@ -144,7 +144,7 @@ const client = new Client({
   host: 'ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech',
   port: 5432, user: 'neondb_owner',
   password: process.env.DB_PASS,
-  database: 'neondb',
+  database: 'FamSPI',
   ssl: { rejectUnauthorized: false }
 });
 (async () => {
@@ -168,7 +168,7 @@ DB_HOST=ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech \
 DB_PORT=5432 \
 DB_USER=neondb_owner \
 DB_PASSWORD=$DB_PASS \
-DB_NAME=neondb \
+DB_NAME=FamSPI \
 DB_SSL=true \
 node backend/scripts/nombre_script.js
 ```

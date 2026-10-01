@@ -9,6 +9,7 @@ import {
     FiUser,
     FiBarChart2,
     FiUserPlus,
+    FiFileText,
 } from "react-icons/fi";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -61,6 +62,13 @@ const DashboardFinanzas = () => {
                     title="Activos Tecnologicos"
                     color="indigo"
                     onClick={() => navigate("/dashboard/ti/activos")}
+                />
+                <ActionCard
+                    icon={FiFileText}
+                    subtitle="Activos TI"
+                    title="Entregas y Retiros"
+                    color="indigo"
+                    onClick={() => navigate("/dashboard/ti/actas")}
                 />
                 <ActionCard
                     icon={FiPieChart}

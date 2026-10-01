@@ -23,6 +23,11 @@ router.get("/:id/documents/:documentId/final-pdf", ctrl.downloadFinalPdf);
 router.post("/:id/signers/:signerId/open", ctrl.openSignerStep);
 router.post("/:id/signers/:signerId/sign", ctrl.signStep);
 router.post("/:id/signers/:signerId/reject", ctrl.rejectStep);
+// Fase 2 del plan de mejoras de firma: corrige la ubicacion visual de una
+// firma YA emitida (no cambia estado ni hashes). Ver signatureWorkflows.
+// service.js#correctSignerPlacement para el detalle de que hace y por que es
+// seguro.
+router.post("/:id/signers/:signerId/correct-placement", ctrl.correctSignerPlacement);
 router.post("/:id/signers/:signerId/reassign", ctrl.reassignSigner);
 
 module.exports = router;

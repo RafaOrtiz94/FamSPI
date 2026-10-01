@@ -34,6 +34,7 @@ import {
   uploadTiAssetInitialConditionPhotos,
   uploadTiFinancialDoc,
 } from "../../../core/api/tiAssetsApi";
+import TiAssetTechSpecButton from "../components/TiAssetTechSpecButton";
 
 const EMPTY_FORM = {
   name: "", brand: "", model: "", serial_number: "", imei: "",
@@ -643,6 +644,7 @@ const TIAssetsFinancieroPage = () => {
                   >
                     <FiFileText size={11} /> Reporte
                   </button>
+                  <TiAssetTechSpecButton asset={selected} />
                 </div>
               </div>
 

@@ -7,6 +7,24 @@ export const fetchCrmForecast = (params) => api.get("/crm-fam/dashboard/forecast
 export const fetchBlueSheetKpis = () => api.get("/crm-fam/dashboard/blue-sheet-kpis").then(r => r.data?.data);
 export const fetchLostReasonsReport = (params) => api.get("/crm-fam/reports/lost-reasons", { params }).then(r => r.data?.data);
 export const fetchRedFlagsReport = (params) => api.get("/crm-fam/reports/red-flags", { params }).then(r => r.data?.data);
+export const fetchWinLossPatternsReport = (params) => api.get("/crm-fam/reports/win-loss-patterns", { params }).then(r => r.data?.data);
+
+const downloadPdf = async (apiPath, params, fallbackFilename) => {
+  const response = await api.get(apiPath, { params, responseType: "arraybuffer" });
+  const disposition = response.headers?.["content-disposition"] || "";
+  const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || fallbackFilename;
+  const blob = new Blob([response.data], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+export const downloadLostReasonsReportPdf = (params) => downloadPdf("/crm-fam/reports/lost-reasons/pdf", params, "reporte_razones_perdida.pdf");
+export const downloadRedFlagsReportPdf = (params) => downloadPdf("/crm-fam/reports/red-flags/pdf", params, "reporte_red_flags.pdf");
 
 // Pipeline Stages
 export const fetchPipelineStages = () => api.get("/crm-fam/pipeline-stages").then(r => r.data?.data);
@@ -30,6 +48,9 @@ export const createAccount = (data) => api.post("/crm-fam/accounts", data).then(
 export const updateAccount = (id, data) => api.put(`/crm-fam/accounts/${id}`, data).then(r => r.data?.data);
 export const deleteAccount = (id) => api.delete(`/crm-fam/accounts/${id}`).then(r => r.data?.data);
 export const fetchAccountTimeline = (id) => api.get(`/crm-fam/accounts/${id}/timeline`).then(r => r.data?.data);
+export const fetchAccountSalesStats = (id) => api.get(`/crm-fam/accounts/${id}/sales-stats`).then(r => r.data?.data);
+export const fetchAccountDuplicates = (id) => api.get(`/crm-fam/accounts/${id}/duplicates`).then(r => r.data?.data);
+export const mergeAccounts = (targetId, sourceId) => api.post(`/crm-fam/accounts/${targetId}/merge`, { source_id: sourceId }).then(r => r.data?.data);
 
 // Contacts
 export const fetchContacts = (params) => api.get("/crm-fam/contacts", { params }).then(r => r.data?.data);
@@ -75,6 +96,10 @@ export const observeBlueSheet = (id, data) => api.post(`/crm-fam/blue-sheets/${i
 export const reopenBlueSheet = (id, data) => api.post(`/crm-fam/blue-sheets/${id}/reopen`, data).then(r => r.data?.data);
 export const fetchBlueSheetVersions = (id) => api.get(`/crm-fam/blue-sheets/${id}/versions`).then(r => r.data?.data);
 export const fetchBlueSheetCompleteness = (id) => api.get(`/crm-fam/blue-sheets/${id}/completeness`).then(r => r.data?.data);
+export const fetchReviewComments = (blueSheetId) => api.get(`/crm-fam/blue-sheets/${blueSheetId}/review-comments`).then(r => r.data?.data);
+export const createReviewComment = (blueSheetId, data) => api.post(`/crm-fam/blue-sheets/${blueSheetId}/review-comments`, data).then(r => r.data?.data);
+export const resolveReviewComment = (blueSheetId, commentId) => api.post(`/crm-fam/blue-sheets/${blueSheetId}/review-comments/${commentId}/resolve`).then(r => r.data?.data);
+export const downloadBlueSheetPdf = (id) => downloadPdf(`/crm-fam/blue-sheets/${id}/pdf`, undefined, "blue_sheet.pdf");
 
 // Buying Influences
 export const fetchBuyingInfluences = (blueSheetId) => api.get(`/crm-fam/blue-sheets/${blueSheetId}/buying-influences`).then(r => r.data?.data);
@@ -110,6 +135,11 @@ export const createRedFlag = (blueSheetId, data) => api.post(`/crm-fam/blue-shee
 export const updateRedFlag = (id, data) => api.put(`/crm-fam/red-flags/${id}`, data).then(r => r.data?.data);
 export const deleteRedFlag = (id) => api.delete(`/crm-fam/red-flags/${id}`).then(r => r.data?.data);
 export const acceptRedFlag = (id, data) => api.post(`/crm-fam/red-flags/${id}/accept`, data).then(r => r.data?.data);
+// Red flags "rapidas" sobre un elemento puntual (comprador, competidor,
+// criterio de scorecard, accion) -- icono de marcar/desmarcar en vez de
+// llenar el formulario libre de arriba.
+export const fetchElementRedFlags = (blueSheetId) => api.get(`/crm-fam/blue-sheets/${blueSheetId}/element-flags`).then(r => r.data?.data);
+export const toggleElementRedFlag = (blueSheetId, data) => api.post(`/crm-fam/blue-sheets/${blueSheetId}/element-flags/toggle`, data).then(r => r.data?.data);
 
 // Scorecard
 export const fetchBlueSheetScorecard = (blueSheetId) => api.get(`/crm-fam/blue-sheets/${blueSheetId}/scorecard`).then(r => r.data?.data);
@@ -150,6 +180,9 @@ const crmFamApi = {
   fetchBlueSheetKpis,
   fetchLostReasonsReport,
   fetchRedFlagsReport,
+  fetchWinLossPatternsReport,
+  downloadLostReasonsReportPdf,
+  downloadRedFlagsReportPdf,
   fetchPipelineStages,
   createPipelineStage,
   updatePipelineStage,
@@ -165,6 +198,9 @@ const crmFamApi = {
   updateAccount,
   deleteAccount,
   fetchAccountTimeline,
+  fetchAccountSalesStats,
+  fetchAccountDuplicates,
+  mergeAccounts,
   fetchContacts,
   fetchContactById,
   createContact,
@@ -202,6 +238,10 @@ const crmFamApi = {
   reopenBlueSheet,
   fetchBlueSheetVersions,
   fetchBlueSheetCompleteness,
+  fetchReviewComments,
+  createReviewComment,
+  resolveReviewComment,
+  downloadBlueSheetPdf,
   fetchBuyingInfluences,
   createBuyingInfluence,
   updateBuyingInfluence,
@@ -225,6 +265,8 @@ const crmFamApi = {
   updateRedFlag,
   deleteRedFlag,
   acceptRedFlag,
+  fetchElementRedFlags,
+  toggleElementRedFlag,
   fetchBlueSheetScorecard,
   saveBlueSheetScorecard,
   fetchActionItems,

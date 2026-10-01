@@ -3,7 +3,7 @@ const { Pool } = require("pg");
 async function run() {
   const actaCode = "ACTA-COL-2026-000018";
   const pool = new Pool({
-    host: process.env.DB_HOST || "ep-wispy-moon-aqszgsal-pooler.c-8.us-east-1.aws.neon.tech",
+    host: process.env.DB_HOST || "ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech",
     port: Number(process.env.DB_PORT || 5432),
     user: process.env.DB_USER || "neondb_owner",
     password: process.env.DB_PASSWORD || "",

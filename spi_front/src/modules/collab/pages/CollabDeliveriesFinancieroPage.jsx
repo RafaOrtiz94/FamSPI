@@ -3268,11 +3268,21 @@ function HerramientaDetailModal({ delivery, onClose }) {
 
 // ── Modal de reportes ─────────────────────────────────────────────────────────
 
+// Categorías separadas para el reporte (cada tipo de entrega tiene su propio
+// ID/tabla -- herramientas, ropa de trabajo, EPP, etc. no deben mezclarse
+// cuando lo que se necesita es un reporte de un solo tipo).
+const REPORT_CATEGORY_OPTIONS = [
+  { value: "", label: "Todas (reporte mezclado)" },
+  ...COLLAB_CATEGORIES.map((key) => ({ value: key, label: CATEGORY_LABELS[key] || key })),
+  { value: "ti", label: CATEGORY_LABELS.ti },
+];
+
 function ReportesModal({ onClose, users }) {
   const { showToast } = useUI();
   const [tab, setTab]           = useState("general"); // "general" | "colaborador"
   const [selUser, setSelUser]   = useState("");
   const [search, setSearch]     = useState("");
+  const [category, setCategory] = useState("");
   const [loading, setLoading]   = useState(false);
 
   const filtered = useMemo(() => {
@@ -3288,15 +3298,17 @@ function ReportesModal({ onClose, users }) {
     setSha256Info(null);
     try {
       const { blob, sha256, filename } = tab === "general"
-        ? await downloadCollabFullReportPdf()
-        : await downloadCollabCollaboratorReportPdf(selUser);
+        ? await downloadCollabFullReportPdf(category || null)
+        : await downloadCollabCollaboratorReportPdf(selUser, category || null);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
       URL.revokeObjectURL(url);
       setSha256Info(sha256);
       showToast("PDF generado y sellado con SHA-256", "success");
     } catch (e) {
-      const msg = e?.response?.status === 404 ? "Sin entregas para este colaborador" : "Error al generar el reporte";
+      const msg = e?.response?.status === 404
+        ? (e?.response?.data?.message || "Sin entregas para este colaborador")
+        : "Error al generar el reporte";
       showToast(msg, "error");
     } finally { setLoading(false); }
   };
@@ -3370,6 +3382,21 @@ function ReportesModal({ onClose, users }) {
               </div>
             </div>
           )}
+
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Tipo de entrega
+            </label>
+            <select value={category} onChange={(e) => setCategory(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:border-slate-400 focus:bg-white focus:outline-none">
+              {REPORT_CATEGORY_OPTIONS.map((opt) => (
+                <option key={opt.value || "all"} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-slate-400">
+              Elige un tipo (ej. Herramientas de trabajo, Ropa de trabajo) para un reporte solo de esa categoría, o "Todas" para el reporte mezclado.
+            </p>
+          </div>
 
           <button type="button" onClick={runReport} disabled={loading || (tab === "colaborador" && !selUser)}
             className="w-full flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
@@ -4281,12 +4308,10 @@ const CollabDeliveriesFinancieroPage = () => {
             className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors">
             <FiRefreshCw size={14} className={loading ? "animate-spin" : ""} /> Actualizar
           </button>
-          {isFinanciero && (
-            <button type="button" onClick={() => setShowReportModal(true)}
-              className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
-              <FiBarChart2 size={14} /> Reportes
-            </button>
-          )}
+          {/* El boton de Reportes (con filtro por tipo de entrega) vive
+              dentro del tab "Entregas/Retiros", no aqui en el header general
+              -- estar en el header junto a la pestana "Activos TI" generaba
+              confusion sobre a que reporte pertenecia. */}
           {canCreateSessions(actorRole) && (
             <button type="button" onClick={() => setShowModal(true)}
               className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors active:scale-[0.97]">
@@ -4328,7 +4353,16 @@ const CollabDeliveriesFinancieroPage = () => {
 
       {/* ── Tab: Entregas/Retiros */}
       {activeTab === "sesiones" && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+        <div className="space-y-4">
+          {isFinanciero && (
+            <div className="flex justify-end">
+              <button type="button" onClick={() => setShowReportModal(true)}
+                className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+                <FiBarChart2 size={14} /> Reportes de entregas
+              </button>
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
           {/* Lista combinada: sesiones collab + actas TI */}
           <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)] flex flex-col">
             <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
@@ -4408,6 +4442,7 @@ const CollabDeliveriesFinancieroPage = () => {
             ) : (
               <EmptyState icon={FiFileText} message="Selecciona un movimiento para ver los detalles" />
             )}
+          </div>
           </div>
         </div>
       )}

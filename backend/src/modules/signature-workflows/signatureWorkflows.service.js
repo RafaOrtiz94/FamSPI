@@ -3,6 +3,7 @@ const { PDFDocument } = require("pdf-lib");
 const db = require("../../config/db");
 const { appendSignatureBlock } = require("./signatureWorkflows.pdf");
 const { detectPlacementsForDocument } = require("./signatureAutoPlacement.service");
+const { resolveParallelWorkflowState } = require("./signatureWorkflowStatePolicy");
 const { uploadBase64File, ensureFolder } = require("../../utils/drive");
 const logger = require("../../config/logger");
 const notificationManager = require("../notifications/notificationManager");
@@ -31,6 +32,7 @@ const SIGNER_STATUS = {
   OPENED: "opened",
   SIGNED: "signed",
   REJECTED: "rejected",
+  REPLACED: "replaced",
 };
 
 const ACTIVE_SIGNING_WORKFLOW_STATUSES = new Set([
@@ -811,6 +813,13 @@ async function getWorkflow(workflowId, user) {
 // nadie firme. Nunca es obligatorio ni bloquea el envio -- si falla la extraccion o
 // no se encuentra el nombre con confianza, el firmante sigue el flujo manual de
 // siempre (signStep preserva lo que el frontend mande, o lo que ya haya aqui).
+//
+// Cuando el nombre matchea una sola fila (unique), se prellena signature_placement
+// directo, mas meta.auto_placement_highlight para que el frontend resalte esa fila
+// (no solo pone el sello a ciegas). Cuando matchea 2+ filas (ambiguous, ej. un
+// nombre repetido en el listado), NO se prellena nada -- se deja meta.
+// auto_placement_candidates con las filas encontradas para que el firmante elija
+// entre esas pocas opciones en vez de buscar a ciegas en todo el documento.
 async function autoDetectAndFillPlacements(client, { workflowId, document, signers }) {
   if (!document?.source_pdf_base64) return 0;
   const pending = signers.filter((signer) => !signer.signature_placement);
@@ -820,15 +829,25 @@ async function autoDetectAndFillPlacements(client, { workflowId, document, signe
   const detected = await detectPlacementsForDocument(pdfBytes, pending);
 
   let placed = 0;
-  for (const [signerId, placement] of detected) {
-    await client.query(
-      `UPDATE signature_workflow_signers
-          SET signature_placement = $2::jsonb,
-              meta = meta || '{"auto_placement": true}'::jsonb
-        WHERE id = $1`,
-      [signerId, JSON.stringify(placement)],
-    );
-    placed += 1;
+  for (const [signerId, result] of detected) {
+    if (result.type === "unique") {
+      const { page_number, x_pct, y_pct, highlight } = result;
+      await client.query(
+        `UPDATE signature_workflow_signers
+            SET signature_placement = $2::jsonb,
+                meta = meta || jsonb_build_object('auto_placement', true, 'auto_placement_highlight', $3::jsonb)
+          WHERE id = $1`,
+        [signerId, JSON.stringify({ page_number, x_pct, y_pct }), JSON.stringify({ page_number, ...highlight })],
+      );
+      placed += 1;
+    } else if (result.type === "ambiguous") {
+      await client.query(
+        `UPDATE signature_workflow_signers
+            SET meta = meta || jsonb_build_object('auto_placement_candidates', $2::jsonb)
+          WHERE id = $1`,
+        [signerId, JSON.stringify(result.candidates)],
+      );
+    }
   }
   return placed;
 }
@@ -1074,15 +1093,17 @@ async function signStep({ workflowId, signerId, user, action }) {
       createdBy: user.id,
     });
 
-    // all non-final signers (used for next-step advancement)
-    const remainingPending = data.signers
-      .filter((item) => Number(item.id) !== Number(signerId))
-      .filter((item) => ![SIGNER_STATUS.SIGNED, SIGNER_STATUS.REJECTED].includes(String(item.status || "").toLowerCase()));
+    // El rechazo es individual: los demas pueden seguir firmando. Para cerrar
+    // y sellar, en cambio, todos los firmantes obligatorios deben estar signed;
+    // un rechazo obligatorio mantiene el workflow en partially_signed.
+    const projectedSigners = data.signers.map((item) => (
+      Number(item.id) === Number(signerId)
+        ? { ...item, status: SIGNER_STATUS.SIGNED }
+        : item
+    ));
+    const workflowResolution = resolveParallelWorkflowState(projectedSigners);
 
-    // only REQUIRED signers block completion — optional ones are skipped
-    const remainingRequired = remainingPending.filter((item) => item.is_required !== false);
-
-    if (!remainingRequired.length) {
+    if (workflowResolution.canComplete) {
       await client.query(
         `UPDATE signature_workflows
             SET status = $2,
@@ -1191,6 +1212,170 @@ async function signStep({ workflowId, signerId, user, action }) {
   }
 }
 
+// Fase 2 del plan de mejoras de firma: corrige la UBICACION VISUAL de una
+// firma ya emitida (signature_placement) sin tocar payload_hash_sha256 ni
+// signature_hash_sha256 -- esos hashes nunca incluyeron el placement (se
+// verifico al diseñar esto), asi que la validez legal/criptografica de la
+// firma no cambia en absoluto, solo donde se dibuja el sello.
+//
+// Solo admin/manager o el propio firmante pueden invocarla, y solo sobre una
+// firma ya emitida (signed). Si el documento ya estaba sellado (finalized_at
+// no nulo), regenera el PDF final con appendSignatureBlock usando el
+// placement corregido y lo resube a Drive -- el sello anterior queda
+// respaldado en meta.corrections para no perder rastro de auditoria.
+async function correctSignerPlacement({ workflowId, signerId, newPlacement, reason, user }) {
+  if (!newPlacement || !Number.isFinite(Number(newPlacement.page_number))
+    || !Number.isFinite(Number(newPlacement.x_pct)) || !Number.isFinite(Number(newPlacement.y_pct))) {
+    const error = new Error("newPlacement invalido: se requiere page_number, x_pct, y_pct");
+    error.status = 400;
+    throw error;
+  }
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    await client.query(`SELECT id FROM signature_workflows WHERE id = $1 FOR UPDATE`, [workflowId]);
+    const data = await getWorkflowRowsForClient(client, workflowId);
+    ensureCanViewWorkflow(data, user);
+
+    const signer = data.signers.find((item) => Number(item.id) === Number(signerId));
+    if (!signer) {
+      const error = new Error("Firmante no encontrado");
+      error.status = 404;
+      throw error;
+    }
+    if (String(signer.status || "").toLowerCase() !== SIGNER_STATUS.SIGNED) {
+      const error = new Error("Solo se puede corregir la ubicacion de una firma ya emitida");
+      error.status = 400;
+      throw error;
+    }
+    // Solo admin/manager o el propio firmante pueden corregir su ubicacion.
+    try {
+      ensureSignerOwnership(signer, user);
+    } catch {
+      ensureCanManageWorkflow(data, user);
+    }
+
+    const oldPlacement = signer.signature_placement;
+    const cleanPlacement = {
+      page_number: Number(newPlacement.page_number),
+      x_pct: Number(newPlacement.x_pct),
+      y_pct: Number(newPlacement.y_pct),
+    };
+
+    await client.query(
+      `UPDATE signature_workflow_signers
+          SET signature_placement = $2::jsonb,
+              meta = (meta - 'auto_placement_candidates') || jsonb_build_object('auto_placement', false, 'placement_corrected', true)
+        WHERE id = $1`,
+      [signerId, JSON.stringify(cleanPlacement)],
+    );
+
+    await appendEvent(client, {
+      workflowId,
+      documentId: signer.document_id,
+      signerId: signer.id,
+      eventType: "signature_placement_corrected",
+      eventDescription: "Se corrigio la ubicacion visual de una firma ya emitida",
+      eventData: { old_placement: oldPlacement, new_placement: cleanPlacement, reason: reason || null },
+      createdBy: user.id,
+    });
+
+    const document = data.documents.find((item) => Number(item.id) === Number(signer.document_id));
+    let resealed = false;
+
+    if (document?.finalized_at) {
+      // El PDF final ya estaba generado y sellado -- hay que regenerarlo con
+      // el placement corregido para que el documento visible refleje la
+      // realidad. Se usan TODOS los firmantes actuales (con el placement ya
+      // corregido en memoria para este), igual que hace signStep al sellar.
+      const allSignersForRender = data.signers.map((item) =>
+        Number(item.id) === Number(signerId) ? { ...item, signature_placement: cleanPlacement } : item,
+      );
+
+      let finalPdfBase64;
+      try {
+        finalPdfBase64 = await appendSignatureBlock({
+          sourcePdfBase64: document.source_pdf_base64,
+          workflow: data.workflow,
+          signers: allSignersForRender,
+          document,
+          verificationBaseUrl: FRONTEND_BASE_URL,
+        });
+      } catch (pdfErr) {
+        logger.error({ err: pdfErr?.message, workflowId }, "[correctSignerPlacement] fallo al regenerar el PDF final, se aborta la correccion");
+        const error = new Error("No se pudo regenerar el PDF final con la ubicacion corregida");
+        error.status = 500;
+        throw error;
+      }
+
+      const finalSha256 = crypto.createHash("sha256").update(Buffer.from(finalPdfBase64, "base64")).digest("hex");
+
+      let finalDriveFileId = document.final_drive_file_id || null;
+      let finalDriveUrl = document.final_drive_url || null;
+      if (FAMSIGN_DRIVE_ROOT) {
+        try {
+          const famsignFolder = await ensureFolder("FamSign", FAMSIGN_DRIVE_ROOT);
+          const wfCode = data.workflow.workflow_code || `WF-${workflowId}`;
+          const wfFolder = await ensureFolder(wfCode, famsignFolder.id);
+          const filename = document.filename
+            ? document.filename.replace(/\.pdf$/i, "") + "_FIRMADO_CORREGIDO.pdf"
+            : `${wfCode}_FIRMADO_CORREGIDO.pdf`;
+          const driveResult = await uploadBase64File(filename, finalPdfBase64, "application/pdf", wfFolder.id);
+          finalDriveFileId = driveResult.id || null;
+          finalDriveUrl = driveResult.webViewLink || null;
+        } catch (driveErr) {
+          logger.error({ err: driveErr, workflowId }, "[correctSignerPlacement] error subiendo el PDF resellado a Drive — se guarda solo en DB");
+        }
+      }
+
+      // Respalda el final anterior en meta.corrections antes de sobreescribir
+      // las columnas final_* -- nunca se pierde el rastro de que hubo un
+      // sello previo y cual era.
+      await client.query(
+        `UPDATE signature_workflow_documents
+            SET final_sha256        = $2,
+                final_pdf_base64    = $3,
+                final_drive_file_id = $4,
+                final_drive_url     = $5,
+                meta = meta || jsonb_build_object(
+                  'corrections',
+                  COALESCE(meta->'corrections', '[]'::jsonb) || jsonb_build_array(jsonb_build_object(
+                    'corrected_at', to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+                    'corrected_by', $6::int,
+                    'signer_id', $7::int,
+                    'previous_final_sha256', final_sha256,
+                    'previous_final_drive_file_id', final_drive_file_id,
+                    'previous_final_drive_url', final_drive_url
+                  ))
+                )
+          WHERE id = $1`,
+        [document.id, finalSha256, finalPdfBase64, finalDriveFileId, finalDriveUrl, user.id, signerId],
+      );
+
+      await appendEvent(client, {
+        workflowId,
+        documentId: document.id,
+        eventType: "final_pdf_resealed",
+        eventDescription: "El PDF final se regenero tras corregir una ubicacion de firma",
+        eventData: { signer_id: signerId, previous_final_sha256: document.final_sha256, new_final_sha256: finalSha256 },
+        createdBy: user.id,
+      });
+
+      resealed = true;
+    }
+
+    await client.query("COMMIT");
+    const refreshed2 = await hydrateWorkflow(workflowId, user);
+    return { workflow: refreshed2, resealed };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function rejectStep({ workflowId, signerId, user, action }) {
   const client = await db.getClient();
   try {
@@ -1223,9 +1408,10 @@ async function rejectStep({ workflowId, signerId, user, action }) {
     await client.query(
       `UPDATE signature_workflows
           SET status = $2,
-              rejected_at = NOW()
+              rejected_at = NULL,
+              current_step = NULL
         WHERE id = $1`,
-      [workflowId, WORKFLOW_STATUS.REJECTED]
+      [workflowId, WORKFLOW_STATUS.PARTIALLY_SIGNED]
     );
 
     await appendEvent(client, {
@@ -1234,7 +1420,11 @@ async function rejectStep({ workflowId, signerId, user, action }) {
       signerId: signer.id,
       eventType: "signer_rejected",
       eventDescription: "El firmante rechazo el documento",
-      eventData: { reason: action.reason },
+      eventData: {
+        reason: action.reason,
+        signing_mode: "parallel",
+        workflow_continues: true,
+      },
       createdBy: user.id,
     });
 
@@ -1571,6 +1761,7 @@ module.exports = {
   openSignerStep,
   signStep,
   rejectStep,
+  correctSignerPlacement,
   listMyPending,
   listMyCompleted,
   listSignerCandidates,

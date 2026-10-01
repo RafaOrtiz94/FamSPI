@@ -65,6 +65,18 @@ exports.rejectStep = asyncHandler(async (req, res) => {
   res.json({ ok: true, data });
 });
 
+exports.correctSignerPlacement = asyncHandler(async (req, res) => {
+  const { page_number, x_pct, y_pct, reason } = req.body || {};
+  const data = await service.correctSignerPlacement({
+    workflowId: Number(req.params.id),
+    signerId: Number(req.params.signerId),
+    newPlacement: { page_number: Number(page_number), x_pct: Number(x_pct), y_pct: Number(y_pct) },
+    reason: reason || null,
+    user: req.user,
+  });
+  res.json({ ok: true, data });
+});
+
 exports.listMyPending = asyncHandler(async (req, res) => {
   const data = await service.listMyPending(req.user);
   res.json({ ok: true, data });

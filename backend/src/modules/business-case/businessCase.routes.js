@@ -1,7 +1,7 @@
 const express = require("express");
 const multer = require("multer");
 const { verifyToken } = require("../../middlewares/auth");
-const { requireRole } = require("../../middlewares/roles");
+const { requireRole, collectUserRoles } = require("../../middlewares/roles");
 const {
   validateDeterminationEquipment,
   validateEquipmentCapacity,
@@ -12,6 +12,8 @@ const determinationsCatalogCtrl = require("./determinationsCatalog.controller");
 const calculationTemplatesCtrl = require("./calculationTemplates.controller");
 const observabilityService = require("./businessCaseObservability.service");
 const sheetGenerationCtrl = require("./businessCaseSheetGeneration.controller");
+const matrixCalculationCtrl = require("./matrixBusinessCaseCalculation.controller");
+const pricingLabCtrl = require("./businessCasePricingLab.controller");
 
 // BC-01: Roles que pueden VER y participar en el BC (todos los involucrados)
 // BC-02/BC-10: analista_comercial = asesor_comercial = comercial / jefe_ti agregado
@@ -84,6 +86,18 @@ const auditSection = (section, accessType = 'read') => (req, _res, next) => {
   next();
 };
 
+// Este laboratorio no hereda el bypass global de SUPER_ROLES de requireRole:
+// mientras este en construccion debe permanecer exclusivo del rol TI validado.
+const requirePricingLabTi = (req, res, next) => {
+  const roles = collectUserRoles(req.user);
+  if (roles.has("jefe_ti") || roles.has("jefe_de_ti")) return next();
+  return res.status(403).json({
+    ok: false,
+    code: "BC_PRICING_LAB_TI_ONLY",
+    message: "El laboratorio de precios esta disponible solo para Jefe TI durante su construccion.",
+  });
+};
+
 router.use((req, res, next) => {
   const startedAt = Date.now();
   res.on("finish", () => {
@@ -127,6 +141,36 @@ router.put(
   verifyToken,
   requireRole(["admin", "administrador", "gerencia", "gerencia_general", "jefe_comercial", "jefe_tecnico", "jefe_operaciones"]),
   ctrl.upsertAutosaveFeatureFlags,
+);
+
+router.get(
+  "/matrix-calculations/catalog",
+  verifyToken,
+  requirePricingLabTi,
+  matrixCalculationCtrl.getCatalog,
+);
+router.post(
+  "/matrix-calculations/preview",
+  verifyToken,
+  requirePricingLabTi,
+  matrixCalculationCtrl.preview,
+);
+
+// Laboratorio paralelo en construccion. Solo TI puede verlo o disparar una
+// lectura del Sheet en memoria; no persiste consumos ni precios de oferta.
+router.get(
+  "/:id/pricing-lab/preview",
+  verifyToken,
+  requirePricingLabTi,
+  auditSection("pricing_lab", "read"),
+  pricingLabCtrl.preview,
+);
+router.post(
+  "/:id/pricing-lab/preview",
+  verifyToken,
+  requirePricingLabTi,
+  auditSection("pricing_lab", "write"),
+  pricingLabCtrl.preview,
 );
 
 // Vista de solo-lectura para jefe_calidad y lorena.loaiza@fam-project.com --
@@ -237,6 +281,7 @@ router.get("/:id/sheets/document-versions", verifyToken, requireRole(businessCas
 router.get("/:id/sheets/jobs/latest", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.getLatestSheetGenerationJobStatus);
 router.get("/:id/sheets/jobs/:jobId", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.getSheetGenerationJobStatus);
 router.get("/sheets/metrics", verifyToken, requireRole(adminRoles), sheetGenerationCtrl.getSheetGenerationMetrics);
+router.post("/sheets/sync-investments", verifyToken, requireRole(adminRoles), sheetGenerationCtrl.syncInvestmentValuesBackfill);
 router.post("/sheets/clear-template-cache", verifyToken, requireRole(adminRoles), ctrl.clearSheetTemplateCache);
 
 // UI Guidance routes (Workspace)
@@ -359,8 +404,11 @@ router.delete(
   requireRole(["jefe_ti"]),
   ctrl.releaseTiAssetReservation,
 );
-router.get("/:id/investments/values", verifyToken, requireRole(investmentValuesRoles), ctrl.getInvestmentValues);
-router.post("/:id/investments/values", verifyToken, requireRole(investmentValuesRoles), ctrl.saveInvestmentValues);
+// Los responsables de una cotización pueden consultar/guardar exclusivamente
+// los ítems que les fueron asignados. El controller valida ese alcance por BC.
+router.get("/:id/investments/values", verifyToken, ctrl.getInvestmentValues);
+router.post("/:id/investments/values", verifyToken, ctrl.saveInvestmentValues);
+router.post("/:id/investments/values/sync-sheet", verifyToken, ctrl.syncInvestmentValuesSheet);
 router.get("/:id/investments/values/assignees", verifyToken, requireRole(investmentValuesRoles), ctrl.getInvestmentQuotationAssignees);
 router.post("/:id/investments/values/assignment", verifyToken, requireRole(investmentValuesRoles), ctrl.assignInvestmentQuotation);
 router.post("/:id/investments/values/request-quotation", verifyToken, requireRole(investmentValuesRoles), ctrl.requestInvestmentQuotation);
@@ -388,6 +436,8 @@ router.put(
 router.get("/:id/complete", verifyToken, requireRole(businessCaseRoles), ctrl.getComplete);
 router.post("/:id/lab-environment", verifyToken, requireRole(businessCaseRoles), ctrl.saveLabEnvironment);
 router.get("/:id/lab-environment", verifyToken, requireRole(businessCaseRoles), ctrl.getLabEnvironment);
+router.get("/:id/lab-environment/product-parameters", verifyToken, requireRole(businessCaseRoles), ctrl.getLabProductParameters);
+router.put("/:id/lab-environment/product-parameters", verifyToken, requireRole(businessCaseRoles), ctrl.saveLabProductParameters);
 router.post("/:id/equipment-details-v2", verifyToken, requireRole(businessCaseRoles), ctrl.saveEquipmentDetailsV2);
 router.post("/:id/lis-integration", verifyToken, requireRole(businessCaseRoles), ctrl.saveLisIntegration);
 router.get("/:id/lis-integration", verifyToken, requireRole(businessCaseRoles), ctrl.getLisIntegration);

@@ -84,7 +84,7 @@ describe("detectSignerPlacement", () => {
 });
 
 describe("detectPlacementsForDocument (version por lote, un solo parseo del PDF)", () => {
-  test("devuelve un placement por cada firmante que se pudo detectar, y omite los que no", async () => {
+  test("devuelve un placement 'unique' por cada firmante que se pudo detectar sin ambiguedad, y omite los que no", async () => {
     const pdf = await buildRosterPdf([
       { name: "Gonzalez Perez Ana Maria" },
       { name: "Loaiza Vasquez Lorena Elizabeth" },
@@ -100,7 +100,32 @@ describe("detectPlacementsForDocument (version por lote, un solo parseo del PDF)
     expect(results.has(10)).toBe(true);
     expect(results.has(20)).toBe(false);
     expect(results.has(30)).toBe(true);
+    expect(results.get(10).type).toBe("unique");
     expect(results.get(10).y_pct).toBeLessThan(results.get(30).y_pct);
+    // Fase 1: viene con datos extra para resaltar la fila en el frontend
+    expect(typeof results.get(10).line_preview).toBe("string");
+    expect(results.get(10).highlight).toEqual(
+      expect.objectContaining({ x_min_pct: expect.any(Number), x_max_pct: expect.any(Number) }),
+    );
+  });
+
+  test("cuando el nombre matchea 2+ filas, devuelve 'ambiguous' con las filas candidatas en vez de omitir al firmante", async () => {
+    const pdf = await buildRosterPdf([
+      { name: "Ana Maria Torres Vega", cedula: "0102030405" },
+      { name: "Ana Maria Torres Vega", cedula: "0605040302" },
+    ]);
+
+    const results = await detectPlacementsForDocument(pdf, [
+      { id: 1, name_snapshot: "Ana Maria Torres Vega" },
+    ]);
+
+    expect(results.size).toBe(1);
+    const result = results.get(1);
+    expect(result.type).toBe("ambiguous");
+    expect(result.candidates).toHaveLength(2);
+    expect(result.candidates[0].y_pct).toBeLessThan(result.candidates[1].y_pct);
+    expect(result.candidates[0].line_preview).toEqual(expect.stringContaining("0102030405"));
+    expect(result.candidates[1].line_preview).toEqual(expect.stringContaining("0605040302"));
   });
 
   test("si el PDF no se puede leer, devuelve un mapa vacio en vez de lanzar", async () => {

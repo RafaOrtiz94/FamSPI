@@ -1,5 +1,25 @@
 import { Link } from "react-router-dom";
+import { Bar, Doughnut } from "react-chartjs-2";
+import {
+  Chart as ChartJS,
+  ArcElement,
+  BarElement,
+  CategoryScale,
+  LinearScale,
+  Tooltip,
+  Legend,
+} from "chart.js";
 import { useCrmDashboard } from "../hooks/useCrmDashboard";
+
+ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, Tooltip, Legend);
+
+const STAGE_CHART_COLOR = "#2563EB";
+const STATUS_CHART_COLORS = { open: "#16A34A", won: "#2563EB", lost: "#DC2626", on_hold: "#D97706", default: "#9CA3AF" };
+const chartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: { legend: { display: false } },
+};
 
 const EMPTY = "-";
 
@@ -78,6 +98,25 @@ export default function CrmDashboardPage() {
     ? pipeline.status_distribution
     : opportunityStats;
 
+  const stageChartData = {
+    labels: stages.map((s) => s.stage_name ?? s.name ?? "—"),
+    datasets: [{
+      label: "Monto por etapa",
+      data: stages.map((s) => toNumber(s.total_amount ?? s.amount_total)),
+      backgroundColor: STAGE_CHART_COLOR,
+      borderRadius: 6,
+    }],
+  };
+
+  const statusChartData = {
+    labels: statusDist.map((s) => s.status || "—"),
+    datasets: [{
+      data: statusDist.map((s) => toNumber(s.count)),
+      backgroundColor: statusDist.map((s) => STATUS_CHART_COLORS[s.status] || STATUS_CHART_COLORS.default),
+      borderWidth: 0,
+    }],
+  };
+
   return (
     <div className="p-6 bg-[#F9FAFB] min-h-full">
       <header className="flex items-center justify-between mb-6">
@@ -140,6 +179,9 @@ export default function CrmDashboardPage() {
             <p className="px-5 py-8 text-sm text-[#6B7280] text-center">Sin datos</p>
           ) : (
             <div className="overflow-x-auto">
+              <div className="px-5 pt-4" style={{ height: 180 }}>
+                <Bar data={stageChartData} options={chartOptions} aria-label="Monto de pipeline por etapa" />
+              </div>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-[#F9FAFB] border-b border-[#E5E7EB]">
@@ -185,7 +227,11 @@ export default function CrmDashboardPage() {
           ) : statusDist.length === 0 ? (
             <p className="px-5 py-8 text-sm text-[#6B7280] text-center">Sin datos</p>
           ) : (
-            <ul className="divide-y divide-[#E5E7EB]">
+            <>
+              <div className="px-5 pt-4 flex justify-center" style={{ height: 180 }}>
+                <Doughnut data={statusChartData} options={{ ...chartOptions, plugins: { legend: { display: true, position: "bottom", labels: { boxWidth: 10, font: { size: 11 } } } } }} aria-label="Distribucion de oportunidades por estado" />
+              </div>
+              <ul className="divide-y divide-[#E5E7EB]">
               {statusDist.map((s, i) => (
                 <li key={i} className="flex items-center justify-between px-5 py-3">
                   <StatusBadge status={s.status} />
@@ -194,7 +240,8 @@ export default function CrmDashboardPage() {
                   </span>
                 </li>
               ))}
-            </ul>
+              </ul>
+            </>
           )}
         </div>
       </div>

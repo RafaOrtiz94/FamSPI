@@ -104,6 +104,15 @@ describe("process-notes service", () => {
     ).rejects.toMatchObject({ status: 403 });
   });
 
+  test.each(["jefe_financiero", "jefe_ti"])("allows %s to use public-purchase notes from the linked Business Case", async (role) => {
+    await expect(service.createNote({
+      entityType: "public_purchase",
+      entityId: "abc-123",
+      author: { id: 2, fullname: "Participante", role },
+      body: "Seguimiento del expediente",
+    })).resolves.toMatchObject({ entity_type: "public_purchase" });
+  });
+
   test("rejects an empty note body", async () => {
     const author = { id: 1, fullname: "Autor Uno", role: "acp_comercial" };
     await expect(

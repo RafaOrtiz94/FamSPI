@@ -143,7 +143,16 @@ const cases = [
   ["80 signStep no filtra sequence_order para habilitar siguiente", () => expect(serviceSource).not.toContain("AND sequence_order = $3")],
   ["81 signStep encadena hash por signed_at real", () => expect(serviceSource).toContain("new Date(a.signed_at || 0)")],
   ["82 signStep conserva guard finalized_at", () => expect(serviceSource).toContain("finalized_at IS NULL")],
-  ["83 rejectStep bloquea workflow", () => expect(serviceSource).toMatch(/rejectStep[\s\S]*FOR UPDATE/)],
+  ["83 rechazo individual bloquea fila y mantiene workflow paralelo activo", () => {
+    const rejectStepSource = serviceSource.slice(
+      serviceSource.indexOf("async function rejectStep"),
+      serviceSource.indexOf("async function listMyPending"),
+    );
+    expect(rejectStepSource).toMatch(/FOR UPDATE/);
+    expect(rejectStepSource).toContain("WORKFLOW_STATUS.PARTIALLY_SIGNED");
+    expect(rejectStepSource).toContain("workflow_continues: true");
+    expect(rejectStepSource).not.toContain("WORKFLOW_STATUS.REJECTED");
+  }],
   ["84 reassignSigner bloquea workflow", () => expect(serviceSource).toMatch(/reassignSigner[\s\S]*FOR UPDATE/)],
   ["85 cancelWorkflow bloquea workflow", () => expect(serviceSource).toMatch(/cancelWorkflow[\s\S]*FOR UPDATE/)],
   ["86 listMyPending incluye pending available opened", () => expect(serviceSource).toContain("s.status IN ('pending', 'available', 'opened')")],

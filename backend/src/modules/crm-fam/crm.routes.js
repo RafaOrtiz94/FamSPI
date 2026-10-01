@@ -3,13 +3,19 @@ const multer = require("multer");
 const router = express.Router();
 const controller = require("./crm.controller");
 const { requireRole } = require("../../middlewares/roles");
+const {
+  CRM_ROLES: crmRoles,
+  MANAGER_ROLES: managerRoles,
+  ADMIN_ROLES: adminRoles,
+  ALL_CRM_ROLES: allCrm,
+  MANAGER_OR_ADMIN_ROLES: managerAdmin,
+} = require("./crm.constants");
 
-const crmRoles = ['comercial', 'jefe_comercial', 'backoffice_comercial', 'asesor_comercial', 'analista_comercial', 'acp_comercial', 'backoffice'];
-const managerRoles = ['jefe_comercial', 'gerencia', 'gerencia_general', 'gerente_general', 'director', 'gerente'];
+// crmAll (roles operativos + manager, sin admin de plataforma) se sigue
+// derivando aqui porque solo lo usa este archivo -- el resto de listas
+// (crmRoles/managerRoles/adminRoles/allCrm/managerAdmin) vienen de
+// crm.constants.js, fuente unica compartida con crm.service.js#isManager.
 const crmAll = [...new Set([...crmRoles, ...managerRoles])];
-const adminRoles = ['jefe_ti', 'jefe_de_ti', 'admin', 'administrador'];
-const allCrm = [...new Set([...crmAll, ...adminRoles])];
-const managerAdmin = [...new Set([...managerRoles, ...adminRoles])];
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 },
@@ -22,6 +28,9 @@ router.get("/dashboard/forecast", requireRole(managerAdmin), controller.getForec
 router.get("/dashboard/blue-sheet-kpis", requireRole(managerAdmin), controller.getBlueSheetKpis);
 router.get("/reports/lost-reasons", requireRole(managerAdmin), controller.getLostReasonsReport);
 router.get("/reports/red-flags", requireRole(managerAdmin), controller.getRedFlagsReport);
+router.get("/reports/lost-reasons/pdf", requireRole(managerAdmin), controller.downloadLostReasonsPdf);
+router.get("/reports/red-flags/pdf", requireRole(managerAdmin), controller.downloadRedFlagsPdf);
+router.get("/reports/win-loss-patterns", requireRole(managerAdmin), controller.getWinLossPatternsReport);
 
 // Pipeline Stages
 router.get("/pipeline-stages", requireRole(allCrm), controller.listPipelineStages);
@@ -45,6 +54,9 @@ router.get("/accounts/:id", requireRole(allCrm), controller.getAccountById);
 router.put("/accounts/:id", requireRole(crmAll), controller.updateAccount);
 router.delete("/accounts/:id", requireRole(crmAll), controller.softDeleteAccount);
 router.get("/accounts/:id/timeline", requireRole(allCrm), controller.getAccountTimeline);
+router.get("/accounts/:id/sales-stats", requireRole(allCrm), controller.getAccountSalesStats);
+router.get("/accounts/:id/duplicates", requireRole(allCrm), controller.getAccountDuplicateCandidates);
+router.post("/accounts/:id/merge", requireRole(managerAdmin), controller.mergeAccounts);
 
 // Contacts
 router.get("/contacts", requireRole(allCrm), controller.listContacts);
@@ -89,7 +101,11 @@ router.post("/blue-sheets/:id/approve", requireRole(managerAdmin), controller.ap
 router.post("/blue-sheets/:id/observe", requireRole(managerAdmin), controller.observeBlueSheet);
 router.post("/blue-sheets/:id/reopen", requireRole(managerAdmin), controller.reopenBlueSheet);
 router.get("/blue-sheets/:id/versions", requireRole(allCrm), controller.getBlueSheetVersions);
+router.get("/blue-sheets/:id/review-comments", requireRole(allCrm), controller.listReviewComments);
+router.post("/blue-sheets/:id/review-comments", requireRole(crmAll), controller.createReviewComment);
+router.post("/blue-sheets/:id/review-comments/:commentId/resolve", requireRole(crmAll), controller.resolveReviewComment);
 router.get("/blue-sheets/:id/completeness", requireRole(allCrm), controller.getBlueSheetCompleteness);
+router.get("/blue-sheets/:id/pdf", requireRole(allCrm), controller.downloadBlueSheetPdf);
 
 // Buying Influences
 router.get("/blue-sheets/:blueSheetId/buying-influences", requireRole(allCrm), controller.listBuyingInfluences);
@@ -122,6 +138,8 @@ router.delete("/strengths/:id", requireRole(crmAll), controller.softDeleteStreng
 // Red Flags
 router.get("/blue-sheets/:blueSheetId/red-flags", requireRole(allCrm), controller.listRedFlags);
 router.post("/blue-sheets/:blueSheetId/red-flags", requireRole(crmAll), controller.createRedFlag);
+router.get("/blue-sheets/:blueSheetId/element-flags", requireRole(allCrm), controller.listElementRedFlags);
+router.post("/blue-sheets/:blueSheetId/element-flags/toggle", requireRole(crmAll), controller.toggleElementRedFlag);
 router.put("/red-flags/:id", requireRole(crmAll), controller.updateRedFlag);
 router.delete("/red-flags/:id", requireRole(crmAll), controller.softDeleteRedFlag);
 router.post("/red-flags/:id/accept", requireRole(managerAdmin), controller.acceptRedFlag);
@@ -143,6 +161,7 @@ router.post("/activities", requireRole(crmAll), controller.createActivity);
 router.put("/activities/:id", requireRole(crmAll), controller.updateActivity);
 router.post("/activities/:id/complete", requireRole(crmAll), controller.completeActivity);
 router.delete("/activities/:id", requireRole(crmAll), controller.softDeleteActivity);
+router.post("/activities/:id/sync-calendar", requireRole(crmAll), controller.syncActivityCalendar);
 
 // Documents
 router.get("/documents", requireRole(allCrm), controller.listDocuments);

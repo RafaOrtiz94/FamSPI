@@ -14,8 +14,10 @@ import {
 } from "react-icons/fi";
 import Modal from "../../../core/ui/components/Modal";
 import { useUI } from "../../../core/ui/UIContext";
+import { useAuth } from "../../../core/auth/AuthContext";
 import {
   downloadTiActa,
+  downloadTiActasReport,
   getTiActaSignatureWorkflow,
   listTiAllActas,
   startTiActaSignatureWorkflow,
@@ -332,14 +334,23 @@ function StartWorkflowModal({ acta, users, loadingUsers, saving, onClose, onSubm
   );
 }
 
+// Financiero (y demas roles de solo consulta) entran a esta misma pantalla
+// para sacar reportes de actas, pero no gestionan el flujo de firma -- el
+// backend ya les devuelve 403 en start-workflow/upload-signed (TI_ROLES),
+// asi que esos botones se ocultan en vez de dejarlos fallar en pantalla.
+const TI_MANAGEMENT_ROLES = new Set(["ti", "jefe_ti", "admin_ti"]);
+
 const TIActasPage = () => {
   const { showToast } = useUI();
+  const { user } = useAuth();
   const navigate = useNavigate();
+  const canManage = TI_MANAGEMENT_ROLES.has(String(user?.role || "").trim().toLowerCase());
 
   const [actas, setActas] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploadingId, setUploadingId] = useState(null);
   const [downloadingFinalPdfId, setDownloadingFinalPdfId] = useState(null);
+  const [downloadingReport, setDownloadingReport] = useState(false);
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
   const [workflowActa, setWorkflowActa] = useState(null);
   const [directoryUsers, setDirectoryUsers] = useState([]);
@@ -369,6 +380,25 @@ const TIActasPage = () => {
   useEffect(() => {
     loadActas();
   }, [loadActas]);
+
+  // Reporte PDF con los mismos 3 filtros que ya tiene la pantalla (tipo,
+  // estado, N° de acta) -- mismo criterio que el card "Actas de
+  // entrega-recepcion" de /dashboard/ti/activos, para que financiero pueda
+  // sacar el reporte filtrado sin tener que descargar acta por acta.
+  const handleDownloadReport = async () => {
+    setDownloadingReport(true);
+    try {
+      await downloadTiActasReport({
+        tipo: filterTipo || undefined,
+        acta_code: debouncedFilterNumero.trim() || undefined,
+        is_complete: filterEstado === "" ? undefined : filterEstado === "true",
+      });
+    } catch {
+      showToast("No se pudo generar el reporte de actas", "error");
+    } finally {
+      setDownloadingReport(false);
+    }
+  };
 
   const handleDownload = async (acta) => {
     try {
@@ -554,6 +584,16 @@ const TIActasPage = () => {
               Limpiar filtros
             </button>
           )}
+          <button
+            type="button"
+            onClick={handleDownloadReport}
+            disabled={downloadingReport}
+            title="Descarga un PDF con las actas que cumplen los filtros de arriba (tipo, estado, N° de acta)"
+            className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+          >
+            {downloadingReport ? <FiRefreshCw size={13} className="animate-spin" /> : <FiDownload size={13} />}
+            Reporte PDF
+          </button>
           <span className="ml-auto text-xs text-slate-400">
             {filteredActas.length} resultado{filteredActas.length !== 1 ? "s" : ""}
           </span>
@@ -634,7 +674,7 @@ const TIActasPage = () => {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1.5">
-                            {!isAnnulled && !acta.signature_workflow_id && !acta.signature_workflow_status && !acta.is_complete ? (
+                            {canManage && !isAnnulled && !acta.signature_workflow_id && !acta.signature_workflow_status && !acta.is_complete ? (
                               <button
                                 type="button"
                                 onClick={() => handleOpenStartWorkflowModal(acta)}
@@ -689,7 +729,7 @@ const TIActasPage = () => {
                               </a>
                             ) : null}
 
-                            {!isAnnulled && !acta.is_complete ? (
+                            {canManage && !isAnnulled && !acta.is_complete ? (
                               <label className="cursor-pointer" title="Subir acta firmada">
                                 <span
                                   className={`flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${

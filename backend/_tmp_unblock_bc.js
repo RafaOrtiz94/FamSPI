@@ -1,10 +1,10 @@
 const { Pool } = require("pg");
 
 const pool = new Pool({
-  host: "ep-wispy-moon-aqszgsal.c-8.us-east-1.aws.neon.tech",
+  host: "ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech",
   user: "neondb_owner",
   password: process.env.NEON_DB_PASSWORD,
-  database: "neondb",
+  database: "FamSPI",
   port: 5432,
   ssl: { rejectUnauthorized: false },
 });

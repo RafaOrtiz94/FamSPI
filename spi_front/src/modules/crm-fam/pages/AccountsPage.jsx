@@ -11,6 +11,31 @@ const ACCOUNT_TYPES = [
   { value: "ong", label: "ONG" },
 ];
 
+const CLASSIFICATIONS = [
+  { value: "", label: "Todas las clasificaciones" },
+  { value: "oro", label: "Oro" },
+  { value: "plata", label: "Plata" },
+  { value: "bronce", label: "Bronce" },
+  { value: "normal", label: "Normal" },
+];
+
+const CLASSIFICATION_BADGES = {
+  oro: "bg-amber-50 text-amber-700 border-amber-200",
+  plata: "bg-slate-100 text-slate-600 border-slate-300",
+  bronce: "bg-orange-50 text-orange-700 border-orange-200",
+  normal: "bg-blue-50 text-blue-700 border-blue-100",
+};
+const CLASSIFICATION_LABELS = { oro: "Oro", plata: "Plata", bronce: "Bronce", normal: "Normal" };
+
+function ClassificationBadge({ value }) {
+  if (!value) return <span className="text-[#6B7280]">—</span>;
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${CLASSIFICATION_BADGES[value] || "bg-slate-100 text-slate-600 border-slate-200"}`}>
+      {CLASSIFICATION_LABELS[value] || value}
+    </span>
+  );
+}
+
 const LIMIT = 20;
 
 const EMPTY_FORM = {
@@ -33,6 +58,7 @@ function SkeletonRows() {
       <td className={skCellHidden}>{pulse}</td>
       <td className={skCellHidden}>{pulse}</td>
       <td className={skCellHidden}>{pulse}</td>
+      <td className={skCellHidden}>{pulse}</td>
       <td className={skCell}>{pulse}</td>
     </tr>
   ));
@@ -45,6 +71,7 @@ export default function AccountsPage() {
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [accountType, setAccountType] = useState("");
+  const [classification, setClassification] = useState("");
   const [offset, setOffset] = useState(0);
 
   // Debounce q 300ms
@@ -54,11 +81,12 @@ export default function AccountsPage() {
   }, [q]);
 
   // Reset offset on filter change
-  useEffect(() => { setOffset(0); }, [debouncedQ, accountType]);
+  useEffect(() => { setOffset(0); }, [debouncedQ, accountType, classification]);
 
   const params = {
     ...(debouncedQ ? { q: debouncedQ } : {}),
     ...(accountType ? { account_type: accountType } : {}),
+    ...(classification ? { classification } : {}),
     limit: LIMIT,
     offset,
   };
@@ -136,6 +164,15 @@ export default function AccountsPage() {
             <option key={t.value} value={t.value}>{t.label}</option>
           ))}
         </select>
+        <select
+          value={classification}
+          onChange={e => setClassification(e.target.value)}
+          className="border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+        >
+          {CLASSIFICATIONS.map(c => (
+            <option key={c.value} value={c.value}>{c.label}</option>
+          ))}
+        </select>
       </section>
 
       {/* Error banner */}
@@ -153,6 +190,7 @@ export default function AccountsPage() {
               <th className="px-4 py-3 text-left font-medium">Nombre</th>
               <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">RUC</th>
               <th className="px-4 py-3 text-left font-medium">Tipo</th>
+              <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Clasificación</th>
               <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Industria</th>
               <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Ciudad</th>
               <th className="px-4 py-3 text-left font-medium hidden sm:table-cell"># Opp</th>
@@ -164,7 +202,7 @@ export default function AccountsPage() {
               <SkeletonRows />
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-[#6B7280]">
+                <td colSpan={8} className="px-4 py-8 text-center text-[#6B7280]">
                   Sin resultados
                 </td>
               </tr>
@@ -178,6 +216,7 @@ export default function AccountsPage() {
                   <td className="px-4 py-3 font-medium text-[#1F2937]">{acc.account_name}</td>
                   <td className="px-4 py-3 text-[#6B7280] hidden sm:table-cell">{acc.ruc || "—"}</td>
                   <td className="px-4 py-3 text-[#6B7280]">{acc.account_type || "—"}</td>
+                  <td className="px-4 py-3 hidden sm:table-cell"><ClassificationBadge value={acc.classification} /></td>
                   <td className="px-4 py-3 text-[#6B7280] hidden sm:table-cell">{acc.industry || "—"}</td>
                   <td className="px-4 py-3 text-[#6B7280] hidden sm:table-cell">{acc.city || "—"}</td>
                   <td className="px-4 py-3 text-[#6B7280] hidden sm:table-cell">{acc.opportunities_count ?? 0}</td>

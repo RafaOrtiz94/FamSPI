@@ -1,7 +1,7 @@
-process.env.DB_HOST = "ep-lucky-bar-aw5wr0cn.c-12.us-east-1.aws.neon.tech";
+process.env.DB_HOST = "ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech";
 process.env.DB_USER = "neondb_owner";
 process.env.DB_PASSWORD = "npg_rExYDGS14fPO";
-process.env.DB_NAME = "neondb";
+process.env.DB_NAME = "FamSPI";
 process.env.DB_SSL = "true";
 const db = require("../src/config/db");
 const svc = require("../src/modules/business-case/businessCaseOffer.service");

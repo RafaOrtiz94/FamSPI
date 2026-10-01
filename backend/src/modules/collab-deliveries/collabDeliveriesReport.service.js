@@ -79,9 +79,17 @@ function buildPdf({ groups, title, subtitle, generatedAt, generatedByName, sha25
     doc.moveDown(1);
 
     // ── Per-collaborator sections ─────────────────────────────────────────────
-    const COL_W = [130, 65, 65, 65, 85, 65, 40];
+    // Bug reportado 2026-09-24: con lineBreak:false + ellipsis, columnas
+    // angostas (Item, Categoria, Acta) cortaban el contenido ("Herramienta
+    // de trabajo", nombres largos de item, codigos de acta largos) en vez de
+    // mostrarlo completo. Ahora las celdas hacen wrap normal y la fila crece
+    // (row height dinamico via heightOfString) para que nunca se oculte nada.
+    const COL_W = [135, 75, 55, 60, 80, 75, 35];
     const COL_X = COL_W.reduce((acc, w, i) => { acc.push((acc[i - 1] || 40) + (i > 0 ? COL_W[i - 1] : 0)); return acc; }, []);
     const COL_HDR = ["Ítem", "Categoría", "Estado", "Entrega", "Retiro / Fecha", "Acta", "Firmada"];
+    const ROW_FONT_SIZE = 7.5;
+    const ROW_MIN_HEIGHT = 16;
+    const ROW_LINE_PAD = 4; // margen inferior extra cuando el texto ocupa mas de una linea
 
     Object.values(groups).forEach((group) => {
       if (doc.y > 650) doc.addPage();
@@ -106,30 +114,41 @@ function buildPdf({ groups, title, subtitle, generatedAt, generatedByName, sha25
 
       // Rows
       group.rows.forEach((r, idx) => {
-        if (doc.y > 740) doc.addPage();
-        const rowY = doc.y;
-        if (idx % 2 === 1) doc.rect(40, rowY, PW, 16).fill("#f8fafc");
         const vals = [
-          (r.item_name || "-").slice(0, 22),
+          r.item_name || "-",
           CAT_ES[r.category] || r.category || "-",
           STATUS_ES[r.status] || r.status || "-",
           fmtDate(r.delivery_date),
           r.retiro_at ? fmtDate(r.retiro_at) : (r.renewal_date ? `Renov: ${fmtDate(r.renewal_date)}` : "-"),
-          (r.acta_code || "-").slice(0, 14),
+          r.acta_code || "-",
           r.acta_firmada_at ? "Sí" : "No",
         ];
+
+        // Alto real que necesita cada celda con wrap (nunca truncamos) -- la
+        // fila usa el maximo de las 7 columnas, con un piso de ROW_MIN_HEIGHT
+        // para no apretar filas de una sola linea.
+        doc.fontSize(ROW_FONT_SIZE).font("Helvetica");
+        const rowHeight = Math.max(
+          ROW_MIN_HEIGHT,
+          ...vals.map((v, i) => doc.heightOfString(v, { width: COL_W[i] - 4 }) + ROW_LINE_PAD),
+        );
+
+        if (doc.y + rowHeight > 740) doc.addPage();
+        const rowY = doc.y;
+        if (idx % 2 === 1) doc.rect(40, rowY, PW, rowHeight).fill("#f8fafc");
         vals.forEach((v, i) => {
           const color = i === 6
             ? (v === "Sí" ? "#16a34a" : "#dc2626")
             : i === 2
               ? (r.status === "retirado" ? "#94a3b8" : "#334155")
               : "#334155";
-          doc.fontSize(7.5).font("Helvetica").fillColor(color)
-            .text(v, COL_X[i] + 2, rowY + 3, { width: COL_W[i] - 4, lineBreak: false, ellipsis: true });
+          doc.fontSize(ROW_FONT_SIZE).font("Helvetica").fillColor(color)
+            .text(v, COL_X[i] + 2, rowY + 3, { width: COL_W[i] - 4 });
         });
-        doc.y = rowY + 16;
+        doc.y = rowY + rowHeight;
 
-        // Serial / talla / observations sub-row
+        // Serial / talla / observations sub-row -- tambien con wrap (antes
+        // lineBreak:false podia cortar observaciones largas contra el borde).
         const _attrs = (typeof r.attributes === "object" && r.attributes) ? r.attributes : {};
         const tallaStr = r.category === "ropa" && (_attrs.talla || _attrs.cantidad)
           ? [_attrs.talla ? `Talla: ${_attrs.talla}` : "", _attrs.cantidad ? `Cant.: ${_attrs.cantidad}` : ""].filter(Boolean).join("  ·  ")
@@ -138,11 +157,14 @@ function buildPdf({ groups, title, subtitle, generatedAt, generatedByName, sha25
           const sub = [
             r.serial_number ? `Serie: ${r.serial_number}` : "",
             tallaStr,
-            r.observations ? `Obs: ${String(r.observations).slice(0, 60)}` : "",
+            r.observations ? `Obs: ${String(r.observations)}` : "",
           ].filter(Boolean).join("  ·  ");
-          doc.fontSize(6.5).font("Helvetica").fillColor("#94a3b8")
-            .text(sub, 46, doc.y, { width: PW - 12, lineBreak: false });
-          doc.y += 10;
+          const subWidth = PW - 12;
+          doc.fontSize(6.5).font("Helvetica");
+          const subHeight = doc.heightOfString(sub, { width: subWidth });
+          if (doc.y + subHeight > 750) doc.addPage();
+          doc.fillColor("#94a3b8").text(sub, 46, doc.y, { width: subWidth });
+          doc.y += subHeight + 3;
         }
       });
       doc.moveDown(0.8);
@@ -251,25 +273,64 @@ function groupByCollaborator(rows) {
   return groups;
 }
 
-async function fetchAllRows(whereCollabExtra = "", whereCollabParams = [], whereTiExtra = "", whereTiParams = []) {
+// category: una de COLLAB_CATEGORIES ("ropa", "epp", "herramienta",
+// "logistica", "suministros", "poliza") o "ti" (activos TI, que vive en una
+// tabla/consulta aparte -- ver _TI_REPORT_QUERY). null/undefined = sin
+// filtrar (reporte mezclado, comportamiento original).
+async function fetchAllRows({ userId = null, category = null } = {}) {
+  const collabConditions = [];
+  const collabParams = [];
+  if (userId) {
+    collabParams.push(userId);
+    collabConditions.push(`d.user_id = $${collabParams.length}`);
+  }
+  if (category) {
+    collabParams.push(category);
+    collabConditions.push(`ci.category = $${collabParams.length}`);
+  }
+  const whereCollabExtra = collabConditions.length ? `AND ${collabConditions.join(" AND ")}` : "";
+
+  const tiConditions = [];
+  const tiParams = [];
+  if (userId) {
+    tiParams.push(userId);
+    tiConditions.push(`COALESCE(a.recipient_user_id, a.previous_user_id) = $${tiParams.length}`);
+  }
+  if (category && category !== "ti") {
+    // _TI_REPORT_QUERY solo puede devolver category='ti' -- si se pidio otra
+    // categoria, la respuesta correcta es "sin filas", no hace falta ni
+    // mandar el WHERE como parametro.
+    tiConditions.push("FALSE");
+  }
+  const whereTiExtra = tiConditions.length ? `AND ${tiConditions.join(" AND ")}` : "";
+
   const [collabResult, tiResult] = await Promise.all([
-    db.query(_REPORT_QUERY(whereCollabExtra), whereCollabParams),
-    db.query(_TI_REPORT_QUERY(whereTiExtra), whereTiParams),
+    db.query(_REPORT_QUERY(whereCollabExtra), collabParams),
+    db.query(_TI_REPORT_QUERY(whereTiExtra), tiParams),
   ]);
   return [...collabResult.rows, ...tiResult.rows];
 }
 
+function resolveCategoryTitle(category) {
+  if (!category) return null;
+  return CAT_ES[category] || category;
+}
+
 // ─── Public API ────────────────────────────────────────────────────────────────
 
-async function generateFullReportPdf({ generatedByName } = {}) {
-  const rows = await fetchAllRows();
+async function generateFullReportPdf({ generatedByName, category = null } = {}) {
+  const rows = await fetchAllRows({ category });
   const groups = groupByCollaborator(rows);
   const generatedAt = new Date();
+  const categoryLabel = resolveCategoryTitle(category);
+  const title = categoryLabel
+    ? `Reporte de Entregas — ${categoryLabel}`
+    : "Reporte General de Entregas a Colaboradores";
 
   // First pass — placeholder hash
   const pdfBuf = await buildPdf({
     groups,
-    title: "Reporte General de Entregas a Colaboradores",
+    title,
     subtitle: null,
     generatedAt,
     generatedByName,
@@ -281,23 +342,30 @@ async function generateFullReportPdf({ generatedByName } = {}) {
   // Second pass — embed real hash
   const finalBuf = await buildPdf({
     groups,
-    title: "Reporte General de Entregas a Colaboradores",
+    title,
     subtitle: null,
     generatedAt,
     generatedByName,
     sha256,
   });
 
-  return { buffer: finalBuf, sha256: computeSha256HexFromBuffer(finalBuf), filename: `reporte_general_entregas_${new Date().toISOString().slice(0, 10)}.pdf` };
+  const categorySlug = category ? `_${category}` : "";
+  return {
+    buffer: finalBuf,
+    sha256: computeSha256HexFromBuffer(finalBuf),
+    filename: `reporte_general_entregas${categorySlug}_${new Date().toISOString().slice(0, 10)}.pdf`,
+  };
 }
 
-async function generateCollaboratorReportPdf(userId, { generatedByName } = {}) {
-  const rows = await fetchAllRows(
-    "AND d.user_id = $1", [userId],
-    "AND COALESCE(a.recipient_user_id, a.previous_user_id) = $1", [userId],
-  );
+async function generateCollaboratorReportPdf(userId, { generatedByName, category = null } = {}) {
+  const rows = await fetchAllRows({ userId, category });
   if (!rows.length) {
-    const err = new Error("Sin entregas para este colaborador");
+    const categoryLabel = resolveCategoryTitle(category);
+    const err = new Error(
+      categoryLabel
+        ? `Sin entregas de ${categoryLabel} para este colaborador`
+        : "Sin entregas para este colaborador",
+    );
     err.status = 404;
     throw err;
   }
@@ -306,10 +374,14 @@ async function generateCollaboratorReportPdf(userId, { generatedByName } = {}) {
   const collaboratorName = collab.colaborador || collab.email || `Usuario #${userId}`;
   const groups = groupByCollaborator(rows);
   const generatedAt = new Date();
+  const categoryLabel = resolveCategoryTitle(category);
+  const title = categoryLabel
+    ? `Reporte de ${categoryLabel} — ${collaboratorName}`
+    : `Reporte de Entregas — ${collaboratorName}`;
 
   const pdfBuf = await buildPdf({
     groups,
-    title: `Reporte de Entregas — ${collaboratorName}`,
+    title,
     subtitle: collab.email || null,
     generatedAt,
     generatedByName,
@@ -320,7 +392,7 @@ async function generateCollaboratorReportPdf(userId, { generatedByName } = {}) {
 
   const finalBuf = await buildPdf({
     groups,
-    title: `Reporte de Entregas — ${collaboratorName}`,
+    title,
     subtitle: collab.email || null,
     generatedAt,
     generatedByName,
@@ -328,10 +400,11 @@ async function generateCollaboratorReportPdf(userId, { generatedByName } = {}) {
   });
 
   const safeName = collaboratorName.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s]/g, "").replace(/\s+/g, "_").toLowerCase();
+  const categorySlug = category ? `_${category}` : "";
   return {
     buffer: finalBuf,
     sha256: computeSha256HexFromBuffer(finalBuf),
-    filename: `reporte_${safeName}_${new Date().toISOString().slice(0, 10)}.pdf`,
+    filename: `reporte_${safeName}${categorySlug}_${new Date().toISOString().slice(0, 10)}.pdf`,
     collaboratorName,
   };
 }

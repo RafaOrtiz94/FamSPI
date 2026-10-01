@@ -1092,6 +1092,49 @@ describe("businessCaseOffer.service", () => {
     expect(ws["I13"]?.f).toBeUndefined();
   });
 
+  test("buildOfferWorkbookBuffer en DETERMINACION: solo US$ DET, kit oculto y convertido", () => {
+    const buffer = service.__testables.buildOfferWorkbookBuffer({
+      clientName: "Cliente Demo",
+      equipmentName: "COBAS PURE e402",
+      determination_only: true,
+      sections: {
+        reactivo: [{ product: "FT4", code: "9043284190", detPerKit: 300, kitPrice: 600 }],
+        calibrador: [],
+        control: [],
+        consumible: [],
+        electrolito: [],
+      },
+    });
+    const XLSX = require("xlsx");
+    const wb = XLSX.read(buffer, { type: "buffer", cellStyles: true });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+
+    expect(ws["I11"]?.v).toBe("US$ DET");
+    expect(ws["H11"]).toBeUndefined();
+    expect(ws["H13"]).toBeUndefined();
+    expect(ws["I13"]?.v).toBe(2);
+    expect(ws["I13"]?.f).toBeUndefined();
+    expect(ws["!cols"]?.[7]?.hidden).toBe(true);
+  });
+
+  test("buildOfferTemplatePayload en DETERMINACION deja solo reactivos; texto libre no aplica", async () => {
+    const items = [
+      { item_key: "r1", item_id: "R1", name: "Reactivo", item_type: "reactivo", equipment_id: 15 },
+      { item_key: "c1", item_id: "C1", name: "Calibrador", item_type: "calibrador", equipment_id: 15 },
+      { item_key: "m1", item_id: "M1", name: "Material", item_type: "material", equipment_id: 15 },
+    ];
+    const only = await service.__testables.buildOfferTemplatePayload({ contract_object: "Determinación efectiva" }, items, {});
+    expect(only.determination_only).toBe(true);
+    Object.entries(only.sections).forEach(([key, rows]) => {
+      if (key !== "reactivo") expect(rows).toEqual([]);
+    });
+
+    const freeText = await service.__testables.buildOfferTemplatePayload(
+      { contract_object: "ADQUISICION DE DETERMINACIONES PARA GASES Y ELECTROLITOS" }, items, {},
+    );
+    expect(freeText.determination_only).toBe(false);
+  });
+
   test("computeSectionEquipmentGroups agrupa filas consecutivas del mismo equipo sin reordenar", () => {
     const groups = service.__testables.computeSectionEquipmentGroups([
       { product: "R1", equipmentName: "cobas e411 disk" },

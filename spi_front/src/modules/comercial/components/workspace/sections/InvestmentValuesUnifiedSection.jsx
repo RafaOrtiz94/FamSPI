@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { FiAlertCircle, FiCheckCircle, FiClock, FiLayers, FiMail, FiPercent, FiSave, FiUserPlus } from "react-icons/fi";
+import { FiAlertCircle, FiCheckCircle, FiClock, FiLayers, FiMail, FiPercent, FiRefreshCw, FiSave, FiUserPlus } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useAuth } from "../../../../../core/auth/AuthContext";
 import { useUI } from "../../../../../core/ui/UIContext";
@@ -111,15 +111,20 @@ const InvestmentValuesUnifiedSection = ({
   const [dirtyMap, setDirtyMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [syncingSheet, setSyncingSheet] = useState(false);
   const [closingWithoutItems, setClosingWithoutItems] = useState(false);
   const [assignmentSavingId, setAssignmentSavingId] = useState(null);
   const [quotationRequestingId, setQuotationRequestingId] = useState(null);
 
   const role = String(user?.role || user?.scope || user?.role_name || "").toLowerCase();
+  const canEditAssignedQuotation = Boolean(permissions.canEditAssignedInvestmentValues);
+  const canManageQuotations = OPERATIONAL_ROLES.has(role) || FINANCIAL_ROLES.has(role);
   const canEditOperational =
-    OPERATIONAL_ROLES.has(role) && permissions.canEdit !== false && operationalOwnership?.canUserEdit !== false;
+    (canEditAssignedQuotation && !operationalOwnership?.isLocked) ||
+    (OPERATIONAL_ROLES.has(role) && permissions.canEdit !== false && operationalOwnership?.canUserEdit !== false);
   const canEditFinancial =
-    FINANCIAL_ROLES.has(role) && permissions.canEdit !== false && financialOwnership?.canUserEdit !== false;
+    (canEditAssignedQuotation && !financialOwnership?.isLocked) ||
+    (FINANCIAL_ROLES.has(role) && permissions.canEdit !== false && financialOwnership?.canUserEdit !== false);
   const canEditAny = canEditOperational || canEditFinancial;
 
   const load = useCallback(async () => {
@@ -129,7 +134,9 @@ const InvestmentValuesUnifiedSection = ({
       const [operationalRes, financialRes, assigneesRes, tiReservations] = await Promise.all([
         api.get(`/business-case/${bcId}/investments/values`, { params: { class: "operativa" } }),
         api.get(`/business-case/${bcId}/investments/values`, { params: { class: "financiera" } }),
-        api.get(`/business-case/${bcId}/investments/values/assignees`),
+        canManageQuotations
+          ? api.get(`/business-case/${bcId}/investments/values/assignees`)
+          : Promise.resolve(null),
         listAllTiAssetReservations(bcId).catch(() => []),
       ]);
       const countsByCatalogId = {};
@@ -159,7 +166,7 @@ const InvestmentValuesUnifiedSection = ({
     } finally {
       setLoading(false);
     }
-  }, [bcId, showToast]);
+  }, [bcId, canManageQuotations, showToast]);
 
   useEffect(() => {
     load();
@@ -213,6 +220,25 @@ const InvestmentValuesUnifiedSection = ({
     }
   };
 
+  // Sincronizacion manual: pasa los precios GUARDADOS a la hoja BC (Precio =
+  // valor residual unitario, Total = cantidad x precio) con respaldo previo.
+  const handleSyncSheet = async () => {
+    if (!bcId) return;
+    try {
+      setSyncingSheet(true);
+      const response = await api.post(`/business-case/${bcId}/investments/values/sync-sheet`);
+      const backupName = response?.data?.data?.backup?.name;
+      showToast(
+        backupName ? `Precios sincronizados con la hoja. Respaldo: ${backupName}` : "Precios sincronizados con la hoja",
+        "success",
+      );
+    } catch (error) {
+      showToast(error?.response?.data?.message || "No se pudo sincronizar con la hoja", "error");
+    } finally {
+      setSyncingSheet(false);
+    }
+  };
+
   const getActionClass = () => (canEditFinancial ? "financiera" : "operativa");
 
   const handleAssignQuotation = async (item) => {
@@ -262,7 +288,7 @@ const InvestmentValuesUnifiedSection = ({
     operationalOwnership?.metadata?.completion_basis === "no_additional_investments_selected" ||
     financialOwnership?.metadata?.completion_basis === "no_additional_investments_selected",
   );
-  const canCloseWithoutItems = Boolean(canEditAny && !items.length && !closedWithoutInvestments);
+  const canCloseWithoutItems = Boolean(canManageQuotations && canEditAny && !items.length && !closedWithoutInvestments);
   const totals = useMemo(() => items.reduce((acc, row) => {
     const qty = Number(row.quantity || 1);
     const op = Number(row.operational_unit_price || 0);
@@ -337,6 +363,18 @@ const InvestmentValuesUnifiedSection = ({
             >
               <FiSave size={13} />
               {saving ? "Guardando..." : "Guardar precios"}
+            </button>
+          )}
+          {canEditAny && items.length > 0 && (
+            <button
+              type="button"
+              onClick={handleSyncSheet}
+              disabled={syncingSheet || saving || dirtyCount > 0}
+              title={dirtyCount > 0 ? "Guarda los cambios antes de sincronizar" : "Pasar precios guardados a la hoja de Sheets"}
+              className="inline-flex items-center gap-2 rounded-full border border-emerald-600 bg-white px-4 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition-colors hover:bg-emerald-50 disabled:border-gray-200 disabled:text-gray-400"
+            >
+              <FiRefreshCw size={13} className={syncingSheet ? "animate-spin" : ""} />
+              {syncingSheet ? "Sincronizando..." : "Sincronizar con Sheet"}
             </button>
           )}
         </div>
@@ -518,7 +556,7 @@ const InvestmentValuesUnifiedSection = ({
                     </p>
                   )}
 
-                  {canEditAny && !coveredByTiInventory && (
+                  {canManageQuotations && !coveredByTiInventory && (
                     <div className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
                       <label className="flex flex-col gap-1">
                         <span className="text-xs font-semibold text-gray-500">Responsable de cotizacion</span>

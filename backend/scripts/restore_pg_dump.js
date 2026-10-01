@@ -5,7 +5,7 @@
  * Soporta bloques `COPY ... FROM stdin;` via pg-copy-streams.
  *
  * Uso:
- *   DB_HOST=... DB_PORT=5432 DB_USER=neondb_owner DB_PASSWORD=... DB_NAME=neondb \
+ *   DB_HOST=... DB_PORT=5432 DB_USER=neondb_owner DB_PASSWORD=... DB_NAME=FamSPI \
  *   node backend/scripts/restore_pg_dump.js /ruta/al/dump.sql.gz
  *
  * Requiere pg-copy-streams instalado (npm install pg-copy-streams --no-save

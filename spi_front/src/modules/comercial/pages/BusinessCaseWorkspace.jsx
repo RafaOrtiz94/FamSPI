@@ -39,6 +39,7 @@ const WORKSPACE_SECTION_ORDER = [
  "determinations",
  "investments",
  "investment_values",
+ "pricing_lab",
  "feasibility",
  // offer_workspace faltaba aqui (ver skill bc-workspace-tabs): si aparece en
  // el tab pero no en esta lista, se rompe el auto-avance ("siguiente
@@ -96,8 +97,13 @@ const resolveProcessNotesScope = (businessCase, businessCaseId) => {
 };
 
 // BC-21: Usa la función exportada del config para obtener secciones visibles por rol
-const getVisibleSectionsByRole = (role = "") => {
- return getVisibleSections(role, WORKSPACE_SECTION_ORDER);
+const getVisibleSectionsByRole = (role = "", hasAssignedInvestmentQuotation = false) => {
+ if (hasAssignedInvestmentQuotation) return ["investment_values"];
+ const normalizedRole = String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+ const visible = getVisibleSections(role, WORKSPACE_SECTION_ORDER);
+ return ["jefe_ti", "jefe_de_ti"].includes(normalizedRole)
+  ? visible
+  : visible.filter((section) => section !== "pricing_lab");
 };
 
 const normalizeWorkspaceSection = (sectionId = "") => (
@@ -225,7 +231,8 @@ const BusinessCaseWorkspace = () => {
  const normalizedUIGuidance = await refreshWorkspaceState();
  if (sectionCompleted && options?.section) {
  const userRole = normalizedUIGuidance?.permissions?.userRole || "comercial";
- const visible = getVisibleSectionsByRole(userRole);
+ const hasAssignedInvestmentQuotation = Boolean(normalizedUIGuidance?.permissions?.canEditAssignedInvestmentValues);
+ const visible = getVisibleSectionsByRole(userRole, hasAssignedInvestmentQuotation);
  let nextSection = getNextSectionId(options.section, userRole);
  if (
  options.section === "determinations" &&
@@ -294,7 +301,8 @@ const BusinessCaseWorkspace = () => {
  // BC cerrado no factible: solo el Resumen queda accesible, ninguna otra
  // seccion (edicion no tiene sentido sobre un caso ya descartado).
  const isClosedNoFactible = normalizedUIGuidance?.workflowState?.currentStage === "cerrado_no_factible";
- const visibleSections = isClosedNoFactible ? ["consumption_export"] : getVisibleSectionsByRole(userRole);
+ const hasAssignedInvestmentQuotation = Boolean(normalizedUIGuidance?.permissions?.canEditAssignedInvestmentValues);
+ const visibleSections = isClosedNoFactible ? ["consumption_export"] : getVisibleSectionsByRole(userRole, hasAssignedInvestmentQuotation);
  const normalizedSelectedSection = normalizeWorkspaceSection(selectedSection);
  if (normalizedSelectedSection !== selectedSection && visibleSections.includes(normalizedSelectedSection)) {
  setSelectedSection(normalizedSelectedSection);
@@ -373,7 +381,10 @@ const BusinessCaseWorkspace = () => {
  }
  };
 
- const visibleSections = getVisibleSectionsByRole(uiGuidance?.permissions?.userRole || "comercial");
+ const visibleSections = getVisibleSectionsByRole(
+  uiGuidance?.permissions?.userRole || "comercial",
+  Boolean(uiGuidance?.permissions?.canEditAssignedInvestmentValues),
+ );
  const pendingReopenRequest = uiGuidance?.preflow?.extensionRequest || null;
  const isTechnicalReviewExpired = Boolean(
   uiGuidance?.preflow?.isActive &&

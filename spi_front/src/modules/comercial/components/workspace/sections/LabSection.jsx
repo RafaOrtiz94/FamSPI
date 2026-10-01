@@ -7,6 +7,7 @@ import { useUI } from "../../../../../core/ui/UIContext";
 import Card from "../../../../../core/ui/components/Card";
 import { useAutoEditSection } from "../BusinessCaseWorkspaceContext";
 import SectionEditorBadge from "../SectionEditorBadge";
+import LabProductParametersCard from "./LabProductParametersCard";
 
 // Mismos roles que ya autoriza el backend en POST /sections/:section/unlock.
 const LAB_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial"]);
@@ -344,6 +345,8 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
  </div>
  )}
  </form>
+
+ <LabProductParametersCard bcId={bcId} canEdit={canEdit} />
  </div>
  );
 };

@@ -1,6 +1,6 @@
 const { Client } = require('pg');
 const client = new Client({
-  host: 'ep-wispy-moon-aqszgsal-pooler.c-8.us-east-1.aws.neon.tech',
+  host: 'ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech',
   port: 5432,
   user: 'neondb_owner',
   password: process.env.DB_PASSWORD,

@@ -7,6 +7,7 @@ import {
   reserveTiAsset,
   searchReservableTiAssets,
 } from "../../../../../core/api/bcInvestmentTiAssetsApi";
+import TiAssetTechSpecButton from "../../../../ti/components/TiAssetTechSpecButton";
 
 // Vincula activos TI concretos (por serie) a un item de inversiones adicionales.
 // Dos modos:
@@ -258,6 +259,8 @@ const TiAssetReservationPanel = ({ bcId, catalogId, quantity, showToast, canMana
                 <p className="mt-1 text-xs text-slate-700">{formatCharacteristics(detailAsset.characteristics)}</p>
               </div>
             )}
+            {/* Reserva: id = reserva, activo en ti_asset_id; busqueda: id = activo. */}
+            <TiAssetTechSpecButton asset={{ id: detailAsset.ti_asset_id ?? detailAsset.id, asset_code: detailAsset.asset_code }} />
           </div>
         )}
       </Modal>

@@ -3,11 +3,11 @@ const { Client } = require("pg");
 
 async function main() {
   const client = new Client({
-    host: "ep-wispy-moon-aqszgsal.c-8.us-east-1.aws.neon.tech", // directo, sin -pooler
+    host: "ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech", // directo, sin -pooler
     port: 5432,
     user: "neondb_owner",
     password: "npg_W12CVSvHJEsA",
-    database: "neondb",
+    database: "FamSPI",
     ssl: { rejectUnauthorized: false },
   });
   await client.connect();

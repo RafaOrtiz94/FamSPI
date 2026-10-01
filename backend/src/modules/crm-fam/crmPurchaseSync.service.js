@@ -427,6 +427,7 @@ async function syncBusinessCaseOfferSent(businessCaseId, actorUser) {
 
 module.exports = {
   STAGE_NAMES,
+  ensureLinkColumns,
   syncPublicPurchaseCreated,
   syncPrivatePurchaseCreated,
   syncPublicPurchaseStage,

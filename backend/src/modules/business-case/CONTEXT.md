@@ -126,6 +126,10 @@ Prefijo: `/api/v1/business-case`
 ### Cálculos y Exportación
 | Método | Ruta | Handler | Roles |
 |--------|------|---------|-------|
+| GET | `/matrix-calculations/catalog` | `matrixBusinessCaseCalculation.controller#getCatalog` | jefe_ti / jefe_de_ti exclusivamente |
+| POST | `/matrix-calculations/preview` | `matrixBusinessCaseCalculation.controller#preview` | jefe_ti / jefe_de_ti exclusivamente |
+| GET | `/:id/pricing-lab/preview` | `businessCasePricingLab.controller#preview` | jefe_ti / jefe_de_ti exclusivamente |
+| POST | `/:id/pricing-lab/preview` | `businessCasePricingLab.controller#preview` (lee Sheet en memoria y calcula) | jefe_ti / jefe_de_ti exclusivamente |
 | GET | `/:id/calculations` | `getCalculations` | businessCaseRoles |
 | POST | `/:id/recalculate` | `recalculate` | businessCaseRoles |
 | GET | `/:id/export/pdf` | `exportPdf` | businessCaseRoles |
@@ -433,3 +437,227 @@ Posición: columna `right-4`, por encima de `NotificationBell.jsx` y `Attendance
 - `deliveryCeiling.service.js` fue eliminado (código muerto, sin callers reales en producción); ver skill `modulo-techos-entrega`
 - El módulo `requests` (fuera de `business-case`) tiene su propio catálogo `request_types` con labels tipo "F.ST-XX" que NO tienen relación de código con los endpoints `/determinations/inspection-request` de este módulo, a pesar de compartir el nombre "inspección de ambiente" en el título de `F.ST-20` — son dos sistemas distintos (uno genérico de solicitudes con AJV, otro embebido en `modern_bc_metadata` del BC). No asumir que tocar uno afecta al otro.
 - El `RequestsListModal`/`RequestStatWidget` compartido (`spi_front/src/modules/shared/solicitudes/`) filtra por defecto `mine: true` — cualquier widget nuevo en una bandeja de "aprobador" (no del propio creador de la solicitud) debe pasar `initialFilters: { mine: false }` explícito o no verá ninguna solicitud.
+
+---
+
+## 12. Motor versionado de matrices de costos (2026-09)
+
+El motor declarativo de matrices vive en `matrixCalculationEngine.service.js`. No ejecuta
+fórmulas arbitrarias: solo acepta paquetes curados, versionados y asociados al SHA-256 del
+libro revisado. La selección es exacta por `family`, `equipment`, `modality` y `version`; no
+existe fallback entre equipos o modalidades.
+
+Endpoints autenticados exclusivamente para `jefe_ti`/`jefe_de_ti`:
+
+| Método | Ruta | Uso |
+|--------|------|-----|
+| GET | `/matrix-calculations/catalog` | Lista paquetes activos, alcances en cuarentena y cobertura de las 29 hojas auditadas |
+| POST | `/matrix-calculations/preview` | Ejecuta un paquete exacto sin persistir ni modificar el recálculo productivo existente |
+
+La modalidad debe enviarse explícitamente porque el modelo actual de Business Case no
+almacena `determinacion`, `prueba_efectiva` o `todo_comprado`. Por esa razón este motor no
+está conectado automáticamente a `/:id/recalculate`: inferirla cambiaría el resultado sin
+evidencia de negocio.
+
+### Laboratorio paralelo de precios (en construcción)
+
+`pricing_lab` es una sección aislada del workspace visible únicamente para
+`jefe_ti`/`jefe_de_ti`; el control se repite en frontend y backend y no usa el bypass de
+super-rol de `requireRole`. El `GET` calcula con cantidades ya almacenadas. El `POST`
+lee el Sheet y superpone sus cantidades únicamente en memoria para esa respuesta. En
+ambos casos `offerWriteEnabled=false`: no se actualizan consumos, versiones ni precios
+de la oferta oficial.
+
+La integración conserva las fuentes verificadas del mapeador: reactivos toman demanda de
+`DET/AÑO PROCESO`; controles, calibradores y materiales toman `PRODUCTO CALCULADO` y, en
+las pestañas que carecen de esa columna, el mapeador usa `PRODUCTO A ENTREGAR/ENVIAR` como
+fallback. Todo termina normalizado en `bc_consumption_items.annual_qty`; la columna de
+despacho `planned_qty` se mantiene separada y se expone para comparación. No se sustituyen
+cantidades entre columnas por inferencia.
+
+Cobertura verificada:
+
+- Hematología: 13 alcances activos y 14 en cuarentena con evidencia de la celda fuente.
+- Inmuno-Química: hojas de cálculo en cuarentena hasta definir la semántica de divisores en
+  cero y corregir referencias rotas/externas del libro fuente.
+- Catálogo de auditoría: `matrixCalculationCoverage.catalog.js`.
+
+### Modelo predictivo híbrido del laboratorio (modo sombra)
+
+El laboratorio incorpora `businessCasePredictiveLab.service.js` sin conectarlo a la
+oferta oficial. El modelo combina tres estimadores históricos (mediana, proporción
+respecto de la demanda total de reactivos y vecino más cercano en espacio logarítmico)
+con la fórmula auditada del paquete. La fórmula siempre tiene prioridad y ninguna
+sugerencia es publicable (`offerWriteEnabled=false`, `publishable=false`).
+
+El umbral obligatorio de exactitud es **99,9 %**. Se define como
+`max(0, 100 * (1 - WAPE))` sobre cantidades positivas y se valida dejando fuera un
+Business Case completo en cada iteración. Los rangos P50/P80/P95 son cuantiles
+empíricos, no garantías probabilísticas.
+
+`bc_consumption_items.planned_qty` se usa solo como proxy para producir sugerencias.
+No se acepta como verdad operacional. La habilitación futura exige al menos cinco
+Business Cases comparables con despacho completo y valida contra
+`bc_dispatch_items.ops_dispatched_qty`. Mientras esos resultados no existan o el
+backtest no alcance 99,9 %, `automaticCorrectionEligible=false` y la interfaz muestra
+el bloqueo. El servicio hace consultas de solo lectura y no entrena ni persiste un
+modelo en la base de datos.
+
+La versión `hybrid-pro-ultra-0.2.0` corrige la población histórica: solo acepta
+consumos cuyo equipo continúa presente en `bc_equipment_selection`, excluye
+`DRAFT_INICIAL` y descarta muestras sin demanda reactiva positiva. Para evitar
+una regla universal que los datos no respaldan, usa un campeón verificable por
+familia: calibradores conservan la cantidad del vecino más próximo en el vector
+logarítmico de reactivos; controles y materiales escalan ese vecino por la
+relación de demanda reactiva total. El backtest evalúa solo calibradores,
+controles y materiales; los reactivos quedan como entradas del predictor y como
+salidas únicamente cuando existe una fórmula auditada.
+
+Las sugerencias con uno o más pares se muestran exclusivamente para revisión.
+La respuesta informa métricas proxy, métricas operacionales, número de pares,
+método por producto y estado de soporte. Esto no relaja la puerta automática:
+siguen siendo obligatorios cinco casos con despacho completo y 99,9 % de
+exactitud operacional.
+
+### Contexto verificable por producto (v0.3)
+
+El laboratorio predictivo incorpora un contexto independiente para cada
+producto. La identidad se construye con `catalog_consumables.id`, código de
+proveedor, tipo y compatibilidad real de `catalog_equipment_consumables`; los
+valores DET/KIT y estabilidad solo se incorporan cuando provienen de un paquete
+de cálculo auditado o de un campo de catálogo poblado. También se expone el
+perfil de reactivos observado en Business Cases productivos donde el producto
+tuvo cantidad positiva.
+
+Los campos faltantes se reportan explícitamente. Un código de proveedor que
+identifica más de un producto compatible con el mismo equipo se marca como
+`ambiguous_supplier_code` y no recibe sugerencia histórica. El contexto mejora
+la trazabilidad y evita mezclar productos, pero no eleva por sí solo la
+exactitud operacional: rendimiento, estabilidad y vínculos producto-
+determinación continúan incompletos en el catálogo productivo y deben cargarse
+con evidencia antes de usarlos como variables del modelo.
+
+La versión `hybrid-pro-ultra-0.4.0` separa la identidad interna por tipo y
+código para impedir que un reactivo, calibrador, control o material con el mismo
+identificador sobrescriba a otro. Para controles y materiales, la distancia y
+el escalamiento usan únicamente el perfil de reactivos observado junto al
+producto en los pares de entrenamiento; controles redondean al entero más
+cercano y materiales hacia arriba. Estas decisiones fueron seleccionadas con
+validación leave-one-Business-Case-out en producción. No modifican la puerta de
+99,9 % ni habilitan escrituras automáticas.
+
+### Evidencia primaria de fabricante (v0.5)
+
+La versión `hybrid-pro-ultra-0.5.0` incorpora una capa local, versionada y de
+solo lectura con evidencia primaria de Roche y Sysmex. Cada evidencia conserva
+fabricante, familia de producto, hechos verificables, URL, versión documental
+cuando está disponible y fecha de consulta. Esta capa enriquece
+`productKnowledge.manufacturerEvidence`; no consulta Internet durante una
+solicitud, no reemplaza por sí sola las fórmulas auditadas y no habilita
+escrituras en la oferta.
+
+Para XN Check, el período oficial de uso de 56 días respalda el valor de
+estabilidad del paquete de cálculo. Para CELLCLEAN AUTO, la documentación
+oficial establece limpieza semanal y el catálogo interno presenta 20 unidades
+por paquete: la cobertura aritmética resultante es 140 días, frente a 150 días
+en el Sheet. El sistema conserva la fórmula actual y marca la comparación como
+`requires_review`; no corrige la diferencia sin validación del responsable de
+producto. Las fichas Roche registradas aportan asociaciones, presentaciones y
+estabilidades de C.f.a.s., C.f.a.s. Lipids, C.f.a.s. HbA1c y PreciControl, pero
+no se convierten en cantidades automáticas mientras falten la política local de
+QC y los consumos por evento.
+
+### Ciclo visible de aprendizaje (v0.6)
+
+La versión `hybrid-pro-ultra-0.6.0` compara, sin escribir la oferta, cada
+cantidad sugerida con `bc_consumption_items.planned_qty` del Business Case
+actual. Cada producto queda clasificado como `exact_match`, `different`,
+`awaiting_registered_quantity` o `prediction_unavailable`, y la respuesta
+incluye un resumen de coincidencia exacta del caso. Esta comparación es
+exclusivamente un proxy de planificación: la validación oficial continúa
+dependiendo de `bc_dispatch_items.ops_dispatched_qty` en despachos completos.
+
+Todos los registros de consumo permanecen disponibles como observaciones. Un
+caso solo entra al histórico de sugerencias después de salir de
+`DRAFT_INICIAL`, conserva su equipo seleccionado y tiene demanda reactiva
+positiva. El Business Case consultado se excluye siempre de sus propios pares,
+evitando fuga de información. La UI de `pricing_lab`, todavía restringida a
+Jefe TI, muestra la leyenda de ajuste, la cantidad sugerida, la registrada y
+el estado de coincidencia; no aplica cambios automáticos.
+
+### Motor por reglas — Fase 1: ficha técnica versionada (2026-09-29)
+
+Dirección nueva: calibradores, controles, materiales e ISE se calcularán con
+**fórmulas por reglas para la duración del proceso**
+(`bc_requirements.projected_deadline_months`), no anual y no por histórico. La
+meta de 99,9 % se mide contra casos validados por experto, no contra lo que se
+registró en el Sheet. El modelo histórico anterior queda como comparación.
+
+- `migrations/305_catalog_consumable_specs.sql`: tabla `catalog_consumable_specs`,
+  una fila por **versión** de ficha (`valid_from`/`valid_to`, una sola abierta por
+  código). Guarda presentación, estabilidad abierto/a bordo, uso único,
+  intervalo de reemplazo, base de consumo y evidencia (documento, versión,
+  fecha, URL). Se enlaza por `supplier_code` sin ceros a la izquierda; no tiene
+  FK porque el mismo código aparece en varias filas de `catalog_consumables`.
+- `system_specs` (JSONB) guarda los datos que cambian por analizador:
+  estabilidad a bordo, eventos de calibración (cambio de lote o de pack),
+  intervalos (`interval_days`, `onboard_pack_interval_days`,
+  `same_lot_interval_days`, `onboard_kit_interval_days`), réplicas e intervalo
+  de control. La clave `todos` aplica a todos los analizadores del documento.
+  Son los valores por defecto que se mostrarán y podrán ajustarse en
+  **Entorno Laboratorio**.
+- `migrations/306_seed_catalog_consumable_specs.sql`: **todo el catálogo**
+  (684 códigos: 393 reactivos, 105 calibradores, 85 controles, 101 materiales),
+  sacado de documentos vigentes de Roche eLabDoc (Method Sheet o catálogo de
+  accesorios). Estados:
+  - `verified` (27): piloto `cobas Pure <303>`, revisado a mano.
+  - `extracted` (458): extraído automáticamente, con evidencia textual en
+    `parameters.evidence`; falta revisión humana.
+  - `partial` (131): hay documento pero falta presentación, estabilidad o
+    frecuencia de calibración.
+  - `requires_review` (5).
+  - `pending` (63): sin documento del fabricante.
+- `parameters.linked_products`: calibradores, controles y materiales que lista
+  el documento de cada reactivo (366 productos). Así se sabe qué calibrador y
+  qué control consume cada reactivo.
+- `parameters.onboard_aliquot_single_use` (Elecsys CalSet/PreciControl): cada
+  alícuota puesta en el analizador se usa una vez, pero el frasco sigue vigente
+  a 2-8 °C según `stability_open_days`. `single_use` se reserva para envases que
+  se descartan al abrir (ampollas ISE Standard, pruebas POC).
+- El mismo 306 completa `catalog_consumables.supplier_code` (solo donde hoy es
+  NULL) en 38 filas duplicadas del catálogo que no tenían código. El código se
+  resolvió por coincidencia exacta de nombre en eLabDoc. Hay 32 productos del
+  catálogo sin código que siguen sin resolver: tienen dos códigos candidatos o
+  el nombre no coincide.
+- **Regenerar o actualizar las fichas:** `backend/scripts/consumable-specs/run.js`.
+  El parser está en `consumableSpecsExtractor.js`, con tests. Las fichas
+  revisadas a mano del piloto están en `curatedCobasPure303.json`.
+  - `--mode=seed` produce la carga completa.
+  - `--mode=update` vuelve a buscar cada código en eLabDoc y, cuando Roche
+    publicó otra versión del documento (cambio de presentación, estabilidad,
+    etc.), genera SQL que cierra la versión vigente (`valid_to`) e inserta la
+    nueva.
+  - No escribe en la base: produce un `.sql` para aplicar a mano.
+  - Requiere `pdftotext`.
+- **Entorno Laboratorio → "Parámetros por producto"**
+  (`LabProductParametersCard.jsx`):
+  - Endpoints `GET/PUT /:id/lab-environment/product-parameters` en
+    `bcLabProductParameters.service.js`. Cruza los productos del BC con cantidad
+    con la ficha vigente y elige el bloque del analizador del BC: primero el
+    específico, luego `todos`, luego `cobas c systems`.
+  - Muestra calibración, control, estabilidad y los calibradores/controles
+    vinculados, y avisa si no están en el BC.
+  - El laboratorio puede ajustar el intervalo de recalibración, el intervalo de
+    control, la estabilidad a bordo y la estabilidad abierto. Los ajustes se
+    guardan en `bc_lab_product_parameters` (migración 307) solo si difieren del
+    fabricante.
+  - El valor `effective` (ajuste ?? fabricante) es la entrada que debe leer el
+    motor de cálculo.
+  - Guardar exige que la sección `lab` sea editable (`assertSectionEditable`).
+- Hallazgos pendientes de Comercial/Aplicaciones: el ISE Reference Electrolyte
+  2 x 2000 mL (8392013190) es para cobas ISE neo/pro ISE, no para c 303 (a este
+  le corresponde 10820652216, 1 x 500 mL). Los electrodos 10825441001,
+  10825468001, 3246353001 y 3149501001 no tienen ficha para c 303.
+- Aún falta el lado del reactivo: frecuencia de calibración y volumen de
+  calibrador/control por prueba en c 303. Sale de los Method Sheets de cada
+  reactivo y es requisito para la Fase 2 (motor de simulación).

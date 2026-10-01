@@ -9,6 +9,7 @@ const determinationsService = require("./determinations.service");
 const investmentsService = require("./investments.service");
 const dispatchWorkspaceService = require("./bcDispatchWorkspace.service");
 const bcLabEnvironmentService = require("./bcLabEnvironment.service");
+const bcLabProductParametersService = require("./bcLabProductParameters.service");
 const bcLisIntegrationService = require("./bcLisIntegration.service");
 const bcRequirementsService = require("./bcRequirements.service");
 const bcDeliveriesService = require("./bcDeliveries.service");
@@ -252,6 +253,16 @@ const INVESTMENT_VALUES_OP_ROLES = new Set([
   "jefe_ti",
 ]);
 const INVESTMENT_VALUES_FIN_ROLES = new Set(["jefe_financiero", "jefe_ti"]);
+// Roles que pueden consultar todos los valores de inversión. Debe mantenerse
+// alineado con investmentValuesRoles en businessCase.routes.js; los demás
+// usuarios solo reciben los ítems cuya cotización les fue asignada.
+const INVESTMENT_VALUES_ACCESS_ROLES = new Set([
+  ...INVESTMENT_VALUES_OP_ROLES,
+  ...INVESTMENT_VALUES_FIN_ROLES,
+  "gerencia",
+  "gerencia_general",
+  "jefe_comercial",
+]);
 // Edicion en paralelo de la lista de inversiones (sin carrito ni dueno por
 // item): estos son los unicos roles que pueden agregar items o cambiar
 // cantidades/caracteristicas.
@@ -434,6 +445,11 @@ async function failIdempotentWrite(session, error) {
 
 function resolveRequestRole(req) {
   return String(req.user?.role || req.user?.scope || req.user?.role_name || "").trim().toLowerCase();
+}
+
+function resolveRequestUserId(req) {
+  const userId = Number(req.user?.id ?? req.user?.sub ?? req.user?.user_id ?? req.user?.uuid);
+  return Number.isInteger(userId) && userId > 0 ? userId : null;
 }
 
 // Carrito eliminado: acp_comercial, jefe_comercial,
@@ -1561,8 +1577,7 @@ async function notifyInvestmentQuotationRequested({ businessCaseId, actor, selec
         `Codigo: ${itemCode}. Categoria: ${category}. Cantidad requerida: ${quantity}. ` +
         `Caracteristicas: ${characteristics}. Observaciones: ${observations}. ` +
         "Debes gestionar tres cotizaciones de proveedores diferentes o una cotizacion de un proveedor validado. " +
-        "Las cotizaciones recopiladas deben ser enviadas a Jefe Financiero; esta persona sera la responsable de registrar los valores en el sistema. " +
-        "No registres precios en el Business Case.",
+        "Registra en el Business Case únicamente los valores de esta cotización asignada; no tendrás acceso a otros ítems ni secciones.",
       data: {
         business_case_id: businessCaseId,
         target_path: targetPath,
@@ -2535,6 +2550,35 @@ async function getLabEnvironment(req, res) {
   } catch (error) {
     logger.error({ error: error.message }, 'Error getting lab environment');
     res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+// Parametros por producto de Entorno Laboratorio (ficha del fabricante + ajuste del laboratorio).
+async function getLabProductParameters(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await bcLabProductParametersService.getProductParameters(id);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error getting lab product parameters");
+    res.status(error.status || 500).json({ success: false, message: error.message });
+  }
+}
+
+async function saveLabProductParameters(req, res) {
+  try {
+    const { id } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    await assertSectionEditable(id, "lab", req.user);
+    const result = await bcLabProductParametersService.saveProductParameters(
+      id,
+      req.body?.items,
+      req.user?.email,
+    );
+    res.json({ success: true, data: result });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error saving lab product parameters");
+    res.status(error.status || 500).json({ success: false, message: error.message });
   }
 }
 
@@ -4301,6 +4345,10 @@ async function getUIGuidance(req, res) {
     );
 
     // Get permissions based on user role
+    const canEditAssignedInvestmentValues = !workspaceClosedByFeasibility && await investmentsService.hasInvestmentQuotationAssignment(
+      id,
+      resolveRequestUserId(req),
+    );
     const permissions = {
       userRole: userRole,
       canEdit: !workspaceClosedByFeasibility,
@@ -4325,6 +4373,7 @@ async function getUIGuidance(req, res) {
       feasibilityIsDefinitivelyRejected: isDefinitivelyRejected, // BC-17: rechazo sin más apelaciones posibles
       workspaceClosed: workspaceClosedByFeasibility,
       canEditInvestments,
+      canEditAssignedInvestmentValues,
       canEditDeterminations,
       canViewOfferWorkspace: Boolean(offerWorkspace?.permissions?.canView),
       canManageOfferWorkspace: Boolean(offerWorkspace?.permissions?.canManage),
@@ -6777,7 +6826,18 @@ async function getInvestmentValues(req, res) {
       return res.status(400).json({ ok: false, message: 'Parámetro class debe ser operativa o financiera' });
     }
     await businessCaseService.assertModernBusinessCase(id);
-    const rows = await investmentsService.getInvestmentValuesByClass(id, investmentClass);
+    const role = resolveRequestRole(req);
+    const isValueRole = INVESTMENT_VALUES_ACCESS_ROLES.has(role);
+    const userId = resolveRequestUserId(req);
+    const hasAssignedQuotation = !isValueRole && await investmentsService.hasInvestmentQuotationAssignment(id, userId);
+    if (!isValueRole && !hasAssignedQuotation) {
+      return res.status(403).json({ ok: false, message: "No tienes una cotización asignada en este Business Case." });
+    }
+    const rows = await investmentsService.getInvestmentValuesByClass(
+      id,
+      investmentClass,
+      hasAssignedQuotation ? { assigneeId: userId } : undefined,
+    );
     const pricingContext = await investmentsService.getInvestmentPricingContext(id);
 
     // Precios en tiempo real: sin deadline ni cierre, cualquier item con
@@ -6883,6 +6943,38 @@ async function requestInvestmentQuotation(req, res) {
   }
 }
 
+// Boton "Sincronizar con Sheet" de Precios financieros y operativos: pasa los
+// precios guardados al bloque de inversiones de la hoja BC (Precio = residual
+// unitario, Total = cantidad x precio como valor, sin formula), con copia de
+// respaldo verificada antes de escribir.
+async function syncInvestmentValuesSheet(req, res) {
+  try {
+    const { id } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const role = resolveRequestRole(req);
+    const canSync =
+      INVESTMENT_VALUES_OP_ROLES.has(role) ||
+      INVESTMENT_VALUES_FIN_ROLES.has(role) ||
+      (await investmentsService.hasInvestmentQuotationAssignment(id, resolveRequestUserId(req)));
+    if (!canSync) {
+      return res.status(403).json({ ok: false, message: "No tienes permisos para sincronizar precios de inversiones" });
+    }
+
+    const result = await sheetGenerationService.syncInvestmentValuesToSheet(id, { backup: true });
+    if (!result.synced && result.reason === "no_sheet") {
+      return res.status(409).json({
+        ok: false,
+        code: "BC_SHEET_NOT_GENERATED",
+        message: "Este Business Case aun no tiene hoja de Sheets generada",
+      });
+    }
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    logger.error({ error: error.message, code: error.code }, "Error syncing investment values to sheet");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code, details: error.details || null });
+  }
+}
+
 async function saveInvestmentValues(req, res) {
   try {
     const { id } = req.params;
@@ -6898,9 +6990,7 @@ async function saveInvestmentValues(req, res) {
     const allowedForClass = investmentClass === 'operativa'
       ? INVESTMENT_VALUES_OP_ROLES
       : INVESTMENT_VALUES_FIN_ROLES;
-    if (!allowedForClass.has(role)) {
-      return res.status(403).json({ ok: false, message: `Solo ${[...allowedForClass].join(' / ')} puede editar valores ${investmentClass}s` });
-    }
+    const isValueEditor = allowedForClass.has(role);
 
     // Precios en tiempo real, sin carrito ni cierre: solo se bloquea si la
     // seccion fue bloqueada por otra via generica (lockSection).
@@ -6917,6 +7007,14 @@ async function saveInvestmentValues(req, res) {
     const values = req.body?.values;
     if (!Array.isArray(values) || !values.length) {
       return res.status(400).json({ ok: false, message: 'values es requerido' });
+    }
+
+    if (!isValueEditor) {
+      await investmentsService.assertInvestmentQuotationAssignments(
+        id,
+        resolveRequestUserId(req),
+        values.map((item) => item?.catalog_id),
+      );
     }
 
     const normalizedValues = values.map((item) => {
@@ -6949,54 +7047,20 @@ async function saveInvestmentValues(req, res) {
       );
     }
 
-    // Prices are entered in SPI and then synchronized to the official Sheet
-    // for both financial and operational value sections.
+    // Precios guardados en SPI -> solo el bloque de inversiones de la hoja BC
+    // existente. No regenera la hoja completa (otros campos/pestanas intactos).
     let sheetSync = null;
-    if (["operativa", "financiera"].includes(investmentClass)) {
-      try {
-        const syncResult = await sheetGenerationService.enqueueGenerationJob({
-          businessCaseId: id,
-          input: {},
-          user: req.user || null,
-          idempotencyKey: `auto:inv-values-${investmentClass}:${id}:${Date.now()}`,
-          correlationId: null,
-        });
-
-        if (syncResult?.replay) {
-          sheetSync = {
-            queued: true,
-            replay: true,
-            status: syncResult.replayStatus || 202,
-          };
-        } else {
-          const job = syncResult?.responseBody?.data || {};
-          sheetSync = {
-            queued: true,
-            replay: false,
-            status: 202,
-            job_id: job.job_id || null,
-            request_id: job.request_id || null,
-          };
-        }
-
-        try {
-          await sheetGenerationService.processPendingJobsBatch({ limit: 1 });
-        } catch (inlineSyncError) {
-          logger.warn(
-            { error: inlineSyncError?.message || String(inlineSyncError), businessCaseId: id },
-            "[BC_SHEET] Inline processing after saving operational investment values failed",
-          );
-        }
-      } catch (syncError) {
-        logger.warn(
-          { error: syncError?.message || String(syncError), businessCaseId: id },
-          "No se pudo encolar sincronizacion a Sheets tras guardar valores operativos",
-        );
-        sheetSync = {
-          queued: false,
-          error: syncError?.message || "No se pudo iniciar la sincronizacion de hoja",
-        };
-      }
+    try {
+      sheetSync = await sheetGenerationService.syncInvestmentValuesToSheet(id);
+    } catch (syncError) {
+      logger.warn(
+        { error: syncError?.message || String(syncError), businessCaseId: id, investmentClass },
+        "No se pudo sincronizar precios de inversiones a Sheets",
+      );
+      sheetSync = {
+        synced: false,
+        error: syncError?.message || "No se pudo sincronizar la hoja",
+      };
     }
 
     try {
@@ -7107,6 +7171,7 @@ module.exports = {
   assignInvestmentQuotation,
   requestInvestmentQuotation,
   saveInvestmentValues,
+  syncInvestmentValuesSheet,
   getConsumptionItems,
   saveConsumptionItems,
   patchConsumptionItem,
@@ -7152,6 +7217,8 @@ module.exports = {
   // Manual BC Form endpoints
   saveLabEnvironment,
   getLabEnvironment,
+  getLabProductParameters,
+  saveLabProductParameters,
   saveEquipmentDetailsV2,
   saveLisIntegration,
   getLisIntegration,

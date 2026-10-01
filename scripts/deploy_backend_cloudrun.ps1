@@ -115,7 +115,7 @@ try {
     "--max-instances", "3",               # 3 instancias x 8 conexiones = 24 max al pooler Neon
     "--concurrency", "50",                # Máx 50 requests simultáneos por instancia — suficiente para ~40 usuarios de evento
     "--set-env-vars", "NODE_ENV=production",
-    "--set-env-vars", "ENABLE_JOBS=true",
+    "--set-env-vars", "ENABLE_JOBS=false",   # Jobs internos deshabilitados; los Cloud Scheduler externos permanecen pausados desde el corte 2026-09-28 para permitir autosuspend de Neon.
     "--set-env-vars", "JOBS_RUN_ON_START=false",
     "--set-env-vars", "JOBS_BOOTSTRAP_STAGGER_MS=20000",
     "--set-env-vars", "DB_POOL_MAX=8",    # 3 instancias x 8 = 24 conexiones al pooler Neon (evento Kick Off ~40 usuarios)
@@ -124,10 +124,10 @@ try {
     "--set-env-vars", "DB_SSL=true",
     "--set-env-vars", "FRONTEND_URL=https://fam-spi-front.web.app",
     "--set-env-vars", "GOOGLE_REDIRECT_URI=https://spi-backend-983537733948.us-central1.run.app/api/v1/auth/google/callback",
-    "--set-env-vars", "DB_HOST=ep-lucky-bar-aw5wr0cn.c-12.us-east-1.aws.neon.tech",  # MIGRACION 2026-08-20 — proyecto nuevo (lucky-bar) para evitar la cuota de compute agotada en wispy-moon/muddy-sun. Endpoint DIRECTO (SIN -pooler): el pooler de Neon no aisla bien el search_path entre conexiones (ver .agents/skills/neon-compute-quota-failover-skill.md)
+    "--set-env-vars", "DB_HOST=ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech",  # MIGRACION 2026-09-28 — respaldo final con origen congelado desde lucky-bar. Endpoint DIRECTO (SIN -pooler).
     "--set-env-vars", "DB_PORT=5432",
     "--set-env-vars", "DB_USER=neondb_owner",
-    "--set-env-vars", "DB_NAME=neondb",
+    "--set-env-vars", "DB_NAME=FamSPI",
     "--set-env-vars", "GOOGLE_CLIENT_ID=18376271129-1v6irnav4n49298sspaij02qjnigeln3.apps.googleusercontent.com",
     # Audiencia OIDC del proyecto de Apps Script del complemento de Gmail. Debe
     # permanecer aqui porque --set-env-vars reemplaza el conjunto completo.

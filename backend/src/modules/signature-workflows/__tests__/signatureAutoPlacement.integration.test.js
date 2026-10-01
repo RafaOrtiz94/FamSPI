@@ -17,7 +17,14 @@ describe("autoDetectAndFillPlacements", () => {
       { id: 3, name_snapshot: "Ya Tiene Posicion", signature_placement: { page_number: 1, x_pct: 0.5, y_pct: 0.5 } },
     ];
 
-    detectPlacementsForDocument.mockResolvedValue(new Map([[1, { page_number: 1, x_pct: 0.83, y_pct: 0.2 }]]));
+    detectPlacementsForDocument.mockResolvedValue(new Map([[1, {
+      type: "unique",
+      page_number: 1,
+      x_pct: 0.83,
+      y_pct: 0.2,
+      line_preview: "Ana Torres 0102030405",
+      highlight: { x_min_pct: 0.1, x_max_pct: 0.9, y_pct: 0.19, height_pct: 0.02 },
+    }]]));
 
     const placed = await autoDetectAndFillPlacements(client, { workflowId: 66, document, signers });
 
@@ -31,6 +38,35 @@ describe("autoDetectAndFillPlacements", () => {
     expect(sql).toContain("auto_placement");
     expect(params[0]).toBe(1);
     expect(JSON.parse(params[1])).toEqual({ page_number: 1, x_pct: 0.83, y_pct: 0.2 });
+    expect(JSON.parse(params[2])).toEqual({
+      page_number: 1,
+      x_min_pct: 0.1,
+      x_max_pct: 0.9,
+      y_pct: 0.19,
+      height_pct: 0.02,
+    });
+  });
+
+  test("cuando la deteccion es ambigua (2+ filas candidatas), no prellena placement -- solo deja las candidatas en meta", async () => {
+    const client = { query: jest.fn().mockResolvedValue({ rows: [] }) };
+    const document = { source_pdf_base64: Buffer.from("fake-pdf").toString("base64") };
+    const signers = [{ id: 5, name_snapshot: "Ana Maria Torres Vega", signature_placement: null }];
+
+    const candidates = [
+      { page_number: 1, x_pct: 0.83, y_pct: 0.2, line_preview: "fila 1" },
+      { page_number: 1, x_pct: 0.83, y_pct: 0.35, line_preview: "fila 2" },
+    ];
+    detectPlacementsForDocument.mockResolvedValue(new Map([[5, { type: "ambiguous", candidates }]]));
+
+    const placed = await autoDetectAndFillPlacements(client, { workflowId: 66, document, signers });
+
+    expect(placed).toBe(0); // ambiguo no cuenta como "colocado"
+    expect(client.query).toHaveBeenCalledTimes(1);
+    const [sql, params] = client.query.mock.calls[0];
+    expect(sql).toContain("auto_placement_candidates");
+    expect(sql).not.toContain("signature_placement = ");
+    expect(params[0]).toBe(5);
+    expect(JSON.parse(params[1])).toEqual(candidates);
   });
 
   test("sin documento fuente, no intenta nada", async () => {

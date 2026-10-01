@@ -154,6 +154,7 @@ const RequestDetailModal = ({ detail, onClose, onProcessed }) => {
  { key: "correo_contacto", label: "Correo" },
  { key: "direccion_cliente", label: "Dirección" },
  { key: "fecha_instalacion", label: "Fecha de instalación" },
+ { key: "fecha_retiro", label: "Fecha de retiro" },
  { key: "fecha_tope_instalacion", label: "Fecha tope" },
  { key: "equipo_principal", label: "Equipo principal" },
  { key: "equipos", label: "Equipos relacionados" },
@@ -174,7 +175,7 @@ const RequestDetailModal = ({ detail, onClose, onProcessed }) => {
  if (Array.isArray(value)) {
  return value.map((item) => {
  if (typeof item === "string") return item;
- if (item?.nombre_equipo) return item.nombre_equipo;
+ if (item?.nombre_equipo) return item.serial ? `${item.nombre_equipo} (S/N ${item.serial})` : item.nombre_equipo;
  if (item?.nombre) return item.nombre;
  return JSON.stringify(item);
  }).join(", ");

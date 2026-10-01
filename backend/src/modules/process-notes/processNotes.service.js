@@ -23,7 +23,7 @@ const ENTITY_ROLES = {
     "comercial", "asesor_comercial", "analista_comercial", "acp_comercial",
     "jefe_comercial", "gerencia", "gerencia_general", "backoffice_comercial",
     "jefe_tecnico", "jefe_servicio_tecnico", "tecnico", "jefe_operaciones",
-    "operaciones", "jefe_logistica", "logistica",
+    "operaciones", "jefe_logistica", "logistica", "jefe_financiero", "jefe_ti",
   ],
   private_purchase: [
     "comercial", "asesor_comercial", "analista_comercial", "acp_comercial",

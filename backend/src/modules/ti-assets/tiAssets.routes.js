@@ -12,6 +12,8 @@ const {
   TI_LEGACY_ACTA_UPLOAD_ROLES,
 } = require("./tiAssets.service");
 
+const TI_SPEC_ROLES = [...TI_ROLES, "jefe_financiero", "acp_comercial"];
+
 const router   = express.Router();
 const upload   = multer({ storage: multer.memoryStorage() });
 
@@ -54,6 +56,8 @@ router.get("/:id/custody-history",      requireRole(TI_READ_ROLES), ctrl.listCus
 router.get("/:id/assignments-history",  requireRole(TI_READ_ROLES), ctrl.listAssignmentsHistory);
 router.post("/assignments/:assignmentId/evidence", requireRole(TI_ROLES), upload.single("evidence"), ctrl.uploadAssignmentEvidence);
 router.get("/:id/label",                requireRole(TI_LABEL_PRINT_ROLES), ctrl.downloadAssetLabel);
+// Especificacion tecnica (PDF, redaccion asistida por IA): TI + jefe_financiero + acp_comercial
+router.get("/:id/tech-spec",            requireRole(TI_SPEC_ROLES), ctrl.downloadAssetTechSpec);
 router.get("/:id/accessories",          requireRole(TI_READ_ROLES), ctrl.listAccessories);
 router.get("/:id/actas",                requireRole(TI_READ_ROLES), ctrl.listActas);
 router.get("/:id/financial-docs",       requireRole(TI_READ_ROLES), ctrl.listFinancialDocs);
@@ -85,6 +89,8 @@ router.post("/maintenance/:id/request-delivery",     requireRole(TI_ROLES), ctrl
 
 // Reports write
 router.post("/reports/generate", requireRole(TI_ROLES), ctrl.generateReport);
+// Publica en Drive los PDF de especificacion tecnica con redaccion guardada. { dry_run?: true, asset_ids?: [] }
+router.post("/tech-specs/publish", requireRole(TI_ROLES), ctrl.publishTechSpecs);
 router.post("/actas/:actaId/start-signature-workflow", requireRole(TI_ROLES), ctrl.startActaSignatureWorkflow);
 router.patch("/actas/:actaId", requireRole(TI_ROLES), ctrl.updateActa);
 

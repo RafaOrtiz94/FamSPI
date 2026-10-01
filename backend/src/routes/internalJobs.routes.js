@@ -27,6 +27,7 @@ const { runOnce: runSignatureWorkflowExpiry } = require('../jobs/signatureWorkfl
 const { runOnce: runTrainingSignatureReminder } = require('../jobs/trainingSignatureReminderScheduler');
 const { runOnce: runScheduleVisitCompletionReminder } = require('../jobs/scheduleVisitCompletionReminderScheduler');
 const { runOnce: runKickoffAutoStartOverdue } = require('../modules/kickoff/kickoff.scheduler');
+const { runOnce: runCrmActionItemReminder } = require('../jobs/crmActionItemReminderScheduler');
 
 const jobsAuth = require('../middlewares/jobsAuth');
 
@@ -52,6 +53,17 @@ router.post('/equipment/reservations/expired', async (req, res) => {
     } catch (error) {
         console.error('Error en job de reservas expiradas:', error);
         res.status(500).json({ error: 'Falló el procesamiento de reservas' });
+    }
+});
+
+// Endpoint para recordatorio de acciones (Blue Sheet) vencidas
+router.post('/crm/action-items/overdue-reminder', async (req, res) => {
+    try {
+        const result = await runCrmActionItemReminder();
+        res.json({ success: true, ...result });
+    } catch (error) {
+        console.error('Error en job de recordatorio de acciones CRM:', error);
+        res.status(500).json({ error: 'Falló el procesamiento de recordatorios' });
     }
 });
 

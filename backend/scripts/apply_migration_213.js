@@ -5,11 +5,11 @@ const path = require("path");
 const SQL = fs.readFileSync(path.join(__dirname, "../migrations/213_signer_cedula_snapshot.sql"), "utf8");
 
 const client = new Client({
-  host:     process.env.DB_HOST     || "ep-lucky-bar-aw5wr0cn.c-12.us-east-1.aws.neon.tech",
+  host:     process.env.DB_HOST     || "ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech",
   port:     Number(process.env.DB_PORT || 5432),
   user:     process.env.DB_USER     || "neondb_owner",
   password: process.env.DB_PASSWORD || "",
-  database: process.env.DB_NAME     || "neondb",
+  database: process.env.DB_NAME     || "FamSPI",
   ssl: { rejectUnauthorized: false },
 });
 

@@ -6,11 +6,11 @@
  * Version acotada de scripts/create_expedientes_from_applicants.js, solo para este cargo
  * (el generico crearia 71 expedientes nuevos con basura de texto libre de otros postulantes).
  *
- * Uso (apuntando a la base real wispy-moon/neondb, NO al DATABASE_URL de .env que
+ * Uso (apuntando a la base productiva muddy-sun/FamSPI, NO al DATABASE_URL de .env que
  * sigue apuntando a la base vieja congelada muddy-sun/FamSPI):
  *
  *   NEON_PW="$(gcloud secrets versions access latest --secret=DB_PASSWORD --project=famspi-sbox)" \
- *   DATABASE_URL="postgresql://neondb_owner:${NEON_PW}@ep-wispy-moon-aqszgsal.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require" \
+ *   DATABASE_URL="postgresql://neondb_owner:${NEON_PW}@ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech/FamSPI?sslmode=require" \
  *   node backend/scripts/create_warehouse_coordinator_expediente.js
  */
 

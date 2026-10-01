@@ -19,11 +19,11 @@ async function run() {
   const password = await getDbPassword();
 
   const pool = new Pool({
-    host: "ep-lucky-bar-aw5wr0cn.c-12.us-east-1.aws.neon.tech",
+    host: "ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech",
     port: 5432,
     user: "neondb_owner",
     password,
-    database: "neondb",
+    database: "FamSPI",
     ssl: { rejectUnauthorized: false },
   });
 

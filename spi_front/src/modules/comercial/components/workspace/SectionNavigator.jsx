@@ -2,7 +2,7 @@ import React from "react";
 import {
  FiCheckCircle, FiClock, FiLock, FiAlertTriangle, FiUser, FiChevronDown, FiEye,
  FiActivity, FiClipboard, FiHardDrive, FiLink2, FiBarChart2, FiDollarSign, FiCreditCard, FiFlag,
- FiSend, FiTruck, FiFileText,
+ FiSend, FiTruck, FiFileText, FiCpu,
 } from "react-icons/fi";
 import { useAuth } from "../../../../core/auth/AuthContext";
 import Modal from "../../../../core/ui/components/Modal";
@@ -20,7 +20,7 @@ const SectionNavigator = ({
   const { user } = useAuth();
   const [, setNowTick] = React.useState(Date.now());
   const [mobileOpen, setMobileOpen] = React.useState(false);
- const userRole = (user?.role || "").toLowerCase();
+ const userRole = String(user?.role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 
  const { sectionOwnership } = uiGuidance;
  const { rules } = sectionOwnership;
@@ -100,6 +100,12 @@ const SectionNavigator = ({
  icon: FiFlag
  },
  {
+ id: "pricing_lab",
+ title: "Cálculo automático (beta)",
+ description: "Vista TI paralela para precios calculados desde el Sheet",
+ icon: FiCpu
+ },
+ {
  id: "offer_workspace",
  title: "Oferta Comercial",
  description: "Hoja editable, PDF visible y decision final del comercial creador",
@@ -124,7 +130,13 @@ const SectionNavigator = ({
  ];
 
  // Filter sections based on role
- const availableSections = allSections.filter((section) => !section.hidden);
+ // pricing_lab es deliberadamente mas estricto que visible="all": durante
+ // construccion ni admin ni otro rol debe descubrir la seccion por el sidebar.
+ const availableSections = allSections.filter((section) => (
+ !section.hidden && (
+ section.id !== "pricing_lab" || ["jefe_ti", "jefe_de_ti"].includes(userRole)
+ )
+ ));
  const roleVisibleSections = roleConfig.visible === "all"
  ? availableSections
  : availableSections.filter(s => roleConfig.visible.includes(s.id));
@@ -193,7 +205,7 @@ const SectionNavigator = ({
 
  const getSectionStatus = (sectionId) => {
  // Resumen es solo lectura: nunca "completado" ni "pendiente", no aplica.
- if (sectionId === "consumption_export") {
+ if (sectionId === "consumption_export" || sectionId === "pricing_lab") {
  return { status: "info", icon: FiEye, color: "text-gray-400" };
  }
  // Determinaciones tiene su propio lock por subseccion (reactivos/controles/

@@ -643,11 +643,13 @@ export const getDeterminationsStatDocumentInfo = async (businessCaseId) => {
  return data.data || data;
 };
 
-export const uploadDeterminationsStatDocument = async (businessCaseId, file) => {
+export const uploadDeterminationsStatDocument = async (businessCaseId, file, options = {}) => {
  const formData = new FormData();
  formData.append("file", file);
  const { data } = await api.post(`/business-case/${businessCaseId}/determinations/stat-document`, formData, {
- headers: { "Content-Type": "multipart/form-data" },
+ // Axios agrega el boundary multipart correcto. Definir Content-Type a mano
+ // puede dejarlo sin boundary en algunos navegadores/proxies.
+ onUploadProgress: options.onUploadProgress,
  });
  return data.data || data;
 };

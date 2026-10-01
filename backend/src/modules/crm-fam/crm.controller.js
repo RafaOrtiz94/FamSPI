@@ -10,6 +10,9 @@ const createAccount = (req, res) => respond(res, service.createAccount(req.body,
 const updateAccount = (req, res) => respond(res, service.updateAccount(req.params.id, req.body, req.user));
 const softDeleteAccount = (req, res) => respond(res, service.softDeleteAccount(req.params.id, req.user));
 const getAccountTimeline = (req, res) => respond(res, service.getAccountTimeline(req.params.id, req.user));
+const getAccountSalesStats = (req, res) => respond(res, service.getAccountSalesStats(req.params.id, req.user));
+const mergeAccounts = (req, res) => respond(res, service.mergeAccounts(req.params.id, req.body?.source_id, req.user));
+const getAccountDuplicateCandidates = (req, res) => respond(res, service.getAccountDuplicateCandidates(req.params.id, req.user));
 
 // CONTACTS
 const listContacts = (req, res) => respond(res, service.listContacts({ ...req.query, user: req.user }));
@@ -60,6 +63,9 @@ const approveBlueSheet = (req, res) => respond(res, service.approveBlueSheet(req
 const observeBlueSheet = (req, res) => respond(res, service.observeBlueSheet(req.params.id, req.body, req.user));
 const reopenBlueSheet = (req, res) => respond(res, service.reopenBlueSheet(req.params.id, req.body, req.user));
 const getBlueSheetVersions = (req, res) => respond(res, service.getBlueSheetVersions(req.params.id, req.user));
+const listReviewComments = (req, res) => respond(res, service.listReviewComments(req.params.id, req.user));
+const createReviewComment = (req, res) => respond(res, service.createReviewComment(req.params.id, req.body, req.user));
+const resolveReviewComment = (req, res) => respond(res, service.resolveReviewComment(req.params.commentId, req.user));
 const getBlueSheetCompleteness = (req, res) => respond(res, service.getBlueSheetCompleteness(req.params.id, req.user));
 
 // BUYING INFLUENCES
@@ -93,6 +99,8 @@ const softDeleteStrength = (req, res) => respond(res, service.softDeleteStrength
 // RED FLAGS
 const listRedFlags = (req, res) => respond(res, service.listRedFlags(req.params.blueSheetId, req.user));
 const createRedFlag = (req, res) => respond(res, service.createRedFlag(req.params.blueSheetId, req.body, req.user));
+const listElementRedFlags = (req, res) => respond(res, service.listElementRedFlags(req.params.blueSheetId, req.user));
+const toggleElementRedFlag = (req, res) => respond(res, service.toggleElementRedFlag({ ...req.body, blue_sheet_id: req.params.blueSheetId }, req.user));
 const updateRedFlag = (req, res) => respond(res, service.updateRedFlag(req.params.id, req.body, req.user));
 const softDeleteRedFlag = (req, res) => respond(res, service.softDeleteRedFlag(req.params.id, req.user));
 const acceptRedFlag = (req, res) => respond(res, service.acceptRedFlag(req.params.id, req.body, req.user));
@@ -117,6 +125,7 @@ const createActivity = (req, res) => respond(res, service.createActivity(req.bod
 const updateActivity = (req, res) => respond(res, service.updateActivity(req.params.id, req.body, req.user));
 const completeActivity = (req, res) => respond(res, service.completeActivity(req.params.id, req.body, req.user));
 const softDeleteActivity = (req, res) => respond(res, service.softDeleteActivity(req.params.id, req.user));
+const syncActivityCalendar = (req, res) => respond(res, service.syncActivityCalendar(req.params.id, req.user));
 
 // DOCUMENTS
 const listDocuments = (req, res) => respond(res, service.listDocuments({ ...req.query, user: req.user }));
@@ -142,9 +151,36 @@ const getForecast = (req, res) => respond(res, service.getForecast(req.query, re
 const getBlueSheetKpis = (req, res) => respond(res, service.getBlueSheetKpis(req.user));
 const getLostReasonsReport = (req, res) => respond(res, service.getLostReasonsReport(req.query, req.user));
 const getRedFlagsReport = (req, res) => respond(res, service.getRedFlagsReport(req.query, req.user));
+const getWinLossPatternsReport = (req, res) => respond(res, service.getWinLossPatternsReport(req.query, req.user));
+
+const pdfReports = require("./crmReports.pdf.service");
+const downloadLostReasonsPdf = async (req, res) => {
+  try {
+    const { buffer, filename } = await pdfReports.generateLostReasonsPdf(req.query, req.user);
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"`, "Content-Length": buffer.length });
+    res.send(buffer);
+  } catch (e) { res.status(e.status || 500).json({ ok: false, message: e.message || "Error" }); }
+};
+const downloadRedFlagsPdf = async (req, res) => {
+  try {
+    const { buffer, filename } = await pdfReports.generateRedFlagsPdf(req.query, req.user);
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"`, "Content-Length": buffer.length });
+    res.send(buffer);
+  } catch (e) { res.status(e.status || 500).json({ ok: false, message: e.message || "Error" }); }
+};
+
+const blueSheetPdf = require("./crmBlueSheetPdf.service");
+const downloadBlueSheetPdf = async (req, res) => {
+  try {
+    const { buffer, filename } = await blueSheetPdf.generateBlueSheetPdf(req.params.id, req.user);
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"`, "Content-Length": buffer.length });
+    res.send(buffer);
+  } catch (e) { res.status(e.status || 500).json({ ok: false, message: e.message || "Error" }); }
+};
 
 module.exports = {
   listAccounts, getAccountById, createAccount, updateAccount, softDeleteAccount, getAccountTimeline,
+  getAccountSalesStats, mergeAccounts, getAccountDuplicateCandidates,
   listContacts, getContactById, createContact, updateContact, softDeleteContact,
   listLeads, getLeadById, createLead, updateLead, softDeleteLead, convertLead, disqualifyLead,
   linkLeadAccount, createLeadContact, promoteLeadToOpportunity,
@@ -155,19 +191,23 @@ module.exports = {
   updateBlueSheetGeneral, updateBlueSheetBuyingProcess, updateBlueSheetStrategy,
   submitBlueSheetForReview, approveBlueSheet, observeBlueSheet, reopenBlueSheet,
   getBlueSheetVersions, getBlueSheetCompleteness,
+  listReviewComments, createReviewComment, resolveReviewComment,
   listBuyingInfluences, createBuyingInfluence, updateBuyingInfluence, softDeleteBuyingInfluence,
   listWinResults, createWinResult, updateWinResult, softDeleteWinResult,
   listCompetitors, createCompetitor, updateCompetitor, softDeleteCompetitor,
   listCompetitivePreferences, upsertCompetitivePreference,
   listStrengths, createStrength, updateStrength, softDeleteStrength,
   listRedFlags, createRedFlag, updateRedFlag, softDeleteRedFlag, acceptRedFlag,
+  listElementRedFlags, toggleElementRedFlag,
   listScorecardCriteria, createScorecardCriterion, updateScorecardCriterion,
   getBlueSheetScorecard, saveBlueSheetScorecard,
   listActionItems, createActionItem, updateActionItem, completeActionItem, softDeleteActionItem,
   listActivities, createActivity, updateActivity, completeActivity, softDeleteActivity,
+  syncActivityCalendar,
   listDocuments, createDocument, uploadDocumentFile, softDeleteDocument,
   listNotes, createNote, updateNote, softDeleteNote,
   listLostReasons, createLostReason, updateLostReason,
   getDashboardSummary, getPipelineByStage, getForecast, getBlueSheetKpis,
-  getLostReasonsReport, getRedFlagsReport,
+  getLostReasonsReport, getRedFlagsReport, getWinLossPatternsReport,
+  downloadLostReasonsPdf, downloadRedFlagsPdf, downloadBlueSheetPdf,
 };

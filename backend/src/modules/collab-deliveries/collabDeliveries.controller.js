@@ -269,10 +269,22 @@ async function getCollaboratorReport(req, res) {
   } catch (e) { err(res, e); }
 }
 
+// Categorias validas para filtrar el reporte por separado. Debe mantenerse en
+// sync con COLLAB_CATEGORIES del frontend (CollabDeliveriesFinancieroPage.jsx)
+// + "ti" (activos TI, que en esta misma pantalla se mezclan con las entregas
+// de colaboradores pero viven en una tabla/consulta aparte).
+const REPORT_CATEGORIES = new Set(["ropa", "epp", "herramienta", "logistica", "suministros", "poliza", "ti"]);
+
+function resolveReportCategory(raw) {
+  const category = String(raw || "").trim().toLowerCase();
+  return category && REPORT_CATEGORIES.has(category) ? category : null;
+}
+
 async function getFullReportPdf(req, res) {
   try {
     const generatedByName = req.user?.fullname || req.user?.name || req.user?.email || null;
-    const { buffer, sha256, filename } = await reportSvc.generateFullReportPdf({ generatedByName });
+    const category = resolveReportCategory(req.query?.category);
+    const { buffer, sha256, filename } = await reportSvc.generateFullReportPdf({ generatedByName, category });
     res.set({
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename="${filename}"`,
@@ -289,7 +301,8 @@ async function getCollaboratorReportPdf(req, res) {
     if (!Number.isInteger(userId) || userId <= 0)
       return res.status(400).json({ message: "userId inválido" });
     const generatedByName = req.user?.fullname || req.user?.name || req.user?.email || null;
-    const { buffer, sha256, filename } = await reportSvc.generateCollaboratorReportPdf(userId, { generatedByName });
+    const category = resolveReportCategory(req.query?.category);
+    const { buffer, sha256, filename } = await reportSvc.generateCollaboratorReportPdf(userId, { generatedByName, category });
     res.set({
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename="${filename}"`,

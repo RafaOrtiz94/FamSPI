@@ -41,10 +41,15 @@ const STATUS_LABELS = {
   new: 'Nuevo',
   contacted: 'Contactado',
   qualified: 'Calificado',
-  unqualified: 'No calificado',
+  unqualified: 'Descalificado',
   converted: 'Convertido',
   disqualified: 'Descalificado',
 };
+
+// `unqualified` es el estado final que persiste el endpoint de
+// descalificacion. `disqualified` se conserva solo para visualizar datos
+// historicos que pudieran usar el nombre anterior.
+const isFinalLeadStatus = (status) => ['converted', 'unqualified', 'disqualified'].includes(status);
 
 const PRIORITY_LABELS = {
   low: 'Baja',
@@ -686,7 +691,7 @@ export default function LeadsPage() {
                           Calificar
                         </button>
                       )}
-                      {lead.status !== 'disqualified' && lead.status !== 'converted' && (
+                      {!isFinalLeadStatus(lead.status) && (
                         <button
                           onClick={() => handleDisqualify(lead)}
                           className="text-xs px-3 py-1 rounded-lg border border-[#DC2626] text-[#DC2626] hover:bg-red-50 whitespace-nowrap"

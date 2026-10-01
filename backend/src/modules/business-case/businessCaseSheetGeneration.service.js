@@ -13,6 +13,7 @@ const {
   loadTemplateDefinition,
   buildSheetPayloads,
   syncBusinessCaseToGoogleSheet,
+  syncInvestmentsToGoogleSheet,
 } = require("./businessCaseSheetSyncLocal.service");
 const {
   resolveSheetSyncOutcome,
@@ -27,6 +28,14 @@ const {
   filterEquipmentPairsForSheet,
   shouldIncludeBackupInSheet,
 } = require("./businessCaseSheetEquipment.helper");
+// Reusa la misma logica de "horas habiles" que ya calcula el SLA de 48h
+// post-estadisticas (businessCaseWorkflowSla.service.js) -- "no menor a 48
+// horas" + "sin incluir fines de semana" es exactamente addWeekdayHours().
+const { addWeekdayHours } = require("./businessCaseWorkflowSla.service");
+// El "inicio" real para esta fecha es cuando comercial sube el documento
+// estadistico (bc_determinations_documents.uploaded_at) y el BC pasa a
+// jefe_comercial/acp_comercial -- no la creacion del BC.
+const { getCurrentDocument } = require("./businessCaseDeterminationsGate.service");
 
 const OPERATION_SCOPE_ENQUEUE = "bc_sheet_generation_enqueue_v1";
 const RETRYABLE_ERROR_CODES = new Set([
@@ -191,7 +200,7 @@ async function ensureQueueTable() {
 async function assertBusinessCaseExists(businessCaseId) {
   const { rows } = await db.query(
     `SELECT id, request_type, uses_modern_system, client_name, bc_purchase_type, drive_folder_id,
-            bc_equipment_cost,
+            bc_equipment_cost, deadline_months, projected_deadline_months,
             process_code, contract_object, modern_bc_metadata, extra, canonical_state
        FROM equipment_purchase_requests
       WHERE id = $1
@@ -335,19 +344,6 @@ function normalizeInvestmentNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function calculateProcessDepreciation({ unitPrice, percentage, projectedMonths }) {
-  const base = normalizeInvestmentNumber(unitPrice);
-  if (base === null) return null;
-
-  const rate = normalizeInvestmentNumber(percentage);
-  const months = normalizeInvestmentNumber(projectedMonths);
-  const safeRate = rate === null || rate < 0 ? 0 : rate;
-  const safeMonths = months === null || months <= 0 ? 0 : months;
-  const annual = base * (safeRate / 100);
-  const monthly = annual / 12;
-  return Number((monthly * safeMonths).toFixed(2));
-}
-
 function normalizeBool(value) {
   if (value === null || value === undefined) return null;
   if (typeof value === "boolean") return value ? "Si" : "No";
@@ -355,6 +351,36 @@ function normalizeBool(value) {
   if (s === "true" || s === "1" || s === "yes" || s === "si" || s === "sí") return "Si";
   if (s === "false" || s === "0" || s === "no") return "No";
   return value;
+}
+
+// DD/MM/YYYY en America/Guayaquil (sin DST) -- formato que Sheets reconoce
+// como fecha con valueInputOption USER_ENTERED (ver writeRanges).
+function formatDateEs(date) {
+  if (!date) return null;
+  try {
+    return new Intl.DateTimeFormat("es-EC", {
+      timeZone: "America/Guayaquil",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(date);
+  } catch (_) {
+    return null;
+  }
+}
+
+// "Fecha maxima para calculo de consumibles (no menor a 48 horas)": el
+// "inicio" es cuando comercial sube el documento estadistico y el BC pasa a
+// jefe_comercial/acp_comercial (bc_determinations_documents.uploaded_at) --
+// no la creacion del BC. 48 horas habiles (sin fines de semana) desde ahi,
+// misma logica que ya usa el SLA de 48h post-estadisticas (addWeekdayHours).
+async function computeConsumablesMaxDate(businessCaseId) {
+  const document = await getCurrentDocument(businessCaseId);
+  const startRaw = document?.uploaded_at;
+  const start = startRaw ? new Date(startRaw) : null;
+  if (!start || !Number.isFinite(start.getTime())) return null;
+  const deadline = addWeekdayHours(start, 48);
+  return formatDateEs(deadline);
 }
 
 async function getEquipmentNamesMapByIds(ids = []) {
@@ -428,18 +454,22 @@ function buildInversionesPayload(investments = [], options = {}) {
       if (!name) return;
       const cantidad = normalizeInvestmentNumber(item?.quantity);
       const financialPrice = normalizeInvestmentNumber(item?.unit_price_financial ?? item?.unit_price);
-      const processDepreciation = calculateProcessDepreciation({
-        unitPrice: financialPrice,
-        percentage: item?.depreciation_percentage,
-        projectedMonths: options.projectedMonths,
-      });
+      // Columna "Precio" del Sheet = valor residual unitario (precio -
+      // depreciacion proyectada), mismo calculo que muestra la UI de precios.
+      const residualUnitPrice = financialPrice === null
+        ? null
+        : investmentsService.calculateFinancialDepreciation({
+          unitPrice: financialPrice,
+          percentage: item?.depreciation_percentage,
+          projectedMonths: options.projectedMonths,
+        }).net;
       out[name] = {
         nombre: name,
         categoria: String(item?.category || "").trim(),
         caracteristicas: String(item?.characteristics || "").trim(),
         observaciones: String(item?.notes || "").trim(),
         cantidad: cantidad === null ? 0 : cantidad,
-        precio: processDepreciation === null ? 0 : processDepreciation,
+        precio: residualUnitPrice === null ? 0 : residualUnitPrice,
         precio_operativo: normalizeInvestmentNumber(item?.unit_price) ?? 0,
         precio_financiero: normalizeInvestmentNumber(item?.unit_price_financial) ?? null,
         descripcion: String(item?.characteristics || item?.notes || name || "").trim(),
@@ -548,6 +578,7 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     : [];
 
   const fields = {};
+  setFieldIfPresent(fields, "FechaMaximaCalculoConsumibles", await computeConsumablesMaxDate(businessCaseId));
   setFieldIfPresent(fields, "TipoDeCliente", pickFirst(
     normalizeClientProcessTypeLabel(bcRow?.bc_purchase_type),
     normalizeClientProcessTypeLabel(generalData.purchaseType),
@@ -620,8 +651,13 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   setFieldIfPresent(fields, "ModeloProveedor2", lisInterfaces[1]?.model || lisInterfaces[1]?.provider);
   setFieldIfPresent(fields, "ModeloProveedor3", lisInterfaces[2]?.model || lisInterfaces[2]?.provider);
 
-  setFieldIfPresent(fields, "Plazo", requirements?.deadline_months);
-  setFieldIfPresent(fields, "ProyeccionPlazo", requirements?.projected_deadline_months);
+  // Mismo fallback que investments.getInvestmentPricingContext (lo que ve la
+  // UI de precios): sin esto, BCs con plazo solo en equipment_purchase_requests
+  // mandaban meses=0 y la depreciacion de inversiones salia 0 en el Sheet.
+  const deadlineMonths = pickFirst(requirements?.deadline_months, bcRow?.deadline_months);
+  const projectedDeadlineMonths = pickFirst(requirements?.projected_deadline_months, bcRow?.projected_deadline_months);
+  setFieldIfPresent(fields, "Plazo", deadlineMonths);
+  setFieldIfPresent(fields, "ProyeccionPlazo", projectedDeadlineMonths);
   setFieldIfPresent(fields, "PresupuestoReferencial", pickFirst(
     metadata.referential_budget,
     generalData.referential_budget,
@@ -693,8 +729,8 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   );
 
   const sheetContext = {
-    deadline_months: requirements?.deadline_months ?? null,
-    projected_deadline_months: requirements?.projected_deadline_months ?? null,
+    deadline_months: deadlineMonths ?? null,
+    projected_deadline_months: projectedDeadlineMonths ?? null,
     modality: null,
   };
 
@@ -1628,7 +1664,72 @@ async function getDocumentVersions({ businessCaseId, limit = 20 }) {
   };
 }
 
+// Al guardar precios (financieros/operativos): actualiza SOLO el bloque de
+// inversiones de la hoja BC ya generada. Sin hoja previa no crea nada -- la
+// generacion completa sigue siendo el unico camino que crea/recrea la hoja.
+async function syncInvestmentValuesToSheet(businessCaseId, { backup = false } = {}) {
+  const bcRow = await assertBusinessCaseExists(businessCaseId);
+  const lastSheet = toObject(bcRow?.modern_bc_metadata)?.bc_sheet_generation?.last || {};
+  const sheetId = lastSheet?.provider === "google_sheets_local" ? lastSheet.sheet_id || null : null;
+  if (!sheetId) return { synced: false, reason: "no_sheet" };
+
+  const [requirements, investments] = await Promise.all([
+    bcRequirementsService.getRequirements(businessCaseId),
+    investmentsService.getCatalogWithSelections(businessCaseId),
+  ]);
+  const projectedMonths = pickFirst(requirements?.projected_deadline_months, bcRow?.projected_deadline_months);
+  const result = await syncInvestmentsToGoogleSheet({
+    sheetId,
+    inversiones: buildInversionesPayload(investments, { projectedMonths }),
+    backup,
+  });
+  return { synced: true, ...result };
+}
+
+// Backfill: lleva a cada hoja BC ya generada los precios que hoy muestra la UI.
+// Solo toca el bloque de inversiones y deja una copia de respaldo de cada hoja
+// antes de escribir. dryRun=true (default) solo lista los BCs, sin escribir.
+async function syncInvestmentValuesForAllBusinessCases({ dryRun = true, businessCaseIds = null } = {}) {
+  const ids = Array.isArray(businessCaseIds) && businessCaseIds.length ? businessCaseIds.map(String) : null;
+  const { rows } = await db.query(
+    `SELECT epr.id
+       FROM equipment_purchase_requests epr
+      WHERE epr.request_type = 'business_case'
+        AND epr.uses_modern_system IS NOT FALSE
+        AND epr.modern_bc_metadata #>> '{bc_sheet_generation,last,provider}' = 'google_sheets_local'
+        AND epr.modern_bc_metadata #>> '{bc_sheet_generation,last,sheet_id}' IS NOT NULL
+        AND EXISTS (SELECT 1 FROM bc_investment_selections s WHERE s.business_case_id = epr.id AND s.selected = true)
+        AND ($1::text[] IS NULL OR epr.id::text = ANY($1::text[]))
+      ORDER BY epr.id`,
+    [ids],
+  );
+
+  const results = [];
+  for (const { id } of rows) {
+    if (dryRun) {
+      results.push({ business_case_id: id, synced: false, reason: "dry_run" });
+      continue;
+    }
+    try {
+      results.push({ business_case_id: id, ...(await syncInvestmentValuesToSheet(id, { backup: true })) });
+    } catch (error) {
+      logger.warn({ businessCaseId: id, error: error?.message }, "[BC_SHEET] Backfill de precios fallo");
+      results.push({ business_case_id: id, synced: false, error: error?.message || String(error) });
+    }
+  }
+
+  return {
+    dry_run: dryRun,
+    total: results.length,
+    synced: results.filter((item) => item.synced).length,
+    failed: results.filter((item) => item.error).length,
+    results,
+  };
+}
+
 module.exports = {
+  syncInvestmentValuesToSheet,
+  syncInvestmentValuesForAllBusinessCases,
   enqueueGenerationJob,
   getGenerationPreview,
   processPendingJobsBatch,

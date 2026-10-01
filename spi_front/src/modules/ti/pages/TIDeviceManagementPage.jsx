@@ -78,6 +78,7 @@ import {
   getTiLiberationPhotos,
   getTiLiberationPhotoFile,
 } from "../../../core/api/tiAssetsApi";
+import TiAssetTechSpecButton from "../components/TiAssetTechSpecButton";
 
 const STATUS_LABELS = {
   unassigned: "Sin asignar",
@@ -2342,6 +2343,10 @@ const TIDeviceManagementPage = () => {
                     {downloadingLabelAssetId === selected.id ? <FiRefreshCw size={12} className="animate-spin" /> : <FiPrinter size={12} />}
                     Imprimir etiqueta
                   </button>
+                  <TiAssetTechSpecButton
+                    asset={selected}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-60"
+                  />
                 </div>
               </div>
 

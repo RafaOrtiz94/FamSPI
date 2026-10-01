@@ -1,7 +1,7 @@
 const { Client } = require('pg');
 const tables = ['catalog_consumables', 'catalog_equipment_consumables', 'delivery_request', 'delivery_request_line', 'delivery_dispatch', 'delivery_dispatch_line', 'delivery_ceiling', 'delivery_ceiling_line', 'inventory', 'inventory_movements', 'equipment_models'];
 const client = new Client({
-  host: 'ep-wispy-moon-aqszgsal-pooler.c-8.us-east-1.aws.neon.tech',
+  host: 'ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech',
   port: 5432,
   user: 'neondb_owner',
   password: process.env.DB_PASSWORD,

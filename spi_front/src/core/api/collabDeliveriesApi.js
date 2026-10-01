@@ -195,8 +195,12 @@ export const getCollabCollaboratorReport = async (userId) => {
   return Array.isArray(data) ? data : data?.data ?? [];
 };
 
-export const downloadCollabFullReportPdf = async () => {
-  const response = await api.get(`${base}/report/full/pdf`, { responseType: "blob" });
+// category: "ropa" | "epp" | "herramienta" | "logistica" | "suministros" |
+// "poliza" | "ti", o vacío/undefined para el reporte general mezclado (mismo
+// comportamiento de siempre).
+export const downloadCollabFullReportPdf = async (category = null) => {
+  const params = category ? { category } : undefined;
+  const response = await api.get(`${base}/report/full/pdf`, { responseType: "blob", params });
   return {
     blob: response.data,
     sha256: response.headers["x-sha256"] || null,
@@ -204,8 +208,9 @@ export const downloadCollabFullReportPdf = async () => {
   };
 };
 
-export const downloadCollabCollaboratorReportPdf = async (userId) => {
-  const response = await api.get(`${base}/report/collaborator/${userId}/pdf`, { responseType: "blob" });
+export const downloadCollabCollaboratorReportPdf = async (userId, category = null) => {
+  const params = category ? { category } : undefined;
+  const response = await api.get(`${base}/report/collaborator/${userId}/pdf`, { responseType: "blob", params });
   return {
     blob: response.data,
     sha256: response.headers["x-sha256"] || null,

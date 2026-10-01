@@ -215,6 +215,16 @@ const SignatureWorkflowDetailPage = () => {
   // nadie firme. Si vino prellenado, se usa directo -- el firmante ya no necesita hacer clic,
   // aunque PdfSignerViewer lo sigue dejando corregir con un clic si no es correcto.
   const autoPlacementDetected = Boolean(actionableSigner?.meta?.auto_placement);
+  // Fase 1: cuando el nombre matcheo mas de una fila (ambiguous), el backend no
+  // prellena nada pero deja las filas candidatas -- se ofrecen para elegir entre
+  // pocas opciones en vez de buscar a ciegas en todo el documento.
+  const autoPlacementHighlight = actionableSigner?.meta?.auto_placement_highlight || null;
+  const autoPlacementCandidates = Array.isArray(actionableSigner?.meta?.auto_placement_candidates)
+    ? actionableSigner.meta.auto_placement_candidates
+    : null;
+  const handleSelectCandidate = useCallback((candidate) => {
+    setPlacement({ page_number: candidate.page_number, x_pct: candidate.x_pct, y_pct: candidate.y_pct });
+  }, []);
 
   useEffect(() => {
     if (actionableSigner?.signature_placement && !placement) {
@@ -709,7 +719,12 @@ const SignatureWorkflowDetailPage = () => {
                     </p>
                     {autoPlacementDetected && (
                       <p className="mb-2 text-[11px] text-slate-500">
-                        Ubicamos tu fila en el documento. Si no es correcta, haz clic en la posición correcta.
+                        Ubicamos tu fila en el documento (recuadro verde). Si no es correcta, haz clic en la posición correcta.
+                      </p>
+                    )}
+                    {!autoPlacementDetected && autoPlacementCandidates?.length > 0 && (
+                      <p className="mb-2 text-[11px] text-amber-700">
+                        Tu nombre coincide con {autoPlacementCandidates.length} filas del documento. Haz clic en uno de los recuadros azules para elegir la tuya, o ubica tu firma manualmente.
                       </p>
                     )}
                     {pdfLoading ? (
@@ -722,6 +737,9 @@ const SignatureWorkflowDetailPage = () => {
                         signatureB64={signatureB64}
                         placement={placement}
                         onPlacement={setPlacement}
+                        highlight={autoPlacementHighlight}
+                        candidates={autoPlacementCandidates}
+                        onSelectCandidate={handleSelectCandidate}
                       />
                     ) : (
                       <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
@@ -1076,7 +1094,12 @@ const SignatureWorkflowDetailPage = () => {
                     </p>
                     {autoPlacementDetected && (
                       <p className="mb-2 text-[11px] text-slate-500">
-                        Ubicamos tu fila en el documento. Si no es correcta, haz clic en la posición correcta.
+                        Ubicamos tu fila en el documento (recuadro verde). Si no es correcta, haz clic en la posición correcta.
+                      </p>
+                    )}
+                    {!autoPlacementDetected && autoPlacementCandidates?.length > 0 && (
+                      <p className="mb-2 text-[11px] text-amber-700">
+                        Tu nombre coincide con {autoPlacementCandidates.length} filas del documento. Haz clic en uno de los recuadros azules para elegir la tuya, o ubica tu firma manualmente.
                       </p>
                     )}
                     {pdfLoading ? (
@@ -1089,6 +1112,9 @@ const SignatureWorkflowDetailPage = () => {
                         signatureB64={signatureB64}
                         placement={placement}
                         onPlacement={setPlacement}
+                        highlight={autoPlacementHighlight}
+                        candidates={autoPlacementCandidates}
+                        onSelectCandidate={handleSelectCandidate}
                       />
                     ) : (
                       <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">

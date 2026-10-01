@@ -28,6 +28,14 @@ import {
   fetchActionItems,
   createActionItem,
   deleteActionItem,
+  fetchBlueSheetCompleteness,
+  fetchElementRedFlags,
+  toggleElementRedFlag,
+  fetchBlueSheetVersions,
+  fetchReviewComments,
+  createReviewComment,
+  resolveReviewComment,
+  downloadBlueSheetPdf,
 } from "../../../core/api/crmFamApi";
 import { getUsers } from "../../../core/api/usersApi";
 
@@ -43,8 +51,45 @@ const BS_STATUS = {
 };
 
 const RF_COLORS = { low: "#6B7280", medium: "#D97706", high: "#DC2626", critical: "#7C3AED" };
+const ELEMENT_TYPE_LABELS = {
+  buying_influence: "Compradores",
+  competitor: "Competidores",
+  scorecard_criterion: "Scorecard",
+  action_item: "Acciones",
+};
 
 const EDITABLE_STATUSES = ["draft", "in_progress", "needs_update", "observed"];
+
+// Plantillas ligeras: solo prellenan texto inicial (objetivo/situación) para
+// no arrancar de cero cada vez -- nada de IA, son 3 presets estáticos por
+// tipo de venta frecuente en FAM. El usuario los edita libremente después.
+const BS_TEMPLATES = {
+  blank: { label: "En blanco", data: {} },
+  new_client: {
+    label: "Cliente nuevo",
+    data: {
+      sales_objective_text: "Cerrar la primera venta con este cliente y establecer una relación comercial recurrente.",
+      customer_situation_current: "Cliente sin historial de compras previas con FAM. Evaluando proveedores.",
+      customer_situation_desired: "Cliente convertido, con primer pedido facturado y proceso de reorden establecido.",
+    },
+  },
+  renewal: {
+    label: "Renovación / recompra",
+    data: {
+      sales_objective_text: "Renovar el contrato/servicio vigente antes de su vencimiento, evitando fuga a la competencia.",
+      customer_situation_current: "Cliente activo con contrato o equipo próximo a vencer/renovar.",
+      customer_situation_desired: "Renovación firmada con condiciones iguales o mejores, sin interrupción de servicio.",
+    },
+  },
+  upsell: {
+    label: "Expansión (upsell/cross-sell)",
+    data: {
+      sales_objective_text: "Ampliar el alcance actual del cliente con equipos/servicios adicionales.",
+      customer_situation_current: "Cliente activo satisfecho con la solución actual, con necesidad detectada de mayor capacidad o alcance.",
+      customer_situation_desired: "Cliente con la solución ampliada operando y facturada.",
+    },
+  },
+};
 
 const TABS = [
   { key: "general",      label: "General" },
@@ -55,6 +100,7 @@ const TABS = [
   { key: "redflags",     label: "Red Flags" },
   { key: "scorecard",    label: "Scorecard" },
   { key: "actions",      label: "Acciones" },
+  { key: "history",      label: "Historial" },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -75,7 +121,7 @@ function CompletionBar({ value = 0 }) {
   const pct = Math.min(100, Math.round(value));
   const color = pct >= 80 ? "#16A34A" : pct >= 50 ? "#D97706" : "#DC2626";
   return (
-    <div className="mb-6">
+    <div className="mb-3">
       <div className="flex justify-between text-sm mb-1">
         <span className="text-[#6B7280]">Completitud</span>
         <span className="font-medium text-[#1F2937]">{pct}%</span>
@@ -86,6 +132,110 @@ function CompletionBar({ value = 0 }) {
           style={{ width: `${pct}%`, backgroundColor: color }}
         />
       </div>
+    </div>
+  );
+}
+
+// Checklist visual de completitud -- antes solo se veia el % numerico
+// (CompletionBar) sin saber que faltaba. Se apoya en el mismo desglose que
+// ya usa el backend para calcular el score (crm.calculators.js#getCompletenessBreakdown),
+// asi que nunca puede desincronizarse del numero real.
+function CompletenessChecklist({ blueSheetId, fallbackScore, onJumpToTab }) {
+  const [breakdown, setBreakdown] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!blueSheetId) return;
+    setLoading(true);
+    fetchBlueSheetCompleteness(blueSheetId)
+      .then((res) => setBreakdown(res))
+      .catch(() => setBreakdown(null))
+      .finally(() => setLoading(false));
+  }, [blueSheetId]);
+
+  const score = breakdown?.completeness_score ?? fallbackScore ?? 0;
+  const items = Array.isArray(breakdown?.checklist) ? breakdown.checklist : [];
+  const pendingCount = items.filter((i) => !i.met).length;
+
+  return (
+    <div className="mb-6">
+      <CompletionBar value={score} />
+      {!loading && items.length > 0 && onJumpToTab && (
+        <NextBestActions items={items} onJump={onJumpToTab} />
+      )}
+      {!loading && items.length > 0 && (
+        <div className="rounded-2xl border border-[#E5E7EB] overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+            className="w-full flex items-center justify-between px-4 py-2.5 bg-[#F9FAFB] hover:bg-[#F3F4F6] transition-colors text-left"
+          >
+            <span className="text-xs font-medium text-[#1F2937]">
+              {pendingCount === 0 ? "Todos los criterios cumplidos" : `${pendingCount} criterio${pendingCount === 1 ? "" : "s"} pendiente${pendingCount === 1 ? "" : "s"}`}
+            </span>
+            <span className="text-xs text-[#2563EB] font-medium">{expanded ? "Ocultar" : "Ver detalle"}</span>
+          </button>
+          {expanded && (
+            <ul className="divide-y divide-[#F1F5F9]">
+              {items.map((item) => (
+                <li key={item.key} className="flex items-center gap-2.5 px-4 py-2 text-sm">
+                  <span
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                      item.met ? "bg-[#DCFCE7] text-[#16A34A]" : "bg-[#F3F4F6] text-[#9CA3AF]"
+                    }`}
+                  >
+                    {item.met ? "✓" : ""}
+                  </span>
+                  <span className={item.met ? "text-[#1F2937]" : "text-[#6B7280]"}>{item.label}</span>
+                  <span className="ml-auto text-[10px] text-[#9CA3AF]">{item.points} pts</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Siguiente mejor acción: convierte los criterios de completitud aún NO
+// cumplidos (mismo desglose que ya calcula el backend) en una lista corta y
+// priorizada por puntos -- para que el usuario sepa exactamente qué hacer
+// primero en vez de solo ver "68%" sin contexto accionable. Sin IA: es una
+// reordenación determinística de datos que ya existen.
+const CHECKLIST_KEY_TO_TAB = {
+  sales_objective: "general", situation_current: "general", situation_desired: "general",
+  buying_process: "general", strategy_summary: "general",
+  economic_buyer: "buyers", coach: "buyers",
+  win_results: "results",
+  competitors: "competitors",
+  strengths: "strengths",
+  scorecard: "scorecard",
+};
+
+function NextBestActions({ items, onJump }) {
+  const pending = items.filter((i) => !i.met).sort((a, b) => b.points - a.points).slice(0, 3);
+  if (pending.length === 0) return null;
+  return (
+    <div className="mb-6 border border-[#BFDBFE] bg-[#EFF6FF] rounded-2xl p-4">
+      <h3 className="text-sm font-semibold text-[#1E3A8A] mb-2">Siguiente mejor acción</h3>
+      <ul className="space-y-2">
+        {pending.map((item) => (
+          <li key={item.key} className="flex items-center justify-between gap-3 text-sm">
+            <span className="text-[#1E3A8A]">{item.label} <span className="text-xs text-[#60A5FA]">(+{item.points} pts)</span></span>
+            {CHECKLIST_KEY_TO_TAB[item.key] && (
+              <button
+                type="button"
+                onClick={() => onJump(CHECKLIST_KEY_TO_TAB[item.key])}
+                className="shrink-0 px-3 py-1 rounded-lg text-xs font-medium bg-[#2563EB] text-white hover:bg-[#1D4ED8]"
+              >
+                Completar
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -113,6 +263,70 @@ function Field({ label, required, children }) {
       {children}
     </div>
   );
+}
+
+// Icono de red flag para marcar/desmarcar directamente sobre un elemento
+// (comprador, competidor, criterio de scorecard, accion) -- ver
+// useElementRedFlags mas abajo. "suggested" es solo para acciones vencidas:
+// el sistema ya sugiere la bandera, un clic la confirma como red flag real.
+function RedFlagIcon({ active, suggested, onClick, disabled, title }) {
+  const stateCls = active
+    ? "bg-[#FEE2E2] text-[#DC2626] border-[#FCA5A5]"
+    : suggested
+      ? "bg-[#FFFBEB] text-[#D97706] border-[#FDE68A]"
+      : "bg-white text-[#CBD5E1] border-[#E5E7EB] hover:text-[#9CA3AF] hover:border-[#CBD5E1]";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title || (active ? "Quitar red flag" : "Marcar red flag")}
+      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${stateCls}`}
+    >
+      🚩
+    </button>
+  );
+}
+
+// Carga una sola vez (por Blue Sheet) el set de elementos que ya tienen red
+// flag activa, y expone un toggle optimista compartido entre las 4 pestanas
+// (Compradores, Competidores, Scorecard, Acciones) para que el estado no se
+// pierda al cambiar de pestana.
+function useElementRedFlags(blueSheetId) {
+  const [flags, setFlags] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    if (!blueSheetId) return;
+    setLoading(true);
+    try { setFlags(await fetchElementRedFlags(blueSheetId) || []); } catch { setFlags([]); }
+    setLoading(false);
+  }, [blueSheetId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const key = (type, id) => `${type}:${id}`;
+  const flagsByKey = new Map(flags.map((f) => [key(f.related_entity_type, f.related_entity_id), f]));
+
+  const isFlagged = (type, id) => flagsByKey.has(key(type, id));
+
+  const toggle = async (type, id, label) => {
+    // Optimista: refleja el cambio de inmediato, revierte si falla.
+    const flaggedNow = isFlagged(type, id);
+    setFlags((prev) => flaggedNow
+      ? prev.filter((f) => !(f.related_entity_type === type && f.related_entity_id === id))
+      : [...prev, { related_entity_type: type, related_entity_id: id, severity: "medium" }]);
+    try {
+      await toggleElementRedFlag(blueSheetId, { related_entity_type: type, related_entity_id: id, label });
+    } catch (e) {
+      setFlags((prev) => flaggedNow
+        ? [...prev, { related_entity_type: type, related_entity_id: id, severity: "medium" }]
+        : prev.filter((f) => !(f.related_entity_type === type && f.related_entity_id === id)));
+      alert(e.message || "No se pudo actualizar la red flag");
+    }
+  };
+
+  return { isFlagged, toggle, loading };
 }
 
 const inputCls = "w-full border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/40";
@@ -233,7 +447,7 @@ function TabGeneral({ bs, editable, onSaved }) {
 
 // ─── Tab: Compradores ─────────────────────────────────────────────────────────
 
-function TabBuyers({ bs, editable }) {
+function TabBuyers({ bs, editable, redFlags }) {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -293,6 +507,7 @@ function TabBuyers({ bs, editable }) {
                 <th className="pb-2 pr-4 font-medium">Rol</th>
                 <th className="pb-2 pr-4 font-medium">Receptividad</th>
                 <th className="pb-2 pr-4 font-medium">Acceso</th>
+                <th className="pb-2 pr-4 font-medium text-center">Red flag</th>
                 {editable && <th className="pb-2 font-medium">Acciones</th>}
               </tr>
             </thead>
@@ -304,6 +519,12 @@ function TabBuyers({ bs, editable }) {
                   <td className="py-2 pr-4">{ROLE_LABELS[b.influence_role] || b.influence_role}</td>
                   <td className="py-2 pr-4">{RECEPT_LABELS[b.receptivity] || b.receptivity}</td>
                   <td className="py-2 pr-4">{ACCESS_LABELS[b.access_level] || b.access_level}</td>
+                  <td className="py-2 pr-4 text-center">
+                    <RedFlagIcon
+                      active={redFlags.isFlagged("buying_influence", b.id)}
+                      onClick={() => redFlags.toggle("buying_influence", b.id, `Red flag en influenciador: ${b.full_name}`)}
+                    />
+                  </td>
                   {editable && (
                     <td className="py-2">
                       <button onClick={() => handleDelete(b.id)} className={btnDanger}>Eliminar</button>
@@ -356,6 +577,67 @@ function TabBuyers({ bs, editable }) {
   );
 }
 
+// ─── Coverage Matrix: compradores × win-results, para ver de un vistazo a
+// quién le falta "Win" personal registrado (Strategic Selling: sin Win propio
+// por comprador, ese comprador no está realmente asegurado) ───────────────────
+
+function CoverageMatrix({ buyers, results }) {
+  const ROLE_SHORT = { economic_buyer: "EB", user_buyer: "UB", technical_buyer: "TB", coach: "Coach" };
+  const rows = buyers.map((b) => {
+    const own = results.filter((r) => r.buying_influence_id === b.id);
+    return {
+      buyer: b,
+      hasWin: own.some((r) => r.result_type === "win"),
+      hasResult: own.some((r) => r.result_type === "result"),
+      count: own.length,
+    };
+  });
+  const covered = rows.filter((r) => r.hasWin).length;
+  const pct = rows.length ? Math.round((covered / rows.length) * 100) : 0;
+  const gaps = rows.filter((r) => !r.hasWin);
+
+  return (
+    <div className="mb-5 border border-[#E5E7EB] rounded-xl p-4 bg-[#F9FAFB]">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-[#1F2937]">Matriz de cobertura</h3>
+        <span
+          className="text-xs font-medium px-2 py-0.5 rounded-full"
+          style={{ color: pct >= 75 ? "#15803D" : pct >= 40 ? "#D97706" : "#DC2626", backgroundColor: pct >= 75 ? "#DCFCE7" : pct >= 40 ? "#FEF3C7" : "#FEE2E2" }}
+        >
+          {covered}/{rows.length} compradores con Win propio ({pct}%)
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-[#6B7280]">
+              <th className="pb-1 pr-3 font-medium">Comprador</th>
+              <th className="pb-1 pr-3 font-medium">Rol</th>
+              <th className="pb-1 pr-3 font-medium text-center">Win</th>
+              <th className="pb-1 pr-3 font-medium text-center">Resultado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.buyer.id} className="border-t border-[#E5E7EB]">
+                <td className="py-1.5 pr-3 text-[#1F2937]">{r.buyer.full_name}</td>
+                <td className="py-1.5 pr-3 text-[#6B7280]">{ROLE_SHORT[r.buyer.influence_role] || r.buyer.influence_role}</td>
+                <td className="py-1.5 pr-3 text-center">{r.hasWin ? <span className="text-[#16A34A]">✓</span> : <span className="text-[#DC2626]">✗</span>}</td>
+                <td className="py-1.5 pr-3 text-center">{r.hasResult ? <span className="text-[#16A34A]">✓</span> : <span className="text-[#9CA3AF]">–</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {gaps.length > 0 && (
+        <p className="text-xs text-[#D97706] mt-2">
+          Sin Win registrado: {gaps.map((g) => g.buyer.full_name).join(", ")}.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── Tab: Resultados (Win-Results) ────────────────────────────────────────────
 
 function TabResults({ bs, editable }) {
@@ -398,6 +680,7 @@ function TabResults({ bs, editable }) {
 
   return (
     <div>
+      {buyers.length > 0 && <CoverageMatrix buyers={buyers} results={list} />}
       <div className="flex justify-between items-center mb-4">
         <span className="text-sm text-[#6B7280]">{list.length} resultados</span>
         {editable && buyers.length > 0 && (
@@ -464,7 +747,7 @@ function TabResults({ bs, editable }) {
 
 // ─── Tab: Competidores ────────────────────────────────────────────────────────
 
-function TabCompetitors({ bs, editable }) {
+function TabCompetitors({ bs, editable, redFlags }) {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -523,7 +806,13 @@ function TabCompetitors({ bs, editable }) {
                   {c.known_strengths && <p className="text-xs text-[#16A34A] mb-1">Fortalezas: {c.known_strengths}</p>}
                   {c.known_weaknesses && <p className="text-xs text-[#DC2626]">Debilidades: {c.known_weaknesses}</p>}
                 </div>
-                {editable && <button onClick={() => handleDelete(c.id)} className={btnDanger}>Eliminar</button>}
+                <div className="flex items-center gap-2 shrink-0">
+                  <RedFlagIcon
+                    active={redFlags.isFlagged("competitor", c.id)}
+                    onClick={() => redFlags.toggle("competitor", c.id, `Competidor de riesgo: ${c.competitor_name}`)}
+                  />
+                  {editable && <button onClick={() => handleDelete(c.id)} className={btnDanger}>Eliminar</button>}
+                </div>
               </div>
             </div>
           ))}
@@ -706,7 +995,14 @@ function TabRedFlags({ bs, editable }) {
             <tbody>
               {list.map(rf => (
                 <tr key={rf.id} className="border-b border-[#E5E7EB] last:border-0">
-                  <td className="py-2 pr-4 text-[#1F2937]">{rf.flag_description}</td>
+                  <td className="py-2 pr-4 text-[#1F2937]">
+                    {rf.flag_description || rf.flag_title}
+                    {rf.related_entity_type && (
+                      <span className="ml-2 text-[10px] text-[#9CA3AF] font-medium uppercase tracking-wide">
+                        · marcada desde {ELEMENT_TYPE_LABELS[rf.related_entity_type] || rf.related_entity_type}
+                      </span>
+                    )}
+                  </td>
                   <td className="py-2 pr-4">
                     <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ color: RF_COLORS[rf.severity] || "#6B7280", backgroundColor: "#F3F4F6" }}>
                       {SEV_LABELS[rf.severity] || rf.severity}
@@ -752,7 +1048,7 @@ function TabRedFlags({ bs, editable }) {
 
 // ─── Tab: Scorecard ───────────────────────────────────────────────────────────
 
-function TabScorecard({ bs }) {
+function TabScorecard({ bs, redFlags }) {
   const [data, setData] = useState(null);
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(true);
@@ -798,7 +1094,13 @@ function TabScorecard({ bs }) {
                 <p className="font-medium text-[#1F2937] text-sm">{c.name}</p>
                 {c.description && <p className="text-xs text-[#6B7280] mt-0.5">{c.description}</p>}
               </div>
-              <span className="text-lg font-semibold text-[#2563EB] min-w-[2rem] text-right">{answers[c.id] ?? 0}</span>
+              <div className="flex items-center gap-2 shrink-0">
+                <RedFlagIcon
+                  active={redFlags.isFlagged("scorecard_criterion", c.id)}
+                  onClick={() => redFlags.toggle("scorecard_criterion", c.id, `Respuesta baja en scorecard: ${c.name}`)}
+                />
+                <span className="text-lg font-semibold text-[#2563EB] min-w-[2rem] text-right">{answers[c.id] ?? 0}</span>
+              </div>
             </div>
             <input
               type="range"
@@ -831,7 +1133,7 @@ function TabScorecard({ bs }) {
 
 // ─── Tab: Acciones ────────────────────────────────────────────────────────────
 
-function TabActions({ bs, editable }) {
+function TabActions({ bs, editable, redFlags }) {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -887,22 +1189,37 @@ function TabActions({ bs, editable }) {
         <p className="text-sm text-[#6B7280]">Sin acciones registradas.</p>
       ) : (
         <div className="space-y-3">
-          {list.map(a => (
-            <div key={a.id} className="border border-[#E5E7EB] rounded-xl p-4 flex justify-between items-start">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-medium text-[#1F2937] text-sm">{a.title}</span>
-                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ color: PRI_COLORS[a.priority] || "#6B7280", backgroundColor: "#F3F4F6" }}>
-                    {PRI_LABELS[a.priority] || a.priority}
-                  </span>
+          {list.map(a => {
+            const isOverdue = a.due_date
+              && !["completed", "cancelled"].includes(a.status)
+              && new Date(a.due_date) < new Date();
+            return (
+              <div key={a.id} className="border border-[#E5E7EB] rounded-xl p-4 flex justify-between items-start">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-medium text-[#1F2937] text-sm">{a.title}</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full" style={{ color: PRI_COLORS[a.priority] || "#6B7280", backgroundColor: "#F3F4F6" }}>
+                      {PRI_LABELS[a.priority] || a.priority}
+                    </span>
+                  </div>
+                  {a.due_date && (
+                    <p className={`text-xs ${isOverdue ? "text-[#DC2626] font-medium" : "text-[#6B7280]"}`}>
+                      Vence: {new Date(a.due_date).toLocaleDateString("es-PE")}{isOverdue ? " — vencida" : ""}
+                    </p>
+                  )}
                 </div>
-                {a.due_date && (
-                  <p className="text-xs text-[#6B7280]">Vence: {new Date(a.due_date).toLocaleDateString("es-PE")}</p>
-                )}
+                <div className="flex items-center gap-2 shrink-0 ml-4">
+                  <RedFlagIcon
+                    active={redFlags.isFlagged("action_item", a.id)}
+                    suggested={isOverdue && !redFlags.isFlagged("action_item", a.id)}
+                    onClick={() => redFlags.toggle("action_item", a.id, `Tarea vencida: ${a.title}`)}
+                    title={isOverdue && !redFlags.isFlagged("action_item", a.id) ? "Sugerida: tarea vencida — clic para confirmar red flag" : undefined}
+                  />
+                  {editable && <button onClick={() => handleDelete(a.id)} className={btnDanger}>Eliminar</button>}
+                </div>
               </div>
-              {editable && <button onClick={() => handleDelete(a.id)} className={`${btnDanger} ml-4`}>Eliminar</button>}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
       {modal && (
@@ -939,6 +1256,274 @@ function TabActions({ bs, editable }) {
   );
 }
 
+// ─── Tab: Historial (comentarios de revision + versiones) ────────────────────
+// Los dos endpoints existian en el backend sin ninguna pantalla que los
+// consumiera -- version_history (snapshot en cada aprobacion) y los
+// comentarios que un manager deja al observar. Se agrupan en una sola
+// pestana porque conceptualmente son "que paso con este Blue Sheet".
+const REVIEW_SEVERITY_COLORS = { info: "#6B7280", low: "#6B7280", medium: "#D97706", high: "#DC2626" };
+
+function TabHistory({ bs, editable }) {
+  const [comments, setComments] = useState([]);
+  const [versions, setVersions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [newComment, setNewComment] = useState({ section_name: "", comment_text: "" });
+  const [posting, setPosting] = useState(false);
+  const [resolvingId, setResolvingId] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [c, v] = await Promise.all([
+        fetchReviewComments(bs.id).catch(() => []),
+        fetchBlueSheetVersions(bs.id).catch(() => []),
+      ]);
+      setComments(Array.isArray(c) ? c : []);
+      setVersions(Array.isArray(v) ? v : []);
+    } finally {
+      setLoading(false);
+    }
+  }, [bs.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handlePostComment = async () => {
+    if (!newComment.comment_text.trim()) return;
+    setPosting(true);
+    try {
+      await createReviewComment(bs.id, { ...newComment, section_name: newComment.section_name || null });
+      setNewComment({ section_name: "", comment_text: "" });
+      load();
+    } catch (e) { alert(e.message || "Error"); }
+    setPosting(false);
+  };
+
+  const handleResolve = async (id) => {
+    setResolvingId(id);
+    try { await resolveReviewComment(bs.id, id); load(); } catch (e) { alert(e.message || "Error"); }
+    setResolvingId(null);
+  };
+
+  if (loading) return <p className="text-sm text-[#6B7280]">Cargando...</p>;
+
+  const pendingComments = comments.filter((c) => !c.is_resolved);
+  const resolvedComments = comments.filter((c) => c.is_resolved);
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-[#1F2937]">Comentarios de revisión</h3>
+          <span className="text-xs text-[#6B7280]">{pendingComments.length} pendiente{pendingComments.length === 1 ? "" : "s"}</span>
+        </div>
+
+        {editable && (
+          <div className="border border-[#E5E7EB] rounded-xl p-3 mb-4">
+            <div className="flex gap-2 mb-2">
+              <select
+                className={`${inputCls} max-w-[200px]`}
+                value={newComment.section_name}
+                onChange={(e) => setNewComment((c) => ({ ...c, section_name: e.target.value }))}
+              >
+                {COMMENT_SECTION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <textarea
+              className={textareaCls}
+              rows={2}
+              placeholder="Deja una nota sobre esta sección (visible para todo el equipo, sin necesidad de observar todo el Blue Sheet)"
+              value={newComment.comment_text}
+              onChange={(e) => setNewComment((c) => ({ ...c, comment_text: e.target.value }))}
+            />
+            <div className="flex justify-end mt-2">
+              <button onClick={handlePostComment} disabled={posting || !newComment.comment_text.trim()} className={btnPrimary}>
+                {posting ? "Guardando..." : "Comentar"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {comments.length === 0 ? (
+          <p className="text-sm text-[#6B7280]">Sin comentarios registrados.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {[...pendingComments, ...resolvedComments].map((c) => (
+              <div key={c.id} className={`border rounded-xl p-3 ${c.is_resolved ? "border-[#E5E7EB] opacity-60" : "border-[#FDE68A] bg-[#FFFBEB]"}`}>
+                <div className="flex justify-between items-start gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      {c.section_name && (
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-[#6B7280]">
+                          {COMMENT_SECTION_OPTIONS.find((o) => o.value === c.section_name)?.label || c.section_name}
+                        </span>
+                      )}
+                      <span className="text-xs font-medium" style={{ color: REVIEW_SEVERITY_COLORS[c.severity] || "#6B7280" }}>
+                        {c.severity}
+                      </span>
+                      {c.requires_correction && !c.is_resolved && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#FEE2E2] text-[#DC2626]">Requiere corrección</span>
+                      )}
+                      {c.is_resolved && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#DCFCE7] text-[#16A34A]">Resuelto</span>
+                      )}
+                    </div>
+                    <p className="text-sm text-[#1F2937]">{c.comment_text}</p>
+                    <p className="text-xs text-[#9CA3AF] mt-1">
+                      {c.created_by_name || "—"} · {new Date(c.created_at).toLocaleDateString("es-EC")}
+                    </p>
+                  </div>
+                  {!c.is_resolved && editable && (
+                    <button onClick={() => handleResolve(c.id)} disabled={resolvingId === c.id} className={`${btnSecondary} shrink-0`}>
+                      {resolvingId === c.id ? "..." : "Marcar resuelto"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h3 className="text-sm font-semibold text-[#1F2937] mb-3">Historial de versiones</h3>
+        {versions.length === 0 ? (
+          <p className="text-sm text-[#6B7280]">Aún no hay versiones aprobadas.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#E5E7EB] text-[#6B7280] text-left">
+                  <th className="pb-2 pr-4 font-medium">Versión</th>
+                  <th className="pb-2 pr-4 font-medium">Motivo</th>
+                  <th className="pb-2 pr-4 font-medium">Por</th>
+                  <th className="pb-2 font-medium">Fecha</th>
+                </tr>
+              </thead>
+              <tbody>
+                {versions.map((v) => (
+                  <tr key={v.id} className="border-b border-[#E5E7EB] last:border-0">
+                    <td className="py-2 pr-4 font-medium text-[#1F2937]">v{v.version_number}</td>
+                    <td className="py-2 pr-4 text-[#6B7280]">{v.reason || "-"}</td>
+                    <td className="py-2 pr-4 text-[#6B7280]">{v.created_by_name || "—"}</td>
+                    <td className="py-2 text-[#6B7280]">{new Date(v.created_at).toLocaleDateString("es-EC")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Modal: Aprobar / Observar / Reabrir con motivo real ──────────────────────
+// Antes estos 3 botones mandaban {} siempre -- el backend ya guarda el motivo
+// (approval_notes, crm_review_comments por seccion, reopen_reason) pero nadie
+// lo escribia nunca, asi que el comercial jamas veia por que se observo o
+// reabrio su Blue Sheet.
+const COMMENT_SECTION_OPTIONS = [
+  { value: "", label: "General (sin sección)" },
+  { value: "general", label: "General" },
+  { value: "buyers", label: "Compradores" },
+  { value: "results", label: "Resultados" },
+  { value: "competitors", label: "Competidores" },
+  { value: "strengths", label: "Fortalezas" },
+  { value: "scorecard", label: "Scorecard" },
+  { value: "actions", label: "Acciones" },
+];
+
+function emptyComment() {
+  return { section_name: "", comment_text: "", severity: "medium", requires_correction: false };
+}
+
+function ReviewActionModal({ action, onClose, onSubmit, busy }) {
+  const [notes, setNotes] = useState("");
+  const [comments, setComments] = useState([emptyComment()]);
+
+  const titles = { approve: "Aprobar Blue Sheet", observe: "Observar Blue Sheet", reopen: "Reabrir Blue Sheet" };
+  const submitLabels = { approve: "Aprobar", observe: "Observar", reopen: "Reabrir" };
+
+  const setCommentField = (idx, field, value) => {
+    setComments((prev) => prev.map((c, i) => (i === idx ? { ...c, [field]: value } : c)));
+  };
+  const addComment = () => setComments((prev) => [...prev, emptyComment()]);
+  const removeComment = (idx) => setComments((prev) => prev.filter((_, i) => i !== idx));
+
+  const handleSubmit = () => {
+    if (action === "observe") {
+      const valid = comments.filter((c) => c.comment_text.trim());
+      if (!valid.length) return alert("Escribe al menos un comentario explicando qué falta corregir.");
+      onSubmit({ comments: valid.map((c) => ({ ...c, section_name: c.section_name || null })) });
+    } else if (action === "approve") {
+      onSubmit({ notes: notes.trim() || null });
+    } else if (action === "reopen") {
+      if (!notes.trim()) return alert("Escribe el motivo de la reapertura.");
+      onSubmit({ reason: notes.trim() });
+    }
+  };
+
+  return (
+    <Modal title={titles[action]} onClose={onClose}>
+      {action === "observe" ? (
+        <div>
+          <p className="text-sm text-[#6B7280] mb-4">
+            El comercial verá cada comentario junto a la sección que corresponde cuando vuelva a abrir este Blue Sheet.
+          </p>
+          <div className="flex flex-col gap-4 mb-4">
+            {comments.map((c, idx) => (
+              <div key={idx} className="border border-[#E5E7EB] rounded-xl p-3">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-xs font-semibold text-[#6B7280] uppercase tracking-wide">Comentario {idx + 1}</span>
+                  {comments.length > 1 && (
+                    <button onClick={() => removeComment(idx)} className="text-xs text-[#DC2626] hover:underline">Quitar</button>
+                  )}
+                </div>
+                <Field label="Sección">
+                  <select className={inputCls} value={c.section_name} onChange={(e) => setCommentField(idx, "section_name", e.target.value)}>
+                    {COMMENT_SECTION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </Field>
+                <Field label="Comentario" required>
+                  <textarea className={textareaCls} rows={2} value={c.comment_text} onChange={(e) => setCommentField(idx, "comment_text", e.target.value)} />
+                </Field>
+                <div className="flex items-center gap-4">
+                  <Field label="Severidad">
+                    <select className={inputCls} value={c.severity} onChange={(e) => setCommentField(idx, "severity", e.target.value)}>
+                      <option value="low">Bajo</option>
+                      <option value="medium">Medio</option>
+                      <option value="high">Alto</option>
+                    </select>
+                  </Field>
+                  <label className="flex items-center gap-2 text-sm text-[#1F2937] mb-4">
+                    <input type="checkbox" checked={c.requires_correction} onChange={(e) => setCommentField(idx, "requires_correction", e.target.checked)} />
+                    Requiere corrección
+                  </label>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button onClick={addComment} className={`${btnSecondary} mb-4`}>+ Otro comentario</button>
+          <div className="flex gap-3 justify-end">
+            <button onClick={onClose} className={btnSecondary}>Cancelar</button>
+            <button onClick={handleSubmit} disabled={busy} className={btnPrimary}>{busy ? "Guardando..." : submitLabels[action]}</button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <Field label={action === "reopen" ? "Motivo de la reapertura" : "Nota de aprobación (opcional)"} required={action === "reopen"}>
+            <textarea className={textareaCls} rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </Field>
+          <div className="flex gap-3 justify-end mt-2">
+            <button onClick={onClose} className={btnSecondary}>Cancelar</button>
+            <button onClick={handleSubmit} disabled={busy} className={btnPrimary}>{busy ? "Guardando..." : submitLabels[action]}</button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function BlueSheetPage() {
@@ -948,8 +1533,11 @@ export default function BlueSheetPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [template, setTemplate] = useState("blank");
   const [activeTab, setActiveTab] = useState("general");
   const [actionLoading, setActionLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const elementRedFlags = useElementRedFlags(bs?.id);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -973,7 +1561,7 @@ export default function BlueSheetPage() {
   const handleCreate = async () => {
     setCreating(true);
     try {
-      const newBs = await createBlueSheet(opportunityId, {});
+      const newBs = await createBlueSheet(opportunityId, BS_TEMPLATES[template]?.data || {});
       setBs(newBs);
     } catch (e) {
       alert(e.message || "Error al crear Blue Sheet");
@@ -982,16 +1570,19 @@ export default function BlueSheetPage() {
     }
   };
 
-  const handleAction = async (action, ...args) => {
+  const [reviewModal, setReviewModal] = useState(null); // 'approve' | 'observe' | 'reopen' | null
+
+  const handleAction = async (action, payload = {}) => {
     setActionLoading(true);
     try {
       let result;
       if (action === "submit") result = await submitBlueSheet(bs.id);
-      else if (action === "approve") result = await approveBlueSheet(bs.id, {});
-      else if (action === "observe") result = await observeBlueSheet(bs.id, {});
-      else if (action === "reopen") result = await reopenBlueSheet(bs.id, {});
+      else if (action === "approve") result = await approveBlueSheet(bs.id, payload);
+      else if (action === "observe") result = await observeBlueSheet(bs.id, payload);
+      else if (action === "reopen") result = await reopenBlueSheet(bs.id, payload);
       if (result) setBs(result);
       else await load();
+      setReviewModal(null);
     } catch (e) {
       alert(e.message || "Error");
     } finally {
@@ -1052,6 +1643,17 @@ export default function BlueSheetPage() {
         {bs && (
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={bs.status} />
+            <button
+              onClick={async () => {
+                setPdfLoading(true);
+                try { await downloadBlueSheetPdf(bs.id); } catch { /* noop: fallo silencioso, no bloquea la vista */ }
+                setPdfLoading(false);
+              }}
+              disabled={pdfLoading}
+              className={btnSecondary}
+            >
+              {pdfLoading ? "Generando…" : "Descargar PDF"}
+            </button>
             {canSubmit && (
               <button
                 onClick={() => handleAction("submit")}
@@ -1063,16 +1665,16 @@ export default function BlueSheetPage() {
             )}
             {canApproveObserve && (
               <>
-                <button onClick={() => handleAction("approve")} disabled={actionLoading} className="px-4 py-2 rounded-xl text-sm font-medium bg-[#16A34A] text-white hover:bg-[#15803D] disabled:opacity-50">
+                <button onClick={() => setReviewModal("approve")} disabled={actionLoading} className="px-4 py-2 rounded-xl text-sm font-medium bg-[#16A34A] text-white hover:bg-[#15803D] disabled:opacity-50">
                   Aprobar
                 </button>
-                <button onClick={() => handleAction("observe")} disabled={actionLoading} className="px-4 py-2 rounded-xl text-sm font-medium bg-[#FEF3C7] text-[#D97706] hover:bg-[#FDE68A] disabled:opacity-50">
+                <button onClick={() => setReviewModal("observe")} disabled={actionLoading} className="px-4 py-2 rounded-xl text-sm font-medium bg-[#FEF3C7] text-[#D97706] hover:bg-[#FDE68A] disabled:opacity-50">
                   Observar
                 </button>
               </>
             )}
             {canReopen && (
-              <button onClick={() => handleAction("reopen")} disabled={actionLoading} className={btnSecondary}>
+              <button onClick={() => setReviewModal("reopen")} disabled={actionLoading} className={btnSecondary}>
                 Reabrir
               </button>
             )}
@@ -1084,16 +1686,45 @@ export default function BlueSheetPage() {
       {!bs && (
         <div className="border border-dashed border-[#E5E7EB] rounded-2xl p-12 text-center">
           <p className="text-[#6B7280] mb-4">No hay Blue Sheet para esta oportunidad.</p>
-          <button onClick={handleCreate} disabled={creating} className={btnPrimary}>
-            {creating ? "Creando..." : "Crear Blue Sheet"}
-          </button>
+          <div className="flex flex-col items-center gap-3">
+            <label className="flex items-center gap-2 text-sm text-[#6B7280]">
+              Plantilla inicial
+              <select
+                value={template}
+                onChange={(e) => setTemplate(e.target.value)}
+                className="border border-[#E5E7EB] rounded-xl px-3 py-1.5 text-[#1F2937] text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+              >
+                {Object.entries(BS_TEMPLATES).map(([key, t]) => (
+                  <option key={key} value={key}>{t.label}</option>
+                ))}
+              </select>
+            </label>
+            <button onClick={handleCreate} disabled={creating} className={btnPrimary}>
+              {creating ? "Creando..." : "Crear Blue Sheet"}
+            </button>
+          </div>
         </div>
       )}
 
       {/* BS content */}
       {bs && (
         <>
-          <CompletionBar value={bs.completeness_score || 0} />
+          {bs.status === "needs_update" && bs.reopen_reason && (
+            <div className="mb-4 px-4 py-3 bg-[#FEE2E2] border border-[#DC2626] text-[#991B1B] rounded-xl text-sm">
+              <b>Motivo de la reapertura:</b> {bs.reopen_reason}
+            </div>
+          )}
+          {bs.status === "observed" && (
+            <div className="mb-4 px-4 py-3 bg-[#FEF3C7] border border-[#D97706] text-[#92400E] rounded-xl text-sm">
+              Este Blue Sheet fue observado. Revisa los comentarios en la pestaña <b>Historial</b> antes de volver a enviarlo.
+            </div>
+          )}
+          {bs.status === "approved" && bs.approval_notes && (
+            <div className="mb-4 px-4 py-3 bg-[#DCFCE7] border border-[#16A34A] text-[#14532D] rounded-xl text-sm">
+              <b>Nota de aprobación:</b> {bs.approval_notes}
+            </div>
+          )}
+          <CompletenessChecklist blueSheetId={bs.id} fallbackScore={bs.completeness_score || 0} onJumpToTab={setActiveTab} />
 
           {/* Tabs */}
           <div className="flex gap-1 mb-6 border-b border-[#E5E7EB] overflow-x-auto">
@@ -1118,13 +1749,13 @@ export default function BlueSheetPage() {
               <TabGeneral bs={bs} editable={editable} onSaved={load} />
             )}
             {activeTab === "buyers" && (
-              <TabBuyers bs={bs} editable={editable} />
+              <TabBuyers bs={bs} editable={editable} redFlags={elementRedFlags} />
             )}
             {activeTab === "results" && (
               <TabResults bs={bs} editable={editable} />
             )}
             {activeTab === "competitors" && (
-              <TabCompetitors bs={bs} editable={editable} />
+              <TabCompetitors bs={bs} editable={editable} redFlags={elementRedFlags} />
             )}
             {activeTab === "strengths" && (
               <TabStrengths bs={bs} editable={editable} />
@@ -1133,13 +1764,25 @@ export default function BlueSheetPage() {
               <TabRedFlags bs={bs} editable={editable} />
             )}
             {activeTab === "scorecard" && (
-              <TabScorecard bs={bs} />
+              <TabScorecard bs={bs} redFlags={elementRedFlags} />
             )}
             {activeTab === "actions" && (
-              <TabActions bs={bs} editable={editable} />
+              <TabActions bs={bs} editable={editable} redFlags={elementRedFlags} />
+            )}
+            {activeTab === "history" && (
+              <TabHistory bs={bs} editable={editable} />
             )}
           </div>
         </>
+      )}
+
+      {reviewModal && (
+        <ReviewActionModal
+          action={reviewModal}
+          busy={actionLoading}
+          onClose={() => setReviewModal(null)}
+          onSubmit={(payload) => handleAction(reviewModal, payload)}
+        />
       )}
     </div>
   );

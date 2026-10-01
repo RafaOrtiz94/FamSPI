@@ -1,11 +1,24 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useAccount } from "../hooks/useCrmAccounts";
-import { updateAccount, fetchAccountTimeline } from "../../../core/api/crmFamApi";
+import { useAccount, useAccountSalesStats } from "../hooks/useCrmAccounts";
+import { useAuth } from "../../../core/auth/AuthContext";
+import { useUI } from "../../../core/ui/UIContext";
+import {
+  updateAccount, fetchAccountTimeline, fetchAccountDuplicates, mergeAccounts,
+} from "../../../core/api/crmFamApi";
+
+// Misma lista que MANAGER_OR_ADMIN_ROLES en backend/crm.constants.js -- solo
+// managers pueden fusionar cuentas (la ruta ya lo exige, esto es para no
+// ofrecer un boton que el backend va a rechazar).
+const CRM_MANAGER_ROLES = new Set([
+  "jefe_comercial", "gerencia", "gerencia_general", "gerente_general", "director", "gerente",
+  "jefe_ti", "jefe_de_ti", "admin", "administrador",
+]);
 
 const EDITABLE_FIELDS = [
   { name: "account_name", label: "Nombre", required: true },
   { name: "account_type", label: "Tipo", type: "select", options: ["", "empresa", "persona_natural", "gobierno", "ong"] },
+  { name: "classification", label: "Clasificación", type: "select", options: ["", "oro", "plata", "bronce", "normal"] },
   { name: "ruc", label: "RUC" },
   { name: "industry", label: "Industria" },
   { name: "email", label: "Email", type: "email" },
@@ -13,8 +26,100 @@ const EDITABLE_FIELDS = [
   { name: "city", label: "Ciudad" },
   { name: "country", label: "País" },
   { name: "website", label: "Sitio web" },
+  { name: "sales_target_amount", label: "Meta de ventas (USD)", type: "number" },
   { name: "description", label: "Descripción", type: "textarea" },
 ];
+
+// Clasificacion de la cuenta (oro/plata/bronce/normal) -- separada de las
+// estadisticas de ventas, ver requerimiento del usuario.
+const CLASSIFICATION_BADGES = {
+  oro: "bg-amber-50 text-amber-700 border-amber-200",
+  plata: "bg-slate-100 text-slate-600 border-slate-300",
+  bronce: "bg-orange-50 text-orange-700 border-orange-200",
+  normal: "bg-blue-50 text-blue-700 border-blue-100",
+};
+const CLASSIFICATION_LABELS = { oro: "Oro", plata: "Plata", bronce: "Bronce", normal: "Normal" };
+
+function ClassificationBadge({ value }) {
+  if (!value) return <span className="text-sm text-[#1F2937]">—</span>;
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${CLASSIFICATION_BADGES[value] || "bg-slate-100 text-slate-600 border-slate-200"}`}>
+      {CLASSIFICATION_LABELS[value] || value}
+    </span>
+  );
+}
+
+const money = (value) =>
+  value == null ? "—" : `$${Number(value).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const OPPORTUNITY_STATUS_LABELS = { open: "abierta", won: "ganada", lost: "perdida", cancelled: "cancelada" };
+
+// Bug corregido: getAccountTimeline (backend) siempre devolvio un objeto
+// agrupado ({leads, opportunities, activities, notes, documents, ...}),
+// nunca el array plano que este componente esperaba -- el timeline jamas
+// mostro nada. Esto normaliza los grupos (incluyendo Business Case/compras
+// privadas, agregados para "Cuenta 360") en una sola lista ordenada.
+function normalizeTimeline(raw) {
+  if (!raw || typeof raw !== "object") return [];
+  const events = [];
+
+  (raw.leads || []).forEach((l) => events.push({
+    id: `lead-${l.id}`, date: l.created_at, kind: "Lead",
+    title: l.full_name || l.lead_code || "Lead",
+    subtitle: l.status ? `Estado: ${l.status}` : null,
+  }));
+
+  (raw.opportunities || []).forEach((o) => events.push({
+    id: `opp-${o.id}`, date: o.created_at, kind: "Oportunidad",
+    title: o.name || o.opportunity_code || "Oportunidad",
+    subtitle: [
+      o.status ? `Estado: ${OPPORTUNITY_STATUS_LABELS[o.status] || o.status}` : null,
+      o.estimated_amount != null ? money(o.estimated_amount) : null,
+    ].filter(Boolean).join(" · ") || null,
+  }));
+
+  (raw.activities || []).forEach((a) => events.push({
+    id: `act-${a.id}`, date: a.scheduled_at || a.completed_at, kind: "Actividad",
+    title: a.subject || a.activity_type || "Actividad",
+    subtitle: a.status ? `Estado: ${a.status}` : null,
+  }));
+
+  (raw.notes || []).forEach((n) => events.push({
+    id: `note-${n.id}`, date: n.created_at, kind: "Nota",
+    title: n.note_text ? (n.note_text.length > 120 ? `${n.note_text.slice(0, 120)}…` : n.note_text) : "Nota",
+    subtitle: null,
+  }));
+
+  (raw.documents || []).forEach((d) => events.push({
+    id: `doc-${d.id}`, date: d.created_at, kind: "Documento",
+    title: d.document_name || "Documento",
+    subtitle: d.document_type || null,
+  }));
+
+  // Business Case / compras publicas vinculadas por oportunidad (puente
+  // crmPurchaseSync) -- esto es lo nuevo: antes el timeline de la cuenta
+  // no mostraba nada de lo que pasa fuera del CRM.
+  (raw.business_cases || []).forEach((bc) => events.push({
+    id: `bc-${bc.id}`, date: bc.updated_at || bc.created_at, kind: "Business Case",
+    title: bc.process_code ? `Proceso ${bc.process_code}` : "Business Case",
+    subtitle: [bc.canonical_state, bc.contract_object].filter(Boolean).join(" · ") || null,
+  }));
+
+  (raw.private_purchases || []).forEach((pp) => events.push({
+    id: `pp-${pp.id}`, date: pp.updated_at || pp.created_at, kind: "Compra privada",
+    title: "Compra privada",
+    subtitle: pp.status ? `Estado: ${pp.status}` : null,
+  }));
+
+  return events
+    .filter((e) => e.date)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+
+const TIMELINE_KIND_COLORS = {
+  Lead: "#7C3AED", "Oportunidad": "#2563EB", Actividad: "#0E8F72",
+  Nota: "#6B7280", Documento: "#B8860B", "Business Case": "#DC2626", "Compra privada": "#DC2626",
+};
 
 function Field({ field, value, editing, onChange }) {
   if (!editing) {
@@ -24,6 +129,12 @@ function Field({ field, value, editing, onChange }) {
           {value}
         </a>
       );
+    }
+    if (field.name === "classification") {
+      return <ClassificationBadge value={value} />;
+    }
+    if (field.name === "sales_target_amount") {
+      return <span className="text-sm text-[#1F2937]">{value ? money(value) : "—"}</span>;
     }
     return <span className="text-sm text-[#1F2937]">{value || "—"}</span>;
   }
@@ -36,7 +147,11 @@ function Field({ field, value, editing, onChange }) {
         onChange={onChange}
         className="w-full border border-[#E5E7EB] rounded-xl px-3 py-1.5 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
       >
-        {field.options.map(o => <option key={o} value={o}>{o || "Seleccionar..."}</option>)}
+        {field.options.map(o => (
+          <option key={o} value={o}>
+            {o ? (field.name === "classification" ? (CLASSIFICATION_LABELS[o] || o) : o) : "Seleccionar..."}
+          </option>
+        ))}
       </select>
     );
   }
@@ -71,9 +186,115 @@ function Spinner() {
   );
 }
 
+// Estadisticas de ventas de la cuenta, para proyecciones comerciales.
+function SalesStatsCard({ accountId }) {
+  const { data: stats, loading, error } = useAccountSalesStats(accountId);
+
+  if (loading) return <div className="bg-white border border-[#E5E7EB] rounded-2xl p-6 mb-6"><Spinner /></div>;
+  if (error) return null; // no bloquear el detalle de cuenta si esto falla
+  if (!stats) return null;
+
+  const hasTarget = stats.sales_target_amount != null;
+  const metrics = [
+    { label: "Monto total generado", value: money(stats.total_estimated_amount), hint: `${stats.total_opportunities} oportunidad(es) generada(s)` },
+    { label: "Meta de ventas", value: hasTarget ? money(stats.sales_target_amount) : "Sin meta definida" },
+    { label: "Vendido (ganado)", value: money(stats.won_amount), hint: `${stats.won_opportunities} oportunidad(es) ganada(s)` },
+    { label: "Falta por vender", value: hasTarget ? money(stats.remaining_to_target) : "—" },
+    {
+      label: "Oportunidades faltantes para meta",
+      value: hasTarget ? String(stats.opportunities_needed_for_target) : "—",
+      hint: stats.avg_deal_size != null ? `Basado en un promedio de ${money(stats.avg_deal_size)} por oportunidad` : null,
+    },
+    { label: "Oportunidades ganadas", value: String(stats.won_opportunities) },
+    { label: "% Ganadas", value: stats.win_rate_pct != null ? `${stats.win_rate_pct}%` : "—", hint: "Sobre oportunidades cerradas (ganadas + perdidas)" },
+    { label: "% Perdidas", value: stats.loss_rate_pct != null ? `${stats.loss_rate_pct}%` : "—" },
+  ];
+
+  return (
+    <div className="bg-white border border-[#E5E7EB] rounded-2xl p-6 mb-6">
+      <h2 className="text-base font-semibold text-[#1F2937] mb-4">Estadísticas de ventas — proyección comercial</h2>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {metrics.map((m) => (
+          <div key={m.label} className="rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+            <p className="text-xs font-medium text-[#6B7280] uppercase tracking-wide mb-1">{m.label}</p>
+            <p className="text-lg font-semibold text-[#1F2937]">{m.value}</p>
+            {m.hint && <p className="text-[11px] text-[#6B7280] mt-1">{m.hint}</p>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Candidatos a duplicado (mismo RUC o nombre parecido) con accion de fusion
+// -- antes el aviso de "nombre parecido" solo aparecia una vez, al crear una
+// cuenta nueva, y no habia forma de resolverlo despues.
+function DuplicateAccountsCard({ accountId, accountName, canMerge, onMerged }) {
+  const { showToast } = useUI();
+  const [candidates, setCandidates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [mergingId, setMergingId] = useState(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetchAccountDuplicates(accountId)
+      .then((rows) => setCandidates(Array.isArray(rows) ? rows : []))
+      .catch(() => setCandidates([]))
+      .finally(() => setLoading(false));
+  }, [accountId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading || candidates.length === 0) return null;
+
+  const handleMerge = async (sourceId, sourceName) => {
+    if (!window.confirm(`¿Fusionar "${sourceName}" dentro de "${accountName}"? Esta acción no se puede deshacer.`)) return;
+    setMergingId(sourceId);
+    try {
+      await mergeAccounts(accountId, sourceId);
+      showToast(`"${sourceName}" se fusionó dentro de "${accountName}"`, "success");
+      setCandidates((prev) => prev.filter((c) => c.id !== sourceId));
+      onMerged?.();
+    } catch (err) {
+      showToast(err?.response?.data?.message || "No se pudo fusionar", "error");
+    } finally {
+      setMergingId(null);
+    }
+  };
+
+  return (
+    <div className="bg-[#FFFBEB] border border-[#F59E0B] rounded-2xl p-5 mb-6">
+      <h2 className="text-sm font-semibold text-[#92400E] mb-1">Posibles cuentas duplicadas</h2>
+      <p className="text-xs text-[#92400E] mb-3">Mismo RUC o nombre parecido a "{accountName}".</p>
+      <ul className="flex flex-col gap-2">
+        {candidates.map((c) => (
+          <li key={c.id} className="flex items-center justify-between gap-3 bg-white border border-[#FDE68A] rounded-xl px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-sm text-[#1F2937] font-medium truncate">{c.account_name}</p>
+              <p className="text-xs text-[#6B7280]">{c.ruc || "Sin RUC"} {c.city ? `· ${c.city}` : ""}</p>
+            </div>
+            {canMerge && (
+              <button
+                type="button"
+                onClick={() => handleMerge(c.id, c.account_name)}
+                disabled={mergingId === c.id}
+                className="shrink-0 px-3 py-1.5 text-xs font-medium bg-[#B45309] text-white rounded-lg hover:bg-[#92400E] disabled:opacity-50 transition-colors"
+              >
+                {mergingId === c.id ? "Fusionando..." : "Fusionar aquí"}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export default function AccountDetailPage() {
   const { id } = useParams();
   const { data: account, loading, error, refresh } = useAccount(id);
+  const { user } = useAuth();
+  const canMerge = CRM_MANAGER_ROLES.has(user?.role);
 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
@@ -90,7 +311,7 @@ export default function AccountDetailPage() {
     setTimelineLoading(true);
     setTimelineError(null);
     fetchAccountTimeline(id)
-      .then(res => setTimeline(Array.isArray(res) ? res : (res?.data ?? [])))
+      .then(res => setTimeline(normalizeTimeline(res)))
       .catch(e => setTimelineError(e.message || "Error cargando timeline"))
       .finally(() => setTimelineLoading(false));
   }, [id]);
@@ -158,6 +379,13 @@ export default function AccountDetailPage() {
         <span className="text-[#1F2937] font-medium">{account.account_name}</span>
       </nav>
 
+      <DuplicateAccountsCard
+        accountId={id}
+        accountName={account.account_name}
+        canMerge={canMerge}
+        onMerged={refresh}
+      />
+
       {/* Main card */}
       <form onSubmit={handleSave}>
         <div className="bg-white border border-[#E5E7EB] rounded-2xl p-6 mb-6">
@@ -222,6 +450,8 @@ export default function AccountDetailPage() {
         </div>
       </form>
 
+      <SalesStatsCard accountId={id} />
+
       {/* Timeline */}
       <div className="bg-white border border-[#E5E7EB] rounded-2xl p-6">
         <h2 className="text-base font-semibold text-[#1F2937] mb-4">Timeline</h2>
@@ -234,17 +464,23 @@ export default function AccountDetailPage() {
         )}
         {!timelineLoading && timeline.length > 0 && (
           <ol className="relative border-l border-[#E5E7EB] ml-2 flex flex-col gap-5">
-            {timeline.map((item, i) => (
-              <li key={item.id ?? i} className="ml-4">
-                <span className="absolute -left-1.5 mt-1 w-3 h-3 rounded-full bg-[#2563EB] border-2 border-white" />
-                <p className="text-xs text-[#6B7280] mb-0.5">
-                  {item.occurred_at
-                    ? new Date(item.occurred_at).toLocaleDateString("es-PE", { year: "numeric", month: "short", day: "numeric" })
-                    : "—"}
-                </p>
-                <p className="text-sm text-[#1F2937]">{item.description || item.event_type || "Evento"}</p>
-                {item.details && (
-                  <p className="text-xs text-[#6B7280] mt-0.5">{typeof item.details === "string" ? item.details : JSON.stringify(item.details)}</p>
+            {timeline.map((item) => (
+              <li key={item.id} className="ml-4">
+                <span
+                  className="absolute -left-1.5 mt-1 w-3 h-3 rounded-full border-2 border-white"
+                  style={{ backgroundColor: TIMELINE_KIND_COLORS[item.kind] || "#6B7280" }}
+                />
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: TIMELINE_KIND_COLORS[item.kind] || "#6B7280" }}>
+                    {item.kind}
+                  </span>
+                  <span className="text-xs text-[#6B7280]">
+                    {new Date(item.date).toLocaleDateString("es-EC", { year: "numeric", month: "short", day: "numeric" })}
+                  </span>
+                </div>
+                <p className="text-sm text-[#1F2937]">{item.title}</p>
+                {item.subtitle && (
+                  <p className="text-xs text-[#6B7280] mt-0.5">{item.subtitle}</p>
                 )}
               </li>
             ))}

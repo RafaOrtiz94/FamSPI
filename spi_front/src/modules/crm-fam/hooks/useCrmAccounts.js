@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { fetchAccounts, fetchAccountById } from "../../../core/api/crmFamApi";
+import { fetchAccounts, fetchAccountById, fetchAccountSalesStats } from "../../../core/api/crmFamApi";
 
 export function useAccounts(params) {
   const [data, setData] = useState(null);
@@ -35,6 +35,29 @@ export function useAccount(id) {
     setError(null);
     try {
       setData(await fetchAccountById(id));
+    } catch (e) {
+      setError(e.message || "Error");
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return { data, loading, error, refresh: load };
+}
+
+export function useAccountSalesStats(id) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    if (!id) return;
+    setLoading(true);
+    setError(null);
+    try {
+      setData(await fetchAccountSalesStats(id));
     } catch (e) {
       setError(e.message || "Error");
     } finally {

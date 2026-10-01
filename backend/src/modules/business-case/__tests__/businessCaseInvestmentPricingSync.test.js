@@ -15,14 +15,47 @@ const sheetSyncSource = fs.readFileSync(
 );
 
 describe("business case investment pricing sync", () => {
-  it("exports process depreciation as Sheet investment price", () => {
-    expect(sheetGenerationSource).toContain("calculateProcessDepreciation");
+  it("exports residual unit value as Sheet investment price", () => {
+    expect(sheetGenerationSource).toContain("investmentsService.calculateFinancialDepreciation");
     expect(sheetGenerationSource).toContain("item?.unit_price_financial ?? item?.unit_price");
     expect(sheetGenerationSource).toContain("percentage: item?.depreciation_percentage");
     expect(sheetGenerationSource).toContain("projectedMonths: sheetContext.projected_deadline_months");
-    expect(sheetGenerationSource).toContain("precio: processDepreciation === null ? 0 : processDepreciation");
+    expect(sheetGenerationSource).toContain("precio: residualUnitPrice === null ? 0 : residualUnitPrice");
     expect(sheetGenerationSource).toContain("precio_financiero");
     expect(sheetGenerationSource).toContain("precio_operativo");
+  });
+
+  it("writes residual price in E and quantity x price total in F", () => {
+    const { buildInvestmentRanges } = require("../businessCaseSheetSyncLocal.service");
+    const template = {
+      bc: {
+        objectiveRows: new Map([["servidor", 71], ["lis", 64], ["etiquetas", 99]]),
+        investmentRowDefaults: new Map([
+          [64, { B: "", D: 0, E: "", F: "$ -" }],
+          [99, { B: "Rollo x2000 uds", D: 0, E: "$ 6,29", F: "$ -" }],
+        ]),
+      },
+    };
+    const { updates, clears } = buildInvestmentRanges(
+      template,
+      {
+        Servidor: { nombre: "Servidor", cantidad: 3, precio: 850.5 },
+        "Equipo nuevo": { nombre: "Equipo nuevo", cantidad: 2, precio: 100 },
+      },
+      // 99 fue llenada por SPI antes y se deselecciono; 64 nunca se uso.
+      { currentRows: new Map([[64, { D: "0" }], [99, { D: "4" }], [71, { D: "1" }]]) },
+    );
+    const cell = (range) => updates.find((u) => u.range === range)?.values[0][0];
+    expect(cell("BC!E71")).toBe(850.5);
+    expect(cell("BC!F71")).toBe(2551.5);
+    expect(cell("BC!B71")).toBeUndefined(); // sin caracteristicas no pisa la plantilla
+    expect(cell("BC!F64")).toBeUndefined(); // fila nunca usada: no se toca
+    expect(cell("BC!B99")).toBe("Rollo x2000 uds"); // restaurada tal cual plantilla
+    expect(cell("BC!E99")).toBe("$ 6,29");
+    expect(cell("BC!D99")).toBe(0);
+    expect(cell("BC!E131")).toBe(100);
+    expect(cell("BC!F131")).toBe(200);
+    expect(clears.every((range) => /^BC!A131:F205$/.test(range))).toBe(true);
   });
 
   it("loads financial investment values for automatic Sheet generation", () => {

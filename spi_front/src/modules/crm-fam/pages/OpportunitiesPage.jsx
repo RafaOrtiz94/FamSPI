@@ -24,7 +24,7 @@ import {
 } from "../../../core/api/crmFamApi";
 import SearchableSelect from "../../../core/ui/components/SearchableSelect";
 import Modal from "../../../core/ui/components/Modal";
-import { FiInbox, FiBriefcase, FiUsers, FiUserPlus, FiShoppingCart, FiPhone, FiMail, FiMessageSquare, FiMessageCircle } from "react-icons/fi";
+import { FiInbox, FiBriefcase, FiUsers, FiUserPlus, FiShoppingCart, FiPhone, FiMail, FiMessageSquare, FiMessageCircle, FiClock } from "react-icons/fi";
 import { PrivatePurchaseRequestModal } from "../../../core/ui/components/RequestModals";
 import NewPurchaseRequestModal from "../../../shared/purchases/NewPurchaseRequestModal";
 
@@ -120,6 +120,20 @@ const OPP_STATUS = {
   lost:      { bg: "#FEE2E2", text: "#DC2626", label: "Perdida" },
   suspended: { bg: "#F3F4F6", text: "#6B7280", label: "Suspendida" },
 };
+
+// Oportunidad "estancada": abierta y sin actualizacion en mas de N dias --
+// el dato (updated_at) ya viene en cada fila de listOpportunities, no hace
+// falta ningun endpoint nuevo.
+const STALE_DAYS = 14;
+function isStaleOpportunity(opp) {
+  if (opp.status !== "open" || !opp.updated_at) return false;
+  const days = (Date.now() - new Date(opp.updated_at).getTime()) / 86400000;
+  return days >= STALE_DAYS;
+}
+function staleDaysCount(opp) {
+  if (!opp.updated_at) return 0;
+  return Math.floor((Date.now() - new Date(opp.updated_at).getTime()) / 86400000);
+}
 
 const STATUS_OPTIONS = [
   { value: "", label: "Todos los estados" },
@@ -938,6 +952,15 @@ function OpportunityCard({ opp, navigate, showAnalysisActions, onAddActivity, on
         </div>
         <Badge bg={health.bg} text={health.text} label={health.label} />
       </div>
+      {isStaleOpportunity(opp) && (
+        <div
+          className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-[#FEF3C7] px-2.5 py-1 text-[11px] font-medium text-[#92400E]"
+          title={`Sin actividad hace ${staleDaysCount(opp)} días`}
+        >
+          <FiClock size={11} />
+          Estancada — {staleDaysCount(opp)} días sin movimiento
+        </div>
+      )}
       {missingFields.length > 0 ? (
         <div className="mt-2 rounded-2xl border border-[#FDE68A] bg-[#FFFBEB] p-2.5">
           <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
@@ -1363,12 +1386,14 @@ export default function OpportunitiesPage() {
   }, []);
 
   // Leads asignados al usuario, para Fase 1 (Leads) y Fase 2 (Leads calificados).
-  // Se excluyen los ya convertidos/descalificados: esos ya no son prospectos activos.
+  // El endpoint de descalificacion guarda `unqualified`; `disqualified` se
+  // mantiene como compatibilidad con datos historicos. Ninguno debe volver a
+  // aparecer como prospecto accionable en el embudo.
   const refreshLeads = useCallback(() => {
     fetchLeads({ limit: 200 })
       .then(res => {
         const all = Array.isArray(res?.data) ? res.data : [];
-        setLeads(all.filter(l => !["converted", "disqualified"].includes(l.status)));
+        setLeads(all.filter(l => !["converted", "unqualified", "disqualified"].includes(l.status)));
       })
       .catch(() => setLeads([]));
   }, []);
@@ -1470,7 +1495,18 @@ export default function OpportunitiesPage() {
     <div className="p-6 bg-[#F9FAFB] min-h-full">
       {/* Header */}
       <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <h1 className="text-2xl font-semibold text-[#1F2937]">Embudo de ventas</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-semibold text-[#1F2937]">Embudo de ventas</h1>
+          {rows.filter(isStaleOpportunity).length > 0 && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full bg-[#FEF3C7] px-3 py-1 text-xs font-medium text-[#92400E]"
+              title={`Oportunidades abiertas sin actividad hace ${STALE_DAYS} días o más`}
+            >
+              <FiClock size={12} />
+              {rows.filter(isStaleOpportunity).length} estancada{rows.filter(isStaleOpportunity).length === 1 ? "" : "s"}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowModal(true)}

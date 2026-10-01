@@ -17,7 +17,7 @@ const USERS = [
   { fullname: "Luisao Escobar",       email: "luisao.escobar@fam-project.com" },
 ];
 
-const DB_HOST     = process.env.DB_HOST     || "ep-wispy-moon-aqszgsal-pooler.c-8.us-east-1.aws.neon.tech";
+const DB_HOST     = process.env.DB_HOST     || "ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech";
 const DB_PORT     = Number(process.env.DB_PORT || 5432);
 const DB_USER     = process.env.DB_USER     || "neondb_owner";
 const DB_PASSWORD = process.env.DB_PASSWORD || "";

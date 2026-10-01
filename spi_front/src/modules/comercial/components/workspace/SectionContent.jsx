@@ -1,7 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { FiLock, FiInfo } from "react-icons/fi";
-import { lockSection, unlockSection } from "../../../../core/api/businessCaseApi";
-import { useUI } from "../../../../core/ui/UIContext";
 import EquipmentSection from "./EquipmentSection";
 import DeterminationsSection from "./DeterminationsSection";
 import InvestmentsSection from "./InvestmentsSection";
@@ -14,6 +12,7 @@ import ConsumptionExportSection from "./sections/ConsumptionExportSection";
 import DispatchWorkspaceSection from "./sections/DispatchWorkspaceSection";
 import FeasibilitySection from "./sections/FeasibilitySection";
 import OfferWorkspaceSection from "./sections/OfferWorkspaceSection";
+import PricingLabSection from "./sections/PricingLabSection";
 import { roleToLabel } from "../../../../core/utils/businessCaseFlowState";
 
 const SectionContent = ({
@@ -22,9 +21,6 @@ const SectionContent = ({
  uiGuidance,
  onSectionSave
 }) => {
- const { showToast } = useUI();
- const [lockBusy, setLockBusy] = useState(false);
-
  // Lazy mount + keep alive: sección se monta la primera vez que se visita y
  // permanece montada. Evita fetches prematuros en secciones no visitadas.
  const [mountedSections, setMountedSections] = useState(() => new Set([selectedSection]));
@@ -42,6 +38,7 @@ const SectionContent = ({
  const isInvestments = selectedSection === "investments";
  const isInvestmentValues = selectedSection === "investment_values";
  const isOfferWorkspace = selectedSection === "offer_workspace";
+ const isPricingLab = selectedSection === "pricing_lab";
  // "determinations" tiene su propio sistema de permisos (determinations_gate
  // .permissions.canEditDeterminations, ver businessCaseDeterminationsGate
  // .service.js) totalmente independiente del flag generico permissions.canEdit
@@ -56,42 +53,10 @@ const SectionContent = ({
  // investments/determinations como "las 3 con reglas propias", pero aqui
  // faltaba, reproduciendo el mismo banner falso.
  const isDispatchWorkspace = selectedSection === "dispatch_workspace";
- const hasOwnPermissionModel = isInvestments || isInvestmentValues || isOfferWorkspace || isDeterminations || isDispatchWorkspace;
- const canLock = permissions.canBlockSections && !sectionRule.isLocked && !hasOwnPermissionModel;
- const canUnlock = permissions.canUnblockSections && sectionRule.isLocked && !hasOwnPermissionModel;
- const businessCaseId = businessCase?.id || uiGuidance?.businessCase?.id;
-
+ const hasOwnPermissionModel = isInvestments || isInvestmentValues || isOfferWorkspace || isPricingLab || isDeterminations || isDispatchWorkspace;
  // Each section passes its own id so save is always attributed correctly
  const makeForwardSave = (sectionId) => (options = {}) => {
   onSectionSave?.({ ...options, section: sectionId });
- };
-
- const handleLock = async () => {
-  if (!businessCaseId) return;
-  setLockBusy(true);
-  try {
-   await lockSection(businessCaseId, selectedSection);
-   showToast("Seccion bloqueada para edicion", "success");
-   makeForwardSave(selectedSection)({ markComplete: false });
-  } catch (error) {
-   showToast(error?.response?.data?.message || "No se pudo bloquear la seccion", "error");
-  } finally {
-   setLockBusy(false);
-  }
- };
-
- const handleUnlock = async () => {
-  if (!businessCaseId) return;
-  setLockBusy(true);
-  try {
-   await unlockSection(businessCaseId, selectedSection);
-   showToast("Seccion desbloqueada", "success");
-   makeForwardSave(selectedSection)({ markComplete: false });
-  } catch (error) {
-   showToast(error?.response?.data?.message || "No se pudo desbloquear la seccion", "error");
-  } finally {
-   setLockBusy(false);
-  }
  };
 
  const canonicalState = businessCase?.canonical_state || uiGuidance?.workflowState?.currentState;
@@ -131,7 +96,7 @@ const SectionContent = ({
      <span>BC observado por viabilidad — revisa los comentarios antes de editar</span>
     </div>
    )}
-   {(canLock || canUnlock) && (
+   {/*
     <div className="flex flex-wrap items-center justify-end gap-2">
      {canLock && (
       <button
@@ -154,7 +119,7 @@ const SectionContent = ({
       </button>
      )}
     </div>
-   )}
+   */}
 
    {/* Lazy mount + keep alive: sección se renderiza solo cuando ha sido visitada
        (o es la activa). Una vez montada permanece en el DOM oculta para preservar
@@ -288,6 +253,12 @@ const SectionContent = ({
       ownership={uiGuidance?.sectionOwnership?.rules?.offer_workspace || {}}
       onSave={makeForwardSave("offer_workspace")}
      />
+    </div>
+   )}
+
+   {mountedSections.has("pricing_lab") && (
+    <div className={selectedSection === "pricing_lab" ? "" : "hidden"}>
+     <PricingLabSection />
     </div>
    )}
   </div>
