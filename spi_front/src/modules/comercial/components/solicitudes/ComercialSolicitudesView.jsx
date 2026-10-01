@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { FiClipboard, FiUserPlus, FiTruck, FiUsers } from "react-icons/fi";
 import { useUI } from "../../../../core/ui/UIContext";
-import { useAuth } from "../../../../core/auth/useAuth";
-import { getClientRequests, getRequestById, getClientRequestById } from "../../../../core/api/requestsApi";
+import { getRequestById, getClientRequestById } from "../../../../core/api/requestsApi";
 import { getDocumentsByRequest } from "../../../../core/api/documentsApi";
 import { getFilesByRequest } from "../../../../core/api/filesApi";
 import { createPrivatePurchase } from "../../../../core/api/privatePurchasesApi";
@@ -12,7 +10,6 @@ import Modal from "../../../../core/ui/components/Modal";
 import RequestDetailModal from "../RequestDetailModal";
 
 import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVacacionModal";
-import RequestStatWidget from "../../../shared/solicitudes/components/RequestStatWidget";
 import RequestsListModal from "../../../shared/solicitudes/components/RequestsListModal";
 import BaseSolicitudesView from "../../../shared/solicitudes/BaseSolicitudesView";
 
@@ -40,55 +37,10 @@ const fileToBase64 = (file) =>
  reader.readAsDataURL(file);
  });
 
-const statWidgets = [
- {
- id: 'clientes',
- title: 'Solicitudes de Clientes',
- icon: FiUserPlus,
- color: 'emerald',
- type: 'client_request',
- fetcher: async (params) => {
- const res = await getClientRequests(params);
- return res;
- }
- },
- {
- id: 'inspecciones',
- title: 'Inspecciones Técnicas',
- icon: FiClipboard,
- color: 'blue',
- type: 'inspeccion'
- },
- {
- id: 'retiros',
- title: 'Retiros y Devoluciones',
- icon: FiTruck,
- color: 'amber',
- type: 'retiro'
- },
- {
- id: 'vacaciones',
- title: 'Mis Permisos',
- icon: FiUsers,
- color: 'orange',
- type: 'vacaciones',
- initialFilters: { mine: true }
- }
-];
-
 const ComercialSolicitudesView = () => {
  const { showToast, showLoader, hideLoader } = useUI();
- const { user } = useAuth();
- const normalizedRole = (user?.role || user?.role_name || "").toLowerCase();
- const isBackofficeUser = normalizedRole.includes("backoffice");
 
- const visibleStatWidgets = isBackofficeUser
- ? statWidgets.filter(
- (widget) => widget.id !== "inspecciones" && widget.id !== "retiros"
- )
- : statWidgets;
-
- const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
+ const [, setShowPurchaseHandoff] = useState(false);
  const [showPermisoModal, setShowPermisoModal] = useState(false);
  const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
 
@@ -101,7 +53,6 @@ const ComercialSolicitudesView = () => {
  const [offerKind, setOfferKind] = useState("venta");
  const [comodatoFile, setComodatoFile] = useState(null);
  const [showPrivateModal, setShowPrivateModal] = useState(false);
- const [creatingPrivate, setCreatingPrivate] = useState(false);
 
  // Cargar equipos disponibles al montar el componente - RESTORED FROM REFERENCE VERSION
  useEffect(() => {
@@ -235,19 +186,19 @@ const ComercialSolicitudesView = () => {
  }
  };
 
+ const reloadCurrentRequestDetail = async () => {
+ const current = detail.data?.request;
+ if (!current?.id) return;
+ await handleViewRequest(current);
+ };
+
  // View Modal State
  const [viewType, setViewType] = useState(null);
- const [viewTitle, setViewTitle] = useState("");
- const [viewCustomFetcher, setViewCustomFetcher] = useState(null);
+ const [viewTitle] = useState("");
+ const [viewCustomFetcher] = useState(null);
 
  const handlePurchaseHandoffOpen = () => {
  setShowPurchaseHandoff(true);
- };
-
- const handleViewList = (type, title, fetcher = null) => {
- setViewType(type);
- setViewTitle(title);
- setViewCustomFetcher(() => fetcher);
  };
 
  const resetPrivateModalFields = () => {
@@ -444,6 +395,7 @@ const ComercialSolicitudesView = () => {
 
  <RequestDetailModal
  detail={detail}
+ onProcessed={reloadCurrentRequestDetail}
  onClose={() =>
  setDetail({ open: false, loading: false, data: null, error: null })
  }

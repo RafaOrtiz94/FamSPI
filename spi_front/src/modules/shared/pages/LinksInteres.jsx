@@ -6,7 +6,6 @@ import {
  FiTool,
  FiUsers,
  FiClipboard,
- FiFileText,
  FiShield,
  FiBriefcase,
 } from "react-icons/fi";

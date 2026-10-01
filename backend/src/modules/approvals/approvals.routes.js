@@ -34,10 +34,14 @@ router.get(
 );
 
 // ✅ Aprobar
+// "jefe_servicio" es un grupo en middlewares/roles.js que ya expande a todos
+// los alias (jefe_tecnico, jefe_de_tecnico, jefe_servicio_tecnico,
+// jefe_de_servicio_tecnico) -- antes el literal "jefe_servicio" no estaba
+// en esta lista, asi que nadie con ese rol exacto podia aprobar/coordinar.
 router.post(
   "/:id/approve",
   verifyToken,
-  requireRole(["jefe_servicio_tecnico", "jefe_tecnico"]),
+  requireRole(["jefe_servicio"]),
   ctrl.approve
 );
 
@@ -45,7 +49,7 @@ router.post(
 router.post(
   "/:id/reject",
   verifyToken,
-  requireRole(["jefe_servicio_tecnico", "jefe_tecnico"]),
+  requireRole(["jefe_servicio"]),
   ctrl.reject
 );
 

@@ -1,19 +1,15 @@
-import React from 'react';
+import React from "react";
 
-const Alert = ({ children, className = '' }) => {
+const Alert = ({ children, className = "" }) => {
   return (
-    <div className={`p-4 rounded-md bg-red-50 border border-red-200 ${className}`}>
+    <div className={`rounded-xl border border-red-200 bg-red-50/80 px-4 py-3 text-sm text-red-800 ${className}`}>
       {children}
     </div>
   );
 };
 
-const AlertDescription = ({ children, className = '' }) => {
-  return (
-    <div className={`text-sm text-red-700 ${className}`}>
-      {children}
-    </div>
-  );
+const AlertDescription = ({ children, className = "" }) => {
+  return <div className={`leading-relaxed text-sm text-red-700 ${className}`}>{children}</div>;
 };
 
 export { Alert, AlertDescription };

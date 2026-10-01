@@ -1,0 +1,54 @@
+/*
+  Sistema visual del workspace de tickets de soporte TI ("ti-scope").
+  A diferencia de servicio/design/tokens.css (que duplica valores hex que ya
+  no coinciden con DESIGN.md 2.1), este scope referencia directamente las
+  variables globales definidas en src/index.css -- un cambio de tema
+  claro/oscuro se propaga automaticamente sin tocar este archivo.
+*/
+
+.ti-scope {
+  --ti-accent: var(--action);
+  --ti-accent-strong: var(--action-hover);
+  --ti-on-accent: var(--on-action);
+  --ti-canvas: var(--canvas);
+  --ti-surface: var(--surface);
+  --ti-surface-sunken: var(--surface-subtle);
+  --ti-surface-raised: var(--surface-raised);
+  --ti-border: var(--border);
+  --ti-border-control: var(--border-control);
+  --ti-text: var(--text);
+  --ti-text-muted: var(--text-secondary);
+  --ti-selected: var(--selected);
+  --ti-focus: var(--focus);
+
+  --ti-success-bg: var(--success-bg);
+  --ti-success-text: var(--success-text);
+  --ti-warning-bg: var(--warning-bg);
+  --ti-warning-text: var(--warning-text);
+  --ti-danger-bg: var(--danger-bg);
+  --ti-danger-text: var(--danger-text);
+  --ti-danger-solid: var(--danger-solid);
+  --ti-info-bg: var(--info-bg);
+  --ti-info-text: var(--info-text);
+
+  /* Radios por funcion (DESIGN.md §1: sm=6 md=8 lg=12 xl=16). Estos tokens
+     todavia no existen como var() globales en index.css -- se declaran
+     literales aqui hasta que se incorporen al bloque raiz del sistema. */
+  --ti-radius-badge: 6px;
+  --ti-radius-control: 8px;
+  --ti-radius-panel: 12px;
+  --ti-radius-overlay: 16px;
+
+  --ti-shadow-popover: var(--shadow-popover);
+  --ti-shadow-overlay: var(--shadow-overlay);
+  --ti-control-height: var(--control-height);
+  --ti-row-height: var(--row-height);
+
+  color: var(--ti-text);
+  background: var(--ti-canvas);
+}
+
+.ti-scope :focus-visible {
+  outline: 2px solid var(--ti-focus);
+  outline-offset: 2px;
+}

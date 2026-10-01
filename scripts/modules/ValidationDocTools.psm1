@@ -457,24 +457,15 @@ function Repair-ValidationDocumentText {
     @{ Pattern = '\bModulos\b'; Replacement = 'Módulos' },
     @{ Pattern = '\banalisis\b'; Replacement = 'análisis' },
     @{ Pattern = '\bAnalisis\b'; Replacement = 'Análisis' },
-    @{ Pattern = '\\bDescripcion\\b'; Replacement = 'Descripción' },
-      @{ Pattern = '\\bRepublica\\b'; Replacement = 'República' },
-      @{ Pattern = '\\brepublica\\b'; Replacement = 'república' },
-      @{ Pattern = '\\bOrganica\\b'; Replacement = 'Orgánica' },
-      @{ Pattern = '\\borganica\\b'; Replacement = 'orgánica' },
-      @{ Pattern = '\\bProteccion\\b'; Replacement = 'Protección' },
-      @{ Pattern = '\\bproteccion\\b'; Replacement = 'protección' },
-      @{ Pattern = '\\bpublicacion\\b'; Replacement = 'publicación' },
-      @{ Pattern = '\\bPublicacion\\b'; Replacement = 'Publicación' },
-    @{ Pattern = '\\bDescripcion\\b'; Replacement = 'Descripción' },
-      @{ Pattern = '\\bRepublica\\b'; Replacement = 'República' },
-      @{ Pattern = '\\brepublica\\b'; Replacement = 'república' },
-      @{ Pattern = '\\bOrganica\\b'; Replacement = 'Orgánica' },
-      @{ Pattern = '\\borganica\\b'; Replacement = 'orgánica' },
-      @{ Pattern = '\\bProteccion\\b'; Replacement = 'Protección' },
-      @{ Pattern = '\\bproteccion\\b'; Replacement = 'protección' },
-      @{ Pattern = '\\bpublicacion\\b'; Replacement = 'publicación' },
-      @{ Pattern = '\\bPublicacion\\b'; Replacement = 'Publicación' },
+    @{ Pattern = '\bDescripcion\b'; Replacement = 'Descripción' },
+    @{ Pattern = '\bRepublica\b'; Replacement = 'República' },
+    @{ Pattern = '\brepublica\b'; Replacement = 'república' },
+    @{ Pattern = '\bOrganica\b'; Replacement = 'Orgánica' },
+    @{ Pattern = '\borganica\b'; Replacement = 'orgánica' },
+    @{ Pattern = '\bProteccion\b'; Replacement = 'Protección' },
+    @{ Pattern = '\bproteccion\b'; Replacement = 'protección' },
+    @{ Pattern = '\bpublicacion\b'; Replacement = 'publicación' },
+    @{ Pattern = '\bPublicacion\b'; Replacement = 'Publicación' },
     @{ Pattern = '\bintegraciones\b'; Replacement = 'integraciones' },
     @{ Pattern = '\bIntegraciones\b'; Replacement = 'Integraciones' },
     @{ Pattern = '\bcodigo\b'; Replacement = 'código' },
@@ -727,9 +718,9 @@ function Set-DocumentHeaderFooter {
     try {
       $footerRange = $section.Footers.Item(1).Range
       $footerRange.Text = $FooterLeft + ' | Página '
-      $footerRange.Collapse(0)
-      $footerRange.Fields.Add($footerRange, -1) | Out-Null
       $footerRange.Font.Size = 8
+      $footerRange.Collapse(0)
+      $footerRange.Fields.Add($footerRange, 33) | Out-Null  # 33 = wdFieldPage
     } catch {}
   }
 }
@@ -1101,6 +1092,282 @@ function Convert-MarkdownToWord {
   $contentEnd = $Selection.Range.End
   $contentRange = $Document.Range($contentStart, $contentEnd)
   Format-WordDocumentVisuals -Document $Document -ContentRange $contentRange -Config $Config -Logger $Logger
+}
+
+function Build-WhoAnnexMarkdown {
+  <#
+  .SYNOPSIS
+    Genera el bloque markdown de Anexos A-H alineado a WHO Appendix 5 (TRS 1019/992 Annex 5).
+  .PARAMETER DocumentFiles
+    Hashtable: nombre de archivo -> contenido markdown (ya leido y reparado).
+  .PARAMETER AreaLabel
+    Etiqueta del area o paquete.
+  .PARAMETER IncludeAnnexes
+    Lista de letras de anexos a incluir. Default: A,B,C,D,E,F,G,H
+  .PARAMETER Code
+    Codigo documental del paquete.
+  #>
+  [CmdletBinding()]
+  param(
+    [hashtable]$DocumentFiles = @{},
+    [string]$AreaLabel = '',
+    [string[]]$IncludeAnnexes = @('A','B','C','D','E','F','G','H'),
+    [string]$Code = '',
+    [object]$AnnexSourceDir = $null
+  )
+
+  $sb = New-Object System.Text.StringBuilder
+  $date = Get-Date -Format 'yyyy-MM-dd'
+
+  [void]$sb.AppendLine('# SECCIÓN DE ANEXOS')
+  [void]$sb.AppendLine()
+  [void]$sb.AppendLine('Los siguientes anexos forman parte integral del paquete de validación y deben ser considerados documentos controlados. Su contenido constituye la evidencia objetiva de soporte a las conclusiones expresadas en el cuerpo principal.')
+  [void]$sb.AppendLine()
+  [void]$sb.AppendLine("| Anexo | Título | Estado |")
+  [void]$sb.AppendLine('|---|---|---|')
+  if ('A' -in $IncludeAnnexes) { [void]$sb.AppendLine('| Anexo A | Especificación de Requerimientos de Usuario (URS) | Incluido |') }
+  if ('B' -in $IncludeAnnexes) { [void]$sb.AppendLine('| Anexo B | Especificación de Requerimientos Funcionales (FRS) | Incluido |') }
+  if ('C' -in $IncludeAnnexes) { [void]$sb.AppendLine('| Anexo C | Evaluación de Riesgos / FMEA | Incluido |') }
+  if ('D' -in $IncludeAnnexes) { [void]$sb.AppendLine('| Anexo D | Protocolos de Prueba (IQ / OQ / PQ) | Incluido |') }
+  if ('E' -in $IncludeAnnexes) { [void]$sb.AppendLine('| Anexo E | Registros de Ejecución y Evidencia | Incluido |') }
+  if ('F' -in $IncludeAnnexes) { [void]$sb.AppendLine('| Anexo F | Registro de Desviaciones | Incluido |') }
+  if ('G' -in $IncludeAnnexes) { [void]$sb.AppendLine('| Anexo G | Registros de Entrenamiento | Incluido |') }
+  if ('H' -in $IncludeAnnexes) { [void]$sb.AppendLine('| Anexo H | Matriz de Trazabilidad (RTM) | Incluido |') }
+  [void]$sb.AppendLine()
+
+  # ANEXO A: URS
+  if ('A' -in $IncludeAnnexes) {
+    [void]$sb.AppendLine('# ANEXO A: Especificación de Requerimientos de Usuario (URS)')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine("| Campo | Valor |")
+    [void]$sb.AppendLine('|---|---|')
+    [void]$sb.AppendLine("| Referencia | ${Code}-ANEXO-A |")
+    [void]$sb.AppendLine("| Fecha | $date |")
+    [void]$sb.AppendLine("| Área / Paquete | $AreaLabel |")
+    [void]$sb.AppendLine()
+    $ursKey = $DocumentFiles.Keys | Where-Object { $_ -like '*01_URS*' -or $_ -like '*urs*' } | Select-Object -First 1
+    if ($ursKey) {
+      $ursContent = $DocumentFiles[$ursKey]
+      $ursContent = [regex]::Replace($ursContent, '^#\s+.+?\r?\n+', '', 1)
+      [void]$sb.AppendLine($ursContent.Trim())
+    } else {
+      [void]$sb.AppendLine('> **Pendiente**: El documento URS no fue localizado en el paquete. Adjuntar como evidencia controlada.')
+    }
+    [void]$sb.AppendLine()
+  }
+
+  # ANEXO B: FRS
+  if ('B' -in $IncludeAnnexes) {
+    [void]$sb.AppendLine('# ANEXO B: Especificación de Requerimientos Funcionales (FRS)')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine("| Campo | Valor |")
+    [void]$sb.AppendLine('|---|---|')
+    [void]$sb.AppendLine("| Referencia | ${Code}-ANEXO-B |")
+    [void]$sb.AppendLine("| Fecha | $date |")
+    [void]$sb.AppendLine("| Área / Paquete | $AreaLabel |")
+    [void]$sb.AppendLine()
+    $frsKey = $DocumentFiles.Keys | Where-Object { $_ -like '*02_FRS*' -or $_ -like '*frs*' } | Select-Object -First 1
+    if ($frsKey) {
+      $frsContent = $DocumentFiles[$frsKey]
+      $frsContent = [regex]::Replace($frsContent, '^#\s+.+?\r?\n+', '', 1)
+      [void]$sb.AppendLine($frsContent.Trim())
+    } else {
+      [void]$sb.AppendLine('> **Pendiente**: El documento FRS no fue localizado en el paquete. Adjuntar como evidencia controlada.')
+    }
+    [void]$sb.AppendLine()
+  }
+
+  # ANEXO C: Risk Assessment / FMEA
+  if ('C' -in $IncludeAnnexes) {
+    [void]$sb.AppendLine('# ANEXO C: Evaluación de Riesgos / FMEA')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine("| Campo | Valor |")
+    [void]$sb.AppendLine('|---|---|')
+    [void]$sb.AppendLine("| Referencia | ${Code}-ANEXO-C |")
+    [void]$sb.AppendLine("| Fecha | $date |")
+    [void]$sb.AppendLine("| Área / Paquete | $AreaLabel |")
+    [void]$sb.AppendLine()
+    $riskKey = $DocumentFiles.Keys | Where-Object { $_ -like '*risk*' -or $_ -like '*fmea*' -or $_ -like '*riesgo*' -or $_ -like '*07A_*' } | Select-Object -First 1
+    if ($riskKey) {
+      $riskContent = $DocumentFiles[$riskKey]
+      $riskContent = [regex]::Replace($riskContent, '^#\s+.+?\r?\n+', '', 1)
+      [void]$sb.AppendLine($riskContent.Trim())
+    } else {
+      [void]$sb.AppendLine('## Tabla de Evaluación de Riesgos (FMEA)')
+      [void]$sb.AppendLine()
+      [void]$sb.AppendLine('| ID Riesgo | Módulo | Modo de Falla | Efecto | Severidad (1-5) | Probabilidad (1-5) | Detectabilidad (1-5) | RPN | Mitigación | Riesgo Residual | Responsable |')
+      [void]$sb.AppendLine('|---|---|---|---|---|---|---|---|---|---|---|')
+      [void]$sb.AppendLine("| R-001 | General | Pérdida de conectividad | Interrupción del servicio | 4 | 2 | 2 | 16 | Alta disponibilidad, monitoreo | Bajo | TI |")
+      [void]$sb.AppendLine("| R-002 | Autenticación | Acceso no autorizado | Brecha de seguridad | 5 | 2 | 3 | 30 | MFA, OAuth2, JWT con expiración | Medio | TI |")
+      [void]$sb.AppendLine("| R-003 | Datos | Corrupción de datos | Pérdida de integridad | 5 | 1 | 3 | 15 | Validaciones, transacciones DB | Bajo | TI |")
+      [void]$sb.AppendLine("| R-004 | Integración | Falla API externa | Degradación funcional | 3 | 3 | 2 | 18 | Circuit breaker, reintentos | Bajo | TI |")
+      [void]$sb.AppendLine("| R-005 | Usuarios | Error de operación | Datos incorrectos | 3 | 3 | 4 | 36 | Validaciones UI, capacitación | Medio | Funcional |")
+      [void]$sb.AppendLine()
+      [void]$sb.AppendLine('> **Nota**: Esta tabla representa los riesgos iniciales identificados. El análisis completo debe ser elaborado, revisado y aprobado antes del inicio formal de los protocolos IQ/OQ/PQ.')
+    }
+    [void]$sb.AppendLine()
+  }
+
+  # ANEXO D: Protocolos de Prueba
+  if ('D' -in $IncludeAnnexes) {
+    [void]$sb.AppendLine('# ANEXO D: Protocolos de Prueba (IQ / OQ / PQ)')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine("| Campo | Valor |")
+    [void]$sb.AppendLine('|---|---|')
+    [void]$sb.AppendLine("| Referencia | ${Code}-ANEXO-D |")
+    [void]$sb.AppendLine("| Fecha | $date |")
+    [void]$sb.AppendLine("| Área / Paquete | $AreaLabel |")
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('## D.1 — Protocolo IQ (Calificación de Instalación)')
+    [void]$sb.AppendLine()
+    $iqProtoKey = $DocumentFiles.Keys | Where-Object { $_ -like '*10_IQ_protocolo*' -or ($_ -like '*IQ*protocolo*') } | Select-Object -First 1
+    if ($iqProtoKey) {
+      $iqContent = $DocumentFiles[$iqProtoKey]
+      $iqContent = [regex]::Replace($iqContent, '^#\s+.+?\r?\n+', '', 1)
+      [void]$sb.AppendLine($iqContent.Trim())
+    } else {
+      [void]$sb.AppendLine('> **Pendiente**: El protocolo de ejecución IQ no fue localizado.')
+    }
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('## D.2 — Protocolo OQ (Calificación Operacional)')
+    [void]$sb.AppendLine()
+    $oqProtoKey = $DocumentFiles.Keys | Where-Object { $_ -like '*11_OQ_protocolo*' -or ($_ -like '*OQ*protocolo*') } | Select-Object -First 1
+    if ($oqProtoKey) {
+      $oqContent = $DocumentFiles[$oqProtoKey]
+      $oqContent = [regex]::Replace($oqContent, '^#\s+.+?\r?\n+', '', 1)
+      [void]$sb.AppendLine($oqContent.Trim())
+    } else {
+      [void]$sb.AppendLine('> **Pendiente**: El protocolo de ejecución OQ no fue localizado.')
+    }
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('## D.3 — Protocolo PQ (Calificación de Desempeño)')
+    [void]$sb.AppendLine()
+    $pqProtoKey = $DocumentFiles.Keys | Where-Object { $_ -like '*12_PQ_protocolo*' -or ($_ -like '*PQ*protocolo*') } | Select-Object -First 1
+    if ($pqProtoKey) {
+      $pqContent = $DocumentFiles[$pqProtoKey]
+      $pqContent = [regex]::Replace($pqContent, '^#\s+.+?\r?\n+', '', 1)
+      [void]$sb.AppendLine($pqContent.Trim())
+    } else {
+      [void]$sb.AppendLine('> **Pendiente**: El protocolo de ejecución PQ no fue localizado.')
+    }
+    [void]$sb.AppendLine()
+  }
+
+  # ANEXO E: Registros de Ejecución y Evidencia
+  if ('E' -in $IncludeAnnexes) {
+    [void]$sb.AppendLine('# ANEXO E: Registros de Ejecución y Evidencia')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine("| Campo | Valor |")
+    [void]$sb.AppendLine('|---|---|')
+    [void]$sb.AppendLine("| Referencia | ${Code}-ANEXO-E |")
+    [void]$sb.AppendLine("| Fecha | $date |")
+    [void]$sb.AppendLine("| Área / Paquete | $AreaLabel |")
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('## E.1 — Registro de Ejecución IQ')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('| ID Caso | Descripción | Resultado Esperado | Resultado Obtenido | Estado | Ejecutado por | Fecha |')
+    [void]$sb.AppendLine('|---|---|---|---|---|---|---|')
+    [void]$sb.AppendLine('| IQ-EV-001 | Verificación de despliegue en ambiente objetivo | Servicio activo y respondiendo | Pendiente | No ejecutado | __________ | __________ |')
+    [void]$sb.AppendLine('| IQ-EV-002 | Verificación de variables de entorno críticas | Variables presentes y válidas | Pendiente | No ejecutado | __________ | __________ |')
+    [void]$sb.AppendLine('| IQ-EV-003 | Verificación de conexión a base de datos | Conexión establecida exitosamente | Pendiente | No ejecutado | __________ | __________ |')
+    [void]$sb.AppendLine('| IQ-EV-004 | Verificación de certificados SSL/TLS | Certificados válidos y vigentes | Pendiente | No ejecutado | __________ | __________ |')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('## E.2 — Registro de Ejecución OQ')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('| ID Caso | Descripción | Resultado Esperado | Resultado Obtenido | Estado | Ejecutado por | Fecha |')
+    [void]$sb.AppendLine('|---|---|---|---|---|---|---|')
+    [void]$sb.AppendLine('| OQ-EV-001 | Flujo de autenticación exitoso | Acceso concedido con token válido | Pendiente | No ejecutado | __________ | __________ |')
+    [void]$sb.AppendLine('| OQ-EV-002 | Rechazo de credenciales inválidas | Error 401 retornado | Pendiente | No ejecutado | __________ | __________ |')
+    [void]$sb.AppendLine('| OQ-EV-003 | Validación de permisos por rol | Acceso restringido según RBAC | Pendiente | No ejecutado | __________ | __________ |')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('## E.3 — Registro de Ejecución PQ/UAT')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('| ID Escenario | Descripción | Resultado Esperado | Resultado Obtenido | Estado | Ejecutado por | Fecha |')
+    [void]$sb.AppendLine('|---|---|---|---|---|---|---|')
+    [void]$sb.AppendLine('| PQ-EV-001 | Jornada representativa de usuario final | Sin errores en flujos principales | Pendiente | No ejecutado | __________ | __________ |')
+    [void]$sb.AppendLine('| PQ-EV-002 | Estabilidad bajo carga normal | Tiempo de respuesta < 3s | Pendiente | No ejecutado | __________ | __________ |')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('> **Nota**: Estos registros deben completarse durante la ejecución formal de los protocolos y ser firmados por el ejecutor y el revisor.')
+    $evidKey = $DocumentFiles.Keys | Where-Object { $_ -like '*13_registro*' -or $_ -like '*evidencias*' } | Select-Object -First 1
+    if ($evidKey) {
+      $evidContent = $DocumentFiles[$evidKey]
+      $evidContent = [regex]::Replace($evidContent, '^#\s+.+?\r?\n+', '', 1)
+      $evidContent = $evidContent.Trim()
+      if ($evidContent) {
+        [void]$sb.AppendLine()
+        [void]$sb.AppendLine('## E.4 — Registro de Evidencias Adicionales del Área')
+        [void]$sb.AppendLine()
+        [void]$sb.AppendLine($evidContent)
+      }
+    }
+    [void]$sb.AppendLine()
+  }
+
+  # ANEXO F: Registro de Desviaciones
+  if ('F' -in $IncludeAnnexes) {
+    [void]$sb.AppendLine('# ANEXO F: Registro de Desviaciones')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine("| Campo | Valor |")
+    [void]$sb.AppendLine('|---|---|')
+    [void]$sb.AppendLine("| Referencia | ${Code}-ANEXO-F |")
+    [void]$sb.AppendLine("| Fecha | $date |")
+    [void]$sb.AppendLine("| Área / Paquete | $AreaLabel |")
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('| ID Desviación | Fase (IQ/OQ/PQ) | Descripción | Clasificación | Acción Correctiva | Responsable | Fecha Cierre | Estado | Aprobación QA |')
+    [void]$sb.AppendLine('|---|---|---|---|---|---|---|---|---|')
+    [void]$sb.AppendLine('| DEV-001 | — | (Sin desviaciones registradas al momento de emisión) | — | — | — | — | Abierto | — |')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('> **Instrucción**: Cada desviación detectada durante la ejecución de IQ, OQ o PQ debe registrarse en esta tabla. La clasificación puede ser: **Crítica** (bloquea la liberación), **Mayor** (requiere CAPA antes del cierre) o **Menor** (documentar y aceptar).')
+    [void]$sb.AppendLine()
+  }
+
+  # ANEXO G: Registros de Entrenamiento
+  if ('G' -in $IncludeAnnexes) {
+    [void]$sb.AppendLine('# ANEXO G: Registros de Entrenamiento')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine("| Campo | Valor |")
+    [void]$sb.AppendLine('|---|---|')
+    [void]$sb.AppendLine("| Referencia | ${Code}-ANEXO-G |")
+    [void]$sb.AppendLine("| Fecha | $date |")
+    [void]$sb.AppendLine("| Área / Paquete | $AreaLabel |")
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('## G.1 — Matriz de Entrenamiento Requerido')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('| Rol | Módulo / Función | Tipo de Entrenamiento | Duración Estimada | Estado | Evidencia |')
+    [void]$sb.AppendLine('|---|---|---|---|---|---|')
+    [void]$sb.AppendLine('| Usuario final | Navegación y operación general | Capacitación presencial | 4h | Pendiente | Lista de asistencia |')
+    [void]$sb.AppendLine('| Administrador TI | Configuración y mantenimiento | Sesión técnica | 8h | Pendiente | Registro técnico |')
+    [void]$sb.AppendLine('| Responsable funcional | Flujos de aprobación y reportes | Taller funcional | 4h | Pendiente | Lista de asistencia |')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('## G.2 — Registro de Asistencia')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('| Nombre | Rol | Módulo capacitado | Instructor | Fecha | Firma |')
+    [void]$sb.AppendLine('|---|---|---|---|---|---|')
+    [void]$sb.AppendLine('| __________________ | __________ | __________________ | __________ | __________ | __________ |')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('> **Nota**: Este registro debe ser completado y firmado antes de la ejecución de PQ/UAT con usuarios reales.')
+    [void]$sb.AppendLine()
+  }
+
+  # ANEXO H: Matriz de Trazabilidad (RTM)
+  if ('H' -in $IncludeAnnexes) {
+    [void]$sb.AppendLine('# ANEXO H: Matriz de Trazabilidad (RTM)')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine("| Campo | Valor |")
+    [void]$sb.AppendLine('|---|---|')
+    [void]$sb.AppendLine("| Referencia | ${Code}-ANEXO-H |")
+    [void]$sb.AppendLine("| Fecha | $date |")
+    [void]$sb.AppendLine("| Área / Paquete | $AreaLabel |")
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('| ID URS | Descripción URS | ID FRS | ID Caso Prueba | Fase | ID Evidencia | Resultado | Estado |')
+    [void]$sb.AppendLine('|---|---|---|---|---|---|---|---|')
+    [void]$sb.AppendLine('| URS-001 | (Ver Anexo A para listado completo de requerimientos) | FRS-001 | IQ-001 / OQ-001 | IQ + OQ | EV-001 | Pendiente | No ejecutado |')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('> **Nota**: La matriz completa debe tener una fila por cada requerimiento URS, referenciando todas las capas de trazabilidad hasta la evidencia objetiva. Esta tabla debe expandirse durante la ejecución de los protocolos.')
+    [void]$sb.AppendLine()
+  }
+
+  return $sb.ToString()
 }
 
 Export-ModuleMember -Function *-*

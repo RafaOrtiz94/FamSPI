@@ -1,0 +1,61 @@
+{
+  "fields": {
+    "stage": {
+      "options": [
+        "Prospeccion",
+        "Asignado",
+        "En Seguimiento",
+        "Lead Calificado",
+        "Analisis de Necesidades",
+        "Desarrollo de Oferta",
+        "Presentacion de Propuesta",
+        "Negociacion",
+        "Contratos",
+        "Cerrado Ganado",
+        "Cerrado Perdido",
+        "Archivado"
+      ],
+      "stageList": [
+        "Prospeccion",
+        "Asignado",
+        "En Seguimiento",
+        "Lead Calificado",
+        "Analisis de Necesidades",
+        "Desarrollo de Oferta",
+        "Presentacion de Propuesta",
+        "Negociacion",
+        "Contratos"
+      ],
+      "wonStageList": ["Cerrado Ganado"],
+      "lostStageList": ["Cerrado Perdido"],
+      "probabilityMap": {
+        "Prospeccion": 10,
+        "Asignado": 15,
+        "En Seguimiento": 20,
+        "Lead Calificado": 30,
+        "Analisis de Necesidades": 40,
+        "Desarrollo de Oferta": 55,
+        "Presentacion de Propuesta": 70,
+        "Negociacion": 85,
+        "Contratos": 95,
+        "Cerrado Ganado": 100,
+        "Cerrado Perdido": 0,
+        "Archivado": 0
+      },
+      "style": {
+        "Prospeccion": "default",
+        "Asignado": "info",
+        "En Seguimiento": "info",
+        "Lead Calificado": "primary",
+        "Analisis de Necesidades": "primary",
+        "Desarrollo de Oferta": "warning",
+        "Presentacion de Propuesta": "warning",
+        "Negociacion": "warning",
+        "Contratos": "warning",
+        "Cerrado Ganado": "success",
+        "Cerrado Perdido": "danger",
+        "Archivado": "default"
+      }
+    }
+  }
+}

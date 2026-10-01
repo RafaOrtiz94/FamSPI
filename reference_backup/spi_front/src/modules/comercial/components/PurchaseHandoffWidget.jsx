@@ -157,22 +157,6 @@ const PurchaseHandoffWidget = ({ isOpen: externalIsOpen, onOpenChange, hideButto
 
   return (
     <>
-      {!hideButton && (
-        <div className="flex flex-col justify-between h-full">
-          <div className="mb-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
-              Nueva Solicitud de Compra
-            </p>
-            <p className="text-sm text-gray-700">
-              Envía al ACP Comercial para gestionar proveedor
-            </p>
-          </div>
-          <Button size="sm" className="w-full" onClick={() => setIsOpen(true)}>
-            Abrir Formulario
-          </Button>
-        </div>
-      )}
-
       {isOpen && (
         <>
           {creating && (

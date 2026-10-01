@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 // Usamos mock de API para validación GXP simulada si no hay endpoint estricto en Fase 3.
-import api from "../../../core/api";
 
 const CA0101AuthModal = ({ isOpen, onClose, onAuthenticated, actionLabel }) => {
   const [password, setPassword] = useState("");

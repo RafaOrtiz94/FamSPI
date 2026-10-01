@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { getAttendanceRange } from "../../../core/api/attendanceApi";
+import { getAttendanceRange, getAttendanceTeamRange } from "../../../core/api/attendanceApi";
 
 const normalizeFiltersForKey = (filters = {}) => {
   const userIds = Array.isArray(filters.userIds)
@@ -28,7 +28,10 @@ const useAttendanceReportsQuery = ({ filters = {}, enabled = false, signal } = {
 
   const query = useQuery({
     queryKey: ["attendance-reports", "range", normalizedFilters],
-    queryFn: async ({ signal: querySignal }) => getAttendanceRange(normalizedFilters, querySignal),
+    queryFn: async ({ signal: querySignal }) =>
+      normalizedFilters.mode === "team"
+        ? getAttendanceTeamRange(normalizedFilters, querySignal)
+        : getAttendanceRange(normalizedFilters, querySignal),
     enabled: Boolean(enabled && normalizedFilters.startDate && normalizedFilters.endDate),
     staleTime: 1000 * 30,
     cancelRefetch: true,

@@ -344,4 +344,6 @@ module.exports = {
   applyAdvancedSignature,
   getDocument,
   listByRequest,
+  driveViewLink,
+  driveUcLink,
 };

@@ -254,4 +254,5 @@ module.exports = {
   createDepartment,
   updateDepartment,
   deleteDepartment,
+  normalizeDepartmentStatus,
 };

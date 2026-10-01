@@ -90,10 +90,27 @@ async function closeOffboarding(req, res) {
   }
 }
 
+async function cancelOffboarding(req, res) {
+  try {
+    const data = await service.cancelOffboarding({
+      userId: req.params.userId,
+      actor: req.user,
+    });
+    res.json({ ok: true, data });
+  } catch (err) {
+    logger.error({ err }, "Error cancelando offboarding");
+    res.status(getErrorStatus(err, 400)).json({
+      ok: false,
+      message: err?.message || "No se pudo cancelar el offboarding",
+    });
+  }
+}
+
 module.exports = {
   getWorkspace,
   updateTask,
   runLiquidation,
   startOffboarding,
+  cancelOffboarding,
   closeOffboarding,
 };

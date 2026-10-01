@@ -25,36 +25,65 @@ const logger = require("../../config/logger");
  * @returns {Promise<Array>} Ranked list of compatible backup equipment
  */
 async function getCompatibleBackupCandidates(primaryEquipmentId, options = {}) {
+  // NOTA: el catalogo real usado por bc_equipment_selection es servicio.equipos
+  // (id_equipo), NO public.equipment_models. equipment_models es un catalogo
+  // paralelo/huerfano (ids 104-133, sin relacion con los ids reales de
+  // servicio.equipos) y ademas su tabla de matriz de compatibilidad referencia
+  // columnas que ya no existen en produccion. Por eso el matching "avanzado"
+  // (getAdvancedBackupCandidates) fallaba siempre en silencio y solo quedaba
+  // el legacy - que tambien apuntaba a la tabla equivocada. Ambos se
+  // reescribieron para usar servicio.equipos, el catalogo real.
+  const candidates = await getLegacyBackupCandidates(primaryEquipmentId, options);
+
+  // El backup puede ser el mismo equipo que el principal (unidad adicional
+  // identica) o uno parecido. La consulta de arriba excluye el propio
+  // equipo (e.id_equipo != primaryEquipmentId) porque esa exclusion tiene
+  // sentido dentro del matching de "similares" - pero el propio equipo
+  // tambien debe quedar disponible como opcion, asi que se agrega aparte
+  // al inicio de la lista.
+  const selfCandidate = await getSameEquipmentAsBackupOption(primaryEquipmentId);
+  return selfCandidate ? [selfCandidate, ...(candidates || [])] : (candidates || []);
+}
+
+/**
+ * Devuelve el propio equipo principal como opcion de backup ("mismo equipo"),
+ * ya que un backup valido puede ser una unidad adicional identica a la
+ * principal, no solo un modelo parecido.
+ */
+async function getSameEquipmentAsBackupOption(primaryEquipmentId) {
   try {
-    // NEW: First try advanced compatibility-based selection
-    const candidates = await getAdvancedBackupCandidates(primaryEquipmentId, options);
+    const { rows } = await db.query(
+      `SELECT e.id_equipo AS id, e.nombre AS name, e.code, e.capacity_per_hour, e.max_daily_capacity,
+              e.base_price, e.category_type, e.fabricante AS manufacturer, e.modelo AS model,
+              e.descripcion AS description, e.estado AS status
+       FROM servicio.equipos e
+       WHERE e.id_equipo = $1 AND e.estado = 'operativo'`,
+      [primaryEquipmentId],
+    );
+    const equipment = rows[0];
+    if (!equipment) return null;
 
-    if (candidates && candidates.length > 0) {
-      logger.info({
-        primaryEquipmentId,
-        candidatesCount: candidates.length,
-        method: 'advanced_compatibility'
-      }, 'Using advanced compatibility-based backup selection');
-      return candidates;
-    }
-
-    // FALLBACK: Use legacy category-based logic when no compatibility data exists
-    logger.warn({
-      primaryEquipmentId,
-      method: 'legacy_fallback'
-    }, 'No compatibility data found, falling back to legacy category-based selection');
-
-    return await getLegacyBackupCandidates(primaryEquipmentId, options);
-
+    return {
+      ...equipment,
+      compatibility_score: 1,
+      capacity_overlap_percentage: 100,
+      cost_penalty_percentage: 0,
+      priority_score: 100,
+      notes: 'Mismo equipo que el principal (unidad adicional)',
+      match_type: 'same_equipment',
+      match_confidence: 1,
+      primary_equipment: { id: primaryEquipmentId, name: equipment.name },
+      compatibility_metadata: {
+        match_type: 'same_equipment',
+        match_confidence: 1,
+        note: 'El backup es una unidad adicional identica al equipo principal',
+      },
+      categories: [equipment.category_type],
+      raw: equipment,
+    };
   } catch (error) {
-    logger.error({
-      error: error.message,
-      primaryEquipmentId,
-      method: 'error_fallback'
-    }, 'Error in compatibility selection, using legacy fallback');
-
-    // FINAL FALLBACK: Ensure system never breaks
-    return await getLegacyBackupCandidates(primaryEquipmentId, options);
+    logger.error({ error: error.message, primaryEquipmentId }, 'Error obteniendo el propio equipo como opcion de backup');
+    return null;
   }
 }
 
@@ -261,11 +290,12 @@ async function getAdvancedBackupCandidates(primaryEquipmentId, options = {}) {
 async function getLegacyBackupCandidates(primaryEquipmentId, options = {}) {
   const { maxCandidates = 10 } = options;
 
-  // Get primary equipment basic info
+  // Get primary equipment basic info (servicio.equipos: catalogo real usado
+  // por bc_equipment_selection, no public.equipment_models).
   const primaryQuery = `
-    SELECT e.category_type, e.name
-    FROM public.equipment_models e
-    WHERE e.id = $1 AND e.status = 'operativo'
+    SELECT e.category_type, e.nombre AS name
+    FROM servicio.equipos e
+    WHERE e.id_equipo = $1 AND e.estado = 'operativo'
   `;
 
   const primaryResult = await db.query(primaryQuery, [primaryEquipmentId]);
@@ -283,17 +313,17 @@ async function getLegacyBackupCandidates(primaryEquipmentId, options = {}) {
   // Legacy category-based matching
   const legacyQuery = `
     SELECT
-      e.id,
-      e.name,
+      e.id_equipo AS id,
+      e.nombre AS name,
       e.code,
       e.capacity_per_hour,
       e.max_daily_capacity,
       e.base_price,
       e.category_type,
-      e.manufacturer,
-      e.model,
-      e.description,
-      e.status,
+      e.fabricante AS manufacturer,
+      e.modelo AS model,
+      e.descripcion AS description,
+      e.estado AS status,
       0.5 as compatibility_score, -- Default legacy score
       80.0 as capacity_overlap_percentage,
       0.0 as cost_penalty_percentage,
@@ -304,11 +334,11 @@ async function getLegacyBackupCandidates(primaryEquipmentId, options = {}) {
       null as maintenance_cost_monthly,
       'legacy_category' as match_type,
       0.5 as match_confidence
-    FROM public.equipment_models e
+    FROM servicio.equipos e
     WHERE e.category_type = ANY($1)
-      AND e.id != $2
-      AND e.status = 'operativo'
-    ORDER BY e.base_price ASC, e.name ASC
+      AND e.id_equipo != $2
+      AND e.estado = 'operativo'
+    ORDER BY e.base_price ASC, e.nombre ASC
     LIMIT $3
   `;
 

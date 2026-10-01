@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { FiActivity, FiAlertTriangle, FiFileText } from "react-icons/fi";
+import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
 
 export default function CA0117Workspace() {
   const [selectedLane, setSelectedLane] = useState(null);
@@ -11,7 +12,7 @@ export default function CA0117Workspace() {
   ];
 
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50">
+    <div className={WORKSPACE_PAGE_CLASS}>
       <header className="border-b border-gray-200 bg-white px-6 py-4">
         <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-900">
           <FiAlertTriangle className="text-blue-600" />

@@ -1,0 +1,9 @@
+sheet,cell,row,column,source,target_header,reason,label,description
+XP 300,F9,9,F/6,objective,DET/AÑO PROCESO,target_column,CELLPACK 20L,"Rellenar columna 'DET/AÑO PROCESO' en XP 300!F9 (fila 9, columna F/6). Contexto de fila: 'CELLPACK 20L' en C9."
+XP 300,F10,10,F/6,objective,DET/AÑO PROCESO,target_column,STROMA WH KX21 x 500ML,"Rellenar columna 'DET/AÑO PROCESO' en XP 300!F10 (fila 10, columna F/6). Contexto de fila: 'STROMA WH KX21 x 500ML' en C10."
+XP 300,F11,11,F/6,objective,DET/AÑO PROCESO,target_column,EIGHT CHECK-3WP XTRA ( 4 X 2 ML),"Rellenar columna 'DET/AÑO PROCESO' en XP 300!F11 (fila 11, columna F/6). Contexto de fila: 'EIGHT CHECK-3WP XTRA ( 4 X 2 ML)' en C11."
+XP 300,F12,12,F/6,objective,DET/AÑO PROCESO,target_column,PAPER ROLL F.PRINTER STP211-144 (10PCS.),"Rellenar columna 'DET/AÑO PROCESO' en XP 300!F12 (fila 12, columna F/6). Contexto de fila: 'PAPER ROLL F.PRINTER STP211-144 (10PCS.)' en C12."
+XP 300,I9,9,I/9,objective,PRODUCTO A ENTREGAR,target_column,CELLPACK 20L,"Rellenar columna 'PRODUCTO A ENTREGAR' en XP 300!I9 (fila 9, columna I/9). Contexto de fila: 'CELLPACK 20L' en C9."
+XP 300,I10,10,I/9,objective,PRODUCTO A ENTREGAR,target_column,STROMA WH KX21 x 500ML,"Rellenar columna 'PRODUCTO A ENTREGAR' en XP 300!I10 (fila 10, columna I/9). Contexto de fila: 'STROMA WH KX21 x 500ML' en C10."
+XP 300,I11,11,I/9,objective,PRODUCTO A ENTREGAR,target_column,EIGHT CHECK-3WP XTRA ( 4 X 2 ML),"Rellenar columna 'PRODUCTO A ENTREGAR' en XP 300!I11 (fila 11, columna I/9). Contexto de fila: 'EIGHT CHECK-3WP XTRA ( 4 X 2 ML)' en C11."
+XP 300,I12,12,I/9,objective,PRODUCTO A ENTREGAR,target_column,PAPER ROLL F.PRINTER STP211-144 (10PCS.),"Rellenar columna 'PRODUCTO A ENTREGAR' en XP 300!I12 (fila 12, columna I/9). Contexto de fila: 'PAPER ROLL F.PRINTER STP211-144 (10PCS.)' en C12."

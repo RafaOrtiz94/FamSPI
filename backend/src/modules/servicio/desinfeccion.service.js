@@ -9,7 +9,7 @@ const { PDFDocument, StandardFonts } = require("pdf-lib");
 const logger = require("../../config/logger");
 const { drive } = require("../../config/google");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
-const { securePdfForm } = require("../../utils/pdfFormSecurity");
+const { securePdfForm, setFieldFontSizeSafe } = require("../../utils/pdfFormSecurity");
 
 // Resuelve la plantilla contemplando ambas grafias del nombre (acento correcto y nombre actual en disco)
 const TEMPLATE_FILENAMES = [
@@ -170,7 +170,7 @@ const generateDisinfectionPDF = async (disinfectionData, providedSignatureBuffer
   const templateBytes = fs.readFileSync(templatePath);
   const pdfDoc = await PDFDocument.load(templateBytes);
   const form = pdfDoc.getForm();
-  const baseFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const baseFont = await pdfDoc.embedFont(StandardFonts.TimesRoman);
 
   // Firma: base64 (canvas) o id de Drive. Si viene por parámetro, se usa directamente.
   let signatureBuffer = providedSignatureBuffer;
@@ -295,19 +295,18 @@ const generateDisinfectionPDF = async (disinfectionData, providedSignatureBuffer
     }
   }
 
-  // Ajustar tipografia
-  try {
-    form.getFields().forEach((field) => {
+  // Ajustar tipografia por campo: un campo sin /DA (default appearance) en la
+  // plantilla no debe abortar el resto (mismo bug que rompia F.ST-20 entero).
+  form.getFields().forEach((field) => {
+    setFieldFontSizeSafe(field, 10);
+    try {
       if (typeof field.updateAppearances === "function") {
         field.updateAppearances(baseFont);
       }
-      if (typeof field.setFontSize === "function") {
-        field.setFontSize(10);
-      }
-    });
-  } catch (appearanceErr) {
-    logger.warn({ appearanceErr }, "No se pudieron ajustar apariencias de campos");
-  }
+    } catch (appearanceErr) {
+      logger.warn({ fieldName: field.getName?.(), appearanceErr }, "No se pudo ajustar apariencia de campo");
+    }
+  });
 
   securePdfForm(form);
   const pdfBytes = await pdfDoc.save();

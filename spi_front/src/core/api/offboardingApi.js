@@ -27,11 +27,17 @@ export const closeOffboardingProcess = async (userId) => {
   return data?.data || data;
 };
 
+export const cancelOffboardingProcess = async (userId) => {
+  const { data } = await api.post(`/offboarding/${userId}/cancel`);
+  return data?.data || data;
+};
+
 const offboardingApi = {
   getOffboardingWorkspace,
   updateOffboardingTask,
   runOffboardingLiquidation,
   startOffboardingProcess,
+  cancelOffboardingProcess,
   closeOffboardingProcess,
 };
 

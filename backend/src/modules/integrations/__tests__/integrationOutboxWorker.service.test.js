@@ -8,12 +8,13 @@ jest.mock("../../../config/logger", () => ({
   warn: jest.fn(),
 }));
 
-jest.mock("../../../config/odooIntegration", () => ({
-  isOdooIntegrationEnabled: jest.fn(),
+jest.mock("../crm.service", () => ({
+  isCrmSyncEnabled: jest.fn(),
+  sendClientApproved: jest.fn(),
 }));
 
 const db = require("../../../config/db");
-const { isOdooIntegrationEnabled } = require("../../../config/odooIntegration");
+const crmService = require("../crm.service");
 const { processPendingOutboxBatch } = require("../integrationOutboxWorker.service");
 
 describe("integrationOutboxWorker.service", () => {
@@ -21,25 +22,7 @@ describe("integrationOutboxWorker.service", () => {
     jest.clearAllMocks();
   });
 
-  it("con flag OFF marca eventos pendientes como skipped", async () => {
-    isOdooIntegrationEnabled.mockReturnValue(false);
-    db.query.mockResolvedValueOnce({ rowCount: 2 });
-
-    const summary = await processPendingOutboxBatch({ limit: 10 });
-
-    expect(summary).toMatchObject({
-      enabled: false,
-      scanned: 2,
-      skipped: 2,
-      sent: 0,
-      failed: 0,
-      dead: 0,
-    });
-    expect(db.query).toHaveBeenCalledTimes(1);
-  });
-
-  it("procesa batch con flag ON y reparte sent/failed", async () => {
-    isOdooIntegrationEnabled.mockReturnValue(true);
+  it("marca como skipped un evento no-CRM (Odoo ya no existe, no hay provider)", async () => {
     db.query
       .mockResolvedValueOnce({
         rows: [
@@ -50,10 +33,41 @@ describe("integrationOutboxWorker.service", () => {
             correlation_id: "corr-1",
             attempt_count: 1,
           },
+        ],
+      }) // claim pending
+      .mockResolvedValueOnce({ rowCount: 1 }); // mark skipped
+
+    const summary = await processPendingOutboxBatch({ limit: 10 });
+
+    expect(summary).toMatchObject({
+      scanned: 1,
+      sent: 0,
+      failed: 0,
+      dead: 0,
+      skipped: 1,
+    });
+    expect(crmService.sendClientApproved).not.toHaveBeenCalled();
+  });
+
+  it("procesa batch CRM y reparte sent/failed", async () => {
+    crmService.isCrmSyncEnabled.mockReturnValue(true);
+    crmService.sendClientApproved
+      .mockResolvedValueOnce({ ok: true })
+      .mockRejectedValueOnce(new Error("CRM transport error"));
+    db.query
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 1,
+            event_type: "crm.client.approved",
+            payload: {},
+            correlation_id: "corr-1",
+            attempt_count: 1,
+          },
           {
             id: 2,
-            event_type: "delivery_request.created",
-            payload: { simulate_failure: true },
+            event_type: "crm.client.approved",
+            payload: {},
             correlation_id: "corr-2",
             attempt_count: 1,
           },
@@ -65,10 +79,10 @@ describe("integrationOutboxWorker.service", () => {
     const summary = await processPendingOutboxBatch({
       limit: 10,
       maxAttempts: 3,
+      eventTypeFilter: "crm.%",
     });
 
     expect(summary).toMatchObject({
-      enabled: true,
       scanned: 2,
       sent: 1,
       failed: 1,
@@ -79,14 +93,15 @@ describe("integrationOutboxWorker.service", () => {
   });
 
   it("envia a dead cuando supera max_attempts", async () => {
-    isOdooIntegrationEnabled.mockReturnValue(true);
+    crmService.isCrmSyncEnabled.mockReturnValue(true);
+    crmService.sendClientApproved.mockRejectedValueOnce(new Error("CRM transport error"));
     db.query
       .mockResolvedValueOnce({
         rows: [
           {
             id: 9,
-            event_type: "delivery_request.confirmed",
-            payload: { simulate_failure: true },
+            event_type: "crm.client.approved",
+            payload: {},
             correlation_id: "corr-9",
             attempt_count: 3,
           },
@@ -97,10 +112,10 @@ describe("integrationOutboxWorker.service", () => {
     const summary = await processPendingOutboxBatch({
       limit: 5,
       maxAttempts: 3,
+      eventTypeFilter: "crm.%",
     });
 
     expect(summary).toMatchObject({
-      enabled: true,
       scanned: 1,
       sent: 0,
       failed: 0,
@@ -110,4 +125,3 @@ describe("integrationOutboxWorker.service", () => {
     expect(summary.processed_ids).toEqual([9]);
   });
 });
-

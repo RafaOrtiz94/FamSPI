@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FamSPI - Propuesta: Workspace Maestro de Modelos de Equipo</title>
+<style>
+  :root {
+    --navy:#172033;
+    --slate:#334155;
+    --muted:#64748B;
+    --line:#E2E8F0;
+    --paper:#F8FAFC;
+    --white:#FFFFFF;
+    --blue:#2563EB;
+    --blue-bg:#DBEAFE;
+    --blue-tx:#1E3A8A;
+    --green:#16A34A;
+    --green-bg:#DCFCE7;
+    --green-tx:#14532D;
+    --amber:#D97706;
+    --amber-bg:#FEF3C7;
+    --amber-tx:#78350F;
+    --red:#DC2626;
+    --red-bg:#FEE2E2;
+    --red-tx:#7F1D1D;
+    --purple:#7C3AED;
+    --purple-bg:#F3E8FF;
+    --purple-tx:#4C1D95;
+    --cyan-bg:#CFFAFE;
+    --cyan-tx:#155E75;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--paper);
+    color: #1F2937;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  header {
+    background: var(--navy);
+    color: white;
+    padding: 18px 40px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    align-items: baseline;
+  }
+  header h1 { font-size: 18px; font-weight: 750; letter-spacing: 0; }
+  header span { color: #CBD5E1; font-size: 13px; }
+
+  .tabs {
+    display: flex;
+    gap: 2px;
+    background: #E2E8F0;
+    padding: 8px 40px 0;
+    overflow-x: auto;
+  }
+  .tab-btn {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    padding: 10px 16px;
+    border-radius: 8px 8px 0 0;
+    font-weight: 650;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .tab-btn:hover { background: #F1F5F9; color: var(--slate); }
+  .tab-btn.active { background: white; color: #0F172A; }
+
+  main { padding: 30px 40px 48px; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .section-title { font-size: 18px; font-weight: 750; color: #0F172A; margin-bottom: 4px; }
+  .section-desc { color: var(--muted); margin-bottom: 22px; max-width: 980px; }
+  h3 {
+    font-size: 12px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--slate);
+    border-bottom: 1px solid var(--line);
+    margin: 26px 0 12px;
+    padding-bottom: 8px;
+  }
+  h3:first-of-type { margin-top: 0; }
+
+  .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .card {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+    box-shadow: 0 1px 5px rgba(15,23,42,.04);
+  }
+  .card h4 { font-size: 14px; color: #0F172A; margin-bottom: 6px; }
+  .card p { color: var(--muted); }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .b-blue { background: var(--blue-bg); color: var(--blue-tx); }
+  .b-green { background: var(--green-bg); color: var(--green-tx); }
+  .b-amber { background: var(--amber-bg); color: var(--amber-tx); }
+  .b-red { background: var(--red-bg); color: var(--red-tx); }
+  .b-purple { background: var(--purple-bg); color: var(--purple-tx); }
+  .b-cyan { background: var(--cyan-bg); color: var(--cyan-tx); }
+  .b-gray { background: #E5E7EB; color: #374151; }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: white; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    background: #F1F5F9;
+    color: var(--slate);
+    font-weight: 700;
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  code {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 12px;
+    background: #F1F5F9;
+    color: #334155;
+    padding: 2px 5px;
+    border-radius: 5px;
+  }
+
+  .flow {
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+  .step {
+    min-width: 160px;
+    flex: 1;
+    background: white;
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--blue);
+    border-radius: 10px;
+    padding: 12px;
+  }
+  .step strong { display: block; color: #0F172A; margin-bottom: 4px; }
+  .step span { color: var(--muted); font-size: 12px; }
+  .arrow {
+    align-self: center;
+    color: #94A3B8;
+    font-weight: 800;
+  }
+
+  .mock {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .mock-head {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .mock-title { font-weight: 800; color: #0F172A; }
+  .mock-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px 12px;
+    background: #F8FAFC;
+    border-bottom: 1px solid var(--line);
+  }
+  .mock-tab {
+    padding: 6px 10px;
+    border-radius: 7px;
+    background: white;
+    border: 1px solid var(--line);
+    font-size: 12px;
+    font-weight: 700;
+    color: #334155;
+  }
+  .mock-body { padding: 14px; }
+  .metric {
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 10px;
+    background: #FFFFFF;
+  }
+  .metric small { display:block; color: var(--muted); }
+  .metric strong { font-size: 18px; color: #0F172A; }
+  .warn { border-left: 4px solid var(--amber); background: #FFFBEB; }
+  .ok { border-left: 4px solid var(--green); background: #F0FDF4; }
+  .danger { border-left: 4px solid var(--red); background: #FEF2F2; }
+
+  .er-board {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr 1fr;
+    gap: 14px;
+    align-items: start;
+  }
+  .entity {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 1px 5px rgba(15,23,42,.04);
+  }
+  .entity.main { border-color: #93C5FD; box-shadow: 0 0 0 2px #DBEAFE; }
+  .entity-title {
+    background: #F1F5F9;
+    padding: 9px 11px;
+    font-weight: 800;
+    color: #0F172A;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .entity.main .entity-title { background: var(--blue-bg); color: var(--blue-tx); }
+  .entity ul { list-style: none; }
+  .entity li {
+    display: flex;
+    gap: 7px;
+    padding: 6px 11px;
+    border-bottom: 1px solid #F1F5F9;
+    color: #334155;
+  }
+  .entity li:last-child { border-bottom: 0; }
+  .key {
+    min-width: 28px;
+    font-size: 10px;
+    font-weight: 800;
+    color: #64748B;
+    text-transform: uppercase;
+  }
+  .rel-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .rel {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 10px 12px;
+  }
+  .rel strong { display: block; color: #0F172A; margin-bottom: 3px; }
+  .rel span { color: var(--muted); font-size: 12px; }
+
+  @media (max-width: 900px) {
+    header, .tabs { padding-left: 20px; padding-right: 20px; }
+    main { padding: 24px 20px 40px; }
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    .er-board, .rel-list { grid-template-columns: 1fr; }
+    .arrow { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Workspace Maestro de Modelos de Equipo</h1>
+  <span>Propuesta visual para FamSPI - modelos, insumos, servicio y unidades derivadas</span>
+</header>
+
+<nav class="tabs" aria-label="Secciones">
+  <button class="tab-btn active" data-tab="resumen">Resumen</button>
+  <button class="tab-btn" data-tab="modelo">Modelo Canonico</button>
+  <button class="tab-btn" data-tab="insumos">Insumos</button>
+  <button class="tab-btn" data-tab="servicio">Servicio</button>
+  <button class="tab-btn" data-tab="er">ER Detallado</button>
+  <button class="tab-btn" data-tab="workspace">Workspace</button>
+  <button class="tab-btn" data-tab="plan">Plan</button>
+</nav>
+
+<main>
+  <section id="resumen" class="panel active">
+    <div class="section-title">Resumen ejecutivo</div>
+    <p class="section-desc">La propuesta define el equipo como modelo maestro reutilizable. Las unidades fisicas con serial siguen existiendo, pero son derivadas del modelo y no deben mezclarse con los datos generales del equipo.</p>
+
+    <div class="grid-3">
+      <div class="card ok">
+        <h4>Modelo de equipo</h4>
+        <p>Referencia canonica para Business Case, negociacion, calculos, determinaciones, insumos y servicio tecnico.</p>
+      </div>
+      <div class="card warn">
+        <h4>Unidad fisica</h4>
+        <p>Activo con serial, cliente, ubicacion y estado. Debe derivarse del modelo cuando entra al flujo logistico o inventario.</p>
+      </div>
+      <div class="card danger">
+        <h4>Problema actual</h4>
+        <p>Hay tres catalogos paralelos de modelos y relaciones de servicio incompletas.</p>
+      </div>
+    </div>
+
+    <h3>Evidencia validada en Neon</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tabla</th><th>Rol</th><th>Conteo</th><th>Lectura</th></tr></thead>
+        <tbody>
+          <tr><td><code>servicio.equipos</code></td><td>Catalogo tecnico historico</td><td>30</td><td>Usado por vista de BC y FKs actuales</td></tr>
+          <tr><td><code>public.equipment_models</code></td><td>Catalogo moderno</td><td>30</td><td>Mejor candidato a canonico</td></tr>
+          <tr><td><code>public.equipos_modelo</code></td><td>Catalogo de inventario</td><td>30</td><td>Base para unidades fisicas</td></tr>
+          <tr><td><code>catalog_consumables</code></td><td>Reactivos, controles, calibradores, consumibles, materiales</td><td>685</td><td>Catalogo con datos reales</td></tr>
+          <tr><td><code>catalog_equipment_consumables</code></td><td>Relacion modelo-insumo-determinacion</td><td>1228</td><td>Matriz mas madura hoy</td></tr>
+          <tr><td><code>equipment_maintenance_parts</code></td><td>Piezas de mantenimiento por modelo</td><td>0</td><td>Estructura existe, pero no cubre tipos de mantenimiento/procedimientos</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="modelo" class="panel">
+    <div class="section-title">Modelo canonico</div>
+    <p class="section-desc">Un modelo debe concentrar identidad, clasificacion, parametros comerciales, parametros tecnicos y relaciones con insumos y servicio.</p>
+
+    <div class="flow">
+      <div class="step"><strong>Identidad</strong><span>SKU, nombre, fabricante, modelo, categoria</span></div>
+      <div class="arrow">></div>
+      <div class="step"><strong>BC / Comercial</strong><span>capacidad, costos, formula, ROI</span></div>
+      <div class="arrow">></div>
+      <div class="step"><strong>Laboratorio</strong><span>determinaciones y condiciones tecnicas</span></div>
+      <div class="arrow">></div>
+      <div class="step"><strong>Servicio</strong><span>piezas, procedimientos, documentos y rutinas</span></div>
+    </div>
+
+    <h3>Decision propuesta</h3>
+    <div class="grid-2">
+      <div class="card">
+        <h4>Canonico recomendado</h4>
+        <p><code>public.equipment_models</code> por contener datos modernos de catalogo, formulas, costos y FK desde piezas de mantenimiento.</p>
+      </div>
+      <div class="card">
+        <h4>Compatibilidad temporal</h4>
+        <p>Mantener mapa por <code>sku/code</code> contra <code>servicio.equipos</code> y <code>equipos_modelo</code> hasta migrar vistas y FKs.</p>
+      </div>
+    </div>
+
+    <h3>Estados de completitud del modelo</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Color</th><th>Etiqueta</th><th>Criterio</th></tr></thead>
+        <tbody>
+          <tr><td><span class="badge b-green">Verde</span></td><td>listo</td><td>Comercial, laboratorio, insumos y servicio completos</td></tr>
+          <tr><td><span class="badge b-blue">Azul</span></td><td>listo para BC</td><td>Datos comerciales, determinaciones e insumos minimos completos</td></tr>
+          <tr><td><span class="badge b-amber">Amarillo</span></td><td>servicio pendiente</td><td>BC completo, procedimientos de mantenimiento incompletos</td></tr>
+          <tr><td><span class="badge b-red">Rojo</span></td><td>bloqueado</td><td>Falta identidad minima o hay inconsistencia de catalogo</td></tr>
+          <tr><td><span class="badge b-gray">Gris</span></td><td>inactivo</td><td>Modelo no disponible para nuevas propuestas</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="insumos" class="panel">
+    <div class="section-title">Insumos atados al modelo</div>
+    <p class="section-desc">Los reactivos, consumibles, calibradores, controles y materiales deben vivir como relaciones del modelo. No pertenecen a una unidad fisica especifica salvo excepciones operativas.</p>
+
+    <div class="grid-4">
+      <div class="card"><h4>Reactivos</h4><p>Consumo por determinacion, rendimiento, costo y proveedor.</p></div>
+      <div class="card"><h4>Controles</h4><p>Control de calidad por rutina, turno o prueba especial.</p></div>
+      <div class="card"><h4>Calibradores</h4><p>Frecuencia de calibracion, version y vigencia.</p></div>
+      <div class="card"><h4>Materiales</h4><p>Insumos complementarios requeridos para operar el modelo.</p></div>
+    </div>
+
+    <h3>Matriz propuesta modelo-insumo</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Campo</th><th>Uso</th><th>Fuente base</th></tr></thead>
+        <tbody>
+          <tr><td><code>equipment_model_id</code></td><td>Modelo canonico</td><td><code>equipment_models</code></td></tr>
+          <tr><td><code>material_id</code></td><td>Reactivo, control, calibrador, consumible o material</td><td><code>catalog_consumables</code></td></tr>
+          <tr><td><code>determination_id</code></td><td>Relacion opcional con una determinacion</td><td><code>catalog_determinations</code></td></tr>
+          <tr><td><code>consumption_rate</code></td><td>Tasa de consumo por prueba o rutina</td><td><code>catalog_equipment_consumables</code></td></tr>
+          <tr><td><code>usage_context</code></td><td>BC, laboratorio, preventivo, instalacion</td><td>nuevo campo sugerido</td></tr>
+          <tr><td><code>criticality</code></td><td>Critico, normal, opcional</td><td>nuevo campo sugerido</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="servicio" class="panel">
+    <div class="section-title">Servicio tecnico por modelo</div>
+    <p class="section-desc">Servicio necesita un catalogo maestro de piezas y una matriz de piezas/materiales por procedimiento de mantenimiento. Correctivos siguen siendo eventos del caso, pero pueden seleccionar piezas del catalogo.</p>
+
+    <div class="grid-3">
+      <div class="card">
+        <h4>Catalogo de piezas</h4>
+        <p>Piezas reutilizables por codigo, tipo, proveedor, criticidad y estado.</p>
+      </div>
+      <div class="card">
+        <h4>Procedimientos preventivos</h4>
+        <p>Rutinas mensual, trimestral, semestral, anual o por horas/ciclos con piezas y materiales.</p>
+      </div>
+      <div class="card">
+        <h4>Procedimientos correctivos</h4>
+        <p>Tipos de correctivo o sintomas con piezas sugeridas, materiales y criterios tecnicos.</p>
+      </div>
+    </div>
+
+    <h3>Flujo servicio</h3>
+    <div class="flow">
+      <div class="step"><strong>Modelo</strong><span>Selecciona categoria y version tecnica</span></div>
+      <div class="arrow">></div>
+      <div class="step"><strong>Procedimiento</strong><span>Define tipo, frecuencia, piezas, materiales y tiempos</span></div>
+      <div class="arrow">></div>
+      <div class="step"><strong>Planificacion</strong><span>Genera tareas preventivas por unidad/cliente</span></div>
+      <div class="arrow">></div>
+      <div class="step"><strong>Ejecucion</strong><span>Registra consumo real y evidencias</span></div>
+    </div>
+
+    <h3>Regla correctivo vs catalogo</h3>
+    <div class="card">
+      <p>Un repuesto en un caso correctivo debe poder seleccionarse desde el catalogo del modelo. Si el tecnico registra una parte no catalogada, queda como excepcion y puede promoverse luego al catalogo maestro.</p>
+    </div>
+  </section>
+
+  <section id="workspace" class="panel">
+    <div class="section-title">Workspace propuesto</div>
+    <p class="section-desc">Una ficha de modelo con tabs por area. Todos ven el modelo completo; las acciones se habilitan por rol.</p>
+
+    <div class="mock">
+      <div class="mock-head">
+        <div>
+          <div class="mock-title">cobas b 123 POC system</div>
+          <div><code>5122279001</code> Roche - Gasometria / BGM</div>
+        </div>
+        <div>
+          <span class="badge b-blue">listo para BC</span>
+          <span class="badge b-amber">servicio pendiente</span>
+        </div>
+      </div>
+      <div class="mock-tabs">
+        <span class="mock-tab">General</span>
+        <span class="mock-tab">BC / Comercial</span>
+        <span class="mock-tab">Laboratorio</span>
+        <span class="mock-tab">Insumos</span>
+        <span class="mock-tab">Servicio</span>
+        <span class="mock-tab">Documentos</span>
+        <span class="mock-tab">Unidades</span>
+      </div>
+      <div class="mock-body">
+        <div class="grid-4">
+          <div class="metric"><small>Determinaciones</small><strong>8</strong></div>
+          <div class="metric"><small>Insumos</small><strong>42</strong></div>
+          <div class="metric"><small>Procedimientos servicio</small><strong>0</strong></div>
+          <div class="metric"><small>Unidades fisicas</small><strong>0</strong></div>
+        </div>
+      </div>
+    </div>
+
+    <h3>Permisos sugeridos</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Area</th><th>Puede ver</th><th>Puede editar</th></tr></thead>
+        <tbody>
+          <tr><td>Comercial / ACP</td><td>Todo el modelo</td><td>BC, costos, insumos comerciales</td></tr>
+          <tr><td>Tecnico / Jefe tecnico</td><td>Todo el modelo</td><td>Piezas, preventivo, documentos tecnicos</td></tr>
+          <tr><td>Backoffice</td><td>Todo el modelo</td><td>Reactivos de procesos privados, segun regla actual</td></tr>
+          <tr><td>Gerencia</td><td>Todo el modelo</td><td>Aprobar/publicar o desactivar</td></tr>
+          <tr><td>TI/Admin</td><td>Todo el modelo</td><td>Correcciones de catalogo y mapeos</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="er" class="panel">
+    <div class="section-title">Diagrama entidad-relacion detallado</div>
+    <p class="section-desc">El modelo de equipo es la entidad central. Las piezas viven en un catalogo maestro y se atan a procedimientos de mantenimiento preventivo o correctivo; no se duplican como piezas preventivas directas del modelo.</p>
+
+    <h3>Entidades principales</h3>
+    <div class="er-board">
+      <div class="entity main">
+        <div class="entity-title"><span>EQUIPMENT_MODEL</span><span class="badge b-blue">central</span></div>
+        <ul>
+          <li><span class="key">PK</span><code>id</code></li>
+          <li><span class="key">UK</span><code>sku</code></li>
+          <li><span class="key"></span><code>code</code>, <code>name</code></li>
+          <li><span class="key"></span><code>manufacturer</code>, <code>model</code></li>
+          <li><span class="key"></span><code>category</code>, <code>category_type</code></li>
+          <li><span class="key"></span><code>status</code>, <code>technical_specs</code></li>
+        </ul>
+      </div>
+
+      <div class="entity">
+        <div class="entity-title"><span>MODEL_COMMERCIAL_PROFILE</span><span class="badge b-green">BC</span></div>
+        <ul>
+          <li><span class="key">PK</span><code>id</code></li>
+          <li><span class="key">FK</span><code>equipment_model_id</code></li>
+          <li><span class="key"></span><code>base_price</code>, <code>maintenance_cost</code></li>
+          <li><span class="key"></span><code>capacity_per_hour</code></li>
+          <li><span class="key"></span><code>max_daily_capacity</code></li>
+          <li><span class="key"></span><code>default_calculation_formula</code></li>
+        </ul>
+      </div>
+
+      <div class="entity">
+        <div class="entity-title"><span>MODEL_ALIAS</span><span class="badge b-amber">migracion</span></div>
+        <ul>
+          <li><span class="key">PK</span><code>id</code></li>
+          <li><span class="key">FK</span><code>equipment_model_id</code></li>
+          <li><span class="key"></span><code>source_system</code>, <code>source_table</code></li>
+          <li><span class="key"></span><code>source_id</code>, <code>source_code</code></li>
+          <li><span class="key"></span><code>source_name</code>, <code>is_primary</code></li>
+        </ul>
+      </div>
+
+      <div class="entity">
+        <div class="entity-title"><span>DETERMINATION_CATALOG</span><span class="badge b-purple">lab</span></div>
+        <ul>
+          <li><span class="key">PK</span><code>id</code></li>
+          <li><span class="key"></span><code>name</code>, <code>roche_code</code></li>
+          <li><span class="key"></span><code>category</code>, <code>subcategory</code></li>
+          <li><span class="key"></span><code>status</code>, <code>cost_per_test</code></li>
+          <li><span class="key"></span><code>calculation_formula</code></li>
+        </ul>
+      </div>
+
+      <div class="entity">
+        <div class="entity-title"><span>MODEL_DETERMINATION</span><span class="badge b-purple">relacion</span></div>
+        <ul>
+          <li><span class="key">PK</span><code>id</code></li>
+          <li><span class="key">FK</span><code>equipment_model_id</code></li>
+          <li><span class="key">FK</span><code>determination_id</code></li>
+          <li><span class="key"></span><code>volume_per_test</code></li>
+          <li><span class="key"></span><code>reagent_consumption</code></li>
+          <li><span class="key"></span><code>calibration_frequency</code></li>
+        </ul>
+      </div>
+
+      <div class="entity">
+        <div class="entity-title"><span>MATERIAL_CATALOG</span><span class="badge b-cyan">insumo</span></div>
+        <ul>
+          <li><span class="key">PK</span><code>id</code></li>
+          <li><span class="key"></span><code>name</code>, <code>type</code></li>
+          <li><span class="key"></span><code>supplier</code>, <code>supplier_code</code></li>
+          <li><span class="key"></span><code>units_per_kit</code>, <code>unit_price</code></li>
+          <li><span class="key"></span><code>yield_per_unit</code>, <code>reorder_point</code></li>
+        </ul>
+      </div>
+
+      <div class="entity">
+        <div class="entity-title"><span>MODEL_MATERIAL</span><span class="badge b-cyan">matriz</span></div>
+        <ul>
+          <li><span class="key">PK</span><code>id</code></li>
+          <li><span class="key">FK</span><code>equipment_model_id</code></li>
+          <li><span class="key">FK</span><code>material_id</code></li>
+          <li><span class="key">FK</span><code>determination_id</code></li>
+          <li><span class="key"></span><code>usage_context</code>, <code>consumption_rate</code></li>
+          <li><span class="key"></span><code>is_required</code>, <code>criticality</code></li>
+        </ul>
+      </div>
+
+      <div class="entity">
+        <div class="entity-title"><span>PART_CATALOG</span><span class="badge b-amber">piezas</span></div>
+        <ul>
+          <li><span class="key">PK</span><code>id</code></li>
+          <li><span class="key">UK</span><code>part_code</code></li>
+          <li><span class="key"></span><code>part_name</code>, <code>part_type</code></li>
+          <li><span class="key"></span><code>manufacturer</code>, <code>supplier</code></li>
+          <li><span class="key"></span><code>reference_cost</code>, <code>criticality</code></li>
+          <li><span class="key"></span><code>requires_disinfection</code>, <code>status</code></li>
+        </ul>
+      </div>
+
+      <div class="entity">
+        <div class="entity-title"><span>MAINTENANCE_PROCEDURE</span><span class="badge b-amber">rutina</span></div>
+        <ul>
+          <li><span class="key">PK</span><code>id</code></li>
+          <li><span class="key">FK</span><code>equipment_model_id</code></li>
+          <li><span class="key"></span><code>procedure_code</code>, <code>procedure_name</code></li>
+          <li><span class="key"></span><code>procedure_type</code></li>
+          <li><span class="key"></span><code>frequency_type</code>, <code>frequency_value</code></li>
+          <li><span class="key"></span><code>estimated_minutes</code>, <code>responsible_role</code></li>
+        </ul>
+      </div>
+
+      <div class="entity">
+        <div class="entity-title"><span>MAINTENANCE_PROCEDURE_PART</span><span class="badge b-amber">detalle</span></div>
+        <ul>
+          <li><span class="key">PK</span><code>id</code></li>
+          <li><span class="key">FK</span><code>maintenance_procedure_id</code></li>
+          <li><span class="key">FK</span><code>part_id</code></li>
+          <li><span class="key"></span><code>quantity</code>, <code>unit</code></li>
+          <li><span class="key"></span><code>is_required</code>, <code>criticality</code></li>
+          <li><span class="key"></span><code>replace_by_default</code>, <code>instructions</code></li>
+        </ul>
+      </div>
+
+      <div class="entity">
+        <div class="entity-title"><span>MODEL_DOCUMENT_REQUIREMENT</span><span class="badge b-gray">F.ST</span></div>
+        <ul>
+          <li><span class="key">PK</span><code>id</code></li>
+          <li><span class="key">FK</span><code>equipment_model_id</code></li>
+          <li><span class="key"></span><code>procedure_code</code>, <code>document_code</code></li>
+          <li><span class="key"></span><code>document_name</code></li>
+          <li><span class="key"></span><code>required_for_installation</code></li>
+          <li><span class="key"></span><code>required_for_preventive</code></li>
+        </ul>
+      </div>
+
+      <div class="entity">
+        <div class="entity-title"><span>EQUIPMENT_UNIT</span><span class="badge b-gray">derivada</span></div>
+        <ul>
+          <li><span class="key">PK</span><code>id</code></li>
+          <li><span class="key">FK</span><code>equipment_model_id</code></li>
+          <li><span class="key">UK</span><code>serial</code></li>
+          <li><span class="key"></span><code>status</code>, <code>current_location</code></li>
+          <li><span class="key">FK</span><code>client_id</code>, <code>client_location_id</code></li>
+          <li><span class="key"></span><code>serial_pending</code></li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Relaciones cardinales</h3>
+    <div class="rel-list">
+      <div class="rel"><strong>Modelo 1:N Determinaciones</strong><span>Un modelo soporta muchas determinaciones; una determinacion puede mapearse por modelo con parametros propios.</span></div>
+      <div class="rel"><strong>Modelo 1:N Insumos</strong><span>Un modelo requiere muchos materiales; la relacion define consumo, contexto y criticidad.</span></div>
+      <div class="rel"><strong>Insumo 1:N Modelos</strong><span>Un reactivo/control/calibrador puede usarse en multiples modelos.</span></div>
+      <div class="rel"><strong>Modelo 1:N Procedimientos</strong><span>Un modelo puede tener muchos tipos de mantenimiento preventivo o correctivo.</span></div>
+      <div class="rel"><strong>Procedimiento 1:N Piezas</strong><span>Cada procedimiento define que piezas requiere, cantidad y criticidad.</span></div>
+      <div class="rel"><strong>Procedimiento 1:N Materiales</strong><span>Cada procedimiento puede consumir reactivos, controles, calibradores o materiales.</span></div>
+      <div class="rel"><strong>Modelo 1:N Documentos</strong><span>El modelo define que F.ST o checklists aplican por categoria o procedimiento.</span></div>
+      <div class="rel"><strong>Modelo 1:N Unidades</strong><span>Las unidades fisicas son instancias con serial, cliente y estado propio.</span></div>
+    </div>
+
+    <h3>Mapeo contra tablas actuales</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Entidad propuesta</th><th>Tabla actual mas cercana</th><th>Estado</th></tr></thead>
+        <tbody>
+          <tr><td><code>EQUIPMENT_MODEL</code></td><td><code>equipment_models</code> / <code>servicio.equipos</code> / <code>equipos_modelo</code></td><td><span class="badge b-red">duplicado</span></td></tr>
+          <tr><td><code>MODEL_ALIAS</code></td><td>no existe formalmente</td><td><span class="badge b-amber">recomendado</span></td></tr>
+          <tr><td><code>MODEL_COMMERCIAL_PROFILE</code></td><td>columnas en <code>equipment_models</code></td><td><span class="badge b-green">embebido</span></td></tr>
+          <tr><td><code>DETERMINATION_CATALOG</code></td><td><code>catalog_determinations</code></td><td><span class="badge b-green">existe</span></td></tr>
+          <tr><td><code>MODEL_MATERIAL</code></td><td><code>catalog_equipment_consumables</code></td><td><span class="badge b-blue">existe parcial</span></td></tr>
+          <tr><td><code>MATERIAL_CATALOG</code></td><td><code>catalog_consumables</code></td><td><span class="badge b-green">existe</span></td></tr>
+          <tr><td><code>PART_CATALOG</code></td><td>no existe formalmente</td><td><span class="badge b-amber">recomendado</span></td></tr>
+          <tr><td><code>MAINTENANCE_PROCEDURE</code></td><td>existe disperso en servicio/mantenimientos</td><td><span class="badge b-amber">recomendado</span></td></tr>
+          <tr><td><code>MAINTENANCE_PROCEDURE_PART</code></td><td><code>equipment_maintenance_parts</code> cubre solo una parte</td><td><span class="badge b-amber">ampliar</span></td></tr>
+          <tr><td><code>EQUIPMENT_UNIT</code></td><td><code>equipos_unidad</code></td><td><span class="badge b-amber">existe vacia</span></td></tr>
+          <tr><td><code>UNIT_LIFECYCLE_EVENT</code></td><td><code>equipos_historial</code></td><td><span class="badge b-green">existe</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="plan" class="panel">
+    <div class="section-title">Plan de cambios</div>
+    <p class="section-desc">Cambios secuenciados para evitar romper Business Case, compras, servicio o inventario.</p>
+
+    <div class="grid-2">
+      <div class="card">
+        <h4>CHG-01 - Catalogo canonico</h4>
+        <p>Elegir <code>equipment_models</code> como fuente principal o documentar una decision alternativa. Crear mapa temporal contra los otros catalogos.</p>
+      </div>
+      <div class="card">
+        <h4>CHG-02 - Tipos de insumo</h4>
+        <p>Normalizar <code>reactivo</code>, <code>control</code>, <code>calibrador</code>, <code>consumible</code> y <code>material</code>.</p>
+      </div>
+      <div class="card">
+        <h4>CHG-03 - Matriz modelo-insumo</h4>
+        <p>Fortalecer <code>catalog_equipment_consumables</code> con contexto de uso, obligatoriedad y criticidad.</p>
+      </div>
+      <div class="card">
+        <h4>CHG-04 - Catalogo de piezas</h4>
+        <p>Crear piezas maestras reutilizables y conectarlas a procedimientos preventivos o correctivos.</p>
+      </div>
+      <div class="card">
+        <h4>CHG-05 - Correctivos catalogados</h4>
+        <p>Separar catalogo maestro de piezas de repuesto solicitado en caso correctivo.</p>
+      </div>
+      <div class="card">
+        <h4>CHG-06 - Workspace maestro</h4>
+        <p>Implementar lista y ficha con tabs, badges de completitud y acciones por rol.</p>
+      </div>
+    </div>
+
+    <h3>Resultado esperado</h3>
+    <div class="card ok">
+      <p>Desde una sola ficha se puede saber que modelo es, que categoria tiene, que determinaciones soporta, que reactivos consume, que controles/calibradores necesita, que piezas requiere en mantenimiento y si esta listo para BC o servicio tecnico.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+  const buttons = document.querySelectorAll('.tab-btn');
+  const panels = document.querySelectorAll('.panel');
+  buttons.forEach((button) => {
+    button.addEventListener('click', () => {
+      buttons.forEach((b) => b.classList.remove('active'));
+      panels.forEach((p) => p.classList.remove('active'));
+      button.classList.add('active');
+      document.getElementById(button.dataset.tab).classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>

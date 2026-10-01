@@ -12,7 +12,12 @@ export const useGetActiveAlarms = () => {
       const { data } = await api.get("/calidad/temperature/alarms");
       return data.data; // Formato estandar {ok: true, data: [...]}
     },
-    refetchInterval: 60000, // Auto refresco cada 60s panel predictivo
+    // ponytail: modulo Calidad sin uso real en produccion todavia (desarrollo
+    // pausado) -> 10min en vez de 60s, y por encima del timeout de autosuspend
+    // de Neon (~5min) para no gastar compute en un panel que nadie mira.
+    // Techo: bajar a 30-60s cuando el modulo entre en uso real, porque una
+    // alarma de temperatura si es seguridad-critica.
+    refetchInterval: 600000,
   });
 };
 

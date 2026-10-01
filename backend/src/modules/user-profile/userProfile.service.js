@@ -9,6 +9,13 @@ const {
   PROFILE_SYNC_KEYS,
   applyNestedFields,
 } = require("../shared/profileSync");
+const { splitUserProfileMetadata } = require("../shared/userProfileMetadata");
+const {
+  getAssignedCorporatePhoneByUserId,
+  injectCorporatePhoneIntoProfile,
+  injectCorporatePhoneIntoUserMetadata,
+  stripCorporatePhoneFromUserMetadata,
+} = require("../shared/corporatePhone");
 
 const ALLOWED_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const BLOCKED_METADATA_KEYS = new Set([
@@ -26,6 +33,7 @@ const REVIEW_REQUIRED_PATHS = [
   "domicilio.ciudad_domicilio",
   "domicilio.direccion_domicilio",
   "emergencia.persona_contacto",
+  "emergencia.parentesco_contacto",
   "emergencia.telefono_contacto",
 ];
 
@@ -148,7 +156,10 @@ const mergeCollaboratorIntoProfile = (
   collaboratorProfile = {},
 ) => {
   const safe = sanitizeMetadata(metadata);
-  return applyNestedFields(safe, collaboratorProfile, PROFILE_SYNC_KEYS);
+  const merged = applyNestedFields(safe, collaboratorProfile, PROFILE_SYNC_KEYS);
+  const reviewedAt = collaboratorProfile?.extra?.profile_last_reviewed_at;
+  if (reviewedAt) merged.profile_last_reviewed_at = reviewedAt;
+  return merged;
 };
 
 const getByPath = (source, path) =>
@@ -167,6 +178,20 @@ const getMissingAnnualReviewFields = (metadata = {}) =>
 
 const mergeProfileIntoCollaborator = (collabProfile = {}, metadata = {}) => {
   return applyNestedFields(collabProfile, metadata, PROFILE_SYNC_KEYS);
+};
+
+const mergeProfileIntoCollaboratorSafely = (collabProfile = {}, metadata = {}) => {
+  return applyNestedFields(collabProfile, metadata, PROFILE_SYNC_KEYS, {
+    preserveExistingOnBlank: true,
+  });
+};
+
+const buildProfileResponse = (profile, collaboratorProfile = {}, assignedCorporatePhone = null) => {
+  const mergedMetadata = injectCorporatePhoneIntoUserMetadata(
+    mergeCollaboratorIntoProfile(profile?.metadata || {}, collaboratorProfile),
+    assignedCorporatePhone,
+  );
+  return mapProfileRow({ ...profile, metadata: mergedMetadata });
 };
 
 const getProfile = async (userId) => {
@@ -201,17 +226,25 @@ const createProfile = async ({
 }) => {
   const identity = await getIdentity(userId);
   const safeMetadata = sanitizeMetadata(metadata);
+  const assignedCorporatePhone = await getAssignedCorporatePhoneByUserId(userId);
+  const normalizedMetadata = injectCorporatePhoneIntoUserMetadata(
+    stripCorporatePhoneFromUserMetadata(safeMetadata),
+    assignedCorporatePhone,
+  );
   const safePreferences = sanitizePreferences(preferences);
+  const { ownMetadata, collaboratorMetadata } =
+    splitUserProfileMetadata(normalizedMetadata);
+  const reviewTimestamp = normalizedMetadata.profile_last_reviewed_at;
 
-  if (safeMetadata.profile_last_reviewed_at) {
-    const reviewDate = new Date(safeMetadata.profile_last_reviewed_at);
+  if (normalizedMetadata.profile_last_reviewed_at) {
+    const reviewDate = new Date(normalizedMetadata.profile_last_reviewed_at);
     if (Number.isNaN(reviewDate.getTime())) {
       const err = new Error("La fecha de revision anual no es valida");
       err.status = 400;
       throw err;
     }
 
-    const missingFields = getMissingAnnualReviewFields(safeMetadata);
+    const missingFields = getMissingAnnualReviewFields(normalizedMetadata);
     if (missingFields.length > 0) {
       const err = new Error(
         `No se puede cerrar la revision anual: faltan campos obligatorios (${missingFields.join(", ")})`,
@@ -233,14 +266,56 @@ const createProfile = async ({
       userId,
       avatarInfo.avatar_url || null,
       avatarInfo.avatar_drive_id || null,
-      safeMetadata,
+      {
+        ...ownMetadata,
+        ...(reviewTimestamp ? { profile_last_reviewed_at: reviewTimestamp } : {}),
+      },
       safePreferences,
     ],
   );
 
   const profile = mapProfileRow(rows[0]);
-  await auditChange({ userId, action: "crear", before: null, after: profile });
-  return profile;
+  let responseProfile = profile;
+  try {
+    const { rows: collabRows } = await db.query(
+      `SELECT profile FROM collaborator_profiles WHERE user_id = $1 LIMIT 1`,
+      [userId],
+    );
+    const collabProfile = collabRows[0]?.profile || {};
+    const mergedCollaboratorProfile = {
+      ...injectCorporatePhoneIntoProfile(
+        mergeProfileIntoCollaboratorSafely(collabProfile, collaboratorMetadata),
+        assignedCorporatePhone,
+      ),
+      ...(reviewTimestamp
+        ? {
+            extra: {
+              profile_last_reviewed_at: reviewTimestamp,
+            },
+          }
+        : {}),
+    };
+
+    await db.query(
+      `INSERT INTO collaborator_profiles (user_id, profile, updated_by)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id)
+       DO UPDATE SET profile = EXCLUDED.profile, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+      [userId, mergedCollaboratorProfile, userId],
+    );
+    responseProfile = buildProfileResponse(
+      profile,
+      mergedCollaboratorProfile,
+      assignedCorporatePhone,
+    );
+  } catch (syncErr) {
+    logger.warn(
+      { syncErr, userId },
+      "No se pudo sincronizar perfil con colaborador",
+    );
+  }
+  await auditChange({ userId, action: "crear", before: null, after: responseProfile });
+  return responseProfile;
 };
 
 const updateProfile = async ({
@@ -263,24 +338,39 @@ const updateProfile = async ({
 
   const current = existing;
   const safeMetadata = sanitizeMetadata(metadata);
+  const assignedCorporatePhone = await getAssignedCorporatePhoneByUserId(userId);
+  const normalizedMetadata = injectCorporatePhoneIntoUserMetadata(
+    stripCorporatePhoneFromUserMetadata(safeMetadata),
+    assignedCorporatePhone,
+  );
   const safePreferences = sanitizePreferences(preferences);
+  const { ownMetadata, collaboratorMetadata } =
+    splitUserProfileMetadata(normalizedMetadata);
+  const reviewTimestamp = normalizedMetadata.profile_last_reviewed_at;
 
-  const mergedMetadata = { ...current.metadata, ...safeMetadata };
+  const mergedMetadata = { ...current.metadata, ...ownMetadata };
+  if (reviewTimestamp !== undefined) {
+    mergedMetadata.profile_last_reviewed_at = reviewTimestamp;
+  }
   const mergedPreferences = { ...current.preferences, ...safePreferences };
+  const reviewValidationMetadata = {
+    ...mergeCollaboratorIntoProfile(mergedMetadata, collaboratorMetadata),
+    ...(reviewTimestamp ? { profile_last_reviewed_at: reviewTimestamp } : {}),
+  };
 
   const hasReviewUpdate = Object.prototype.hasOwnProperty.call(
-    safeMetadata,
+    normalizedMetadata,
     "profile_last_reviewed_at",
   );
-  if (hasReviewUpdate && safeMetadata.profile_last_reviewed_at) {
-    const reviewDate = new Date(safeMetadata.profile_last_reviewed_at);
+  if (hasReviewUpdate && normalizedMetadata.profile_last_reviewed_at) {
+    const reviewDate = new Date(normalizedMetadata.profile_last_reviewed_at);
     if (Number.isNaN(reviewDate.getTime())) {
       const err = new Error("La fecha de revision anual no es valida");
       err.status = 400;
       throw err;
     }
 
-    const missingFields = getMissingAnnualReviewFields(mergedMetadata);
+    const missingFields = getMissingAnnualReviewFields(reviewValidationMetadata);
     if (missingFields.length > 0) {
       const err = new Error(
         `No se puede cerrar la revision anual: faltan campos obligatorios (${missingFields.join(", ")})`,
@@ -313,6 +403,7 @@ const updateProfile = async ({
   );
 
   const profile = mapProfileRow(rows[0]);
+  let responseProfile = profile;
 
   try {
     const { rows: collabRows } = await db.query(
@@ -320,10 +411,22 @@ const updateProfile = async ({
       [userId],
     );
     const collabProfile = collabRows[0]?.profile || {};
-    const mergedCollaboratorProfile = mergeProfileIntoCollaborator(
-      collabProfile,
-      mergedMetadata,
+    let mergedCollaboratorProfile = injectCorporatePhoneIntoProfile(
+      mergeProfileIntoCollaboratorSafely(
+        collabProfile,
+        collaboratorMetadata,
+      ),
+      assignedCorporatePhone,
     );
+    if (reviewTimestamp !== undefined) {
+      mergedCollaboratorProfile = {
+        ...mergedCollaboratorProfile,
+        extra: {
+          ...(mergedCollaboratorProfile.extra || {}),
+          profile_last_reviewed_at: reviewTimestamp,
+        },
+      };
+    }
 
     await db.query(
       `INSERT INTO collaborator_profiles (user_id, profile, updated_by)
@@ -331,6 +434,11 @@ const updateProfile = async ({
        ON CONFLICT (user_id)
        DO UPDATE SET profile = EXCLUDED.profile, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
       [userId, mergedCollaboratorProfile, userId],
+    );
+    responseProfile = buildProfileResponse(
+      profile,
+      mergedCollaboratorProfile,
+      assignedCorporatePhone,
     );
   } catch (syncErr) {
     logger.warn(
@@ -343,9 +451,9 @@ const updateProfile = async ({
     userId,
     action: "actualizar",
     before: current,
-    after: profile,
+    after: responseProfile,
   });
-  return profile;
+  return responseProfile;
 };
 
 const resolveAvatarFolder = async (identity) => {
@@ -484,42 +592,29 @@ const auditChange = async ({ userId, action, before, after }) => {
 const getProfileWithIdentity = async (userId) => {
   const identity = await getIdentity(userId);
   let profile = (await getProfile(userId)) || null;
+  const assignedCorporatePhone = await getAssignedCorporatePhoneByUserId(userId);
 
   const { rows: collabRows } = await db.query(
     `SELECT profile FROM collaborator_profiles WHERE user_id = $1 LIMIT 1`,
     [userId],
   );
-  const collaboratorProfile = collabRows[0]?.profile || {};
+  const collaboratorProfile = injectCorporatePhoneIntoProfile(
+    collabRows[0]?.profile || {},
+    assignedCorporatePhone,
+  );
 
   if (!profile) {
     profile = await ensureUserProfileMeta(userId, {});
   }
 
-  const mergedMetadata = mergeCollaboratorIntoProfile(
-    profile.metadata || {},
-    collaboratorProfile,
-  );
-
-  if (
-    JSON.stringify(mergedMetadata) !== JSON.stringify(profile.metadata || {})
-  ) {
-    const { rows } = await db.query(
-      `UPDATE user_profile
-       SET metadata = $2,
-           updated_at = NOW()
-       WHERE user_id = $1
-       RETURNING id, user_id, avatar_url, avatar_drive_id, metadata, preferences, created_at, updated_at`,
-      [userId, mergedMetadata],
-    );
-    profile = mapProfileRow(rows[0]);
-  } else {
-    profile = mapProfileRow({ ...profile, metadata: mergedMetadata });
-  }
+  profile = buildProfileResponse(profile, collaboratorProfile, assignedCorporatePhone);
 
   return { identity, profile };
 };
 
 module.exports = {
+  sanitizeMetadata,
+  toDriveViewUrl,
   getProfileWithIdentity,
   createProfile,
   updateProfile,

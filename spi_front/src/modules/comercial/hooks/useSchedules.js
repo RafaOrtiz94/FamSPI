@@ -9,6 +9,7 @@ import {
  deleteSchedule,
  submitSchedule,
  addScheduledVisit,
+ syncScheduleWeekCity,
  updateScheduledVisit,
  deleteScheduledVisit,
 } from "../../../core/api/schedulesApi";
@@ -225,6 +226,25 @@ export const useSchedules = ({ skipLoad = false } = {}) => {
  [loadScheduleDetail, loadSchedules],
  );
 
+ const syncWeekCity = useCallback(
+ async (id, payload) => {
+ setLoading(true);
+ setError(null);
+ try {
+ const data = await syncScheduleWeekCity(id, payload);
+ await loadScheduleDetail(id, { silent: true });
+ await loadSchedules({ silent: true });
+ return data;
+ } catch (err) {
+ setError(err.message || "No se pudo sincronizar la ciudad de la semana");
+ throw err;
+ } finally {
+ setLoading(false);
+ }
+ },
+ [loadScheduleDetail, loadSchedules],
+ );
+
  const removeVisit = useCallback(
  async (id, visitId) => {
  setLoading(true);
@@ -292,6 +312,7 @@ export const useSchedules = ({ skipLoad = false } = {}) => {
  submit,
  addVisit,
  updateVisit,
+ syncWeekCity,
  removeVisit,
  };
 };

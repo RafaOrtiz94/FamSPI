@@ -189,8 +189,86 @@ async function createDeliveryEvents({ purchaseId, clientName, deliveryStartAt, d
   }
 }
 
+/**
+ * Crea un evento de reunión para el pipeline de selección.
+ * @param {Object} p
+ * @param {string} p.summary         - Título del evento
+ * @param {string} p.description     - Descripción
+ * @param {string|Date} p.startAt    - Fecha/hora inicio (ISO o Date)
+ * @param {number} p.durationMinutes - Duración en minutos (default 60)
+ * @param {string[]} p.attendees     - Emails de asistentes internos
+ * @param {string} [p.location]      - Ubicación o enlace
+ */
+/**
+ * Crea un evento de reunión para el pipeline de selección.
+ * Si withMeet=true genera automáticamente un enlace de Google Meet.
+ * @param {Object} p
+ * @param {string} p.summary         - Título del evento
+ * @param {string} p.description     - Descripción
+ * @param {string|Date} p.startAt    - Fecha/hora inicio (ISO o Date)
+ * @param {number} p.durationMinutes - Duración en minutos (default 60)
+ * @param {string[]} p.attendees     - Emails de asistentes internos
+ * @param {string} [p.location]      - Ubicación o enlace
+ * @param {boolean} [p.withMeet]     - Generar enlace de Google Meet (default false)
+ * @returns {Promise<{eventId, htmlLink, meetLink}|null>}
+ */
+async function createPipelineMeetingEvent({ summary, description, startAt, durationMinutes = 60, attendees = [], location = '', withMeet = false }) {
+  try {
+    const { calendar } = require('../../config/google');
+    if (!calendar) {
+      console.warn('[PIPELINE][CALENDAR] Calendar no disponible, evento no creado');
+      return null;
+    }
+    const start = new Date(startAt);
+    const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+
+    const resource = {
+      summary,
+      description,
+      location,
+      start: { dateTime: start.toISOString(), timeZone: 'America/Guayaquil' },
+      end:   { dateTime: end.toISOString(),   timeZone: 'America/Guayaquil' },
+      attendees: attendees.map(email => ({ email })),
+      reminders: {
+        useDefault: false,
+        overrides: [
+          { method: 'email', minutes: 24 * 60 },
+          { method: 'popup', minutes: 30 },
+        ],
+      },
+      extendedProperties: { private: { source: 'hiring_pipeline' } },
+    };
+
+    if (withMeet) {
+      resource.conferenceData = {
+        createRequest: {
+          requestId: `pipeline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          conferenceSolutionKey: { type: 'hangoutsMeet' },
+        },
+      };
+    }
+
+    const response = await calendar.events.insert({
+      calendarId: process.env.GOOGLE_CALENDAR_ID || 'primary',
+      conferenceDataVersion: withMeet ? 1 : 0,
+      resource,
+      sendUpdates: 'none',
+    });
+
+    const meetLink = withMeet
+      ? (response.data.conferenceData?.entryPoints?.find(e => e.entryPointType === 'video')?.uri || null)
+      : null;
+
+    return { eventId: response.data.id, htmlLink: response.data.htmlLink, meetLink };
+  } catch (e) {
+    console.error('[PIPELINE][CALENDAR] No se pudo crear el evento:', e.message);
+    return null;
+  }
+}
+
 module.exports = {
   createDeliveryEvents,
   createDeliveryEvent,
-  getUserEmailsByRoles
+  getUserEmailsByRoles,
+  createPipelineMeetingEvent,
 };

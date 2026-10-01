@@ -192,7 +192,8 @@ const listProductMap = async ({ page = 1, limit = DEFAULT_LIST_LIMIT, active, q,
       m.*,
       e.name AS spi_equipment_model_name,
       e.code AS spi_equipment_model_code,
-      e.sku AS spi_equipment_model_sku
+      e.sku AS spi_equipment_model_sku,
+      COUNT(*) OVER()::int AS total_count
     FROM public.integration_product_map m
     LEFT JOIN public.equipment_models e ON e.id = m.spi_equipment_model_id
     ${whereSql}
@@ -201,22 +202,14 @@ const listProductMap = async ({ page = 1, limit = DEFAULT_LIST_LIMIT, active, q,
     OFFSET $${params.length + 2}
   `;
 
-  const countSql = `
-    SELECT COUNT(*)::int AS total
-    FROM public.integration_product_map m
-    LEFT JOIN public.equipment_models e ON e.id = m.spi_equipment_model_id
-    ${whereSql}
-  `;
-
-  const [listResult, countResult] = await Promise.all([
-    db.query(listSql, [...params, safeLimit, offset]),
-    db.query(countSql, params),
-  ]);
+  const { rows: listRows } = await db.query(listSql, [...params, safeLimit, offset]);
+  const total = listRows.length > 0 ? listRows[0].total_count : 0;
+  const listResult = { rows: listRows.map(({ total_count, ...row }) => row) };
 
   return {
     page: safePage,
     limit: safeLimit,
-    total: Number(countResult.rows[0]?.total || 0),
+    total,
     rows: listResult.rows.map(mapRow),
   };
 };

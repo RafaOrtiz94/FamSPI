@@ -78,157 +78,157 @@
 - [x] `CA-01-04-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
 - [x] `CA-01-04-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
 
-## Epic: CA-01-05 - Gestão y Control de Documentos
+## Epic: CA-01-05 - Gestion y Control de Documentos
 ### Fase 1: Persistencia
-- [x] `CA-01-05-T01`: Implementar tablas ORM (schema.prisma o similar) para Gestão y Control de Documentos.
+- [x] `CA-01-05-T01`: Implementar tasblas ORM (schema.prisma o similar) para Gestão y Control de Documentos.
 - [x] `CA-01-05-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
 ### Fase 2: State Machine y Core Services
 - [x] `CA-01-05-T03`: Desarrollar `ca0105StateMachine.service.js` para control de transiciones.
 - [x] `CA-01-05-T04`: Integrar servicio Core (`ca0105.service.js`) inyectando logica GXP Audit.
-- [x] `CA-01-05-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
+- [ ] `CA-01-05-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
 ### Fase 3: Endpoints y Security Edge
-- [x] `CA-01-05-T06`: Implementar `ca0105.controller.js` usando validaciones DTO y Zod.
-- [x] `CA-01-05-T07`: Registrar rutas en `ca0105.routes.js` con middleware RBAC autoritativo.
+- [ ] `CA-01-05-T06`: Implementar `ca0105.controller.js` usando validaciones DTO y Zod.
+- [ ] `CA-01-05-T07`: Registrar rutas en `ca0105.routes.js` con middleware RBAC autoritativo.
 ### Fase 4: Micro-Frontends & UI Workspaces
-- [x] `CA-01-05-T08`: Desarrollar componente Master (`CA0105Workspace.jsx`).
-- [x] `CA-01-05-T09`: Desarrollar Stepper/Timeline (`CA0105Stepper.jsx`) con checks visuales.
-- [x] `CA-01-05-T10`: Conectar Hooks/Queries contra los endpoints API REST.
+- [ ] `CA-01-05-T08`: Desarrollar componente Master (`CA0105Workspace.jsx`).
+- [ ] `CA-01-05-T09`: Desarrollar Stepper/Timeline (`CA0105Stepper.jsx`) con checks visuales.
+- [ ] `CA-01-05-T10`: Conectar Hooks/Queries contra los endpoints API REST.
 ### Fase 5: Firma & Sellado Documental GXP
-- [x] `CA-01-05-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
-- [x] `CA-01-05-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
+- [ ] `CA-01-05-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
+- [ ] `CA-01-05-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
 
 ## Epic: CA-01-06 - Retiro del Mercado (Recall)
 ### Fase 1: Persistencia
-- [x] `CA-01-06-T01`: Implementar tablas ORM (schema.prisma o similar) para Retiro del Mercado (Recall).
-- [x] `CA-01-06-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
+- [ ] `CA-01-06-T01`: Implementar tablas ORM (schema.prisma o similar) para Retiro del Mercado (Recall).
+- [ ] `CA-01-06-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
 ### Fase 2: State Machine y Core Services
-- [x] `CA-01-06-T03`: Desarrollar `ca0106StateMachine.service.js` para control de transiciones.
-- [x] `CA-01-06-T04`: Integrar servicio Core (`ca0106.service.js`) inyectando logica GXP Audit.
-- [x] `CA-01-06-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
+- [ ] `CA-01-06-T03`: Desarrollar `ca0106StateMachine.service.js` para control de transiciones.
+- [ ] `CA-01-06-T04`: Integrar servicio Core (`ca0106.service.js`) inyectando logica GXP Audit.
+- [ ] `CA-01-06-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
 ### Fase 3: Endpoints y Security Edge
-- [x] `CA-01-06-T06`: Implementar `ca0106.controller.js` usando validaciones DTO y Zod.
-- [x] `CA-01-06-T07`: Registrar rutas en `ca0106.routes.js` con middleware RBAC autoritativo.
+- [ ] `CA-01-06-T06`: Implementar `ca0106.controller.js` usando validaciones DTO y Zod.
+- [ ] `CA-01-06-T07`: Registrar rutas en `ca0106.routes.js` con middleware RBAC autoritativo.
 ### Fase 4: Micro-Frontends & UI Workspaces
-- [x] `CA-01-06-T08`: Desarrollar componente Master (`CA0106Workspace.jsx`).
-- [x] `CA-01-06-T09`: Desarrollar Stepper/Timeline (`CA0106Stepper.jsx`) con checks visuales.
-- [x] `CA-01-06-T10`: Conectar Hooks/Queries contra los endpoints API REST.
+- [ ] `CA-01-06-T08`: Desarrollar componente Master (`CA0106Workspace.jsx`).
+- [ ] `CA-01-06-T09`: Desarrollar Stepper/Timeline (`CA0106Stepper.jsx`) con checks visuales.
+- [ ] `CA-01-06-T10`: Conectar Hooks/Queries contra los endpoints API REST.
 ### Fase 5: Firma & Sellado Documental GXP
-- [x] `CA-01-06-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
-- [x] `CA-01-06-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
+- [ ] `CA-01-06-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
+- [ ] `CA-01-06-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
 
 ## Epic: CA-01-07 - Quejas y Reclamos
 ### Fase 1: Persistencia
-- [x] `CA-01-07-T01`: Implementar tablas ORM (schema.prisma o similar) para Quejas y Reclamos.
-- [x] `CA-01-07-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
+- [ ] `CA-01-07-T01`: Implementar tablas ORM (schema.prisma o similar) para Quejas y Reclamos.
+- [ ] `CA-01-07-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
 ### Fase 2: State Machine y Core Services
-- [x] `CA-01-07-T03`: Desarrollar `ca0107StateMachine.service.js` para control de transiciones.
-- [x] `CA-01-07-T04`: Integrar servicio Core (`ca0107.service.js`) inyectando logica GXP Audit.
-- [x] `CA-01-07-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
+- [ ] `CA-01-07-T03`: Desarrollar `ca0107StateMachine.service.js` para control de transiciones.
+- [ ] `CA-01-07-T04`: Integrar servicio Core (`ca0107.service.js`) inyectando logica GXP Audit.
+- [ ] `CA-01-07-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
 ### Fase 3: Endpoints y Security Edge
-- [x] `CA-01-07-T06`: Implementar `ca0107.controller.js` usando validaciones DTO y Zod.
-- [x] `CA-01-07-T07`: Registrar rutas en `ca0107.routes.js` con middleware RBAC autoritativo.
+- [ ] `CA-01-07-T06`: Implementar `ca0107.controller.js` usando validaciones DTO y Zod.
+- [ ] `CA-01-07-T07`: Registrar rutas en `ca0107.routes.js` con middleware RBAC autoritativo.
 ### Fase 4: Micro-Frontends & UI Workspaces
-- [x] `CA-01-07-T08`: Desarrollar componente Master (`CA0107Workspace.jsx`).
-- [x] `CA-01-07-T09`: Desarrollar Stepper/Timeline (`CA0107Stepper.jsx`) con checks visuales.
-- [x] `CA-01-07-T10`: Conectar Hooks/Queries contra los endpoints API REST.
+- [ ] `CA-01-07-T08`: Desarrollar componente Master (`CA0107Workspace.jsx`).
+- [ ] `CA-01-07-T09`: Desarrollar Stepper/Timeline (`CA0107Stepper.jsx`) con checks visuales.
+- [ ] `CA-01-07-T10`: Conectar Hooks/Queries contra los endpoints API REST.
 ### Fase 5: Firma & Sellado Documental GXP
-- [x] `CA-01-07-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
-- [x] `CA-01-07-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
+- [ ] `CA-01-07-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
+- [ ] `CA-01-07-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
 
 ## Epic: CA-01-08 - Plan de Contingencia Refrigerados
 ### Fase 1: Persistencia
-- [x] `CA-01-08-T01`: Implementar tablas ORM (schema.prisma o similar) para Plan de Contingencia Refrigerados.
-- [x] `CA-01-08-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
+- [ ] `CA-01-08-T01`: Implementar tablas ORM (schema.prisma o similar) para Plan de Contingencia Refrigerados.
+- [ ] `CA-01-08-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
 ### Fase 2: State Machine y Core Services
-- [x] `CA-01-08-T03`: Desarrollar `ca0108StateMachine.service.js` para control de transiciones.
-- [x] `CA-01-08-T04`: Integrar servicio Core (`ca0108.service.js`) inyectando logica GXP Audit.
-- [x] `CA-01-08-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
+- [ ] `CA-01-08-T03`: Desarrollar `ca0108StateMachine.service.js` para control de transiciones.
+- [ ] `CA-01-08-T04`: Integrar servicio Core (`ca0108.service.js`) inyectando logica GXP Audit.
+- [ ] `CA-01-08-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
 ### Fase 3: Endpoints y Security Edge
-- [x] `CA-01-08-T06`: Implementar `ca0108.controller.js` usando validaciones DTO y Zod.
-- [x] `CA-01-08-T07`: Registrar rutas en `ca0108.routes.js` con middleware RBAC autoritativo.
+- [ ] `CA-01-08-T06`: Implementar `ca0108.controller.js` usando validaciones DTO y Zod.
+- [ ] `CA-01-08-T07`: Registrar rutas en `ca0108.routes.js` con middleware RBAC autoritativo.
 ### Fase 4: Micro-Frontends & UI Workspaces
-- [x] `CA-01-08-T08`: Desarrollar componente Master (`CA0108Workspace.jsx`).
-- [x] `CA-01-08-T09`: Desarrollar Stepper/Timeline (`CA0108Stepper.jsx`) con checks visuales.
-- [x] `CA-01-08-T10`: Conectar Hooks/Queries contra los endpoints API REST.
+- [ ] `CA-01-08-T08`: Desarrollar componente Master (`CA0108Workspace.jsx`).
+- [ ] `CA-01-08-T09`: Desarrollar Stepper/Timeline (`CA0108Stepper.jsx`) con checks visuales.
+- [ ] `CA-01-08-T10`: Conectar Hooks/Queries contra los endpoints API REST.
 ### Fase 5: Firma & Sellado Documental GXP
-- [x] `CA-01-08-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
-- [x] `CA-01-08-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
+- [ ] `CA-01-08-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
+- [ ] `CA-01-08-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
 
 ## Epic: CA-01-09 - CAPA (Acciones Correctivas)
 ### Fase 1: Persistencia
-- [x] `CA-01-09-T01`: Implementar tablas ORM (schema.prisma o similar) para CAPA (Acciones Correctivas).
-- [x] `CA-01-09-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
+- [ ] `CA-01-09-T01`: Implementar tablas ORM (schema.prisma o similar) para CAPA (Acciones Correctivas).
+- [ ] `CA-01-09-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
 ### Fase 2: State Machine y Core Services
-- [x] `CA-01-09-T03`: Desarrollar `ca0109StateMachine.service.js` para control de transiciones.
-- [x] `CA-01-09-T04`: Integrar servicio Core (`ca0109.service.js`) inyectando logica GXP Audit.
-- [x] `CA-01-09-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
+- [ ] `CA-01-09-T03`: Desarrollar `ca0109StateMachine.service.js` para control de transiciones.
+- [ ] `CA-01-09-T04`: Integrar servicio Core (`ca0109.service.js`) inyectando logica GXP Audit.
+- [ ] `CA-01-09-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
 ### Fase 3: Endpoints y Security Edge
-- [x] `CA-01-09-T06`: Implementar `ca0109.controller.js` usando validaciones DTO y Zod.
-- [x] `CA-01-09-T07`: Registrar rutas en `ca0109.routes.js` con middleware RBAC autoritativo.
+- [ ] `CA-01-09-T06`: Implementar `ca0109.controller.js` usando validaciones DTO y Zod.
+- [ ] `CA-01-09-T07`: Registrar rutas en `ca0109.routes.js` con middleware RBAC autoritativo.
 ### Fase 4: Micro-Frontends & UI Workspaces
-- [x] `CA-01-09-T08`: Desarrollar componente Master (`CA0109Workspace.jsx`).
-- [x] `CA-01-09-T09`: Desarrollar Stepper/Timeline (`CA0109Stepper.jsx`) con checks visuales.
-- [x] `CA-01-09-T10`: Conectar Hooks/Queries contra los endpoints API REST.
+- [ ] `CA-01-09-T08`: Desarrollar componente Master (`CA0109Workspace.jsx`).
+- [ ] `CA-01-09-T09`: Desarrollar Stepper/Timeline (`CA0109Stepper.jsx`) con checks visuales.
+- [ ] `CA-01-09-T10`: Conectar Hooks/Queries contra los endpoints API REST.
 ### Fase 5: Firma & Sellado Documental GXP
-- [x] `CA-01-09-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
-- [x] `CA-01-09-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
+- [ ] `CA-01-09-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
+- [ ] `CA-01-09-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
 
 ## Epic: CA-01-10 - Gestión de Riesgos
 ### Fase 1: Persistencia
-- [x] `CA-01-10-T01`: Implementar tablas ORM (schema.prisma o similar) para Gestión de Riesgos.
-- [x] `CA-01-10-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
+- [ ] `CA-01-10-T01`: Implementar tablas ORM (schema.prisma o similar) para Gestión de Riesgos.
+- [ ] `CA-01-10-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
 ### Fase 2: State Machine y Core Services
-- [x] `CA-01-10-T03`: Desarrollar `ca0110StateMachine.service.js` para control de transiciones.
-- [x] `CA-01-10-T04`: Integrar servicio Core (`ca0110.service.js`) inyectando logica GXP Audit.
-- [x] `CA-01-10-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
+- [ ] `CA-01-10-T03`: Desarrollar `ca0110StateMachine.service.js` para control de transiciones.
+- [ ] `CA-01-10-T04`: Integrar servicio Core (`ca0110.service.js`) inyectando logica GXP Audit.
+- [ ] `CA-01-10-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
 ### Fase 3: Endpoints y Security Edge
-- [x] `CA-01-10-T06`: Implementar `ca0110.controller.js` usando validaciones DTO y Zod.
-- [x] `CA-01-10-T07`: Registrar rutas en `ca0110.routes.js` con middleware RBAC autoritativo.
+- [ ] `CA-01-10-T06`: Implementar `ca0110.controller.js` usando validaciones DTO y Zod.
+- [ ] `CA-01-10-T07`: Registrar rutas en `ca0110.routes.js` con middleware RBAC autoritativo.
 ### Fase 4: Micro-Frontends & UI Workspaces
-- [x] `CA-01-10-T08`: Desarrollar componente Master (`CA0110Workspace.jsx`).
-- [x] `CA-01-10-T09`: Desarrollar Stepper/Timeline (`CA0110Stepper.jsx`) con checks visuales.
-- [x] `CA-01-10-T10`: Conectar Hooks/Queries contra los endpoints API REST.
+- [ ] `CA-01-10-T08`: Desarrollar componente Master (`CA0110Workspace.jsx`).
+- [ ] `CA-01-10-T09`: Desarrollar Stepper/Timeline (`CA0110Stepper.jsx`) con checks visuales.
+- [ ] `CA-01-10-T10`: Conectar Hooks/Queries contra los endpoints API REST.
 ### Fase 5: Firma & Sellado Documental GXP
-- [x] `CA-01-10-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
-- [x] `CA-01-10-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
+- [ ] `CA-01-10-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
+- [ ] `CA-01-10-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
 
 ## Epic: CA-01-11 - Manejo de Derrames e Incidentes
 ### Fase 1: Persistencia
-- [x] `CA-01-11-T01`: Implementar tablas ORM (schema.prisma o similar) para Manejo de Derrames e Incidentes.
-- [x] `CA-01-11-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
+- [ ] `CA-01-11-T01`: Implementar tablas ORM (schema.prisma o similar) para Manejo de Derrames e Incidentes.
+- [ ] `CA-01-11-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
 ### Fase 2: State Machine y Core Services
-- [x] `CA-01-11-T03`: Desarrollar `ca0111StateMachine.service.js` para control de transiciones.
-- [x] `CA-01-11-T04`: Integrar servicio Core (`ca0111.service.js`) inyectando logica GXP Audit.
-- [x] `CA-01-11-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
+- [ ] `CA-01-11-T03`: Desarrollar `ca0111StateMachine.service.js` para control de transiciones.
+- [ ] `CA-01-11-T04`: Integrar servicio Core (`ca0111.service.js`) inyectando logica GXP Audit.
+- [ ] `CA-01-11-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
 ### Fase 3: Endpoints y Security Edge
-- [x] `CA-01-11-T06`: Implementar `ca0111.controller.js` usando validaciones DTO y Zod.
-- [x] `CA-01-11-T07`: Registrar rutas en `ca0111.routes.js` con middleware RBAC autoritativo.
+- [ ] `CA-01-11-T06`: Implementar `ca0111.controller.js` usando validaciones DTO y Zod.
+- [ ] `CA-01-11-T07`: Registrar rutas en `ca0111.routes.js` con middleware RBAC autoritativo.
 ### Fase 4: Micro-Frontends & UI Workspaces
-- [x] `CA-01-11-T08`: Desarrollar componente Master (`CA0111Workspace.jsx`).
-- [x] `CA-01-11-T09`: Desarrollar Stepper/Timeline (`CA0111Stepper.jsx`) con checks visuales.
-- [x] `CA-01-11-T10`: Conectar Hooks/Queries contra los endpoints API REST.
+- [ ] `CA-01-11-T08`: Desarrollar componente Master (`CA0111Workspace.jsx`).
+- [ ] `CA-01-11-T09`: Desarrollar Stepper/Timeline (`CA0111Stepper.jsx`) con checks visuales.
+- [ ] `CA-01-11-T10`: Conectar Hooks/Queries contra los endpoints API REST.
 ### Fase 5: Firma & Sellado Documental GXP
-- [x] `CA-01-11-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
-- [x] `CA-01-11-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
+- [ ] `CA-01-11-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
+- [ ] `CA-01-11-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
 
 ## Epic: CA-01-12 - Prácticas de Higiene Personal
 ### Fase 1: Persistencia
-- [x] `CA-01-12-T01`: Implementar tablas ORM (schema.prisma o similar) para Prácticas de Higiene Personal.
-- [x] `CA-01-12-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
+- [ ] `CA-01-12-T01`: Implementar tablas ORM (schema.prisma o similar) para Prácticas de Higiene Personal.
+- [ ] `CA-01-12-T02`: Desarrollar logica transaccional de DB e indexacion con soporte soft_delete.
 ### Fase 2: State Machine y Core Services
-- [x] `CA-01-12-T03`: Desarrollar `ca0112StateMachine.service.js` para control de transiciones.
-- [x] `CA-01-12-T04`: Integrar servicio Core (`ca0112.service.js`) inyectando logica GXP Audit.
-- [x] `CA-01-12-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
+- [ ] `CA-01-12-T03`: Desarrollar `ca0112StateMachine.service.js` para control de transiciones.
+- [ ] `CA-01-12-T04`: Integrar servicio Core (`ca0112.service.js`) inyectando logica GXP Audit.
+- [ ] `CA-01-12-T05`: Programar CRON workers asincronos para SLAs y escalamientos.
 ### Fase 3: Endpoints y Security Edge
-- [x] `CA-01-12-T06`: Implementar `ca0112.controller.js` usando validaciones DTO y Zod.
-- [x] `CA-01-12-T07`: Registrar rutas en `ca0112.routes.js` con middleware RBAC autoritativo.
+- [ ] `CA-01-12-T06`: Implementar `ca0112.controller.js` usando validaciones DTO y Zod.
+- [ ] `CA-01-12-T07`: Registrar rutas en `ca0112.routes.js` con middleware RBAC autoritativo.
 ### Fase 4: Micro-Frontends & UI Workspaces
-- [x] `CA-01-12-T08`: Desarrollar componente Master (`CA0112Workspace.jsx`).
-- [x] `CA-01-12-T09`: Desarrollar Stepper/Timeline (`CA0112Stepper.jsx`) con checks visuales.
-- [x] `CA-01-12-T10`: Conectar Hooks/Queries contra los endpoints API REST.
+- [ ] `CA-01-12-T08`: Desarrollar componente Master (`CA0112Workspace.jsx`).
+- [ ] `CA-01-12-T09`: Desarrollar Stepper/Timeline (`CA0112Stepper.jsx`) con checks visuales.
+- [ ] `CA-01-12-T10`: Conectar Hooks/Queries contra los endpoints API REST.
 ### Fase 5: Firma & Sellado Documental GXP
-- [x] `CA-01-12-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
-- [x] `CA-01-12-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
+- [ ] `CA-01-12-T11`: Acoplar widget de Firma Electrónica/2FA en modal de validación final.
+- [ ] `CA-01-12-T12`: Módulo de impresión PDF on-the-fly (pdf-lib) incrustando QR de trazabilidad.
 
 ## Epic: CA-01-13 - Comunicación Interna/Externa
 ### Fase 1: Persistencia

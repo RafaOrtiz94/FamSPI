@@ -78,3 +78,21 @@ const Button = ({
 
 export default Button;
 export { Button };
+
+/**
+ * Layout-only class for full-width action buttons inside widgets/cards.
+ * Color is provided by Button's `variant` prop — never add bg/text overrides in className.
+ *
+ * Usage:
+ *   import { Button, actionBtnClass } from '@/core/ui/components/Button';
+ *   <Button variant="warning" className={actionBtnClass}>Registrar</Button>
+ */
+export const actionBtnClass =
+  "w-full min-h-[48px] text-sm font-semibold py-2.5 transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 [touch-action:manipulation]";
+
+/**
+ * Same layout, but for secondary/ghost-style full-width buttons (no filled bg).
+ * Use with variant="ghost" or variant="secondary".
+ */
+export const actionBtnNeutralClass =
+  "w-full min-h-[48px] text-sm font-semibold py-2.5 transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 [touch-action:manipulation]";
