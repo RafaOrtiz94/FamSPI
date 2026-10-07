@@ -220,6 +220,46 @@ async function getInvestmentSelections(businessCaseId) {
     return rows;
 }
 
+// Compara las selecciones antes y despues de un guardado y devuelve solo los items cuya cantidad
+// cambio: "added" (no estaba), "updated" (cantidad distinta) o "removed" (cantidad a 0).
+function detectInvestmentSelectionChanges(previousRows = [], savedRows = []) {
+    const previous = new Map(previousRows.map((row) => [String(row.catalog_id), row]));
+    return savedRows
+        .map((row) => {
+            const before = previous.get(String(row.catalog_id));
+            const previousQuantity = before?.selected && Number(before.quantity) > 0 ? Number(before.quantity) : 0;
+            const quantity = Number(row.quantity) > 0 ? Number(row.quantity) : 0;
+            if (previousQuantity === quantity) return null;
+            const type = !previousQuantity ? "added" : !quantity ? "removed" : "updated";
+            return { catalog_id: row.catalog_id, type, previous_quantity: previousQuantity, quantity };
+        })
+        .filter(Boolean);
+}
+
+// Texto corto del cambio; lo usan la notificacion y la marca de precio pendiente.
+function describeInvestmentSelectionChange(change = {}) {
+    if (change.type === "added") return `Agregada - cantidad ${change.quantity}`;
+    if (change.type === "removed") return `Retirada - tenia ${change.previous_quantity}`;
+    return `Cantidad editada - de ${change.previous_quantity} a ${change.quantity}`;
+}
+
+// Deja el precio "pendiente de revisar" en los items agregados o con cantidad editada.
+// La marca se limpia al guardar de nuevo el precio financiero (saveInvestmentValuesBatch).
+async function markInvestmentPriceReviewPending(businessCaseId, changes = []) {
+    const pending = changes.filter((change) => change.type !== "removed");
+    for (const change of pending) {
+        await db.query(
+            `UPDATE bc_investment_selections
+                SET price_review_pending_at = now(),
+                    price_review_note = $3
+              WHERE business_case_id = $1
+                AND catalog_id = $2`,
+            [businessCaseId, change.catalog_id, describeInvestmentSelectionChange(change)]
+        );
+    }
+    return pending.length;
+}
+
 async function getCatalogWithSelections(businessCaseId) {
     const { rows } = await db.query(
         `SELECT c.id, c.code, c.name, c.category, c.investment_class, c.display_order, c.is_active,
@@ -425,7 +465,9 @@ async function getInvestmentValuesByClass(businessCaseId, investmentClass, { ass
            s.owner_email,
            s.owner_role,
            s.updated_by_role,
-           s.updated_by_email
+           s.updated_by_email,
+           s.price_review_pending_at,
+           s.price_review_note
          FROM bc_investment_catalog c
          INNER JOIN bc_investment_selections s
            ON s.catalog_id = c.id
@@ -563,8 +605,9 @@ async function saveInvestmentValuesBatch(businessCaseId, investmentClass, values
                 businessCaseId,
                 catalog_id,
             ];
+            // Guardar el precio financiero cierra la revision pendiente por cambio de cantidad.
             const depreciationAssignment = investmentClass === 'financiera'
-                ? ', depreciation_percentage = $2'
+                ? ', depreciation_percentage = $2, price_review_pending_at = NULL, price_review_note = NULL'
                 : '';
             if (investmentClass === 'financiera') params.splice(5, 0, depreciation_percentage ?? null);
             const businessCaseParam = investmentClass === 'financiera' ? '$5' : '$4';
@@ -952,6 +995,9 @@ module.exports = {
     listInvestmentCatalog,
     createInvestmentCatalogItem,
     getInvestmentSelections,
+    detectInvestmentSelectionChanges,
+    describeInvestmentSelectionChange,
+    markInvestmentPriceReviewPending,
     getCatalogWithSelections,
     upsertInvestmentSelection,
     upsertInvestmentSelectionsBatch,

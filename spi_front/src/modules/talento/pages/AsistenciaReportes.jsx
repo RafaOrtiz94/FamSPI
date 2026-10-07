@@ -420,7 +420,12 @@ const SelectedMarkPanel = ({ selectedMark, onClose }) => {
           Cerrar mapa
         </button>
       </div>
-      <AttendanceMapView rows={[mapRow]} getGeoPoints={(row) => row.geo_points || []} selectedUserId={selectedMark.userId} />
+      <AttendanceMapView
+        rows={[mapRow]}
+        getGeoPoints={(row) => row.geo_points || []}
+        selectedUserId={selectedMark.userId}
+        includeOperationalBoundaryPoints
+      />
     </div>
   );
 };
@@ -451,6 +456,19 @@ const resolveDrivePhotoUrl = (url, fileId) => {
 };
 
 const hasMileageValue = (value) => value !== null && value !== undefined && value !== "";
+
+const getOperationalDistanceKm = (row = {}) => {
+  const storedDistance = Number(row.odometer_distance_km);
+  if (Number.isFinite(storedDistance) && storedDistance >= 0) return storedDistance;
+
+  const startKm = Number(row.odometer_start_km);
+  const endKm = Number(row.odometer_end_km);
+  if (Number.isFinite(startKm) && Number.isFinite(endKm) && endKm >= startKm) {
+    return Number((endKm - startKm).toFixed(2));
+  }
+
+  return null;
+};
 
 const MileagePhoto = ({ label, url }) => {
   const [previewError, setPreviewError] = useState(false);
@@ -498,16 +516,41 @@ const MileagePhoto = ({ label, url }) => {
   );
 };
 
-const MileageTab = ({ rows }) => {
-  const mileageRows = (Array.isArray(rows) ? rows : []).filter((row) => (
-    hasMileageValue(row?.odometer_start_km)
-    || hasMileageValue(row?.odometer_end_km)
-    || hasMileageValue(row?.odometer_distance_km)
-    || Boolean(row?.odometer_start_photo_drive_url)
-    || Boolean(row?.odometer_start_photo_drive_file_id)
-    || Boolean(row?.odometer_end_photo_drive_url)
-    || Boolean(row?.odometer_end_photo_drive_file_id)
-  ));
+const MileageTab = ({ rows, periodLabel }) => {
+  const mileageRows = useMemo(() => {
+    const seenOperationalExits = new Set();
+
+    return (Array.isArray(rows) ? rows : []).reduce((items, row) => {
+      const hasMileage = hasMileageValue(row?.odometer_start_km)
+        || hasMileageValue(row?.odometer_end_km)
+        || hasMileageValue(row?.odometer_distance_km)
+        || Boolean(row?.odometer_start_photo_drive_url)
+        || Boolean(row?.odometer_start_photo_drive_file_id)
+        || Boolean(row?.odometer_end_photo_drive_url)
+        || Boolean(row?.odometer_end_photo_drive_file_id);
+      if (!hasMileage) return items;
+
+      const operationalExitKey = row?.exception_id
+        ? `exception:${row.exception_id}`
+        : `attendance:${row?.user_id || "user"}:${row?.date || "date"}`;
+      if (seenOperationalExits.has(operationalExitKey)) return items;
+      seenOperationalExits.add(operationalExitKey);
+
+      items.push({
+        ...row,
+        mileageDistanceKm: getOperationalDistanceKm(row),
+        mileageDate: row?.operational_start_date || row?.date,
+      });
+      return items;
+    }, []);
+  }, [rows]);
+
+  const totalDistanceKm = mileageRows.reduce(
+    (total, row) => total + (Number.isFinite(row.mileageDistanceKm) ? row.mileageDistanceKm : 0),
+    0,
+  );
+  const closedTrips = mileageRows.filter((row) => Number.isFinite(row.mileageDistanceKm)).length;
+  const pendingDistanceTrips = mileageRows.length - closedTrips;
 
   if (!mileageRows.length) {
     return (
@@ -523,6 +566,25 @@ const MileageTab = ({ rows }) => {
 
   return (
     <div className="space-y-3 p-4">
+      <section className="grid gap-3 rounded-[16px] border border-[#DCE3E9] bg-[#F9FAFB] p-4 sm:grid-cols-2">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-[#586A79]">Kilómetros recorridos</p>
+          <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-[#172B3A]">
+            {formatKilometers(closedTrips ? totalDistanceKm : null)}
+          </p>
+          <p className="mt-1 text-xs text-[#586A79]">Total de salidas operacionales del período seleccionado.</p>
+        </div>
+        <div className="border-t border-[#DCE3E9] pt-3 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-[#586A79]">Salidas con distancia calculada</p>
+          <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-[#172B3A]">
+            {closedTrips} <span className="text-sm font-medium text-[#586A79]">de {mileageRows.length}</span>
+          </p>
+          <p className="mt-1 text-xs text-[#586A79]">
+            {periodLabel || "Período seleccionado"}{pendingDistanceTrips ? ` · ${pendingDistanceTrips} pendiente(s) de cierre.` : ""}
+          </p>
+        </div>
+      </section>
+
       {mileageRows.map((row, index) => {
         const startPhotoUrl = resolveDrivePhotoUrl(
           row.odometer_start_photo_drive_url,
@@ -535,14 +597,14 @@ const MileageTab = ({ rows }) => {
 
         return (
           <article
-            key={`${row.user_id || "user"}-${row.date || "date"}-${row.exception_id || index}`}
+            key={`${row.user_id || "user"}-${row.mileageDate || "date"}-${row.exception_id || index}`}
             className="rounded-[16px] border border-[#E5E7EB] bg-white p-4"
           >
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <FiMapPin size={14} className="text-[#2563EB]" />
-                  <h3 className="text-sm font-semibold text-[#1F2937]">{fmtDate(row.date)}</h3>
+                  <h3 className="text-sm font-semibold text-[#1F2937]">{fmtDate(row.mileageDate)}</h3>
                   <Badge tone="blue">Kilometraje</Badge>
                 </div>
                 <p className="mt-1 text-xs text-[#6B7280]">
@@ -550,7 +612,7 @@ const MileageTab = ({ rows }) => {
                 </p>
               </div>
               <span className="rounded-full bg-[#F3F4F6] px-2.5 py-1 font-mono text-xs font-semibold text-[#4B5563]">
-                Distancia: {formatKilometers(row.odometer_distance_km)}
+                Total recorrido: {formatKilometers(row.mileageDistanceKm)}
               </span>
             </div>
 
@@ -570,6 +632,9 @@ const MileageTab = ({ rows }) => {
                 <MileagePhoto label="Fotografia de salida" url={endPhotoUrl} />
               </section>
             </div>
+            <p className="mt-3 font-mono text-[11px] text-[#586A79]">
+              Lectura inicial → final: {formatKilometers(row.odometer_start_km)} → {formatKilometers(row.odometer_end_km)}
+            </p>
           </article>
         );
       })}
@@ -1552,6 +1617,21 @@ const REG_TYPE_LABEL = {
   offline_sync_adjustment: "Ajuste sincronizacion offline",
 };
 
+const REG_MARK_LABEL = {
+  missing_clock_in: "Entrada",
+  late_arrival: "Entrada",
+  missing_lunch_out: "Salida a almuerzo",
+  missing_lunch_in: "Regreso de almuerzo",
+  early_departure: "Salida",
+  missing_clock_out: "Salida",
+  wrong_location: "Marcación registrada",
+  field_operation_adjustment: "Marcación de operación en campo",
+  client_visit_adjustment: "Marcación de visita a cliente",
+  offline_sync_adjustment: "Marcación sincronizada sin conexión",
+};
+
+const getRegularizationMarkLabel = (type) => REG_MARK_LABEL[type] || "Marcación por regularizar";
+
 const normalizeAttendanceDateValue = (value) => {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -1704,7 +1784,7 @@ const TeleworkRequestsPanel = () => {
   );
 };
 
-const GestionTab = ({ userId, rows, range, canManageTelework = false }) => {
+const GestionTab = ({ userId, rows, range, periodLabel, canManageTelework = false }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [subTab, setSubTab] = useState("atrasos");
@@ -1867,7 +1947,7 @@ const GestionTab = ({ userId, rows, range, canManageTelework = false }) => {
 
       {subTab === "cumpleanos" && <BirthdayBenefitPanel userId={userId} />}
 
-      {subTab === "kilometraje" && <MileageTab rows={rows} />}
+      {subTab === "kilometraje" && <MileageTab rows={rows} periodLabel={periodLabel} />}
       {subTab === "teletrabajo" && canManageTelework && <TeleworkRequestsPanel />}
 
       {/* ── Regularizaciones sub-tab ── */}
@@ -1881,16 +1961,28 @@ const GestionTab = ({ userId, rows, range, canManageTelework = false }) => {
               <div className="space-y-2">
                 {pendingEntries.map((pe) => (
                   <div key={pe.date} className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-[#FEF3C7] bg-[#FFFBEB] px-4 py-3">
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <span className="font-mono text-xs font-semibold text-[#1F2937]">{fmtDate(pe.date)}</span>
                       <p className="mt-0.5 text-[11px] text-[#92400E]">
                         El colaborador solicito regularizacion de entrada — entrada no marcada
+                      </p>
+                      {pe.reason ? (
+                        <p className="mt-1 text-xs text-[#6B7280]">
+                          <span className="font-semibold text-[#374151]">Observación:</span> {pe.reason}
+                        </p>
+                      ) : null}
+                      <p className="mt-1 font-mono text-[11px] text-[#6B7280]">
+                        Hora de solicitud: {pe.request_created_at ? fmtTime(pe.request_created_at) : "No disponible"}
                       </p>
                     </div>
                     <button
                       type="button"
                       disabled={busy === `entry-${pe.date}`}
-                      onClick={() => setApplyModal({ date: pe.date, entryTime: "09:00" })}
+                      onClick={() => setApplyModal({
+                        date: pe.date,
+                        entryTime: "09:00",
+                        requestCreatedAt: pe.request_created_at,
+                      })}
                       className="cursor-pointer rounded-[10px] bg-[#2563EB] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-[#1D4ED8] active:scale-[0.97] disabled:opacity-50"
                     >
                       Aplicar entrada
@@ -1951,7 +2043,11 @@ const GestionTab = ({ userId, rows, range, canManageTelework = false }) => {
                               <button
                                 type="button"
                                 disabled={busy === reg.id}
-                                onClick={() => setApplyModal({ date: reg.attendance_date, entryTime: reg.requested_timestamp ? fmtTime(reg.requested_timestamp) : "09:00" })}
+                                onClick={() => setApplyModal({
+                                  date: reg.attendance_date,
+                                  entryTime: reg.requested_timestamp ? fmtTime(reg.requested_timestamp) : "09:00",
+                                  requestCreatedAt: reg.created_at,
+                                })}
                                 className="cursor-pointer rounded-[10px] bg-[#2563EB] px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:bg-[#1D4ED8] active:scale-[0.97] disabled:opacity-50"
                               >
                                 Aplicar entrada
@@ -1981,8 +2077,17 @@ const GestionTab = ({ userId, rows, range, canManageTelework = false }) => {
             <p className="mb-4 text-xs text-[#6B7280]">
               Fecha: <strong>{fmtDate(applyModal.date)}</strong> · Ingresa la hora de entrada a registrar
             </p>
+            <div className="mb-4 rounded-[12px] border border-[#D1D5DB] bg-[#F9FAFB] px-3 py-2">
+              <p className="text-[11px] font-semibold text-[#6B7280]">Cambio de hora</p>
+              <p className="mt-0.5 font-mono text-sm font-semibold text-[#1F2937]">
+                {applyModal.requestCreatedAt ? fmtTime(applyModal.requestCreatedAt) : "--:--"} → {applyModal.entryTime || "--:--"}
+              </p>
+              <p className="mt-1 text-[11px] text-[#6B7280]">
+                Hora de solicitud → hora de entrada a regularizar.
+              </p>
+            </div>
             <div className="mb-5 flex flex-col gap-1.5">
-              <label className="text-[11px] font-semibold text-[#6B7280]">Hora de entrada</label>
+              <label className="text-[11px] font-semibold text-[#6B7280]">Hora de entrada a regularizar</label>
               <input
                 type="time"
                 value={applyModal.entryTime}
@@ -2069,6 +2174,9 @@ const GeneralRegularizationsModal = ({ open, onClose }) => {
     : [];
   const formalRegs = Array.isArray(data?.formal_regularizations)
     ? data.formal_regularizations
+    : [];
+  const historyRegs = Array.isArray(data?.regularization_history)
+    ? data.regularization_history
     : [];
   const summary = data?.summary || {};
 
@@ -2224,6 +2332,9 @@ const GeneralRegularizationsModal = ({ open, onClose }) => {
           <span className="rounded-full bg-[#EFF6FF] px-3 py-1 text-xs font-semibold text-[#1D4ED8]">
             Solicitudes formales de regularizacion: {summary.formal_pending ?? 0}
           </span>
+          <span className="rounded-full bg-[#F3F4F6] px-3 py-1 text-xs font-semibold text-[#4B5563]">
+            Historial: {summary.history_total ?? 0}
+          </span>
           <button
             type="button"
             onClick={load}
@@ -2240,13 +2351,14 @@ const GeneralRegularizationsModal = ({ open, onClose }) => {
             <FiRefreshCw className="animate-spin text-[#D1D5DB]" size={22} />
           </div>
         ) : (
-          <div className="grid gap-5 xl:grid-cols-[1.05fr_1fr]">
+          <div className="space-y-5">
+            <div className="grid gap-5 xl:grid-cols-[1.05fr_1fr]">
             <section className="overflow-hidden rounded-[20px] border border-[#FDE68A] bg-[#FFFBEB]">
               <div className="flex flex-wrap items-center gap-2 border-b border-[#FDE68A] px-4 py-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-[#92400E]">Entradas pendientes</h3>
+                  <h3 className="text-sm font-semibold text-[#92400E]">Marcaciones de entrada pendientes</h3>
                   <p className="text-xs text-[#B45309]">
-                    Solicitudes directas con incumplimiento de entrada faltante.
+                    Este bloque aplica únicamente la marcación de entrada solicitada por el colaborador.
                   </p>
                 </div>
                 <button
@@ -2273,7 +2385,7 @@ const GeneralRegularizationsModal = ({ open, onClose }) => {
                   <EmptySection
                     icon={FiCheck}
                     title="Sin entradas pendientes"
-                    description="No hay entradas faltantes pendientes con los filtros actuales."
+                    description="No hay marcaciones de entrada pendientes con los filtros actuales."
                   />
                 ) : (
                   pendingEntries.map((row) => {
@@ -2304,7 +2416,7 @@ const GeneralRegularizationsModal = ({ open, onClose }) => {
                               {row.department_name ? ` · ${row.department_name}` : ""}
                             </p>
                             <p className="text-[11px] font-semibold text-[#B45309]">
-                              Incumplimiento: Entrada faltante
+                              Marcación a regularizar: Entrada
                             </p>
                             <p className="font-mono text-[11px] text-[#9CA3AF]">
                               {row.email || "--"}
@@ -2315,11 +2427,14 @@ const GeneralRegularizationsModal = ({ open, onClose }) => {
                                 <span className="font-semibold">Observacion:</span> {row.reason}
                               </div>
                             ) : null}
+                            <p className="mt-2 font-mono text-[11px] text-[#6B7280]">
+                              Hora de solicitud: {row.request_created_at ? fmtTime(row.request_created_at) : "No disponible"}
+                            </p>
                           </div>
                         </div>
                         <div className="flex flex-wrap items-end gap-3">
                           <label className="flex min-w-[180px] flex-col gap-1">
-                            <span className="text-[11px] font-semibold text-[#6B7280]">Hora de entrada</span>
+                            <span className="text-[11px] font-semibold text-[#6B7280]">Hora de entrada a regularizar</span>
                             <input
                               type="time"
                               value={entryTimes[key] || "09:00"}
@@ -2328,7 +2443,16 @@ const GeneralRegularizationsModal = ({ open, onClose }) => {
                               }
                               className="h-10 rounded-[12px] border border-[#D1D5DB] px-3 font-mono text-sm text-[#1F2937] outline-none focus:border-[#2563EB]"
                             />
+                            <span className="text-[11px] text-[#6B7280]">
+                              Se registrará como la hora de entrada de esta fecha.
+                            </span>
                           </label>
+                          <div className="min-w-[180px] rounded-[12px] border border-[#D1D5DB] bg-[#F9FAFB] px-3 py-2">
+                            <p className="text-[11px] font-semibold text-[#6B7280]">Cambio de hora</p>
+                            <p className="mt-0.5 font-mono text-sm font-semibold text-[#1F2937]">
+                              {row.request_created_at ? fmtTime(row.request_created_at) : "--:--"} → {entryTimes[key] || "09:00"}
+                            </p>
+                          </div>
                           <button
                             type="button"
                             disabled={submitting}
@@ -2365,7 +2489,7 @@ const GeneralRegularizationsModal = ({ open, onClose }) => {
                 <div>
                   <h3 className="text-sm font-semibold text-[#1D4ED8]">Solicitudes formales de regularizacion</h3>
                   <p className="text-xs text-[#4B5563]">
-                    Aprobacion o rechazo masivo de solicitudes formales pendientes.
+                    Revisa la marcación afectada y la hora solicitada antes de aprobar o rechazar.
                   </p>
                 </div>
                 <button
@@ -2421,7 +2545,7 @@ const GeneralRegularizationsModal = ({ open, onClose }) => {
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-semibold text-[#1F2937]">{row.affected_name}</span>
                             <span className="rounded-full bg-[#EFF6FF] px-2 py-0.5 text-[10px] font-semibold text-[#1D4ED8]">
-                              {REG_TYPE_LABEL[row.regularization_type] || row.regularization_type}
+                              Marcación: {getRegularizationMarkLabel(row.regularization_type)}
                             </span>
                             <span className="rounded-full bg-[#F3F4F6] px-2 py-0.5 text-[10px] font-semibold text-[#6B7280]">
                               {fmtDate(row.attendance_date)}
@@ -2433,6 +2557,9 @@ const GeneralRegularizationsModal = ({ open, onClose }) => {
                           </p>
                           <p className="text-[11px] font-semibold text-[#1D4ED8]">
                             Incumplimiento: {REG_TYPE_LABEL[row.regularization_type] || row.regularization_type}
+                          </p>
+                          <p className="font-mono text-[11px] text-[#6B7280]">
+                            Hora solicitada: {row.requested_timestamp ? fmtTime(row.requested_timestamp) : "No indicada"}
                           </p>
                           <p className="font-mono text-[11px] text-[#9CA3AF]">
                             {row.affected_email || "--"}
@@ -2447,6 +2574,63 @@ const GeneralRegularizationsModal = ({ open, onClose }) => {
                       </div>
                     </label>
                   ))
+                )}
+              </div>
+            </section>
+            </div>
+
+            <section className="overflow-hidden rounded-[20px] border border-[#E5E7EB] bg-white">
+              <div className="border-b border-[#E5E7EB] px-4 py-3">
+                <h3 className="text-sm font-semibold text-[#1F2937]">Historial de regularizaciones</h3>
+                <p className="text-xs text-[#6B7280]">
+                  Regularizaciones procesadas por Talento Humano en todos los períodos, según los filtros actuales.
+                </p>
+              </div>
+              <div className="max-h-[62dvh] space-y-2 overflow-y-auto p-3">
+                {!historyRegs.length ? (
+                  <EmptySection
+                    icon={FiCheck}
+                    title="Sin historial de regularizaciones"
+                    description="No hay regularizaciones procesadas con los filtros actuales."
+                  />
+                ) : (
+                  historyRegs.map((row) => {
+                    const processedAt = row.applied_at || row.approved_at || row.rejected_at || row.cancelled_at || row.updated_at;
+                    return (
+                      <article key={row.id} className="rounded-[12px] border border-[#E5E7EB] bg-[#F9FAFB] px-4 py-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-semibold text-[#1F2937]">{row.affected_name || row.affected_email}</span>
+                              <Badge tone={REG_STATUS_TONE[row.status] || "neutral"}>
+                                {REG_STATUS_LABEL[row.status] || row.status}
+                              </Badge>
+                              <span className="rounded-full bg-[#EAF0FF] px-2 py-0.5 text-[10px] font-semibold text-[#234BA4]">
+                                Marcación: {getRegularizationMarkLabel(row.regularization_type)}
+                              </span>
+                              <span className="font-mono text-[11px] text-[#6B7280]">{fmtDate(row.attendance_date)}</span>
+                            </div>
+                            <p className="text-xs text-[#6B7280]">
+                              {row.cargo || "Sin cargo"}{row.department_name ? ` · ${row.department_name}` : ""}
+                            </p>
+                            {row.reason ? (
+                              <p className="text-xs text-[#374151]">
+                                <span className="font-semibold">Observación:</span> {row.reason}
+                              </p>
+                            ) : null}
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-[#6B7280]">
+                              <span>Solicitada: {row.created_at ? fmtDate(row.created_at) : "--"}{row.created_at ? ` · ${fmtTime(row.created_at)}` : ""}</span>
+                              <span>Procesada: {processedAt ? `${fmtDate(processedAt)} · ${fmtTime(processedAt)}` : "--"}</span>
+                              {row.approver_name ? <span>Por: {row.approver_name}</span> : null}
+                              {row.regularization_type === "missing_clock_in" && row.registered_entry_time ? (
+                                <span>Entrada registrada: {fmtTime(row.registered_entry_time)}</span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })
                 )}
               </div>
             </section>
@@ -2625,7 +2809,13 @@ const ExpedientePanel = ({ detail, loading, onScheduleMeeting, onDownloadRh, pLa
         )}
 
         {activeTab === TABS.GESTION && (
-          <GestionTab userId={collaborator.user_id} rows={rows} range={range} canManageTelework={canManageTelework} />
+          <GestionTab
+            userId={collaborator.user_id}
+            rows={rows}
+            range={range}
+            periodLabel={pLabel}
+            canManageTelework={canManageTelework}
+          />
         )}
       </div>
     </div>

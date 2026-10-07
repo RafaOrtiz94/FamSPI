@@ -120,6 +120,13 @@ Módulo de control de asistencia. Permite a colaboradores marcar entrada/salida,
   - Controller: `attendance.controller.js → generatePDF`
   - Middleware: `verifyToken`, `requireAttendanceReportAccess("param", { allowAll: true })`
 
+- **POST /internal/jobs/attendance/overtime-justification-report** (job mensual, `x-jobs-key`)
+  - Job: `jobs/overtimeJustificationReport.js → runOnce`
+  - Service: `attendanceOvertimeJustification.service.js`
+  - Body opcional: `{ year, month }` (por defecto, mes calendario anterior en hora Ecuador)
+  - Genera el PDF de justificación de horas extras de un colaborador. Total neto = horas "por sistema" (hora extra de marcaciones en jornada normal) + horas "declaradas" (días con salida operacional/teletrabajo; se cuentan aunque no haya otra evidencia) − atrasos no justificados (misma regla del sistema: L-V, >6 min, sin justificación aprobada, sin salida operacional ese día). Jornada L-V 09:00–18:00; sábados y domingos completos. PDF horizontal para RH: resumen (horas y decimal), una fila por día con sustento y justificación técnica (tickets resueltos/cerrados + módulos de `auditoria.logs` con actividad fuera de jornada; sin commits, Cloud Run no tiene el repo) y solo las observaciones que afectan el cálculo. Lo sube a Drive (`Informes Horas Extras`) y lo envía por correo.
+  - Env requeridas: `OVERTIME_REPORT_USER_EMAIL`, `OVERTIME_REPORT_RECIPIENTS`; opcional `OVERTIME_REPORT_DRIVE_ROOT_FOLDER_ID`.
+
 ## 3. Flujo principal
 
 1. Colaborador marca entrada desde app/iPhone shortcut → `POST /clock-in` o `/marcar/entrada`

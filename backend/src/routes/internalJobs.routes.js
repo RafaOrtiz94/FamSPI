@@ -28,6 +28,7 @@ const { runOnce: runTrainingSignatureReminder } = require('../jobs/trainingSigna
 const { runOnce: runScheduleVisitCompletionReminder } = require('../jobs/scheduleVisitCompletionReminderScheduler');
 const { runOnce: runKickoffAutoStartOverdue } = require('../modules/kickoff/kickoff.scheduler');
 const { runOnce: runCrmActionItemReminder } = require('../jobs/crmActionItemReminderScheduler');
+const { runOnce: runOvertimeJustificationReport } = require('../jobs/overtimeJustificationReport');
 
 const jobsAuth = require('../middlewares/jobsAuth');
 
@@ -104,6 +105,19 @@ router.post('/attendance/overtime', async (req, res) => {
             error: 'Falló el procesamiento de overtime',
             details: error.message
         });
+    }
+});
+
+// Job mensual: informe PDF de justificacion de horas extras (mes anterior por defecto; year/month opcionales)
+router.post('/attendance/overtime-justification-report', async (req, res) => {
+    try {
+        const year = Number(req.body?.year ?? req.query?.year) || undefined;
+        const month = Number(req.body?.month ?? req.query?.month) || undefined;
+        const result = await runOvertimeJustificationReport({ year, month });
+        res.json({ success: true, message: 'Informe de horas extras generado', data: result });
+    } catch (error) {
+        console.error('Error en job de informe de horas extras:', error);
+        res.status(error.status || 500).json({ error: 'Falló el informe de horas extras', details: error.message });
     }
 });
 

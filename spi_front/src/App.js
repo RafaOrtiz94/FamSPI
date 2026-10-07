@@ -7,6 +7,7 @@ import { PwaStatusProvider } from "./core/pwa/PwaStatusContext";
 import { UIProvider } from "./core/ui/UIContext";
 import { NotificationProvider } from "./core/ui/NotificationContext";
 import AppRoutes from "./routes/AppRoutes"; // ✅ Importa el archivo correcto
+import EnvironmentBanner from "./core/ui/components/EnvironmentBanner";
 import { Toaster } from "react-hot-toast";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "./index.css";
@@ -30,6 +31,7 @@ function App() {
             <NotificationProvider>
               <BrowserRouter>
                 <AppRoutes />
+                <EnvironmentBanner />
                 <Toaster
                   position="top-right"
                   containerStyle={{

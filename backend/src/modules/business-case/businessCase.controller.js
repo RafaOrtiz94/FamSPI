@@ -268,6 +268,44 @@ const INVESTMENT_VALUES_ACCESS_ROLES = new Set([
 // cantidades/caracteristicas.
 const { INVESTMENT_EDIT_ROLES, hasInvestmentEditRole } = require("./investmentEditAccess");
 const bcInvestmentTiAssetReservationsService = require("./bcInvestmentTiAssetReservations.service");
+const processNotesService = require("../process-notes/processNotes.service");
+
+// Mismas etiquetas que spi_front/src/core/utils/businessCaseSections.js.
+const SECTION_NOTE_LABELS = {
+  general: "Datos Generales",
+  lab: "Entorno Laboratorio",
+  requirement: "Condiciones del BC",
+  equipment: "Equipamiento",
+  lis: "Integración LIS",
+  determinations: "Determinaciones",
+  investments: "Inversiones",
+  investment_values_op: "Precio operativo",
+  investment_values_fin: "Precio financiero",
+  dispatch_workspace: "Cantidades Máximas",
+  feasibility: "Factibilidad",
+};
+
+// Cada seccion cerrada deja constancia en las notas del proceso (las del
+// expediente de compras si el BC ya lo tiene). Best-effort: nunca interrumpe el cierre.
+async function noteSectionsClosed({ businessCaseId, sections, user, detail = null }) {
+  const labels = sections.map((section) => SECTION_NOTE_LABELS[section] || section).join(", ");
+  await noteProcessEvent({
+    businessCaseId,
+    user,
+    body: `${sections.length > 1 ? "Secciones cerradas" : "Sección cerrada"} en Business Case: ${labels}${detail ? `\n${detail}` : ""}`,
+  });
+}
+
+// Hitos del BC que no son un cierre de seccion (envio a revision tecnica, decision de
+// factibilidad) pero deben quedar en las notas del proceso. Best-effort, igual que el cierre.
+async function noteProcessEvent({ businessCaseId, user, body }) {
+  try {
+    const thread = await processNotesService.resolveBusinessCaseThread(businessCaseId);
+    await processNotesService.recordAutomaticNote({ ...thread, author: user, body });
+  } catch (error) {
+    logger.warn({ error: error.message, businessCaseId }, "No se pudo dejar nota automatica del proceso");
+  }
+}
 const INVESTMENT_COMPLETE_ROLES = new Set([
   "acp_comercial",
   "jefe_comercial",
@@ -1451,6 +1489,14 @@ async function applyDeterminationsCompletionTransition({ businessCase, role, use
         preflow_handoff_by_role: role,
       },
     });
+    // Solo en el primer envio: esta transicion puede dispararse desde dos endpoints.
+    if (currentGate.phase !== "technical_review") {
+      await noteProcessEvent({
+        businessCaseId,
+        user,
+        body: "Determinaciones en Business Case: reactivos validados y enviados a revisión técnica.",
+      });
+    }
     return;
   }
 
@@ -1625,6 +1671,88 @@ async function notifyInvestmentQuotationRequested({ businessCaseId, actor, selec
     );
     return { sent: false, reason: "notification_error" };
   }
+}
+
+// Tras guardar selecciones: marca el precio como pendiente de revisar en los items que cambiaron
+// (la seccion de precios los resalta) y devuelve los cambios para notificar. Un fallo al marcar
+// no debe tumbar el guardado de la inversion, que ya se hizo.
+async function registerInvestmentSelectionChanges({ businessCaseId, previousSelections, savedSelections }) {
+  const changes = investmentsService.detectInvestmentSelectionChanges(previousSelections, savedSelections);
+  if (!changes.length) return changes;
+  try {
+    await investmentsService.markInvestmentPriceReviewPending(businessCaseId, changes);
+  } catch (error) {
+    logger.error(
+      { error: error?.message || String(error), businessCaseId },
+      "No se pudo marcar el precio de inversiones como pendiente de revisar",
+    );
+  }
+  return changes;
+}
+
+// Avisa a quien registra precios (jefe_financiero) cuando se agregan inversiones adicionales o
+// cambian sus cantidades, para que corrija los valores. Un guardado = una notificacion con todos los items.
+async function notifyInvestmentSelectionChanges({ businessCaseId, businessCase, actor, changes = [] }) {
+  if (!changes.length) return { sent: 0, reason: "no_changes" };
+
+  const actorEmail = String(actor?.email || "").trim().toLowerCase();
+  const recipients = (await getUsersByRoles(["jefe_financiero"]))
+    .filter((user) => String(user.email || "").trim().toLowerCase() !== actorEmail);
+  if (!recipients.length) return { sent: 0, reason: "no_recipients" };
+
+  const catalog = await investmentsService.getCatalogWithSelections(businessCaseId);
+  const catalogById = new Map(catalog.map((row) => [String(row.id), row]));
+  // Una fila por item: la campana las muestra en el mensaje y el correo como tabla (detail_rows).
+  const detailRows = changes.map((change) => ({
+    label: resolveInvestmentQuotationItemName(catalogById.get(String(change.catalog_id)) || {}),
+    value: investmentsService.describeInvestmentSelectionChange(change),
+  }));
+  const detail = detailRows.map((row) => `${row.label} (${row.value})`).join("; ");
+  const clientName = businessCase?.client_name || "cliente sin nombre";
+  const actorLabel = actor?.fullname || actor?.name || actor?.email || "Un usuario";
+  // ?section= abre el workspace directamente en Precios financieros y operativos.
+  const targetPath = `/dashboard/business-case/workspace/${businessCaseId}?section=investment_values`;
+
+  let sent = 0;
+  for (const recipient of recipients) {
+    try {
+      await notificationManager.sendNotification({
+        userId: recipient.id,
+        template: "custom_html",
+        customTitle: `Inversiones adicionales modificadas: ${clientName}`,
+        customMessage:
+          `${actorLabel} modifico inversiones adicionales: ${detail}. ` +
+          "Revisa y corrige los precios de estos items.",
+        data: {
+          business_case_id: businessCaseId,
+          target_path: targetPath,
+          cta_label: "Corregir precios",
+          email_subject: `Inversiones adicionales modificadas - ${clientName}`,
+          client_name: clientName,
+          detail_rows: detailRows,
+        },
+        type: "alert",
+        priority: 2,
+        email: true,
+        chat: false,
+        source: "business_case.investment_selection_changed",
+        meta: {
+          businessCaseId,
+          process_key: buildBusinessCaseProcessKey(businessCaseId),
+          actor: actorEmail || null,
+          target_path: targetPath,
+          cta_label: "Corregir precios",
+        },
+      });
+      sent += 1;
+    } catch (error) {
+      logger.warn(
+        { error: error?.message || String(error), businessCaseId, recipientId: recipient.id },
+        "No se pudo notificar cambios en inversiones adicionales",
+      );
+    }
+  }
+  return { sent };
 }
 
 async function startDeterminationsTechWindowIfNeeded({ businessCase, role, actorUser }) {
@@ -2364,6 +2492,11 @@ async function submitFeasibilityDecision(req, res) {
     }
 
     const updated = await businessCaseService.saveFeasibilityDecision(req.params.id, value, req.user);
+    await noteProcessEvent({
+      businessCaseId: req.params.id,
+      user: req.user,
+      body: `Factibilidad registrada en Business Case: ${value.is_feasible ? "factible" : "no factible"}${value.notes ? `\n${value.notes}` : ""}`,
+    });
     await workflowSlaService.markCompleted({
       businessCaseId: req.params.id,
       actorEmail: req.user?.email || null,
@@ -2634,17 +2767,28 @@ async function saveInvestmentSelection(req, res) {
       throw error;
     }
 
+    const previousSelections = await investmentsService.getInvestmentSelections(id);
     const selection = isBatch
       ? await investmentsService.upsertInvestmentSelectionsBatch(id, payload.selections, req.user)
       : await investmentsService.upsertInvestmentSelection(id, payload, req.user);
+    const investmentChanges = await registerInvestmentSelectionChanges({
+      businessCaseId: id,
+      previousSelections,
+      savedSelections: isBatch ? selection : [selection],
+    });
     const responseBody = isBatch
       ? { ok: true, data: { items: selection, saved_count: selection.length } }
       : { ok: true, data: selection };
     await completeIdempotentWrite(idempotencySession, responseBody, 200);
     res.json(responseBody);
 
-    // Fire-and-forget: detect changes → stamp deadline → notify value managers
-    // El SLA de valores inicia solo cuando se confirma el carrito.
+    // Fire-and-forget: un fallo al notificar no debe afectar el guardado ya confirmado.
+    notifyInvestmentSelectionChanges({
+      businessCaseId: id,
+      businessCase: bc,
+      actor: req.user,
+      changes: investmentChanges,
+    }).catch((err) => logger.warn({ error: err?.message, businessCaseId: id }, "Investment selection notification failed"));
   } catch (error) {
     await failIdempotentWrite(idempotencySession, error);
     logger.error({ error: error.message }, 'Error saving investment selection');
@@ -2706,6 +2850,13 @@ async function closeInvestmentsWithoutAdditionalItems(req, res) {
         },
       );
     }
+
+    await noteSectionsClosed({
+      businessCaseId: id,
+      sections,
+      user: req.user,
+      detail: "Cerradas sin inversiones adicionales.",
+    });
 
     const existingInvestmentsMetadata = preflowService.toObject(bc?.modern_bc_metadata)?.investments || {};
     await preflowService.updateBusinessCaseMetadata(id, {
@@ -2882,6 +3033,10 @@ async function createInvestmentCatalogItem(req, res) {
         req.user
       );
     }
+    // Item nuevo de catalogo: no tenia seleccion previa en este BC.
+    const investmentChanges = selection
+      ? await registerInvestmentSelectionChanges({ businessCaseId: id, previousSelections: [], savedSelections: [selection] })
+      : [];
     res.json({
       ok: true,
       data: {
@@ -2895,6 +3050,15 @@ async function createInvestmentCatalogItem(req, res) {
         updated_by_email: selection?.updated_by_email ?? null
       }
     });
+
+    if (investmentChanges.length) {
+      notifyInvestmentSelectionChanges({
+        businessCaseId: id,
+        businessCase: bc,
+        actor: req.user,
+        changes: investmentChanges,
+      }).catch((err) => logger.warn({ error: err?.message, businessCaseId: id }, "Investment selection notification failed"));
+    }
   } catch (error) {
     logger.error({ error: error.message }, 'Error creating investment catalog item');
     res.status(error.status || 500).json({ ok: false, message: error.message });
@@ -6677,6 +6841,8 @@ async function recordSectionCompletion(req, res) {
     }
 
     const processResult = await preflowService.ensurePreflowWorkspaceProcess({ businessCaseId: id, actorUser: user, durationHours: PRE_BC_DURATION_HOURS });
+    // Despues del preflow: si este cierre creo el expediente, la nota ya cae en su hilo.
+    await noteSectionsClosed({ businessCaseId: id, sections: [canonicalSection], user, detail: reason || null });
     const latestBusinessCase = await businessCaseService.getBusinessCaseById(id);
     const isCommercialActor = isCommercialSectionActor(req);
     if (canonicalSection === "general" && isCommercialActor && shouldStartQueueOnGeneralSave(latestBusinessCase)) {
@@ -7082,11 +7248,9 @@ async function saveInvestmentValues(req, res) {
       return res.status(400).json({ ok: false, message: 'Campo class debe ser operativa o financiera' });
     }
 
-    // Role gate: only the designated role per class
-    const allowedForClass = investmentClass === 'operativa'
-      ? INVESTMENT_VALUES_OP_ROLES
-      : INVESTMENT_VALUES_FIN_ROLES;
-    const isValueEditor = allowedForClass.has(role);
+    // Solo jefe_financiero registra precios, operativos y financieros. Los roles
+    // por clase siguen gestionando cotizaciones (assertInvestmentValuesEditorRole).
+    const isValueEditor = role === "jefe_financiero";
 
     // Precios en tiempo real, sin carrito ni cierre: solo se bloquea si la
     // seccion fue bloqueada por otra via generica (lockSection).
@@ -7110,7 +7274,7 @@ async function saveInvestmentValues(req, res) {
     if (!isValueEditor) {
       return res.status(403).json({
         ok: false,
-        message: "Solo el rol responsable de valores puede registrar precios. Como cotizador, sube la cotización del ítem.",
+        message: "Solo Jefe Financiero puede registrar precios. Como cotizador, sube la cotización del ítem.",
         code: "INVESTMENT_VALUES_ROLE_REQUIRED",
       });
     }
@@ -7196,6 +7360,7 @@ async function saveInvestmentValues(req, res) {
               completion_basis: "all_financial_prices_completed",
             },
           );
+          await noteSectionsClosed({ businessCaseId: id, sections: ["investment_values_fin"], user: req.user });
           financialSectionJustCompleted = true;
         }
       }

@@ -564,19 +564,20 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
               placeholder="Especificaciones solicitadas para esta inversion"
             />
           </div>
-          {Number(qtyModal.item?.quantity) > 0 ? (
+          {/* Vinculacion de activos TI: solo jefe_ti la ve; para el resto es ruido visual. */}
+          {currentRole !== "jefe_ti" ? null : Number(qtyModal.item?.quantity) > 0 ? (
             <TiAssetReservationPanel
               bcId={bcId}
               catalogId={qtyModal.item.id}
               quantity={qtyModal.item.quantity}
               showToast={showToast}
-              canManage={currentRole === "jefe_ti"}
+              canManage
             />
-          ) : currentRole === "jefe_ti" ? (
+          ) : (
             <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
               Guarda este item con una cantidad mayor a 0 (botón "Guardar borrador") para poder reservar activos TI concretos.
             </p>
-          ) : null}
+          )}
 
           <div className="space-y-2">
             <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Observaciones (opcional)</label>

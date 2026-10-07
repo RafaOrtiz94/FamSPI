@@ -363,6 +363,10 @@ export default function ProcessNotesFab({ entityType, entityId, title = "Notas d
                         {note.author_role_snapshot ? (
                           <span className="ml-1 text-[11px] uppercase tracking-wide text-slate-400">{note.author_role_snapshot}</span>
                         ) : null}
+                        {/* Nota escrita en el hilo del Business Case antes de que existiera este expediente. */}
+                        {note.thread_entity_type === "business_case" && entityType !== "business_case" ? (
+                          <span className="ml-1 rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700">Business Case</span>
+                        ) : null}
                       </div>
                       <span
                         title={`Hash de integridad: ${note.note_hash_sha256}`}

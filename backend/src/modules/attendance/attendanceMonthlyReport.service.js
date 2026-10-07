@@ -525,6 +525,8 @@ async function generateMonthlyAttendanceReportBuffer({ start, end, userIds, requ
 
 module.exports = {
   generateMonthlyAttendanceReportBuffer,
+  // Reutilizados por attendanceOvertimeJustification.service.js
+  pdfHelpers: { drawBrandHeader, pdfEnsureSpace, pdfResetX, pdfTable, streamPdfToBuffer, toDurationLabel },
   __private: {
     buildDayRecord,
     buildExcelBuffer,

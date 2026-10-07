@@ -4,10 +4,26 @@ param(
   [string]$Region = "us-central1",
   [string]$ServiceName = "spi-backend",
   [string]$ImageTag = "manual",
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+  # Sin -Environment el script despliega produccion exactamente igual que siempre.
+  [ValidateSet("production", "staging")]
+  [string]$Environment = "production",
+  [string]$StagingFrontendUrl = "",        # obligatorio con -Environment staging
+  [string]$StagingDriveRootFolderId = "",  # obligatorio con -Environment staging: carpeta de Drive propia de staging
+  [switch]$PrintOnly                       # muestra los argumentos finales de gcloud y termina sin construir ni desplegar
 )
 
 $ErrorActionPreference = "Stop"
+
+# Staging (docs/plans/rbac-unified-access-implementation-plan.md, Fase 1A): otro servicio, otra
+# base, otros secretos, sin correo, sin chat, sin push y sin jobs.
+if ($Environment -eq "staging") {
+  if (-not $PSBoundParameters.ContainsKey("ServiceName")) { $ServiceName = "spi-backend-staging" }
+  if (-not $PSBoundParameters.ContainsKey("ImageTag")) { $ImageTag = "staging" }
+  if ($ServiceName -eq "spi-backend") { throw "Staging no puede desplegarse sobre el servicio de produccion spi-backend." }
+  if ([string]::IsNullOrWhiteSpace($StagingFrontendUrl)) { throw "Con -Environment staging se requiere -StagingFrontendUrl." }
+  if ([string]::IsNullOrWhiteSpace($StagingDriveRootFolderId)) { throw "Con -Environment staging se requiere -StagingDriveRootFolderId." }
+}
 
 function Write-Step {
   param(
@@ -80,6 +96,10 @@ function Show-CloudRunFailureDiagnostics {
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $backendPath = Join-Path $repoRoot "backend"
 $image = "us-central1-docker.pkg.dev/$ProjectId/cloud-run-source-deploy/${ServiceName}:${ImageTag}"
+if ($Environment -eq "staging") {
+  # cloudbuild.yaml siempre construye la imagen "spi-backend"; staging la distingue por la etiqueta.
+  $image = "us-central1-docker.pkg.dev/$ProjectId/cloud-run-source-deploy/spi-backend:${ImageTag}"
+}
 
 Assert-Command "gcloud"
 
@@ -90,9 +110,11 @@ if (-not (Test-Path (Join-Path $backendPath "Dockerfile"))) {
 Push-Location $backendPath
 try {
   Write-Step "Validando entorno" 5
-  Invoke-GcloudChecked -Args @("config", "set", "project", $ProjectId)
+  if (-not $PrintOnly) {
+    Invoke-GcloudChecked -Args @("config", "set", "project", $ProjectId)
+  }
 
-  if (-not $SkipBuild) {
+  if (-not $SkipBuild -and -not $PrintOnly) {
     Write-Step "Construyendo imagen $image (con cache de capas)" 20
     Invoke-GcloudChecked -Args @(
       "builds", "submit",
@@ -184,6 +206,60 @@ try {
     "--set-secrets", "GCHAT_WEBHOOK_URL_TH=GCHAT_WEBHOOK_URL_TH:latest",  # webhook del Space privado de Talento Humano (alertas de asistencia/regularizacion/teletrabajo van solo por chat)
     "--set-secrets", "/secrets/gsa-key.json=GSA_KEY_JSON:latest"
   )
+
+  if ($Environment -eq "staging") {
+    # Se parte de la lista de produccion y se reemplaza solo lo que debe diferir, para que
+    # staging herede cualquier variable nueva sin mantener dos listas.
+    $envOverrides = [ordered]@{
+      "NODE_ENV"                    = "staging"
+      "DB_HOST"                     = "ep-frosty-dawn-b5cn1c7v.c-7.us-east-2.aws.neon.tech"  # proyecto Neon exclusivo de staging, endpoint directo
+      "DB_NAME"                     = "neondb"
+      "FRONTEND_URL"                = $StagingFrontendUrl
+      "APP_FRONTEND_URL"            = $StagingFrontendUrl
+      "GOOGLE_REDIRECT_URI"         = "https://$ServiceName-983537733948.$Region.run.app/api/v1/auth/google/callback"
+      "DRIVE_ROOT_FOLDER_ID"        = $StagingDriveRootFolderId
+      "BC_TEMPLATE_DRIVE_FOLDER_ID" = $StagingDriveRootFolderId  # una plantilla subida desde staging no debe caer en la carpeta de produccion
+      "EMAIL_NOTIFICATIONS_ENABLED" = "false"
+      "NOTIFICATIONS_EMAIL_ENABLED" = "false"
+      "NOTIFICATIONS_PUSH_ENABLED"  = "false"
+      "DISABLE_MAIL"                = "true"
+      "DISABLE_GCHAT"               = "true"
+      "DB_BACKUP_AUTO_ENABLED"      = "false"
+    }
+    $secretOverrides = @{
+      "DB_PASSWORD"        = "DB_PASSWORD_STAGING"
+      "SECRET_KEY"         = "SECRET_KEY_STAGING"
+      "REFRESH_SECRET_KEY" = "REFRESH_SECRET_KEY_STAGING"
+      "JOBS_KEY"           = "JOBS_KEY_STAGING"
+    }
+    # Sin estos secretos staging no puede enviar por SMTP ni publicar en el chat de Talento Humano.
+    $secretsRemoved = @("SMTP_PASS", "GCHAT_WEBHOOK_URL_TH")
+
+    $stagingArgs = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $deployArgs.Count; $i++) {
+      $flag = $deployArgs[$i]
+      if ($flag -eq "--set-env-vars" -or $flag -eq "--set-secrets") {
+        $pair = $deployArgs[$i + 1]
+        $name = $pair.Substring(0, $pair.IndexOf("="))
+        $i++
+        if ($flag -eq "--set-env-vars" -and $envOverrides.Contains($name)) { continue }
+        if ($flag -eq "--set-secrets" -and $secretsRemoved -contains $name) { continue }
+        if ($flag -eq "--set-secrets" -and $secretOverrides.ContainsKey($name)) { $pair = "$name=$($secretOverrides[$name]):latest" }
+        $stagingArgs.Add($flag); $stagingArgs.Add($pair)
+        continue
+      }
+      if ($flag -eq "--max-instances") { $stagingArgs.Add($flag); $stagingArgs.Add("1"); $i++; continue }
+      $stagingArgs.Add($flag)
+    }
+    foreach ($name in $envOverrides.Keys) { $stagingArgs.Add("--set-env-vars"); $stagingArgs.Add("$name=$($envOverrides[$name])") }
+    $deployArgs = $stagingArgs.ToArray()
+  }
+
+  if ($PrintOnly) {
+    Write-Host "gcloud (ambiente: $Environment, servicio: $ServiceName)"
+    $deployArgs | ForEach-Object { Write-Host "  $_" }
+    return
+  }
 
   try {
     Invoke-GcloudChecked -Args $deployArgs

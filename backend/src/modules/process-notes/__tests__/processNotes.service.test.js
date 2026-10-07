@@ -216,4 +216,72 @@ describe("process-notes service", () => {
       }),
     ).rejects.toMatchObject({ status: 400 });
   });
+
+  test("records an outbound flow email as an email note without sending anything", async () => {
+    const author = { id: 1, fullname: "ACP Uno", role: "acp_comercial" };
+    const note = await service.recordOutboundEmail({
+      entityType: "private_purchase",
+      entityId: 77,
+      author,
+      to: "proveedor@externo.com, otro@externo.com",
+      subject: "Solicitud de disponibilidad",
+      html: "<p>Equipo <strong>cobas</strong></p>",
+    });
+    expect(note).toMatchObject({ note_type: "email", entity_type: "private_purchase", entity_id: "77" });
+    expect(note.email_meta).toMatchObject({ direction: "outbound", to: ["proveedor@externo.com", "otro@externo.com"] });
+    expect(note.body).toContain("Equipo cobas");
+    expect(mockSendMail).not.toHaveBeenCalled();
+  });
+
+  test("automatic notes never throw: missing author or database failure returns null", async () => {
+    await expect(
+      service.recordAutomaticNote({ entityType: "business_case", entityId: "bc-1", author: null, body: "Sección cerrada" }),
+    ).resolves.toBeNull();
+
+    const db = require("../../../config/db");
+    db.query.mockRejectedValueOnce(new Error("db caida"));
+    await expect(
+      service.recordAutomaticNote({ entityType: "business_case", entityId: "bc-1", author: { id: 1 }, body: "Sección cerrada" }),
+    ).resolves.toBeNull();
+  });
+});
+
+describe("process-notes: hilo de compra unido al del Business Case de origen", () => {
+  const db = require("../../../config/db");
+  const service = require("../processNotes.service");
+
+  beforeEach(() => db.query.mockReset());
+
+  test("listNotes de una compra incluye las notas del BC que la origino", async () => {
+    db.query
+      .mockResolvedValueOnce({ rows: [{ business_case_id: "bc-1" }] })
+      .mockResolvedValueOnce({ rows: [{ id: 1, thread_entity_type: "business_case" }, { id: 2, thread_entity_type: "private_purchase" }] });
+
+    const notes = await service.listNotes("private_purchase", "pp-9");
+
+    expect(notes).toHaveLength(2);
+    expect(db.query.mock.calls[0][0]).toMatch(/FROM private_purchase_requests/);
+    expect(db.query.mock.calls[1][0]).toMatch(/n\.entity_type = 'business_case' AND n\.entity_id = \$3/);
+    expect(db.query.mock.calls[1][1]).toEqual(["private_purchase", "pp-9", "bc-1"]);
+  });
+
+  test("listNotes de un BC no busca hilo de origen", async () => {
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    await service.listNotes("business_case", "bc-1");
+
+    expect(db.query).toHaveBeenCalledTimes(1);
+    expect(db.query.mock.calls[0][1]).toEqual(["business_case", "bc-1", null]);
+  });
+
+  test("markNoteRead acepta una nota del hilo del BC de origen", async () => {
+    db.query
+      .mockResolvedValueOnce({ rows: [] }) // no esta en el hilo de la compra
+      .mockResolvedValueOnce({ rows: [{ business_case_id: "bc-1" }] })
+      .mockResolvedValueOnce({ rows: [{ id: 5 }] }) // si esta en el hilo del BC
+      .mockResolvedValueOnce({ rows: [] }); // insert de lectura
+
+    await expect(service.markNoteRead("private_purchase", "pp-9", 5, 7)).resolves.toBeUndefined();
+    expect(db.query.mock.calls[2][1]).toEqual([5, "bc-1"]);
+  });
 });

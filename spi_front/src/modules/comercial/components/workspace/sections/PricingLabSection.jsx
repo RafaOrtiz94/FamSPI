@@ -357,7 +357,9 @@ const PredictiveModelPanel = ({ model }) => {
     </div>
    ) : (
     <p className="mt-4 rounded-xl border border-dashed border-violet-200 bg-white p-4 text-sm text-slate-600">
-     No hay reactivos, calibradores, controles o materiales identificados para este equipo.
+     {(model.items || []).length
+      ? `Se identificaron ${model.items.length} productos para este equipo, pero todavía no hay cantidad sugerida: el equipo no tiene una fórmula auditada y hay ${model.comparableCases || 0} Business Case(s) comparables con el mismo equipo.`
+      : "No hay reactivos, calibradores, controles o materiales identificados para este equipo."}
     </p>
    )}
    <p className="mt-3 text-xs text-slate-500">

@@ -53,6 +53,7 @@ import {
 } from '../../../../../core/api/privatePurchasesApi';
 import { getEquiposDisponibles } from '../../../../../core/api/inventarioApi';
 import ReservationsOverviewModal from '../components/ReservationsOverviewModal';
+import BusinessCaseAvailabilityHistory from '../components/BusinessCaseAvailabilityHistory';
 
 /* ─── Utility: File → base64 ──────────────────────────────────────────── */
 const fileToBase64 = (file) =>
@@ -724,6 +725,10 @@ const AvailabilityTab = ({ purchase, type, userRoles, hasRole, refresh }) => {
             </motion.div>
           )}
         </AnimatePresence>
+
+        <BusinessCaseAvailabilityHistory
+          businessCaseId={purchase?.business_case_gate?.business_case_id || purchase?.business_case_id}
+        />
 
         {/* Estado actual */}
         <div className="bg-white rounded-xl border border-soft-border p-5 shadow-ambient">

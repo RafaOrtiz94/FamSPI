@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
 import { FiAlertCircle, FiCheckCircle, FiClock, FiLayers, FiMail, FiPaperclip, FiPercent, FiRefreshCw, FiSave, FiTrash2, FiUpload, FiUserPlus } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useAuth } from "../../../../../core/auth/AuthContext";
@@ -8,10 +8,13 @@ import SectionEditorBadge from "../SectionEditorBadge";
 import TiAssetReservationPanel from "./TiAssetReservationPanel";
 import { listAllTiAssetReservations } from "../../../../../core/api/bcInvestmentTiAssetsApi";
 
-// jefe_ti tiene acceso a ambas clases de precios (financieros y operativos),
-// a diferencia de jefe_operaciones/jefe_financiero que solo editan la suya.
+// Roles de valores por clase: gestionan cotizaciones, cierre sin inversiones y
+// sincronizacion con la hoja. Ya NO definen quien registra precios.
 const OPERATIONAL_ROLES = new Set(["jefe_operaciones", "jefe_de_operaciones", "jefe_ti"]);
 const FINANCIAL_ROLES = new Set(["jefe_financiero", "jefe_ti"]);
+// Solo jefe_financiero registra precios (operativo, financiero y depreciacion);
+// el resto de roles los ve en solo lectura. El backend aplica la misma regla.
+const PRICE_EDITOR_ROLES = new Set(["jefe_financiero"]);
 
 const money = (value) =>
   Number(value || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -191,6 +194,9 @@ function mergeInvestmentRows(operationalRows = [], financialRows = []) {
     });
   });
   return Array.from(rowsById.values()).sort((left, right) => {
+    // Primero los items agregados o con cantidad editada cuyo precio falta revisar.
+    const pendingDiff = Number(Boolean(right.price_review_pending_at)) - Number(Boolean(left.price_review_pending_at));
+    if (pendingDiff) return pendingDiff;
     const leftOrder = Number.isFinite(Number(left.display_order)) ? Number(left.display_order) : Number.MAX_SAFE_INTEGER;
     const rightOrder = Number.isFinite(Number(right.display_order)) ? Number(right.display_order) : Number.MAX_SAFE_INTEGER;
     if (leftOrder !== rightOrder) return leftOrder - rightOrder;
@@ -226,11 +232,16 @@ const InvestmentValuesUnifiedSection = ({
   const canManageQuotations = OPERATIONAL_ROLES.has(role) || FINANCIAL_ROLES.has(role);
   // El cotizador asignado solo sube cotizaciones (QuotationFilesPanel); los
   // precios los registran unicamente los roles de valores.
-  const canEditOperational =
-    OPERATIONAL_ROLES.has(role) && permissions.canEdit !== false && operationalOwnership?.canUserEdit !== false;
-  const canEditFinancial =
-    FINANCIAL_ROLES.has(role) && permissions.canEdit !== false && financialOwnership?.canUserEdit !== false;
+  const sectionEditable = permissions.canEdit !== false;
+  const isPriceEditor = PRICE_EDITOR_ROLES.has(role) && sectionEditable;
+  const canEditOperational = isPriceEditor && operationalOwnership?.canUserEdit !== false;
+  const canEditFinancial = isPriceEditor && financialOwnership?.canUserEdit !== false;
   const canEditAny = canEditOperational || canEditFinancial;
+  // Acciones que no son precios (cerrar sin inversiones, sincronizar hoja): roles de valores, como antes.
+  const canManageValues = sectionEditable && (
+    (OPERATIONAL_ROLES.has(role) && operationalOwnership?.canUserEdit !== false) ||
+    (FINANCIAL_ROLES.has(role) && financialOwnership?.canUserEdit !== false)
+  );
 
   const load = useCallback(async () => {
     if (!bcId) return;
@@ -344,7 +355,7 @@ const InvestmentValuesUnifiedSection = ({
     }
   };
 
-  const getActionClass = () => (canEditFinancial ? "financiera" : "operativa");
+  const getActionClass = () => (FINANCIAL_ROLES.has(role) ? "financiera" : "operativa");
 
   const handleAssignQuotation = async (item) => {
     const assigneeId = assigneeDrafts[String(item.catalog_id)] || null;
@@ -387,13 +398,26 @@ const InvestmentValuesUnifiedSection = ({
   };
 
   const dirtyCount = useMemo(() => Object.keys(dirtyMap).length, [dirtyMap]);
+
+  // Items con precio pendiente de revisar (el backend los marca al agregar o editar cantidad).
+  const pendingReviewCount = useMemo(() => items.filter((row) => row.price_review_pending_at).length, [items]);
+  // Al llegar desde una notificacion (?section=investment_values) se lleva la vista al primer pendiente.
+  const [searchParams] = useSearchParams();
+  const openedFromLink = searchParams.get("section") === "investment_values";
+  const firstPendingRef = useRef(null);
+  const scrolledToPendingRef = useRef(false);
+  useEffect(() => {
+    if (!openedFromLink || loading || !pendingReviewCount || scrolledToPendingRef.current) return;
+    scrolledToPendingRef.current = true;
+    firstPendingRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [openedFromLink, loading, pendingReviewCount]);
   const financialSyncPending = Boolean(syncStatus?.financial?.pending);
   const operationalSyncPending = Boolean(syncStatus?.operational?.pending);
   const closedWithoutInvestments = Boolean(
     operationalOwnership?.metadata?.completion_basis === "no_additional_investments_selected" ||
     financialOwnership?.metadata?.completion_basis === "no_additional_investments_selected",
   );
-  const canCloseWithoutItems = Boolean(canManageQuotations && canEditAny && !items.length && !closedWithoutInvestments);
+  const canCloseWithoutItems = Boolean(canManageQuotations && canManageValues && !items.length && !closedWithoutInvestments);
   const totals = useMemo(() => items.reduce((acc, row) => {
     const qty = Number(row.quantity || 1);
     const op = Number(row.operational_unit_price || 0);
@@ -470,7 +494,7 @@ const InvestmentValuesUnifiedSection = ({
               {saving ? "Guardando..." : "Guardar precios"}
             </button>
           )}
-          {canEditAny && items.length > 0 && (
+          {canManageValues && items.length > 0 && (
             <button
               type="button"
               onClick={handleSyncSheet}
@@ -536,10 +560,23 @@ const InvestmentValuesUnifiedSection = ({
         </div>
       )}
 
+      {pendingReviewCount > 0 && (
+        <div className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <FiAlertCircle size={16} className="mt-0.5 shrink-0" />
+          <span>
+            {pendingReviewCount === 1
+              ? "1 inversion fue agregada o cambio de cantidad."
+              : `${pendingReviewCount} inversiones fueron agregadas o cambiaron de cantidad.`}
+            {" "}Aparecen primero y resaltadas hasta que se guarde su precio financiero.
+          </span>
+        </div>
+      )}
+
       {items.length > 0 && (
         <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white">
           <div className="divide-y divide-gray-100">
-            {items.map((item) => {
+            {items.map((item, itemIndex) => {
+              const pendingReview = Boolean(item.price_review_pending_at);
               const qty = Number(item.quantity || 1);
               const reservedTiAssetCount = tiAssetCountsByCatalogId[String(item.catalog_id)] || 0;
               const coveredByTiInventory = reservedTiAssetCount > 0 && reservedTiAssetCount >= Number(item.quantity || 0);
@@ -549,10 +586,34 @@ const InvestmentValuesUnifiedSection = ({
                 pricingContext?.projected_deadline_months,
               );
               return (
-                <div key={item.catalog_id} className="space-y-4 p-4">
+                <div
+                  key={item.catalog_id}
+                  ref={pendingReview && itemIndex === 0 ? firstPendingRef : undefined}
+                  className={`space-y-4 p-4 ${pendingReview ? "border-l-4 border-amber-400 bg-amber-50/60" : ""}`}
+                >
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
                       <div className="text-sm font-semibold text-gray-900">{item.name}</div>
+                      {pendingReview && (
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                            <FiAlertCircle size={11} />
+                            Revisar precio{item.price_review_note ? ` · ${item.price_review_note}` : ""}
+                          </span>
+                          {canEditFinancial && item.financial_unit_price != null && !dirtyMap[`${item.catalog_id}:financiera`] && (
+                            <button
+                              type="button"
+                              onClick={() => markDirty(item.catalog_id, "financiera")}
+                              className="text-xs font-semibold text-amber-800 underline underline-offset-2 hover:text-amber-950"
+                            >
+                              El precio actual es correcto
+                            </button>
+                          )}
+                          {dirtyMap[`${item.catalog_id}:financiera`] && (
+                            <span className="text-xs text-amber-700">Se marcara como revisado al guardar</span>
+                          )}
+                        </div>
+                      )}
                       <div className="mt-1 text-xs text-gray-500">
                         Cantidad: {item.quantity ?? "-"}
                         {item.characteristics ? ` · ${item.characteristics}` : ""}
@@ -589,13 +650,16 @@ const InvestmentValuesUnifiedSection = ({
                     </div>
                   </div>
 
-                  <TiAssetReservationPanel
-                    bcId={bcId}
-                    catalogId={item.catalog_id}
-                    quantity={item.quantity}
-                    showToast={showToast}
-                    canManage={role === "jefe_ti"}
-                  />
+                  {/* Vinculacion de activos TI: solo jefe_ti la ve; para el resto es ruido visual. */}
+                  {role === "jefe_ti" && (
+                    <TiAssetReservationPanel
+                      bcId={bcId}
+                      catalogId={item.catalog_id}
+                      quantity={item.quantity}
+                      showToast={showToast}
+                      canManage
+                    />
+                  )}
 
                   {!coveredByTiInventory && (
                     <QuotationFilesPanel

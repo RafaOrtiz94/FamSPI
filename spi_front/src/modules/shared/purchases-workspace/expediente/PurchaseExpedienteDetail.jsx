@@ -7,10 +7,12 @@ import {
   FiRefreshCw, FiAlertCircle, FiTrendingUp, FiLock,
   FiZap, FiArrowRight, FiActivity,
   FiShield,
+  FiClipboard,
 } from 'react-icons/fi';
 
 import { useAuth } from '../../../../core/auth/AuthContext';
 import usePurchaseExpediente from '../hooks/usePurchaseExpediente';
+import { forwardPrivatePurchaseToAcp } from '../../../../core/api/privatePurchasesApi';
 
 import ExpedienteSummaryTab from './tabs/ExpedienteSummaryTab';
 import PrivateFlowTab       from './tabs/PrivateFlowTab';
@@ -23,6 +25,7 @@ import TrainingTab          from './tabs/TrainingTab';
 import ConsumableFilesTab   from './tabs/ConsumableFilesTab';
 import ExpedienteTimelineTab from './tabs/ExpedienteTimelineTab';
 import ExpedienteAuditTab   from './tabs/ExpedienteAuditTab';
+import PublicPurchaseComplianceTab from './tabs/PublicPurchaseComplianceTab';
 import { hasRole, hasAnyRole, isManager as isManagerRole } from '../purchaseRoleGroups';
 import ProcessNotesFab from '../../../../core/ui/components/ProcessNotesFab';
 
@@ -801,6 +804,7 @@ const AVAIL_STATUS_LABELS = {
 
 const TABS_PUBLIC = [
   { id: 'resumen',        label: 'Resumen',            icon: FiActivity    },
+  { id: 'cumplimiento',   label: 'Cumplimiento',       icon: FiClipboard   },
   { id: 'disponibilidad', label: 'Disponibilidad',     icon: FiCheckCircle },
   { id: 'acp',            label: 'ACP / Portal',        icon: FiGlobe       },
   { id: 'contrato',       label: 'Contrato',            icon: FiFileText    },
@@ -839,6 +843,7 @@ const TAB_ROLE_LABELS = {
   tecnica:         'Servicio Técnico',
   entrenamiento:   'Servicio Técnico / Comercial',
   insumos:         'ACP Comercial / Operaciones',
+  cumplimiento:    'ACP Comercial',
 };
 
 // ponytail: todas las etapas son visibles para todos los roles (informacion
@@ -887,6 +892,69 @@ function ErrorState({ message, onRetry }) {
   );
 }
 
+/**
+ * Mismo tab Disponibilidad del expediente, para seguir el flujo desde el Business
+ * Case enlazado: mismos datos, mismos endpoints y el mismo bloqueo por etapa.
+ * No es un flujo aparte: lo que se haga aqui se ve en el expediente y viceversa.
+ */
+export const PurchaseAvailabilityPanel = ({ id, type }) => {
+  const { user } = useAuth();
+  const userRoles = useMemo(() => normalizeRoles(user), [user]);
+  const hasRole = (token) => userRoles.some((r) => r === token || r.includes(token));
+  const { purchase, loading, error, refresh } = usePurchaseExpediente(id, type);
+  const [forwarding, setForwarding] = useState(false);
+  const [forwardError, setForwardError] = useState(null);
+
+  if (loading && !purchase) return <LoadingSkeleton />;
+  if (error) return <ErrorState message={error} onRetry={refresh} />;
+  if (!purchase) return null;
+
+  const gate = purchase.business_case_gate;
+  if (gate?.required && !gate.open && gate.status === 'rejected') {
+    return (
+      <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+        Business Case no factible: el flujo operativo del expediente está cerrado.
+      </p>
+    );
+  }
+
+  if (computeTabStates(purchase, type).locked.has('disponibilidad')) {
+    // Privado: Disponibilidad se habilita cuando el asesor envia la solicitud a ACP.
+    const canForward = type === 'private' && purchase.status === 'pending_backoffice'
+      && hasAnyRole(userRoles, ['comercial', 'gerencia']);
+    const handleForward = async () => {
+      setForwarding(true);
+      setForwardError(null);
+      try {
+        await forwardPrivatePurchaseToAcp(purchase.id);
+        await refresh();
+      } catch (err) {
+        setForwardError(err?.response?.data?.message || err?.message || 'No se pudo enviar la solicitud a ACP');
+      } finally {
+        setForwarding(false);
+      }
+    };
+    return (
+      <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <p>La disponibilidad se habilita cuando la solicitud se envía a ACP Comercial.</p>
+        {forwardError && <p className="text-red-700">{forwardError}</p>}
+        {canForward && (
+          <button
+            type="button"
+            onClick={handleForward}
+            disabled={forwarding}
+            className="inline-flex items-center gap-2 rounded-lg bg-ink-slate px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+          >
+            {forwarding ? 'Enviando...' : 'Solicitar disponibilidad a ACP'}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return <AvailabilityTab purchase={purchase} type={type} userRoles={userRoles} hasRole={hasRole} refresh={refresh} />;
+};
+
 const PurchaseExpedienteDetail = ({ id, type }) => {
   const navigate       = useNavigate();
   const { user }     = useAuth();
@@ -902,7 +970,10 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
   const isManager = useMemo(() => isManagerRole(userRoles), [userRoles]);
   const tabs = useMemo(() => {
     const base = type === 'public' ? TABS_PUBLIC : TABS_PRIVATE;
-    const filtered = filterTabsByParticipation(base, userRoles, isManager);
+    let filtered = filterTabsByParticipation(base, userRoles, isManager);
+    if (type === 'public' && !userRoles.includes('acp_comercial')) {
+      filtered = filtered.filter((tab) => tab.id !== 'cumplimiento');
+    }
     return canViewAudit ? filtered : filtered.filter((t) => t.id !== 'auditoria');
   }, [type, canViewAudit, userRoles, isManager]);
   const pendingTabs = useMemo(() => computePendingTabs(purchase, type, userRoles), [purchase, type, userRoles]);
@@ -997,6 +1068,17 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
               <span className="text-[10px] font-medium text-slate-500 hidden sm:block">
                 {AVAIL_STATUS_LABELS[purchase.availability_status]}
               </span>
+            )}
+            {/* BC como herramienta del expediente: acceso permanente, no solo mientras bloquea. */}
+            {(businessCaseGate?.business_case_id || purchase.business_case_id) && (
+              <button
+                type="button"
+                onClick={() => navigate(`/dashboard/business-case/workspace/${businessCaseGate?.business_case_id || purchase.business_case_id}`)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-ink-slate transition-colors duration-150 hover:bg-slate-100 cursor-pointer"
+              >
+                Business Case
+                <FiArrowRight size={12} aria-hidden="true" />
+              </button>
             )}
             <button
               onClick={refresh}
@@ -1252,6 +1334,7 @@ const PurchaseExpedienteDetail = ({ id, type }) => {
             className="p-5"
           >
             {activeTab === 'resumen'        && <ExpedienteSummaryTab  {...summaryProps} {...tabProps} />}
+            {activeTab === 'cumplimiento'   && <PublicPurchaseComplianceTab purchase={purchase} />}
             {activeTab === 'flujo_comercial'&& <PrivateFlowTab        {...tabProps} />}
             {activeTab === 'disponibilidad' && <AvailabilityTab       {...tabProps} />}
             {activeTab === 'acp'            && <PublicAcpTab          {...tabProps} />}

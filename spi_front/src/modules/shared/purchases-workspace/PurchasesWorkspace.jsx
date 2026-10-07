@@ -27,15 +27,21 @@ import {
   listConsumableFilesOverview,
   previewStandaloneBusinessCaseFile,
 } from '../../../core/api/consumableFilesApi';
+import { listBusinessCases } from '../../../core/api/businessCaseApi';
 import { listEquipmentPurchases } from '../../../core/api/equipmentPurchasesApi';
 import { listPrivatePurchases } from '../../../core/api/privatePurchasesApi';
 import Modal from '../../../core/ui/components/Modal';
+import { PrivatePurchaseRequestModal } from '../../../core/ui/components/RequestModals';
 import { useUI } from '../../../core/ui/UIContext';
+import PurchaseTypeSelector from '../../../shared/purchases/PurchaseTypeSelector';
+import { usePreflowPurchaseStart } from '../../../shared/purchases/usePreflowPurchaseStart';
+import { PURCHASE_START_MODE } from '../../../shared/purchases/purchaseTypes';
 import { WORKSPACE_PAGE_CLASS } from '../../../core/ui/workspaceLayout';
 import StandaloneConsumableForm, { createStandaloneFormState } from './components/StandaloneConsumableForm';
 import TabBadge from './components/TabBadge';
 import PurchaseExpedienteDetail from './expediente/PurchaseExpedienteDetail';
 import StandaloneConsumableFileDetail from './expediente/StandaloneConsumableFileDetail';
+import { normalizePreparingBusinessCase } from './preparingBusinessCase';
 import { normalizeRoles, hasAnyRole, isLogistics } from './purchaseRoleGroups';
 
 const EASE_OUT = [0.23, 1, 0.32, 1];
@@ -176,12 +182,17 @@ const PurchasesWorkspace = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { showToast } = useUI();
+  const { showToast, showLoader, hideLoader } = useUI();
+  // Alta de expediente desde Compras: mismo selector y mismos flujos que Solicitudes.
+  const { startPreflow } = usePreflowPurchaseStart({ navigate, showToast, showLoader, hideLoader });
+  const [purchaseTypeSelectorOpen, setPurchaseTypeSelectorOpen] = useState(false);
+  const [privatePurchaseKind, setPrivatePurchaseKind] = useState(null);
   const prefersReducedMotion = useReducedMotion();
   const userRoles = useMemo(() => normalizeRoles(user), [user]);
   const canAccessWorkspace = hasAnyRole(userRoles, ALL_WORKFLOW_ROLES);
 
   const [items, setItems] = useState([]);
+  const [preparingItems, setPreparingItems] = useState([]);
   const [selected, setSelected] = useState(null);
   const [typeFilter, setTypeFilter] = useState(() => new URLSearchParams(location.search).get('tab') || 'all');
   const [query, setQuery] = useState('');
@@ -201,9 +212,11 @@ const PurchasesWorkspace = () => {
     setLoading(true);
     setError(null);
     try {
-      const [publicResult, privateResult] = await Promise.allSettled([
+      // La lista de BC es opcional: roles sin acceso a BC reciben 403 y simplemente no ven filas en preparacion.
+      const [publicResult, privateResult, businessCaseResult] = await Promise.allSettled([
         listEquipmentPurchases(),
         listPrivatePurchases({ limit: 200 }),
+        listBusinessCases({ pageSize: 200 }),
       ]);
 
       const publicItems = publicResult.status === 'fulfilled'
@@ -218,6 +231,14 @@ const PurchasesWorkspace = () => {
       ));
 
       setItems(nextItems);
+
+      // El enlace canonico (columna business_case_id) manda sobre los metadatos del BC.
+      const linkedBcIds = new Set(nextItems.map((item) => String(item.raw?.business_case_id || '')).filter(Boolean));
+      setPreparingItems(
+        (businessCaseResult.status === 'fulfilled' ? (businessCaseResult.value?.items || []) : [])
+          .map(normalizePreparingBusinessCase)
+          .filter((item) => item && !linkedBcIds.has(String(item.id))),
+      );
 
       if (publicResult.status === 'rejected' && privateResult.status === 'rejected') {
         setError('No se pudieron cargar los expedientes de compras.');
@@ -310,13 +331,15 @@ const PurchasesWorkspace = () => {
   ), [items, standaloneItems]);
   const filteredItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    return combinedItems.filter((item) => {
+    // Las filas en preparacion solo se listan: nunca entran a combinedItems, asi no se
+    // autoseleccionan ni se abren como expediente.
+    return [...preparingItems, ...combinedItems].filter((item) => {
       if (typeFilter !== 'all' && item.type !== typeFilter) return false;
       if (!normalizedQuery) return true;
       return [item.title, item.subtitle, item.status, item.modality, item.id]
         .some((value) => String(value || '').toLowerCase().includes(normalizedQuery));
     });
-  }, [combinedItems, query, typeFilter]);
+  }, [combinedItems, preparingItems, query, typeFilter]);
   const groupedItems = useMemo(() => {
     const groupedMap = new Map(
       WORKSPACE_SECTIONS.map((section) => [section.key, []]),
@@ -506,6 +529,16 @@ const PurchasesWorkspace = () => {
               {hasAnyRole(userRoles, ['comercial']) && (
                 <button
                   type="button"
+                  onClick={() => setPurchaseTypeSelectorOpen(true)}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 text-sm font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-slate-800 active:scale-[0.97]"
+                >
+                  <FiPlus size={15} aria-hidden="true" />
+                  Nuevo expediente
+                </button>
+              )}
+              {hasAnyRole(userRoles, ['comercial']) && (
+                <button
+                  type="button"
                   onClick={() => setStandaloneModalOpen(true)}
                   className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 text-sm font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-emerald-600 active:scale-[0.97]"
                 >
@@ -650,7 +683,7 @@ const PurchasesWorkspace = () => {
                         {!isCollapsed ? (
                           <div className="mt-2 space-y-2">
                           {section.items.length ? section.items.map((item) => {
-                            const active = selected?.id === item.id && selected?.type === item.type;
+                            const active = !item.preparing && selected?.id === item.id && selected?.type === item.type;
                             const consumables = item.type === 'standalone'
                               ? item.raw
                               : (consumablesByPurchase.get(`${item.type}:${item.id}`) || null);
@@ -658,7 +691,9 @@ const PurchasesWorkspace = () => {
                               <button
                                 key={`${item.type}:${item.id}`}
                                 type="button"
-                                onClick={() => setSelected(item)}
+                                onClick={() => (item.preparing
+                                  ? navigate(`/dashboard/business-case/workspace/${item.id}`)
+                                  : setSelected(item))}
                                 aria-pressed={active}
                                 className={`w-full rounded-2xl border-2 p-3 text-left transition-colors duration-150 active:scale-[0.99] ${
                                   active
@@ -786,6 +821,27 @@ const PurchasesWorkspace = () => {
           </AnimatePresence>
         </section>
       </section>
+
+      <PurchaseTypeSelector
+        isOpen={purchaseTypeSelectorOpen}
+        onClose={() => setPurchaseTypeSelectorOpen(false)}
+        origin="purchases_workspace"
+        onSelect={({ purchaseFamily, purchaseKind, startFrom }) => {
+          if (startFrom === PURCHASE_START_MODE.BUSINESS_CASE_PREFLOW) {
+            startPreflow({ family: purchaseFamily, kind: purchaseKind, origin: 'purchases_workspace' });
+            return;
+          }
+          setPrivatePurchaseKind(purchaseKind);
+        }}
+      />
+
+      <PrivatePurchaseRequestModal
+        isOpen={Boolean(privatePurchaseKind)}
+        initialOfferKind={privatePurchaseKind || 'venta'}
+        hideOfferKindSelector
+        onClose={() => setPrivatePurchaseKind(null)}
+        onSuccess={loadPurchases}
+      />
 
       <Modal
         open={standaloneModalOpen}

@@ -19,6 +19,7 @@ const MANAGER_ROLES = new Set([
   "director", "gerente", "jefe_comercial",
 ]);
 const normalizeRoleToken = (value) => String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+const CRM_LEADS_ALL_ACCESS_ROLE = "crm_leads_all_access";
 const normalizeText = (value) =>
   String(value || "")
     .normalize("NFD")
@@ -443,6 +444,9 @@ const EMPTY_FILTERS = {
 export default function LeadsPage() {
   const { user } = useAuth();
   const isManager = MANAGER_ROLES.has(normalizeRoleToken(user?.role));
+  const canAccessAllLeads = isManager || (Array.isArray(user?.extra_roles) && user.extra_roles
+    .map(normalizeRoleToken)
+    .includes(CRM_LEADS_ALL_ACCESS_ROLE));
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -452,11 +456,11 @@ export default function LeadsPage() {
   const [successMsg, setSuccessMsg] = useState(null);
 
   useEffect(() => {
-    if (!isManager) return;
+    if (!canAccessAllLeads) return;
     getUsers()
       .then((users) => setAdvisors(normalizeUserList(users).filter((u) => ADVISOR_ROLES.has(normalizeRoleToken(u.role)))))
       .catch(() => setAdvisors([]));
-  }, [isManager]);
+  }, [canAccessAllLeads]);
 
   const setFilter = (key) => (e) => { setFilters((f) => ({ ...f, [key]: e.target.value })); setOffset(0); };
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
@@ -549,7 +553,7 @@ export default function LeadsPage() {
             <option key={val} value={val}>{label}</option>
           ))}
         </select>
-        {isManager && (
+        {canAccessAllLeads && (
           <select
             className="border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] bg-white focus:outline-none focus:border-[#2563EB]"
             value={filters.ownerUserId}
@@ -640,7 +644,7 @@ export default function LeadsPage() {
               <th className="px-4 py-3 text-left text-xs font-semibold text-white uppercase tracking-wide hidden sm:table-cell">Empresa</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-white uppercase tracking-wide hidden sm:table-cell">Email</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-white uppercase tracking-wide">Estado</th>
-              {isManager && (
+              {canAccessAllLeads && (
                 <th className="px-4 py-3 text-left text-xs font-semibold text-white uppercase tracking-wide hidden sm:table-cell">Asesor</th>
               )}
               <th className="px-4 py-3 text-left text-xs font-semibold text-white uppercase tracking-wide hidden sm:table-cell">Prioridad</th>
@@ -650,10 +654,10 @@ export default function LeadsPage() {
           </thead>
           <tbody className="divide-y divide-[#E5E7EB]">
             {loading ? (
-              <Skeleton cols={isManager ? 8 : 7} />
+              <Skeleton cols={canAccessAllLeads ? 8 : 7} />
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={isManager ? 8 : 7} className="px-4 py-8 text-center text-sm text-[#6B7280]">
+                <td colSpan={canAccessAllLeads ? 8 : 7} className="px-4 py-8 text-center text-sm text-[#6B7280]">
                   Sin leads
                 </td>
               </tr>
@@ -668,7 +672,7 @@ export default function LeadsPage() {
                   <td className="px-4 py-3">
                     <StatusBadge status={lead.status} />
                   </td>
-                  {isManager && (
+                  {canAccessAllLeads && (
                     <td className="px-4 py-3 text-[#6B7280] hidden sm:table-cell">{lead.owner_name || '—'}</td>
                   )}
                   <td className="px-4 py-3 text-[#6B7280] hidden sm:table-cell">{PRIORITY_LABELS[lead.priority] || lead.priority || '—'}</td>

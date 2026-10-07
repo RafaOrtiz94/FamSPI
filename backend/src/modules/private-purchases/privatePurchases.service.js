@@ -13,7 +13,23 @@ const { createDeliveryEvents } = require('../calendar/calendar.service');
 const { createAllDayEvent } = require("../../utils/calendar");
 const { uploadBase64File, ensureFolder, drive } = require("../../utils/drive");
 const { resolveExternalDriveIntegrity } = require("../../utils/documentHash");
-const { sendAndArchive } = require("../../utils/emailArchive");
+const { sendAndArchive: sendAndArchiveEmail } = require("../../utils/emailArchive");
+const processNotesService = require("../process-notes/processNotes.service");
+
+// Todo correo del expediente queda tambien como nota del proceso (best-effort, nunca lanza).
+const sendAndArchive = async (args) => {
+  const result = await sendAndArchiveEmail(args);
+  await processNotesService.recordOutboundEmail({
+    entityType: "private_purchase",
+    entityId: args.request?.id,
+    author: args.user,
+    to: args.to,
+    cc: args.cc,
+    subject: args.subject,
+    html: args.html,
+  });
+  return result;
+};
 const { renderProviderEmail } = require("../../utils/emailTemplate");
 const { generateDeliveryActPdf } = require("./privatePurchases.acta");
 const businessCaseService = require('../business-case/businessCase.service');

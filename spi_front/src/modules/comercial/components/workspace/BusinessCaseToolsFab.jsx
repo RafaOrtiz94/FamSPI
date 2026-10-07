@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { FiBox, FiCalendar, FiCheck, FiExternalLink, FiFileText, FiSearch, FiTool, FiX } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
 import api from "../../../../core/api";
@@ -18,6 +18,14 @@ import {
  getDeterminationsStatDocumentInfo,
  requestBusinessCaseEnvironmentInspection,
 } from "../../../../core/api/businessCaseApi";
+
+// El tab Disponibilidad del expediente, tal cual; lazy para no cargar el workspace
+// de compras en cada BC que no abre esta herramienta.
+const PurchaseAvailabilityPanel = lazy(() =>
+ import("../../../shared/purchases-workspace/expediente/PurchaseExpedienteDetail").then((m) => ({
+ default: m.PurchaseAvailabilityPanel,
+ })),
+);
 
 // Roles replicados de los gates del backend (privados a sus respectivos
 // archivos, no exportables) — el backend re-valida igual, esto solo evita
@@ -59,7 +67,14 @@ const EMPTY_INSPECTION_FORM = {
  observations: "",
 };
 
-export default function BusinessCaseToolsFab() {
+// linkedPurchaseScope: mismo objeto que resuelve BusinessCaseWorkspace para las
+// notas ({ entityType, entityId }). Con expediente enlazado, la disponibilidad
+// se gestiona en el Workspace de Compras y aqui no se abren consultas paralelas.
+export default function BusinessCaseToolsFab({ linkedPurchaseScope = null }) {
+ const linkedPurchaseType = { public_purchase: "public", private_purchase: "private" }[linkedPurchaseScope?.entityType] || null;
+ const linkedPurchasePath = linkedPurchaseType && linkedPurchaseScope?.entityId
+  ? `/dashboard/purchases/workspace?tab=${linkedPurchaseType}&requestType=${linkedPurchaseType}&requestId=${linkedPurchaseScope.entityId}`
+  : null;
  const { bcId, businessCase } = useBusinessCaseWorkspace();
  const { user } = useAuth();
  const { showToast } = useUI();
@@ -222,7 +237,11 @@ export default function BusinessCaseToolsFab() {
  };
 
  const openPurchasesWorkspace = () => {
- const tab = businessCase?.bc_purchase_type === "comodato_publico" ? "public" : "private";
+ if (linkedPurchasePath) {
+ navigate(linkedPurchasePath);
+ return;
+ }
+ const tab = ["public", "comodato_publico"].includes(businessCase?.bc_purchase_type) ? "public" : "private";
  navigate(`/dashboard/purchases/workspace?tab=${tab}`);
  };
 
@@ -319,7 +338,8 @@ export default function BusinessCaseToolsFab() {
  setActiveTool(null);
  };
 
- const canOpenAvailabilityTool = canRequestAvailability || canManageReservations;
+ // Con expediente enlazado, quien participa en el BC puede seguir la disponibilidad (el backend valida cada accion).
+ const canOpenAvailabilityTool = canRequestAvailability || canManageReservations || Boolean(linkedPurchasePath);
 
  if (!canOpenAvailabilityTool && !canRequestInspection) return null;
 
@@ -382,7 +402,7 @@ export default function BusinessCaseToolsFab() {
  )}
 
  {/* Herramienta: Disponibilidad de equipo */}
- <Modal open={activeTool === "availability"} onClose={closeTool} title="Disponibilidad de equipo" maxWidth="max-w-lg">
+ <Modal open={activeTool === "availability"} onClose={closeTool} title="Disponibilidad de equipo" maxWidth={linkedPurchasePath ? "max-w-5xl" : "max-w-lg"}>
  <div className="space-y-4">
  {loadingReservations ? (
  <p className="text-xs text-slate-500">Cargando reservas activas...</p>
@@ -487,9 +507,12 @@ export default function BusinessCaseToolsFab() {
 
  <div className="border-t border-slate-200 pt-4 space-y-3">
  <p className="text-xs text-slate-600">
- Si necesitas confirmar disponibilidad o pedir que se reserve, envia una solicitud formal a ACP Comercial.
+ {linkedPurchasePath
+ ? "Disponibilidad del proceso: es el mismo flujo del expediente de compras, lo que hagas aqui queda registrado alli."
+ : "Si necesitas confirmar disponibilidad o pedir que se reserve, envia una solicitud formal a ACP Comercial."}
  </p>
- {bcAvailabilityRequests.length > 0 && (
+ {/* Con expediente, las solicitudes previas del BC ya salen dentro del tab embebido. */}
+ {!linkedPurchasePath && bcAvailabilityRequests.length > 0 && (
  <ul className="space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
  {bcAvailabilityRequests.map((r) => (
  <li key={r.id} className="flex items-center justify-between gap-2">
@@ -499,6 +522,24 @@ export default function BusinessCaseToolsFab() {
  ))}
  </ul>
  )}
+ {linkedPurchasePath ? (
+ <>
+ <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+ <Suspense fallback={<p className="p-4 text-xs text-slate-500">Cargando disponibilidad del expediente...</p>}>
+ <PurchaseAvailabilityPanel id={linkedPurchaseScope.entityId} type={linkedPurchaseType} />
+ </Suspense>
+ </div>
+ <button
+ type="button"
+ onClick={openPurchasesWorkspace}
+ className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+ >
+ <FiExternalLink size={14} />
+ Abrir expediente de compras
+ </button>
+ </>
+ ) : (
+ <>
  <label className="space-y-1.5 block">
  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Notas (opcional)</span>
  <textarea
@@ -518,6 +559,8 @@ export default function BusinessCaseToolsFab() {
  <FiCheck size={14} />
  {requestingAvailability ? "Enviando..." : "Solicitar a ACP Comercial"}
  </button>
+ </>
+ )}
  </div>
  </div>
  </Modal>

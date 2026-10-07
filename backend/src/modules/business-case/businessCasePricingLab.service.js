@@ -4,6 +4,8 @@ const registry = require("./matrixCalculationPackages.registry");
 const businessCaseOfferService = require("./businessCaseOffer.service");
 const sheetReader = require("./businessCaseSheetSyncLocal.service");
 const predictiveLabService = require("./businessCasePredictiveLab.service");
+const { executePackage } = require("./matrixCalculationEngine.service");
+const cobasQuantities = require("./calculationPackages/immunoChemistryCobasQuantities.package");
 
 const MATRIX_VERSION = "2024-12-06.1";
 
@@ -471,6 +473,174 @@ function blockedEquipmentResult(equipment, scope, error, extra = {}) {
   };
 }
 
+function normalizeProductCode(value) {
+  const raw = String(value ?? "").trim();
+  return /^\d+$/.test(raw) ? raw.replace(/^0+(?=\d)/, "") : raw;
+}
+
+// Calibradores y controles que la ficha del fabricante vincula a cada reactivo
+// con demanda (catalog_consumable_specs.parameters.linked_products). Sin la
+// tabla (entorno sin migracion 305) no hay vinculos y el calculo lo advierte.
+async function loadReagentLinks(consumptions) {
+  const codes = [...new Set((consumptions || [])
+    .filter((item) => normalizeText(item.item_type) === "reactivo" && toFiniteNumber(item.annual_qty) > 0)
+    .map((item) => normalizeProductCode(item.item_id))
+    .filter(Boolean))];
+  const links = new Map();
+  if (!codes.length) return links;
+  try {
+    const { rows } = await db.query(
+      `SELECT supplier_code, parameters->'linked_products' AS linked
+         FROM catalog_consumable_specs
+        WHERE valid_to IS NULL AND supplier_code = ANY($1::text[])`,
+      [codes],
+    );
+    rows.forEach((row) => {
+      const linked = row.linked || {};
+      links.set(row.supplier_code, [...(linked.calibradores || []), ...(linked.controles || [])].map(normalizeProductCode));
+    });
+  } catch (error) {
+    if (error.code !== "42P01") throw error;
+  }
+  return links;
+}
+
+// El equipo combinado (quimica + inmunologia) usa las dos pestañas del libro. Un
+// consumible que aparece en ambas (copillas, etiquetas, papel) es un mismo
+// producto compartido por los dos analizadores: se entrega una vez, con la mayor
+// de las dos cantidades, y se conservan las celdas de ambas pestañas.
+function collapseSharedProducts(calculatedItems) {
+  const byProduct = new Map();
+  calculatedItems.forEach((item) => {
+    const previous = byProduct.get(item.productId);
+    if (!previous) {
+      byProduct.set(item.productId, { ...item, occurrence: 1 });
+      return;
+    }
+    const winner = Number(item.calculatedQuantity) > Number(previous.calculatedQuantity) ? item : previous;
+    byProduct.set(item.productId, {
+      ...winner,
+      occurrence: 1,
+      sharedAcrossModules: true,
+      sourceCells: [...new Set([...previous.sourceCells, ...item.sourceCells])],
+    });
+  });
+  return [...byProduct.values()];
+}
+
+function buildQuantityEquipmentResult({ equipment, modality, quantityPackage, items, reagentLinks }) {
+  const { packageDefinition, modeledRows, unmodeledRows } = quantityPackage;
+  const scope = { ...packageDefinition.scope, modality: modality || packageDefinition.scope.modality, version: packageDefinition.version };
+
+  // Demanda por producto: el mayor DET/AÑO/PROCESO positivo registrado para el codigo.
+  const demandByCode = new Map();
+  (items || []).forEach((item) => {
+    const code = normalizeProductCode(item.item_id);
+    const demand = toFiniteNumber(item.annual_qty);
+    if (!code || !(demand > 0) || normalizeText(item.item_type) !== "reactivo") return;
+    demandByCode.set(code, Math.max(demandByCode.get(code) || 0, demand));
+  });
+
+  const linkedCodes = new Set();
+  const reagentsWithoutLinks = [];
+  demandByCode.forEach((_demand, code) => {
+    const linked = reagentLinks.get(code);
+    if (!linked || !linked.length) reagentsWithoutLinks.push(code);
+    (linked || []).forEach((linkedCode) => linkedCodes.add(linkedCode));
+  });
+
+  const inputs = { active_quimica: false, active_inmuno: false };
+  const modeledReagentCodes = new Set();
+  modeledRows.forEach((row) => {
+    if (row.block === "reactivo") {
+      const demand = demandByCode.get(row.productId) || 0;
+      inputs[row.inputName] = demand;
+      modeledReagentCodes.add(row.productId);
+      if (demand > 0) inputs[`active_${row.module}`] = true;
+    } else if (row.inputName.startsWith("linked_")) {
+      inputs[row.inputName] = linkedCodes.has(row.productId);
+    }
+  });
+
+  const reagentsOutsidePackage = [...demandByCode.keys()].filter((code) => !modeledReagentCodes.has(code));
+  const warnings = [];
+  if (reagentsOutsidePackage.length) {
+    warnings.push({
+      code: "REAGENT_NOT_IN_AUDITED_SHEET",
+      message: `Reactivos con demanda que no estan en la plantilla auditada (sin cantidad): ${reagentsOutsidePackage.join(", ")}.`,
+    });
+  }
+  if (reagentsWithoutLinks.length) {
+    warnings.push({
+      code: "REAGENT_WITHOUT_LINKED_PRODUCTS",
+      message: `Reactivos con demanda sin calibradores/controles vinculados en su ficha (no generan cantidades para el resto): ${reagentsWithoutLinks.join(", ")}.`,
+    });
+  }
+  const withoutStability = unmodeledRows.filter((row) => row.reason === "MISSING_STABILITY_OR_PRESENTATION").length;
+  if (withoutStability) {
+    warnings.push({
+      code: "ROWS_WITHOUT_STABILITY",
+      message: `${withoutStability} producto(s) de la plantilla no tienen dias de estabilidad o presentacion y quedan sin cantidad.`,
+    });
+  }
+  const iseRows = unmodeledRows.filter((row) => row.reason === "ISE_REQUIRES_VOLUME_RULE").length;
+  if (iseRows) {
+    warnings.push({
+      code: "ISE_NOT_MODELED",
+      message: `Los ${iseRows} productos de electrolitos (ISE) no se calculan: su consumo depende del volumen de muestras y la plantilla solo trae el minimo por estabilidad.`,
+    });
+  }
+
+  const base = {
+    equipmentId: Number(equipment.equipment_id),
+    equipmentName: equipment.equipment_name,
+    equipmentCode: equipment.equipment_code,
+    scope,
+    warnings,
+    inputs: {
+      reagentsWithDemand: demandByCode.size,
+      linkedCalibratorsAndControls: linkedCodes.size,
+      activeChemistry: inputs.active_quimica,
+      activeImmunology: inputs.active_inmuno,
+    },
+    inputEvidence: {
+      demand: { source: "bc_consumption_items.annual_qty (reactivos)" },
+      links: { source: "catalog_consumable_specs.parameters.linked_products" },
+    },
+  };
+
+  if (!demandByCode.size) {
+    return {
+      ...base,
+      status: "blocked",
+      blockers: [{ code: "ANNUAL_DEMAND_MISSING", message: "Ningun reactivo tiene DET/AÑO/PROCESO; no hay base para calcular." }],
+      calculation: null,
+    };
+  }
+
+  try {
+    const calculation = executePackage(packageDefinition, inputs);
+    return {
+      ...base,
+      status: "calculated",
+      blockers: [],
+      calculation: {
+        packageId: calculation.packageId,
+        version: calculation.version,
+        sourceSha256: calculation.sourceSha256,
+        processPrices: extractProcessPrices(calculation.values),
+        items: collapseSharedProducts(
+          // Solo lo que hay que entregar: el resto de la plantilla queda en 0.
+          extractCalculatedItems(calculation, items).filter((item) => Number(item.calculatedQuantity) > 0),
+        ),
+        traceCount: calculation.trace.length,
+      },
+    };
+  } catch (error) {
+    return blockedEquipmentResult(equipment, scope, error, { warnings, inputs: base.inputs, evidence: base.inputEvidence });
+  }
+}
+
 async function buildPreview(businessCaseId, { refreshFromSheet = false } = {}) {
   const data = await loadPricingContext(businessCaseId);
   let sheetSync = { requested: refreshFromSheet, ok: null, readOnly: true };
@@ -513,7 +683,22 @@ async function buildPreview(businessCaseId, { refreshFromSheet = false } = {}) {
     });
   }
 
+  const reagentLinks = await loadReagentLinks(data.consumptions);
+
   const equipmentResults = data.equipment.map((equipment) => {
+    // Inmuno-quimica cobas: formula auditada de cantidades (sin precios), derivada
+    // de los reactivos con demanda. No pasa por las matrices de precios.
+    const quantityPackage = cobasQuantities.getQuantityPackage(equipment.equipment_name);
+    if (quantityPackage) {
+      return buildQuantityEquipmentResult({
+        equipment,
+        modality,
+        quantityPackage,
+        items: data.consumptions.filter((item) => Number(item.equipment_id) === Number(equipment.equipment_id)),
+        reagentLinks,
+      });
+    }
+
     const family = resolveFamily(equipment.category);
     const matrixEquipment = resolveMatrixEquipment(equipment.equipment_name);
     const scope = {
@@ -653,6 +838,7 @@ module.exports = {
     derivePackageInputs,
     extractProcessPrices,
     extractCalculatedItems,
+    buildQuantityEquipmentResult,
     annualQuantitySourceForType,
     readSheetQuantitiesForPreview,
   },

@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 const ctrl = require("./equipmentPurchases.controller");
+const complianceCtrl = require("./purchaseCompliance.controller");
 const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
 const { streamPurchaseUpdates } = require("./purchaseEvents");
@@ -78,12 +79,35 @@ router.get("/stats", verifyToken, requireRole(managerRoles), ctrl.getStats);
 router.get("/active-reservations", verifyToken, requireRole(["acp_comercial", ...managerRoles]), ctrl.getActiveReservations);
 router.get("/freed-reservations", verifyToken, requireRole(["acp_comercial", ...managerRoles]), ctrl.getFreedReservations);
 router.get("/technical-schedule", verifyToken, requireRole(viewerRoles), ctrl.getTechnicalScheduleCalendar);
+router.get("/compliance/shared-documents", verifyToken, requireRole(["acp_comercial"]), complianceCtrl.listSharedDocuments);
+router.post(
+  "/compliance/shared-documents/:documentType",
+  verifyToken,
+  requireRole(["acp_comercial"]),
+  complianceCtrl.upload.single("file"),
+  complianceCtrl.uploadSharedDocument,
+);
 router.get("/", verifyToken, requireRole(viewerRoles), ctrl.listMine);
 router.get("/:id", verifyToken, requireRole(viewerRoles), ctrl.getOne);
 router.get("/:id/timeline", verifyToken, requireRole(viewerRoles), ctrl.getTimeline);
 
 router.post("/", verifyToken, requireRole(creatorRoles), ctrl.create);
 router.post("/provider-contacts", verifyToken, requireRole(managerRoles), ctrl.saveProviderContact);
+router.get("/:id/compliance", verifyToken, requireRole(["acp_comercial"]), complianceCtrl.getCompliance);
+router.patch("/:id/compliance/procedure", verifyToken, requireRole(["acp_comercial"]), complianceCtrl.updateProcedureType);
+router.post(
+  "/:id/compliance/items/:requirementKey/evidence",
+  verifyToken,
+  requireRole(["acp_comercial"]),
+  complianceCtrl.upload.single("file"),
+  complianceCtrl.uploadEvidence,
+);
+router.patch(
+  "/:id/compliance/items/:requirementKey/status",
+  verifyToken,
+  requireRole(["acp_comercial"]),
+  complianceCtrl.updateItemStatus,
+);
 router.use("/:id", verifyToken, requirePurchaseBusinessCaseGate("public"));
 router.post("/:id/start-availability", verifyToken, requireRole(managerRoles), ctrl.startAvailability);
 router.post("/:id/provider-response", verifyToken, requireRole(managerRoles), ctrl.saveProviderResponse);

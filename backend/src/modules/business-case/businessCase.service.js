@@ -448,13 +448,18 @@ async function saveFeasibilityDecision(
           notes: notes || "",
         };
 
+        // "rechazado_falta_informacion" no es una modalidad comercial: escribirlo en
+        // offer_kind viola private_purchase_requests_offer_kind_check y devolvia 500
+        // con la decision ya guardada. En ese caso se conserva la modalidad y el
+        // expediente no pasa a flujo alterno (queda en business_case_rejected).
+        const hasAlternateOfferKind = normalizedFallback !== "rechazado_falta_informacion";
         await db.query(
           `UPDATE private_purchase_requests
-              SET offer_kind = $2,
+              SET offer_kind = COALESCE($2, offer_kind),
                   extra = $3::jsonb,
                   updated_at = NOW()
             WHERE id = $1`,
-          [privatePurchaseId, normalizedFallback, JSON.stringify(privateExtra)],
+          [privatePurchaseId, hasAlternateOfferKind ? normalizedFallback : null, JSON.stringify(privateExtra)],
         );
 
         const { rows: refreshedRows } = await db.query(
@@ -463,6 +468,7 @@ async function saveFeasibilityDecision(
         );
         const currentPrivateStatus = refreshedRows[0]?.status || purchase.status;
         if (
+          hasAlternateOfferKind &&
           PrivatePurchaseStateMachine.canTransition(
             currentPrivateStatus,
             PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE,

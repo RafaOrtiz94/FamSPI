@@ -1,5 +1,5 @@
 import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { FiAlertTriangle } from "react-icons/fi";
 import {
  getBusinessCase,
@@ -135,7 +135,14 @@ const ROLE_FORCE_INVESTMENTS_AFTER_DETERMINATIONS = new Set([
 const BusinessCaseWorkspace = () => {
  const { id: bcId } = useParams();
  const { showToast } = useUI();
- const [selectedSection, setSelectedSection] = useState("general");
+ // ?section=<id> (enlaces de notificaciones) abre el workspace en esa seccion; si el rol no la
+ // ve, la carga del workspace cae a la primera seccion visible.
+ const [searchParams] = useSearchParams();
+ const linkedSection = searchParams.get("section");
+ const [selectedSection, setSelectedSection] = useState(linkedSection || "general");
+ useEffect(() => {
+  if (linkedSection) setSelectedSection(normalizeWorkspaceSection(linkedSection));
+ }, [linkedSection]);
  const [autoEditSection, setAutoEditSection] = useState(null);
  const autoEditInitialized = useRef(false);
  const [businessCase, setBusinessCase] = useState(null);
@@ -629,6 +636,15 @@ const BusinessCaseWorkspace = () => {
  </div>
  )}
  </div>
+ {/* El BC es una herramienta del expediente de compras: retorno siempre visible si hay vinculo. */}
+ {processNotesScope.entityType !== "business_case" && (
+ <Link
+ to={`/dashboard/purchases/workspace?tab=${processNotesScope.entityType === "private_purchase" ? "private" : "public"}&requestType=${processNotesScope.entityType === "private_purchase" ? "private" : "public"}&requestId=${processNotesScope.entityId}`}
+ className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+ >
+ ← Volver al expediente de compras
+ </Link>
+ )}
  </div>
 
  <CaseHeader
@@ -656,7 +672,7 @@ const BusinessCaseWorkspace = () => {
  </ErrorBoundary>
 
  <ErrorBoundary title="Herramientas del Business Case" message="Error en las herramientas flotantes.">
- <BusinessCaseToolsFab />
+ <BusinessCaseToolsFab linkedPurchaseScope={processNotesScope} />
  </ErrorBoundary>
 
  <ErrorBoundary title="Notas del Business Case" message="Error en las notas del proceso.">

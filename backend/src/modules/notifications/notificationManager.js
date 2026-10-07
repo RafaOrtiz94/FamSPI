@@ -1259,6 +1259,19 @@ class NotificationManager {
       ? `<div style="text-align:center; margin:28px 0 24px;">${actionButtons}</div>`
       : "";
 
+    // Detalle opcional (data.detail_rows = [{ label, value }]): tabla bajo el mensaje para
+    // notificaciones que listan cambios item por item.
+    const detailRows = [data?.detail_rows, notification?.meta?.detail_rows, notification?.meta?.data?.detail_rows]
+      .find((rows) => Array.isArray(rows) && rows.length) || [];
+    const detailBlock = detailRows.length
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse; margin:4px 0 8px; border:1px solid #e2e8f0; border-radius:12px;">${detailRows
+        .map((row, index) => `<tr style="background:${index % 2 ? "#f8fafc" : "#ffffff"};">
+          <td style="padding:10px 14px; font-size:14px; font-weight:700; color:#0f172a; border-bottom:1px solid #e2e8f0;">${escapeHtml(normalizeHumanText(row?.label))}</td>
+          <td style="padding:10px 14px; font-size:14px; color:#334155; text-align:right; border-bottom:1px solid #e2e8f0;">${escapeHtml(normalizeHumanText(row?.value))}</td>
+        </tr>`)
+        .join("")}</table>`
+      : "";
+
     return `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -1276,6 +1289,7 @@ class NotificationManager {
     </div>
     <div style="background:#ffffff; padding: 30px 32px;">
       <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#334155;">${escapeHtml(message)}</p>
+      ${detailBlock}
       ${ctaBlock}
       <div style="border-radius:16px; background:#f8fafc; border:1px solid #e2e8f0; padding:14px 16px; margin-top:18px;">
       <p style="margin:0; color:#64748b; font-size:12px; line-height:1.5;">

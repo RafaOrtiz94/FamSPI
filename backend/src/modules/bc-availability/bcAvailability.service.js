@@ -3,6 +3,7 @@ const logger = require("../../config/logger");
 const { sendMail } = require("../../utils/mailer");
 const { renderProviderEmail } = require("../../utils/emailTemplate");
 const { createNotification } = require("../notifications/notifications.service");
+const processNotesService = require("../process-notes/processNotes.service");
 
 const CLOSE_STATUSES = ["confirmed", "rejected", "cu_pending", "import_pending"];
 const SUPPLIER_RESULTS = ["available_new", "available_cu", "import_only", "unavailable"];
@@ -136,11 +137,12 @@ async function sendToSuppliers({ id, user, providerEmails, notes }) {
     user,
   });
 
+  const subject = `Solicitud de disponibilidad - ${request.equipment_name || "Equipo"} (#${request.id})`;
   const sent = [];
   for (const email of emails) {
     const result = await sendMail({
       to: email,
-      subject: `Solicitud de disponibilidad - ${request.equipment_name || "Equipo"} (#${request.id})`,
+      subject,
       html,
       gmailUserId: user?.id,
       from: user?.email,
@@ -152,6 +154,14 @@ async function sendToSuppliers({ id, user, providerEmails, notes }) {
       [id, email, result?.providerThreadId || null],
     );
     sent.push(rows[0]);
+  }
+
+  // Constancia en las notas del proceso (best-effort, nunca lanza): una nota por envio, con todos los proveedores.
+  try {
+    const thread = await processNotesService.resolveBusinessCaseThread(request.business_case_id);
+    await processNotesService.recordOutboundEmail({ ...thread, author: user, to: emails, subject, html });
+  } catch (error) {
+    logger.warn({ error: error?.message, id }, "No se pudo dejar nota del correo de disponibilidad BC");
   }
 
   await db.query(

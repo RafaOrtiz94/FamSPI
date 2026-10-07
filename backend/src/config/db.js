@@ -10,6 +10,9 @@ const { Pool } = require("pg");
 const logger = require("./logger");
 require("dotenv").config();
 
+// Solo actua con NODE_ENV=staging: impide abrir un pool contra produccion desde staging.
+require("./stagingGuard").assertEnvironmentIsolation();
+
 const intFromEnv = (key, fallback) => {
   const value = parseInt(process.env[key], 10);
   return Number.isFinite(value) ? value : fallback;

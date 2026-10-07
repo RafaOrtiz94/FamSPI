@@ -7681,12 +7681,26 @@ const getCollaboratorJustificationsPanel = async (req, res) => {
         [userId, rangeStart, rangeEnd]
       ).catch(() => ({ rows: [] })),
       db.query(
-        `SELECT date, entry_time, entry_pending_regularization
-           FROM user_attendance_records
-          WHERE user_id = $1 AND entry_pending_regularization = TRUE
-            AND ($2::date IS NULL OR date >= $2::date)
-            AND ($3::date IS NULL OR date <= $3::date)
-          ORDER BY date DESC`,
+        `SELECT
+            uar.date,
+            uar.entry_time,
+            uar.entry_pending_regularization,
+            linked_reg.reason,
+            linked_reg.created_at AS request_created_at
+           FROM user_attendance_records uar
+          LEFT JOIN LATERAL (
+            SELECT r.reason, r.created_at
+              FROM attendance_regularizations r
+             WHERE r.affected_user_id = uar.user_id
+               AND r.attendance_date = uar.date
+               AND LOWER(COALESCE(r.regularization_type, '')) = 'missing_clock_in'
+             ORDER BY r.created_at DESC, r.id DESC
+             LIMIT 1
+          ) linked_reg ON TRUE
+          WHERE uar.user_id = $1 AND uar.entry_pending_regularization = TRUE
+            AND ($2::date IS NULL OR uar.date >= $2::date)
+            AND ($3::date IS NULL OR uar.date <= $3::date)
+          ORDER BY uar.date DESC`,
         [userId, rangeStart, rangeEnd]
       ).catch(() => ({ rows: [] })),
       db.query(
@@ -7802,7 +7816,36 @@ const getGlobalRegularizationsPanel = async (req, res) => {
       formalWhere.push(`LOWER(COALESCE(r.regularization_type, '')) = $${formalParams.length}`);
     }
 
-    const [pendingRes, formalRes] = await Promise.all([
+    const historyParams = [];
+    const historyWhere = [
+      "LOWER(COALESCE(r.status, '')) <> 'pending'",
+      "(cp.user_id IS NULL OR (COALESCE(cp.profile->'extra'->>'applicant_source','') <> 'google_forms' AND COALESCE((cp.profile->'extra' ? 'preguntas_adicionales'), false) = false))",
+    ];
+
+    if (search) {
+      historyParams.push(`%${search}%`);
+      const placeholder = `$${historyParams.length}`;
+      historyWhere.push(`(
+        LOWER(COALESCE(affected.fullname, affected.name, affected.email)) LIKE ${placeholder}
+        OR LOWER(COALESCE(affected.email, '')) LIKE ${placeholder}
+        OR LOWER(COALESCE(cp.profile->'personal'->>'cedula', '')) LIKE ${placeholder}
+        OR LOWER(COALESCE(cp.profile->'laboral'->>'cargo', '')) LIKE ${placeholder}
+      )`);
+    }
+    if (startDate) {
+      historyParams.push(startDate);
+      historyWhere.push(`r.attendance_date >= $${historyParams.length}::date`);
+    }
+    if (endDate) {
+      historyParams.push(endDate);
+      historyWhere.push(`r.attendance_date <= $${historyParams.length}::date`);
+    }
+    if (regularizationType) {
+      historyParams.push(regularizationType);
+      historyWhere.push(`LOWER(COALESCE(r.regularization_type, '')) = $${historyParams.length}`);
+    }
+
+    const [pendingRes, formalRes, historyRes] = await Promise.all([
       db.query(
         `SELECT
             uar.user_id,
@@ -7810,6 +7853,7 @@ const getGlobalRegularizationsPanel = async (req, res) => {
             uar.entry_time,
             uar.entry_pending_regularization,
             linked_reg.reason,
+            linked_reg.created_at AS request_created_at,
             linked_reg.requested_timestamp,
             COALESCE(NULLIF(u.fullname, ''), NULLIF(u.name, ''), u.email) AS fullname,
             u.email,
@@ -7822,7 +7866,7 @@ const getGlobalRegularizationsPanel = async (req, res) => {
           LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
           LEFT JOIN departments d ON d.id = u.department_id
           LEFT JOIN LATERAL (
-            SELECT r.reason, r.requested_timestamp
+            SELECT r.reason, r.created_at, r.requested_timestamp
               FROM attendance_regularizations r
              WHERE r.affected_user_id = uar.user_id
                AND r.attendance_date = uar.date
@@ -7855,6 +7899,28 @@ const getGlobalRegularizationsPanel = async (req, res) => {
          ORDER BY r.attendance_date DESC, COALESCE(NULLIF(affected.fullname, ''), NULLIF(affected.name, ''), affected.email) ASC, r.id DESC`,
         formalParams
       ).catch(() => ({ rows: [] })),
+      db.query(
+        `SELECT
+            r.*,
+            uar.entry_time AS registered_entry_time,
+            COALESCE(NULLIF(affected.fullname, ''), NULLIF(affected.name, ''), affected.email) AS affected_name,
+            affected.email AS affected_email,
+            d.name AS department_name,
+            cp.profile->'laboral'->>'cargo' AS cargo,
+            COALESCE(NULLIF(requester.fullname, ''), NULLIF(requester.name, ''), requester.email) AS requester_name,
+            COALESCE(NULLIF(approver.fullname, ''), NULLIF(approver.name, ''), approver.email) AS approver_name
+          FROM attendance_regularizations r
+          INNER JOIN users affected ON affected.id = r.affected_user_id
+          LEFT JOIN user_attendance_records uar
+                 ON uar.user_id = r.affected_user_id AND uar.date = r.attendance_date
+          LEFT JOIN collaborator_profiles cp ON cp.user_id = affected.id
+          LEFT JOIN departments d ON d.id = affected.department_id
+          LEFT JOIN users requester ON requester.id = r.requester_user_id
+          LEFT JOIN users approver ON approver.id = r.approver_user_id
+         WHERE ${historyWhere.join(" AND ")}
+         ORDER BY COALESCE(r.applied_at, r.approved_at, r.rejected_at, r.cancelled_at, r.updated_at, r.created_at) DESC, r.id DESC`,
+        historyParams
+      ).catch(() => ({ rows: [] })),
     ]);
 
     return res.status(200).json({
@@ -7862,9 +7928,11 @@ const getGlobalRegularizationsPanel = async (req, res) => {
       data: {
         pending_entry_regularizations: pendingRes.rows,
         formal_regularizations: formalRes.rows,
+        regularization_history: historyRes.rows,
         summary: {
           pending_entries: pendingRes.rows.length,
           formal_pending: formalRes.rows.length,
+          history_total: historyRes.rows.length,
           total: pendingRes.rows.length + formalRes.rows.length,
         },
       },

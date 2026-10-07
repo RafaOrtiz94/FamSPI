@@ -5,6 +5,7 @@ const PDFDocument = require("pdfkit");
 const { ensureFolder, uploadBase64File, copyTemplate, replaceTags } = require("../../utils/drive");
 const { createAllDayEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
+const processNotesService = require("../process-notes/processNotes.service");
 const { renderProviderEmail } = require("../../utils/emailTemplate");
 const inventarioService = require("../inventario/inventario.service");
 const notificationManager = require("../notifications/notificationManager");
@@ -2139,6 +2140,10 @@ async function sendAndArchive({
     references: threadContext?.lastMessageId || undefined,
   });
   const fileId = await archiveEmail({ html, subject, folderId, prefix, request, actionLabel, user });
+  // Todo correo del expediente queda tambien como nota del proceso (best-effort, nunca lanza).
+  await processNotesService.recordOutboundEmail({
+    entityType: "public_purchase", entityId: request?.id, author: user, to, cc, subject, html,
+  });
   return {
     fileId,
     threadId: sendResult?.providerThreadId || threadContext?.threadId || null,

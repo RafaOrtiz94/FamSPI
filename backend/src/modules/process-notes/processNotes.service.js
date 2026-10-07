@@ -99,12 +99,43 @@ async function listMentionCandidates(entityType) {
   return rows;
 }
 
+// Un expediente de compras nace de un Business Case, y las notas anteriores a su creacion
+// (cierres de seccion, correos) viven en el hilo del BC. Se leen juntas sin moverlas: cada hilo
+// es append-only y tiene su propia cadena de hash.
+async function resolveOriginBusinessCaseId(entityType, entityId) {
+  if (entityType === "business_case") return null;
+  const { table, idColumn } = ENTITY_TABLES[entityType];
+  const { rows } = await db.query(
+    `SELECT business_case_id::text AS business_case_id FROM ${table} WHERE ${idColumn}::text = $1 LIMIT 1`,
+    [String(entityId)],
+  );
+  return rows[0]?.business_case_id || null;
+}
+
+// Busca una nota en el hilo del proceso y, si no esta, en el hilo del BC que lo origino.
+async function findNoteInProcess(noteId, entityType, entityId, columns = "id") {
+  const own = await db.query(
+    `SELECT ${columns} FROM process_notes WHERE id = $1 AND entity_type = $2 AND entity_id = $3 LIMIT 1`,
+    [noteId, entityType, String(entityId)],
+  );
+  if (own.rows[0]) return own.rows[0];
+  const originBusinessCaseId = await resolveOriginBusinessCaseId(entityType, entityId);
+  if (!originBusinessCaseId) return null;
+  const origin = await db.query(
+    `SELECT ${columns} FROM process_notes WHERE id = $1 AND entity_type = 'business_case' AND entity_id = $2 LIMIT 1`,
+    [noteId, originBusinessCaseId],
+  );
+  return origin.rows[0] || null;
+}
+
 async function listNotes(entityType, entityId) {
   assertValidEntityType(entityType);
+  const originBusinessCaseId = await resolveOriginBusinessCaseId(entityType, entityId);
   const { rows } = await db.query(
     `SELECT n.id, n.parent_note_id, n.author_id, n.author_name_snapshot, n.author_role_snapshot,
             n.body, n.mentioned_user_ids, n.note_type, n.email_meta, n.attachments, n.source_communication_id,
             n.note_hash_sha256, n.previous_note_hash_sha256, n.created_at,
+            n.entity_type AS thread_entity_type,
             COALESCE(
               (SELECT jsonb_agg(jsonb_build_object('user_id', r.user_id, 'name', u.fullname, 'read_at', r.read_at) ORDER BY r.read_at ASC)
                  FROM process_note_reads r JOIN users u ON u.id = r.user_id
@@ -112,9 +143,10 @@ async function listNotes(entityType, entityId) {
               '[]'::jsonb
             ) AS read_by
        FROM process_notes n
-      WHERE n.entity_type = $1 AND n.entity_id = $2
-      ORDER BY n.created_at ASC`,
-    [entityType, String(entityId)],
+      WHERE (n.entity_type = $1 AND n.entity_id = $2)
+         OR (n.entity_type = 'business_case' AND n.entity_id = $3)
+      ORDER BY n.created_at ASC, n.id ASC`,
+    [entityType, String(entityId), originBusinessCaseId],
   );
   return rows;
 }
@@ -237,12 +269,7 @@ async function createNote({ entityType, entityId, author, body, parentNoteId = n
 
   let parentNote = null;
   if (parentNoteId) {
-    const { rows } = await db.query(
-      `SELECT id, author_id, author_name_snapshot FROM process_notes
-        WHERE id = $1 AND entity_type = $2 AND entity_id = $3 LIMIT 1`,
-      [parentNoteId, entityType, String(entityId)],
-    );
-    parentNote = rows[0] || null;
+    parentNote = await findNoteInProcess(parentNoteId, entityType, entityId, "id, author_id, author_name_snapshot");
     if (!parentNote) {
       const err = new Error("La nota a la que intentas responder no existe en este proceso.");
       err.status = 404;
@@ -475,6 +502,66 @@ async function sendProcessEmail({ entityType, entityId, author, to, cc = [], sub
   return note;
 }
 
+// Un Business Case y su expediente de compras son el mismo proceso: si el BC ya
+// tiene expediente, su hilo de notas es el del expediente (mismo criterio que
+// usa el frontend del BC); si no, el propio del BC.
+async function resolveBusinessCaseThread(businessCaseId) {
+  const { rows } = await db.query(
+    `SELECT 'public_purchase' AS entity_type, id::text AS entity_id
+       FROM equipment_purchase_requests
+      WHERE business_case_id = $1 AND COALESCE(request_type, 'purchase') = 'purchase'
+     UNION ALL
+     SELECT 'private_purchase', id::text FROM private_purchase_requests WHERE business_case_id = $1
+     LIMIT 1`,
+    [businessCaseId],
+  );
+  return rows[0]
+    ? { entityType: rows[0].entity_type, entityId: rows[0].entity_id }
+    : { entityType: "business_case", entityId: String(businessCaseId) };
+}
+
+// Notas que el sistema deja a nombre del usuario que ejecuto la accion (correo
+// enviado desde un flujo, seccion cerrada). Best-effort: la accion de origen ya
+// fue autorizada por su propia ruta y nunca debe fallar por culpa de la nota.
+async function recordAutomaticNote({ entityType, entityId, author, body, noteType = "note", emailMeta = null }) {
+  try {
+    const text = String(body || "").trim().slice(0, 4000);
+    if (!ENTITY_TYPES.has(entityType) || !entityId || !Number.isInteger(Number(author?.id)) || !text) return null;
+    return await _appendNote({ entityType, entityId, author, body: text, noteType, emailMeta });
+  } catch (error) {
+    logger.warn({ error: error?.message, entityType, entityId }, "No se pudo registrar la nota automatica del proceso");
+    return null;
+  }
+}
+
+async function recordOutboundEmail({ entityType, entityId, author, to, cc, subject, html }) {
+  // Sin validar formato (normalizeEmailList lanza): el correo ya salio, aqui solo se deja constancia.
+  const toList = (value) => (Array.isArray(value) ? value : String(value || "").split(/[,;]/))
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  const recipients = toList(to);
+  const ccList = toList(cc);
+  const text = String(html || "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return recordAutomaticNote({
+    entityType,
+    entityId,
+    author,
+    noteType: "email",
+    emailMeta: { direction: "outbound", to: recipients, cc: ccList, subject: subject || null, attachments: [] },
+    body: [
+      `Correo enviado a: ${recipients.join(", ")}`,
+      ccList.length ? `CC: ${ccList.join(", ")}` : null,
+      subject ? `Asunto: ${subject}` : null,
+      text,
+    ].filter(Boolean).join("\n"),
+  });
+}
+
 // ponytail: "registro de notificados" se resuelve reusando la tabla
 // notifications ya existente (source=process_notes.*) en vez de crear una
 // tabla nueva solo para auditar a quien se le aviso -- ya queda consultable
@@ -528,11 +615,7 @@ function buildTargetPath(entityType, entityId) {
 
 async function markNoteRead(entityType, entityId, noteId, userId) {
   assertValidEntityType(entityType);
-  const { rows } = await db.query(
-    `SELECT id FROM process_notes WHERE id = $1 AND entity_type = $2 AND entity_id = $3 LIMIT 1`,
-    [noteId, entityType, String(entityId)],
-  );
-  if (!rows[0]) {
+  if (!(await findNoteInProcess(noteId, entityType, entityId))) {
     const err = new Error("Nota no encontrada.");
     err.status = 404;
     throw err;
@@ -553,5 +636,8 @@ module.exports = {
   createNote,
   recordInboundEmail,
   sendProcessEmail,
+  resolveBusinessCaseThread,
+  recordAutomaticNote,
+  recordOutboundEmail,
   markNoteRead,
 };

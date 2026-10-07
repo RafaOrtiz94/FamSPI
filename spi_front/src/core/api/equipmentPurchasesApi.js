@@ -56,6 +56,54 @@ export const getEquipmentPurchaseMeta = async () => {
  return data.data || {};
 };
 
+export const getPublicPurchaseCompliance = async (id) => {
+ const { data } = await api.get(`/equipment-purchases/${id}/compliance`);
+ return data.data;
+};
+
+export const updatePublicPurchaseComplianceProcedure = async (id, procedureType) => {
+ const { data } = await api.patch(`/equipment-purchases/${id}/compliance/procedure`, {
+ procedure_type: procedureType,
+ });
+ return data.data;
+};
+
+export const uploadPublicPurchaseComplianceEvidence = async (id, requirementKey, file) => {
+ const body = new FormData();
+ body.append("file", file);
+ const { data } = await api.post(
+ `/equipment-purchases/${id}/compliance/items/${requirementKey}/evidence`,
+ body,
+ { headers: { "Content-Type": "multipart/form-data" } },
+ );
+ return data.data;
+};
+
+export const updatePublicPurchaseComplianceStatus = async (id, requirementKey, status, notes = "") => {
+ const { data } = await api.patch(
+ `/equipment-purchases/${id}/compliance/items/${requirementKey}/status`,
+ { status, notes },
+ );
+ return data.data;
+};
+
+export const listPublicPurchaseSharedDocuments = async () => {
+ const { data } = await api.get("/equipment-purchases/compliance/shared-documents");
+ return data.data || [];
+};
+
+export const uploadPublicPurchaseSharedDocument = async (documentType, file, notes = "") => {
+ const body = new FormData();
+ body.append("file", file);
+ if (notes) body.append("notes", notes);
+ const { data } = await api.post(
+ `/equipment-purchases/compliance/shared-documents/${documentType}`,
+ body,
+ { headers: { "Content-Type": "multipart/form-data" } },
+ );
+ return data.data || [];
+};
+
 export const listEquipmentProviderContacts = async ({ q = "", limit = 50 } = {}) => {
  const { data } = await api.get("/equipment-purchases/provider-contacts", {
  params: { q, limit },

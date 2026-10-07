@@ -56,7 +56,15 @@ Roles:
 - `equipmentPurchases.service.js` (169KB) — muy extenso
 
 ## 5. Base de datos
-- No verificado en DB
+
+Verificado en Neon PostgreSQL el 2026-10-02. El control documental de compras públicas usa:
+
+- `public_purchase_compliance_items`: estado por requisito y compra.
+- `public_purchase_compliance_evidence`: evidencias de Drive y vínculos a documentos reutilizables.
+- `public_purchase_compliance_shared_documents`: biblioteca versionada de documentos habilitantes vigentes.
+- `public_purchase_compliance_events`: trazabilidad de selección de procedimiento, carga y resolución.
+
+La compra relacionada permanece en `equipment_purchase_requests` mediante `purchase_id` UUID.
 
 ## 6. Relaciones
 - `private-purchases`: flujo paralelo para clientes con contrato privado
@@ -79,3 +87,22 @@ Roles:
 ## 9. Notas técnicas
 - Módulo paralelo a `private-purchases` — compras públicas vs. privadas
 - El backend NO tiene versión legacy/vigente separada: es un único set de endpoints vigente. Lo que migró a legacy fue solo el frontend (páginas comerciales viejas → workspace unificado). No existe un módulo backend "purchases-workspace" ni equivalente — el workspace unificado consume literalmente estas mismas rutas.
+
+## 10. Cumplimiento documental de compras públicas
+
+Acceso exclusivo al rol exacto `acp_comercial`; el servicio vuelve a validar el rol para impedir el bypass administrativo general del middleware.
+
+- `GET /compliance/shared-documents`: biblioteca reutilizable vigente.
+- `POST /compliance/shared-documents/:documentType`: crea una nueva versión y conserva el histórico.
+- `GET /:id/compliance`: checklist, progreso, evidencias y trazabilidad.
+- `PATCH /:id/compliance/procedure`: selecciona Ínfima cuantía o Subasta inversa electrónica.
+- `POST /:id/compliance/items/:requirementKey/evidence`: carga evidencia en Drive.
+- `PATCH /:id/compliance/items/:requirementKey/status`: completa, reabre o marca No aplica cuando la regla lo permite.
+
+Reglas verificadas en `purchaseCompliance.rules.js`:
+
+- Ínfima cuantía: obligatorios exactamente 3, 8, 9 y 20.
+- Subasta inversa electrónica: obligatorios del 2 al 20.
+- Póliza de fiel cumplimiento: obligatoria solo sobre USD 70.000.
+- Necesidad de contratación: ítem independiente, no altera la secuencia obligatoria.
+- Documentos habilitantes: ocho archivos separados, reutilizables y versionados.

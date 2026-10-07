@@ -77,6 +77,7 @@ const AttendanceMapView = ({
   rows = [],
   getGeoPoints = (row) => row.geo_points || [],
   selectedUserId,
+  includeOperationalBoundaryPoints = false,
   onMarkerClick: handleMarkerClickProp,
   onProfileClick,
 }) => {
@@ -88,8 +89,11 @@ const AttendanceMapView = ({
    const { isLoaded, loadError } = useGoogleMaps();
 
   const markers = useMemo(() => {
-    return transformToMarkers(rows, getGeoPoints).filter((marker) => !["start", "return"].includes(String(marker?.type || "").toLowerCase()));
-  }, [rows, getGeoPoints]);
+    return transformToMarkers(rows, getGeoPoints).filter((marker) => (
+      includeOperationalBoundaryPoints
+        || !["start", "return"].includes(String(marker?.type || "").toLowerCase())
+    ));
+  }, [rows, getGeoPoints, includeOperationalBoundaryPoints]);
 
   const center = useMemo(() => {
     const coords = markers.map((m) => m.coord);

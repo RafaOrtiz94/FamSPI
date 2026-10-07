@@ -845,9 +845,17 @@ const LEAD_OWNER_ROLES = new Set([
   'backoffice',
 ]);
 const normalizeRoleToken = (value) => String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+const CRM_LEADS_ALL_ACCESS_ROLE = 'crm_leads_all_access';
+
+// Capacidad puntual para supervisar el embudo de Leads sin conceder el resto
+// de privilegios de manager del CRM (reportes, oportunidades, Blue Sheets).
+const canAccessAllLeads = (user) =>
+  isManager(user) || (Array.isArray(user?.extra_roles) && user.extra_roles
+    .map(normalizeRoleToken)
+    .includes(CRM_LEADS_ALL_ACCESS_ROLE));
 
 const canAccessLead = (lead, user) =>
-  isManager(user) || Number(lead?.owner_user_id) === Number(user?.id) || Number(lead?.created_by) === Number(user?.id);
+  canAccessAllLeads(user) || Number(lead?.owner_user_id) === Number(user?.id) || Number(lead?.created_by) === Number(user?.id);
 
 const resolveLeadOwnerId = async (client, ownerUserId, user) => {
   const fallbackOwnerId = Number(user?.id);
@@ -878,7 +886,7 @@ const listLeads = async ({
   const conditions = ['l.deleted_at IS NULL'];
   const params = [];
 
-  if (!isManager(user)) {
+  if (!canAccessAllLeads(user)) {
     params.push(user.id);
     conditions.push(`(l.owner_user_id = $${params.length} OR l.created_by = $${params.length})`);
   } else if (owner_user_id) {
