@@ -69,8 +69,13 @@ function cleanupOldPings(now) {
 async function recordPing({ userId, location, accuracy, operationalTypes, now = Date.now() }) {
   // Number(null) es 0: sin este filtro un cuerpo vacio se guardaria como el punto 0,0.
   const blank = (value) => value === null || value === undefined || value === "";
-  const incomplete = location && typeof location === "object" && (blank(location.lat) || blank(location.lng));
-  const point = incomplete ? null : parseCoordinatePair(location);
+  const separate = location && typeof location === "object";
+  const incomplete = separate && (blank(location.lat) || blank(location.lng));
+  // Un iPhone en español envia los decimales con coma ("-0,9345"): se aceptan en campos separados.
+  const decimal = (value) => String(value).trim().replace(",", ".");
+  const point = incomplete
+    ? null
+    : parseCoordinatePair(separate ? { lat: decimal(location.lat), lng: decimal(location.lng) } : location);
   if (!point) return { tracking: false, stored: false, reason: "invalid_location" };
 
   let exceptionId;

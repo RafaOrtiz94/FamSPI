@@ -36,12 +36,14 @@ Buscar **"Obtener contenido de URL"** y agregarla. Tocar la flecha para ver toda
 | Encabezados | `Authorization` = `Bearer EL_TOKEN_DE_LA_PERSONA` |
 | Cuerpo de la solicitud | `JSON` |
 
-En el cuerpo, agregar dos campos de tipo **Texto**:
+En el cuerpo, agregar dos campos de tipo **Texto**. La clave es solo la palabra indicada, en minúsculas y sin nada más:
 
-| Clave | Valor |
+| Clave (escribir exactamente esto) | Valor |
 |---|---|
 | `lat` | Variable **Ubicación actual**, y en ella elegir **Latitud** |
 | `lng` | Variable **Ubicación actual**, y en ella elegir **Longitud** |
+
+Si la clave lleva otra palabra (por ejemplo "campo lat"), el servidor responde `invalid_location`.
 
 Para elegir Latitud: tocar el campo de valor, elegir la variable **Ubicación actual**, tocar la variable ya insertada y seleccionar **Latitud**. Igual con Longitud.
 

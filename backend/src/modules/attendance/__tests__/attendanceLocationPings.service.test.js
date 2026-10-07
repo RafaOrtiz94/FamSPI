@@ -37,6 +37,15 @@ describe("attendanceLocationPings.recordPing", () => {
     expect(inserts()[0][1]).toEqual([7, 588, -1.2325, -78.6396, 12.5]);
   });
 
+  test("acepta decimales con coma, como los envia un iPhone configurado en español", async () => {
+    activeRows([{ user_id: 7, id: 588 }]);
+    const result = await service.recordPing({
+      userId: 7, location: { lat: "-0,9345", lng: "-78,6157" }, operationalTypes: TYPES, now: NOW,
+    });
+    expect(result).toEqual({ tracking: true, stored: true });
+    expect(inserts()[0][1].slice(2, 4)).toEqual([-0.9345, -78.6157]);
+  });
+
   test("no guarda dos puntos de la misma persona dentro del intervalo minimo", async () => {
     activeRows([{ user_id: 7, id: 588 }]);
     await service.recordPing({ userId: 7, location: "-1.2,-78.6", operationalTypes: TYPES, now: NOW });
