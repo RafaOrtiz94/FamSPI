@@ -81,6 +81,30 @@ const requireAttendanceTeamAccess = (req, res, next) => {
   });
 };
 
+// Ubicacion de quienes estan en salida operacional: jefaturas y gerencia. Decision
+// pendiente de gerencia (docs/plans/ubicacion-salidas-operacionales-plan.md, seccion 8).
+const LIVE_MAP_ROLES = new Set([...TEAM_LEAD_ROLES, "gerencia", "gerencia_general"]);
+
+const requireLiveMapAccess = (req, res, next) => {
+  const roleTokens = [
+    req.user?.role,
+    req.user?.scope,
+    req.user?.role_name,
+    req.user?.rol,
+    ...(Array.isArray(req.user?.roles) ? req.user.roles : []),
+    ...(Array.isArray(req.user?.scopes) ? req.user.scopes : []),
+  ]
+    .map(normalizeRoleToken)
+    .filter(Boolean);
+
+  if (roleTokens.some((role) => LIVE_MAP_ROLES.has(role))) return next();
+  return res.status(403).json({
+    ok: false,
+    code: "ATTENDANCE_LIVE_MAP_FORBIDDEN",
+    message: "Tu rol no puede consultar la ubicacion de salidas operacionales",
+  });
+};
+
 const attendanceReportLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
@@ -128,6 +152,8 @@ const birthdayBenefitUpload = multer({
 
 // 🗣️ Siri Smart Attendance (iPhone Shortcuts)
 router.post("/shortcut/run-smart-mark", verifyToken, attendanceMarkLimiter, shortcutController.runSmartMark);
+// Ubicacion periodica del Atajo: solo se guarda con salida operacional activa.
+router.post("/shortcut/location", verifyToken, attendanceMarkLimiter, controller.recordLocationPing);
 router.post("/shortcut/token", verifyToken, shortcutController.issueToken);
 router.post(
   "/shortcut/admin/token/:userId",
@@ -208,6 +234,8 @@ router.get("/overtime", verifyToken, controller.getOvertimeRecords);
 // Query endpoints
 router.get("/today", verifyToken, controller.getToday);
 router.get("/live-presence", verifyToken, controller.getLivePresence);
+// Con coordenadas: solo jefaturas y gerencia. /live-presence (sin coordenadas) sigue abierta como antes.
+router.get("/live-presence/map", verifyToken, requireLiveMapAccess, attendanceReportLimiter, controller.getLiveMap);
 router.get("/punctuality/summary", verifyToken, controller.getPunctualitySummary);
 router.get("/workspace/overview", verifyToken, controller.getAttendanceWorkspaceOverview);
 router.get("/workspace/breaches", verifyToken, controller.getAttendanceWorkspaceBreaches);

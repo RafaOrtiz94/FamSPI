@@ -12,6 +12,18 @@ Módulo de control de asistencia. Permite a colaboradores marcar entrada/salida,
   - Body: `{ intent: "smart_attendance"|"operational_exit", spoken_input?, continuation_token?, location: "lat,lng" }`
   - Resuelve la marcación correcta según `canonical_flow` de getToday y reusa los handlers existentes vía dispatch interno. Modos de respuesta: `completed` (acción ejecutada), `conversation` (Siri pregunta y reenvía `continuation_token`, JWT stateless TTL 10m ligado al usuario), `handoff` (`open_url` al paso exacto `/asistencia/marcar/:action`), `blocked` (mensaje hablable controlado). Siempre responde HTTP 200 en fallos de negocio para que Shortcuts lea `spoken_message`.
 
+- **POST /api/v1/attendance/shortcut/location** (Atajo de ubicacion)
+  - Controller: `attendance.controller.js → recordLocationPing`
+  - Service: `attendanceLocationPings.service.js`
+  - Middleware: `verifyToken`, `attendanceMarkLimiter`
+  - Body: `{ lat, lng, accuracy? }` o `{ location: "lat,lng" }`. Responde siempre 200 con `{ tracking, stored, reason? }`.
+  - Solo guarda (tabla `attendance_location_pings`, migracion 312) si el usuario tiene una salida operacional activa. Quien tiene salida activa se resuelve desde una lista en memoria renovada cada 2 min: un ping sin salida no toca la base. Maximo un punto por persona cada 4 min; retencion 30 dias. Guia: `docs/user-guides/atajo-ubicacion-ios.md`.
+
+- **GET /api/v1/attendance/live-presence/map**
+  - Controller: `attendance.controller.js → getLiveMap` · Service: `attendanceLiveLocation.service.js`
+  - Middleware: `verifyToken`, `requireLiveMapAccess` (jefaturas y gerencia), `attendanceReportLimiter`
+  - Ultima ubicacion conocida de quienes estan en salida operacional activa: la mas reciente entre las marcaciones (inicio, llegada, salida, regreso, visitas, almuerzo) y el ultimo ping del Atajo. Cada consulta queda auditada (`attendance_live_map_access`).
+
 - **POST /api/v1/attendance/shortcut/token**
   - Controller: `attendanceShortcut.controller.js → issueToken`
   - Middleware: `verifyToken`

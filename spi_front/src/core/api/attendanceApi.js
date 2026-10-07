@@ -590,6 +590,12 @@ export const getAttendanceLivePresence = async () => {
   });
 };
 
+// Sin cache de respaldo a proposito: una ubicacion vieja mostrada como actual es peor que un error.
+export const getAttendanceLiveMap = async () => {
+  const response = await api.get("/attendance/live-presence/map");
+  return { data: response.data?.data || [], generatedAt: response.data?.generated_at || null };
+};
+
 export const getAttendancePunctualitySummary = async () => {
   return getWithCacheFallback({
     endpoint: "/attendance/punctuality/summary",

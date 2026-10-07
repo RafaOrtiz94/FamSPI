@@ -16,14 +16,28 @@ async function recordIssuedToken({ jti, userId, issuedBy, expiresAt }) {
   );
 }
 
+// El Atajo de ubicacion llama cada pocos minutos desde cada iPhone: sin esta
+// memoria cada llamada consultaria la base y la mantendria despierta. Una
+// revocacion tarda como maximo REVOCATION_CACHE_TTL_MS en aplicarse en otras
+// instancias; en la instancia que revoca es inmediata (revokeTokenById).
+const REVOCATION_CACHE_TTL_MS = 5 * 60 * 1000;
+const revocationCache = new Map(); // jti -> { revoked, checkedAt }
+
 async function isTokenRevoked(jti) {
   if (!jti) return false;
+  const cached = revocationCache.get(jti);
+  // Revocado no se revierte: se recuerda sin vencimiento.
+  if (cached && (cached.revoked || Date.now() - cached.checkedAt < REVOCATION_CACHE_TTL_MS)) {
+    return cached.revoked;
+  }
   const { rows } = await db.query(
     `SELECT revoked_at FROM attendance_shortcut_tokens WHERE jti = $1 LIMIT 1`,
     [jti]
   );
   // Fila ausente (tokens emitidos antes de esta migración) = no revocado.
-  return Boolean(rows[0]?.revoked_at);
+  const revoked = Boolean(rows[0]?.revoked_at);
+  revocationCache.set(jti, { revoked, checkedAt: Date.now() });
+  return revoked;
 }
 
 async function listTokensForUser(userId) {
@@ -42,11 +56,12 @@ async function revokeTokenById({ id, revokedBy }) {
     `UPDATE attendance_shortcut_tokens
         SET revoked_at = NOW(), revoked_by = $2
       WHERE id = $1 AND revoked_at IS NULL
-      RETURNING id, user_id`,
+      RETURNING id, user_id, jti`,
     [id, revokedBy || null]
   );
   const row = rows[0] || null;
   if (row) {
+    if (row.jti) revocationCache.set(row.jti, { revoked: true, checkedAt: Date.now() });
     logger.info({ tokenId: id, userId: row.user_id, revokedBy }, "[ATTENDANCE][SHORTCUT] Token revocado");
   }
   return row;
@@ -57,4 +72,6 @@ module.exports = {
   isTokenRevoked,
   listTokensForUser,
   revokeTokenById,
+  REVOCATION_CACHE_TTL_MS,
+  __resetRevocationCacheForTests: () => revocationCache.clear(),
 };

@@ -44,6 +44,7 @@ import {
 import Modal from "../../../core/ui/components/Modal";
 import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
 import AttendanceMapView from "../components/attendance-reports/AttendanceMapView";
+import LiveOperationalMap from "../components/attendance-reports/LiveOperationalMap";
 import { parseCoordinatePair } from "../utils/attendanceGeo";
 import famLogo from "../../../assets/famproject_logo.png";
 
@@ -1653,6 +1654,18 @@ const GENERAL_REGULARIZATION_TYPE_OPTIONS = [
   { value: "offline_sync_adjustment", label: "Ajuste sincronizacion offline" },
 ];
 
+// Mismos roles que el backend (attendance.routes.js, LIVE_MAP_ROLES); el servidor es quien decide.
+const LIVE_MAP_ROLES = new Set([
+  "jefe_comercial", "jefe_tecnico", "jefe_servicio_tecnico", "jefe_ti", "jefe_logistica",
+  "jefe_operaciones", "jefe_talento_humano", "jefe_de_talento_humano", "gerencia", "gerencia_general",
+]);
+
+const canViewLiveMap = (user = {}) => [
+  user.role, user.scope, user.role_name, user.rol,
+  ...(Array.isArray(user.roles) ? user.roles : []),
+  ...(Array.isArray(user.scopes) ? user.scopes : []),
+].map(normalizeToken).some((role) => LIVE_MAP_ROLES.has(role));
+
 const hasExactTalentHumanRole = (user = {}) => [
   user.role,
   user.scope,
@@ -2827,6 +2840,8 @@ const ExpedientePanel = ({ detail, loading, onScheduleMeeting, onDownloadRh, pLa
 const AsistenciaReportes = () => {
   const { user } = useAuth();
   const canManageTelework = hasExactTalentHumanRole(user);
+  const showLiveMap = canViewLiveMap(user);
+  const [liveMapOpen, setLiveMapOpen] = useState(false);
   const [periodMode, setPeriodMode] = useState(PM.MONTH);
   const [dayValue, setDayValue] = useState(todayIso());
   const [monthValue, setMonthValue] = useState(currentMonth());
@@ -2986,6 +3001,16 @@ const AsistenciaReportes = () => {
           <p className="text-xs text-[#6B7280]">{pLabel}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {showLiveMap && (
+            <button
+              type="button"
+              onClick={() => setLiveMapOpen(true)}
+              className="cursor-pointer inline-flex items-center gap-1.5 rounded-[12px] border border-[#BFDBFE] bg-[#EFF6FF] px-3.5 py-2 text-xs font-semibold text-[#1D4ED8]"
+            >
+              <FiMapPin size={12} />
+              Mapa en vivo
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setGeneralRegularizationsOpen(true)}
@@ -3236,6 +3261,12 @@ const AsistenciaReportes = () => {
         open={generalRegularizationsOpen}
         onClose={() => setGeneralRegularizationsOpen(false)}
       />
+      {showLiveMap && (
+        <Modal open={liveMapOpen} onClose={() => setLiveMapOpen(false)} title="Salidas operacionales: última ubicación conocida" maxWidth="max-w-6xl">
+          {/* Montado solo con el modal abierto: no consulta ubicaciones mientras nadie lo mira. */}
+          {liveMapOpen && <LiveOperationalMap />}
+        </Modal>
+      )}
     </div>
   );
 };

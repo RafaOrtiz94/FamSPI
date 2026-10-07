@@ -20,6 +20,8 @@ const { hasReportingAccess } = require("./attendance.auth");
 const { normalizeAttendanceRangeFilters } = require("./attendanceRangeFilters");
 const { buildAttendanceRangeQuery } = require("./attendanceReports.service");
 const { logAttendanceReportAccess } = require("./attendanceAudit.service");
+const attendanceLiveLocationService = require("./attendanceLiveLocation.service");
+const attendanceLocationPingsService = require("./attendanceLocationPings.service");
 const { getRequestContext, computeIdempotencyHash } = require("./attendanceRequestContext.service");
 const {
   getExistingIdempotentResponse,
@@ -4162,6 +4164,61 @@ const getLivePresence = async (req, res) => {
   }
 };
 
+// Ping de ubicacion del Atajo de iPhone. Responde siempre 200 y corto: el Atajo
+// corre solo, a horas fijas, y sin salida operacional activa no se toca la base.
+const recordLocationPing = async (req, res) => {
+  const body = req.body || {};
+  const result = await attendanceLocationPingsService.recordPing({
+    userId: req.user?.id,
+    location: body.location ?? { lat: body.lat ?? body.latitude, lng: body.lng ?? body.longitude },
+    accuracy: body.accuracy,
+    operationalTypes: OPERATIONAL_EXCEPTION_TYPES,
+  });
+  return res.status(200).json({ ok: true, ...result });
+};
+
+// Mapa de quienes estan en salida operacional activa con su ultima ubicacion
+// conocida. Solo jefaturas (ver ruta) y cada consulta queda auditada.
+const getLiveMap = async (req, res) => {
+  try {
+    await ensureOperationalDestinationColumns();
+    const operationalTypes = OPERATIONAL_EXCEPTION_TYPES.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean);
+    const entries = await attendanceLiveLocationService.getLiveMap({ operationalTypes });
+
+    const data = entries.map(({ row, position }) => {
+      const categoryKey = String(row.operational_category || "").trim().toLowerCase();
+      const { statusLabel, statusKey } = buildLivePresenceStatus({
+        visitScope: null,
+        operationalStatus: row.operational_status,
+        operationalCategory: row.operational_category,
+      });
+      return {
+        user_id: Number(row.user_id),
+        display_name: row.display_name || row.email || null,
+        role: row.role || null,
+        operational_category_label: OPERATIONAL_CATEGORY_LABELS[categoryKey] || "Gestion externa",
+        destination_label: row.operational_destination_label || row.description || "Salida operacional",
+        city_label: normalizeOperationalDestinationCity(row.operational_destination_city) || "Sin ciudad",
+        status_label: statusLabel,
+        status_key: statusKey,
+        started_at: row.start_time || null,
+        position,
+      };
+    });
+
+    logAttendanceReportAccess({
+      requester: req.user || {},
+      action: "attendance_live_map_access",
+      result: { total: data.length, filteredTotal: data.filter((item) => item.position).length },
+    });
+
+    return res.status(200).json({ ok: true, data, generated_at: new Date().toISOString() });
+  } catch (err) {
+    logger.error({ err }, "Error obteniendo mapa de salidas operacionales");
+    return res.status(500).json({ ok: false, message: "Error obteniendo el mapa de salidas operacionales" });
+  }
+};
+
 const getUserAttendance = async (req, res) => {
   try {
     const requesterId = Number(req.user?.id || 0);
@@ -8135,6 +8192,8 @@ module.exports = {
   getActiveException,
   getToday,
   getLivePresence,
+  getLiveMap,
+  recordLocationPing,
   getPunctualitySummary,
   getUserAttendance,
   getRange,
