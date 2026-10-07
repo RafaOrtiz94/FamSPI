@@ -1656,8 +1656,8 @@ const GENERAL_REGULARIZATION_TYPE_OPTIONS = [
 
 // Mismos roles que el backend (attendance.routes.js, LIVE_MAP_ROLES); el servidor es quien decide.
 const LIVE_MAP_ROLES = new Set([
-  "jefe_comercial", "jefe_tecnico", "jefe_servicio_tecnico", "jefe_ti", "jefe_logistica",
-  "jefe_operaciones", "jefe_talento_humano", "jefe_de_talento_humano", "gerencia", "gerencia_general",
+  "talento_humano", "jefe_talento_humano", "jefe_de_talento_humano", "analista_talento_humano",
+  "asistente_talento_humano", "auxiliar_talento_humano", "rh", "rrhh", "gerencia_general", "gerente_general",
 ]);
 
 const canViewLiveMap = (user = {}) => [

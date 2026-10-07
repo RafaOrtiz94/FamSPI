@@ -21,7 +21,7 @@ Módulo de control de asistencia. Permite a colaboradores marcar entrada/salida,
 
 - **GET /api/v1/attendance/live-presence/map**
   - Controller: `attendance.controller.js → getLiveMap` · Service: `attendanceLiveLocation.service.js`
-  - Middleware: `verifyToken`, `requireLiveMapAccess` (jefaturas y gerencia), `attendanceReportLimiter`
+  - Middleware: `verifyToken`, `requireLiveMapAccess` (solo Talento Humano y Gerencia General), `attendanceReportLimiter`
   - Ultima ubicacion conocida de quienes estan en salida operacional activa: la mas reciente entre las marcaciones (inicio, llegada, salida, regreso, visitas, almuerzo) y el ultimo ping del Atajo. Cada consulta queda auditada (`attendance_live_map_access`).
 
 - **POST /api/v1/attendance/shortcut/token**

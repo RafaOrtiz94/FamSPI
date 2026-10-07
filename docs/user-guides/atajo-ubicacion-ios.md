@@ -6,7 +6,7 @@ Esta guía es para TI. Explica cómo dejar configurado en un iPhone el Atajo que
 
 - Envía la ubicación del iPhone al SPI a las horas que se configuren.
 - El SPI **solo la guarda si la persona tiene una salida operacional activa**. Fuera de una salida, la descarta sin guardarla.
-- Jefaturas y gerencia ven el último punto en **Asistencia Reportes > Mapa en vivo**.
+- Talento Humano y Gerencia General ven el último punto en **Asistencia Reportes > Mapa en vivo**. Nadie más tiene acceso.
 - No rastrea de forma continua: hay un punto por cada vez que corre el Atajo.
 
 ## Antes de empezar
