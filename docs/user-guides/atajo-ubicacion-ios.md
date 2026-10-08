@@ -64,7 +64,7 @@ Para ver qué respondió el servidor, agregar temporalmente la acción **"Mostra
 | Respuesta | Significado |
 |---|---|
 | `"tracking": true, "stored": true` | Guardado. |
-| `"tracking": false, "reason": "no_active_exit"` | No hay salida operacional activa. Es lo normal fuera de una salida. |
+| `"tracking": false, "reason": "no_active_exit"` | No hay salida operacional activa. Es lo normal fuera de una salida. Una salida recién iniciada tarda hasta 30 segundos en reconocerse. |
 | `"stored": false, "reason": "too_soon"` | Ya se guardó un punto hace menos de 4 minutos. |
 | `"reason": "invalid_location"` | No llegaron latitud y longitud. Revisar los campos del cuerpo. |
 | `"code": "TOKEN_REVOKED"` o error 401/403 | Token revocado, vencido o mal copiado. Generar uno nuevo. |

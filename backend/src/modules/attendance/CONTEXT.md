@@ -17,7 +17,7 @@ Módulo de control de asistencia. Permite a colaboradores marcar entrada/salida,
   - Service: `attendanceLocationPings.service.js`
   - Middleware: `verifyToken`, `attendanceMarkLimiter`
   - Body: `{ lat, lng, accuracy? }` o `{ location: "lat,lng" }`. Responde siempre 200 con `{ tracking, stored, reason? }`.
-  - Solo guarda (tabla `attendance_location_pings`, migracion 312) si el usuario tiene una salida operacional activa. Quien tiene salida activa se resuelve desde una lista en memoria renovada cada 2 min: un ping sin salida no toca la base. Maximo un punto por persona cada 4 min; retencion 30 dias. Guia: `docs/user-guides/atajo-ubicacion-ios.md`.
+  - Solo guarda (tabla `attendance_location_pings`, migracion 312) si el usuario tiene una salida operacional activa. Quien tiene salida activa se resuelve desde una lista en memoria renovada cada 30 s: un ping sin salida no toca la base. Maximo un punto por persona cada 4 min; retencion 30 dias. Guia: `docs/user-guides/atajo-ubicacion-ios.md`.
 
 - **GET /api/v1/attendance/live-presence/map**
   - Controller: `attendance.controller.js → getLiveMap` · Service: `attendanceLiveLocation.service.js`

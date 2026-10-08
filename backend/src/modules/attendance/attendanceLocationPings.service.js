@@ -8,20 +8,23 @@ const { parseCoordinatePair } = require("./attendanceGeo.utils");
  * El Atajo corre en el telefono a horas fijas, tenga o no una salida operacional
  * la persona. Para que eso no despierte ni cargue la base de datos:
  *   - quien tiene salida activa se resuelve desde una lista en memoria, renovada
- *     con UNA consulta cada ACTIVE_CACHE_TTL_MS; un ping sin salida no toca la base;
+ *     con UNA consulta cada ACTIVE_CACHE_TTL_MS (y solo si llegan pings); el resto
+ *     de pings sin salida no toca la base;
  *   - con salida activa se guarda como maximo un punto por persona cada
  *     MIN_STORE_INTERVAL_MS (los demas se descartan en memoria);
  *   - los puntos viejos se borran solos (RETENTION_DAYS).
  */
 
-const ACTIVE_CACHE_TTL_MS = 2 * 60 * 1000;
+// 30 s: quien inicia una salida y prueba el Atajo enseguida no debe recibir "sin salida".
+// La lista solo se renueva cuando llega un ping, asi que son como mucho 2 consultas por minuto.
+const ACTIVE_CACHE_TTL_MS = 30 * 1000;
 const MIN_STORE_INTERVAL_MS = 4 * 60 * 1000;
 const RETENTION_DAYS = Number(process.env.ATTENDANCE_LOCATION_PINGS_RETENTION_DAYS) || 30;
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const UNDEFINED_TABLE = "42P01";
 
 // ponytail: cache por instancia. Con varias instancias cada una hace su propia
-// consulta cada 2 min y una salida recien iniciada tarda hasta 2 min en verse;
+// consulta cada 30 s y una salida recien iniciada tarda hasta 30 s en verse;
 // si eso pesa, invalidar al marcar inicio/cierre o mover la lista a Redis.
 let activeByUser = new Map();
 let activeLoadedAt = 0;
