@@ -1,5 +1,6 @@
-import React, { useState, useContext } from "react";
-import { FiCreditCard, FiUserPlus, FiUsers, FiBriefcase, FiUser } from "react-icons/fi";
+import React, { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { FiCreditCard, FiUserPlus, FiUsers, FiBriefcase, FiUser, FiBox } from "react-icons/fi";
 import { getClientRequests } from "../../../../core/api/requestsApi";
 import Modal from "../../../../core/ui/components/Modal";
 import Button from "../../../../core/ui/components/Button";
@@ -8,14 +9,20 @@ import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVaca
 import RequestStatWidget from "../../../shared/solicitudes/components/RequestStatWidget";
 import RequestsListModal from "../../../shared/solicitudes/components/RequestsListModal";
 import BaseSolicitudesView from "../../../shared/solicitudes/BaseSolicitudesView";
-import { useUI } from "../../../../core/ui/useUI";
-import { AuthContext } from "../../../../core/auth/AuthContext";
+import BcAvailabilityPanel from "./BcAvailabilityPanel";
 
 const ACPComercialSolicitudesView = () => {
  // UI States
- const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
+ const [, setShowPurchaseHandoff] = useState(false);
  const [showPermisoModal, setShowPermisoModal] = useState(false);
  const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
+ const [showAvailabilityPanel, setShowAvailabilityPanel] = useState(false);
+ const [searchParams] = useSearchParams();
+
+ // Enlace de la notificacion a ACP (?disponibilidad=<id>) abre el panel directo
+ useEffect(() => {
+ if (searchParams.get('disponibilidad')) setShowAvailabilityPanel(true);
+ }, [searchParams]);
 
  // View Modal State
  const [viewType, setViewType] = useState(null);
@@ -34,7 +41,9 @@ const ACPComercialSolicitudesView = () => {
 
  const handleWidgetClick = (widget) => {
  console.log('FASE6: handleWidgetClick called with widget:', widget.id);
- if (widget.id === 'compras') {
+ if (widget.id === 'disponibilidad_equipo') {
+ setShowAvailabilityPanel(true);
+ } else if (widget.id === 'compras') {
  console.log('FASE6: Opening NEW purchase type modal for compras widget');
  // ✅ NUEVO: Usar la nueva funcionalidad del dashboard
  setShowPurchaseTypeModal(true);
@@ -84,6 +93,12 @@ const ACPComercialSolicitudesView = () => {
  color: 'orange',
  type: 'vacaciones',
  initialFilters: { mine: true }
+ },
+ {
+ id: 'disponibilidad_equipo',
+ title: 'Solicitudes de Disponibilidad',
+ icon: FiBox,
+ color: 'blue'
  }
  ];
 
@@ -187,6 +202,8 @@ const ACPComercialSolicitudesView = () => {
  open={showPermisoModal}
  onClose={() => setShowPermisoModal(false)}
  />
+
+ <BcAvailabilityPanel open={showAvailabilityPanel} onClose={() => setShowAvailabilityPanel(false)} />
 
  {/* MODAL LISTADO DE SOLICITUDES */}
  <RequestsListModal

@@ -369,12 +369,6 @@ const SolicitudesPage = () => {
               <div className="p-3 bg-indigo-100 rounded-xl">
                 <FiClipboard className="text-indigo-600" size={28} />
               </div>
-              <div>
-                <h1 className="text-3xl font-bold text-slate-900">Solicitudes</h1>
-                <p className="text-slate-600 mt-1">
-                  {roleConfig.isACP ? 'Gestión ACP - Solicitudes y requerimientos' : 'Gestión comercial - Solicitudes y seguimiento'}
-                </p>
-              </div>
             </div>
 
             <div className="flex items-center gap-4">

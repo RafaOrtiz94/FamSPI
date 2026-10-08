@@ -53,7 +53,7 @@ export const revokeExternalAccess = async (id) => {
   return data;
 };
 
-export default {
+const auditPrepApi = {
   getAuditStatus,
   updateAuditStatus,
   listAuditSections,
@@ -66,3 +66,5 @@ export default {
   addExternalAccess,
   revokeExternalAccess,
 };
+
+export default auditPrepApi;

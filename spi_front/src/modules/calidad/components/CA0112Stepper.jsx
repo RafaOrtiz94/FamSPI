@@ -13,13 +13,6 @@ export default function CA0112Stepper({ record, onClose }) {
   const currentStatus = useMemo(() => record?.status || "pending", [record]);
   const activeStepIndex = useMemo(() => steps.findIndex(s => s.key === currentStatus), [currentStatus]);
 
-  const getStepIndex = (result) => {
-    if (result === 'approved') return 3;
-    if (result === 'conditionally_approved') return 2;
-    if (result === 'failed') return 1;
-    return 0;
-  };
-
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">

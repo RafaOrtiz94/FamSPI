@@ -1,0 +1,1730 @@
+{
+  "generatedAt": "2026-10-07",
+  "counts": {
+    "sin_control_visible": 12,
+    "usa_identidad_del_usuario": 101,
+    "valida_rol_o_permiso": 42,
+    "guarda_propia_en_ruta": 20
+  },
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/api/documents/:documentId/sign",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "signature",
+      "handler": "(anonima)",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/signature/documents/:documentId/sign",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "signature",
+      "handler": "(anonima)",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/admin/apply-entry-regularization",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "applyEntryRegularization",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/admin/collaborator/:userId/birthday-benefit/qr",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "generateCollaboratorBirthdayBenefitQr",
+      "manual": null
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/attendance/admin/late-justification/:id",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "updateLateJustification",
+      "manual": {
+        "verdict": "valida rol",
+        "note": "El controlador exige hasHrDashboardAccess y responde 403. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/birthday-benefit/:token/evidence",
+      "verdict": "sin_control_visible",
+      "evidence": "ni el controlador ni las funciones que llama mencionan rol o usuario",
+      "module": "attendance",
+      "handler": "submitBirthdayBenefitEvidence",
+      "manual": {
+        "verdict": "valida propiedad",
+        "note": "El servicio aplica assertCanAccessOwnBenefit: solo el dueno del beneficio o quien administra cumpleanos. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/birthday-benefit/:token/redeem",
+      "verdict": "sin_control_visible",
+      "evidence": "ni el controlador ni las funciones que llama mencionan rol o usuario",
+      "module": "attendance",
+      "handler": "redeemBirthdayBenefit",
+      "manual": {
+        "verdict": "valida propiedad",
+        "note": "El servicio aplica assertCanAccessOwnBenefit. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/clock-in",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockIn",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/clock-in-lunch",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockInLunch",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/clock-out",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockOut",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/clock-out-lunch",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockOutLunch",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/exception",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "registerException",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/exception/status",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "updateExceptionStatus",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/late-justification",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "justifyLateArrival",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/location-sync",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "syncLocation",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/almuerzo-entrada",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockInLunch",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/almuerzo-entrada-operacional",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockInOperationalLunch",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/almuerzo-salida",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockOutLunch",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/almuerzo-salida-operacional",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockOutOperationalLunch",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/cierre-viaje",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockCloseTrip",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/cliente-entrada",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockInField",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/cliente-salida",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockOutField",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/entrada",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockIn",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/entrada-campo",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockInOperational",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/entrada-imprevista",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockInUnexpected",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/entrada-oficina",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockInOperational",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/llegada-destino",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockInDestino",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/llegada-imprevista",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockUnexpectedArrival",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/regreso-imprevisto",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockInUnexpected",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/retorno-imprevisto",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockUnexpectedReturn",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/salida",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockOut",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/salida-campo",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockOutOperational",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/salida-imprevista",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockOutUnexpected",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/salida-oficina",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockOutOperational",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/visita-entrada",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockInField",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/marcar/visita-salida",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "clockOutField",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/non-compliance/:userId/schedule-meeting",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "scheduleAttendanceFollowUpMeeting",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/overtime",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "markOvertime",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/period/:periodKey/status",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "transition",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/permission-entry-start",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "startPermissionEntry",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/permission-exit-finish",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "finishPermissionExit",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/regularizations",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "create",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/regularizations/:id/status",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "transition",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/regularize-entry",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "requestEntryRegularization",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/shortcut/location",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "recordLocationPing",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/shortcut/run-smart-mark",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "runSmartMark",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/shortcut/token",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "issueToken",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/telework/requests",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "attendance",
+      "handler": "create",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/attendance/telework/requests/:id/decision",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requireExactTalentHumanRole",
+      "module": "attendance",
+      "handler": "decide",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/audit-prep/documents/:id/status",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "auditPrep.controller.js → updateDocumentStatus()",
+      "module": "audit-prep",
+      "handler": "(anonima)",
+      "manual": {
+        "verdict": "valida rol",
+        "note": "El servicio aplica assertAllowedSection contra los roles permitidos de la seccion. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/audit-prep/documents/upload",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "auditPrep.controller.js → updateDocumentStatus()",
+      "module": "audit-prep",
+      "handler": "(anonima)",
+      "manual": {
+        "verdict": "valida rol",
+        "note": "El servicio aplica assertAllowedSection. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/change-password",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "auth",
+      "handler": "changePassword",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "verdict": "sin_control_visible",
+      "evidence": "ni el controlador ni las funciones que llama mencionan rol o usuario",
+      "module": "auth",
+      "handler": "logout",
+      "manual": {
+        "verdict": "no aplica",
+        "note": "Cierra la sesion del propio token; no requiere rol. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/lopdp/accept",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "auth",
+      "handler": "acceptInternalLopdp",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/business-case/:id/investments/values",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "controlador",
+      "module": "business-case",
+      "handler": "saveInvestmentValues",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/business-case/:id/investments/values/:catalogId/quotation-files",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "business-case",
+      "handler": "uploadInvestmentQuotationFile",
+      "manual": null
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/business-case/:id/investments/values/quotation-files/:fileId",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "investments.service.js → removeQuotationFile()",
+      "module": "business-case",
+      "handler": "removeInvestmentQuotationFile",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/business-case/:id/investments/values/sync-sheet",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "controlador",
+      "module": "business-case",
+      "handler": "syncInvestmentValuesSheet",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/business-case/:id/pricing-lab/preview",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requirePricingLabTi",
+      "module": "business-case",
+      "handler": "preview",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/business-case/matrix-calculations/preview",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requirePricingLabTi",
+      "module": "business-case",
+      "handler": "preview",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/clients/:id/visit-status",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "clients.service.js → upsertVisitStatus()",
+      "module": "clients",
+      "handler": "setVisitStatus",
+      "manual": {
+        "verdict": "valida propiedad",
+        "note": "El servicio responde 403 si el cliente no fue creado por el usuario ni le esta asignado. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/clients/prospect-visit",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "clients.service.js → upsertProspectVisit()",
+      "module": "clients",
+      "handler": "registerProspectVisit",
+      "manual": {
+        "verdict": "limitado al propio usuario",
+        "note": "Crea o actualiza solo visitas cuyo user_email es el del usuario. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/famdays/configurators",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "famdays.service.js → assertCanAdmin()",
+      "module": "famdays",
+      "handler": "setConfigurators",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/famdays/events",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "famdays.service.js → assertCanConfigure()",
+      "module": "famdays",
+      "handler": "createEvent",
+      "manual": null
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/famdays/events/:eventId",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "famdays.service.js → assertCanConfigure()",
+      "module": "famdays",
+      "handler": "deleteEvent",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/famdays/events/:eventId",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "famdays.service.js → assertCanConfigure()",
+      "module": "famdays",
+      "handler": "updateEvent",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/famdays/events/:eventId/presentations",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "famdays.service.js → assertCanConfigure()",
+      "module": "famdays",
+      "handler": "createPresentation",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/famdays/events/:eventId/qr/regenerate",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "famdays.service.js → assertCanConfigure()",
+      "module": "famdays",
+      "handler": "regenerateEventQr",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/famdays/events/:eventId/questions",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requireFamDaysAccess",
+      "module": "famdays",
+      "handler": "createEventQuestion",
+      "manual": null
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/famdays/presentations/:presentationId",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "famdays.service.js → assertCanConfigure()",
+      "module": "famdays",
+      "handler": "deletePresentation",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/famdays/presentations/:presentationId",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "famdays.service.js → assertCanConfigure()",
+      "module": "famdays",
+      "handler": "updatePresentation",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/famdays/presentations/:presentationId/questions",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requireFamDaysAccess",
+      "module": "famdays",
+      "handler": "createQuestion",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/famdays/questions/:questionId/answer",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "famdays.service.js → assertCanConfigure()",
+      "module": "famdays",
+      "handler": "answerQuestion",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/famdays/questions/:questionId/hide",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "famdays.service.js → assertCanConfigure()",
+      "module": "famdays",
+      "handler": "hideQuestion",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/famdays/questions/:questionId/highlight",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "famdays.service.js → assertCanConfigure()",
+      "module": "famdays",
+      "handler": "highlightQuestion",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/famdays/questions/:questionId/moderate",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "famdays.service.js → assertCanConfigure()",
+      "module": "famdays",
+      "handler": "moderateQuestion",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/famdays/questions/:questionId/rate-aporte",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requireFamDaysAccess",
+      "module": "famdays",
+      "handler": "rateAporte",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/gmail-context/communications",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "gmail-context",
+      "handler": "register",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/gmail-context/communications/:id/auto-link",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "gmail-context",
+      "handler": "autoLink",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/gmail-context/communications/:id/link",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "gmail-context",
+      "handler": "link",
+      "manual": null
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/gmail/auth/revoke",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "gmail",
+      "handler": "(anonima)",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/gmail/send",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "gmail",
+      "handler": "(anonima)",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/hiring-pipeline/my-test-assignments/:entryId/confirm",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "hiring-pipeline",
+      "handler": "confirmTestDate",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/hiring-pipeline/my-test-assignments/:entryId/result",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "hiring-pipeline",
+      "handler": "submitTestResult",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/kickoff/presentations/:presentationId/blocks/next",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requirePresenterOrAdmin",
+      "module": "kickoff",
+      "handler": "nextBlock",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/kickoff/presentations/:presentationId/blocks/previous",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requirePresenterOrAdmin",
+      "module": "kickoff",
+      "handler": "prevBlock",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/kickoff/presentations/:presentationId/finish",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requirePresenterOrAdmin",
+      "module": "kickoff",
+      "handler": "finishPresentation",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/kickoff/presentations/:presentationId/qr/regenerate",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requirePresenterOrAdmin",
+      "module": "kickoff",
+      "handler": "regenerateQr",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/kickoff/presentations/:presentationId/questions",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requireKickoffAccess",
+      "module": "kickoff",
+      "handler": "createQuestion",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/kickoff/presentations/:presentationId/start",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requirePresenterOrAdmin",
+      "module": "kickoff",
+      "handler": "startPresentation",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/kickoff/questions/:questionId/answer",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requireReportAccess",
+      "module": "kickoff",
+      "handler": "moderateQuestion",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/kickoff/questions/:questionId/approve",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requireQuestionModerator",
+      "module": "kickoff",
+      "handler": "moderateQuestion",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/kickoff/questions/:questionId/hide",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requireQuestionModerator",
+      "module": "kickoff",
+      "handler": "moderateQuestion",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/kickoff/questions/:questionId/highlight",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requireQuestionModerator",
+      "module": "kickoff",
+      "handler": "moderateQuestion",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/kickoff/questions/:questionId/moderate",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requireQuestionModerator",
+      "module": "kickoff",
+      "handler": "moderateQuestion",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/kickoff/questions/:questionId/rate",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requireKickoffAccess",
+      "module": "kickoff",
+      "handler": "rateQuestion",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/kickoff/questions/:questionId/rate-aporte",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requireKickoffAccess",
+      "module": "kickoff",
+      "handler": "rateAporte",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/kickoff/tiebreaker/rounds/:roundId/vote",
+      "verdict": "guarda_propia_en_ruta",
+      "evidence": "middleware requireKickoffAccess",
+      "module": "kickoff",
+      "handler": "castTiebreakerVote",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/notifications",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "notifications",
+      "handler": "create",
+      "manual": null
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/notifications/:id",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "notifications",
+      "handler": "remove",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/notifications/:id/read",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "notifications",
+      "handler": "markRead",
+      "manual": null
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/notifications/clear",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "notifications",
+      "handler": "clear",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/notifications/push/subscribe",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "notifications",
+      "handler": "subscribePush",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/notifications/push/unsubscribe",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "notifications",
+      "handler": "unsubscribePush",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/notifications/read-all",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "notifications",
+      "handler": "markAll",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/permisos",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "permisos.service.js → assertRequesterCanCreateTimeOff()",
+      "module": "permisos",
+      "handler": "create",
+      "manual": {
+        "verdict": "limitado al propio usuario",
+        "note": "Crea la solicitud a nombre del usuario y aplica assertRequesterCanCreateTimeOff. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/permisos/:id/aprobar-final",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "permisos",
+      "handler": "aprobarFinal",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/permisos/:id/aprobar-parcial",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "permisos",
+      "handler": "aprobarParcial",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/permisos/:id/cancelar",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "permisos.service.js → cancelarSolicitud()",
+      "module": "permisos",
+      "handler": "cancelar",
+      "manual": {
+        "verdict": "valida propiedad",
+        "note": "Solo el solicitante o su aprobador; en otro caso 403. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/permisos/:id/cancelar/revisar",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "permisos.service.js → revisarCancelacionSolicitud()",
+      "module": "permisos",
+      "handler": "revisarCancelacion",
+      "manual": {
+        "verdict": "valida rol",
+        "note": "Solo el aprobador asignado o quien pueda aprobar; en otro caso 403. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/permisos/:id/justificantes",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "permisos.service.js → subirJustificantes()",
+      "module": "permisos",
+      "handler": "uploadJustificantes",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/permisos/:id/justificantes/revisar",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "permisos.service.js → revisarJustificante()",
+      "module": "permisos",
+      "handler": "revisarJustificantes",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/permisos/:id/rechazar",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "permisos",
+      "handler": "rechazar",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/permisos/:id/recovery-plan",
+      "verdict": "sin_control_visible",
+      "evidence": "ni el controlador ni las funciones que llama mencionan rol o usuario",
+      "module": "permisos",
+      "handler": "updateRecoveryPlan",
+      "manual": {
+        "verdict": "valida propiedad",
+        "note": "Solo el solicitante o el aprobador. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/permisos/:id/regularizar",
+      "verdict": "sin_control_visible",
+      "evidence": "ni el controlador ni las funciones que llama mencionan rol o usuario",
+      "module": "permisos",
+      "handler": "resolverRegularizacion",
+      "manual": {
+        "verdict": "valida rol",
+        "note": "Solo Talento Humano o administracion; en otro caso 403. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/permisos/:id/regularizar/convertir-vacaciones",
+      "verdict": "sin_control_visible",
+      "evidence": "ni el controlador ni las funciones que llama mencionan rol o usuario",
+      "module": "permisos",
+      "handler": "convertirAVacaciones",
+      "manual": {
+        "verdict": "deshabilitado",
+        "note": "La funcion siempre responde 409: la conversion a vacaciones esta apagada. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/permisos/estudios/matricula",
+      "verdict": "sin_control_visible",
+      "evidence": "ni el controlador ni las funciones que llama mencionan rol o usuario",
+      "module": "permisos",
+      "handler": "registerStudyEnrollment",
+      "manual": {
+        "verdict": "limitado al propio usuario",
+        "note": "Registra la matricula del propio usuario. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/permisos/estudios/matriculas/:id/revisar",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "permisos",
+      "handler": "reviewStudyEnrollment",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/personnel-requests/:id/comments",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "personnel-requests",
+      "handler": "addComment",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/process-notes/:entityType/:entityId",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "processNotes.service.js → assertUserHasEntityTypeAccess()",
+      "module": "process-notes",
+      "handler": "(anonima)",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/process-notes/:entityType/:entityId/:noteId/read",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "processNotes.service.js → assertUserHasEntityTypeAccess()",
+      "module": "process-notes",
+      "handler": "(anonima)",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/process-notes/:entityType/:entityId/email",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "processNotes.service.js → assertUserHasEntityTypeAccess()",
+      "module": "process-notes",
+      "handler": "(anonima)",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/requests/new-client",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "requests",
+      "handler": "(anonima)",
+      "manual": null
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/requests/new-client/:id",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "requests",
+      "handler": "(anonima)",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/requests/new-client/consent-token",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "requests.controller.js → createRequest()",
+      "module": "requests",
+      "handler": "(anonima)",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/requests/new-client/consent-token/verify",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "requests.controller.js → createRequest()",
+      "module": "requests",
+      "handler": "(anonima)",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/signature-workflows",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "signatureWorkflows.validation.js → validateCreateWorkflowPayload()",
+      "module": "signature-workflows",
+      "handler": "(anonima)",
+      "manual": {
+        "verdict": "abierto por diseno",
+        "note": "Cualquier usuario autenticado puede crear un flujo de firma; queda como su creador. Confirmar con el responsable si debe restringirse. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/signature-workflows/:id/cancel",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "signatureWorkflows.controller.js → validateSignerProfiles()",
+      "module": "signature-workflows",
+      "handler": "(anonima)",
+      "manual": {
+        "verdict": "valida propiedad",
+        "note": "ensureCanManageWorkflow: solo el creador o un administrador. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/signature-workflows/:id/send",
+      "verdict": "sin_control_visible",
+      "evidence": "ni el controlador ni las funciones que llama mencionan rol o usuario",
+      "module": "signature-workflows",
+      "handler": "(anonima)",
+      "manual": {
+        "verdict": "valida propiedad",
+        "note": "ensureCanManageWorkflow. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/signature-workflows/:id/signers/:signerId/correct-placement",
+      "verdict": "sin_control_visible",
+      "evidence": "ni el controlador ni las funciones que llama mencionan rol o usuario",
+      "module": "signature-workflows",
+      "handler": "(anonima)",
+      "manual": {
+        "verdict": "valida propiedad",
+        "note": "ensureCanViewWorkflow, ensureSignerOwnership y ensureCanManageWorkflow. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/signature-workflows/:id/signers/:signerId/open",
+      "verdict": "sin_control_visible",
+      "evidence": "ni el controlador ni las funciones que llama mencionan rol o usuario",
+      "module": "signature-workflows",
+      "handler": "(anonima)",
+      "manual": {
+        "verdict": "valida propiedad",
+        "note": "ensureCanViewWorkflow y ensureSignerOwnership: solo el firmante de ese paso. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/signature-workflows/:id/signers/:signerId/reassign",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "signature-workflows",
+      "handler": "(anonima)",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/signature-workflows/:id/signers/:signerId/reject",
+      "verdict": "sin_control_visible",
+      "evidence": "ni el controlador ni las funciones que llama mencionan rol o usuario",
+      "module": "signature-workflows",
+      "handler": "(anonima)",
+      "manual": {
+        "verdict": "valida propiedad",
+        "note": "ensureCanViewWorkflow y ensureSignerOwnership. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/signature-workflows/:id/signers/:signerId/sign",
+      "verdict": "sin_control_visible",
+      "evidence": "ni el controlador ni las funciones que llama mencionan rol o usuario",
+      "module": "signature-workflows",
+      "handler": "(anonima)",
+      "manual": {
+        "verdict": "valida propiedad",
+        "note": "ensureCanViewWorkflow y ensureSignerOwnership: nadie firma por otro. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/signature-workflows/validate-signer-profiles",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "signatureWorkflows.controller.js → validateSignerProfiles()",
+      "module": "signature-workflows",
+      "handler": "(anonima)",
+      "manual": {
+        "verdict": "HALLAZGO: sin control",
+        "note": "Cualquier usuario autenticado puede enviar una lista de IDs y recibir correo, nombre completo y que datos de perfil le faltan a cada uno (nombres, apellidos, cedula, cargo). No valida rol ni relacion con esos usuarios. Severidad baja: expone datos de perfil incompletos. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/signature/documents/:documentId/sign",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "signature",
+      "handler": "(anonima)",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/suggestion-box/submissions",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "suggestionBox.service.js → createSubmission()",
+      "module": "suggestion-box",
+      "handler": "(anonima)",
+      "manual": {
+        "verdict": "abierto por diseno",
+        "note": "Buzon de sugerencias: cualquier usuario interno puede enviar. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/support-tickets",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "support-tickets",
+      "handler": "create",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/support-tickets/:id/close",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "supportTickets.service.js → closeTicketByRequester()",
+      "module": "support-tickets",
+      "handler": "closeByRequester",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/support-tickets/:id/comments",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "supportTickets.service.js → getTicketForActor()",
+      "module": "support-tickets",
+      "handler": "addComment",
+      "manual": {
+        "verdict": "valida propiedad",
+        "note": "Solo el solicitante, el tecnico asignado o TI; en otro caso 403. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/support-tickets/:id/reopen",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "supportTickets.service.js → reopenTicket()",
+      "module": "support-tickets",
+      "handler": "reopen",
+      "manual": {
+        "verdict": "valida propiedad",
+        "note": "Solo el dueno del ticket o TI; en otro caso 403. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/support-tickets/:id/satisfaction",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "supportTickets.service.js → rateTicketSatisfaction()",
+      "module": "support-tickets",
+      "handler": "rateSatisfaction",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/me/certifications",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "user-certifications",
+      "handler": "createMyCertification",
+      "manual": null
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/users/me/certifications/:certId",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "user-certifications",
+      "handler": "deleteMyCertification",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/me/certifications/bulk",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "user-certifications",
+      "handler": "createMyBulkCertifications",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/me/profile",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "user-profile",
+      "handler": "createMine",
+      "manual": null
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/users/me/profile",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "user-profile",
+      "handler": "updateMine",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/me/profile/documents",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "controlador",
+      "module": "user-profile",
+      "handler": "uploadMyDocument",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/vacaciones",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "vacaciones.service.js → assertRequesterCanCreateTimeOff()",
+      "module": "vacaciones",
+      "handler": "create",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/vacaciones/:id/cancel",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "vacaciones.service.js → cancelVacationRequest()",
+      "module": "vacaciones",
+      "handler": "cancel",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/vacaciones/:id/cancel/review",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "vacaciones.service.js → cancelVacationRequest()",
+      "module": "vacaciones",
+      "handler": "reviewCancel",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/vacaciones/:id/dates",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "vacaciones.service.js → updateVacationDates()",
+      "module": "vacaciones",
+      "handler": "updateDates",
+      "manual": null
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/vacaciones/:id/status",
+      "verdict": "valida_rol_o_permiso",
+      "evidence": "vacaciones.service.js → updateVacationStatus()",
+      "module": "vacaciones",
+      "handler": "updateStatus",
+      "manual": null
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/work-management/boards/:boardId/groups",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "createGroup",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/work-management/checklist-items/:checklistItemId",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "deleteChecklistItem",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/work-management/checklist-items/:checklistItemId",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "updateChecklistItem",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/work-management/groups/:groupId/items",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "createItem",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/work-management/items/:itemId",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "deleteItem",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/work-management/items/:itemId",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "updateItem",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/work-management/items/:itemId/assignees",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "updateItemAssignees",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/work-management/items/:itemId/attachments",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "uploadItemAttachment",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/work-management/items/:itemId/checklist-items",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "createChecklistItem",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/work-management/items/:itemId/comments",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "createItemComment",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/work-management/items/:itemId/reorder",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "reorderItem",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/work-management/items/:itemId/supporters",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "addItemSupporter",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/work-management/items/:itemId/supporters/:supporterUserId",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "removeItemSupporter",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/work-management/projects/:projectId",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "deleteProject",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/work-management/projects/:projectId/boards",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "createBoard",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/work-management/projects/from-opportunity/:opportunityId",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "createProjectFromOpportunity",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/work-management/workspaces",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "createWorkspace",
+      "manual": {
+        "verdict": "abierto por diseno",
+        "note": "Cualquier usuario autenticado puede crear un espacio de trabajo y queda como su dueno. Confirmar con el responsable. Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/work-management/workspaces/:workspaceId",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "deleteWorkspace",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/work-management/workspaces/:workspaceId",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "updateWorkspace",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/work-management/workspaces/:workspaceId/members",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "addWorkspaceMember",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/work-management/workspaces/:workspaceId/members/:memberUserId",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "removeWorkspaceMember",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/work-management/workspaces/:workspaceId/projects",
+      "verdict": "usa_identidad_del_usuario",
+      "evidence": "workManagement.controller.js → getUserId()",
+      "module": "work-management",
+      "handler": "createProject",
+      "manual": {
+        "verdict": "valida pertenencia",
+        "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+      }
+    }
+  ]
+}

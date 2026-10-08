@@ -2,7 +2,8 @@ FROM node:20-slim
 
 WORKDIR /app
 
-COPY package*.json ./
+# Capa apt ANTES de copiar package.json: no depende de nada del repo, asi el
+# cache de esta capa (la mas lenta) sobrevive a cualquier cambio de codigo.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
   && install -d /usr/share/postgresql-common/pgdg \
@@ -13,6 +14,8 @@ RUN apt-get update \
   && apt-get update \
   && apt-get install -y --no-install-recommends postgresql-client-17 \
   && rm -rf /var/lib/apt/lists/*
+
+COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY . .

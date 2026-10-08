@@ -53,4 +53,18 @@ const getApplicantById = async (req, res) => {
   }
 };
 
-module.exports = { importApplicant, listApplicants, getApplicantById };
+const syncApplicantsFromSheet = async (req, res) => {
+  try {
+    const result = await service.syncApplicantsFromSheet();
+    logger.info({ result }, "Sync manual de postulantes desde Google Sheet");
+    return res.status(200).json({ ok: true, data: result });
+  } catch (err) {
+    logger.error({ err }, "Error sincronizando postulantes desde Google Sheet");
+    return res.status(err.status || 500).json({
+      ok: false,
+      message: err.message || "Error sincronizando postulantes desde el formulario",
+    });
+  }
+};
+
+module.exports = { importApplicant, listApplicants, getApplicantById, syncApplicantsFromSheet };

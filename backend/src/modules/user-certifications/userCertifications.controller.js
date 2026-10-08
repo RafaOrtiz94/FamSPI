@@ -49,10 +49,25 @@ const collectRequesterRoles = (user = {}) => {
   return roles;
 };
 
+const parseCertificationPayload = (rawBody = {}) => {
+  const nextBody = { ...rawBody };
+  if (typeof nextBody.metadata === 'string') {
+    try {
+      nextBody.metadata = JSON.parse(nextBody.metadata);
+    } catch (_error) {
+      const err = new Error('Metadata invalida');
+      err.status = 400;
+      throw err;
+    }
+  }
+  return nextBody;
+};
+
 // POST /api/v1/users/me/certifications
 const createMyCertification = async (req, res) => {
   try {
-    const { error, value } = certificationSchema.validate(req.body);
+    const parsedBody = parseCertificationPayload(req.body);
+    const { error, value } = certificationSchema.validate(parsedBody);
     if (error) {
       return res.status(400).json({
         ok: false,

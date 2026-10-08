@@ -5,57 +5,57 @@
 ## 1. Inventario y Análisis de Origen (Oracle)
 
 ### Fase 1: Auditoría de tablas Oracle
-- [x] `MIGR-01-T01`: Ejecutar auditoríaOracle con `audit_gui.py` para identificar tablas de negocio (91 tablas)
-- [x] `MIGR-01-T02`: Documentar estructura de tablas Oracle (SCHEMA, FK, índices)
-- [x] `MIGR-01-T03`: Identificar tablas sin datos relevantes para migration
+- [ ] `MIGR-01-T01`: Ejecutar auditoríaOracle con `audit_gui.py` para identificar tablas de negocio y relacionadas para realizar la migracion a la base de odoo 
+- [ ] `MIGR-01-T02`: Documentar estructura de tablas Oracle (SCHEMA, FK, índices)
+- [ ] `MIGR-01-T03`: Identificar tablas sin datos relevantes para migration
 
 ### Fase 2: Análisis de datos Oracle
-- [x] `MIGR-01-T04`: Obtener conteos de partners/clientes en Oracle
-- [x] `MIGR-01-T05`: Obtener conteos de productos en Oracle  
-- [x] `MIGR-01-T06`: Obtener conteos de pedidos/órdenes de venta en Oracle
+- [ ] `MIGR-01-T04`: Obtener conteos de partners/clientes en Oracle
+- [ ] `MIGR-01-T05`: Obtener conteos de productos en Oracle  
+- [ ] `MIGR-01-T06`: Obtener conteos de pedidos/órdenes de venta en Oracle
 
 ## 2. Configuración del Entorno
 
 ### Fase 3: Prerrequisitos
-- [x] `MIGR-02-T01`: Verificar Oracle SQL*Plus disponible en PATH
-- [x] `MIGR-02-T02`: Verificar Python 3.10+ con psycopg2-binary
-- [x] `MIGR-02-T03`: Verificar conexión PostgreSQL a Odoo
-- [x] `MIGR-02-T04`:	Configurar credenciales en migrate_oracle_to_odoo_erp.py
-- [x] `MIGR-02-T05`:	Crear backup de base Odoo con pg_dump
+- [ ] `MIGR-02-T01`: Verificar Oracle SQL*Plus disponible en PATH
+- [ ] `MIGR-02-T02`: Verificar Python 3.10+ con psycopg2-binary
+- [ ] `MIGR-02-T03`: Verificar conexión PostgreSQL a Odoo
+- [ ] `MIGR-02-T04`:	Configurar credenciales en migrate_oracle_to_odoo_erp.py
+- [ ] `MIGR-02-T05`:	Crear backup de base Odoo con pg_dump
 
 ## 3. Migración de Datos Principales
 
 ### Fase 4: Partners y Contactos
-- [x] `MIGR-03-T01`: Migrar clientes (res.partner con customer_rank)
-- [x] `MIGR-03-T02`: Migrar proveedores (res.partner con supplier_rank)
-- [x] `MIGR-03-T03`: Migrar contactos y direcciones
-- [x] `MIGR-03-T04`: Validar conteos post-migración partners
+- [ ] `MIGR-03-T01`: Migrar clientes (res.partner con customer_rank)
+- [ ] `MIGR-03-T02`: Migrar proveedores (res.partner con supplier_rank)
+- [ ] `MIGR-03-T03`: Migrar contactos y direcciones
+- [ ] `MIGR-03-T04`: Validar conteos post-migración partners
 
 ### Fase 5: Productos y Catálogo
-- [x] `MIGR-04-T01`: Migrar productos (product.product + product.template)
-- [x] `MIGR-04-T02`: Migrar categorías de productos
-- [x] `MIGR-04-T03`: Migrar precios de venta (product.pricelist)
-- [x] `MIGR-04-T04`: Migrar precios de compra
-- [x] `MIGR-04-T05`: Validar productos sin precios (generar informe)
+- [ ] `MIGR-04-T01`: Migrar productos (product.product + product.template)
+- [ ] `MIGR-04-T02`: Migrar categorías de productos
+- [ ] `MIGR-04-T03`: Migrar precios de venta (product.pricelist)
+- [ ] `MIGR-04-T04`: Migrar precios de compra
+- [ ] `MIGR-04-T05`: Validar productos sin precios (generar informe)
 
 ### Fase 6: Inventory y Stock
-- [x] `MIGR-05-T01`: Migrar ubicaciones de almacén (stock.location)
-- [x] `MIGR-05-T02`: Migrar lotes de inventario
-- [x] `MIGR-05-T03`: Migrar cuantidades en stock (stock.quant)
-- [x] `MIGR-05-T04`: Validar stock por ubicación
+- [ ] `MIGR-05-T01`: Migrar ubicaciones de almacén (stock.location)
+- [ ] `MIGR-05-T02`: Migrar lotes de inventario
+- [ ] `MIGR-05-T03`: Migrar cuantidades en stock (stock.quant)
+- [ ] `MIGR-05-T04`: Validar stock por ubicación
 
 ## 4. Procesos de Negocio
 
 ### Fase 7: Pedidos y Ventas
-- [x] `MIGR-06-T01`: Migrar órdenes de venta (sale.order)
-- [x] `MIGR-06-T02`: Migrar líneas de venta (sale.order.line)
-- [x] `MIGR-06-T03`: Migrar presupuestos/quotations
-- [x] `MIGR-06-T04`: Validar estado de pedidos
+- [ ] `MIGR-06-T01`: Migrar órdenes de venta (sale.order)
+- [ ] `MIGR-06-T02`: Migrar líneas de venta (sale.order.line)
+- [ ] `MIGR-06-T03`: Migrar presupuestos/quotations
+- [ ] `MIGR-06-T04`: Validar estado de pedidos
 
 ### Fase 8: Compras
-- [x] `MIGR-07-T01`: Migrar órdenes de compra (purchase.order)
-- [x] `MIGR-07-T02`: Migrar líneas de compra (purchase.order.line)
-- [x] `MIGR-07-T03`: Migrar recibos de entrada (stock.picking)
+- [ ] `MIGR-07-T01`: Migrar órdenes de compra (purchase.order)
+- [ ] `MIGR-07-T02`: Migrar líneas de compra (purchase.order.line)
+- [ ] `MIGR-07-T03`: Migrar recibos de entrada (stock.picking)
 
 ### Fase 9: Contabilidad
 - [ ] `MIGR-08-T01`: Migrar account.journal (diarios)

@@ -1,0 +1,2606 @@
+{
+  "generated_at": "2026-07-22T19:20:52.167Z",
+  "source": "backend/src/modules/*/__tests__/*.test.js (extraccion automatica, no manual)",
+  "module_count": 54,
+  "total_module_dirs": 61,
+  "modules_with_tests": 54,
+  "modules_without_tests": 0,
+  "total_test_cases": 333,
+  "high_risk_modules_without_tests": [],
+  "excluded_empty_modules": [],
+  "dead_modules": [
+    {
+      "module": "logistica",
+      "reason": "Ruteador huerfano: depende de `auth/auth.middleware` (inexistente) y no esta montado en registerRoutes. Codigo muerto."
+    },
+    {
+      "module": "operaciones",
+      "reason": "Ruteador huerfano: depende de `auth/auth.middleware` (inexistente) y no esta montado en registerRoutes. Codigo muerto."
+    },
+    {
+      "module": "tecnico",
+      "reason": "Ruteador huerfano: depende de `auth/auth.middleware` (inexistente) y no esta montado en registerRoutes. Codigo muerto."
+    }
+  ],
+  "out_of_scope_modules": [
+    {
+      "module": "famdays",
+      "reason": "Iniciativa interna auxiliar de bajo riesgo, sin impacto en cumplimiento ni datos criticos (DQ §7)."
+    },
+    {
+      "module": "kickoff",
+      "reason": "Portal auxiliar de arranque, sin datos regulados centrales (DQ §7)."
+    },
+    {
+      "module": "public-delivery-plans",
+      "reason": "Portal publico de consulta, sin autorizaciones ni datos criticos GxP (DQ §7)."
+    },
+    {
+      "module": "world-cup-2026",
+      "reason": "Portal promocional temporal (predicciones 2026), sin impacto en datos regulados ni autorizaciones (DQ §7)."
+    }
+  ],
+  "in_development_modules": [
+    {
+      "module": "calidad",
+      "note": "Modulo en desarrollo activo (lineas CA0101-CA0117); funcionalidad y alcance en evolucion. Validacion provisional, sujeta a re-evaluacion al estabilizarse."
+    }
+  ],
+  "modules": {
+    "applicants": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/applicants/__tests__/applicants.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-APPLICANTS-001",
+          "description": "calculateAge — devuelve cadena vacia para fecha ausente o invalida",
+          "test_file": "backend/src/modules/applicants/__tests__/applicants.helpers.test.js",
+          "test_line": 10
+        },
+        {
+          "req_id": "REQ-APPLICANTS-002",
+          "description": "calculateAge — calcula una edad plausible para una fecha pasada",
+          "test_file": "backend/src/modules/applicants/__tests__/applicants.helpers.test.js",
+          "test_line": 14
+        },
+        {
+          "req_id": "REQ-APPLICANTS-003",
+          "description": "normalizePhone — deja solo digitos",
+          "test_file": "backend/src/modules/applicants/__tests__/applicants.helpers.test.js",
+          "test_line": 21
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "approvals": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/approvals/__tests__/approvals.service.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-APPROVALS-001",
+          "description": "approvals.service listPending — applies explicit approver visibility while preserving legacy unassigned requests",
+          "test_file": "backend/src/modules/approvals/__tests__/approvals.service.test.js",
+          "test_line": 27
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "attendance": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+        "backend/src/modules/attendance/__tests__/attendance.service.test.js",
+        "backend/src/modules/attendance/__tests__/attendanceReports.service.test.js",
+        "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-ATTENDANCE-001",
+          "description": "attendance flow separation — blocks unexpected exit start when operational flow is active",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 39
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-002",
+          "description": "attendance flow separation — blocks operational exit start when unexpected flow is active",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 62
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-003",
+          "description": "attendance flow separation — registers operational exit successfully",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 92
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-004",
+          "description": "attendance flow separation — returns operational cycle as active when user starts it again on another day",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 141
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-005",
+          "description": "attendance flow separation — registers operational return successfully",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 178
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-006",
+          "description": "attendance flow separation — closes operational trip from outside office and also closes the regular day",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 214
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-007",
+          "description": "attendance flow separation — registers unexpected exit successfully",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 259
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-008",
+          "description": "attendance flow separation — registers unexpected return successfully",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 285
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-009",
+          "description": "attendance flow separation — registers field visit entry successfully for prospect",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 314
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-010",
+          "description": "attendance flow separation — registers field visit exit successfully for prospect",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 352
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-011",
+          "description": "attendance flow separation — accepts explicit post visit action when closing field visit",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 379
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-012",
+          "description": "attendance flow separation — rejects invalid post visit action when closing field visit",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 413
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-013",
+          "description": "attendance flow separation — returns LOCATION_REQUIRED_RETRY when location is missing in clock-in",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 435
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-014",
+          "description": "attendance flow separation — blocks clock-in when user has active approved time off",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 455
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-015",
+          "description": "attendance flow separation — blocks lunch start when there is no entry",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 483
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-016",
+          "description": "attendance flow separation — blocks lunch return when lunch start was not marked",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 511
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-017",
+          "description": "attendance flow separation — blocks day exit when entry was not marked",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 533
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-018",
+          "description": "attendance flow separation — blocks day exit when it happens a few seconds after entry",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 555
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-019",
+          "description": "attendance flow separation — requires type and description for registerException",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 592
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-020",
+          "description": "attendance flow separation — returns invalid status when updating exception with unsupported state",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 610
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-021",
+          "description": "attendance flow separation — allows operational destination exit to continue with active status",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 631
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-022",
+          "description": "attendance flow separation — blocks generic completion of an operational flow without final evidence",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 654
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-023",
+          "description": "attendance flow separation — blocks field visit entry for users without field role",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 674
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-024",
+          "description": "attendance flow separation — returns 404 when closing field visit with no active visit",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 692
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-025",
+          "description": "attendance flow separation — returns 200 when client visit was already closed recently (idempotent close)",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 723
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-026",
+          "description": "attendance flow separation — falls back when client_assignments table is missing and still registers client visit entry",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 756
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-027",
+          "description": "attendance flow separation — falls back to legacy insert when optional client visit columns are missing",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 796
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-028",
+          "description": "attendance flow separation — continues field visit entry when schedules table is missing",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 835
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-029",
+          "description": "attendance flow separation — returns 400 when client_id is invalid in field visit entry",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 872
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-030",
+          "description": "attendance flow separation — returns 400 when client_id is invalid in field visit exit",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 898
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-031",
+          "description": "attendance flow separation — falls back to latest active client visit (today/yesterday) when strict date close does not match",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 921
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-032",
+          "description": "attendance flow separation — ignores missing schedules table when closing active client visit",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 955
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-033",
+          "description": "attendance flow separation — keeps the operational exception ON_SITE (does not force ACTIVE) when a client visit closes with continue_operation",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 996
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-034",
+          "description": "attendance flow separation — getToday never reports a late arrival for a user who has not clocked in yet",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 1031
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-035",
+          "description": "attendance flow separation — getToday still reports a real late arrival once entry_time exists",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 1053
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-036",
+          "description": "attendance flow separation — does not auto-close today",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 1093
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-037",
+          "description": "attendance flow separation — does not mirror entry_time from an operational exit that starts before the official workday",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 1147
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-038",
+          "description": "attendance flow separation — blocks closing the operation (clockInOperational) while a client visit is still open",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 1190
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-039",
+          "description": "attendance flow separation — blocks closing the trip (clockCloseTrip) while a client visit is still open",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.controller.flows.test.js",
+          "test_line": 1222
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-040",
+          "description": "attendance.service RH-09 helpers — maps RH-09 day fields by template row position when field names are crossed",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.service.test.js",
+          "test_line": 29
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-041",
+          "description": "attendance.service RH-09 helpers — uses official non-working day labels for weekend and vacations",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.service.test.js",
+          "test_line": 52
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-042",
+          "description": "attendance.service RH-09 helpers — prints VAC-{ID} in hour cells for approved vacation days",
+          "test_file": "backend/src/modules/attendance/__tests__/attendance.service.test.js",
+          "test_line": 68
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-043",
+          "description": "attendanceReports.service permission enrichment — adds permission exit and return marks for hourly approved permissions",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceReports.service.test.js",
+          "test_line": 14
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-044",
+          "description": "attendanceReports.service permission enrichment — uses emergency label for emergency permissions",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceReports.service.test.js",
+          "test_line": 41
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-045",
+          "description": "attendanceReports.service permission enrichment — does not create permission marks for vacations or permissions without hourly range",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceReports.service.test.js",
+          "test_line": 61
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-046",
+          "description": "resolveSmartMark — flujo normal — sin entrada registrada ejecuta clockIn y responde mensaje hablable",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 58
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-047",
+          "description": "resolveSmartMark — flujo normal — jornada completa responde día cerrado sin marcar",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 71
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-048",
+          "description": "resolveSmartMark — flujo normal — falta de GPS se traduce a mensaje hablable controlado",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 80
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-049",
+          "description": "resolveSmartMark — flujo normal — sin nombre reconocible, el mensaje queda capitalizado sin saludo",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 90
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-050",
+          "description": "resolveSmartMark — conversación operacional — intent operacional sin flujo activo inicia conversación de categoría",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 101
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-051",
+          "description": "resolveSmartMark — conversación operacional — categoría cliente pregunta tipo de visita",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 111
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-052",
+          "description": "resolveSmartMark — conversación operacional — prospecto pide nombre y luego vehículo; sin vehículo ejecuta salida operacional",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 119
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-053",
+          "description": "resolveSmartMark — conversación operacional — vehículo personal deriva a handoff con URL de captura",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 141
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-054",
+          "description": "resolveSmartMark — conversación operacional — cronograma deriva a handoff",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 155
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-055",
+          "description": "resolveSmartMark — flujo operacional activo — salida marcada sin llegada ejecuta llegada-destino",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 170
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-056",
+          "description": "resolveSmartMark — flujo operacional activo — cierre con vehículo personal (falta foto km final) deriva a handoff exacto",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 185
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-057",
+          "description": "resolveSmartMark — flujo operacional activo — visita a cliente activa pregunta si continua a otro cliente o regresa a oficina",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 198
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-058",
+          "description": "resolveSmartMark — flujo operacional activo — responde ",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 213
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-059",
+          "description": "resolveSmartMark — flujo operacional activo — prospecto nuevo tras cerrar visita: se marca por voz, sin UI",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 226
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-060",
+          "description": "resolveSmartMark — flujo operacional activo — cronograma/emergencia para el siguiente cliente sigue siendo handoff (selección compleja)",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 244
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-061",
+          "description": "resolveSmartMark — flujo operacional activo — responde ",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 253
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-062",
+          "description": "resolveSmartMark — flujo operacional activo — al llegar al destino (sin almuerzo aun) pregunta cliente/almuerzo/cierre",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 265
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-063",
+          "description": "resolveSmartMark — flujo operacional activo — responde ",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 280
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-064",
+          "description": "resolveSmartMark — flujo operacional activo — estando a almuerzo (salida marcada, sin regreso): re-invocar el atajo marca el regreso solo y pregunta cliente/cierre",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 289
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-065",
+          "description": "resolveSmartMark — flujo operacional activo — almuerzo ya completo (salida y regreso marcados): pregunta solo cliente/cierre, sin ofrecer almuerzo de nuevo",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 311
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-066",
+          "description": "resolveSmartMark — flujo operacional activo — responde ",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 330
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-067",
+          "description": "resolveSmartMark — flujo operacional activo — responde ",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 350
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-068",
+          "description": "aviso de redirección en handoff — todo handoff avisa explícitamente ",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 362
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-069",
+          "description": "seguridad de continuation_token — token de otro usuario se rechaza",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 373
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-070",
+          "description": "seguridad de continuation_token — token corrupto se rechaza",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 382
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-071",
+          "description": "issueShortcutToken — emite JWT con mismos claims iss/aud aceptados por verifyToken, dura 6 meses y queda registrado para revocación",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 390
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-072",
+          "description": "issueShortcutToken — perfil sin iss/aud (token emitido por TI para otro usuario) igual pasa verifyToken",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 425
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-073",
+          "description": "getFirstName — usa el email (nombre.apellido) aunque fullname venga en orden legal apellidos+nombres",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 443
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-074",
+          "description": "getFirstName — email sin punto usa el local-part completo",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 452
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-075",
+          "description": "getFirstName — sin email cae a la primera palabra de fullname",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 456
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-076",
+          "description": "getFirstName — sin email ni fullname devuelve cadena vacia (sin saludo)",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 460
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-077",
+          "description": "frases motivadoras (entrada / salida operacional) — hay al menos 100 frases sin duplicados",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 466
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-078",
+          "description": "frases motivadoras (entrada / salida operacional) — salida operacional cierra con una frase motivadora del banco",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 471
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-079",
+          "description": "frases motivadoras (entrada / salida operacional) — almuerzo/salida final no llevan frase motivadora (solo entrada y salida operacional)",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 482
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-080",
+          "description": "frases motivadoras (entrada / salida operacional) — en muchas corridas aparece mas de una frase distinta (no siempre la misma)",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 491
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-081",
+          "description": "parsers de voz — categorías con acentos y frases completas",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 506
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-082",
+          "description": "parsers de voz — sí/no",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 513
+        },
+        {
+          "req_id": "REQ-ATTENDANCE-083",
+          "description": "parsers de voz — sí/no toleran puntuación pegada (coma, punto)",
+          "test_file": "backend/src/modules/attendance/__tests__/attendanceShortcut.service.test.js",
+          "test_line": 519
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "audit-prep": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/audit-prep/__tests__/auditPrep.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-AUDIT-PREP-001",
+          "description": "audit-prep – isAuditActive — es falso cuando el modo auditoria esta apagado",
+          "test_file": "backend/src/modules/audit-prep/__tests__/auditPrep.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-AUDIT-PREP-002",
+          "description": "audit-prep – isAuditActive — es falso cuando la fecha de inicio es futura",
+          "test_file": "backend/src/modules/audit-prep/__tests__/auditPrep.helpers.test.js",
+          "test_line": 11
+        },
+        {
+          "req_id": "REQ-AUDIT-PREP-003",
+          "description": "audit-prep – assertAllowedSection — lanza 404 cuando la seccion no existe",
+          "test_file": "backend/src/modules/audit-prep/__tests__/auditPrep.helpers.test.js",
+          "test_line": 17
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "auditoria": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/auditoria/__tests__/auditoria.service.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-AUDITORIA-001",
+          "description": "listAudits — devuelve filas, total parseado y paginacion; aplica limit/offset",
+          "test_file": "backend/src/modules/auditoria/__tests__/auditoria.service.test.js",
+          "test_line": 15
+        },
+        {
+          "req_id": "REQ-AUDITORIA-002",
+          "description": "listAudits — consulta la tabla auditoria.logs",
+          "test_file": "backend/src/modules/auditoria/__tests__/auditoria.service.test.js",
+          "test_line": 33
+        }
+      ],
+      "risk_level": "alto",
+      "gap_justification": ""
+    },
+    "auth": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/auth/__tests__/session.repository.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-AUTH-001",
+          "description": "createSession — inserta la sesion con los parametros correctos y devuelve el registro",
+          "test_file": "backend/src/modules/auth/__tests__/session.repository.test.js",
+          "test_line": 18
+        },
+        {
+          "req_id": "REQ-AUTH-002",
+          "description": "updateSessionRefreshToken — rota el refresh token de la sesion activa y devuelve filas afectadas",
+          "test_file": "backend/src/modules/auth/__tests__/session.repository.test.js",
+          "test_line": 29
+        },
+        {
+          "req_id": "REQ-AUTH-003",
+          "description": "closeSessionsByEmail — cierra todas las sesiones activas del usuario",
+          "test_file": "backend/src/modules/auth/__tests__/session.repository.test.js",
+          "test_line": 40
+        },
+        {
+          "req_id": "REQ-AUTH-004",
+          "description": "closeSessionByRefreshToken — no consulta la base si no hay token",
+          "test_file": "backend/src/modules/auth/__tests__/session.repository.test.js",
+          "test_line": 49
+        },
+        {
+          "req_id": "REQ-AUTH-005",
+          "description": "closeSessionByRefreshToken — cierra la sesion asociada al refresh token",
+          "test_file": "backend/src/modules/auth/__tests__/session.repository.test.js",
+          "test_line": 55
+        }
+      ],
+      "risk_level": "alto",
+      "gap_justification": ""
+    },
+    "business-case": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/business-case/__tests__/businessCaseDeterminationsGate.service.test.js",
+        "backend/src/modules/business-case/__tests__/businessCaseSheetEquipment.helper.test.js",
+        "backend/src/modules/business-case/__tests__/businessCaseSheetGeneration.contract.test.js",
+        "backend/src/modules/business-case/__tests__/businessCaseSheetVersioning.helper.test.js",
+        "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+        "backend/src/modules/business-case/__tests__/consumptionVersionConflict.integration.test.js",
+        "backend/src/modules/business-case/__tests__/deliveryCeiling.service.test.js",
+        "backend/src/modules/business-case/__tests__/exporters.test.js",
+        "backend/src/modules/business-case/__tests__/investments.depreciation.test.js",
+        "backend/src/modules/business-case/__tests__/preflow.service.test.js",
+        "backend/src/modules/business-case/__tests__/syncConsumptionFromSheet.creates.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-BUSINESS-CASE-001",
+          "description": "businessCaseDeterminationsGate.service — buildGateInfo en private_comodato asigna roles correctos",
+          "test_file": "backend/src/modules/business-case/__tests__/businessCaseDeterminationsGate.service.test.js",
+          "test_line": 4
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-002",
+          "description": "businessCaseDeterminationsGate.service — buildGateInfo en public asigna acp_comercial como responsable de la fase comercial",
+          "test_file": "backend/src/modules/business-case/__tests__/businessCaseDeterminationsGate.service.test.js",
+          "test_line": 32
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-003",
+          "description": "businessCaseDeterminationsGate.service — assertCanEditDeterminationsOrThrow falla sin documento",
+          "test_file": "backend/src/modules/business-case/__tests__/businessCaseDeterminationsGate.service.test.js",
+          "test_line": 60
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-004",
+          "description": "businessCaseDeterminationsGate.service — usa el SLA de revision tecnica y bloquea al vencer",
+          "test_file": "backend/src/modules/business-case/__tests__/businessCaseDeterminationsGate.service.test.js",
+          "test_line": 71
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-005",
+          "description": "business case sheet equipment filtering — only includes a backup when simultaneous installation is affirmative",
+          "test_file": "backend/src/modules/business-case/__tests__/businessCaseSheetEquipment.helper.test.js",
+          "test_line": 8
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-006",
+          "description": "business case sheet equipment filtering — recognizes boolean and legacy textual affirmative values",
+          "test_file": "backend/src/modules/business-case/__tests__/businessCaseSheetEquipment.helper.test.js",
+          "test_line": 20
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-007",
+          "description": "businessCaseSheetGeneration.contract — validates generation payload and sets defaults",
+          "test_file": "backend/src/modules/business-case/__tests__/businessCaseSheetGeneration.contract.test.js",
+          "test_line": 10
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-008",
+          "description": "businessCaseSheetGeneration.contract — rejects invalid inversiones payload",
+          "test_file": "backend/src/modules/business-case/__tests__/businessCaseSheetGeneration.contract.test.js",
+          "test_line": 22
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-009",
+          "description": "businessCaseSheetGeneration.contract — builds deterministic signatures with stable stringify",
+          "test_file": "backend/src/modules/business-case/__tests__/businessCaseSheetGeneration.contract.test.js",
+          "test_line": 32
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-010",
+          "description": "businessCaseSheetVersioning.helper — marks same sheet sync as same_file_updated and avoids new version",
+          "test_file": "backend/src/modules/business-case/__tests__/businessCaseSheetVersioning.helper.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-011",
+          "description": "businessCaseSheetVersioning.helper — marks recreated spreadsheet with missing sheets as replacement",
+          "test_file": "backend/src/modules/business-case/__tests__/businessCaseSheetVersioning.helper.test.js",
+          "test_line": 21
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-012",
+          "description": "businessCaseSheetVersioning.helper — updates existing history entry when the same file is reused",
+          "test_file": "backend/src/modules/business-case/__tests__/businessCaseSheetVersioning.helper.test.js",
+          "test_line": 38
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-013",
+          "description": "businessCaseSheetVersioning.helper — prepends a new history entry when the file is replaced",
+          "test_file": "backend/src/modules/business-case/__tests__/businessCaseSheetVersioning.helper.test.js",
+          "test_line": 63
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-014",
+          "description": "evaluateExpression — should evaluate simple arithmetic",
+          "test_file": "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+          "test_line": 10
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-015",
+          "description": "evaluateExpression — should evaluate with variables",
+          "test_file": "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+          "test_line": 15
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-016",
+          "description": "evaluateExpression — should handle decimals correctly",
+          "test_file": "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+          "test_line": 23
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-017",
+          "description": "evaluateExpression — should prevent dangerous code execution",
+          "test_file": "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+          "test_line": 31
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-018",
+          "description": "evaluateConditional — should evaluate first matching condition",
+          "test_file": "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+          "test_line": 39
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-019",
+          "description": "evaluatePipeline — should execute steps in order",
+          "test_file": "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+          "test_line": 64
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-020",
+          "description": "Real-world formulas — should calculate standard consumption",
+          "test_file": "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+          "test_line": 84
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-021",
+          "description": "Real-world formulas — should calculate with wash cycles",
+          "test_file": "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+          "test_line": 104
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-022",
+          "description": "getApplicableFormula — should get formula from determination if exists",
+          "test_file": "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+          "test_line": 129
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-023",
+          "description": "getApplicableFormula — should fallback to equipment formula",
+          "test_file": "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+          "test_line": 133
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-024",
+          "description": "getApplicableFormula — should return default formula as fallback",
+          "test_file": "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+          "test_line": 137
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-025",
+          "description": "Security tests — should prevent eval injection",
+          "test_file": "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+          "test_line": 146
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-026",
+          "description": "Security tests — should prevent require injection",
+          "test_file": "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+          "test_line": 152
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-027",
+          "description": "Security tests — should prevent import injection",
+          "test_file": "backend/src/modules/business-case/__tests__/calculationEngine.test.js",
+          "test_line": 158
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-028",
+          "description": "Business Case consumption version conflicts (integration) — retorna 409 cuando saveConsumptionItems recibe versión stale",
+          "test_file": "backend/src/modules/business-case/__tests__/consumptionVersionConflict.integration.test.js",
+          "test_line": 111
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-029",
+          "description": "Business Case consumption version conflicts (integration) — acepta guardado cuando la versión coincide",
+          "test_file": "backend/src/modules/business-case/__tests__/consumptionVersionConflict.integration.test.js",
+          "test_line": 127
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-030",
+          "description": "Business Case consumption version conflicts (integration) — retorna 409 en patchConsumptionItem con versión stale",
+          "test_file": "backend/src/modules/business-case/__tests__/consumptionVersionConflict.integration.test.js",
+          "test_line": 142
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-031",
+          "description": "Business Case consumption version conflicts (integration) — patchConsumptionItem retorna snapshot consistente con item guardado",
+          "test_file": "backend/src/modules/business-case/__tests__/consumptionVersionConflict.integration.test.js",
+          "test_line": 164
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-032",
+          "description": "deliveryCeiling.service — crea draft y agrega linea en estado draft",
+          "test_file": "backend/src/modules/business-case/__tests__/deliveryCeiling.service.test.js",
+          "test_line": 24
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-033",
+          "description": "deliveryCeiling.service — permite transiciones draft -> approved y approved -> active",
+          "test_file": "backend/src/modules/business-case/__tests__/deliveryCeiling.service.test.js",
+          "test_line": 121
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-034",
+          "description": "deliveryCeiling.service — rechaza transicion invalida active -> draft",
+          "test_file": "backend/src/modules/business-case/__tests__/deliveryCeiling.service.test.js",
+          "test_line": 196
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-035",
+          "description": "Exporters — should generate a PDF buffer with BC content",
+          "test_file": "backend/src/modules/business-case/__tests__/exporters.test.js",
+          "test_line": 75
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-036",
+          "description": "Exporters — should generate an Excel workbook with the expected sheets",
+          "test_file": "backend/src/modules/business-case/__tests__/exporters.test.js",
+          "test_line": 81
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-037",
+          "description": "financial investment depreciation — calculates annual, monthly and projected depreciation",
+          "test_file": "backend/src/modules/business-case/__tests__/investments.depreciation.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-038",
+          "description": "businessCasePreflow.service — buildPreflowInfo calcula progreso y serverNow",
+          "test_file": "backend/src/modules/business-case/__tests__/preflow.service.test.js",
+          "test_line": 25
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-039",
+          "description": "businessCasePreflow.service — isPreflowCase reconoce private_comodato",
+          "test_file": "backend/src/modules/business-case/__tests__/preflow.service.test.js",
+          "test_line": 48
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-040",
+          "description": "businessCasePreflow.service — buildPreflowInfo usa fase review y expone tiempo comercial registrado",
+          "test_file": "backend/src/modules/business-case/__tests__/preflow.service.test.js",
+          "test_line": 52
+        },
+        {
+          "req_id": "REQ-BUSINESS-CASE-041",
+          "description": "scratch: sync crea items nuevos desde el Sheet (no solo actualiza) — bc_consumption_items vacia + catalogo con match -> crea el item con annual_qty del Sheet",
+          "test_file": "backend/src/modules/business-case/__tests__/syncConsumptionFromSheet.creates.test.js",
+          "test_line": 15
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "calendar": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/calendar/__tests__/calendar.service.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-CALENDAR-001",
+          "description": "calendar – getUserEmailsByRoles — devuelve los emails de los usuarios que tienen alguno de los roles",
+          "test_file": "backend/src/modules/calendar/__tests__/calendar.service.test.js",
+          "test_line": 8
+        },
+        {
+          "req_id": "REQ-CALENDAR-002",
+          "description": "calendar – getUserEmailsByRoles — devuelve arreglo vacio si la consulta falla",
+          "test_file": "backend/src/modules/calendar/__tests__/calendar.service.test.js",
+          "test_line": 15
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "calidad": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/calidad/__tests__/ca0110.rpn.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-CALIDAD-001",
+          "description": "calidad CA0110 – calculateRPN — multiplica severidad x ocurrencia x deteccion",
+          "test_file": "backend/src/modules/calidad/__tests__/ca0110.rpn.test.js",
+          "test_line": 11
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": "",
+      "in_development": true,
+      "dev_note": "Modulo en desarrollo activo (lineas CA0101-CA0117); funcionalidad y alcance en evolucion. Validacion provisional, sujeta a re-evaluacion al estabilizarse."
+    },
+    "clients": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/clients/__tests__/clients.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-CLIENTS-001",
+          "description": "clients – buildDriveLink — construye el enlace de Drive con el id del archivo",
+          "test_file": "backend/src/modules/clients/__tests__/clients.helpers.test.js",
+          "test_line": 7
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "collab-deliveries": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/collab-deliveries/__tests__/collabDeliveries.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-COLLAB-DELIVERIES-001",
+          "description": "collab-deliveries – normalizeActaCategory — agrupa variantes de herramienta",
+          "test_file": "backend/src/modules/collab-deliveries/__tests__/collabDeliveries.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-COLLAB-DELIVERIES-002",
+          "description": "collab-deliveries – normalizeActaCategory — agrupa variantes de ropa/uniforme",
+          "test_file": "backend/src/modules/collab-deliveries/__tests__/collabDeliveries.helpers.test.js",
+          "test_line": 12
+        },
+        {
+          "req_id": "REQ-COLLAB-DELIVERIES-003",
+          "description": "collab-deliveries – normalizeActaCategory — devuelve null para vacio y el valor normalizado para otras categorias",
+          "test_file": "backend/src/modules/collab-deliveries/__tests__/collabDeliveries.helpers.test.js",
+          "test_line": 17
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "collaborators": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/collaborators/__tests__/collaborators.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-COLLABORATORS-001",
+          "description": "collaborators – computeProfileCompletion — marca complete=false y done=0 con un perfil vacio",
+          "test_file": "backend/src/modules/collaborators/__tests__/collaborators.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-COLLABORATORS-002",
+          "description": "collaborators – computeProfileCompletion — total es consistente entre corridas (PROFILE_PATHS fijo)",
+          "test_file": "backend/src/modules/collaborators/__tests__/collaborators.helpers.test.js",
+          "test_line": 14
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "consumable-files": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-CONSUMABLE-FILES-001",
+          "description": "consumable-files – normalizeText — recorta y usa fallback cuando es null/undefined/vacio",
+          "test_file": "backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js",
+          "test_line": 10
+        },
+        {
+          "req_id": "REQ-CONSUMABLE-FILES-002",
+          "description": "consumable-files – normalizeNumeric — acepta un numero valido dentro de rango y redondea a 3 decimales",
+          "test_file": "backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js",
+          "test_line": 18
+        },
+        {
+          "req_id": "REQ-CONSUMABLE-FILES-003",
+          "description": "consumable-files – normalizeNumeric — lanza error si el valor no es numerico",
+          "test_file": "backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js",
+          "test_line": 21
+        },
+        {
+          "req_id": "REQ-CONSUMABLE-FILES-004",
+          "description": "consumable-files – normalizeNumeric — lanza error si esta fuera de rango (min por defecto 0)",
+          "test_file": "backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js",
+          "test_line": 24
+        },
+        {
+          "req_id": "REQ-CONSUMABLE-FILES-005",
+          "description": "consumable-files – normalizeItemType — acepta los tipos validos y cualquier otro cae en ",
+          "test_file": "backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js",
+          "test_line": 30
+        },
+        {
+          "req_id": "REQ-CONSUMABLE-FILES-006",
+          "description": "consumable-files – normalizeBoolean — interpreta valores comunes de verdadero",
+          "test_file": "backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js",
+          "test_line": 37
+        },
+        {
+          "req_id": "REQ-CONSUMABLE-FILES-007",
+          "description": "consumable-files – normalizeBoolean — usa el fallback ante valores ausentes",
+          "test_file": "backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js",
+          "test_line": 42
+        },
+        {
+          "req_id": "REQ-CONSUMABLE-FILES-008",
+          "description": "consumable-files – hasAnyRole — reconoce un rol permitido entre varios formatos de usuario",
+          "test_file": "backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js",
+          "test_line": 49
+        },
+        {
+          "req_id": "REQ-CONSUMABLE-FILES-009",
+          "description": "consumable-files – hasAnyRole — no reconoce un usuario sin el rol permitido",
+          "test_file": "backend/src/modules/consumable-files/__tests__/consumableFiles.helpers.test.js",
+          "test_line": 53
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "crm-fam": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-CRM-FAM-001",
+          "description": "getWeightedAmount — 50% of 1000 = 500",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 10
+        },
+        {
+          "req_id": "REQ-CRM-FAM-002",
+          "description": "getWeightedAmount — null amount returns null",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 11
+        },
+        {
+          "req_id": "REQ-CRM-FAM-003",
+          "description": "getWeightedAmount — 0 prob returns null",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 12
+        },
+        {
+          "req_id": "REQ-CRM-FAM-004",
+          "description": "getHealthStatus — null → gray",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 16
+        },
+        {
+          "req_id": "REQ-CRM-FAM-005",
+          "description": "getHealthStatus — 75 → green",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 17
+        },
+        {
+          "req_id": "REQ-CRM-FAM-006",
+          "description": "getHealthStatus — 74 → yellow",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 18
+        },
+        {
+          "req_id": "REQ-CRM-FAM-007",
+          "description": "getHealthStatus — 50 → yellow",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 19
+        },
+        {
+          "req_id": "REQ-CRM-FAM-008",
+          "description": "getHealthStatus — 49 → red",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 20
+        },
+        {
+          "req_id": "REQ-CRM-FAM-009",
+          "description": "calculateScorecardScore — empty inputs → 0",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 28
+        },
+        {
+          "req_id": "REQ-CRM-FAM-010",
+          "description": "calculateScorecardScore — full score → 100",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 29
+        },
+        {
+          "req_id": "REQ-CRM-FAM-011",
+          "description": "calculateScorecardScore — missing answer treated as 0",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 33
+        },
+        {
+          "req_id": "REQ-CRM-FAM-012",
+          "description": "calculateCompletenessScore — empty BS → 0",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 51
+        },
+        {
+          "req_id": "REQ-CRM-FAM-013",
+          "description": "calculateCompletenessScore — economic_buyer adds points",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 53
+        },
+        {
+          "req_id": "REQ-CRM-FAM-014",
+          "description": "calculateCompletenessScore — strategy_summary ≥ 50 chars adds points",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 61
+        },
+        {
+          "req_id": "REQ-CRM-FAM-015",
+          "description": "calculateCompletenessScore — score never exceeds 100",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 69
+        },
+        {
+          "req_id": "REQ-CRM-FAM-016",
+          "description": "calculateHealthScore — no red flags, no overdue actions → high score",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 96
+        },
+        {
+          "req_id": "REQ-CRM-FAM-017",
+          "description": "calculateHealthScore — critical open red flag reduces score",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 106
+        },
+        {
+          "req_id": "REQ-CRM-FAM-018",
+          "description": "calculateHealthScore — all overdue actions reduce score",
+          "test_file": "backend/src/modules/crm-fam/__tests__/crm.calculators.test.js",
+          "test_line": 122
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "dashboard": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/dashboard/__tests__/dashboard.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-DASHBOARD-001",
+          "description": "dashboard – classifyPgError — clasifica error sin codigo como DB_ERROR generico",
+          "test_file": "backend/src/modules/dashboard/__tests__/dashboard.helpers.test.js",
+          "test_line": 4
+        },
+        {
+          "req_id": "REQ-DASHBOARD-002",
+          "description": "dashboard – classifyPgError — clasifica tabla inexistente (42P01) como SCHEMA_MISSING",
+          "test_file": "backend/src/modules/dashboard/__tests__/dashboard.helpers.test.js",
+          "test_line": 8
+        },
+        {
+          "req_id": "REQ-DASHBOARD-003",
+          "description": "dashboard – classifyPgError — clasifica columna inexistente (42703) como SCHEMA_MISSING",
+          "test_file": "backend/src/modules/dashboard/__tests__/dashboard.helpers.test.js",
+          "test_line": 13
+        },
+        {
+          "req_id": "REQ-DASHBOARD-004",
+          "description": "dashboard – classifyPgError — clasifica otros codigos de error como DB_ERROR de conexion",
+          "test_file": "backend/src/modules/dashboard/__tests__/dashboard.helpers.test.js",
+          "test_line": 18
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "delivery-ceilings": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/delivery-ceilings/__tests__/deliveryCeilings.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-DELIVERY-CEILINGS-001",
+          "description": "delivery-ceilings – toRounded — redondea a 3 decimales",
+          "test_file": "backend/src/modules/delivery-ceilings/__tests__/deliveryCeilings.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-DELIVERY-CEILINGS-002",
+          "description": "delivery-ceilings – toRounded — trata null/vacio como 0",
+          "test_file": "backend/src/modules/delivery-ceilings/__tests__/deliveryCeilings.helpers.test.js",
+          "test_line": 11
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "delivery-requests": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-DELIVERY-REQUESTS-001",
+          "description": "deliveryRequests.service — rechaza creacion cuando el ceiling no esta activo",
+          "test_file": "backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js",
+          "test_line": 24
+        },
+        {
+          "req_id": "REQ-DELIVERY-REQUESTS-002",
+          "description": "deliveryRequests.service — devuelve MAX_EXCEEDED cuando requestedQty excede remaining",
+          "test_file": "backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js",
+          "test_line": 47
+        },
+        {
+          "req_id": "REQ-DELIVERY-REQUESTS-003",
+          "description": "deliveryRequests.service — rechaza segundo request cuando delivered_qty ya consumio el nuevo saldo",
+          "test_file": "backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js",
+          "test_line": 81
+        },
+        {
+          "req_id": "REQ-DELIVERY-REQUESTS-004",
+          "description": "deliveryRequests.service — compra publica sin plan aprobado devuelve PUBLIC_PLAN_NOT_APPROVED",
+          "test_file": "backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js",
+          "test_line": 113
+        },
+        {
+          "req_id": "REQ-DELIVERY-REQUESTS-005",
+          "description": "deliveryRequests.service — compra publica con plan en draft devuelve PUBLIC_PLAN_NOT_APPROVED",
+          "test_file": "backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js",
+          "test_line": 147
+        },
+        {
+          "req_id": "REQ-DELIVERY-REQUESTS-006",
+          "description": "deliveryRequests.service — compra publica valida contra tramo vigente y permite crear request",
+          "test_file": "backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js",
+          "test_line": 181
+        },
+        {
+          "req_id": "REQ-DELIVERY-REQUESTS-007",
+          "description": "deliveryRequests.service — compra publica con cantidad mayor al tramo falla con TRANCHE_MAX_EXCEEDED",
+          "test_file": "backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js",
+          "test_line": 261
+        },
+        {
+          "req_id": "REQ-DELIVERY-REQUESTS-008",
+          "description": "deliveryRequests.service — compra publica sin tramo vigente devuelve OUTSIDE_DELIVERY_WINDOW",
+          "test_file": "backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js",
+          "test_line": 300
+        },
+        {
+          "req_id": "REQ-DELIVERY-REQUESTS-009",
+          "description": "deliveryRequests.service — confirma entrega y aumenta delivered_qty en delivery_ceiling_line",
+          "test_file": "backend/src/modules/delivery-requests/__tests__/deliveryRequests.service.test.js",
+          "test_line": 337
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "departments": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/departments/__tests__/departments.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-DEPARTMENTS-001",
+          "description": "departments – normalizeDepartmentStatus — normaliza variantes de inactivo a ",
+          "test_file": "backend/src/modules/departments/__tests__/departments.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-DEPARTMENTS-002",
+          "description": "departments – normalizeDepartmentStatus — cualquier otro valor (incluido vacio) se considera ",
+          "test_file": "backend/src/modules/departments/__tests__/departments.helpers.test.js",
+          "test_line": 12
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "documents": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/documents/__tests__/document.service.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-DOCUMENTS-001",
+          "description": "document.service – enlaces de Drive — construye el enlace de visualizacion con el id del archivo",
+          "test_file": "backend/src/modules/documents/__tests__/document.service.test.js",
+          "test_line": 10
+        },
+        {
+          "req_id": "REQ-DOCUMENTS-002",
+          "description": "document.service – enlaces de Drive — construye el enlace de descarga directa con el id del archivo",
+          "test_file": "backend/src/modules/documents/__tests__/document.service.test.js",
+          "test_line": 14
+        }
+      ],
+      "risk_level": "alto",
+      "gap_justification": ""
+    },
+    "equipment-management": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/equipment-management/__tests__/equipmentManagement.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-EQUIPMENT-MANAGEMENT-001",
+          "description": "equipment-management – conversores — toIntOrNull convierte enteros y devuelve null ante vacio/invalido",
+          "test_file": "backend/src/modules/equipment-management/__tests__/equipmentManagement.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-EQUIPMENT-MANAGEMENT-002",
+          "description": "equipment-management – conversores — toTextOrNull recorta y devuelve null ante vacio",
+          "test_file": "backend/src/modules/equipment-management/__tests__/equipmentManagement.helpers.test.js",
+          "test_line": 14
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "equipment-purchases": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/equipment-purchases/__tests__/unifiedPurchaseVisibility.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-EQUIPMENT-PURCHASES-001",
+          "description": "unifiedPurchaseVisibility – isTabVisible — un tab con roles [",
+          "test_file": "backend/src/modules/equipment-purchases/__tests__/unifiedPurchaseVisibility.test.js",
+          "test_line": 11
+        },
+        {
+          "req_id": "REQ-EQUIPMENT-PURCHASES-002",
+          "description": "unifiedPurchaseVisibility – isTabVisible — un tab marcado hidden nunca es visible",
+          "test_file": "backend/src/modules/equipment-purchases/__tests__/unifiedPurchaseVisibility.test.js",
+          "test_line": 15
+        },
+        {
+          "req_id": "REQ-EQUIPMENT-PURCHASES-003",
+          "description": "unifiedPurchaseVisibility – isTabVisible — un tab inexistente devuelve false",
+          "test_file": "backend/src/modules/equipment-purchases/__tests__/unifiedPurchaseVisibility.test.js",
+          "test_line": 19
+        },
+        {
+          "req_id": "REQ-EQUIPMENT-PURCHASES-004",
+          "description": "unifiedPurchaseVisibility – isActionAllowed — devuelve false para un estado sin configuracion",
+          "test_file": "backend/src/modules/equipment-purchases/__tests__/unifiedPurchaseVisibility.test.js",
+          "test_line": 25
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "files": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/files/__tests__/file.service.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-FILES-001",
+          "description": "files – listByRequest — mapea created_at a uploaded_at para cada adjunto",
+          "test_file": "backend/src/modules/files/__tests__/file.service.test.js",
+          "test_line": 19
+        },
+        {
+          "req_id": "REQ-FILES-002",
+          "description": "files – deleteFile — elimina en Drive y BD, y registra la auditoria con el request_id afectado",
+          "test_file": "backend/src/modules/files/__tests__/file.service.test.js",
+          "test_line": 28
+        },
+        {
+          "req_id": "REQ-FILES-003",
+          "description": "files – deleteFile — propaga el error si Drive falla y registra el error",
+          "test_file": "backend/src/modules/files/__tests__/file.service.test.js",
+          "test_line": 40
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "finanzas": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/finanzas/__tests__/finanzas.controller.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-FINANZAS-001",
+          "description": "listInventory — devuelve el inventario ordenado",
+          "test_file": "backend/src/modules/finanzas/__tests__/finanzas.controller.test.js",
+          "test_line": 22
+        },
+        {
+          "req_id": "REQ-FINANZAS-002",
+          "description": "moveInventory – validaciones — rechaza un tipo de movimiento invalido",
+          "test_file": "backend/src/modules/finanzas/__tests__/finanzas.controller.test.js",
+          "test_line": 33
+        },
+        {
+          "req_id": "REQ-FINANZAS-003",
+          "description": "moveInventory – validaciones — rechaza una cantidad no positiva",
+          "test_file": "backend/src/modules/finanzas/__tests__/finanzas.controller.test.js",
+          "test_line": 40
+        },
+        {
+          "req_id": "REQ-FINANZAS-004",
+          "description": "moveInventory – validaciones — devuelve 404 cuando el inventario no existe",
+          "test_file": "backend/src/modules/finanzas/__tests__/finanzas.controller.test.js",
+          "test_line": 47
+        },
+        {
+          "req_id": "REQ-FINANZAS-005",
+          "description": "moveInventory – validaciones — rechaza una salida con stock insuficiente",
+          "test_file": "backend/src/modules/finanzas/__tests__/finanzas.controller.test.js",
+          "test_line": 55
+        }
+      ],
+      "risk_level": "alto",
+      "gap_justification": ""
+    },
+    "gmail": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/gmail/__tests__/gmail.controller.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-GMAIL-001",
+          "description": "gmail.controller.sendEmail — rechaza cuando faltan campos obligatorios",
+          "test_file": "backend/src/modules/gmail/__tests__/gmail.controller.test.js",
+          "test_line": 27
+        },
+        {
+          "req_id": "REQ-GMAIL-002",
+          "description": "gmail.controller.sendEmail — envia el correo y registra la accion cuando el payload es valido",
+          "test_file": "backend/src/modules/gmail/__tests__/gmail.controller.test.js",
+          "test_line": 35
+        },
+        {
+          "req_id": "REQ-GMAIL-003",
+          "description": "gmail.controller.sendEmail — devuelve 403 con needsAuth cuando el error es de autorizacion",
+          "test_file": "backend/src/modules/gmail/__tests__/gmail.controller.test.js",
+          "test_line": 46
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "hiring-pipeline": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/hiring-pipeline/__tests__/hiringPipeline.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-HIRING-PIPELINE-001",
+          "description": "hiring-pipeline – hasApprovedStageResult — es true cuando existe un resultado aprobado para esa etapa",
+          "test_file": "backend/src/modules/hiring-pipeline/__tests__/hiringPipeline.helpers.test.js",
+          "test_line": 11
+        },
+        {
+          "req_id": "REQ-HIRING-PIPELINE-002",
+          "description": "hiring-pipeline – hasApprovedStageResult — es false sin resultados o sin match de etapa/resultado",
+          "test_file": "backend/src/modules/hiring-pipeline/__tests__/hiringPipeline.helpers.test.js",
+          "test_line": 15
+        },
+        {
+          "req_id": "REQ-HIRING-PIPELINE-003",
+          "description": "hiring-pipeline – isLegacyReferenceVerificationPending — es false si la etapa no es verificacion_referencias",
+          "test_file": "backend/src/modules/hiring-pipeline/__tests__/hiringPipeline.helpers.test.js",
+          "test_line": 22
+        },
+        {
+          "req_id": "REQ-HIRING-PIPELINE-004",
+          "description": "hiring-pipeline – isLegacyReferenceVerificationPending — es false si el estado no es en_evaluacion",
+          "test_file": "backend/src/modules/hiring-pipeline/__tests__/hiringPipeline.helpers.test.js",
+          "test_line": 25
+        },
+        {
+          "req_id": "REQ-HIRING-PIPELINE-005",
+          "description": "hiring-pipeline – isLegacyReferenceVerificationPending — es true para un candidato legacy que avanzo sin verificacion de referencias aprobada",
+          "test_file": "backend/src/modules/hiring-pipeline/__tests__/hiringPipeline.helpers.test.js",
+          "test_line": 28
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "integrations": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/integrations/__tests__/integrationOutbox.service.test.js",
+        "backend/src/modules/integrations/__tests__/integrationOutboxWorker.service.test.js",
+        "backend/src/modules/integrations/__tests__/productMap.service.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-INTEGRATIONS-001",
+          "description": "integrationOutbox.service — no duplica filas para la misma idempotency_key",
+          "test_file": "backend/src/modules/integrations/__tests__/integrationOutbox.service.test.js",
+          "test_line": 13
+        },
+        {
+          "req_id": "REQ-INTEGRATIONS-002",
+          "description": "integrationOutbox.service — usa dbClient transaccional cuando se provee",
+          "test_file": "backend/src/modules/integrations/__tests__/integrationOutbox.service.test.js",
+          "test_line": 52
+        },
+        {
+          "req_id": "REQ-INTEGRATIONS-003",
+          "description": "integrationOutboxWorker.service — marca como skipped un evento no-CRM (Odoo ya no existe, no hay provider)",
+          "test_file": "backend/src/modules/integrations/__tests__/integrationOutboxWorker.service.test.js",
+          "test_line": 25
+        },
+        {
+          "req_id": "REQ-INTEGRATIONS-004",
+          "description": "integrationOutboxWorker.service — procesa batch CRM y reparte sent/failed",
+          "test_file": "backend/src/modules/integrations/__tests__/integrationOutboxWorker.service.test.js",
+          "test_line": 52
+        },
+        {
+          "req_id": "REQ-INTEGRATIONS-005",
+          "description": "integrationOutboxWorker.service — envia a dead cuando supera max_attempts",
+          "test_file": "backend/src/modules/integrations/__tests__/integrationOutboxWorker.service.test.js",
+          "test_line": 95
+        },
+        {
+          "req_id": "REQ-INTEGRATIONS-006",
+          "description": "productMap.service — lista filas paginadas del libro de correspondencia",
+          "test_file": "backend/src/modules/integrations/__tests__/productMap.service.test.js",
+          "test_line": 13
+        },
+        {
+          "req_id": "REQ-INTEGRATIONS-007",
+          "description": "productMap.service — crea fila cuando no existe match activo para upsert",
+          "test_file": "backend/src/modules/integrations/__tests__/productMap.service.test.js",
+          "test_line": 56
+        },
+        {
+          "req_id": "REQ-INTEGRATIONS-008",
+          "description": "productMap.service — genera reporte de cobertura con estructura estable",
+          "test_file": "backend/src/modules/integrations/__tests__/productMap.service.test.js",
+          "test_line": 97
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "inventario": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/inventario/__tests__/inventario.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-INVENTARIO-001",
+          "description": "inventario – normalizeDetalleValue — serializa objetos a JSON",
+          "test_file": "backend/src/modules/inventario/__tests__/inventario.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-INVENTARIO-002",
+          "description": "inventario – normalizeDetalleValue — devuelve null para null/undefined",
+          "test_file": "backend/src/modules/inventario/__tests__/inventario.helpers.test.js",
+          "test_line": 11
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "management": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/management/__tests__/management.service.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-MANAGEMENT-001",
+          "description": "management.service — returns a global total for paginated request lists",
+          "test_file": "backend/src/modules/management/__tests__/management.service.test.js",
+          "test_line": 13
+        },
+        {
+          "req_id": "REQ-MANAGEMENT-002",
+          "description": "management.service — guards JSON request_id casts before comparing trace ids",
+          "test_file": "backend/src/modules/management/__tests__/management.service.test.js",
+          "test_line": 34
+        },
+        {
+          "req_id": "REQ-MANAGEMENT-003",
+          "description": "management.service — returns an empty trace for invalid ids without hitting the database",
+          "test_file": "backend/src/modules/management/__tests__/management.service.test.js",
+          "test_line": 45
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "mantenimientos": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/mantenimientos/__tests__/mantenimientos.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-MANTENIMIENTOS-001",
+          "description": "mantenimientos – normalizeTipo — reconoce variantes de correctivo y todo lo demas como preventivo",
+          "test_file": "backend/src/modules/mantenimientos/__tests__/mantenimientos.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-MANTENIMIENTOS-002",
+          "description": "mantenimientos – toUTCDate / dateToISO — normaliza una fecha ISO (YYYY-MM-DD) a medianoche UTC",
+          "test_file": "backend/src/modules/mantenimientos/__tests__/mantenimientos.helpers.test.js",
+          "test_line": 16
+        },
+        {
+          "req_id": "REQ-MANTENIMIENTOS-003",
+          "description": "mantenimientos – toUTCDate / dateToISO — usa la fecha actual como fallback si el valor es invalido",
+          "test_file": "backend/src/modules/mantenimientos/__tests__/mantenimientos.helpers.test.js",
+          "test_line": 20
+        },
+        {
+          "req_id": "REQ-MANTENIMIENTOS-004",
+          "description": "mantenimientos – addMonthsUtc — suma meses en UTC sin mutar la fecha original",
+          "test_file": "backend/src/modules/mantenimientos/__tests__/mantenimientos.helpers.test.js",
+          "test_line": 28
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "module-access": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/module-access/__tests__/moduleAccess.service.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-MODULE-ACCESS-001",
+          "description": "moduleAccess – catalogo de modulos — expone un catalogo no vacio con clave y prefijos por modulo",
+          "test_file": "backend/src/modules/module-access/__tests__/moduleAccess.service.test.js",
+          "test_line": 12
+        },
+        {
+          "req_id": "REQ-MODULE-ACCESS-002",
+          "description": "moduleAccess – resolveModuleKeyByPath — resuelve la clave de modulo por su prefijo de ruta (match mas largo)",
+          "test_file": "backend/src/modules/module-access/__tests__/moduleAccess.service.test.js",
+          "test_line": 25
+        },
+        {
+          "req_id": "REQ-MODULE-ACCESS-003",
+          "description": "moduleAccess – resolveModuleKeyByPath — devuelve null para una ruta que no pertenece a ningun modulo",
+          "test_file": "backend/src/modules/module-access/__tests__/moduleAccess.service.test.js",
+          "test_line": 33
+        }
+      ],
+      "risk_level": "alto",
+      "gap_justification": ""
+    },
+    "notifications": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/notifications/__tests__/notifications.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-NOTIFICATIONS-001",
+          "description": "notifications – mapNotificationRow — mapea los campos de la fila y usa {} cuando meta es null",
+          "test_file": "backend/src/modules/notifications/__tests__/notifications.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-NOTIFICATIONS-002",
+          "description": "notifications – mapNotificationRow — preserva meta cuando viene definido",
+          "test_file": "backend/src/modules/notifications/__tests__/notifications.helpers.test.js",
+          "test_line": 18
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "offboarding": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/offboarding/__tests__/offboarding.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-OFFBOARDING-001",
+          "description": "offboarding – buildOffboardingRequestCode — genera un codigo con prefijo OFF y el id del usuario",
+          "test_file": "backend/src/modules/offboarding/__tests__/offboarding.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-OFFBOARDING-002",
+          "description": "offboarding – buildOffboardingRequestCode — genera codigos distintos en llamadas separadas",
+          "test_file": "backend/src/modules/offboarding/__tests__/offboarding.helpers.test.js",
+          "test_line": 11
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "opportunities": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/opportunities/__tests__/opportunities.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-OPPORTUNITIES-001",
+          "description": "opportunities – normalizeNumber — convierte numeros validos",
+          "test_file": "backend/src/modules/opportunities/__tests__/opportunities.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-OPPORTUNITIES-002",
+          "description": "opportunities – normalizeNumber — usa el fallback (0 por defecto) ante valores invalidos",
+          "test_file": "backend/src/modules/opportunities/__tests__/opportunities.helpers.test.js",
+          "test_line": 11
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "permisos": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/permisos/__tests__/permisos.validation.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-PERMISOS-001",
+          "description": "validatePermisoEstudios — acepta hasta 3 horas",
+          "test_file": "backend/src/modules/permisos/__tests__/permisos.validation.test.js",
+          "test_line": 14
+        },
+        {
+          "req_id": "REQ-PERMISOS-002",
+          "description": "validatePermisoEstudios — rechaza mas de 3 horas",
+          "test_file": "backend/src/modules/permisos/__tests__/permisos.validation.test.js",
+          "test_line": 17
+        },
+        {
+          "req_id": "REQ-PERMISOS-003",
+          "description": "validatePermisoSalud — exige fechas de inicio y fin",
+          "test_file": "backend/src/modules/permisos/__tests__/permisos.validation.test.js",
+          "test_line": 29
+        },
+        {
+          "req_id": "REQ-PERMISOS-004",
+          "description": "validatePermisoSalud — rechaza fecha fin anterior a inicio",
+          "test_file": "backend/src/modules/permisos/__tests__/permisos.validation.test.js",
+          "test_line": 33
+        },
+        {
+          "req_id": "REQ-PERMISOS-005",
+          "description": "validatePermisoSalud — rechaza subtipo de salud no valido",
+          "test_file": "backend/src/modules/permisos/__tests__/permisos.validation.test.js",
+          "test_line": 38
+        },
+        {
+          "req_id": "REQ-PERMISOS-006",
+          "description": "validatePermisoSalud — para menos de 4 dias exige certificado medico y no tramite IESS",
+          "test_file": "backend/src/modules/permisos/__tests__/permisos.validation.test.js",
+          "test_line": 42
+        },
+        {
+          "req_id": "REQ-PERMISOS-007",
+          "description": "validatePermisoSalud — para 4 dias o mas exige certificado IESS y tramite de subsidios",
+          "test_file": "backend/src/modules/permisos/__tests__/permisos.validation.test.js",
+          "test_line": 48
+        },
+        {
+          "req_id": "REQ-PERMISOS-008",
+          "description": "validatePermisoSalud — marca recuperable solo para atencion medica familiar",
+          "test_file": "backend/src/modules/permisos/__tests__/permisos.validation.test.js",
+          "test_line": 60
+        },
+        {
+          "req_id": "REQ-PERMISOS-009",
+          "description": "getStartOfWeek / getEndOfWeek — el inicio de semana es domingo y el fin es sabado",
+          "test_file": "backend/src/modules/permisos/__tests__/permisos.validation.test.js",
+          "test_line": 69
+        }
+      ],
+      "risk_level": "alto",
+      "gap_justification": ""
+    },
+    "personnel-requests": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/personnel-requests/__tests__/personnelRequests.addComment.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-PERSONNEL-REQUESTS-001",
+          "description": "personnel-requests – addComment — rechaza un comentario vacio",
+          "test_file": "backend/src/modules/personnel-requests/__tests__/personnelRequests.addComment.test.js",
+          "test_line": 19
+        },
+        {
+          "req_id": "REQ-PERSONNEL-REQUESTS-002",
+          "description": "personnel-requests – addComment — marca is_internal=false para un rol sin permiso, aunque se solicite interno",
+          "test_file": "backend/src/modules/personnel-requests/__tests__/personnelRequests.addComment.test.js",
+          "test_line": 23
+        },
+        {
+          "req_id": "REQ-PERSONNEL-REQUESTS-003",
+          "description": "personnel-requests – addComment — permite is_internal=true para un rol autorizado (talento_humano)",
+          "test_file": "backend/src/modules/personnel-requests/__tests__/personnelRequests.addComment.test.js",
+          "test_line": 29
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "private-purchases": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/private-purchases/__tests__/privatePurchases.roles.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-PRIVATE-PURCHASES-001",
+          "description": "privatePurchases – _hasAnyRoleToken — hace match por token contenido en el rol del usuario",
+          "test_file": "backend/src/modules/private-purchases/__tests__/privatePurchases.roles.test.js",
+          "test_line": 11
+        },
+        {
+          "req_id": "REQ-PRIVATE-PURCHASES-002",
+          "description": "privatePurchases – _hasAnyRoleToken — no hace match para un rol ajeno o usuario sin roles",
+          "test_file": "backend/src/modules/private-purchases/__tests__/privatePurchases.roles.test.js",
+          "test_line": 15
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "requests": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/requests/__tests__/sendConsentEmailToken.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-REQUESTS-001",
+          "description": "sendConsentEmailToken — envia el codigo por un unico camino (sendMail), sin doble intento por gmailService",
+          "test_file": "backend/src/modules/requests/__tests__/sendConsentEmailToken.test.js",
+          "test_line": 25
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "schedules": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/schedules/__tests__/schedules.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-SCHEDULES-001",
+          "description": "schedules – buildGoogleMapsDeepLink — devuelve null cuando no hay paradas",
+          "test_file": "backend/src/modules/schedules/__tests__/schedules.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-SCHEDULES-002",
+          "description": "schedules – buildGoogleMapsDeepLink — construye la URL con origen y destino cuando hay locationQuery validos",
+          "test_file": "backend/src/modules/schedules/__tests__/schedules.helpers.test.js",
+          "test_line": 12
+        },
+        {
+          "req_id": "REQ-SCHEDULES-003",
+          "description": "schedules – buildGoogleMapsDeepLink — devuelve null si falta locationQuery en la primera o ultima parada",
+          "test_file": "backend/src/modules/schedules/__tests__/schedules.helpers.test.js",
+          "test_line": 22
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "security": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/security/__tests__/security.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-SECURITY-001",
+          "description": "security.whitelist – validacion de CIDR — acepta un CIDR IPv4 valido",
+          "test_file": "backend/src/modules/security/__tests__/security.helpers.test.js",
+          "test_line": 21
+        },
+        {
+          "req_id": "REQ-SECURITY-002",
+          "description": "security.whitelist – validacion de CIDR — rechaza CIDR mal formados",
+          "test_file": "backend/src/modules/security/__tests__/security.helpers.test.js",
+          "test_line": 26
+        },
+        {
+          "req_id": "REQ-SECURITY-003",
+          "description": "security.whitelist – coincidencia IP contra CIDR — hace match dentro de un /24",
+          "test_file": "backend/src/modules/security/__tests__/security.helpers.test.js",
+          "test_line": 36
+        },
+        {
+          "req_id": "REQ-SECURITY-004",
+          "description": "security.whitelist – coincidencia IP contra CIDR — no hace match fuera del /24",
+          "test_file": "backend/src/modules/security/__tests__/security.helpers.test.js",
+          "test_line": 41
+        },
+        {
+          "req_id": "REQ-SECURITY-005",
+          "description": "security.whitelist – coincidencia IP contra CIDR — soporta coincidencia exacta de IP",
+          "test_file": "backend/src/modules/security/__tests__/security.helpers.test.js",
+          "test_line": 45
+        },
+        {
+          "req_id": "REQ-SECURITY-006",
+          "description": "security.whitelist – coincidencia IP contra CIDR — devuelve false ante entradas vacias",
+          "test_file": "backend/src/modules/security/__tests__/security.helpers.test.js",
+          "test_line": 50
+        },
+        {
+          "req_id": "REQ-SECURITY-007",
+          "description": "security.privacy – enmascarado y saneo de datos sensibles — enmascara el ultimo octeto de una IPv4 dentro de un string",
+          "test_file": "backend/src/modules/security/__tests__/security.helpers.test.js",
+          "test_line": 57
+        },
+        {
+          "req_id": "REQ-SECURITY-008",
+          "description": "security.privacy – enmascarado y saneo de datos sensibles — devuelve el valor tal cual si no es string",
+          "test_file": "backend/src/modules/security/__tests__/security.helpers.test.js",
+          "test_line": 61
+        },
+        {
+          "req_id": "REQ-SECURITY-009",
+          "description": "security.privacy – enmascarado y saneo de datos sensibles — trunca user-agents largos a 80 caracteres + ...",
+          "test_file": "backend/src/modules/security/__tests__/security.helpers.test.js",
+          "test_line": 66
+        },
+        {
+          "req_id": "REQ-SECURITY-010",
+          "description": "security.privacy – enmascarado y saneo de datos sensibles — sanitizeForExportRow siempre enmascara la IP y trunca el user_agent",
+          "test_file": "backend/src/modules/security/__tests__/security.helpers.test.js",
+          "test_line": 74
+        },
+        {
+          "req_id": "REQ-SECURITY-011",
+          "description": "security.holidays – deteccion de fin de semana y fuera de horario — identifica sabado y domingo como fin de semana",
+          "test_file": "backend/src/modules/security/__tests__/security.helpers.test.js",
+          "test_line": 84
+        },
+        {
+          "req_id": "REQ-SECURITY-012",
+          "description": "security.holidays – deteccion de fin de semana y fuera de horario — marca fuera de horario un sabado",
+          "test_file": "backend/src/modules/security/__tests__/security.helpers.test.js",
+          "test_line": 90
+        },
+        {
+          "req_id": "REQ-SECURITY-013",
+          "description": "security.holidays – deteccion de fin de semana y fuera de horario — marca fuera de horario un dia laboral de madrugada",
+          "test_file": "backend/src/modules/security/__tests__/security.helpers.test.js",
+          "test_line": 96
+        },
+        {
+          "req_id": "REQ-SECURITY-014",
+          "description": "security.holidays – deteccion de fin de semana y fuera de horario — no marca fuera de horario un dia laboral en horario de oficina",
+          "test_file": "backend/src/modules/security/__tests__/security.helpers.test.js",
+          "test_line": 102
+        }
+      ],
+      "risk_level": "alto",
+      "gap_justification": ""
+    },
+    "servicio": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/servicio/__tests__/externalCases.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-SERVICIO-001",
+          "description": "servicio (external cases) – buildCaseCode — genera el codigo con prefijo EXT y padding a 6 digitos",
+          "test_file": "backend/src/modules/servicio/__tests__/externalCases.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-SERVICIO-002",
+          "description": "servicio (external cases) – buildCaseCode — maneja id ausente sin lanzar",
+          "test_file": "backend/src/modules/servicio/__tests__/externalCases.helpers.test.js",
+          "test_line": 11
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "shared": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/shared/__tests__/profileSync.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-SHARED-001",
+          "description": "isPassiveEmploymentStatus — reconoce todos los estados pasivos definidos (case-insensitive)",
+          "test_file": "backend/src/modules/shared/__tests__/profileSync.test.js",
+          "test_line": 11
+        },
+        {
+          "req_id": "REQ-SHARED-002",
+          "description": "isPassiveEmploymentStatus — no marca como pasivo un estado activo o vacio",
+          "test_file": "backend/src/modules/shared/__tests__/profileSync.test.js",
+          "test_line": 16
+        },
+        {
+          "req_id": "REQ-SHARED-003",
+          "description": "shouldSyncUserActiveStatus — sincroniza solo cuando el estado es pasivo",
+          "test_file": "backend/src/modules/shared/__tests__/profileSync.test.js",
+          "test_line": 24
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "signature": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/signature/__tests__/signature.validation.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-SIGNATURE-001",
+          "description": "validateSignatureRequest — acepta una solicitud completa y valida",
+          "test_file": "backend/src/modules/signature/__tests__/signature.validation.test.js",
+          "test_line": 17
+        },
+        {
+          "req_id": "REQ-SIGNATURE-002",
+          "description": "validateSignatureRequest — exige el documento en base64",
+          "test_file": "backend/src/modules/signature/__tests__/signature.validation.test.js",
+          "test_line": 21
+        },
+        {
+          "req_id": "REQ-SIGNATURE-003",
+          "description": "validateSignatureRequest — exige consentimiento expreso (consent === true)",
+          "test_file": "backend/src/modules/signature/__tests__/signature.validation.test.js",
+          "test_line": 26
+        },
+        {
+          "req_id": "REQ-SIGNATURE-004",
+          "description": "validateSignatureRequest — exige el rol con el que se firma",
+          "test_file": "backend/src/modules/signature/__tests__/signature.validation.test.js",
+          "test_line": 31
+        },
+        {
+          "req_id": "REQ-SIGNATURE-005",
+          "description": "validateSignatureRequest — exige el rol autorizado para el sello",
+          "test_file": "backend/src/modules/signature/__tests__/signature.validation.test.js",
+          "test_line": 36
+        }
+      ],
+      "risk_level": "alto",
+      "gap_justification": ""
+    },
+    "signature-workflows": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-SIGNATURE-WORKFLOWS-001",
+          "description": "validateCreateWorkflowPayload – documento PDF — acepta pdf_base64 con prefijo data: y calcula el hash",
+          "test_file": "backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js",
+          "test_line": 25
+        },
+        {
+          "req_id": "REQ-SIGNATURE-WORKFLOWS-002",
+          "description": "validateCreateWorkflowPayload – documento PDF — exige document.pdf_base64",
+          "test_file": "backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js",
+          "test_line": 32
+        },
+        {
+          "req_id": "REQ-SIGNATURE-WORKFLOWS-003",
+          "description": "validateCreateWorkflowPayload — normaliza un payload valido, ordena firmantes y calcula sha256",
+          "test_file": "backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js",
+          "test_line": 40
+        },
+        {
+          "req_id": "REQ-SIGNATURE-WORKFLOWS-004",
+          "description": "validateCreateWorkflowPayload — exige source_module",
+          "test_file": "backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js",
+          "test_line": 51
+        },
+        {
+          "req_id": "REQ-SIGNATURE-WORKFLOWS-005",
+          "description": "validateCreateWorkflowPayload — exige source_entity_id numerico y positivo",
+          "test_file": "backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js",
+          "test_line": 57
+        },
+        {
+          "req_id": "REQ-SIGNATURE-WORKFLOWS-006",
+          "description": "validateCreateWorkflowPayload — exige al menos un firmante",
+          "test_file": "backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js",
+          "test_line": 63
+        },
+        {
+          "req_id": "REQ-SIGNATURE-WORKFLOWS-007",
+          "description": "validateCreateWorkflowPayload — rechaza sequence_order duplicado",
+          "test_file": "backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js",
+          "test_line": 69
+        },
+        {
+          "req_id": "REQ-SIGNATURE-WORKFLOWS-008",
+          "description": "validateCreateWorkflowPayload — exige email en cada firmante",
+          "test_file": "backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js",
+          "test_line": 75
+        },
+        {
+          "req_id": "REQ-SIGNATURE-WORKFLOWS-009",
+          "description": "validateSignerActionPayload — exige consentimiento cuando requireConsent es true",
+          "test_file": "backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js",
+          "test_line": 83
+        },
+        {
+          "req_id": "REQ-SIGNATURE-WORKFLOWS-010",
+          "description": "validateSignerActionPayload — exige razon cuando requireReason es true",
+          "test_file": "backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js",
+          "test_line": 88
+        },
+        {
+          "req_id": "REQ-SIGNATURE-WORKFLOWS-011",
+          "description": "validateSignerActionPayload — acepta y normaliza una ubicacion de firma valida",
+          "test_file": "backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js",
+          "test_line": 92
+        },
+        {
+          "req_id": "REQ-SIGNATURE-WORKFLOWS-012",
+          "description": "validateSignerActionPayload — descarta una ubicacion de firma invalida (page_number < 1)",
+          "test_file": "backend/src/modules/signature-workflows/__tests__/signatureWorkflows.validation.test.js",
+          "test_line": 99
+        }
+      ],
+      "risk_level": "alto",
+      "gap_justification": ""
+    },
+    "support-tickets": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/support-tickets/__tests__/supportTickets.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-SUPPORT-TICKETS-001",
+          "description": "derivePriority — alto + alto => critica",
+          "test_file": "backend/src/modules/support-tickets/__tests__/supportTickets.helpers.test.js",
+          "test_line": 10
+        },
+        {
+          "req_id": "REQ-SUPPORT-TICKETS-002",
+          "description": "derivePriority — un solo alto => alta",
+          "test_file": "backend/src/modules/support-tickets/__tests__/supportTickets.helpers.test.js",
+          "test_line": 13
+        },
+        {
+          "req_id": "REQ-SUPPORT-TICKETS-003",
+          "description": "derivePriority — medio => media",
+          "test_file": "backend/src/modules/support-tickets/__tests__/supportTickets.helpers.test.js",
+          "test_line": 17
+        },
+        {
+          "req_id": "REQ-SUPPORT-TICKETS-004",
+          "description": "derivePriority — ambos bajos => baja",
+          "test_file": "backend/src/modules/support-tickets/__tests__/supportTickets.helpers.test.js",
+          "test_line": 20
+        },
+        {
+          "req_id": "REQ-SUPPORT-TICKETS-005",
+          "description": "derivePriority — por defecto (sin datos) trata como medio => media",
+          "test_file": "backend/src/modules/support-tickets/__tests__/supportTickets.helpers.test.js",
+          "test_line": 23
+        },
+        {
+          "req_id": "REQ-SUPPORT-TICKETS-006",
+          "description": "isTIUser — no reconoce a un usuario sin roles",
+          "test_file": "backend/src/modules/support-tickets/__tests__/supportTickets.helpers.test.js",
+          "test_line": 29
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "talento_humano": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/talento_humano/__tests__/hr.controller.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-TALENTO-HUMANO-001",
+          "description": "hr.controller.createEmployee — rechaza un payload sin campos obligatorios (cedula)",
+          "test_file": "backend/src/modules/talento_humano/__tests__/hr.controller.test.js",
+          "test_line": 22
+        },
+        {
+          "req_id": "REQ-TALENTO-HUMANO-002",
+          "description": "hr.controller.createEmployee — crea el empleado cuando el payload es valido",
+          "test_file": "backend/src/modules/talento_humano/__tests__/hr.controller.test.js",
+          "test_line": 30
+        },
+        {
+          "req_id": "REQ-TALENTO-HUMANO-003",
+          "description": "hr.controller.listEmployees — devuelve la lista de empleados",
+          "test_file": "backend/src/modules/talento_humano/__tests__/hr.controller.test.js",
+          "test_line": 46
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "technical-applications": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/technical-applications/__tests__/technicalApplications.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-TECHNICAL-APPLICATIONS-001",
+          "description": "technical-applications – normalizeRow — mapea snake_case a camelCase para created_at/updated_at",
+          "test_file": "backend/src/modules/technical-applications/__tests__/technicalApplications.helpers.test.js",
+          "test_line": 7
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "ti-assets": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/ti-assets/__tests__/tiAssets.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-TI-ASSETS-001",
+          "description": "ti-assets – buildTiActaItemsBlock — numera los items e incluye marca/serie/estado/observaciones cuando existen",
+          "test_file": "backend/src/modules/ti-assets/__tests__/tiAssets.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-TI-ASSETS-002",
+          "description": "ti-assets – buildTiActaItemsBlock — usa el nombre por defecto y omite campos ausentes",
+          "test_file": "backend/src/modules/ti-assets/__tests__/tiAssets.helpers.test.js",
+          "test_line": 19
+        },
+        {
+          "req_id": "REQ-TI-ASSETS-003",
+          "description": "ti-assets – buildTiActaItemsBlock — devuelve cadena vacia con arreglo vacio",
+          "test_file": "backend/src/modules/ti-assets/__tests__/tiAssets.helpers.test.js",
+          "test_line": 24
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "trainings": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/trainings/__tests__/trainings.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-TRAININGS-001",
+          "description": "trainings – buildFullName — compone apellidos + nombres en mayusculas",
+          "test_file": "backend/src/modules/trainings/__tests__/trainings.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-TRAININGS-002",
+          "description": "trainings – buildFullName — usa el fallback cuando no hay nombres ni apellidos",
+          "test_file": "backend/src/modules/trainings/__tests__/trainings.helpers.test.js",
+          "test_line": 11
+        },
+        {
+          "req_id": "REQ-TRAININGS-003",
+          "description": "trainings – normalizeTrainerName — recorta, pone en mayusculas y devuelve null si queda vacio",
+          "test_file": "backend/src/modules/trainings/__tests__/trainings.helpers.test.js",
+          "test_line": 18
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "user-certifications": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/user-certifications/__tests__/userCertifications.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-USER-CERTIFICATIONS-001",
+          "description": "user-certifications – formatDateLabel — devuelve el fallback para valores ausentes o invalidos",
+          "test_file": "backend/src/modules/user-certifications/__tests__/userCertifications.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-USER-CERTIFICATIONS-002",
+          "description": "user-certifications – formatDateLabel — formatea una fecha valida",
+          "test_file": "backend/src/modules/user-certifications/__tests__/userCertifications.helpers.test.js",
+          "test_line": 12
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "user-profile": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/user-profile/__tests__/userProfile.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-USER-PROFILE-001",
+          "description": "user-profile – sanitizeMetadata — elimina claves bloqueadas (email, fullname, etc.)",
+          "test_file": "backend/src/modules/user-profile/__tests__/userProfile.helpers.test.js",
+          "test_line": 7
+        },
+        {
+          "req_id": "REQ-USER-PROFILE-002",
+          "description": "user-profile – sanitizeMetadata — trunca strings a 500 caracteres y descarta undefined",
+          "test_file": "backend/src/modules/user-profile/__tests__/userProfile.helpers.test.js",
+          "test_line": 12
+        },
+        {
+          "req_id": "REQ-USER-PROFILE-003",
+          "description": "user-profile – sanitizeMetadata — devuelve {} si metadata no es un objeto",
+          "test_file": "backend/src/modules/user-profile/__tests__/userProfile.helpers.test.js",
+          "test_line": 17
+        },
+        {
+          "req_id": "REQ-USER-PROFILE-004",
+          "description": "user-profile – toDriveViewUrl — construye la URL de thumbnail cuando hay driveId",
+          "test_file": "backend/src/modules/user-profile/__tests__/userProfile.helpers.test.js",
+          "test_line": 24
+        },
+        {
+          "req_id": "REQ-USER-PROFILE-005",
+          "description": "user-profile – toDriveViewUrl — devuelve null sin driveId",
+          "test_file": "backend/src/modules/user-profile/__tests__/userProfile.helpers.test.js",
+          "test_line": 27
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "users": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/users/__tests__/users.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-USERS-001",
+          "description": "normalizeRole — minusculiza y reemplaza espacios/guiones por guion bajo",
+          "test_file": "backend/src/modules/users/__tests__/users.helpers.test.js",
+          "test_line": 12
+        },
+        {
+          "req_id": "REQ-USERS-002",
+          "description": "normalizeText — recorta y limita la longitud",
+          "test_file": "backend/src/modules/users/__tests__/users.helpers.test.js",
+          "test_line": 19
+        },
+        {
+          "req_id": "REQ-USERS-003",
+          "description": "normalizeEmail — normaliza a minusculas y sin espacios",
+          "test_file": "backend/src/modules/users/__tests__/users.helpers.test.js",
+          "test_line": 27
+        },
+        {
+          "req_id": "REQ-USERS-004",
+          "description": "isValidEmail — acepta correos validos y rechaza invalidos",
+          "test_file": "backend/src/modules/users/__tests__/users.helpers.test.js",
+          "test_line": 33
+        },
+        {
+          "req_id": "REQ-USERS-005",
+          "description": "parseBoolean — interpreta valores verdaderos/falsos y devuelve null si es ambiguo",
+          "test_file": "backend/src/modules/users/__tests__/users.helpers.test.js",
+          "test_line": 42
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    },
+    "vacaciones": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/vacaciones/__tests__/vacaciones.service.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-VACACIONES-001",
+          "description": "computeVacationDaysWithWeekendRule — devuelve 0 dias cuando la fecha fin es anterior al inicio",
+          "test_file": "backend/src/modules/vacaciones/__tests__/vacaciones.service.test.js",
+          "test_line": 11
+        },
+        {
+          "req_id": "REQ-VACACIONES-002",
+          "description": "computeVacationDaysWithWeekendRule — cuenta dias inclusivos sin extension cuando no hay viernes en el rango",
+          "test_file": "backend/src/modules/vacaciones/__tests__/vacaciones.service.test.js",
+          "test_line": 16
+        },
+        {
+          "req_id": "REQ-VACACIONES-003",
+          "description": "computeVacationDaysWithWeekendRule — extiende al sabado y domingo cuando el rango termina un viernes y hay cupo",
+          "test_file": "backend/src/modules/vacaciones/__tests__/vacaciones.service.test.js",
+          "test_line": 22
+        },
+        {
+          "req_id": "REQ-VACACIONES-004",
+          "description": "computeVacationDaysWithWeekendRule — no extiende cuando ya se consumieron los 2 fines de semana del cupo",
+          "test_file": "backend/src/modules/vacaciones/__tests__/vacaciones.service.test.js",
+          "test_line": 29
+        }
+      ],
+      "risk_level": "alto",
+      "gap_justification": ""
+    },
+    "viaticos": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/viaticos/__tests__/viaticos.access.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-VIATICOS-001",
+          "description": "isFinanceUser — reconoce un rol de finanzas (en role o scope, y por lista separada por comas)",
+          "test_file": "backend/src/modules/viaticos/__tests__/viaticos.access.test.js",
+          "test_line": 10
+        },
+        {
+          "req_id": "REQ-VIATICOS-002",
+          "description": "isFinanceUser — no reconoce a un rol ajeno a finanzas ni a un usuario sin roles",
+          "test_file": "backend/src/modules/viaticos/__tests__/viaticos.access.test.js",
+          "test_line": 16
+        },
+        {
+          "req_id": "REQ-VIATICOS-003",
+          "description": "canAccessViaticos — permite acceso a finanzas y a admin",
+          "test_file": "backend/src/modules/viaticos/__tests__/viaticos.access.test.js",
+          "test_line": 23
+        },
+        {
+          "req_id": "REQ-VIATICOS-004",
+          "description": "canAccessViaticos — niega acceso a un usuario sin roles",
+          "test_file": "backend/src/modules/viaticos/__tests__/viaticos.access.test.js",
+          "test_line": 28
+        }
+      ],
+      "risk_level": "alto",
+      "gap_justification": ""
+    },
+    "work-management": {
+      "has_automated_tests": true,
+      "test_files": [
+        "backend/src/modules/work-management/__tests__/workManagement.helpers.test.js"
+      ],
+      "requirements": [
+        {
+          "req_id": "REQ-WORK-MANAGEMENT-001",
+          "description": "isUuid — acepta un UUID v4 valido",
+          "test_file": "backend/src/modules/work-management/__tests__/workManagement.helpers.test.js",
+          "test_line": 10
+        },
+        {
+          "req_id": "REQ-WORK-MANAGEMENT-002",
+          "description": "isUuid — rechaza cadenas que no son UUID",
+          "test_file": "backend/src/modules/work-management/__tests__/workManagement.helpers.test.js",
+          "test_line": 13
+        }
+      ],
+      "risk_level": "medio-bajo",
+      "gap_justification": ""
+    }
+  }
+}

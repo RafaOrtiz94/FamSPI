@@ -10,6 +10,9 @@ import {
 } from "react-icons/fi";
 import { checklistSections } from "../collaboratorProfileDefinitions";
 
+const resolveDocumentType = (document) =>
+  document?.canonical_doc_type || document?.doc_type || "";
+
 const normalizeRole = (value) =>
   String(value || "")
     .trim()
@@ -42,6 +45,8 @@ const PersonnelChecklist = ({
   readOnly = false,
   userRole = "",
   checklistMode = "all",
+  sections = checklistSections,
+  canUploadDocument,
 }) => {
   const handleChecklistFlagToggle = onChecklistFlagToggle || onToggleFlag;
   const handleDocumentUpload = onDocumentUpload || onUpload;
@@ -49,15 +54,16 @@ const PersonnelChecklist = ({
 
   const visibleSections = useMemo(() => {
     if (checklistMode === "exit") {
-      return checklistSections.filter((section) => String(section?.title || "").toLowerCase().includes("salida"));
+      return sections.filter((section) => String(section?.title || "").toLowerCase().includes("salida"));
     }
     if (checklistMode === "entry") {
-      return checklistSections.filter((section) => !String(section?.title || "").toLowerCase().includes("salida"));
+      return sections.filter((section) => !String(section?.title || "").toLowerCase().includes("salida"));
     }
-    return checklistSections;
-  }, [checklistMode]);
+    return sections;
+  }, [checklistMode, sections]);
 
-  const isDocUploaded = (docKey) => documents.some((doc) => doc.doc_type === docKey);
+  const isDocUploaded = (docKey) =>
+    documents.some((doc) => resolveDocumentType(doc) === docKey);
 
   const getOverallCompletion = () => {
     let total = 0;
@@ -104,9 +110,9 @@ const PersonnelChecklist = ({
       <div className="rounded-2xl border border-brand-hr-primary/15 bg-brand-hr-primary-contrast p-4 shadow-sm">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-brand-hr-primary">Progreso del checklist</h3>
+            <h3 className="text-sm font-semibold text-brand-hr-primary">Avance del checklist del expediente</h3>
             <p className="text-xs text-brand-hr-primary-muted">
-              {overall.done} de {overall.total} validaciones completadas
+              {overall.done} de {overall.total} validaciones visibles ya estan completadas en este expediente
             </p>
           </div>
           <span className="rounded-full bg-brand-hr-primary-soft px-3 py-1 text-xs font-semibold text-brand-hr-primary">
@@ -143,7 +149,7 @@ const PersonnelChecklist = ({
                 <div>
                   <h4 className="text-sm font-semibold text-brand-hr-primary">{section.title}</h4>
                   <p className="text-[10px] text-brand-hr-primary-muted">
-                    {done} / {total} completado
+                    {done} de {total} validaciones completadas
                   </p>
                 </div>
                 {complete ? (
@@ -163,6 +169,10 @@ const PersonnelChecklist = ({
                   const roleRule = !isDoc ? CHECKLIST_ROLE_RULES[item.flagKey] : null;
                   const canToggleByRole =
                     !roleRule || roleRule.some((role) => normalizeRole(role) === normalizedRole);
+                  const uploadAllowed =
+                    typeof canUploadDocument === "function"
+                      ? canUploadDocument({ key: item.docType })
+                      : true;
                   const isChecked = isDoc
                     ? isDocUploaded(item.docType)
                     : Boolean(profileData?.onboarding?.[item.flagKey]);
@@ -186,7 +196,7 @@ const PersonnelChecklist = ({
                             <span className="text-brand-hr-primary">{item.label}</span>
                           </div>
 
-                          {!isChecked && !readOnly && !isLocked ? (
+                          {!isChecked && !readOnly && !isLocked && uploadAllowed ? (
                             <div className="relative">
                               <input
                                 type="file"
@@ -205,7 +215,7 @@ const PersonnelChecklist = ({
                                 ) : (
                                   <FiUploadCloud title="Icono para subir documento" />
                                 )}
-                                Subir
+                                Cargar archivo
                               </button>
                             </div>
                           ) : null}
@@ -213,6 +223,10 @@ const PersonnelChecklist = ({
                           {isChecked ? (
                             <span className="flex items-center gap-1 text-[10px] font-medium text-hr-success">
                               <FiCheck title="Icono de documento cargado" /> Cargado
+                            </span>
+                          ) : !uploadAllowed ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                              Visible sin permiso de carga
                             </span>
                           ) : null}
                         </div>

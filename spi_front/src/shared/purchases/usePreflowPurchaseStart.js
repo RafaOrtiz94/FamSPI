@@ -5,11 +5,11 @@ import { PURCHASE_FAMILY } from './purchaseTypes';
 
 export function usePreflowPurchaseStart({ navigate, showToast, showLoader, hideLoader }) {
  const startPreflow = useCallback(
- async ({ family, kind, origin = 'unknown' }) => {
+ async ({ family, kind, origin = 'unknown', client = null, onCreated = null }) => {
  try {
  showLoader?.();
  const bcPayload = {
- client_name: 'Pendiente de definir',
+ client_name: client?.nombre || client?.commercial_name || client?.label || 'Pendiente de definir',
  bc_purchase_type: family === PURCHASE_FAMILY.PUBLIC ? 'public' : 'private_comodato',
  status: 'draft',
  bc_stage: 'pending_comercial',
@@ -41,6 +41,8 @@ export function usePreflowPurchaseStart({ navigate, showToast, showLoader, hideL
  if (!bcId) {
  throw new Error('No se pudo identificar el Business Case creado');
  }
+
+ await onCreated?.({ businessCaseId: bcId });
 
  showToast?.('Business Case creado. Completa las secciones comerciales para iniciar el flujo de compras.', 'success');
  navigate?.(`/dashboard/business-case/workspace/${bcId}`);

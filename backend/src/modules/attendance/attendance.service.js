@@ -13,6 +13,7 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { drive } = require("../../config/google");
 const { securePdfForm } = require("../../utils/pdfFormSecurity");
+const { buildAttendanceRegularization } = require("./attendanceReports.service");
 const {
   HASH_ALGORITHM,
   computeSha256HexFromBuffer,
@@ -36,8 +37,12 @@ const getTemplateBytes = () => {
   return templateBytesCache;
 };
 
-const normalizePeriodType = (value) =>
-  String(value || "monthly").trim().toLowerCase() === "annual" ? "annual" : "monthly";
+const normalizePeriodType = (value) => {
+  const normalized = String(value || "monthly").trim().toLowerCase();
+  if (normalized === "annual" || normalized === "yearly") return "annual";
+  if (normalized === "weekly" || normalized === "week") return "weekly";
+  return "monthly";
+};
 
 const parseDateOnly = (value) => {
   if (!value) return null;
@@ -89,6 +94,29 @@ const parseRecordDate = (rawValue) => {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0);
 };
 
+const normalizeRecordDateKey = (rawValue) => {
+  if (rawValue instanceof Date && !Number.isNaN(rawValue.getTime())) {
+    const year = rawValue.getUTCFullYear();
+    const month = String(rawValue.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(rawValue.getUTCDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+  const parsed = parseRecordDate(rawValue);
+  if (parsed) return formatDateOnly(parsed);
+  return String(rawValue || "").slice(0, 10);
+};
+
+const enrichAttendanceRecordForActa = (row = {}) => {
+  const normalizedRow = {
+    ...row,
+    date: normalizeRecordDateKey(row.date),
+  };
+  return {
+    ...normalizedRow,
+    ...buildAttendanceRegularization(normalizedRow),
+  };
+};
+
 const isSameMonth = (a, b) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
 
@@ -99,6 +127,19 @@ const isDateBefore = (a, b) =>
       (a.getMonth() === b.getMonth() && a.getDate() < b.getDate())));
 
 const monthKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+const getMonthSequenceBetween = (startDate, endDate) => {
+  const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1, 12, 0, 0, 0);
+  const endCursor = new Date(endDate.getFullYear(), endDate.getMonth(), 1, 12, 0, 0, 0);
+  const months = [];
+
+  while (cursor <= endCursor) {
+    months.push(new Date(cursor));
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  return months;
+};
 
 const normalizeMonthName = (date) =>
   date
@@ -118,6 +159,8 @@ const startOfDay = (date) =>
 const endOfDay = (date) =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
 
+const isWeekendDate = (date) => date.getDay() === 0 || date.getDay() === 6;
+
 const parseDateTime = (value) => {
   if (!value) return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
@@ -128,9 +171,22 @@ const parseDateTime = (value) => {
   return parsed;
 };
 
-const buildVacationLabel = (ids = []) => `VAC-ID ${ids.join("/")}`;
-const buildPermissionLabel = (id, timeLabel = "") =>
-  `PER-ID ${id}${timeLabel ? ` ${timeLabel}` : ""}`;
+const buildPermissionLabel = (id) => `PER-${id}`;
+const buildVacationLabel = (ids = []) => {
+  const sorted = [...new Set(ids.filter((n) => Number.isInteger(n)))].sort((a, b) => a - b);
+  return sorted.length ? sorted.map((id) => `VAC-${id}`).join(" / ") : "VAC";
+};
+const WEEKEND_LABEL = "FIN DE SEMANA";
+const VACATION_LABEL = "VACACIONES";
+const DAY_TEXT_FIELD_PREFIXES = Object.freeze([
+  "hora_entrada",
+  "hora_salida_a",
+  "hora_entrada_a",
+  "hora_salida",
+  "ra_observaciones",
+]);
+const DAY_TEXT_FIELD_PATTERN =
+  /^(hora_entrada_a|hora_salida_a|hora_entrada|hora_salida|ra_observaciones)_(\d+)$/;
 
 const uniqueNumericIds = (values = []) =>
   [...new Set(values.map((item) => Number.parseInt(item, 10)).filter((item) => Number.isInteger(item)))];
@@ -162,6 +218,7 @@ const formatTime = (timestamp) => {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    hourCycle: "h23",
   });
 };
 
@@ -179,6 +236,54 @@ const setFieldText = (form, fieldName, value) => {
     logger.warn({ fieldName, err }, "No se pudo asignar texto al campo");
   }
   return false;
+};
+
+const getFieldFirstWidgetRect = (field) => {
+  const widgets = field?.acroField?.getWidgets?.() || [];
+  return widgets[0]?.getRectangle?.() || null;
+};
+
+const buildDayTextFieldLookup = (form) => {
+  const columns = new Map(DAY_TEXT_FIELD_PREFIXES.map((prefix) => [prefix, []]));
+
+  for (const field of form.getFields()) {
+    const name = field.getName();
+    const match = name.match(DAY_TEXT_FIELD_PATTERN);
+    if (!match) continue;
+
+    const [, prefix, suffixDayRaw] = match;
+    const suffixDay = Number.parseInt(suffixDayRaw, 10);
+    if (!Number.isInteger(suffixDay) || suffixDay < 1 || suffixDay > 31) continue;
+
+    const rect = getFieldFirstWidgetRect(field);
+    columns.get(prefix).push({
+      name,
+      suffixDay,
+      y: Number.isFinite(rect?.y) ? rect.y : Number.NEGATIVE_INFINITY,
+      x: Number.isFinite(rect?.x) ? rect.x : Number.POSITIVE_INFINITY,
+    });
+  }
+
+  const lookup = new Map();
+  for (const [prefix, fields] of columns.entries()) {
+    fields
+      .sort((a, b) => b.y - a.y || a.x - b.x || a.suffixDay - b.suffixDay)
+      .slice(0, 31)
+      .forEach((field, index) => {
+        lookup.set(`${prefix}_${index + 1}`, field.name);
+      });
+  }
+
+  return lookup;
+};
+
+const setDayFieldText = (form, dayFieldLookup, prefix, day, value) =>
+  setFieldText(form, dayFieldLookup.get(`${prefix}_${day}`) || `${prefix}_${day}`, value);
+
+const resolveDayOverrideLabel = ({ currentDate, dayTimeOff }) => {
+  if (isWeekendDate(currentDate)) return WEEKEND_LABEL;
+  if (dayTimeOff?.vacations?.size) return buildVacationLabel(uniqueNumericIds([...dayTimeOff.vacations]));
+  return null;
 };
 
 /**
@@ -274,16 +379,119 @@ const fetchAttendanceUser = async (userId) => {
 };
 
 const fetchAttendanceRecords = async (userId, startDate, endDate) => {
-  const query = await db.query(
-    `
-    SELECT *
-    FROM user_attendance_records
-    WHERE user_id = $1 AND date BETWEEN $2 AND $3
-    ORDER BY date ASC
-    `,
-    [userId, startDate, endDate]
-  );
-  return query.rows;
+  const baseSelect = `
+      SELECT
+        a.*,
+        ex.exception_type,
+        ex.exception_status,
+        COALESCE(field_ops.field_events, '[]'::json) AS field_events
+      FROM user_attendance_records a
+      LEFT JOIN LATERAL (
+        SELECT
+          e.type AS exception_type,
+          e.status AS exception_status
+        FROM attendance_exceptions e
+        WHERE e.user_id = a.user_id
+          AND (
+            e.date = a.date
+            OR (
+              LOWER(COALESCE(e.type, '')) = ANY(ARRAY['operacion_campo', 'operacion_de_campo', 'salida_oficina', 'viaje', 'campo']::text[])
+              AND a.date BETWEEN e.date AND COALESCE(e.return_time::date, e.date)
+            )
+          )
+        ORDER BY COALESCE(e.start_time, e.created_at) DESC, e.id DESC
+        LIMIT 1
+      ) ex ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'type', event_rows.event_type,
+                'time', event_rows.event_time
+              )
+              ORDER BY event_rows.event_time ASC
+            ),
+            '[]'::json
+          ) AS field_events
+        FROM (
+          SELECT 'client_entry'::text AS event_type, cvl.hora_entrada AS event_time
+          FROM client_visit_logs cvl
+          WHERE cvl.user_email IS NOT NULL
+            AND LOWER(COALESCE(cvl.user_email, '')) = LOWER(COALESCE((SELECT email FROM users WHERE id = a.user_id LIMIT 1), ''))
+            AND cvl.visit_date = a.date
+            AND cvl.hora_entrada IS NOT NULL
+          UNION ALL
+          SELECT 'client_exit'::text AS event_type, cvl.hora_salida AS event_time
+          FROM client_visit_logs cvl
+          WHERE cvl.user_email IS NOT NULL
+            AND LOWER(COALESCE(cvl.user_email, '')) = LOWER(COALESCE((SELECT email FROM users WHERE id = a.user_id LIMIT 1), ''))
+            AND cvl.visit_date = a.date
+            AND cvl.hora_salida IS NOT NULL
+          UNION ALL
+          SELECT 'client_entry'::text AS event_type, pv.check_in_time AS event_time
+          FROM prospect_visits pv
+          WHERE pv.user_email IS NOT NULL
+            AND LOWER(COALESCE(pv.user_email, '')) = LOWER(COALESCE((SELECT email FROM users WHERE id = a.user_id LIMIT 1), ''))
+            AND pv.visit_date = a.date
+            AND pv.check_in_time IS NOT NULL
+          UNION ALL
+          SELECT 'client_exit'::text AS event_type, pv.check_out_time AS event_time
+          FROM prospect_visits pv
+          WHERE pv.user_email IS NOT NULL
+            AND LOWER(COALESCE(pv.user_email, '')) = LOWER(COALESCE((SELECT email FROM users WHERE id = a.user_id LIMIT 1), ''))
+            AND pv.visit_date = a.date
+            AND pv.check_out_time IS NOT NULL
+          UNION ALL
+          SELECT 'office_exit'::text AS event_type, e.start_time AS event_time
+          FROM attendance_exceptions e
+          WHERE e.user_id = a.user_id
+            AND e.date = a.date
+            AND e.start_time IS NOT NULL
+          UNION ALL
+          SELECT 'office_entry'::text AS event_type, e.return_time AS event_time
+          FROM attendance_exceptions e
+          WHERE e.user_id = a.user_id
+            AND e.date = a.date
+            AND e.return_time IS NOT NULL
+        ) event_rows
+      ) field_ops ON true
+      WHERE a.user_id = $1
+        AND a.date BETWEEN $2 AND $3
+  `;
+  try {
+    const query = await db.query(
+      `
+      SELECT
+        a.*,
+        lj.status AS late_justification_status,
+        lj.regularized_entry_time AS late_regularized_entry_time,
+        base.exception_type,
+        base.exception_status,
+        base.field_events
+      FROM (${baseSelect}) base
+      JOIN user_attendance_records a ON a.id = base.id
+      LEFT JOIN attendance_late_justifications lj
+        ON lj.user_id = a.user_id
+       AND lj.attendance_date = a.date
+      ORDER BY a.date ASC
+      `,
+      [userId, startDate, endDate]
+    );
+    return query.rows.map(enrichAttendanceRecordForActa);
+  } catch (err) {
+    if (err?.code !== "42P01") throw err;
+    const query = await db.query(
+      `
+      SELECT a.*, base.exception_type, base.exception_status, base.field_events
+      FROM (${baseSelect}) base
+      JOIN user_attendance_records a ON a.id = base.id
+      ORDER BY date ASC
+      `,
+      [userId, startDate, endDate]
+    );
+    return query.rows.map(enrichAttendanceRecordForActa);
+  }
 };
 
 const fetchApprovedTimeOffRecords = async (userEmail, startDate, endDate) => {
@@ -381,7 +589,14 @@ const buildMonthlyTimeOffMap = (periodDate, rawTimeOffRecords = []) => {
   return map;
 };
 
-const resolveHourlySlotValue = ({ rawValue, slotName, dayTimeOff }) => {
+const resolveHourlySlotValue = ({ rawValue, slotName, dayTimeOff, regularizedEntryTime = null, lateJustificationStatus = null }) => {
+  if (slotName === "entry" && lateJustificationStatus === "approved") {
+    const regularized = String(regularizedEntryTime || "").trim();
+    if (regularized) {
+      return regularized.slice(0, 5);
+    }
+  }
+
   const formattedTime = rawValue ? formatTime(rawValue) : "";
   if (!dayTimeOff) return formattedTime;
 
@@ -405,7 +620,7 @@ const resolveHourlySlotValue = ({ rawValue, slotName, dayTimeOff }) => {
           rawDate >= item.start &&
           rawDate <= item.end
       );
-      if (match) return buildPermissionLabel(match.id, formattedTime);
+      if (match) return buildPermissionLabel(match.id);
     }
     return formattedTime;
   }
@@ -414,7 +629,7 @@ const resolveHourlySlotValue = ({ rawValue, slotName, dayTimeOff }) => {
   if (slotName === "entry") {
     const first = sortedByStart[0];
     const resumeTime = first?.end ? formatTime(first.end) : "";
-    return buildPermissionLabel(first.id, resumeTime);
+    return buildPermissionLabel(first.id);
   }
 
   const permissionIds = uniqueNumericIds(sortedByStart.map((item) => item.id));
@@ -492,6 +707,7 @@ const buildMonthlyPdfBuffer = async ({
   const templateBytes = getTemplateBytes();
   const pdfDoc = await PDFDocument.load(templateBytes);
   const form = pdfDoc.getForm();
+  const dayFieldLookup = buildDayTextFieldLookup(form);
 
   const periodYear = periodDate.getFullYear();
   const periodMonth = periodDate.getMonth();
@@ -511,47 +727,78 @@ const buildMonthlyPdfBuffer = async ({
 
   for (let day = 1; day <= 31; day += 1) {
     if (day > daysInMonth) {
-      setFieldText(form, `hora_entrada_${day}`, "");
-      setFieldText(form, `hora_salida_${day}`, "");
-      setFieldText(form, `hora_entrada_a_${day}`, "");
-      setFieldText(form, `hora_salida_a_${day}`, "");
-      setFieldText(form, `ra_observaciones_${day}`, "");
+      setDayFieldText(form, dayFieldLookup, "hora_entrada", day, "");
+      setDayFieldText(form, dayFieldLookup, "hora_salida", day, "");
+      setDayFieldText(form, dayFieldLookup, "hora_entrada_a", day, "");
+      setDayFieldText(form, dayFieldLookup, "hora_salida_a", day, "");
+      setDayFieldText(form, dayFieldLookup, "ra_observaciones", day, "");
       await setFieldSignature(pdfDoc, form, `Firma_${day}`, null, "", true);
       await setFieldSignature(pdfDoc, form, `Firma_S_${day}`, null, "", true);
       continue;
     }
 
     const currentDate = new Date(periodYear, periodMonth, day, 12, 0, 0, 0);
-    const isWeekend = currentDate.getDay() === 0 || currentDate.getDay() === 6;
+    const isWeekend = isWeekendDate(currentDate);
     const isBeforeHireDate = Boolean(hireDate && isDateBefore(currentDate, hireDate));
-    const record = isBeforeHireDate ? null : recordsByDay.get(day);
+    const record = isBeforeHireDate || isWeekend ? null : recordsByDay.get(day);
     const dayTimeOff = isBeforeHireDate ? null : timeOffByDay.get(day);
+    const dayOverrideLabel = resolveDayOverrideLabel({ currentDate, dayTimeOff });
 
-    setFieldText(
+    setDayFieldText(
       form,
-      `hora_entrada_${day}`,
-      resolveHourlySlotValue({ rawValue: record?.entry_time, slotName: "entry", dayTimeOff })
+      dayFieldLookup,
+      "hora_entrada",
+      day,
+      dayOverrideLabel ||
+        resolveHourlySlotValue({
+          rawValue: record?.acta_entry_time || record?.entry_time,
+          slotName: "entry",
+          dayTimeOff,
+          regularizedEntryTime: record?.late_regularized_entry_time || null,
+          lateJustificationStatus: record?.late_justification_status || null,
+        })
     );
-    setFieldText(
+    setDayFieldText(
       form,
-      `hora_salida_a_${day}`,
-      resolveHourlySlotValue({ rawValue: record?.lunch_start_time, slotName: "lunch_start", dayTimeOff })
+      dayFieldLookup,
+      "hora_salida_a",
+      day,
+      dayOverrideLabel ||
+        resolveHourlySlotValue({
+          rawValue: record?.acta_lunch_start_time || record?.lunch_start_time,
+          slotName: "lunch_start",
+          dayTimeOff,
+        })
     );
-    setFieldText(
+    setDayFieldText(
       form,
-      `hora_entrada_a_${day}`,
-      resolveHourlySlotValue({ rawValue: record?.lunch_end_time, slotName: "lunch_end", dayTimeOff })
+      dayFieldLookup,
+      "hora_entrada_a",
+      day,
+      dayOverrideLabel ||
+        resolveHourlySlotValue({
+          rawValue: record?.acta_lunch_end_time || record?.lunch_end_time,
+          slotName: "lunch_end",
+          dayTimeOff,
+        })
     );
-    setFieldText(
+    setDayFieldText(
       form,
-      `hora_salida_${day}`,
-      resolveHourlySlotValue({ rawValue: record?.exit_time, slotName: "exit", dayTimeOff })
+      dayFieldLookup,
+      "hora_salida",
+      day,
+      dayOverrideLabel ||
+        resolveHourlySlotValue({
+          rawValue: record?.acta_exit_time || record?.exit_time,
+          slotName: "exit",
+          dayTimeOff,
+        })
     );
 
     const observation = isBeforeHireDate
       ? "NO LABORABA EN LA EMPRESA"
       : isWeekend
-      ? "FIN DE SEMANA"
+      ? WEEKEND_LABEL
       : dayTimeOff?.vacations?.size
       ? buildVacationLabel(uniqueNumericIds([...dayTimeOff.vacations]))
       : dayTimeOff?.permissions?.length
@@ -559,7 +806,7 @@ const buildMonthlyPdfBuffer = async ({
           .map((id) => buildPermissionLabel(id))
           .join(" / ")
       : "";
-    setFieldText(form, `ra_observaciones_${day}`, observation);
+    setDayFieldText(form, dayFieldLookup, "ra_observaciones", day, observation);
 
     const hasFirstCycle = record && record.entry_time && record.lunch_start_time;
     if (hasFirstCycle && signatureBuffer) {
@@ -616,12 +863,50 @@ const finalizeResult = (buffer, extra = {}) => {
   };
 };
 
+const buildRangePdfBuffer = async ({
+  user,
+  startDate,
+  endDate,
+  records = [],
+  timeOffRecords = [],
+  signatureBuffer = null,
+  hireDate = null,
+}) => {
+  const months = getMonthSequenceBetween(startDate, endDate);
+  const recordsByMonth = groupRecordsByMonth(records);
+  const mergedPdf = await PDFDocument.create();
+
+  for (const periodDate of months) {
+    const key = monthKey(periodDate);
+    const monthRecords = (recordsByMonth.get(key) || []).filter((record) => {
+      const recordDate = parseRecordDate(record?.date);
+      if (!recordDate) return false;
+      return recordDate >= startDate && recordDate <= endDate;
+    });
+
+    const monthPdfBuffer = await buildMonthlyPdfBuffer({
+      user,
+      periodDate,
+      records: monthRecords,
+      timeOffRecords,
+      signatureBuffer,
+      hireDate,
+    });
+    const monthPdfDoc = await PDFDocument.load(monthPdfBuffer);
+    const copiedPages = await mergedPdf.copyPages(monthPdfDoc, monthPdfDoc.getPageIndices());
+    copiedPages.forEach((page) => mergedPdf.addPage(page));
+  }
+
+  const mergedBytes = await mergedPdf.save();
+  return Buffer.from(mergedBytes);
+};
+
 /**
  * Generate attendance PDF report.
  * @param {number|string} userId
  * @param {string} startDate YYYY-MM-DD
  * @param {string} endDate YYYY-MM-DD
- * @param {{ periodType?: 'monthly'|'annual', year?: number|string }} options
+ * @param {{ periodType?: 'weekly'|'monthly'|'annual', year?: number|string }} options
  */
 const generateAttendancePDF = async (userId, startDate, endDate, options = {}) => {
   const targetUserId = Number(userId);
@@ -713,28 +998,64 @@ const generateAttendancePDF = async (userId, startDate, endDate, options = {}) =
     formatDateOnly(parsedStartDate),
     formatDateOnly(parsedEndDate)
   );
-  const monthRecords = monthRecordsRaw.filter((record) => {
-    const recordDate = parseRecordDate(record?.date);
-    return Boolean(recordDate && isSameMonth(recordDate, periodDate));
-  });
-
-  const monthlyBuffer = await buildMonthlyPdfBuffer({
+  const rangeBuffer = await buildRangePdfBuffer({
     user,
-    periodDate,
-    records: monthRecords,
+    startDate: parsedStartDate,
+    endDate: parsedEndDate,
+    records: monthRecordsRaw,
     timeOffRecords: monthTimeOffRecords,
     signatureBuffer,
     hireDate,
   });
 
-  return finalizeResult(monthlyBuffer, {
-    periodType: "monthly",
-    fileLabel: `${periodDate.getFullYear()}-${String(periodDate.getMonth() + 1).padStart(2, "0")}`,
+  const rangeLabel =
+    parsedStartDate.getFullYear() === parsedEndDate.getFullYear() &&
+    parsedStartDate.getMonth() === parsedEndDate.getMonth()
+      ? `${periodDate.getFullYear()}-${String(periodDate.getMonth() + 1).padStart(2, "0")}`
+      : `${formatDateOnly(parsedStartDate)}_${formatDateOnly(parsedEndDate)}`;
+
+  return finalizeResult(rangeBuffer, {
+    periodType,
+    fileLabel: rangeLabel,
     periodStart: formatDateOnly(parsedStartDate),
     periodEnd: formatDateOnly(parsedEndDate),
   });
 };
 
+const generateAttendanceBulkPDF = async (userIds = [], startDate, endDate, options = {}) => {
+  const normalizedIds = [...new Set((Array.isArray(userIds) ? userIds : []).map(Number).filter((value) => Number.isInteger(value) && value > 0))];
+  if (!normalizedIds.length) {
+    throw new Error("No hay usuarios para generar el reporte masivo");
+  }
+
+  const mergedPdf = await PDFDocument.create();
+  for (const userId of normalizedIds) {
+    const pdfResult = await generateAttendancePDF(userId, startDate, endDate, options);
+    const pdfBuffer = pdfResult?.buffer;
+    if (!pdfBuffer) continue;
+    const userPdf = await PDFDocument.load(pdfBuffer);
+    const copiedPages = await mergedPdf.copyPages(userPdf, userPdf.getPageIndices());
+    copiedPages.forEach((page) => mergedPdf.addPage(page));
+  }
+
+  const mergedBytes = await mergedPdf.save();
+  const mergedBuffer = Buffer.from(mergedBytes);
+  return finalizeResult(mergedBuffer, {
+    periodType: normalizePeriodType(options?.periodType),
+    periodStart: startDate || null,
+    periodEnd: endDate || null,
+  });
+};
+
 module.exports = {
   generateAttendancePDF,
+  generateAttendanceBulkPDF,
+  __private: {
+    VACATION_LABEL,
+    WEEKEND_LABEL,
+    buildDayTextFieldLookup,
+    enrichAttendanceRecordForActa,
+    resolveDayOverrideLabel,
+    resolveHourlySlotValue,
+  },
 };

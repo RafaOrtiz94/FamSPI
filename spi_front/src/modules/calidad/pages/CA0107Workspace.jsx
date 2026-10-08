@@ -2,6 +2,8 @@ import React, { useMemo, useState } from "react";
 import { FiEdit3, FiAlertCircle, FiDollarSign, FiLink, FiShield, FiTrendingUp, FiActivity, FiUser } from "react-icons/fi";
 import { useAuth } from "../../../core/auth/useAuth";
 import CA0107Stepper from "../components/CA0107Stepper";
+import Modal from "../../../core/ui/components/Modal";
+import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
 
 const laneCards = [
   { key: "intake", title: "Intake", description: "Formulario de ingreso de quejas.", accent: "from-red-500 to-rose-600", icon: FiEdit3 },
@@ -29,7 +31,7 @@ export default function CA0107Workspace() {
   const handleExpandRecord = (record) => setExpandedRecord(record?.id === expandedRecord?.id ? null : record);
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50">
+    <div className={WORKSPACE_PAGE_CLASS}>
       <header className="bg-white border-b border-gray-200 px-6 py-4">
         <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
           <FiAlertCircle className="text-red-600" />
@@ -86,13 +88,9 @@ export default function CA0107Workspace() {
           </div>
         )}
 
-        {expandedRecord && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-              <CA0107Stepper record={expandedRecord} onClose={() => handleExpandRecord(null)} />
-            </div>
-          </div>
-        )}
+        <Modal open={Boolean(expandedRecord)} onClose={() => handleExpandRecord(null)} maxWidth="max-w-2xl">
+          {expandedRecord && <CA0107Stepper record={expandedRecord} onClose={() => handleExpandRecord(null)} />}
+        </Modal>
       </div>
     </div>
   );

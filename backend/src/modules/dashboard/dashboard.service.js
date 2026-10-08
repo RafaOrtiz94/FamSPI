@@ -313,5 +313,6 @@ async function getCommercialSummary(options = {}) {
 }
 
 module.exports = {
+    classifyPgError,
     getCommercialSummary,
 };

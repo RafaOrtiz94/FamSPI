@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { verifyDocument } from '../../../core/api';
 
 /**
@@ -14,7 +14,6 @@ import { verifyDocument } from '../../../core/api';
  */
 const DocumentVerification = () => {
  const { token } = useParams();
- const [searchParams] = useSearchParams();
  const [loading, setLoading] = useState(true);
  const [verificationData, setVerificationData] = useState(null);
  const [error, setError] = useState(null);

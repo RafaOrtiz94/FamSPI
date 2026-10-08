@@ -38,6 +38,17 @@ export const REQUEST_TYPES_CONFIG = {
  iconBgClass: "bg-indigo-100 text-indigo-600",
  emptyMessage: "No has creado requerimientos de compra"
  },
+ credito: {
+ id: 'credito',
+ label: "Solicitud de Credito",
+ title: "Solicitudes de Credito",
+ icon: FiCreditCard,
+ color: "blue",
+ subtitle: "Cupo y plazo",
+ bgClass: "bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800",
+ iconBgClass: "bg-blue-100 text-blue-600",
+ emptyMessage: "No has creado solicitudes de credito"
+ },
  permisos: {
  id: 'permisos',
  label: "Permisos y Vacaciones",
@@ -146,7 +157,9 @@ export const getStatusColor = (status) => {
  switch (status?.toLowerCase()) {
  case 'approved':
  case 'aprobada':
+ case 'aprobado':
  case 'completed':
+ case 'completado':
  return 'text-green-600 bg-green-50';
  case 'pending':
  case 'pendiente':
@@ -165,7 +178,9 @@ export const getStatusIcon = (status) => {
  switch (status?.toLowerCase()) {
  case 'approved':
  case 'aprobada':
+ case 'aprobado':
  case 'completed':
+ case 'completado':
  return <FiCheckCircle className="w-4 h-4" />;
  case 'pending':
  case 'pendiente':
@@ -193,9 +208,9 @@ export const getAvailableActions = (user) => {
  const isBackofficeCommercial = roleName === "backoffice_comercial";
  const isJefeComercial = roleName.includes("jefe_comercial") || roleName.includes("jefe comercial");
 
- const baseActions = ["cliente", "compra", "permisos"];
- const acpActions = ["cliente", "compra", "permisos"];
- const backofficeCommercialActions = ["cliente", "compra", "permisos"];
+ const baseActions = ["cliente", "compra", "credito", "permisos"];
+ const acpActions = ["cliente", "compra", "credito", "permisos"];
+ const backofficeCommercialActions = ["cliente", "compra", "credito", "permisos"];
  const fullActions = ["inspection", "retiro", ...baseActions];
 
  let availableActionIds;

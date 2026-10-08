@@ -1,6 +1,7 @@
 import React from "react";
 import axios from "axios";
 export * from "./signatureApi";
+export * from "./signatureWorkflowsApi";
 
 /**
  * ==========================================================
@@ -40,7 +41,24 @@ export const API_BASE_URL = normalizeApiBase(
 const api = axios.create({
  baseURL: API_BASE_URL,
  withCredentials: false, // ❌ Sin cookies
+ timeout: 15000,
 });
+
+export const isTransientApiError = (error) => {
+ const status = Number(error?.response?.status || 0);
+ const code = String(error?.code || "").toUpperCase();
+ const message = String(error?.message || "").toLowerCase();
+
+ if (!error?.response) return true;
+ if (code === "ECONNABORTED") return true;
+ if ([408, 425, 429, 500, 502, 503, 504].includes(status)) return true;
+
+ return (
+  message.includes("timeout") ||
+  message.includes("network error") ||
+  message.includes("failed to fetch")
+ );
+};
 
 // ==========================================================
 // 🔑 Manejo de tokens
@@ -147,6 +165,9 @@ api.interceptors.request.use(
  if (activeAccessToken) {
  config.headers.Authorization = `Bearer ${activeAccessToken}`;
  }
+ if (typeof window !== "undefined") {
+ config.headers["x-app-path"] = window.location.pathname || "";
+ }
  return config;
  },
  (error) => Promise.reject(error)
@@ -199,6 +220,9 @@ api.interceptors.request.use(
  const activeAccessToken = getAccessToken();
  if (activeAccessToken) {
  config.headers.Authorization = `Bearer ${activeAccessToken}`;
+ }
+ if (typeof window !== "undefined") {
+ config.headers["x-app-path"] = window.location.pathname || "";
  }
  return config;
  },
@@ -428,6 +452,7 @@ export const startAutoUpdates = () => {
  if (updateIntervalId) return; // Ya está ejecutándose
 
  updateIntervalId = setInterval(() => {
+ if (document.hidden) return;
  // Emitir evento de polling para componentes que necesiten actualizarse
  eventEmitter.emit('auto-update', { timestamp: Date.now() });
  }, UPDATE_INTERVAL);

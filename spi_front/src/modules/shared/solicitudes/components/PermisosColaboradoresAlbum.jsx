@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { FiCalendar, FiClock, FiEye, FiUser, FiSearch, FiX } from "react-icons/fi";
-import Card from "../../../../core/ui/components/Card";
+import { FiCalendar, FiClock, FiEye, FiSearch, FiX } from "react-icons/fi";
 import Button from "../../../../core/ui/components/Button";
 import { getResumenColaboradores } from "../../../../core/api/permisosApi";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
@@ -71,6 +70,7 @@ const PermisosColaboradoresAlbum = ({ compact = false }) => {
 
  useEffect(() => {
  load();
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, []);
 
  useScopedAutoUpdate(
@@ -107,7 +107,6 @@ const PermisosColaboradoresAlbum = ({ compact = false }) => {
  : "block w-full pl-10 pr-3 py-2 border border-gray-200 rounded-xl bg-white/50 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white transition-all shadow-sm";
  const gridClass = compact ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3" : "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4";
  const cardPadding = compact ? "p-4 space-y-3" : "p-5 space-y-4";
- const avatarSize = compact ? "h-9 w-9" : "h-10 w-10";
  const modalPadding = compact ? "p-4 space-y-6" : "p-6 space-y-8";
  const modalHeaderPadding = compact ? "px-4 py-3" : "px-6 py-4";
  const modalFooterPadding = compact ? "px-4 py-3" : "px-6 py-4";
@@ -334,9 +333,9 @@ return (
  <div className="text-xs text-gray-400">
  Duración: {computePermisoDuration(item)}
  </div>
- {Array.isArray(item.justificantes_urls) && item.justificantes_urls.length > 0 && (
- <div className="mt-2 flex flex-wrap gap-2">
- {item.justificantes_urls.map((url, idx) => (
+{Array.isArray(item.justificantes_urls) && item.justificantes_urls.length > 0 && (
+<div className="mt-2 flex flex-wrap gap-2">
+{item.justificantes_urls.map((url, idx) => (
  <a
  key={`${item.id}-doc-${idx}`}
  href={url}
@@ -346,10 +345,26 @@ return (
  >
  <FiEye className="h-3 w-3" />
  Doc {idx + 1}
- </a>
- ))}
- </div>
- )}
+</a>
+))}
+</div>
+)}
+{Array.isArray(item.external_coordination_urls) && item.external_coordination_urls.length > 0 && (
+<div className="mt-2 flex flex-wrap gap-2">
+{item.external_coordination_urls.map((url, idx) => (
+<a
+key={`${item.id}-coord-${idx}`}
+href={url}
+target="_blank"
+rel="noopener noreferrer"
+className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[10px] font-medium text-slate-700 shadow-sm border border-slate-200 hover:border-slate-300 transition-colors"
+>
+<FiEye className="h-3 w-3" />
+Coordinación {idx + 1}
+</a>
+))}
+</div>
+)}
  </div>
  ))}
  </div>

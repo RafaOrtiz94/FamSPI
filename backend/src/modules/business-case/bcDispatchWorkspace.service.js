@@ -1,5 +1,11 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
+const {
+  buildSheetPayloads,
+  loadTemplateDefinition,
+  protectSpreadsheetAfterMaximumQuantitiesSync,
+  pullMaximumQuantitiesFromGoogleSheet,
+} = require("./businessCaseSheetSyncLocal.service");
 
 const ALLOWED_ITEM_TYPES = new Set([
   "reactivo",
@@ -114,9 +120,87 @@ async function queryWithClient(client, sql, params = []) {
   return db.query(sql, params);
 }
 
+function toObject(value) {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+async function resolveBusinessCaseSheetId(businessCaseId, client = null) {
+  // BUG corregido: esta query pedia bc_spreadsheet_id, columna que no existe
+  // en equipment_purchase_requests -- la query fallaba siempre (atrapada en
+  // el try/catch del caller), asi que el pull de PRODUCTO A ENTREGAR desde
+  // Sheets nunca se ejecutaba. El sheet_id real vive solo en
+  // modern_bc_metadata.bc_sheet_generation.last.sheet_id.
+  const { rows } = await queryWithClient(
+    client,
+    `SELECT modern_bc_metadata
+       FROM equipment_purchase_requests
+      WHERE id = $1
+      LIMIT 1`,
+    [businessCaseId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+
+  const metadata = toObject(row.modern_bc_metadata);
+  return metadata?.bc_sheet_generation?.last?.sheet_id || null;
+}
+
+function buildSheetContextFromConsumptionRows(consumptionRows = []) {
+  const equipmentMap = new Map();
+  consumptionRows.forEach((row) => {
+    const equipmentId = Number(row.equipment_id);
+    if (!Number.isInteger(equipmentId) || equipmentId <= 0) return;
+    if (!equipmentMap.has(equipmentId)) {
+      equipmentMap.set(equipmentId, {
+        id: equipmentId,
+        name: row.equipment_name || null,
+        code: null,
+        model: null,
+      });
+    }
+  });
+
+  const maxQuantities = consumptionRows.map((row) => ({
+    item_key: row.item_key,
+    item_id: row.item_id || null,
+    item_name: row.name || null,
+    item_type: row.item_type || null,
+    source: row.source || null,
+    equipment_id: row.equipment_id || null,
+    equipment_name: row.equipment_name || null,
+    annual_qty: row.annual_qty === null || row.annual_qty === undefined ? null : Number(row.annual_qty),
+  }));
+
+  const equipmentRecords = Array.from(equipmentMap.values());
+  const equipmentTabs = buildSheetPayloads({
+    template: loadTemplateDefinition(),
+    equipmentRecords,
+    payload: {
+      fields: {},
+      max_quantities: maxQuantities,
+      sheet_context: {},
+    },
+  });
+
+  return { equipmentTabs };
+}
+
 async function syncDispatchWorkspaceFromConsumption(businessCaseId, options = {}) {
   const client = options.client || null;
   const allowMissingTable = Boolean(options.allowMissingTable);
+  const sheetSync = {
+    maximumQuantitiesFound: 0,
+    maximumQuantitiesApplied: 0,
+    sheetProtected: false,
+    sheetProtectionReason: null,
+  };
   try {
     const { rows: consumptionRows } = await queryWithClient(
       client,
@@ -192,8 +276,8 @@ async function syncDispatchWorkspaceFromConsumption(businessCaseId, options = {}
          p.equipment_id,
          p.equipment_name,
          GREATEST(COALESCE(p.annual_qty, 0), 0),
-         GREATEST(COALESCE(p.annual_qty, 0), 0),
-         GREATEST(COALESCE(p.annual_qty, 0), 0),
+         0,
+         0,
          0,
          'pendiente',
          NOW(),
@@ -208,14 +292,6 @@ async function syncDispatchWorkspaceFromConsumption(businessCaseId, options = {}
          equipment_id = EXCLUDED.equipment_id,
          equipment_name = EXCLUDED.equipment_name,
          annual_qty = EXCLUDED.annual_qty,
-         planned_qty = CASE
-           WHEN bc_dispatch_items.commercial_updated_at IS NULL THEN EXCLUDED.annual_qty
-           ELSE bc_dispatch_items.planned_qty
-         END,
-         ops_dispatch_qty = CASE
-           WHEN bc_dispatch_items.operations_updated_at IS NULL THEN EXCLUDED.annual_qty
-           ELSE bc_dispatch_items.ops_dispatch_qty
-         END,
          updated_at = NOW()`,
       [businessCaseId, JSON.stringify(payload)],
     );
@@ -233,7 +309,58 @@ async function syncDispatchWorkspaceFromConsumption(businessCaseId, options = {}
       [businessCaseId],
     );
 
-    return getDispatchWorkspace(businessCaseId, { client, skipSync: true });
+    try {
+      const sheetId = await resolveBusinessCaseSheetId(businessCaseId, client);
+      if (sheetId) {
+        const { equipmentTabs } = buildSheetContextFromConsumptionRows(consumptionRows);
+        const sheetUpdates = await pullMaximumQuantitiesFromGoogleSheet({
+          sheetId,
+          equipmentTabs,
+        });
+        sheetSync.maximumQuantitiesFound = sheetUpdates.length;
+
+        if (sheetUpdates.length) {
+          const result = await queryWithClient(
+            client,
+            `WITH payload AS (
+               SELECT *
+               FROM jsonb_to_recordset($2::jsonb) AS p(
+                 item_key text,
+                 planned_qty numeric
+               )
+             )
+             UPDATE bc_dispatch_items d
+                SET planned_qty = GREATEST(COALESCE(p.planned_qty, 0), 0),
+                    updated_at = NOW()
+               FROM payload p
+              WHERE d.business_case_id = $1
+                AND d.item_key = p.item_key
+                AND d.commercial_updated_at IS NULL`,
+            [businessCaseId, JSON.stringify(sheetUpdates)],
+          );
+          sheetSync.maximumQuantitiesApplied = result.rowCount || 0;
+        }
+
+        if (sheetUpdates.length) {
+          const protection = await protectSpreadsheetAfterMaximumQuantitiesSync({
+            sheetId,
+            businessCaseId,
+          });
+          sheetSync.sheetProtected = protection.protected === true;
+          sheetSync.sheetProtectionReason = protection.reason || null;
+          sheetSync.protectedSheets = protection.protectedSheets || 0;
+        }
+      }
+    } catch (sheetSyncError) {
+      logger.warn(
+        { businessCaseId, error: sheetSyncError.message },
+        "No se pudo sincronizar o proteger PRODUCTO A ENTREGAR/ENVIAR desde Google Sheet. Continua con datos locales.",
+      );
+      sheetSync.sheetProtectionReason = sheetSyncError.message || "SHEET_SYNC_OR_PROTECTION_ERROR";
+    }
+
+    const workspace = await getDispatchWorkspace(businessCaseId, { client, skipSync: true });
+    return { ...workspace, sheetSync };
   } catch (error) {
     if (isDispatchTableMissing(error)) {
       if (allowMissingTable) {
@@ -293,7 +420,7 @@ async function getDispatchWorkspace(businessCaseId, options = {}) {
 
   if (!skipSync) {
     const synced = await syncDispatchWorkspaceFromConsumption(businessCaseId, { client, allowMissingTable: true });
-    if (synced?.migrationRequired) {
+    if (synced?.migrationRequired || synced?.items) {
       return synced;
     }
   }

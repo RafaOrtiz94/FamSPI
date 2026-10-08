@@ -1,0 +1,992 @@
+{
+  "acp_comercial": {
+    "home": "/dashboard/comercial",
+    "menus": [
+      "Compras y Equipos",
+      "Finanzas",
+      "Herramientas",
+      "Personas",
+      "Ventas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/comercial",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/comercial/clientes",
+        "label": "Clientes"
+      },
+      {
+        "href": "/dashboard/comercial/solicitudes",
+        "label": "Solicitudes"
+      },
+      {
+        "href": "/dashboard/crm-fam",
+        "label": "CRM-FAM"
+      },
+      {
+        "href": "/dashboard/equipos",
+        "label": "Workspace de Equipos"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/finanzas/viaticos",
+        "label": "Workspace Viaticos"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/purchases/workspace",
+        "label": "Workspace de Compras"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/talento-humano/permisos",
+        "label": "Permisos y Vacaciones"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      },
+      {
+        "href": "/dashboard/work-management",
+        "label": "Work Management"
+      }
+    ]
+  },
+  "comercial": {
+    "home": "/dashboard/comercial",
+    "menus": [
+      "Compras y Equipos",
+      "Finanzas",
+      "Herramientas",
+      "Personas",
+      "Ventas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/comercial",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/comercial/clientes",
+        "label": "Clientes"
+      },
+      {
+        "href": "/dashboard/comercial/solicitudes",
+        "label": "Solicitudes"
+      },
+      {
+        "href": "/dashboard/crm-fam",
+        "label": "CRM-FAM"
+      },
+      {
+        "href": "/dashboard/equipos",
+        "label": "Workspace de Equipos"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/finanzas/viaticos",
+        "label": "Workspace Viaticos"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/purchases/workspace",
+        "label": "Workspace de Compras"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/talento-humano/permisos",
+        "label": "Permisos y Vacaciones"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      },
+      {
+        "href": "/dashboard/work-management",
+        "label": "Work Management"
+      }
+    ]
+  },
+  "financiero": {
+    "home": "/dashboard/finanzas",
+    "menus": [
+      "Compras y Equipos",
+      "Finanzas",
+      "Herramientas",
+      "Personas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/finanzas",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/talento-humano/permisos",
+        "label": "Permisos y Vacaciones"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      }
+    ]
+  },
+  "gerencia_general": {
+    "home": "/dashboard/gerencia",
+    "menus": [
+      "Administración",
+      "Compras y Equipos",
+      "Herramientas",
+      "Personas",
+      "Reportes",
+      "Ventas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/business-case",
+        "label": "Business Case"
+      },
+      {
+        "href": "/dashboard/business-case/observabilidad",
+        "label": "Obs. BC"
+      },
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/collab/resumen",
+        "label": "Entregas Colaboradores"
+      },
+      {
+        "href": "/dashboard/comercial/aprobaciones-planificacion",
+        "label": "Aprobación de planes"
+      },
+      {
+        "href": "/dashboard/comercial/delivery-ceilings",
+        "label": "Maximos y Saldos"
+      },
+      {
+        "href": "/dashboard/comercial/famsheets",
+        "label": "FamSheets"
+      },
+      {
+        "href": "/dashboard/crm-fam",
+        "label": "CRM-FAM"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/kickoff",
+        "label": "Kick Off 2026 🚧"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      },
+      {
+        "href": "/dashboard/work-management",
+        "label": "Work Management"
+      }
+    ]
+  },
+  "ing_servicio": {
+    "home": "/dashboard/servicio-tecnico",
+    "menus": [
+      "Compras y Equipos",
+      "Finanzas",
+      "Herramientas",
+      "Personas",
+      "Servicio Técnico",
+      "Ventas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/equipos",
+        "label": "Workspace de Equipos"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/finanzas/viaticos",
+        "label": "Workspace Viaticos"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/purchases/workspace",
+        "label": "Workspace de Compras"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico/aplicaciones",
+        "label": "Aplicaciones ST"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico/asistencia",
+        "label": "Asistencia y Salidas"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico/casos-externos",
+        "label": "Casos Externos"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico/cronograma",
+        "label": "Cronograma Tecnico"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico/disponibilidad",
+        "label": "Disponibilidad"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico/inspecciones",
+        "label": "Inspecciones de Ambiente"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico/mantenimientos",
+        "label": "Mantenimientos"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/talento-humano/permisos",
+        "label": "Permisos y Vacaciones"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      },
+      {
+        "href": "/dashboard/work-management",
+        "label": "Work Management"
+      }
+    ]
+  },
+  "ing_servicio_ext": {
+    "home": "/dashboard/ext",
+    "menus": [
+      "Finanzas",
+      "Herramientas",
+      "Personas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/ext",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/finanzas/viaticos",
+        "label": "Workspace Viaticos"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      }
+    ]
+  },
+  "jefe_calidad": {
+    "home": "/dashboard/calidad",
+    "menus": [
+      "Herramientas",
+      "Personas",
+      "Reportes",
+      "Ventas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/business-case/resumen",
+        "label": "Business Case (resumen)"
+      },
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/calidad",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      }
+    ]
+  },
+  "jefe_comercial": {
+    "home": "/dashboard/comercial",
+    "menus": [
+      "Compras y Equipos",
+      "Finanzas",
+      "Herramientas",
+      "Personas",
+      "Ventas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/comercial",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/comercial/clientes",
+        "label": "Clientes"
+      },
+      {
+        "href": "/dashboard/comercial/solicitudes",
+        "label": "Solicitudes"
+      },
+      {
+        "href": "/dashboard/crm-fam",
+        "label": "CRM-FAM"
+      },
+      {
+        "href": "/dashboard/equipos",
+        "label": "Workspace de Equipos"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/finanzas/viaticos",
+        "label": "Workspace Viaticos"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/purchases/workspace",
+        "label": "Workspace de Compras"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/talento-humano/permisos",
+        "label": "Permisos y Vacaciones"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      },
+      {
+        "href": "/dashboard/work-management",
+        "label": "Work Management"
+      }
+    ]
+  },
+  "jefe_financiero": {
+    "home": "/dashboard/finanzas",
+    "menus": [
+      "Compras y Equipos",
+      "Finanzas",
+      "Herramientas",
+      "Personas",
+      "Ventas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/business-case",
+        "label": "Business Case"
+      },
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/comercial/solicitudes",
+        "label": "Solicitudes"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/finanzas",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/talento-humano/permisos",
+        "label": "Permisos y Vacaciones"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      }
+    ]
+  },
+  "jefe_logistica": {
+    "home": "/dashboard/logistica",
+    "menus": [
+      "Compras y Equipos",
+      "Herramientas",
+      "Personas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/logistica",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      },
+      {
+        "href": "/dashboard/work-management",
+        "label": "Work Management"
+      }
+    ]
+  },
+  "jefe_operaciones": {
+    "home": "/dashboard/operaciones",
+    "menus": [
+      "Compras y Equipos",
+      "Herramientas",
+      "Personas",
+      "Ventas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/business-case",
+        "label": "Business Case"
+      },
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/equipos",
+        "label": "Workspace de Equipos"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/operaciones",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/operaciones/clientes",
+        "label": "Clientes"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      },
+      {
+        "href": "/dashboard/work-management",
+        "label": "Work Management"
+      }
+    ]
+  },
+  "jefe_servicio": {
+    "home": "/dashboard/servicio-tecnico",
+    "menus": [
+      "Compras y Equipos",
+      "Finanzas",
+      "Herramientas",
+      "Personas",
+      "Reportes",
+      "Servicio Técnico",
+      "Ventas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/business-case/observabilidad",
+        "label": "Obs. BC"
+      },
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/collab/entregas",
+        "label": "Entregas Colaboradores"
+      },
+      {
+        "href": "/dashboard/equipos",
+        "label": "Workspace de Equipos"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/finanzas/viaticos",
+        "label": "Workspace Viaticos"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/purchases/workspace",
+        "label": "Workspace de Compras"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico/aplicaciones",
+        "label": "Aplicaciones ST"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico/asistencia",
+        "label": "Asistencia y Salidas"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico/casos-externos",
+        "label": "Casos Externos"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico/cronograma",
+        "label": "Cronograma Tecnico"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico/disponibilidad",
+        "label": "Disponibilidad"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico/mantenimientos",
+        "label": "Mantenimientos"
+      },
+      {
+        "href": "/dashboard/servicio-tecnico/solicitudes",
+        "label": "Solicitudes"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/talento-humano/permisos",
+        "label": "Permisos y Vacaciones"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      },
+      {
+        "href": "/dashboard/work-management",
+        "label": "Work Management"
+      }
+    ]
+  },
+  "jefe_ti": {
+    "home": "/dashboard/ti",
+    "menus": [
+      "Administración",
+      "Finanzas",
+      "Herramientas",
+      "Personas",
+      "TI",
+      "Ventas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/auditoria",
+        "label": "Auditoría y Trazabilidad"
+      },
+      {
+        "href": "/dashboard/business-case",
+        "label": "Business Case"
+      },
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/crm-fam",
+        "label": "CRM-FAM"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/finanzas/viaticos",
+        "label": "Workspace Viaticos"
+      },
+      {
+        "href": "/dashboard/kickoff",
+        "label": "Kick Off 2026 🚧"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/talento-humano/colaboradores",
+        "label": "Colaboradores"
+      },
+      {
+        "href": "/dashboard/talento-humano/gestion",
+        "label": "Usuarios y Departamentos"
+      },
+      {
+        "href": "/dashboard/talento-humano/permisos",
+        "label": "Permisos y Vacaciones"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      },
+      {
+        "href": "/dashboard/ti",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/ti/dispositivos",
+        "label": "Dispositivos TI"
+      },
+      {
+        "href": "/dashboard/ti/modulos",
+        "label": "Modulos por Usuario"
+      },
+      {
+        "href": "/dashboard/ti/shortcut-token",
+        "label": "Token Shortcut Siri"
+      },
+      {
+        "href": "/dashboard/ti/workspace",
+        "label": "Workspace TI"
+      },
+      {
+        "href": "/dashboard/work-management",
+        "label": "Work Management"
+      }
+    ]
+  },
+  "logistica": {
+    "home": "/dashboard/logistica",
+    "menus": [
+      "Compras y Equipos",
+      "Herramientas",
+      "Personas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/logistica",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      },
+      {
+        "href": "/dashboard/work-management",
+        "label": "Work Management"
+      }
+    ]
+  },
+  "operaciones": {
+    "home": "/dashboard/operaciones",
+    "menus": [
+      "Compras y Equipos",
+      "Herramientas",
+      "Personas",
+      "Ventas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/business-case",
+        "label": "Business Case"
+      },
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/equipos",
+        "label": "Workspace de Equipos"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/operaciones",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/work-management",
+        "label": "Work Management"
+      }
+    ]
+  },
+  "pasante": {
+    "home": "/dashboard/pasante",
+    "menus": [
+      "Herramientas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard",
+        "label": "Inicio"
+      }
+    ]
+  },
+  "talento_humano": {
+    "home": "/dashboard/talento-humano",
+    "menus": [
+      "Compras y Equipos",
+      "Finanzas",
+      "Herramientas",
+      "Personas"
+    ],
+    "links": [
+      {
+        "href": "/dashboard/buzon-sugerencias",
+        "label": "Buzón de sugerencias"
+      },
+      {
+        "href": "/dashboard/capacitaciones",
+        "label": "Capacitaciones"
+      },
+      {
+        "href": "/dashboard/collab/entregas",
+        "label": "Entregas Colaboradores"
+      },
+      {
+        "href": "/dashboard/famdays",
+        "label": "FamDays"
+      },
+      {
+        "href": "/dashboard/finanzas/viaticos",
+        "label": "Workspace Viaticos"
+      },
+      {
+        "href": "/dashboard/links-interes",
+        "label": "Links de Interés"
+      },
+      {
+        "href": "/dashboard/signatures/inbox",
+        "label": "Firma Digital"
+      },
+      {
+        "href": "/dashboard/talento-humano",
+        "label": "Inicio"
+      },
+      {
+        "href": "/dashboard/talento-humano/pruebas-tecnicas",
+        "label": "Gestor de pruebas asignadas"
+      }
+    ]
+  }
+}

@@ -12,6 +12,7 @@ const UIGuidancePanel = ({ businessCaseId, selectedSection }) => {
  if (businessCaseId && isOpen) {
  loadGuidance();
  }
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [businessCaseId, isOpen]);
 
  const loadGuidance = async () => {

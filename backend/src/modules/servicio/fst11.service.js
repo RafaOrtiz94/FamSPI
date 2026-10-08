@@ -105,11 +105,11 @@ const generateFst11PdfBuffer = async ({
     doc.on("error", reject);
     doc.on("end", () => resolve(Buffer.concat(chunks)));
 
-    doc.font("Helvetica-Bold").fontSize(14).text("F.ST-11 - ACTA DE RETIRO / DESINSTALACION", {
+    doc.font("Times-Bold").fontSize(14).text("F.ST-11 - ACTA DE RETIRO / DESINSTALACION", {
       align: "center",
     });
     doc.moveDown(0.6);
-    doc.font("Helvetica").fontSize(10);
+    doc.font("Times-Roman").fontSize(10);
     doc.text(`Fecha de emisión: ${toDateTimeLabel(generatedAt)}`);
     doc.text(`Workflow origen: ${String(sourceType || "").toUpperCase()} / ${sourceId || "N/D"}`);
     doc.text(`Solicitud comercial (F.ST-21): ${requestId || "N/D"}`);
@@ -118,8 +118,8 @@ const generateFst11PdfBuffer = async ({
     doc.text(`Estado de workflow al emitir: ${workflowStatus || "N/D"}`);
 
     doc.moveDown(0.5);
-    doc.font("Helvetica-Bold").text("Coordinación de retiro");
-    doc.font("Helvetica");
+    doc.font("Times-Bold").text("Coordinación de retiro");
+    doc.font("Times-Roman");
     doc.text(`Fecha programada: ${toDateLabel(state.coordination?.scheduled_date)}`);
     doc.text(
       `Coordinado por: ${normalizeText(state.coordination?.coordinated_by_email, "N/D")}`,
@@ -128,8 +128,8 @@ const generateFst11PdfBuffer = async ({
     doc.text(`Telefono contacto: ${normalizeText(state.coordination?.contact_phone, "N/D")}`);
 
     doc.moveDown(0.5);
-    doc.font("Helvetica-Bold").text("Control técnico");
-    doc.font("Helvetica");
+    doc.font("Times-Bold").text("Control técnico");
+    doc.font("Times-Roman");
     doc.text(
       `WO retiro: ${normalizeText(state.work_order?.work_order_number, "N/D")} (estado: ${
         normalizeText(state.work_order?.status, "pending")
@@ -150,8 +150,8 @@ const generateFst11PdfBuffer = async ({
     }
 
     doc.moveDown(0.5);
-    doc.font("Helvetica-Bold").text("Embalaje, etiquetado y bultos");
-    doc.font("Helvetica");
+    doc.font("Times-Bold").text("Embalaje, etiquetado y bultos");
+    doc.font("Times-Roman");
     doc.text(
       `Estado embalaje: ${normalizeText(state.packaging?.status, "pending")} | Bultos: ${
         Number.isFinite(Number(state.packaging?.total_packages))
@@ -162,8 +162,8 @@ const generateFst11PdfBuffer = async ({
     packageLines.forEach((line) => doc.text(line));
 
     doc.moveDown(0.5);
-    doc.font("Helvetica-Bold").text("Logística de salida");
-    doc.font("Helvetica");
+    doc.font("Times-Bold").text("Logística de salida");
+    doc.font("Times-Roman");
     doc.text(`Fecha de retiro: ${toDateLabel(state.logistics?.pickup_date)}`);
     doc.text(`Ejecutado en: ${toDateTimeLabel(state.logistics?.picked_up_at)}`);
     doc.text(`Transportista: ${normalizeText(state.logistics?.carrier_name, "N/D")}`);
@@ -172,8 +172,8 @@ const generateFst11PdfBuffer = async ({
     );
 
     doc.moveDown(0.5);
-    doc.font("Helvetica-Bold").text("Observaciones");
-    doc.font("Helvetica").text(normalizeText(notes, "Sin observaciones adicionales."));
+    doc.font("Times-Bold").text("Observaciones");
+    doc.font("Times-Roman").text(normalizeText(notes, "Sin observaciones adicionales."));
 
     doc.moveDown(1);
     doc.text("Firma técnico SPI: ______________________________");

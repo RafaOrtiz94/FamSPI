@@ -4,10 +4,26 @@ param(
   [string]$Region = "us-central1",
   [string]$ServiceName = "spi-backend",
   [string]$ImageTag = "manual",
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+  # Sin -Environment el script despliega produccion exactamente igual que siempre.
+  [ValidateSet("production", "staging")]
+  [string]$Environment = "production",
+  [string]$StagingFrontendUrl = "",        # obligatorio con -Environment staging
+  [string]$StagingDriveRootFolderId = "",  # obligatorio con -Environment staging: carpeta de Drive propia de staging
+  [switch]$PrintOnly                       # muestra los argumentos finales de gcloud y termina sin construir ni desplegar
 )
 
 $ErrorActionPreference = "Stop"
+
+# Staging (docs/plans/rbac-unified-access-implementation-plan.md, Fase 1A): otro servicio, otra
+# base, otros secretos, sin correo, sin chat, sin push y sin jobs.
+if ($Environment -eq "staging") {
+  if (-not $PSBoundParameters.ContainsKey("ServiceName")) { $ServiceName = "spi-backend-staging" }
+  if (-not $PSBoundParameters.ContainsKey("ImageTag")) { $ImageTag = "staging" }
+  if ($ServiceName -eq "spi-backend") { throw "Staging no puede desplegarse sobre el servicio de produccion spi-backend." }
+  if ([string]::IsNullOrWhiteSpace($StagingFrontendUrl)) { throw "Con -Environment staging se requiere -StagingFrontendUrl." }
+  if ([string]::IsNullOrWhiteSpace($StagingDriveRootFolderId)) { throw "Con -Environment staging se requiere -StagingDriveRootFolderId." }
+}
 
 function Write-Step {
   param(
@@ -28,9 +44,62 @@ function Assert-Command {
   }
 }
 
+function Invoke-GcloudChecked {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Args
+  )
+
+  & gcloud @Args
+  if ($LASTEXITCODE -ne 0) {
+    throw "gcloud fallo (exit $LASTEXITCODE): gcloud $($Args -join ' ')"
+  }
+}
+
+function Show-CloudRunFailureDiagnostics {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ProjectId,
+    [Parameter(Mandatory = $true)]
+    [string]$Region,
+    [Parameter(Mandatory = $true)]
+    [string]$ServiceName
+  )
+
+  try {
+    $revision = & gcloud run revisions list `
+      --service $ServiceName `
+      --region $Region `
+      --project $ProjectId `
+      --limit 1 `
+      --sort-by "~metadata.creationTimestamp" `
+      --format "value(metadata.name)"
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($revision)) {
+      Write-Warning "No se pudo resolver la revision mas reciente para diagnostico."
+      return
+    }
+
+    Write-Host ""
+    Write-Host "=== Diagnostico Cloud Run: $revision ==="
+    & gcloud logging read `
+      "resource.type=cloud_run_revision AND resource.labels.service_name=$ServiceName AND resource.labels.revision_name=$revision" `
+      --project $ProjectId `
+      --limit 40 `
+      --format "value(timestamp,logName,severity,textPayload)"
+  }
+  catch {
+    Write-Warning "No se pudieron obtener logs de diagnostico de Cloud Run: $($_.Exception.Message)"
+  }
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $backendPath = Join-Path $repoRoot "backend"
 $image = "us-central1-docker.pkg.dev/$ProjectId/cloud-run-source-deploy/${ServiceName}:${ImageTag}"
+if ($Environment -eq "staging") {
+  # cloudbuild.yaml siempre construye la imagen "spi-backend"; staging la distingue por la etiqueta.
+  $image = "us-central1-docker.pkg.dev/$ProjectId/cloud-run-source-deploy/spi-backend:${ImageTag}"
+}
 
 Assert-Command "gcloud"
 
@@ -41,13 +110,18 @@ if (-not (Test-Path (Join-Path $backendPath "Dockerfile"))) {
 Push-Location $backendPath
 try {
   Write-Step "Validando entorno" 5
-  gcloud config set project $ProjectId | Out-Null
+  if (-not $PrintOnly) {
+    Invoke-GcloudChecked -Args @("config", "set", "project", $ProjectId)
+  }
 
-  if (-not $SkipBuild) {
-    Write-Step "Construyendo imagen $image" 20
-    & gcloud builds submit `
-      --tag $image `
-      --project $ProjectId
+  if (-not $SkipBuild -and -not $PrintOnly) {
+    Write-Step "Construyendo imagen $image (con cache de capas)" 20
+    Invoke-GcloudChecked -Args @(
+      "builds", "submit",
+      "--config", "cloudbuild.yaml",
+      "--substitutions", "_TAG=$ImageTag",
+      "--project", $ProjectId
+    )
   }
 
   Write-Step "Desplegando servicio $ServiceName" 65
@@ -60,27 +134,42 @@ try {
     "--allow-unauthenticated",
     "--memory", "512Mi",
     "--cpu", "1",
+    "--max-instances", "3",               # 3 instancias x 8 conexiones = 24 max al pooler Neon
+    "--concurrency", "50",                # Máx 50 requests simultáneos por instancia — suficiente para ~40 usuarios de evento
     "--set-env-vars", "NODE_ENV=production",
+    "--set-env-vars", "ENABLE_JOBS=false",   # Jobs internos deshabilitados; los Cloud Scheduler externos permanecen pausados desde el corte 2026-09-28 para permitir autosuspend de Neon.
+    "--set-env-vars", "JOBS_RUN_ON_START=false",
+    "--set-env-vars", "JOBS_BOOTSTRAP_STAGGER_MS=20000",
+    "--set-env-vars", "DB_POOL_MAX=8",    # 3 instancias x 8 = 24 conexiones al pooler Neon (evento Kick Off ~40 usuarios)
+    "--set-env-vars", "DB_POOL_MIN=0",    # 0: sin conexiones calientes -> permite autosuspend de Neon fuera de horario/trafico
+    "--set-env-vars", "DB_CONN_TIMEOUT_MS=15000",
     "--set-env-vars", "DB_SSL=true",
     "--set-env-vars", "FRONTEND_URL=https://fam-spi-front.web.app",
     "--set-env-vars", "GOOGLE_REDIRECT_URI=https://spi-backend-983537733948.us-central1.run.app/api/v1/auth/google/callback",
-    "--set-env-vars", "DB_HOST=ep-muddy-sun-ah5um48r-pooler.c-3.us-east-1.aws.neon.tech",
+    "--set-env-vars", "DB_HOST=ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech",  # MIGRACION 2026-09-28 — respaldo final con origen congelado desde lucky-bar. Endpoint DIRECTO (SIN -pooler).
     "--set-env-vars", "DB_PORT=5432",
     "--set-env-vars", "DB_USER=neondb_owner",
     "--set-env-vars", "DB_NAME=FamSPI",
     "--set-env-vars", "GOOGLE_CLIENT_ID=18376271129-1v6irnav4n49298sspaij02qjnigeln3.apps.googleusercontent.com",
+    # Audiencia OIDC del proyecto de Apps Script del complemento de Gmail. Debe
+    # permanecer aqui porque --set-env-vars reemplaza el conjunto completo.
+    "--set-env-vars", "GMAIL_CONTEXT_ADDON_AUDIENCE=669746596764-qeb081v9ni8tbdierp6oopilinn1ob0c.apps.googleusercontent.com",
     "--set-env-vars", "DRIVE_ROOT_FOLDER_ID=0AILKwXtcdfRFUk9PVA",
+    "--set-env-vars", "BC_TEMPLATE_DRIVE_FOLDER_ID=1RAiU8BwtUleLrvipVq7h-rfqE_R1qIoH",  # carpeta Drive donde se sube cada nueva version de la plantilla base del Business Case (businessCaseTemplateVersions.service.js) -- si falta, subir un archivo nuevo responde "No hay carpeta de Drive configurada". Este script usa --set-env-vars (reemplaza todo el set), asi que cualquier var agregada a mano con "gcloud run services update --update-env-vars" fuera de este archivo se pierde en el siguiente deploy si no queda tambien aqui.
     "--set-env-vars", "GMAIL_SERVICE_ACCOUNT_CLIENT_EMAIL=spi-cuenta-servicio@dashboard-spi.iam.gserviceaccount.com",
     "--set-env-vars", "GMAIL_DELEGATED_USER=administrador@fam-project.com",
     "--set-env-vars", "GOOGLE_SUBJECT=administrador@fam-project.com",
     "--set-env-vars", "GSA_KEY_PATH=/secrets/gsa-key.json",
     "--set-env-vars", "EMAIL_NOTIFICATIONS_ENABLED=true",
+    "--set-env-vars", "NOTIFICATIONS_EMAIL_ENABLED=true",
+    "--set-env-vars", "NOTIFICATIONS_PUSH_ENABLED=true",
     "--set-env-vars", "DISABLE_MAIL=false",
-    "--set-env-vars", "NOTIFICATION_ASYNC_DISPATCH_ENABLED=false",
+    "--set-env-vars", "NOTIFICATION_ASYNC_DISPATCH_ENABLED=true",
     "--set-env-vars", "EMAIL_SUPPRESS_SOURCES=",
     "--set-env-vars", "NOTIFICATION_TIMEZONE=America/Guayaquil",
     "--set-env-vars", "APP_TIMEZONE=America/Guayaquil",
     "--set-env-vars", "TZ=America/Guayaquil",
+    "--set-env-vars", "APP_FRONTEND_URL=https://fam-spi-front.web.app",
     "--set-env-vars", "ACCESS_TOKEN_EXPIRES_IN=8h",
     "--set-env-vars", "REFRESH_TOKEN_EXPIRES_IN=30d",
     "--set-env-vars", "DB_BACKUP_FOLDER_NAME=Backup Base",
@@ -95,23 +184,99 @@ try {
     "--set-secrets", "DOC_TEMPLATE_SOLICITUD_1=DOC_TEMPLATE_SOLICITUD_1:latest",
     "--set-secrets", "DOC_TEMPLATE_SOLICITUD_2=DOC_TEMPLATE_SOLICITUD_2:latest",
     "--set-secrets", "DOC_TEMPLATE_SOLICITUD_3=DOC_TEMPLATE_SOLICITUD_3:latest",
+    "--set-secrets", "COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID=COLLAB_ACTA_HERRAMIENTA_TEMPLATE_ID:latest",
+    "--set-secrets", "COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID=COLLAB_ACTA_HERRAMIENTA_INT_TEMPLATE_ID:latest",
+    "--set-secrets", "COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID=COLLAB_ACTA_HERRAMIENTA_EXT_TEMPLATE_ID:latest",
+    "--set-env-vars", "COLLAB_ACTA_EPP_TEMPLATE_ID=17hZiqsespzG-EdoyhHFDL-nLs81LR2T3NHIRitOZVRM",
+    "--set-env-vars", "COLLAB_ACTA_ROPA_TEMPLATE_ID=11nKdp8U-B4wKcWcmBcZeaeQEu2nqyB_5BL8wgUK7NKo",
+    "--set-env-vars", "COLLAB_ACTA_ROPA_INT_TEMPLATE_ID=11nKdp8U-B4wKcWcmBcZeaeQEu2nqyB_5BL8wgUK7NKo",
+    "--set-env-vars", "COLLAB_ACTA_ROPA_EXT_TEMPLATE_ID=1gn3BmysfeS3NzlniNg2NS3IVmzjdLKFrjIK79EMX-70",  # 2026-08-24 — plantilla ropa de trabajo para personal EXTERNO (antes no existia variante, solo caia al template interno)
+    "--set-secrets", "TI_ACTA_ENTREGA_TEMPLATE_ID=TI_ACTA_ENTREGA_TEMPLATE_ID:latest",
+    "--set-secrets", "TI_ACTA_RETIRO_TEMPLATE_ID=TI_ACTA_RETIRO_TEMPLATE_ID:latest",
     "--set-secrets", "DB_PASSWORD=DB_PASSWORD:latest",
     "--set-secrets", "SECRET_KEY=SECRET_KEY:latest",
     "--set-secrets", "REFRESH_SECRET_KEY=REFRESH_SECRET_KEY:latest",
     "--set-secrets", "GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest",
     "--set-secrets", "GOOGLE_MAPS_SERVER_API_KEY=GOOGLE_MAPS_SERVER_API_KEY:latest",
+    "--set-secrets", "WEB_PUSH_PUBLIC_KEY=WEB_PUSH_PUBLIC_KEY:latest",
+    "--set-secrets", "WEB_PUSH_PRIVATE_KEY=WEB_PUSH_PRIVATE_KEY:latest",
+    "--set-secrets", "WEB_PUSH_SUBJECT=WEB_PUSH_SUBJECT:latest",
     "--set-secrets", "SMTP_PASS=SMTP_PASS:latest",
     "--set-secrets", "JOBS_KEY=JOBS_KEY:latest",
+    "--set-secrets", "GCHAT_WEBHOOK_URL_TH=GCHAT_WEBHOOK_URL_TH:latest",  # webhook del Space privado de Talento Humano (alertas de asistencia/regularizacion/teletrabajo van solo por chat)
     "--set-secrets", "/secrets/gsa-key.json=GSA_KEY_JSON:latest"
   )
 
-  & gcloud @deployArgs
+  if ($Environment -eq "staging") {
+    # Se parte de la lista de produccion y se reemplaza solo lo que debe diferir, para que
+    # staging herede cualquier variable nueva sin mantener dos listas.
+    $envOverrides = [ordered]@{
+      "NODE_ENV"                    = "staging"
+      "DB_HOST"                     = "ep-frosty-dawn-b5cn1c7v.c-7.us-east-2.aws.neon.tech"  # proyecto Neon exclusivo de staging, endpoint directo
+      "DB_NAME"                     = "neondb"
+      "FRONTEND_URL"                = $StagingFrontendUrl
+      "APP_FRONTEND_URL"            = $StagingFrontendUrl
+      "GOOGLE_REDIRECT_URI"         = "https://$ServiceName-983537733948.$Region.run.app/api/v1/auth/google/callback"
+      "DRIVE_ROOT_FOLDER_ID"        = $StagingDriveRootFolderId
+      "BC_TEMPLATE_DRIVE_FOLDER_ID" = $StagingDriveRootFolderId  # una plantilla subida desde staging no debe caer en la carpeta de produccion
+      "EMAIL_NOTIFICATIONS_ENABLED" = "false"
+      "NOTIFICATIONS_EMAIL_ENABLED" = "false"
+      "NOTIFICATIONS_PUSH_ENABLED"  = "false"
+      "DISABLE_MAIL"                = "true"
+      "DISABLE_GCHAT"               = "true"
+      "DB_BACKUP_AUTO_ENABLED"      = "false"
+    }
+    $secretOverrides = @{
+      "DB_PASSWORD"        = "DB_PASSWORD_STAGING"
+      "SECRET_KEY"         = "SECRET_KEY_STAGING"
+      "REFRESH_SECRET_KEY" = "REFRESH_SECRET_KEY_STAGING"
+      "JOBS_KEY"           = "JOBS_KEY_STAGING"
+    }
+    # Sin estos secretos staging no puede enviar por SMTP ni publicar en el chat de Talento Humano.
+    $secretsRemoved = @("SMTP_PASS", "GCHAT_WEBHOOK_URL_TH")
+
+    $stagingArgs = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $deployArgs.Count; $i++) {
+      $flag = $deployArgs[$i]
+      if ($flag -eq "--set-env-vars" -or $flag -eq "--set-secrets") {
+        $pair = $deployArgs[$i + 1]
+        $name = $pair.Substring(0, $pair.IndexOf("="))
+        $i++
+        if ($flag -eq "--set-env-vars" -and $envOverrides.Contains($name)) { continue }
+        if ($flag -eq "--set-secrets" -and $secretsRemoved -contains $name) { continue }
+        if ($flag -eq "--set-secrets" -and $secretOverrides.ContainsKey($name)) { $pair = "$name=$($secretOverrides[$name]):latest" }
+        $stagingArgs.Add($flag); $stagingArgs.Add($pair)
+        continue
+      }
+      if ($flag -eq "--max-instances") { $stagingArgs.Add($flag); $stagingArgs.Add("1"); $i++; continue }
+      $stagingArgs.Add($flag)
+    }
+    foreach ($name in $envOverrides.Keys) { $stagingArgs.Add("--set-env-vars"); $stagingArgs.Add("$name=$($envOverrides[$name])") }
+    $deployArgs = $stagingArgs.ToArray()
+  }
+
+  if ($PrintOnly) {
+    Write-Host "gcloud (ambiente: $Environment, servicio: $ServiceName)"
+    $deployArgs | ForEach-Object { Write-Host "  $_" }
+    return
+  }
+
+  try {
+    Invoke-GcloudChecked -Args $deployArgs
+  }
+  catch {
+    Show-CloudRunFailureDiagnostics -ProjectId $ProjectId -Region $Region -ServiceName $ServiceName
+    throw
+  }
 
   Write-Step "Verificando revision activa" 90
   $serviceInfo = & gcloud run services describe $ServiceName `
     --region $Region `
     --project $ProjectId `
     --format "value(status.latestReadyRevisionName,status.url)"
+  if ($LASTEXITCODE -ne 0) {
+    throw "No se pudo describir el servicio desplegado"
+  }
 
   Write-Step "Completado" 100
   Write-Host ""

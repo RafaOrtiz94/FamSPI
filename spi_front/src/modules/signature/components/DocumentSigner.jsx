@@ -146,6 +146,7 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
  } finally {
  setLoading(false);
  }
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [resolvedDocumentId, documentData, consentText, roleAtSign, authorizedRole, onSignatureComplete]);
 
  const renderStep1 = () => (

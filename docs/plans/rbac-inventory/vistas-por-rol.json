@@ -1,0 +1,1661 @@
+{
+  "acp_comercial": [
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/comercial",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/comercial",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/comercial/clientes",
+      "label": "Clientes",
+      "outcome": "abre",
+      "landed": "/dashboard/comercial/clientes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/comercial/solicitudes",
+      "label": "Solicitudes",
+      "outcome": "abre",
+      "landed": "/dashboard/comercial/solicitudes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/crm-fam",
+      "label": "CRM-FAM",
+      "outcome": "abre",
+      "landed": "/dashboard/crm-fam",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/equipos",
+      "label": "Workspace de Equipos",
+      "outcome": "abre",
+      "landed": "/dashboard/equipos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/finanzas/viaticos",
+      "label": "Workspace Viaticos",
+      "outcome": "abre",
+      "landed": "/dashboard/finanzas/viaticos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/purchases/workspace",
+      "label": "Workspace de Compras",
+      "outcome": "abre",
+      "landed": "/dashboard/purchases/workspace",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/permisos",
+      "label": "Permisos y Vacaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/permisos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/work-management",
+      "label": "Work Management",
+      "outcome": "abre",
+      "landed": "/dashboard/work-management",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ],
+  "comercial": [
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/comercial",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/comercial",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/comercial/clientes",
+      "label": "Clientes",
+      "outcome": "abre",
+      "landed": "/dashboard/comercial/clientes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/comercial/solicitudes",
+      "label": "Solicitudes",
+      "outcome": "abre",
+      "landed": "/dashboard/comercial/solicitudes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/crm-fam",
+      "label": "CRM-FAM",
+      "outcome": "abre",
+      "landed": "/dashboard/crm-fam",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/equipos",
+      "label": "Workspace de Equipos",
+      "outcome": "abre",
+      "landed": "/dashboard/equipos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/finanzas/viaticos",
+      "label": "Workspace Viaticos",
+      "outcome": "abre",
+      "landed": "/dashboard/finanzas/viaticos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/purchases/workspace",
+      "label": "Workspace de Compras",
+      "outcome": "abre",
+      "landed": "/dashboard/purchases/workspace",
+      "apiErrors": [
+        "500 GET /api/v1/process-notes/private_purchase/45bbb685-a680-4b14-8521-09a23ad3220f",
+        "500 GET /api/v1/process-notes/private_purchase/mention-candidates"
+      ],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/permisos",
+      "label": "Permisos y Vacaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/permisos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/work-management",
+      "label": "Work Management",
+      "outcome": "abre",
+      "landed": "/dashboard/work-management",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ],
+  "financiero": [
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/finanzas",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/finanzas",
+      "apiErrors": [
+        "403 GET /api/v1/business-case"
+      ],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/permisos",
+      "label": "Permisos y Vacaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/permisos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ],
+  "gerencia_general": [
+    {
+      "href": "/dashboard",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/gerencia",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/business-case",
+      "label": "Business Case",
+      "outcome": "abre",
+      "landed": "/dashboard/business-case",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/business-case/observabilidad",
+      "label": "Obs. BC",
+      "outcome": "abre",
+      "landed": "/dashboard/business-case/observabilidad",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/collab/resumen",
+      "label": "Entregas Colaboradores",
+      "outcome": "abre",
+      "landed": "/dashboard/collab/resumen",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/comercial/aprobaciones-planificacion",
+      "label": "Aprobación de planes",
+      "outcome": "abre",
+      "landed": "/dashboard/comercial/aprobaciones-planificacion",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/comercial/delivery-ceilings",
+      "label": "Maximos y Saldos",
+      "outcome": "abre",
+      "landed": "/dashboard/comercial/delivery-ceilings",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/comercial/famsheets",
+      "label": "FamSheets",
+      "outcome": "abre",
+      "landed": "/dashboard/comercial/famsheets",
+      "apiErrors": [
+        "500 GET /api/v1/famsheets",
+        "500 GET /api/v1/famsheets/dashboard/manager"
+      ],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/crm-fam",
+      "label": "CRM-FAM",
+      "outcome": "abre",
+      "landed": "/dashboard/crm-fam",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/kickoff",
+      "label": "Kick Off 2026 🚧",
+      "outcome": "en_construccion",
+      "landed": "/dashboard/kickoff",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/work-management",
+      "label": "Work Management",
+      "outcome": "abre",
+      "landed": "/dashboard/work-management",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ],
+  "ing_servicio": [
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/equipos",
+      "label": "Workspace de Equipos",
+      "outcome": "abre",
+      "landed": "/dashboard/equipos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/finanzas/viaticos",
+      "label": "Workspace Viaticos",
+      "outcome": "abre",
+      "landed": "/dashboard/finanzas/viaticos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/purchases/workspace",
+      "label": "Workspace de Compras",
+      "outcome": "abre",
+      "landed": "/dashboard/purchases/workspace",
+      "apiErrors": [
+        "403 GET /api/v1/consumable-files/overview",
+        "500 GET /api/v1/process-notes/private_purchase/45bbb685-a680-4b14-8521-09a23ad3220f",
+        "500 GET /api/v1/process-notes/private_purchase/mention-candidates"
+      ],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico/aplicaciones",
+      "label": "Aplicaciones ST",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico/aplicaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico/asistencia",
+      "label": "Asistencia y Salidas",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico/asistencia",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico/casos-externos",
+      "label": "Casos Externos",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico/casos-externos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico/cronograma",
+      "label": "Cronograma Tecnico",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico/cronograma",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico/disponibilidad",
+      "label": "Disponibilidad",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico/disponibilidad",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico/inspecciones",
+      "label": "Inspecciones de Ambiente",
+      "outcome": "redirige",
+      "landed": "/dashboard/servicio-tecnico/solicitudes",
+      "apiErrors": [
+        "500 GET /api/v1/private-purchases/by-role/tecnico"
+      ],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico/mantenimientos",
+      "label": "Mantenimientos",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico/mantenimientos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/permisos",
+      "label": "Permisos y Vacaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/permisos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/work-management",
+      "label": "Work Management",
+      "outcome": "abre",
+      "landed": "/dashboard/work-management",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ],
+  "ing_servicio_ext": [
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/ext",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/ext",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/finanzas/viaticos",
+      "label": "Workspace Viaticos",
+      "outcome": "abre",
+      "landed": "/dashboard/finanzas/viaticos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ],
+  "jefe_calidad": [
+    {
+      "href": "/dashboard/business-case/resumen",
+      "label": "Business Case (resumen)",
+      "outcome": "abre",
+      "landed": "/dashboard/business-case/resumen",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/calidad",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/calidad",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ],
+  "jefe_comercial": [
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/comercial",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/comercial",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/comercial/clientes",
+      "label": "Clientes",
+      "outcome": "abre",
+      "landed": "/dashboard/comercial/clientes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/comercial/solicitudes",
+      "label": "Solicitudes",
+      "outcome": "abre",
+      "landed": "/dashboard/comercial/solicitudes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/crm-fam",
+      "label": "CRM-FAM",
+      "outcome": "abre",
+      "landed": "/dashboard/crm-fam",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/equipos",
+      "label": "Workspace de Equipos",
+      "outcome": "abre",
+      "landed": "/dashboard/equipos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/finanzas/viaticos",
+      "label": "Workspace Viaticos",
+      "outcome": "abre",
+      "landed": "/dashboard/finanzas/viaticos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/purchases/workspace",
+      "label": "Workspace de Compras",
+      "outcome": "abre",
+      "landed": "/dashboard/purchases/workspace",
+      "apiErrors": [
+        "500 GET /api/v1/process-notes/private_purchase/45bbb685-a680-4b14-8521-09a23ad3220f",
+        "500 GET /api/v1/process-notes/private_purchase/mention-candidates"
+      ],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/permisos",
+      "label": "Permisos y Vacaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/permisos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/work-management",
+      "label": "Work Management",
+      "outcome": "abre",
+      "landed": "/dashboard/work-management",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ],
+  "jefe_financiero": [
+    {
+      "href": "/dashboard/business-case",
+      "label": "Business Case",
+      "outcome": "abre",
+      "landed": "/dashboard/business-case",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/comercial/solicitudes",
+      "label": "Solicitudes",
+      "outcome": "no_autorizado",
+      "landed": "/unauthorized",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/finanzas",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/finanzas",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/permisos",
+      "label": "Permisos y Vacaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/permisos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ],
+  "jefe_logistica": [
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/logistica",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/logistica",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/work-management",
+      "label": "Work Management",
+      "outcome": "abre",
+      "landed": "/dashboard/work-management",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ],
+  "jefe_operaciones": [
+    {
+      "href": "/dashboard/business-case",
+      "label": "Business Case",
+      "outcome": "abre",
+      "landed": "/dashboard/business-case",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/equipos",
+      "label": "Workspace de Equipos",
+      "outcome": "abre",
+      "landed": "/dashboard/equipos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/operaciones",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/operaciones",
+      "apiErrors": [
+        "403 GET /api/v1/mantenimientos"
+      ],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/operaciones/clientes",
+      "label": "Clientes",
+      "outcome": "abre",
+      "landed": "/dashboard/operaciones/clientes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/work-management",
+      "label": "Work Management",
+      "outcome": "abre",
+      "landed": "/dashboard/work-management",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ],
+  "jefe_servicio": [
+    {
+      "href": "/dashboard/business-case/observabilidad",
+      "label": "Obs. BC",
+      "outcome": "no_autorizado",
+      "landed": "/unauthorized",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/collab/entregas",
+      "label": "Entregas Colaboradores",
+      "outcome": "abre",
+      "landed": "/dashboard/collab/entregas",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/equipos",
+      "label": "Workspace de Equipos",
+      "outcome": "abre",
+      "landed": "/dashboard/equipos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/finanzas/viaticos",
+      "label": "Workspace Viaticos",
+      "outcome": "abre",
+      "landed": "/dashboard/finanzas/viaticos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/purchases/workspace",
+      "label": "Workspace de Compras",
+      "outcome": "abre",
+      "landed": "/dashboard/purchases/workspace",
+      "apiErrors": [
+        "403 GET /api/v1/consumable-files/overview",
+        "500 GET /api/v1/process-notes/private_purchase/45bbb685-a680-4b14-8521-09a23ad3220f",
+        "500 GET /api/v1/process-notes/private_purchase/mention-candidates"
+      ],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico/aplicaciones",
+      "label": "Aplicaciones ST",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico/aplicaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico/asistencia",
+      "label": "Asistencia y Salidas",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico/asistencia",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico/casos-externos",
+      "label": "Casos Externos",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico/casos-externos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico/cronograma",
+      "label": "Cronograma Tecnico",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico/cronograma",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico/disponibilidad",
+      "label": "Disponibilidad",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico/disponibilidad",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico/mantenimientos",
+      "label": "Mantenimientos",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico/mantenimientos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/servicio-tecnico/solicitudes",
+      "label": "Solicitudes",
+      "outcome": "abre",
+      "landed": "/dashboard/servicio-tecnico/solicitudes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/permisos",
+      "label": "Permisos y Vacaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/permisos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [
+        "429 GET /api/v1/notifications"
+      ],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/work-management",
+      "label": "Work Management",
+      "outcome": "abre",
+      "landed": "/dashboard/work-management",
+      "apiErrors": [
+        "429 GET /api/v1/notifications"
+      ],
+      "pageErrors": []
+    }
+  ],
+  "jefe_ti": [
+    {
+      "href": "/dashboard/auditoria",
+      "label": "Auditoría y Trazabilidad",
+      "outcome": "abre",
+      "landed": "/dashboard/auditoria",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/business-case",
+      "label": "Business Case",
+      "outcome": "abre",
+      "landed": "/dashboard/business-case",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/crm-fam",
+      "label": "CRM-FAM",
+      "outcome": "abre",
+      "landed": "/dashboard/crm-fam",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/finanzas/viaticos",
+      "label": "Workspace Viaticos",
+      "outcome": "abre",
+      "landed": "/dashboard/finanzas/viaticos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/kickoff",
+      "label": "Kick Off 2026 🚧",
+      "outcome": "abre",
+      "landed": "/dashboard/kickoff",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/colaboradores",
+      "label": "Colaboradores",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/colaboradores",
+      "apiErrors": [
+        "403 GET /api/v1/collaborators"
+      ],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/gestion",
+      "label": "Usuarios y Departamentos",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/gestion",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/permisos",
+      "label": "Permisos y Vacaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/permisos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/ti",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/ti",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/ti/dispositivos",
+      "label": "Dispositivos TI",
+      "outcome": "abre",
+      "landed": "/dashboard/ti/dispositivos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/ti/modulos",
+      "label": "Modulos por Usuario",
+      "outcome": "abre",
+      "landed": "/dashboard/ti/modulos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/ti/shortcut-token",
+      "label": "Token Shortcut Siri",
+      "outcome": "abre",
+      "landed": "/dashboard/ti/shortcut-token",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/ti/workspace",
+      "label": "Workspace TI",
+      "outcome": "abre",
+      "landed": "/dashboard/ti/workspace",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/work-management",
+      "label": "Work Management",
+      "outcome": "abre",
+      "landed": "/dashboard/work-management",
+      "apiErrors": [
+        "429 GET /api/v1/notifications"
+      ],
+      "pageErrors": []
+    }
+  ],
+  "logistica": [
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/logistica",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/logistica",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/work-management",
+      "label": "Work Management",
+      "outcome": "abre",
+      "landed": "/dashboard/work-management",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ],
+  "operaciones": [
+    {
+      "href": "/dashboard/business-case",
+      "label": "Business Case",
+      "outcome": "abre",
+      "landed": "/dashboard/business-case",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/equipos",
+      "label": "Workspace de Equipos",
+      "outcome": "abre",
+      "landed": "/dashboard/equipos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/operaciones",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/operaciones",
+      "apiErrors": [
+        "403 GET /api/v1/mantenimientos"
+      ],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/work-management",
+      "label": "Work Management",
+      "outcome": "abre",
+      "landed": "/dashboard/work-management",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ],
+  "pasante": [
+    {
+      "href": "/dashboard",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/pasante",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ],
+  "talento_humano": [
+    {
+      "href": "/dashboard/buzon-sugerencias",
+      "label": "Buzón de sugerencias",
+      "outcome": "abre",
+      "landed": "/dashboard/buzon-sugerencias",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/capacitaciones",
+      "label": "Capacitaciones",
+      "outcome": "abre",
+      "landed": "/dashboard/capacitaciones",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/collab/entregas",
+      "label": "Entregas Colaboradores",
+      "outcome": "abre",
+      "landed": "/dashboard/collab/entregas",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/famdays",
+      "label": "FamDays",
+      "outcome": "abre",
+      "landed": "/dashboard/famdays",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/finanzas/viaticos",
+      "label": "Workspace Viaticos",
+      "outcome": "abre",
+      "landed": "/dashboard/finanzas/viaticos",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/links-interes",
+      "label": "Links de Interés",
+      "outcome": "abre",
+      "landed": "/dashboard/links-interes",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/signatures/inbox",
+      "label": "Firma Digital",
+      "outcome": "abre",
+      "landed": "/dashboard/signatures/inbox",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano",
+      "label": "Inicio",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano",
+      "apiErrors": [],
+      "pageErrors": []
+    },
+    {
+      "href": "/dashboard/talento-humano/pruebas-tecnicas",
+      "label": "Gestor de pruebas asignadas",
+      "outcome": "abre",
+      "landed": "/dashboard/talento-humano/pruebas-tecnicas",
+      "apiErrors": [],
+      "pageErrors": []
+    }
+  ]
+}
