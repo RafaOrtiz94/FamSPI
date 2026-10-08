@@ -86,6 +86,8 @@ function Set-BackendEnv {
     ENABLE_JOBS                 = "false"
     JOBS_RUN_ON_START           = "false"
     DB_BACKUP_AUTO_ENABLED      = "false"
+    # Modo sombra de autorizacion modular (plan RBAC, Fase 2): solo registra diferencias.
+    RBAC_MODULE_SHADOW          = "true"
     # Sin credenciales de Google: Drive, Docs, Gmail y calendario quedan deshabilitados.
     # Debe ser un valor NO vacio: en PowerShell asignar "" borra la variable y dotenv
     # volveria a cargar la ruta real desde backend\.env.
@@ -106,8 +108,9 @@ function Start-Backend {
 function Start-Frontend {
   $env:PORT = "$FrontendPort"
   $env:BROWSER = "none"
-  $env:REACT_APP_API_ABSOLUTE_URL = "http://localhost:$BackendPort"
-  $env:REACT_APP_API_BASE_URL = "http://localhost:$BackendPort"
+  $env:REACT_APP_API_ABSOLUTE_URL = "http://localhost:$BackendPort/api/v1"
+  # Con /api/v1 como en produccion: los clientes de FamDays y Kickoff usan esta variable tal cual.
+  $env:REACT_APP_API_BASE_URL = "http://localhost:$BackendPort/api/v1"
   $env:REACT_APP_LAN_MODE = "false"
   $env:REACT_APP_ENV_LABEL = "STAGING LOCAL"
   Set-Location (Join-Path $repoRoot "spi_front")

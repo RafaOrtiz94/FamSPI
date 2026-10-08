@@ -69,6 +69,8 @@ const LIVE_PRESENCE_CARD_PAGE_SIZE = 4;
 const PUNCTUALITY_BASE_MINUTES = 9 * 60;
 const PUNCTUALITY_TOLERANCE_MINUTES = 6;
 const ENTRY_MARK_CUTOFF_MINUTES = 9 * 60 + 20; // 09:20 — after this, entry is blocked
+const LUNCH_MAX_DURATION_MINUTES = 60;
+const LUNCH_REMINDER_REMAINING_MINUTES = 10;
 const ATTENDANCE_LOCATION_FIELDS = Object.freeze({
   entry: "entry_location",
   lunch_start: "lunch_start_location",
@@ -133,6 +135,23 @@ const getLocalDateKey = (date = new Date()) => {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+};
+
+const getLunchCountdown = (lunchStart, now = new Date()) => {
+  const start = toDate(lunchStart);
+  if (!start || Number.isNaN(start.getTime())) return null;
+
+  const remainingSeconds = Math.max(
+    0,
+    Math.ceil(((LUNCH_MAX_DURATION_MINUTES * 60 * 1000) - (now.getTime() - start.getTime())) / 1000),
+  );
+  const minutes = Math.floor(remainingSeconds / 60);
+  const seconds = remainingSeconds % 60;
+
+  return {
+    remainingSeconds,
+    display: `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`,
+  };
 };
 
 const getClientDisplayLabel = (client) => {
@@ -424,6 +443,7 @@ const AttendanceWidget = () => {
   const [operationalCategory, setOperationalCategory] = useState("");
   const [operationalDetail, setOperationalDetail] = useState("");
   const [teleworkRequestDate, setTeleworkRequestDate] = useState(() => getLocalDateKey());
+  const [teleworkAccessCode, setTeleworkAccessCode] = useState("");
   const [operationalDestinationCity, setOperationalDestinationCity] = useState("");
   const [operationalDestination, setOperationalDestination] = useState("");
   const [operationalVehicleMode, setOperationalVehicleMode] = useState("company");
@@ -1521,6 +1541,7 @@ const AttendanceWidget = () => {
     setOperationalCategory("");
     setOperationalDetail("");
     setTeleworkRequestDate(getLocalDateKey());
+    setTeleworkAccessCode("");
     setOperationalDestination("");
     setOperationalDestinationCity("");
     setOperationalVehicleMode("company");
@@ -1623,13 +1644,15 @@ const AttendanceWidget = () => {
       actionLocation = await getLocationForAction();
       if (operationalModalPhase === "start") {
         let teleworkRequestId = null;
+        let enteredAccessCode = "";
         if (isTeleworkCategory(operationalCategory)) {
           const selectedRequestDate = String(teleworkRequestDate || "").slice(0, 10);
           let request = teleworkRequests.find((item) =>
             String(item?.request_date || "").slice(0, 10) === selectedRequestDate
             && String(item?.status || "").toUpperCase() === "APPROVED"
           ) || null;
-          if (!request) {
+          enteredAccessCode = String(teleworkAccessCode || "").trim().toUpperCase();
+          if (!request && !enteredAccessCode) {
             const requestResponse = await createTeleworkRequest({
               city: resolvedOperationalDestination.city,
               location: actionLocation,
@@ -1640,7 +1663,7 @@ const AttendanceWidget = () => {
             request = requestResponse?.data || null;
           }
           const requestIsForToday = String(request?.request_date || "").slice(0, 10) === getLocalDateKey();
-          if (String(request?.status || "").toUpperCase() !== "APPROVED" || !requestIsForToday) {
+          if (!enteredAccessCode && (String(request?.status || "").toUpperCase() !== "APPROVED" || !requestIsForToday)) {
             await loadTeleworkRequests();
             setOperationalModalOpen(false);
             showToast(
@@ -1653,7 +1676,7 @@ const AttendanceWidget = () => {
             );
             return;
           }
-          teleworkRequestId = request.id;
+          teleworkRequestId = request?.id || null;
         }
         const res = await marcarSalidaOficina(actionLocation, buildOperationalStartPayload({
           description: operationalDetail,
@@ -1664,6 +1687,7 @@ const AttendanceWidget = () => {
           destinationLabel: resolvedOperationalDestination.label,
           destinationCity: resolvedOperationalDestination.city,
           teleworkRequestId,
+          teleworkAccessCode: enteredAccessCode || null,
         }));
         if (res?.ok) {
           await ensureSyncExceptionTargetLocation("start", actionLocation);
@@ -3286,6 +3310,8 @@ const AttendanceWidget = () => {
 
   const renderWidgetContent = () => {
     const isOnLunch = attendance?.lunch_start_time && !attendance?.lunch_end_time;
+    const lunchCountdown = isOnLunch ? getLunchCountdown(attendance.lunch_start_time, currentTime) : null;
+    const lunchReminderWindow = Boolean(lunchCountdown && lunchCountdown.remainingSeconds <= (LUNCH_REMINDER_REMAINING_MINUTES * 60));
     const isDayComplete = !!attendance?.exit_time;
     const hasEntry = !!attendance?.entry_time;
     const hasRecordedFlow = hasEntry || Boolean(attendance?.lunch_start_time) || Boolean(attendance?.lunch_end_time);
@@ -3444,11 +3470,14 @@ const AttendanceWidget = () => {
               {hasEntry && !isDayComplete && (
                 <div className="mt-0.5 font-mono text-sm text-slate-500">{elapsedDisplay} en jornada</div>
               )}
-              {attendance?.entry_time && (
-                <div className="mt-1 font-mono text-xs text-slate-400">
-                  Entrada: {formatTime(attendance.entry_time)}
-                  {attendance?.lunch_start_time && ` · Almuerzo: ${formatTime(attendance.lunch_start_time)}${attendance?.lunch_end_time ? `–${formatTime(attendance.lunch_end_time)}` : ""}`}
-                  {attendance?.exit_time && ` · Salida: ${formatTime(attendance.exit_time)}`}
+              {lunchCountdown && (
+                <div className={`mt-3 inline-flex items-center gap-3 rounded-xl border px-3 py-2 ${lunchReminderWindow ? "border-amber-300 bg-amber-100/80 text-amber-950" : "border-amber-200 bg-amber-50 text-amber-900"}`} role="status" aria-live="polite">
+                  <FiCoffee className="shrink-0" aria-hidden="true" />
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest">Tiempo restante de almuerzo</p>
+                    <p className="font-mono text-xl font-bold tabular-nums">{lunchCountdown.display}</p>
+                    {lunchReminderWindow ? <p className="text-xs">Registra tu regreso antes de completar una hora.</p> : null}
+                  </div>
                 </div>
               )}
             </div>
@@ -3970,6 +3999,17 @@ const AttendanceWidget = () => {
                       className={CONTROL_TEXTAREA_CLASS}
                       placeholder="Indica el motivo de la jornada remota"
                     />
+                    <label className="mt-4 block">
+                      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.08em] text-emerald-800">Código de acceso <span className="font-normal normal-case">(si fue emitido por Talento Humano)</span></span>
+                      <input
+                        value={teleworkAccessCode}
+                        onChange={(event) => setTeleworkAccessCode(event.target.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 8))}
+                        className={CONTROL_INPUT_CLASS}
+                        placeholder="Ejemplo: AB2C3D4E"
+                        inputMode="text"
+                        autoCapitalize="characters"
+                      />
+                    </label>
                   </div>
                 </div>
               ) : null}
@@ -4087,7 +4127,7 @@ const AttendanceWidget = () => {
                   ? (teleworkRequests.some((request) =>
                       String(request?.request_date || "").slice(0, 10) === String(teleworkRequestDate || "").slice(0, 10)
                       && String(request?.status || "").toUpperCase() === "APPROVED"
-                    ) ? "Registrar marcacion" : "Solicitar teletrabajo")
+                    ) || String(teleworkAccessCode || "").trim() ? "Registrar marcacion" : "Solicitar teletrabajo")
                   : "Registrar marcacion"}
             </Button>
           </div>

@@ -654,6 +654,7 @@ export const buildOperationalStartPayload = ({
   destinationLabel,
   destinationCity,
   teleworkRequestId,
+  teleworkAccessCode,
 }) => {
   const normalizedCategory = String(category || "").trim().toLowerCase();
   return {
@@ -667,6 +668,7 @@ export const buildOperationalStartPayload = ({
     operational_destination_label: String(destinationLabel || "").trim(),
     operational_destination_city: String(destinationCity || "").trim(),
     ...(teleworkRequestId ? { telework_request_id: Number(teleworkRequestId) } : {}),
+    ...(String(teleworkAccessCode || "").trim() ? { telework_access_code: String(teleworkAccessCode).trim() } : {}),
   };
 };
 

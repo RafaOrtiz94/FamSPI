@@ -3,6 +3,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../../core/auth/AuthContext";
 
 const ADMIN_ROLES = ["jefe_ti", "jefe_de_ti", "admin", "administrador"];
+const CAMPAIGN_ROLES = ["jefe_comercial", "gerencia", "gerencia_general", "gerente_general", "director", "gerente", ...ADMIN_ROLES];
 
 const BASE_TABS = [
   { label: "Dashboard", path: "/dashboard/crm-fam", exact: true },
@@ -15,6 +16,7 @@ const BASE_TABS = [
 ];
 
 const ADMIN_TAB = { label: "Configuracion", path: "/dashboard/crm-fam/settings" };
+const CAMPAIGN_TAB = { label: "Campanas", path: "/dashboard/crm-fam/campaigns" };
 
 const CrmShell = () => {
   const { user } = useAuth();
@@ -25,8 +27,13 @@ const CrmShell = () => {
     .split(",")
     .map((r) => r.trim().toLowerCase());
   const isAdmin = userRoles.some((r) => ADMIN_ROLES.includes(r));
+  const canManageCampaigns = userRoles.some((r) => CAMPAIGN_ROLES.includes(r));
 
-  const tabs = isAdmin ? [...BASE_TABS, ADMIN_TAB] : BASE_TABS;
+  const tabs = [
+    ...BASE_TABS,
+    ...(canManageCampaigns ? [CAMPAIGN_TAB] : []),
+    ...(isAdmin ? [ADMIN_TAB] : []),
+  ];
 
   const isActive = (tab) => {
     if (tab.exact) return location.pathname === tab.path;

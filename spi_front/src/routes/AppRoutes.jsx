@@ -134,6 +134,7 @@ const BlueSheetPage        = lazy(() => import("../modules/crm-fam/pages/BlueShe
 const CrmActivitiesPage    = lazy(() => import("../modules/crm-fam/pages/CrmActivitiesPage"));
 const CrmReportsPage       = lazy(() => import("../modules/crm-fam/pages/CrmReportsPage"));
 const CrmSettingsPage      = lazy(() => import("../modules/crm-fam/pages/CrmSettingsPage"));
+const CrmCampaignsPage     = lazy(() => import("../modules/crm-fam/pages/CrmCampaignsPage"));
 const CrmShell             = lazy(() => import("../modules/crm-fam/pages/CrmShell"));
 const WorkManagementPage   = lazy(() => import("../modules/work-management/pages/WorkManagementPage"));
 
@@ -826,6 +827,7 @@ const AppRoutes = () => {
               <Route path="/dashboard/crm-fam/opportunities/:opportunityId/blue-sheet" element={<BlueSheetPage />} />
               <Route path="/dashboard/crm-fam/activities"                   element={<CrmActivitiesPage />} />
               <Route path="/dashboard/crm-fam/reports"                      element={<CrmReportsPage />} />
+              <Route path="/dashboard/crm-fam/campaigns"                    element={<CrmCampaignsPage />} />
               <Route path="/dashboard/crm-fam/settings"                     element={<CrmSettingsPage />} />
             </Route>
           </Route>

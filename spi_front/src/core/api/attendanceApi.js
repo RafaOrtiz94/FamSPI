@@ -378,6 +378,20 @@ export const createTeleworkRequest = async ({ city, location, locationAccuracy =
   return data;
 };
 
+export const issueTeleworkAccessCode = async ({ userId } = {}) => {
+  const { data } = await api.post("/attendance/telework/access-codes", {
+    user_id: userId,
+  });
+  return data;
+};
+
+export const revokeTeleworkAccessCode = async ({ userId } = {}) => {
+  const { data } = await api.post("/attendance/telework/access-codes/revoke", {
+    user_id: userId,
+  });
+  return data;
+};
+
 export const getTeleworkRequests = async (query = {}) => {
   const params = new URLSearchParams();
   if (query?.scope) params.set("scope", String(query.scope));

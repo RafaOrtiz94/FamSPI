@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import LiveOperationalMap from "../LiveOperationalMap";
 import { getAttendanceLiveMap } from "../../../../../core/api/attendanceApi";
 
@@ -49,6 +49,6 @@ describe("LiveOperationalMap", () => {
 
     getAttendanceLiveMap.mockRejectedValueOnce({ response: { data: { message: "Tu rol no puede consultar" } } });
     render(<LiveOperationalMap />);
-    await waitFor(() => expect(screen.getByText("Tu rol no puede consultar")).toBeTruthy());
+    expect(await screen.findByText("Tu rol no puede consultar")).toBeTruthy();
   });
 });

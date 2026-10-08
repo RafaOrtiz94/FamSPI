@@ -1,10 +1,10 @@
 {
   "summary": {
-    "total": 1525,
+    "total": 1538,
     "byClassification": {
       "publico": 32,
-      "rol": 1070,
-      "solo_autenticado": 382,
+      "rol": 1075,
+      "solo_autenticado": 390,
       "permiso_central": 5,
       "interno": 36
     },
@@ -557,6 +557,22 @@
       "permissions": [],
       "modules": [],
       "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "solo_autenticado"
+    },
+    {
+      "scope": "private",
+      "method": "GET",
+      "path": "/api/v1/attendance/live-presence/map",
+      "handler": "getLiveMap",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [],
+      "modules": [],
+      "otherMiddlewares": [
+        "requireLiveMapAccess",
+        "(anonima)"
+      ],
       "declaredPublic": false,
       "classification": "solo_autenticado"
     },
@@ -1197,6 +1213,21 @@
     {
       "scope": "private",
       "method": "POST",
+      "path": "/api/v1/attendance/shortcut/location",
+      "handler": "recordLocationPing",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [],
+      "modules": [],
+      "otherMiddlewares": [
+        "(anonima)"
+      ],
+      "declaredPublic": false,
+      "classification": "solo_autenticado"
+    },
+    {
+      "scope": "private",
+      "method": "POST",
       "path": "/api/v1/attendance/shortcut/run-smart-mark",
       "handler": "runSmartMark",
       "authenticated": true,
@@ -1234,6 +1265,36 @@
       "otherMiddlewares": [
         "requireAttendanceTeamAccess",
         "(anonima)"
+      ],
+      "declaredPublic": false,
+      "classification": "solo_autenticado"
+    },
+    {
+      "scope": "private",
+      "method": "POST",
+      "path": "/api/v1/attendance/telework/access-codes",
+      "handler": "issueCode",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [],
+      "modules": [],
+      "otherMiddlewares": [
+        "requireExactTalentHumanRole"
+      ],
+      "declaredPublic": false,
+      "classification": "solo_autenticado"
+    },
+    {
+      "scope": "private",
+      "method": "POST",
+      "path": "/api/v1/attendance/telework/access-codes/revoke",
+      "handler": "revokeCode",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [],
+      "modules": [],
+      "otherMiddlewares": [
+        "requireExactTalentHumanRole"
       ],
       "declaredPublic": false,
       "classification": "solo_autenticado"
@@ -12105,6 +12166,136 @@
       "otherMiddlewares": [
         "multerMiddleware"
       ],
+      "declaredPublic": false,
+      "classification": "rol"
+    },
+    {
+      "scope": "private",
+      "method": "GET",
+      "path": "/api/v1/crm-fam/email-campaigns",
+      "handler": "listEmailCampaigns",
+      "authenticated": true,
+      "roleGuards": [
+        [
+          "admin",
+          "administrador",
+          "director",
+          "gerencia",
+          "gerencia_general",
+          "gerente",
+          "gerente_general",
+          "jefe_comercial",
+          "jefe_de_ti",
+          "jefe_ti"
+        ]
+      ],
+      "permissions": [],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "rol"
+    },
+    {
+      "scope": "private",
+      "method": "POST",
+      "path": "/api/v1/crm-fam/email-campaigns",
+      "handler": "createEmailCampaign",
+      "authenticated": true,
+      "roleGuards": [
+        [
+          "admin",
+          "administrador",
+          "director",
+          "gerencia",
+          "gerencia_general",
+          "gerente",
+          "gerente_general",
+          "jefe_comercial",
+          "jefe_de_ti",
+          "jefe_ti"
+        ]
+      ],
+      "permissions": [],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "rol"
+    },
+    {
+      "scope": "private",
+      "method": "DELETE",
+      "path": "/api/v1/crm-fam/email-campaigns/:id",
+      "handler": "softDeleteEmailCampaign",
+      "authenticated": true,
+      "roleGuards": [
+        [
+          "admin",
+          "administrador",
+          "director",
+          "gerencia",
+          "gerencia_general",
+          "gerente",
+          "gerente_general",
+          "jefe_comercial",
+          "jefe_de_ti",
+          "jefe_ti"
+        ]
+      ],
+      "permissions": [],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "rol"
+    },
+    {
+      "scope": "private",
+      "method": "GET",
+      "path": "/api/v1/crm-fam/email-campaigns/:id",
+      "handler": "getEmailCampaignById",
+      "authenticated": true,
+      "roleGuards": [
+        [
+          "admin",
+          "administrador",
+          "director",
+          "gerencia",
+          "gerencia_general",
+          "gerente",
+          "gerente_general",
+          "jefe_comercial",
+          "jefe_de_ti",
+          "jefe_ti"
+        ]
+      ],
+      "permissions": [],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "rol"
+    },
+    {
+      "scope": "private",
+      "method": "PUT",
+      "path": "/api/v1/crm-fam/email-campaigns/:id",
+      "handler": "updateEmailCampaign",
+      "authenticated": true,
+      "roleGuards": [
+        [
+          "admin",
+          "administrador",
+          "director",
+          "gerencia",
+          "gerencia_general",
+          "gerente",
+          "gerente_general",
+          "jefe_comercial",
+          "jefe_de_ti",
+          "jefe_ti"
+        ]
+      ],
+      "permissions": [],
+      "modules": [],
+      "otherMiddlewares": [],
       "declaredPublic": false,
       "classification": "rol"
     },
@@ -32328,6 +32519,22 @@
     },
     {
       "scope": "private",
+      "method": "GET",
+      "path": "/asistencia/live-presence/map",
+      "handler": "getLiveMap",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [],
+      "modules": [],
+      "otherMiddlewares": [
+        "requireLiveMapAccess",
+        "(anonima)"
+      ],
+      "declaredPublic": false,
+      "classification": "solo_autenticado"
+    },
+    {
+      "scope": "private",
       "method": "POST",
       "path": "/asistencia/location-sync",
       "handler": "syncLocation",
@@ -32963,6 +33170,21 @@
     {
       "scope": "private",
       "method": "POST",
+      "path": "/asistencia/shortcut/location",
+      "handler": "recordLocationPing",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [],
+      "modules": [],
+      "otherMiddlewares": [
+        "(anonima)"
+      ],
+      "declaredPublic": false,
+      "classification": "solo_autenticado"
+    },
+    {
+      "scope": "private",
+      "method": "POST",
       "path": "/asistencia/shortcut/run-smart-mark",
       "handler": "runSmartMark",
       "authenticated": true,
@@ -33000,6 +33222,36 @@
       "otherMiddlewares": [
         "requireAttendanceTeamAccess",
         "(anonima)"
+      ],
+      "declaredPublic": false,
+      "classification": "solo_autenticado"
+    },
+    {
+      "scope": "private",
+      "method": "POST",
+      "path": "/asistencia/telework/access-codes",
+      "handler": "issueCode",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [],
+      "modules": [],
+      "otherMiddlewares": [
+        "requireExactTalentHumanRole"
+      ],
+      "declaredPublic": false,
+      "classification": "solo_autenticado"
+    },
+    {
+      "scope": "private",
+      "method": "POST",
+      "path": "/asistencia/telework/access-codes/revoke",
+      "handler": "revokeCode",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [],
+      "modules": [],
+      "otherMiddlewares": [
+        "requireExactTalentHumanRole"
       ],
       "declaredPublic": false,
       "classification": "solo_autenticado"

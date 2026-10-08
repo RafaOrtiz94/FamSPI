@@ -11,6 +11,9 @@ const notificationManager = require("../modules/notifications/notificationManage
 
 const OPERATIONAL_EXCEPTION_TYPES = ["operacion_campo", "operacion_de_campo", "salida_oficina", "viaje", "campo"];
 const OPERATIONAL_OVERTIME_THRESHOLD_HOURS = Number(process.env.ATTENDANCE_OPERATIONAL_OVERTIME_THRESHOLD_HOURS || 8);
+const LUNCH_MAX_DURATION_MINUTES = 60;
+const LUNCH_REMINDER_REMAINING_MINUTES = 10;
+const LUNCH_RETURN_REMINDER_SOURCE = "attendance.lunch_return_reminder";
 
 /**
  * Process automatic shift closures and overtime start
@@ -278,19 +281,76 @@ const processOperationalOvertimeNotifications = async () => {
   return { scanned: rows.length, notified };
 };
 
+const processLunchReturnReminders = async () => {
+  const { rows } = await db.query(
+    `SELECT
+        ar.id AS attendance_record_id,
+        ar.user_id,
+        ar.lunch_start_time,
+        COALESCE(u.fullname, u.name, u.email) AS display_name,
+        ROUND(EXTRACT(EPOCH FROM (NOW() - ar.lunch_start_time)) / 60.0)::int AS elapsed_minutes
+      FROM user_attendance_records ar
+      JOIN users u ON u.id = ar.user_id
+      WHERE ar.lunch_start_time IS NOT NULL
+        AND ar.lunch_end_time IS NULL
+        AND ar.exit_time IS NULL
+        AND NOW() >= ar.lunch_start_time + ($1::int * INTERVAL '1 minute')
+        AND NOW() < ar.lunch_start_time + ($2::int * INTERVAL '1 minute')
+        AND NOT EXISTS (
+          SELECT 1
+          FROM notifications n
+          WHERE n.user_id = ar.user_id
+            AND n.source = $3
+            AND n.meta ->> 'attendance_record_id' = ar.id::text
+        )`,
+    [
+      LUNCH_MAX_DURATION_MINUTES - LUNCH_REMINDER_REMAINING_MINUTES,
+      LUNCH_MAX_DURATION_MINUTES,
+      LUNCH_RETURN_REMINDER_SOURCE,
+    ],
+  );
+
+  let notified = 0;
+  for (const row of rows) {
+    const remainingMinutes = Math.max(0, LUNCH_MAX_DURATION_MINUTES - Number(row.elapsed_minutes || 0));
+    const notification = await notificationManager.sendNotification({
+      userId: row.user_id,
+      customTitle: "Tu almuerzo termina en 10 minutos",
+      customMessage: `${row.display_name || "Recuerda"}, registra tu regreso antes de completar los ${LUNCH_MAX_DURATION_MINUTES} minutos de almuerzo.`,
+      type: "warning",
+      source: LUNCH_RETURN_REMINDER_SOURCE,
+      priority: 2,
+      email: false,
+      push: true,
+      meta: {
+        attendance_record_id: row.attendance_record_id,
+        lunch_start_time: row.lunch_start_time,
+        lunch_max_duration_minutes: LUNCH_MAX_DURATION_MINUTES,
+        remaining_minutes: remainingMinutes,
+        target_path: "/dashboard/asistencia",
+      },
+    });
+    if (notification) notified += 1;
+  }
+
+  return { scanned: rows.length, notified };
+};
+
 // Alias for Cloud Scheduler compatibility
 const runOnce = async () => {
   const overtime = await processAutomaticOvertime();
   const opNotifications = await processOperationalOvertimeNotifications();
+  const lunchReminders = await processLunchReturnReminders();
   logger.info(
-    `[ATTENDANCE SCHEDULER] op_overtime_notifications: scanned=${opNotifications.scanned} notified=${opNotifications.notified}`
+    `[ATTENDANCE SCHEDULER] op_overtime_notifications: scanned=${opNotifications.scanned} notified=${opNotifications.notified}; lunch_reminders: scanned=${lunchReminders.scanned} notified=${lunchReminders.notified}`
   );
-  return { overtime, opNotifications };
+  return { overtime, opNotifications, lunchReminders };
 };
 
 module.exports = {
   processAutomaticOvertime,
   processOperationalOvertimeNotifications,
+  processLunchReturnReminders,
   getSchedulerStatus,
   triggerManualRun,
   runOnce,

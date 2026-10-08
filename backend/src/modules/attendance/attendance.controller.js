@@ -44,6 +44,7 @@ const { getMonthlyPunctualitySummary } = require("./attendancePunctuality.servic
 const {
   getApprovedRequestForMarking,
   consumeRequest: consumeTeleworkRequest,
+  getAccessCodeForMarking,
 } = require("./teleworkRequests.service");
 
 const resolveAttendanceAvatarUrl = (avatarUrl, avatarDriveId) => {
@@ -6242,6 +6243,7 @@ const clockOutOperational = async (req, res) => {
 
     const isTeleworkStart = operationalPayload.category === "teletrabajo";
     let approvedTeleworkRequest = null;
+    let teleworkAccessCode = null;
     if (isTeleworkStart) {
       approvedTeleworkRequest = await getApprovedRequestForMarking({
         userId,
@@ -6249,10 +6251,16 @@ const clockOutOperational = async (req, res) => {
         requestDate: today,
       });
       if (!approvedTeleworkRequest) {
+        teleworkAccessCode = await getAccessCodeForMarking({
+          userId,
+          code: req.body?.telework_access_code || req.body?.teleworkAccessCode,
+        });
+      }
+      if (!approvedTeleworkRequest && !teleworkAccessCode) {
         return res.status(409).json({
           ok: false,
           code: "TELEWORK_APPROVAL_REQUIRED",
-          message: "Antes de marcar teletrabajo debes solicitarlo y esperar la aprobación de Talento Humano.",
+          message: "Antes de marcar teletrabajo debes tener una solicitud aprobada o un codigo de acceso vigente.",
           data: { request_status: "PENDING_OR_NOT_FOUND", request_date: today },
         });
       }

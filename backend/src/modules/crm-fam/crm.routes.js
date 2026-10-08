@@ -32,6 +32,14 @@ router.get("/reports/lost-reasons/pdf", requireRole(managerAdmin), controller.do
 router.get("/reports/red-flags/pdf", requireRole(managerAdmin), controller.downloadRedFlagsPdf);
 router.get("/reports/win-loss-patterns", requireRole(managerAdmin), controller.getWinLossPatternsReport);
 
+// Email campaigns remain draft-only until marketing consent and unsubscribe
+// policies are available. They use the existing manager/admin CRM scope.
+router.get("/email-campaigns", requireRole(managerAdmin), controller.listEmailCampaigns);
+router.post("/email-campaigns", requireRole(managerAdmin), controller.createEmailCampaign);
+router.get("/email-campaigns/:id", requireRole(managerAdmin), controller.getEmailCampaignById);
+router.put("/email-campaigns/:id", requireRole(managerAdmin), controller.updateEmailCampaign);
+router.delete("/email-campaigns/:id", requireRole(managerAdmin), controller.softDeleteEmailCampaign);
+
 // Pipeline Stages
 router.get("/pipeline-stages", requireRole(allCrm), controller.listPipelineStages);
 router.post("/pipeline-stages", requireRole(adminRoles), controller.createPipelineStage);

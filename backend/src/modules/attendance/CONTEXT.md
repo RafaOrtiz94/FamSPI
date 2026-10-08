@@ -54,6 +54,11 @@ Módulo de control de asistencia. Permite a colaboradores marcar entrada/salida,
   - Controller: `attendance.controller.js → clockOut`
   - Middleware: `verifyToken`
 
+- **POST /api/v1/attendance/telework/access-codes**
+  - Controller: `teleworkRequests.controller.js → issueCode`
+  - Middleware: `verifyToken`, rol exacto `talento_humano`
+  - Genera un código individual permanente de ocho caracteres para un colaborador autorizado. El código se persiste como hash y revoca el acceso permanente anterior de ese usuario. Es alternativa a una solicitud aprobada; no se envía por correo.
+
 - **POST /api/v1/attendance/clock-out-lunch** | alias: `/marcar/almuerzo-salida`
   - Controller: `attendance.controller.js → clockOutLunch`
   - Middleware: `verifyToken`
@@ -139,6 +144,10 @@ Módulo de control de asistencia. Permite a colaboradores marcar entrada/salida,
   - Genera el PDF de justificación de horas extras de un colaborador. Total neto = horas "por sistema" (hora extra de marcaciones en jornada normal) + horas "declaradas" (días con salida operacional/teletrabajo; se cuentan aunque no haya otra evidencia) − atrasos no justificados (misma regla del sistema: L-V, >6 min, sin justificación aprobada, sin salida operacional ese día). Jornada L-V 09:00–18:00; sábados y domingos completos. PDF horizontal para RH: resumen (horas y decimal), una fila por día con sustento y justificación técnica (tickets resueltos/cerrados + módulos de `auditoria.logs` con actividad fuera de jornada; sin commits, Cloud Run no tiene el repo) y solo las observaciones que afectan el cálculo. Lo sube a Drive (`Informes Horas Extras`) y lo envía por correo.
   - Env requeridas: `OVERTIME_REPORT_USER_EMAIL`, `OVERTIME_REPORT_RECIPIENTS`; opcional `OVERTIME_REPORT_DRIVE_ROOT_FOLDER_ID`.
 
+- **POST /internal/jobs/attendance/overtime** (job periódico, `x-jobs-key`)
+  - Job: `jobs/attendanceOvertimeScheduler.js → runOnce`.
+  - Además del cierre automático y alertas operacionales, revisa pausas de almuerzo activas. Entre los minutos 50 y 60 crea una única notificación de retorno por registro de asistencia, solo por Web Push (sin correo). Requiere que el colaborador haya autorizado y mantenga una suscripción push activa.
+
 ## 3. Flujo principal
 
 1. Colaborador marca entrada desde app/iPhone shortcut → `POST /clock-in` o `/marcar/entrada`
@@ -158,10 +167,14 @@ Módulo de control de asistencia. Permite a colaboradores marcar entrada/salida,
 ## 5. Base de datos
 
 ### Tablas usadas:
-- No verificado en DB
+- Verificado parcialmente en Neon el 2026-10-07 para las tablas de teletrabajo.
+
+- `attendance_telework_requests`: solicitudes y aprobaciones de teletrabajo.
+- `attendance_telework_access_codes`: códigos individuales, permanentes y revocables para iniciar teletrabajo sin solicitud previa (migraciones `314` y `315`). Solo el rol exacto `talento_humano` puede emitirlos o revocarlos.
 
 ### Campos relevantes:
-- No verificado en DB
+- `attendance_telework_access_codes.is_permanent`: identifica el acceso que no vence ni se consume.
+- `attendance_telework_access_codes.status`: admite `ACTIVE` y `REVOKED` para controlar el acceso permanente.
 
 ## 6. Relaciones
 - `attendance.service.js` (27KB): lógica de negocio principal

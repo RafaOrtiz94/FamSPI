@@ -1,0 +1,61 @@
+# Integracion continua de FamSPI (plan RBAC, Fase 1B).
+# Solo verifica: lint sin auto-fix, pruebas y build. No despliega nada ni toca produccion.
+# Las pruebas E2E (Playwright) NO corren aqui: necesitan el ambiente local de pruebas.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20 # misma version mayor que backend/Dockerfile
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      # "npm run lint" usa --fix y reescribe archivos; aqui solo se verifica.
+      - name: Lint
+        run: npx eslint src scripts/rbac scripts/staging
+      - name: Pruebas
+        run: npx jest --ci
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: spi_front
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: spi_front/package-lock.json
+      - run: npm ci
+      - name: Lint
+        run: npx eslint src --ext .js,.jsx
+      # Falla si se agrego o cambio una ruta sin regenerar el inventario de acceso (plan RBAC, Fase 0).
+      - name: Inventario de rutas al dia
+        run: node scripts/rbac/generate_route_inventory.js --check
+      - name: Pruebas
+        run: npx react-scripts test --watchAll=false
+        env:
+          CI: "true"
+      # CI=false: con CI=true react-scripts convierte los avisos de lint en errores de build.
+      - name: Build
+        run: npm run build
+        env:
+          CI: "false"

@@ -224,6 +224,8 @@ router.post("/marcar/cierre-viaje", verifyToken, attendanceMarkLimiter, operatio
 // limita al rol exacto talento_humano, sin habilitar aliases ni administradores.
 router.get("/telework/requests", verifyToken, teleworkRequestsController.list);
 router.post("/telework/requests", verifyToken, attendanceMarkLimiter, teleworkRequestsController.create);
+router.post("/telework/access-codes", verifyToken, requireExactTalentHumanRole, teleworkRequestsController.issueCode);
+router.post("/telework/access-codes/revoke", verifyToken, requireExactTalentHumanRole, teleworkRequestsController.revokeCode);
 router.post(
   "/telework/requests/:id/decision",
   verifyToken,

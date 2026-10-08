@@ -832,6 +832,200 @@ const softDeleteContact = async (id, user) => {
   return { id: rows[0].id, deleted: true };
 };
 
+// ─── Email campaigns (draft workspace, no external dispatch) ────────────────
+const CAMPAIGN_MAX_RECIPIENTS = 500;
+
+const campaignError = (message, status = 400) => Object.assign(new Error(message), { status });
+const requiredCampaignText = (value, label, maxLength) => {
+  const normalized = String(value || '').trim();
+  if (!normalized) throw campaignError(`${label} es requerido`);
+  if (normalized.length > maxLength) throw campaignError(`${label} supera el maximo de ${maxLength} caracteres`);
+  return normalized;
+};
+
+const ensureCampaignManager = (user) => {
+  if (!isManager(user)) throw campaignError('Acceso denegado', 403);
+};
+
+const resolveCampaignRecipients = async (recipients) => {
+  if (!Array.isArray(recipients) || !recipients.length) throw campaignError('Agrega al menos un destinatario');
+  if (recipients.length > CAMPAIGN_MAX_RECIPIENTS) throw campaignError(`Una campana admite hasta ${CAMPAIGN_MAX_RECIPIENTS} destinatarios`);
+
+  const resolved = [];
+  const seenEmails = new Set();
+  for (const recipient of recipients) {
+    const sourceType = String(recipient?.source_type || '').trim();
+    const sourceId = String(recipient?.source_id || '').trim();
+    const laboratoryName = requiredCampaignText(recipient?.laboratory_name, 'Laboratorio', 200);
+    if (!['contact', 'account'].includes(sourceType) || !sourceId) {
+      throw campaignError('Cada destinatario debe provenir de un contacto o cliente registrado');
+    }
+
+    const lookup = sourceType === 'contact'
+      ? await db.query(
+          `SELECT c.id, c.first_name, c.last_name, c.full_name, c.email, c.account_id
+             FROM crm.crm_contacts c
+            WHERE c.id = $1 AND c.deleted_at IS NULL`,
+          [sourceId],
+        )
+      : await db.query(
+          `SELECT a.id, a.account_name, a.email
+             FROM crm.crm_accounts a
+            WHERE a.id = $1 AND a.deleted_at IS NULL`,
+          [sourceId],
+        );
+    const source = lookup.rows[0];
+    if (!source) throw campaignError('Uno de los destinatarios ya no existe o fue eliminado', 404);
+
+    const email = String(source.email || '').trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw campaignError('Todos los destinatarios deben tener un email valido');
+    }
+    if (seenEmails.has(email)) throw campaignError(`El email ${email} esta repetido en la audiencia`);
+    seenEmails.add(email);
+
+    const name = sourceType === 'contact'
+      ? String(source.full_name || [source.first_name, source.last_name].filter(Boolean).join(' ') || email).trim()
+      : String(source.account_name || email).trim();
+    resolved.push({
+      contact_id: sourceType === 'contact' ? source.id : null,
+      account_id: sourceType === 'account' ? source.id : null,
+      recipient_name: name,
+      recipient_email: email,
+      laboratory_name: laboratoryName,
+    });
+  }
+  return resolved;
+};
+
+const getEmailCampaignById = async (id, user) => {
+  ensureCampaignManager(user);
+  const { rows } = await db.query(
+    `SELECT c.*, u.fullname AS created_by_name,
+            COUNT(r.id)::int AS recipient_count
+       FROM crm.crm_email_campaigns c
+       LEFT JOIN public.users u ON u.id = c.created_by
+       LEFT JOIN crm.crm_email_campaign_recipients r ON r.campaign_id = c.id
+      WHERE c.id = $1 AND c.deleted_at IS NULL
+      GROUP BY c.id, u.fullname`,
+    [id],
+  );
+  if (!rows.length) throw campaignError('Campana no encontrada', 404);
+  const campaign = rows[0];
+  const { rows: recipients } = await db.query(
+    `SELECT id, contact_id, account_id, recipient_name, recipient_email, laboratory_name, delivery_status, created_at
+       FROM crm.crm_email_campaign_recipients
+      WHERE campaign_id = $1
+      ORDER BY recipient_name ASC`,
+    [id],
+  );
+  return { ...campaign, recipients };
+};
+
+const listEmailCampaigns = async ({ q, limit = 50, offset = 0 } = {}, user) => {
+  ensureCampaignManager(user);
+  const params = [];
+  const conditions = ['c.deleted_at IS NULL'];
+  if (q) {
+    params.push(`%${q}%`);
+    conditions.push(`(c.campaign_name ILIKE $${params.length} OR c.subject ILIKE $${params.length})`);
+  }
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const safeOffset = Math.max(Number(offset) || 0, 0);
+  params.push(safeLimit, safeOffset);
+  const { rows } = await db.query(
+    `SELECT c.id, c.campaign_name, c.subject, c.preheader, c.status, c.created_at, c.updated_at,
+            u.fullname AS created_by_name, COUNT(r.id)::int AS recipient_count, COUNT(*) OVER()::int AS total_count
+       FROM crm.crm_email_campaigns c
+       LEFT JOIN public.users u ON u.id = c.created_by
+       LEFT JOIN crm.crm_email_campaign_recipients r ON r.campaign_id = c.id
+      WHERE ${conditions.join(' AND ')}
+      GROUP BY c.id, u.fullname
+      ORDER BY c.updated_at DESC
+      LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params,
+  );
+  const total = rows[0]?.total_count || 0;
+  return { data: rows.map(({ total_count, ...campaign }) => campaign), total, limit: safeLimit, offset: safeOffset };
+};
+
+const saveCampaignRecipients = async (client, campaignId, recipients) => {
+  for (const recipient of recipients) {
+    await client.query(
+      `INSERT INTO crm.crm_email_campaign_recipients
+        (campaign_id, contact_id, account_id, recipient_name, recipient_email, laboratory_name)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [campaignId, recipient.contact_id, recipient.account_id, recipient.recipient_name, recipient.recipient_email, recipient.laboratory_name],
+    );
+  }
+};
+
+const createEmailCampaign = async (data, user) => {
+  ensureCampaignManager(user);
+  const campaignName = requiredCampaignText(data?.campaign_name, 'Nombre de la campana', 160);
+  const subject = requiredCampaignText(data?.subject, 'Asunto', 200);
+  const bodyContent = requiredCampaignText(data?.body_content, 'Contenido', 20000);
+  const preheader = data?.preheader == null || data.preheader === '' ? null : requiredCampaignText(data.preheader, 'Preencabezado', 240);
+  const recipients = await resolveCampaignRecipients(data?.recipients);
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `INSERT INTO crm.crm_email_campaigns (campaign_name, subject, preheader, body_content, created_by, updated_by)
+       VALUES ($1, $2, $3, $4, $5, $5) RETURNING *`,
+      [campaignName, subject, preheader, bodyContent, user.id],
+    );
+    await saveCampaignRecipients(client, rows[0].id, recipients);
+    await client.query('COMMIT');
+    await crmAuditLog({ entity_name: 'email_campaign', entity_id: rows[0].id, action: 'created', new_data: { campaign_name: campaignName, recipient_count: recipients.length, status: 'draft' }, user });
+    return getEmailCampaignById(rows[0].id, user);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
+};
+
+const updateEmailCampaign = async (id, data, user) => {
+  ensureCampaignManager(user);
+  const current = await getEmailCampaignById(id, user);
+  const campaignName = requiredCampaignText(data?.campaign_name, 'Nombre de la campana', 160);
+  const subject = requiredCampaignText(data?.subject, 'Asunto', 200);
+  const bodyContent = requiredCampaignText(data?.body_content, 'Contenido', 20000);
+  const preheader = data?.preheader == null || data.preheader === '' ? null : requiredCampaignText(data.preheader, 'Preencabezado', 240);
+  const recipients = await resolveCampaignRecipients(data?.recipients);
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE crm.crm_email_campaigns
+          SET campaign_name = $2, subject = $3, preheader = $4, body_content = $5, updated_by = $6, updated_at = now()
+        WHERE id = $1`,
+      [id, campaignName, subject, preheader, bodyContent, user.id],
+    );
+    await client.query('DELETE FROM crm.crm_email_campaign_recipients WHERE campaign_id = $1', [id]);
+    await saveCampaignRecipients(client, id, recipients);
+    await client.query('COMMIT');
+    await crmAuditLog({ entity_name: 'email_campaign', entity_id: id, action: 'updated', old_data: { campaign_name: current.campaign_name, recipient_count: current.recipient_count }, new_data: { campaign_name: campaignName, recipient_count: recipients.length }, changed_fields: ['campaign_name', 'subject', 'preheader', 'body_content', 'recipients'], user });
+    return getEmailCampaignById(id, user);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
+};
+
+const softDeleteEmailCampaign = async (id, user) => {
+  ensureCampaignManager(user);
+  const current = await getEmailCampaignById(id, user);
+  const { rows } = await db.query(
+    `UPDATE crm.crm_email_campaigns SET deleted_at = now(), updated_by = $2, updated_at = now()
+      WHERE id = $1 AND deleted_at IS NULL RETURNING id`,
+    [id, user.id],
+  );
+  if (!rows.length) throw campaignError('Campana no encontrada', 404);
+  await crmAuditLog({ entity_name: 'email_campaign', entity_id: id, action: 'deleted', old_data: { campaign_name: current.campaign_name }, user });
+  return { id, deleted: true };
+};
+
 // ─── Leads ────────────────────────────────────────────────────────────────────
 
 const mkErr = (msg, status) => Object.assign(new Error(msg), { status });
@@ -3012,6 +3206,8 @@ module.exports = {
   getAccountSalesStats, mergeAccounts, getAccountDuplicateCandidates,
   // Contacts
   listContacts, getContactById, createContact, updateContact, softDeleteContact,
+  // Email campaigns
+  listEmailCampaigns, getEmailCampaignById, createEmailCampaign, updateEmailCampaign, softDeleteEmailCampaign,
   // Leads
   listLeads, getLeadById, createLead, updateLead, softDeleteLead, convertLead, disqualifyLead,
   linkLeadAccount, createLeadContact,

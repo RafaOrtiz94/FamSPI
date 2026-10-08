@@ -40,7 +40,10 @@ import {
   transitionAttendanceRegularization,
   getTeleworkRequests,
   decideTeleworkRequest,
+  issueTeleworkAccessCode,
+  revokeTeleworkAccessCode,
 } from "../../../core/api/attendanceApi";
+import { getUsers } from "../../../core/api/usersApi";
 import Modal from "../../../core/ui/components/Modal";
 import { WORKSPACE_PAGE_CLASS } from "../../../core/ui/workspaceLayout";
 import AttendanceMapView from "../components/attendance-reports/AttendanceMapView";
@@ -1681,6 +1684,9 @@ const TeleworkRequestsPanel = () => {
   const [busy, setBusy] = useState(null);
   const [rejectingId, setRejectingId] = useState(null);
   const [rejectionReason, setRejectionReason] = useState("");
+  const [users, setUsers] = useState([]);
+  const [codeUserId, setCodeUserId] = useState("");
+  const [issuedCode, setIssuedCode] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1696,6 +1702,29 @@ const TeleworkRequestsPanel = () => {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { getUsers({ limit: 500 }).then((data) => setUsers(Array.isArray(data) ? data : (data?.users || data?.data || []))).catch(() => setUsers([])); }, []);
+
+  const handleIssueCode = async () => {
+    if (!codeUserId) { toast.error("Selecciona un colaborador."); return; }
+    setBusy("access-code");
+    try {
+      const response = await issueTeleworkAccessCode({ userId: codeUserId });
+      setIssuedCode(response?.data || null);
+      toast.success("Código de acceso generado.");
+    } catch (error) { toast.error(error?.response?.data?.message || "No se pudo generar el código."); }
+    finally { setBusy(null); }
+  };
+
+  const handleRevokeCode = async () => {
+    if (!codeUserId) { toast.error("Selecciona un colaborador."); return; }
+    setBusy("revoke-access-code");
+    try {
+      await revokeTeleworkAccessCode({ userId: codeUserId });
+      setIssuedCode(null);
+      toast.success("Acceso permanente revocado.");
+    } catch (error) { toast.error(error?.response?.data?.message || "No se pudo revocar el código."); }
+    finally { setBusy(null); }
+  };
 
   const handleDecision = async (requestId, decision) => {
     if (decision === "reject" && !String(rejectionReason || "").trim()) {
@@ -1734,6 +1763,20 @@ const TeleworkRequestsPanel = () => {
           <FiRefreshCw size={12} className={loading ? "animate-spin" : ""} /> Actualizar
         </button>
       </div>
+
+      <section className="rounded-[16px] border border-[#DBEAFE] bg-[#F8FBFF] p-4">
+        <h4 className="text-sm font-semibold text-[#1E3A8A]">Código de acceso excepcional</h4>
+        <p className="mt-1 text-xs leading-5 text-[#475569]">Genera un código individual y permanente solo para el colaborador autorizado. Permite marcar teletrabajo sin solicitud previa hasta que Talento Humano lo revoque o emita uno nuevo.</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+          <select value={codeUserId} onChange={(event) => { setCodeUserId(event.target.value); setIssuedCode(null); }} className="rounded-[10px] border border-[#BFDBFE] bg-white px-3 py-2 text-sm text-[#1F2937]">
+            <option value="">Seleccionar colaborador</option>
+            {users.map((user) => <option key={user.id} value={user.id}>{user.fullname || user.name || user.email || `Usuario #${user.id}`}</option>)}
+          </select>
+          <button type="button" onClick={handleIssueCode} disabled={busy === "access-code"} className="rounded-[10px] bg-[#2563EB] px-3 py-2 text-xs font-semibold text-white hover:bg-[#1D4ED8] disabled:opacity-60">{busy === "access-code" ? "Generando..." : "Generar código"}</button>
+          <button type="button" onClick={handleRevokeCode} disabled={busy === "revoke-access-code"} className="rounded-[10px] border border-[#FECACA] bg-white px-3 py-2 text-xs font-semibold text-[#B91C1C] hover:bg-[#FEF2F2] disabled:opacity-60">{busy === "revoke-access-code" ? "Revocando..." : "Revocar acceso"}</button>
+        </div>
+        {issuedCode?.code ? <div className="mt-3 rounded-[10px] border border-[#BFDBFE] bg-white px-3 py-2 text-sm text-[#1E3A8A]">Código para compartir de forma segura: <span className="font-mono text-base font-bold tracking-[0.16em]">{issuedCode.code}</span></div> : null}
+      </section>
 
       {loading ? (
         <div className="flex h-40 items-center justify-center"><FiRefreshCw className="animate-spin text-[#D1D5DB]" size={20} /></div>

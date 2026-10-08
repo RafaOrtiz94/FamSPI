@@ -49,3 +49,7 @@ backend/backups/
 
 # Optional local assets
 
+
+# Pruebas E2E y verificacion en navegador (artefactos locales)
+spi_front/e2e/.results/
+.playwright-mcp/

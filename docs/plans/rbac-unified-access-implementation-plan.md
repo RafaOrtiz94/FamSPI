@@ -171,6 +171,25 @@ Trabajo:
 - Definir politica de acceso por ausencia de configuracion y politica de expiracion de grants.
 - Capturar un snapshot anonimizado de roles, asignaciones, accesos modulares y estados para comparar.
 
+Avance al 2026-10-07 (todo generado desde el codigo y desde la copia local de datos; nada escrito a mano):
+
+| Entregable | Archivo en `docs/plans/rbac-inventory/` | Generador |
+|---|---|---|
+| Matriz de endpoints (1.529) con guardas, roles y clasificacion | `backend-endpoints.json` / `.csv` | `backend/scripts/rbac/generate_access_inventory.js` |
+| Matriz de rutas UI (165) con guardas anidadas | `frontend-routes.json` / `.csv` | `spi_front/scripts/rbac/generate_route_inventory.js` |
+| Navegacion real por rol (17 roles) | `frontend-navigation-by-role.json` | `spi_front/e2e/rbac-navigation.spec.js` |
+| Registro de roles, aliases y capacidades (67 nombres) | `registro-de-roles.md` | `backend/scripts/rbac/build_access_review.js` |
+| Matriz por modulo (63 modulos) lista para revision funcional | `matriz-por-modulo.md` | idem |
+| Foto anonimizada de datos (solo conteos) | `datos-snapshot.json` | idem, con `STAGING_DATABASE_URL` local |
+
+- Hecho: prueba automatica de inventario. Ambos generadores tienen modo `--check`; el de rutas UI corre en CI y el de endpoints se ejecuta en local antes de cada despliegue (carga la app completa).
+- Hecho: clasificacion automatica del 100% de endpoints y rutas en publico, interno, solo autenticado, por rol y permiso central.
+- Datos relevantes de la foto: 31 de los usuarios activos no tienen ninguna fila en `user_module_access` (acceden por la regla de permitir por defecto); solo `jefe_ti`, `talento_humano` y los pasantes tienen filas. Dos modulos estan en construccion (`kickoff_2026`, `ti_casos_externos`).
+- Pendiente, requiere personas: nombrar responsable por modulo y aprobar `matriz-por-modulo.md`; revisar las 222 escrituras sin guarda de rol en la ruta (listadas por modulo con casilla); decidir los 22 alias sin usuarios y las politicas de la seccion 11. Completar recurso, accion, alcance y regla de workflow por endpoint depende de esas aprobaciones.
+- Hecho (2026-10-07): revision de las 222 escrituras sin guarda de rol (175 unicas) en `revision-escrituras-sin-rol.md`: 42 validan rol en el codigo, 20 tienen guarda propia, 101 usan la identidad del usuario, 12 revisadas a mano. Un hallazgo de severidad baja (`POST /signature-workflows/validate-signer-profiles`, sin control) y 3 abiertas por diseno. 73 solo tienen revision automatica.
+- Hecho (2026-10-07): verificacion de vistas por rol en `vistas-por-rol.md` (`spi_front/e2e/rbac-views.spec.js`). 199 enlaces de menu de 17 roles: 195 abren, 1 en construccion, 1 redirige y 2 rebotan en "no autorizado" (`jefe_financiero` -> Solicitudes; `jefe_servicio` -> Obs. BC). Sin errores de pagina.
+- Defectos encontrados en la verificacion, ajenos al RBAC y sin corregir: las notas de proceso de compras privadas responden 500 (`processNotes.service.js` busca una columna `client_name` que no existe en `private_purchase_requests`); `GET /private-purchases/by-role/jefe_logistica` responde 500 al rol `logistica`; cuatro pantallas abren pero una de sus llamadas responde 403 (`financiero`, `jefe_operaciones`, `jefe_servicio`, `jefe_ti`).
+
 Pruebas y evidencia:
 
 - Prueba automatica que falle si aparece un endpoint o ruta UI sin clasificar.
@@ -278,6 +297,26 @@ Trabajo, en este orden (ver estado real de herramientas en 3.3):
 8. Incorporar un pipeline de CI (`.github/workflows`) con lint sin auto-fix, pruebas backend, pruebas frontend y build.
 9. Publicar resultados como evidencia; una prueba inestable bloquea la fase hasta estabilizarse.
 
+Avance al 2026-10-07:
+
+- Hecho (paso 1): linea base en verde. Backend 131 suites y 923 pruebas; frontend 17 suites y 122 pruebas. Se corrigieron dos pruebas que ya fallaban antes de este trabajo, sin tocar codigo en uso: `consumptionVersionConflict` (no cargaba por `uuid` ESM) y `dateUtils` (esperaba una raya larga y el codigo devuelve guion desde abril). Tambien un error de lint en `LiveOperationalMap.test.jsx`.
+- Hecho (paso 2): `supertest` en backend y `@playwright/test` en frontend, con `spi_front/playwright.config.js` y carpeta `spi_front/e2e/`. La configuracion se niega a correr contra una URL que no sea local.
+- Hecho (paso 4): caracterizacion del RBAC legacy del backend en `backend/src/middlewares/__tests__/roles.characterization.test.js` (normalizacion, grupos, superroles, `extra_roles`, atajo de pasante y matriz rol por grupo) y del frontend en `spi_front/src/core/auth/__tests__/ProtectedRoute.characterization.test.jsx`.
+- Hecho (paso 5): fixtures sin datos personales en `backend/src/security/authorization/__fixtures__/legacyRoles.fixture.js` (17 roles reales, valores invalidos y combinaciones reales de `extra_roles`).
+- Hecho (paso 6): contrato HTTP 401/403/200 de `verifyToken` y `requireRole` en `authContract.characterization.test.js`.
+- Hecho (paso 7): 19 pruebas E2E en `spi_front/e2e/rbac-navigation.spec.js`: cada uno de los 17 roles entra a su panel y su navegacion (menus y enlaces) se compara con la linea base `docs/plans/rbac-inventory/frontend-navigation-by-role.json`; mas acceso directo por URL denegado y redireccion al login sin sesion. Dos corridas seguidas dieron el mismo resultado.
+- Hecho (paso 8): `.github/workflows/ci.yml` con lint sin auto-fix, pruebas y build. No verificado en GitHub: se activa al subirlo.
+- El verificador del inventario (`generate_access_inventory.js --check`) detecto 4 endpoints nuevos de asistencia agregados en paralelo; inventario regenerado a 1.529 endpoints.
+
+Hallazgos de la caracterizacion (comportamiento actual, no deseado):
+
+- Backend y frontend deciden distinto. El backend expande grupos (`requireRole(["comercial"])` deja pasar a `jefe_comercial`); el frontend compara el valor exacto.
+- Superroles distintos. En el backend solo `admin` y `administrador` pasan todo, y ningun usuario real tiene esos roles. En el frontend `admin` no tiene pase; lo tienen `gerencia` y `pasante` en rutas no estrictas.
+- `gerencia_general`, que es el rol real del usuario de gerencia, no recibe el pase de `gerencia` del frontend salvo que su `scope` sea exactamente `gerencia`.
+- `jefe_logistica` y `logistica` no pertenecen a ningun grupo de roles del backend.
+- Siete grupos o roles no permiten hoy a ningun rol real: `admin`, `backoffice_comercial` (solo llega por `extra_roles`), `esp_app`, `esp_app_ext`, `jefe_finanzas`, `jefe_servicio_tecnico` y `jefe_talento_humano`.
+- El texto `"null"` como rol no se trata como pendiente: cae en no autorizado.
+
 Comandos base, sujetos a la configuracion real de cada entrega:
 
 ```bash
@@ -309,6 +348,16 @@ Trabajo:
 - Mantener temporalmente la decision legacy mientras se mide paridad.
 - Reemplazar el bypass generico de `pasante` solamente cuando todas sus asignaciones efectivas esten cubiertas por modulo y permiso explicitos.
 - Conservar `x-app-path` unicamente para observabilidad una vez completada la migracion.
+
+Avance al 2026-10-08 (validado solo en el ambiente local; nada desplegado):
+
+- Hecho: registro `backend/src/security/authorization/apiModuleRegistry.js` con 34 prefijos de API: 5 transversales y 29 con sus modulos. Sale de las llamadas observadas al recorrer el menu de los 17 roles; una prueba impide declarar modulos que no existan en el catalogo. Es parcial (solo cargas de pagina) y requiere aprobacion funcional.
+- Hecho: modo sombra `moduleShadow.js`, llamado desde `moduleAccessGuard`. Apagado salvo `RBAC_MODULE_SHADOW=true` (encendido solo en `staging_local.ps1`). No se espera, descarta sus errores y no guarda identificadores de usuario ni de recurso. Cada diferencia se escribe una vez en el log con `rbacShadow: "module"`.
+- Hecho: pruebas negativas (encabezado ausente, falsificado y de otro modulo), de fallo seguro y de respuesta identica con la sombra encendida y apagada.
+- Resultado local: de 876 combinaciones sin declarar a 0 decisiones distintas y 2 de modulo distinto, ya incorporadas al registro. No se repitio el recorrido despues de incorporarlas.
+- Hallazgo: `GET /api/v1/notifications` (la raiz, sin barra final) no entra en la exencion de `BYPASS_PREFIXES` y si pasa por el control modular, al contrario de lo que dice su comentario.
+- Limite: el conteo vive en memoria por instancia; en Cloud Run la evidencia se lee del log.
+- Pendiente: declarar los prefijos no observados (acciones de escritura y pantallas fuera del menu), encender la sombra en produccion con aprobacion y cumplir la ventana de observacion, y sustituir el atajo de `pasante`.
 
 Compuerta de salida:
 

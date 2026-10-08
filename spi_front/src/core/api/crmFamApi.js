@@ -59,6 +59,13 @@ export const createContact = (data) => api.post("/crm-fam/contacts", data).then(
 export const updateContact = (id, data) => api.put(`/crm-fam/contacts/${id}`, data).then(r => r.data?.data);
 export const deleteContact = (id) => api.delete(`/crm-fam/contacts/${id}`).then(r => r.data?.data);
 
+// Email campaigns are a draft workspace until promotional delivery is approved.
+export const fetchEmailCampaigns = (params) => api.get("/crm-fam/email-campaigns", { params }).then(r => r.data?.data);
+export const fetchEmailCampaignById = (id) => api.get(`/crm-fam/email-campaigns/${id}`).then(r => r.data?.data);
+export const createEmailCampaign = (data) => api.post("/crm-fam/email-campaigns", data).then(r => r.data?.data);
+export const updateEmailCampaign = (id, data) => api.put(`/crm-fam/email-campaigns/${id}`, data).then(r => r.data?.data);
+export const deleteEmailCampaign = (id) => api.delete(`/crm-fam/email-campaigns/${id}`).then(r => r.data?.data);
+
 // Leads
 export const fetchLeads = (params) => api.get("/crm-fam/leads", { params }).then(r => r.data?.data);
 export const fetchLeadById = (id) => api.get(`/crm-fam/leads/${id}`).then(r => r.data?.data);
@@ -206,6 +213,11 @@ const crmFamApi = {
   createContact,
   updateContact,
   deleteContact,
+  fetchEmailCampaigns,
+  fetchEmailCampaignById,
+  createEmailCampaign,
+  updateEmailCampaign,
+  deleteEmailCampaign,
   fetchLeads,
   fetchLeadById,
   createLead,

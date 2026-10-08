@@ -49,6 +49,8 @@ managerAdmin = managerRoles ∪ adminRoles         // aprobar/observar/reabrir B
 
 Frontend: `AppRoutes.jsx` protege todo `/dashboard/crm-fam/*` con `allowedRoles` = comercial, jefe_comercial, backoffice_comercial, asesor_comercial, analista_comercial, acp_comercial, backoffice, gerencia, gerencia_general, gerente_general, director, gerente, jefe_ti, jefe_de_ti. El tab "Configuración" en `CrmShell.jsx` solo aparece para `jefe_ti`, `jefe_de_ti`, `admin`, `administrador`.
 
+Campañas de email: el workspace `/dashboard/crm-fam/campaigns` y sus endpoints solo admiten roles manager/admin (`managerAdmin`). Permite guardar borradores con contactos o cuentas registradas, laboratorio por destinatario y vista previa de `{{nombre_cliente}}` / `{{laboratorio}}`. No existe despacho de marketing: está bloqueado hasta definir consentimiento, bajas y remitente comercial.
+
 ## 4. Endpoints
 
 Prefijo: `/api/v1/crm-fam`
@@ -156,6 +158,8 @@ Buying Influences, Win-Results (bajo `/buying-influences/:buyingInfluenceId/win-
 
 Esquema dedicado `crm` (no `public`). Migraciones: `231_crm_schema_init.sql` (24 tablas), `232_crm_catalogs_seed.sql` (seed inicial: 12 etapas genéricas, 10 criterios de scorecard, 11 motivos de pérdida), `233_crm_sub_tables_schema_fix.sql`, `239/240` (integración con `scheduled_visits`/ciudad en leads), `242_crm_embudo_ventas_8_fases.sql` (reemplaza las 12 etapas por las 6 reales del embudo), `243_crm_activities_missing_columns.sql`.
 
+`313_crm_email_campaigns.sql` agrega `crm.crm_email_campaigns` y `crm.crm_email_campaign_recipients`; la segunda conserva el snapshot de nombre, email y laboratorio de la audiencia del borrador.
+
 Tablas (24): `crm_pipeline_stages`, `crm_accounts`, `crm_contacts`, `crm_leads`, `crm_opportunities`, `crm_opportunity_products`, `crm_blue_sheets`, `crm_blue_sheet_versions`, `crm_buying_influences`, `crm_win_results`, `crm_competitors`, `crm_competitive_preferences`, `crm_strengths`, `crm_red_flags`, `crm_scorecard_criteria`, `crm_scorecard_answers`, `crm_action_items`, `crm_activities`, `crm_documents`, `crm_notes`, `crm_review_comments`, `crm_lost_reasons`, `crm_audit_log`, `crm_integration_outbox`.
 
 `crm_activities.source_module` (texto nullable, migración `298_work_management_crm_activity_sync.sql`) marca de forma estructurada quién generó la actividad: `'work_management'` (items de Work Management, ver `backend/src/modules/work-management/CONTEXT.md` §6) o `'schedule'` (visitas de cronograma, `schedules.service.js#upsertCrmFamActivityForScheduledVisit`). Filas anteriores a esta migración quedan con `source_module IS NULL` — el frontend (`CrmActivitiesPage.jsx#getActivityOrigin`) conserva como fallback la heurística vieja (`activity_type==='visita' && is_scheduled_visit`) para esas filas históricas, así que no hace falta backfill.
@@ -179,7 +183,7 @@ Columnas puente agregadas fuera del esquema `crm` (para enlazar procesos externo
 
 ## 8. Frontend asociado
 
-Todo bajo `spi_front/src/modules/crm-fam/`, montado en `CrmShell.jsx` (tabs: Dashboard, Cuentas, Contactos, Leads, "Embudo de ventas" = Opportunities, Actividades, Reportes, + Configuración solo admin).
+Todo bajo `spi_front/src/modules/crm-fam/`, montado en `CrmShell.jsx` (tabs: Dashboard, Cuentas, Contactos, Leads, "Embudo de ventas" = Opportunities, Actividades, Reportes, Campañas para manager/admin, + Configuración solo admin).
 
 | Ruta | Página |
 |------|--------|

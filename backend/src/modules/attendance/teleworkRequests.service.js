@@ -2,6 +2,7 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const notificationManager = require("../notifications/notificationManager");
 const { getBusinessDate } = require("./attendance.utils");
+const { createHash, randomInt } = require("crypto");
 
 const TELEWORK_NOTIFICATION_SOURCE = "attendance.telework";
 const TELEWORK_REPORT_PATH = "/dashboard/talento-humano/asistencia-reportes";
@@ -330,6 +331,82 @@ const getApprovedRequestForMarking = async ({ userId, requestId = null, requestD
   return result.rows[0] || null;
 };
 
+const hashAccessCode = (code) => createHash("sha256").update(String(code || "").trim()).digest("hex");
+const buildAccessCode = () => {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return Array.from({ length: 8 }, () => alphabet[randomInt(alphabet.length)]).join("");
+};
+
+const issueAccessCode = async ({ userId, issuer }) => {
+  if (!hasExactTalentHumanRole(issuer)) {
+    const error = new Error("Solo talento_humano puede generar codigos de teletrabajo");
+    error.status = 403;
+    error.code = "TELEWORK_CODE_ISSUE_FORBIDDEN";
+    throw error;
+  }
+  const normalizedUserId = Number(userId);
+  if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
+    const error = new Error("Selecciona un usuario valido"); error.status = 400; error.code = "TELEWORK_CODE_USER_REQUIRED"; throw error;
+  }
+  const { rows: users } = await db.query(
+    "SELECT id FROM users WHERE id = $1 AND COALESCE(active, TRUE) = TRUE LIMIT 1",
+    [normalizedUserId],
+  );
+  if (!users.length) { const error = new Error("El usuario no existe o esta inactivo"); error.status = 404; error.code = "TELEWORK_CODE_USER_NOT_FOUND"; throw error; }
+  const code = buildAccessCode();
+  await db.query(
+    `UPDATE attendance_telework_access_codes
+        SET status = 'REVOKED', revoked_at = NOW(), updated_at = NOW()
+      WHERE user_id = $1 AND status = 'ACTIVE' AND is_permanent = TRUE`,
+    [normalizedUserId],
+  );
+  const { rows } = await db.query(
+    `INSERT INTO attendance_telework_access_codes (user_id, code_hash, status, is_permanent, issued_by_user_id)
+     VALUES ($1, $2, 'ACTIVE', TRUE, $3) RETURNING id, user_id, status, is_permanent, created_at`,
+    [normalizedUserId, hashAccessCode(code), Number(issuer.id)],
+  );
+  return { ...rows[0], code };
+};
+
+const revokeAccessCode = async ({ userId, issuer }) => {
+  if (!hasExactTalentHumanRole(issuer)) {
+    const error = new Error("Solo talento_humano puede revocar codigos de teletrabajo");
+    error.status = 403;
+    error.code = "TELEWORK_CODE_REVOKE_FORBIDDEN";
+    throw error;
+  }
+  const normalizedUserId = Number(userId);
+  if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
+    const error = new Error("Selecciona un usuario valido"); error.status = 400; error.code = "TELEWORK_CODE_USER_REQUIRED"; throw error;
+  }
+  const { rows } = await db.query(
+    `UPDATE attendance_telework_access_codes
+        SET status = 'REVOKED', revoked_at = NOW(), updated_at = NOW()
+      WHERE user_id = $1 AND status = 'ACTIVE' AND is_permanent = TRUE
+      RETURNING id`,
+    [normalizedUserId],
+  );
+  if (!rows.length) {
+    const error = new Error("El colaborador no tiene un codigo permanente activo");
+    error.status = 404;
+    error.code = "TELEWORK_CODE_NOT_ACTIVE";
+    throw error;
+  }
+  return { user_id: normalizedUserId };
+};
+
+const getAccessCodeForMarking = async ({ userId, code }) => {
+  const normalizedCode = String(code || "").trim().toUpperCase();
+  if (!/^[A-Z2-9]{8}$/.test(normalizedCode)) return null;
+  const { rows } = await db.query(
+    `SELECT id FROM attendance_telework_access_codes
+      WHERE user_id = $1 AND code_hash = $2 AND status = 'ACTIVE' AND is_permanent = TRUE
+      LIMIT 1`,
+    [Number(userId), hashAccessCode(normalizedCode)],
+  );
+  return rows[0] || null;
+};
+
 const consumeRequest = async ({ requestId, exceptionId }) => {
   if (!requestId) return;
   await db.query(
@@ -347,4 +424,7 @@ module.exports = {
   decideRequest,
   getApprovedRequestForMarking,
   consumeRequest,
+  issueAccessCode,
+  revokeAccessCode,
+  getAccessCodeForMarking,
 };

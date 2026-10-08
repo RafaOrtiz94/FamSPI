@@ -2,6 +2,7 @@ const {
   resolveModuleKeyByPath,
   isModuleEnabledForUser,
 } = require("../modules/module-access/moduleAccess.service");
+const { observeModuleDecision } = require("../security/authorization/moduleShadow");
 
 // Rutas que nunca dependen de user_module_access: auth (aun sin sesion),
 // el propio panel de gestion de modulos (siempre exclusivo de jefe_ti/admin_ti,
@@ -27,12 +28,17 @@ async function moduleAccessGuard(req, res, next) {
 
     const frontendPath = req.headers["x-app-path"] || "";
     const moduleKey = resolveModuleKeyByPath(frontendPath);
-    if (!moduleKey) return next();
+    if (!moduleKey) {
+      observeModuleDecision(req, { moduleKey: null, allowed: true });
+      return next();
+    }
 
     const enabled = await isModuleEnabledForUser({
       userId: req.user.id,
       moduleKey,
     });
+    // Modo sombra (RBAC Fase 2): solo registra; no se espera ni cambia la respuesta.
+    observeModuleDecision(req, { moduleKey, allowed: enabled });
     if (enabled) {
       // Marca que este request ya fue autorizado por module_access, para que
       // requireRole (mas adelante en la cadena) sepa que es seguro dejar

@@ -69,4 +69,28 @@ const decide = async (req, res) => {
   }
 };
 
-module.exports = { create, list, decide };
+const issueCode = async (req, res) => {
+  try {
+    const code = await service.issueAccessCode({
+      userId: req.body?.user_id || req.body?.userId,
+      issuer: req.user,
+    });
+    return res.status(201).json({ ok: true, code: "TELEWORK_ACCESS_CODE_ISSUED", message: "Codigo permanente de teletrabajo generado. Compartelo de forma segura con el colaborador.", data: code });
+  } catch (error) {
+    return res.status(error.status || 500).json({ ok: false, code: error.code || "TELEWORK_ACCESS_CODE_ISSUE_FAILED", message: error.message || "No se pudo generar el codigo" });
+  }
+};
+
+const revokeCode = async (req, res) => {
+  try {
+    const result = await service.revokeAccessCode({
+      userId: req.body?.user_id || req.body?.userId,
+      issuer: req.user,
+    });
+    return res.json({ ok: true, code: "TELEWORK_ACCESS_CODE_REVOKED", message: "Codigo permanente de teletrabajo revocado.", data: result });
+  } catch (error) {
+    return res.status(error.status || 500).json({ ok: false, code: error.code || "TELEWORK_ACCESS_CODE_REVOKE_FAILED", message: error.message || "No se pudo revocar el codigo" });
+  }
+};
+
+module.exports = { create, list, decide, issueCode, revokeCode };

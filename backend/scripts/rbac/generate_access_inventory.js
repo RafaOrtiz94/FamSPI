@@ -114,13 +114,16 @@ function walk(router, prefix, inherited, scope) {
       const chain = [...local, ...handlers.slice(0, -1)];
       const finalHandler = handlers[handlers.length - 1];
       routePaths.forEach((routePath) => methods.forEach((method) => {
-        endpoints.push({
+        const endpoint = {
           scope,
           method: method.toUpperCase(),
           path: joinPath(prefix, String(routePath)),
           handler: finalHandler?.name || "(anonima)",
           ...summarize(chain),
-        });
+        };
+        // No enumerable: lo usa review_open_writes.js y no entra al JSON del inventario.
+        Object.defineProperty(endpoint, "fns", { value: { chain, finalHandler } });
+        endpoints.push(endpoint);
       }));
     } else if (layer.handle && Array.isArray(layer.handle.stack)) {
       walk(layer.handle, joinPath(prefix, layer.__mountPath), local, scope);
@@ -167,7 +170,9 @@ const rows = endpoints.map((endpoint) => {
   const declaredPublic = endpoint.scope === "public" || isPublicPath(endpoint.path);
   const authenticated = endpoint.authenticated || !declaredPublic;
   const row = { ...endpoint, authenticated, declaredPublic };
-  return { ...row, classification: classify(row) };
+  const classified = { ...row, classification: classify(row) };
+  if (endpoint.fns) Object.defineProperty(classified, "fns", { value: endpoint.fns });
+  return classified;
 });
 const moduleOf = (routePath) => routePath.replace(/^\/api\/v1\//, "").split("/")[0] || "(raiz)";
 
@@ -198,6 +203,10 @@ const csv = [
 const json = `${JSON.stringify({ summary, endpoints: rows }, null, 2)}\n`;
 const jsonPath = path.join(OUT_DIR, "backend-endpoints.json");
 const csvPath = path.join(OUT_DIR, "backend-endpoints.csv");
+
+module.exports = { rows };
+
+if (require.main !== module) return;
 
 if (process.argv.includes("--check")) {
   const saved = fs.existsSync(jsonPath) ? fs.readFileSync(jsonPath, "utf8") : "";

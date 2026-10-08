@@ -21,6 +21,13 @@ const createContact = (req, res) => respond(res, service.createContact(req.body,
 const updateContact = (req, res) => respond(res, service.updateContact(req.params.id, req.body, req.user));
 const softDeleteContact = (req, res) => respond(res, service.softDeleteContact(req.params.id, req.user));
 
+// EMAIL CAMPAIGNS
+const listEmailCampaigns = (req, res) => respond(res, service.listEmailCampaigns(req.query, req.user));
+const getEmailCampaignById = (req, res) => respond(res, service.getEmailCampaignById(req.params.id, req.user));
+const createEmailCampaign = (req, res) => respond(res, service.createEmailCampaign(req.body, req.user));
+const updateEmailCampaign = (req, res) => respond(res, service.updateEmailCampaign(req.params.id, req.body, req.user));
+const softDeleteEmailCampaign = (req, res) => respond(res, service.softDeleteEmailCampaign(req.params.id, req.user));
+
 // LEADS
 const listLeads = (req, res) => respond(res, service.listLeads({ ...req.query, user: req.user }));
 const getLeadById = (req, res) => respond(res, service.getLeadById(req.params.id, req.user));
@@ -182,6 +189,7 @@ module.exports = {
   listAccounts, getAccountById, createAccount, updateAccount, softDeleteAccount, getAccountTimeline,
   getAccountSalesStats, mergeAccounts, getAccountDuplicateCandidates,
   listContacts, getContactById, createContact, updateContact, softDeleteContact,
+  listEmailCampaigns, getEmailCampaignById, createEmailCampaign, updateEmailCampaign, softDeleteEmailCampaign,
   listLeads, getLeadById, createLead, updateLead, softDeleteLead, convertLead, disqualifyLead,
   linkLeadAccount, createLeadContact, promoteLeadToOpportunity,
   listPipelineStages, createPipelineStage, updatePipelineStage,
