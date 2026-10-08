@@ -4165,8 +4165,13 @@ const getLivePresence = async (req, res) => {
   }
 };
 
+// Minutos hasta el siguiente envio que el Atajo debe programar. Con salida activa
+// el Atajo se re-arma solo; sin salida recibe 0 y deja de enviar hasta que algo lo
+// vuelva a iniciar. Asi la frecuencia se cambia aqui y no telefono por telefono.
+const LOCATION_PING_INTERVAL_MINUTES = Math.max(5, Number(process.env.ATTENDANCE_LOCATION_PING_INTERVAL_MINUTES) || 10);
+
 // Ping de ubicacion del Atajo de iPhone. Responde siempre 200 y corto: el Atajo
-// corre solo, a horas fijas, y sin salida operacional activa no se toca la base.
+// corre solo y sin salida operacional activa no se toca la base.
 const recordLocationPing = async (req, res) => {
   const body = req.body || {};
   const result = await attendanceLocationPingsService.recordPing({
@@ -4175,7 +4180,11 @@ const recordLocationPing = async (req, res) => {
     accuracy: body.accuracy,
     operationalTypes: OPERATIONAL_EXCEPTION_TYPES,
   });
-  return res.status(200).json({ ok: true, ...result });
+  return res.status(200).json({
+    ok: true,
+    ...result,
+    next_ping_minutes: result.tracking ? LOCATION_PING_INTERVAL_MINUTES : 0,
+  });
 };
 
 // Mapa de quienes estan en salida operacional activa con su ultima ubicacion
