@@ -88,6 +88,13 @@ function Set-BackendEnv {
     DB_BACKUP_AUTO_ENABLED      = "false"
     # Modo sombra de autorizacion modular (plan RBAC, Fase 2): solo registra diferencias.
     RBAC_MODULE_SHADOW          = "true"
+    RBAC_CENTRAL_SHADOW         = "true"
+    # Piloto de enforcement central (Fase 5): module_access.* se decide con el motor central, con respaldo a la regla de siempre.
+    RBAC_CENTRAL_PILOT          = "true"
+    # Enforcement central en TODAS las areas (Fase 7), solo para ensayar en staging. Produccion se activa area por area.
+    RBAC_CENTRAL_ENFORCE        = "*"
+    # Multiempresa (enfoque SaaS, paso 2): apagado por defecto. STAGING_TENANT_MODE=on lo enciende para ensayar.
+    RBAC_TENANT_MODE            = $(if ($env:STAGING_TENANT_MODE -eq "on") { "true" } else { "false" })
     # Sin credenciales de Google: Drive, Docs, Gmail y calendario quedan deshabilitados.
     # Debe ser un valor NO vacio: en PowerShell asignar "" borra la variable y dotenv
     # volveria a cargar la ruta real desde backend\.env.

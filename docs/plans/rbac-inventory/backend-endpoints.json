@@ -1,14 +1,14 @@
 {
   "summary": {
-    "total": 1538,
+    "total": 1554,
     "byClassification": {
       "publico": 32,
       "rol": 1075,
       "solo_autenticado": 390,
-      "permiso_central": 5,
+      "permiso_central": 21,
       "interno": 36
     },
-    "modules": 61,
+    "modules": 62,
     "distinctRoles": [
       "acp_comercial",
       "admin",
@@ -23934,6 +23934,246 @@
       "otherMiddlewares": [],
       "declaredPublic": false,
       "classification": "rol"
+    },
+    {
+      "scope": "private",
+      "method": "GET",
+      "path": "/api/v1/rbac/audit",
+      "handler": "listAudit",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.read"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "GET",
+      "path": "/api/v1/rbac/matrix",
+      "handler": "getMatrix",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.read"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "GET",
+      "path": "/api/v1/rbac/members",
+      "handler": "listMembers",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.read"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "GET",
+      "path": "/api/v1/rbac/permissions",
+      "handler": "listPermissions",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.read"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "GET",
+      "path": "/api/v1/rbac/roles",
+      "handler": "listRoles",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.read"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "POST",
+      "path": "/api/v1/rbac/roles",
+      "handler": "createRole",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.manage"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "DELETE",
+      "path": "/api/v1/rbac/roles/:roleId",
+      "handler": "archiveRole",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.manage"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "GET",
+      "path": "/api/v1/rbac/roles/:roleId",
+      "handler": "getRole",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.read"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "PUT",
+      "path": "/api/v1/rbac/roles/:roleId",
+      "handler": "updateRole",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.manage"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "GET",
+      "path": "/api/v1/rbac/summary",
+      "handler": "getSummary",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.read"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "POST",
+      "path": "/api/v1/rbac/sync-inherited",
+      "handler": "syncInherited",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.manage"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "GET",
+      "path": "/api/v1/rbac/users/:userId",
+      "handler": "getUserAccess",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.read"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "POST",
+      "path": "/api/v1/rbac/users/:userId/grants",
+      "handler": "grantPermission",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.manage"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "DELETE",
+      "path": "/api/v1/rbac/users/:userId/grants/:grantId",
+      "handler": "revokeGrant",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.manage"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "POST",
+      "path": "/api/v1/rbac/users/:userId/roles",
+      "handler": "assignRole",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.manage"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
+    },
+    {
+      "scope": "private",
+      "method": "DELETE",
+      "path": "/api/v1/rbac/users/:userId/roles/:assignmentId",
+      "handler": "revokeRole",
+      "authenticated": true,
+      "roleGuards": [],
+      "permissions": [
+        "rbac.manage"
+      ],
+      "modules": [],
+      "otherMiddlewares": [],
+      "declaredPublic": false,
+      "classification": "permiso_central"
     },
     {
       "scope": "private",

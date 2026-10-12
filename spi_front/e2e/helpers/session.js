@@ -12,7 +12,7 @@ function testPassword() {
 async function loginAs(page, role) {
   await page.goto("/login");
   // La marca del ambiente confirma que no se esta probando contra produccion.
-  await expect(page.getByRole("status", { name: /Ambiente STAGING/i })).toBeVisible();
+  await expect(page.getByRole("status", { name: /Ambiente STAGING/i })).toBeVisible({ timeout: 30000 });
   await page.getByRole("button", { name: "Acceso pasantes" }).click();
   await page.getByRole("textbox", { name: "Usuario" }).fill(`prueba.${role}`);
   await page.getByRole("textbox", { name: "Contraseña" }).fill(testPassword());

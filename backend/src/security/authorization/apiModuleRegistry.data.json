@@ -1,0 +1,466 @@
+{
+  "/api/v1/approvals": {
+    "modules": [
+      "servicio_solicitudes"
+    ],
+    "evidence": "estatica"
+  },
+  "/api/v1/attendance": {
+    "modules": [],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/audit-prep": {
+    "modules": [],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/auditoria": {
+    "modules": [
+      "auditoria"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/bc-availability": {
+    "modules": [
+      "business_case",
+      "comercial",
+      "comercial_solicitudes",
+      "workspace_compras"
+    ],
+    "evidence": "estatica"
+  },
+  "/api/v1/business-case": {
+    "modules": [
+      "backoffice",
+      "business_case",
+      "comercial",
+      "comercial_clientes",
+      "comercial_solicitudes",
+      "crm_fam",
+      "finanzas",
+      "gerencia",
+      "inicio",
+      "operaciones",
+      "servicio_solicitudes",
+      "workspace_compras"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/calculation-templates": {
+    "modules": [
+      "operaciones"
+    ],
+    "evidence": "estatica"
+  },
+  "/api/v1/calidad": {
+    "modules": [
+      "calidad"
+    ],
+    "evidence": "estatica"
+  },
+  "/api/v1/clients": {
+    "modules": [],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/collab-deliveries": {
+    "modules": [
+      "collab_entregas",
+      "collab_resumen",
+      "talento_colaboradores",
+      "talento_command_center",
+      "talento_solicitudes",
+      "talento_workspace_personal"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/collaborators": {
+    "modules": [
+      "calidad",
+      "gerencia",
+      "talento_colaboradores",
+      "talento_command_center",
+      "talento_humano",
+      "talento_reporte_documentacion",
+      "talento_solicitudes",
+      "talento_workspace_personal"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/consumable-files": {
+    "modules": [
+      "business_case",
+      "comercial",
+      "workspace_compras"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/crm-fam": {
+    "modules": [
+      "comercial_planificacion",
+      "crm_fam"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/dashboard": {
+    "modules": [
+      "backoffice",
+      "business_case",
+      "calidad",
+      "capacitaciones",
+      "collab_entregas",
+      "comercial",
+      "comercial_clientes",
+      "comercial_solicitudes",
+      "crm_fam",
+      "finanzas",
+      "gerencia",
+      "inicio",
+      "kickoff_2026",
+      "links_interes",
+      "operaciones",
+      "servicio_capacitaciones",
+      "servicio_correctivos",
+      "servicio_mantenimientos",
+      "servicio_solicitudes",
+      "signatures",
+      "talento_colaboradores",
+      "talento_command_center",
+      "talento_departamentos",
+      "talento_gestion",
+      "talento_humano",
+      "talento_solicitudes",
+      "talento_usuarios",
+      "talento_workspace_personal",
+      "ti",
+      "ti_actas",
+      "ti_reportes",
+      "ti_workspace",
+      "work_management",
+      "workspace_compras"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/delivery-ceilings": {
+    "modules": [
+      "comercial_maximos_saldos"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/delivery-requests": {
+    "modules": [
+      "comercial_maximos_saldos"
+    ],
+    "evidence": "estatica"
+  },
+  "/api/v1/departments": {
+    "modules": [
+      "talento_departamentos",
+      "talento_gestion",
+      "talento_usuarios",
+      "ti"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/determinations-catalog": {
+    "modules": [
+      "operaciones"
+    ],
+    "evidence": "estatica"
+  },
+  "/api/v1/documents": {
+    "modules": [
+      "comercial_solicitudes"
+    ],
+    "evidence": "estatica"
+  },
+  "/api/v1/equipment-catalog": {
+    "modules": [
+      "business_case",
+      "comercial",
+      "operaciones"
+    ],
+    "evidence": "estatica"
+  },
+  "/api/v1/equipment-management": {
+    "modules": [
+      "business_case",
+      "comercial",
+      "servicio_equipos",
+      "workspace_compras"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/equipment-purchases": {
+    "modules": [
+      "backoffice",
+      "business_case",
+      "comercial",
+      "comercial_clientes",
+      "comercial_solicitudes",
+      "crm_fam",
+      "gerencia",
+      "operaciones",
+      "servicio_solicitudes",
+      "workspace_compras"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/famsheets": {
+    "modules": [
+      "comercial"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/files": {
+    "modules": [
+      "business_case",
+      "comercial",
+      "comercial_solicitudes",
+      "operaciones",
+      "servicio_solicitudes",
+      "workspace_compras"
+    ],
+    "evidence": "estatica"
+  },
+  "/api/v1/hiring-pipeline": {
+    "modules": [
+      "talento_colaboradores",
+      "talento_command_center",
+      "talento_pruebas_tecnicas",
+      "talento_solicitudes",
+      "talento_workspace_personal"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/inventario": {
+    "modules": [
+      "backoffice",
+      "business_case",
+      "comercial",
+      "comercial_clientes",
+      "comercial_solicitudes",
+      "crm_fam",
+      "operaciones",
+      "servicio_solicitudes",
+      "workspace_compras"
+    ],
+    "evidence": "estatica"
+  },
+  "/api/v1/mantenimientos": {
+    "modules": [
+      "inicio",
+      "operaciones",
+      "servicio_correctivos",
+      "servicio_mantenimientos"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/module-access": {
+    "modules": [
+      "ti_modulos"
+    ],
+    "evidence": "estatica"
+  },
+  "/api/v1/notifications": {
+    "modules": [],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/offboarding": {
+    "modules": [
+      "talento_colaboradores",
+      "talento_command_center",
+      "talento_solicitudes",
+      "talento_workspace_personal"
+    ],
+    "evidence": "estatica"
+  },
+  "/api/v1/permisos": {
+    "modules": [
+      "comercial_solicitudes",
+      "finanzas",
+      "gerencia",
+      "inicio",
+      "operaciones",
+      "servicio_solicitudes",
+      "talento_permisos",
+      "ti"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/personnel-requests": {
+    "modules": [
+      "comercial_solicitudes",
+      "servicio_solicitudes",
+      "talento_colaboradores",
+      "talento_command_center",
+      "talento_solicitudes",
+      "talento_workspace_personal"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/private-purchases": {
+    "modules": [
+      "backoffice",
+      "business_case",
+      "comercial",
+      "comercial_clientes",
+      "comercial_solicitudes",
+      "crm_fam",
+      "gerencia",
+      "logistica",
+      "operaciones",
+      "servicio_solicitudes",
+      "workspace_compras"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/process-notes": {
+    "modules": [
+      "business_case",
+      "comercial",
+      "workspace_compras"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/rbac": {
+    "modules": [
+      "ti_modulos"
+    ],
+    "evidence": "estatica"
+  },
+  "/api/v1/requests": {
+    "modules": [
+      "backoffice",
+      "business_case",
+      "comercial",
+      "comercial_clientes",
+      "comercial_solicitudes",
+      "inicio",
+      "operaciones",
+      "servicio_solicitudes",
+      "workspace_compras"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/schedules": {
+    "modules": [
+      "comercial_aprobacion_planes",
+      "comercial_planificacion"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/servicio": {
+    "modules": [
+      "inicio",
+      "servicio_aplicaciones",
+      "servicio_asistencia",
+      "servicio_capacitaciones",
+      "servicio_correctivos",
+      "servicio_cronograma",
+      "servicio_desinfeccion",
+      "servicio_disponibilidad",
+      "servicio_equipos",
+      "servicio_mantenimientos",
+      "servicio_solicitudes",
+      "servicio_verificacion",
+      "ti_casos_externos"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/signature-workflows": {
+    "modules": [],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/suggestion-box": {
+    "modules": [
+      "inicio"
+    ],
+    "evidence": "estatica"
+  },
+  "/api/v1/support-tickets": {
+    "modules": [
+      "ti_reportes",
+      "ti_workspace"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/technical-applications": {
+    "modules": [
+      "servicio_aplicaciones"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/ti-assets": {
+    "modules": [
+      "business_case",
+      "collab_entregas",
+      "comercial",
+      "talento_colaboradores",
+      "talento_command_center",
+      "talento_solicitudes",
+      "talento_workspace_personal",
+      "ti_actas",
+      "ti_activos",
+      "ti_dispositivos"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/trainings": {
+    "modules": [
+      "capacitaciones"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/users": {
+    "modules": [
+      "backoffice",
+      "collab_entregas",
+      "comercial_clientes",
+      "crm_fam",
+      "famdays",
+      "kickoff_2026",
+      "operaciones",
+      "servicio_solicitudes",
+      "talento_asistencia",
+      "talento_colaboradores",
+      "talento_command_center",
+      "talento_departamentos",
+      "talento_gestion",
+      "talento_solicitudes",
+      "talento_usuarios",
+      "talento_workspace_personal",
+      "ti",
+      "ti_actas",
+      "ti_activos",
+      "ti_dispositivos",
+      "ti_modulos",
+      "ti_reportes"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/vacaciones": {
+    "modules": [
+      "comercial_solicitudes",
+      "finanzas",
+      "gerencia",
+      "inicio",
+      "operaciones",
+      "servicio_solicitudes",
+      "talento_permisos",
+      "ti"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/viaticos": {
+    "modules": [
+      "finanzas_viaticos"
+    ],
+    "evidence": "observada y estatica"
+  },
+  "/api/v1/work-management": {
+    "modules": [
+      "crm_fam",
+      "work_management"
+    ],
+    "evidence": "observada y estatica"
+  }
+}

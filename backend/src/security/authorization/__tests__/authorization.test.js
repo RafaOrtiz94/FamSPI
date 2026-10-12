@@ -25,6 +25,8 @@ describe("authorization core", () => {
     expect(listPermissionsForUser({ role: "jefe_ti" })).toEqual([
       "module_access.read",
       "module_access.manage",
+      "rbac.read",
+      "rbac.manage",
     ]);
   });
 });

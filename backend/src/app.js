@@ -24,6 +24,7 @@ const { auditMiddleware } = require("./middlewares/auditMiddleware");
 const { normalizeApiPayloads, logLegacyUsageStats } = require("./middlewares/apiNormalization");
 const { verifyToken } = require("./middlewares/auth");
 const { moduleAccessGuard } = require("./middlewares/moduleAccess");
+const { centralShadow } = require("./security/authorization/centralShadow");
 const { isPublicPath } = require("./routes/publicPaths");
 const { mountPublicRoutes, mountPrivateRoutes } = require("./routes/registerRoutes");
 
@@ -144,6 +145,8 @@ app.use((req, res, next) => {
 app.use(normalizeApiPayloads);
 app.use(logLegacyUsageStats);
 app.use(moduleAccessGuard);
+// Modo sombra del motor central (plan RBAC, Fase 4): apagado salvo RBAC_CENTRAL_SHADOW=true; solo registra.
+app.use(centralShadow);
 app.use(auditMiddleware);
 
 mountPrivateRoutes(app);

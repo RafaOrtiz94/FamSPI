@@ -1,9 +1,9 @@
 {
   "summary": {
-    "total": 165,
+    "total": 166,
     "byClassification": {
       "publica": 15,
-      "rol": 138,
+      "rol": 139,
       "rol_estricto": 12
     },
     "redirects": 8,
@@ -64,7 +64,7 @@
   "routes": [
     {
       "path": "*",
-      "line": 905,
+      "line": 907,
       "component": "NotFound",
       "redirectTo": null,
       "classification": "publica",
@@ -73,7 +73,7 @@
     },
     {
       "path": "/",
-      "line": 904,
+      "line": 906,
       "component": "Navigate",
       "redirectTo": "/login",
       "classification": "publica",
@@ -82,7 +82,7 @@
     },
     {
       "path": "/activos-ti/:assetCode",
-      "line": 236,
+      "line": 237,
       "component": "TIAssetPublicLookupPage",
       "redirectTo": null,
       "classification": "publica",
@@ -91,7 +91,7 @@
     },
     {
       "path": "/asistencia/marcar/:action",
-      "line": 288,
+      "line": 289,
       "component": "AttendanceAction",
       "redirectTo": null,
       "classification": "rol",
@@ -136,7 +136,7 @@
     },
     {
       "path": "/asistencia/mobile-shortcuts",
-      "line": 287,
+      "line": 288,
       "component": "MobileShortcuts",
       "redirectTo": null,
       "classification": "rol",
@@ -181,7 +181,7 @@
     },
     {
       "path": "/buzon-sugerencias",
-      "line": 238,
+      "line": 239,
       "component": "SuggestionBoxPublicPage",
       "redirectTo": null,
       "classification": "publica",
@@ -190,7 +190,7 @@
     },
     {
       "path": "/configuration",
-      "line": 743,
+      "line": 744,
       "component": "ConfigurationPage",
       "redirectTo": null,
       "classification": "rol",
@@ -235,7 +235,7 @@
     },
     {
       "path": "/cumpleanos/canje/:token",
-      "line": 234,
+      "line": 235,
       "component": "BirthdayBenefitRedeemPage",
       "redirectTo": null,
       "classification": "publica",
@@ -244,7 +244,7 @@
     },
     {
       "path": "/dashboard",
-      "line": 283,
+      "line": 284,
       "component": "RoleRedirect",
       "redirectTo": null,
       "classification": "rol",
@@ -289,7 +289,7 @@
     },
     {
       "path": "/dashboard/auditoria",
-      "line": 712,
+      "line": 713,
       "component": "Auditoria",
       "redirectTo": null,
       "classification": "rol",
@@ -343,7 +343,7 @@
     },
     {
       "path": "/dashboard/auditoria/preparacion",
-      "line": 736,
+      "line": 737,
       "component": "AuditPrepPage",
       "redirectTo": null,
       "classification": "rol",
@@ -406,7 +406,7 @@
     },
     {
       "path": "/dashboard/backoffice/client-request/:id",
-      "line": 785,
+      "line": 786,
       "component": "ClientRequestReview",
       "redirectTo": null,
       "classification": "rol",
@@ -463,7 +463,7 @@
     },
     {
       "path": "/dashboard/backoffice/client-requests",
-      "line": 784,
+      "line": 785,
       "component": "ClientRequests",
       "redirectTo": null,
       "classification": "rol",
@@ -520,7 +520,7 @@
     },
     {
       "path": "/dashboard/backoffice/clientes",
-      "line": 786,
+      "line": 787,
       "component": "ClientesPage",
       "redirectTo": null,
       "classification": "rol",
@@ -577,7 +577,7 @@
     },
     {
       "path": "/dashboard/backoffice/private-purchases",
-      "line": 800,
+      "line": 801,
       "component": "LegacyPrivatePurchaseRedirect",
       "redirectTo": null,
       "classification": "rol",
@@ -644,1660 +644,6 @@
     },
     {
       "path": "/dashboard/business-case",
-      "line": 370,
-      "component": "BusinessCaseWorkspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "acp_comercial",
-            "analista_comercial",
-            "asesor_comercial",
-            "backoffice",
-            "backoffice_comercial",
-            "comercial",
-            "esp_app",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "jefe_comercial",
-            "jefe_de_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "operaciones",
-            "servicio_tecnico"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/business-case/observabilidad",
-      "line": 393,
-      "component": "BusinessCaseObservabilityDashboard",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "admin",
-            "administrador",
-            "gerencia",
-            "gerencia_general",
-            "jefe_comercial",
-            "jefe_operaciones",
-            "jefe_tecnico"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/business-case/resumen",
-      "line": 376,
-      "component": "BusinessCaseQualitySummary",
-      "redirectTo": null,
-      "classification": "rol_estricto",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "bc_quality_summary",
-            "jefe_calidad"
-          ],
-          "strict": true
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/business-case/workspace",
-      "line": 372,
-      "component": "BusinessCaseWorkspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "acp_comercial",
-            "analista_comercial",
-            "asesor_comercial",
-            "backoffice",
-            "backoffice_comercial",
-            "comercial",
-            "esp_app",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "jefe_comercial",
-            "jefe_de_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "operaciones",
-            "servicio_tecnico"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/business-case/workspace/:id",
-      "line": 373,
-      "component": "BusinessCaseWorkspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "acp_comercial",
-            "analista_comercial",
-            "asesor_comercial",
-            "backoffice",
-            "backoffice_comercial",
-            "comercial",
-            "esp_app",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "jefe_comercial",
-            "jefe_de_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "operaciones",
-            "servicio_tecnico"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/buzon-sugerencias",
-      "line": 574,
-      "component": "SuggestionBoxDashboardPage",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad",
-      "line": 546,
-      "component": "DashboardCalidad",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/areas",
-      "line": 560,
-      "component": "CA0114Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/auditorias",
-      "line": 561,
-      "component": "CA0115Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/buenas-practicas",
-      "line": 549,
-      "component": "CA0103Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/capa",
-      "line": 555,
-      "component": "CA0109Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/comunicaciones",
-      "line": 559,
-      "component": "CA0113Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/documentos",
-      "line": 551,
-      "component": "CA0105Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/documentos-rrhh",
-      "line": 565,
-      "component": "QualityHrDocumentsPage",
-      "redirectTo": null,
-      "classification": "rol_estricto",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "jefe_calidad"
-          ],
-          "strict": true
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/higiene",
-      "line": 558,
-      "component": "CA0112Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/incidentes",
-      "line": 557,
-      "component": "CA0111Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/limpieza",
-      "line": 548,
-      "component": "CA0102Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/muestreo",
-      "line": 562,
-      "component": "CA0116Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/plagas",
-      "line": 550,
-      "component": "CA0104Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/quejas",
-      "line": 553,
-      "component": "CA0107Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/recall",
-      "line": 552,
-      "component": "CA0106Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/refrigerados",
-      "line": 554,
-      "component": "CA0108Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/riesgos",
-      "line": 556,
-      "component": "CA0110Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/tecnovigilancia",
-      "line": 563,
-      "component": "CA0117Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/calidad/temperatura",
-      "line": 547,
-      "component": "CA0101Workspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/capacitaciones",
-      "line": 615,
-      "component": "CapacitacionesWorkspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/capacitaciones/:id",
-      "line": 616,
-      "component": "CapacitacionDetailPage",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/clientes",
-      "line": 595,
-      "component": "ClientesPage",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "acp_comercial",
-            "admin",
-            "administrador",
-            "backoffice_comercial",
-            "comercial",
-            "gerencia",
-            "gerencia_general",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_operaciones",
-            "operaciones",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/collab/entregas",
-      "line": 539,
-      "component": "CollabDeliveriesFinancieroPage",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "financiero",
-            "jefe_financiero",
-            "jefe_servicio",
-            "jefe_tecnico",
-            "talento_humano"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/collab/resumen",
-      "line": 542,
-      "component": "CollabDeliveriesGerenciaPage",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "gerencia",
-            "gerencia_general"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/comercial",
-      "line": 298,
-      "component": "DashboardComercial",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "acp_comercial",
-            "backoffice_comercial",
-            "comercial",
-            "director",
-            "gerencia",
-            "gerencia_general",
-            "gerente_general",
-            "jefe_comercial"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/comercial/acp-compras",
-      "line": 325,
-      "component": "LegacyPublicPurchaseRedirect",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "acp_comercial"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/comercial/aprobaciones-planificacion",
-      "line": 333,
-      "component": "AprobacionCronogramas",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "admin",
-            "administrador",
-            "gerencia",
-            "gerencia_general",
-            "jefe_comercial"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/comercial/business-case",
       "line": 371,
       "component": "BusinessCaseWorkspace",
       "redirectTo": null,
@@ -2369,8 +715,1662 @@
       "unresolved": false
     },
     {
+      "path": "/dashboard/business-case/observabilidad",
+      "line": 394,
+      "component": "BusinessCaseObservabilityDashboard",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "admin",
+            "administrador",
+            "gerencia",
+            "gerencia_general",
+            "jefe_comercial",
+            "jefe_operaciones",
+            "jefe_tecnico"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/business-case/resumen",
+      "line": 377,
+      "component": "BusinessCaseQualitySummary",
+      "redirectTo": null,
+      "classification": "rol_estricto",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "bc_quality_summary",
+            "jefe_calidad"
+          ],
+          "strict": true
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/business-case/workspace",
+      "line": 373,
+      "component": "BusinessCaseWorkspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "acp_comercial",
+            "analista_comercial",
+            "asesor_comercial",
+            "backoffice",
+            "backoffice_comercial",
+            "comercial",
+            "esp_app",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "jefe_comercial",
+            "jefe_de_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "operaciones",
+            "servicio_tecnico"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/business-case/workspace/:id",
+      "line": 374,
+      "component": "BusinessCaseWorkspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "acp_comercial",
+            "analista_comercial",
+            "asesor_comercial",
+            "backoffice",
+            "backoffice_comercial",
+            "comercial",
+            "esp_app",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "jefe_comercial",
+            "jefe_de_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "operaciones",
+            "servicio_tecnico"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/buzon-sugerencias",
+      "line": 575,
+      "component": "SuggestionBoxDashboardPage",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad",
+      "line": 547,
+      "component": "DashboardCalidad",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/areas",
+      "line": 561,
+      "component": "CA0114Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/auditorias",
+      "line": 562,
+      "component": "CA0115Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/buenas-practicas",
+      "line": 550,
+      "component": "CA0103Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/capa",
+      "line": 556,
+      "component": "CA0109Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/comunicaciones",
+      "line": 560,
+      "component": "CA0113Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/documentos",
+      "line": 552,
+      "component": "CA0105Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/documentos-rrhh",
+      "line": 566,
+      "component": "QualityHrDocumentsPage",
+      "redirectTo": null,
+      "classification": "rol_estricto",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "jefe_calidad"
+          ],
+          "strict": true
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/higiene",
+      "line": 559,
+      "component": "CA0112Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/incidentes",
+      "line": 558,
+      "component": "CA0111Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/limpieza",
+      "line": 549,
+      "component": "CA0102Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/muestreo",
+      "line": 563,
+      "component": "CA0116Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/plagas",
+      "line": 551,
+      "component": "CA0104Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/quejas",
+      "line": 554,
+      "component": "CA0107Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/recall",
+      "line": 553,
+      "component": "CA0106Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/refrigerados",
+      "line": 555,
+      "component": "CA0108Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/riesgos",
+      "line": 557,
+      "component": "CA0110Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/tecnovigilancia",
+      "line": 564,
+      "component": "CA0117Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/calidad/temperatura",
+      "line": 548,
+      "component": "CA0101Workspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/capacitaciones",
+      "line": 616,
+      "component": "CapacitacionesWorkspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/capacitaciones/:id",
+      "line": 617,
+      "component": "CapacitacionDetailPage",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/clientes",
+      "line": 596,
+      "component": "ClientesPage",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "acp_comercial",
+            "admin",
+            "administrador",
+            "backoffice_comercial",
+            "comercial",
+            "gerencia",
+            "gerencia_general",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_operaciones",
+            "operaciones",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/collab/entregas",
+      "line": 540,
+      "component": "CollabDeliveriesFinancieroPage",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "financiero",
+            "jefe_financiero",
+            "jefe_servicio",
+            "jefe_tecnico",
+            "talento_humano"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/collab/resumen",
+      "line": 543,
+      "component": "CollabDeliveriesGerenciaPage",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "gerencia",
+            "gerencia_general"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/comercial",
+      "line": 299,
+      "component": "DashboardComercial",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "acp_comercial",
+            "backoffice_comercial",
+            "comercial",
+            "director",
+            "gerencia",
+            "gerencia_general",
+            "gerente_general",
+            "jefe_comercial"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/comercial/acp-compras",
+      "line": 326,
+      "component": "LegacyPublicPurchaseRedirect",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "acp_comercial"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/comercial/aprobaciones-planificacion",
+      "line": 334,
+      "component": "AprobacionCronogramas",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "admin",
+            "administrador",
+            "gerencia",
+            "gerencia_general",
+            "jefe_comercial"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/comercial/business-case",
+      "line": 372,
+      "component": "BusinessCaseWorkspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "acp_comercial",
+            "analista_comercial",
+            "asesor_comercial",
+            "backoffice",
+            "backoffice_comercial",
+            "comercial",
+            "esp_app",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "jefe_comercial",
+            "jefe_de_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "operaciones",
+            "servicio_tecnico"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
       "path": "/dashboard/comercial/clientes",
-      "line": 311,
+      "line": 312,
       "component": "ClientesPage",
       "redirectTo": null,
       "classification": "rol",
@@ -2424,7 +2424,7 @@
     },
     {
       "path": "/dashboard/comercial/delivery-ceilings",
-      "line": 316,
+      "line": 317,
       "component": "DeliveryCeilingsPage",
       "redirectTo": null,
       "classification": "rol",
@@ -2478,7 +2478,7 @@
     },
     {
       "path": "/dashboard/comercial/equipment-purchases",
-      "line": 315,
+      "line": 316,
       "component": "LegacyPublicPurchaseRedirect",
       "redirectTo": null,
       "classification": "rol",
@@ -2532,7 +2532,7 @@
     },
     {
       "path": "/dashboard/comercial/famsheets",
-      "line": 317,
+      "line": 318,
       "component": "OpportunitiesPage",
       "redirectTo": null,
       "classification": "rol",
@@ -2586,7 +2586,7 @@
     },
     {
       "path": "/dashboard/comercial/famsheets/:id",
-      "line": 319,
+      "line": 320,
       "component": "OpportunityWorkspace",
       "redirectTo": null,
       "classification": "rol",
@@ -2640,7 +2640,7 @@
     },
     {
       "path": "/dashboard/comercial/famsheets/dashboard",
-      "line": 318,
+      "line": 319,
       "component": "FamSheetsDashboardPage",
       "redirectTo": null,
       "classification": "rol",
@@ -2694,7 +2694,7 @@
     },
     {
       "path": "/dashboard/comercial/new-client-request",
-      "line": 314,
+      "line": 315,
       "component": "NewClientRequest",
       "redirectTo": null,
       "classification": "rol",
@@ -2748,7 +2748,7 @@
     },
     {
       "path": "/dashboard/comercial/opportunities",
-      "line": 320,
+      "line": 321,
       "component": "Navigate",
       "redirectTo": "/dashboard/comercial/famsheets",
       "classification": "rol",
@@ -2802,7 +2802,7 @@
     },
     {
       "path": "/dashboard/comercial/opportunities/:id",
-      "line": 321,
+      "line": 322,
       "component": "OpportunityWorkspace",
       "redirectTo": null,
       "classification": "rol",
@@ -2856,7 +2856,7 @@
     },
     {
       "path": "/dashboard/comercial/planificacion",
-      "line": 312,
+      "line": 313,
       "component": "PlanificacionMensual",
       "redirectTo": null,
       "classification": "rol",
@@ -2910,7 +2910,7 @@
     },
     {
       "path": "/dashboard/comercial/plantilla-bc",
-      "line": 329,
+      "line": 330,
       "component": "BusinessCaseTemplatePage",
       "redirectTo": null,
       "classification": "rol_estricto",
@@ -2961,7 +2961,7 @@
     },
     {
       "path": "/dashboard/comercial/solicitudes",
-      "line": 309,
+      "line": 310,
       "component": "SolicitudesPage",
       "redirectTo": null,
       "classification": "rol",
@@ -3015,7 +3015,7 @@
     },
     {
       "path": "/dashboard/crm-fam",
-      "line": 819,
+      "line": 820,
       "component": "CrmDashboardPage",
       "redirectTo": null,
       "classification": "rol",
@@ -3080,7 +3080,7 @@
     },
     {
       "path": "/dashboard/crm-fam/accounts",
-      "line": 820,
+      "line": 821,
       "component": "AccountsPage",
       "redirectTo": null,
       "classification": "rol",
@@ -3145,7 +3145,7 @@
     },
     {
       "path": "/dashboard/crm-fam/accounts/:id",
-      "line": 821,
+      "line": 822,
       "component": "AccountDetailPage",
       "redirectTo": null,
       "classification": "rol",
@@ -3210,7 +3210,7 @@
     },
     {
       "path": "/dashboard/crm-fam/activities",
-      "line": 827,
+      "line": 828,
       "component": "CrmActivitiesPage",
       "redirectTo": null,
       "classification": "rol",
@@ -3274,8 +3274,73 @@
       "unresolved": false
     },
     {
+      "path": "/dashboard/crm-fam/campaigns",
+      "line": 830,
+      "component": "CrmCampaignsPage",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "acp_comercial",
+            "analista_comercial",
+            "asesor_comercial",
+            "backoffice",
+            "backoffice_comercial",
+            "comercial",
+            "director",
+            "gerencia",
+            "gerencia_general",
+            "gerente",
+            "gerente_general",
+            "jefe_comercial",
+            "jefe_de_comercial",
+            "jefe_de_ti",
+            "jefe_ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
       "path": "/dashboard/crm-fam/contacts",
-      "line": 822,
+      "line": 823,
       "component": "ContactsPage",
       "redirectTo": null,
       "classification": "rol",
@@ -3340,7 +3405,7 @@
     },
     {
       "path": "/dashboard/crm-fam/leads",
-      "line": 823,
+      "line": 824,
       "component": "LeadsPage",
       "redirectTo": null,
       "classification": "rol",
@@ -3405,7 +3470,7 @@
     },
     {
       "path": "/dashboard/crm-fam/opportunities",
-      "line": 824,
+      "line": 825,
       "component": "CrmOpportunitiesPage",
       "redirectTo": null,
       "classification": "rol",
@@ -3470,7 +3535,7 @@
     },
     {
       "path": "/dashboard/crm-fam/opportunities/:id",
-      "line": 825,
+      "line": 826,
       "component": "OpportunityDetailPage",
       "redirectTo": null,
       "classification": "rol",
@@ -3535,7 +3600,7 @@
     },
     {
       "path": "/dashboard/crm-fam/opportunities/:opportunityId/blue-sheet",
-      "line": 826,
+      "line": 827,
       "component": "BlueSheetPage",
       "redirectTo": null,
       "classification": "rol",
@@ -3600,7 +3665,7 @@
     },
     {
       "path": "/dashboard/crm-fam/reports",
-      "line": 828,
+      "line": 829,
       "component": "CrmReportsPage",
       "redirectTo": null,
       "classification": "rol",
@@ -3665,7 +3730,7 @@
     },
     {
       "path": "/dashboard/crm-fam/settings",
-      "line": 829,
+      "line": 831,
       "component": "CrmSettingsPage",
       "redirectTo": null,
       "classification": "rol",
@@ -3730,77 +3795,6 @@
     },
     {
       "path": "/dashboard/equipos",
-      "line": 449,
-      "component": "EquipmentWorkspace",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "acp_comercial",
-            "admin",
-            "admin_ti",
-            "administrador",
-            "backoffice_comercial",
-            "comercial",
-            "esp_app",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "jefe_comercial",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/equipos/activos",
       "line": 450,
       "component": "EquipmentWorkspace",
       "redirectTo": null,
@@ -3871,8 +3865,79 @@
       "unresolved": false
     },
     {
+      "path": "/dashboard/equipos/activos",
+      "line": 451,
+      "component": "EquipmentWorkspace",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "acp_comercial",
+            "admin",
+            "admin_ti",
+            "administrador",
+            "backoffice_comercial",
+            "comercial",
+            "esp_app",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "jefe_comercial",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
       "path": "/dashboard/ext",
-      "line": 403,
+      "line": 404,
       "component": "ExtUserDashboard",
       "redirectTo": null,
       "classification": "rol_estricto",
@@ -3924,7 +3989,7 @@
     },
     {
       "path": "/dashboard/famdays",
-      "line": 753,
+      "line": 754,
       "component": "FamDaysPage",
       "redirectTo": null,
       "classification": "rol",
@@ -3969,7 +4034,7 @@
     },
     {
       "path": "/dashboard/finanzas",
-      "line": 296,
+      "line": 297,
       "component": "DashboardFinanzas",
       "redirectTo": null,
       "classification": "rol",
@@ -4014,7 +4079,7 @@
     },
     {
       "path": "/dashboard/finanzas/viaticos",
-      "line": 706,
+      "line": 707,
       "component": "ViaticosWorkspace",
       "redirectTo": null,
       "classification": "rol",
@@ -4087,7 +4152,7 @@
     },
     {
       "path": "/dashboard/gerencia",
-      "line": 293,
+      "line": 294,
       "component": "DashboardGerencia",
       "redirectTo": null,
       "classification": "rol",
@@ -4132,51 +4197,6 @@
     },
     {
       "path": "/dashboard/gerencia/aprobaciones-contratos",
-      "line": 294,
-      "component": "PurchasesAlbumPage",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/gerencia/compras-album",
       "line": 295,
       "component": "PurchasesAlbumPage",
       "redirectTo": null,
@@ -4221,8 +4241,53 @@
       "unresolved": false
     },
     {
+      "path": "/dashboard/gerencia/compras-album",
+      "line": 296,
+      "component": "PurchasesAlbumPage",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
       "path": "/dashboard/kickoff",
-      "line": 750,
+      "line": 751,
       "component": "KickoffPage",
       "redirectTo": null,
       "classification": "rol",
@@ -4267,7 +4332,7 @@
     },
     {
       "path": "/dashboard/kickoff/presentacion/:presentationId",
-      "line": 751,
+      "line": 752,
       "component": "KickoffPresentationPage",
       "redirectTo": null,
       "classification": "rol",
@@ -4312,7 +4377,7 @@
     },
     {
       "path": "/dashboard/kickoff/sala/:presentationId",
-      "line": 752,
+      "line": 753,
       "component": "KickoffQuestionRoomPage",
       "redirectTo": null,
       "classification": "rol",
@@ -4357,7 +4422,7 @@
     },
     {
       "path": "/dashboard/links-interes",
-      "line": 598,
+      "line": 599,
       "component": "LinksInteres",
       "redirectTo": null,
       "classification": "rol",
@@ -4402,7 +4467,7 @@
     },
     {
       "path": "/dashboard/logistica",
-      "line": 545,
+      "line": 546,
       "component": "DashboardLogistica",
       "redirectTo": null,
       "classification": "rol",
@@ -4447,7 +4512,7 @@
     },
     {
       "path": "/dashboard/logistica/private-purchases",
-      "line": 608,
+      "line": 609,
       "component": "LegacyPrivatePurchaseRedirect",
       "redirectTo": null,
       "classification": "rol",
@@ -4498,7 +4563,7 @@
     },
     {
       "path": "/dashboard/mi-perfil",
-      "line": 745,
+      "line": 746,
       "component": "(expresion)",
       "redirectTo": null,
       "classification": "rol",
@@ -4543,7 +4608,7 @@
     },
     {
       "path": "/dashboard/mi-perfil",
-      "line": 909,
+      "line": 911,
       "component": "profileModalElement",
       "redirectTo": null,
       "classification": "publica",
@@ -4552,7 +4617,7 @@
     },
     {
       "path": "/dashboard/notificaciones",
-      "line": 746,
+      "line": 747,
       "component": "AllNotificationsPage",
       "redirectTo": null,
       "classification": "rol",
@@ -4597,7 +4662,7 @@
     },
     {
       "path": "/dashboard/operaciones",
-      "line": 544,
+      "line": 545,
       "component": "DashboardOperaciones",
       "redirectTo": null,
       "classification": "rol",
@@ -4642,7 +4707,7 @@
     },
     {
       "path": "/dashboard/operaciones/clientes",
-      "line": 602,
+      "line": 603,
       "component": "ClientesPage",
       "redirectTo": null,
       "classification": "rol",
@@ -4694,7 +4759,7 @@
     },
     {
       "path": "/dashboard/operaciones/determinaciones",
-      "line": 597,
+      "line": 598,
       "component": "DeterminationsCatalog",
       "redirectTo": null,
       "classification": "rol",
@@ -4739,7 +4804,7 @@
     },
     {
       "path": "/dashboard/operaciones/private-purchases",
-      "line": 603,
+      "line": 604,
       "component": "LegacyPrivatePurchaseRedirect",
       "redirectTo": null,
       "classification": "rol",
@@ -4791,7 +4856,7 @@
     },
     {
       "path": "/dashboard/pasante",
-      "line": 408,
+      "line": 409,
       "component": "PasanteDashboard",
       "redirectTo": null,
       "classification": "rol_estricto",
@@ -4842,7 +4907,7 @@
     },
     {
       "path": "/dashboard/purchases/workspace",
-      "line": 857,
+      "line": 859,
       "component": "PurchasesWorkspace",
       "redirectTo": null,
       "classification": "rol",
@@ -4907,7 +4972,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico",
-      "line": 411,
+      "line": 412,
       "component": "DashboardServicio",
       "redirectTo": null,
       "classification": "rol",
@@ -4952,7 +5017,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/aplicaciones",
-      "line": 454,
+      "line": 455,
       "component": "ServicioAplicaciones",
       "redirectTo": null,
       "classification": "rol",
@@ -4997,7 +5062,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/asistencia",
-      "line": 456,
+      "line": 457,
       "component": "ServicioAsistencia",
       "redirectTo": null,
       "classification": "rol",
@@ -5042,7 +5107,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/capacitaciones",
-      "line": 418,
+      "line": 419,
       "component": "ServicioCapacitaciones",
       "redirectTo": null,
       "classification": "rol",
@@ -5087,7 +5152,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/casos-externos",
-      "line": 484,
+      "line": 485,
       "component": "ServicioExternalCasesWorkspace",
       "redirectTo": null,
       "classification": "rol",
@@ -5149,7 +5214,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/correctivos",
-      "line": 414,
+      "line": 415,
       "component": "ServicioMantenimientos",
       "redirectTo": null,
       "classification": "rol",
@@ -5194,7 +5259,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/cronograma",
-      "line": 412,
+      "line": 413,
       "component": "ServicioDisponibilidad",
       "redirectTo": null,
       "classification": "rol",
@@ -5239,7 +5304,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/desinfeccion",
-      "line": 455,
+      "line": 456,
       "component": "ServicioDesinfeccion",
       "redirectTo": null,
       "classification": "rol",
@@ -5284,7 +5349,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/disponibilidad",
-      "line": 417,
+      "line": 418,
       "component": "ServicioDisponibilidad",
       "redirectTo": null,
       "classification": "rol",
@@ -5329,7 +5394,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/entregas-privadas",
-      "line": 490,
+      "line": 491,
       "component": "Navigate",
       "redirectTo": "/dashboard/purchases/workspace?tab=private",
       "classification": "rol",
@@ -5384,7 +5449,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/equipos",
-      "line": 419,
+      "line": 420,
       "component": "ServicioEquipos",
       "redirectTo": null,
       "classification": "rol",
@@ -5429,7 +5494,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/inspecciones",
-      "line": 413,
+      "line": 414,
       "component": "Navigate",
       "redirectTo": "/dashboard/servicio-tecnico/solicitudes",
       "classification": "rol",
@@ -5474,7 +5539,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/mantenimientos",
-      "line": 415,
+      "line": 416,
       "component": "ServicioMantenimientos",
       "redirectTo": null,
       "classification": "rol",
@@ -5519,7 +5584,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/retiros",
-      "line": 462,
+      "line": 463,
       "component": "Navigate",
       "redirectTo": "/dashboard/servicio-tecnico/solicitudes",
       "classification": "rol",
@@ -5576,7 +5641,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/solicitudes",
-      "line": 416,
+      "line": 417,
       "component": "ServicioSolicitudes",
       "redirectTo": null,
       "classification": "rol",
@@ -5621,7 +5686,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/verificacion",
-      "line": 457,
+      "line": 458,
       "component": "ServicioVerificacionEquipos",
       "redirectTo": null,
       "classification": "rol",
@@ -5666,7 +5731,7 @@
     },
     {
       "path": "/dashboard/servicio-tecnico/workspace-procedimiento",
-      "line": 461,
+      "line": 462,
       "component": "Navigate",
       "redirectTo": "/dashboard/purchases/workspace?tab=public&subtab=tecnica",
       "classification": "rol",
@@ -5723,7 +5788,7 @@
     },
     {
       "path": "/dashboard/signatures",
-      "line": 760,
+      "line": 761,
       "component": "Navigate",
       "redirectTo": "/dashboard/signatures/inbox",
       "classification": "rol",
@@ -5768,7 +5833,7 @@
     },
     {
       "path": "/dashboard/signatures/:documentId/sign",
-      "line": 765,
+      "line": 766,
       "component": "DocumentSigner",
       "redirectTo": null,
       "classification": "rol",
@@ -5813,7 +5878,7 @@
     },
     {
       "path": "/dashboard/signatures/all",
-      "line": 764,
+      "line": 765,
       "component": "SignatureDashboard",
       "redirectTo": null,
       "classification": "rol",
@@ -5858,7 +5923,7 @@
     },
     {
       "path": "/dashboard/signatures/completed",
-      "line": 763,
+      "line": 764,
       "component": "SignatureDashboard",
       "redirectTo": null,
       "classification": "rol",
@@ -5903,7 +5968,7 @@
     },
     {
       "path": "/dashboard/signatures/created",
-      "line": 762,
+      "line": 763,
       "component": "SignatureDashboard",
       "redirectTo": null,
       "classification": "rol",
@@ -5948,7 +6013,7 @@
     },
     {
       "path": "/dashboard/signatures/inbox",
-      "line": 761,
+      "line": 762,
       "component": "SignatureDashboard",
       "redirectTo": null,
       "classification": "rol",
@@ -5993,7 +6058,7 @@
     },
     {
       "path": "/dashboard/signatures/workflows/:workflowId",
-      "line": 766,
+      "line": 767,
       "component": "SignatureWorkflowDetailPage",
       "redirectTo": null,
       "classification": "rol",
@@ -6038,7 +6103,7 @@
     },
     {
       "path": "/dashboard/talento-humano",
-      "line": 500,
+      "line": 501,
       "component": "DashboardTalento",
       "redirectTo": null,
       "classification": "rol_estricto",
@@ -6093,7 +6158,7 @@
     },
     {
       "path": "/dashboard/talento-humano/asistencia-reportes",
-      "line": 670,
+      "line": 671,
       "component": "AsistenciaReportes",
       "redirectTo": null,
       "classification": "rol",
@@ -6161,51 +6226,6 @@
     },
     {
       "path": "/dashboard/talento-humano/colaboradores",
-      "line": 627,
-      "component": "CollaboratorCommandCenter",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/talento-humano/colaboradores/:id",
       "line": 628,
       "component": "CollaboratorCommandCenter",
       "redirectTo": null,
@@ -6250,8 +6270,8 @@
       "unresolved": false
     },
     {
-      "path": "/dashboard/talento-humano/command-center",
-      "line": 624,
+      "path": "/dashboard/talento-humano/colaboradores/:id",
+      "line": 629,
       "component": "CollaboratorCommandCenter",
       "redirectTo": null,
       "classification": "rol",
@@ -6295,7 +6315,7 @@
       "unresolved": false
     },
     {
-      "path": "/dashboard/talento-humano/command-center/:kind",
+      "path": "/dashboard/talento-humano/command-center",
       "line": 625,
       "component": "CollaboratorCommandCenter",
       "redirectTo": null,
@@ -6340,7 +6360,7 @@
       "unresolved": false
     },
     {
-      "path": "/dashboard/talento-humano/command-center/:kind/:id",
+      "path": "/dashboard/talento-humano/command-center/:kind",
       "line": 626,
       "component": "CollaboratorCommandCenter",
       "redirectTo": null,
@@ -6385,8 +6405,53 @@
       "unresolved": false
     },
     {
+      "path": "/dashboard/talento-humano/command-center/:kind/:id",
+      "line": 627,
+      "component": "CollaboratorCommandCenter",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
       "path": "/dashboard/talento-humano/departamentos",
-      "line": 632,
+      "line": 633,
       "component": "PeopleAdminHub",
       "redirectTo": null,
       "classification": "rol_estricto",
@@ -6438,245 +6503,6 @@
     },
     {
       "path": "/dashboard/talento-humano/gestion",
-      "line": 630,
-      "component": "PeopleAdminHub",
-      "redirectTo": null,
-      "classification": "rol_estricto",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "jefe_ti",
-            "ti"
-          ],
-          "strict": true
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/talento-humano/permisos",
-      "line": 708,
-      "component": "PermisosPage",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/talento-humano/pruebas-tecnicas",
-      "line": 612,
-      "component": "TechnicalTestResponsiblePage",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/talento-humano/reporte-documentacion",
-      "line": 622,
-      "component": "DocumentosReportePage",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "gerencia_general",
-            "talento_humano"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/talento-humano/solicitudes",
-      "line": 634,
-      "component": "CollaboratorCommandCenter",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/talento-humano/usuarios",
       "line": 631,
       "component": "PeopleAdminHub",
       "redirectTo": null,
@@ -6728,9 +6554,99 @@
       "unresolved": false
     },
     {
-      "path": "/dashboard/talento-humano/workspace-personal",
-      "line": 641,
-      "component": "CollaboratorCommandCenter",
+      "path": "/dashboard/talento-humano/permisos",
+      "line": 709,
+      "component": "PermisosPage",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/talento-humano/pruebas-tecnicas",
+      "line": 613,
+      "component": "TechnicalTestResponsiblePage",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/talento-humano/reporte-documentacion",
+      "line": 623,
+      "component": "DocumentosReportePage",
       "redirectTo": null,
       "classification": "rol",
       "roleGuards": [
@@ -6771,8 +6687,6 @@
         },
         {
           "roles": [
-            "admin",
-            "gerencia",
             "gerencia_general",
             "talento_humano"
           ],
@@ -6782,7 +6696,104 @@
       "unresolved": false
     },
     {
-      "path": "/dashboard/talento-humano/workspace-personal/:id",
+      "path": "/dashboard/talento-humano/solicitudes",
+      "line": 635,
+      "component": "CollaboratorCommandCenter",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/talento-humano/usuarios",
+      "line": 632,
+      "component": "PeopleAdminHub",
+      "redirectTo": null,
+      "classification": "rol_estricto",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "jefe_ti",
+            "ti"
+          ],
+          "strict": true
+        }
+      ],
+      "unresolved": false
+    },
+    {
+      "path": "/dashboard/talento-humano/workspace-personal",
       "line": 642,
       "component": "CollaboratorCommandCenter",
       "redirectTo": null,
@@ -6836,8 +6847,62 @@
       "unresolved": false
     },
     {
+      "path": "/dashboard/talento-humano/workspace-personal/:id",
+      "line": 643,
+      "component": "CollaboratorCommandCenter",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "admin",
+            "gerencia",
+            "gerencia_general",
+            "talento_humano"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
       "path": "/dashboard/ti",
-      "line": 503,
+      "line": 504,
       "component": "DashboardTI",
       "redirectTo": null,
       "classification": "rol",
@@ -6890,7 +6955,7 @@
     },
     {
       "path": "/dashboard/ti/actas",
-      "line": 518,
+      "line": 519,
       "component": "TIActasPage",
       "redirectTo": null,
       "classification": "rol",
@@ -6950,7 +7015,7 @@
     },
     {
       "path": "/dashboard/ti/activos",
-      "line": 536,
+      "line": 537,
       "component": "TIAssetsFinancieroPage",
       "redirectTo": null,
       "classification": "rol",
@@ -7010,7 +7075,7 @@
     },
     {
       "path": "/dashboard/ti/casos-externos",
-      "line": 485,
+      "line": 486,
       "component": "ServicioExternalCasesWorkspace",
       "redirectTo": null,
       "classification": "rol",
@@ -7072,7 +7137,7 @@
     },
     {
       "path": "/dashboard/ti/dispositivos",
-      "line": 505,
+      "line": 506,
       "component": "TIDeviceManagementPage",
       "redirectTo": null,
       "classification": "rol",
@@ -7125,7 +7190,7 @@
     },
     {
       "path": "/dashboard/ti/mantenimientos",
-      "line": 506,
+      "line": 507,
       "component": "Navigate",
       "redirectTo": "/dashboard/ti/dispositivos",
       "classification": "rol",
@@ -7178,58 +7243,6 @@
     },
     {
       "path": "/dashboard/ti/modulos",
-      "line": 521,
-      "component": "TIModuleAccessPage",
-      "redirectTo": null,
-      "classification": "rol",
-      "roleGuards": [
-        {
-          "roles": [
-            "acp_comercial",
-            "admin_ti",
-            "backoffice_comercial",
-            "calidad",
-            "comercial",
-            "esp_app",
-            "esp_app_ext",
-            "financiero",
-            "finanzas",
-            "gerencia",
-            "gerencia_general",
-            "ing_servicio",
-            "ing_servicio_ext",
-            "jefe_calidad",
-            "jefe_comercial",
-            "jefe_de_operaciones",
-            "jefe_financiero",
-            "jefe_finanzas",
-            "jefe_logistica",
-            "jefe_operaciones",
-            "jefe_servicio",
-            "jefe_servicio_tecnico",
-            "jefe_tecnico",
-            "jefe_ti",
-            "logistica",
-            "operaciones",
-            "servicio_tecnico",
-            "talento_humano",
-            "tecnico",
-            "ti"
-          ],
-          "strict": false
-        },
-        {
-          "roles": [
-            "admin_ti",
-            "jefe_ti"
-          ],
-          "strict": false
-        }
-      ],
-      "unresolved": false
-    },
-    {
-      "path": "/dashboard/ti/modulos/*",
       "line": 522,
       "component": "TIModuleAccessPage",
       "redirectTo": null,
@@ -7281,8 +7294,60 @@
       "unresolved": false
     },
     {
+      "path": "/dashboard/ti/modulos/*",
+      "line": 523,
+      "component": "TIModuleAccessPage",
+      "redirectTo": null,
+      "classification": "rol",
+      "roleGuards": [
+        {
+          "roles": [
+            "acp_comercial",
+            "admin_ti",
+            "backoffice_comercial",
+            "calidad",
+            "comercial",
+            "esp_app",
+            "esp_app_ext",
+            "financiero",
+            "finanzas",
+            "gerencia",
+            "gerencia_general",
+            "ing_servicio",
+            "ing_servicio_ext",
+            "jefe_calidad",
+            "jefe_comercial",
+            "jefe_de_operaciones",
+            "jefe_financiero",
+            "jefe_finanzas",
+            "jefe_logistica",
+            "jefe_operaciones",
+            "jefe_servicio",
+            "jefe_servicio_tecnico",
+            "jefe_tecnico",
+            "jefe_ti",
+            "logistica",
+            "operaciones",
+            "servicio_tecnico",
+            "talento_humano",
+            "tecnico",
+            "ti"
+          ],
+          "strict": false
+        },
+        {
+          "roles": [
+            "admin_ti",
+            "jefe_ti"
+          ],
+          "strict": false
+        }
+      ],
+      "unresolved": false
+    },
+    {
       "path": "/dashboard/ti/shortcut-token",
-      "line": 507,
+      "line": 508,
       "component": "TIShortcutTokenPage",
       "redirectTo": null,
       "classification": "rol",
@@ -7335,7 +7400,7 @@
     },
     {
       "path": "/dashboard/ti/workspace",
-      "line": 504,
+      "line": 505,
       "component": "TicketsWorkspace",
       "redirectTo": null,
       "classification": "rol",
@@ -7388,7 +7453,7 @@
     },
     {
       "path": "/dashboard/ti/workspace/reportes",
-      "line": 528,
+      "line": 529,
       "component": "TicketsReports",
       "redirectTo": null,
       "classification": "rol_estricto",
@@ -7439,7 +7504,7 @@
     },
     {
       "path": "/dashboard/ti/workspace/reportes/kpis/:id/editar",
-      "line": 530,
+      "line": 531,
       "component": "TicketKpiForm",
       "redirectTo": null,
       "classification": "rol_estricto",
@@ -7490,7 +7555,7 @@
     },
     {
       "path": "/dashboard/ti/workspace/reportes/kpis/nuevo",
-      "line": 529,
+      "line": 530,
       "component": "TicketKpiForm",
       "redirectTo": null,
       "classification": "rol_estricto",
@@ -7541,7 +7606,7 @@
     },
     {
       "path": "/dashboard/work-management",
-      "line": 894,
+      "line": 896,
       "component": "WorkManagementPage",
       "redirectTo": null,
       "classification": "rol",
@@ -7617,7 +7682,7 @@
     },
     {
       "path": "/dashboard/work-management/projects/:projectId",
-      "line": 895,
+      "line": 897,
       "component": "WorkManagementPage",
       "redirectTo": null,
       "classification": "rol",
@@ -7693,7 +7758,7 @@
     },
     {
       "path": "/documents",
-      "line": 742,
+      "line": 743,
       "component": "DocumentsPage",
       "redirectTo": null,
       "classification": "rol",
@@ -7738,7 +7803,7 @@
     },
     {
       "path": "/famdays/sala/:token",
-      "line": 233,
+      "line": 234,
       "component": "FamDaysQREntryPage",
       "redirectTo": null,
       "classification": "publica",
@@ -7747,7 +7812,7 @@
     },
     {
       "path": "/gmail-context",
-      "line": 744,
+      "line": 745,
       "component": "GmailContextPage",
       "redirectTo": null,
       "classification": "rol",
@@ -7792,7 +7857,7 @@
     },
     {
       "path": "/kickoff/sala/:token",
-      "line": 232,
+      "line": 233,
       "component": "KickoffQREntryPage",
       "redirectTo": null,
       "classification": "publica",
@@ -7801,7 +7866,7 @@
     },
     {
       "path": "/login",
-      "line": 222,
+      "line": 223,
       "component": "Login",
       "redirectTo": null,
       "classification": "publica",
@@ -7810,7 +7875,7 @@
     },
     {
       "path": "/login/callback",
-      "line": 223,
+      "line": 224,
       "component": "LoginCallback",
       "redirectTo": null,
       "classification": "publica",
@@ -7819,7 +7884,7 @@
     },
     {
       "path": "/mantenimientos",
-      "line": 741,
+      "line": 742,
       "component": "MantenimientosPage",
       "redirectTo": null,
       "classification": "rol",
@@ -7864,7 +7929,7 @@
     },
     {
       "path": "/mobile-shortcuts",
-      "line": 286,
+      "line": 287,
       "component": "MobileShortcuts",
       "redirectTo": null,
       "classification": "rol",
@@ -7909,7 +7974,7 @@
     },
     {
       "path": "/predicciones/mundial-2026",
-      "line": 226,
+      "line": 227,
       "component": "WorldCup2026PortalPage",
       "redirectTo": null,
       "classification": "publica",
@@ -7918,7 +7983,7 @@
     },
     {
       "path": "/registro-en-proceso",
-      "line": 225,
+      "line": 226,
       "component": "RolePending",
       "redirectTo": null,
       "classification": "publica",
@@ -7927,7 +7992,7 @@
     },
     {
       "path": "/requests",
-      "line": 740,
+      "line": 741,
       "component": "RequestsPage",
       "redirectTo": null,
       "classification": "rol",
@@ -7972,7 +8037,7 @@
     },
     {
       "path": "/unauthorized",
-      "line": 224,
+      "line": 225,
       "component": "Unauthorized",
       "redirectTo": null,
       "classification": "publica",
@@ -7981,7 +8046,7 @@
     },
     {
       "path": "/verificar/:token",
-      "line": 229,
+      "line": 230,
       "component": "DocumentVerification",
       "redirectTo": null,
       "classification": "publica",
@@ -7990,7 +8055,7 @@
     },
     {
       "path": "/verificar/famsign/:token",
-      "line": 230,
+      "line": 231,
       "component": "SignatureWorkflowVerificationPage",
       "redirectTo": null,
       "classification": "publica",

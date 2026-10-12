@@ -12,6 +12,8 @@ const AUTHORIZATION_MANIFEST_VERSION = 1;
 const PERMISSION_ROLE_MAP = Object.freeze({
   "module_access.read": ["jefe_ti", "admin_ti"],
   "module_access.manage": ["jefe_ti", "admin_ti"],
+  "rbac.read": ["jefe_ti", "admin_ti"],
+  "rbac.manage": ["jefe_ti", "admin_ti"],
 });
 
 const SUPER_ROLES = new Set(["admin", "administrador"]);

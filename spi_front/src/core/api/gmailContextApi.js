@@ -35,3 +35,8 @@ export const linkGmailContextCommunication = async (id, payload) => {
   const { data } = await api.post(`${base}/communications/${id}/link`, payload);
   return data?.data;
 };
+
+export const discardGmailContextCommunication = async (id) => {
+  const { data } = await api.post(`${base}/communications/${id}/discard`);
+  return data?.data;
+};

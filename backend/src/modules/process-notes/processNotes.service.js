@@ -38,7 +38,8 @@ const ADMIN_BYPASS_ROLES = new Set(["admin", "administrador", "gerencia", "geren
 const ENTITY_TABLES = {
   business_case: { table: "equipment_purchase_requests", idColumn: "id", labelColumn: "client_name" },
   public_purchase: { table: "equipment_purchase_requests", idColumn: "id", labelColumn: "client_name" },
-  private_purchase: { table: "private_purchase_requests", idColumn: "id", labelColumn: "client_name" },
+  // private_purchase_requests no tiene client_name: el nombre vive en el JSON client_snapshot.
+  private_purchase: { table: "private_purchase_requests", idColumn: "id", labelColumn: "COALESCE(client_snapshot->>'commercial_name', client_snapshot->>'name')" },
 };
 
 const EMAIL_MAX_ATTACHMENTS_BYTES = 20 * 1024 * 1024; // margen bajo el limite practico de Gmail (~25MB)

@@ -165,4 +165,21 @@ async function link(req, res) {
   }
 }
 
-module.exports = { register, list, searchClients, clientSuggestions, processCandidates, autoLink, searchProcesses, link };
+async function discard(req, res) {
+  try {
+    const data = await service.discardCommunication({ id: req.params.id, user: req.user });
+    await logAction({
+      user_id: req.user.id,
+      module: "gmail_context",
+      action: "discard",
+      entity: "gmail_context_communications",
+      entity_id: data.id,
+      details: { previous_status: "pending_link" },
+    });
+    return res.json({ ok: true, data });
+  } catch (error) {
+    return serviceError(res, error);
+  }
+}
+
+module.exports = { register, list, searchClients, clientSuggestions, processCandidates, autoLink, searchProcesses, link, discard };

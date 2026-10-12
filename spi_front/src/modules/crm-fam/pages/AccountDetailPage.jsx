@@ -5,7 +5,9 @@ import { useAuth } from "../../../core/auth/AuthContext";
 import { useUI } from "../../../core/ui/UIContext";
 import {
   updateAccount, fetchAccountTimeline, fetchAccountDuplicates, mergeAccounts,
+  fetchAccountPlans, createAccountPlan, updateAccountPlan, deleteAccountPlan,
 } from "../../../core/api/crmFamApi";
+import { getUsers } from "../../../core/api/usersApi";
 
 // Misma lista que MANAGER_OR_ADMIN_ROLES en backend/crm.constants.js -- solo
 // managers pueden fusionar cuentas (la ruta ya lo exige, esto es para no
@@ -26,8 +28,7 @@ const EDITABLE_FIELDS = [
   { name: "city", label: "Ciudad" },
   { name: "country", label: "País" },
   { name: "website", label: "Sitio web" },
-  { name: "sales_target_amount", label: "Meta de ventas (USD)", type: "number" },
-  { name: "description", label: "Descripción", type: "textarea" },
+  { name: "notes", label: "Notas", type: "textarea" },
 ];
 
 // Clasificacion de la cuenta (oro/plata/bronce/normal) -- separada de las
@@ -133,9 +134,6 @@ function Field({ field, value, editing, onChange }) {
     if (field.name === "classification") {
       return <ClassificationBadge value={value} />;
     }
-    if (field.name === "sales_target_amount") {
-      return <span className="text-sm text-[#1F2937]">{value ? money(value) : "—"}</span>;
-    }
     return <span className="text-sm text-[#1F2937]">{value || "—"}</span>;
   }
 
@@ -186,28 +184,45 @@ function Spinner() {
   );
 }
 
-// Estadisticas de ventas de la cuenta, para proyecciones comerciales.
-function SalesStatsCard({ accountId }) {
-  const { data: stats, loading, error } = useAccountSalesStats(accountId);
+// Estadisticas de ventas del plan seleccionado, para proyecciones comerciales.
+// El pipeline necesario sale del historial del vendedor del plan (win rate y
+// promedio por oportunidad), no del de esta cuenta.
+function SalesStatsCard({ accountId, planId, refreshKey }) {
+  const { data: stats, loading, error, refresh } = useAccountSalesStats(accountId, planId);
+
+  useEffect(() => { if (refreshKey) refresh(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <div className="bg-white border border-[#E5E7EB] rounded-2xl p-6 mb-6"><Spinner /></div>;
   if (error) return null; // no bloquear el detalle de cuenta si esto falla
   if (!stats) return null;
 
   const hasTarget = stats.sales_target_amount != null;
+  const seller = stats.seller || {};
+  const hasHistory = seller.win_rate_pct != null;
+  const pipelineHint = !hasTarget
+    ? "Crea un plan para calcularlo"
+    : !hasHistory
+      ? "El vendedor aún no tiene oportunidades cerradas"
+      : [
+          stats.opportunities_to_generate != null ? `≈ ${stats.opportunities_to_generate} oportunidades` : null,
+          `win rate ${seller.win_rate_pct}%`,
+          seller.avg_deal_size != null ? `promedio ${money(seller.avg_deal_size)}` : null,
+        ].filter(Boolean).join(" · ");
+
   const metrics = [
-    { label: "Monto total generado", value: money(stats.total_estimated_amount), hint: `${stats.total_opportunities} oportunidad(es) generada(s)` },
-    { label: "Meta de ventas", value: hasTarget ? money(stats.sales_target_amount) : "Sin meta definida" },
-    { label: "Vendido (ganado)", value: money(stats.won_amount), hint: `${stats.won_opportunities} oportunidad(es) ganada(s)` },
+    { label: "Meta del plan", value: hasTarget ? money(stats.sales_target_amount) : "Sin plan", hint: stats.plan?.name },
+    { label: "Vendido (ganado + contratos)", value: money(stats.sold_amount), hint: `${stats.sold_opportunities} oportunidad(es)` },
     { label: "Falta por vender", value: hasTarget ? money(stats.remaining_to_target) : "—" },
     {
-      label: "Oportunidades faltantes para meta",
-      value: hasTarget ? String(stats.opportunities_needed_for_target) : "—",
-      hint: stats.avg_deal_size != null ? `Basado en un promedio de ${money(stats.avg_deal_size)} por oportunidad` : null,
+      label: "Pipeline a generar",
+      value: hasTarget && hasHistory ? money(stats.required_pipeline_amount) : "—",
+      hint: pipelineHint,
+      strong: true,
     },
-    { label: "Oportunidades ganadas", value: String(stats.won_opportunities) },
-    { label: "% Ganadas", value: stats.win_rate_pct != null ? `${stats.win_rate_pct}%` : "—", hint: "Sobre oportunidades cerradas (ganadas + perdidas)" },
-    { label: "% Perdidas", value: stats.loss_rate_pct != null ? `${stats.loss_rate_pct}%` : "—" },
+    { label: "Monto total generado (cuenta)", value: money(stats.total_estimated_amount), hint: `${stats.total_opportunities} oportunidad(es) generada(s)` },
+    { label: "% Ganadas (cuenta)", value: stats.win_rate_pct != null ? `${stats.win_rate_pct}%` : "—", hint: "Sobre oportunidades cerradas (ganadas + perdidas)" },
+    { label: "% Perdidas (cuenta)", value: stats.loss_rate_pct != null ? `${stats.loss_rate_pct}%` : "—" },
+    { label: "Vendedor del plan", value: seller.name || "—", hint: seller.won_count != null ? `${seller.won_count} ganadas · ${seller.lost_count} perdidas` : null },
   ];
 
   return (
@@ -215,13 +230,215 @@ function SalesStatsCard({ accountId }) {
       <h2 className="text-base font-semibold text-[#1F2937] mb-4">Estadísticas de ventas — proyección comercial</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {metrics.map((m) => (
-          <div key={m.label} className="rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+          <div key={m.label} className={`rounded-xl border p-4 ${m.strong ? "border-[#2563EB] bg-[#EFF6FF]" : "border-[#E5E7EB] bg-[#F9FAFB]"}`}>
             <p className="text-xs font-medium text-[#6B7280] uppercase tracking-wide mb-1">{m.label}</p>
             <p className="text-lg font-semibold text-[#1F2937]">{m.value}</p>
             {m.hint && <p className="text-[11px] text-[#6B7280] mt-1">{m.hint}</p>}
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+const PLAN_STATUS_LABELS = { active: "Activo", closed: "Cerrado" };
+const EMPTY_PLAN = { name: "", period_start: "", period_end: "", target_amount: "", seller_user_id: "", status: "active", notes: "" };
+const planInputCls = "w-full border border-[#E5E7EB] rounded-xl px-3 py-1.5 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB]";
+const planLabelCls = "block text-xs font-medium text-[#6B7280] uppercase tracking-wide mb-1";
+const dateOnly = (v) => (v ? String(v).slice(0, 10) : "");
+const formatPeriod = (p) => (p.period_start || p.period_end
+  ? `${dateOnly(p.period_start) || "…"} → ${dateOnly(p.period_end) || "…"}`
+  : "Histórico completo");
+
+// Planes de la cuenta: una cuenta puede tener varios (por año, trimestre,
+// vendedor...). El plan seleccionado alimenta la tarjeta de estadisticas.
+function AccountPlansCard({ accountId, canEditSeller, selectedPlanId, onSelect, onChanged }) {
+  const { showToast } = useUI();
+  const [plans, setPlans] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState(null); // null = cerrado; {id?, ...campos}
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState(null);
+  const [sellers, setSellers] = useState([]);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetchAccountPlans(accountId)
+      .then((rows) => setPlans(Array.isArray(rows) ? rows : []))
+      .catch(() => setPlans([]))
+      .finally(() => setLoading(false));
+  }, [accountId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!canEditSeller) return;
+    getUsers()
+      .then((users) => setSellers(Array.isArray(users) ? users : (users?.rows || users?.data || [])))
+      .catch(() => setSellers([]));
+  }, [canEditSeller]);
+
+  const openNew = () => { setFormError(null); setForm({ ...EMPTY_PLAN }); };
+  const openEdit = (p) => {
+    setFormError(null);
+    setForm({
+      id: p.id, name: p.name || "", period_start: dateOnly(p.period_start), period_end: dateOnly(p.period_end),
+      target_amount: p.target_amount ?? "", seller_user_id: p.seller_user_id || "", status: p.status || "active", notes: p.notes || "",
+    });
+  };
+  const setField = (e) => setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
+
+  const save = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setFormError(null);
+    const payload = {
+      name: form.name,
+      period_start: form.period_start || null,
+      period_end: form.period_end || null,
+      target_amount: form.target_amount,
+      status: form.status,
+      notes: form.notes || null,
+      ...(canEditSeller && form.seller_user_id ? { seller_user_id: Number(form.seller_user_id) } : {}),
+    };
+    try {
+      const saved = form.id
+        ? await updateAccountPlan(accountId, form.id, payload)
+        : await createAccountPlan(accountId, payload);
+      setForm(null);
+      load();
+      if (!form.id && saved?.id) onSelect(saved.id);
+      onChanged();
+      showToast("Plan guardado", "success");
+    } catch (err) {
+      setFormError(err?.response?.data?.message || err.message || "No se pudo guardar el plan");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (p) => {
+    if (!window.confirm(`¿Eliminar el plan "${p.name}"?`)) return;
+    try {
+      await deleteAccountPlan(accountId, p.id);
+      if (selectedPlanId === p.id) onSelect(null);
+      load();
+      onChanged();
+    } catch (err) {
+      showToast(err?.response?.data?.message || "No se pudo eliminar el plan", "error");
+    }
+  };
+
+  return (
+    <div className="bg-white border border-[#E5E7EB] rounded-2xl p-6 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-base font-semibold text-[#1F2937]">Planes de la cuenta</h2>
+        {!form && (
+          <button
+            type="button"
+            onClick={openNew}
+            className="px-3 py-1.5 text-sm bg-[#2563EB] text-white rounded-xl hover:bg-blue-700 transition-colors"
+          >
+            Nuevo plan
+          </button>
+        )}
+      </div>
+
+      {form && (
+        <form onSubmit={save} className="mb-5 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className={planLabelCls}>Nombre *</label>
+              <input name="name" value={form.name} onChange={setField} required className={planInputCls} placeholder="Ej: Plan 2026" />
+            </div>
+            <div>
+              <label className={planLabelCls}>Meta de ventas (USD) *</label>
+              <input name="target_amount" type="number" min="0" step="0.01" value={form.target_amount} onChange={setField} required className={planInputCls} />
+            </div>
+            <div>
+              <label className={planLabelCls}>Inicio del periodo</label>
+              <input name="period_start" type="date" value={form.period_start} onChange={setField} className={planInputCls} />
+            </div>
+            <div>
+              <label className={planLabelCls}>Fin del periodo</label>
+              <input name="period_end" type="date" value={form.period_end} onChange={setField} className={planInputCls} />
+            </div>
+            <div>
+              <label className={planLabelCls}>Estado</label>
+              <select name="status" value={form.status} onChange={setField} className={planInputCls}>
+                <option value="active">Activo</option>
+                <option value="closed">Cerrado</option>
+              </select>
+            </div>
+            {canEditSeller && (
+              <div>
+                <label className={planLabelCls}>Vendedor</label>
+                <select name="seller_user_id" value={form.seller_user_id} onChange={setField} className={planInputCls}>
+                  <option value="">Propietario de la cuenta</option>
+                  {sellers.map((u) => (
+                    <option key={u.id} value={u.id}>{u.fullname || u.email}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="md:col-span-2">
+              <label className={planLabelCls}>Notas</label>
+              <textarea name="notes" value={form.notes} onChange={setField} rows={2} className={`${planInputCls} resize-none`} />
+            </div>
+          </div>
+          <p className="text-[11px] text-[#6B7280] mt-2">Sin periodo, el plan cuenta todo lo ganado o en Contratos de la cuenta.</p>
+          {formError && <p className="text-sm text-[#DC2626] mt-2">{formError}</p>}
+          <div className="flex justify-end gap-2 mt-3">
+            <button
+              type="button"
+              onClick={() => setForm(null)}
+              className="px-3 py-1.5 text-sm border border-[#E5E7EB] rounded-xl text-[#1F2937] hover:bg-[#334155]/5 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-3 py-1.5 text-sm bg-[#2563EB] text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {saving ? "Guardando..." : "Guardar plan"}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {loading ? (
+        <Spinner />
+      ) : plans.length === 0 ? (
+        <p className="text-sm text-[#6B7280]">Esta cuenta aún no tiene planes. Crea uno para ver su proyección comercial.</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {plans.map((p) => {
+            const selected = (selectedPlanId || plans[0]?.id) === p.id;
+            return (
+              <li
+                key={p.id}
+                className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 cursor-pointer transition-colors ${selected ? "border-[#2563EB] bg-[#EFF6FF]" : "border-[#E5E7EB] hover:bg-[#334155]/5"}`}
+                onClick={() => onSelect(p.id)}
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[#1F2937] truncate">
+                    {p.name}
+                    <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-[#6B7280]">{PLAN_STATUS_LABELS[p.status] || p.status}</span>
+                  </p>
+                  <p className="text-xs text-[#6B7280]">
+                    {money(p.target_amount)} · {formatPeriod(p)}{p.seller_name ? ` · ${p.seller_name}` : ""}
+                  </p>
+                </div>
+                <div className="flex gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <button type="button" onClick={() => openEdit(p)} className="text-sm text-[#2563EB] hover:underline">Editar</button>
+                  <button type="button" onClick={() => remove(p)} className="text-sm text-[#DC2626] hover:underline">Eliminar</button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }
@@ -295,6 +512,8 @@ export default function AccountDetailPage() {
   const { data: account, loading, error, refresh } = useAccount(id);
   const { user } = useAuth();
   const canMerge = CRM_MANAGER_ROLES.has(user?.role);
+  const [selectedPlanId, setSelectedPlanId] = useState(null);
+  const [statsVersion, setStatsVersion] = useState(0);
 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
@@ -450,7 +669,15 @@ export default function AccountDetailPage() {
         </div>
       </form>
 
-      <SalesStatsCard accountId={id} />
+      <AccountPlansCard
+        accountId={id}
+        canEditSeller={canMerge}
+        selectedPlanId={selectedPlanId}
+        onSelect={setSelectedPlanId}
+        onChanged={() => setStatsVersion((v) => v + 1)}
+      />
+
+      <SalesStatsCard accountId={id} planId={selectedPlanId} refreshKey={statsVersion} />
 
       {/* Timeline */}
       <div className="bg-white border border-[#E5E7EB] rounded-2xl p-6">

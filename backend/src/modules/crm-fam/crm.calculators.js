@@ -110,7 +110,33 @@ function getWeightedAmount(estimatedAmount, probabilityPct) {
   return Math.round(Number(estimatedAmount) * Number(probabilityPct) / 100 * 100) / 100;
 }
 
+// Pipeline que hay que generar para cerrar la meta de un plan, dado el
+// historial del vendedor: faltante / win rate. Ej: faltan 1.000.000 con 50%
+// de win rate -> 2.000.000 en oportunidades; a 50.000 de promedio, 40 opps.
+// Devuelve null en lo que no se puede calcular (sin historial) en vez de inventarlo.
+function calculateRequiredPipeline({ targetAmount, soldAmount, winRatePct, avgDealSize }) {
+  if (targetAmount === null || targetAmount === undefined) {
+    return { remaining_to_target: null, required_pipeline_amount: null, opportunities_to_generate: null };
+  }
+  const remaining = Math.max(0, Number(targetAmount) - Number(soldAmount || 0));
+  if (remaining === 0) {
+    return { remaining_to_target: 0, required_pipeline_amount: 0, opportunities_to_generate: 0 };
+  }
+  const winRate = Number(winRatePct);
+  if (!winRatePct || !(winRate > 0)) {
+    return { remaining_to_target: remaining, required_pipeline_amount: null, opportunities_to_generate: null };
+  }
+  const required = Math.round((remaining / (winRate / 100)) * 100) / 100;
+  const avg = Number(avgDealSize);
+  return {
+    remaining_to_target: remaining,
+    required_pipeline_amount: required,
+    opportunities_to_generate: avg > 0 ? Math.ceil(required / avg) : null,
+  };
+}
+
 module.exports = {
+  calculateRequiredPipeline,
   calculateCompletenessScore,
   getCompletenessBreakdown,
   calculateScorecardScore,

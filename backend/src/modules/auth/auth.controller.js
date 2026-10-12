@@ -1192,4 +1192,6 @@ module.exports = {
   localLogin,
   localAuthLogin,
   changePassword,
+  // Lo usan los scripts de RBAC para derivar el scope que el login pone en el token.
+  resolveRoleMeta,
 };

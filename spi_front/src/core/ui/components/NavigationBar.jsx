@@ -28,6 +28,7 @@ import {
   FiChevronDown,
   FiX,
   FiMessageSquare,
+  FiMail,
 } from "react-icons/fi";
 import clsx from "clsx";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
@@ -394,6 +395,13 @@ const famDaysLink = {
   category: "herramientas",
 };
 
+const gmailCommunicationsLink = {
+  name: "Correos Gmail",
+  icon: FiMail,
+  path: "/gmail-context",
+  category: "herramientas",
+};
+
 const suggestionBoxLink = {
   name: "Buzón de sugerencias",
   icon: FiMessageSquare,
@@ -458,7 +466,7 @@ const getPriorityGroups = (scope, role, auditActive, extraRoles = []) => {
 
   // Siempre incluir inicio como critico
   groups.critical.push(getHomeLink(scope));
-  groups.admin.push(famDaysLink);
+  groups.admin.push(famDaysLink, gmailCommunicationsLink);
 
   // 📊 GERENCIA - Enfoque en control y supervisión
   if (["gerencia", "gerencia_general", "gerente_general", "director"].includes(scope)) {
@@ -482,9 +490,6 @@ const getPriorityGroups = (scope, role, auditActive, extraRoles = []) => {
     groups.primary.push(viaticosLink, collabEntregasLink, asistenciaReportesLink, permisosLink);
     if (!hideBusinessCaseForFinance) {
       groups.primary.push(businessCaseLink);
-    }
-    if (scope === "jefe_financiero") {
-      groups.primary.push(comercialLinks[0]);
     }
     groups.secondary.push(capacitacionesLink, firmaLink);
     if (auditActive) groups.secondary.push(auditPrepLink);
@@ -646,7 +651,6 @@ const getPriorityGroups = (scope, role, auditActive, extraRoles = []) => {
   if ([
     "jefe_comercial",
     "jefe_tecnico",
-    "jefe_servicio",
     "jefe_operaciones",
     "gerencia",
     "gerencia_general",

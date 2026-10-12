@@ -11,8 +11,8 @@ export default function GmailContextPage() {
       open
       title="Categorizar comunicación de Gmail"
       maxWidth="max-w-6xl"
-      closeOnBackdrop={false}
-      onClose={() => navigate(-1)}
+      closeOnBackdrop
+      onClose={() => navigate("/dashboard")}
     >
       <GmailContextCommunications initialCommunicationId={searchParams.get("communication_id")} />
     </Modal>

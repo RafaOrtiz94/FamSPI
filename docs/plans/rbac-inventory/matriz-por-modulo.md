@@ -2,7 +2,7 @@
 
 Generada el 2026-10-08 por `backend/scripts/rbac/build_access_review.js` desde `backend-endpoints.json`. No editar a mano: se regenera. El detalle fila por fila esta en `backend-endpoints.csv`.
 
-Totales: 1534 endpoints en 63 modulos · por rol 1075 · solo autenticado 386 · permiso central 5 · publicos 32 · internos 36.
+Totales: 1549 endpoints en 64 modulos · por rol 1075 · solo autenticado 390 · permiso central 16 · publicos 32 · internos 36.
 
 Como leerla: "solo autenticado" significa que la ruta no exige rol; el control puede estar dentro del controlador o no existir. Cada escritura de esa lista debe confirmarse antes de convertirla en permiso.
 
@@ -33,13 +33,13 @@ Responsable funcional: _por asignar_ · Aprobado: _pendiente_
 
 ## asistencia
 
-Endpoints: 75 | por rol: 3 | solo autenticado: 72 (47 de escritura) | permiso central: 0 | publicos: 0 | internos: 0
+Endpoints: 77 | por rol: 3 | solo autenticado: 74 (49 de escritura) | permiso central: 0 | publicos: 0 | internos: 0
 
 Roles reales con acceso (endpoints por rol que pasan):
 
 `jefe_ti` 3
 
-Escrituras sin guarda de rol en la ruta (47) — confirmar si el control esta en el controlador o falta:
+Escrituras sin guarda de rol en la ruta (49) — confirmar si el control esta en el controlador o falta:
 
 - [ ] `POST /asistencia/admin/apply-entry-regularization` → `applyEntryRegularization`
 - [ ] `POST /asistencia/admin/collaborator/:userId/birthday-benefit/qr` → `generateCollaboratorBirthdayBenefitQr`
@@ -66,19 +66,19 @@ Escrituras sin guarda de rol en la ruta (47) — confirmar si el control esta en
 - [ ] `POST /asistencia/marcar/entrada-imprevista` → `clockInUnexpected`
 - [ ] `POST /asistencia/marcar/entrada-oficina` → `clockInOperational`
 - [ ] `POST /asistencia/marcar/llegada-destino` → `clockInDestino`
-- ... y 22 mas (ver backend-endpoints.csv)
+- ... y 24 mas (ver backend-endpoints.csv)
 
 Responsable funcional: _por asignar_ · Aprobado: _pendiente_
 
 ## attendance
 
-Endpoints: 75 | por rol: 3 | solo autenticado: 72 (47 de escritura) | permiso central: 0 | publicos: 0 | internos: 0
+Endpoints: 77 | por rol: 3 | solo autenticado: 74 (49 de escritura) | permiso central: 0 | publicos: 0 | internos: 0
 
 Roles reales con acceso (endpoints por rol que pasan):
 
 `jefe_ti` 3
 
-Escrituras sin guarda de rol en la ruta (47) — confirmar si el control esta en el controlador o falta:
+Escrituras sin guarda de rol en la ruta (49) — confirmar si el control esta en el controlador o falta:
 
 - [ ] `POST /api/v1/attendance/admin/apply-entry-regularization` → `applyEntryRegularization`
 - [ ] `POST /api/v1/attendance/admin/collaborator/:userId/birthday-benefit/qr` → `generateCollaboratorBirthdayBenefitQr`
@@ -105,7 +105,7 @@ Escrituras sin guarda de rol en la ruta (47) — confirmar si el control esta en
 - [ ] `POST /api/v1/attendance/marcar/entrada-imprevista` → `clockInUnexpected`
 - [ ] `POST /api/v1/attendance/marcar/entrada-oficina` → `clockInOperational`
 - [ ] `POST /api/v1/attendance/marcar/llegada-destino` → `clockInDestino`
-- ... y 22 mas (ver backend-endpoints.csv)
+- ... y 24 mas (ver backend-endpoints.csv)
 
 Responsable funcional: _por asignar_ · Aprobado: _pendiente_
 
@@ -619,6 +619,12 @@ Endpoints: 4 | por rol: 4 | solo autenticado: 0 (0 de escritura) | permiso centr
 Roles reales con acceso (endpoints por rol que pasan):
 
 `acp_comercial` 4 · `gerencia_general` 4 · `jefe_comercial` 4 · `jefe_operaciones` 4
+
+Responsable funcional: _por asignar_ · Aprobado: _pendiente_
+
+## rbac
+
+Endpoints: 11 | por rol: 0 | solo autenticado: 0 (0 de escritura) | permiso central: 11 | publicos: 0 | internos: 0
 
 Responsable funcional: _por asignar_ · Aprobado: _pendiente_
 

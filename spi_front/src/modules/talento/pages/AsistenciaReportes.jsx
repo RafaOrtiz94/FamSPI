@@ -263,72 +263,6 @@ const buildRealMarks = (row = {}) => ([
   },
 ]);
 
-const buildPermissionMarks = (row = {}) => ([
-  {
-    key: "permission_exit",
-    time: row.permission_exit_time || null,
-  },
-  {
-    key: "permission_return",
-    time: row.permission_return_time || null,
-  },
-]);
-
-const buildTeleworkMarks = (row = {}) => {
-  const isTelework = normalizeToken(row.operational_category) === "teletrabajo";
-  if (!isTelework) {
-    return [
-      { key: "telework_start", time: null, point: null },
-      { key: "telework_lunch_start", time: null, point: null },
-      { key: "telework_lunch_end", time: null, point: null },
-      { key: "telework_end", time: null, point: null },
-    ];
-  }
-
-  return [
-    {
-      key: "telework_start",
-      time: row.start_time || row.entry_time || null,
-      point: resolvePoint({
-        location: row.start_location || row.entry_location,
-        time: row.start_time || row.entry_time || null,
-        type: "telework_start",
-        label: "Inicio de teletrabajo",
-      }),
-    },
-    {
-      key: "telework_lunch_start",
-      time: row.lunch_start_time || null,
-      point: resolvePoint({
-        location: row.lunch_start_location,
-        time: row.lunch_start_time || null,
-        type: "telework_lunch_start",
-        label: "Salida a almuerzo teletrabajo",
-      }),
-    },
-    {
-      key: "telework_lunch_end",
-      time: row.lunch_end_time || null,
-      point: resolvePoint({
-        location: row.lunch_end_location,
-        time: row.lunch_end_time || null,
-        type: "telework_lunch_end",
-        label: "Regreso de almuerzo teletrabajo",
-      }),
-    },
-    {
-      key: "telework_end",
-      time: row.return_time || row.exit_time || null,
-      point: resolvePoint({
-        location: row.return_location || row.exit_location,
-        time: row.return_time || row.exit_time || null,
-        type: "telework_end",
-        label: "Cierre de teletrabajo",
-      }),
-    },
-  ];
-};
-
 const getInitials = (name = "") => {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return "NA";
@@ -1000,14 +934,15 @@ const STATUS_MAP = {
   lunch_open: { tone: "amber", label: "Almuerzo abierto" },
 };
 
-const MarksTable = ({ rows = [], variant = "regularized", onMarkClick = null }) => {
+const MarksTable = ({ rows = [], onMarkClick = null }) => {
   if (!rows.length)
     return <EmptySection icon={FiClock} title="Sin marcaciones en este periodo" description="El colaborador no registra asistencia en el rango filtrado." />;
 
-  const isRegularized = variant === "regularized";
-  const headers = isRegularized
-    ? ["Fecha", "Estado", "Entrada", "Alm. S", "Alm. E", "Salida", "Perm. S", "Perm. E", "Extra", "Oper.", "Modalidad", "TT Inicio", "TT Alm. S", "TT Alm. E", "TT Cierre", "Ciudad", "Ubicacion", "Excepcion"]
-    : ["Fecha", "Estado", "Entrada", "Alm. S", "Alm. E", "Salida", "Extra", "Oper.", "Modalidad", "TT Inicio", "TT Alm. S", "TT Alm. E", "TT Cierre", "Ciudad", "Ubicacion", "Excepcion"];
+  const headers = [
+    "Fecha", "Estado", "Entrada", "Alm. S", "Alm. E", "Salida",
+    "Entrada regulada", "Alm. S regulado", "Alm. E regulado", "Salida regulada",
+    "Extra", "Ciudad", "Ubicacion", "Excepcion",
+  ];
 
   return (
     <div className="overflow-x-auto">
@@ -1022,10 +957,8 @@ const MarksTable = ({ rows = [], variant = "regularized", onMarkClick = null }) 
         <tbody className="divide-y divide-[#F9FAFB]">
           {rows.map((row) => {
             const { tone, label } = STATUS_MAP[row.attendance_status] || { tone: "neutral", label: row.attendance_status || "Sin entrada" };
-            const marks = variant === "real" ? buildRealMarks(row) : buildRegularizedMarks(row);
-            const permissionMarks = buildPermissionMarks(row);
-            const isTelework = normalizeToken(row.operational_category) === "teletrabajo";
-            const teleworkMarks = buildTeleworkMarks(row);
+            const realMarks = buildRealMarks(row);
+            const regularizedMarks = buildRegularizedMarks(row);
             const location = row.start_location || row.entry_location || row.return_location || row.exit_location;
             const point = parseCoordinatePair(location);
             const renderMarkCell = (mark, muted = false) => {
@@ -1057,23 +990,15 @@ const MarksTable = ({ rows = [], variant = "regularized", onMarkClick = null }) 
               <tr key={`${row.user_id}-${row.date}`} className="hover:bg-[#F9FAFB]">
                 <td className="px-3 py-2 font-mono text-xs font-medium text-[#1F2937]">{fmtDate(row.date)}</td>
                 <td className="px-3 py-2"><Badge tone={tone}>{label}</Badge></td>
-                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{renderMarkCell(marks[0], false)}</td>
-                <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(marks[1], true)}</td>
-                <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(marks[2], true)}</td>
-                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{renderMarkCell(marks[3], false)}</td>
-                {isRegularized ? (
-                  <>
-                    <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(permissionMarks[0], true)}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(permissionMarks[1], true)}</td>
-                  </>
-                ) : null}
+                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{renderMarkCell(realMarks[0], false)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(realMarks[1], true)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(realMarks[2], true)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{renderMarkCell(realMarks[3], false)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{renderMarkCell(regularizedMarks[0], false)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(regularizedMarks[1], true)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(regularizedMarks[2], true)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{renderMarkCell(regularizedMarks[3], false)}</td>
                 <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{fmtOvertime(row)}</td>
-                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{fmtHours(row.operational_elapsed_hours)}</td>
-                <td className="px-3 py-2"><Badge tone={isTelework ? "blue" : "neutral"}>{isTelework ? "Teletrabajo" : "Presencial / campo"}</Badge></td>
-                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{renderMarkCell(teleworkMarks[0], false)}</td>
-                <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(teleworkMarks[1], true)}</td>
-                <td className="px-3 py-2 font-mono text-xs text-[#6B7280]">{renderMarkCell(teleworkMarks[2], true)}</td>
-                <td className="px-3 py-2 font-mono text-xs text-[#1F2937]">{renderMarkCell(teleworkMarks[3], false)}</td>
                 <td className="max-w-[150px] px-3 py-2 text-xs text-[#1F2937]">{row.operational_destination_city || "--"}</td>
                 <td className="px-3 py-2 font-mono text-[11px] text-[#6B7280]">{point ? `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` : "--"}</td>
                 <td className="px-3 py-2">
@@ -2822,7 +2747,7 @@ const ExpedientePanel = ({ detail, loading, onScheduleMeeting, onDownloadRh, pLa
 
         {activeTab === TABS.MARKS && (
           <div className="p-4">
-            <MarksTable rows={rows} variant="regularized" onMarkClick={setSelectedMark} />
+            <MarksTable rows={rows} onMarkClick={setSelectedMark} />
           </div>
         )}
 

@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiCheck, FiChevronRight, FiInbox, FiLink, FiLoader, FiRefreshCw, FiSearch, FiShoppingCart } from "react-icons/fi";
+import { FiCheck, FiChevronRight, FiInbox, FiLink, FiLoader, FiRefreshCw, FiSearch, FiShoppingCart, FiTrash2 } from "react-icons/fi";
 import toast from "react-hot-toast";
 import {
   getGmailContextClientSuggestions,
   getGmailContextProcessCandidates,
+  discardGmailContextCommunication,
   linkGmailContextCommunication,
   listGmailContextCommunications,
   searchGmailContextClients,
@@ -58,6 +59,7 @@ export default function GmailContextCommunications({ initialCommunicationId = nu
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [clientId, setClientId] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
+  const [autoDetectedClientId, setAutoDetectedClientId] = useState(null);
   const [processCandidates, setProcessCandidates] = useState([]);
   const [loadingProcessCandidates, setLoadingProcessCandidates] = useState(false);
   const [entityType, setEntityType] = useState("business_case");
@@ -66,6 +68,7 @@ export default function GmailContextCommunications({ initialCommunicationId = nu
   const [selectedProcess, setSelectedProcess] = useState(null);
   const [searching, setSearching] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [discardingId, setDiscardingId] = useState(null);
   const [purchaseSelectorOpen, setPurchaseSelectorOpen] = useState(false);
   const [newPurchaseModalOpen, setNewPurchaseModalOpen] = useState(false);
   const [newPurchaseMode, setNewPurchaseMode] = useState("private_direct");
@@ -142,6 +145,7 @@ export default function GmailContextCommunications({ initialCommunicationId = nu
     setClientSuggestions([]);
     setClientId(null);
     setSelectedClient(null);
+    setAutoDetectedClientId(null);
     setProcessCandidates([]);
     setProcessQuery("");
     setProcessMatches([]);
@@ -150,7 +154,9 @@ export default function GmailContextCommunications({ initialCommunicationId = nu
     getGmailContextClientSuggestions(communication.id)
       .then((suggestions) => {
         setClientSuggestions(suggestions);
-        if (suggestions.length === 1) selectClient(suggestions[0], communication.id);
+        if (suggestions.length === 1) {
+          selectClient(suggestions[0], communication.id, { autoDetected: true });
+        }
       })
       .catch(() => toast.error("No se pudieron detectar coincidencias de cliente."))
       .finally(() => setLoadingSuggestions(false));
@@ -162,7 +168,7 @@ export default function GmailContextCommunications({ initialCommunicationId = nu
     if (communication) selectCommunication(communication);
   }, [initialCommunicationId, pendingItems, selected?.id]);
 
-  const selectClient = (client, communicationId = selected?.id) => {
+  const selectClient = (client, communicationId = selected?.id, { autoDetected = false } = {}) => {
     const normalizedClient = {
       ...client,
       nombre: client.nombre || client.commercial_name || client.label || "",
@@ -170,6 +176,7 @@ export default function GmailContextCommunications({ initialCommunicationId = nu
     };
     setClientId(normalizedClient.id);
     setSelectedClient(normalizedClient);
+    setAutoDetectedClientId(autoDetected ? normalizedClient.id : null);
     setClientQuery(normalizedClient.label || normalizedClient.nombre);
     setClientMatches([]);
     setProcessCandidates([]);
@@ -206,6 +213,24 @@ export default function GmailContextCommunications({ initialCommunicationId = nu
       toast.error(requestError?.response?.data?.message || "No se pudo vincular el correo.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const discard = async (communication) => {
+    if (!communication || discardingId) return;
+    const confirmed = window.confirm("¿Descartar este correo? No se vinculará a ningún proceso, pero quedará registrado para auditoría.");
+    if (!confirmed) return;
+
+    setDiscardingId(communication.id);
+    try {
+      await discardGmailContextCommunication(communication.id);
+      if (selected?.id === communication.id) setSelected(null);
+      toast.success("Correo descartado.");
+      await load();
+    } catch (requestError) {
+      toast.error(requestError?.response?.data?.message || "No se pudo descartar el correo.");
+    } finally {
+      setDiscardingId(null);
     }
   };
 
@@ -264,11 +289,21 @@ export default function GmailContextCommunications({ initialCommunicationId = nu
         <div className="grid divide-y divide-slate-200 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:divide-x lg:divide-y-0">
           <div className="max-h-[36rem] overflow-y-auto">
             {pendingItems.map((item) => (
-              <button key={item.id} type="button" onClick={() => selectCommunication(item)} className={`block w-full border-l-4 px-5 py-4 text-left transition hover:bg-slate-50 ${selected?.id === item.id ? "border-action-blue bg-action-blue/5" : "border-transparent"}`}>
-                <div className="flex items-start justify-between gap-3"><p className="line-clamp-1 font-medium text-slate-900">{item.subject || "Sin asunto"}</p><FiChevronRight className="mt-1 shrink-0 text-slate-400" /></div>
-                <p className="mt-1 line-clamp-1 text-sm text-slate-600">{item.sender_email || "Remitente no disponible"}</p>
-                <p className="mt-2 text-xs text-slate-500">{dateTime(item.received_at || item.created_at)}</p>
-              </button>
+              <div key={item.id} className={`border-l-4 px-5 py-4 transition ${selected?.id === item.id ? "border-action-blue bg-action-blue/5" : "border-transparent hover:bg-slate-50"}`}>
+                <button type="button" onClick={() => selectCommunication(item)} className="block w-full cursor-pointer text-left" aria-label={`Administrar correo: ${item.subject || "Sin asunto"}`}>
+                  <div className="flex items-start justify-between gap-3"><p className="line-clamp-1 font-medium text-slate-900">{item.subject || "Sin asunto"}</p><FiChevronRight className="mt-1 shrink-0 text-slate-400" /></div>
+                  <p className="mt-1 line-clamp-1 text-sm text-slate-600">{item.sender_email || "Remitente no disponible"}</p>
+                  <p className="mt-2 text-xs text-slate-500">{dateTime(item.received_at || item.created_at)}</p>
+                </button>
+                <div className="mt-3 flex gap-2">
+                  <button type="button" onClick={() => selectCommunication(item)} className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center rounded-md border border-action-blue/30 px-2.5 text-xs font-semibold text-action-blue transition hover:bg-action-blue/5">
+                    Administrar
+                  </button>
+                  <button type="button" onClick={() => discard(item)} disabled={discardingId === item.id} className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-1 rounded-md border border-rose-200 px-2.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60" aria-label={`Descartar correo: ${item.subject || "Sin asunto"}`}>
+                    <FiTrash2 aria-hidden="true" /> {discardingId === item.id ? "Descartando…" : "Descartar"}
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
 
@@ -282,12 +317,33 @@ export default function GmailContextCommunications({ initialCommunicationId = nu
                     <FiSearch className="absolute left-3 top-3 text-slate-400" />
                     <input
                       value={clientQuery}
-                      onChange={(event) => { setClientQuery(event.target.value); setClientId(null); }}
+                      onChange={(event) => {
+                        setClientQuery(event.target.value);
+                        setClientId(null);
+                        setSelectedClient(null);
+                        setAutoDetectedClientId(null);
+                        setProcessCandidates([]);
+                        setProcessQuery("");
+                        setProcessMatches([]);
+                        setSelectedProcess(null);
+                      }}
                       placeholder="Busca por nombre, correo o RUC"
                       className="min-h-10 w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm outline-none focus:border-action-blue focus:ring-2 focus:ring-action-blue/15"
                     />
                   </div>
                 </label>
+
+                {selectedClient ? (
+                  <div
+                    className="rounded-lg border border-action-blue/20 bg-action-blue/5 px-3 py-2 text-sm text-slate-700"
+                    role="status"
+                  >
+                    <span className="font-semibold text-slate-900">
+                      {autoDetectedClientId === selectedClient.id ? "Cliente identificado automáticamente:" : "Cliente seleccionado:"}
+                    </span>{" "}
+                    {selectedClient.nombre || selectedClient.label || "Cliente sin nombre"}. Los procesos públicos y privados compatibles se cargan a continuación.
+                  </div>
+                ) : null}
 
                 {loadingSuggestions ? <p className="text-xs text-slate-500">Detectando coincidencias verificables de cliente…</p> : null}
                 {clientSuggestions.length > 0 ? (

@@ -47,7 +47,7 @@ export function useAccount(id) {
   return { data, loading, error, refresh: load };
 }
 
-export function useAccountSalesStats(id) {
+export function useAccountSalesStats(id, planId) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -57,13 +57,13 @@ export function useAccountSalesStats(id) {
     setLoading(true);
     setError(null);
     try {
-      setData(await fetchAccountSalesStats(id));
+      setData(await fetchAccountSalesStats(id, planId));
     } catch (e) {
       setError(e.message || "Error");
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, planId]);
 
   useEffect(() => { load(); }, [load]);
 

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { FiAlertCircle, FiCheckCircle, FiClock, FiLayers, FiMail, FiPaperclip, FiPercent, FiRefreshCw, FiSave, FiTrash2, FiUpload, FiUserPlus } from "react-icons/fi";
+import { FiAlertCircle, FiCheckCircle, FiChevronDown, FiChevronRight, FiClock, FiLayers, FiMail, FiPaperclip, FiPercent, FiRefreshCw, FiSave, FiTrash2, FiUpload, FiUserPlus } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useAuth } from "../../../../../core/auth/AuthContext";
 import { useUI } from "../../../../../core/ui/UIContext";
@@ -226,6 +226,16 @@ const InvestmentValuesUnifiedSection = ({
   const [closingWithoutItems, setClosingWithoutItems] = useState(false);
   const [assignmentSavingId, setAssignmentSavingId] = useState(null);
   const [quotationRequestingId, setQuotationRequestingId] = useState(null);
+  // Override manual de abierto/cerrado por item; sin override, abierto solo si esta pendiente.
+  const [expandedMap, setExpandedMap] = useState({});
+  // Estado de la ultima sincronizacion con la hoja tras guardar: { status, at }.
+  const [lastSync, setLastSync] = useState(null);
+  const dirtyRef = useRef({});
+  const revRef = useRef({});
+  const saveFailedRef = useRef(false);
+  const saveRef = useRef(null);
+  const itemsRef = useRef([]);
+  const draftsRef = useRef({});
 
   const role = String(user?.role || user?.scope || user?.role_name || "").toLowerCase();
   const canEditAssignedQuotation = Boolean(permissions.canEditAssignedInvestmentValues);
@@ -243,10 +253,10 @@ const InvestmentValuesUnifiedSection = ({
     (FINANCIAL_ROLES.has(role) && financialOwnership?.canUserEdit !== false)
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ silent = false } = {}) => {
     if (!bcId) return;
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const [operationalRes, financialRes, assigneesRes, tiReservations] = await Promise.all([
         api.get(`/business-case/${bcId}/investments/values`, { params: { class: "operativa" } }),
         api.get(`/business-case/${bcId}/investments/values`, { params: { class: "financiera" } }),
@@ -263,7 +273,21 @@ const InvestmentValuesUnifiedSection = ({
       setTiAssetCountsByCatalogId(countsByCatalogId);
       const operationalPayload = operationalRes?.data?.data || {};
       const financialPayload = financialRes?.data?.data || {};
-      const merged = mergeInvestmentRows(operationalPayload.items || [], financialPayload.items || []);
+      // Recargar (asignar responsable, subir cotizacion, etc.) no debe pisar
+      // precios editados y aun sin guardar: se conservan los campos sucios.
+      const localById = new Map(itemsRef.current.map((row) => [Number(row.catalog_id), row]));
+      const dirty = dirtyRef.current;
+      const merged = mergeInvestmentRows(operationalPayload.items || [], financialPayload.items || []).map((row) => {
+        const local = localById.get(Number(row.catalog_id));
+        if (!local) return row;
+        const next = { ...row };
+        if (dirty[`${row.catalog_id}:operativa`]) next.operational_unit_price = local.operational_unit_price;
+        if (dirty[`${row.catalog_id}:financiera`]) {
+          next.financial_unit_price = local.financial_unit_price;
+          next.depreciation_percentage = local.depreciation_percentage;
+        }
+        return next;
+      });
       setItems(merged);
       setPricingContext(financialPayload.pricing_context || operationalPayload.pricing_context || null);
       setSyncStatus({
@@ -271,11 +295,13 @@ const InvestmentValuesUnifiedSection = ({
         financial: financialPayload.sync_status || null,
       });
       setAssignees(Array.isArray(assigneesRes?.data?.data) ? assigneesRes.data.data : []);
-      setAssigneeDrafts(Object.fromEntries(merged.map((item) => [
-        String(item.catalog_id),
-        item.quotation_assignee_id ? String(item.quotation_assignee_id) : "",
-      ])));
-      setDirtyMap({});
+      setAssigneeDrafts(Object.fromEntries(merged.map((item) => {
+        const key = String(item.catalog_id);
+        const saved = item.quotation_assignee_id ? String(item.quotation_assignee_id) : "";
+        // Se respeta una seleccion de responsable que aun no se asigno.
+        return [key, draftsRef.current[key] ?? saved];
+      })));
+      setDirtyMap((current) => Object.fromEntries(Object.entries(current).filter(([key]) => dirty[key])));
     } catch (error) {
       console.error("Error loading unified investment values", error);
       showToast("No se pudieron cargar los precios de inversiones", "error");
@@ -289,7 +315,10 @@ const InvestmentValuesUnifiedSection = ({
   }, [load]);
 
   const markDirty = (catalogId, className) => {
-    setDirtyMap((current) => ({ ...current, [`${catalogId}:${className}`]: true }));
+    const key = `${catalogId}:${className}`;
+    revRef.current[key] = (revRef.current[key] || 0) + 1;
+    saveFailedRef.current = false;
+    setDirtyMap((current) => ({ ...current, [key]: true }));
   };
 
   const updateField = (catalogId, field, value, className) => {
@@ -312,10 +341,13 @@ const InvestmentValuesUnifiedSection = ({
         depreciation_percentage: row.depreciation_percentage ?? null,
       }));
 
-    if (!operationalValues.length && !financialValues.length) {
-      showToast("No hay cambios pendientes para tu rol", "info");
-      return;
-    }
+    if (!operationalValues.length && !financialValues.length) return;
+
+    const savedKeys = [
+      ...operationalValues.map((v) => `${v.catalog_id}:operativa`),
+      ...financialValues.map((v) => `${v.catalog_id}:financiera`),
+    ];
+    const revSnapshot = Object.fromEntries(savedKeys.map((k) => [k, revRef.current[k]]));
 
     try {
       setSaving(true);
@@ -326,15 +358,46 @@ const InvestmentValuesUnifiedSection = ({
       if (financialValues.length) {
         requests.push(api.post(`/business-case/${bcId}/investments/values`, { class: "financiera", values: financialValues }));
       }
-      await Promise.all(requests);
-      await load();
-      showToast("Precios guardados y sincronizacion de Sheet iniciada", "success");
+      const responses = await Promise.all(requests);
+      const syncs = responses.map((res) => res?.data?.data?.sheet_sync).filter(Boolean);
+      const failed = syncs.find((sync) => sync.synced === false && sync.reason !== "no_sheet");
+      if (failed) {
+        setLastSync({ status: "error", at: new Date() });
+        showToast(`Precios guardados, pero no se pudo sincronizar con la hoja: ${failed.error || "error desconocido"}`, "error");
+      } else if (syncs.length && syncs.every((sync) => sync.reason === "no_sheet")) {
+        setLastSync({ status: "no_sheet", at: new Date() });
+      } else {
+        setLastSync({ status: "ok", at: new Date() });
+      }
+
+      // Solo se limpia lo que no volvio a editarse mientras guardaba.
+      const remaining = Object.keys(dirtyRef.current).filter(
+        (key) => !(savedKeys.includes(key) && revRef.current[key] === revSnapshot[key]),
+      );
+      dirtyRef.current = Object.fromEntries(remaining.map((key) => [key, true]));
+      setDirtyMap(dirtyRef.current);
+      // Recarga silenciosa solo si no hay ediciones nuevas que pisar.
+      if (!remaining.length) await load({ silent: true });
     } catch (error) {
+      saveFailedRef.current = true;
+      setLastSync({ status: "error", at: new Date() });
       showToast(error?.response?.data?.message || "No se pudieron guardar los precios", "error");
     } finally {
       setSaving(false);
     }
   };
+  saveRef.current = handleSave;
+  dirtyRef.current = dirtyMap;
+  itemsRef.current = items;
+  draftsRef.current = assigneeDrafts;
+
+  // Autoguardado: tras 1,2 s sin editar se guardan los cambios y el backend
+  // sincroniza la hoja. Si falla, no reintenta hasta la siguiente edicion.
+  useEffect(() => {
+    if (!canEditAny || saving || saveFailedRef.current || !Object.keys(dirtyMap).length) return undefined;
+    const timer = setTimeout(() => saveRef.current?.(), 1200);
+    return () => clearTimeout(timer);
+  }, [dirtyMap, items, saving, canEditAny]);
 
   // Sincronizacion manual: pasa los precios GUARDADOS a la hoja BC (Precio =
   // valor residual unitario, Total = cantidad x precio) con respaldo previo.
@@ -366,7 +429,7 @@ const InvestmentValuesUnifiedSection = ({
         catalog_id: item.catalog_id,
         assignee_id: assigneeId,
       });
-      await load();
+      await load({ silent: true });
       showToast(assigneeId ? "Responsable de cotizacion asignado" : "Responsable removido", "success");
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo asignar el responsable", "error");
@@ -382,7 +445,7 @@ const InvestmentValuesUnifiedSection = ({
         class: getActionClass(),
         catalog_id: item.catalog_id,
       });
-      await load();
+      await load({ silent: true });
       const notification = response?.data?.data?.notification;
       showToast(
         notification?.sent === false && notification?.reason === "already_requested"
@@ -464,7 +527,7 @@ const InvestmentValuesUnifiedSection = ({
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-gray-900">Precios financieros y operativos</h2>
           <p className="text-sm text-gray-500">
-            Una sola seccion para evitar reescrituras: operaciones registra precio operativo y financiero registra precio financiero/depreciacion.
+            Jefe Financiero registra los precios y la depreciacion. Los cambios se guardan y se sincronizan con la hoja automaticamente.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <SectionEditorBadge ownership={operationalOwnership} />
@@ -483,7 +546,22 @@ const InvestmentValuesUnifiedSection = ({
           <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
             Financiero: ${money(totals.financial)}
           </span>
-          {canEditAny && (
+          {saving ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+              <FiRefreshCw size={11} className="animate-spin" /> Guardando y sincronizando...
+            </span>
+          ) : lastSync && dirtyCount === 0 ? (
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ${
+                lastSync.status === "ok" ? "bg-emerald-50 text-emerald-700" : lastSync.status === "error" ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-600"
+              }`}
+            >
+              {lastSync.status === "ok" && <><FiCheckCircle size={11} /> Hoja sincronizada {lastSync.at.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" })}</>}
+              {lastSync.status === "error" && <><FiAlertCircle size={11} /> Error de sincronizacion</>}
+              {lastSync.status === "no_sheet" && "Guardado (el BC aun no tiene hoja)"}
+            </span>
+          ) : null}
+          {canEditAny && saveFailedRef.current && dirtyCount > 0 && (
             <button
               type="button"
               onClick={handleSave}
@@ -491,7 +569,7 @@ const InvestmentValuesUnifiedSection = ({
               className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors disabled:bg-gray-200 disabled:text-gray-500"
             >
               <FiSave size={13} />
-              {saving ? "Guardando..." : "Guardar precios"}
+              {saving ? "Guardando..." : "Reintentar guardado"}
             </button>
           )}
           {canManageValues && items.length > 0 && (
@@ -572,6 +650,17 @@ const InvestmentValuesUnifiedSection = ({
         </div>
       )}
 
+      {items.length > 1 && (
+        <div className="flex justify-end gap-3 text-xs font-semibold text-blue-700">
+          <button type="button" className="hover:underline" onClick={() => setExpandedMap(Object.fromEntries(items.map((row) => [row.catalog_id, true])))}>
+            Expandir todo
+          </button>
+          <button type="button" className="hover:underline" onClick={() => setExpandedMap(Object.fromEntries(items.map((row) => [row.catalog_id, false])))}>
+            Colapsar todo
+          </button>
+        </div>
+      )}
+
       {items.length > 0 && (
         <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white">
           <div className="divide-y divide-gray-100">
@@ -585,15 +674,48 @@ const InvestmentValuesUnifiedSection = ({
                 item.depreciation_percentage,
                 pricingContext?.projected_deadline_months,
               );
+              // Pendiente = falta precio financiero (obligatorio) o hay revision de precio abierta.
+              const isPending = pendingReview || !(Number(item.financial_unit_price) > 0);
+              const isOpen = expandedMap[item.catalog_id] ?? isPending;
               return (
                 <div
                   key={item.catalog_id}
                   ref={pendingReview && itemIndex === 0 ? firstPendingRef : undefined}
-                  className={`space-y-4 p-4 ${pendingReview ? "border-l-4 border-amber-400 bg-amber-50/60" : ""}`}
+                  className={pendingReview ? "border-l-4 border-amber-400 bg-amber-50/60" : ""}
                 >
+                  <button
+                    type="button"
+                    onClick={() => setExpandedMap((current) => ({ ...current, [item.catalog_id]: !isOpen }))}
+                    aria-expanded={isOpen}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50"
+                  >
+                    {isOpen ? <FiChevronDown size={16} className="shrink-0 text-gray-400" /> : <FiChevronRight size={16} className="shrink-0 text-gray-400" />}
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900">{item.name}</span>
+                    <span className="hidden shrink-0 text-xs text-gray-500 sm:inline">Cant. {item.quantity ?? "-"}</span>
+                    {!isOpen && (
+                      <span className="hidden shrink-0 text-xs text-gray-500 md:inline">
+                        Financiero ${money(item.financial_unit_price)} · Operativo ${money(Number(item.operational_unit_price || 0) * qty)}
+                      </span>
+                    )}
+                    {dirtyMap[`${item.catalog_id}:operativa`] || dirtyMap[`${item.catalog_id}:financiera`] ? (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
+                        <FiClock size={11} /> Sin guardar
+                      </span>
+                    ) : null}
+                    {isPending ? (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                        <FiAlertCircle size={11} /> Pendiente
+                      </span>
+                    ) : (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
+                        <FiCheckCircle size={11} /> Completo
+                      </span>
+                    )}
+                  </button>
+                  {isOpen && (
+                  <div className="space-y-4 px-4 pb-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold text-gray-900">{item.name}</div>
                       {pendingReview && (
                         <div className="mt-1 flex flex-wrap items-center gap-2">
                           <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
@@ -667,7 +789,7 @@ const InvestmentValuesUnifiedSection = ({
                       item={item}
                       canUpload={canManageQuotations || canEditAssignedQuotation}
                       showToast={showToast}
-                      onChanged={load}
+                      onChanged={() => load({ silent: true })}
                     />
                   )}
 
@@ -782,12 +904,8 @@ const InvestmentValuesUnifiedSection = ({
                     </div>
                   )}
 
-                  {dirtyMap[`${item.catalog_id}:operativa`] || dirtyMap[`${item.catalog_id}:financiera`] ? (
-                    <div className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
-                      <FiClock size={11} />
-                      Cambios pendientes
-                    </div>
-                  ) : null}
+                  </div>
+                  )}
                 </div>
               );
             })}

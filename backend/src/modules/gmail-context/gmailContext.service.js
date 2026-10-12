@@ -386,6 +386,28 @@ async function linkCommunication({ id, user, entityType, entityId, clientRequest
   return formatCommunication(rows[0]);
 }
 
+async function discardCommunication({ id, user }) {
+  const communication = await getCommunicationOrThrow(id, user);
+  if (communication.status === "discarded") return communication;
+  if (communication.status !== "pending_link") {
+    throw httpError("Solo se pueden descartar comunicaciones pendientes de vinculacion.", 409, "GMAIL_CONTEXT_DISCARD_NOT_ALLOWED");
+  }
+
+  const { rows } = await db.query(
+    `UPDATE gmail_context_communications
+        SET status = 'discarded',
+            updated_at = NOW()
+      WHERE id = $1
+        AND status = 'pending_link'
+      RETURNING *`,
+    [id],
+  );
+  if (!rows[0]) {
+    throw httpError("La comunicacion ya no esta disponible para descartar.", 409, "GMAIL_CONTEXT_DISCARD_CONFLICT");
+  }
+  return formatCommunication(rows[0]);
+}
+
 module.exports = {
   extractClientSearchTerms,
   suggestClientsForCommunication,
@@ -398,4 +420,5 @@ module.exports = {
   autoLinkCommunication,
   searchProcesses,
   linkCommunication,
+  discardCommunication,
 };

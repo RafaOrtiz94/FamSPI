@@ -155,7 +155,7 @@ function expandRoles(allowed = []) {
 function requireRole(allowedRoles = []) {
   const expanded = expandRoles(allowedRoles);
   const allowsPasante = expanded.has("pasante");
-  return (req, res, next) => {
+  const legacyMiddleware = (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ ok: false, error: "No autenticado." });
     }
@@ -193,6 +193,14 @@ function requireRole(allowedRoles = []) {
       ok: false,
       error: `Acceso denegado. Roles permitidos: ${Array.from(expanded).join(", ")}`,
     });
+  };
+
+  // Enforcement central por area (plan RBAC, Fase 7): sin RBAC_CENTRAL_ENFORCE decide solo lo de arriba,
+  // exactamente como antes. Con la bandera, centralEnforce decide para las areas listadas y cae a
+  // legacyMiddleware ante cualquier duda o fallo.
+  return (req, res, next) => {
+    if (!process.env.RBAC_CENTRAL_ENFORCE) return legacyMiddleware(req, res, next);
+    return require("../security/authorization/centralEnforce").enforceCentral(req, res, next, legacyMiddleware);
   };
 }
 

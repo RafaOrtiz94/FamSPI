@@ -29,6 +29,8 @@ jobs:
       # "npm run lint" usa --fix y reescribe archivos; aqui solo se verifica.
       - name: Lint
         run: npx eslint src scripts/rbac scripts/staging
+      - name: Registro API a modulo al dia
+        run: node scripts/rbac/generate_api_module_registry.js --check
       - name: Pruebas
         run: npx jest --ci
 

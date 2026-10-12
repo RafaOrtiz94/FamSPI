@@ -63,6 +63,10 @@ router.put("/accounts/:id", requireRole(crmAll), controller.updateAccount);
 router.delete("/accounts/:id", requireRole(crmAll), controller.softDeleteAccount);
 router.get("/accounts/:id/timeline", requireRole(allCrm), controller.getAccountTimeline);
 router.get("/accounts/:id/sales-stats", requireRole(allCrm), controller.getAccountSalesStats);
+router.get("/accounts/:id/plans", requireRole(allCrm), controller.listAccountPlans);
+router.post("/accounts/:id/plans", requireRole(crmAll), controller.createAccountPlan);
+router.put("/accounts/:id/plans/:planId", requireRole(crmAll), controller.updateAccountPlan);
+router.delete("/accounts/:id/plans/:planId", requireRole(crmAll), controller.softDeleteAccountPlan);
 router.get("/accounts/:id/duplicates", requireRole(allCrm), controller.getAccountDuplicateCandidates);
 router.post("/accounts/:id/merge", requireRole(managerAdmin), controller.mergeAccounts);
 

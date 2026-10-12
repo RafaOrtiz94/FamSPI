@@ -42,6 +42,7 @@ import {
   updateGlobalModuleStatus,
 } from "../../../core/api/moduleAccessApi";
 import Modal from "../../../core/ui/components/Modal";
+import RbacCentralPanel from "../components/RbacCentralPanel";
 
 const STAGE_LABELS = { production: "Producción", testing: "Pruebas (whitelist)", construction: "En construcción" };
 const STAGE_BADGE = {
@@ -355,6 +356,7 @@ const TIModuleAccessPage = () => {
         {[
           ["users", "Por Usuario", FiUsers],
           ["global", "Estado Global", FiGlobe],
+          ["rbac", "Roles y permisos", FiShield],
         ].map(([k, l, Icon]) => (
           <button
             key={k}
@@ -369,6 +371,8 @@ const TIModuleAccessPage = () => {
           </button>
         ))}
       </div>
+
+      {tab === "rbac" && <RbacCentralPanel />}
 
       {tab === "global" && (
         <div className="space-y-4">

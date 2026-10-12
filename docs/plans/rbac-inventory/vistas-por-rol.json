@@ -207,10 +207,7 @@
       "label": "Workspace de Compras",
       "outcome": "abre",
       "landed": "/dashboard/purchases/workspace",
-      "apiErrors": [
-        "500 GET /api/v1/process-notes/private_purchase/45bbb685-a680-4b14-8521-09a23ad3220f",
-        "500 GET /api/v1/process-notes/private_purchase/mention-candidates"
-      ],
+      "apiErrors": [],
       "pageErrors": []
     },
     {
@@ -276,9 +273,7 @@
       "label": "Inicio",
       "outcome": "abre",
       "landed": "/dashboard/finanzas",
-      "apiErrors": [
-        "403 GET /api/v1/business-case"
-      ],
+      "apiErrors": [],
       "pageErrors": []
     },
     {
@@ -384,10 +379,7 @@
       "label": "FamSheets",
       "outcome": "abre",
       "landed": "/dashboard/comercial/famsheets",
-      "apiErrors": [
-        "500 GET /api/v1/famsheets",
-        "500 GET /api/v1/famsheets/dashboard/manager"
-      ],
+      "apiErrors": [],
       "pageErrors": []
     },
     {
@@ -501,11 +493,7 @@
       "label": "Workspace de Compras",
       "outcome": "abre",
       "landed": "/dashboard/purchases/workspace",
-      "apiErrors": [
-        "403 GET /api/v1/consumable-files/overview",
-        "500 GET /api/v1/process-notes/private_purchase/45bbb685-a680-4b14-8521-09a23ad3220f",
-        "500 GET /api/v1/process-notes/private_purchase/mention-candidates"
-      ],
+      "apiErrors": [],
       "pageErrors": []
     },
     {
@@ -561,9 +549,7 @@
       "label": "Inspecciones de Ambiente",
       "outcome": "redirige",
       "landed": "/dashboard/servicio-tecnico/solicitudes",
-      "apiErrors": [
-        "500 GET /api/v1/private-purchases/by-role/tecnico"
-      ],
+      "apiErrors": [],
       "pageErrors": []
     },
     {
@@ -809,10 +795,7 @@
       "label": "Workspace de Compras",
       "outcome": "abre",
       "landed": "/dashboard/purchases/workspace",
-      "apiErrors": [
-        "500 GET /api/v1/process-notes/private_purchase/45bbb685-a680-4b14-8521-09a23ad3220f",
-        "500 GET /api/v1/process-notes/private_purchase/mention-candidates"
-      ],
+      "apiErrors": [],
       "pageErrors": []
     },
     {
@@ -870,14 +853,6 @@
       "label": "Capacitaciones",
       "outcome": "abre",
       "landed": "/dashboard/capacitaciones",
-      "apiErrors": [],
-      "pageErrors": []
-    },
-    {
-      "href": "/dashboard/comercial/solicitudes",
-      "label": "Solicitudes",
-      "outcome": "no_autorizado",
-      "landed": "/unauthorized",
       "apiErrors": [],
       "pageErrors": []
     },
@@ -1050,9 +1025,7 @@
       "label": "Inicio",
       "outcome": "abre",
       "landed": "/dashboard/operaciones",
-      "apiErrors": [
-        "403 GET /api/v1/mantenimientos"
-      ],
+      "apiErrors": [],
       "pageErrors": []
     },
     {
@@ -1089,14 +1062,6 @@
     }
   ],
   "jefe_servicio": [
-    {
-      "href": "/dashboard/business-case/observabilidad",
-      "label": "Obs. BC",
-      "outcome": "no_autorizado",
-      "landed": "/unauthorized",
-      "apiErrors": [],
-      "pageErrors": []
-    },
     {
       "href": "/dashboard/buzon-sugerencias",
       "label": "Buzón de sugerencias",
@@ -1158,11 +1123,7 @@
       "label": "Workspace de Compras",
       "outcome": "abre",
       "landed": "/dashboard/purchases/workspace",
-      "apiErrors": [
-        "403 GET /api/v1/consumable-files/overview",
-        "500 GET /api/v1/process-notes/private_purchase/45bbb685-a680-4b14-8521-09a23ad3220f",
-        "500 GET /api/v1/process-notes/private_purchase/mention-candidates"
-      ],
+      "apiErrors": [],
       "pageErrors": []
     },
     {
@@ -1250,9 +1211,7 @@
       "label": "Gestor de pruebas asignadas",
       "outcome": "abre",
       "landed": "/dashboard/talento-humano/pruebas-tecnicas",
-      "apiErrors": [
-        "429 GET /api/v1/notifications"
-      ],
+      "apiErrors": [],
       "pageErrors": []
     },
     {
@@ -1552,9 +1511,7 @@
       "label": "Inicio",
       "outcome": "abre",
       "landed": "/dashboard/operaciones",
-      "apiErrors": [
-        "403 GET /api/v1/mantenimientos"
-      ],
+      "apiErrors": [],
       "pageErrors": []
     },
     {

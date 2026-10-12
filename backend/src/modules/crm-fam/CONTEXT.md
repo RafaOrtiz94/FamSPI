@@ -84,6 +84,14 @@ Prefijo: `/api/v1/crm-fam`
 | PUT | `/accounts/:id` | `updateAccount` | crmAll (solo manager puede cambiar `owner_user_id`) |
 | DELETE | `/accounts/:id` | `softDeleteAccount` | crmAll (owner o manager) |
 | GET | `/accounts/:id/timeline` | `getAccountTimeline` | allCrm |
+| GET | `/accounts/:id/sales-stats?plan_id=` | `getAccountSalesStats` | allCrm — KPIs del plan (vendido, faltante, pipeline a generar) |
+| GET | `/accounts/:id/duplicates` | `getAccountDuplicateCandidates` | allCrm |
+| POST | `/accounts/:id/merge` | `mergeAccounts` | managerAdmin — reasigna contactos, oportunidades, leads, actividades, notas, documentos, planes, destinatarios de campañas y proyectos de work-management |
+| GET | `/accounts/:id/plans` | `listAccountPlans` | allCrm |
+| POST | `/accounts/:id/plans` | `createAccountPlan` | crmAll (solo manager asigna un `seller_user_id` distinto al dueño de la cuenta) |
+| PUT/DELETE | `/accounts/:id/plans/:planId` | `updateAccountPlan` / `softDeleteAccountPlan` | crmAll |
+
+**Planes de cuenta** (migración 318, tabla `crm.crm_account_plans`): una cuenta tiene varios planes (nombre, periodo opcional, meta, vendedor, estado activo/cerrado). `crm_accounts.sales_target_amount` quedó como dato histórico y ya no se escribe. KPI "pipeline a generar" = (meta − vendido) ÷ win rate del vendedor del plan; "vendido" = oportunidades `won` o abiertas en la fase *Contratos* (cambiar de etapa no cierra la oportunidad). Cálculo puro en `crm.calculators.js#calculateRequiredPipeline`.
 
 ### Contacts
 | Método | Ruta | Handler | Roles |

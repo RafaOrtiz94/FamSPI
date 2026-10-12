@@ -202,6 +202,8 @@ Compuerta de salida:
 - Cero permisos inventados o sin propietario funcional.
 - Politicas de default y `extra_roles` aprobadas.
 
+Avance al 2026-10-08, aprobacion por area: el enfoque para obtener la aprobacion de cada jefe es mostrarle lo que su equipo puede hacer hoy segun las reglas escritas en el codigo y pedirle que marque lo que deberia ser distinto. `backend/scripts/rbac/build_area_review.js` genera un documento por area en `docs/plans/rbac-inventory/revision-por-area/` (11 areas): por cada parte del sistema, que acciones (ver, crear, editar, borrar) puede hacer cada rol del equipo, que otros equipos comparten ese acceso, y casillas para marcar cambios, mas las partes donde endpoints parecidos tratan distinto a los roles. Lo que cada jefe responda se aplica despues en el codigo (`requireRole`). Las cantidades de usuarios salen de la copia local de pruebas.
+
 ### Fase 1A - Ambiente de staging separado de produccion
 
 Decision del 2026-10-07: el ambiente de pruebas es LOCAL, no en la nube. Corre entero en el equipo de TI: PostgreSQL 17 propio (misma version mayor que produccion) en `%LOCALAPPDATA%FamSPI-staging`, puerto 5544; backend en `http://localhost:8090` con `NODE_ENV=staging`; frontend en `http://localhost:3101`. Se arranca con `scripts/staging_local.ps1`. No usa Cloud Run, Firebase, secretos `_STAGING`, carpeta de Drive ni OAuth de Google: se entra con las cuentas `prueba.<rol>`. Ventajas: no comparte cuota de Neon ni proyecto de GCP con produccion, no tiene costo y no requiere despliegues. Limites aceptados: solo se usa desde ese equipo (o su red local), no reproduce Cloud Run y deja fuera las funciones de Google (inicio de sesion con Google, Drive, documentos). El staging en la nube descrito mas abajo queda como opcion futura, no como requisito; `deploy_backend_cloudrun.ps1 -Environment staging` ya lo soporta. El proyecto de Neon `frosty-dawn` se uso como paso intermedio y origen de la copia saneada; la base local se carga desde ahi con `backend/scripts/staging/load_local_staging_db.sh`, sin leer produccion.
@@ -357,7 +359,9 @@ Avance al 2026-10-08 (validado solo en el ambiente local; nada desplegado):
 - Resultado local: de 876 combinaciones sin declarar a 0 decisiones distintas y 2 de modulo distinto, ya incorporadas al registro. No se repitio el recorrido despues de incorporarlas.
 - Hallazgo: `GET /api/v1/notifications` (la raiz, sin barra final) no entra en la exencion de `BYPASS_PREFIXES` y si pasa por el control modular, al contrario de lo que dice su comentario.
 - Limite: el conteo vive en memoria por instancia; en Cloud Run la evidencia se lee del log.
-- Pendiente: declarar los prefijos no observados (acciones de escritura y pantallas fuera del menu), encender la sombra en produccion con aprobacion y cumplir la ventana de observacion, y sustituir el atajo de `pasante`.
+- Hecho (2026-10-08): el registro se completo con evidencia estatica. `backend/scripts/rbac/generate_api_module_registry.js` sigue los imports de cada pantalla de `AppRoutes.jsx` y anota que APIs alcanza; la une con lo observado y escribe `apiModuleRegistry.data.json` (lo que lee el backend) y `docs/plans/rbac-inventory/api-por-modulo.md` (lo que se aprueba). Tiene modo `--check`. Resultado: 47 de 59 prefijos privados declarados, 5 transversales; 9 sin evidencia de uso desde una pantalla y 3 solo alcanzadas desde el layout comun quedan sin declarar.
+- Limites de la evidencia estatica: exagera cuando un componente compartido arrastra APIs a pantallas que no las usan; solo marca transversal lo que se observo desde todas las pantallas; no ve llamadas armadas con una URL base propia (FamDays, Kickoff).
+- Pendiente: aprobacion funcional de `api-por-modulo.md`, revisar los 12 prefijos sin declarar, encender la sombra en produccion con aprobacion y cumplir la ventana de observacion, y sustituir el atajo de `pasante`.
 
 Compuerta de salida:
 
@@ -393,6 +397,16 @@ Compuerta de salida:
 - Ningun usuario pierde o gana permisos por el solo hecho de cargar los catalogos.
 - Neon y manifiesto central producen resultados reproducibles.
 
+Avance al 2026-10-08 (validado solo en el ambiente local; produccion no se toco):
+
+- Hecho: migracion `316_rbac_central_assignments.sql` con `user_role_assignments`, `user_permission_grants` y `rbac_endpoint_permissions`. Las asignaciones van por usuario porque 286 ata `user_roles` a un tenant y el tenant esta fuera de alcance. Aplicada solo en la base local; idempotente (se aplico dos veces).
+- Hecho: `backend/scripts/rbac/seed_rbac_catalog.js` deriva todo del codigo y de los datos: 63 modulos, 62 roles, 514 permisos provisionales (`<area>.<recurso>.<accion>`, con `-v2` cuando un mismo nombre agrupa roles distintos), 7.107 relaciones rol-permiso, 1.075 endpoints mapeados y 69 asignaciones heredadas de los 59 usuarios (rol, scope derivado del login y `extra_roles`). Se niega a correr fuera de localhost. Idempotente (dos corridas, mismos conteos).
+- Hecho: los 5 usuarios con valor no convertible (`pending`, `"null"`) no se convierten, como exige la fase; quedan listados en `catalogo-central-informe.md` y siguen sin acceso, igual que hoy.
+- Hecho: `verify_central_parity.js` ejecuta las funciones `requireRole` REALES de los 1.075 endpoints con guarda de rol contra 68 usuarios de prueba (todos los roles del catalogo, `extra_roles` reales, valores invalidos, administrador, pasante con y sin modulo verificado): 74.175 comparaciones, 0 diferencias. Y compara las asignaciones guardadas con los roles que ve `requireRole` para los 59 usuarios: 0 diferencias. Resultado en `paridad-motor-central.md`.
+- Los nombres de permiso son provisionales. Que 51 nombres agrupen roles distintos es una inconsistencia entre endpoints parecidos que cada responsable de area debe decidir si corrige o conserva (`catalogo-central-informe.md`).
+- Rendimiento medido en local: 20,9 microsegundos por decision del motor central con la cache caliente, frente a 0,7 de `requireRole` solo. La cache (60 s) refresca el modelo y los roles de cada usuario con dos consultas por minuto. Medicion en produccion pendiente.
+- Pendiente de la fase: publicar un manifiesto versionado nuevo en `/auth/me`. Hoy `/auth/me` ya publica `permissions` y `authorization_manifest_version`; los roles centrales no se publican a proposito, porque el catalogo completo en el token puede quedar obsoleto.
+
 ### Fase 4 - Motor central en modo sombra
 
 Objetivo: calcular permisos centralmente sin cambiar respuestas productivas.
@@ -415,6 +429,8 @@ Compuerta de salida:
 - Rendimiento dentro del presupuesto definido con medicion real.
 - Los contratos existentes permanecen compatibles.
 
+Avance al 2026-10-08 (solo local): modo sombra del motor central (`centralShadow.js`, bandera `RBAC_CENTRAL_SHADOW`). Al terminar cada respuesta compara la decision central con el 403 real, con tiempo limite de 2 s, errores descartados, sin identificadores de usuario y con un resumen cada 500 evaluaciones. Con los 17 roles recorriendo todo el menu encontro un defecto real de mi mapa (una ruta sin guarda, `/requests/new-client/my`, se confundia con la ruta parametrica `/new-client/:id`), corregido y con prueba. Falta repetir la ventana de observacion en produccion.
+
 ### Fase 5 - Piloto de enforcement
 
 Objetivo: validar el modelo completo en un modulo controlado.
@@ -436,6 +452,8 @@ Compuerta de salida:
 - No existen regresiones en los demas modulos.
 - Rollback ejercitado y documentado.
 - Aceptacion funcional y tecnica registrada.
+
+Avance al 2026-10-08 (solo local): `module_access.*` se decide con el motor central cuando `RBAC_CENTRAL_PILOT=true` (`authorization.middleware.js`). Si el motor falla, agota el tiempo o no conoce el permiso, decide la regla de siempre; con la bandera apagada el comportamiento y el contrato de `req.authorization` no cambian. Pruebas: bandera apagada, central permite, central niega, fallo, permiso desconocido y usuario sin id. Rollback: quitar la variable. Falta: activar en produccion y observar errores 401/403, latencia y divergencias.
 
 ### Fase 6 - UI unificada de administracion
 
@@ -481,6 +499,8 @@ Compuerta de salida:
 - Toda mutacion produce auditoria y actualiza el manifiesto/cache.
 - La UI cumple el checklist de `DESIGN.md`.
 
+Avance al 2026-10-08 (solo local): API `/api/v1/rbac` (`modules/rbac-admin`, permisos `rbac.read` y `rbac.manage` solo para `jefe_ti`/`admin_ti`) y pestana "Roles y permisos" dentro de `TIModuleAccessPage` (no se crea una pantalla paralela). Permite ver roles, permisos y acceso por usuario, asignar roles manuales y permisos individuales con motivo obligatorio y vencimiento futuro, y revocarlos. Nadie puede modificar sus propios roles. La pantalla dice de forma visible que hoy no cambia el acceso real. Cada mutacion es POST/DELETE, por lo que `auditMiddleware` la registra. Pendiente respecto al texto de la fase: la matriz como pagina dedicada, la pestana de auditoria con valor anterior y nuevo, y las comparaciones visuales en 390/768/1440 px.
+
 ### Fase 7 - Migracion controlada de modulos
 
 Objetivo: reemplazar reglas locales sin una migracion masiva.
@@ -513,6 +533,81 @@ Compuerta de salida por modulo:
 - Navegacion, URL directa y APIs coherentes.
 - Flujos de negocio y estados intactos.
 - Evidencia adjunta y rollback probado.
+
+Avance al 2026-10-08 (mecanismo listo, ningun modulo activado):
+
+- Hecho: enforcement central por area de la API con `RBAC_CENTRAL_ENFORCE="area1,area2"` (`centralEnforce.js`, llamado desde `requireRole`). Sin la variable `requireRole` se comporta exactamente como antes. Con ella, solo las areas listadas se deciden con el motor, usando los roles del token mas las asignaciones manuales de la base y los grants; ante area no listada, endpoint sin permiso en el catalogo, error o tiempo agotado decide `requireRole`. Rollback: quitar la variable (en Cloud Run se actualiza la variable, sin construir ni desplegar codigo).
+- Hecho: con el enforcement activo en TODAS las areas, las funciones reales de `requireRole` dan el mismo resultado que sin la bandera en las 74.175 comparaciones (0 diferencias).
+- Hecho: las mutaciones administrativas dejan rastro. Una asignacion y su revocacion hechas desde la pantalla quedaron en `auditoria.logs` (modulo `rbac`, acciones `crear` y `eliminar`, con actor y rol), y la tabla conserva quien concedio, que, a quien, cuando, por que y hasta cuando. La pestana de auditoria con valor anterior y nuevo sigue pendiente.
+- Defecto ajeno al RBAC encontrado en la verificacion, sin corregir: `requests.controller.js` (listado de solicitudes de cliente) pasa un texto como detalle JSON a `logAction`, la insercion falla y cae al respaldo. Se pierde esa auditoria y el log se llena de errores.
+- No hecho, y no es posible hacerlo de una vez: la migracion modulo por modulo exige, por cada ola, ventana de observacion en produccion con la sombra encendida, aprobacion funcional del responsable de area y activacion con rollback ensayado. Esos pasos requieren tiempo calendario y personas; ver el procedimiento en `docs/plans/rbac-runbook-activacion.md`.
+
+Segunda entrega del 2026-10-08 (solo local; 316 aprobada solo para el ambiente local):
+
+- Hecho (Fase 6): la pestana "Roles y permisos" ahora tiene tres vistas: Usuarios, Matriz (permisos por rol y area, con encabezados fijos y desplazamiento propio) y Auditoria (quien cambio que, con valor anterior y nuevo). Pruebas en navegador: la matriz y la auditoria cargan, un cambio queda con antes y despues, y a 390 px de ancho no hay desborde horizontal en ninguna de las tres.
+- Hecho (Fase 8): cada alta, baja, grant y sincronizacion escribe un registro de negocio (modulo `rbac_cambios`) con valor anterior y nuevo, ademas del registro generico de la peticion. Si la auditoria falla no deshace el cambio ya hecho.
+- Hecho (pendiente conocido de la Fase 3): las asignaciones heredadas de `users.role` y `extra_roles` ya no quedan desactualizadas. Al abrir un usuario en la pantalla se ponen al dia, y `POST /rbac/sync-inherited` lo hace para todos. Probado: al cambiar `extra_roles` de un usuario aparece y desaparece la asignacion heredada, y una segunda sincronizacion no cambia nada (0 agregadas, 0 retiradas). La derivacion vive en un solo modulo (`inheritedAssignments.js`) que usan el sembrador y la pantalla.
+- Sigue pendiente de la Fase 6: comparaciones visuales en 768 y 1440 px y pruebas de teclado y contraste con herramienta; en 390 px solo se verifico el desborde.
+
+Tercera entrega del 2026-10-08: cierre en el ambiente de pruebas. Todo lo siguiente es local; produccion no se toco.
+
+- Estado de partida del ambiente local: `RBAC_MODULE_SHADOW`, `RBAC_CENTRAL_SHADOW`, `RBAC_CENTRAL_PILOT` y `RBAC_CENTRAL_ENFORCE="*"` activos en `scripts/staging_local.ps1`. El valor `"*"` activa todas las areas y existe solo para ensayar; en produccion se listan las areas una a una.
+- Hecho (Fase 7, ensayo): con el enforcement central en todas las areas, 54 de 54 pruebas de navegador pasan (navegacion de los 17 roles, vistas, panel, accesibilidad y enforcement). Las funciones reales de `requireRole` de los 1.075 endpoints dan el mismo resultado con y sin la bandera en 74.175 comparaciones.
+- Hecho (Fase 7, efecto real): barrido de 229 endpoints GET como `comercial`: 145 devuelven 403, y 18 de ellos pasan a 200 solo por una asignacion manual del rol `financiero`, y vuelven a 403 al revocarla. Probado ademas por la API: grant individual, asignacion con vencimiento, motivo obligatorio, vencimiento futuro, nadie se modifica a si mismo, y quien no es de TI no puede administrar roles ni escalar privilegios.
+- Hecho (Fase 5, expiracion): un rol o grant con vencimiento deja de valer al vencer aunque la cache no haya expirado (antes podia sostenerse hasta 60 s). Probado con un rol de 4 s: entra, y a los 5,5 s da 403.
+- Hecho (Fases 5 y 7, rollback ensayado): se reinicio el backend local sin `RBAC_CENTRAL_ENFORCE`. La asignacion manual se guarda pero ya no abre el acceso, el rol de siempre sigue entrando y la navegacion de los 17 roles es identica a la linea base (`rbac-rollback.spec.js`).
+- Hecho (Fase 6): accesibilidad con axe WCAG 2.2 AA a 390, 768 y 1440 px y en tema oscuro, navegacion por teclado con foco visible, zoom equivalente a 200 % y objetivos tactiles de 44 px. Encontro y se corrigieron dos fallos reales: un boton dentro de la lista de pestanas y tres regiones con desplazamiento inalcanzables por teclado. Pruebas de componentes con todos los estados: carga, error recuperable (con Reintentar), restringido (403), vacio y exito.
+- Hecho (Fase 1B): el flujo de CI se valido localmente paso a paso: YAML valido, `npm ci --dry-run` correcto en backend y frontend, lint sin errores, inventarios al dia y suites verdes. Sigue sin ejecutarse en GitHub.
+- Las pruebas de navegador no incluyen comparacion visual con capturas de referencia: la adaptacion se verifica por desborde, accesibilidad y objetivos tactiles, no pixel a pixel.
+
+Lo que no se puede cerrar en el ambiente de pruebas (condiciones de salida que dependen de produccion, de personas o del calendario):
+
+| Pendiente | Por que no se cierra aqui |
+|---|---|
+| Aprobacion funcional de la matriz y de los nombres de permiso (Fases 0, 3 y 7) | la da el jefe de cada area |
+| Ventana de observacion de la sombra con trafico real (Fases 2, 4 y 5) | exige dias de uso real en produccion |
+| Activacion area por area con observacion entre una y otra (Fase 7) | exige produccion y tiempo |
+| Migracion 316 y siembra en produccion | requiere aprobacion expresa; el sembrador hoy se niega fuera de localhost |
+| CI en GitHub (Fase 1B) | se ejecuta al subir el codigo |
+| Retirar `x-app-path` como autoridad y las comparaciones de rol del frontend (Fase 9) | depende de la aprobacion del registro ruta API a modulo (hoy parcialmente estatico: sustituir el encabezado lo haria mas permisivo) y de terminar la Fase 7 |
+
+Cuarta entrega del 2026-10-08: constructor de roles (enfoque SaaS, paso 1). Decision del dueno del producto: el software es un SaaS, lo que revierte la restriccion 12 (tenant fuera de alcance) como direccion de producto; se empieza por el constructor de roles con una sola empresa y el modelo multiempresa queda como paso 2 y 3.
+
+- Hecho: pestana "Roles" en la pantalla de administracion (TI): lista de roles con tipo (Sistema o Personalizado), cantidad de permisos y usuarios; crear, editar y archivar roles personalizados; ver y duplicar roles de sistema; selector de permisos agrupado por parte del sistema con "todo el grupo", busqueda y contador; motivo obligatorio; copiar los permisos de otro rol.
+- Hecho: API `/api/v1/rbac/roles` (crear, leer, editar, archivar) con las protecciones: prefijo `custom_` obligatorio (nadie puede crear un rol llamado `admin`), sin delegacion de permisos de administracion del RBAC, roles de sistema inmutables, un rol con usuarios activos no se archiva, todo en transaccion y con auditoria de antes y despues.
+- Hecho: un rol personalizado asignado a un usuario abre acceso real en las areas con el control central activo y editarlo cambia ese acceso de inmediato. Probado en navegador y por la API.
+- Hecho: el sembrador conserva los roles personalizados y sus permisos al volver a correr (antes borraba todos los vinculos rol-permiso de lo generado).
+- Hecho: accesibilidad del constructor (axe WCAG 2.2 AA) a 390 y 1440 px en claro y oscuro. Encontro un desborde horizontal real en la lista de roles a 390 px, causado por texto oculto para lectores de pantalla fuera de la region con desplazamiento; corregido.
+- Limites: los roles son globales (`tenant_id` NULL); no hay administrador por empresa ni aislamiento entre empresas; un rol personalizado no tiene efecto donde el control central esta apagado; un rol archivado conserva su nombre reservado.
+- Paso 2 (siguiente): modelo multiempresa. Llenar `tenants` con la empresa actual, pasar roles, asignaciones, grants y auditoria a empresa y membresia, y usar `tenant_modules` para los modulos por plan. Paso 3: filtrar por empresa en las consultas del motor y separar el administrador de la empresa del de la plataforma. Son un proyecto aparte con su propia fase de pruebas.
+
+Quinta entrega del 2026-10-08: multiempresa, paso 2, con la condicion del dueno del producto de no afectar el funcionamiento actual.
+
+Garantias (todas verificadas, solo en el ambiente local):
+
+- Apagado por defecto (`RBAC_TENANT_MODE`). Apagado, el servicio ejecuta las mismas consultas de antes: las 16 pruebas de administracion y las 66 de seguridad existentes pasan sin modificarlas, y hay pruebas nuevas que fijan que no se agrega ninguna condicion de empresa.
+- Solo aditivo: la migracion `317_rbac_tenant_scope.sql` agrega columnas nulas a dos tablas propias de 316 y un indice; no cambia ninguna fila (se aplico dos veces: 94 asignaciones y 4 permisos antes y despues). No toca `users`, tablas de negocio, el token ni `requireRole`.
+- La empresa se resuelve en el servidor desde la membresia, nunca desde el token ni un encabezado.
+- Se probo en tres estados, con la regresion completa del navegador: (P0) modo apagado, (P1) modo encendido con una sola empresa, que debe dar exactamente lo mismo, y (P2) dos empresas, con las pruebas de aislamiento.
+
+Alcance del paso 2: empresa por defecto con todos los usuarios como miembros (`seed_tenants.js`); administradores acotados a su empresa; roles personalizados por empresa (mismo nombre tecnico permitido en dos empresas sin mezclar permisos); auditoria, matriz, conteos y resumen por empresa; listado de miembros propio (`GET /rbac/members`) para que la pantalla no muestre usuarios de otra empresa.
+
+Resultados (solo ambiente local, 2026-10-08):
+
+| Estado | Resultado |
+|---|---|
+| (P0) modo apagado, regresion completa del navegador | 60 de 60, identico a antes |
+| (P1) modo encendido, regresion completa + aislamiento | 67 de 67 (1 omitida: rollback del control central, que no aplica) |
+| (P2) dos empresas, aislamiento | 7 de 7 |
+| Backend | 142 suites, 1.015 pruebas |
+| Frontend | 19 suites, 142 pruebas, lint sin errores |
+| Equivalencia con requireRole (74.175 comparaciones, control central en todas las areas) | 0 diferencias |
+
+Defecto real encontrado y corregido durante P2: el piloto de `module_access` solo miraba las asignaciones de la base y negaba a un administrador de TI recien creado, aunque su rol del token si le correspondia. Ahora suma los roles del token, igual que el control por area; con pruebas.
+
+Decision de diseno registrada: las asignaciones heredadas de `users.role` y las anteriores al modo multiempresa tienen empresa nula y valen para todas las empresas del usuario; los registros de auditoria anteriores no tienen etiqueta y no se muestran a ninguna empresa; un rol personalizado anterior al modo se ve pero no se edita desde una empresa.
+
+Fuera del paso 2 (paso 3): administrador de plataforma separado, aislamiento de los datos de negocio y modulos por plan (`tenant_modules`). Se hara con el mismo metodo.
 
 ### Fase 8 - Auditoria y operacion
 

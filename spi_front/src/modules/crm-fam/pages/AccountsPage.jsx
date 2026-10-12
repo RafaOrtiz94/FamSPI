@@ -193,7 +193,7 @@ export default function AccountsPage() {
               <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Clasificación</th>
               <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Industria</th>
               <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Ciudad</th>
-              <th className="px-4 py-3 text-left font-medium hidden sm:table-cell"># Opp</th>
+              <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Opp. abiertas</th>
               <th className="px-4 py-3 text-left font-medium">Acciones</th>
             </tr>
           </thead>
@@ -219,7 +219,7 @@ export default function AccountsPage() {
                   <td className="px-4 py-3 hidden sm:table-cell"><ClassificationBadge value={acc.classification} /></td>
                   <td className="px-4 py-3 text-[#6B7280] hidden sm:table-cell">{acc.industry || "—"}</td>
                   <td className="px-4 py-3 text-[#6B7280] hidden sm:table-cell">{acc.city || "—"}</td>
-                  <td className="px-4 py-3 text-[#6B7280] hidden sm:table-cell">{acc.opportunities_count ?? 0}</td>
+                  <td className="px-4 py-3 text-[#6B7280] hidden sm:table-cell">{acc.open_opportunity_count ?? 0}</td>
                   <td className="px-4 py-3">
                     <button
                       onClick={e => { e.stopPropagation(); navigate(`/dashboard/crm-fam/accounts/${acc.id}`); }}

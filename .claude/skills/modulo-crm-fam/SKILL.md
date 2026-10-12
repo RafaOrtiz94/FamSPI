@@ -82,7 +82,9 @@ Solo managers (`isManager(user)` en `crm.service.js`) pueden aprobar/observar/re
 
 5. **Roles de este módulo no usan `ROLE_GROUPS`** de `middlewares/roles.js` — `crm.routes.js` arma sus propios sets (`crmRoles`, `managerRoles`, `adminRoles`) localmente en el archivo. Si cambias un grupo de roles central, este módulo no se entera.
 
-6. **`account.visibility`** (`company`/`team`/`private`) determina si otros comerciales ven la cuenta. Un lead sin cuenta vinculada (`converted_account_id` null) es visible solo para su owner/creador salvo manager — ver `canAccessLead`.
+6. **Cuentas: planes y KPI de pipeline.** Una cuenta tiene VARIOS planes (`crm.crm_account_plans`: meta, periodo opcional, vendedor, estado). `crm_accounts.sales_target_amount` es solo histórico: no lo escribas. El KPI "pipeline a generar" sale de `calculateRequiredPipeline` con el win rate y el promedio del VENDEDOR del plan (todas sus oportunidades), no de la cuenta. "Vendido" = `status='won'` O abierta en la etapa *Contratos* (mover de etapa no cierra la oportunidad; `closeWon` es aparte). `mergeAccounts` también reasigna planes, destinatarios de campañas y `work_management.projects.crm_account_id`, omitiendo tablas que no existan en el entorno.
+
+7. **`account.visibility`** (`company`/`team`/`private`) determina si otros comerciales ven la cuenta. Un lead sin cuenta vinculada (`converted_account_id` null) es visible solo para su owner/creador salvo manager — ver `canAccessLead`.
 
 ---
 
@@ -111,7 +113,7 @@ Solo managers (`isManager(user)` en `crm.service.js`) pueden aprobar/observar/re
 - `spi_front/src/core/ui/components/NavigationBar.jsx` — entrada "CRM-FAM" (ícono `FiTarget`) → `/dashboard/crm-fam`.
 
 ### Base de datos
-Schema dedicado `crm` (no `public`), 24 tablas, PK `uuid gen_random_uuid()`, FK a usuarios `integer references public.users(id)`. Migraciones: `231_crm_schema_init.sql`, `232_crm_catalogs_seed.sql`, `233_crm_sub_tables_schema_fix.sql`, `239_scheduled_visits_crm_activity_id.sql`, `240_crm_leads_city_and_scheduled_visits_lead_id.sql`, `242_crm_embudo_ventas_8_fases.sql`, `243_crm_activities_missing_columns.sql`.
+Schema dedicado `crm` (no `public`), 24 tablas, PK `uuid gen_random_uuid()`, FK a usuarios `integer references public.users(id)`. Migraciones: `231_crm_schema_init.sql`, `232_crm_catalogs_seed.sql`, `233_crm_sub_tables_schema_fix.sql`, `239_scheduled_visits_crm_activity_id.sql`, `240_crm_leads_city_and_scheduled_visits_lead_id.sql`, `242_crm_embudo_ventas_8_fases.sql`, `243_crm_activities_missing_columns.sql`, `301_crm_accounts_classification_sales_target.sql` (clasificación oro/plata/bronce/normal), `313_crm_email_campaigns.sql`, `318_crm_account_plans.sql` (planes de cuenta).
 
 Tablas: `crm_pipeline_stages`, `crm_accounts`, `crm_contacts`, `crm_leads`, `crm_opportunities`, `crm_opportunity_products`, `crm_blue_sheets`, `crm_blue_sheet_versions`, `crm_buying_influences`, `crm_win_results`, `crm_competitors`, `crm_competitive_preferences`, `crm_strengths`, `crm_red_flags`, `crm_scorecard_criteria`, `crm_scorecard_answers`, `crm_action_items`, `crm_activities`, `crm_documents`, `crm_notes`, `crm_review_comments`, `crm_lost_reasons`, `crm_audit_log`, `crm_integration_outbox`.
 

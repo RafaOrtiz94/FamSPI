@@ -48,7 +48,11 @@ export const createAccount = (data) => api.post("/crm-fam/accounts", data).then(
 export const updateAccount = (id, data) => api.put(`/crm-fam/accounts/${id}`, data).then(r => r.data?.data);
 export const deleteAccount = (id) => api.delete(`/crm-fam/accounts/${id}`).then(r => r.data?.data);
 export const fetchAccountTimeline = (id) => api.get(`/crm-fam/accounts/${id}/timeline`).then(r => r.data?.data);
-export const fetchAccountSalesStats = (id) => api.get(`/crm-fam/accounts/${id}/sales-stats`).then(r => r.data?.data);
+export const fetchAccountSalesStats = (id, planId) => api.get(`/crm-fam/accounts/${id}/sales-stats`, { params: planId ? { plan_id: planId } : {} }).then(r => r.data?.data);
+export const fetchAccountPlans = (id) => api.get(`/crm-fam/accounts/${id}/plans`).then(r => r.data?.data);
+export const createAccountPlan = (id, data) => api.post(`/crm-fam/accounts/${id}/plans`, data).then(r => r.data?.data);
+export const updateAccountPlan = (id, planId, data) => api.put(`/crm-fam/accounts/${id}/plans/${planId}`, data).then(r => r.data?.data);
+export const deleteAccountPlan = (id, planId) => api.delete(`/crm-fam/accounts/${id}/plans/${planId}`).then(r => r.data?.data);
 export const fetchAccountDuplicates = (id) => api.get(`/crm-fam/accounts/${id}/duplicates`).then(r => r.data?.data);
 export const mergeAccounts = (targetId, sourceId) => api.post(`/crm-fam/accounts/${targetId}/merge`, { source_id: sourceId }).then(r => r.data?.data);
 
@@ -206,6 +210,10 @@ const crmFamApi = {
   deleteAccount,
   fetchAccountTimeline,
   fetchAccountSalesStats,
+  fetchAccountPlans,
+  createAccountPlan,
+  updateAccountPlan,
+  deleteAccountPlan,
   fetchAccountDuplicates,
   mergeAccounts,
   fetchContacts,

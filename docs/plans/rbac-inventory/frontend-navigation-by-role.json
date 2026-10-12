@@ -524,10 +524,6 @@
         "label": "Capacitaciones"
       },
       {
-        "href": "/dashboard/comercial/solicitudes",
-        "label": "Solicitudes"
-      },
-      {
         "href": "/dashboard/famdays",
         "label": "FamDays"
       },
@@ -657,15 +653,10 @@
       "Finanzas",
       "Herramientas",
       "Personas",
-      "Reportes",
       "Servicio Técnico",
       "Ventas"
     ],
     "links": [
-      {
-        "href": "/dashboard/business-case/observabilidad",
-        "label": "Obs. BC"
-      },
       {
         "href": "/dashboard/buzon-sugerencias",
         "label": "Buzón de sugerencias"

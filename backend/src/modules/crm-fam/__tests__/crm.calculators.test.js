@@ -133,3 +133,28 @@ describe('calculateHealthScore', () => {
     expect(score).toBeLessThan(80);
   });
 });
+
+describe('calculateRequiredPipeline', () => {
+  const { calculateRequiredPipeline } = require('../crm.calculators');
+
+  test('meta 1.000.000, 50% win rate, 50.000 promedio -> 2.000.000 y 40 oportunidades', () => {
+    expect(calculateRequiredPipeline({ targetAmount: 1000000, soldAmount: 0, winRatePct: 50, avgDealSize: 50000 }))
+      .toEqual({ remaining_to_target: 1000000, required_pipeline_amount: 2000000, opportunities_to_generate: 40 });
+  });
+  test('descuenta lo ya vendido', () => {
+    expect(calculateRequiredPipeline({ targetAmount: 1000000, soldAmount: 400000, winRatePct: 50, avgDealSize: 50000 }))
+      .toEqual({ remaining_to_target: 600000, required_pipeline_amount: 1200000, opportunities_to_generate: 24 });
+  });
+  test('meta cumplida -> nada por generar', () => {
+    expect(calculateRequiredPipeline({ targetAmount: 100, soldAmount: 150, winRatePct: 50, avgDealSize: 10 }))
+      .toEqual({ remaining_to_target: 0, required_pipeline_amount: 0, opportunities_to_generate: 0 });
+  });
+  test('sin historial (win rate null) no inventa valores', () => {
+    expect(calculateRequiredPipeline({ targetAmount: 1000, soldAmount: 0, winRatePct: null, avgDealSize: null }))
+      .toEqual({ remaining_to_target: 1000, required_pipeline_amount: null, opportunities_to_generate: null });
+  });
+  test('sin plan (meta null) devuelve todo null', () => {
+    expect(calculateRequiredPipeline({ targetAmount: null, soldAmount: 0, winRatePct: 50, avgDealSize: 10 }))
+      .toEqual({ remaining_to_target: null, required_pipeline_amount: null, opportunities_to_generate: null });
+  });
+});

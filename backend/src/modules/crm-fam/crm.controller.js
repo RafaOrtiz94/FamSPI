@@ -10,7 +10,11 @@ const createAccount = (req, res) => respond(res, service.createAccount(req.body,
 const updateAccount = (req, res) => respond(res, service.updateAccount(req.params.id, req.body, req.user));
 const softDeleteAccount = (req, res) => respond(res, service.softDeleteAccount(req.params.id, req.user));
 const getAccountTimeline = (req, res) => respond(res, service.getAccountTimeline(req.params.id, req.user));
-const getAccountSalesStats = (req, res) => respond(res, service.getAccountSalesStats(req.params.id, req.user));
+const getAccountSalesStats = (req, res) => respond(res, service.getAccountSalesStats(req.params.id, req.user, req.query.plan_id));
+const listAccountPlans = (req, res) => respond(res, service.listAccountPlans(req.params.id, req.user));
+const createAccountPlan = (req, res) => respond(res, service.createAccountPlan(req.params.id, req.body, req.user));
+const updateAccountPlan = (req, res) => respond(res, service.updateAccountPlan(req.params.id, req.params.planId, req.body, req.user));
+const softDeleteAccountPlan = (req, res) => respond(res, service.softDeleteAccountPlan(req.params.id, req.params.planId, req.user));
 const mergeAccounts = (req, res) => respond(res, service.mergeAccounts(req.params.id, req.body?.source_id, req.user));
 const getAccountDuplicateCandidates = (req, res) => respond(res, service.getAccountDuplicateCandidates(req.params.id, req.user));
 
@@ -188,6 +192,7 @@ const downloadBlueSheetPdf = async (req, res) => {
 module.exports = {
   listAccounts, getAccountById, createAccount, updateAccount, softDeleteAccount, getAccountTimeline,
   getAccountSalesStats, mergeAccounts, getAccountDuplicateCandidates,
+  listAccountPlans, createAccountPlan, updateAccountPlan, softDeleteAccountPlan,
   listContacts, getContactById, createContact, updateContact, softDeleteContact,
   listEmailCampaigns, getEmailCampaignById, createEmailCampaign, updateEmailCampaign, softDeleteEmailCampaign,
   listLeads, getLeadById, createLead, updateLead, softDeleteLead, convertLead, disqualifyLead,

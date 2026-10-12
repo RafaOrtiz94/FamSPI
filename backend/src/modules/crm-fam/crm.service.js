@@ -292,9 +292,14 @@ const assertValidClassification = (value) => {
   }
 };
 
-const listAccounts = async ({ q, status, owner_user_id, classification, limit = 50, offset = 0, user } = {}) => {
+const listAccounts = async ({ q, status, owner_user_id, classification, account_type, limit = 50, offset = 0, user } = {}) => {
   const conditions = ['a.deleted_at IS NULL'];
   const params = [];
+
+  if (account_type) {
+    params.push(account_type);
+    conditions.push(`a.account_type = $${params.length}`);
+  }
 
   if (q) {
     params.push(`%${q}%`);
@@ -408,8 +413,8 @@ const createAccount = async (data, user) => {
     `INSERT INTO crm.crm_accounts
       (account_name, legal_name, ruc, account_type, industry, employee_count_range, annual_revenue_range,
        country, province, city, address, website, phone, email, linkedin_url,
-       status, visibility, owner_user_id, notes, classification, sales_target_amount, created_by, updated_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$22)
+       status, visibility, owner_user_id, notes, classification, created_by, updated_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$21)
      RETURNING *`,
     [
       data.account_name, data.legal_name || null, data.ruc || null,
@@ -419,8 +424,7 @@ const createAccount = async (data, user) => {
       data.address || null, data.website || null, data.phone || null,
       data.email || null, data.linkedin_url || null,
       data.status || 'active', data.visibility || 'company',
-      owner, data.notes || null, data.classification || null,
-      data.sales_target_amount ?? null, user.id,
+      owner, data.notes || null, data.classification || null, user.id,
     ]
   );
 
@@ -456,7 +460,7 @@ const updateAccount = async (id, data, user) => {
     'employee_count_range','annual_revenue_range','country','province',
     'city','address','website','phone','email','linkedin_url',
     'status','visibility','owner_user_id','notes',
-    'classification','sales_target_amount',
+    'classification',
   ];
 
   const sets = [];
@@ -560,73 +564,250 @@ const getAccountTimeline = async (id, user) => {
   return { leads, opportunities, activities, notes, documents, business_cases: businessCases, private_purchases: privatePurchases };
 };
 
-// Estadisticas de ventas por cuenta -- para proyecciones comerciales
-// (independiente de la clasificacion oro/plata/bronce/normal, ver
-// requerimiento explicito del usuario: "fuera de la clasificacion").
-// Se basa en crm.crm_opportunities.status ('open'/'won'/'lost'/'cancelled')
-// y en el monto de meta guardado en crm_accounts.sales_target_amount.
-const getAccountSalesStats = async (id, user) => {
-  const account = await getAccountById(id, user); // throws 404/403
+// ─── Planes de cuenta ────────────────────────────────────────────────────────
+// Una cuenta puede tener varios planes (meta por periodo y vendedor). La meta
+// unica crm_accounts.sales_target_amount quedo como dato historico.
+
+const PLAN_STATUSES = new Set(['active', 'closed']);
+const PLAN_FIELDS = ['name', 'period_start', 'period_end', 'target_amount', 'seller_user_id', 'status', 'notes'];
+
+const normalizePlanInput = (data, { partial }) => {
+  const out = {};
+  for (const f of PLAN_FIELDS) {
+    if (data[f] !== undefined) out[f] = data[f] === '' ? null : data[f];
+  }
+  if (!partial || out.name !== undefined) {
+    if (!out.name || !String(out.name).trim()) throw mkErr('El nombre del plan es obligatorio', 400);
+    out.name = String(out.name).trim();
+  }
+  if (!partial || out.target_amount !== undefined) {
+    const n = Number(out.target_amount);
+    if (out.target_amount === null || out.target_amount === undefined || !Number.isFinite(n) || n < 0) {
+      throw mkErr('La meta del plan debe ser un monto mayor o igual a 0', 400);
+    }
+    out.target_amount = n;
+  }
+  if (out.status !== undefined && !PLAN_STATUSES.has(out.status)) {
+    throw mkErr('Estado de plan inválido (active o closed)', 400);
+  }
+  if (out.period_start && out.period_end && out.period_end < out.period_start) {
+    throw mkErr('El fin del periodo no puede ser anterior al inicio', 400);
+  }
+  return out;
+};
+
+const PLAN_SELECT = `
+  SELECT p.*, u.fullname AS seller_name
+    FROM crm.crm_account_plans p
+    LEFT JOIN public.users u ON u.id = p.seller_user_id`;
+
+const listAccountPlans = async (accountId, user) => {
+  await getAccountById(accountId, user); // 404/403
+  const { rows } = await db.query(
+    `${PLAN_SELECT}
+      WHERE p.account_id = $1 AND p.deleted_at IS NULL
+      ORDER BY (p.status = 'active') DESC, p.period_start DESC NULLS LAST, p.created_at DESC`,
+    [accountId]
+  );
+  return rows;
+};
+
+const getAccountPlan = async (accountId, planId) => {
+  const { rows } = await db.query(
+    `${PLAN_SELECT} WHERE p.id = $1 AND p.account_id = $2 AND p.deleted_at IS NULL`,
+    [planId, accountId]
+  );
+  if (!rows.length) throw mkErr('Plan no encontrado', 404);
+  return rows[0];
+};
+
+const createAccountPlan = async (accountId, data = {}, user) => {
+  const account = await getAccountById(accountId, user); // 404/403
+  const input = normalizePlanInput(data, { partial: false });
+  // Solo managers asignan un vendedor distinto al propietario de la cuenta.
+  const seller = isManager(user) && input.seller_user_id ? input.seller_user_id : account.owner_user_id;
 
   const { rows } = await db.query(
-    `SELECT status, COUNT(*)::int AS count,
-            COALESCE(SUM(estimated_amount), 0)::numeric AS estimated_total,
-            COALESCE(SUM(won_amount), 0)::numeric AS won_total
-       FROM crm.crm_opportunities
-      WHERE account_id = $1 AND deleted_at IS NULL
-      GROUP BY status`,
+    `INSERT INTO crm.crm_account_plans
+       (account_id, name, period_start, period_end, target_amount, seller_user_id, status, notes, created_by, updated_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9) RETURNING id`,
+    [
+      accountId, input.name, input.period_start || null, input.period_end || null,
+      input.target_amount, seller, input.status || 'active', input.notes || null, user.id,
+    ]
+  );
+  return getAccountPlan(accountId, rows[0].id);
+};
+
+const updateAccountPlan = async (accountId, planId, data = {}, user) => {
+  await getAccountById(accountId, user); // 404/403
+  const current = await getAccountPlan(accountId, planId);
+  const input = normalizePlanInput(data, { partial: true });
+  if (input.seller_user_id !== undefined && !isManager(user)) delete input.seller_user_id;
+
+  const start = input.period_start !== undefined ? input.period_start : current.period_start;
+  const end = input.period_end !== undefined ? input.period_end : current.period_end;
+  if (start && end && new Date(end) < new Date(start)) {
+    throw mkErr('El fin del periodo no puede ser anterior al inicio', 400);
+  }
+
+  const sets = [];
+  const params = [];
+  for (const [field, value] of Object.entries(input)) {
+    params.push(value);
+    sets.push(`${field} = $${params.length}`);
+  }
+  if (!sets.length) return current;
+
+  params.push(user.id);
+  sets.push(`updated_by = $${params.length}`, 'updated_at = now()');
+  params.push(planId);
+  await db.query(`UPDATE crm.crm_account_plans SET ${sets.join(', ')} WHERE id = $${params.length}`, params);
+  return getAccountPlan(accountId, planId);
+};
+
+const softDeleteAccountPlan = async (accountId, planId, user) => {
+  await getAccountById(accountId, user); // 404/403
+  await getAccountPlan(accountId, planId); // 404
+  await db.query(
+    `UPDATE crm.crm_account_plans SET deleted_at = now(), updated_by = $2 WHERE id = $1`,
+    [planId, user.id]
+  );
+  return { id: planId, deleted: true };
+};
+
+// Estadisticas de ventas por cuenta y plan -- para proyecciones comerciales.
+//
+// "Vendido" = oportunidad ganada (status 'won') O que ya esta en la fase
+// "Contratos" del embudo (aun status 'open': cambiar de etapa no cierra la
+// oportunidad). Monto: won_amount, o el estimado si no se registro.
+// Si el plan tiene periodo, solo cuenta lo cerrado dentro de el (fecha de
+// cierre real, o la estimada mientras siga abierta); sin periodo, todo el historico.
+//
+// El pipeline necesario sale del historial del VENDEDOR del plan (todas sus
+// oportunidades), no del de esta cuenta: ver calculateRequiredPipeline.
+const SOLD_CONDITION = `(o.status = 'won' OR (o.status = 'open' AND st.name = 'Contratos'))`;
+const SOLD_AMOUNT = `COALESCE(o.won_amount, o.estimated_amount, 0)`;
+
+const getAccountSalesStats = async (id, user, planId) => {
+  const account = await getAccountById(id, user); // throws 404/403
+
+  let plan = null;
+  if (planId) {
+    plan = await getAccountPlan(id, planId);
+  } else {
+    const { rows } = await db.query(
+      `${PLAN_SELECT}
+        WHERE p.account_id = $1 AND p.deleted_at IS NULL
+        ORDER BY (p.status = 'active') DESC, p.period_start DESC NULLS LAST, p.created_at DESC
+        LIMIT 1`,
+      [id]
+    );
+    plan = rows[0] || null;
+  }
+
+  // Resumen de la cuenta (todo el historico).
+  const { rows: summaryRows } = await db.query(
+    `SELECT CASE WHEN ${SOLD_CONDITION} THEN 'won' ELSE o.status END AS bucket,
+            COUNT(*)::int AS count,
+            COALESCE(SUM(o.estimated_amount), 0)::numeric AS estimated_total,
+            COALESCE(SUM(${SOLD_AMOUNT}), 0)::numeric AS sold_total
+       FROM crm.crm_opportunities o
+       LEFT JOIN crm.crm_pipeline_stages st ON st.id = o.stage_id
+      WHERE o.account_id = $1 AND o.deleted_at IS NULL
+      GROUP BY 1`,
     [id]
   );
-
-  const byStatus = Object.fromEntries(rows.map((r) => [r.status, r]));
-  const openCount = Number(byStatus.open?.count || 0);
-  const wonCount = Number(byStatus.won?.count || 0);
-  const lostCount = Number(byStatus.lost?.count || 0);
-  const cancelledCount = Number(byStatus.cancelled?.count || 0);
+  const byBucket = Object.fromEntries(summaryRows.map((r) => [r.bucket, r]));
+  const openCount = Number(byBucket.open?.count || 0);
+  const wonCount = Number(byBucket.won?.count || 0);
+  const lostCount = Number(byBucket.lost?.count || 0);
+  const cancelledCount = Number(byBucket.cancelled?.count || 0);
   const totalOpportunities = openCount + wonCount + lostCount + cancelledCount;
+  const totalEstimatedAmount = summaryRows.reduce((sum, r) => sum + Number(r.estimated_total || 0), 0);
+  const decidedCount = wonCount + lostCount;
 
-  const totalEstimatedAmount = rows.reduce((sum, r) => sum + Number(r.estimated_total || 0), 0);
-  // won_amount puede quedar NULL si se cerro como ganada sin especificar
-  // monto final -- se usa el estimado de esa misma oportunidad como respaldo.
-  const wonAmount = Number(byStatus.won?.won_total || 0) || Number(byStatus.won?.estimated_total || 0);
-
-  const decidedCount = wonCount + lostCount; // oportunidades ya cerradas (ganadas o perdidas)
-  const winRatePct = decidedCount > 0 ? Number(((wonCount / decidedCount) * 100).toFixed(1)) : null;
-  const lossRatePct = decidedCount > 0 ? Number(((lostCount / decidedCount) * 100).toFixed(1)) : null;
-
-  const salesTargetAmount = account.sales_target_amount != null ? Number(account.sales_target_amount) : null;
-
-  // Tamaño de negocio promedio: preferir el promedio de lo ya ganado (dato
-  // real); si todavia no hay nada ganado, usar el promedio de todas las
-  // oportunidades generadas como mejor estimacion disponible.
-  const avgDealSize = wonCount > 0
-    ? wonAmount / wonCount
-    : (totalOpportunities > 0 ? totalEstimatedAmount / totalOpportunities : null);
-
-  let remainingToTarget = null;
-  let opportunitiesNeededForTarget = null;
-  if (salesTargetAmount != null) {
-    remainingToTarget = Math.max(0, salesTargetAmount - wonAmount);
-    opportunitiesNeededForTarget = (remainingToTarget > 0 && avgDealSize > 0)
-      ? Math.ceil(remainingToTarget / avgDealSize)
-      : 0;
+  // Vendido dentro del plan (periodo si lo tiene).
+  const soldParams = [id];
+  let periodClause = '';
+  if (plan?.period_start) {
+    soldParams.push(plan.period_start);
+    periodClause += ` AND COALESCE(o.actual_close_date, o.estimated_close_date) >= $${soldParams.length}::date`;
   }
+  if (plan?.period_end) {
+    soldParams.push(plan.period_end);
+    periodClause += ` AND COALESCE(o.actual_close_date, o.estimated_close_date) <= $${soldParams.length}::date`;
+  }
+  const { rows: soldRows } = await db.query(
+    `SELECT COUNT(*)::int AS count, COALESCE(SUM(${SOLD_AMOUNT}), 0)::numeric AS amount
+       FROM crm.crm_opportunities o
+       LEFT JOIN crm.crm_pipeline_stages st ON st.id = o.stage_id
+      WHERE o.account_id = $1 AND o.deleted_at IS NULL AND ${SOLD_CONDITION}${periodClause}`,
+    soldParams
+  );
+  const soldAmount = Number(soldRows[0]?.amount || 0);
+  const soldCount = Number(soldRows[0]?.count || 0);
+
+  // Historial del vendedor del plan (o, sin plan, propietario de la cuenta).
+  const sellerId = plan?.seller_user_id || account.owner_user_id || null;
+  let seller = { id: sellerId, name: plan?.seller_name || account.owner_name || null,
+                 won_count: 0, lost_count: 0, won_amount: 0, win_rate_pct: null, avg_deal_size: null };
+  if (sellerId) {
+    const { rows: sellerRows } = await db.query(
+      `SELECT COUNT(*) FILTER (WHERE ${SOLD_CONDITION})::int AS won_count,
+              COUNT(*) FILTER (WHERE o.status = 'lost')::int AS lost_count,
+              COALESCE(SUM(${SOLD_AMOUNT}) FILTER (WHERE ${SOLD_CONDITION}), 0)::numeric AS won_amount
+         FROM crm.crm_opportunities o
+         LEFT JOIN crm.crm_pipeline_stages st ON st.id = o.stage_id
+        WHERE o.owner_user_id = $1 AND o.deleted_at IS NULL`,
+      [sellerId]
+    );
+    const s = sellerRows[0] || {};
+    const sWon = Number(s.won_count || 0);
+    const sLost = Number(s.lost_count || 0);
+    const sAmount = Number(s.won_amount || 0);
+    seller = {
+      ...seller,
+      won_count: sWon,
+      lost_count: sLost,
+      won_amount: sAmount,
+      win_rate_pct: sWon + sLost > 0 ? Number(((sWon / (sWon + sLost)) * 100).toFixed(1)) : null,
+      avg_deal_size: sWon > 0 ? sAmount / sWon : null,
+    };
+  }
+
+  const targetAmount = plan ? Number(plan.target_amount) : null;
+  const pipeline = calculators.calculateRequiredPipeline({
+    targetAmount,
+    soldAmount,
+    winRatePct: seller.win_rate_pct,
+    avgDealSize: seller.avg_deal_size,
+  });
 
   return {
     classification: account.classification || null,
-    sales_target_amount: salesTargetAmount,
+    plan: plan && {
+      id: plan.id, name: plan.name, status: plan.status,
+      period_start: plan.period_start, period_end: plan.period_end,
+      target_amount: targetAmount,
+    },
+    seller,
+    // KPIs del plan
+    sales_target_amount: targetAmount,
+    sold_amount: soldAmount,
+    sold_opportunities: soldCount,
+    remaining_to_target: pipeline.remaining_to_target,
+    required_pipeline_amount: pipeline.required_pipeline_amount,
+    opportunities_to_generate: pipeline.opportunities_to_generate,
+    // Resumen de la cuenta
     total_opportunities: totalOpportunities,
     open_opportunities: openCount,
     won_opportunities: wonCount,
     lost_opportunities: lostCount,
     cancelled_opportunities: cancelledCount,
     total_estimated_amount: totalEstimatedAmount,
-    won_amount: wonAmount,
-    remaining_to_target: remainingToTarget,
-    avg_deal_size: avgDealSize,
-    opportunities_needed_for_target: opportunitiesNeededForTarget,
-    win_rate_pct: winRatePct,
-    loss_rate_pct: lossRatePct,
+    win_rate_pct: decidedCount > 0 ? Number(((wonCount / decidedCount) * 100).toFixed(1)) : null,
+    loss_rate_pct: decidedCount > 0 ? Number(((lostCount / decidedCount) * 100).toFixed(1)) : null,
   };
 };
 
@@ -653,21 +834,29 @@ const mergeAccounts = async (targetId, sourceId, user) => {
   try {
     await client.query('BEGIN');
 
+    // `table` va calificada con esquema. Las tablas de modulos posteriores
+    // (planes, campanas, work_management) pueden no existir aun en un entorno
+    // sin esa migracion: se omiten en vez de abortar la transaccion.
     const reassign = async (table, column) => {
+      const { rows: reg } = await client.query('SELECT to_regclass($1) AS t', [table]);
+      if (!reg[0].t) return 0;
       const { rowCount } = await client.query(
-        `UPDATE crm.${table} SET ${column} = $1 WHERE ${column} = $2`,
+        `UPDATE ${table} SET ${column} = $1 WHERE ${column} = $2`,
         [targetId, sourceId],
       );
       return rowCount;
     };
 
     const counts = {
-      contacts: await reassign('crm_contacts', 'account_id'),
-      opportunities: await reassign('crm_opportunities', 'account_id'),
-      leads: await reassign('crm_leads', 'converted_account_id'),
-      activities: await reassign('crm_activities', 'account_id'),
-      notes: await reassign('crm_notes', 'account_id'),
-      documents: await reassign('crm_documents', 'account_id'),
+      contacts: await reassign('crm.crm_contacts', 'account_id'),
+      opportunities: await reassign('crm.crm_opportunities', 'account_id'),
+      leads: await reassign('crm.crm_leads', 'converted_account_id'),
+      activities: await reassign('crm.crm_activities', 'account_id'),
+      notes: await reassign('crm.crm_notes', 'account_id'),
+      documents: await reassign('crm.crm_documents', 'account_id'),
+      plans: await reassign('crm.crm_account_plans', 'account_id'),
+      email_recipients: await reassign('crm.crm_email_campaign_recipients', 'account_id'),
+      work_projects: await reassign('work_management.projects', 'crm_account_id'),
     };
 
     await client.query(
@@ -3204,6 +3393,7 @@ module.exports = {
   // Accounts
   listAccounts, getAccountById, createAccount, updateAccount, softDeleteAccount, getAccountTimeline,
   getAccountSalesStats, mergeAccounts, getAccountDuplicateCandidates,
+  listAccountPlans, createAccountPlan, updateAccountPlan, softDeleteAccountPlan,
   // Contacts
   listContacts, getContactById, createContact, updateContact, softDeleteContact,
   // Email campaigns

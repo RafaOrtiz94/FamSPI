@@ -285,3 +285,16 @@ describe("process-notes: hilo de compra unido al del Business Case de origen", (
     expect(db.query.mock.calls[2][1]).toEqual([5, "bc-1"]);
   });
 });
+
+describe("etiqueta del proceso en compras privadas", () => {
+  it("lee el nombre del cliente desde client_snapshot, no de una columna client_name inexistente", async () => {
+    const db = require("../../../config/db");
+    const service = require("../processNotes.service");
+    db.query.mockReset();
+    db.query.mockResolvedValue({ rows: [{ id: "pp-1", label: "Cliente" }] });
+    await service.assertParticipantAccess("private_purchase", "pp-1", { id: 1, role: "admin" });
+    const labelQuery = db.query.mock.calls.map(([sql]) => sql).find((sql) => sql.includes("AS label FROM private_purchase_requests"));
+    expect(labelQuery).toMatch(/client_snapshot->>'name'/);
+    expect(labelQuery).not.toMatch(/\bclient_name\b/);
+  });
+});
