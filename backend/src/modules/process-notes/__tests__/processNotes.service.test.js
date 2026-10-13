@@ -104,6 +104,24 @@ describe("process-notes service", () => {
     ).rejects.toMatchObject({ status: 403 });
   });
 
+  test("allows backoffice to use private-purchase notes, as in the private purchase viewer routes", async () => {
+    await expect(service.createNote({
+      entityType: "private_purchase",
+      entityId: "private-123",
+      author: { id: 3, fullname: "Backoffice Uno", role: "backoffice" },
+      body: "Seguimiento de la compra privada",
+    })).resolves.toMatchObject({ entity_type: "private_purchase" });
+  });
+
+  test.each(["backoffice", "operaciones", "ing_servicio", "esp_app", "jefe_ti", "jefe_logistica"])("allows %s to use business-case notes", async (role) => {
+    await expect(service.createNote({
+      entityType: "business_case",
+      entityId: "bc-role-access",
+      author: { id: 2, fullname: "Participante", role },
+      body: "Seguimiento del Business Case",
+    })).resolves.toMatchObject({ entity_type: "business_case" });
+  });
+
   test.each(["jefe_financiero", "jefe_ti"])("allows %s to use public-purchase notes from the linked Business Case", async (role) => {
     await expect(service.createNote({
       entityType: "public_purchase",
@@ -243,6 +261,22 @@ describe("process-notes service", () => {
     await expect(
       service.recordAutomaticNote({ entityType: "business_case", entityId: "bc-1", author: { id: 1 }, body: "Sección cerrada" }),
     ).resolves.toBeNull();
+  });
+
+  test("records an automatic note when the authenticated user is identified by JWT subject", async () => {
+    const note = await service.recordAutomaticNote({
+      entityType: "business_case",
+      entityId: "bc-1",
+      author: { sub: "8", fullname: "Actor JWT", role: "comercial" },
+      body: "Sección cerrada en Business Case: Datos Generales",
+    });
+
+    expect(note).toMatchObject({
+      entity_type: "business_case",
+      entity_id: "bc-1",
+      author_id: 8,
+      author_name_snapshot: "Actor JWT",
+    });
   });
 });
 

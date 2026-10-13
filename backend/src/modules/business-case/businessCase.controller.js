@@ -296,6 +296,18 @@ async function noteSectionsClosed({ businessCaseId, sections, user, detail = nul
   });
 }
 
+// El bloqueo automático impide nuevas ediciones del rol comercial, pero no es
+// una completitud funcional. Se registra como hito independiente para que el
+// hilo del proceso refleje exactamente lo ocurrido.
+async function noteSectionAutoLocked({ businessCaseId, section, user }) {
+  const label = SECTION_NOTE_LABELS[section] || section;
+  await noteProcessEvent({
+    businessCaseId,
+    user,
+    body: `Sección bloqueada automáticamente tras guardar información comercial: ${label}.`,
+  });
+}
+
 // Hitos del BC que no son un cierre de seccion (envio a revision tecnica, decision de
 // factibilidad) pero deben quedar en las notas del proceso. Best-effort, igual que el cierre.
 async function noteProcessEvent({ businessCaseId, user, body }) {
@@ -2234,6 +2246,7 @@ async function update(req, res) {
       await BusinessCaseDataOwnership.lockSection(req.params.id, "general", req.user, currentState, {
         source: "auto_lock_after_comercial_save",
       });
+      await noteSectionAutoLocked({ businessCaseId: req.params.id, section: "general", user: req.user });
     }
 
     const shouldNotifyFirstProcessByGeneralSave =
@@ -2664,6 +2677,7 @@ async function saveLabEnvironment(req, res) {
       await BusinessCaseDataOwnership.lockSection(id, "lab", req.user, currentState, {
         source: "auto_lock_after_comercial_save",
       });
+      await noteSectionAutoLocked({ businessCaseId: id, section: "lab", user: req.user });
     }
     const responseBody = { success: true, data: result };
     await completeIdempotentWrite(idempotencySession, responseBody, 200);
@@ -3684,6 +3698,7 @@ async function saveEquipmentDetailsV2(req, res) {
       await BusinessCaseDataOwnership.lockSection(id, "equipment", req.user, currentState, {
         source: "auto_lock_after_comercial_save",
       });
+      await noteSectionAutoLocked({ businessCaseId: id, section: "equipment", user: req.user });
     }
     const responseBody = { success: true, data: payload };
     await completeIdempotentWrite(idempotencySession, responseBody, 200);
@@ -3728,6 +3743,7 @@ async function saveLisIntegration(req, res) {
       await BusinessCaseDataOwnership.lockSection(id, "lis", req.user, currentState, {
         source: "auto_lock_after_comercial_save",
       });
+      await noteSectionAutoLocked({ businessCaseId: id, section: "lis", user: req.user });
     }
     const responseBody = {
       success: true,
@@ -3862,6 +3878,7 @@ async function saveDeliveries(req, res) {
       await BusinessCaseDataOwnership.lockSection(id, "requirement", req.user, currentState, {
         source: "auto_lock_after_comercial_save",
       });
+      await noteSectionAutoLocked({ businessCaseId: id, section: "requirement", user: req.user });
     }
     const responseBody = { success: true, data: result };
     await completeIdempotentWrite(idempotencySession, responseBody, 200);

@@ -1857,6 +1857,21 @@ class PrivatePurchasesService {
       user_email: user.email
     });
 
+    // Embudo CRM: estados de la negociacion de la oferta que no tienen su propia llamada de
+    // sincronizacion. No bloquea el flujo de compras si el CRM falla.
+    const crmStage = {
+      [PRIVATE_PURCHASE_STATES.PRICE_IMPROVEMENT_REQUESTED]: [crmPurchaseSyncService.STAGE_NAMES.NEGOTIATION, null],
+      [PRIVATE_PURCHASE_STATES.PENDING_CLIENT_SIGNATURE]: [crmPurchaseSyncService.STAGE_NAMES.ACCEPTANCE, null],
+      [PRIVATE_PURCHASE_STATES.REJECTED]: [crmPurchaseSyncService.STAGE_NAMES.CLOSED_LOST, 'lost'],
+    }[toState];
+    if (crmStage) {
+      try {
+        await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmStage[0], user, crmStage[1]);
+      } catch (crmSyncError) {
+        logger.warn({ crmSyncError, purchaseId, toState }, 'No se pudo sincronizar el estado de la compra privada con CRM');
+      }
+    }
+
     return transitionResult;
   }
 
@@ -2122,7 +2137,8 @@ class PrivatePurchasesService {
 
     await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.OFFER_SIGNED, user, 'Oferta firmada recibida');
     try {
-      await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmPurchaseSyncService.STAGE_NAMES.NEGOTIATION, user);
+      // Oferta firmada por el cliente = aceptada: la oportunidad pasa a Contratos.
+      await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmPurchaseSyncService.STAGE_NAMES.CONTRACTS, user);
     } catch (crmSyncError) {
       logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar oferta firmada privada con CRM');
     }

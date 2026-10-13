@@ -1,4 +1,7 @@
 const service = require("./crm.service");
+const delivery = require("./crmCampaignDelivery.service");
+const swot = require("./crmAccountSwot.service");
+const journey = require("./crmOpportunityJourney.service");
 const respond = (res, fn) =>
   fn.then((data) => res.json({ ok: true, data }))
     .catch((err) => res.status(err.status || 500).json({ ok: false, message: err.message || "Error" }));
@@ -25,12 +28,29 @@ const createContact = (req, res) => respond(res, service.createContact(req.body,
 const updateContact = (req, res) => respond(res, service.updateContact(req.params.id, req.body, req.user));
 const softDeleteContact = (req, res) => respond(res, service.softDeleteContact(req.params.id, req.user));
 
+// ACCOUNT SWOT (FODA)
+const getAccountSwot = (req, res) => respond(res, swot.getSwot(req.params.id, req.query, req.user));
+const createSwotItem = (req, res) => respond(res, swot.createItem(req.params.id, req.body, req.user));
+const acceptSwotSuggestion = (req, res) => respond(res, swot.acceptSuggestion(req.params.id, req.body, req.user));
+const dismissSwotSuggestion = (req, res) => respond(res, swot.dismissSuggestion(req.params.id, req.body, req.user));
+const updateSwotItem = (req, res) => respond(res, swot.updateItem(req.params.id, req.params.itemId, req.body, req.user));
+const deleteSwotItem = (req, res) => respond(res, swot.deleteItem(req.params.id, req.params.itemId, req.user));
+const createSwotVersion = (req, res) => respond(res, swot.createVersion(req.params.id, req.body, req.user));
+const listSwotVersions = (req, res) => respond(res, swot.listVersions(req.params.id, req.user));
+const getSwotVersion = (req, res) => respond(res, swot.getVersion(req.params.id, req.params.versionId, req.user));
+
 // EMAIL CAMPAIGNS
 const listEmailCampaigns = (req, res) => respond(res, service.listEmailCampaigns(req.query, req.user));
 const getEmailCampaignById = (req, res) => respond(res, service.getEmailCampaignById(req.params.id, req.user));
 const createEmailCampaign = (req, res) => respond(res, service.createEmailCampaign(req.body, req.user));
 const updateEmailCampaign = (req, res) => respond(res, service.updateEmailCampaign(req.params.id, req.body, req.user));
 const softDeleteEmailCampaign = (req, res) => respond(res, service.softDeleteEmailCampaign(req.params.id, req.user));
+const sendCampaignTest = (req, res) => respond(res, delivery.sendTestEmail(req.params.id, req.user));
+const sendCampaignBatch = (req, res) => respond(res, delivery.sendBatch(req.params.id, req.body, req.user));
+const retryCampaignFailed = (req, res) => respond(res, delivery.retryFailed(req.params.id, req.user));
+const duplicateEmailCampaign = (req, res) => respond(res, delivery.duplicateCampaign(req.params.id, req.user));
+const campaignAudiencePreview = (req, res) => respond(res, delivery.audiencePreview(req.query, req.user));
+const listCampaignSuppressions = (req, res) => respond(res, delivery.listSuppressions(req.query, req.user));
 
 // LEADS
 const listLeads = (req, res) => respond(res, service.listLeads({ ...req.query, user: req.user }));
@@ -45,7 +65,7 @@ const createLeadContact = (req, res) => respond(res, service.createLeadContact(r
 const promoteLeadToOpportunity = (req, res) => respond(res, service.promoteLeadToOpportunity(req.params.id, req.body, req.user));
 
 // PIPELINE STAGES
-const listPipelineStages = (req, res) => respond(res, service.listPipelineStages());
+const listPipelineStages = (req, res) => respond(res, service.listPipelineStages(req.query));
 const createPipelineStage = (req, res) => respond(res, service.createPipelineStage(req.body, req.user));
 const updatePipelineStage = (req, res) => respond(res, service.updatePipelineStage(req.params.id, req.body, req.user));
 
@@ -59,6 +79,8 @@ const closeWon = (req, res) => respond(res, service.closeWon(req.params.id, req.
 const closeLost = (req, res) => respond(res, service.closeLost(req.params.id, req.body, req.user));
 const suspendOpportunity = (req, res) => respond(res, service.suspendOpportunity(req.params.id, req.body, req.user));
 const getOpportunityHealth = (req, res) => respond(res, service.getOpportunityHealth(req.params.id, req.user));
+const listOpportunityJourneys = (req, res) => respond(res, journey.listJourneys(req.query, req.user));
+const getOpportunityJourney = (req, res) => respond(res, journey.getJourney(req.params.id, req.user));
 const getOpportunityPurchaseStatus = (req, res) => respond(res, service.getOpportunityPurchaseStatus(req.params.id, req.user));
 const linkPurchaseToOpportunity = (req, res) => respond(res, service.linkPurchaseToOpportunity(req.params.id, req.body, req.user));
 
@@ -117,7 +139,7 @@ const softDeleteRedFlag = (req, res) => respond(res, service.softDeleteRedFlag(r
 const acceptRedFlag = (req, res) => respond(res, service.acceptRedFlag(req.params.id, req.body, req.user));
 
 // SCORECARD
-const listScorecardCriteria = (req, res) => respond(res, service.listScorecardCriteria());
+const listScorecardCriteria = (req, res) => respond(res, service.listScorecardCriteria(req.query));
 const createScorecardCriterion = (req, res) => respond(res, service.createScorecardCriterion(req.body, req.user));
 const updateScorecardCriterion = (req, res) => respond(res, service.updateScorecardCriterion(req.params.id, req.body, req.user));
 const getBlueSheetScorecard = (req, res) => respond(res, service.getBlueSheetScorecard(req.params.blueSheetId, req.user));
@@ -151,7 +173,7 @@ const updateNote = (req, res) => respond(res, service.updateNote(req.params.id, 
 const softDeleteNote = (req, res) => respond(res, service.softDeleteNote(req.params.id, req.user));
 
 // LOST REASONS
-const listLostReasons = (req, res) => respond(res, service.listLostReasons());
+const listLostReasons = (req, res) => respond(res, service.listLostReasons(req.query));
 const createLostReason = (req, res) => respond(res, service.createLostReason(req.body, req.user));
 const updateLostReason = (req, res) => respond(res, service.updateLostReason(req.params.id, req.body, req.user));
 
@@ -195,11 +217,16 @@ module.exports = {
   listAccountPlans, createAccountPlan, updateAccountPlan, softDeleteAccountPlan,
   listContacts, getContactById, createContact, updateContact, softDeleteContact,
   listEmailCampaigns, getEmailCampaignById, createEmailCampaign, updateEmailCampaign, softDeleteEmailCampaign,
+  getAccountSwot, createSwotItem, acceptSwotSuggestion, dismissSwotSuggestion, updateSwotItem, deleteSwotItem,
+  createSwotVersion, listSwotVersions, getSwotVersion,
+  sendCampaignTest, sendCampaignBatch, retryCampaignFailed, duplicateEmailCampaign,
+  campaignAudiencePreview, listCampaignSuppressions,
   listLeads, getLeadById, createLead, updateLead, softDeleteLead, convertLead, disqualifyLead,
   linkLeadAccount, createLeadContact, promoteLeadToOpportunity,
   listPipelineStages, createPipelineStage, updatePipelineStage,
   listOpportunities, getOpportunityById, createOpportunity, updateOpportunity,
   changeOpportunityStage, closeWon, closeLost, suspendOpportunity, getOpportunityHealth, getOpportunityPurchaseStatus, linkPurchaseToOpportunity,
+  listOpportunityJourneys, getOpportunityJourney,
   createBlueSheet, getBlueSheetByOpportunity, getBlueSheetById,
   updateBlueSheetGeneral, updateBlueSheetBuyingProcess, updateBlueSheetStrategy,
   submitBlueSheetForReview, approveBlueSheet, observeBlueSheet, reopenBlueSheet,

@@ -49,7 +49,7 @@ managerAdmin = managerRoles ∪ adminRoles         // aprobar/observar/reabrir B
 
 Frontend: `AppRoutes.jsx` protege todo `/dashboard/crm-fam/*` con `allowedRoles` = comercial, jefe_comercial, backoffice_comercial, asesor_comercial, analista_comercial, acp_comercial, backoffice, gerencia, gerencia_general, gerente_general, director, gerente, jefe_ti, jefe_de_ti. El tab "Configuración" en `CrmShell.jsx` solo aparece para `jefe_ti`, `jefe_de_ti`, `admin`, `administrador`.
 
-Campañas de email: el workspace `/dashboard/crm-fam/campaigns` y sus endpoints solo admiten roles manager/admin (`managerAdmin`). Permite guardar borradores con contactos o cuentas registradas, laboratorio por destinatario y vista previa de `{{nombre_cliente}}` / `{{laboratorio}}`. No existe despacho de marketing: está bloqueado hasta definir consentimiento, bajas y remitente comercial.
+Campañas de email (migraciones 313 + 319): `/dashboard/crm-fam/campaigns`, solo `managerAdmin`. Flujo: borrador → prueba al correo del propio usuario (obligatoria) → confirmación explícita del total → envío por lotes de 20 (`POST /email-campaigns/:id/send`, el frontend repite hasta no quedar pendientes; reanudable) → `sent`. Solo sale por service account (`mailer.sendBulkMail`: nunca SMTP ni Google Chat). Cada correo lleva enlace y cabecera `List-Unsubscribe` (one-click); quien se da de baja entra a `crm.crm_email_suppressions` y se omite siempre. Límite diario `CRM_CAMPAIGN_DAILY_LIMIT` (300 por defecto, día America/Guayaquil). Métricas por destinatario (aperturas por pixel, clics por enlace propio resuelto desde el contenido guardado; sin redirección abierta). Audiencia por filtros (`GET /email-campaigns/audience`), duplicar/plantillas (`is_template`), reintento de fallidos. Rutas públicas sin JWT en `/api/v1/crm-campaigns/{unsubscribe,open,click}/:token` (`crmCampaignPublic.routes.js`; el GET de baja solo confirma, el POST ejecuta). Lógica en `crmCampaignDelivery.service.js`. URL pública de los enlaces: `CRM_PUBLIC_BASE_URL` o el origen de `GOOGLE_REDIRECT_URI`.
 
 ## 4. Endpoints
 
@@ -90,6 +90,13 @@ Prefijo: `/api/v1/crm-fam`
 | GET | `/accounts/:id/plans` | `listAccountPlans` | allCrm |
 | POST | `/accounts/:id/plans` | `createAccountPlan` | crmAll (solo manager asigna un `seller_user_id` distinto al dueño de la cuenta) |
 | PUT/DELETE | `/accounts/:id/plans/:planId` | `updateAccountPlan` / `softDeleteAccountPlan` | crmAll |
+| GET | `/accounts/:id/swot?plan_id=` | `getSwot` | allCrm — items del FODA + sugerencias vigentes del CRM |
+| POST | `/accounts/:id/swot` | `createItem` | crmAll — item manual (cuadrante, título, impacto, plan opcional) |
+| POST | `/accounts/:id/swot/accept` · `/dismiss` | `acceptSuggestion` / `dismissSuggestion` | crmAll — la sugerencia se recalcula en el servidor por `source_key` |
+| PUT/DELETE | `/accounts/:id/swot/:itemId` | `updateItem` / `deleteItem` | crmAll — quitar un item automático lo pasa a descartado (no reaparece) |
+| GET/POST | `/accounts/:id/swot/versions` (+ `/:versionId`) | `listVersions` / `createVersion` / `getVersion` | allCrm / crmAll — instantánea explícita; el detalle trae qué cambió desde entonces |
+
+**FODA de la cuenta** (migración 320, `crm_account_swot_items` y `crm_account_swot_versions`; lógica en `crmAccountSwot.service.js`, reglas puras en `crmAccountSwot.rules.js`): el CRM propone y el vendedor acepta, edita o descarta. Reglas: fortalezas (historial ganado, clasificación oro/plata, fortalezas del Blue Sheet, relación activa), oportunidades (pipeline abierto, fase Contratos, brecha frente a la meta del plan), debilidades (perdidas con motivos, sin pipeline, actividades vencidas, contacto frío, sin contactos) y amenazas (competidores, red flags críticas/altas abiertas, cierres vencidos). Solo usa columnas de la migración 231: `relevance_score`, `threat_level` y `updated_by` (migración 233) NO existen en producción.
 
 **Planes de cuenta** (migración 318, tabla `crm.crm_account_plans`): una cuenta tiene varios planes (nombre, periodo opcional, meta, vendedor, estado activo/cerrado). `crm_accounts.sales_target_amount` quedó como dato histórico y ya no se escribe. KPI "pipeline a generar" = (meta − vendido) ÷ win rate del vendedor del plan; "vendido" = oportunidades `won` o abiertas en la fase *Contratos* (cambiar de etapa no cierra la oportunidad). Cálculo puro en `crm.calculators.js#calculateRequiredPipeline`.
 
@@ -200,20 +207,24 @@ Todo bajo `spi_front/src/modules/crm-fam/`, montado en `CrmShell.jsx` (tabs: Das
 | `/dashboard/crm-fam/accounts/:id` | `AccountDetailPage.jsx` |
 | `/dashboard/crm-fam/contacts` | `ContactsPage.jsx` |
 | `/dashboard/crm-fam/leads` | `LeadsPage.jsx` |
-| `/dashboard/crm-fam/opportunities` | `OpportunitiesPage.jsx` (1631 líneas — la página más grande del módulo) |
+| `/dashboard/crm-fam/opportunities` | `OpportunitiesPage.jsx` (tablero / tabla / pronóstico) |
 | `/dashboard/crm-fam/opportunities/:id` | `OpportunityDetailPage.jsx` |
-| `/dashboard/crm-fam/opportunities/:opportunityId/blue-sheet` | `BlueSheetPage.jsx` (1055 líneas) |
+| `/dashboard/crm-fam/opportunities/:opportunityId/blue-sheet` | `BlueSheetPage.jsx` (11 pasos guiados con autoguardado; pasos en `pages/bluesheet/`) |
+| `/dashboard/crm-fam/campaigns` | `CrmCampaignsPage.jsx` (manager/admin) |
 | `/dashboard/crm-fam/activities` | `CrmActivitiesPage.jsx` (incluye `OriginBadge`/`getActivityOrigin` — badge de origen genérico leyendo `source_module`, con fallback a la heurística de `is_scheduled_visit` para filas históricas; `TYPE_LABELS` incluye `tarea` para actividades creadas desde Work Management) |
 | `/dashboard/crm-fam/reports` | `CrmReportsPage.jsx` |
 | `/dashboard/crm-fam/settings` | `CrmSettingsPage.jsx` (solo jefe_ti/admin — catálogos) |
 
-API client: `spi_front/src/core/api/crmFamApi.js` (todas las funciones `fetch*`/`create*`/`update*` mapean 1:1 a los endpoints de `/crm-fam/*`, usan el `api` axios compartido con interceptor de auth). Hooks en `spi_front/src/modules/crm-fam/hooks/`: `useCrmAccounts`, `useCrmContacts`, `useCrmLeads`, `useCrmOpportunities`, `useCrmBlueSheet`, `useCrmDashboard` — patrón uniforme `{ data, loading, error, refresh }`.
+API client: `spi_front/src/core/api/crmFamApi.js` (todas las funciones `fetch*`/`create*`/`update*` mapean 1:1 a los endpoints de `/crm-fam/*`, usan el `api` axios compartido con interceptor de auth). Las páginas se apoyan en el kit del módulo, `spi_front/src/modules/crm-fam/ui/` (componentes sobre los tokens de `DESIGN.md` vía colores Tailwind `fam-*`, estado de filtros en la URL con `useUrlState`, carga con `useLoad`, diálogos `ConfirmDialog`/`ReasonDialog` sobre el `<Modal>` del sistema, paleta Ctrl+K). Los hooks `hooks/useCrm*` fueron eliminados.
+
+Catálogos: `GET /pipeline-stages`, `/scorecard-criteria` y `/lost-reasons` aceptan `?include_inactive=true` (lo usa Configuración para poder reactivar elementos).
 
 Entrada en `NavigationBar.jsx`: link "CRM-FAM" (`FiTarget`) → `/dashboard/crm-fam`, visible para roles comerciales.
 
 ## 9. Riesgos y notas técnicas
 - **La documentación previa de este módulo (README.md / CONTEXT.md viejo) decía "Etapa 1 — esqueleto, 501 Not Implemented". Es falsa/desactualizada** — el módulo está completo y en producción. No asumir stubs sin verificar el código.
 - **Historial de columnas faltantes**: la migración 231 (schema inicial) no coincidía con lo que `crm.service.js` esperaba — se corrigió en 233 (buying_influences, win_results, competitors, strengths, red_flags) y en 243 (activities: `duration_minutes`, `outcome_notes`, `outcome_rating`). Antes de agregar un campo nuevo a una query de `crm.service.js`, verificar que la columna exista en la migración más reciente — el patrón de "servicio adelantado a la migración" ya causó 500 en producción dos veces.
+- **Blue Sheet y migraciones 233/321**: la 233 nunca se aplicó en producción, así que compradores, resultados de ganancia, competidores, fortalezas, red flags, scorecard y completar acciones responden 500 allí. `321_crm_blue_sheet_schema_completion.sql` agrega lo que la 233 tampoco cubría (`crm_scorecard_answers.notes/scored_by`, `crm_action_items.completion_notes`, `crm_win_results.result_description` opcional) y debe aplicarse DESPUÉS de la 233. `saveBlueSheetScorecard` acepta un arreglo, `{answers}` o un mapa criterio→puntaje; un Blue Sheet `observed` puede volver a enviarse a revisión.
 - **Nombres de etapas del pipeline son frágiles**: `crmPurchaseSync.service.js#STAGE_NAMES` resuelve la etapa por **nombre exacto** (normalizado sin tildes) contra `crm.crm_pipeline_stages`. Ya hubo un bug real donde los nombres sembrados en `242_crm_embudo_ventas_8_fases.sql` no coincidían con las constantes hardcodeadas (faltaban variantes con/sin tilde) y la sincronización fallaba en silencio (`logger.warn`, sin excepción). Si se renombra una etapa en el catálogo, hay que actualizar `STAGE_NAMES` en `crmPurchaseSync.service.js` a la vez.
 - **12 etapas viejas conviven con las 6 nuevas**: la migración 242 no borra las etapas genéricas anteriores, solo las desactiva (`is_active=false`) para no romper referencias históricas de oportunidades ya cerradas. Cualquier query de catálogo debe filtrar `is_active=true`.
 - **Columnas puente creadas en runtime, no en migración numerada**: `ensureLinkColumns()` (crmPurchaseSync) y `ensureActivityFollowupSchema()` (crm.service) ejecutan `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` al vuelo la primera vez que se necesitan, en vez de vivir en una migración con número. Funcional pero atípico frente al resto del repo — no buscar estas columnas en `backend/migrations/`.

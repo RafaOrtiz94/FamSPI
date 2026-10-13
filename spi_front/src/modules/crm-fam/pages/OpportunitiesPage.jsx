@@ -1,1771 +1,713 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
-import { useOpportunities } from "../hooks/useCrmOpportunities";
+// Embudo de ventas. Tres vistas del mismo pipeline abierto: tablero por fases (arrastrar o mover por
+// menú), tabla ordenable y pronóstico ponderado. Cada tarjeta muestra el recorrido de su expediente
+// (Business Case o compra) y sus accesos directos; el recorrido de todas llega en una sola consulta.
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { FiAlertTriangle, FiBriefcase, FiClock, FiExternalLink, FiFileText, FiMessageCircle, FiPlus, FiShoppingCart, FiUserPlus, FiUsers } from "react-icons/fi";
 import {
-  createOpportunity,
-  fetchPipelineStages,
-  fetchLeads,
-  updateLead,
-  disqualifyLead,
-  linkLeadAccount,
-  createLeadContact,
-  promoteLeadToOpportunity,
-  fetchOpportunityPurchaseStatus,
-  linkPurchaseToOpportunity,
-  createActivity,
-  fetchActivities,
-  changeOpportunityStage,
-  fetchAccounts,
-  fetchAccountById,
-  createAccount,
-  createContact,
-  fetchContacts,
-  updateOpportunity,
+  changeOpportunityStage, disqualifyLead, fetchAccounts, fetchActivities, fetchLeads, fetchOpportunities,
+  fetchOpportunityJourneys, fetchPipelineStages, promoteLeadToOpportunity, updateLead, updateOpportunity,
 } from "../../../core/api/crmFamApi";
-import SearchableSelect from "../../../core/ui/components/SearchableSelect";
-import Modal from "../../../core/ui/components/Modal";
-import { FiInbox, FiBriefcase, FiUsers, FiUserPlus, FiShoppingCart, FiPhone, FiMail, FiMessageSquare, FiMessageCircle, FiClock } from "react-icons/fi";
-import { PrivatePurchaseRequestModal } from "../../../core/ui/components/RequestModals";
-import NewPurchaseRequestModal from "../../../shared/purchases/NewPurchaseRequestModal";
+import { useAuth } from "../../../core/auth/AuthContext";
+import { useUI } from "../../../core/ui/UIContext";
+import { ActivityFormModal } from "../components/ActivityModals";
+import ContactFormModal from "../components/ContactFormModal";
+import {
+  AccountLinkModal, AccountPeekModal, ContactsModal, missingFields, OPPORTUNITY_FIELDS, OpportunityFieldsModal,
+  OpportunityFormModal, opportunitySource, PurchasePickerModal,
+} from "../components/OpportunityDialogs";
+import { JourneyPanel, JourneyStrip } from "../components/OpportunityJourney";
+import { ReasonDialog } from "../ui/dialogs";
+import {
+  Badge, Btn, cx, DataTable, DefList, EmptyState, ErrorNote, FilterChip, IconBtn, Inspector, Menu, PageHeader, Panel,
+  SearchInput, SelectInput, Skeleton, SkeletonRows, sortRows, StatusBadge, Tabs,
+} from "../ui/kit";
+import { date, daysFromToday, errorMessage, money, number, relativeDay } from "../ui/format";
+import { isManager } from "../ui/roles";
+import { accountClassification, activityType, blueSheetStatus, health as healthOf, leadStatus, opportunityStatus } from "../ui/status";
+import { listOf, useLoad } from "../ui/useLoad";
+import { useUrlSearch, useUrlState } from "../ui/useUrlState";
 
-const PURCHASE_STATUS_LABELS = {
-  pending_commercial: "Pendiente comercial",
-  pending_backoffice: "Pendiente backoffice",
-  offer_sent: "Oferta enviada",
-  pending_manager_signature: "Pendiente firma gerencia",
-  pending_client_signature: "Pendiente firma cliente",
-  offer_signed: "Oferta firmada",
-  offer_rejected_by_commercial: "Oferta rechazada (comercial)",
-  price_improvement_requested: "Mejora de precio solicitada",
-  client_registration_requested: "Registro de cliente solicitado",
-  client_registered: "Cliente registrado",
-  inspection_requested: "Inspección solicitada",
-  business_case_in_progress: "Business case en curso",
-  business_case_under_review: "Business case en revisión",
-  business_case_feasibility_approved: "Factibilidad aprobada",
-  business_case_rejected: "Business case rechazado",
-  delivered_signed: "Entregado y firmado",
-  rejected: "Rechazado",
-};
-
-const OFFER_KIND_LABELS = { venta: "Venta", alquiler: "Alquiler", alquiler_transferencia_dominio: "Alquiler con transferencia", comodato: "Comodato" };
-
-const purchaseStatusLabel = (status) =>
-  PURCHASE_STATUS_LABELS[status] || String(status || "").replaceAll("_", " ");
-
-// ponytail: mismo par bg/text que ya usan HEALTH_COLORS/OPP_STATUS mas abajo,
-// agrupado por semantica (pendiente=ambar, aprobado/enviado=verde/azul, rechazado=rojo).
-const PURCHASE_STATUS_COLORS = {
-  pending_commercial: { bg: "#FEF3C7", text: "#B45309" },
-  pending_backoffice: { bg: "#FEF3C7", text: "#B45309" },
-  offer_sent: { bg: "#DBEAFE", text: "#1D4ED8" },
-  pending_manager_signature: { bg: "#FEF3C7", text: "#B45309" },
-  pending_client_signature: { bg: "#FEF3C7", text: "#B45309" },
-  offer_signed: { bg: "#DCFCE7", text: "#16A34A" },
-  offer_rejected_by_commercial: { bg: "#FEE2E2", text: "#DC2626" },
-  price_improvement_requested: { bg: "#FEF3C7", text: "#B45309" },
-  client_registration_requested: { bg: "#FEF3C7", text: "#B45309" },
-  client_registered: { bg: "#DCFCE7", text: "#16A34A" },
-  inspection_requested: { bg: "#FEF3C7", text: "#B45309" },
-  business_case_in_progress: { bg: "#DBEAFE", text: "#1D4ED8" },
-  business_case_under_review: { bg: "#FEF3C7", text: "#B45309" },
-  business_case_feasibility_approved: { bg: "#DCFCE7", text: "#16A34A" },
-  business_case_rejected: { bg: "#FEE2E2", text: "#DC2626" },
-  delivered_signed: { bg: "#DCFCE7", text: "#16A34A" },
-  rejected: { bg: "#FEE2E2", text: "#DC2626" },
-};
-const purchaseStatusColor = (status) => PURCHASE_STATUS_COLORS[status] || { bg: "#F3F4F6", text: "#6B7280" };
-
-// ponytail: tel:/sms:/mailto: los resuelve el sistema operativo (app nativa en iOS/Android,
-// Phone Link / cliente de correo en Windows); wa.me rutea solo a app o WhatsApp Web.
-const contactHref = {
-  whatsapp: (phone) => `https://wa.me/${String(phone).replace(/\D/g, "")}`,
-  call: (phone) => `tel:${String(phone).replace(/[^\d+]/g, "")}`,
-  sms: (phone) => `sms:${String(phone).replace(/[^\d+]/g, "")}`,
-  email: (email) => `mailto:${email}`,
-};
-
-const LIMIT = 20;
-
-// Tokens de boton por variante (DESIGN.md §7 Components / Buttons)
-const BTN_PRIMARY = "rounded-xl bg-[#2563EB] text-white transition-transform duration-[120ms] ease-out hover:bg-[#1D4ED8] active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer";
-const BTN_SECONDARY = "rounded-xl bg-white border border-[#D1D5DB] text-[#1F2937] transition-transform duration-[120ms] ease-out hover:bg-[#F9FAFB] active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer";
-const BTN_DANGER_SOFT = "rounded-xl bg-white border border-[#DC2626] text-[#DC2626] transition-transform duration-[120ms] ease-out hover:bg-[#FEE2E2] active:scale-[0.97] cursor-pointer";
-const BTN_SUCCESS_SOFT = "rounded-xl bg-white border border-[#16A34A] text-[#16A34A] transition-transform duration-[120ms] ease-out hover:bg-[#DCFCE7] active:scale-[0.97] cursor-pointer";
-const CARD_BASE = "rounded-xl border border-[#E5E7EB] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)] transition-shadow duration-150";
-const CARD_INTERACTIVE = `${CARD_BASE} cursor-pointer hover:shadow-[0_4px_16px_rgba(0,0,0,0.10)] hover:border-[#D1D5DB]`;
-const KANBAN_TONES = [
-  { rail: "#2563EB", bg: "#EFF6FF", chip: "#DBEAFE", text: "#1D4ED8" },
-  { rail: "#0F766E", bg: "#ECFDF5", chip: "#CCFBF1", text: "#0F766E" },
-  { rail: "#D97706", bg: "#FFFBEB", chip: "#FEF3C7", text: "#B45309" },
-  { rail: "#7C3AED", bg: "#F5F3FF", chip: "#EDE9FE", text: "#6D28D9" },
-  { rail: "#DB2777", bg: "#FDF2F8", chip: "#FCE7F3", text: "#BE185D" },
-  { rail: "#475569", bg: "#F8FAFC", chip: "#E2E8F0", text: "#334155" },
-];
-const LEAD_TONE = { rail: "#2563EB", bg: "#EFF6FF", chip: "#DBEAFE", text: "#1D4ED8" };
-const QUALIFIED_TONE = { rail: "#16A34A", bg: "#F0FDF4", chip: "#DCFCE7", text: "#15803D" };
-
-const getColumnTone = (index = 0) => KANBAN_TONES[index % KANBAN_TONES.length];
-
-const HEALTH_COLORS = {
-  gray:   { bg: "#F3F4F6", text: "#6B7280", label: "Iniciar Blue Sheet" },
-  green:  { bg: "#DCFCE7", text: "#16A34A", label: "Buena" },
-  yellow: { bg: "#FEF3C7", text: "#D97706", label: "Regular" },
-  red:    { bg: "#FEE2E2", text: "#DC2626", label: "Critica" },
-};
-
-const OPP_STATUS = {
-  open:      { bg: "#EFF6FF", text: "#1D4ED8", label: "Abierta" },
-  won:       { bg: "#DCFCE7", text: "#16A34A", label: "Ganada" },
-  lost:      { bg: "#FEE2E2", text: "#DC2626", label: "Perdida" },
-  suspended: { bg: "#F3F4F6", text: "#6B7280", label: "Suspendida" },
-};
-
-// Oportunidad "estancada": abierta y sin actualizacion en mas de N dias --
-// el dato (updated_at) ya viene en cada fila de listOpportunities, no hace
-// falta ningun endpoint nuevo.
+const BASE = "/dashboard/crm-fam";
 const STALE_DAYS = 14;
-function isStaleOpportunity(opp) {
-  if (opp.status !== "open" || !opp.updated_at) return false;
-  const days = (Date.now() - new Date(opp.updated_at).getTime()) / 86400000;
-  return days >= STALE_DAYS;
-}
-function staleDaysCount(opp) {
-  if (!opp.updated_at) return 0;
-  return Math.floor((Date.now() - new Date(opp.updated_at).getTime()) / 86400000);
-}
-
-const STATUS_OPTIONS = [
-  { value: "", label: "Todos los estados" },
-  { value: "open", label: "Abierta" },
-  { value: "won", label: "Ganada" },
-  { value: "lost", label: "Perdida" },
-  { value: "suspended", label: "Suspendida" },
+const LEAD_COLUMN_LIMIT = 20;
+const VIEWS = [
+  { value: "board", label: "Tablero" },
+  { value: "table", label: "Tabla" },
+  { value: "forecast", label: "Pronóstico" },
 ];
 
-const SOURCE_OPTIONS = [
-  { value: "directo", label: "Directo" },
-  { value: "referido", label: "Referido" },
-  { value: "inbound", label: "Inbound" },
-  { value: "outbound", label: "Outbound" },
-  { value: "licitacion", label: "Licitacion" },
-];
+// Oportunidad estancada: abierta y sin cambios en STALE_DAYS días o más (updated_at viene en la lista).
+const daysIdle = (o) => (o.updated_at ? Math.floor((Date.now() - new Date(o.updated_at).getTime()) / 86400000) : 0);
+const isStale = (o) => o.status === "open" && daysIdle(o) >= STALE_DAYS;
+const leadName = (l) => (l.full_name || "").trim() || [l.first_name, l.last_name].filter(Boolean).join(" ") || l.company_name || `Lead ${l.lead_code || ""}`;
+const probabilityOf = (o, stage) => Number(o.probability_override ?? stage?.probability_default ?? o.probability_default ?? 0);
 
-const EMPTY_FORM = {
-  name: "",
-  account_id: "",
-  stage_id: "",
-  estimated_amount: "",
-  estimated_close_date: "",
-  source: "",
-};
-
-function Badge({ bg, text, label }) {
+// ─── Tablero ─────────────────────────────────────────────────────────────────
+function Column({ title, count, total, tone, dropActive, onDragOver, onDragLeave, onDrop, footer, children }) {
   return (
-    <span
-      className="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
-      style={{ backgroundColor: bg, color: text }}
-    >
-      {label}
-    </span>
-  );
-}
-
-function SkeletonRows() {
-  const p = <div className="animate-pulse bg-gray-200 h-4 rounded w-full" />;
-  return Array.from({ length: 5 }).map((_, i) => (
-    <tr key={i} className="border-b border-[#E5E7EB]">
-      <td className="px-4 py-3">{p}</td>
-      <td className="px-4 py-3 hidden sm:table-cell">{p}</td>
-      <td className="px-4 py-3">{p}</td>
-      <td className="px-4 py-3 hidden md:table-cell">{p}</td>
-      <td className="px-4 py-3 hidden md:table-cell">{p}</td>
-      <td className="px-4 py-3 hidden md:table-cell">{p}</td>
-      <td className="px-4 py-3">{p}</td>
-      <td className="px-4 py-3">{p}</td>
-    </tr>
-  ));
-}
-
-function fmt(val) {
-  if (val == null) return "—";
-  return val;
-}
-
-function fmtMoney(val) {
-  if (val == null || val === "") return "—";
-  return Number(val).toLocaleString("es-PE", { style: "currency", currency: "PEN", minimumFractionDigits: 0 });
-}
-
-function fmtDate(val) {
-  if (!val) return "—";
-  return new Date(val).toLocaleDateString("es-PE");
-}
-
-function PurchaseStatusBadge({ opportunityId, navigate }) {
-  const [purchase, setPurchase] = useState(undefined); // undefined = loading, null = sin solicitud
-
-  useEffect(() => {
-    let alive = true;
-    fetchOpportunityPurchaseStatus(opportunityId)
-      .then((res) => { if (alive) setPurchase(res || null); })
-      .catch(() => { if (alive) setPurchase(null); });
-    return () => { alive = false; };
-  }, [opportunityId]);
-
-  if (purchase === undefined) {
-    return <div className="text-xs text-[#9CA3AF] mt-1">Cargando estado...</div>;
-  }
-  if (!purchase) {
-    return <div className="text-xs text-[#9CA3AF] mt-1">Sin requerimiento de compra</div>;
-  }
-  const isPublic = purchase.purchase_type === "public";
-  return (
-    <div className="mt-1.5 flex flex-col gap-1">
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <Badge bg="#EFF6FF" text="#1D4ED8" label={isPublic ? "Compra pública" : (OFFER_KIND_LABELS[purchase.offer_kind] || "Compra privada")} />
-        <Badge {...purchaseStatusColor(purchase.status)} label={purchaseStatusLabel(purchase.status)} />
-      </div>
-      <button
-        onClick={(e) => { e.stopPropagation(); navigate(`/dashboard/purchases/workspace?tab=${isPublic ? "public" : "private"}`); }}
-        className="cursor-pointer text-left text-xs text-[#2563EB] hover:underline"
-      >
-        Ver expediente
-      </button>
-    </div>
-  );
-}
-
-function AddActivityModal({ opportunityId, onClose, onSaved }) {
-  const [subject, setSubject] = useState("");
-  const [activityType, setActivityType] = useState("llamada");
-  const [scheduledAt, setScheduledAt] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState(null);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!subject.trim()) return;
-    setSaving(true);
-    setErr(null);
-    try {
-      await createActivity({
-        opportunity_id: opportunityId,
-        subject: subject.trim(),
-        activity_type: activityType,
-        scheduled_at: scheduledAt || null,
-      });
-      onSaved();
-    } catch (ex) {
-      setErr(ex.message || "Error al guardar la actividad");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal open title="Agregar actividad" onClose={onClose} maxWidth="max-w-sm">
-      {err && (
-        <div className="mb-3 rounded-xl border border-[#DC2626]/30 bg-[#FEE2E2] px-3 py-2 text-sm text-[#DC2626]">
-          {err}
-        </div>
-      )}
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-[#1F2937]">Asunto</label>
-          <input
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            placeholder="Asunto de la actividad"
-            className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
-            autoFocus
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-[#1F2937]">Tipo</label>
-          <select
-            value={activityType}
-            onChange={(e) => setActivityType(e.target.value)}
-            className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
-          >
-            <option value="llamada">Llamada</option>
-            <option value="reunion">Reunión</option>
-            <option value="email">Email</option>
-            <option value="visita">Visita</option>
-            <option value="otro">Otro</option>
-          </select>
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-[#1F2937]">Fecha programada</label>
-          <input
-            type="datetime-local"
-            value={scheduledAt}
-            onChange={(e) => setScheduledAt(e.target.value)}
-            className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
-          />
-        </div>
-        <div className="flex justify-end gap-2 pt-1">
-          <button type="button" onClick={onClose} className={`px-4 py-2 text-sm ${BTN_SECONDARY}`}>
-            Cancelar
-          </button>
-          <button type="submit" disabled={saving} className={`px-4 py-2 text-sm font-medium ${BTN_PRIMARY}`}>
-            {saving ? "Guardando..." : "Guardar"}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-function ActivitiesSummary({ opportunityId, onAddActivity }) {
-  const [activities, setActivities] = useState(undefined); // undefined = loading
-
-  const load = useCallback(() => {
-    fetchActivities({ opportunity_id: opportunityId, limit: 5 })
-      .then((res) => {
-        const rows = Array.isArray(res) ? res : (res?.data ?? []);
-        setActivities(rows);
-      })
-      .catch(() => setActivities([]));
-  }, [opportunityId]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const pending = Array.isArray(activities) ? activities.filter(a => a.status === "scheduled") : [];
-
-  return (
-    <div className="mt-1.5 border-t border-[#F1F5F9] pt-1.5">
-      {pending.length > 0 && (
-        <div className="flex flex-col gap-0.5 mb-1">
-          {pending.slice(0, 2).map(a => (
-            <div key={a.id} className="text-[11px] text-[#6B7280] truncate">• {a.subject}</div>
-          ))}
-        </div>
-      )}
-      <div className="flex items-center justify-between gap-2">
-        <Badge bg="#F3F4F6" text="#6B7280" label={`${pending.length} actividad${pending.length === 1 ? "" : "es"}`} />
-        <button
-          onClick={(e) => { e.stopPropagation(); onAddActivity(opportunityId, load); }}
-          className="text-xs text-[#2563EB] hover:underline"
-        >
-          + Actividad
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function CreateAccountFromLeadModal({ lead, accountOptions, onClose, onSaved }) {
-  const [accountName, setAccountName] = useState(lead.company_name || "");
-  const [selectedId, setSelectedId] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState(null);
-
-  const handleLinkExisting = async () => {
-    if (!selectedId) return;
-    setSaving(true);
-    setErr(null);
-    try {
-      await linkLeadAccount(lead.id, { account_id: selectedId });
-      onSaved();
-    } catch (ex) {
-      setErr(ex.message || "Error al vincular la cuenta");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    if (!accountName.trim()) return;
-    setSaving(true);
-    setErr(null);
-    try {
-      await linkLeadAccount(lead.id, { account_name: accountName.trim() });
-      onSaved();
-    } catch (ex) {
-      setErr(ex.message || "Error al crear y vincular la cuenta");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal open title="Cuenta del lead" onClose={onClose} maxWidth="max-w-md">
-      {err && (
-        <div className="mb-3 rounded-xl border border-[#DC2626]/30 bg-[#FEE2E2] px-3 py-2 text-sm text-[#DC2626]">
-          {err}
-        </div>
-      )}
-      <div className="flex flex-col gap-4">
-        <div className="rounded-2xl border border-[#DBEAFE] bg-[#EFF6FF] p-3">
-          <p className="text-sm font-semibold text-[#1E3A8A]">Vincula el lead a una cuenta desde el primer contacto</p>
-          <p className="mt-1 text-xs text-[#1D4ED8]">El lead no se convierte ni cambia de etapa; solo queda asociado para contactos y seguimiento.</p>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-medium text-[#1F2937]">Cuenta existente</label>
-          <SearchableSelect options={accountOptions} value={selectedId} onChange={setSelectedId} placeholder="Buscar cuenta por nombre..." />
-          <button
-            type="button"
-            onClick={handleLinkExisting}
-            disabled={!selectedId || saving}
-            className={`mt-2 px-4 py-2 text-sm font-medium ${BTN_PRIMARY}`}
-          >
-            {saving ? "Vinculando..." : "Vincular cuenta"}
-          </button>
-        </div>
-
-        <form onSubmit={handleCreate} className="border-t border-[#E5E7EB] pt-3">
-          <label className="mb-1 block text-xs font-medium text-[#1F2937]">Crear cuenta nueva</label>
-          <input
-            value={accountName}
-            onChange={(e) => setAccountName(e.target.value)}
-            placeholder="Nombre de la cuenta"
-            className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
-            autoFocus
-          />
-          <div className="flex justify-end gap-2 pt-3">
-            <button type="button" onClick={onClose} className={`px-4 py-2 text-sm ${BTN_SECONDARY}`}>Cancelar</button>
-            <button type="submit" disabled={saving || !accountName.trim()} className={`px-4 py-2 text-sm font-medium ${BTN_PRIMARY}`}>
-              {saving ? "Creando..." : "Crear y vincular"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </Modal>
-  );
-}
-
-function CreateContactModal({ initial = {}, accountOptions, defaultAccountId = "", leadId = null, onClose, onSaved }) {
-  const [firstName, setFirstName] = useState(initial.first_name || "");
-  const [lastName, setLastName] = useState(initial.last_name || "");
-  const [email, setEmail] = useState(initial.email || "");
-  const [phone, setPhone] = useState(initial.phone || "");
-  const [accountId, setAccountId] = useState(defaultAccountId || initial.converted_account_id || "");
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState(null);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!firstName.trim()) return;
-    setSaving(true);
-    setErr(null);
-    try {
-      const payload = {
-        first_name: firstName.trim(),
-        last_name: lastName.trim() || null,
-        email: email.trim() || null,
-        phone: phone.trim() || null,
-        account_id: accountId || null,
-      };
-      if (leadId) {
-        await createLeadContact(leadId, payload);
-      } else {
-        await createContact(payload);
-      }
-      onSaved();
-    } catch (ex) {
-      setErr(ex.message || "Error al crear el contacto");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal open title="Crear contacto" onClose={onClose} maxWidth="max-w-sm">
-      {err && (
-        <div className="mb-3 rounded-xl border border-[#DC2626]/30 bg-[#FEE2E2] px-3 py-2 text-sm text-[#DC2626]">
-          {err}
-        </div>
-      )}
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[#1F2937]">Nombre</label>
-            <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Nombre" className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20" autoFocus />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[#1F2937]">Apellido</label>
-            <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Apellido" className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20" />
-          </div>
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-[#1F2937]">Email</label>
-          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@empresa.com" className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20" />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-[#1F2937]">Telefono</label>
-          <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+593 99 000 0000" className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20" />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-[#1F2937]">Cuenta (opcional)</label>
-          <SearchableSelect options={accountOptions} value={accountId} onChange={setAccountId} placeholder="Buscar cuenta por nombre..." />
-        </div>
-        <div className="flex justify-end gap-2 pt-1">
-          <button type="button" onClick={onClose} className={`px-4 py-2 text-sm ${BTN_SECONDARY}`}>Cancelar</button>
-          <button type="submit" disabled={saving} className={`px-4 py-2 text-sm font-medium ${BTN_PRIMARY}`}>
-            {saving ? "Guardando..." : "Guardar"}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-function ContactsListModal({ opp, onClose, onAddContact }) {
-  const [contacts, setContacts] = useState(undefined);
-
-  useEffect(() => {
-    if (!opp.account_id) { setContacts([]); return; }
-    fetchContacts({ account_id: opp.account_id, limit: 100 })
-      .then((res) => setContacts(Array.isArray(res) ? res : (res?.data ?? [])))
-      .catch(() => setContacts([]));
-  }, [opp.account_id]);
-
-  const ACTION_BTN = "flex h-9 w-9 items-center justify-center rounded-xl border border-[#E5E7EB] text-[#6B7280] transition-colors hover:bg-[#F3F4F6] hover:text-[#1F2937] cursor-pointer";
-
-  return (
-    <Modal open title={`Contactos${opp.account_name ? ` · ${opp.account_name}` : ""}`} onClose={onClose} maxWidth="max-w-md">
-      {!opp.account_id ? (
-        <div className="flex flex-col items-center gap-1.5 py-6 text-center">
-          <FiUsers size={28} className="text-[#D1D5DB]" />
-          <p className="text-sm font-medium text-[#1F2937]">Esta oportunidad no tiene cuenta</p>
-          <p className="text-xs text-[#6B7280]">Vincula una cuenta para ver sus contactos.</p>
-        </div>
-      ) : contacts === undefined ? (
-        <div className="flex flex-col gap-2">
-          {[1, 2].map((i) => <div key={i} className="h-14 animate-pulse rounded-xl bg-[#F3F4F6]" />)}
-        </div>
-      ) : contacts.length === 0 ? (
-        <div className="flex flex-col items-center gap-1.5 py-6 text-center">
-          <FiUsers size={28} className="text-[#D1D5DB]" />
-          <p className="text-sm font-medium text-[#1F2937]">Sin contactos en esta cuenta</p>
-          <button onClick={onAddContact} className={`mt-1 px-4 py-2 text-sm font-medium ${BTN_PRIMARY}`}>Agregar contacto</button>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {contacts.map((c) => {
-            const phone = c.mobile || c.phone;
-            return (
-              <div key={c.id} className="flex items-center justify-between gap-3 rounded-xl border border-[#E5E7EB] bg-white p-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-[#1F2937]">{c.full_name || [c.first_name, c.last_name].filter(Boolean).join(" ")}</p>
-                  <p className="truncate text-xs text-[#6B7280]">{[c.job_title, phone, c.email].filter(Boolean).join(" · ") || "Sin datos de contacto"}</p>
-                </div>
-                <div className="flex shrink-0 gap-1.5">
-                  {phone && (
-                    <>
-                      <a href={contactHref.whatsapp(phone)} target="_blank" rel="noreferrer" title="WhatsApp" className={ACTION_BTN}><FiMessageCircle size={15} /></a>
-                      <a href={contactHref.call(phone)} title="Llamar" className={ACTION_BTN}><FiPhone size={15} /></a>
-                      <a href={contactHref.sms(phone)} title="Mensaje de texto" className={ACTION_BTN}><FiMessageSquare size={15} /></a>
-                    </>
-                  )}
-                  {c.email && (
-                    <a href={contactHref.email(c.email)} title="Correo" className={ACTION_BTN}><FiMail size={15} /></a>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-          <button onClick={onAddContact} className={`mt-1 self-start px-4 py-2 text-sm ${BTN_SECONDARY}`}>Agregar contacto</button>
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-function LeadContactsModal({ lead, onClose, onAddContact }) {
-  const [contacts, setContacts] = useState(undefined);
-
-  useEffect(() => {
-    if (!lead.converted_account_id) {
-      const direct = lead.converted_contact_id
-        ? [{
-            id: lead.converted_contact_id,
-            full_name: lead.converted_contact_name,
-            email: lead.converted_contact_email,
-            phone: lead.converted_contact_phone,
-          }]
-        : [];
-      setContacts(direct);
-      return;
-    }
-    fetchContacts({ account_id: lead.converted_account_id, limit: 100 })
-      .then((res) => {
-        const rows = Array.isArray(res) ? res : (res?.data ?? []);
-        setContacts(rows);
-      })
-      .catch(() => setContacts([]));
-  }, [lead]);
-
-  const ACTION_BTN = "flex h-9 w-9 items-center justify-center rounded-xl border border-[#E5E7EB] text-[#6B7280] transition-colors hover:bg-[#F3F4F6] hover:text-[#1F2937] cursor-pointer";
-  const title = lead.converted_account_name || lead.company_name || lead.full_name || "Lead";
-
-  return (
-    <Modal open title={`Contactos · ${title}`} onClose={onClose} maxWidth="max-w-md">
-      {contacts === undefined ? (
-        <div className="flex flex-col gap-2">
-          {[1, 2].map((i) => <div key={i} className="h-14 animate-pulse rounded-xl bg-[#F3F4F6]" />)}
-        </div>
-      ) : contacts.length === 0 ? (
-        <div className="flex flex-col items-center gap-1.5 py-6 text-center">
-          <FiUsers size={28} className="text-[#D1D5DB]" />
-          <p className="text-sm font-medium text-[#1F2937]">Sin contactos registrados</p>
-          <button onClick={onAddContact} className={`mt-1 px-4 py-2 text-sm font-medium ${BTN_PRIMARY}`}>Nuevo contacto</button>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {contacts.map((c) => {
-            const phone = c.mobile || c.phone;
-            return (
-              <div key={c.id} className="flex items-center justify-between gap-3 rounded-xl border border-[#E5E7EB] bg-white p-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-[#1F2937]">{c.full_name || [c.first_name, c.last_name].filter(Boolean).join(" ") || "Contacto sin nombre"}</p>
-                  <p className="truncate text-xs text-[#6B7280]">{[c.job_title, phone, c.email].filter(Boolean).join(" · ") || "Sin datos de contacto"}</p>
-                </div>
-                <div className="flex shrink-0 gap-1.5">
-                  {phone && (
-                    <>
-                      <a href={contactHref.whatsapp(phone)} target="_blank" rel="noreferrer" title="WhatsApp" className={ACTION_BTN}><FiMessageCircle size={15} /></a>
-                      <a href={contactHref.call(phone)} title="Llamar" className={ACTION_BTN}><FiPhone size={15} /></a>
-                      <a href={contactHref.sms(phone)} title="Mensaje de texto" className={ACTION_BTN}><FiMessageSquare size={15} /></a>
-                    </>
-                  )}
-                  {c.email && (
-                    <a href={contactHref.email(c.email)} title="Correo" className={ACTION_BTN}><FiMail size={15} /></a>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-          <button onClick={onAddContact} className={`mt-1 self-start px-4 py-2 text-sm ${BTN_SECONDARY}`}>Nuevo contacto</button>
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-function AccountModal({ opp, accountOptions, onClose, onLinked }) {
-  const [account, setAccount] = useState(undefined);
-  const [selectedId, setSelectedId] = useState("");
-  const [newName, setNewName] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState(null);
-
-  useEffect(() => {
-    if (!opp.account_id) { setAccount(null); return; }
-    fetchAccountById(opp.account_id)
-      .then((res) => setAccount(res || null))
-      .catch(() => setAccount(null));
-  }, [opp.account_id]);
-
-  const linkAccount = async (accountId) => {
-    setSaving(true);
-    setErr(null);
-    try {
-      await updateOpportunity(opp.id, { account_id: accountId });
-      onLinked();
-    } catch (ex) {
-      setErr(ex.message || "No se pudo vincular la cuenta");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCreateAndLink = async () => {
-    if (!newName.trim()) return;
-    setSaving(true);
-    setErr(null);
-    try {
-      const created = await createAccount({ account_name: newName.trim() });
-      await updateOpportunity(opp.id, { account_id: created.id });
-      onLinked();
-    } catch (ex) {
-      setErr(ex.message || "No se pudo crear la cuenta");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal open title={opp.account_id ? "Cuenta" : "Vincular cuenta"} onClose={onClose} maxWidth="max-w-md">
-      {err && (
-        <div className="mb-3 rounded-xl border border-[#DC2626]/30 bg-[#FEE2E2] px-3 py-2 text-sm text-[#DC2626]">{err}</div>
-      )}
-      {opp.account_id ? (
-        account === undefined ? (
-          <div className="h-24 animate-pulse rounded-xl bg-[#F3F4F6]" />
-        ) : !account ? (
-          <p className="text-sm text-[#6B7280]">No se pudo cargar la informacion de la cuenta.</p>
-        ) : (
-          <div className="flex flex-col gap-2 text-sm">
-            <p className="text-base font-semibold text-[#1F2937]">{account.account_name}</p>
-            <div className="grid grid-cols-2 gap-2 text-xs text-[#6B7280]">
-              <span>RUC: <span className="font-mono text-[#1F2937]">{account.ruc || "sin dato"}</span></span>
-              <span>Tipo: {account.account_type || "sin dato"}</span>
-              <span>Industria: {account.industry || "sin dato"}</span>
-              <span>Ciudad: {account.city || "sin dato"}</span>
-            </div>
-          </div>
-        )
-      ) : (
-        <div className="flex flex-col gap-4">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[#1F2937]">Vincular cuenta existente</label>
-            <SearchableSelect options={accountOptions} value={selectedId} onChange={setSelectedId} placeholder="Buscar cuenta por nombre..." />
-            <button
-              onClick={() => selectedId && linkAccount(selectedId)}
-              disabled={!selectedId || saving}
-              className={`mt-2 px-4 py-2 text-sm font-medium ${BTN_PRIMARY}`}
-            >
-              {saving ? "Vinculando..." : "Vincular"}
-            </button>
-          </div>
-          <div className="border-t border-[#E5E7EB] pt-3">
-            <label className="mb-1 block text-xs font-medium text-[#1F2937]">O crear cuenta nueva</label>
-            <input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Nombre de la cuenta"
-              className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
-            />
-            <button
-              onClick={handleCreateAndLink}
-              disabled={!newName.trim() || saving}
-              className={`mt-2 px-4 py-2 text-sm ${BTN_SECONDARY}`}
-            >
-              {saving ? "Creando..." : "Crear y vincular"}
-            </button>
-          </div>
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-function PurchasePickerModal({ opp, onClose, onCreated }) {
-  const [flow, setFlow] = useState(null); // null | 'private' | 'public'
-
-  const handleSuccess = async (result, purchaseType) => {
-    const purchaseId = result?.data?.id || result?.id || result?.request?.id || null;
-    if (purchaseId) {
-      await linkPurchaseToOpportunity(opp.id, { purchase_id: purchaseId, purchase_type: purchaseType }).catch(() => {});
-    }
-    onCreated();
-  };
-
-  if (flow === "private") {
-    return (
-      <PrivatePurchaseRequestModal
-        isOpen
-        onClose={onClose}
-        onSuccess={(result) => handleSuccess(result, "private")}
-      />
-    );
-  }
-  if (flow === "public") {
-    return (
-      <NewPurchaseRequestModal
-        isOpen
-        onClose={onClose}
-        onSuccess={(result) => handleSuccess(result, "public")}
-      />
-    );
-  }
-  return (
-    <Modal open title="Requerimiento de compra" onClose={onClose} maxWidth="max-w-sm">
-      <p className="mb-3 text-sm text-[#6B7280]">Selecciona el tipo de proceso para {opp.name}.</p>
-      <div className="flex flex-col gap-2">
-        <button onClick={() => setFlow("private")} className={`px-4 py-3 text-left text-sm font-medium ${BTN_SECONDARY}`}>
-          Compra privada
-          <span className="block text-xs font-normal text-[#6B7280]">Venta, alquiler o comodato a cliente final</span>
-        </button>
-        <button onClick={() => setFlow("public")} className={`px-4 py-3 text-left text-sm font-medium ${BTN_SECONDARY}`}>
-          Compra pública
-          <span className="block text-xs font-normal text-[#6B7280]">Proceso con entidad pública / handoff a ACP</span>
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
-// Campos de negocio que una oportunidad deberia tener pero un lead recien calificado no trae.
-// Se piden al pasar a Analisis (con opcion de omitir) y quedan marcados como pendientes en la
-// tarjeta hasta que se completen aca mismo.
-const OPP_FIELD_DEFS = [
-  { key: "account_id", label: "Cuenta" },
-  { key: "estimated_amount", label: "Monto estimado" },
-  { key: "probability_override", label: "Probabilidad" },
-  { key: "estimated_close_date", label: "Cierre estimado" },
-  { key: "source", label: "Fuente" },
-];
-
-function OpportunityFieldsForm({ initial = {}, accountOptions, onSubmit, submitLabel, secondaryAction, busy, error }) {
-  const [accountId, setAccountId] = useState(initial.account_id || "");
-  const [amount, setAmount] = useState(initial.estimated_amount ?? "");
-  const [probability, setProbability] = useState(initial.probability_override ?? "");
-  const [closeDate, setCloseDate] = useState(initial.estimated_close_date ? String(initial.estimated_close_date).slice(0, 10) : "");
-  const [source, setSource] = useState(initial.source || "");
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSubmit({
-      account_id: accountId || null,
-      estimated_amount: amount ? Number(amount) : null,
-      probability_override: probability ? Number(probability) : null,
-      estimated_close_date: closeDate || null,
-      source: source || null,
-    });
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-      {error && (
-        <div className="rounded-xl border border-[#DC2626]/30 bg-[#FEE2E2] px-3 py-2 text-sm text-[#DC2626]">{error}</div>
-      )}
-      <div>
-        <label className="mb-1 block text-xs font-medium text-[#1F2937]">Cuenta</label>
-        <SearchableSelect options={accountOptions} value={accountId} onChange={setAccountId} placeholder="Buscar cuenta por nombre..." />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-[#1F2937]">Monto estimado</label>
-          <input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)}
-            className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm font-mono focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20" />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-[#1F2937]">Probabilidad (%)</label>
-          <input type="number" min="0" max="100" value={probability} onChange={(e) => setProbability(e.target.value)}
-            className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm font-mono focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20" />
-        </div>
-      </div>
-      <div>
-        <label className="mb-1 block text-xs font-medium text-[#1F2937]">Cierre estimado</label>
-        <input type="date" value={closeDate} onChange={(e) => setCloseDate(e.target.value)}
-          className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20" />
-      </div>
-      <div>
-        <label className="mb-1 block text-xs font-medium text-[#1F2937]">Fuente</label>
-        <select value={source} onChange={(e) => setSource(e.target.value)}
-          className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20">
-          <option value="">Seleccionar...</option>
-          {SOURCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-      </div>
-      <div className="mt-1 flex justify-end gap-2">
-        {secondaryAction}
-        <button type="submit" disabled={busy} className={`px-4 py-2 text-sm font-medium ${BTN_PRIMARY}`}>
-          {busy ? "Guardando..." : submitLabel}
-        </button>
-      </div>
-    </form>
-  );
-}
-
-function PromoteLeadModal({ lead, accountOptions, onClose, onPromote }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-
-  const submit = async (fields) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await onPromote(lead, fields);
-    } catch (ex) {
-      setError(ex.message || "No se pudo iniciar el analisis");
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal open title="Iniciar análisis de oportunidad" onClose={onClose} maxWidth="max-w-md">
-      <p className="mb-3 text-sm text-[#6B7280]">
-        Completa lo que ya sepas de {lead.full_name || lead.company_name}. Podés omitir y completarlo después desde la tarjeta.
-      </p>
-      <OpportunityFieldsForm
-        accountOptions={accountOptions}
-        onSubmit={submit}
-        submitLabel="Iniciar análisis"
-        busy={busy}
-        error={error}
-        secondaryAction={
-          <button type="button" onClick={() => submit({})} disabled={busy} className={`px-4 py-2 text-sm ${BTN_SECONDARY}`}>
-            Omitir por ahora
-          </button>
-        }
-      />
-    </Modal>
-  );
-}
-
-function CompleteOpportunityModal({ opp, accountOptions, onClose, onSaved }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-
-  const submit = async (fields) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await updateOpportunity(opp.id, fields);
-      onSaved();
-    } catch (ex) {
-      setError(ex.message || "No se pudo guardar");
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal open title="Completar información" onClose={onClose} maxWidth="max-w-md">
-      <OpportunityFieldsForm
-        initial={opp}
-        accountOptions={accountOptions}
-        onSubmit={submit}
-        submitLabel="Guardar"
-        busy={busy}
-        error={error}
-        secondaryAction={
-          <button type="button" onClick={onClose} className={`px-4 py-2 text-sm ${BTN_SECONDARY}`}>Cancelar</button>
-        }
-      />
-    </Modal>
-  );
-}
-
-function OpportunityCard({ opp, navigate, showAnalysisActions, onAddActivity, onOpenAccount, onOpenContacts, onAddContact, onOpenPurchase, onCompleteFields, purchaseReloadKey, draggable, onDragStart }) {
-  const health = HEALTH_COLORS[opp.health_status] ?? HEALTH_COLORS.gray;
-  const ICON_BTN = "flex h-8 w-8 items-center justify-center rounded-xl border border-[#E5E7EB] bg-white text-[#64748B] shadow-[0_1px_3px_rgba(15,23,42,0.06)] transition-colors hover:border-[#CBD5E1] hover:bg-[#F8FAFC] hover:text-[#0F172A] cursor-pointer";
-  const stop = (fn) => (e) => { e.stopPropagation(); fn(opp); };
-  const missingFields = OPP_FIELD_DEFS.filter(f => !opp[f.key]);
-  return (
-    <div
-      draggable={draggable}
-      onDragStart={onDragStart}
-      onClick={() => navigate(`/dashboard/crm-fam/opportunities/${opp.id}`)}
-      className={`${CARD_INTERACTIVE} group relative overflow-hidden p-3 pl-4 active:scale-[0.99] duration-[120ms] ease-out ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
-    >
-      <div className="absolute inset-y-0 left-0 w-1 bg-[#2563EB] opacity-80 transition-all group-hover:w-1.5" />
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-[#0F172A] truncate">{opp.name}</div>
-          {opp.opportunity_code && <div className="mt-0.5 text-[10px] font-mono uppercase tracking-[0.12em] text-[#94A3B8]">{opp.opportunity_code}</div>}
-        </div>
-        <Badge bg={health.bg} text={health.text} label={health.label} />
-      </div>
-      {isStaleOpportunity(opp) && (
-        <div
-          className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-[#FEF3C7] px-2.5 py-1 text-[11px] font-medium text-[#92400E]"
-          title={`Sin actividad hace ${staleDaysCount(opp)} días`}
-        >
-          <FiClock size={11} />
-          Estancada — {staleDaysCount(opp)} días sin movimiento
-        </div>
-      )}
-      {missingFields.length > 0 ? (
-        <div className="mt-2 rounded-2xl border border-[#FDE68A] bg-[#FFFBEB] p-2.5">
-          <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
-            {OPP_FIELD_DEFS.map(f => (
-              <div key={f.key} className="min-w-0">
-                <span className="block text-[#92600A]">{f.label}</span>
-                <span className="block truncate font-medium text-[#1F2937]">
-                  {f.key === "account_id" ? (opp.account_name || "—")
-                    : f.key === "estimated_amount" ? (opp.estimated_amount != null ? fmtMoney(opp.estimated_amount) : "—")
-                    : f.key === "probability_override" ? (opp.probability_override != null ? `${opp.probability_override}%` : "—")
-                    : f.key === "estimated_close_date" ? (opp.estimated_close_date ? fmtDate(opp.estimated_close_date) : "—")
-                    : (SOURCE_OPTIONS.find(o => o.value === opp.source)?.label || "—")}
-                </span>
-              </div>
-            ))}
-          </div>
-          <button
-            onClick={stop(onCompleteFields)}
-            className="mt-1.5 cursor-pointer text-left text-[11px] font-medium text-[#D97706] hover:underline"
-          >
-            Completar información ({missingFields.length} pendiente{missingFields.length === 1 ? "" : "s"})
-          </button>
-        </div>
-      ) : (
-        <>
-          {opp.account_name && (
-            <div className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full bg-[#F1F5F9] px-2.5 py-1 text-xs font-medium text-[#475569]">
-              <FiBriefcase size={12} className="shrink-0" />
-              <span className="truncate">{opp.account_name}</span>
-            </div>
-          )}
-          {opp.estimated_amount != null && (
-            <div className="mt-2 text-lg font-semibold tracking-tight text-[#0F172A]">{fmtMoney(opp.estimated_amount)}</div>
-          )}
-        </>
-      )}
-      <PurchaseStatusBadge key={purchaseReloadKey} opportunityId={opp.id} navigate={navigate} />
-      <ActivitiesSummary opportunityId={opp.id} onAddActivity={onAddActivity} />
-      {showAnalysisActions && (
-        <div className="mt-1.5 border-t border-[#F1F5F9] pt-1.5">
-          <button
-            onClick={(e) => { e.stopPropagation(); navigate("/dashboard/comercial/new-client-request"); }}
-            className="cursor-pointer text-left text-xs text-[#2563EB] hover:underline"
-          >
-            Solicitar creación de cliente
-          </button>
-        </div>
-      )}
-      <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#F1F5F9] pt-2.5">
-        <div className="flex gap-1.5">
-          <button onClick={stop(onOpenAccount)} title={opp.account_id ? "Ver cuenta" : "Vincular cuenta"} className={`${ICON_BTN} ${!opp.account_id ? "border-dashed border-[#93C5FD] text-[#2563EB]" : ""}`}>
-            <FiBriefcase size={14} />
-          </button>
-          <button onClick={stop(onOpenContacts)} title="Contactos de la cuenta" className={ICON_BTN}>
-            <FiUsers size={14} />
-          </button>
-          <button onClick={stop(onAddContact)} title="Agregar contacto" className={ICON_BTN}>
-            <FiUserPlus size={14} />
-          </button>
-          <button onClick={stop(onOpenPurchase)} title="Solicitud de requerimiento de compra" className={ICON_BTN}>
-            <FiShoppingCart size={14} />
-          </button>
-        </div>
-        <button
-          onClick={e => { e.stopPropagation(); navigate(`/dashboard/crm-fam/opportunities/${opp.id}/blue-sheet`); }}
-          className="cursor-pointer transition-transform hover:scale-[1.02]"
-          title="Abrir Blue Sheet"
-        >
-          <span className="rounded-full bg-[#F8FAFC] px-2 py-1 text-[11px] font-medium text-[#64748B] ring-1 ring-[#E2E8F0]">Blue Sheet</span>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function LeadCard({ lead, actions }) {
-  const leadName = lead.full_name || [lead.first_name, lead.last_name].filter(Boolean).join(" ") || lead.company_name || `Lead ${lead.lead_code || lead.id}`;
-  const accountName = lead.converted_account_name || lead.account_name || "";
-  const contactCount = Number(lead.linked_contact_count) || 0;
-  return (
-    <div className={`${CARD_BASE} relative overflow-hidden border-[#BFDBFE] bg-gradient-to-br from-white to-[#EFF6FF] p-3 pl-4`}>
-      <div className="absolute inset-y-0 left-0 w-1 bg-[#2563EB]" />
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-sm font-semibold text-[#0F172A] truncate">{leadName}</div>
-        <Badge bg="#EFF6FF" text="#1D4ED8" label="Lead" />
-      </div>
-      {lead.company_name && lead.full_name && (
-        <div className="mt-1 text-xs text-[#475569] truncate">{lead.company_name}</div>
-      )}
-      {lead.city && <div className="mt-1 inline-flex rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-medium text-[#64748B] ring-1 ring-[#DBEAFE]">{lead.city}</div>}
-      {lead.converted_account_id && (
-        <div className="mt-2 flex items-center gap-2 rounded-xl border border-[#BFDBFE] bg-[#EFF6FF] px-2.5 py-2 text-xs text-[#1D4ED8]">
-          <FiBriefcase size={14} className="shrink-0" />
-          <div className="min-w-0">
-            <p className="truncate font-semibold text-[#1E3A8A]">{accountName || "Cuenta vinculada"}</p>
-            <p className="text-[11px] text-[#2563EB]">{contactCount} contacto{contactCount === 1 ? "" : "s"} asociado{contactCount === 1 ? "" : "s"}</p>
-          </div>
-        </div>
-      )}
-      <div className="mt-2 flex flex-wrap gap-2">{actions}</div>
-    </div>
-  );
-}
-
-function Column({ title, count, total, tone = KANBAN_TONES[0], onDragOver, onDrop, dropActive, children }) {
-  return (
-    <div
+    <section
+      aria-label={title}
       onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className={`flex min-w-[300px] max-w-[300px] flex-col gap-3 rounded-[1.35rem] border p-3 shadow-[0_10px_28px_rgba(15,23,42,0.07)] transition-all duration-150 ${dropActive ? "scale-[1.01] border-[#93C5FD] bg-[#DBEAFE]" : "border-[#E2E8F0] bg-white"}`}
-    >
-      <div className="rounded-2xl border border-white/70 p-3" style={{ background: `linear-gradient(135deg, ${tone.bg}, #FFFFFF)` }}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <span className="block truncate text-sm font-bold text-[#0F172A]">{title}</span>
-            <span className="mt-1 block text-[11px] font-medium uppercase tracking-[0.16em]" style={{ color: tone.text }}>
-              {count} registro{count === 1 ? "" : "s"}
-            </span>
-          </div>
-          <span className="shrink-0 rounded-full px-2.5 py-1 text-xs font-bold" style={{ backgroundColor: tone.chip, color: tone.text }}>
-            {count}
-          </span>
-        </div>
-        {total > 0 && (
-          <div className="mt-2 rounded-xl bg-white/80 px-2.5 py-1.5 text-xs font-semibold text-[#0F172A] ring-1 ring-white">
-            Pipeline: <span className="font-mono">{fmtMoney(total)}</span>
-          </div>
-        )}
-      </div>
-      {count === 0 ? (
-        <div className="flex min-h-[130px] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 py-6 text-center">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white shadow-sm">
-            <FiInbox size={20} className="text-[#94A3B8]" />
-          </div>
-          <p className="text-xs font-medium text-[#64748B]">Sin movimientos por ahora</p>
-          <p className="max-w-[190px] text-[11px] leading-relaxed text-[#94A3B8]">Arrastra oportunidades a esta etapa cuando avancen en el proceso.</p>
-        </div>
-      ) : (
-        children
+      className={cx(
+        "flex w-[288px] shrink-0 flex-col rounded-xl border transition-colors duration-100",
+        dropActive ? "border-fam-action bg-fam-selected" : tone === "lead" ? "border-fam-border bg-fam-subtle" : "border-fam-border bg-fam-canvas",
       )}
-    </div>
+    >
+      <header className="border-b border-fam-border px-3 py-2.5">
+        <div className="flex items-baseline justify-between gap-2">
+          <h3 className="min-w-0 truncate text-sm font-semibold text-fam-text">{title}</h3>
+          <span className="fam-numeric shrink-0 text-[13px] text-fam-muted">{number(count)}</span>
+        </div>
+        {total !== undefined && <p className="fam-numeric text-[13px] text-fam-muted">{money(total)}</p>}
+      </header>
+      <div className="flex min-h-[96px] flex-1 flex-col gap-2 overflow-y-auto p-2 lg:max-h-[calc(100dvh-20rem)]">
+        {count === 0 ? <p className="px-2 py-6 text-center text-[13px] text-fam-muted">Sin registros</p> : children}
+        {footer}
+      </div>
+    </section>
   );
 }
 
-function KanbanView({ stages, rows, leads, loading, navigate, onQualifyLead, onDisqualifyLead, onPromoteLead, onMoveStage, accountOptions, onAccountCreated, onLeadChanged, onOpportunityChanged }) {
-  const [activityModal, setActivityModal] = useState(null); // { opportunityId, refresh } | null
-  const [accountModalLead, setAccountModalLead] = useState(null);
-  const [contactModalLead, setContactModalLead] = useState(null);
-  const [contactsModalLead, setContactsModalLead] = useState(null);
-  const [dragOverStageId, setDragOverStageId] = useState(null);
-  const [accountModalOpp, setAccountModalOpp] = useState(null);
-  const [contactsModalOpp, setContactsModalOpp] = useState(null);
-  const [addContactOpp, setAddContactOpp] = useState(null);
-  const [purchaseModalOpp, setPurchaseModalOpp] = useState(null);
-  const [purchaseReloadKey, setPurchaseReloadKey] = useState(0);
-  const [promoteModalLead, setPromoteModalLead] = useState(null);
-  const [completeFieldsOpp, setCompleteFieldsOpp] = useState(null);
-
-  const sortedStages = useMemo(
-    () => [...stages].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)),
-    [stages]
-  );
-
-  const opportunityLeadIds = useMemo(() => new Set(rows.map(o => o.lead_id).filter(Boolean)), [rows]);
-  const leadsNew = useMemo(() => leads.filter(l => ["new", "contacted"].includes(l.status)), [leads]);
-  const leadsQualified = useMemo(
-    () => leads.filter(l => l.status === "qualified" && !opportunityLeadIds.has(l.id)),
-    [leads, opportunityLeadIds],
-  );
-
-  const byStage = useMemo(() => {
-    const map = {};
-    for (const opp of rows) {
-      const key = opp.stage_id ?? "__none__";
-      if (!map[key]) map[key] = [];
-      map[key].push(opp);
-    }
-    return map;
-  }, [rows]);
-
-  const totalByStage = useMemo(() => {
-    const map = {};
-    for (const [key, opps] of Object.entries(byStage)) {
-      map[key] = opps.reduce((sum, o) => sum + (Number(o.estimated_amount) || 0), 0);
-    }
-    return map;
-  }, [byStage]);
-
-  const renderLeadActions = (lead, { qualified = false } = {}) => (
-    <div className="flex w-full flex-wrap items-center gap-2">
-      {qualified ? (
-        <button onClick={() => setPromoteModalLead(lead)} className={`px-3 py-1.5 text-xs font-medium ${BTN_PRIMARY}`}>Iniciar analisis</button>
-      ) : (
-        <>
-          <button onClick={() => onQualifyLead(lead)} className={`px-3 py-1.5 text-xs font-medium ${BTN_SUCCESS_SOFT}`}>Calificar</button>
-          <button onClick={() => onDisqualifyLead(lead)} className={`px-3 py-1.5 text-xs font-medium ${BTN_DANGER_SOFT}`}>Descalificar</button>
-        </>
-      )}
-      {!lead.converted_account_id && (
-        <button onClick={() => setAccountModalLead(lead)} title="Crear o vincular cuenta" className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium ${BTN_SECONDARY}`}>
-          <FiBriefcase size={13} />
-          Cuenta
-        </button>
-      )}
-      {Number(lead.linked_contact_count) > 0 && (
-        <button onClick={() => setContactsModalLead(lead)} title="Ver contactos registrados" aria-label="Ver contactos registrados" className={`inline-flex h-8 w-8 items-center justify-center ${BTN_SECONDARY}`}>
-          <FiUsers size={14} />
-        </button>
-      )}
-      <button onClick={() => setContactModalLead(lead)} title="Nuevo contacto" className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium ${BTN_SECONDARY}`}>
-        <FiUserPlus size={13} />
-        Nuevo contacto
+function OpportunityCard({ opp, journey, selected, stages, onOpen, onMove, onAction }) {
+  const missing = missingFields(opp).length;
+  const h = healthOf(opp.health_status);
+  const tier = opp.account_classification ? accountClassification(opp.account_classification) : null;
+  const act = (type) => () => onAction(type, opp);
+  return (
+    <article
+      draggable
+      onDragStart={(e) => { e.dataTransfer.setData("text/plain", opp.id); e.dataTransfer.effectAllowed = "move"; }}
+      className={cx("rounded-lg border bg-fam-surface p-3", selected ? "border-fam-action ring-1 ring-fam-action" : "border-fam-border")}
+    >
+      <button type="button" onClick={() => onOpen(opp)} className="block w-full text-left">
+        <span className="line-clamp-2 text-sm font-medium text-fam-text">{opp.name}</span>
+        <span className="mt-1 flex items-center gap-1.5 text-[13px] text-fam-muted">
+          <FiBriefcase className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate">{opp.account_name || "Sin cuenta"}</span>
+          {tier && <Badge tone={tier.tone} className="shrink-0">{tier.label}</Badge>}
+        </span>
       </button>
-    </div>
+      <div className="mt-2 flex items-end justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap gap-1">
+          {opp.health_status && opp.health_status !== "gray" && <Badge tone={h.tone}>{h.label}</Badge>}
+          {isStale(opp) && <Badge tone="warning"><FiClock className="mr-1 h-3 w-3" aria-hidden="true" />{daysIdle(opp)} d sin movimiento</Badge>}
+          {missing > 0 && <Badge tone="warning">Faltan {missing} dato{missing === 1 ? "" : "s"}</Badge>}
+        </div>
+        <span className="fam-numeric shrink-0 text-sm font-semibold text-fam-text">{opp.estimated_amount != null ? money(opp.estimated_amount) : "—"}</span>
+      </div>
+      <JourneyStrip journey={journey} />
+      {/* Accesos directos de la tarjeta. "Mover" es la alternativa accesible al arrastre. */}
+      <div className="mt-2 flex items-center justify-between gap-1 border-t border-fam-border pt-2">
+        <div className="flex">
+          <IconBtn icon={FiBriefcase} label={opp.account_id ? "Ver cuenta" : "Vincular cuenta"} className={cx("h-8 w-8", !opp.account_id && "text-fam-action")} onClick={act(opp.account_id ? "account-peek" : "account-link")} />
+          <IconBtn icon={FiMessageCircle} label="Escribir o llamar a un contacto de la cuenta" className="h-8 w-8" disabled={!opp.account_id} onClick={act("contacts")} />
+          <IconBtn icon={FiUserPlus} label="Agregar contacto" className="h-8 w-8" onClick={act("contact-new")} />
+          <IconBtn icon={FiShoppingCart} label="Requerimiento de compra" className="h-8 w-8" onClick={act("purchase")} />
+          <Link to={`${BASE}/opportunities/${opp.id}/blue-sheet`} aria-label="Abrir Blue Sheet" title="Abrir Blue Sheet" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-fam-muted transition-colors duration-100 hover:bg-fam-subtle hover:text-fam-text">
+            <FiFileText className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </div>
+        <Menu
+          label="Mover"
+          variant="ghost"
+          size="sm"
+          items={stages.map((s) => ({ label: s.name, disabled: s.id === opp.stage_id, onSelect: () => onMove(opp, s) }))}
+        />
+      </div>
+    </article>
   );
+}
+
+function LeadCard({ lead, selected, onOpen }) {
+  return (
+    <article className={cx("rounded-lg border bg-fam-surface p-3", selected ? "border-fam-action ring-1 ring-fam-action" : "border-fam-border")}>
+      <button type="button" onClick={() => onOpen(lead)} className="block w-full text-left">
+        <span className="line-clamp-2 text-sm font-medium text-fam-text">{leadName(lead)}</span>
+        <span className="mt-0.5 block truncate text-[13px] text-fam-muted">{[lead.company_name, lead.city].filter(Boolean).join(" · ") || "Sin empresa"}</span>
+      </button>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {lead.status === "contacted" && <StatusBadge of={leadStatus} value={lead.status} />}
+        {lead.converted_account_id && <Badge tone="info">{lead.converted_account_name || "Cuenta vinculada"}</Badge>}
+        {lead.status === "new" && daysFromToday(lead.created_at) <= -3 && <Badge tone="warning">{relativeDay(lead.created_at)}</Badge>}
+      </div>
+    </article>
+  );
+}
+
+function Board({ stages, opps, journeys, leads, loading, selected, onOpenOpp, onOpenLead, onMove, onAction }) {
+  const card = (o) => (
+    <OpportunityCard key={o.id} opp={o} journey={journeys[o.id]} stages={stages} selected={selected === `opp:${o.id}`} onOpen={onOpenOpp} onMove={onMove} onAction={onAction} />
+  );
+  const [over, setOver] = useState(null);
+  const byStage = useMemo(() => {
+    const map = new Map(stages.map((s) => [s.id, []]));
+    opps.forEach((o) => { if (map.has(o.stage_id)) map.get(o.stage_id).push(o); });
+    return map;
+  }, [stages, opps]);
+  const unstaged = useMemo(() => opps.filter((o) => !stages.some((s) => s.id === o.stage_id)), [opps, stages]);
+  const promoted = useMemo(() => new Set(opps.map((o) => o.lead_id).filter(Boolean)), [opps]);
+  const leadsNew = leads.filter((l) => ["new", "contacted"].includes(l.status));
+  const leadsQualified = leads.filter((l) => l.status === "qualified" && !promoted.has(l.id));
 
   if (loading) {
     return (
-      <div className="flex gap-4 overflow-x-auto rounded-[1.75rem] bg-gradient-to-br from-[#F8FAFC] to-[#EEF2FF] p-4 pb-5">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="flex min-w-[300px] max-w-[300px] flex-col gap-3 rounded-[1.35rem] border border-[#E2E8F0] bg-white p-3 shadow-[0_10px_28px_rgba(15,23,42,0.07)]">
-            <div className="h-20 animate-pulse rounded-2xl bg-[#F1F5F9]" />
-            {Array.from({ length: 3 }).map((__, j) => (
-              <div key={j} className="h-28 animate-pulse rounded-xl bg-[#F8FAFC]" />
-            ))}
+      <div className="flex gap-3 overflow-x-auto pb-2" role="status" aria-label="Cargando tablero">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="w-[288px] shrink-0 space-y-2 rounded-xl border border-fam-border bg-fam-canvas p-2">
+            <Skeleton className="h-10 w-full" /><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" />
           </div>
         ))}
       </div>
     );
   }
 
+  const leadFooter = (list, status) => list.length > LEAD_COLUMN_LIMIT && (
+    <Link to={`${BASE}/leads?status=${status}`} className="px-2 py-1 text-center text-[13px] text-fam-action underline underline-offset-2">
+      Ver los {number(list.length)} en Leads
+    </Link>
+  );
+
   return (
-    <div className="overflow-x-auto rounded-[1.75rem] bg-gradient-to-br from-[#F8FAFC] via-white to-[#EEF2FF] p-4 pb-5 shadow-inner">
-      {/* Fase 1: Leads */}
-      <div className="flex gap-4">
-        <Column title="Leads" count={leadsNew.length} tone={LEAD_TONE}>
-          {leadsNew.map(lead => (
-            <LeadCard
-              key={lead.id}
-              lead={lead}
-              actions={renderLeadActions(lead)}
-            />
-          ))}
+    <div className="flex gap-3 overflow-x-auto pb-2">
+      <Column title="Leads" count={leadsNew.length} tone="lead" footer={leadFooter(leadsNew, "new")}>
+        {leadsNew.slice(0, LEAD_COLUMN_LIMIT).map((l) => <LeadCard key={l.id} lead={l} selected={selected === `lead:${l.id}`} onOpen={onOpenLead} />)}
+      </Column>
+      <Column title="Leads calificados" count={leadsQualified.length} tone="lead" footer={leadFooter(leadsQualified, "qualified")}>
+        {leadsQualified.slice(0, LEAD_COLUMN_LIMIT).map((l) => <LeadCard key={l.id} lead={l} selected={selected === `lead:${l.id}`} onOpen={onOpenLead} />)}
+      </Column>
+      {stages.map((stage) => {
+        const cards = byStage.get(stage.id) || [];
+        return (
+          <Column
+            key={stage.id}
+            title={stage.name}
+            count={cards.length}
+            total={cards.reduce((sum, o) => sum + (Number(o.estimated_amount) || 0), 0)}
+            dropActive={over === stage.id}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (over !== stage.id) setOver(stage.id); }}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(null); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setOver(null);
+              const opp = opps.find((o) => o.id === e.dataTransfer.getData("text/plain"));
+              if (opp && opp.stage_id !== stage.id) onMove(opp, stage);
+            }}
+          >
+            {cards.map(card)}
+          </Column>
+        );
+      })}
+      {unstaged.length > 0 && (
+        <Column title="Sin fase" count={unstaged.length} total={unstaged.reduce((sum, o) => sum + (Number(o.estimated_amount) || 0), 0)}>
+          {unstaged.map(card)}
         </Column>
-
-        {/* Fase 2: Leads calificados */}
-        <Column title="Leads calificados" count={leadsQualified.length} tone={QUALIFIED_TONE}>
-          {leadsQualified.map(lead => (
-            <LeadCard
-              key={lead.id}
-              lead={lead}
-              actions={renderLeadActions(lead, { qualified: true })}
-            />
-          ))}
-        </Column>
-
-        {/* Fase 3-8: etapas reales de la oportunidad, arrastrables entre columnas */}
-        {sortedStages.map((stage, index) => {
-          const cards = byStage[stage.id] ?? [];
-          const isAnalisis = stage.order_index === 1;
-          return (
-            <Column
-              key={stage.id}
-              title={stage.name}
-              count={cards.length}
-              total={totalByStage[stage.id] ?? 0}
-              tone={getColumnTone(index)}
-              dropActive={dragOverStageId === stage.id}
-              onDragOver={(e) => { e.preventDefault(); setDragOverStageId(stage.id); }}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOverStageId(null);
-                const oppId = e.dataTransfer.getData("text/plain");
-                if (oppId && oppId !== stage.id) onMoveStage(oppId, stage.id);
-              }}
-            >
-              {cards.map(opp => (
-                <OpportunityCard
-                  key={opp.id}
-                  opp={opp}
-                  navigate={navigate}
-                  showAnalysisActions={isAnalisis}
-                  onAddActivity={(oppId, refresh) => setActivityModal({ opportunityId: oppId, refresh })}
-                  onOpenAccount={setAccountModalOpp}
-                  onOpenContacts={setContactsModalOpp}
-                  onAddContact={setAddContactOpp}
-                  onOpenPurchase={setPurchaseModalOpp}
-                  onCompleteFields={setCompleteFieldsOpp}
-                  purchaseReloadKey={purchaseReloadKey}
-                  draggable
-                  onDragStart={(e) => e.dataTransfer.setData("text/plain", opp.id)}
-                />
-              ))}
-            </Column>
-          );
-        })}
-      </div>
-
-      {activityModal && (
-        <AddActivityModal
-          opportunityId={activityModal.opportunityId}
-          onClose={() => setActivityModal(null)}
-          onSaved={() => { activityModal.refresh(); setActivityModal(null); }}
-        />
-      )}
-      {accountModalLead && (
-        <CreateAccountFromLeadModal
-          lead={accountModalLead}
-          accountOptions={accountOptions}
-          onClose={() => setAccountModalLead(null)}
-          onSaved={() => { onAccountCreated(); onLeadChanged(); setAccountModalLead(null); }}
-        />
-      )}
-      {contactModalLead && (
-        <CreateContactModal
-          initial={contactModalLead}
-          accountOptions={accountOptions}
-          leadId={contactModalLead.id}
-          onClose={() => setContactModalLead(null)}
-          onSaved={() => { onLeadChanged(); setContactModalLead(null); }}
-        />
-      )}
-      {contactsModalLead && (
-        <LeadContactsModal
-          lead={contactsModalLead}
-          onClose={() => setContactsModalLead(null)}
-          onAddContact={() => { setContactModalLead(contactsModalLead); setContactsModalLead(null); }}
-        />
-      )}
-      {accountModalOpp && (
-        <AccountModal
-          opp={accountModalOpp}
-          accountOptions={accountOptions}
-          onClose={() => setAccountModalOpp(null)}
-          onLinked={() => { setAccountModalOpp(null); onAccountCreated(); onOpportunityChanged(); }}
-        />
-      )}
-      {contactsModalOpp && (
-        <ContactsListModal
-          opp={contactsModalOpp}
-          onClose={() => setContactsModalOpp(null)}
-          onAddContact={() => { setAddContactOpp(contactsModalOpp); setContactsModalOpp(null); }}
-        />
-      )}
-      {addContactOpp && (
-        <CreateContactModal
-          initial={{}}
-          accountOptions={accountOptions}
-          defaultAccountId={addContactOpp.account_id || ""}
-          onClose={() => setAddContactOpp(null)}
-          onSaved={() => setAddContactOpp(null)}
-        />
-      )}
-      {purchaseModalOpp && (
-        <PurchasePickerModal
-          opp={purchaseModalOpp}
-          onClose={() => setPurchaseModalOpp(null)}
-          onCreated={() => { setPurchaseModalOpp(null); setPurchaseReloadKey(k => k + 1); }}
-        />
-      )}
-      {promoteModalLead && (
-        <PromoteLeadModal
-          lead={promoteModalLead}
-          accountOptions={accountOptions}
-          onClose={() => setPromoteModalLead(null)}
-          onPromote={async (lead, fields) => {
-            await onPromoteLead(lead, fields);
-            setPromoteModalLead(null);
-          }}
-        />
-      )}
-      {completeFieldsOpp && (
-        <CompleteOpportunityModal
-          opp={completeFieldsOpp}
-          accountOptions={accountOptions}
-          onClose={() => setCompleteFieldsOpp(null)}
-          onSaved={() => { setCompleteFieldsOpp(null); onOpportunityChanged(); }}
-        />
       )}
     </div>
   );
 }
 
-export default function OpportunitiesPage() {
-  const navigate = useNavigate();
-
-  const [viewMode] = useState("kanban");
-
-  const [q, setQ] = useState("");
-  const [debouncedQ, setDebouncedQ] = useState("");
-  const [status, setStatus] = useState("");
-  const [stageId, setStageId] = useState("");
-  const [offset, setOffset] = useState(0);
-  const [stages, setStages] = useState([]);
-  const [leads, setLeads] = useState([]);
-  const [accountOptions, setAccountOptions] = useState([]);
-
-  const refreshAccountOptions = useCallback(() => {
-    fetchAccounts({ limit: 500 })
-      .then((res) => {
-        const rows = Array.isArray(res) ? res : (res?.data ?? []);
-        setAccountOptions(rows.map((a) => ({ value: a.id, label: a.account_name })));
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => { refreshAccountOptions(); }, [refreshAccountOptions]);
-
-  // Debounce
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q), 300);
-    return () => clearTimeout(t);
-  }, [q]);
-
-  // Reset offset on filter change
-  useEffect(() => { setOffset(0); }, [debouncedQ, status, stageId]);
-
-  // Load stages once
-  useEffect(() => {
-    fetchPipelineStages()
-      .then(s => setStages(Array.isArray(s) ? s : []))
-      .catch(() => {});
-  }, []);
-
-  // Leads asignados al usuario, para Fase 1 (Leads) y Fase 2 (Leads calificados).
-  // El endpoint de descalificacion guarda `unqualified`; `disqualified` se
-  // mantiene como compatibilidad con datos historicos. Ninguno debe volver a
-  // aparecer como prospecto accionable en el embudo.
-  const refreshLeads = useCallback(() => {
-    fetchLeads({ limit: 200 })
-      .then(res => {
-        const all = Array.isArray(res?.data) ? res.data : [];
-        setLeads(all.filter(l => !["converted", "unqualified", "disqualified"].includes(l.status)));
-      })
-      .catch(() => setLeads([]));
-  }, []);
-  useEffect(() => { refreshLeads(); }, [refreshLeads]);
-
-  const params = viewMode === "kanban"
-    ? { status: "open", limit: 500, offset: 0 }
-    : {
-        ...(debouncedQ ? { q: debouncedQ } : {}),
-        ...(status ? { status } : {}),
-        ...(stageId ? { stage_id: stageId } : {}),
-        limit: LIMIT,
-        offset,
-      };
-
-  const { data, loading, error, refresh } = useOpportunities(params);
-
-  const rows = Array.isArray(data) ? data : (data?.data ?? []);
-  const total = Array.isArray(data) ? data.length : (data?.total ?? 0);
-  const hasNext = offset + LIMIT < total || rows.length === LIMIT;
-  const hasPrev = offset > 0;
-
-  // Modal state
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState(null);
-
-  const handleFormChange = useCallback((e) => {
-    const { name, value } = e.target;
-    setForm(prev => ({ ...prev, [name]: value }));
-  }, []);
-
-  const handleCreate = useCallback(async (e) => {
-    e.preventDefault();
-    if (!form.name.trim()) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const payload = { ...form };
-      if (!payload.account_id) delete payload.account_id;
-      if (!payload.stage_id) delete payload.stage_id;
-      if (!payload.estimated_amount) delete payload.estimated_amount;
-      if (!payload.estimated_close_date) delete payload.estimated_close_date;
-      if (!payload.source) delete payload.source;
-      if (payload.estimated_amount) payload.estimated_amount = Number(payload.estimated_amount);
-      await createOpportunity(payload);
-      setShowModal(false);
-      setForm(EMPTY_FORM);
-      refresh();
-    } catch (err) {
-      setSaveError(err.message || "Error al guardar");
-    } finally {
-      setSaving(false);
-    }
-  }, [form, refresh]);
-
-  const handleCloseModal = useCallback(() => {
-    setShowModal(false);
-    setForm(EMPTY_FORM);
-    setSaveError(null);
-  }, []);
-
-  const handleQualifyLead = useCallback(async (lead) => {
-    try {
-      await updateLead(lead.id, { status: "qualified" });
-      refreshLeads();
-    } catch (err) {
-      alert(err.message || "Error al calificar");
-    }
-  }, [refreshLeads]);
-
-  const handleDisqualifyLead = useCallback(async (lead) => {
-    if (!window.confirm(`Descalificar lead "${lead.full_name || lead.company_name || ""}"?`)) return;
-    try {
-      await disqualifyLead(lead.id, { reason: "Manual" });
-      refreshLeads();
-    } catch (err) {
-      alert(err.message || "Error al descalificar");
-    }
-  }, [refreshLeads]);
-
-  const handlePromoteLead = useCallback(async (lead, fields) => {
-    await promoteLeadToOpportunity(lead.id, fields);
-    refreshLeads();
-    refresh();
-  }, [refreshLeads, refresh]);
-
-  const handleMoveStage = useCallback(async (opportunityId, stageId) => {
-    try {
-      await changeOpportunityStage(opportunityId, { stage_id: stageId });
-      refresh();
-    } catch (err) {
-      alert(err.message || "Error al mover la oportunidad de etapa");
-    }
-  }, [refresh]);
+// ─── Pronóstico ──────────────────────────────────────────────────────────────
+function Forecast({ stages, opps }) {
+  const rows = stages.map((s) => {
+    const list = opps.filter((o) => o.stage_id === s.id);
+    const total = list.reduce((sum, o) => sum + (Number(o.estimated_amount) || 0), 0);
+    const weighted = list.reduce((sum, o) => sum + (Number(o.estimated_amount) || 0) * probabilityOf(o, s) / 100, 0);
+    return { id: s.id, name: s.name, probability: Number(s.probability_default || 0), count: list.length, total, weighted };
+  });
+  const sum = (key) => rows.reduce((acc, r) => acc + r[key], 0);
+  const max = Math.max(1, ...rows.map((r) => r.total));
 
   return (
-    <div className="p-6 bg-[#F9FAFB] min-h-full">
-      {/* Header */}
-      <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold text-[#1F2937]">Embudo de ventas</h1>
-          {rows.filter(isStaleOpportunity).length > 0 && (
-            <span
-              className="inline-flex items-center gap-1.5 rounded-full bg-[#FEF3C7] px-3 py-1 text-xs font-medium text-[#92400E]"
-              title={`Oportunidades abiertas sin actividad hace ${STALE_DAYS} días o más`}
-            >
-              <FiClock size={12} />
-              {rows.filter(isStaleOpportunity).length} estancada{rows.filter(isStaleOpportunity).length === 1 ? "" : "s"}
-            </span>
+    <Panel title="Pronóstico ponderado" hint="Monto de cada oportunidad abierta × su probabilidad (la propia o, si no tiene, la de su fase)" flush>
+      <DataTable
+        caption="Pronóstico por fase"
+        rowKey="id"
+        columns={[
+          { key: "name", header: "Fase", render: (r) => (
+            <div>
+              <span className="font-medium">{r.name}</span>
+              <div className="mt-1 h-1.5 w-full max-w-[220px] overflow-hidden rounded-full bg-fam-subtle" aria-hidden="true">
+                <div className="h-full rounded-full bg-fam-action" style={{ width: `${(r.total / max) * 100}%` }} />
+              </div>
+            </div>
+          ) },
+          { key: "probability", header: "Prob. de la fase", align: "right", hideBelow: "sm", render: (r) => `${r.probability}%` },
+          { key: "count", header: "Oportunidades", align: "right", render: (r) => number(r.count) },
+          { key: "total", header: "Monto", align: "right", hideBelow: "sm", render: (r) => money(r.total) },
+          { key: "weighted", header: "Ponderado", align: "right", render: (r) => <span className="font-semibold">{money(r.weighted)}</span> },
+        ]}
+        rows={rows}
+      />
+      <div className="flex flex-wrap justify-end gap-x-10 gap-y-2 border-t border-fam-border px-4 py-3">
+        <p className="text-[13px] text-fam-muted">Oportunidades <span className="fam-numeric ml-1 text-sm font-semibold text-fam-text">{number(sum("count"))}</span></p>
+        <p className="text-[13px] text-fam-muted">Pipeline <span className="fam-numeric ml-1 text-sm font-semibold text-fam-text">{money(sum("total"))}</span></p>
+        <p className="text-[13px] text-fam-muted">Pronóstico <span className="fam-numeric ml-1 text-sm font-semibold text-fam-text">{money(sum("weighted"))}</span></p>
+      </div>
+    </Panel>
+  );
+}
+
+// ─── Detalle de oportunidad en el inspector ──────────────────────────────────
+function OpportunityPeek({ opp, stage, purchaseKey, activityKey, onComplete, onAddActivity, onNewPurchase }) {
+  const [activities, setActivities] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    setActivities(null);
+    fetchActivities({ opportunity_id: opp.id, limit: 10 })
+      .then((res) => { if (!cancelled) setActivities(listOf(res)); })
+      .catch(() => { if (!cancelled) setActivities([]); });
+    return () => { cancelled = true; };
+  }, [opp.id, activityKey]);
+
+  const missing = missingFields(opp);
+  const pending = (activities || []).filter((a) => a.status === "scheduled");
+  const h = healthOf(opp.health_status);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap gap-2">
+        <StatusBadge of={opportunityStatus} value={opp.status} />
+        <Badge tone={h.tone}>{h.label}</Badge>
+        {opp.blue_sheet_status && <Badge tone={blueSheetStatus(opp.blue_sheet_status).tone}>Blue Sheet: {blueSheetStatus(opp.blue_sheet_status).label.toLowerCase()}</Badge>}
+        {isStale(opp) && <Badge tone="warning">{daysIdle(opp)} días sin movimiento</Badge>}
+      </div>
+
+      {missing.length > 0 && (
+        <div className="rounded-lg bg-fam-warning-bg px-3 py-2.5">
+          <p className="text-[13px] text-fam-warning">Faltan datos de negocio: {missing.map((f) => f.label.toLowerCase()).join(", ")}.</p>
+          <Btn size="sm" className="mt-2" onClick={onComplete}>Completar información</Btn>
+        </div>
+      )}
+
+      <DefList
+        columns={2}
+        items={[
+          { label: "Cuenta", value: opp.account_id ? <Link to={`${BASE}/accounts/${opp.account_id}`} className="text-fam-action underline underline-offset-2">{opp.account_name || "Abrir cuenta"}</Link> : null },
+          { label: "Fase", value: stage?.name || opp.stage_name },
+          { label: "Monto estimado", value: opp.estimated_amount != null ? money(opp.estimated_amount) : null, numeric: true },
+          { label: "Probabilidad", value: `${probabilityOf(opp, stage)}%${opp.probability_override == null ? " (de la fase)" : ""}`, numeric: true },
+          { label: "Cierre estimado", value: opp.estimated_close_date ? `${date(opp.estimated_close_date)} (${relativeDay(opp.estimated_close_date)})` : null },
+          { label: "Fuente", value: opp.source ? opportunitySource(opp.source) : null },
+          { label: "Responsable", value: opp.owner_name },
+          { label: "Código", value: opp.opportunity_code ? <span className="fam-id">{opp.opportunity_code}</span> : null },
+        ]}
+      />
+
+      <div className="border-t border-fam-border pt-4">
+        <h3 className="mb-3 text-[13px] font-semibold text-fam-text">Recorrido</h3>
+        <JourneyPanel opportunityId={opp.id} reloadKey={purchaseKey} onNewPurchase={onNewPurchase} />
+      </div>
+
+      <div className="border-t border-fam-border pt-4">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-[13px] font-semibold text-fam-text">Actividades pendientes {activities && <span className="fam-numeric font-normal text-fam-muted">{pending.length}</span>}</h3>
+          <Btn variant="link" onClick={onAddActivity}>Agregar</Btn>
+        </div>
+        {activities === null ? <Skeleton className="h-5 w-48" /> : pending.length === 0 ? (
+          <p className="text-sm text-fam-muted">Ninguna programada.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {pending.slice(0, 5).map((a) => (
+              <li key={a.id} className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="min-w-0 truncate text-fam-text">{activityType(a.activity_type)} · {a.subject}</span>
+                <span className={cx("fam-numeric shrink-0 text-[13px]", a.scheduled_at && daysFromToday(a.scheduled_at) < 0 ? "text-fam-danger" : "text-fam-muted")}>{a.scheduled_at ? relativeDay(a.scheduled_at) : "sin fecha"}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LeadPeekFunnel({ lead }) {
+  const contacts = Number(lead.linked_contact_count) || 0;
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap gap-2"><StatusBadge of={leadStatus} value={lead.status} /></div>
+      <DefList
+        columns={2}
+        items={[
+          { label: "Empresa", value: lead.company_name },
+          { label: "Ciudad", value: lead.city },
+          { label: "Correo", value: lead.email ? <a href={`mailto:${lead.email}`} className="break-all text-fam-action underline underline-offset-2">{lead.email}</a> : null },
+          { label: "Teléfono", value: lead.phone },
+          { label: "Cuenta", value: lead.converted_account_id ? <Link to={`${BASE}/accounts/${lead.converted_account_id}`} className="text-fam-action underline underline-offset-2">{lead.converted_account_name || "Abrir cuenta"}</Link> : "Sin vincular" },
+          { label: "Contactos", value: number(contacts), numeric: true },
+          { label: "Recibido", value: `${date(lead.created_at)} (${relativeDay(lead.created_at)})` },
+          { label: "Asesor", value: lead.owner_name },
+        ]}
+      />
+      {lead.interest_description && (
+        <div className="border-t border-fam-border pt-4">
+          <h3 className="mb-1 text-[13px] font-semibold text-fam-text">Interés o necesidad</h3>
+          <p className="whitespace-pre-wrap text-sm text-fam-text">{lead.interest_description}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Página ──────────────────────────────────────────────────────────────────
+export default function OpportunitiesPage() {
+  const { user } = useAuth();
+  const { showToast } = useUI();
+  const manager = isManager(user);
+  const [url, setUrl] = useUrlState({ view: "board", q: "", owner: "", stale: "", status: "open", sel: "", new: "" });
+  const view = VIEWS.some((v) => v.value === url.view) ? url.view : "board";
+  const [search, setSearch] = useUrlSearch(url.q, (q) => setUrl({ q }));
+  const [stages, setStages] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [sort, setSort] = useState({ key: "estimated_close_date", dir: "asc" });
+  const [dialog, setDialog] = useState(null); // { type, opp?, lead? }
+  const [purchaseKey, setPurchaseKey] = useState(0);
+  const [activityKey, setActivityKey] = useState(0);
+  const [moved, setMoved] = useState({}); // movimientos optimistas: { oppId: stageId }
+  const [busy, setBusy] = useState(false);
+
+  const loadAccounts = useCallback(() => {
+    fetchAccounts({ limit: 500 }).then((res) => setAccounts(listOf(res))).catch(() => {});
+  }, []);
+  useEffect(() => {
+    loadAccounts();
+    fetchPipelineStages()
+      .then((s) => setStages((Array.isArray(s) ? s : []).filter((x) => x.is_active !== false).sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))))
+      .catch(() => setStages([]));
+  }, [loadAccounts]);
+
+  // El tablero y el pronóstico trabajan sobre lo abierto; la tabla puede revisar cualquier estado.
+  const status = view === "table" ? url.status : "open";
+  const oppsLoad = useLoad(() => fetchOpportunities({ ...(status ? { status } : {}), limit: 500 }), [status], { fallback: "No se pudo cargar el embudo." });
+  const leadsLoad = useLoad(() => fetchLeads({ limit: 200 }), [], { fallback: "No se pudieron cargar los leads." });
+  const reloadOpps = oppsLoad.reload;
+  const reloadLeads = leadsLoad.reload;
+
+  const allOpps = useMemo(
+    () => listOf(oppsLoad.data).map((o) => (moved[o.id] ? { ...o, stage_id: moved[o.id] } : o)),
+    [oppsLoad.data, moved],
+  );
+  const leads = useMemo(() => listOf(leadsLoad.data).filter((l) => !["converted", "unqualified", "disqualified"].includes(l.status)), [leadsLoad.data]);
+  const owners = useMemo(() => [...new Map(allOpps.filter((o) => o.owner_user_id).map((o) => [String(o.owner_user_id), o.owner_name || `Usuario ${o.owner_user_id}`])).entries()].sort((a, b) => a[1].localeCompare(b[1], "es")), [allOpps]);
+
+  const term = url.q.trim().toLowerCase();
+  const matches = (text) => String(text || "").toLowerCase().includes(term);
+  const opps = useMemo(() => allOpps.filter((o) => (
+    (!term || matches(o.name) || matches(o.account_name) || matches(o.opportunity_code))
+    && (!url.owner || String(o.owner_user_id) === url.owner)
+    && (!url.stale || isStale(o))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  )), [allOpps, term, url.owner, url.stale]);
+  const shownLeads = useMemo(() => leads.filter((l) => (
+    (!term || matches(leadName(l)) || matches(l.company_name))
+    && (!url.owner || String(l.owner_user_id) === url.owner)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  )), [leads, term, url.owner]);
+
+  // Recorrido de todas las oportunidades cargadas, en una consulta (no una por tarjeta).
+  const oppIds = useMemo(() => allOpps.map((o) => o.id).sort().join(","), [allOpps]);
+  const [journeys, setJourneys] = useState({});
+  useEffect(() => {
+    if (!oppIds) { setJourneys({}); return undefined; }
+    let cancelled = false;
+    fetchOpportunityJourneys(oppIds.split(",")).then((map) => { if (!cancelled) setJourneys(map || {}); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [oppIds, purchaseKey]);
+
+  const staleCount = allOpps.filter(isStale).length;
+  const stageById = useMemo(() => new Map(stages.map((s) => [s.id, s])), [stages]);
+  const [selKind, selId] = url.sel.split(":");
+  const selOpp = selKind === "opp" ? allOpps.find((o) => o.id === selId) : null;
+  const selLead = selKind === "lead" ? leads.find((l) => l.id === selId) : null;
+  const select = (key) => setUrl({ sel: url.sel === key ? "" : key }, { replace: false });
+  const hasFilters = Boolean(url.q || url.owner || url.stale);
+  const clearFilters = () => { setSearch(""); setUrl({ q: "", owner: "", stale: "" }); };
+
+  // Mover de fase con actualización optimista; si el servidor falla, la tarjeta vuelve a su fase.
+  const move = async (opp, stage) => {
+    setMoved((m) => ({ ...m, [opp.id]: stage.id }));
+    try {
+      const res = await changeOpportunityStage(opp.id, { stage_id: stage.id });
+      showToast(res?.warning ? `Movida a ${stage.name}. ${res.warning}.` : `Movida a ${stage.name}`, res?.warning ? "warning" : "success");
+      await reloadOpps();
+    } catch (err) {
+      showToast(errorMessage(err, "No se pudo mover la oportunidad."), "error");
+    } finally {
+      setMoved((m) => { const next = { ...m }; delete next[opp.id]; return next; });
+    }
+  };
+
+  const qualify = async (lead) => {
+    setBusy(true);
+    try { await updateLead(lead.id, { status: "qualified" }); await reloadLeads(); showToast("Lead calificado", "success"); }
+    catch (err) { showToast(errorMessage(err, "No se pudo calificar."), "error"); }
+    finally { setBusy(false); }
+  };
+
+  const close = () => setDialog(null);
+  const tableRows = useMemo(() => sortRows(opps, sort, {
+    estimated_amount: (r) => Number(r.estimated_amount || 0),
+    probability: (r) => probabilityOf(r, stageById.get(r.stage_id)),
+    idle: (r) => daysIdle(r),
+  }), [opps, sort, stageById]);
+
+  return (
+    <div className="flex min-w-0 flex-col">
+      <PageHeader
+        title="Embudo de ventas"
+        count={oppsLoad.loading && !oppsLoad.data ? null : `${number(opps.length)} oportunidad${opps.length === 1 ? "" : "es"} · ${money(opps.reduce((s, o) => s + (Number(o.estimated_amount) || 0), 0))}`}
+        actions={<Btn variant="primary" icon={FiPlus} onClick={() => setUrl({ new: "1" })}>Nueva oportunidad</Btn>}
+      >
+        <Tabs label="Vistas del embudo" tabs={VIEWS} value={view} onChange={(v) => setUrl({ view: v, sel: "" })} />
+      </PageHeader>
+
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <SearchInput value={search} onChange={setSearch} placeholder="Buscar oportunidad, cuenta o código…" label="Buscar en el embudo" className="w-full sm:w-80" />
+        {manager && owners.length > 1 && (
+          <div className="w-full sm:w-60">
+            <SelectInput aria-label="Filtrar por responsable" value={url.owner} onChange={(e) => setUrl({ owner: e.target.value })}>
+              <option value="">Todo el equipo</option>
+              {owners.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </SelectInput>
+          </div>
+        )}
+        {view === "table" && (
+          <div className="w-full sm:w-44">
+            <SelectInput aria-label="Estado" value={url.status} onChange={(e) => setUrl({ status: e.target.value })}>
+              <option value="open">Abiertas</option>
+              <option value="won">Ganadas</option>
+              <option value="lost">Perdidas</option>
+              <option value="">Todos los estados</option>
+            </SelectInput>
+          </div>
+        )}
+        {staleCount > 0 && !url.stale && (
+          <Btn icon={FiAlertTriangle} onClick={() => setUrl({ stale: "1" })}>{staleCount} estancada{staleCount === 1 ? "" : "s"}</Btn>
+        )}
+        {url.stale && <FilterChip label={`Sin movimiento ${STALE_DAYS}+ días`} onRemove={() => setUrl({ stale: "" })} />}
+        {hasFilters && <Btn variant="link" onClick={clearFilters}>Limpiar</Btn>}
+      </div>
+
+      <ErrorNote message={oppsLoad.error} onRetry={reloadOpps} className="mb-4" />
+      {view === "board" && <ErrorNote message={leadsLoad.error} onRetry={reloadLeads} className="mb-4" />}
+
+      <div className={selOpp || selLead ? "grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,1fr)_400px]" : ""}>
+        <div className="min-w-0">
+          {view === "board" && (
+            <Board
+              stages={stages}
+              opps={opps}
+              journeys={journeys}
+              leads={shownLeads}
+              loading={(oppsLoad.loading && !oppsLoad.data) || stages.length === 0}
+              selected={url.sel}
+              onOpenOpp={(o) => select(`opp:${o.id}`)}
+              onOpenLead={(l) => select(`lead:${l.id}`)}
+              onMove={move}
+              onAction={(type, opp) => setDialog({ type, opp })}
+            />
           )}
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowModal(true)}
-            className={`px-4 py-2 text-sm font-medium ${BTN_PRIMARY}`}
-          >
-            Nueva oportunidad
-          </button>
-        </div>
-      </header>
 
-      {/* Filters — table mode only */}
-      {viewMode === "table" && (
-        <section className="flex flex-wrap gap-3 mb-5">
-          <input
-            type="text"
-            placeholder="Buscar..."
-            value={q}
-            onChange={e => setQ(e.target.value)}
-            className="border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] placeholder-[#6B7280] focus:outline-none focus:ring-2 focus:ring-[#2563EB] w-56"
-          />
-          <select
-            value={status}
-            onChange={e => setStatus(e.target.value)}
-            className="border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-          >
-            {STATUS_OPTIONS.map(o => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          <select
-            value={stageId}
-            onChange={e => setStageId(e.target.value)}
-            className="border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-          >
-            <option value="">Todas las etapas</option>
-            {stages.map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-        </section>
-      )}
+          {view === "table" && (
+            <Panel flush>
+              {oppsLoad.loading && !oppsLoad.data ? <SkeletonRows rows={8} /> : tableRows.length === 0 ? (
+                <EmptyState title={hasFilters ? "Ninguna oportunidad coincide" : "Sin oportunidades en este estado"} hint={hasFilters ? "Quita filtros o cambia la búsqueda." : undefined} action={hasFilters ? <Btn onClick={clearFilters}>Limpiar filtros</Btn> : undefined} />
+              ) : (
+                <DataTable
+                  caption="Oportunidades"
+                  sort={sort}
+                  onSort={(key) => setSort((s) => ({ key, dir: s.key === key && s.dir === "asc" ? "desc" : "asc" }))}
+                  selectedId={selOpp?.id}
+                  onRowClick={(o) => select(`opp:${o.id}`)}
+                  columns={[
+                    { key: "name", header: "Oportunidad", sortable: true, render: (o) => (
+                      <div className="min-w-0">
+                        <button type="button" onClick={(e) => { e.stopPropagation(); select(`opp:${o.id}`); }} className="max-w-full truncate text-left font-medium text-fam-text hover:text-fam-action">{o.name}</button>
+                        <div className="truncate text-[13px] text-fam-muted">{o.account_name || "Sin cuenta"}</div>
+                      </div>
+                    ) },
+                    { key: "stage_name", header: "Fase", sortable: true, hideBelow: "md", render: (o) => stageById.get(o.stage_id)?.name || o.stage_name || "—" },
+                    ...(url.status !== "open" ? [{ key: "status", header: "Estado", render: (o) => <StatusBadge of={opportunityStatus} value={o.status} /> }] : []),
+                    { key: "health_status", header: "Salud", hideBelow: "lg", render: (o) => <StatusBadge of={healthOf} value={o.health_status || "gray"} /> },
+                    { key: "owner_name", header: "Responsable", sortable: true, hideBelow: "xl", render: (o) => <span className="block max-w-[160px] truncate">{o.owner_name || "—"}</span> },
+                    { key: "idle", header: "Sin movimiento", align: "right", sortable: true, hideBelow: "lg", render: (o) => (o.status === "open" ? <span className={isStale(o) ? "text-fam-warning" : undefined}>{daysIdle(o)} d</span> : "—") },
+                    { key: "estimated_close_date", header: "Cierre", sortable: true, hideBelow: "sm", render: (o) => <span className="fam-numeric">{date(o.estimated_close_date)}</span> },
+                    { key: "probability", header: "Prob.", align: "right", sortable: true, hideBelow: "lg", render: (o) => `${probabilityOf(o, stageById.get(o.stage_id))}%` },
+                    { key: "estimated_amount", header: "Monto", align: "right", sortable: true, render: (o) => money(o.estimated_amount) },
+                  ].filter((c) => !(selOpp && ["owner_name", "idle", "probability", "health_status"].includes(c.key)))}
+                  rows={tableRows}
+                />
+              )}
+            </Panel>
+          )}
 
-      {/* Error */}
-      {error && (
-        <div className="mb-4 px-4 py-3 bg-[#FEE2E2] border border-[#DC2626] text-[#DC2626] rounded-xl text-sm">
-          {error}
+          {view === "forecast" && (oppsLoad.loading && !oppsLoad.data ? <SkeletonRows rows={6} /> : <Forecast stages={stages} opps={opps} />)}
         </div>
-      )}
 
-      {/* Kanban view */}
-      {viewMode === "kanban" ? (
-        <KanbanView
+        <Inspector
+          open={Boolean(selOpp)}
+          title={selOpp?.name}
+          onClose={() => setUrl({ sel: "" })}
+          footer={selOpp && (
+            <>
+              <Menu
+                label="Más"
+                items={[
+                  selOpp.account_id
+                    ? { label: "Ver cuenta", icon: FiBriefcase, onSelect: () => setDialog({ type: "account-peek", opp: selOpp }) }
+                    : { label: "Vincular cuenta", icon: FiBriefcase, onSelect: () => setDialog({ type: "account-link", opp: selOpp }) },
+                  { label: "Contactos de la cuenta", icon: FiUsers, disabled: !selOpp.account_id, onSelect: () => setDialog({ type: "contacts", opp: selOpp }) },
+                  { label: "Agregar contacto", icon: FiUserPlus, onSelect: () => setDialog({ type: "contact-new", opp: selOpp }) },
+                  { label: "Requerimiento de compra", icon: FiShoppingCart, onSelect: () => setDialog({ type: "purchase", opp: selOpp }) },
+                ]}
+              />
+              <Btn icon={FiFileText} to={`${BASE}/opportunities/${selOpp.id}/blue-sheet`}>Blue Sheet</Btn>
+              <Btn variant="primary" icon={FiExternalLink} to={`${BASE}/opportunities/${selOpp.id}`}>Abrir</Btn>
+            </>
+          )}
+        >
+          {selOpp && (
+            <>
+              <OpportunityPeek
+                opp={selOpp}
+                stage={stageById.get(selOpp.stage_id)}
+                purchaseKey={purchaseKey}
+                activityKey={activityKey}
+                onComplete={() => setDialog({ type: "complete", opp: selOpp })}
+                onAddActivity={() => setDialog({ type: "activity", opp: selOpp })}
+                onNewPurchase={() => setDialog({ type: "purchase", opp: selOpp })}
+              />
+              {stageById.get(selOpp.stage_id)?.order_index === 1 && (
+                <p className="mt-5 border-t border-fam-border pt-4 text-sm">
+                  <Link to="/dashboard/comercial/new-client-request" className="text-fam-action underline underline-offset-2">Solicitar creación de cliente</Link>
+                </p>
+              )}
+            </>
+          )}
+        </Inspector>
+
+        <Inspector
+          open={Boolean(selLead)}
+          title={selLead ? leadName(selLead) : ""}
+          onClose={() => setUrl({ sel: "" })}
+          footer={selLead && (
+            <>
+              <Menu
+                label="Más"
+                items={[
+                  !selLead.converted_account_id && { label: "Vincular cuenta", icon: FiBriefcase, onSelect: () => setDialog({ type: "account-link", lead: selLead }) },
+                  { label: "Ver contactos", icon: FiUsers, disabled: !(Number(selLead.linked_contact_count) > 0), onSelect: () => setDialog({ type: "contacts", lead: selLead }) },
+                  { label: "Nuevo contacto", icon: FiUserPlus, onSelect: () => setDialog({ type: "contact-new", lead: selLead }) },
+                  selLead.status !== "qualified" && { label: "Descalificar", danger: true, onSelect: () => setDialog({ type: "disqualify", lead: selLead }) },
+                ]}
+              />
+              {selLead.status === "qualified"
+                ? <Btn variant="primary" onClick={() => setDialog({ type: "promote", lead: selLead })}>Iniciar análisis</Btn>
+                : <Btn variant="primary" loading={busy} onClick={() => qualify(selLead)}>Calificar</Btn>}
+            </>
+          )}
+        >
+          {selLead && <LeadPeekFunnel lead={selLead} />}
+        </Inspector>
+      </div>
+
+      {url.new === "1" && (
+        <OpportunityFormModal
+          accounts={accounts}
           stages={stages}
-          rows={rows}
-          leads={leads}
-          loading={loading}
-          navigate={navigate}
-          onQualifyLead={handleQualifyLead}
-          onDisqualifyLead={handleDisqualifyLead}
-          onPromoteLead={handlePromoteLead}
-          onMoveStage={handleMoveStage}
-          accountOptions={accountOptions}
-          onAccountCreated={refreshAccountOptions}
-          onLeadChanged={refreshLeads}
-          onOpportunityChanged={refresh}
+          onClose={() => setUrl({ new: "" })}
+          onSaved={(saved) => { setUrl({ new: "", sel: saved?.id ? `opp:${saved.id}` : "" }); reloadOpps(); showToast("Oportunidad creada", "success"); }}
         />
-      ) : (
-        <>
-          {/* Table */}
-          <div className="bg-white border border-[#E5E7EB] rounded-2xl overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-[#1E293B] text-white">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium">Nombre</th>
-                  <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Cuenta</th>
-                  <th className="px-4 py-3 text-left font-medium">Etapa</th>
-                  <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Monto</th>
-                  <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Prob.</th>
-                  <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Cierre</th>
-                  <th className="px-4 py-3 text-left font-medium">Salud</th>
-                  <th className="px-4 py-3 text-left font-medium">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <SkeletonRows />
-                ) : rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-[#6B7280]">
-                      Sin resultados
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map(opp => {
-                    const health = HEALTH_COLORS[opp.health_status] ?? HEALTH_COLORS.gray;
-                    const statusCfg = OPP_STATUS[opp.status] ?? OPP_STATUS.open;
-                    return (
-                      <tr
-                        key={opp.id}
-                        onClick={() => navigate(`/dashboard/crm-fam/opportunities/${opp.id}`)}
-                        className="border-b border-[#E5E7EB] hover:bg-[#334155]/5 cursor-pointer transition-colors"
-                      >
-                        <td className="px-4 py-3 font-medium text-[#1F2937]">
-                          <div>{opp.name}</div>
-                          <div className="mt-0.5">
-                            <Badge bg={statusCfg.bg} text={statusCfg.text} label={statusCfg.label} />
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-[#6B7280] hidden sm:table-cell">{fmt(opp.account_name)}</td>
-                        <td className="px-4 py-3 text-[#6B7280]">{fmt(opp.stage_name)}</td>
-                        <td className="px-4 py-3 text-[#6B7280] hidden md:table-cell">{fmtMoney(opp.estimated_amount)}</td>
-                        <td className="px-4 py-3 text-[#6B7280] hidden md:table-cell">
-                          {opp.probability != null ? `${opp.probability}%` : "—"}
-                        </td>
-                        <td className="px-4 py-3 text-[#6B7280] hidden md:table-cell">{fmtDate(opp.estimated_close_date)}</td>
-                        <td className="px-4 py-3">
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              navigate(`/dashboard/crm-fam/opportunities/${opp.id}/blue-sheet`);
-                            }}
-                            className="inline-block cursor-pointer hover:opacity-80 transition-opacity"
-                            title="Abrir Blue Sheet"
-                          >
-                            <Badge bg={health.bg} text={health.text} label={health.label} />
-                          </button>
-                        </td>
-                        <td className="px-4 py-3">
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              navigate(`/dashboard/crm-fam/opportunities/${opp.id}`);
-                            }}
-                            className="text-[#2563EB] hover:underline text-sm font-medium"
-                          >
-                            Ver
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination */}
-          {!loading && rows.length > 0 && (
-            <div className="flex items-center gap-3 mt-4 justify-end">
-              <button
-                onClick={() => setOffset(o => Math.max(0, o - LIMIT))}
-                disabled={!hasPrev}
-                className="px-3 py-1 text-sm border border-[#E5E7EB] rounded-xl text-[#1F2937] disabled:opacity-40 hover:bg-[#334155]/5 transition-colors"
-              >
-                Anterior
-              </button>
-              <span className="text-sm text-[#6B7280]">
-                {offset + 1}–{offset + rows.length}
-              </span>
-              <button
-                onClick={() => setOffset(o => o + LIMIT)}
-                disabled={!hasNext}
-                className="px-3 py-1 text-sm border border-[#E5E7EB] rounded-xl text-[#1F2937] disabled:opacity-40 hover:bg-[#334155]/5 transition-colors"
-              >
-                Siguiente
-              </button>
-            </div>
-          )}
-        </>
       )}
 
-      <Modal open={showModal} title="Nueva oportunidad" onClose={handleCloseModal} maxWidth="max-w-md">
-        <form onSubmit={handleCreate} className="flex flex-col gap-3">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-[#1F2937]">
-              Nombre <span className="text-[#DC2626]">*</span>
-            </label>
-            <input
-              name="name"
-              value={form.name}
-              onChange={handleFormChange}
-              required
-              className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-[#1F2937]">Cuenta (opcional)</label>
-            <SearchableSelect
-              options={accountOptions}
-              value={form.account_id}
-              onChange={(value) => setForm((f) => ({ ...f, account_id: value }))}
-              placeholder="Buscar cuenta por nombre..."
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-[#1F2937]">Etapa</label>
-            <select
-              name="stage_id"
-              value={form.stage_id}
-              onChange={handleFormChange}
-              className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
-            >
-              <option value="">Seleccionar...</option>
-              {stages.map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-[#1F2937]">Monto estimado</label>
-            <input
-              name="estimated_amount"
-              type="number"
-              min="0"
-              step="0.01"
-              value={form.estimated_amount}
-              onChange={handleFormChange}
-              className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20 font-mono"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-[#1F2937]">Cierre estimado</label>
-            <input
-              name="estimated_close_date"
-              type="date"
-              value={form.estimated_close_date}
-              onChange={handleFormChange}
-              className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-[#1F2937]">Fuente</label>
-            <select
-              name="source"
-              value={form.source}
-              onChange={handleFormChange}
-              className="w-full min-h-10 rounded-xl border border-[#D1D5DB] bg-white px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
-            >
-              <option value="">Seleccionar...</option>
-              {SOURCE_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-          {saveError && (
-            <div className="rounded-xl border border-[#DC2626]/30 bg-[#FEE2E2] px-3 py-2 text-sm text-[#DC2626]">
-              {saveError}
-            </div>
-          )}
-          <div className="mt-2 flex justify-end gap-3">
-            <button type="button" onClick={handleCloseModal} className={`px-4 py-2 text-sm ${BTN_SECONDARY}`}>
-              Cancelar
-            </button>
-            <button type="submit" disabled={saving} className={`px-4 py-2 text-sm font-medium ${BTN_PRIMARY}`}>
-              {saving ? "Guardando..." : "Guardar"}
-            </button>
-          </div>
-        </form>
-      </Modal>
+      {dialog?.type === "complete" && (
+        <OpportunityFieldsModal
+          title="Completar información"
+          description={`Datos de negocio de “${dialog.opp.name}”. Campos: ${OPPORTUNITY_FIELDS.map((f) => f.label.toLowerCase()).join(", ")}.`}
+          initial={dialog.opp}
+          accounts={accounts}
+          submitLabel="Guardar"
+          onClose={close}
+          onSubmit={async (fields) => { await updateOpportunity(dialog.opp.id, fields); close(); reloadOpps(); showToast("Información guardada", "success"); }}
+        />
+      )}
+      {dialog?.type === "promote" && (
+        <OpportunityFieldsModal
+          title="Iniciar análisis de oportunidad"
+          description={`Completa lo que ya sepas de ${leadName(dialog.lead)}. Puedes omitirlo y completarlo después desde la tarjeta.`}
+          initial={{ account_id: dialog.lead.converted_account_id }}
+          accounts={accounts}
+          submitLabel="Iniciar análisis"
+          skipLabel="Omitir por ahora"
+          onClose={close}
+          onSubmit={async (fields) => {
+            const created = await promoteLeadToOpportunity(dialog.lead.id, fields);
+            close();
+            const newId = created?.opportunity?.id || created?.id;
+            setUrl({ sel: newId ? `opp:${newId}` : "" });
+            reloadLeads(); reloadOpps();
+            showToast("Lead promovido a oportunidad", "success");
+          }}
+        />
+      )}
+      {dialog?.type === "account-link" && (
+        <AccountLinkModal
+          lead={dialog.lead}
+          opportunity={dialog.opp}
+          accounts={accounts}
+          onClose={close}
+          onLinked={() => { close(); loadAccounts(); if (dialog.lead) reloadLeads(); else reloadOpps(); showToast("Cuenta vinculada", "success"); }}
+        />
+      )}
+      {dialog?.type === "account-peek" && <AccountPeekModal accountId={dialog.opp.account_id} onClose={close} />}
+      {dialog?.type === "contacts" && (
+        <ContactsModal
+          title={`Contactos · ${dialog.opp ? (dialog.opp.account_name || dialog.opp.name) : (dialog.lead.converted_account_name || dialog.lead.company_name || leadName(dialog.lead))}`}
+          accountId={dialog.opp ? dialog.opp.account_id : dialog.lead.converted_account_id}
+          seed={dialog.lead && dialog.lead.converted_contact_id ? [{
+            id: dialog.lead.converted_contact_id, full_name: dialog.lead.converted_contact_name,
+            email: dialog.lead.converted_contact_email, phone: dialog.lead.converted_contact_phone,
+          }] : []}
+          onAddContact={() => setDialog({ type: "contact-new", opp: dialog.opp, lead: dialog.lead })}
+          onClose={close}
+        />
+      )}
+      {dialog?.type === "contact-new" && (
+        <ContactFormModal
+          leadId={dialog.lead?.id}
+          initial={dialog.lead
+            ? { first_name: dialog.lead.first_name, last_name: dialog.lead.last_name, email: dialog.lead.email, phone: dialog.lead.phone, account_id: dialog.lead.converted_account_id }
+            : { account_id: dialog.opp?.account_id }}
+          onClose={close}
+          onSaved={() => { close(); if (dialog.lead) reloadLeads(); showToast("Contacto creado", "success"); }}
+        />
+      )}
+      {dialog?.type === "purchase" && (
+        <PurchasePickerModal opportunity={dialog.opp} onClose={close} onCreated={() => { close(); setPurchaseKey((k) => k + 1); showToast("Requerimiento de compra creado", "success"); }} />
+      )}
+      {dialog?.type === "activity" && (
+        <ActivityFormModal
+          defaults={{ opportunity_id: dialog.opp.id, account_id: dialog.opp.account_id, context: dialog.opp.name, activity_type: "llamada" }}
+          onClose={close}
+          onSaved={() => { close(); setActivityKey((k) => k + 1); showToast("Actividad registrada", "success"); }}
+        />
+      )}
+      {dialog?.type === "disqualify" && (
+        <ReasonDialog
+          title={`Descalificar a ${leadName(dialog.lead)}`}
+          description="El lead saldrá del embudo. Podrás verlo en Leads, en la vista Descalificados."
+          label="Motivo"
+          confirmLabel="Descalificar"
+          danger
+          onClose={close}
+          onConfirm={async (reason) => {
+            await disqualifyLead(dialog.lead.id, { reason: reason || "Manual" });
+            close(); setUrl({ sel: "" }); reloadLeads(); showToast("Lead descalificado", "success");
+          }}
+        />
+      )}
     </div>
   );
 }

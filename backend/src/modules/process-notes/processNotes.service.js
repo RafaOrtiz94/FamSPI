@@ -15,8 +15,9 @@ const ENTITY_TYPES = new Set(["business_case", "public_purchase", "private_purch
 const ENTITY_ROLES = {
   business_case: [
     "comercial", "asesor_comercial", "analista_comercial", "acp_comercial",
-    "backoffice_comercial", "jefe_comercial", "jefe_servicio", "jefe_tecnico",
-    "jefe_financiero", "jefe_operaciones", "gerencia", "gerencia_general",
+    "backoffice", "backoffice_comercial", "jefe_comercial", "jefe_operaciones",
+    "operaciones", "jefe_servicio", "jefe_tecnico", "ing_servicio", "esp_app",
+    "jefe_financiero", "jefe_ti", "jefe_logistica", "gerencia", "gerencia_general",
     "admin", "administrador",
   ],
   public_purchase: [
@@ -28,6 +29,7 @@ const ENTITY_ROLES = {
   private_purchase: [
     "comercial", "asesor_comercial", "analista_comercial", "acp_comercial",
     "jefe_comercial", "gerencia", "gerencia_general", "backoffice_comercial",
+    "backoffice",
     "jefe_tecnico", "jefe_servicio_tecnico", "tecnico", "jefe_operaciones",
     "operaciones", "jefe_logistica", "logistica", "ing_servicio", "esp_app",
     "jefe_servicio",
@@ -521,14 +523,27 @@ async function resolveBusinessCaseThread(businessCaseId) {
     : { entityType: "business_case", entityId: String(businessCaseId) };
 }
 
+function normalizeAutomaticNoteAuthor(author) {
+  const id = Number(author?.id ?? author?.user_id ?? author?.sub ?? author?.uuid);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  return { ...author, id };
+}
+
 // Notas que el sistema deja a nombre del usuario que ejecuto la accion (correo
 // enviado desde un flujo, seccion cerrada). Best-effort: la accion de origen ya
 // fue autorizada por su propia ruta y nunca debe fallar por culpa de la nota.
 async function recordAutomaticNote({ entityType, entityId, author, body, noteType = "note", emailMeta = null }) {
   try {
     const text = String(body || "").trim().slice(0, 4000);
-    if (!ENTITY_TYPES.has(entityType) || !entityId || !Number.isInteger(Number(author?.id)) || !text) return null;
-    return await _appendNote({ entityType, entityId, author, body: text, noteType, emailMeta });
+    const normalizedAuthor = normalizeAutomaticNoteAuthor(author);
+    if (!ENTITY_TYPES.has(entityType) || !entityId || !normalizedAuthor || !text) {
+      logger.warn(
+        { entityType, entityId, hasAuthor: Boolean(author), hasBody: Boolean(text) },
+        "No se pudo registrar la nota automatica: datos de evento incompletos",
+      );
+      return null;
+    }
+    return await _appendNote({ entityType, entityId, author: normalizedAuthor, body: text, noteType, emailMeta });
   } catch (error) {
     logger.warn({ error: error?.message, entityType, entityId }, "No se pudo registrar la nota automatica del proceso");
     return null;
@@ -639,6 +654,7 @@ module.exports = {
   sendProcessEmail,
   resolveBusinessCaseThread,
   recordAutomaticNote,
+  normalizeAutomaticNoteAuthor,
   recordOutboundEmail,
   markNoteRead,
 };

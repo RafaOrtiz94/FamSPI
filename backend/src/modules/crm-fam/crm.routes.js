@@ -35,7 +35,14 @@ router.get("/reports/win-loss-patterns", requireRole(managerAdmin), controller.g
 // Email campaigns remain draft-only until marketing consent and unsubscribe
 // policies are available. They use the existing manager/admin CRM scope.
 router.get("/email-campaigns", requireRole(managerAdmin), controller.listEmailCampaigns);
+// Rutas fijas antes de /:id para que no se interpreten como un id.
+router.get("/email-campaigns/audience", requireRole(managerAdmin), controller.campaignAudiencePreview);
+router.get("/email-campaigns/suppressions", requireRole(managerAdmin), controller.listCampaignSuppressions);
 router.post("/email-campaigns", requireRole(managerAdmin), controller.createEmailCampaign);
+router.post("/email-campaigns/:id/test", requireRole(managerAdmin), controller.sendCampaignTest);
+router.post("/email-campaigns/:id/send", requireRole(managerAdmin), controller.sendCampaignBatch);
+router.post("/email-campaigns/:id/retry", requireRole(managerAdmin), controller.retryCampaignFailed);
+router.post("/email-campaigns/:id/duplicate", requireRole(managerAdmin), controller.duplicateEmailCampaign);
 router.get("/email-campaigns/:id", requireRole(managerAdmin), controller.getEmailCampaignById);
 router.put("/email-campaigns/:id", requireRole(managerAdmin), controller.updateEmailCampaign);
 router.delete("/email-campaigns/:id", requireRole(managerAdmin), controller.softDeleteEmailCampaign);
@@ -67,6 +74,16 @@ router.get("/accounts/:id/plans", requireRole(allCrm), controller.listAccountPla
 router.post("/accounts/:id/plans", requireRole(crmAll), controller.createAccountPlan);
 router.put("/accounts/:id/plans/:planId", requireRole(crmAll), controller.updateAccountPlan);
 router.delete("/accounts/:id/plans/:planId", requireRole(crmAll), controller.softDeleteAccountPlan);
+// FODA de la cuenta (migracion 320). Rutas fijas (accept, dismiss, versions) antes de /:itemId.
+router.get("/accounts/:id/swot", requireRole(allCrm), controller.getAccountSwot);
+router.post("/accounts/:id/swot", requireRole(crmAll), controller.createSwotItem);
+router.post("/accounts/:id/swot/accept", requireRole(crmAll), controller.acceptSwotSuggestion);
+router.post("/accounts/:id/swot/dismiss", requireRole(crmAll), controller.dismissSwotSuggestion);
+router.get("/accounts/:id/swot/versions", requireRole(allCrm), controller.listSwotVersions);
+router.post("/accounts/:id/swot/versions", requireRole(crmAll), controller.createSwotVersion);
+router.get("/accounts/:id/swot/versions/:versionId", requireRole(allCrm), controller.getSwotVersion);
+router.put("/accounts/:id/swot/:itemId", requireRole(crmAll), controller.updateSwotItem);
+router.delete("/accounts/:id/swot/:itemId", requireRole(crmAll), controller.deleteSwotItem);
 router.get("/accounts/:id/duplicates", requireRole(allCrm), controller.getAccountDuplicateCandidates);
 router.post("/accounts/:id/merge", requireRole(managerAdmin), controller.mergeAccounts);
 
@@ -92,7 +109,10 @@ router.post("/leads/:id/promote", requireRole(crmAll), controller.promoteLeadToO
 // Opportunities
 router.get("/opportunities", requireRole(allCrm), controller.listOpportunities);
 router.post("/opportunities", requireRole(crmAll), controller.createOpportunity);
+// Recorrido (cliente, disponibilidad, factibilidad, oferta, contrato, entrega, consumibles). Va antes de /:id.
+router.get("/opportunities/journeys", requireRole(allCrm), controller.listOpportunityJourneys);
 router.get("/opportunities/:id", requireRole(allCrm), controller.getOpportunityById);
+router.get("/opportunities/:id/journey", requireRole(allCrm), controller.getOpportunityJourney);
 router.put("/opportunities/:id", requireRole(crmAll), controller.updateOpportunity);
 router.get("/opportunities/:id/health", requireRole(allCrm), controller.getOpportunityHealth);
 router.get("/opportunities/:id/purchase-status", requireRole(allCrm), controller.getOpportunityPurchaseStatus);

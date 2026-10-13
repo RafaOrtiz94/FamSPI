@@ -80,6 +80,7 @@ const tiAssetsPublicRoutes = require("../modules/ti-assets/tiAssets.public.route
 const collabDeliveriesRoutes = require("../modules/collab-deliveries/collabDeliveries.routes");
 const moduleAccessRoutes = require("../modules/module-access/moduleAccess.routes");
 const rbacAdminRoutes = require("../modules/rbac-admin/rbacAdmin.routes");
+const crmCampaignPublicRoutes = require("../modules/crm-fam/crmCampaignPublic.routes");
 const kickoffRoutes = require("../modules/kickoff/kickoff.routes");
 const famdaysRoutes = require("../modules/famdays/famdays.routes");
 const opportunitiesRoutes = require("../modules/opportunities/opportunities.routes");
@@ -97,6 +98,8 @@ function mountPublicRoutes(app) {
   app.use("/api/v1/gmail-context/addon", gmailContextAddonRoutes);
   app.use("/api/v1/suggestion-box/public", suggestionBoxPublicRoutes);
   app.use("/api/v1/ti-assets/public", tiAssetsPublicRoutes);
+  // Baja, apertura y clic de campanas CRM: se identifican por token del destinatario, sin JWT.
+  app.use("/api/v1/crm-campaigns", crmCampaignPublicRoutes);
   app.use("/api/applicants", applicantsRoutes);
   // LEGACY (2026-08-12): Mundial 2026 termino, endpoint desactivado (ver require arriba).
   // app.use("/api/v1/world-cup-2026", worldCup2026Routes);

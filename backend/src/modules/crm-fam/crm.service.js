@@ -1091,7 +1091,13 @@ const getEmailCampaignById = async (id, user) => {
   ensureCampaignManager(user);
   const { rows } = await db.query(
     `SELECT c.*, u.fullname AS created_by_name,
-            COUNT(r.id)::int AS recipient_count
+            COUNT(r.id)::int AS recipient_count,
+            COUNT(r.id) FILTER (WHERE r.delivery_status = 'sent')::int AS sent_count,
+            COUNT(r.id) FILTER (WHERE r.delivery_status = 'failed')::int AS failed_count,
+            COUNT(r.id) FILTER (WHERE r.delivery_status = 'skipped')::int AS skipped_count,
+            COUNT(r.id) FILTER (WHERE r.delivery_status = 'pending')::int AS pending_count,
+            COUNT(r.id) FILTER (WHERE r.open_count > 0)::int AS opened_count,
+            COUNT(r.id) FILTER (WHERE r.click_count > 0)::int AS clicked_count
        FROM crm.crm_email_campaigns c
        LEFT JOIN public.users u ON u.id = c.created_by
        LEFT JOIN crm.crm_email_campaign_recipients r ON r.campaign_id = c.id
@@ -1102,7 +1108,8 @@ const getEmailCampaignById = async (id, user) => {
   if (!rows.length) throw campaignError('Campana no encontrada', 404);
   const campaign = rows[0];
   const { rows: recipients } = await db.query(
-    `SELECT id, contact_id, account_id, recipient_name, recipient_email, laboratory_name, delivery_status, created_at
+    `SELECT id, contact_id, account_id, recipient_name, recipient_email, laboratory_name, delivery_status, created_at,
+            sent_at, error_message, open_count, click_count
        FROM crm.crm_email_campaign_recipients
       WHERE campaign_id = $1
       ORDER BY recipient_name ASC`,
@@ -1123,8 +1130,13 @@ const listEmailCampaigns = async ({ q, limit = 50, offset = 0 } = {}, user) => {
   const safeOffset = Math.max(Number(offset) || 0, 0);
   params.push(safeLimit, safeOffset);
   const { rows } = await db.query(
-    `SELECT c.id, c.campaign_name, c.subject, c.preheader, c.status, c.created_at, c.updated_at,
-            u.fullname AS created_by_name, COUNT(r.id)::int AS recipient_count, COUNT(*) OVER()::int AS total_count
+    `SELECT c.id, c.campaign_name, c.subject, c.preheader, c.status, c.is_template, c.test_sent_at, c.sent_at,
+            c.created_at, c.updated_at, u.fullname AS created_by_name, COUNT(r.id)::int AS recipient_count,
+            COUNT(r.id) FILTER (WHERE r.delivery_status = 'sent')::int AS sent_count,
+            COUNT(r.id) FILTER (WHERE r.delivery_status = 'failed')::int AS failed_count,
+            COUNT(r.id) FILTER (WHERE r.open_count > 0)::int AS opened_count,
+            COUNT(r.id) FILTER (WHERE r.click_count > 0)::int AS clicked_count,
+            COUNT(*) OVER()::int AS total_count
        FROM crm.crm_email_campaigns c
        LEFT JOIN public.users u ON u.id = c.created_by
        LEFT JOIN crm.crm_email_campaign_recipients r ON r.campaign_id = c.id
@@ -1160,9 +1172,9 @@ const createEmailCampaign = async (data, user) => {
   try {
     await client.query('BEGIN');
     const { rows } = await client.query(
-      `INSERT INTO crm.crm_email_campaigns (campaign_name, subject, preheader, body_content, created_by, updated_by)
-       VALUES ($1, $2, $3, $4, $5, $5) RETURNING *`,
-      [campaignName, subject, preheader, bodyContent, user.id],
+      `INSERT INTO crm.crm_email_campaigns (campaign_name, subject, preheader, body_content, is_template, created_by, updated_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $6) RETURNING *`,
+      [campaignName, subject, preheader, bodyContent, data?.is_template === true, user.id],
     );
     await saveCampaignRecipients(client, rows[0].id, recipients);
     await client.query('COMMIT');
@@ -1177,6 +1189,7 @@ const createEmailCampaign = async (data, user) => {
 const updateEmailCampaign = async (id, data, user) => {
   ensureCampaignManager(user);
   const current = await getEmailCampaignById(id, user);
+  if (current.status !== 'draft') throw campaignError('Solo se pueden editar campanas en borrador', 409);
   const campaignName = requiredCampaignText(data?.campaign_name, 'Nombre de la campana', 160);
   const subject = requiredCampaignText(data?.subject, 'Asunto', 200);
   const bodyContent = requiredCampaignText(data?.body_content, 'Contenido', 20000);
@@ -1187,9 +1200,10 @@ const updateEmailCampaign = async (id, data, user) => {
     await client.query('BEGIN');
     await client.query(
       `UPDATE crm.crm_email_campaigns
-          SET campaign_name = $2, subject = $3, preheader = $4, body_content = $5, updated_by = $6, updated_at = now()
+          SET campaign_name = $2, subject = $3, preheader = $4, body_content = $5, updated_by = $6, updated_at = now(),
+              is_template = COALESCE($7, is_template)
         WHERE id = $1`,
-      [id, campaignName, subject, preheader, bodyContent, user.id],
+      [id, campaignName, subject, preheader, bodyContent, user.id, typeof data?.is_template === 'boolean' ? data.is_template : null],
     );
     await client.query('DELETE FROM crm.crm_email_campaign_recipients WHERE campaign_id = $1', [id]);
     await saveCampaignRecipients(client, id, recipients);
@@ -1645,9 +1659,13 @@ const disqualifyLead = async (id, { reason } = {}, user) => {
 
 // ─── Pipeline Stages ─────────────────────────────────────────────────────────
 
-const listPipelineStages = async () => {
+// Los catalogos se listan solo con lo activo; la pantalla de Configuracion pide tambien lo inactivo
+// (include_inactive) para poder reactivarlo -- antes, desactivar algo lo hacia desaparecer para siempre.
+const wantsInactive = (query) => ['1', 'true', true].includes(query?.include_inactive);
+
+const listPipelineStages = async (query = {}) => {
   const { rows } = await db.query(
-    `SELECT * FROM crm.crm_pipeline_stages WHERE is_active = true ORDER BY order_index ASC`
+    `SELECT * FROM crm.crm_pipeline_stages ${wantsInactive(query) ? '' : 'WHERE is_active = true'} ORDER BY is_active DESC, order_index ASC`
   );
   return rows;
 };
@@ -1715,7 +1733,7 @@ const listOpportunities = async ({ status, stage_id, owner_user_id, account_id, 
   const where = conditions.join(' AND ');
 
   const { rows } = await db.query(`
-    SELECT o.*, a.account_name,
+    SELECT o.*, a.account_name, a.classification as account_classification,
       s.name as stage_name, s.order_index as stage_order, s.probability_default,
       u.fullname as owner_name,
       bs.status as blue_sheet_status, bs.health_score as blue_sheet_health_score,
@@ -2112,7 +2130,9 @@ const updateBlueSheetStrategy = (id, data, user) => _updateBsFields(id, [
 const submitBlueSheetForReview = async (id, user) => {
   const bs = await _getBsWithAccess(id, user);
 
-  if (!['draft', 'in_progress', 'needs_update'].includes(bs.status)) {
+  // 'observed' tambien puede reenviarse: el comercial corrige lo observado y vuelve a pedir
+  // revision (antes quedaba sin salida hasta que un manager lo reabriera).
+  if (!['draft', 'in_progress', 'needs_update', 'observed'].includes(bs.status)) {
     throw mkErr(`No se puede enviar a revisión desde estado '${bs.status}'`, 409);
   }
 
@@ -2745,8 +2765,8 @@ const acceptRedFlag = async (id, { mitigation_plan } = {}, user) => {
 
 // ─── Scorecard ────────────────────────────────────────────────────────────────
 
-const listScorecardCriteria = async () => {
-  const { rows } = await db.query(`SELECT * FROM crm.crm_scorecard_criteria WHERE is_active=true ORDER BY display_order ASC`);
+const listScorecardCriteria = async (query = {}) => {
+  const { rows } = await db.query(`SELECT * FROM crm.crm_scorecard_criteria ${wantsInactive(query) ? '' : 'WHERE is_active=true'} ORDER BY is_active DESC, display_order ASC`);
   return rows;
 };
 
@@ -2783,8 +2803,20 @@ const getBlueSheetScorecard = async (blueSheetId, user) => {
   return { criteria, answers, score };
 };
 
-const saveBlueSheetScorecard = async (blueSheetId, answers, user) => {
+// Acepta la lista [{ criterion_id, score, notes }], { answers: [...] } o el mapa { criterion_id: score }
+// que enviaba la pantalla original (con el que este endpoint fallaba siempre: "answers is not iterable").
+const normalizeScorecardAnswers = (input) => {
+  const raw = Array.isArray(input) ? input : Array.isArray(input?.answers) ? input.answers
+    : Object.entries(input || {}).map(([criterion_id, score]) => ({ criterion_id, score }));
+  return raw
+    .map((a) => ({ criterion_id: a?.criterion_id, score: Number(a?.score), notes: a?.notes }))
+    .filter((a) => a.criterion_id && Number.isInteger(a.score) && a.score >= 0 && a.score <= 5);
+};
+
+const saveBlueSheetScorecard = async (blueSheetId, input, user) => {
   await _bsAccess(blueSheetId, user);
+  const answers = normalizeScorecardAnswers(input);
+  if (!answers.length) throw mkErr('Sin respuestas válidas de scorecard (puntaje de 0 a 5 por criterio)', 400);
   for (const { criterion_id, score, notes } of answers) {
     await db.query(
       `INSERT INTO crm.crm_scorecard_answers (blue_sheet_id, criterion_id, score, notes, scored_by)
@@ -3212,8 +3244,8 @@ const softDeleteNote = async (id, user) => {
 
 // ─── Lost Reasons ─────────────────────────────────────────────────────────────
 
-const listLostReasons = async () => {
-  const { rows } = await db.query(`SELECT * FROM crm.crm_lost_reasons WHERE is_active=true ORDER BY display_order ASC, reason_name ASC`);
+const listLostReasons = async (query = {}) => {
+  const { rows } = await db.query(`SELECT * FROM crm.crm_lost_reasons ${wantsInactive(query) ? '' : 'WHERE is_active=true'} ORDER BY is_active DESC, display_order ASC, reason_name ASC`);
   return rows;
 };
 

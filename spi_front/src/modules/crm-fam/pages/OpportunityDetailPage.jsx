@@ -1,671 +1,495 @@
-import { useState, useEffect, useCallback } from "react";
-import { Link, useParams, useNavigate } from "react-router-dom";
-import { useOpportunity } from "../hooks/useCrmOpportunities";
+// Expediente de la oportunidad: identidad y estado arriba, la línea de fases como firma de
+// trazabilidad (DESIGN.md §3.3), indicadores del negocio y, debajo, datos, actividades, Blue Sheet,
+// compra y acciones. Cada cierre explica su consecuencia antes de confirmarse.
+import { useCallback, useEffect, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { FiCheck, FiFileText, FiPlus } from "react-icons/fi";
+import Modal from "../../../core/ui/components/Modal";
 import {
-  fetchPipelineStages,
-  fetchLostReasons,
-  closeOpportunityWon,
-  closeOpportunityLost,
-  changeOpportunityStage,
-  suspendOpportunity,
+  changeOpportunityStage, closeOpportunityLost, closeOpportunityWon, fetchAccounts, fetchActivities, fetchLostReasons,
+  fetchOpportunityById, fetchPipelineStages, suspendOpportunity, updateOpportunity,
 } from "../../../core/api/crmFamApi";
+import { createProjectFromOpportunity, fetchWorkspaces } from "../../../core/api/workManagementApi";
+import { useUI } from "../../../core/ui/UIContext";
+import { ActivityFormModal } from "../components/ActivityModals";
+import ContactFormModal from "../components/ContactFormModal";
 import {
-  createProjectFromOpportunity,
-  fetchWorkspaces,
-} from "../../../core/api/workManagementApi";
+  AccountLinkModal, ContactsModal, missingFields, OpportunityFieldsModal, opportunitySource, PurchasePickerModal,
+} from "../components/OpportunityDialogs";
+import { JourneyPanel } from "../components/OpportunityJourney";
+import { ReasonDialog } from "../ui/dialogs";
+import {
+  Badge, Btn, cx, DefList, ErrorNote, Field, Menu, PageHeader, Panel, SelectInput, Skeleton, StatStrip, StatusBadge, TextArea, TextInput,
+} from "../ui/kit";
+import { date, daysFromToday, errorMessage, money, relativeDay } from "../ui/format";
+import { activityStatus, activityType, blueSheetStatus, health as healthOf, opportunityStatus } from "../ui/status";
+import { listOf, useLoad } from "../ui/useLoad";
 
-const HEALTH_COLORS = {
-  gray:   { bg: "#F3F4F6", text: "#6B7280", label: "Sin Blue Sheet" },
-  green:  { bg: "#DCFCE7", text: "#16A34A", label: "Buena" },
-  yellow: { bg: "#FEF3C7", text: "#D97706", label: "Regular" },
-  red:    { bg: "#FEE2E2", text: "#DC2626", label: "Critica" },
-};
+const BASE = "/dashboard/crm-fam";
+const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
-const OPP_STATUS = {
-  open:      { bg: "#EFF6FF", text: "#1D4ED8", label: "Abierta" },
-  won:       { bg: "#DCFCE7", text: "#16A34A", label: "Ganada" },
-  lost:      { bg: "#FEE2E2", text: "#DC2626", label: "Perdida" },
-  suspended: { bg: "#F3F4F6", text: "#6B7280", label: "Suspendida" },
-};
-
-function Badge({ bg, text, label }) {
+// ─── Línea de fases ──────────────────────────────────────────────────────────
+// Fases reales del embudo: completadas, actual y pendientes. Si la oportunidad sigue abierta,
+// cada fase es un botón para moverla (con su nombre visible; no depende del color).
+function StageTrack({ stages, currentId, canMove, movingId, onMove }) {
+  const currentIndex = stages.findIndex((s) => s.id === currentId);
+  if (!stages.length) return null;
   return (
-    <span
-      className="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
-      style={{ backgroundColor: bg, color: text }}
-    >
-      {label}
-    </span>
+    <nav aria-label="Fases de la oportunidad" className="mb-6">
+      {/* Móvil: resumen de la fase actual + selector */}
+      <div className="sm:hidden">
+        <p className="text-[13px] text-fam-muted">Fase {currentIndex >= 0 ? currentIndex + 1 : "—"} de {stages.length}</p>
+        {canMove ? (
+          <SelectInput aria-label="Cambiar fase" value={currentId || ""} disabled={Boolean(movingId)} onChange={(e) => { const s = stages.find((x) => x.id === e.target.value); if (s) onMove(s); }}>
+            {currentIndex < 0 && <option value="">Sin fase</option>}
+            {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </SelectInput>
+        ) : <p className="text-sm font-semibold text-fam-text">{stages[currentIndex]?.name || "Sin fase"}</p>}
+      </div>
+      <ol className="hidden sm:flex">
+        {stages.map((s, i) => {
+          const state = i < currentIndex ? "done" : i === currentIndex ? "current" : "pending";
+          const node = (
+            <span className="flex min-w-0 flex-col items-start gap-1.5">
+              <span className="flex w-full items-center">
+                <span className={cx(
+                  "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold",
+                  state === "done" && "border-fam-control bg-fam-subtle text-fam-text",
+                  state === "current" && "border-fam-action bg-fam-action text-fam-on-action",
+                  state === "pending" && "border-fam-border bg-fam-surface text-fam-muted",
+                )}>
+                  {state === "done" ? <FiCheck className="h-3.5 w-3.5" aria-hidden="true" /> : i + 1}
+                </span>
+                {i < stages.length - 1 && <span className={cx("h-px flex-1", i < currentIndex ? "bg-fam-control" : "bg-fam-border")} aria-hidden="true" />}
+              </span>
+              <span className={cx("pr-3 text-left text-[13px] leading-tight", state === "current" ? "font-semibold text-fam-text" : "text-fam-muted")}>
+                {s.name}
+                <span className="sr-only">{state === "done" ? " (completada)" : state === "current" ? " (fase actual)" : " (pendiente)"}</span>
+              </span>
+            </span>
+          );
+          return (
+            <li key={s.id} className="min-w-0 flex-1" aria-current={state === "current" ? "step" : undefined}>
+              {canMove && state !== "current" ? (
+                <button type="button" disabled={Boolean(movingId)} onClick={() => onMove(s)} title={`Mover a ${s.name}`} className="w-full rounded-md py-1 text-left transition-colors duration-100 hover:bg-fam-subtle disabled:opacity-60">
+                  {node}
+                </button>
+              ) : <div className="py-1">{node}</div>}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }
 
-function Card({ title, children, className = "" }) {
-  return (
-    <div className={`bg-white border border-[#E5E7EB] rounded-2xl p-5 ${className}`}>
-      {title && <h3 className="text-sm font-semibold text-[#1E293B] mb-3">{title}</h3>}
-      {children}
-    </div>
-  );
-}
-
-function Field({ label, value }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-xs text-[#6B7280]">{label}</span>
-      <span className="text-sm text-[#1F2937]">{value ?? "—"}</span>
-    </div>
-  );
-}
-
-function fmt(val) { return val ?? "—"; }
-
-function fmtMoney(val) {
-  if (val == null || val === "") return "—";
-  return Number(val).toLocaleString("es-PE", { style: "currency", currency: "PEN", minimumFractionDigits: 0 });
-}
-
-function fmtDate(val) {
-  if (!val) return "—";
-  return new Date(val).toLocaleDateString("es-PE");
-}
-
-function todayISO() {
-  return new Date().toISOString().split("T")[0];
-}
-
-// --- Modals ---
-
-function ModalWon({ opp, onClose, onDone }) {
-  const [form, setForm] = useState({
-    won_amount: opp?.estimated_amount ?? "",
-    actual_close_date: todayISO(),
-  });
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState(null);
-
-  const handle = async (e) => {
+// ─── Diálogos de cierre ──────────────────────────────────────────────────────
+function WonModal({ opp, onClose, onDone }) {
+  const [form, setForm] = useState({ won_amount: opp.estimated_amount ?? "", actual_close_date: todayISO(), notes: "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const set = (name) => (e) => setForm((f) => ({ ...f, [name]: e.target.value }));
+  const submit = async (e) => {
     e.preventDefault();
-    setSaving(true);
-    setErr(null);
+    if (form.won_amount === "" || Number(form.won_amount) < 0) { setError("Indica el monto ganado."); return; }
+    setBusy(true); setError("");
     try {
-      await closeOpportunityWon(opp.id, {
-        won_amount: Number(form.won_amount),
-        actual_close_date: form.actual_close_date,
+      const res = await closeOpportunityWon(opp.id, { won_amount: Number(form.won_amount), actual_close_date: form.actual_close_date, notes: form.notes.trim() || undefined });
+      onDone(res);
+    } catch (err) { setError(errorMessage(err, "No se pudo cerrar la oportunidad.")); setBusy(false); }
+  };
+  return (
+    <Modal open title="Cerrar como ganada" onClose={onClose} maxWidth="max-w-md" disableClose={busy}>
+      <form onSubmit={submit} noValidate>
+        <p className="mb-4 text-sm text-fam-muted">“{opp.name}” quedará cerrada y su monto contará como vendido en la cuenta. No se puede reabrir desde aquí.</p>
+        <ErrorNote message={error} className="mb-4" />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Monto ganado (USD)">{(p) => <TextInput {...p} type="number" min="0" step="0.01" value={form.won_amount} onChange={set("won_amount")} className="fam-numeric" autoFocus />}</Field>
+          <Field label="Fecha de cierre">{(p) => <TextInput {...p} type="date" value={form.actual_close_date} onChange={set("actual_close_date")} />}</Field>
+          <div className="sm:col-span-2"><Field label="Nota" optional>{(p) => <TextArea {...p} rows={2} value={form.notes} onChange={set("notes")} />}</Field></div>
+        </div>
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
+          <Btn onClick={onClose} disabled={busy}>Cancelar</Btn>
+          <Btn type="submit" variant="primary" loading={busy}>{busy ? "Cerrando…" : "Cerrar como ganada"}</Btn>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function LostModal({ opp, onClose, onDone }) {
+  const [reasons, setReasons] = useState(null);
+  const [form, setForm] = useState({ lost_reason_id: "", lost_reason_detail: "", lesson_learned: "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const set = (name) => (e) => setForm((f) => ({ ...f, [name]: e.target.value }));
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchLostReasons().then((r) => { if (!cancelled) setReasons(Array.isArray(r) ? r : []); }).catch(() => { if (!cancelled) setReasons([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!form.lost_reason_id) { setError("Elige el motivo de la pérdida."); return; }
+    setBusy(true); setError("");
+    try {
+      await closeOpportunityLost(opp.id, {
+        lost_reason_id: form.lost_reason_id,
+        lost_reason_detail: form.lost_reason_detail.trim() || null,
+        lesson_learned: form.lesson_learned.trim() || null,
       });
       onDone();
-    } catch (e) {
-      setErr(e.message || "Error");
-    } finally {
-      setSaving(false);
-    }
+    } catch (err) { setError(errorMessage(err, "No se pudo cerrar la oportunidad.")); setBusy(false); }
   };
 
   return (
-    <ModalShell title="Cerrar como Ganada" onClose={onClose}>
-      <form onSubmit={handle} className="flex flex-col gap-3">
-        <div>
-          <label className="block text-sm font-medium text-[#1F2937] mb-1">Monto ganado</label>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={form.won_amount}
-            onChange={e => setForm(f => ({ ...f, won_amount: e.target.value }))}
-            className="w-full border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-          />
+    <Modal open title="Cerrar como perdida" onClose={onClose} maxWidth="max-w-md" disableClose={busy}>
+      <form onSubmit={submit} noValidate>
+        <p className="mb-4 text-sm text-fam-muted">“{opp.name}” saldrá del embudo. El motivo alimenta los reportes de pérdidas.</p>
+        <ErrorNote message={error} className="mb-4" />
+        {reasons !== null && reasons.length === 0 && <ErrorNote message="No hay motivos de pérdida configurados. Pide a un administrador que los cree en Configuración." className="mb-4" />}
+        <div className="space-y-4">
+          <Field label="Motivo">
+            {(p) => (
+              <SelectInput {...p} value={form.lost_reason_id} onChange={set("lost_reason_id")} disabled={reasons === null}>
+                <option value="">{reasons === null ? "Cargando…" : "Seleccionar"}</option>
+                {(reasons || []).map((r) => <option key={r.id} value={r.id}>{r.reason_name}</option>)}
+              </SelectInput>
+            )}
+          </Field>
+          <Field label="Detalle" optional>{(p) => <TextArea {...p} value={form.lost_reason_detail} onChange={set("lost_reason_detail")} placeholder="Qué pasó, contra quién se perdió…" />}</Field>
+          <Field label="Lección aprendida" optional>{(p) => <TextArea {...p} rows={2} value={form.lesson_learned} onChange={set("lesson_learned")} />}</Field>
         </div>
-        <div>
-          <label className="block text-sm font-medium text-[#1F2937] mb-1">Fecha de cierre real</label>
-          <input
-            type="date"
-            value={form.actual_close_date}
-            onChange={e => setForm(f => ({ ...f, actual_close_date: e.target.value }))}
-            className="w-full border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-          />
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
+          <Btn onClick={onClose} disabled={busy}>Cancelar</Btn>
+          <Btn type="submit" variant="danger" loading={busy}>{busy ? "Cerrando…" : "Cerrar como perdida"}</Btn>
         </div>
-        <ModalActions onClose={onClose} saving={saving} err={err} label="Confirmar" />
       </form>
-    </ModalShell>
+    </Modal>
   );
 }
 
-function ModalLost({ opp, onClose, onDone }) {
-  const [reasons, setReasons] = useState([]);
-  const [form, setForm] = useState({ lost_reason_id: "", lost_reason_detail: "" });
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState(null);
-
-  useEffect(() => {
-    fetchLostReasons()
-      .then(r => setReasons(Array.isArray(r) ? r : []))
-      .catch(() => {});
-  }, []);
-
-  const handle = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    setErr(null);
-    try {
-      const payload = { ...form };
-      if (!payload.lost_reason_id) delete payload.lost_reason_id;
-      await closeOpportunityLost(opp.id, payload);
-      onDone();
-    } catch (e) {
-      setErr(e.message || "Error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <ModalShell title="Cerrar como Perdida" onClose={onClose}>
-      <form onSubmit={handle} className="flex flex-col gap-3">
-        <div>
-          <label className="block text-sm font-medium text-[#1F2937] mb-1">Razon de perdida</label>
-          <select
-            value={form.lost_reason_id}
-            onChange={e => setForm(f => ({ ...f, lost_reason_id: e.target.value }))}
-            className="w-full border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-          >
-            <option value="">Seleccionar...</option>
-            {reasons.map(r => (
-              <option key={r.id} value={r.id}>{r.name ?? r.reason ?? r.label}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-[#1F2937] mb-1">Detalle</label>
-          <textarea
-            value={form.lost_reason_detail}
-            onChange={e => setForm(f => ({ ...f, lost_reason_detail: e.target.value }))}
-            rows={3}
-            className="w-full border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB] resize-none"
-          />
-        </div>
-        <ModalActions onClose={onClose} saving={saving} err={err} label="Confirmar" />
-      </form>
-    </ModalShell>
-  );
-}
-
-function ModalStage({ opp, onClose, onDone }) {
-  const [stages, setStages] = useState([]);
-  const [stageId, setStageId] = useState(opp?.stage_id ?? "");
-  const [warning, setWarning] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState(null);
-
-  useEffect(() => {
-    fetchPipelineStages()
-      .then(s => setStages(Array.isArray(s) ? s : []))
-      .catch(() => {});
-  }, []);
-
-  const handle = async (e) => {
-    e.preventDefault();
-    if (!stageId) return;
-    setSaving(true);
-    setErr(null);
-    setWarning(null);
-    try {
-      const res = await changeOpportunityStage(opp.id, { stage_id: stageId });
-      if (res?.warning) setWarning(res.warning);
-      onDone();
-    } catch (e) {
-      setErr(e.message || "Error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <ModalShell title="Cambiar etapa" onClose={onClose}>
-      <form onSubmit={handle} className="flex flex-col gap-3">
-        <div>
-          <label className="block text-sm font-medium text-[#1F2937] mb-1">Etapa</label>
-          <select
-            value={stageId}
-            onChange={e => setStageId(e.target.value)}
-            className="w-full border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-          >
-            <option value="">Seleccionar...</option>
-            {stages.map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-        </div>
-        {warning && (
-          <p className="text-sm text-[#D97706] bg-[#FEF3C7] px-3 py-2 rounded-xl">{warning}</p>
-        )}
-        <ModalActions onClose={onClose} saving={saving} err={err} label="Cambiar" />
-      </form>
-    </ModalShell>
-  );
-}
-
-function ModalSuspend({ opp, onClose, onDone }) {
-  const [notes, setNotes] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState(null);
-
-  const handle = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    setErr(null);
-    try {
-      await suspendOpportunity(opp.id, { notes });
-      onDone();
-    } catch (e) {
-      setErr(e.message || "Error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <ModalShell title="Suspender oportunidad" onClose={onClose}>
-      <form onSubmit={handle} className="flex flex-col gap-3">
-        <div>
-          <label className="block text-sm font-medium text-[#1F2937] mb-1">Notas</label>
-          <textarea
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            rows={3}
-            className="w-full border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB] resize-none"
-          />
-        </div>
-        <ModalActions onClose={onClose} saving={saving} err={err} label="Suspender" />
-      </form>
-    </ModalShell>
-  );
-}
-
-function ModalShell({ title, onClose, children }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl border border-[#E5E7EB] w-full max-w-md p-6 shadow-none max-h-[90vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold text-[#1F2937] mb-4">{title}</h2>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function ModalCreateWorkProject({ opp, onClose, onDone }) {
+function WorkProjectModal({ opp, onClose }) {
   const navigate = useNavigate();
-  const [workspaces, setWorkspaces] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState(null);
-  const [form, setForm] = useState({
-    workspace_id: "",
-    name: `WM · ${opp?.name || ""}`,
-    description: opp?.description || "",
-    priority: "medium",
-    status: "draft",
-    default_board_name: "Seguimiento comercial",
-  });
+  const [workspaces, setWorkspaces] = useState(null);
+  const [form, setForm] = useState({ workspace_id: "", name: `WM · ${opp.name || ""}`, description: opp.description || "", priority: "medium", status: "draft", default_board_name: "Seguimiento comercial" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const set = (name) => (e) => setForm((f) => ({ ...f, [name]: e.target.value }));
 
   useEffect(() => {
     let cancelled = false;
     fetchWorkspaces()
       .then((rows) => {
         if (cancelled) return;
-        const nextRows = Array.isArray(rows) ? rows : [];
-        setWorkspaces(nextRows);
-        setForm((current) => ({
-          ...current,
-          workspace_id: current.workspace_id || nextRows[0]?.id || "",
-        }));
+        const list = Array.isArray(rows) ? rows : [];
+        setWorkspaces(list);
+        setForm((f) => ({ ...f, workspace_id: f.workspace_id || list[0]?.id || "" }));
       })
-      .catch((error) => {
-        if (!cancelled) {
-          setErr(error?.message || "No se pudieron cargar los workspaces.");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .catch((err) => { if (!cancelled) { setWorkspaces([]); setError(errorMessage(err, "No se pudieron cargar los espacios de trabajo.")); } });
+    return () => { cancelled = true; };
   }, []);
 
-  const handle = async (event) => {
-    event.preventDefault();
-    if (!form.workspace_id) {
-      setErr("Selecciona un workspace para continuar.");
-      return;
-    }
-    setSaving(true);
-    setErr(null);
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!form.workspace_id) { setError("Elige un espacio de trabajo."); return; }
+    setBusy(true); setError("");
     try {
       const project = await createProjectFromOpportunity(opp.id, form);
-      onDone();
       navigate(`/dashboard/work-management/projects/${project.id}`);
-    } catch (error) {
-      const backendMessage = error?.response?.data?.message || error?.message || "No se pudo crear el proyecto.";
-      setErr(backendMessage);
-    } finally {
-      setSaving(false);
-    }
+    } catch (err) { setError(errorMessage(err, "No se pudo crear el proyecto.")); setBusy(false); }
   };
 
   return (
-    <ModalShell title="Crear proyecto en Work Management" onClose={onClose}>
-      <form onSubmit={handle} className="flex flex-col gap-3">
-        {loading ? (
-          <div className="space-y-2">
-            <div className="h-11 animate-pulse rounded-xl bg-slate-100" />
-            <div className="h-11 animate-pulse rounded-xl bg-slate-100" />
-            <div className="h-28 animate-pulse rounded-xl bg-slate-100" />
+    <Modal open title="Crear proyecto en Work Management" onClose={onClose} maxWidth="max-w-lg" disableClose={busy}>
+      <form onSubmit={submit} noValidate>
+        <ErrorNote message={error} className="mb-4" />
+        {workspaces === null ? <Skeleton className="h-40 w-full" /> : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {workspaces.length === 0 && <p className="rounded-lg bg-fam-warning-bg px-3 py-2 text-sm text-fam-warning sm:col-span-2">No tienes espacios de trabajo. Crea uno primero en Work Management.</p>}
+            <div className="sm:col-span-2">
+              <Field label="Espacio de trabajo">
+                {(p) => (
+                  <SelectInput {...p} value={form.workspace_id} onChange={set("workspace_id")}>
+                    {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                  </SelectInput>
+                )}
+              </Field>
+            </div>
+            <div className="sm:col-span-2"><Field label="Nombre del proyecto">{(p) => <TextInput {...p} value={form.name} onChange={set("name")} />}</Field></div>
+            <div className="sm:col-span-2"><Field label="Descripción" optional>{(p) => <TextArea {...p} value={form.description} onChange={set("description")} />}</Field></div>
+            <Field label="Prioridad">
+              {(p) => (
+                <SelectInput {...p} value={form.priority} onChange={set("priority")}>
+                  <option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option><option value="critical">Crítica</option>
+                </SelectInput>
+              )}
+            </Field>
+            <Field label="Estado inicial">
+              {(p) => (
+                <SelectInput {...p} value={form.status} onChange={set("status")}>
+                  <option value="draft">Borrador</option><option value="active">Activo</option>
+                </SelectInput>
+              )}
+            </Field>
           </div>
-        ) : (
-          <>
-            {!workspaces.length ? (
-              <p className="rounded-xl bg-[#FEF3C7] px-3 py-2 text-sm text-[#92400E]">
-                No tienes workspaces disponibles. Crea uno primero en Work Management.
-              </p>
-            ) : null}
-
-            <div>
-              <label className="block text-sm font-medium text-[#1F2937] mb-1">Workspace</label>
-              <select
-                value={form.workspace_id}
-                onChange={(e) => setForm((current) => ({ ...current, workspace_id: e.target.value }))}
-                className="w-full border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-              >
-                {workspaces.map((workspace) => (
-                  <option key={workspace.id} value={workspace.id}>
-                    {workspace.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-[#1F2937] mb-1">Nombre del proyecto</label>
-              <input
-                value={form.name}
-                onChange={(e) => setForm((current) => ({ ...current, name: e.target.value }))}
-                className="w-full border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-[#1F2937] mb-1">Descripcion</label>
-              <textarea
-                value={form.description}
-                onChange={(e) => setForm((current) => ({ ...current, description: e.target.value }))}
-                rows={3}
-                className="w-full border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB] resize-none"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-[#1F2937] mb-1">Prioridad</label>
-                <select
-                  value={form.priority}
-                  onChange={(e) => setForm((current) => ({ ...current, priority: e.target.value }))}
-                  className="w-full border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                >
-                  <option value="low">Baja</option>
-                  <option value="medium">Media</option>
-                  <option value="high">Alta</option>
-                  <option value="critical">Critica</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-[#1F2937] mb-1">Estado inicial</label>
-                <select
-                  value={form.status}
-                  onChange={(e) => setForm((current) => ({ ...current, status: e.target.value }))}
-                  className="w-full border border-[#E5E7EB] rounded-xl px-3 py-2 text-sm text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                >
-                  <option value="draft">Draft</option>
-                  <option value="active">Activo</option>
-                </select>
-              </div>
-            </div>
-          </>
         )}
-
-        <ModalActions
-          onClose={onClose}
-          saving={saving}
-          err={err}
-          label="Crear proyecto"
-        />
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
+          <Btn onClick={onClose} disabled={busy}>Cancelar</Btn>
+          <Btn type="submit" variant="primary" loading={busy} disabled={!workspaces?.length}>{busy ? "Creando…" : "Crear proyecto"}</Btn>
+        </div>
       </form>
-    </ModalShell>
+    </Modal>
   );
 }
 
-function ModalActions({ onClose, saving, err, label }) {
-  return (
-    <>
-      {err && <p className="text-sm text-[#DC2626]">{err}</p>}
-      <div className="flex justify-end gap-3 mt-2">
-        <button
-          type="button"
-          onClick={onClose}
-          className="px-4 py-2 text-sm border border-[#E5E7EB] rounded-xl text-[#1F2937] hover:bg-[#334155]/5 transition-colors"
-        >
-          Cancelar
-        </button>
-        <button
-          type="submit"
-          disabled={saving}
-          className="px-4 py-2 text-sm bg-[#2563EB] text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors"
-        >
-          {saving ? "Guardando..." : label}
-        </button>
-      </div>
-    </>
-  );
-}
-
-// --- Main page ---
-
+// ─── Página ──────────────────────────────────────────────────────────────────
 export default function OpportunityDetailPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
-  const { data: opp, loading, error, refresh } = useOpportunity(id);
+  const { showToast } = useUI();
+  const { loading, data: opp, error, reload } = useLoad(() => fetchOpportunityById(id), [id], { fallback: "No se pudo cargar la oportunidad." });
+  const [stages, setStages] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [activities, setActivities] = useState(null);
+  const [dialog, setDialog] = useState(null);
+  const [movingId, setMovingId] = useState(null);
+  const [purchaseKey, setPurchaseKey] = useState(0);
 
-  const [modal, setModal] = useState(null); // 'won' | 'lost' | 'stage' | 'suspend'
+  useEffect(() => {
+    fetchPipelineStages()
+      .then((s) => setStages((Array.isArray(s) ? s : []).filter((x) => x.is_active !== false).sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))))
+      .catch(() => setStages([]));
+  }, []);
 
-  const closeModal = useCallback(() => setModal(null), []);
-  const handleDone = useCallback(() => { setModal(null); refresh(); }, [refresh]);
+  const loadActivities = useCallback(() => {
+    fetchActivities({ opportunity_id: id, limit: 30 }).then((res) => setActivities(listOf(res))).catch(() => setActivities([]));
+  }, [id]);
+  useEffect(() => { loadActivities(); }, [loadActivities]);
 
-  if (loading) {
-    return (
-      <div className="p-6 bg-[#F9FAFB] min-h-full">
-        <div className="animate-pulse space-y-4">
-          <div className="h-6 bg-gray-200 rounded w-48" />
-          <div className="h-40 bg-gray-200 rounded-2xl" />
-          <div className="h-40 bg-gray-200 rounded-2xl" />
-        </div>
-      </div>
-    );
+  // Las cuentas solo hacen falta para completar datos o vincular: se cargan al abrir ese diálogo.
+  useEffect(() => {
+    if (!["complete", "account-link"].includes(dialog) || accounts.length) return;
+    fetchAccounts({ limit: 500 }).then((res) => setAccounts(listOf(res))).catch(() => {});
+  }, [dialog, accounts.length]);
+
+  if (loading && !opp) {
+    return <div className="space-y-4"><Skeleton className="h-4 w-48" /><Skeleton className="h-8 w-96 max-w-full" /><Skeleton className="h-16 w-full" /><Skeleton className="h-48 w-full" /></div>;
   }
-
   if (error || !opp) {
     return (
-      <div className="p-6 bg-[#F9FAFB] min-h-full">
-        <div className="px-4 py-3 bg-[#FEE2E2] border border-[#DC2626] text-[#DC2626] rounded-xl text-sm">
-          {error ?? "Oportunidad no encontrada"}
-        </div>
-        <button
-          onClick={() => navigate("/dashboard/crm-fam/opportunities")}
-          className="mt-4 text-sm text-[#2563EB] hover:underline"
-        >
-          Volver a oportunidades
-        </button>
+      <div className="flex min-w-0 flex-col">
+        <PageHeader title="Oportunidad" context={<Link to={`${BASE}/opportunities`} className="underline underline-offset-2">Embudo</Link>} />
+        <ErrorNote message={error || "Esta oportunidad no existe o no tienes acceso."} onRetry={reload} />
       </div>
     );
   }
 
-  const health = HEALTH_COLORS[opp.health_status] ?? HEALTH_COLORS.gray;
-  const statusCfg = OPP_STATUS[opp.status] ?? OPP_STATUS.open;
   const isOpen = opp.status === "open";
-
-  const activities = Array.isArray(opp.recent_activities) ? opp.recent_activities : [];
+  const stage = stages.find((s) => s.id === opp.stage_id);
+  const probability = Number(opp.probability_override ?? opp.probability_default ?? stage?.probability_default ?? 0);
+  const amount = opp.estimated_amount != null ? Number(opp.estimated_amount) : null;
+  const missing = missingFields(opp);
+  const h = healthOf(opp.health_status);
+  const closeIn = opp.estimated_close_date ? daysFromToday(opp.estimated_close_date) : null;
+  const pending = (activities || []).filter((a) => !["completed", "cancelled"].includes(a.status));
+  const done = (activities || []).filter((a) => ["completed", "cancelled"].includes(a.status));
   const actionItems = Array.isArray(opp.open_action_items) ? opp.open_action_items : [];
+  const close = () => setDialog(null);
+
+  const move = async (target) => {
+    setMovingId(target.id);
+    try {
+      const res = await changeOpportunityStage(opp.id, { stage_id: target.id });
+      showToast(res?.warning ? `Movida a ${target.name}. ${res.warning}.` : `Movida a ${target.name}`, res?.warning ? "warning" : "success");
+      await reload();
+    } catch (err) {
+      showToast(errorMessage(err, "No se pudo cambiar la fase."), "error");
+    } finally { setMovingId(null); }
+  };
 
   return (
-    <div className="p-6 bg-[#F9FAFB] min-h-full">
-      {/* Breadcrumb */}
-      <nav className="text-sm text-[#6B7280] mb-5 flex items-center gap-1">
-        <Link to="/dashboard/crm-fam/opportunities" className="hover:text-[#2563EB] transition-colors">
-          Oportunidades
-        </Link>
-        <span>/</span>
-        <span className="text-[#1F2937] font-medium">{opp.name}</span>
-      </nav>
+    <div className="flex min-w-0 flex-col">
+      <PageHeader
+        title={opp.name}
+        context={<><Link to={`${BASE}/opportunities`} className="underline underline-offset-2">Embudo</Link> / Oportunidad</>}
+        actions={(
+          <>
+            <Menu
+              label="Más"
+              items={[
+                isOpen && { label: "Cerrar como perdida", danger: true, onSelect: () => setDialog("lost") },
+                isOpen && { label: "Suspender", onSelect: () => setDialog("suspend") },
+                { label: "Requerimiento de compra", onSelect: () => setDialog("purchase") },
+                { label: "Contactos de la cuenta", disabled: !opp.account_id, onSelect: () => setDialog("contacts") },
+                !opp.account_id && { label: "Vincular cuenta", onSelect: () => setDialog("account-link") },
+                { label: "Crear proyecto en Work Management", onSelect: () => setDialog("work-project") },
+              ]}
+            />
+            <Btn icon={FiFileText} to={`${BASE}/opportunities/${id}/blue-sheet`}>{opp.blue_sheet_id ? "Blue Sheet" : "Iniciar Blue Sheet"}</Btn>
+            {isOpen && <Btn variant="primary" icon={FiCheck} onClick={() => setDialog("won")}>Cerrar como ganada</Btn>}
+          </>
+        )}
+      >
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-fam-muted">
+          <StatusBadge of={opportunityStatus} value={opp.status} />
+          {opp.blue_sheet_id && (!opp.health_status || opp.health_status === "gray")
+            ? <Badge tone={blueSheetStatus(opp.blue_sheet_status).tone}>Blue Sheet: {blueSheetStatus(opp.blue_sheet_status).label.toLowerCase()}</Badge>
+            : <Badge tone={h.tone}>{h.label}</Badge>}
+          {opp.opportunity_code && <span className="fam-id text-fam-text">{opp.opportunity_code}</span>}
+          {opp.account_id
+            ? <Link to={`${BASE}/accounts/${opp.account_id}`} className="text-fam-action underline underline-offset-2">{opp.account_name}</Link>
+            : <span>Sin cuenta</span>}
+          {opp.owner_name && <span>Responsable: <span className="text-fam-text">{opp.owner_name}</span></span>}
+        </div>
+      </PageHeader>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main column */}
-        <div className="lg:col-span-2 flex flex-col gap-6">
-          {/* Basic data */}
-          <Card title="Datos de la oportunidad">
-            <div className="flex items-center gap-2 mb-4">
-              <h2 className="text-lg font-semibold text-[#1F2937]">{opp.name}</h2>
-              <Badge bg={statusCfg.bg} text={statusCfg.text} label={statusCfg.label} />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Cuenta" value={fmt(opp.account_name)} />
-              <Field label="Monto estimado" value={fmtMoney(opp.estimated_amount)} />
-              <Field label="Probabilidad" value={opp.probability != null ? `${opp.probability}%` : null} />
-              <Field label="Cierre estimado" value={fmtDate(opp.estimated_close_date)} />
-              <Field label="Fuente" value={fmt(opp.source)} />
-              <Field label="Propietario" value={fmt(opp.owner_name)} />
-            </div>
+      <StageTrack stages={stages} currentId={opp.stage_id} canMove={isOpen} movingId={movingId} onMove={move} />
+
+      <StatStrip
+        className="mb-6"
+        items={[
+          { label: opp.status === "won" ? "Monto ganado" : "Monto estimado", value: opp.status === "won" && opp.won_amount != null ? money(opp.won_amount) : money(amount) },
+          { label: "Probabilidad", value: `${probability}%`, hint: opp.probability_override == null ? "la de la fase actual" : "definida para esta oportunidad" },
+          { label: "Ponderado", value: amount != null ? money(amount * probability / 100) : "—", hint: "monto × probabilidad" },
+          { label: opp.actual_close_date ? "Cerrada" : "Cierre estimado", value: date(opp.actual_close_date || opp.estimated_close_date), hint: isOpen && closeIn !== null ? (closeIn < 0 ? `venció ${relativeDay(opp.estimated_close_date)}` : relativeDay(opp.estimated_close_date)) : undefined, tone: isOpen && closeIn !== null && closeIn < 0 ? "danger" : undefined },
+        ]}
+      />
+
+      {opp.status === "lost" && (
+        <p className="mb-6 rounded-lg bg-fam-danger-bg px-4 py-3 text-sm text-fam-danger">
+          Perdida{opp.lost_reason_name ? `: ${opp.lost_reason_name}` : ""}{opp.lost_reason_detail ? ` — ${opp.lost_reason_detail}` : ""}
+        </p>
+      )}
+
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="space-y-6">
+          <Panel title="Datos del negocio" actions={isOpen && <Btn size="sm" onClick={() => setDialog("complete")}>Editar</Btn>}>
+            {missing.length > 0 && isOpen && (
+              <p className="mb-4 rounded-lg bg-fam-warning-bg px-3 py-2 text-[13px] text-fam-warning">Faltan: {missing.map((f) => f.label.toLowerCase()).join(", ")}.</p>
+            )}
+            <DefList
+              columns={2}
+              items={[
+                { label: "Cuenta", value: opp.account_id ? <Link to={`${BASE}/accounts/${opp.account_id}`} className="text-fam-action underline underline-offset-2">{opp.account_name}</Link> : null },
+                { label: "RUC de la cuenta", value: opp.account_ruc ? <span className="fam-id">{opp.account_ruc}</span> : null },
+                { label: "Fuente", value: opp.source ? opportunitySource(opp.source) : null },
+                { label: "Fase", value: stage?.name || opp.stage_name },
+                { label: "Creada", value: date(opp.created_at) },
+                { label: "Última actualización", value: date(opp.updated_at) },
+              ]}
+            />
             {opp.description && (
-              <div className="mt-4 pt-4 border-t border-[#E5E7EB]">
-                <p className="text-xs text-[#6B7280] mb-1">Descripcion</p>
-                <p className="text-sm text-[#1F2937]">{opp.description}</p>
+              <div className="mt-4 border-t border-fam-border pt-4">
+                <p className="mb-1 text-[13px] text-fam-muted">Descripción</p>
+                <p className="whitespace-pre-wrap text-sm text-fam-text">{opp.description}</p>
               </div>
             )}
-          </Card>
+          </Panel>
 
-          {/* Stage + actions */}
-          <Card title="Etapa y acciones">
-            <div className="flex items-center gap-3 mb-4">
-              <span className="text-sm font-medium text-[#1F2937]">
-                {opp.stage_name ?? "Sin etapa"}
-              </span>
-              {opp.probability != null && (
-                <span className="text-sm text-[#6B7280]">— {opp.probability}% probabilidad</span>
-              )}
-            </div>
-            {isOpen ? (
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => setModal("stage")}
-                  className="px-3 py-2 text-sm border border-[#E5E7EB] rounded-xl text-[#1F2937] hover:bg-[#334155]/5 transition-colors"
-                >
-                  Cambiar etapa
-                </button>
-                <button
-                  onClick={() => setModal("won")}
-                  className="px-3 py-2 text-sm bg-[#DCFCE7] text-[#16A34A] rounded-xl hover:bg-green-200 transition-colors font-medium"
-                >
-                  Cerrar Ganada
-                </button>
-                <button
-                  onClick={() => setModal("lost")}
-                  className="px-3 py-2 text-sm bg-[#FEE2E2] text-[#DC2626] rounded-xl hover:bg-red-200 transition-colors font-medium"
-                >
-                  Cerrar Perdida
-                </button>
-                <button
-                  onClick={() => setModal("suspend")}
-                  className="px-3 py-2 text-sm bg-[#F3F4F6] text-[#6B7280] rounded-xl hover:bg-gray-200 transition-colors"
-                >
-                  Suspender
-                </button>
-              </div>
+          <Panel title="Actividades" flush actions={<Btn variant="primary" size="sm" icon={FiPlus} onClick={() => setDialog("activity")}>Agregar</Btn>}>
+            {activities === null ? <div className="p-4"><Skeleton className="h-16 w-full" /></div> : activities.length === 0 ? (
+              <p className="px-5 py-6 text-sm text-fam-muted">Aún no hay actividades en esta oportunidad. Registra la primera llamada, visita o reunión.</p>
             ) : (
-              <p className="text-sm text-[#6B7280]">Estado: {statusCfg.label}. No disponible acciones de cierre.</p>
+              <ul className="divide-y divide-fam-border">
+                {[...pending, ...done].map((a) => {
+                  const d = a.scheduled_at ? daysFromToday(a.scheduled_at) : null;
+                  const overdue = a.status === "scheduled" && d !== null && d < 0;
+                  return (
+                    <li key={a.id}>
+                      <Link to={`${BASE}/activities?view=${a.status === "scheduled" ? "pendientes" : a.status === "completed" ? "completadas" : a.status === "cancelled" ? "canceladas" : "seguimiento"}&scope=team&sel=${a.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors duration-100 hover:bg-fam-subtle sm:px-5">
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-fam-text">{a.subject}</span>
+                          <span className="block text-[13px] text-fam-muted">{activityType(a.activity_type)}{a.owner_name ? ` · ${a.owner_name}` : ""}</span>
+                        </span>
+                        <StatusBadge of={activityStatus} value={a.status} />
+                        <span className={cx("fam-numeric hidden w-24 shrink-0 text-right text-[13px] sm:block", overdue ? "font-medium text-fam-danger" : "text-fam-muted")}>
+                          {a.scheduled_at ? (a.status === "scheduled" ? relativeDay(a.scheduled_at) : date(a.completed_at || a.scheduled_at)) : "sin fecha"}
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
-            <div className="mt-3">
-              <button
-                onClick={() => setModal("work-project")}
-                className="px-3 py-2 text-sm border border-[#2563EB] text-[#2563EB] rounded-xl hover:bg-[#EFF6FF] transition-colors font-medium"
-              >
-                Crear proyecto WM
-              </button>
-            </div>
-          </Card>
+          </Panel>
         </div>
 
-        {/* Sidebar */}
-        <div className="flex flex-col gap-6">
-          {/* Health + Blue Sheet */}
-          <Card title="Salud del negocio">
-            <div className="flex items-center gap-3 mb-4">
-              <Badge bg={health.bg} text={health.text} label={health.label} />
-              {opp.health_score != null && (
-                <span className="text-sm text-[#6B7280]">{opp.health_score} pts</span>
-              )}
-            </div>
-            <Link
-              to={`/dashboard/crm-fam/opportunities/${id}/blue-sheet`}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[#2563EB] text-[#2563EB] text-sm font-medium hover:bg-[#EFF6FF] transition-colors"
-            >
-              {opp.health_status == null || opp.health_status === "gray"
-                ? "Iniciar Blue Sheet"
-                : "Ver / Seguimiento Blue Sheet"}
-            </Link>
-          </Card>
-
-          {/* Recent activities */}
-          <Card title="Ultimas actividades">
-            {activities.length === 0 ? (
-              <p className="text-sm text-[#6B7280]">Sin actividades recientes.</p>
+        <div className="space-y-6">
+          <Panel title="Blue Sheet" actions={<Btn variant="link" to={`${BASE}/opportunities/${id}/blue-sheet`}>{opp.blue_sheet_id ? "Abrir" : "Iniciar"}</Btn>}>
+            {!opp.blue_sheet_id ? (
+              <p className="text-sm text-fam-muted">
+                {opp.requires_blue_sheet || opp.stage_requires_bs ? "Esta oportunidad requiere Blue Sheet y aún no se ha iniciado." : "Sin Blue Sheet. Documenta la estrategia para medir la salud del negocio."}
+              </p>
             ) : (
-              <ul className="flex flex-col gap-2">
-                {activities.map((a, i) => (
-                  <li key={a.id ?? i} className="text-sm text-[#1F2937] border-b border-[#E5E7EB] pb-2 last:border-0 last:pb-0">
-                    <span className="font-medium">{a.activity_type ?? a.type}</span>
-                    {a.subject && <span className="text-[#6B7280]"> — {a.subject}</span>}
-                    {a.activity_date && (
-                      <div className="text-xs text-[#6B7280] mt-0.5">{fmtDate(a.activity_date)}</div>
-                    )}
-                  </li>
-                ))}
+              <DefList
+                columns={2}
+                items={[
+                  { label: "Estado", value: <StatusBadge of={blueSheetStatus} value={opp.blue_sheet_status} /> },
+                  { label: "Salud", value: opp.health_score != null ? `${Math.round(Number(opp.health_score))} / 100` : "—", numeric: true },
+                  { label: "Completitud", value: opp.completeness_score != null ? `${Math.round(Number(opp.completeness_score))}%` : "—", numeric: true },
+                  { label: "Scorecard", value: opp.scorecard_score != null ? `${Math.round(Number(opp.scorecard_score))}%` : "—", numeric: true },
+                ]}
+              />
+            )}
+          </Panel>
+
+          <Panel title="Recorrido" hint="Avance del Business Case o de la compra" actions={<Btn variant="link" onClick={() => setDialog("purchase")}>Nuevo requerimiento</Btn>}>
+            <JourneyPanel opportunityId={opp.id} reloadKey={purchaseKey} />
+          </Panel>
+
+          <Panel title="Acciones abiertas" hint="Del Blue Sheet">
+            {actionItems.length === 0 ? <p className="text-sm text-fam-muted">Sin acciones abiertas.</p> : (
+              <ul className="space-y-2">
+                {actionItems.map((a) => {
+                  const late = a.due_date && daysFromToday(a.due_date) < 0;
+                  return (
+                    <li key={a.id} className="flex items-baseline justify-between gap-3 text-sm">
+                      <span className="min-w-0 text-fam-text">{a.title}</span>
+                      {a.due_date && <span className={cx("fam-numeric shrink-0 text-[13px]", late ? "font-medium text-fam-danger" : "text-fam-muted")}>{late ? `venció ${relativeDay(a.due_date)}` : relativeDay(a.due_date)}</span>}
+                    </li>
+                  );
+                })}
               </ul>
             )}
-          </Card>
-
-          {/* Open action items */}
-          <Card title="Action Items abiertos">
-            {actionItems.length === 0 ? (
-              <p className="text-sm text-[#6B7280]">Sin action items abiertos.</p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {actionItems.map((a, i) => (
-                  <li key={a.id ?? i} className="text-sm text-[#1F2937] border-b border-[#E5E7EB] pb-2 last:border-0 last:pb-0">
-                    <span>{a.description ?? a.title ?? a.action}</span>
-                    {a.due_date && (
-                      <div className="text-xs text-[#6B7280] mt-0.5">Vence: {fmtDate(a.due_date)}</div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
+          </Panel>
         </div>
       </div>
 
-      {/* Modals */}
-      {modal === "won" && <ModalWon opp={opp} onClose={closeModal} onDone={handleDone} />}
-      {modal === "lost" && <ModalLost opp={opp} onClose={closeModal} onDone={handleDone} />}
-      {modal === "stage" && <ModalStage opp={opp} onClose={closeModal} onDone={handleDone} />}
-      {modal === "suspend" && <ModalSuspend opp={opp} onClose={closeModal} onDone={handleDone} />}
-      {modal === "work-project" && (
-        <ModalCreateWorkProject opp={opp} onClose={closeModal} onDone={handleDone} />
+      {dialog === "won" && <WonModal opp={opp} onClose={close} onDone={(res) => { close(); reload(); showToast(res?.warning ? `Cerrada como ganada. ${res.warning}.` : "Oportunidad ganada", res?.warning ? "warning" : "success"); }} />}
+      {dialog === "lost" && <LostModal opp={opp} onClose={close} onDone={() => { close(); reload(); showToast("Oportunidad cerrada como perdida", "success"); }} />}
+      {dialog === "suspend" && (
+        <ReasonDialog
+          title="Suspender oportunidad"
+          description={`“${opp.name}” saldrá del embudo activo sin contarse como perdida.`}
+          label="Motivo"
+          confirmLabel="Suspender"
+          onClose={close}
+          onConfirm={async (notes) => { await suspendOpportunity(opp.id, { notes }); close(); reload(); showToast("Oportunidad suspendida", "success"); }}
+        />
+      )}
+      {dialog === "work-project" && <WorkProjectModal opp={opp} onClose={close} />}
+      {dialog === "complete" && (
+        <OpportunityFieldsModal
+          title="Datos del negocio"
+          initial={opp}
+          accounts={accounts}
+          submitLabel="Guardar"
+          onClose={close}
+          onSubmit={async (fields) => { await updateOpportunity(opp.id, fields); close(); reload(); showToast("Datos guardados", "success"); }}
+        />
+      )}
+      {dialog === "account-link" && <AccountLinkModal opportunity={opp} accounts={accounts} onClose={close} onLinked={() => { close(); reload(); showToast("Cuenta vinculada", "success"); }} />}
+      {dialog === "contacts" && <ContactsModal title={`Contactos · ${opp.account_name || ""}`} accountId={opp.account_id} onAddContact={() => setDialog("contact-new")} onClose={close} />}
+      {dialog === "contact-new" && <ContactFormModal accountId={opp.account_id || undefined} onClose={close} onSaved={() => { close(); showToast("Contacto creado", "success"); }} />}
+      {dialog === "purchase" && <PurchasePickerModal opportunity={opp} onClose={close} onCreated={() => { close(); setPurchaseKey((k) => k + 1); showToast("Requerimiento de compra creado", "success"); }} />}
+      {dialog === "activity" && (
+        <ActivityFormModal
+          defaults={{ opportunity_id: opp.id, account_id: opp.account_id, context: opp.name }}
+          onClose={close}
+          onSaved={() => { close(); loadActivities(); showToast("Actividad registrada", "success"); }}
+        />
       )}
     </div>
   );

@@ -236,7 +236,7 @@ async function getLastThreadMessageId(gmailClient, threadId, { required = false 
 // lineas mas largas, pero otros clientes/relays en el camino no siempre.
 const wrapBase64 = (value) => String(value || "").replace(/(.{1,76})/g, "$1\r\n").trim();
 
-const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo, messageId, inReplyTo, references, attachments = [] }) => {
+const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo, messageId, inReplyTo, references, attachments = [], headers = {} }) => {
   const lines = [
     `From: ${encodeAddressHeader(from)}`,
     `To: ${Array.isArray(to) ? to.map((item) => normalizeEmailAddress(item)).join(", ") : normalizeEmailAddress(to)}`,
@@ -250,6 +250,10 @@ const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo, messag
   // threadId de la API por si solo no basta si estos headers no coinciden.
   if (inReplyTo) lines.push(`In-Reply-To: ${inReplyTo}`);
   if (references) lines.push(`References: ${references}`);
+  // Cabeceras extra (p. ej. List-Unsubscribe de las campanas); sin saltos de linea para evitar inyeccion.
+  for (const [name, value] of Object.entries(headers || {})) {
+    if (/^[A-Za-z0-9-]+$/.test(name) && value) lines.push(`${name}: ${String(value).replace(/[\r\n]+/g, " ")}`);
+  }
 
   lines.push(`Subject: ${encodeHeaderValue(subject)}`);
   lines.push("MIME-Version: 1.0");
@@ -301,6 +305,7 @@ async function sendViaServiceAccount({
   references = null,
   attachments = [],
   requireThreading = false,
+  headers = {},
 }) {
   // resolveDelegatedUser cae a GOOGLE_SUBJECT (administrador) cuando el candidato
   // es invalido -- nunca retorna falsy. Sin el guard `delegatedUser &&`, el primer
@@ -366,6 +371,7 @@ async function sendViaServiceAccount({
     inReplyTo: previousMessageId || undefined,
     references: previousReferences || undefined,
     attachments,
+    headers,
   });
   let response;
   try {
@@ -610,4 +616,24 @@ async function sendMail({
   });
 }
 
-module.exports = { sendMail };
+// Envio masivo (campanas CRM): SOLO service account. A diferencia de sendMail no cae a SMTP ni a
+// Google Chat (publicar un correo promocional en un chat seria una fuga); si falla, lanza el error
+// y el destinatario queda marcado como fallido. Respeta los mismos interruptores globales.
+async function sendBulkMail({ to, subject, html, text = null, headers = {} } = {}) {
+  if (!to || !subject || (!html && !text)) return { delivered: false, via: "none", reason: "missing_fields" };
+  if (!EMAIL_NOTIFICATIONS_ENABLED || MAIL_GLOBALLY_DISABLED) {
+    return { delivered: false, via: "none", reason: "disabled_globally" };
+  }
+  const fromAddress = normalizeHumanText(resolveFrom({ from: null, senderName: null }));
+  return sendViaServiceAccount({
+    to,
+    subject: normalizeHumanText(subject),
+    html: html ? normalizeHumanText(html) : html,
+    text: normalizeHumanText(text || (!html ? undefined : htmlToText(html))),
+    replyTo: normalizeHumanText(SYSTEM_MAIL_REPLY_TO || undefined),
+    from: fromAddress || undefined,
+    headers,
+  });
+}
+
+module.exports = { sendMail, sendBulkMail };

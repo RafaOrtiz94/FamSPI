@@ -1,692 +1,229 @@
-import { useState, useEffect, useCallback } from "react";
+// Configuración del CRM: tres catálogos (fases del embudo, criterios del scorecard y motivos de
+// pérdida) con la misma mecánica. Lo desactivado sigue visible para poder reactivarlo.
+import { useState } from "react";
+import { FiPlus } from "react-icons/fi";
+import Modal from "../../../core/ui/components/Modal";
 import {
-  fetchPipelineStages, createPipelineStage, updatePipelineStage,
-  fetchScorecardCriteria, createScorecardCriterion, updateScorecardCriterion,
-  fetchLostReasons, createLostReason, updateLostReason,
+  createLostReason, createPipelineStage, createScorecardCriterion, fetchLostReasons, fetchPipelineStages,
+  fetchScorecardCriteria, updateLostReason, updatePipelineStage, updateScorecardCriterion,
 } from "../../../core/api/crmFamApi";
+import { useAuth } from "../../../core/auth/AuthContext";
+import { useUI } from "../../../core/ui/UIContext";
+import { Badge, Btn, DataTable, EmptyState, ErrorNote, Field, PageHeader, Panel, SkeletonRows, Tabs, TextArea, TextInput } from "../ui/kit";
+import { errorMessage } from "../ui/format";
+import { isAdmin } from "../ui/roles";
+import { useLoad } from "../ui/useLoad";
+import { useUrlState } from "../ui/useUrlState";
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// Fases de las que depende la sincronización con Business Case y compras, y el cálculo de "vendido".
+// Su nombre no debe cambiarse (crmPurchaseSync.service.js las busca por nombre exacto).
+const LOCKED_STAGE_NAMES = ["Análisis de la oportunidad", "Desarrollo de la oferta", "Presentación de la oferta", "Negociación", "Aceptación o rechazo", "Contratos"];
 
-function SkeletonRows({ cols = 5 }) {
-  return Array.from({ length: 3 }).map((_, i) => (
-    <tr key={i} className="border-b border-[#E5E7EB] animate-pulse">
-      {Array.from({ length: cols }).map((__, j) => (
-        <td key={j} className="px-4 py-3">
-          <div className="h-4 bg-gray-200 rounded w-3/4" />
-        </td>
-      ))}
-    </tr>
-  ));
-}
+const num = (value, fallback = 0) => (value === "" || value === null || value === undefined ? fallback : Number(value));
 
-function ErrorBanner({ msg }) {
-  return (
-    <div className="mb-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-      {msg}
-    </div>
-  );
-}
-
-function Badge({ active }) {
-  return (
-    <span
-      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-        active ? "bg-green-100 text-green-700" : "bg-gray-100 text-[#6B7280]"
-      }`}
-    >
-      {active ? "Activo" : "Inactivo"}
-    </span>
-  );
-}
-
-// ── Modal base ────────────────────────────────────────────────────────────────
-
-function Modal({ title, onClose, onSubmit, submitting, children }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-        <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-[#1F2937]">{title}</h2>
-          <button
-            onClick={onClose}
-            className="text-[#6B7280] hover:text-[#1F2937] text-lg leading-none"
-          >
-            ×
-          </button>
+const CATALOGS = {
+  stages: {
+    tab: "Fases del embudo",
+    intro: "Las columnas del tablero, en orden. La probabilidad se usa para el pronóstico ponderado.",
+    singular: "fase",
+    load: () => fetchPipelineStages({ include_inactive: 1 }),
+    create: createPipelineStage,
+    update: updatePipelineStage,
+    nameKey: "name",
+    blank: { name: "", description: "", order_index: "", probability_default: "", requires_blue_sheet: false },
+    toForm: (r) => ({ name: r.name || "", description: r.description || "", order_index: r.order_index ?? "", probability_default: r.probability_default ?? "", requires_blue_sheet: Boolean(r.requires_blue_sheet) }),
+    toPayload: (f) => ({ name: f.name.trim(), description: f.description.trim() || null, order_index: num(f.order_index), probability_default: num(f.probability_default), requires_blue_sheet: Boolean(f.requires_blue_sheet) }),
+    validate: (f) => (!f.name.trim() ? "Escribe el nombre de la fase." : num(f.probability_default) < 0 || num(f.probability_default) > 100 ? "La probabilidad va de 0 a 100." : ""),
+    columns: [
+      { key: "order_index", header: "Orden", align: "right", render: (r) => r.order_index ?? "—" },
+      { key: "name", header: "Fase", render: (r) => <span className="font-medium">{r.name}</span> },
+      { key: "probability_default", header: "Probabilidad", align: "right", render: (r) => `${Number(r.probability_default || 0)}%` },
+      { key: "requires_blue_sheet", header: "Blue Sheet", hideBelow: "sm", render: (r) => (r.requires_blue_sheet ? <Badge tone="info">Requerido</Badge> : <span className="text-fam-muted">Opcional</span>) },
+    ],
+    fields: (f, set, editing) => (
+      <>
+        <Field label="Nombre" hint={editing && LOCKED_STAGE_NAMES.includes(editing.name) ? "Esta fase la usan Business Case, compras y el cálculo de vendido: su nombre no se puede cambiar." : undefined}>
+          {(p) => <TextInput {...p} value={f.name} onChange={set("name")} maxLength={100} autoFocus disabled={Boolean(editing && LOCKED_STAGE_NAMES.includes(editing.name))} />}
+        </Field>
+        <Field label="Descripción" optional>{(p) => <TextArea {...p} rows={2} value={f.description} onChange={set("description")} />}</Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Orden en el tablero">{(p) => <TextInput {...p} type="number" min="0" value={f.order_index} onChange={set("order_index")} className="fam-numeric" />}</Field>
+          <Field label="Probabilidad (%)">{(p) => <TextInput {...p} type="number" min="0" max="100" value={f.probability_default} onChange={set("probability_default")} className="fam-numeric" />}</Field>
         </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSubmit();
-          }}
-          className="space-y-4"
-        >
-          {children}
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-xl border border-[#E5E7EB] px-4 py-2 text-sm text-[#6B7280] hover:bg-gray-50"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {submitting ? "Guardando..." : "Guardar"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function Field({ label, children }) {
-  return (
-    <div>
-      <label className="mb-1 block text-xs font-medium text-[#6B7280]">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-const inputCls =
-  "w-full rounded-xl border border-[#E5E7EB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none";
-
-// ── Tab: Etapas del Pipeline ──────────────────────────────────────────────────
-
-const stageDefaults = {
-  name: "",
-  order_index: "",
-  probability_default: "",
-  requires_blue_sheet: false,
+        <label className="flex items-center gap-2 text-sm text-fam-text"><input type="checkbox" checked={f.requires_blue_sheet} onChange={set("requires_blue_sheet")} /> Requiere Blue Sheet aprobado para entrar a esta fase</label>
+      </>
+    ),
+  },
+  criteria: {
+    tab: "Scorecard",
+    intro: "Los criterios que se califican de 0 a 5 en cada Blue Sheet. El peso define cuánto cuenta cada uno en el puntaje.",
+    singular: "criterio",
+    load: () => fetchScorecardCriteria({ include_inactive: 1 }),
+    create: createScorecardCriterion,
+    update: updateScorecardCriterion,
+    nameKey: "criterion_name",
+    blank: { criterion_name: "", criterion_description: "", weight: "1", display_order: "" },
+    toForm: (r) => ({ criterion_name: r.criterion_name || "", criterion_description: r.criterion_description || "", weight: r.weight ?? "1", display_order: r.display_order ?? "" }),
+    toPayload: (f) => ({ criterion_name: f.criterion_name.trim(), criterion_description: f.criterion_description.trim() || null, weight: num(f.weight, 1), display_order: num(f.display_order) }),
+    validate: (f) => (!f.criterion_name.trim() ? "Escribe el nombre del criterio." : num(f.weight, 1) <= 0 ? "El peso debe ser mayor que 0." : ""),
+    columns: [
+      { key: "display_order", header: "Orden", align: "right", render: (r) => r.display_order ?? "—" },
+      { key: "criterion_name", header: "Criterio", render: (r) => <div><span className="font-medium">{r.criterion_name}</span>{r.criterion_description && <div className="text-[13px] text-fam-muted">{r.criterion_description}</div>}</div> },
+      { key: "weight", header: "Peso", align: "right", render: (r) => Number(r.weight || 0) },
+    ],
+    fields: (f, set) => (
+      <>
+        <Field label="Nombre">{(p) => <TextInput {...p} value={f.criterion_name} onChange={set("criterion_name")} maxLength={200} autoFocus />}</Field>
+        <Field label="Descripción" optional hint="Qué significa calificar alto en este criterio.">{(p) => <TextArea {...p} rows={2} value={f.criterion_description} onChange={set("criterion_description")} />}</Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Peso">{(p) => <TextInput {...p} type="number" min="0.1" step="0.1" value={f.weight} onChange={set("weight")} className="fam-numeric" />}</Field>
+          <Field label="Orden">{(p) => <TextInput {...p} type="number" min="0" value={f.display_order} onChange={set("display_order")} className="fam-numeric" />}</Field>
+        </div>
+      </>
+    ),
+  },
+  reasons: {
+    tab: "Motivos de pérdida",
+    intro: "Las opciones al cerrar una oportunidad como perdida. Alimentan el reporte de motivos de pérdida.",
+    singular: "motivo",
+    load: () => fetchLostReasons({ include_inactive: 1 }),
+    create: createLostReason,
+    update: updateLostReason,
+    nameKey: "reason_name",
+    blank: { reason_name: "", reason_description: "", display_order: "" },
+    toForm: (r) => ({ reason_name: r.reason_name || "", reason_description: r.reason_description || "", display_order: r.display_order ?? "" }),
+    toPayload: (f) => ({ reason_name: f.reason_name.trim(), reason_description: f.reason_description.trim() || null, display_order: num(f.display_order) }),
+    validate: (f) => (!f.reason_name.trim() ? "Escribe el motivo." : ""),
+    columns: [
+      { key: "display_order", header: "Orden", align: "right", render: (r) => r.display_order ?? "—" },
+      { key: "reason_name", header: "Motivo", render: (r) => <div><span className="font-medium">{r.reason_name}</span>{r.reason_description && <div className="text-[13px] text-fam-muted">{r.reason_description}</div>}</div> },
+    ],
+    fields: (f, set) => (
+      <>
+        <Field label="Motivo">{(p) => <TextInput {...p} value={f.reason_name} onChange={set("reason_name")} maxLength={200} autoFocus />}</Field>
+        <Field label="Descripción" optional>{(p) => <TextArea {...p} rows={2} value={f.reason_description} onChange={set("reason_description")} />}</Field>
+        <Field label="Orden">{(p) => <TextInput {...p} type="number" min="0" value={f.display_order} onChange={set("display_order")} className="fam-numeric" />}</Field>
+      </>
+    ),
+  },
 };
 
-function PipelineStagesTab() {
-  const [stages, setStages] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [modal, setModal] = useState(null); // null | { mode: "create"|"edit", data: {} }
-  const [form, setForm] = useState(stageDefaults);
-  const [submitting, setSubmitting] = useState(false);
+function CatalogForm({ catalog, item, onClose, onSaved }) {
+  const [form, setForm] = useState(item ? catalog.toForm(item) : catalog.blank);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const set = (name) => (e) => setForm((f) => ({ ...f, [name]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const submit = async (e) => {
+    e.preventDefault();
+    const problem = catalog.validate(form);
+    if (problem) { setError(problem); return; }
+    setBusy(true); setError("");
     try {
-      const data = await fetchPipelineStages();
-      setStages(data || []);
-    } catch (e) {
-      setError(e?.response?.data?.message || "Error al cargar etapas.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  function openCreate() {
-    setForm(stageDefaults);
-    setModal({ mode: "create" });
-  }
-
-  function openEdit(stage) {
-    setForm({
-      name: stage.name || "",
-      order_index: stage.order_index ?? "",
-      probability_default: stage.probability_default ?? "",
-      requires_blue_sheet: !!stage.requires_blue_sheet,
-    });
-    setModal({ mode: "edit", id: stage.id });
-  }
-
-  async function handleSubmit() {
-    if (!form.name.trim()) return;
-    setSubmitting(true);
-    try {
-      const payload = {
-        name: form.name.trim(),
-        order_index: form.order_index !== "" ? Number(form.order_index) : undefined,
-        probability_default:
-          form.probability_default !== "" ? Number(form.probability_default) : undefined,
-        requires_blue_sheet: form.requires_blue_sheet,
-      };
-      if (modal.mode === "create") {
-        await createPipelineStage(payload);
-      } else {
-        await updatePipelineStage(modal.id, payload);
-      }
-      setModal(null);
-      load();
-    } catch (e) {
-      setError(e?.response?.data?.message || "Error al guardar.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function toggleActive(stage) {
-    try {
-      await updatePipelineStage(stage.id, { is_active: !stage.is_active });
-      load();
-    } catch (e) {
-      setError(e?.response?.data?.message || "Error al actualizar estado.");
-    }
-  }
+      if (item) await catalog.update(item.id, catalog.toPayload(form)); else await catalog.create(catalog.toPayload(form));
+      onSaved();
+    } catch (err) { setError(errorMessage(err, "No se pudo guardar.")); setBusy(false); }
+  };
 
   return (
-    <div>
-      {error && <ErrorBanner msg={error} />}
-      <div className="mb-4 flex justify-end">
-        <button
-          onClick={openCreate}
-          className="rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-        >
-          Nueva etapa
-        </button>
-      </div>
-      <div className="overflow-x-auto rounded-2xl border border-[#E5E7EB] bg-white">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-[#E5E7EB] bg-[#F9FAFB] text-left text-xs font-medium text-[#6B7280]">
-              <th className="px-4 py-3">Nombre</th>
-              <th className="px-4 py-3">Orden</th>
-              <th className="px-4 py-3">Prob. Default</th>
-              <th className="px-4 py-3">Requiere BS</th>
-              <th className="px-4 py-3">Activo</th>
-              <th className="px-4 py-3">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <SkeletonRows cols={6} />
-            ) : stages.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-[#6B7280]">
-                  Sin etapas configuradas.
-                </td>
-              </tr>
-            ) : (
-              stages.map((s) => (
-                <tr key={s.id} className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F9FAFB]">
-                  <td className="px-4 py-3 font-medium text-[#1F2937]">{s.name}</td>
-                  <td className="px-4 py-3 text-[#6B7280]">{s.order_index ?? "—"}</td>
-                  <td className="px-4 py-3 text-[#6B7280]">
-                    {s.probability_default != null ? `${s.probability_default}%` : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-[#6B7280]">{s.requires_blue_sheet ? "Sí" : "No"}</td>
-                  <td className="px-4 py-3">
-                    <button onClick={() => toggleActive(s)} title="Toggle activo">
-                      <Badge active={s.is_active} />
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => openEdit(s)}
-                      className="text-[#2563EB] hover:underline text-xs"
-                    >
-                      Editar
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+    <Modal open title={item ? `Editar ${catalog.singular}` : `Agregar ${catalog.singular}`} onClose={onClose} maxWidth="max-w-lg" disableClose={busy}>
+      <form onSubmit={submit} noValidate>
+        <ErrorNote message={error} className="mb-4" />
+        <div className="space-y-4">{catalog.fields(form, set, item)}</div>
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
+          <Btn onClick={onClose} disabled={busy}>Cancelar</Btn>
+          <Btn type="submit" variant="primary" loading={busy}>{busy ? "Guardando…" : "Guardar"}</Btn>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
-      {modal && (
-        <Modal
-          title={modal.mode === "create" ? "Nueva etapa" : "Editar etapa"}
-          onClose={() => setModal(null)}
-          onSubmit={handleSubmit}
-          submitting={submitting}
-        >
-          <Field label="Nombre *">
-            <input
-              className={inputCls}
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              required
-            />
-          </Field>
-          <Field label="Orden">
-            <input
-              type="number"
-              className={inputCls}
-              value={form.order_index}
-              onChange={(e) => setForm((f) => ({ ...f, order_index: e.target.value }))}
-              min={0}
-            />
-          </Field>
-          <Field label="Probabilidad default (0-100)">
-            <input
-              type="number"
-              className={inputCls}
-              value={form.probability_default}
-              onChange={(e) => setForm((f) => ({ ...f, probability_default: e.target.value }))}
-              min={0}
-              max={100}
-            />
-          </Field>
-          <Field label="">
-            <label className="flex items-center gap-2 text-sm text-[#1F2937]">
-              <input
-                type="checkbox"
-                checked={form.requires_blue_sheet}
-                onChange={(e) => setForm((f) => ({ ...f, requires_blue_sheet: e.target.checked }))}
-                className="rounded"
-              />
-              Requiere Blue Sheet
-            </label>
-          </Field>
-        </Modal>
+function Catalog({ catalog }) {
+  const { showToast } = useUI();
+  const { loading, data, error, reload } = useLoad(catalog.load, [catalog], { fallback: "No se pudo cargar el catálogo." });
+  const [editing, setEditing] = useState(null); // null | {} | item
+  const [toggling, setToggling] = useState(null);
+  const rows = Array.isArray(data) ? data : [];
+  const active = rows.filter((r) => r.is_active !== false);
+  const inactive = rows.filter((r) => r.is_active === false);
+
+  const toggle = async (item) => {
+    setToggling(item.id);
+    try {
+      await catalog.update(item.id, { is_active: !item.is_active });
+      await reload();
+      showToast(item.is_active ? "Desactivado: ya no se ofrece al equipo" : "Reactivado", "success");
+    } catch (err) { showToast(errorMessage(err, "No se pudo cambiar el estado."), "error"); }
+    finally { setToggling(null); }
+  };
+
+  const actions = {
+    key: "actions", header: "", align: "right",
+    render: (r) => (
+      <span className="flex justify-end gap-1">
+        <Btn variant="ghost" size="sm" onClick={() => setEditing(r)}>Editar</Btn>
+        <Btn variant="ghost" size="sm" loading={toggling === r.id} disabled={r.is_active !== false && LOCKED_STAGE_NAMES.includes(r.name)} title={r.is_active !== false && LOCKED_STAGE_NAMES.includes(r.name) ? "Fase usada por Business Case y compras" : undefined} onClick={() => toggle(r)}>
+          {r.is_active === false ? "Reactivar" : "Desactivar"}
+        </Btn>
+      </span>
+    ),
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="max-w-2xl text-sm text-fam-muted">{catalog.intro}</p>
+        <Btn variant="primary" icon={FiPlus} onClick={() => setEditing({})}>Agregar {catalog.singular}</Btn>
+      </div>
+      <ErrorNote message={error} onRetry={reload} />
+      {loading && !data ? <Panel flush><SkeletonRows rows={5} /></Panel> : error ? null : (
+        <>
+          <Panel flush>
+            {active.length === 0
+              ? <EmptyState title={`No hay ${catalog.singular}s activos`} hint="Agrega el primero para que el equipo pueda usarlo." />
+              : <DataTable caption={catalog.tab} columns={[...catalog.columns, actions]} rows={active} />}
+          </Panel>
+          {inactive.length > 0 && (
+            <details className="rounded-xl border border-fam-border bg-fam-surface">
+              <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-fam-text sm:px-5">Inactivos <span className="fam-numeric font-normal text-fam-muted">{inactive.length}</span></summary>
+              <div className="border-t border-fam-border"><DataTable caption={`${catalog.tab} inactivos`} columns={[...catalog.columns, actions]} rows={inactive} /></div>
+            </details>
+          )}
+        </>
+      )}
+      {editing && (
+        <CatalogForm
+          catalog={catalog}
+          item={editing.id ? editing : null}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); reload(); showToast("Guardado", "success"); }}
+        />
       )}
     </div>
   );
 }
-
-// ── Tab: Criterios Scorecard ──────────────────────────────────────────────────
-
-const criterionDefaults = {
-  criterion_name: "",
-  criterion_description: "",
-  weight: "",
-  display_order: "",
-};
-
-function ScorecardCriteriaTab() {
-  const [criteria, setCriteria] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [modal, setModal] = useState(null);
-  const [form, setForm] = useState(criterionDefaults);
-  const [submitting, setSubmitting] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await fetchScorecardCriteria();
-      setCriteria(data || []);
-    } catch (e) {
-      setError(e?.response?.data?.message || "Error al cargar criterios.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  function openCreate() {
-    setForm(criterionDefaults);
-    setModal({ mode: "create" });
-  }
-
-  function openEdit(c) {
-    setForm({
-      criterion_name: c.criterion_name || "",
-      criterion_description: c.criterion_description || "",
-      weight: c.weight ?? "",
-      display_order: c.display_order ?? "",
-    });
-    setModal({ mode: "edit", id: c.id });
-  }
-
-  async function handleSubmit() {
-    if (!form.criterion_name.trim()) return;
-    setSubmitting(true);
-    try {
-      const payload = {
-        criterion_name: form.criterion_name.trim(),
-        criterion_description: form.criterion_description.trim() || undefined,
-        weight: form.weight !== "" ? Number(form.weight) : undefined,
-        display_order: form.display_order !== "" ? Number(form.display_order) : undefined,
-      };
-      if (modal.mode === "create") {
-        await createScorecardCriterion(payload);
-      } else {
-        await updateScorecardCriterion(modal.id, payload);
-      }
-      setModal(null);
-      load();
-    } catch (e) {
-      setError(e?.response?.data?.message || "Error al guardar.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function toggleActive(c) {
-    try {
-      await updateScorecardCriterion(c.id, { is_active: !c.is_active });
-      load();
-    } catch (e) {
-      setError(e?.response?.data?.message || "Error al actualizar estado.");
-    }
-  }
-
-  return (
-    <div>
-      {error && <ErrorBanner msg={error} />}
-      <div className="mb-4 flex justify-end">
-        <button
-          onClick={openCreate}
-          className="rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-        >
-          Nuevo criterio
-        </button>
-      </div>
-      <div className="overflow-x-auto rounded-2xl border border-[#E5E7EB] bg-white">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-[#E5E7EB] bg-[#F9FAFB] text-left text-xs font-medium text-[#6B7280]">
-              <th className="px-4 py-3">Nombre</th>
-              <th className="px-4 py-3">Peso</th>
-              <th className="px-4 py-3">Orden</th>
-              <th className="px-4 py-3">Activo</th>
-              <th className="px-4 py-3">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <SkeletonRows cols={5} />
-            ) : criteria.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-[#6B7280]">
-                  Sin criterios configurados.
-                </td>
-              </tr>
-            ) : (
-              criteria.map((c) => (
-                <tr key={c.id} className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F9FAFB]">
-                  <td className="px-4 py-3 font-medium text-[#1F2937]">{c.criterion_name}</td>
-                  <td className="px-4 py-3 text-[#6B7280]">{c.weight ?? "—"}</td>
-                  <td className="px-4 py-3 text-[#6B7280]">{c.display_order ?? "—"}</td>
-                  <td className="px-4 py-3">
-                    <button onClick={() => toggleActive(c)} title="Toggle activo">
-                      <Badge active={c.is_active} />
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => openEdit(c)}
-                      className="text-[#2563EB] hover:underline text-xs"
-                    >
-                      Editar
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {modal && (
-        <Modal
-          title={modal.mode === "create" ? "Nuevo criterio" : "Editar criterio"}
-          onClose={() => setModal(null)}
-          onSubmit={handleSubmit}
-          submitting={submitting}
-        >
-          <Field label="Nombre *">
-            <input
-              className={inputCls}
-              value={form.criterion_name}
-              onChange={(e) => setForm((f) => ({ ...f, criterion_name: e.target.value }))}
-              required
-            />
-          </Field>
-          <Field label="Descripcion">
-            <textarea
-              className={`${inputCls} resize-none`}
-              rows={3}
-              value={form.criterion_description}
-              onChange={(e) => setForm((f) => ({ ...f, criterion_description: e.target.value }))}
-            />
-          </Field>
-          <Field label="Peso (1-10)">
-            <input
-              type="number"
-              className={inputCls}
-              value={form.weight}
-              onChange={(e) => setForm((f) => ({ ...f, weight: e.target.value }))}
-              min={1}
-              max={10}
-            />
-          </Field>
-          <Field label="Orden">
-            <input
-              type="number"
-              className={inputCls}
-              value={form.display_order}
-              onChange={(e) => setForm((f) => ({ ...f, display_order: e.target.value }))}
-              min={0}
-            />
-          </Field>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ── Tab: Razones de Perdida ───────────────────────────────────────────────────
-
-const lostReasonDefaults = {
-  reason_name: "",
-  reason_description: "",
-  display_order: "",
-};
-
-function LostReasonsTab() {
-  const [reasons, setReasons] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [modal, setModal] = useState(null);
-  const [form, setForm] = useState(lostReasonDefaults);
-  const [submitting, setSubmitting] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await fetchLostReasons();
-      setReasons(data || []);
-    } catch (e) {
-      setError(e?.response?.data?.message || "Error al cargar razones.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  function openCreate() {
-    setForm(lostReasonDefaults);
-    setModal({ mode: "create" });
-  }
-
-  function openEdit(r) {
-    setForm({
-      reason_name: r.reason_name || "",
-      reason_description: r.reason_description || "",
-      display_order: r.display_order ?? "",
-    });
-    setModal({ mode: "edit", id: r.id });
-  }
-
-  async function handleSubmit() {
-    if (!form.reason_name.trim()) return;
-    setSubmitting(true);
-    try {
-      const payload = {
-        reason_name: form.reason_name.trim(),
-        reason_description: form.reason_description.trim() || undefined,
-        display_order: form.display_order !== "" ? Number(form.display_order) : undefined,
-      };
-      if (modal.mode === "create") {
-        await createLostReason(payload);
-      } else {
-        await updateLostReason(modal.id, payload);
-      }
-      setModal(null);
-      load();
-    } catch (e) {
-      setError(e?.response?.data?.message || "Error al guardar.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function toggleActive(r) {
-    try {
-      await updateLostReason(r.id, { is_active: !r.is_active });
-      load();
-    } catch (e) {
-      setError(e?.response?.data?.message || "Error al actualizar estado.");
-    }
-  }
-
-  return (
-    <div>
-      {error && <ErrorBanner msg={error} />}
-      <div className="mb-4 flex justify-end">
-        <button
-          onClick={openCreate}
-          className="rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-        >
-          Nueva razon
-        </button>
-      </div>
-      <div className="overflow-x-auto rounded-2xl border border-[#E5E7EB] bg-white">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-[#E5E7EB] bg-[#F9FAFB] text-left text-xs font-medium text-[#6B7280]">
-              <th className="px-4 py-3">Razon</th>
-              <th className="px-4 py-3">Descripcion</th>
-              <th className="px-4 py-3">Orden</th>
-              <th className="px-4 py-3">Activo</th>
-              <th className="px-4 py-3">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <SkeletonRows cols={5} />
-            ) : reasons.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-[#6B7280]">
-                  Sin razones configuradas.
-                </td>
-              </tr>
-            ) : (
-              reasons.map((r) => (
-                <tr key={r.id} className="border-b border-[#E5E7EB] last:border-0 hover:bg-[#F9FAFB]">
-                  <td className="px-4 py-3 font-medium text-[#1F2937]">{r.reason_name}</td>
-                  <td className="px-4 py-3 text-[#6B7280] max-w-xs truncate">
-                    {r.reason_description || "—"}
-                  </td>
-                  <td className="px-4 py-3 text-[#6B7280]">{r.display_order ?? "—"}</td>
-                  <td className="px-4 py-3">
-                    <button onClick={() => toggleActive(r)} title="Toggle activo">
-                      <Badge active={r.is_active} />
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => openEdit(r)}
-                      className="text-[#2563EB] hover:underline text-xs"
-                    >
-                      Editar
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {modal && (
-        <Modal
-          title={modal.mode === "create" ? "Nueva razon de perdida" : "Editar razon de perdida"}
-          onClose={() => setModal(null)}
-          onSubmit={handleSubmit}
-          submitting={submitting}
-        >
-          <Field label="Razon *">
-            <input
-              className={inputCls}
-              value={form.reason_name}
-              onChange={(e) => setForm((f) => ({ ...f, reason_name: e.target.value }))}
-              required
-            />
-          </Field>
-          <Field label="Descripcion">
-            <textarea
-              className={`${inputCls} resize-none`}
-              rows={3}
-              value={form.reason_description}
-              onChange={(e) => setForm((f) => ({ ...f, reason_description: e.target.value }))}
-            />
-          </Field>
-          <Field label="Orden">
-            <input
-              type="number"
-              className={inputCls}
-              value={form.display_order}
-              onChange={(e) => setForm((f) => ({ ...f, display_order: e.target.value }))}
-              min={0}
-            />
-          </Field>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ── Page ──────────────────────────────────────────────────────────────────────
-
-const TABS = [
-  { id: "stages", label: "Etapas del Pipeline", Component: PipelineStagesTab },
-  { id: "scorecard", label: "Criterios Scorecard", Component: ScorecardCriteriaTab },
-  { id: "lost", label: "Razones de Perdida", Component: LostReasonsTab },
-];
 
 export default function CrmSettingsPage() {
-  const [activeTab, setActiveTab] = useState("stages");
-  const ActiveComponent = TABS.find((t) => t.id === activeTab)?.Component;
+  const { user } = useAuth();
+  const [url, setUrl] = useUrlState({ tab: "stages" });
+  const tab = CATALOGS[url.tab] ? url.tab : "stages";
+
+  if (!isAdmin(user)) {
+    return (
+      <div className="flex min-w-0 flex-col">
+        <PageHeader title="Configuración" />
+        <Panel><EmptyState title="Solo para administradores" hint="La configuración del CRM la gestiona el área de TI." /></Panel>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-[#F9FAFB] p-6">
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-[#1E293B]">Configuracion CRM</h1>
-        <p className="mt-1 text-sm text-[#6B7280]">
-          Administra etapas del pipeline, criterios de scorecard y razones de perdida.
-        </p>
-      </div>
-
-      {/* Tabs */}
-      <div className="mb-6 flex gap-1 rounded-xl border border-[#E5E7EB] bg-white p-1 w-fit">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setActiveTab(t.id)}
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === t.id
-                ? "bg-[#2563EB] text-white shadow-sm"
-                : "text-[#6B7280] hover:text-[#1F2937]"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {ActiveComponent && <ActiveComponent />}
+    <div className="flex min-w-0 flex-col">
+      <PageHeader title="Configuración">
+        <Tabs label="Catálogos" tabs={Object.entries(CATALOGS).map(([value, c]) => ({ value, label: c.tab }))} value={tab} onChange={(v) => setUrl({ tab: v })} />
+      </PageHeader>
+      <Catalog key={tab} catalog={CATALOGS[tab]} />
     </div>
   );
 }

@@ -1,718 +1,306 @@
-import { useState, useEffect, useCallback } from "react";
-import {
-  fetchActivities,
-  createActivity,
-  completeActivity,
-  updateActivity,
-  uploadDocument,
-  fetchOpportunities,
-} from "../../../core/api/crmFamApi";
-import SearchableSelect from "../../../core/ui/components/SearchableSelect";
-import FileUploadZone from "../../../core/ui/components/FileUploadZone";
+// Actividades como agenda: lo pendiente agrupado por urgencia (vencidas, hoy, próximas), las visitas
+// que esperan cierre comercial, y el historial. El detalle se revisa en el inspector sin dejar la lista.
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { FiCalendar, FiCheck, FiExternalLink, FiPlus, FiSlash } from "react-icons/fi";
+import { fetchActivities, updateActivity } from "../../../core/api/crmFamApi";
+import { useAuth } from "../../../core/auth/AuthContext";
+import { useUI } from "../../../core/ui/UIContext";
+import { ActivityCloseModal, ActivityFormModal } from "../components/ActivityModals";
+import { ConfirmDialog } from "../ui/dialogs";
+import { Badge, Btn, cx, DefList, EmptyState, ErrorNote, Inspector, PageHeader, Panel, SelectInput, SkeletonRows, StatusBadge, Tabs } from "../ui/kit";
+import { date, daysFromToday, relativeDay, time } from "../ui/format";
+import { isManager } from "../ui/roles";
+import { ACTIVITY_TYPES, activityStatus, activityType } from "../ui/status";
+import { listOf, useLoad } from "../ui/useLoad";
+import { useUrlState } from "../ui/useUrlState";
 
-const LIMIT = 20;
+const BASE = "/dashboard/crm-fam";
+const PAGE = 100;
+const VIEWS = [
+  { value: "pendientes", label: "Pendientes" },
+  { value: "seguimiento", label: "Por cerrar" },
+  { value: "completadas", label: "Completadas" },
+  { value: "canceladas", label: "Canceladas" },
+];
+const STATUS_BY_VIEW = { pendientes: "scheduled", seguimiento: "visited_pending_followup", completadas: "completed", canceladas: "cancelled" };
 
-const TYPE_LABELS = {
-  llamada: "Llamada",
-  reunion: "Reunion",
-  email: "Email",
-  visita: "Visita",
-  demo: "Demo",
-  propuesta: "Propuesta",
-  seguimiento: "Seguimiento",
-  tarea: "Tarea",
-};
+// Las visitas del cronograma solo se marcan realizadas desde Asistencia: aquí no se completan ni cancelan.
+const fromSchedule = (a) => a.source_module === "schedule" || (a.activity_type === "visita" && Boolean(a.is_scheduled_visit));
+const originOf = (a) => (a.source_module === "work_management" ? "Work Management" : fromSchedule(a) ? "Cronograma" : "CRM");
+const needsClose = (a) => a.status === "visited_pending_followup" || a.followup_status === "incomplete_followup";
+const customerOf = (a) => a.visit_client_name || a.account_name || a.opportunity_name || "Sin cliente vinculado";
+const whenOf = (a) => a.hora_salida || a.completed_at || a.scheduled_at || a.visit_date;
 
-// Origen de la actividad: viene de un campo estructurado nuevo
-// (source_module) para actividades creadas desde Work Management o
-// cronograma. Las visitas de cronograma creadas ANTES de que existiera esa
-// columna quedan con source_module NULL, asi que se conserva el fallback
-// viejo (activity_type==='visita' && is_scheduled_visit) para no perder el
-// badge en filas historicas -- no requiere backfill de datos.
-const ORIGIN_LABELS = {
-  work_management: "Work Management",
-  schedule: "Cronograma",
-};
-
-function getActivityOrigin(activity) {
-  if (activity?.source_module && ORIGIN_LABELS[activity.source_module]) {
-    return ORIGIN_LABELS[activity.source_module];
-  }
-  if (activity?.activity_type === "visita" && activity?.is_scheduled_visit) {
-    return ORIGIN_LABELS.schedule;
-  }
-  return "CRM";
+function ActivityRow({ a, selected, onOpen }) {
+  const d = a.scheduled_at ? daysFromToday(a.scheduled_at) : null;
+  const open = a.status === "scheduled";
+  const overdue = open && d !== null && d < 0;
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-pressed={selected}
+        className={cx("flex w-full items-center gap-3 px-4 py-3 text-left transition-colors duration-100 sm:px-5", selected ? "bg-fam-selected" : "hover:bg-fam-subtle")}
+      >
+        <FiCalendar className="h-4 w-4 shrink-0 text-fam-muted" aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-fam-text">{a.subject}</span>
+          <span className="block truncate text-[13px] text-fam-muted">{activityType(a.activity_type)} · {customerOf(a)}{a.owner_name ? ` · ${a.owner_name}` : ""}</span>
+        </span>
+        {needsClose(a) && <Badge tone="warning">Falta cierre</Badge>}
+        <span className={cx("fam-numeric hidden shrink-0 text-[13px] sm:block", overdue ? "font-medium text-fam-danger" : "text-fam-muted")}>
+          {open && d !== null ? (d === 0 ? (time(a.scheduled_at) || "hoy") : relativeDay(a.scheduled_at)) : date(whenOf(a))}
+        </span>
+      </button>
+    </li>
+  );
 }
 
-const STATUS_COLORS = {
-  scheduled: { bg: "#EFF6FF", text: "#1D4ED8" },
-  visited_pending_followup: { bg: "#FEF3C7", text: "#D97706" },
-  completed: { bg: "#DCFCE7", text: "#16A34A" },
-  cancelled: { bg: "#FEE2E2", text: "#DC2626" },
-};
-
-const STATUS_LABELS = {
-  scheduled: "Programada",
-  visited_pending_followup: "Visitada, pendiente de cierre",
-  completed: "Completada",
-  cancelled: "Cancelada",
-};
-
-const FOLLOWUP_LABELS = {
-  pending_followup: "Pendiente de comentarios y resultado",
-  incomplete_followup: "Cierre incompleto",
-  completed: "Cierre registrado",
-  not_applicable: "Sin seguimiento requerido",
-};
-
-const EMPTY_FORM = {
-  activity_type: "",
-  subject: "",
-  scheduled_at: "",
-  duration_minutes: "",
-  description: "",
-  opportunity_id: "",
-};
-
-function Skeleton() {
-  const p = <div className="h-4 bg-gray-200 rounded w-3/4" />;
+function Group({ title, tone, items, selectedId, onOpen }) {
+  if (!items.length) return null;
   return (
-    <div className="grid gap-3">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="animate-pulse rounded-[18px] border border-[#E5E7EB] bg-white p-4">
-          <div className="flex items-start justify-between gap-3">
-            {p}
-            <div className="h-6 w-24 rounded-full bg-gray-200" />
-          </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-3">
-            <div className="h-14 rounded-[14px] bg-gray-100" />
-            <div className="h-14 rounded-[14px] bg-gray-100" />
-            <div className="h-14 rounded-[14px] bg-gray-100" />
-          </div>
-        </div>
-      ))}
+    <div>
+      <h3 className="flex items-center gap-2 border-b border-fam-border bg-fam-canvas px-4 py-2 text-[13px] font-semibold text-fam-text sm:px-5">
+        {title}
+        <span className={cx("fam-numeric font-normal", tone === "danger" ? "text-fam-danger" : "text-fam-muted")}>{items.length}</span>
+      </h3>
+      <ul className="divide-y divide-fam-border">
+        {items.map((a) => <ActivityRow key={a.id} a={a} selected={selectedId === a.id} onOpen={() => onOpen(a)} />)}
+      </ul>
     </div>
   );
 }
 
-function TypeBadge({ type }) {
+function ActivityPeek({ a }) {
+  const documents = Array.isArray(a.documents) ? a.documents : [];
   return (
-    <span
-      className="inline-block px-2 py-0.5 rounded-[6px] text-xs font-medium"
-      style={{ background: "#F3F4F6", color: "#374151" }}
-    >
-      {TYPE_LABELS[type] ?? type}
-    </span>
-  );
-}
-
-function StatusBadge({ status }) {
-  const colors = STATUS_COLORS[status] ?? { bg: "#F3F4F6", text: "#374151" };
-  return (
-    <span
-      className="inline-block px-2 py-0.5 rounded-[6px] text-xs font-medium"
-      style={{ background: colors.bg, color: colors.text }}
-    >
-      {STATUS_LABELS[status] ?? status}
-    </span>
-  );
-}
-
-function OriginBadge({ activity }) {
-  return (
-    <span
-      className="inline-block px-2 py-0.5 rounded-[6px] text-xs font-medium"
-      style={{ background: "#EEF2FF", color: "#4338CA" }}
-    >
-      {getActivityOrigin(activity)}
-    </span>
-  );
-}
-
-function NewActivityModal({ onClose, onSaved }) {
-  const [form, setForm] = useState({ ...EMPTY_FORM });
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState(null);
-  const [opportunityOptions, setOpportunityOptions] = useState([]);
-
-  useEffect(() => {
-    fetchOpportunities({ limit: 500 })
-      .then((res) => {
-        const rows = Array.isArray(res) ? res : (res?.data ?? []);
-        setOpportunityOptions(rows.map((o) => ({ value: o.id, label: o.name })));
-      })
-      .catch(() => setOpportunityOptions([]));
-  }, []);
-
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!form.activity_type) { setErr("Tipo requerido"); return; }
-    if (!form.subject.trim()) { setErr("Asunto requerido"); return; }
-    setSaving(true);
-    setErr(null);
-    try {
-      const payload = {
-        activity_type: form.activity_type,
-        subject: form.subject.trim(),
-        scheduled_at: form.scheduled_at || null,
-        duration_minutes: form.duration_minutes ? Number(form.duration_minutes) : null,
-        description: form.description || null,
-        opportunity_id: form.opportunity_id || null,
-      };
-      await createActivity(payload);
-      onSaved();
-    } catch (ex) {
-      setErr(ex.message || "Error al guardar");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-3" onClick={onClose}>
-      <div
-        className="w-full max-w-md rounded-[16px] bg-white p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="mb-4 text-lg font-semibold text-[#1F2937]">Nueva actividad</h2>
-        {err && (
-          <div className="mb-3 rounded-[12px] border border-[#DC2626]/30 bg-[#FEE2E2] px-3 py-2 text-sm text-[#DC2626]">
-            {err}
-          </div>
-        )}
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[#6B7280]">Tipo *</label>
-            <select
-              className="w-full rounded-[12px] border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none"
-              value={form.activity_type}
-              onChange={set("activity_type")}
-            >
-              <option value="">Seleccionar tipo</option>
-              {Object.entries(TYPE_LABELS).map(([val, label]) => (
-                <option key={val} value={val}>{label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[#6B7280]">Asunto *</label>
-            <input
-              className="w-full rounded-[12px] border border-[#E5E7EB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none"
-              value={form.subject}
-              onChange={set("subject")}
-              placeholder="Asunto de la actividad"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[#6B7280]">Fecha programada</label>
-            <input
-              type="datetime-local"
-              className="w-full rounded-[12px] border border-[#E5E7EB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none"
-              value={form.scheduled_at}
-              onChange={set("scheduled_at")}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[#6B7280]">Duracion (minutos)</label>
-            <input
-              type="number"
-              min="0"
-              className="w-full rounded-[12px] border border-[#E5E7EB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none"
-              value={form.duration_minutes}
-              onChange={set("duration_minutes")}
-              placeholder="60"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[#6B7280]">Descripcion</label>
-            <textarea
-              rows={3}
-              className="w-full resize-none rounded-[12px] border border-[#E5E7EB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none"
-              value={form.description}
-              onChange={set("description")}
-              placeholder="Descripcion opcional"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[#6B7280]">Oportunidad (opcional)</label>
-            <SearchableSelect
-              options={opportunityOptions}
-              value={form.opportunity_id}
-              onChange={(value) => setForm((f) => ({ ...f, opportunity_id: value }))}
-              placeholder="Buscar oportunidad por nombre..."
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-[12px] border border-[#E5E7EB] px-4 py-2 text-sm text-[#6B7280] hover:bg-gray-50"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-[12px] bg-[#2563EB] px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-            >
-              {saving ? "Guardando..." : "Guardar"}
-            </button>
-          </div>
-        </form>
+    <div className="space-y-5">
+      <div className="flex flex-wrap gap-2">
+        <StatusBadge of={activityStatus} value={a.status} />
+        <Badge>{activityType(a.activity_type)}</Badge>
+        <Badge>{originOf(a)}</Badge>
       </div>
-    </div>
-  );
-}
 
-function CompleteModal({ activity, onClose, onSaved }) {
-  const [outcome, setOutcome] = useState(activity?.outcome || "");
-  const [notes, setNotes] = useState(activity?.outcome_notes || "");
-  const [nextStep, setNextStep] = useState(activity?.next_step || "");
-  const [documentName, setDocumentName] = useState("");
-  const [documentType, setDocumentType] = useState("evidencia_visita");
-  const [evidenceFile, setEvidenceFile] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState(null);
+      {needsClose(a) && (
+        <p className="rounded-lg bg-fam-warning-bg px-3 py-2 text-[13px] text-fam-warning">
+          La visita ya está registrada. Falta documentar qué se logró, los comentarios y la evidencia si aplica.
+        </p>
+      )}
+      {fromSchedule(a) && a.status === "scheduled" && (
+        <p className="rounded-lg bg-fam-info-bg px-3 py-2 text-[13px] text-fam-info">
+          Viene del cronograma: se marca como realizada cuando el asesor registra la visita desde Asistencia.
+        </p>
+      )}
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    setErr(null);
-    try {
-      if (!outcome.trim()) {
-        setErr("Registra que se logro con la visita.");
-        setSaving(false);
-        return;
-      }
-      if (!notes.trim()) {
-        setErr("Agrega comentarios de la visita.");
-        setSaving(false);
-        return;
-      }
-      await completeActivity(activity.id, {
-        outcome: outcome.trim(),
-        outcome_notes: notes.trim(),
-        next_step: nextStep.trim() || null,
-      });
-      if (evidenceFile) {
-        const formData = new FormData();
-        formData.append("file", evidenceFile);
-        formData.append("activity_id", activity.id);
-        formData.append("account_id", activity.account_id || "");
-        formData.append("opportunity_id", activity.opportunity_id || "");
-        formData.append("document_name", documentName.trim() || evidenceFile.name);
-        formData.append("document_type", documentType);
-        await uploadDocument(formData);
-      }
-      onSaved();
-    } catch (ex) {
-      setErr(ex.message || "Error al completar");
-    } finally {
-      setSaving(false);
-    }
-  };
+      <DefList
+        items={[
+          { label: "Cliente", value: a.account_id ? <Link to={`${BASE}/accounts/${a.account_id}`} className="text-fam-action underline underline-offset-2">{customerOf(a)}</Link> : customerOf(a) },
+          a.opportunity_id && { label: "Oportunidad", value: <Link to={`${BASE}/opportunities/${a.opportunity_id}`} className="text-fam-action underline underline-offset-2">{a.opportunity_name || "Abrir oportunidad"}</Link> },
+          { label: "Fecha", value: whenOf(a) ? `${date(whenOf(a))}${time(whenOf(a)) ? ` · ${time(whenOf(a))}` : ""}` : "Sin fecha" },
+          a.duration_minutes && { label: "Duración", value: `${a.duration_minutes} min` },
+          { label: "Responsable", value: a.owner_name },
+          a.description && { label: "Descripción", value: <span className="whitespace-pre-wrap">{a.description}</span> },
+        ]}
+      />
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-3" onClick={onClose}>
-      <div
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[20px] bg-white p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="mb-1 text-lg font-semibold text-[#1F2937]">Cerrar seguimiento de visita</h2>
-        <p className="mb-4 text-sm text-[#6B7280]">{activity.subject}</p>
-        {activity.visit_client_name && (
-          <div className="mb-4 rounded-[16px] border border-[#FEF3C7] bg-[#FFFBEB] px-4 py-3 text-sm text-[#92400E]">
-            La visita a <strong>{activity.visit_client_name}</strong> ya fue registrada en asistencia.
-            Falta documentar comentarios, resultado y evidencia comercial.
-          </div>
+      {a.calendar_event_url && (
+        <a href={a.calendar_event_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm text-fam-action underline underline-offset-2">
+          <FiExternalLink className="h-3.5 w-3.5" aria-hidden="true" /> Ver en Calendar
+        </a>
+      )}
+
+      {(a.outcome || a.outcome_notes || a.next_step) && (
+        <div className="border-t border-fam-border pt-4">
+          <h3 className="mb-3 text-[13px] font-semibold text-fam-text">Cierre comercial</h3>
+          <DefList
+            items={[
+              { label: "Qué se logró", value: a.outcome ? <span className="whitespace-pre-wrap">{a.outcome}</span> : "Pendiente" },
+              { label: "Comentarios", value: a.outcome_notes ? <span className="whitespace-pre-wrap">{a.outcome_notes}</span> : "Pendiente" },
+              { label: "Próximo paso", value: a.next_step ? <span className="whitespace-pre-wrap">{a.next_step}</span> : "Sin siguiente paso" },
+            ]}
+          />
+        </div>
+      )}
+
+      <div className="border-t border-fam-border pt-4">
+        <h3 className="mb-2 text-[13px] font-semibold text-fam-text">Documentos <span className="fam-numeric font-normal text-fam-muted">{documents.length}</span></h3>
+        {documents.length === 0 ? (
+          <p className="text-sm text-fam-muted">Sin documentos adjuntos.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {documents.map((doc) => (
+              <li key={doc.id}>
+                <a href={doc.drive_file_url} target="_blank" rel="noopener noreferrer" className="text-sm text-fam-action underline underline-offset-2">{doc.document_name || "Documento"}</a>
+              </li>
+            ))}
+          </ul>
         )}
-        {err && (
-          <div className="mb-3 rounded-[12px] border border-[#DC2626]/30 bg-[#FEE2E2] px-3 py-2 text-sm text-[#DC2626]">
-            {err}
-          </div>
-        )}
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[#6B7280]">Que se logro con la visita *</label>
-            <textarea
-              rows={3}
-              className="w-full resize-none rounded-[12px] border border-[#E5E7EB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none"
-              value={outcome}
-              onChange={(e) => setOutcome(e.target.value)}
-              placeholder="Ejemplo: se valido necesidad, se obtuvo compromiso de compra, se levanto requerimiento tecnico..."
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[#6B7280]">Comentarios de la visita *</label>
-            <textarea
-              rows={4}
-              className="w-full resize-none rounded-[12px] border border-[#E5E7EB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Registra acuerdos, objeciones, personas contactadas y contexto relevante."
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-[#6B7280]">Proximo paso</label>
-            <textarea
-              rows={2}
-              className="w-full resize-none rounded-[12px] border border-[#E5E7EB] px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none"
-              value={nextStep}
-              onChange={(e) => setNextStep(e.target.value)}
-              placeholder="Ejemplo: enviar cotizacion, coordinar demo, levantar Business Case..."
-            />
-          </div>
-          <div className="rounded-[16px] border border-[#E5E7EB] bg-white p-4">
-            <div className="mb-3">
-              <p className="text-sm font-semibold text-[#1F2937]">Documento de evidencia opcional</p>
-              <p className="mt-1 text-xs text-[#6B7280]">
-                Adjunta actas, minutas, requerimientos o evidencia relacionada con la visita.
-              </p>
-            </div>
-            <div className="mb-3 grid gap-2 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-[#6B7280]">Nombre del documento</label>
-                <input
-                  className="min-h-10 w-full rounded-[12px] border border-[#D1D5DB] bg-white px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
-                  value={documentName}
-                  onChange={(e) => setDocumentName(e.target.value)}
-                  placeholder={evidenceFile?.name || "Opcional"}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-[#6B7280]">Tipo de documento</label>
-                <select
-                  className="min-h-10 w-full rounded-[12px] border border-[#D1D5DB] bg-white px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/20"
-                  value={documentType}
-                  onChange={(e) => setDocumentType(e.target.value)}
-                >
-                  <option value="evidencia_visita">Evidencia de visita</option>
-                  <option value="acta_reunion">Acta / minuta</option>
-                  <option value="requerimiento">Requerimiento</option>
-                  <option value="cotizacion">Cotizacion</option>
-                </select>
-              </div>
-            </div>
-            <FileUploadZone
-              id={`crm-activity-evidence-${activity.id}`}
-              accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
-              label="Guardar cierre y adjuntar"
-              description="PDF, Office o imagen. Maximo 15 MB."
-              file={evidenceFile}
-              onFileChange={setEvidenceFile}
-              onUpload={() => handleSubmit({ preventDefault: () => {} })}
-              uploading={saving && Boolean(evidenceFile)}
-              disabled={saving}
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-[12px] border border-[#E5E7EB] px-4 py-2 text-sm text-[#6B7280] hover:bg-gray-50"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-[12px] bg-[#16A34A] px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60"
-            >
-              {saving ? "Guardando..." : "Guardar cierre"}
-            </button>
-          </div>
-        </form>
       </div>
     </div>
   );
 }
 
 export default function CrmActivitiesPage() {
-  const [typeFilter, setTypeFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [offset, setOffset] = useState(0);
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [modal, setModal] = useState(null);
+  const { user } = useAuth();
+  const { showToast } = useUI();
+  const manager = isManager(user);
+  const [url, setUrl] = useUrlState({ view: "pendientes", type: "", scope: "mine", sel: "", new: "" });
+  const view = STATUS_BY_VIEW[url.view] ? url.view : "pendientes";
+  const [limit, setLimit] = useState(PAGE);
+  const [closing, setClosing] = useState(null);
+  const [cancelling, setCancelling] = useState(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = {
-        limit: LIMIT,
-        offset,
-        ...(typeFilter && { activity_type: typeFilter }),
-        ...(statusFilter && { status: statusFilter }),
-      };
-      const result = await fetchActivities(params);
-      setData(result);
-    } catch (ex) {
-      setError(ex.message || "Error al cargar actividades");
-    } finally {
-      setLoading(false);
-    }
-  }, [offset, typeFilter, statusFilter]);
+  useEffect(() => { setLimit(PAGE); }, [view, url.type, url.scope]);
 
-  useEffect(() => { load(); }, [load]);
+  // El backend limita a lo propio a quien no es manager; un manager elige entre lo suyo y el equipo.
+  const owner = manager && url.scope === "team" ? {} : { owner_user_id: user?.id };
+  const { loading, data, error, reload } = useLoad(
+    async () => {
+      const base = { ...owner, ...(url.type ? { activity_type: url.type } : {}), limit };
+      if (view !== "seguimiento") return listOf(await fetchActivities({ ...base, status: STATUS_BY_VIEW[view] }));
+      // "Por cerrar" junta las visitas sin cierre y las completadas con cierre incompleto.
+      const [pending, done] = await Promise.all([
+        fetchActivities({ ...base, status: "visited_pending_followup" }),
+        fetchActivities({ ...base, status: "completed" }),
+      ]);
+      return [...listOf(pending), ...listOf(done).filter((a) => a.followup_status === "incomplete_followup")];
+    },
+    [view, url.type, url.scope, limit, user?.id],
+    { fallback: "No se pudieron cargar las actividades." },
+  );
+  const rows = useMemo(() => data || [], [data]);
+  const selected = rows.find((a) => a.id === url.sel);
+  const mayHaveMore = rows.length >= limit && view !== "seguimiento";
 
-  const rows = Array.isArray(data) ? data : (data?.data ?? []);
-  const total = Array.isArray(data) ? rows.length : (data?.total ?? rows.length);
-  const hasNext = offset + LIMIT < total;
-  const hasPrev = offset > 0;
+  const groups = useMemo(() => {
+    if (view !== "pendientes") return null;
+    const withDate = rows.filter((a) => a.scheduled_at);
+    const asc = (x, y) => new Date(x.scheduled_at) - new Date(y.scheduled_at);
+    return {
+      overdue: withDate.filter((a) => daysFromToday(a.scheduled_at) < 0).sort(asc),
+      today: withDate.filter((a) => daysFromToday(a.scheduled_at) === 0).sort(asc),
+      upcoming: withDate.filter((a) => daysFromToday(a.scheduled_at) > 0).sort(asc),
+      undated: rows.filter((a) => !a.scheduled_at),
+    };
+  }, [rows, view]);
 
-  const handleFilterChange = (setter) => (e) => {
-    setter(e.target.value);
-    setOffset(0);
-  };
-
-  const handleCancel = useCallback(async (activity) => {
-    if (!window.confirm(`Cancelar la actividad "${activity.subject}"?`)) return;
-    try {
-      await updateActivity(activity.id, { status: "cancelled" });
-      load();
-    } catch (ex) {
-      alert(ex.message || "Error al cancelar");
-    }
-  }, [load]);
-
-  const closeModal = useCallback(() => setModal(null), []);
-  const onSaved = useCallback(() => { setModal(null); load(); }, [load]);
-
-  const formatDate = (iso) => {
-    if (!iso) return "-";
-    try {
-      return new Date(iso).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" });
-    } catch {
-      return iso;
-    }
-  };
+  const open = (a) => setUrl({ sel: a.id === url.sel ? "" : a.id }, { replace: false });
+  const canAct = (a) => a.status === "scheduled" && !fromSchedule(a);
 
   return (
-    <div className="min-h-full bg-[#F9FAFB] p-4 sm:p-6">
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[#1F2937]">Actividades</h1>
-          <p className="mt-1 text-sm text-[#64748B]">
-            Seguimiento comercial conectado a visitas registradas en asistencia.
-          </p>
+    <div className="flex min-w-0 flex-col">
+      <PageHeader
+        title="Actividades"
+        actions={<Btn variant="primary" icon={FiPlus} onClick={() => setUrl({ new: "1" })}>Nueva actividad</Btn>}
+      >
+        <Tabs label="Vistas" tabs={VIEWS} value={view} onChange={(v) => setUrl({ view: v, sel: "" })} />
+      </PageHeader>
+
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="w-full sm:w-52">
+          <SelectInput aria-label="Filtrar por tipo" value={url.type} onChange={(e) => setUrl({ type: e.target.value })}>
+            <option value="">Todos los tipos</option>
+            {Object.entries(ACTIVITY_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </SelectInput>
         </div>
-        <button
-          onClick={() => setModal({ type: "new" })}
-          className="rounded-[12px] bg-[#2563EB] px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-        >
-          Nueva actividad
-        </button>
-      </div>
-
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row">
-        <select
-          className="rounded-[12px] border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none"
-          value={typeFilter}
-          onChange={handleFilterChange(setTypeFilter)}
-        >
-          <option value="">Todos los tipos</option>
-          {Object.entries(TYPE_LABELS).map(([val, label]) => (
-            <option key={val} value={val}>{label}</option>
-          ))}
-        </select>
-        <select
-          className="rounded-[12px] border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-[#1F2937] focus:border-[#2563EB] focus:outline-none"
-          value={statusFilter}
-          onChange={handleFilterChange(setStatusFilter)}
-        >
-          <option value="">Todos los estados</option>
-          <option value="scheduled">Programada</option>
-          <option value="visited_pending_followup">Visitada pendiente de cierre</option>
-          <option value="completed">Completada</option>
-          <option value="cancelled">Cancelada</option>
-        </select>
-      </div>
-
-      {error && (
-        <div className="mb-4 rounded-[12px] border border-[#DC2626]/30 bg-[#FEE2E2] px-4 py-3 text-sm text-[#DC2626]">
-          {error}
-        </div>
-      )}
-
-      <div className="space-y-3">
-        {loading ? (
-          <Skeleton />
-        ) : rows.length === 0 ? (
-          <div className="rounded-[20px] border border-dashed border-[#CBD5E1] bg-white px-6 py-10 text-center">
-            <p className="text-sm font-semibold text-[#1F2937]">Sin actividades</p>
-            <p className="mt-1 text-sm text-[#6B7280]">
-              Cuando una visita del cronograma se registre en asistencia, quedara aqui para documentar su cierre.
-            </p>
+        {manager && (
+          <div className="w-full sm:w-48">
+            <SelectInput aria-label="Alcance" value={url.scope} onChange={(e) => setUrl({ scope: e.target.value })}>
+              <option value="mine">Lo mío</option>
+              <option value="team">Todo el equipo</option>
+            </SelectInput>
           </div>
-        ) : (
-          rows.map((a) => {
-            const needsFollowup = a.status === "visited_pending_followup" || a.followup_status === "incomplete_followup";
-            const isScheduledVisit = a.activity_type === "visita" && Boolean(a.is_scheduled_visit);
-            const documents = Array.isArray(a.documents) ? a.documents : [];
-            const customerLabel = a.visit_client_name || a.account_name || a.opportunity_name || "Sin cliente vinculado";
-            const visitDate = a.hora_salida || a.completed_at || a.scheduled_at || a.visit_date;
-
-            return (
-              <article
-                key={a.id}
-                className={`rounded-[20px] border bg-white p-4 shadow-sm transition hover:shadow-md ${
-                  needsFollowup ? "border-[#F59E0B]/40 ring-1 ring-[#F59E0B]/10" : "border-[#E5E7EB]"
-                }`}
-              >
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <TypeBadge type={a.activity_type} />
-                      <StatusBadge status={a.status} />
-                      <OriginBadge activity={a} />
-                      {needsFollowup && (
-                        <span className="rounded-full bg-[#FFFBEB] px-2.5 py-1 text-xs font-semibold text-[#B45309]">
-                          Pendiente de cierre comercial
-                        </span>
-                      )}
-                    </div>
-                    <h2 className="mt-2 break-words text-lg font-semibold text-[#0F172A]">{a.subject}</h2>
-                    <p className="mt-1 text-sm text-[#64748B]">
-                      {customerLabel} · {formatDate(visitDate)}
-                      {a.calendar_event_url && (
-                        <>
-                          {" · "}
-                          <a
-                            href={a.calendar_event_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[#2563EB] hover:underline"
-                          >
-                            Ver en Calendar
-                          </a>
-                        </>
-                      )}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {needsFollowup && (
-                      <button
-                        onClick={() => setModal({ type: "complete", activity: a })}
-                        className="rounded-[12px] border border-[#16A34A] px-3 py-2 text-xs font-semibold text-[#15803D] hover:bg-[#DCFCE7]"
-                      >
-                        Registrar cierre
-                      </button>
-                    )}
-                    {a.status === "scheduled" && !isScheduledVisit && (
-                      <button
-                        onClick={() => setModal({ type: "complete", activity: a })}
-                        className="rounded-[12px] border border-[#16A34A] px-3 py-2 text-xs font-semibold text-[#15803D] hover:bg-[#DCFCE7]"
-                      >
-                        Completar
-                      </button>
-                    )}
-                    {a.status === "scheduled" && !isScheduledVisit && (
-                      <button
-                        onClick={() => handleCancel(a)}
-                        className="rounded-[12px] border border-[#DC2626] px-3 py-2 text-xs font-semibold text-[#DC2626] hover:bg-[#FEE2E2]"
-                      >
-                        Cancelar
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {needsFollowup && (
-                  <div className="mt-4 rounded-[16px] border border-[#FDE68A] bg-[#FFFBEB] px-4 py-3 text-sm text-[#92400E]">
-                    Visita registrada en asistencia. Falta completar comentarios, resultado de la visita y evidencia si aplica.
-                  </div>
-                )}
-
-                {isScheduledVisit && a.status === "scheduled" && (
-                  <div className="mt-4 rounded-[16px] border border-[#DBEAFE] bg-[#EFF6FF] px-4 py-3 text-sm text-[#1D4ED8]">
-                    Esta visita viene del cronograma. Se marcara como realizada solo cuando el usuario registre la visita desde Asistencia.
-                  </div>
-                )}
-
-                {(a.outcome || a.outcome_notes || a.next_step) && (
-                  <div className="mt-4 grid gap-3 md:grid-cols-3">
-                    <div className="rounded-[16px] bg-[#F8FAFC] p-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-[#94A3B8]">Logro</p>
-                      <p className="mt-1 whitespace-pre-wrap text-sm text-[#0F172A]">{a.outcome || "Pendiente"}</p>
-                    </div>
-                    <div className="rounded-[16px] bg-[#F8FAFC] p-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-[#94A3B8]">Comentarios</p>
-                      <p className="mt-1 whitespace-pre-wrap text-sm text-[#0F172A]">{a.outcome_notes || "Pendiente"}</p>
-                    </div>
-                    <div className="rounded-[16px] bg-[#F8FAFC] p-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-[#94A3B8]">Proximo paso</p>
-                      <p className="mt-1 whitespace-pre-wrap text-sm text-[#0F172A]">{a.next_step || "Sin siguiente paso"}</p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="mt-4 flex flex-col gap-3 border-t border-[#E5E7EB] pt-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-[#64748B]">
-                    <span className="rounded-full bg-[#F1F5F9] px-2.5 py-1 font-medium">
-                      {FOLLOWUP_LABELS[a.followup_status] || "Seguimiento sin evaluar"}
-                    </span>
-                    <span>{a.documents_count || 0} documento(s)</span>
-                  </div>
-                  {documents.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {documents.slice(0, 3).map((doc) => (
-                        <a
-                          key={doc.id}
-                          href={doc.drive_file_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded-full border border-[#CBD5E1] px-3 py-1 text-xs font-medium text-[#2563EB] hover:bg-[#EFF6FF]"
-                        >
-                          {doc.document_name || "Documento"}
-                        </a>
-                      ))}
-                      {documents.length > 3 && (
-                        <span className="rounded-full bg-[#F1F5F9] px-3 py-1 text-xs text-[#64748B]">
-                          +{documents.length - 3}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </article>
-            );
-          })
         )}
       </div>
 
-      {!loading && rows.length > 0 && (
-        <div className="mt-4 flex items-center justify-between">
-          <span className="text-xs text-[#6B7280]">
-            {offset + 1}-{Math.min(offset + rows.length, total)} de {total}
-          </span>
-          <div className="flex gap-2">
-            <button
-              disabled={!hasPrev}
-              onClick={() => setOffset((o) => Math.max(0, o - LIMIT))}
-              className="rounded-[8px] border border-[#E5E7EB] px-3 py-1 text-sm text-[#1F2937] hover:bg-gray-50 disabled:opacity-40"
-            >
-              Anterior
-            </button>
-            <button
-              disabled={!hasNext}
-              onClick={() => setOffset((o) => o + LIMIT)}
-              className="rounded-[8px] border border-[#E5E7EB] px-3 py-1 text-sm text-[#1F2937] hover:bg-gray-50 disabled:opacity-40"
-            >
-              Siguiente
-            </button>
-          </div>
-        </div>
+      <div className={selected ? "grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,1fr)_420px]" : ""}>
+        <Panel flush>
+          <ErrorNote message={error} onRetry={reload} className="m-4" />
+          {loading && !data ? (
+            <SkeletonRows rows={8} />
+          ) : error ? null : rows.length === 0 ? (
+            view === "pendientes" ? (
+              <EmptyState title="No tienes actividades pendientes" hint="Registra una llamada, reunión o tarea para darle seguimiento." action={<Btn variant="primary" icon={FiPlus} onClick={() => setUrl({ new: "1" })}>Nueva actividad</Btn>} />
+            ) : view === "seguimiento" ? (
+              <EmptyState title="Nada por cerrar" hint="Cuando una visita del cronograma se registre en Asistencia, aparecerá aquí para documentar su resultado." />
+            ) : (
+              <EmptyState title={view === "completadas" ? "Sin actividades completadas" : "Sin actividades canceladas"} hint="Prueba con otro tipo o alcance." />
+            )
+          ) : (
+            <>
+              {groups ? (
+                <>
+                  <Group title="Vencidas" tone="danger" items={groups.overdue} selectedId={url.sel} onOpen={open} />
+                  <Group title="Hoy" items={groups.today} selectedId={url.sel} onOpen={open} />
+                  <Group title="Próximas" items={groups.upcoming} selectedId={url.sel} onOpen={open} />
+                  <Group title="Sin fecha" items={groups.undated} selectedId={url.sel} onOpen={open} />
+                </>
+              ) : (
+                <ul className="divide-y divide-fam-border">
+                  {rows.map((a) => <ActivityRow key={a.id} a={a} selected={url.sel === a.id} onOpen={() => open(a)} />)}
+                </ul>
+              )}
+              {mayHaveMore && (
+                <div className="border-t border-fam-border px-4 py-3 text-center">
+                  <Btn onClick={() => setLimit((n) => n + PAGE)} loading={loading}>{loading ? "Cargando…" : "Cargar más"}</Btn>
+                </div>
+              )}
+            </>
+          )}
+        </Panel>
+
+        <Inspector
+          open={Boolean(selected)}
+          title={selected?.subject}
+          onClose={() => setUrl({ sel: "" })}
+          footer={selected && (needsClose(selected) || canAct(selected)) && (
+            <>
+              {canAct(selected) && <Btn icon={FiSlash} onClick={() => setCancelling(selected)}>Cancelar</Btn>}
+              <Btn variant="primary" icon={FiCheck} onClick={() => setClosing(selected)}>{needsClose(selected) ? "Registrar cierre" : "Completar"}</Btn>
+            </>
+          )}
+        >
+          {selected && <ActivityPeek a={selected} />}
+        </Inspector>
+      </div>
+
+      {url.new === "1" && (
+        <ActivityFormModal
+          onClose={() => setUrl({ new: "" })}
+          onSaved={(saved) => { setUrl({ new: "", view: "pendientes", sel: saved?.id || "" }); reload(); showToast("Actividad registrada", "success"); }}
+        />
       )}
 
-      {modal?.type === "new" && (
-        <NewActivityModal onClose={closeModal} onSaved={onSaved} />
+      {closing && (
+        <ActivityCloseModal
+          activity={closing}
+          onClose={() => setClosing(null)}
+          onSaved={({ uploadFailed }) => {
+            setClosing(null);
+            setUrl({ sel: "" });
+            reload();
+            showToast(uploadFailed ? "Cierre guardado, pero el documento no se pudo adjuntar." : "Cierre guardado", uploadFailed ? "warning" : "success");
+          }}
+        />
       )}
-      {modal?.type === "complete" && (
-        <CompleteModal activity={modal.activity} onClose={closeModal} onSaved={onSaved} />
+
+      {cancelling && (
+        <ConfirmDialog
+          title="Cancelar actividad"
+          description={`“${cancelling.subject}” pasará a Canceladas y dejará de contar como pendiente.`}
+          confirmLabel="Cancelar actividad"
+          danger
+          onClose={() => setCancelling(null)}
+          onConfirm={async () => {
+            await updateActivity(cancelling.id, { status: "cancelled" });
+            setCancelling(null);
+            setUrl({ sel: "" });
+            reload();
+            showToast("Actividad cancelada", "success");
+          }}
+        />
       )}
     </div>
   );

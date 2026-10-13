@@ -27,17 +27,17 @@ export const downloadLostReasonsReportPdf = (params) => downloadPdf("/crm-fam/re
 export const downloadRedFlagsReportPdf = (params) => downloadPdf("/crm-fam/reports/red-flags/pdf", params, "reporte_red_flags.pdf");
 
 // Pipeline Stages
-export const fetchPipelineStages = () => api.get("/crm-fam/pipeline-stages").then(r => r.data?.data);
+export const fetchPipelineStages = (params) => api.get("/crm-fam/pipeline-stages", { params }).then(r => r.data?.data);
 export const createPipelineStage = (data) => api.post("/crm-fam/pipeline-stages", data).then(r => r.data?.data);
 export const updatePipelineStage = (id, data) => api.put(`/crm-fam/pipeline-stages/${id}`, data).then(r => r.data?.data);
 
 // Lost Reasons
-export const fetchLostReasons = () => api.get("/crm-fam/lost-reasons").then(r => r.data?.data);
+export const fetchLostReasons = (params) => api.get("/crm-fam/lost-reasons", { params }).then(r => r.data?.data);
 export const createLostReason = (data) => api.post("/crm-fam/lost-reasons", data).then(r => r.data?.data);
 export const updateLostReason = (id, data) => api.put(`/crm-fam/lost-reasons/${id}`, data).then(r => r.data?.data);
 
 // Scorecard Criteria
-export const fetchScorecardCriteria = () => api.get("/crm-fam/scorecard-criteria").then(r => r.data?.data);
+export const fetchScorecardCriteria = (params) => api.get("/crm-fam/scorecard-criteria", { params }).then(r => r.data?.data);
 export const createScorecardCriterion = (data) => api.post("/crm-fam/scorecard-criteria", data).then(r => r.data?.data);
 export const updateScorecardCriterion = (id, data) => api.put(`/crm-fam/scorecard-criteria/${id}`, data).then(r => r.data?.data);
 
@@ -54,6 +54,15 @@ export const createAccountPlan = (id, data) => api.post(`/crm-fam/accounts/${id}
 export const updateAccountPlan = (id, planId, data) => api.put(`/crm-fam/accounts/${id}/plans/${planId}`, data).then(r => r.data?.data);
 export const deleteAccountPlan = (id, planId) => api.delete(`/crm-fam/accounts/${id}/plans/${planId}`).then(r => r.data?.data);
 export const fetchAccountDuplicates = (id) => api.get(`/crm-fam/accounts/${id}/duplicates`).then(r => r.data?.data);
+export const fetchAccountSwot = (id, params) => api.get(`/crm-fam/accounts/${id}/swot`, { params }).then(r => r.data?.data);
+export const createSwotItem = (id, data) => api.post(`/crm-fam/accounts/${id}/swot`, data).then(r => r.data?.data);
+export const acceptSwotSuggestion = (id, data) => api.post(`/crm-fam/accounts/${id}/swot/accept`, data).then(r => r.data?.data);
+export const dismissSwotSuggestion = (id, data) => api.post(`/crm-fam/accounts/${id}/swot/dismiss`, data).then(r => r.data?.data);
+export const updateSwotItem = (id, itemId, data) => api.put(`/crm-fam/accounts/${id}/swot/${itemId}`, data).then(r => r.data?.data);
+export const deleteSwotItem = (id, itemId) => api.delete(`/crm-fam/accounts/${id}/swot/${itemId}`).then(r => r.data?.data);
+export const fetchSwotVersions = (id) => api.get(`/crm-fam/accounts/${id}/swot/versions`).then(r => r.data?.data);
+export const fetchSwotVersion = (id, versionId) => api.get(`/crm-fam/accounts/${id}/swot/versions/${versionId}`).then(r => r.data?.data);
+export const createSwotVersion = (id, data) => api.post(`/crm-fam/accounts/${id}/swot/versions`, data).then(r => r.data?.data);
 export const mergeAccounts = (targetId, sourceId) => api.post(`/crm-fam/accounts/${targetId}/merge`, { source_id: sourceId }).then(r => r.data?.data);
 
 // Contacts
@@ -69,6 +78,12 @@ export const fetchEmailCampaignById = (id) => api.get(`/crm-fam/email-campaigns/
 export const createEmailCampaign = (data) => api.post("/crm-fam/email-campaigns", data).then(r => r.data?.data);
 export const updateEmailCampaign = (id, data) => api.put(`/crm-fam/email-campaigns/${id}`, data).then(r => r.data?.data);
 export const deleteEmailCampaign = (id) => api.delete(`/crm-fam/email-campaigns/${id}`).then(r => r.data?.data);
+export const sendEmailCampaignTest = (id) => api.post(`/crm-fam/email-campaigns/${id}/test`).then(r => r.data?.data);
+export const sendEmailCampaignBatch = (id, data) => api.post(`/crm-fam/email-campaigns/${id}/send`, data).then(r => r.data?.data);
+export const retryEmailCampaignFailed = (id) => api.post(`/crm-fam/email-campaigns/${id}/retry`).then(r => r.data?.data);
+export const duplicateEmailCampaign = (id) => api.post(`/crm-fam/email-campaigns/${id}/duplicate`).then(r => r.data?.data);
+export const fetchCampaignAudience = (params) => api.get("/crm-fam/email-campaigns/audience", { params }).then(r => r.data?.data);
+export const fetchCampaignSuppressions = (params) => api.get("/crm-fam/email-campaigns/suppressions", { params }).then(r => r.data?.data);
 
 // Leads
 export const fetchLeads = (params) => api.get("/crm-fam/leads", { params }).then(r => r.data?.data);
@@ -90,6 +105,15 @@ export const updateOpportunity = (id, data) => api.put(`/crm-fam/opportunities/$
 export const fetchOpportunityHealth = (id) => api.get(`/crm-fam/opportunities/${id}/health`).then(r => r.data?.data);
 export const fetchOpportunityPurchaseStatus = (id) => api.get(`/crm-fam/opportunities/${id}/purchase-status`).then(r => r.data?.data);
 export const linkPurchaseToOpportunity = (id, data) => api.post(`/crm-fam/opportunities/${id}/link-purchase`, data).then(r => r.data?.data);
+// Recorrido (cliente → disponibilidad → factibilidad → oferta → contrato → entrega → consumibles).
+// La versión por lotes devuelve { [opportunityId]: recorrido } y va en tandas para no exceder la URL.
+export const fetchOpportunityJourneys = async (ids = []) => {
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 120) chunks.push(ids.slice(i, i + 120));
+  const parts = await Promise.all(chunks.map((chunk) => api.get("/crm-fam/opportunities/journeys", { params: { ids: chunk.join(",") } }).then(r => r.data?.data || {})));
+  return Object.assign({}, ...parts);
+};
+export const fetchOpportunityJourney = (id) => api.get(`/crm-fam/opportunities/${id}/journey`).then(r => r.data?.data);
 export const changeOpportunityStage = (id, data) => api.post(`/crm-fam/opportunities/${id}/stage`, data).then(r => r.data?.data);
 export const closeOpportunityWon = (id, data) => api.post(`/crm-fam/opportunities/${id}/close-won`, data).then(r => r.data?.data);
 export const closeOpportunityLost = (id, data) => api.post(`/crm-fam/opportunities/${id}/close-lost`, data).then(r => r.data?.data);
@@ -215,6 +239,15 @@ const crmFamApi = {
   updateAccountPlan,
   deleteAccountPlan,
   fetchAccountDuplicates,
+  fetchAccountSwot,
+  createSwotItem,
+  acceptSwotSuggestion,
+  dismissSwotSuggestion,
+  updateSwotItem,
+  deleteSwotItem,
+  fetchSwotVersions,
+  fetchSwotVersion,
+  createSwotVersion,
   mergeAccounts,
   fetchContacts,
   fetchContactById,
@@ -226,6 +259,12 @@ const crmFamApi = {
   createEmailCampaign,
   updateEmailCampaign,
   deleteEmailCampaign,
+  sendEmailCampaignTest,
+  sendEmailCampaignBatch,
+  retryEmailCampaignFailed,
+  duplicateEmailCampaign,
+  fetchCampaignAudience,
+  fetchCampaignSuppressions,
   fetchLeads,
   fetchLeadById,
   createLead,
