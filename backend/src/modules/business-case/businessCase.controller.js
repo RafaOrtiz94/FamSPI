@@ -266,7 +266,34 @@ const INVESTMENT_VALUES_ACCESS_ROLES = new Set([
 // Edicion en paralelo de la lista de inversiones (sin carrito ni dueno por
 // item): estos son los unicos roles que pueden agregar items o cambiar
 // cantidades/caracteristicas.
-const { INVESTMENT_EDIT_ROLES, hasInvestmentEditRole } = require("./investmentEditAccess");
+const { INVESTMENT_EDIT_ROLES, INVESTMENT_EDIT_EXTRA_ROLE, hasInvestmentEditRole } = require("./investmentEditAccess");
+const { resolveRequiredInvestmentItems } = require("./investmentRequiredItems");
+
+// Items nuevos bajo "Otros": nombre, caracteristicas y cantidad > 0 obligatorios
+// (mismas reglas que un item normal de la lista).
+function normalizeOtherInvestmentItems(items = []) {
+  return (Array.isArray(items) ? items : []).map((item) => {
+    const name = String(item?.name || "").trim();
+    const characteristics = String(item?.characteristics || "").trim();
+    const quantity = Number(item?.quantity);
+    if (!name) {
+      const error = new Error('Cada item de "Otros" necesita un nombre.');
+      error.status = 400;
+      throw error;
+    }
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      const error = new Error(`La cantidad de "${name}" debe ser un numero entero mayor a 0.`);
+      error.status = 400;
+      throw error;
+    }
+    if (!characteristics) {
+      const error = new Error(`Indica las caracteristicas de "${name}".`);
+      error.status = 400;
+      throw error;
+    }
+    return { name, characteristics, quantity, notes: String(item?.notes || "").trim() || null };
+  });
+}
 const bcInvestmentTiAssetReservationsService = require("./bcInvestmentTiAssetReservations.service");
 const processNotesService = require("../process-notes/processNotes.service");
 
@@ -1702,14 +1729,35 @@ async function registerInvestmentSelectionChanges({ businessCaseId, previousSele
   return changes;
 }
 
-// Avisa a quien registra precios (jefe_financiero) cuando se agregan inversiones adicionales o
-// cambian sus cantidades, para que corrija los valores. Un guardado = una notificacion con todos los items.
+// Quienes reciben el aviso de cambios en inversiones: jefe_financiero (registra
+// precios) + todos los roles que editan la lista (INVESTMENT_EDIT_ROLES, que ya
+// incluye jefe_financiero) + usuarios con el permiso puntual bc_investment_edit.
+async function getInvestmentChangeRecipients() {
+  const { rows } = await db.query(
+    `SELECT id, email, fullname, role
+       FROM users
+      WHERE active = true
+        AND email IS NOT NULL
+        AND (role = ANY($1::text[]) OR $2 = ANY(COALESCE(extra_roles, '{}'::text[])))`,
+    [[...INVESTMENT_EDIT_ROLES], INVESTMENT_EDIT_EXTRA_ROLE],
+  );
+  return rows;
+}
+
+// Avisa por correo (al instante, aun fuera de horario) y push cuando se agregan
+// inversiones adicionales o cambian sus cantidades. Un guardado = un aviso por
+// persona con todos los items. jefe_financiero va directo a Precios.
 async function notifyInvestmentSelectionChanges({ businessCaseId, businessCase, actor, changes = [] }) {
   if (!changes.length) return { sent: 0, reason: "no_changes" };
 
   const actorEmail = String(actor?.email || "").trim().toLowerCase();
-  const recipients = (await getUsersByRoles(["jefe_financiero"]))
-    .filter((user) => String(user.email || "").trim().toLowerCase() !== actorEmail);
+  const seen = new Set();
+  const recipients = (await getInvestmentChangeRecipients()).filter((user) => {
+    const email = String(user.email || "").trim().toLowerCase();
+    if (!email || email === actorEmail || seen.has(email)) return false;
+    seen.add(email);
+    return true;
+  });
   if (!recipients.length) return { sent: 0, reason: "no_recipients" };
 
   const catalog = await investmentsService.getCatalogWithSelections(businessCaseId);
@@ -1722,49 +1770,53 @@ async function notifyInvestmentSelectionChanges({ businessCaseId, businessCase, 
   const detail = detailRows.map((row) => `${row.label} (${row.value})`).join("; ");
   const clientName = businessCase?.client_name || "cliente sin nombre";
   const actorLabel = actor?.fullname || actor?.name || actor?.email || "Un usuario";
-  // ?section= abre el workspace directamente en Precios financieros y operativos.
-  const targetPath = `/dashboard/business-case/workspace/${businessCaseId}?section=investment_values`;
 
-  let sent = 0;
-  for (const recipient of recipients) {
-    try {
-      await notificationManager.sendNotification({
-        userId: recipient.id,
-        template: "custom_html",
-        customTitle: `Inversiones adicionales modificadas: ${clientName}`,
-        customMessage:
-          `${actorLabel} modifico inversiones adicionales: ${detail}. ` +
-          "Revisa y corrige los precios de estos items.",
-        data: {
-          business_case_id: businessCaseId,
-          target_path: targetPath,
-          cta_label: "Corregir precios",
-          email_subject: `Inversiones adicionales modificadas - ${clientName}`,
-          client_name: clientName,
-          detail_rows: detailRows,
-        },
-        type: "alert",
-        priority: 2,
-        email: true,
-        chat: false,
-        source: "business_case.investment_selection_changed",
-        meta: {
-          businessCaseId,
-          process_key: buildBusinessCaseProcessKey(businessCaseId),
-          actor: actorEmail || null,
-          target_path: targetPath,
-          cta_label: "Corregir precios",
-        },
-      });
-      sent += 1;
-    } catch (error) {
-      logger.warn(
-        { error: error?.message || String(error), businessCaseId, recipientId: recipient.id },
-        "No se pudo notificar cambios en inversiones adicionales",
-      );
-    }
+  // En paralelo: la respuesta del guardado espera a que salgan todos los avisos.
+  const results = await Promise.allSettled(recipients.map((recipient) => {
+    const isPriceEditor = String(recipient.role || "").toLowerCase() === "jefe_financiero";
+    // ?section= abre el workspace directo en la seccion que le toca a cada quien.
+    const targetPath = `/dashboard/business-case/workspace/${businessCaseId}?section=${isPriceEditor ? "investment_values" : "investments"}`;
+    const ctaLabel = isPriceEditor ? "Corregir precios" : "Ver inversiones";
+    return notificationManager.sendNotification({
+      userId: recipient.id,
+      template: "custom_html",
+      customTitle: `Inversiones adicionales modificadas: ${clientName}`,
+      customMessage:
+        `${actorLabel} modifico inversiones adicionales: ${detail}. ` +
+        (isPriceEditor ? "Revisa y corrige los precios de estos items." : "Revisa la lista de inversiones del Business Case."),
+      data: {
+        business_case_id: businessCaseId,
+        target_path: targetPath,
+        cta_label: ctaLabel,
+        email_subject: `Inversiones adicionales modificadas - ${clientName}`,
+        client_name: clientName,
+        detail_rows: detailRows,
+      },
+      type: "alert",
+      priority: 2,
+      email: true,
+      push: true,
+      chat: false,
+      ignoreEmailSchedule: true,
+      source: "business_case.investment_selection_changed",
+      meta: {
+        businessCaseId,
+        process_key: buildBusinessCaseProcessKey(businessCaseId),
+        actor: actorEmail || null,
+        target_path: targetPath,
+        cta_label: ctaLabel,
+      },
+    });
+  }));
+  // sendNotification no lanza: devuelve null cuando falla.
+  const sent = results.filter((result) => result.status === "fulfilled" && result.value).length;
+  if (sent < recipients.length) {
+    logger.warn(
+      { businessCaseId, sent, recipients: recipients.length },
+      "No se pudo notificar cambios en inversiones adicionales a todos los destinatarios",
+    );
   }
-  return { sent };
+  return { sent, recipients: recipients.length };
 }
 
 async function startDeterminationsTechWindowIfNeeded({ businessCase, role, actorUser }) {
@@ -2750,14 +2802,16 @@ async function saveInvestmentSelection(req, res) {
     const role = resolveRequestRole(req);
     await assertInvestmentsEditable(bc, role, req.user?.extra_roles);
     const canEditPrice = ["jefe_operaciones", "jefe_de_operaciones"].includes(role);
-    const isBatch = Array.isArray(req.body?.selections);
+    const isBatch = Array.isArray(req.body?.selections) || Array.isArray(req.body?.other_items);
     const payload = isBatch
       ? {
-          selections: req.body.selections.map((item) => {
+          selections: (Array.isArray(req.body.selections) ? req.body.selections : []).map((item) => {
             const normalized = { ...(item || {}) };
             if (!canEditPrice) delete normalized.unit_price;
             return normalized;
           }),
+          // Items nuevos bajo "Otros": cada uno crea su fila de catalogo propia del BC.
+          other_items: Array.isArray(req.body.other_items) ? req.body.other_items : [],
         }
       : { ...req.body };
     if (!canEditPrice && !isBatch) {
@@ -2775,34 +2829,90 @@ async function saveInvestmentSelection(req, res) {
       return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
     }
 
-    if (isBatch && !payload.selections.length) {
+    if (isBatch && !payload.selections.length && !payload.other_items.length) {
       const error = new Error("selections no puede estar vacio");
       error.status = 400;
       throw error;
     }
 
+    const otherItems = isBatch ? normalizeOtherInvestmentItems(payload.other_items) : [];
+    const selections = isBatch ? [...payload.selections] : [payload];
+    await investmentsService.assertCatalogItemsBelongToBusinessCase(id, selections.map((item) => item?.catalog_id));
+
+    // Accesorios obligatorios (impresora -> tinta + papel, Zebra -> etiquetas):
+    // los que faltan se agregan con cantidad 1; quitarlos con el disparador
+    // en la lista se rechaza. Se valida antes de crear filas de "Otros".
+    const catalogBefore = await investmentsService.getCatalogWithSelections(id);
+    const required = resolveRequiredInvestmentItems({ catalog: catalogBefore, incoming: selections });
+    if (required.violations.length) {
+      const first = required.violations[0];
+      const error = new Error(`${first.required} es obligatorio mientras haya ${first.trigger} en la lista.`);
+      error.status = 409;
+      error.code = "INVESTMENT_REQUIRED_ITEM";
+      throw error;
+    }
+    required.additions.forEach((addition) => {
+      const index = selections.findIndex((item) => String(item?.catalog_id) === String(addition.catalog_id));
+      if (index >= 0) {
+        selections[index] = {
+          ...selections[index],
+          quantity: addition.quantity,
+          characteristics: selections[index].characteristics || addition.characteristics,
+        };
+      } else {
+        selections.push(addition);
+      }
+    });
+
+    const createdOtherItems = await investmentsService.createOtrosCatalogItems(id, otherItems, req.user);
+    createdOtherItems.forEach((row) => {
+      selections.push({
+        catalog_id: row.id,
+        quantity: row.source.quantity,
+        characteristics: row.source.characteristics,
+        notes: row.source.notes,
+      });
+    });
+
     const previousSelections = await investmentsService.getInvestmentSelections(id);
-    const selection = isBatch
-      ? await investmentsService.upsertInvestmentSelectionsBatch(id, payload.selections, req.user)
-      : await investmentsService.upsertInvestmentSelection(id, payload, req.user);
+    const saved = selections.length > 1 || isBatch
+      ? await investmentsService.upsertInvestmentSelectionsBatch(id, selections, req.user)
+      : [await investmentsService.upsertInvestmentSelection(id, selections[0], req.user)];
     const investmentChanges = await registerInvestmentSelectionChanges({
       businessCaseId: id,
       previousSelections,
-      savedSelections: isBatch ? selection : [selection],
+      savedSelections: saved,
     });
+
+    // Se espera el envio ANTES de responder: en Cloud Run el trabajo que queda
+    // corriendo despues de res.json() puede quedarse sin CPU y no salir nunca
+    // (causa de los avisos que no llegaban). Un fallo al notificar no revierte el guardado.
+    let notification = { sent: 0 };
+    try {
+      notification = await notifyInvestmentSelectionChanges({
+        businessCaseId: id,
+        businessCase: bc,
+        actor: req.user,
+        changes: investmentChanges,
+      });
+    } catch (notifyError) {
+      logger.warn({ error: notifyError?.message, businessCaseId: id }, "Investment selection notification failed");
+    }
+
     const responseBody = isBatch
-      ? { ok: true, data: { items: selection, saved_count: selection.length } }
-      : { ok: true, data: selection };
+      ? {
+          ok: true,
+          data: {
+            items: saved,
+            saved_count: saved.length,
+            required_additions: required.additions.map((item) => item.catalog_id),
+            created_other_items: createdOtherItems.map((row) => ({ id: row.id, name: row.name })),
+            notification,
+          },
+        }
+      : { ok: true, data: saved[0] };
     await completeIdempotentWrite(idempotencySession, responseBody, 200);
     res.json(responseBody);
-
-    // Fire-and-forget: un fallo al notificar no debe afectar el guardado ya confirmado.
-    notifyInvestmentSelectionChanges({
-      businessCaseId: id,
-      businessCase: bc,
-      actor: req.user,
-      changes: investmentChanges,
-    }).catch((err) => logger.warn({ error: err?.message, businessCaseId: id }, "Investment selection notification failed"));
   } catch (error) {
     await failIdempotentWrite(idempotencySession, error);
     logger.error({ error: error.message }, 'Error saving investment selection');
@@ -7228,6 +7338,8 @@ async function uploadInvestmentQuotationFile(req, res) {
       businessCaseId: id,
       catalogId,
       file: req.file,
+      supplierName: req.body?.supplier_name,
+      quotationDate: req.body?.quotation_date,
       user: req.user,
     });
     const notification = await notifyQuotationUploaded({ businessCaseId: id, itemName, actorEmail: req.user?.email || null })
@@ -7236,6 +7348,48 @@ async function uploadInvestmentQuotationFile(req, res) {
   } catch (error) {
     logger.error({ error: error.message }, "Error uploading investment quotation file");
     res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+// Reutilizar una cotizacion de un BC anterior desde el historico: solo roles
+// de valores (el cotizador asignado no ve el historico de otros BCs).
+async function reuseInvestmentQuotationFile(req, res) {
+  try {
+    const { id, catalogId } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const role = resolveRequestRole(req);
+    if (!INVESTMENT_VALUES_OP_ROLES.has(role) && !INVESTMENT_VALUES_FIN_ROLES.has(role)) {
+      return res.status(403).json({ ok: false, message: "Solo los roles de valores pueden reutilizar cotizaciones." });
+    }
+    const { file } = await investmentsService.reuseQuotationFile({
+      businessCaseId: id,
+      catalogId,
+      sourceFileId: req.body?.file_id,
+      user: req.user,
+    });
+    res.status(201).json({ ok: true, data: { file } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error reusing investment quotation file");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+// Matriz historica de inversiones adicionales (todas las BCs) o, con
+// catalog_id + exclude_business_case_id, el historico de un item para el panel
+// de Precios de un BC.
+async function getInvestmentPriceHistory(req, res) {
+  try {
+    const data = await investmentsService.getInvestmentPriceHistory({
+      catalogId: req.query.catalog_id,
+      search: req.query.q,
+      excludeBusinessCaseId: req.query.exclude_business_case_id,
+      fromDate: req.query.from,
+      limit: req.query.limit,
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error getting investment price history");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
   }
 }
 
@@ -7454,6 +7608,8 @@ module.exports = {
   syncInvestmentValuesSheet,
   uploadInvestmentQuotationFile,
   removeInvestmentQuotationFile,
+  reuseInvestmentQuotationFile,
+  getInvestmentPriceHistory,
   getConsumptionItems,
   saveConsumptionItems,
   patchConsumptionItem,

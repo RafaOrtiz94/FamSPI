@@ -181,6 +181,10 @@ router.post(
 // podran ver el resumen").
 router.get("/quality-summary", verifyToken, requireRole(["jefe_calidad", "bc_quality_summary"]), ctrl.getQualitySummaryList);
 router.get("/:id/quality-summary/items", verifyToken, requireRole(["jefe_calidad", "bc_quality_summary"]), ctrl.getQualitySummaryItems);
+// Matriz historica de inversiones adicionales (precios + cotizaciones de BCs
+// anteriores) para reutilizar en BCs nuevos. Solo roles de valores: el
+// cotizador asignado no ve precios de otros BCs.
+router.get("/investments/price-history", verifyToken, requireRole(investmentValuesRoles), ctrl.getInvestmentPriceHistory);
 
 router.get("/", verifyToken, requireRole(businessCaseRoles), ctrl.list);
 // BC-01: BC puede ser creado por comercial, asesor_comercial, analista_comercial,
@@ -412,6 +416,8 @@ router.post("/:id/investments/values/sync-sheet", verifyToken, ctrl.syncInvestme
 // Cotizaciones por item (archivo): cotizador asignado o roles de valores; el controller valida.
 router.post("/:id/investments/values/:catalogId/quotation-files", verifyToken, upload.single("file"), ctrl.uploadInvestmentQuotationFile);
 router.delete("/:id/investments/values/quotation-files/:fileId", verifyToken, ctrl.removeInvestmentQuotationFile);
+// Vincula una cotizacion de un BC anterior (desde el historico) al item de este BC.
+router.post("/:id/investments/values/:catalogId/quotation-files/reuse", verifyToken, requireRole(investmentValuesRoles), ctrl.reuseInvestmentQuotationFile);
 router.get("/:id/investments/values/assignees", verifyToken, requireRole(investmentValuesRoles), ctrl.getInvestmentQuotationAssignees);
 router.post("/:id/investments/values/assignment", verifyToken, requireRole(investmentValuesRoles), ctrl.assignInvestmentQuotation);
 router.post("/:id/investments/values/request-quotation", verifyToken, requireRole(investmentValuesRoles), ctrl.requestInvestmentQuotation);

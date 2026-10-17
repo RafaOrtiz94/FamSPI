@@ -51,6 +51,7 @@ const BusinessCaseTemplatePage = lazy(() => import("../modules/comercial/pages/B
 const BusinessCaseWorkspace = lazy(() => import("../modules/comercial/pages/BusinessCaseWorkspace"));
 const BusinessCaseQualitySummary = lazy(() => import("../modules/comercial/pages/BusinessCaseQualitySummary"));
 const BusinessCaseObservabilityDashboard = lazy(() => import("../modules/comercial/pages/BusinessCaseObservabilityDashboard"));
+const InvestmentPriceHistoryPage = lazy(() => import("../modules/comercial/pages/InvestmentPriceHistoryPage"));
 const OpportunitiesPage = lazy(() => import("../modules/comercial/pages/OpportunitiesPage"));
 const OpportunityWorkspace = lazy(() => import("../modules/comercial/pages/OpportunityWorkspace"));
 const FamSheetsDashboardPage = lazy(() => import("../modules/comercial/pages/FamSheetsDashboardPage"));
@@ -394,6 +395,29 @@ const AppRoutes = () => {
             <Route
               path="/dashboard/business-case/observabilidad"
               element={<BusinessCaseObservabilityDashboard />}
+            />
+          </Route>
+          {/* Debe coincidir con investmentValuesRoles del backend (businessCase.routes.js). */}
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "jefe_operaciones",
+                  "jefe_de_operaciones",
+                  "jefe_financiero",
+                  "jefe_ti",
+                  "gerencia",
+                  "gerencia_general",
+                  "jefe_comercial",
+                  "admin",
+                  "administrador",
+                ]}
+              />
+            }
+          >
+            <Route
+              path="/dashboard/business-case/inversiones-historico"
+              element={<InvestmentPriceHistoryPage />}
             />
           </Route>
 

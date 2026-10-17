@@ -6,6 +6,7 @@ import { useAuth } from "../../../../../core/auth/AuthContext";
 import { useUI } from "../../../../../core/ui/UIContext";
 import SectionEditorBadge from "../SectionEditorBadge";
 import TiAssetReservationPanel from "./TiAssetReservationPanel";
+import InvestmentPriceHistoryPanel from "./InvestmentPriceHistoryPanel";
 import { listAllTiAssetReservations } from "../../../../../core/api/bcInvestmentTiAssetsApi";
 
 // Roles de valores por clase: gestionan cotizaciones, cierre sin inversiones y
@@ -15,6 +16,25 @@ const FINANCIAL_ROLES = new Set(["jefe_financiero", "jefe_ti"]);
 // Solo jefe_financiero registra precios (operativo, financiero y depreciacion);
 // el resto de roles los ve en solo lectura. El backend aplica la misma regla.
 const PRICE_EDITOR_ROLES = new Set(["jefe_financiero"]);
+// Ven el historico de otros BCs: roles de valores (investmentValuesRoles del
+// backend). El cotizador asignado no, solo trabaja sus items.
+const HISTORY_ROLES = new Set([
+  ...OPERATIONAL_ROLES,
+  ...FINANCIAL_ROLES,
+  "gerencia",
+  "gerencia_general",
+  "jefe_comercial",
+]);
+
+const todayIso = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+};
+
+const formatPlainDate = (value) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ""));
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : "";
+};
 
 const money = (value) =>
   Number(value || 0).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -71,21 +91,28 @@ function PricingContextHeader({ context = {} }) {
 function QuotationFilesPanel({ bcId, item, canUpload, showToast, onChanged }) {
   const [uploading, setUploading] = useState(false);
   const [removingId, setRemovingId] = useState(null);
+  // Proveedor y fecha quedan en el historico para reutilizar la cotizacion en otros BCs.
+  const [supplierName, setSupplierName] = useState("");
+  const [quotationDate, setQuotationDate] = useState(todayIso);
   const files = Array.isArray(item.quotation_files) ? item.quotation_files : [];
+  const metadataReady = Boolean(supplierName.trim() && quotationDate);
 
   const handleUpload = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file) return;
+    if (!file || !metadataReady) return;
     try {
       setUploading(true);
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("supplier_name", supplierName.trim());
+      formData.append("quotation_date", quotationDate);
       await api.post(`/business-case/${bcId}/investments/values/${item.catalog_id}/quotation-files`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 120000,
       });
       showToast("Cotización subida. Se notificó a Jefe Financiero para registrar el valor.", "success");
+      setSupplierName("");
       await onChanged();
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo subir la cotización", "error");
@@ -117,8 +144,37 @@ function QuotationFilesPanel({ bcId, item, canUpload, showToast, onChanged }) {
           <FiPaperclip size={13} />
           Cotizaciones ({files.length})
         </span>
-        {canUpload && (
-          <label className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-violet-700 ${uploading ? "pointer-events-none opacity-60" : ""}`}>
+      </div>
+      {canUpload && (
+        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold text-violet-800">Proveedor</span>
+            <input
+              type="text"
+              value={supplierName}
+              onChange={(event) => setSupplierName(event.target.value)}
+              maxLength={200}
+              placeholder="Nombre del proveedor"
+              disabled={uploading}
+              className="rounded-xl border border-violet-200 bg-white px-3 py-1.5 text-xs focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold text-violet-800">Fecha de la cotización</span>
+            <input
+              type="date"
+              value={quotationDate}
+              onChange={(event) => setQuotationDate(event.target.value)}
+              disabled={uploading}
+              className="rounded-xl border border-violet-200 bg-white px-3 py-1.5 text-xs focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+            />
+          </label>
+          <label
+            title={metadataReady ? "" : "Indica proveedor y fecha antes de subir"}
+            className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold text-white transition-colors ${
+              metadataReady ? "cursor-pointer bg-violet-600 hover:bg-violet-700" : "cursor-not-allowed bg-violet-300"
+            } ${uploading ? "pointer-events-none opacity-60" : ""}`}
+          >
             <FiUpload size={13} />
             {uploading ? "Subiendo..." : "Subir cotización"}
             <input
@@ -126,11 +182,11 @@ function QuotationFilesPanel({ bcId, item, canUpload, showToast, onChanged }) {
               accept=".pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.docx,.doc"
               className="hidden"
               onChange={handleUpload}
-              disabled={uploading}
+              disabled={uploading || !metadataReady}
             />
           </label>
-        )}
-      </div>
+        </div>
+      )}
       {files.length ? (
         <ul className="mt-2 space-y-1.5">
           {files.map((file) => (
@@ -145,6 +201,9 @@ function QuotationFilesPanel({ bcId, item, canUpload, showToast, onChanged }) {
                 {file.file_name}
               </a>
               <span className="flex shrink-0 items-center gap-2 text-[11px] text-slate-500">
+                {file.supplier_name ? <strong className="text-slate-700">{file.supplier_name}</strong> : null}
+                {file.quotation_date ? formatPlainDate(file.quotation_date) : null}
+                {file.reused_from_file_id ? <span className="text-violet-700">Reutilizada</span> : null}
                 {file.uploaded_by_email || ""}
                 {file.uploaded_at ? ` · ${new Date(file.uploaded_at).toLocaleDateString("es-EC")}` : ""}
                 {canUpload && (
@@ -240,6 +299,7 @@ const InvestmentValuesUnifiedSection = ({
   const role = String(user?.role || user?.scope || user?.role_name || "").toLowerCase();
   const canEditAssignedQuotation = Boolean(permissions.canEditAssignedInvestmentValues);
   const canManageQuotations = OPERATIONAL_ROLES.has(role) || FINANCIAL_ROLES.has(role);
+  const canSeeHistory = HISTORY_ROLES.has(role);
   // El cotizador asignado solo sube cotizaciones (QuotationFilesPanel); los
   // precios los registran unicamente los roles de valores.
   const sectionEditable = permissions.canEdit !== false;
@@ -285,6 +345,7 @@ const InvestmentValuesUnifiedSection = ({
         if (dirty[`${row.catalog_id}:financiera`]) {
           next.financial_unit_price = local.financial_unit_price;
           next.depreciation_percentage = local.depreciation_percentage;
+          next.reused_from_business_case_id = local.reused_from_business_case_id ?? null;
         }
         return next;
       });
@@ -322,10 +383,32 @@ const InvestmentValuesUnifiedSection = ({
   };
 
   const updateField = (catalogId, field, value, className) => {
-    setItems((current) => current.map((row) => (
-      Number(row.catalog_id) === Number(catalogId) ? { ...row, [field]: value } : row
-    )));
+    setItems((current) => current.map((row) => {
+      if (Number(row.catalog_id) !== Number(catalogId)) return row;
+      // Una edicion manual del precio financiero ya no es "precio reutilizado".
+      const next = { ...row, [field]: value };
+      if (className === "financiera") next.reused_from_business_case_id = null;
+      return next;
+    }));
     markDirty(catalogId, className);
+  };
+
+  // "Usar este precio" desde el historico: copia precio financiero base y % de
+  // depreciacion (la depreciacion se recalcula con la proyeccion de ESTE BC) y
+  // se guarda por el autoguardado normal, dejando el BC de origen en la bitacora.
+  const handleUsePrice = (catalogId, historyRow) => {
+    setItems((current) => current.map((row) => (
+      Number(row.catalog_id) === Number(catalogId)
+        ? {
+            ...row,
+            financial_unit_price: historyRow.financial_unit_price,
+            depreciation_percentage: historyRow.depreciation_percentage ?? null,
+            reused_from_business_case_id: historyRow.business_case_id,
+          }
+        : row
+    )));
+    markDirty(catalogId, "financiera");
+    showToast(`Precio copiado de ${historyRow.client_name || "BC anterior"}. Se guardara automaticamente.`, "success");
   };
 
   const handleSave = async () => {
@@ -339,6 +422,7 @@ const InvestmentValuesUnifiedSection = ({
         catalog_id: row.catalog_id,
         unit_price: row.financial_unit_price ?? null,
         depreciation_percentage: row.depreciation_percentage ?? null,
+        reused_from_business_case_id: row.reused_from_business_case_id ?? null,
       }));
 
     if (!operationalValues.length && !financialValues.length) return;
@@ -690,7 +774,10 @@ const InvestmentValuesUnifiedSection = ({
                     className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50"
                   >
                     {isOpen ? <FiChevronDown size={16} className="shrink-0 text-gray-400" /> : <FiChevronRight size={16} className="shrink-0 text-gray-400" />}
-                    <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900">{item.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900">
+                      {item.parent_name ? <span className="font-normal text-gray-500">{item.parent_name}: </span> : null}
+                      {item.name}
+                    </span>
                     <span className="hidden shrink-0 text-xs text-gray-500 sm:inline">Cant. {item.quantity ?? "-"}</span>
                     {!isOpen && (
                       <span className="hidden shrink-0 text-xs text-gray-500 md:inline">
@@ -790,6 +877,18 @@ const InvestmentValuesUnifiedSection = ({
                       canUpload={canManageQuotations || canEditAssignedQuotation}
                       showToast={showToast}
                       onChanged={() => load({ silent: true })}
+                    />
+                  )}
+
+                  {canSeeHistory && (
+                    <InvestmentPriceHistoryPanel
+                      bcId={bcId}
+                      item={item}
+                      canUsePrice={canEditFinancial && !saving}
+                      canReuseFile={canManageQuotations && !coveredByTiInventory}
+                      showToast={showToast}
+                      onUsePrice={(historyRow) => handleUsePrice(item.catalog_id, historyRow)}
+                      onFileReused={() => load({ silent: true })}
                     />
                   )}
 

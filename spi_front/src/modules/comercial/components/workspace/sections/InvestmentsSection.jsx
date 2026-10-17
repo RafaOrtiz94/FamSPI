@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { FiAlertTriangle, FiCheckCircle, FiClock, FiSave } from "react-icons/fi";
+import { FiAlertTriangle, FiCheckCircle, FiClock, FiLock, FiPlus, FiSave, FiTrash2 } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useParams } from "react-router-dom";
 import { useUI } from "../../../../../core/ui/UIContext";
@@ -8,6 +8,13 @@ import { useAutoEditSection } from "../BusinessCaseWorkspaceContext";
 import Modal from "../../../../../core/ui/components/Modal";
 import SectionEditorBadge from "../SectionEditorBadge";
 import TiAssetReservationPanel from "./TiAssetReservationPanel";
+import { applyRequiredInvestmentItems, getActiveTriggersFor, normalizeInvestmentName } from "./investmentRequiredItems";
+
+// "Otros" ya no es una sola fila: agrupa items propios del BC (parent_catalog_id),
+// cada uno con su fila en la UI y en el Sheet.
+const OTROS_NAME = "otros";
+const isOtrosParent = (item) => item?.parent_catalog_id == null && normalizeInvestmentName(item?.name) === OTROS_NAME;
+const EMPTY_OTHER_DRAFT = { open: false, name: "", characteristics: "", quantity: "1", notes: "" };
 
 // Edicion en paralelo: sin carrito ni dueno por item. Estos son los unicos
 // roles que pueden agregar items o cambiar cantidades/caracteristicas (debe
@@ -96,6 +103,9 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
   const [searchTerm, setSearchTerm] = useState("");
   const [showOnlyWithQuantity, setShowOnlyWithQuantity] = useState(false);
   const [dirtyMap, setDirtyMap] = useState({});
+  // Items nuevos de "Otros" aun sin guardar (se crean en el backend al guardar).
+  const [newOtherItems, setNewOtherItems] = useState([]);
+  const [otherDraft, setOtherDraft] = useState(EMPTY_OTHER_DRAFT);
   const [isEditing, setIsEditing] = useState(false);
   useAutoEditSection("investments", () => setIsEditing(true));
 
@@ -135,6 +145,7 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
       const list = Array.isArray(payload) ? payload : (Array.isArray(payload?.items) ? payload.items : []);
       setItems(Array.isArray(list) ? list : []);
       setDirtyMap({});
+      setNewOtherItems([]);
     } catch (err) {
       console.error("Error loading investment catalog", err);
       showToast("No se pudo cargar el catalogo de inversiones", "error");
@@ -186,19 +197,62 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
       showToast("Ingresa las caracteristicas de la inversion.", "warning");
       return;
     }
+    // Un accesorio obligatorio no se puede retirar mientras su disparador siga en la lista.
+    const blockingTriggers = getActiveTriggersFor(items, qtyModal.item);
+    if (nextQty <= 0 && blockingTriggers.length) {
+      showToast(`${qtyModal.item.name} es obligatorio mientras haya ${blockingTriggers.map((t) => t.name).join(" / ")} en la lista.`, "warning");
+      return;
+    }
     const targetId = qtyModal.item.id;
-    setItems((prev) => prev.map((row) => (row.id === targetId
+    const updated = items.map((row) => (row.id === targetId
       ? { ...row, quantity: nextQty, characteristics, notes: qtyModal.notes.trim() || null, selected: nextQty > 0 }
-      : row)));
+      : row));
+    const { items: withRequired, added } = applyRequiredInvestmentItems(updated);
+    setItems(withRequired);
     markDirty(targetId);
+    added.forEach(({ item }) => markDirty(item.id));
+    if (added.length) {
+      showToast(
+        `Se agrego ${added.map(({ item }) => item.name).join(" y ")} (obligatorio con ${added[0].trigger.name}). Puedes ajustar la cantidad.`,
+        "info",
+      );
+    }
     setQtyModal({ open: false, item: null, quantity: "", characteristics: "", notes: "", submitting: false });
   };
+
+  const openOtherDraft = () => setOtherDraft({ ...EMPTY_OTHER_DRAFT, open: true });
+  const closeOtherDraft = () => setOtherDraft(EMPTY_OTHER_DRAFT);
+
+  const submitOtherDraft = () => {
+    const name = otherDraft.name.trim();
+    const characteristics = otherDraft.characteristics.trim();
+    const quantity = Number(otherDraft.quantity);
+    if (!name) {
+      showToast("Ingresa el nombre del item.", "warning");
+      return;
+    }
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      showToast("La cantidad debe ser un numero entero mayor a 0.", "warning");
+      return;
+    }
+    if (!characteristics) {
+      showToast("Ingresa las caracteristicas del item.", "warning");
+      return;
+    }
+    setNewOtherItems((prev) => [
+      ...prev,
+      { tempId: `${Date.now()}-${prev.length}`, name, characteristics, quantity, notes: otherDraft.notes.trim() || null },
+    ]);
+    closeOtherDraft();
+  };
+
+  const removeNewOtherItem = (tempId) => setNewOtherItems((prev) => prev.filter((item) => item.tempId !== tempId));
 
   const handleSaveDraft = async () => {
     if (!canEdit || !bcId) return;
 
     const dirtyItems = items.filter((row) => Boolean(dirtyMap[String(row.id)]));
-    if (!dirtyItems.length) {
+    if (!dirtyItems.length && !newOtherItems.length) {
       showToast("No hay cambios pendientes por guardar", "info");
       return;
     }
@@ -212,12 +266,18 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
           quantity: row.quantity ?? null,
           characteristics: row.characteristics || null,
         })),
+        other_items: newOtherItems.map(({ name, characteristics, quantity, notes }) => ({ name, characteristics, quantity, notes })),
       };
 
-      await api.post(`/business-case/${bcId}/investments/selections`, payload);
+      const response = await api.post(`/business-case/${bcId}/investments/selections`, payload);
       await loadCatalog();
       setIsEditing(false);
-      showToast(`Borrador guardado: ${dirtyItems.length} inversion(es)`, "success");
+      const savedCount = dirtyItems.length + newOtherItems.length;
+      const notified = Number(response?.data?.data?.notification?.sent || 0);
+      showToast(
+        `Borrador guardado: ${savedCount} inversion(es)${notified ? `. Se notifico a ${notified} persona(s).` : ""}`,
+        "success",
+      );
       onSave();
     } catch (err) {
       console.error("[BusinessCase][Investments] Error saving draft", {
@@ -234,22 +294,46 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
 
   const handleCancelEdit = () => {
     setIsEditing(false);
+    setOtherDraft(EMPTY_OTHER_DRAFT);
     loadCatalog();
   };
 
   const normalizedSearch = searchTerm.trim().toLowerCase();
-  const filteredItems = useMemo(() => {
-    let base = showOnlyWithQuantity ? items.filter((i) => Number(i.quantity) > 0) : items;
-    if (!normalizedSearch) return base;
-    return base.filter((item) => {
-      const name = String(item.name || "").toLowerCase();
-      const category = String(item.category || "").toLowerCase();
-      return name.includes(normalizedSearch) || category.includes(normalizedSearch);
-    });
-  }, [items, normalizedSearch, showOnlyWithQuantity]);
+  const matchesSearch = useCallback((item) => {
+    if (!normalizedSearch) return true;
+    const name = String(item.name || "").toLowerCase();
+    const category = String(item.category || "").toLowerCase();
+    const characteristics = String(item.characteristics || "").toLowerCase();
+    return name.includes(normalizedSearch) || category.includes(normalizedSearch) || characteristics.includes(normalizedSearch);
+  }, [normalizedSearch]);
 
-  const withQuantityCount = useMemo(() => items.filter((item) => Number(item.quantity) > 0).length, [items]);
-  const dirtyCount = useMemo(() => Object.keys(dirtyMap).length, [dirtyMap]);
+  // Items de "Otros" guardados, por id del padre: se muestran dentro del grupo "Otros".
+  const otherItemsByParent = useMemo(() => {
+    const map = new Map();
+    items.filter((item) => item.parent_catalog_id != null).forEach((item) => {
+      const key = String(item.parent_catalog_id);
+      map.set(key, [...(map.get(key) || []), item]);
+    });
+    return map;
+  }, [items]);
+
+  const filteredItems = useMemo(() => items.filter((item) => {
+    if (item.parent_catalog_id != null) return false;
+    if (isOtrosParent(item)) {
+      const children = otherItemsByParent.get(String(item.id)) || [];
+      const hasContent = Number(item.quantity) > 0 || children.length > 0 || newOtherItems.length > 0;
+      if (showOnlyWithQuantity && !hasContent) return false;
+      return matchesSearch(item) || children.some(matchesSearch) || newOtherItems.some(matchesSearch);
+    }
+    if (showOnlyWithQuantity && !(Number(item.quantity) > 0)) return false;
+    return matchesSearch(item);
+  }), [items, otherItemsByParent, newOtherItems, matchesSearch, showOnlyWithQuantity]);
+
+  const withQuantityCount = useMemo(
+    () => items.filter((item) => Number(item.quantity) > 0).length + newOtherItems.length,
+    [items, newOtherItems],
+  );
+  const dirtyCount = useMemo(() => Object.keys(dirtyMap).length + newOtherItems.length, [dirtyMap, newOtherItems]);
   const isClosedWithoutInvestments = Boolean(ownership?.metadata?.no_additional_investments);
   const canCloseWithoutItems = Boolean(canEdit && !isClosedWithoutInvestments && withQuantityCount === 0 && dirtyCount === 0);
 
@@ -269,14 +353,23 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
     }
   };
 
-  const renderInvestmentRow = (item) => {
+  const renderInvestmentRow = (item, { label = null } = {}) => {
     const isDirty = Boolean(dirtyMap[String(item.id)]);
     const hasQuantity = Number(item.quantity) > 0;
+    const requiredBy = getActiveTriggersFor(items, item);
     return (
       <div key={item.id} className="p-4 flex flex-col gap-2 border-b last:border-b-0 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-gray-900">{item.name}</div>
-          <div className="text-xs text-gray-500">Categoria: {item.category || "Sin categoria"}</div>
+          <div className="text-sm font-semibold text-gray-900">{label || item.name}</div>
+          {requiredBy.length > 0 && (
+            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
+              <FiLock size={10} />
+              Obligatorio con {requiredBy.map((trigger) => trigger.name).join(" / ")}
+            </span>
+          )}
+          {item.parent_catalog_id == null && (
+            <div className="text-xs text-gray-500">Categoria: {item.category || "Sin categoria"}</div>
+          )}
           {item.updated_by_role && (
             <div className="text-xs text-gray-500">
               Ultima actualizacion por: {item.updated_by_role}
@@ -327,6 +420,132 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
           >
             {hasQuantity ? "Cambiar cantidad" : "Agregar cantidad"}
           </button>
+        </div>
+      </div>
+    );
+  };
+
+  const canAddOtherItems = canEdit && isEditing && !savingDraft;
+
+  const renderOtrosGroup = (parent) => {
+    const children = otherItemsByParent.get(String(parent.id)) || [];
+    const hasLegacyEntry = Number(parent.quantity) > 0;
+    return (
+      <div key={parent.id} className="border-b last:border-b-0">
+        <div className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-gray-900">{parent.name}</div>
+            <p className="text-xs text-gray-500">
+              Agrega aqui cada inversion que no esta en el catalogo. Cada item tiene su propia fila, en la lista y en el Sheet debajo de "Otros".
+            </p>
+          </div>
+          {canAddOtherItems && (
+            <button
+              type="button"
+              onClick={openOtherDraft}
+              disabled={otherDraft.open}
+              className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:bg-gray-200 disabled:text-gray-500"
+            >
+              <FiPlus size={13} />
+              Agregar item
+            </button>
+          )}
+        </div>
+
+        <div className="ml-4 border-l-2 border-emerald-100 sm:ml-8">
+          {hasLegacyEntry && renderInvestmentRow(parent, { label: `${parent.name} (registro anterior)` })}
+          {children.map((child) => renderInvestmentRow(child))}
+          {newOtherItems.map((draft) => (
+            <div key={draft.tempId} className="flex flex-col gap-2 border-b p-4 last:border-b-0 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-gray-900">{draft.name}</div>
+                <div className="mt-1 text-xs text-gray-600">Caracteristicas: {draft.characteristics}</div>
+                {draft.notes && <div className="text-xs text-gray-400">Obs: {draft.notes}</div>}
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
+                  <FiClock size={12} />
+                  Nuevo, pendiente de guardar
+                </span>
+                <div className="text-center">
+                  <div className="text-lg font-bold text-gray-900">{draft.quantity}</div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">cantidad</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeNewOtherItem(draft.tempId)}
+                  disabled={savingDraft}
+                  title="Quitar item"
+                  className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                >
+                  <FiTrash2 size={14} />
+                </button>
+              </div>
+            </div>
+          ))}
+          {!hasLegacyEntry && !children.length && !newOtherItems.length && !otherDraft.open && (
+            <p className="px-4 py-3 text-xs text-gray-400">Sin items en Otros.</p>
+          )}
+          {otherDraft.open && (
+            <div className="grid grid-cols-1 gap-3 bg-emerald-50/50 p-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 sm:col-span-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Nombre del item</span>
+                <input
+                  type="text"
+                  value={otherDraft.name}
+                  maxLength={200}
+                  onChange={(event) => setOtherDraft((prev) => ({ ...prev, name: event.target.value }))}
+                  placeholder="Ej. Capacitacion al personal"
+                  className="min-h-[40px] rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                />
+              </label>
+              <label className="flex flex-col gap-1 sm:col-span-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Caracteristicas</span>
+                <textarea
+                  rows={2}
+                  value={otherDraft.characteristics}
+                  onChange={(event) => setOtherDraft((prev) => ({ ...prev, characteristics: event.target.value }))}
+                  className="rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Cantidad</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={otherDraft.quantity}
+                  onChange={(event) => setOtherDraft((prev) => ({ ...prev, quantity: event.target.value }))}
+                  className="min-h-[40px] rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Observaciones (opcional)</span>
+                <input
+                  type="text"
+                  value={otherDraft.notes}
+                  onChange={(event) => setOtherDraft((prev) => ({ ...prev, notes: event.target.value }))}
+                  className="min-h-[40px] rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                />
+              </label>
+              <div className="flex justify-end gap-2 sm:col-span-2">
+                <button
+                  type="button"
+                  onClick={closeOtherDraft}
+                  className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-white"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={submitOtherDraft}
+                  className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+                >
+                  Agregar a Otros
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -398,8 +617,9 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
       )}
 
       <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm leading-6 text-emerald-900">
-        El catalogo de inversiones es fijo. Si necesitas registrar algo que no aparece en la lista, usa el item
-        <span className="font-bold"> Otros</span> y detalla las caracteristicas.
+        El catalogo de inversiones es fijo. Si necesitas registrar algo que no aparece en la lista, agregalo como un
+        item nuevo dentro de <span className="font-bold">Otros</span> (puedes agregar varios). Al elegir una impresora
+        se agregan solos sus consumibles obligatorios (tinta y papel; etiquetas para la Zebra).
       </div>
 
       {canEdit && (
@@ -475,7 +695,7 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
 
         {items.length > 0 && (
           filteredItems.length ? (
-            filteredItems.map(renderInvestmentRow)
+            filteredItems.map((item) => (isOtrosParent(item) ? renderOtrosGroup(item) : renderInvestmentRow(item)))
           ) : (
             <div className="p-6 text-center text-gray-500 text-sm">
               {showOnlyWithQuantity

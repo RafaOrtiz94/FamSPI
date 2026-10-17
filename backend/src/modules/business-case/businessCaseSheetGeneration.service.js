@@ -463,7 +463,12 @@ function buildInversionesPayload(investments = [], options = {}) {
           percentage: item?.depreciation_percentage,
           projectedMonths: options.projectedMonths,
         }).net;
-      out[name] = {
+      // Items agregados bajo "Otros" (catalogo propio del BC): clave unica por
+      // id -- dos items pueden llamarse igual -- y fila propia bajo "Otros".
+      const isOtrosItem = item?.parent_catalog_id != null;
+      out[isOtrosItem ? `otros_item:${item.id}` : name] = {
+        otros_item: isOtrosItem,
+        orden: Number(item?.id) || 0,
         nombre: name,
         categoria: String(item?.category || "").trim(),
         caracteristicas: String(item?.characteristics || "").trim(),

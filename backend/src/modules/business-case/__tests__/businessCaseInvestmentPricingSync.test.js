@@ -92,7 +92,9 @@ describe("business case investment pricing sync", () => {
   it("loads financial investment values for automatic Sheet generation", () => {
     expect(investmentsSource).toMatch(/getCatalogWithSelections[\s\S]*s\.unit_price_financial/);
     expect(investmentsSource).toMatch(/getInvestmentSelections[\s\S]*unit_price_financial/);
-    expect(investmentsSource).toMatch(/WHERE c\.is_active = true\s+OR s\.selected = true/);
+    // Items inactivos siguen saliendo si estan seleccionados; los de "Otros" de
+    // otros BCs (business_case_id) nunca salen como catalogo general.
+    expect(investmentsSource).toMatch(/WHERE \(c\.is_active = true AND c\.business_case_id IS NULL\)\s+OR s\.selected = true/);
   });
 
   it("normalizes Sheet header values and writes SMART objective to its template row", () => {

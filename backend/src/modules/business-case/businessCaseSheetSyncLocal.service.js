@@ -375,8 +375,14 @@ function parseBCDefinition(ws) {
   const investmentLabels = new Map();
   const investmentRowDefaults = new Map();
   let inInvestmentBlock = false;
+  // Fila "Sub total" del bloque (etiqueta en columna E, columna A vacia): las
+  // filas de items de "Otros" se insertan entre "Otros" y esta fila.
+  let investmentSubtotalRow = null;
 
   for (let row = range.s.r + 1; row <= range.e.r + 1; row += 1) {
+    if (inInvestmentBlock && !investmentSubtotalRow && normalizeText(String(getCellValue(ws, `E${row}`) || "")) === "sub total") {
+      investmentSubtotalRow = row;
+    }
     const label = String(getCellValue(ws, `A${row}`) || "").trim();
     if (!label) continue;
     const normalizedLabel = normalizeText(label);
@@ -435,7 +441,7 @@ function parseBCDefinition(ws) {
   fieldCells.DeterminacionEfectiva = pickWritableCell(ws, 54, 2, 5);
   fieldCells.Observaciones = pickWritableCell(ws, 55, 2, 5);
 
-  return { fieldCells, objectiveRows, investmentLabels, investmentRowDefaults };
+  return { fieldCells, objectiveRows, investmentLabels, investmentRowDefaults, investmentSubtotalRow };
 }
 
 function parseEquipmentSheetDefinition(name, ws) {
@@ -1742,10 +1748,141 @@ function resolveBusinessCaseName(businessCase = {}) {
   return parts.length ? `BC ${parts.join(" - ")}` : `BC ${Date.now()}`;
 }
 
-function buildBusinessCaseRanges(template, payload) {
+// ─── Items de "Otros" ───────────────────────────────────────────────────────
+// Cada item agregado bajo "Otros" ocupa una fila REAL insertada debajo de la
+// fila "Otros" de la plantilla (antes del Sub total). Todo lo que esta debajo
+// (Sub total, Total, objetivo SMART, filas dinamicas 131+) baja esas filas:
+// las celdas de plantilla con fila > Otros se desplazan con shiftTemplateCell.
+const OTROS_INVESTMENT_LABEL = "otros";
+const OTROS_SCAN_MAX_ROWS = 200;
+
+function getOtrosLayout(template) {
+  const otrosRow = template?.bc?.objectiveRows?.get(OTROS_INVESTMENT_LABEL) || null;
+  const subtotalRow = template?.bc?.investmentSubtotalRow || null;
+  if (!otrosRow || !subtotalRow || subtotalRow <= otrosRow) return null;
+  return { otrosRow, templateGap: subtotalRow - otrosRow - 1 };
+}
+
+function shiftTemplateRow(row, layout, shift) {
+  return layout && shift > 0 && row > layout.otrosRow ? row + shift : row;
+}
+
+function shiftTemplateCell(cell, layout, shift) {
+  const match = /^([A-Z]+)(\d+)$/.exec(String(cell || ""));
+  if (!match) return cell;
+  return `${match[1]}${shiftTemplateRow(Number(match[2]), layout, shift)}`;
+}
+
+function splitOtrosInvestments(inversiones = {}) {
+  const regular = {};
+  const otros = [];
+  Object.entries(inversiones || {}).forEach(([key, investment]) => {
+    if (investment?.otros_item) otros.push(investment);
+    else regular[key] = investment;
+  });
+  otros.sort((left, right) => Number(left?.orden || 0) - Number(right?.orden || 0));
+  return { regular, otros };
+}
+
+function countOtrosInvestments(inversiones = {}) {
+  return splitOtrosInvestments(inversiones).otros.length;
+}
+
+// Cuantas filas de "Otros" tiene hoy la hoja real: las que hay entre "Otros" y
+// el "Sub total" menos las que ya traia la plantilla. null = la hoja no tiene
+// la forma esperada (no se encuentra el Sub total): no se insertan filas.
+async function inspectOtrosRows(spreadsheetId, template) {
+  const layout = getOtrosLayout(template);
+  if (!layout) return null;
+  const firstRow = layout.otrosRow + 1;
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `BC!E${firstRow}:E${firstRow + layout.templateGap + OTROS_SCAN_MAX_ROWS}`,
+  });
+  const values = data?.values || [];
+  const subtotalIndex = values.findIndex((row) => normalizeText(String(row?.[0] || "")) === "sub total");
+  if (subtotalIndex < 0) return null;
+  const spiRows = subtotalIndex - layout.templateGap;
+  if (spiRows < 0) return null;
+  return { ...layout, spiRows };
+}
+
+// Deja exactamente `count` filas de "Otros": inserta (heredando el formato de
+// la fila de arriba) o borra solo filas que SPI inserto antes.
+async function resizeOtrosRows(spreadsheetId, inspection, count) {
+  if (!inspection || count === inspection.spiRows) return;
+  const meta = await getSpreadsheetMeta(spreadsheetId);
+  const tabId = meta.sheetMap.get("BC");
+  if (tabId === undefined || tabId === null) {
+    throw syncGuardError("La hoja no tiene pestana BC", "SHEET_BC_TAB_NOT_FOUND");
+  }
+  // otrosRow (1-based) es el indice 0-based de la primera fila debajo de "Otros".
+  const start = inspection.otrosRow;
+  const request = count > inspection.spiRows
+    ? {
+      insertDimension: {
+        range: { sheetId: tabId, dimension: "ROWS", startIndex: start + inspection.spiRows, endIndex: start + count },
+        inheritFromBefore: true,
+      },
+    }
+    : {
+      deleteDimension: {
+        range: { sheetId: tabId, dimension: "ROWS", startIndex: start + count, endIndex: start + inspection.spiRows },
+      },
+    };
+  await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [request] } });
+}
+
+// Google Sheets no amplia un =SUM(F58:F121) al insertar filas justo debajo del
+// final del rango: se extiende a mano hasta la ultima fila de "Otros".
+async function extendInvestmentSubtotalFormula(spreadsheetId, inspection, count) {
+  if (!inspection || count <= 0) return { adjusted: false };
+  const lastItemRow = inspection.otrosRow + count;
+  const subtotalRow = lastItemRow + inspection.templateGap + 1;
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `BC!F${subtotalRow}`,
+    valueRenderOption: "FORMULA",
+  });
+  const formula = String(data?.values?.[0]?.[0] || "").trim();
+  const match = /^=SUM\(\s*F(\d+)\s*:\s*F(\d+)\s*\)$/i.exec(formula);
+  if (!match) {
+    logger.warn({ spreadsheetId, subtotalRow, formula }, "[SheetGen] Sub total sin formula SUM reconocible; no se ajusto para las filas de Otros");
+    return { adjusted: false, formula };
+  }
+  if (Number(match[2]) >= lastItemRow) return { adjusted: false, formula };
+  const nextFormula = `=SUM(F${match[1]}:F${lastItemRow})`;
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `BC!F${subtotalRow}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: [[nextFormula]] },
+  });
+  return { adjusted: true, formula: nextFormula };
+}
+
+// Ajusta filas de "Otros" + formula del Sub total. Devuelve cuantas filas de
+// Otros quedaron en la hoja (0 si la hoja no tiene la forma esperada: en ese
+// caso los items de Otros van a las filas dinamicas, como cualquier item sin fila).
+async function prepareOtrosRows(spreadsheetId, template, inversiones) {
+  const count = countOtrosInvestments(inversiones);
+  const inspection = await inspectOtrosRows(spreadsheetId, template);
+  if (!inspection) {
+    if (count) logger.warn({ spreadsheetId, count }, "[SheetGen] No se encontro Sub total bajo Otros; items de Otros a filas dinamicas");
+    return 0;
+  }
+  await resizeOtrosRows(spreadsheetId, inspection, count);
+  await extendInvestmentSubtotalFormula(spreadsheetId, inspection, count);
+  return count;
+}
+
+function buildBusinessCaseRanges(template, payload, { otrosRowCount = 0 } = {}) {
   const updates = [];
   const clears = [];
-  const fieldCells = template.bc.fieldCells || {};
+  const layout = getOtrosLayout(template);
+  const fieldCells = Object.fromEntries(
+    Object.entries(template.bc.fieldCells || {}).map(([fieldKey, cell]) => [fieldKey, shiftTemplateCell(cell, layout, otrosRowCount)]),
+  );
   const smartObjectiveCell = fieldCells.SmartObjective || "B129";
 
   Object.entries(fieldCells).forEach(([fieldKey, cell]) => {
@@ -1753,7 +1890,7 @@ function buildBusinessCaseRanges(template, payload) {
     updates.push(buildValueRange(`BC!${cell}`, payload.fields?.[fieldKey] ?? ""));
   });
 
-  const investmentRanges = buildInvestmentRanges(template, payload.inversiones);
+  const investmentRanges = buildInvestmentRanges(template, payload.inversiones, { otrosRowCount });
   clears.push(...investmentRanges.clears);
   updates.push(...investmentRanges.updates);
 
@@ -1783,16 +1920,43 @@ function isReservedAssetsText(value) {
   return String(value || "").trim().toLowerCase().startsWith(RESERVED_ASSETS_PREFIX.toLowerCase());
 }
 
-function buildInvestmentRanges(template, inversiones, { currentRows = null } = {}) {
+// otrosRowCount = filas de "Otros" que YA existen en la hoja (prepareOtrosRows).
+// Si coincide con los items de Otros, cada uno va a su fila bajo "Otros"; si no
+// (hoja sin la forma esperada), van a las filas dinamicas.
+function buildInvestmentRanges(template, inversiones, { currentRows = null, otrosRowCount = 0 } = {}) {
   const updates = [];
   const clears = [];
-  const objectiveRows = template.bc.objectiveRows || new Map();
-  const rowDefaults = template.bc.investmentRowDefaults || new Map();
+  const layout = getOtrosLayout(template);
+  const shift = layout ? otrosRowCount : 0;
+  const objectiveRows = new Map(
+    [...(template.bc.objectiveRows || new Map()).entries()].map(([label, row]) => [label, shiftTemplateRow(row, layout, shift)]),
+  );
+  const rowDefaults = new Map(
+    [...(template.bc.investmentRowDefaults || new Map()).entries()].map(([row, defaults]) => [shiftTemplateRow(row, layout, shift), defaults]),
+  );
+  const dynamicStartRow = shiftTemplateRow(DYNAMIC_INVESTMENTS_START_ROW, layout, shift);
   clears.push(
-    `BC!A${DYNAMIC_INVESTMENTS_START_ROW}:F${DYNAMIC_INVESTMENTS_START_ROW + DYNAMIC_INVESTMENTS_CLEAR_ROWS - 1}`,
+    `BC!A${dynamicStartRow}:F${dynamicStartRow + DYNAMIC_INVESTMENTS_CLEAR_ROWS - 1}`,
   );
 
-  const unmatchedInvestments = [];
+  const { regular: regularInversiones, otros: otrosInvestments } = splitOtrosInvestments(inversiones);
+  const otrosFitRows = Boolean(layout) && otrosInvestments.length > 0 && otrosInvestments.length === otrosRowCount;
+  otrosInvestments.forEach((investment, index) => {
+    if (!otrosFitRows) return;
+    const rowNumber = layout.otrosRow + 1 + index;
+    const reserved = Array.isArray(investment?.activos_reservados) ? investment.activos_reservados.filter(Boolean) : [];
+    const total = Number(investment?.cantidad ?? 0) * Number(investment?.precio ?? 0);
+    updates.push(buildValueRange(`BC!A${rowNumber}`, investment?.nombre || ""));
+    updates.push(buildValueRange(`BC!B${rowNumber}`, String(investment?.caracteristicas || investment?.observaciones || "").trim()));
+    updates.push(buildValueRange(`BC!C${rowNumber}`, reserved.length ? formatReservedAssets(reserved) : ""));
+    updates.push(buildValueRange(`BC!D${rowNumber}`, investment?.cantidad ?? ""));
+    updates.push(buildValueRange(`BC!E${rowNumber}`, investment?.precio ?? ""));
+    updates.push(buildValueRange(`BC!F${rowNumber}`, Number.isFinite(total) ? Number(total.toFixed(2)) : ""));
+  });
+
+  const unmatchedInvestments = otrosFitRows
+    ? []
+    : otrosInvestments.map((investment) => ({ name: investment?.nombre || "Otros", investment }));
   const fuzzyMatchedInvestments = [];
   const rowPayloads = new Map();
 
@@ -1823,7 +1987,7 @@ function buildInvestmentRanges(template, inversiones, { currentRows = null } = {
     rowPayloads.set(rowNumber, current);
   };
 
-  Object.entries(inversiones || {}).forEach(([name, investment]) => {
+  Object.entries(regularInversiones).forEach(([name, investment]) => {
     const match = resolveObjectiveRow(objectiveRows, name);
     if (!match?.rowNumber) {
       unmatchedInvestments.push({ name, investment });
@@ -1880,7 +2044,7 @@ function buildInvestmentRanges(template, inversiones, { currentRows = null } = {
   }
 
   unmatchedInvestments.forEach(({ name, investment }, index) => {
-    const rowNumber = DYNAMIC_INVESTMENTS_START_ROW + index;
+    const rowNumber = dynamicStartRow + index;
     const description = String(
       investment?.caracteristicas ||
       investment?.descripcion ||
@@ -1905,7 +2069,7 @@ function buildInvestmentRanges(template, inversiones, { currentRows = null } = {
     logger.warn(
       {
         names: unmatchedInvestments.map((entry) => entry.name),
-        start_row: DYNAMIC_INVESTMENTS_START_ROW,
+        start_row: dynamicStartRow,
         rows: unmatchedInvestments.length,
       },
       "[SheetGen] inversiones nuevas enviadas a filas dinamicas",
@@ -2155,7 +2319,10 @@ async function syncBusinessCaseToGoogleSheet({ businessCase, outputFolderId, pay
 
   await pruneSheets(spreadsheet.spreadsheetId, spreadsheet.sheetMap, requiredSheetNames);
 
-  const bcRanges = buildBusinessCaseRanges(template, payload);
+  // Antes de escribir: insertar/quitar filas de "Otros" para que todas las
+  // celdas de abajo se calculen ya desplazadas.
+  const otrosRowCount = await prepareOtrosRows(spreadsheet.spreadsheetId, template, payload.inversiones);
+  const bcRanges = buildBusinessCaseRanges(template, payload, { otrosRowCount });
   const sectionRanges = selectedSheets.map((sheetPayload) => buildEquipmentSheetRanges(template, sheetPayload));
 
   const clearRangesPayload = [
@@ -2170,7 +2337,11 @@ async function syncBusinessCaseToGoogleSheet({ businessCase, outputFolderId, pay
   await clearRanges(spreadsheet.spreadsheetId, clearRangesPayload);
   await writeRanges(spreadsheet.spreadsheetId, updatePayload);
   if (payload.fields?.SmartObjective !== undefined) {
-    const smartObjectiveCell = template.bc.fieldCells?.SmartObjective || "B129";
+    const smartObjectiveCell = shiftTemplateCell(
+      template.bc.fieldCells?.SmartObjective || "B129",
+      getOtrosLayout(template),
+      otrosRowCount,
+    );
     await writeRanges(spreadsheet.spreadsheetId, [
       buildValueRange(`BC!${smartObjectiveCell}`, payload.fields.SmartObjective || ""),
     ]);
@@ -2275,7 +2446,8 @@ async function syncInvestmentsToGoogleSheet({ sheetId, inversiones = {}, backup 
   }
 
   const backupFile = backup ? await backupSpreadsheet(sheetId) : null;
-  const { updates, clears } = buildInvestmentRanges(template, inversiones, { currentRows });
+  const otrosRowCount = await prepareOtrosRows(sheetId, template, inversiones);
+  const { updates, clears } = buildInvestmentRanges(template, inversiones, { currentRows, otrosRowCount });
   await clearRanges(sheetId, clears);
   await writeRanges(sheetId, updates);
   return { sheetId, updated_ranges: updates.length, backup: backupFile };

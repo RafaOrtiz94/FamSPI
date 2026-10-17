@@ -204,6 +204,17 @@ Todas las rutas de inversión registran auditoría vía `auditSection()`.
 | GET | `/:id/investments/values/assignees` | `getInvestmentQuotationAssignees` | investmentValuesRoles |
 | POST | `/:id/investments/values/assignment` | `assignInvestmentQuotation` | investmentValuesRoles |
 | POST | `/:id/investments/values/request-quotation` | `requestInvestmentQuotation` | investmentValuesRoles |
+| POST | `/:id/investments/values/:catalogId/quotation-files` | `uploadInvestmentQuotationFile` | cotizador asignado o roles de valores (controller). Requiere `supplier_name` + `quotation_date` |
+| POST | `/:id/investments/values/:catalogId/quotation-files/reuse` | `reuseInvestmentQuotationFile` | investmentValuesRoles; el controller exige rol OP/FIN |
+| GET | `/investments/price-history` | `getInvestmentPriceHistory` | investmentValuesRoles |
+
+**Items de "Otros" (migración 323):** `POST /:id/investments/selections` acepta `other_items: [{ name, characteristics, quantity, notes }]`; cada uno crea una fila propia en `bc_investment_catalog` (`parent_catalog_id` = "Otros", `business_case_id` = BC, `is_active = false`), así precios, cotizaciones, histórico y reservas TI funcionan por `catalog_id` sin cambios. En el Sheet cada item ocupa una fila real insertada debajo de "Otros" (`prepareOtrosRows` en `businessCaseSheetSyncLocal.service.js`): todo lo de abajo (Sub total, Total, objetivo SMART, filas dinámicas 131+) se desplaza y el `=SUM` del Sub total se extiende a mano. Si la hoja no tiene el Sub total esperado, los items van a las filas dinámicas.
+
+**Accesorios obligatorios:** `investmentRequiredItems.js` (backend y frontend, deben coincidir): Impresora → Tinta + A4 printer paper; Impresora Zebra → Etiquetas. Se agregan con cantidad 1 y no se pueden dejar en 0 mientras el disparador siga en la lista (409 `INVESTMENT_REQUIRED_ITEM`).
+
+**Aviso de cambios en inversiones:** correo (al instante, `ignoreEmailSchedule`) + push a `INVESTMENT_EDIT_ROLES` + `extra_roles` `bc_investment_edit`, sin el autor. Se espera antes de responder el guardado (en Cloud Run el trabajo posterior a `res.json` puede no ejecutarse).
+
+**Histórico de inversiones (migración 322):** `GET /investments/price-history` arma la matriz entre BCs desde `bc_investment_selections` (precio vigente por BC) + `bc_investment_quotation_files` (con `supplier_name`/`quotation_date`). Filtros: `catalog_id`, `q`, `from`, `exclude_business_case_id`, `limit`. Cada guardado de precio que cambia valor deja un evento en `bc_investment_price_events` (con `reused_from_business_case_id` cuando el precio se copió desde el histórico). Reutilizar una cotización copia la fila apuntando al mismo `drive_file_id` (no duplica en Drive). UI: página `/dashboard/business-case/inversiones-historico` y `InvestmentPriceHistoryPanel.jsx` por ítem dentro de Precios financieros y operativos.
 
 ### Consumibles
 | Método | Ruta | Handler | Roles |

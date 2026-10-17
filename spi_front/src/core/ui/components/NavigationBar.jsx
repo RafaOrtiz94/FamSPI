@@ -175,6 +175,13 @@ const businessCaseObservabilityLink = {
   category: "reportes",
 };
 
+const investmentPriceHistoryLink = {
+  name: "Histórico inversiones BC",
+  icon: FiLayers,
+  path: "/dashboard/business-case/inversiones-historico",
+  category: "reportes",
+};
+
 const linksInteresLink = {
   name: "Links de Interés",
   icon: FiBookOpen,
@@ -658,6 +665,21 @@ const getPriorityGroups = (scope, role, auditActive, extraRoles = []) => {
     "administrador",
   ].includes(scope)) {
     groups.secondary.push(businessCaseObservabilityLink);
+  }
+
+  // Mismos roles que investmentValuesRoles (backend) y la ruta en AppRoutes.jsx.
+  if ([
+    "jefe_operaciones",
+    "jefe_de_operaciones",
+    "jefe_financiero",
+    "jefe_ti",
+    "gerencia",
+    "gerencia_general",
+    "jefe_comercial",
+    "admin",
+    "administrador",
+  ].includes(scope)) {
+    groups.secondary.push(investmentPriceHistoryLink);
   }
 
   // Kick Off 2026 â€” solo jefe_ti (acceso para reportes post-evento)

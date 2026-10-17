@@ -727,3 +727,18 @@ export const registerBcInspectionResult = async (businessCaseId, payload = {}) =
  const { data } = await api.post(`/business-case/${businessCaseId}/inspection-request/result`, payload);
  return data;
 };
+
+// Matriz historica de inversiones adicionales (precios + cotizaciones de BCs
+// anteriores). params: catalog_id, q, from (AAAA-MM-DD), exclude_business_case_id, limit.
+export const getInvestmentPriceHistory = async (params = {}) => {
+ const { data } = await api.get("/business-case/investments/price-history", { params });
+ return data?.data || { items: [], summary: [], truncated: false };
+};
+
+export const reuseInvestmentQuotationFile = async (businessCaseId, catalogId, fileId) => {
+ const { data } = await api.post(
+  `/business-case/${businessCaseId}/investments/values/${catalogId}/quotation-files/reuse`,
+  { file_id: fileId },
+ );
+ return data?.data;
+};

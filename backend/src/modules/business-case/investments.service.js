@@ -260,9 +260,13 @@ async function markInvestmentPriceReviewPending(businessCaseId, changes = []) {
     return pending.length;
 }
 
+// Incluye los items de "Otros" propios de este BC (parent_catalog_id) mientras
+// esten seleccionados; los de otros BCs nunca aparecen (sin seleccion aqui).
 async function getCatalogWithSelections(businessCaseId) {
+    await ensureInvestmentHistorySchema();
     const { rows } = await db.query(
         `SELECT c.id, c.code, c.name, c.category, c.investment_class, c.display_order, c.is_active,
+                c.parent_catalog_id,
                 COALESCE(s.selected, false) AS selected,
                 s.notes,
                 s.quantity,
@@ -278,12 +282,80 @@ async function getCatalogWithSelections(businessCaseId) {
          LEFT JOIN bc_investment_selections s
            ON s.catalog_id = c.id
           AND s.business_case_id = $1
-         WHERE c.is_active = true
+         WHERE (c.is_active = true AND c.business_case_id IS NULL)
             OR s.selected = true
-         ORDER BY c.display_order NULLS LAST, c.name`,
+         ORDER BY c.display_order NULLS LAST,
+                  (c.parent_catalog_id IS NOT NULL),
+                  CASE WHEN c.parent_catalog_id IS NULL THEN c.name END,
+                  c.id`,
         [businessCaseId]
     );
     return rows;
+}
+
+const OTROS_CATALOG_NAME = 'otros';
+const OTROS_ITEM_NAME_MAX = 200;
+
+// Crea filas de catalogo propias del BC para items agregados bajo "Otros".
+// La seleccion (cantidad, caracteristicas) la guarda despues el flujo normal.
+async function createOtrosCatalogItems(businessCaseId, items = [], user) {
+    await ensureInvestmentHistorySchema();
+    if (!Array.isArray(items) || !items.length) return [];
+    const { rows: parentRows } = await db.query(
+        `SELECT id, category, investment_class, display_order
+           FROM bc_investment_catalog
+          WHERE lower(trim(name)) = $1 AND business_case_id IS NULL
+          ORDER BY is_active DESC, id
+          LIMIT 1`,
+        [OTROS_CATALOG_NAME],
+    );
+    const parent = parentRows[0];
+    if (!parent) {
+        const error = new Error('No existe el item "Otros" en el catalogo de inversiones');
+        error.status = 409;
+        error.code = 'INVESTMENT_OTROS_PARENT_MISSING';
+        throw error;
+    }
+
+    const created = [];
+    for (const item of items) {
+        const name = String(item?.name || '').trim().slice(0, OTROS_ITEM_NAME_MAX);
+        if (!name) {
+            const error = new Error('Cada item de "Otros" necesita un nombre');
+            error.status = 400;
+            error.code = 'INVESTMENT_OTROS_NAME_REQUIRED';
+            throw error;
+        }
+        const { rows } = await db.query(
+            `INSERT INTO bc_investment_catalog
+               (code, name, category, investment_class, display_order, is_active, parent_catalog_id, business_case_id, created_by_email)
+             VALUES (NULL, $1, $2, $3, $4, false, $5, $6, $7)
+             RETURNING id, name, parent_catalog_id`,
+            [name, parent.category, parent.investment_class || 'operativa', parent.display_order, parent.id, businessCaseId, user?.email || null],
+        );
+        created.push({ ...rows[0], source: item });
+    }
+    return created;
+}
+
+// Un item de "Otros" de otro BC no se puede seleccionar aqui.
+async function assertCatalogItemsBelongToBusinessCase(businessCaseId, catalogIds = []) {
+    const ids = [...new Set(catalogIds.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+    if (!ids.length) return;
+    await ensureInvestmentHistorySchema();
+    const { rows } = await db.query(
+        `SELECT id FROM bc_investment_catalog
+          WHERE id = ANY($1::integer[])
+            AND business_case_id IS NOT NULL
+            AND business_case_id <> $2`,
+        [ids, businessCaseId],
+    );
+    if (rows.length) {
+        const error = new Error('El item de inversion pertenece a otro Business Case');
+        error.status = 400;
+        error.code = 'INVESTMENT_ITEM_OTHER_BUSINESS_CASE';
+        throw error;
+    }
 }
 
 async function upsertInvestmentSelection(businessCaseId, data, user) {
@@ -309,6 +381,9 @@ async function upsertInvestmentSelection(businessCaseId, data, user) {
     // habilitado puede tocar cualquier inversion. "Seleccionada" se deriva
     // de la cantidad, no de un checkbox manual.
     const selected = Number(quantity) > 0;
+    // Sin unit_price en el payload se conserva el precio operativo guardado:
+    // editar cantidad/caracteristicas no debe borrarlo (antes quedaba en NULL).
+    const hasUnitPrice = Object.prototype.hasOwnProperty.call(data, 'unit_price');
 
     const { rows } = await db.query(
         `INSERT INTO bc_investment_selections
@@ -320,7 +395,7 @@ async function upsertInvestmentSelection(businessCaseId, data, user) {
            notes = EXCLUDED.notes,
            quantity = EXCLUDED.quantity,
            characteristics = EXCLUDED.characteristics,
-           unit_price = EXCLUDED.unit_price,
+           unit_price = CASE WHEN $12::boolean THEN EXCLUDED.unit_price ELSE bc_investment_selections.unit_price END,
            updated_by_role = EXCLUDED.updated_by_role,
            updated_by_email = EXCLUDED.updated_by_email,
            owner_email = COALESCE(bc_investment_selections.owner_email, EXCLUDED.owner_email),
@@ -338,7 +413,8 @@ async function upsertInvestmentSelection(businessCaseId, data, user) {
             user?.role || null,
             user?.email || null,
             user?.email || null,
-            user?.role || null
+            user?.role || null,
+            hasUnitPrice,
         ]
     );
 
@@ -386,7 +462,7 @@ async function upsertInvestmentSelectionsBatch(businessCaseId, selections = [], 
                    notes = EXCLUDED.notes,
                    quantity = EXCLUDED.quantity,
                    characteristics = EXCLUDED.characteristics,
-                   unit_price = EXCLUDED.unit_price,
+                   unit_price = CASE WHEN $12::boolean THEN EXCLUDED.unit_price ELSE bc_investment_selections.unit_price END,
                    updated_by_role = EXCLUDED.updated_by_role,
                    updated_by_email = EXCLUDED.updated_by_email,
                    owner_email = COALESCE(bc_investment_selections.owner_email, EXCLUDED.owner_email),
@@ -404,7 +480,8 @@ async function upsertInvestmentSelectionsBatch(businessCaseId, selections = [], 
                     user?.role || null,
                     user?.email || null,
                     user?.email || null,
-                    user?.role || null
+                    user?.role || null,
+                    Object.prototype.hasOwnProperty.call(item || {}, 'unit_price'),
                 ]
             );
             out.push(rows[0]);
@@ -432,6 +509,7 @@ async function getInvestmentValuesByClass(businessCaseId, investmentClass, { ass
     }
 
     const priceColumn = investmentClass === 'operativa' ? 's.unit_price' : 's.unit_price_financial';
+    await ensureInvestmentHistorySchema();
     const normalizedAssigneeId = assigneeId == null ? null : Number(assigneeId);
     if (normalizedAssigneeId !== null && (!Number.isInteger(normalizedAssigneeId) || normalizedAssigneeId <= 0)) {
         const error = new Error("Usuario asignado inválido");
@@ -447,6 +525,8 @@ async function getInvestmentValuesByClass(businessCaseId, investmentClass, { ass
            c.category,
            c.investment_class,
            c.display_order,
+           c.parent_catalog_id,
+           parent.name AS parent_name,
            s.id AS selection_id,
            s.quantity,
            s.characteristics,
@@ -473,9 +553,13 @@ async function getInvestmentValuesByClass(businessCaseId, investmentClass, { ass
            ON s.catalog_id = c.id
           AND s.business_case_id = $1
           AND s.selected = true
+         LEFT JOIN bc_investment_catalog parent ON parent.id = c.parent_catalog_id
           WHERE (c.is_active = true OR s.selected = true)
             AND ($2::integer IS NULL OR s.quotation_assignee_id = $2)
-         ORDER BY c.display_order NULLS LAST, c.name`,
+         ORDER BY c.display_order NULLS LAST,
+                  (c.parent_catalog_id IS NOT NULL),
+                  CASE WHEN c.parent_catalog_id IS NULL THEN c.name END,
+                  c.id`,
         [businessCaseId, normalizedAssigneeId]
     );
     if (investmentClass !== 'financiera') return rows;
@@ -573,6 +657,7 @@ async function saveInvestmentValuesBatch(businessCaseId, investmentClass, values
     }
 
     const priceColumn = investmentClass === 'operativa' ? 'unit_price' : 'unit_price_financial';
+    await ensureInvestmentHistorySchema();
     const client = await db.getClient();
     try {
         await client.query('BEGIN');
@@ -588,7 +673,7 @@ async function saveInvestmentValuesBatch(businessCaseId, investmentClass, values
 
             // Both value roles can price every selected item in their own column.
             const check = await client.query(
-                `SELECT s.id
+                `SELECT s.id, s.${priceColumn} AS previous_unit_price, s.depreciation_percentage AS previous_depreciation
                  FROM bc_investment_selections s
                  INNER JOIN bc_investment_catalog c ON c.id = s.catalog_id
                    WHERE s.business_case_id = $1
@@ -628,7 +713,18 @@ async function saveInvestmentValuesBatch(businessCaseId, investmentClass, values
                     ? [unit_price ?? null, depreciation_percentage ?? null, user?.role || null, user?.email || null, businessCaseId, catalog_id]
                     : params,
             );
-            if (rows.length) out.push(rows[0]);
+            if (rows.length) {
+                out.push(rows[0]);
+                await recordPriceEventIfChanged(client, {
+                    businessCaseId,
+                    catalogId: catalog_id,
+                    investmentClass,
+                    previous: check.rows[0],
+                    saved: rows[0],
+                    reusedFromBusinessCaseId: item.reused_from_business_case_id,
+                    user,
+                });
+            }
         }
 
         await client.query('COMMIT');
@@ -826,8 +922,10 @@ async function requestInvestmentQuotation(businessCaseId, catalogId, user) {
 const QUOTATION_MAX_BYTES = 15 * 1024 * 1024;
 const QUOTATION_ALLOWED_MIME = /^(application\/pdf|image\/(jpeg|png|webp)|application\/vnd\.openxmlformats-officedocument\.(spreadsheetml\.sheet|wordprocessingml\.document)|application\/vnd\.ms-excel|application\/msword)$/;
 
+// Archivos de cotizacion + historico de precios (migraciones 309 y 322). Se
+// asegura en runtime porque las migraciones se aplican a mano.
 let quotationFilesSchemaPromise = null;
-function ensureQuotationFilesTable() {
+function ensureInvestmentHistorySchema() {
     if (!quotationFilesSchemaPromise) {
         quotationFilesSchemaPromise = db.query(`
             CREATE TABLE IF NOT EXISTS public.bc_investment_quotation_files (
@@ -848,6 +946,37 @@ function ensureQuotationFilesTable() {
             );
             CREATE INDEX IF NOT EXISTS idx_bc_investment_quotation_files_item
               ON public.bc_investment_quotation_files (business_case_id, catalog_id) WHERE active = true;
+            ALTER TABLE public.bc_investment_quotation_files
+              ADD COLUMN IF NOT EXISTS supplier_name TEXT,
+              ADD COLUMN IF NOT EXISTS quotation_date DATE,
+              ADD COLUMN IF NOT EXISTS reused_from_file_id BIGINT REFERENCES public.bc_investment_quotation_files(id) ON DELETE SET NULL;
+            CREATE TABLE IF NOT EXISTS public.bc_investment_price_events (
+              id                          BIGSERIAL PRIMARY KEY,
+              business_case_id            UUID        NOT NULL REFERENCES public.equipment_purchase_requests(id) ON DELETE CASCADE,
+              catalog_id                  INTEGER     NOT NULL REFERENCES public.bc_investment_catalog(id) ON DELETE CASCADE,
+              price_class                 TEXT        NOT NULL CHECK (price_class IN ('operativa', 'financiera')),
+              previous_unit_price         NUMERIC(12,2),
+              unit_price                  NUMERIC(12,2),
+              previous_depreciation       NUMERIC(5,2),
+              depreciation_percentage     NUMERIC(5,2),
+              quantity                    INTEGER,
+              reused_from_business_case_id UUID REFERENCES public.equipment_purchase_requests(id) ON DELETE SET NULL,
+              changed_by                  INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+              changed_by_email            TEXT,
+              changed_by_role             TEXT,
+              changed_at                  TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            CREATE INDEX IF NOT EXISTS idx_bc_investment_price_events_item
+              ON public.bc_investment_price_events (business_case_id, catalog_id, changed_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_bc_investment_price_events_catalog
+              ON public.bc_investment_price_events (catalog_id, changed_at DESC);
+            ALTER TABLE public.bc_investment_catalog
+              ADD COLUMN IF NOT EXISTS parent_catalog_id INTEGER REFERENCES public.bc_investment_catalog(id) ON DELETE CASCADE,
+              ADD COLUMN IF NOT EXISTS business_case_id UUID REFERENCES public.equipment_purchase_requests(id) ON DELETE CASCADE,
+              ADD COLUMN IF NOT EXISTS created_by_email TEXT;
+            CREATE INDEX IF NOT EXISTS idx_bc_investment_catalog_business_case
+              ON public.bc_investment_catalog (business_case_id)
+              WHERE business_case_id IS NOT NULL;
         `).catch((error) => {
             quotationFilesSchemaPromise = null;
             throw error;
@@ -858,9 +987,10 @@ function ensureQuotationFilesTable() {
 
 // Map catalog_id -> [archivos activos], para adjuntar a cada item de la UI.
 async function listQuotationFilesByCatalog(businessCaseId) {
-    await ensureQuotationFilesTable();
+    await ensureInvestmentHistorySchema();
     const { rows } = await db.query(
-        `SELECT id, catalog_id, file_name, mime_type, size_bytes, drive_url, uploaded_by_email, uploaded_at
+        `SELECT id, catalog_id, file_name, mime_type, size_bytes, drive_url, uploaded_by_email, uploaded_at,
+                supplier_name, quotation_date, reused_from_file_id
            FROM public.bc_investment_quotation_files
           WHERE business_case_id = $1 AND active = true
           ORDER BY uploaded_at ASC`,
@@ -874,14 +1004,33 @@ async function listQuotationFilesByCatalog(businessCaseId) {
     return map;
 }
 
-async function addQuotationFile({ businessCaseId, catalogId, file, user }) {
-    await ensureQuotationFilesTable();
+// Proveedor y fecha de emision son obligatorios: sin ellos la cotizacion no
+// sirve como referencia en el historico.
+function normalizeQuotationMetadata({ supplierName, quotationDate }) {
+    const supplier = String(supplierName || '').trim().slice(0, 200);
+    if (!supplier) {
+        const error = new Error('Indica el proveedor de la cotización');
+        error.status = 400;
+        throw error;
+    }
+    const date = String(quotationDate || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) {
+        const error = new Error('Indica la fecha de la cotización (AAAA-MM-DD)');
+        error.status = 400;
+        throw error;
+    }
+    return { supplier, date };
+}
+
+async function addQuotationFile({ businessCaseId, catalogId, file, supplierName, quotationDate, user }) {
+    await ensureInvestmentHistorySchema();
     const normalizedCatalogId = Number(catalogId);
     if (!file?.buffer?.length) {
         const error = new Error('Adjunta el archivo de la cotización');
         error.status = 400;
         throw error;
     }
+    const metadata = normalizeQuotationMetadata({ supplierName, quotationDate });
     if (file.size > QUOTATION_MAX_BYTES) {
         const error = new Error('El archivo supera el máximo de 15 MB');
         error.status = 400;
@@ -919,9 +1068,9 @@ async function addQuotationFile({ businessCaseId, catalogId, file, user }) {
 
     const { rows } = await db.query(
         `INSERT INTO public.bc_investment_quotation_files
-           (business_case_id, catalog_id, file_name, mime_type, size_bytes, drive_file_id, drive_url, uploaded_by, uploaded_by_email)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING id, catalog_id, file_name, mime_type, size_bytes, drive_url, uploaded_by_email, uploaded_at`,
+           (business_case_id, catalog_id, file_name, mime_type, size_bytes, drive_file_id, drive_url, uploaded_by, uploaded_by_email, supplier_name, quotation_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         RETURNING id, catalog_id, file_name, mime_type, size_bytes, drive_url, uploaded_by_email, uploaded_at, supplier_name, quotation_date, reused_from_file_id`,
         [
             businessCaseId,
             normalizedCatalogId,
@@ -932,6 +1081,8 @@ async function addQuotationFile({ businessCaseId, catalogId, file, user }) {
             driveUrl,
             Number.isInteger(Number(user?.id)) ? Number(user.id) : null,
             user?.email || null,
+            metadata.supplier,
+            metadata.date,
         ],
     );
     await db.query(
@@ -945,7 +1096,7 @@ async function addQuotationFile({ businessCaseId, catalogId, file, user }) {
 }
 
 async function removeQuotationFile({ businessCaseId, fileId, user }) {
-    await ensureQuotationFilesTable();
+    await ensureInvestmentHistorySchema();
     const { rows } = await db.query(
         `UPDATE public.bc_investment_quotation_files
             SET active = false, removed_at = now(), removed_by_email = $3
@@ -974,7 +1125,7 @@ async function removeQuotationFile({ businessCaseId, fileId, user }) {
 }
 
 async function getQuotationFileCatalogId(businessCaseId, fileId) {
-    await ensureQuotationFilesTable();
+    await ensureInvestmentHistorySchema();
     const { rows } = await db.query(
         `SELECT catalog_id FROM public.bc_investment_quotation_files WHERE id = $1 AND business_case_id = $2 AND active = true`,
         [Number(fileId), businessCaseId],
@@ -982,7 +1133,271 @@ async function getQuotationFileCatalogId(businessCaseId, fileId) {
     return rows[0]?.catalog_id ?? null;
 }
 
+// ─── Historico reutilizable de precios y cotizaciones ───────────────────────
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function sameNullableNumber(left, right) {
+    if (left == null || right == null) return left == null && right == null;
+    return Number(left) === Number(right);
+}
+
+// Deja un evento solo si el guardado cambio el precio (o la depreciacion, en
+// financiera). Corre dentro de la transaccion de saveInvestmentValuesBatch.
+async function recordPriceEventIfChanged(client, { businessCaseId, catalogId, investmentClass, previous, saved, reusedFromBusinessCaseId, user }) {
+    const isFinancial = investmentClass === 'financiera';
+    const savedPrice = isFinancial ? saved.unit_price_financial : saved.unit_price;
+    const priceChanged = !sameNullableNumber(previous?.previous_unit_price, savedPrice);
+    const depreciationChanged = isFinancial && !sameNullableNumber(previous?.previous_depreciation, saved.depreciation_percentage);
+    if (!priceChanged && !depreciationChanged) return;
+
+    const reusedFrom = UUID_PATTERN.test(String(reusedFromBusinessCaseId || '')) ? reusedFromBusinessCaseId : null;
+    await client.query(
+        `INSERT INTO public.bc_investment_price_events
+           (business_case_id, catalog_id, price_class, previous_unit_price, unit_price,
+            previous_depreciation, depreciation_percentage, quantity, reused_from_business_case_id,
+            changed_by, changed_by_email, changed_by_role)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [
+            businessCaseId,
+            catalogId,
+            investmentClass,
+            previous?.previous_unit_price ?? null,
+            savedPrice ?? null,
+            isFinancial ? previous?.previous_depreciation ?? null : null,
+            isFinancial ? saved.depreciation_percentage ?? null : null,
+            saved.quantity ?? null,
+            reusedFrom,
+            Number.isInteger(Number(user?.id)) ? Number(user.id) : null,
+            user?.email || null,
+            user?.role || null,
+        ],
+    );
+}
+
+// Vincula al item de este BC un archivo de cotizacion de otro BC (mismo item del
+// catalogo). No duplica el archivo en Drive: copia la fila apuntando al mismo
+// drive_file_id y guarda el origen en reused_from_file_id.
+async function reuseQuotationFile({ businessCaseId, catalogId, sourceFileId, user }) {
+    await ensureInvestmentHistorySchema();
+    const normalizedCatalogId = Number(catalogId);
+    const { rows: sourceRows } = await db.query(
+        `SELECT * FROM public.bc_investment_quotation_files WHERE id = $1 AND active = true`,
+        [Number(sourceFileId)],
+    );
+    const source = sourceRows[0];
+    if (!source) {
+        const error = new Error('Cotización de origen no encontrada');
+        error.status = 404;
+        throw error;
+    }
+    if (String(source.business_case_id) === String(businessCaseId)) {
+        const error = new Error('La cotización ya pertenece a este Business Case');
+        error.status = 409;
+        throw error;
+    }
+    if (Number(source.catalog_id) !== normalizedCatalogId) {
+        const error = new Error('La cotización corresponde a otro ítem de inversión');
+        error.status = 400;
+        throw error;
+    }
+
+    const { rows: selectionRows } = await db.query(
+        `SELECT c.name
+           FROM public.bc_investment_selections s
+           JOIN public.bc_investment_catalog c ON c.id = s.catalog_id
+          WHERE s.business_case_id = $1 AND s.catalog_id = $2 AND s.selected = true
+          LIMIT 1`,
+        [businessCaseId, normalizedCatalogId],
+    );
+    if (!selectionRows.length) {
+        const error = new Error('El item no está seleccionado en este Business Case');
+        error.status = 404;
+        throw error;
+    }
+    const { rows: duplicateRows } = await db.query(
+        `SELECT 1 FROM public.bc_investment_quotation_files
+          WHERE business_case_id = $1 AND catalog_id = $2 AND drive_file_id = $3 AND active = true
+          LIMIT 1`,
+        [businessCaseId, normalizedCatalogId, source.drive_file_id],
+    );
+    if (duplicateRows.length) {
+        const error = new Error('Esta cotización ya está vinculada al ítem');
+        error.status = 409;
+        throw error;
+    }
+
+    const { rows } = await db.query(
+        `INSERT INTO public.bc_investment_quotation_files
+           (business_case_id, catalog_id, file_name, mime_type, size_bytes, drive_file_id, drive_url,
+            uploaded_by, uploaded_by_email, supplier_name, quotation_date, reused_from_file_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         RETURNING id, catalog_id, file_name, mime_type, size_bytes, drive_url, uploaded_by_email, uploaded_at, supplier_name, quotation_date, reused_from_file_id`,
+        [
+            businessCaseId,
+            normalizedCatalogId,
+            source.file_name,
+            source.mime_type,
+            source.size_bytes,
+            source.drive_file_id,
+            source.drive_url,
+            Number.isInteger(Number(user?.id)) ? Number(user.id) : null,
+            user?.email || null,
+            source.supplier_name,
+            source.quotation_date,
+            source.reused_from_file_id || source.id,
+        ],
+    );
+    await db.query(
+        `UPDATE public.bc_investment_selections
+            SET quotation_status = 'received', updated_at = now()
+          WHERE business_case_id = $1 AND catalog_id = $2 AND selected = true`,
+        [businessCaseId, normalizedCatalogId],
+    );
+    logger.info({ businessCaseId, catalogId: normalizedCatalogId, sourceFileId: source.id }, 'Quotation file reused');
+    return { file: rows[0], itemName: selectionRows[0].name };
+}
+
+const toNullableNumber = (value) => (value == null || value === '' ? null : Number(value));
+
+// Matriz historica: una fila por BC x item con precio o cotizacion, mas un
+// resumen por item (ultimo, promedio, rango del precio financiero). Con
+// excludeBusinessCaseId sirve al panel del BC actual sin mostrarse a si mismo.
+async function getInvestmentPriceHistory({ catalogId = null, search = null, excludeBusinessCaseId = null, fromDate = null, limit = 500 } = {}) {
+    await ensureInvestmentHistorySchema();
+    const normalizedCatalogId = catalogId == null || catalogId === '' ? null : Number(catalogId);
+    if (normalizedCatalogId !== null && (!Number.isInteger(normalizedCatalogId) || normalizedCatalogId <= 0)) {
+        const error = new Error('catalog_id es invalido');
+        error.status = 400;
+        throw error;
+    }
+    const excluded = excludeBusinessCaseId && UUID_PATTERN.test(String(excludeBusinessCaseId)) ? excludeBusinessCaseId : null;
+    const searchTerm = String(search || '').trim();
+    const searchPattern = searchTerm ? `%${searchTerm.replace(/[%_\\]/g, '\\$&')}%` : null;
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(String(fromDate || '')) ? fromDate : null;
+    const safeLimit = Math.max(1, Math.min(2000, Number(limit) || 500));
+
+    const baseCte = `
+      WITH base AS (
+        SELECT s.business_case_id,
+               s.catalog_id,
+               c.name AS item_name,
+               c.category,
+               c.code AS item_code,
+               epr.client_name,
+               epr.bc_purchase_type,
+               epr.bc_stage,
+               epr.created_at AS business_case_created_at,
+               s.quantity,
+               s.characteristics,
+               s.notes,
+               s.unit_price AS operational_unit_price,
+               s.unit_price_financial AS financial_unit_price,
+               s.depreciation_percentage,
+               COALESCE(pe.changed_at, s.updated_at) AS priced_at,
+               pe.reused_from_business_case_id,
+               COALESCE(qf.files, '[]'::json) AS quotation_files
+          FROM public.bc_investment_selections s
+          JOIN public.bc_investment_catalog c ON c.id = s.catalog_id
+          JOIN public.equipment_purchase_requests epr ON epr.id = s.business_case_id
+          LEFT JOIN LATERAL (
+            SELECT e.changed_at, e.reused_from_business_case_id
+              FROM public.bc_investment_price_events e
+             WHERE e.business_case_id = s.business_case_id
+               AND e.catalog_id = s.catalog_id
+               AND e.price_class = 'financiera'
+             ORDER BY e.changed_at DESC
+             LIMIT 1
+          ) pe ON true
+          LEFT JOIN LATERAL (
+            SELECT json_agg(json_build_object(
+                     'id', f.id,
+                     'file_name', f.file_name,
+                     'drive_url', f.drive_url,
+                     'supplier_name', f.supplier_name,
+                     'quotation_date', f.quotation_date,
+                     'uploaded_at', f.uploaded_at,
+                     'reused_from_file_id', f.reused_from_file_id
+                   ) ORDER BY f.uploaded_at) AS files
+              FROM public.bc_investment_quotation_files f
+             WHERE f.business_case_id = s.business_case_id
+               AND f.catalog_id = s.catalog_id
+               AND f.active = true
+          ) qf ON true
+         WHERE s.selected = true
+           AND epr.uses_modern_system IS NOT FALSE
+           AND (s.unit_price_financial > 0 OR s.unit_price > 0 OR qf.files IS NOT NULL)
+           AND ($1::integer IS NULL OR s.catalog_id = $1)
+           AND ($2::uuid IS NULL OR s.business_case_id <> $2)
+           AND ($3::text IS NULL
+                OR c.name ILIKE $3
+                OR epr.client_name ILIKE $3
+                OR s.characteristics ILIKE $3
+                OR EXISTS (
+                  SELECT 1 FROM public.bc_investment_quotation_files f2
+                   WHERE f2.business_case_id = s.business_case_id
+                     AND f2.catalog_id = s.catalog_id
+                     AND f2.active = true
+                     AND f2.supplier_name ILIKE $3
+                ))
+           AND ($4::date IS NULL OR COALESCE(pe.changed_at, s.updated_at) >= $4::date)
+      )`;
+    const params = [normalizedCatalogId, excluded, searchPattern, from];
+
+    const [rowsResult, summaryResult] = await Promise.all([
+        db.query(`${baseCte} SELECT * FROM base ORDER BY priced_at DESC LIMIT $5`, [...params, safeLimit]),
+        db.query(
+            `${baseCte}
+             SELECT catalog_id,
+                    MAX(item_name) AS item_name,
+                    MAX(category) AS category,
+                    COUNT(*) AS cases_count,
+                    COUNT(*) FILTER (WHERE financial_unit_price > 0) AS priced_count,
+                    (ARRAY_AGG(financial_unit_price ORDER BY priced_at DESC) FILTER (WHERE financial_unit_price > 0))[1] AS last_financial_unit_price,
+                    (ARRAY_AGG(depreciation_percentage ORDER BY priced_at DESC) FILTER (WHERE financial_unit_price > 0))[1] AS last_depreciation_percentage,
+                    MAX(priced_at) FILTER (WHERE financial_unit_price > 0) AS last_priced_at,
+                    AVG(financial_unit_price) FILTER (WHERE financial_unit_price > 0) AS avg_financial_unit_price,
+                    MIN(financial_unit_price) FILTER (WHERE financial_unit_price > 0) AS min_financial_unit_price,
+                    MAX(financial_unit_price) FILTER (WHERE financial_unit_price > 0) AS max_financial_unit_price,
+                    AVG(operational_unit_price) FILTER (WHERE operational_unit_price > 0) AS avg_operational_unit_price,
+                    SUM(json_array_length(quotation_files)) AS quotation_files_count
+               FROM base
+              GROUP BY catalog_id
+              ORDER BY MAX(item_name)`,
+            params,
+        ),
+    ]);
+
+    const items = rowsResult.rows.map((row) => ({
+        ...row,
+        quantity: toNullableNumber(row.quantity),
+        operational_unit_price: toNullableNumber(row.operational_unit_price),
+        financial_unit_price: toNullableNumber(row.financial_unit_price),
+        depreciation_percentage: toNullableNumber(row.depreciation_percentage),
+    }));
+    const summary = summaryResult.rows.map((row) => ({
+        catalog_id: row.catalog_id,
+        item_name: row.item_name,
+        category: row.category,
+        cases_count: Number(row.cases_count || 0),
+        priced_count: Number(row.priced_count || 0),
+        quotation_files_count: Number(row.quotation_files_count || 0),
+        last_financial_unit_price: toNullableNumber(row.last_financial_unit_price),
+        last_depreciation_percentage: toNullableNumber(row.last_depreciation_percentage),
+        last_priced_at: row.last_priced_at,
+        avg_financial_unit_price: row.avg_financial_unit_price == null ? null : Number(Number(row.avg_financial_unit_price).toFixed(2)),
+        min_financial_unit_price: toNullableNumber(row.min_financial_unit_price),
+        max_financial_unit_price: toNullableNumber(row.max_financial_unit_price),
+        avg_operational_unit_price: row.avg_operational_unit_price == null ? null : Number(Number(row.avg_operational_unit_price).toFixed(2)),
+    }));
+    return { items, summary, truncated: items.length >= safeLimit };
+}
+
 module.exports = {
+    createOtrosCatalogItems,
+    assertCatalogItemsBelongToBusinessCase,
+    getInvestmentPriceHistory,
+    reuseQuotationFile,
     listQuotationFilesByCatalog,
     addQuotationFile,
     removeQuotationFile,

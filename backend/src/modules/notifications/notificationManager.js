@@ -579,6 +579,9 @@ class NotificationManager {
     email = true,
     chat = false,
     push = true,
+    // Avisos que el negocio pide por correo al instante, aun fuera de la
+    // ventana laboral (8:00-19:00). Por defecto se respeta la ventana.
+    ignoreEmailSchedule = false,
     customTitle,
     customMessage,
     type,
@@ -588,8 +591,8 @@ class NotificationManager {
     }) {
     try {
       const emailScheduleAllowed = this.getEmailScheduleState().allowed;
-      const emailEnabledForDispatch = email && this.emailChannelEnabled && emailScheduleAllowed;
-      if (email && !emailScheduleAllowed) {
+      const emailEnabledForDispatch = email && this.emailChannelEnabled && (emailScheduleAllowed || ignoreEmailSchedule);
+      if (email && !emailScheduleAllowed && !ignoreEmailSchedule) {
         logger.info(
           {
             userId,
@@ -647,6 +650,7 @@ class NotificationManager {
                 processKey,
                 emailThreadKey: threadProcessKey,
                 priority: resolvedPriority,
+                ignoreSchedule: ignoreEmailSchedule,
               }),
             );
           }
@@ -671,7 +675,7 @@ class NotificationManager {
             "[NOTIFICATIONS] Fallo en cola asincrona, aplicando fallback sincrono",
           );
           if (emailEnabledForDispatch) {
-            await this.sendEmailNotification(notification, data, { processKey: threadProcessKey });
+            await this.sendEmailNotification(notification, data, { processKey: threadProcessKey, ignoreSchedule: ignoreEmailSchedule });
           }
           if (chat) {
             await this.sendChatNotification(notification, data);
@@ -682,7 +686,7 @@ class NotificationManager {
         }
       } else {
         if (emailEnabledForDispatch) {
-          await this.sendEmailNotification(notification, data, { processKey: threadProcessKey });
+          await this.sendEmailNotification(notification, data, { processKey: threadProcessKey, ignoreSchedule: ignoreEmailSchedule });
         }
         if (chat) {
           await this.sendChatNotification(notification, data);
@@ -880,6 +884,7 @@ class NotificationManager {
             strict: true,
             threadProcessKey: payload.emailThreadKey || null,
             processKey: job.process_key || payload.processKey || null,
+            ignoreSchedule: payload.ignoreSchedule === true,
           });
           if (emailResult?.deferred) {
             await db.query(
@@ -1013,7 +1018,7 @@ class NotificationManager {
       }
 
       const schedule = this.getEmailScheduleState();
-      if (!schedule.allowed) {
+      if (!schedule.allowed && options?.ignoreSchedule !== true) {
         logger.info(
           {
             notificationId: notification?.id,
