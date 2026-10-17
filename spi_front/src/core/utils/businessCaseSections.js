@@ -11,7 +11,7 @@ export const SECTION_LABELS = {
   lis: "Integración LIS",
   determinations: "Determinaciones",
   investments: "Inversiones",
-  investment_values: "Precios financieros y operativos",
+  investment_values: "Precios de inversiones",
   investment_values_op: "Precio operativo",
   investment_values_fin: "Precio financiero",
   consumption_export: "Resumen",

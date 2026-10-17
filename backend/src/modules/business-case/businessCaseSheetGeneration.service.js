@@ -14,6 +14,7 @@ const {
   buildSheetPayloads,
   syncBusinessCaseToGoogleSheet,
   syncInvestmentsToGoogleSheet,
+  syncGeneralFieldsToGoogleSheet,
 } = require("./businessCaseSheetSyncLocal.service");
 const {
   resolveSheetSyncOutcome,
@@ -562,6 +563,44 @@ async function getMaximumQuantitiesByBusinessCaseId(businessCaseId) {
   }
 }
 
+// Porcentaje para la hoja: 15 -> 0.15. La celda lleva formato de porcentaje (se aplica al
+// escribir), asi se ve "15%" y sigue siendo un numero. No se manda el texto "15%" porque su
+// lectura depende del separador decimal del idioma de la hoja.
+function toSheetPercentFraction(value) {
+  if (!hasValue(value)) return value;
+  const number = Number(String(value).trim().replace("%", "").replace(",", "."));
+  return Number.isFinite(number) ? Number((number / 100).toFixed(6)) : value;
+}
+
+// Monto para la hoja como numero; el signo "$" lo pone el formato de moneda de la celda.
+function toSheetAmount(value) {
+  if (!hasValue(value)) return value;
+  const number = Number(String(value).trim().replace(/[$\s]/g, "").replace(",", "."));
+  return Number.isFinite(number) ? number : value;
+}
+
+// Campos de la seccion "Datos Generales" tal como van a la hoja. Los usa la generacion completa
+// y la sync puntual al guardar la seccion, para que ambas escriban exactamente lo mismo.
+function buildGeneralDataFields(bcRow = {}) {
+  const metadata = toObject(bcRow?.modern_bc_metadata);
+  const generalData = toObject(metadata.general_data);
+  return {
+    TipoDeCliente: pickFirst(
+      normalizeClientProcessTypeLabel(bcRow?.bc_purchase_type),
+      normalizeClientProcessTypeLabel(generalData.purchaseType),
+      normalizeClientProcessTypeLabel(metadata.purchaseType),
+    ),
+    EntidadContratante: pickFirst(generalData.contractingEntity, metadata.contractingEntity),
+    Cliente: bcRow?.client_name,
+    CodigoProceso: bcRow?.process_code,
+    ObjetoContratacion: bcRow?.contract_object,
+    SmartObjective: resolveSmartObjective(metadata, generalData, bcRow),
+    ProvinciaCiudad: pickFirst(generalData.provinceCity, metadata.provinceCity),
+    PresupuestoReferencial: toSheetAmount(pickFirst(metadata.referential_budget, generalData.referential_budget, bcRow?.bc_equipment_cost)),
+    PorcentajeMaximoCanje: toSheetPercentFraction(pickFirst(metadata.max_trade_in_percent, generalData.max_trade_in_percent)),
+  };
+}
+
 async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   const metadata = toObject(bcRow?.modern_bc_metadata);
   const generalData = toObject(metadata.general_data);
@@ -609,23 +648,9 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
 
   const fields = {};
   setFieldIfPresent(fields, "FechaMaximaCalculoConsumibles", await computeConsumablesMaxDate(businessCaseId));
-  setFieldIfPresent(fields, "TipoDeCliente", pickFirst(
-    normalizeClientProcessTypeLabel(bcRow?.bc_purchase_type),
-    normalizeClientProcessTypeLabel(generalData.purchaseType),
-    normalizeClientProcessTypeLabel(metadata.purchaseType),
-  ));
-  setFieldIfPresent(fields, "EntidadContratante", pickFirst(
-    generalData.contractingEntity,
-    metadata.contractingEntity,
-  ));
-  setFieldIfPresent(fields, "Cliente", bcRow?.client_name);
-  setFieldIfPresent(fields, "CodigoProceso", bcRow?.process_code);
-  setFieldIfPresent(fields, "ObjetoContratacion", bcRow?.contract_object);
-  setFieldIfPresent(fields, "SmartObjective", resolveSmartObjective(metadata, generalData, bcRow));
-  setFieldIfPresent(fields, "ProvinciaCiudad", pickFirst(
-    generalData.provinceCity,
-    metadata.provinceCity,
-  ));
+  const generalFields = buildGeneralDataFields(bcRow);
+  ["TipoDeCliente", "EntidadContratante", "Cliente", "CodigoProceso", "ObjetoContratacion", "SmartObjective", "ProvinciaCiudad"]
+    .forEach((fieldKey) => setFieldIfPresent(fields, fieldKey, generalFields[fieldKey]));
 
   setFieldIfPresent(fields, "DiasLaboratorio", labEnvironment?.work_days_per_week);
   setFieldIfPresent(fields, "TurnosPorDia", labEnvironment?.shifts_per_day);
@@ -688,15 +713,8 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   const projectedDeadlineMonths = pickFirst(requirements?.projected_deadline_months, bcRow?.projected_deadline_months);
   setFieldIfPresent(fields, "Plazo", deadlineMonths);
   setFieldIfPresent(fields, "ProyeccionPlazo", projectedDeadlineMonths);
-  setFieldIfPresent(fields, "PresupuestoReferencial", pickFirst(
-    metadata.referential_budget,
-    generalData.referential_budget,
-    bcRow?.bc_equipment_cost,
-  ));
-  setFieldIfPresent(fields, "PorcentajeMaximoCanje", pickFirst(
-    metadata.max_trade_in_percent,
-    generalData.max_trade_in_percent,
-  ));
+  setFieldIfPresent(fields, "PresupuestoReferencial", generalFields.PresupuestoReferencial);
+  setFieldIfPresent(fields, "PorcentajeMaximoCanje", generalFields.PorcentajeMaximoCanje);
   setFieldIfPresent(fields, "CompromisoDeCompra", pickFirst(
     metadata.purchase_commitment,
     generalData.purchase_commitment,
@@ -1720,6 +1738,52 @@ async function syncInvestmentValuesToSheet(businessCaseId, { backup = false } = 
   return { synced: true, ...result };
 }
 
+// Datos Generales guardados en SPI -> solo sus celdas en la hoja BC existente. Igual que
+// syncInvestmentValuesToSheet: no regenera la hoja ni toca otros bloques. Un campo vacio en SPI
+// limpia su celda, para que la hoja no conserve un valor que ya se borro.
+async function syncGeneralDataToSheet(businessCaseId, { backup = false } = {}) {
+  const bcRow = await assertBusinessCaseExists(businessCaseId);
+  const lastSheet = toObject(bcRow?.modern_bc_metadata)?.bc_sheet_generation?.last || {};
+  const sheetId = lastSheet?.provider === "google_sheets_local" ? lastSheet.sheet_id || null : null;
+  if (!sheetId) return { synced: false, reason: "no_sheet" };
+
+  const fields = Object.fromEntries(
+    Object.entries(buildGeneralDataFields(bcRow)).map(([fieldKey, value]) => [fieldKey, hasValue(value) ? value : ""]),
+  );
+  const result = await syncGeneralFieldsToGoogleSheet({ sheetId, fields, backup });
+  return { synced: true, ...result };
+}
+
+// Backfill de Datos Generales: lleva a cada hoja BC ya generada lo que hoy muestra la seccion.
+// Deja una copia de respaldo de cada hoja antes de escribir. dryRun=true (default) solo lista.
+async function syncGeneralDataForAllBusinessCases({ dryRun = true, businessCaseIds = null } = {}) {
+  const ids = Array.isArray(businessCaseIds) && businessCaseIds.length ? businessCaseIds.map(String) : null;
+  const { rows } = await db.query(
+    `SELECT epr.id, epr.client_name
+       FROM equipment_purchase_requests epr
+      WHERE epr.request_type = 'business_case'
+        AND epr.uses_modern_system IS NOT FALSE
+        AND epr.modern_bc_metadata #>> '{bc_sheet_generation,last,provider}' = 'google_sheets_local'
+        AND epr.modern_bc_metadata #>> '{bc_sheet_generation,last,sheet_id}' IS NOT NULL
+        AND ($1::text[] IS NULL OR epr.id::text = ANY($1::text[]))
+      ORDER BY epr.id`,
+    [ids],
+  );
+  const results = [];
+  for (const { id, client_name: clientName } of rows) {
+    if (dryRun) {
+      results.push({ business_case_id: id, client_name: clientName, synced: false, reason: "dry_run" });
+      continue;
+    }
+    try {
+      results.push({ business_case_id: id, client_name: clientName, ...(await syncGeneralDataToSheet(id, { backup: true })) });
+    } catch (error) {
+      results.push({ business_case_id: id, client_name: clientName, synced: false, error: error?.message || String(error), code: error?.code || null });
+    }
+  }
+  return results;
+}
+
 // Backfill: lleva a cada hoja BC ya generada los precios que hoy muestra la UI.
 // Solo toca el bloque de inversiones y deja una copia de respaldo de cada hoja
 // antes de escribir. dryRun=true (default) solo lista los BCs, sin escribir.
@@ -1764,6 +1828,11 @@ async function syncInvestmentValuesForAllBusinessCases({ dryRun = true, business
 module.exports = {
   syncInvestmentValuesToSheet,
   syncInvestmentValuesForAllBusinessCases,
+  syncGeneralDataToSheet,
+  syncGeneralDataForAllBusinessCases,
+  buildGeneralDataFields,
+  toSheetPercentFraction,
+  toSheetAmount,
   enqueueGenerationJob,
   getGenerationPreview,
   processPendingJobsBatch,

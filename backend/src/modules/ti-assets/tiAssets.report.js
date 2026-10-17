@@ -21,15 +21,6 @@ const STATUS_ES = {
   in_maintenance: "En mantenimiento",
 };
 
-const ASSET_STATUS_ES = {
-  unassigned: "Sin asignar",
-  assigned: "Asignado",
-  damaged: "Dañado",
-  in_maintenance: "En mantenimiento",
-  retired: "Dado de baja",
-  available: "Disponible",
-};
-
 // ─── DB schema ────────────────────────────────────────────────────────────────
 
 async function ensureReportsTable() {
@@ -82,11 +73,16 @@ async function fetchReportData({ year, month, periodType = "annual" } = {}) {
   const { rows: assets } = await db.query(
     `SELECT a.id, a.name, a.brand, a.model, a.serial_number, a.status,
             a.characteristics, a.purchase_date, a.maintenance_frequency_months,
-            COALESCE(u.fullname, u.name, u.email) AS assigned_to_name
+            a.custody_type, a.client_id,
+            COALESCE(cu.fullname, cu.name, cu.email, u.fullname, u.name, u.email) AS assigned_to_name,
+            COALESCE(c.nombre_comercial, c.razon_social, cr.commercial_name) AS client_name
        FROM public.ti_assets a
        LEFT JOIN public.users u ON u.id = a.assigned_to_user_id
+       LEFT JOIN public.users cu ON cu.id = a.custodian_user_id
+       LEFT JOIN public.clients c ON c.id = a.client_id
+       LEFT JOIN public.client_requests cr ON cr.id = c.client_request_id
       WHERE a.active = true
-      ORDER BY a.name ASC`
+      ORDER BY a.custody_type ASC, a.name ASC`
   );
 
   // Schedules
@@ -151,45 +147,53 @@ function fmtDateTime(val) {
   });
 }
 
-function drawHRule(doc, color = "#e2e8f0") {
-  const { x, y } = doc;
-  doc.save().strokeColor(color).lineWidth(0.5).moveTo(40, y).lineTo(555, y).stroke().restore();
-  doc.moveDown(0.3);
+function getAssetAudience(asset) {
+  if (asset.custody_type === "client") {
+    return { key: "clients", title: "Equipos de uso de clientes", owner: asset.client_name || "Cliente sin identificar" };
+  }
+  if (asset.custody_type === "collaborator") {
+    return { key: "collaborators", title: "Equipos de colaboradores", owner: asset.assigned_to_name || "Colaborador sin identificar" };
+  }
+  return { key: "other", title: "Equipos en custodia interna", owner: "Bodega, préstamo o disponibilidad" };
 }
 
-function buildPdf({ assets, schedulesByAsset, stats, periodLabel, generatedAt, generatedByName, sha256Placeholder }) {
+function buildPdf({ assets, schedulesByAsset, stats, periodLabel, generatedAt, generatedByName }) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 40, size: "A4", bufferPages: true });
+    const doc = new PDFDocument({ margin: 36, size: "A4", layout: "landscape", bufferPages: true, autoFirstPage: false });
     const chunks = [];
     doc.on("data", (c) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    const PAGE_W = 515; // usable width (595 - 2*40)
+    const PAGE_WIDTH = 841.89;
+    const PAGE_HEIGHT = 595.28;
+    const LEFT = 36;
+    const RIGHT = 36;
+    const CONTENT_W = PAGE_WIDTH - LEFT - RIGHT;
+    const CONTENT_BOTTOM = PAGE_HEIGHT - 65;
     const period = periodLabel || "Todos los periodos";
     const generatedAtStr = fmtDateTime(generatedAt);
 
-    // ── Cover / Header ──────────────────────────────────────────────────────
-    doc.rect(40, 40, PAGE_W, 70).fill("#0f172a");
-    doc
-      .fillColor("#ffffff")
-      .fontSize(18)
-      .font("Helvetica-Bold")
-      .text("Cronograma de Mantenimiento TI", 50, 55, { width: PAGE_W - 20 });
-    doc
-      .fontSize(10)
-      .font("Helvetica")
-      .fillColor("#94a3b8")
-      .text(`Período: ${period}   ·   Generado: ${generatedAtStr}`, 50, 82, { width: PAGE_W - 20 });
-    if (generatedByName) {
-      doc.text(`Por: ${generatedByName}`, 50, 96, { width: PAGE_W - 20 });
-    }
+    const addPage = (sectionTitle = null) => {
+      doc.addPage();
+      doc.rect(0, 0, PAGE_WIDTH, 58).fill("#182838");
+      doc.fillColor("#F3F5F7").font("Helvetica-Bold").fontSize(17)
+        .text("Cronograma de mantenimiento TI", LEFT, 17, { width: 430 });
+      doc.fillColor("#91B5FF").font("Helvetica").fontSize(9)
+        .text(`${period}  |  Generado ${generatedAtStr}`, 490, 20, { width: 315, align: "right" });
+      doc.y = 78;
+      if (sectionTitle) {
+        doc.fillColor("#172B3A").font("Helvetica-Bold").fontSize(12).text(sectionTitle, LEFT, doc.y);
+        doc.y += 22;
+      }
+    };
 
-    doc.fillColor("#0f172a").moveDown(2.5);
-
-    // ── Summary stats ───────────────────────────────────────────────────────
-    doc.fontSize(12).font("Helvetica-Bold").fillColor("#0f172a").text("Resumen");
-    drawHRule(doc);
+    addPage();
+    doc.fillColor("#172B3A").fontSize(9).font("Helvetica")
+      .text(`Responsable de generación: ${generatedByName || "Sistema"}`, LEFT, 72, { width: CONTENT_W });
+    doc.y = 98;
+    doc.fontSize(12).font("Helvetica-Bold").text("Resumen operativo", LEFT, doc.y);
+    doc.y += 21;
 
     const statCols = [
       { label: "Equipos activos", value: assets.length },
@@ -198,129 +202,83 @@ function buildPdf({ assets, schedulesByAsset, stats, periodLabel, generatedAt, g
       { label: "Completados", value: stats.completed },
       { label: "Vencidos", value: stats.overdue },
     ];
-    const sw = PAGE_W / statCols.length;
+    const sw = CONTENT_W / statCols.length;
     const sy = doc.y;
     statCols.forEach((st, i) => {
-      const sx = 40 + i * sw;
-      doc.rect(sx + 2, sy, sw - 4, 44).fill(i % 2 === 0 ? "#f8fafc" : "#f1f5f9");
-      doc.fontSize(20).font("Helvetica-Bold").fillColor("#0f172a").text(String(st.value), sx + 2, sy + 4, { width: sw - 4, align: "center" });
-      doc.fontSize(8).font("Helvetica").fillColor("#64748b").text(st.label, sx + 2, sy + 30, { width: sw - 4, align: "center" });
+      const sx = LEFT + i * sw;
+      doc.rect(sx, sy, sw, 45).fill("#F3F5F7");
+      if (i) doc.moveTo(sx, sy + 8).lineTo(sx, sy + 37).strokeColor("#DCE3E9").lineWidth(0.6).stroke();
+      doc.fontSize(18).font("Helvetica-Bold").fillColor("#172B3A").text(String(st.value), sx + 8, sy + 6, { width: sw - 16, align: "center" });
+      doc.fontSize(8).font("Helvetica").fillColor("#586A79").text(st.label, sx + 8, sy + 28, { width: sw - 16, align: "center" });
     });
-    doc.y = sy + 54;
-    doc.moveDown(1);
+    doc.y = sy + 65;
+    doc.font("Helvetica").fontSize(9).fillColor("#586A79")
+      .text("El detalle se organiza por tipo de uso. Cada fila conserva sus fechas de mantenimiento planificada y máxima.", LEFT, doc.y);
 
-    // ── Per-asset sections ─────────────────────────────────────────────────
-    doc.fontSize(12).font("Helvetica-Bold").fillColor("#0f172a").text("Detalle por equipo");
-    drawHRule(doc);
-
-    assets.forEach((asset) => {
-      const assetSchedules = schedulesByAsset[asset.id] || [];
-
-      // Asset card header
-      if (doc.y > 680) doc.addPage();
-
-      doc.rect(40, doc.y, PAGE_W, 20).fill("#1e293b");
-      doc
-        .fillColor("#ffffff")
-        .fontSize(10)
-        .font("Helvetica-Bold")
-        .text(asset.name, 46, doc.y + 4, { width: PAGE_W / 2, continued: true })
-        .font("Helvetica")
-        .fontSize(9)
-        .fillColor("#94a3b8")
-        .text(
-          `${ASSET_STATUS_ES[asset.status] || asset.status}  ·  ${asset.brand || "-"} ${asset.model || "-"}`,
-          { align: "right", width: PAGE_W / 2 - 6 }
-        );
-      doc.y += 24;
-
-      // Asset info row
-      const infoY = doc.y;
-      const infoCols = [
-        ["Serie", asset.serial_number || "-"],
-        ["Asignado a", asset.assigned_to_name || "Sin asignación"],
-        ["Fecha compra", fmtDate(asset.purchase_date)],
-        ["Frec. (meses)", String(asset.maintenance_frequency_months || 12)],
-      ];
-      const iw = PAGE_W / infoCols.length;
-      infoCols.forEach(([label, val], i) => {
-        const ix = 40 + i * iw;
-        doc.fontSize(7).font("Helvetica").fillColor("#64748b").text(label, ix, infoY, { width: iw });
-        doc.fontSize(9).font("Helvetica-Bold").fillColor("#0f172a").text(val, ix, infoY + 10, { width: iw });
+    const groups = ["collaborators", "clients", "other"].map((key) => ({
+      key,
+      assets: assets.filter((asset) => getAssetAudience(asset).key === key),
+    })).filter((group) => group.assets.length);
+    const colW = [190, 125, 105, 82, 82, 90, 95];
+    const headers = ["Equipo", "Responsable / cliente", "Serie", "Planificada", "Fecha máxima", "Estado", "Coordinación"];
+    const drawTableHeader = () => {
+      const y = doc.y;
+      doc.rect(LEFT, y, CONTENT_W, 22).fill("#263C50");
+      let x = LEFT;
+      headers.forEach((header, i) => {
+        doc.fillColor("#F3F5F7").font("Helvetica-Bold").fontSize(7.5).text(header, x + 5, y + 7, { width: colW[i] - 10, lineBreak: false });
+        x += colW[i];
       });
-      doc.y = infoY + 28;
+      doc.y = y + 22;
+    };
 
-      if (!assetSchedules.length) {
-        doc.fontSize(9).font("Helvetica").fillColor("#94a3b8").text("Sin cronograma registrado", 46, doc.y);
-        doc.moveDown(0.8);
-        return;
-      }
-
-      // Schedule table header
-      const colW = [95, 95, 105, 80, 140];
-      const colX = [
-        40,
-        40 + colW[0],
-        40 + colW[0] + colW[1],
-        40 + colW[0] + colW[1] + colW[2],
-        40 + colW[0] + colW[1] + colW[2] + colW[3],
-      ];
-      const headers = ["Fecha planificada", "Fecha máxima", "Coord. retiro", "Estado", "Notas"];
-
-      doc.rect(40, doc.y, PAGE_W, 18).fill("#e2e8f0");
-      const hy = doc.y + 3;
-      headers.forEach((h, i) => {
-        doc.fontSize(7.5).font("Helvetica-Bold").fillColor("#334155").text(h, colX[i] + 2, hy, { width: colW[i] - 4 });
-      });
-      doc.y = hy + 15;
-
-      assetSchedules.forEach((s, idx) => {
-        if (doc.y > 725) doc.addPage();
-        const rowY = doc.y;
-        if (idx % 2 === 1) doc.rect(40, rowY, PAGE_W, 18).fill("#f8fafc");
-
-        const statusColor = s.status === "completed" ? "#16a34a" : s.status === "overdue" ? "#dc2626" : "#334155";
-        const rowValues = [
-          fmtDate(s.planned_date),
-          fmtDate(s.max_due_date),
-          fmtDate(s.coordinated_withdrawal_date),
-          STATUS_ES[s.status] || s.status,
-          s.notes ? String(s.notes).slice(0, 40) : "-",
-        ];
-        rowValues.forEach((v, i) => {
-          doc
-            .fontSize(8)
-            .font("Helvetica")
-            .fillColor(i === 3 ? statusColor : "#334155")
-            .text(v, colX[i] + 2, rowY + 3, { width: colW[i] - 4, lineBreak: false, ellipsis: true });
+    groups.forEach((group) => {
+      const title = getAssetAudience(group.assets[0]).title;
+      addPage(title);
+      drawTableHeader();
+      let rowIndex = 0;
+      group.assets.forEach((asset) => {
+        const audience = getAssetAudience(asset);
+        const assetSchedules = schedulesByAsset[asset.id] || [];
+        const rows = assetSchedules.length ? assetSchedules : [null];
+        rows.forEach((schedule) => {
+          if (doc.y + 27 > CONTENT_BOTTOM) {
+            addPage(`${title} (continuación)`);
+            drawTableHeader();
+          }
+          const y = doc.y;
+          if (rowIndex % 2) doc.rect(LEFT, y, CONTENT_W, 27).fill("#F3F5F7");
+          const status = schedule ? (STATUS_ES[schedule.status] || schedule.status) : "Sin programación";
+          const values = [
+            `${asset.name || "Equipo sin nombre"}${asset.brand || asset.model ? `\n${[asset.brand, asset.model].filter(Boolean).join(" ")}` : ""}`,
+            audience.owner,
+            asset.serial_number || "Sin serie",
+            schedule ? fmtDate(schedule.planned_date) : "Pendiente",
+            schedule ? fmtDate(schedule.max_due_date) : "Pendiente",
+            status,
+            schedule ? fmtDate(schedule.coordinated_withdrawal_date) : "-",
+          ];
+          let x = LEFT;
+          values.forEach((value, i) => {
+            const statusColor = schedule?.status === "completed" ? "#166344" : schedule?.status === "overdue" ? "#B42336" : "#172B3A";
+            doc.fillColor(i === 5 ? statusColor : "#172B3A").font(i === 0 || i === 5 ? "Helvetica-Bold" : "Helvetica")
+              .fontSize(i === 0 ? 7.6 : 7.3).text(String(value), x + 5, y + 6, { width: colW[i] - 10, height: 17, ellipsis: true });
+            x += colW[i];
+          });
+          doc.moveTo(LEFT, y + 27).lineTo(LEFT + CONTENT_W, y + 27).strokeColor("#DCE3E9").lineWidth(0.4).stroke();
+          doc.y = y + 27;
+          rowIndex += 1;
         });
-        doc.y = rowY + 18;
       });
-
-      doc.moveDown(0.6);
     });
-
-    // ── Footer / Integrity block ──────────────────────────────────────────
-    doc.addPage();
-    doc.rect(40, 40, PAGE_W, 80).fill("#0f172a");
-    doc.fillColor("#ffffff").fontSize(11).font("Helvetica-Bold").text("Integridad del documento", 50, 50, { width: PAGE_W - 20 });
-    doc.fontSize(8).font("Helvetica").fillColor("#94a3b8")
-      .text("El siguiente hash SHA-256 identifica de forma única este informe. Cualquier modificación al archivo altera el hash.", 50, 68, { width: PAGE_W - 20 });
-    doc.fontSize(9).font("Helvetica-Bold").fillColor("#60a5fa")
-      .text(sha256Placeholder || "(hash se calcula al generar el buffer final)", 50, 86, { width: PAGE_W - 20 });
-
-    doc.y = 140;
-    doc.fontSize(9).fillColor("#64748b").font("Helvetica")
-      .text(`Generado automáticamente por el sistema FAM SPI`, 40, doc.y, { align: "center", width: PAGE_W })
-      .text(`${generatedAtStr}  ·  ${period}`, { align: "center", width: PAGE_W });
 
     // Page numbers
     const pageCount = doc.bufferedPageRange().count;
     for (let i = 0; i < pageCount; i++) {
       doc.switchToPage(i);
       doc.fontSize(7).fillColor("#94a3b8").font("Helvetica")
-        .text(`Página ${i + 1} de ${pageCount}  ·  FAM SPI Cronograma TI`, 40, 820, {
-          width: PAGE_W,
+        .text(`Página ${i + 1} de ${pageCount}  |  FAM SPI  |  Documento generado automáticamente`, LEFT, PAGE_HEIGHT - 47, {
+          width: CONTENT_W,
           align: "center",
           lineBreak: false,
         });
@@ -352,7 +310,6 @@ async function generateAndStoreMaintenanceReport({ year, month, periodType = "an
     periodLabel,
     generatedAt,
     generatedByName,
-    sha256Placeholder: null,
   });
 
   const sha256 = computeSha256HexFromBuffer(pdfBuffer);
@@ -515,6 +472,5 @@ module.exports = {
   ensureReportsTable,
   getReportByPeriod,
   downloadReportPdfFromDrive,
+  __testables: { buildPdf, fetchReportData, getAssetAudience, normalizeReportPeriod },
 };
-
-

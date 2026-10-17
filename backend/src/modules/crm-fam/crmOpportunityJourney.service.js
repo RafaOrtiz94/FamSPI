@@ -9,8 +9,9 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { MANAGER_OR_ADMIN_ROLES } = require("./crm.constants");
-const { ensureLinkColumns } = require("./crmPurchaseSync.service");
-const { buildJourney } = require("./crmOpportunityJourney.rules");
+const { ensureLinkColumns, STAGE_NAMES, upsertOpportunityStage } = require("./crmPurchaseSync.service");
+const { buildJourney, stageForJourney } = require("./crmOpportunityJourney.rules");
+const { rankNextActions } = require("./crmNextActions.rules");
 
 const MANAGER_ROLES = new Set(MANAGER_OR_ADMIN_ROLES);
 const MAX_IDS = 500;
@@ -201,4 +202,91 @@ const getJourney = async (opportunityId, user) => {
   return { ...journey, events };
 };
 
-module.exports = { listJourneys, getJourney };
+// Reclasifica las oportunidades abiertas cuya fase quedo por detras del avance real de su
+// expediente (uso: script de backfill). Solo avanza, nunca retrocede ni cierra.
+const reclassifyOpenOpportunities = async ({ dryRun = true } = {}) => {
+  const normalize = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+  const [{ rows: opps }, { rows: stages }] = await Promise.all([
+    db.query(`SELECT id, stage_id FROM crm.crm_opportunities WHERE status = 'open' AND deleted_at IS NULL`),
+    db.query(`SELECT id, name, order_index FROM crm.crm_pipeline_stages WHERE is_active = true`),
+  ]);
+  const stageById = new Map(stages.map((s) => [s.id, s]));
+  const stageByName = new Map(stages.map((s) => [normalize(s.name), s]));
+  const summary = { total: opps.length, withJourney: 0, moved: 0, moves: {}, dryRun };
+  if (!opps.length) return summary;
+
+  const byOpp = await collect(opps.map((o) => o.id));
+  for (const opp of opps) {
+    const journey = buildJourney(byOpp.get(opp.id));
+    const key = stageForJourney(journey);
+    if (!key) continue;
+    summary.withJourney += 1;
+    const target = STAGE_NAMES[key].map((name) => stageByName.get(normalize(name))).find(Boolean);
+    const current = stageById.get(opp.stage_id) || null;
+    if (!target || (current && Number(current.order_index) >= Number(target.order_index))) continue;
+    const label = `${current ? current.name : "Sin fase"} → ${target.name}`;
+    summary.moves[label] = (summary.moves[label] || 0) + 1;
+    summary.moved += 1;
+    if (!dryRun) await upsertOpportunityStage(opp.id, STAGE_NAMES[key], null);
+  }
+  return summary;
+};
+
+// Oportunidades abiertas cuyo unico expediente es un Business Case que quedo no factible: se cierran
+// como perdidas (uso: script de backfill; los casos nuevos los cierra syncBusinessCaseNotFeasible).
+const closeNotFeasibleOpportunities = async ({ dryRun = true } = {}) => {
+  const { rows: opps } = await db.query(
+    `SELECT id FROM crm.crm_opportunities WHERE status = 'open' AND deleted_at IS NULL`,
+  );
+  const summary = { reviewed: opps.length, closed: 0, dryRun };
+  if (!opps.length) return summary;
+  const byOpp = await collect(opps.map((o) => o.id));
+  const ids = opps.map((o) => o.id).filter((id) => {
+    const journey = buildJourney(byOpp.get(id));
+    const feasibility = journey?.milestones.find((m) => m.key === "factibilidad");
+    return journey?.reference?.type === "business_case" && feasibility?.state === "blocked";
+  });
+  summary.closed = ids.length;
+  if (dryRun || !ids.length) return summary;
+  await db.query(
+    `UPDATE crm.crm_opportunities
+        SET status = 'lost',
+            lost_reason_detail = COALESCE(lost_reason_detail, 'Business Case no factible'),
+            actual_close_date = COALESCE(actual_close_date, now()::date),
+            updated_at = now()
+      WHERE id = ANY($1::uuid[]) AND status = 'open'`,
+    [ids],
+  );
+  return summary;
+};
+
+// Siguiente mejor acción: oportunidades abiertas del usuario (o del equipo, si es manager y lo
+// pide) ordenadas por urgencia, con el motivo y la acción sugerida (crmNextActions.rules.js).
+const listNextActions = async ({ scope, limit } = {}, user) => {
+  const team = scope === "team" && MANAGER_ROLES.has(user.role);
+  const params = [];
+  let owner = "";
+  if (!team) { params.push(user.id); owner = "AND o.owner_user_id = $1"; }
+  const { rows } = await db.query(
+    `SELECT o.id, o.name, o.account_id, a.account_name, o.estimated_amount, o.estimated_close_date,
+            u.fullname AS owner_name, s.name AS stage_name, bs.status AS blue_sheet_status,
+            GREATEST(0, FLOOR(EXTRACT(EPOCH FROM now() - COALESCE((to_jsonb(o)->>'stage_entered_at')::timestamptz, o.updated_at, o.created_at)) / 86400))::int AS days_in_stage,
+            (SELECT COUNT(*) FROM crm.crm_activities act WHERE act.opportunity_id = o.id AND act.status = 'scheduled')::int AS pending_activities
+       FROM crm.crm_opportunities o
+       LEFT JOIN crm.crm_accounts a ON a.id = o.account_id
+       LEFT JOIN crm.crm_pipeline_stages s ON s.id = o.stage_id
+       LEFT JOIN public.users u ON u.id = o.owner_user_id
+       LEFT JOIN crm.crm_blue_sheets bs ON bs.opportunity_id = o.id
+      WHERE o.status = 'open' AND o.deleted_at IS NULL ${owner}
+      ORDER BY o.updated_at DESC
+      LIMIT 500`,
+    params,
+  );
+  if (!rows.length) return { scope: team ? "team" : "mine", total_open: 0, items: [] };
+  const byOpp = await collect(rows.map((r) => r.id));
+  const opportunities = rows.map((r) => ({ ...r, journey: buildJourney(byOpp.get(r.id)) }));
+  const max = Math.min(Math.max(Number(limit) || 12, 1), 50);
+  return { scope: team ? "team" : "mine", total_open: rows.length, items: rankNextActions(opportunities, { limit: max }) };
+};
+
+module.exports = { listJourneys, getJourney, reclassifyOpenOpportunities, listNextActions, closeNotFeasibleOpportunities };

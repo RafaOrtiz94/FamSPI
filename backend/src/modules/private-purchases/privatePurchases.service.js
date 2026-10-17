@@ -1863,6 +1863,11 @@ class PrivatePurchasesService {
       [PRIVATE_PURCHASE_STATES.PRICE_IMPROVEMENT_REQUESTED]: [crmPurchaseSyncService.STAGE_NAMES.NEGOTIATION, null],
       [PRIVATE_PURCHASE_STATES.PENDING_CLIENT_SIGNATURE]: [crmPurchaseSyncService.STAGE_NAMES.ACCEPTANCE, null],
       [PRIVATE_PURCHASE_STATES.REJECTED]: [crmPurchaseSyncService.STAGE_NAMES.CLOSED_LOST, 'lost'],
+      // Contrato cerrado: la oportunidad pasa a la fase de entrega.
+      [PRIVATE_PURCHASE_STATES.DELIVERY_DATES_REQUESTED]: [crmPurchaseSyncService.STAGE_NAMES.DELIVERY, null],
+      [PRIVATE_PURCHASE_STATES.WAITING_DISPATCH]: [crmPurchaseSyncService.STAGE_NAMES.DELIVERY, null],
+      [PRIVATE_PURCHASE_STATES.DISPATCH_READY]: [crmPurchaseSyncService.STAGE_NAMES.DELIVERY, null],
+      [PRIVATE_PURCHASE_STATES.DELIVERY_ACT_GENERATED]: [crmPurchaseSyncService.STAGE_NAMES.DELIVERY, null],
     }[toState];
     if (crmStage) {
       try {
@@ -4074,7 +4079,8 @@ class PrivatePurchasesService {
     // Transicià¸£à¸“n final
     await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.DELIVERED, user, 'Entrega completada exitosamente');
     try {
-      await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmPurchaseSyncService.STAGE_NAMES.CLOSED_WON, user, 'won');
+      // Equipo entregado: sigue abierta en "Control de consumibles" hasta que exista su expediente.
+      await crmPurchaseSyncService.syncPrivatePurchaseStage(purchaseId, crmPurchaseSyncService.STAGE_NAMES.CONSUMABLES, user);
     } catch (crmSyncError) {
       logger.warn({ crmSyncError, purchaseId }, 'No se pudo sincronizar cierre ganado de compra privada con CRM');
     }

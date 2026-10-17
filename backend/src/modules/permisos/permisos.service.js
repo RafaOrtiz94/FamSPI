@@ -190,6 +190,24 @@ function getActorRoleCandidates(actor = {}) {
   return Array.from(roles);
 }
 
+function buildCurrentRequesterActor(tokenUser = {}, requesterIdentity = null) {
+  if (!requesterIdentity?.role) return tokenUser;
+
+  return {
+    ...tokenUser,
+    id: requesterIdentity.id ?? resolveActorId(tokenUser),
+    email: requesterIdentity.email || tokenUser?.email,
+    role: requesterIdentity.role,
+    department_id: requesterIdentity.department_id ?? tokenUser?.department_id ?? null,
+    // Estos claims pueden pertenecer a un JWT emitido antes de un cambio de rol.
+    // La asignacion debe usar exclusivamente el rol vigente consultado en Neon.
+    scope: null,
+    role_name: null,
+    rol: null,
+    department: null,
+  };
+}
+
 function usesExternalCoordinationFlow(actor = {}) {
   return getActorRoleCandidates(actor).some((role) => EXTERNAL_COORDINATION_ROLES.has(role));
 }
@@ -434,6 +452,8 @@ async function getUserIdentity(userId) {
       `SELECT
           u.id,
           u.email,
+          u.role,
+          u.department_id,
           COALESCE(NULLIF(u.fullname, ''), NULLIF(u.name, ''), u.email) AS fullname,
           cp.profile->'personal'->>'cedula' AS cedula,
           cp.profile->'laboral'->>'sueldo' AS salary
@@ -449,6 +469,8 @@ async function getUserIdentity(userId) {
       `SELECT
           u.id,
           u.email,
+          u.role,
+          u.department_id,
           COALESCE(NULLIF(u.fullname, ''), NULLIF(u.name, ''), u.email) AS fullname,
           NULL::text AS cedula,
           NULL::text AS salary
@@ -2753,13 +2775,14 @@ async function createSolicitud({ body, user, files = [], meta }) {
   const famSignConsentText =
     consentTextFromUi ||
     `Acepto el uso de FamSign para firma y validacion del workflow de esta solicitud (${consentVersion}).`;
-  const externalCoordinationFlow = usesExternalCoordinationFlow(user);
+  const requesterActor = buildCurrentRequesterActor(user, requesterIdentity);
+  const externalCoordinationFlow = usesExternalCoordinationFlow(requesterActor);
   const externalCoordinationFile = pickExternalCoordinationFile(files);
   let approverResolution = null;
   let approverUser = null;
 
   if (!externalCoordinationFlow) {
-    const preferredApproverRoles = buildPreferredApproverRoles(user);
+    const preferredApproverRoles = buildPreferredApproverRoles(requesterActor);
     approverResolution = await resolveApproverWithFallback(preferredApproverRoles);
     payload.approver_role = approverResolution.approverRole;
     approverUser = approverResolution.approverUser;
@@ -2767,7 +2790,7 @@ async function createSolicitud({ body, user, files = [], meta }) {
     payload.approver_email = approverUser?.email || null;
     logger.info(
       {
-        requesterRoles: getActorRoleCandidates(user),
+        requesterRoles: getActorRoleCandidates(requesterActor),
         preferredApproverRoles,
         resolvedApproverRole: payload.approver_role,
         resolvedApproverEmail: payload.approver_email,
@@ -3154,7 +3177,7 @@ async function createSolicitud({ body, user, files = [], meta }) {
       payload.approver_role,
       payload.approver_user_id,
       payload.approver_email,
-      user?.department_id || null,
+      requesterIdentity?.department_id ?? user?.department_id ?? null,
       payload.tipo_solicitud,
       payload.tipo_permiso || null,
       payload.subtipo_calamidad || null,
@@ -6975,4 +6998,6 @@ module.exports = {
   resolverRegularizacion,
   convertirAVacaciones,
   computeBusinessMinutesElapsed,
+  buildCurrentRequesterActor,
+  buildPreferredApproverRoles,
 };

@@ -639,7 +639,7 @@ const InvestmentsSection = ({ businessCase = {}, permissions = {}, ownership = {
             <div>
               <p className="text-sm font-bold text-blue-950">Este BC no requiere inversiones adicionales</p>
               <p className="mt-1 text-xs leading-5 text-blue-800">
-                Si no se necesita ningun item, cierra esta seccion. Tambien se cerraran automaticamente precios operativos y financieros porque no aplican.
+                Si no se necesita ningun item, cierra esta seccion. Tambien se cerraran automaticamente los precios de inversiones porque no aplican.
               </p>
             </div>
             <button

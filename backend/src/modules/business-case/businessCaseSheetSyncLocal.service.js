@@ -1336,6 +1336,7 @@ function loadTemplateDefinition() {
     throw error;
   }
 
+  const loadStartedAt = Date.now();
   const workbook = XLSX.readFile(templatePath, { raw: false, cellFormula: true });
   const bcSheet = workbook.Sheets.BC;
   const mappingDefinition = loadMappingDefinition();
@@ -1353,6 +1354,11 @@ function loadTemplateDefinition() {
     equipmentSheets,
     allSheetNames: workbook.SheetNames.slice(),
   };
+  // Leer la plantilla bloquea el proceso varios segundos: dejar constancia de cada carga real.
+  logger.info(
+    { ms: Date.now() - loadStartedAt, caller: String(new Error().stack || "").split("\n").slice(2, 5).map((line) => line.trim()) },
+    "[SheetGen] Plantilla de Sheets cargada desde disco",
+  );
   return templateCache;
 }
 
@@ -2346,6 +2352,7 @@ async function syncBusinessCaseToGoogleSheet({ businessCase, outputFolderId, pay
       buildValueRange(`BC!${smartObjectiveCell}`, payload.fields.SmartObjective || ""),
     ]);
   }
+  await finalizeBusinessCaseTab(spreadsheet.spreadsheetId, template);
 
   return {
     sheetId: spreadsheet.spreadsheetId,
@@ -2361,6 +2368,96 @@ async function syncBusinessCaseToGoogleSheet({ businessCase, outputFolderId, pay
     previous_sheet_preserved: spreadsheet.previousPreserved === true,
     previous_sheet_preservation_reason: spreadsheet.previousPreservationReason || null,
   };
+}
+
+// ─── Remates de la pestana BC: subtotal de inversiones y formato de numeros ───
+const SHEET_CURRENCY_PATTERN = '"$"#,##0.00';
+const SHEET_PERCENT_PATTERN = "0.##%";
+const INVESTMENT_SUBTOTAL_SEARCH_ROWS = 8;
+
+function splitCellAddress(cell) {
+  const match = /^([A-Z]+)(\d+)$/.exec(String(cell || "").trim().toUpperCase());
+  if (!match) return null;
+  const columnIndex = match[1].split("").reduce((acc, letter) => (acc * 26) + (letter.charCodeAt(0) - 64), 0) - 1;
+  return { column: match[1], columnIndex, row: Number(match[2]) };
+}
+
+// Fila "Sub total" del bloque de inversiones. En la plantilla la celda de la columna Total trae
+// el texto fijo "$ -" (no una formula), asi que nunca sumaba. Se busca la etiqueta justo debajo
+// del bloque en la hoja real (no se asume la fila) y se escribe la suma de la columna Total:
+// las filas de la plantilla mas las filas dinamicas de inversiones nuevas.
+// La formula usa "+" entre rangos y no "," o ";" para no depender del idioma de la hoja.
+async function syncInvestmentSubtotal(sheetId, template) {
+  const rowNumbers = [...(template.bc.objectiveRows || new Map()).values()];
+  if (!rowNumbers.length) return null;
+  const firstRow = Math.min(...rowNumbers);
+  const lastRow = Math.max(...rowNumbers);
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `BC!A${lastRow + 1}:F${lastRow + INVESTMENT_SUBTOTAL_SEARCH_ROWS}`,
+  });
+  const rows = data?.values || [];
+  const offset = rows.findIndex((row) => (row || []).slice(0, 5).some((cell) => normalizeText(String(cell || "")) === "sub total"));
+  if (offset < 0) return null;
+  const subtotalRow = lastRow + 1 + offset;
+  const dynamicEnd = DYNAMIC_INVESTMENTS_START_ROW + DYNAMIC_INVESTMENTS_CLEAR_ROWS - 1;
+  const formula = `=SUM(F${firstRow}:F${lastRow})+SUM(F${DYNAMIC_INVESTMENTS_START_ROW}:F${dynamicEnd})`;
+  await writeRanges(sheetId, [{ range: `BC!F${subtotalRow}`, values: [[formula]] }]);
+  return { row: subtotalRow, cell: `F${subtotalRow}`, formula };
+}
+
+// Formato de numero de celdas de la pestana BC (moneda, porcentaje). Se aplica el formato a la
+// celda en vez de escribir "$" o "%" como texto: asi el valor sigue siendo un numero y no depende
+// del separador decimal del idioma de la hoja.
+async function applyBusinessCaseNumberFormats(sheetId, formats = []) {
+  const targets = formats
+    .map((item) => ({ ...item, address: splitCellAddress(item.cell) }))
+    .filter((item) => item.address && item.pattern);
+  if (!targets.length) return 0;
+  const { sheetMap } = await getSpreadsheetMeta(sheetId);
+  const tabId = sheetMap.get("BC");
+  if (tabId === undefined || tabId === null) return 0;
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: {
+      requests: targets.map((item) => ({
+        repeatCell: {
+          range: {
+            sheetId: tabId,
+            startRowIndex: item.address.row - 1,
+            endRowIndex: item.address.row,
+            startColumnIndex: item.address.columnIndex,
+            endColumnIndex: item.address.columnIndex + 1,
+          },
+          cell: { userEnteredFormat: { numberFormat: { type: item.type, pattern: item.pattern } } },
+          fields: "userEnteredFormat.numberFormat",
+        },
+      })),
+    },
+  });
+  return targets.length;
+}
+
+// Deja la pestana BC presentable tras escribir: subtotal de inversiones con su formula, y moneda
+// / porcentaje en presupuesto referencial, porcentaje de canje y subtotal. No es critico: si
+// falla se registra y la sincronizacion principal se da por buena.
+async function finalizeBusinessCaseTab(sheetId, template, { subtotal = true, generalFormats = true } = {}) {
+  const result = { subtotal: null, formatted: 0 };
+  try {
+    if (subtotal) result.subtotal = await syncInvestmentSubtotal(sheetId, template);
+    const fieldCells = template.bc.fieldCells || {};
+    const formats = [];
+    if (generalFormats) {
+      formats.push({ cell: fieldCells.PresupuestoReferencial, type: "CURRENCY", pattern: SHEET_CURRENCY_PATTERN });
+      formats.push({ cell: fieldCells.PorcentajeMaximoCanje, type: "PERCENT", pattern: SHEET_PERCENT_PATTERN });
+    }
+    if (result.subtotal) formats.push({ cell: result.subtotal.cell, type: "CURRENCY", pattern: SHEET_CURRENCY_PATTERN });
+    result.formatted = await applyBusinessCaseNumberFormats(sheetId, formats);
+  } catch (error) {
+    logger.warn({ error: error?.message || String(error), sheetId }, "[SheetGen] no se pudo aplicar subtotal/formatos de la pestana BC");
+    result.error = error?.message || String(error);
+  }
+  return result;
 }
 
 // Sync puntual de precios: escribe solo el bloque de inversiones en la hoja
@@ -2450,7 +2547,69 @@ async function syncInvestmentsToGoogleSheet({ sheetId, inversiones = {}, backup 
   const { updates, clears } = buildInvestmentRanges(template, inversiones, { currentRows, otrosRowCount });
   await clearRanges(sheetId, clears);
   await writeRanges(sheetId, updates);
-  return { sheetId, updated_ranges: updates.length, backup: backupFile };
+  const finishing = await finalizeBusinessCaseTab(sheetId, template, { generalFormats: false });
+  return { sheetId, updated_ranges: updates.length, backup: backupFile, subtotal: finishing.subtotal };
+}
+
+// Sync puntual de Datos Generales: escribe solo las celdas de esos campos en la pestana BC de la
+// hoja ya existente. No crea, recrea ni poda pestanas, ni toca otros bloques.
+// Garantia antes de escribir (si falla, no se escribe nada): la etiqueta de la columna A de cada
+// fila en la hoja real corresponde al campo que se va a escribir. Si alguien inserto o borro
+// filas, escribir desplazado pisaria otros datos.
+// `fields` debe traer TODOS los campos a sincronizar; un valor vacio limpia la celda.
+async function syncGeneralFieldsToGoogleSheet({ sheetId, fields = {}, backup = false }) {
+  if (!jwtClient) {
+    const error = new Error("Google JWT Client no inicializado para sincronizar Business Case a Sheets");
+    error.code = "GOOGLE_AUTH_UNAVAILABLE";
+    error.status = 500;
+    throw error;
+  }
+  const template = loadTemplateDefinition();
+  const fieldCells = template.bc.fieldCells || {};
+  const targets = Object.keys(fields)
+    .map((fieldKey) => {
+      const cell = fieldCells[fieldKey];
+      const match = /^([A-Z]+)(\d+)$/.exec(String(cell || ""));
+      return match ? { fieldKey, cell, row: Number(match[2]) } : null;
+    })
+    .filter(Boolean);
+  if (!targets.length) return { sheetId, updated_ranges: 0, backup: null, skipped_fields: Object.keys(fields) };
+
+  const firstRow = Math.min(...targets.map((target) => target.row));
+  const lastRow = Math.max(...targets.map((target) => target.row));
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `BC!A${firstRow}:A${lastRow}`,
+  });
+  const labels = data?.values || [];
+  const mismatches = [];
+  targets.forEach((target) => {
+    const found = String(labels[target.row - firstRow]?.[0] || "");
+    const normalized = normalizeText(found);
+    const labelField = normalized.includes("porque es importante ganar este proceso")
+      ? "SmartObjective"
+      : BC_LABEL_FIELD_MAP.get(normalized);
+    if (labelField !== target.fieldKey) mismatches.push({ row: target.row, field: target.fieldKey, found });
+  });
+  if (mismatches.length) {
+    throw syncGuardError(
+      "La hoja no coincide con la plantilla (filas de datos generales desplazadas o distintas); no se escribio nada",
+      "SHEET_TEMPLATE_LAYOUT_MISMATCH",
+      { mismatches: mismatches.slice(0, 10), total_mismatches: mismatches.length },
+    );
+  }
+
+  const backupFile = backup ? await backupSpreadsheet(sheetId) : null;
+  const ranges = targets.map((target) => `BC!${target.cell}`);
+  await clearRanges(sheetId, ranges);
+  await writeRanges(sheetId, targets.map((target) => buildValueRange(`BC!${target.cell}`, fields[target.fieldKey] ?? "")));
+  await finalizeBusinessCaseTab(sheetId, template, { subtotal: false });
+  return {
+    sheetId,
+    updated_ranges: targets.length,
+    backup: backupFile,
+    skipped_fields: Object.keys(fields).filter((fieldKey) => !fieldCells[fieldKey]),
+  };
 }
 
 function clearSheetCaches() {
@@ -2481,6 +2640,9 @@ module.exports = {
   protectSpreadsheetAfterMaximumQuantitiesSync,
   syncBusinessCaseToGoogleSheet,
   syncInvestmentsToGoogleSheet,
+  syncGeneralFieldsToGoogleSheet,
+  syncInvestmentSubtotal,
+  applyBusinessCaseNumberFormats,
   buildInvestmentRanges,
   clearSheetCaches,
   resolveTemplatePath,

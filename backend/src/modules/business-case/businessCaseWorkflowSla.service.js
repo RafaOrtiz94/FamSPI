@@ -503,25 +503,14 @@ function buildPersonalPendingTasks({ role, metadata = {}, consumptionItems = [],
       tasks.push({
         key: "financial_investment_values",
         label: "Registrar valores financieros de las inversiones",
-        detail: "Completa los precios financieros de las inversiones seleccionadas.",
+        detail: "Completa el precio unitario de las inversiones seleccionadas.",
         sheetRequired: false,
       });
     }
   }
 
-  if (normalizedRole === "jefe_operaciones") {
-    const missingValues = selectedInvestments.some(
-      (item) => item.unit_price === null || item.unit_price === undefined,
-    );
-    if (missingValues) {
-      tasks.push({
-        key: "operational_investment_values",
-        label: "Registrar valores operativos de las inversiones",
-        detail: "Completa los precios operativos de las inversiones seleccionadas.",
-        sheetRequired: false,
-      });
-    }
-  }
+  // El precio operativo se elimino (2026-10): jefe_operaciones ya no tiene valores que registrar.
+  // Las inversiones llevan un solo precio unitario, que registra jefe_financiero.
 
   return tasks;
 }
@@ -547,11 +536,8 @@ function isParticipantStageComplete({ role, metadata = {}, investments = [] }) {
     );
   }
 
-  if (normalizedRole === "jefe_operaciones") {
-    return selectedInvestments.every(
-      (item) => item.unit_price !== null && item.unit_price !== undefined,
-    );
-  }
+  // Sin precio operativo no queda etapa de valores para jefe_operaciones.
+  if (normalizedRole === "jefe_operaciones") return true;
 
   if (normalizedRole === "jefe_comercial") {
     return Boolean(getFeasibilityDecision(metadata));

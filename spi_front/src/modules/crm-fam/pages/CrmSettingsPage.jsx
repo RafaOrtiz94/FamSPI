@@ -17,7 +17,7 @@ import { useUrlState } from "../ui/useUrlState";
 
 // Fases de las que depende la sincronización con Business Case y compras, y el cálculo de "vendido".
 // Su nombre no debe cambiarse (crmPurchaseSync.service.js las busca por nombre exacto).
-const LOCKED_STAGE_NAMES = ["Análisis de la oportunidad", "Desarrollo de la oferta", "Presentación de la oferta", "Negociación", "Aceptación o rechazo", "Contratos"];
+const LOCKED_STAGE_NAMES = ["Análisis de la oportunidad", "Desarrollo de la oferta", "Presentación de la oferta", "Negociación", "Aceptación o rechazo", "Contratos", "Entrega e instalación", "Control de consumibles"];
 
 const num = (value, fallback = 0) => (value === "" || value === null || value === undefined ? fallback : Number(value));
 

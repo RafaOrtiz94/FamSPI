@@ -1,0 +1,1939 @@
+const fs = require("fs");
+const path = require("path");
+
+const db = require("../../config/db");
+const logger = require("../../config/logger");
+const { logAction } = require("../../utils/audit");
+const { ensureFolder, replaceTags, exportPdf } = require("../../utils/drive");
+const { drive } = require("../../config/google");
+const notificationManager = require("../notifications/notificationManager");
+
+const DRIVE_ROOT_FOLDER_ID = process.env.DRIVE_ROOT_FOLDER_ID;
+const ANNUAL_ALLOWANCE = 15;
+const MAX_ANNUAL_ALLOWANCE = 30;
+const HOURS_PER_VACATION_DAY = 8;
+const SPECIAL_VACATION_OPENING_BALANCES = {
+  "aura.jimenez@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 23,
+  },
+  "kevin.loor@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 15,
+  },
+  "daniel.fiallos@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 25,
+  },
+  "luisao.escobar@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 23,
+  },
+  "lizbeth.rivadeneira@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 15,
+  },
+  "ilsy.ramirez@fam-project.com": {
+    effectiveDate: "2026-06-25",
+    openingRemainingDays: 14,
+  },
+};
+const TEMPLATE_PATH = path.join(__dirname, "../../data/plantillas/Vacation_Format.docx");
+const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+
+let _vacacionesTableReady = false;
+async function ensureTable() {
+  if (_vacacionesTableReady) return;
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS vacaciones_solicitudes (
+      id SERIAL PRIMARY KEY,
+      requester_id INTEGER NOT NULL,
+      approver_id INTEGER,
+      approver_role TEXT,
+      department_id INTEGER,
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      return_date DATE NOT NULL,
+      period TEXT,
+      days INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'pendiente',
+      drive_doc_id TEXT,
+      drive_pdf_id TEXT,
+      drive_doc_link TEXT,
+      drive_pdf_link TEXT,
+      drive_folder_id TEXT,
+      advance_request BOOLEAN DEFAULT false,
+      advance_eligible_from DATE,
+      created_at TIMESTAMP DEFAULT now(),
+      updated_at TIMESTAMP DEFAULT now()
+    );
+  `);
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS advance_request BOOLEAN DEFAULT false");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS advance_eligible_from DATE");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS allow_negative BOOLEAN DEFAULT false");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS projected_remaining_days DECIMAL(8,2)");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS recovery_date DATE");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS monetary_debt NUMERIC(12,2)");
+  // Bloque 3: columnas para regla de 2 fines de semana, saldo y cruces
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS effective_days DECIMAL(5,2)");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS weekends_consumed SMALLINT NOT NULL DEFAULT 0");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS balance_exceeded BOOLEAN NOT NULL DEFAULT false");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS balance_deficit_days DECIMAL(8,2)");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS date_overlap_warning TEXT");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS source_module TEXT");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS source_request_id INTEGER");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS source_reason TEXT");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ");
+  _vacacionesTableReady = true;
+}
+
+const ROLE_APPROVER = {
+  comercial: "jefe_comercial",
+  acp_comercial: "jefe_comercial",
+  marketing: "jefe_comercial",
+  backoffice_comercial: "jefe_comercial",
+  financiero: "jefe_financiero",
+  finanzas: "jefe_financiero",
+  tecnico: "jefe_tecnico",
+  tecnico_servicio: "jefe_tecnico",
+  ing_servicio: "jefe_servicio",
+  esp_app: "jefe_servicio",
+  ing_servicio_ext: "jefe_servicio",
+  esp_app_ext: "jefe_servicio",
+  logistica: "jefe_logistica",
+  operaciones: "jefe_operaciones",
+  calidad: "jefe_calidad",
+  talento_humano: "gerencia_general",
+  rrhh: "gerencia_general",
+  rh: "gerencia_general",
+};
+
+const HR_ROLES = ["talento-humano", "talento_humano", "talento humano", "rh", "rrhh"];
+const MGMT_ROLES = ["gerencia_general", "gerente_general"];
+const GERENCIA_GENERAL_ROLES = new Set(["gerencia_general", "gerente_general"]);
+const SPECIAL_JEFE_APPROVERS = {
+  jefe_operaciones: "jefe_financiero",
+  jefe_logistica: "jefe_financiero",
+};
+const PREFERRED_APPROVER_EMAILS = String(process.env.PREFERRED_APPROVER_EMAILS || "")
+  .split(",")
+  .map((value) => String(value || "").trim().toLowerCase())
+  .filter(Boolean);
+const PASSIVE_EMPLOYMENT_STATUSES = new Set(["pasivo", "desvinculado", "inactivo"]);
+
+function resolveDbExecutor(executor) {
+  if (executor && typeof executor.query === "function") return executor;
+  return db;
+}
+
+function roundToTwo(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round((numeric + Number.EPSILON) * 100) / 100;
+}
+
+function normalizeRole(role) {
+  return String(role || "").trim().toLowerCase();
+}
+
+function resolveApproverRole(requesterRole = "") {
+  const normalized = normalizeRole(requesterRole);
+  if (SPECIAL_JEFE_APPROVERS[normalized]) return SPECIAL_JEFE_APPROVERS[normalized];
+  const isJefe = normalized.startsWith("jefe_") || normalized.startsWith("jefe");
+  if (isJefe) return "gerencia_general";
+  return ROLE_APPROVER[normalized] || "gerencia_general";
+}
+
+function getApproverRoleCandidates(user = {}) {
+  const candidates = new Set(
+    [user?.role, user?.scope, user?.role_name, user?.rol]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (candidates.has("gerencia_general")) candidates.add("gerente_general");
+  if (candidates.has("gerente_general")) candidates.add("gerencia_general");
+  return Array.from(candidates);
+}
+
+function expandApproverLookupRoles(role) {
+  const normalized = String(role || "").trim().toLowerCase();
+  const roles = new Set([normalized]);
+  if (normalized === "gerencia_general" || normalized === "gerente_general") {
+    roles.add("gerencia_general");
+    roles.add("gerente_general");
+  }
+  if (normalized === "jefe_financiero" || normalized === "jefe_finanzas") {
+    roles.add("jefe_financiero");
+    roles.add("jefe_finanzas");
+  }
+  return Array.from(roles).filter(Boolean);
+}
+
+function diffDaysInclusive(start, end) {
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  const diff = Math.round((endDate - startDate) / (1000 * 60 * 60 * 24));
+  return diff >= 0 ? diff + 1 : 0;
+}
+
+function normalizeDateOnly(value) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    const direct = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (direct) return direct[1];
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function getCurrentDateInAppTimezone() {
+  const timeZone = process.env.APP_TIMEZONE || process.env.TZ || "America/Guayaquil";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  if (!year || !month || !day) return normalizeDateOnly(new Date());
+  return `${year}-${month}-${day}`;
+}
+
+async function loadUser(userId) {
+  const { rows } = await db.query(
+    `SELECT u.id, u.email, u.fullname, u.name, u.role, u.department_id, d.name as department_name,
+            cp.profile->'laboral'->>'sueldo' as salary
+       FROM users u
+       LEFT JOIN departments d ON d.id = u.department_id
+       LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
+      WHERE u.id = $1 LIMIT 1`,
+    [userId]
+  );
+  return rows[0];
+}
+
+async function assertRequesterCanCreateTimeOff(userId) {
+  const targetUserId = Number(userId);
+  if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+    const err = new Error("No se pudo resolver el solicitante de vacaciones.");
+    err.status = 400;
+    throw err;
+  }
+
+  const { rows } = await db.query(
+    `SELECT
+        u.id,
+        u.active,
+        cp.profile->'laboral'->>'estatus_empleado' AS estatus_empleado
+      FROM users u
+      LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
+      WHERE u.id = $1
+      LIMIT 1`,
+    [targetUserId]
+  );
+  const row = rows[0];
+  if (!row) {
+    const err = new Error("No se encontró información del solicitante.");
+    err.status = 404;
+    throw err;
+  }
+
+  const employmentStatus = String(row.estatus_empleado || "").trim().toLowerCase();
+  const inactive =
+    row.active === false ||
+    PASSIVE_EMPLOYMENT_STATUSES.has(employmentStatus);
+
+  if (inactive) {
+    const err = new Error(
+      "Tu usuario se encuentra en estado pasivo/inactivo y no puede crear solicitudes de permisos o vacaciones."
+    );
+    err.status = 403;
+    err.code = "COLLABORATOR_INACTIVE";
+    throw err;
+  }
+}
+
+async function getHireDate(userId, executor = db) {
+  const queryExecutor = resolveDbExecutor(executor);
+  const { rows } = await queryExecutor.query(
+    `SELECT cp.profile->'laboral'->>'fecha_ingreso' AS fecha_ingreso
+       FROM collaborator_profiles cp
+      WHERE cp.user_id = $1
+      LIMIT 1`,
+    [userId]
+  );
+  return rows[0]?.fecha_ingreso || null;
+}
+
+const normalizeDate = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+};
+
+const calculateYearsOfService = (hireDate, asOfDate) => {
+  if (!hireDate || !asOfDate) return 0;
+  let years = asOfDate.getFullYear() - hireDate.getFullYear();
+  const anniversary = new Date(hireDate.getTime());
+  anniversary.setFullYear(hireDate.getFullYear() + years);
+  if (asOfDate < anniversary) years -= 1;
+  return Math.max(years, 0);
+};
+
+const computeVacationAllowance = (hireDateValue, asOfValue = new Date()) => {
+  const hireDate = normalizeDate(hireDateValue);
+  const asOfDate = normalizeDate(asOfValue) || new Date();
+  if (!hireDate) {
+    return {
+      allowance: 0,
+      tenureYears: 0,
+      eligible: false,
+      eligibleFrom: null,
+      missingHireDate: true,
+    };
+  }
+
+  const tenureYears = calculateYearsOfService(hireDate, asOfDate);
+  if (tenureYears < 1) {
+    const eligibleFrom = new Date(hireDate.getTime() + ONE_YEAR_MS);
+    return {
+      allowance: 0,
+      tenureYears,
+      eligible: false,
+      eligibleFrom: eligibleFrom.toISOString().split("T")[0],
+      accruedThisYear: false,
+      missingHireDate: false,
+    };
+  }
+
+  const anniversaryThisYear = new Date(hireDate.getTime());
+  anniversaryThisYear.setFullYear(asOfDate.getFullYear());
+  const accruedThisYear = asOfDate >= anniversaryThisYear;
+  const eligibleFrom = anniversaryThisYear.toISOString().split("T")[0];
+  if (!accruedThisYear) {
+    return {
+      allowance: 0,
+      tenureYears,
+      eligible: true,
+      eligibleFrom,
+      accruedThisYear: false,
+      missingHireDate: false,
+    };
+  }
+
+  const yearsAtAnniversary = calculateYearsOfService(hireDate, anniversaryThisYear);
+  const extra = yearsAtAnniversary > 5 ? yearsAtAnniversary - 5 : 0;
+  return {
+    allowance: Math.min(ANNUAL_ALLOWANCE + extra, MAX_ANNUAL_ALLOWANCE),
+    tenureYears,
+    eligible: true,
+    eligibleFrom,
+    accruedThisYear: true,
+    missingHireDate: false,
+  };
+};
+
+function getSpecialVacationOpeningProfile(userEmail, asOfValue = new Date()) {
+  const normalizedEmail = String(userEmail || "").trim().toLowerCase();
+  const profile = SPECIAL_VACATION_OPENING_BALANCES[normalizedEmail];
+  if (!profile) return null;
+  const effectiveDate = normalizeDateOnly(profile.effectiveDate);
+  const asOfDate = normalizeDateOnly(asOfValue);
+  if (!effectiveDate || !asOfDate || asOfDate < effectiveDate) return null;
+  return profile;
+}
+
+function computeSpecialVacationAccrualFromOpening(hireDateValue, effectiveDateValue, asOfValue = new Date()) {
+  const hireDate = normalizeDate(hireDateValue);
+  const effectiveDate = normalizeDate(effectiveDateValue);
+  const asOfDate = normalizeDate(asOfValue) || new Date();
+  if (!hireDate || !effectiveDate || !asOfDate || asOfDate <= effectiveDate) return 0;
+
+  let accrued = 0;
+  for (let year = effectiveDate.getFullYear(); year <= asOfDate.getFullYear(); year += 1) {
+    const anniversary = new Date(hireDate.getTime());
+    anniversary.setFullYear(year);
+    if (anniversary > effectiveDate && anniversary <= asOfDate) {
+      accrued += computeVacationAllowance(hireDateValue, anniversary).allowance;
+    }
+  }
+
+  return roundToTwo(accrued);
+}
+
+async function getHistoricVacationBalance({ userId, userEmail, year }, executor = db) {
+  const queryExecutor = resolveDbExecutor(executor);
+  const yearValue = Number(year);
+  if (!Number.isFinite(yearValue)) return 0;
+  try {
+    if (userId) {
+      const { rows } = await queryExecutor.query(
+        `SELECT COALESCE(SUM(dias), 0) AS total
+           FROM vacaciones_saldos_historicos
+          WHERE anio = $1
+            AND (user_id = $2 OR LOWER(user_email) = LOWER($3))`,
+        [yearValue, userId, userEmail || ""]
+      );
+      return Number(rows[0]?.total || 0);
+    }
+    if (userEmail) {
+      const { rows } = await queryExecutor.query(
+        `SELECT COALESCE(SUM(dias), 0) AS total
+           FROM vacaciones_saldos_historicos
+          WHERE anio = $1
+            AND LOWER(user_email) = LOWER($2)`,
+        [yearValue, userEmail]
+      );
+      return Number(rows[0]?.total || 0);
+    }
+  } catch (error) {
+    if (error?.code !== "42P01") throw error;
+  }
+  return 0;
+}
+
+async function findApprover(targetRole) {
+  if (!targetRole) return null;
+  const roleCandidates = expandApproverLookupRoles(targetRole);
+  if (!roleCandidates.length) return null;
+  const { rows } = await db.query(
+    `SELECT id
+       FROM users
+      WHERE LOWER(COALESCE(role, '')) = ANY($1::text[]) AND active = true
+      ORDER BY
+        CASE
+          WHEN LOWER(COALESCE(email, '')) = ANY($2) THEN 0
+          WHEN LOWER(COALESCE(email, '')) LIKE 'administrador@%' THEN 2
+          ELSE 1
+        END,
+        id ASC
+      LIMIT 1`,
+    [roleCandidates, PREFERRED_APPROVER_EMAILS]
+  );
+  return rows[0]?.id || null;
+}
+
+async function findTalentoHumanoUsers() {
+  const { rows } = await db.query(
+    `SELECT id FROM users
+      WHERE LOWER(COALESCE(role, '')) IN ('talento_humano', 'jefe_talento_humano')
+        AND COALESCE(active, true) = true
+      LIMIT 20`
+  );
+  return rows;
+}
+
+async function resolveApproverAssignment(preferredRole) {
+  const normalizedPreferredRole = String(preferredRole || "").trim().toLowerCase();
+  const primaryApproverId = await findApprover(normalizedPreferredRole);
+  if (primaryApproverId) {
+    return {
+      approverId: primaryApproverId,
+      approverRole: normalizedPreferredRole,
+      fallbackApplied: false,
+    };
+  }
+
+  if (GERENCIA_GENERAL_ROLES.has(normalizedPreferredRole)) {
+    return {
+      approverId: null,
+      approverRole: normalizedPreferredRole,
+      fallbackApplied: false,
+    };
+  }
+
+  const fallbackRole = "gerencia_general";
+  const fallbackApproverId = await findApprover(fallbackRole);
+  return {
+    approverId: fallbackApproverId || null,
+    approverRole: fallbackRole,
+    fallbackApplied: true,
+  };
+}
+
+async function computeTakenDays(userId, year, options = {}, executor = db) {
+  const queryExecutor = resolveDbExecutor(executor);
+  const values = [userId, year];
+  let excludeClause = "";
+  let upToClause = "";
+  if (options?.excludeRequestId) {
+    values.push(options.excludeRequestId);
+    excludeClause = ` AND id <> $${values.length}`;
+  }
+  if (options?.upToDate) {
+    values.push(normalizeDateOnly(options.upToDate));
+    upToClause = ` AND start_date <= $${values.length}`;
+  }
+
+  const { rows } = await queryExecutor.query(
+    `SELECT COALESCE(SUM(COALESCE(effective_days, days)), 0) AS total
+       FROM vacaciones_solicitudes
+      WHERE requester_id = $1
+        AND status IN ('aprobado','approved')
+        AND EXTRACT(YEAR FROM start_date) = $2
+        ${excludeClause}
+        ${upToClause}`,
+    values
+  );
+  const vacationDays = Number(rows[0]?.total || 0);
+
+  const legacyValues = [userId, year];
+  let legacyUpToClause = "";
+  if (options?.upToDate) {
+    legacyValues.push(normalizeDateOnly(options.upToDate));
+    legacyUpToClause = ` AND fecha_inicio <= $${legacyValues.length}`;
+  }
+
+  const { rows: legacyRows } = await queryExecutor.query(
+    `SELECT COALESCE(SUM(COALESCE(duracion_dias, 0)), 0) AS total
+       FROM permisos_vacaciones
+      WHERE user_id = $1
+        AND LOWER(COALESCE(tipo_solicitud, '')) = 'vacaciones'
+        AND LOWER(COALESCE(status, '')) IN ('aprobado', 'approved')
+        AND EXTRACT(YEAR FROM fecha_inicio) = $2
+        ${legacyUpToClause}`,
+    legacyValues
+  );
+  const legacyVacationDays = Number(legacyRows[0]?.total || 0);
+  return roundToTwo(vacationDays + legacyVacationDays);
+}
+
+function buildAnniversaryDate(year, month, day) {
+  const maxDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const safeDay = Math.min(day, maxDay);
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`;
+}
+
+function resolveLastAnniversaryDate(hireDateValue, departureDateValue) {
+  const hireDate = normalizeDateOnly(hireDateValue);
+  const departureDate = normalizeDateOnly(departureDateValue);
+  if (!hireDate || !departureDate) return null;
+
+  const [hireYear, hireMonth, hireDay] = hireDate.split("-").map(Number);
+  const [departureYear] = departureDate.split("-").map(Number);
+  if (!hireYear || !hireMonth || !hireDay || !departureYear) return null;
+
+  let anniversary = buildAnniversaryDate(departureYear, hireMonth, hireDay);
+  if (anniversary > departureDate) {
+    anniversary = buildAnniversaryDate(departureYear - 1, hireMonth, hireDay);
+  }
+  if (anniversary < hireDate) return hireDate;
+  return anniversary;
+}
+
+function countElapsedDays(startDateValue, endDateValue) {
+  const startDate = normalizeDateOnly(startDateValue);
+  const endDate = normalizeDateOnly(endDateValue);
+  if (!startDate || !endDate) return 0;
+  const startMs = Date.parse(`${startDate}T00:00:00.000Z`);
+  const endMs = Date.parse(`${endDate}T00:00:00.000Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return 0;
+  return Math.floor((endMs - startMs) / MS_PER_DAY);
+}
+
+/**
+ * Calcula la liquidación proporcional de vacaciones para desvinculación.
+ * Fórmula base: (dias_transcurridos / 365) * 15.
+ *
+ * @param {number} userId
+ * @param {string|Date} departureDate
+ * @param {object} [options]
+ * @param {object} [options.client] Cliente transaccional opcional.
+ * @returns {Promise<object>}
+ */
+async function computeOffboardingLiquidation(userId, departureDate, options = {}) {
+  const queryExecutor = resolveDbExecutor(options?.client || options?.executor);
+  const targetUserId = Number(userId);
+  if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+    const err = new Error("Usuario de liquidacion invalido");
+    err.status = 400;
+    throw err;
+  }
+
+  const departureDateOnly = normalizeDateOnly(departureDate);
+  if (!departureDateOnly) {
+    const err = new Error("Fecha de salida invalida");
+    err.status = 400;
+    throw err;
+  }
+
+  const hireDateValue = await getHireDate(targetUserId, queryExecutor);
+  const hireDateOnly = normalizeDateOnly(hireDateValue);
+  if (!hireDateOnly) {
+    const err = new Error("No se encontro fecha de ingreso del colaborador");
+    err.status = 409;
+    throw err;
+  }
+  if (departureDateOnly < hireDateOnly) {
+    const err = new Error("La fecha de salida no puede ser anterior a la fecha de ingreso");
+    err.status = 400;
+    throw err;
+  }
+
+  const lastAnniversary = resolveLastAnniversaryDate(hireDateOnly, departureDateOnly);
+  const elapsedDays = countElapsedDays(lastAnniversary, departureDateOnly);
+  const proportionalDays = roundToTwo((elapsedDays / 365) * ANNUAL_ALLOWANCE);
+  const periodYear = Number(String(lastAnniversary || departureDateOnly).slice(0, 4));
+
+  const { rows: userRows } = await queryExecutor.query(
+    `SELECT email
+       FROM users
+      WHERE id = $1
+      LIMIT 1`,
+    [targetUserId]
+  );
+  const userEmail = userRows[0]?.email || null;
+
+  const hireYear = Number(String(hireDateOnly).slice(0, 4));
+  let carryOverDays = 0;
+  if (Number.isFinite(hireYear) && Number.isFinite(periodYear) && periodYear > hireYear) {
+    for (let year = hireYear; year < periodYear; year += 1) {
+      carryOverDays += await getHistoricVacationBalance(
+        { userId: targetUserId, userEmail, year },
+        queryExecutor
+      );
+    }
+  }
+  carryOverDays = roundToTwo(carryOverDays);
+
+  const takenDays = roundToTwo(
+    await computeTakenDays(
+      targetUserId,
+      periodYear,
+      { upToDate: departureDateOnly },
+      queryExecutor
+    )
+  );
+  const totalToPay = roundToTwo(Math.max(proportionalDays + carryOverDays - takenDays, 0));
+
+  return {
+    user_id: targetUserId,
+    hire_date: hireDateOnly,
+    departure_date: departureDateOnly,
+    period_year: periodYear,
+    last_anniversary: lastAnniversary,
+    elapsed_days: elapsedDays,
+    proportional_days: proportionalDays,
+    carry_over_days: carryOverDays,
+    taken_days: takenDays,
+    total_to_pay: totalToPay,
+  };
+}
+
+/**
+ * Recalcula saldo disponible de vacaciones contra histórico del colaborador.
+ * Se usa para validar creación y reprogramación bajo la misma regla.
+ */
+async function computeVacationBalanceValidation({
+  userId,
+  userEmail,
+  startDate,
+  requestedDays,
+  hireDateValue = null,
+  excludeRequestId = null,
+}) {
+  const normalizedStartDate = normalizeDateOnly(startDate);
+  const year = new Date(`${normalizedStartDate}T00:00:00.000Z`).getUTCFullYear();
+  const allowanceInfo = computeVacationAllowance(hireDateValue, normalizedStartDate);
+  const specialOpeningProfile = getSpecialVacationOpeningProfile(userEmail, normalizedStartDate);
+  let taken = await computeTakenDays(userId, year, { excludeRequestId });
+  const historicalBalance = await getHistoricVacationBalance({
+    userId,
+    userEmail: userEmail || null,
+    year,
+  });
+  let totalAllowance = allowanceInfo.allowance + historicalBalance;
+  let carryOver = historicalBalance;
+  if (specialOpeningProfile) {
+    const usageSinceOpening = await computeVacationUsageSinceDate({
+      userId,
+      userEmail,
+      startDate: specialOpeningProfile.effectiveDate,
+      excludeVacationRequestId: excludeRequestId,
+    });
+    taken = usageSinceOpening.approved;
+    totalAllowance = roundToTwo(
+      Number(specialOpeningProfile.openingRemainingDays || 0) +
+      computeSpecialVacationAccrualFromOpening(
+        hireDateValue,
+        specialOpeningProfile.effectiveDate,
+        normalizedStartDate
+      )
+    );
+    carryOver = roundToTwo(totalAllowance - allowanceInfo.allowance);
+  }
+  const remaining = totalAllowance - taken; // Puede ser negativo
+  const requested = Number(requestedDays || 0);
+  const projectedRemaining = remaining - requested;
+  const exceedsBalance =
+    allowanceInfo.eligible &&
+    !allowanceInfo.missingHireDate &&
+    projectedRemaining < 0;
+
+  let deficitDays = 0;
+  let deficitHours = 0;
+
+  if (exceedsBalance) {
+    deficitDays = roundToTwo(Math.abs(projectedRemaining));
+    deficitHours = roundToTwo(deficitDays * HOURS_PER_VACATION_DAY);
+  }
+
+  return {
+    year,
+    requested_days: requested,
+    allowance: totalAllowance,
+    allowance_base: allowanceInfo.allowance,
+    carry_over: carryOver,
+    taken,
+    remaining,
+    projected_remaining: projectedRemaining,
+    eligible: allowanceInfo.eligible,
+    eligible_from: allowanceInfo.eligibleFrom,
+    missing_hire_date: allowanceInfo.missingHireDate,
+    exceeds_balance: exceedsBalance,
+    recovery_date: null,
+    deficit_days: deficitDays,
+    deficit_hours: deficitHours,
+  };
+}
+
+async function computeVacationUsageSinceDate(
+  { userId, userEmail, startDate, excludeVacationRequestId = null },
+  executor = db
+) {
+  const queryExecutor = resolveDbExecutor(executor);
+  const normalizedStartDate = normalizeDateOnly(startDate);
+  if (!normalizedStartDate) {
+    return { approved: 0, pending: 0 };
+  }
+
+  const vacationValues = [userId, normalizedStartDate];
+  let vacationExcludeClause = "";
+  if (excludeVacationRequestId) {
+    vacationValues.push(excludeVacationRequestId);
+    vacationExcludeClause = ` AND id <> $${vacationValues.length}`;
+  }
+
+  const { rows: vacationRows } = await queryExecutor.query(
+    `SELECT
+        COALESCE(SUM(CASE WHEN LOWER(status) IN ('aprobado','approved') THEN COALESCE(effective_days, days) ELSE 0 END), 0) AS approved,
+        COALESCE(SUM(CASE WHEN LOWER(status) IN ('pendiente','pending') THEN COALESCE(effective_days, days) ELSE 0 END), 0) AS pending
+       FROM vacaciones_solicitudes
+      WHERE requester_id = $1
+        AND start_date >= $2
+        ${vacationExcludeClause}`,
+    vacationValues
+  );
+
+  const { rows: legacyVacationRows } = await queryExecutor.query(
+    `SELECT
+        COALESCE(SUM(CASE WHEN LOWER(status) IN ('aprobado','approved') THEN COALESCE(duracion_dias, 0) ELSE 0 END), 0) AS approved,
+        COALESCE(SUM(CASE WHEN LOWER(status) IN ('pendiente','pending','pending_final','partially_approved') THEN COALESCE(duracion_dias, 0) ELSE 0 END), 0) AS pending
+       FROM permisos_vacaciones
+      WHERE user_id = $1
+        AND LOWER(COALESCE(tipo_solicitud, '')) = 'vacaciones'
+        AND fecha_inicio >= $2`,
+    [userId, normalizedStartDate]
+  );
+
+  return {
+    approved: roundToTwo(
+      Number(vacationRows[0]?.approved || 0) +
+      Number(legacyVacationRows[0]?.approved || 0)
+    ),
+    pending: roundToTwo(
+      Number(vacationRows[0]?.pending || 0) +
+      Number(legacyVacationRows[0]?.pending || 0)
+    ),
+  };
+}
+
+async function ensureDrivePath(user) {
+  const root = await ensureFolder("Talento Humano", DRIVE_ROOT_FOLDER_ID);
+  const permisos = await ensureFolder("Permisos Vacaciones", root.id);
+  const deptName = user.department_name || "General";
+  const deptFolder = await ensureFolder(deptName, permisos.id);
+  const personFolder = await ensureFolder(user.fullname || user.name || user.email || `Usuario-${user.id}`, deptFolder.id);
+  return personFolder.id;
+}
+
+async function createDriveDocument({ user, start_date, end_date, return_date, period, days, folderId }) {
+  const name = `Vacaciones - ${user.fullname || user.name || user.email || "Colaborador"} - ${start_date}`;
+  const media = fs.createReadStream(TEMPLATE_PATH);
+
+  const { data: created } = await drive.files.create({
+    supportsAllDrives: true,
+    requestBody: {
+      name,
+      mimeType: "application/vnd.google-apps.document",
+      parents: folderId ? [folderId] : undefined,
+    },
+    media: {
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      body: media,
+    },
+    fields: "id, name, webViewLink",
+  });
+
+  await replaceTags(created.id, {
+    F_Solicitud: new Date().toLocaleDateString("es-EC"),
+    F_Inicio: start_date,
+    F_Final: end_date,
+    Periodo: period || "",
+    Dias: days?.toString() || "",
+    F_Regreso: return_date,
+    Nombre_Solicitante: user.fullname || user.name || user.email,
+    Cedula_Solicitante: user.cedula || user.identificacion || "",
+  });
+
+  let pdf = null;
+  try {
+    pdf = await exportPdf(created.id, folderId, `${name}.pdf`);
+  } catch (err) {
+    logger.warn({ err }, "No se pudo exportar PDF de vacaciones");
+  }
+
+  return {
+    drive_doc_id: created.id,
+    drive_doc_link: created.webViewLink,
+    drive_pdf_id: pdf?.id || null,
+    drive_pdf_link: pdf?.webViewLink || null,
+  };
+}
+
+/**
+ * Cuenta cuántos fines de semana (pares Sáb+Dom) ya fueron consumidos por el empleado
+ * en solicitudes aprobadas o pendientes del año dado.
+ * Usado por la regla de los 2 fines de semana (Bloque 3).
+ */
+async function computeWeekendsConsumedThisYear(userId, year, excludeId = null) {
+  const values = [userId, year];
+  let excludeClause = "";
+  if (excludeId) {
+    values.push(excludeId);
+    excludeClause = ` AND id <> $${values.length}`;
+  }
+  const { rows } = await db.query(
+    `SELECT COALESCE(SUM(weekends_consumed), 0) AS total
+       FROM vacaciones_solicitudes
+      WHERE requester_id = $1
+        AND EXTRACT(YEAR FROM start_date) = $2
+        AND status IN ('aprobado', 'approved', 'pendiente', 'pending')
+        ${excludeClause}`,
+    values
+  );
+  return Number(rows[0]?.total || 0);
+}
+
+/**
+ * Aplica la regla legal de 2 fines de semana sobre el rango de fechas solicitado.
+ * Regla: si el período incluye un viernes y los sábado+domingo siguientes NO están
+ * ya dentro del rango, se suman esos 2 días al cómputo de balance (hasta 2 veces al año).
+ * Retorna { effectiveDays, weekendsConsumedByRequest }.
+ */
+function computeVacationDaysWithWeekendRule(startDate, endDate, weekendsAlreadyConsumed) {
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+  if (end < start) return { effectiveDays: 0, weekendsConsumedByRequest: 0 };
+
+  const rawDays = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
+  let extensionDays = 0;
+  let weekendsConsumedByRequest = 0;
+  let remainingWeekendQuota = Math.max(0, 2 - weekendsAlreadyConsumed);
+
+  // Recorrer días del período buscando viernes
+  const current = new Date(start);
+  while (current <= end && remainingWeekendQuota > 0) {
+    const dow = current.getUTCDay(); // 0=Dom,1=Lun,...,5=Vie,6=Sáb
+    if (dow === 5) {
+      // Viernes encontrado: verificar si Sáb y Dom siguientes están fuera del rango
+      const sat = new Date(current.getTime() + 24 * 60 * 60 * 1000);
+      const sun = new Date(current.getTime() + 2 * 24 * 60 * 60 * 1000);
+      const satStr = sat.toISOString().split("T")[0];
+      const sunStr = sun.toISOString().split("T")[0];
+      const endStr = endDate;
+      const daysToAdd = (satStr > endStr ? 1 : 0) + (sunStr > endStr ? 1 : 0);
+      extensionDays += daysToAdd;
+      weekendsConsumedByRequest += 1;
+      remainingWeekendQuota -= 1;
+      // Saltar al domingo para no procesar el mismo fin de semana dos veces
+      current.setUTCDate(current.getUTCDate() + 7);
+      continue;
+    }
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+
+  return { effectiveDays: rawDays + extensionDays, weekendsConsumedByRequest };
+}
+
+/**
+ * Verifica si el rango [startDate, endDate] se cruza con otras solicitudes del usuario.
+ * Retorna { hasApproved, hasPending, conflicts[] }.
+ */
+async function checkVacationDateOverlap(userId, startDate, endDate, excludeId = null) {
+  const values = [userId, startDate, endDate];
+  let excludeClause = "";
+  if (excludeId) {
+    values.push(excludeId);
+    excludeClause = ` AND id <> $${values.length}`;
+  }
+  const { rows } = await db.query(
+    `SELECT id, start_date, end_date, status
+       FROM vacaciones_solicitudes
+      WHERE requester_id = $1
+        AND status NOT IN ('rechazado', 'rejected', 'cancelado', 'cancelled')
+        AND start_date <= $3
+        AND end_date >= $2
+        ${excludeClause}
+      ORDER BY start_date`,
+    values
+  );
+  const approved = rows.filter((r) => ["aprobado", "approved"].includes(String(r.status).toLowerCase()));
+  const pending = rows.filter((r) => !["aprobado", "approved"].includes(String(r.status).toLowerCase()));
+  return {
+    hasApproved: approved.length > 0,
+    hasPending: pending.length > 0,
+    conflicts: rows,
+    approvedConflicts: approved,
+    pendingConflicts: pending,
+  };
+}
+
+async function createVacationRequest(payload, userId) {
+  await ensureTable();
+  await assertRequesterCanCreateTimeOff(userId);
+  const user = await loadUser(userId);
+  if (!user) throw new Error("Usuario no encontrado");
+
+  const { start_date, end_date, period, allow_advance } = payload;
+  if (!start_date || !end_date) throw new Error("Las fechas de inicio y fin son obligatorias");
+
+  const normalizedStart = normalizeDateOnly(start_date);
+  const normalizedEnd = normalizeDateOnly(end_date);
+  if (!normalizedStart || !normalizedEnd) throw new Error("Las fechas de inicio y fin son inválidas");
+  if (normalizedEnd < normalizedStart) {
+    const err = new Error("La fecha de fin no puede ser anterior a la fecha de inicio.");
+    err.status = 400;
+    throw err;
+  }
+
+  // Validación de cruces de fechas (Bloque 3)
+  const overlapCheck = await checkVacationDateOverlap(userId, normalizedStart, normalizedEnd);
+  if (overlapCheck.hasApproved) {
+    const conflictDates = overlapCheck.approvedConflicts
+      .map((c) => `#${c.id} (${c.start_date} – ${c.end_date})`)
+      .join(", ");
+    const err = new Error(
+      `Las fechas solicitadas se cruzan con una solicitud de vacaciones ya aprobada: ${conflictDates}. Debes cancelar o modificar la solicitud existente antes de continuar.`
+    );
+    err.status = 409;
+    throw err;
+  }
+  const overlapWarning = overlapCheck.hasPending
+    ? `Advertencia: las fechas se cruzan con solicitudes pendientes de aprobación: ${overlapCheck.pendingConflicts.map((c) => `#${c.id}`).join(", ")}.`
+    : null;
+
+  const hireDateValue = await getHireDate(userId);
+  const allowanceInfo = computeVacationAllowance(hireDateValue, normalizedStart);
+
+  // Regla de 2 fines de semana (Bloque 3)
+  const year = new Date(`${normalizedStart}T00:00:00.000Z`).getUTCFullYear();
+  const weekendsAlreadyConsumed = await computeWeekendsConsumedThisYear(userId, year);
+  const weekendCalc = computeVacationDaysWithWeekendRule(normalizedStart, normalizedEnd, weekendsAlreadyConsumed);
+  const rawDays = payload.days || diffDaysInclusive(normalizedStart, normalizedEnd);
+  const effectiveDays = weekendCalc.effectiveDays;
+  const weekendsConsumedByRequest = weekendCalc.weekendsConsumedByRequest;
+
+  const return_date = payload.return_date || new Date(new Date(normalizedEnd).getTime() + 24 * 60 * 60 * 1000)
+    .toISOString()
+    .split("T")[0];
+
+  // Validación de saldo: advertencia, no bloqueo (Bloque 3)
+  const balanceValidation = await computeVacationBalanceValidation({
+    userId,
+    userEmail: user.email,
+    startDate: normalizedStart,
+    requestedDays: effectiveDays,
+    hireDateValue,
+  });
+  const allowNegative = Boolean(payload?.allow_negative);
+  const balanceExceeded = balanceValidation.exceeds_balance && !allowNegative;
+
+  const approverResolution = await resolveApproverAssignment(
+    resolveApproverRole(user.role || "")
+  );
+  const approverRole = approverResolution.approverRole;
+  const approverId = approverResolution.approverId || null;
+  if (!approverId) {
+    const err = new Error(
+      "No se encontró un aprobador activo para tu solicitud (jefe inmediato o gerencia general)."
+    );
+    err.status = 400;
+    throw err;
+  }
+
+  let driveMeta = { drive_doc_id: null, drive_doc_link: null, drive_pdf_id: null, drive_pdf_link: null, folderId: null };
+  try {
+    const folderId = await ensureDrivePath(user);
+    const doc = await createDriveDocument({
+      user,
+      start_date: normalizedStart,
+      end_date: normalizedEnd,
+      return_date,
+      period,
+      days: rawDays,
+      folderId,
+    });
+    driveMeta = { ...doc, folderId };
+  } catch (err) {
+    logger.warn({ err }, "No se pudo generar documento de vacaciones");
+  }
+
+  const { rows } = await db.query(
+    `INSERT INTO vacaciones_solicitudes (
+      requester_id, approver_id, approver_role, department_id, start_date, end_date, return_date, period, days, status,
+      drive_doc_id, drive_pdf_id, drive_doc_link, drive_pdf_link, drive_folder_id,
+      advance_request, advance_eligible_from, allow_negative, projected_remaining_days, recovery_date, monetary_debt,
+      effective_days, weekends_consumed, balance_exceeded, balance_deficit_days, date_overlap_warning
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pendiente',$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+    RETURNING *`,
+    [
+      userId,
+      approverId,
+      approverRole,
+      user.department_id || null,
+      normalizedStart,
+      normalizedEnd,
+      return_date,
+      period || `${year}`,
+      rawDays,
+      driveMeta.drive_doc_id,
+      driveMeta.drive_pdf_id,
+      driveMeta.drive_doc_link,
+      driveMeta.drive_pdf_link,
+      driveMeta.folderId,
+      (!allowanceInfo.eligible && !allowanceInfo.missingHireDate && (allow_advance !== false)) || allowanceInfo.missingHireDate,
+      !allowanceInfo.eligible ? allowanceInfo.eligibleFrom : null,
+      allowNegative,
+      balanceValidation.projected_remaining,
+      null,
+      null,
+      effectiveDays,
+      weekendsConsumedByRequest,
+      balanceExceeded,
+      balanceExceeded ? balanceValidation.deficit_days : null,
+      overlapWarning,
+    ]
+  );
+
+  await logAction({
+    user_id: userId,
+    module: "vacaciones",
+    action: "create",
+    entity: "vacaciones_solicitudes",
+    entity_id: rows[0].id,
+    details: {
+      start_date: normalizedStart,
+      end_date: normalizedEnd,
+      raw_days: rawDays,
+      effective_days: effectiveDays,
+      weekends_consumed_by_request: weekendsConsumedByRequest,
+      allow_negative: allowNegative,
+      balance_exceeded: balanceExceeded,
+      projected_remaining: balanceValidation.projected_remaining,
+      deficit_days: balanceValidation.deficit_days,
+      date_overlap_warning: overlapWarning,
+    },
+  });
+
+  const balanceWarningMessage = balanceExceeded
+    ? `Advertencia de saldo: déficit proyectado de ${balanceValidation.deficit_days} día(s). El aprobador fue informado.`
+    : null;
+
+  try {
+    if (userId) {
+      await notificationManager.sendNotification({
+        userId,
+        customTitle: "Solicitud enviada",
+        customMessage: balanceWarningMessage
+          ? `Tu solicitud fue enviada para aprobación. ${balanceWarningMessage}`
+          : "Tu solicitud de vacaciones fue enviada para aprobación.",
+        type: balanceExceeded ? "warning" : "info",
+        source: "vacaciones",
+        priority: 0,
+        email: true,
+        meta: {
+          solicitud_id: rows[0].id,
+          solicitante: user.email,
+          target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${rows[0].id}`,
+        },
+      });
+    }
+    if (approverId && approverId != userId) {
+      await notificationManager.sendNotification({
+        userId: approverId,
+        customTitle: balanceExceeded ? "Nueva solicitud de vacaciones — saldo insuficiente" : "Nueva solicitud de vacaciones",
+        customMessage: balanceExceeded
+          ? `${user.fullname || user.email} solicitó vacaciones pero su saldo es insuficiente (déficit: ${balanceValidation.deficit_days} días). Revisa antes de aprobar.`
+          : `${user.fullname || user.email} ha enviado una solicitud de vacaciones.`,
+        type: balanceExceeded ? "warning" : "task",
+        source: "vacaciones",
+        priority: balanceExceeded ? 2 : 1,
+        email: true,
+        meta: {
+          solicitud_id: rows[0].id,
+          solicitante: user.email,
+          balance_exceeded: balanceExceeded,
+          deficit_days: balanceValidation.deficit_days,
+          target_path: `/dashboard/talento-humano/permisos?tab=approve&solicitudId=${rows[0].id}`,
+        },
+      });
+    }
+  } catch (notifyError) {
+    logger.warn({ notifyError, solicitudId: rows[0]?.id }, "No se pudo enviar notificacion de vacaciones");
+  }
+
+  try {
+    const thUsers = await findTalentoHumanoUsers();
+    for (const thUser of thUsers) {
+      if (Number(thUser.id) === Number(userId)) continue;
+      if (Number(thUser.id) === Number(approverId)) continue;
+      await notificationManager.sendNotification({
+        userId: thUser.id,
+        customTitle: "Nueva solicitud de vacaciones registrada",
+        customMessage: `${user.fullname || user.email} envió una solicitud de vacaciones.`,
+        type: "info",
+        source: "vacaciones",
+        priority: 0,
+        email: false,
+        meta: {
+          solicitud_id: rows[0].id,
+          solicitante: user.email,
+          target_path: `/dashboard/talento-humano/permisos?tab=all&solicitudId=${rows[0].id}`,
+        },
+      });
+    }
+  } catch (thNotifyError) {
+    logger.warn({ thNotifyError, solicitudId: rows[0]?.id }, "No se pudo notificar a Talento Humano sobre nueva solicitud de vacaciones");
+  }
+
+  const warnings = [overlapWarning, balanceWarningMessage].filter(Boolean);
+  return {
+    ...rows[0],
+    balance_validation: balanceValidation,
+    remaining_before: balanceValidation.remaining,
+    warnings: warnings.length > 0 ? warnings : undefined,
+  };
+}
+
+async function listVacationRequests(params = {}, user) {
+  await ensureTable();
+  const role = (user.role || "").toLowerCase();
+  const scope = params.scope || "mine";
+
+  const where = [];
+  const values = [];
+  let idx = 1;
+
+  if (params.status) {
+    where.push(`LOWER(status) = LOWER($${idx++})`);
+    values.push(params.status);
+  }
+
+  const canSeeAll = HR_ROLES.includes(role) || MGMT_ROLES.includes(role);
+  if (scope === "pending") {
+    where.push(`status = 'pendiente'`);
+    // Talento Humano/gerencia ven todas las solicitudes pendientes: son aprobador
+    // alterno en cualquier etapa, no solo las que le fueron asignadas por rol.
+    if (!HR_ROLES.includes(role)) {
+      const roleCandidates = getApproverRoleCandidates(user);
+      where.push(`(approver_id = $${idx} OR (approver_id IS NULL AND LOWER(COALESCE(approver_role, '')) = ANY($${idx + 1})))`);
+      values.push(user.id, roleCandidates);
+      idx += 2;
+    }
+  } else if (!canSeeAll || scope === "mine") {
+    where.push(`requester_id = $${idx++}`);
+    values.push(user.id);
+  }
+
+  const { rows } = await db.query(
+    `SELECT v.*, u.fullname as requester_name, u.email as requester_email
+       FROM vacaciones_solicitudes v
+       LEFT JOIN users u ON u.id = v.requester_id
+      ${where.length ? "WHERE " + where.join(" AND ") : ""}
+      ORDER BY v.created_at DESC
+      LIMIT 200`,
+    values
+  );
+
+  return rows;
+}
+
+async function updateVacationStatus(id, status, user) {
+  await ensureTable();
+  const normalized = (status || "").toLowerCase();
+  if (!['aprobado', 'rechazado', 'approved', 'rejected'].includes(normalized)) {
+    throw new Error("Estado inválido");
+  }
+
+  const { rows } = await db.query("SELECT * FROM vacaciones_solicitudes WHERE id = $1", [id]);
+  const current = rows[0];
+  if (!current) throw new Error("Solicitud no encontrada");
+
+  const roleCandidates = getApproverRoleCandidates(user);
+  const isActorHR = roleCandidates.some((candidate) => HR_ROLES.includes(candidate));
+  const canApprove =
+    isActorHR ||
+    current.approver_id === user.id ||
+    (current.approver_id == null &&
+      current.approver_role &&
+      (
+        GERENCIA_GENERAL_ROLES.has(String(current.approver_role).toLowerCase())
+          ? roleCandidates.some((candidate) => GERENCIA_GENERAL_ROLES.has(candidate))
+          : roleCandidates.includes(String(current.approver_role).toLowerCase())
+      ));
+
+  if (!canApprove) throw new Error("No tienes permisos para esta acción");
+
+  const mappedStatus = normalized.startsWith("ap") || normalized === "approved" ? "aprobado" : "rechazado";
+
+  // Advertencia de saldo insuficiente al aprobar (Bloque 3)
+  let approvalBalanceWarning = null;
+  if (mappedStatus === "aprobado" && current.balance_exceeded) {
+    approvalBalanceWarning = `Esta solicitud fue aprobada con saldo insuficiente. Déficit registrado: ${current.balance_deficit_days} día(s).`;
+  }
+
+  const { rows: updated } = await db.query(
+    `UPDATE vacaciones_solicitudes
+        SET status = $1, updated_at = now(), approver_id = COALESCE(approver_id, $2)
+      WHERE id = $3 RETURNING *`,
+    [mappedStatus, user.id, id]
+  );
+
+  await logAction({
+    user_id: user.id,
+    module: "vacaciones",
+    action: mappedStatus,
+    entity: "vacaciones_solicitudes",
+    entity_id: id,
+  });
+
+  try {
+    if (updated[0]?.requester_id) {
+      const isApproved = mappedStatus === "aprobado";
+      await notificationManager.sendNotification({
+        userId: updated[0].requester_id,
+        customTitle: isApproved ? "Vacaciones aprobadas" : "Vacaciones rechazadas",
+        customMessage: isApproved
+          ? (approvalBalanceWarning
+              ? `Tu solicitud de vacaciones fue aprobada. Nota: ${approvalBalanceWarning}`
+              : "Tu solicitud de vacaciones fue aprobada.")
+          : "Tu solicitud de vacaciones fue rechazada.",
+        type: isApproved ? "success" : "warning",
+        source: "vacaciones",
+        priority: 1,
+        email: true,
+        meta: {
+          solicitud_id: updated[0].id,
+          status: mappedStatus,
+          balance_warning: approvalBalanceWarning,
+          target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${updated[0].id}`,
+        },
+      });
+    }
+  } catch (notifyError) {
+    logger.warn({ notifyError, solicitudId: updated[0]?.id }, "No se pudo notificar estado de vacaciones");
+  }
+  return { ...updated[0], balance_approval_warning: approvalBalanceWarning };
+}
+
+function isApprovedVacationStatus(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "aprobado" || normalized === "approved";
+}
+
+function ensureFutureStartDate(startDateValue) {
+  const normalizedStartDate = normalizeDateOnly(startDateValue);
+  if (!normalizedStartDate) {
+    const err = new Error("Fecha de inicio inválida");
+    err.status = 400;
+    throw err;
+  }
+  const today = getCurrentDateInAppTimezone();
+  if (normalizedStartDate <= today) {
+    const err = new Error("Solo se permiten cambios para solicitudes con fecha de inicio futura.");
+    err.status = 409;
+    throw err;
+  }
+  return normalizedStartDate;
+}
+
+function isManagerRole(role) {
+  const normalized = normalizeRole(role);
+  return HR_ROLES.includes(normalized) || MGMT_ROLES.includes(normalized);
+}
+
+function canManageVacationRequest(solicitud, actor = {}) {
+  const actorId = Number(actor?.id);
+  if (!Number.isFinite(actorId)) return false;
+  if (Number(solicitud?.requester_id) === actorId) return true;
+  if (Number(solicitud?.approver_id) === actorId) return true;
+  if (isManagerRole(actor?.role)) return true;
+
+  const roleCandidates = getApproverRoleCandidates(actor);
+  const solicitudApproverRole = String(solicitud?.approver_role || "").trim().toLowerCase();
+  if (!solicitudApproverRole) return false;
+
+  if (GERENCIA_GENERAL_ROLES.has(solicitudApproverRole)) {
+    return roleCandidates.some((candidate) => GERENCIA_GENERAL_ROLES.has(candidate));
+  }
+  return roleCandidates.includes(solicitudApproverRole);
+}
+
+async function resolveOriginalApproverId(solicitud = {}) {
+  if (solicitud?.approver_id) return Number(solicitud.approver_id);
+  if (solicitud?.approver_role) return findApprover(String(solicitud.approver_role).trim().toLowerCase());
+  return null;
+}
+
+async function notifyOriginalApprover({ solicitud, actor, actionType, payload = {} }) {
+  try {
+    const approverId = await resolveOriginalApproverId(solicitud);
+    if (!approverId || Number(approverId) === Number(actor?.id)) return;
+
+    const actorName = actor?.fullname || actor?.name || actor?.email || `usuario #${actor?.id || "N/A"}`;
+    const title = actionType === "rescheduled"
+      ? "Solicitud de vacaciones reprogramada"
+      : "Solicitud de vacaciones cancelada";
+    const message = actionType === "rescheduled"
+      ? `${actorName} cambió las fechas de la solicitud #${solicitud.id}.`
+      : `${actorName} canceló la solicitud #${solicitud.id}.`;
+
+    await notificationManager.sendNotification({
+      userId: approverId,
+      customTitle: title,
+      customMessage: message,
+      type: actionType === "rescheduled" ? "info" : "warning",
+      source: "vacaciones",
+      priority: 1,
+      email: true,
+      meta: {
+        solicitud_id: solicitud.id,
+        requester_id: solicitud.requester_id,
+        action: actionType,
+        ...payload,
+        target_path: `/dashboard/talento-humano/permisos?tab=approve&solicitudId=${solicitud.id}`,
+      },
+    });
+  } catch (notifyError) {
+    logger.warn(
+      { notifyError, solicitudId: solicitud?.id, actionType },
+      "No se pudo notificar al aprobador original de vacaciones"
+    );
+  }
+}
+
+/**
+ * Cancela una solicitud de vacaciones aprobada.
+ * Solo aplica para solicitudes con fecha de inicio futura.
+ *
+ * @param {number|string} solicitudId
+ * @param {number} userId
+ * @param {{ actor?: object, reason?: string }} [options]
+ */
+async function cancelVacationRequest(solicitudId, userId, options = {}) {
+  await ensureTable();
+  const actor = options?.actor && typeof options.actor === "object"
+    ? options.actor
+    : (await loadUser(userId));
+  if (!actor?.id) {
+    const err = new Error("Usuario inválido para cancelar la solicitud");
+    err.status = 400;
+    throw err;
+  }
+
+  const { rows } = await db.query(
+    "SELECT * FROM vacaciones_solicitudes WHERE id = $1 LIMIT 1",
+    [solicitudId]
+  );
+  const current = rows[0];
+  if (!current) {
+    const err = new Error("Solicitud no encontrada");
+    err.status = 404;
+    throw err;
+  }
+
+  if (!canManageVacationRequest(current, actor)) {
+    const err = new Error("No tienes permisos para cancelar esta solicitud");
+    err.status = 403;
+    throw err;
+  }
+
+  if (!isApprovedVacationStatus(current.status)) {
+    const err = new Error("Solo se pueden cancelar solicitudes aprobadas");
+    err.status = 409;
+    throw err;
+  }
+
+  ensureFutureStartDate(current.start_date);
+
+  const { rows: updatedRows } = await db.query(
+    `UPDATE vacaciones_solicitudes
+        SET status = 'cancelado',
+            updated_at = now()
+      WHERE id = $1
+      RETURNING *`,
+    [solicitudId]
+  );
+  const updated = updatedRows[0];
+
+  await logAction({
+    user_id: actor.id,
+    module: "vacaciones",
+    action: "cancel",
+    entity: "vacaciones_solicitudes",
+    entity_id: updated.id,
+    details: {
+      reason: options?.reason || null,
+      previous_status: current.status,
+      next_status: updated.status,
+      start_date: updated.start_date,
+      end_date: updated.end_date,
+    },
+  });
+
+  await notifyOriginalApprover({
+    solicitud: updated,
+    actor,
+    actionType: "cancelled",
+    payload: {
+      previous_status: current.status,
+      next_status: updated.status,
+      reason: options?.reason || null,
+    },
+  });
+
+  return updated;
+}
+
+/**
+ * Reprograma fechas de una solicitud de vacaciones aprobada
+ * validando nuevamente saldo disponible.
+ *
+ * @param {number|string} solicitudId
+ * @param {number} userId
+ * @param {{ start_date: string, end_date: string, return_date?: string, period?: string, days?: number }} payload
+ * @param {{ actor?: object }} [options]
+ */
+async function updateVacationDates(solicitudId, userId, payload = {}, options = {}) {
+  await ensureTable();
+  const actor = options?.actor && typeof options.actor === "object"
+    ? options.actor
+    : (await loadUser(userId));
+  if (!actor?.id) {
+    const err = new Error("Usuario inválido para reprogramar la solicitud");
+    err.status = 400;
+    throw err;
+  }
+
+  const startDate = normalizeDateOnly(payload?.start_date);
+  const endDate = normalizeDateOnly(payload?.end_date);
+  if (!startDate || !endDate) {
+    const err = new Error("Las fechas de inicio y fin son obligatorias");
+    err.status = 400;
+    throw err;
+  }
+  if (startDate > endDate) {
+    const err = new Error("La fecha de inicio no puede ser mayor a la fecha fin");
+    err.status = 400;
+    throw err;
+  }
+  ensureFutureStartDate(startDate);
+
+  const { rows } = await db.query(
+    "SELECT * FROM vacaciones_solicitudes WHERE id = $1 LIMIT 1",
+    [solicitudId]
+  );
+  const current = rows[0];
+  if (!current) {
+    const err = new Error("Solicitud no encontrada");
+    err.status = 404;
+    throw err;
+  }
+
+  if (!canManageVacationRequest(current, actor)) {
+    const err = new Error("No tienes permisos para reprogramar esta solicitud");
+    err.status = 403;
+    throw err;
+  }
+
+  if (!isApprovedVacationStatus(current.status)) {
+    const err = new Error("Solo se pueden reprogramar solicitudes aprobadas");
+    err.status = 409;
+    throw err;
+  }
+  ensureFutureStartDate(current.start_date);
+
+  const rawDays = Number(payload?.days || diffDaysInclusive(startDate, endDate));
+  if (!Number.isFinite(rawDays) || rawDays <= 0) {
+    const err = new Error("La duración de vacaciones es inválida");
+    err.status = 400;
+    throw err;
+  }
+  const returnDate = normalizeDateOnly(payload?.return_date)
+    || new Date(new Date(`${endDate}T00:00:00.000Z`).getTime() + 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+
+  // Re-validar cruces de fechas excluyendo la propia solicitud
+  const overlapCheck = await checkVacationDateOverlap(current.requester_id, startDate, endDate, current.id);
+  if (overlapCheck.hasApproved) {
+    const conflictDates = overlapCheck.approvedConflicts
+      .map((c) => `#${c.id} (${c.start_date} – ${c.end_date})`)
+      .join(", ");
+    const err = new Error(
+      `Las nuevas fechas se cruzan con una solicitud ya aprobada: ${conflictDates}.`
+    );
+    err.status = 409;
+    throw err;
+  }
+  const overlapWarning = overlapCheck.hasPending
+    ? `Advertencia: las fechas se cruzan con solicitudes pendientes: ${overlapCheck.pendingConflicts.map((c) => `#${c.id}`).join(", ")}.`
+    : null;
+
+  // Recalcular effective_days con la regla de 2 fines de semana
+  const year = new Date(`${startDate}T00:00:00.000Z`).getUTCFullYear();
+  const weekendsAlreadyConsumed = await computeWeekendsConsumedThisYear(current.requester_id, year, current.id);
+  const weekendCalc = computeVacationDaysWithWeekendRule(startDate, endDate, weekendsAlreadyConsumed);
+  const effectiveDays = weekendCalc.effectiveDays;
+  const weekendsConsumedByRequest = weekendCalc.weekendsConsumedByRequest;
+
+  const requester = await loadUser(current.requester_id);
+  const hireDateValue = await getHireDate(current.requester_id);
+  const balanceValidation = await computeVacationBalanceValidation({
+    userId: current.requester_id,
+    userEmail: requester?.email || null,
+    startDate,
+    requestedDays: effectiveDays,
+    hireDateValue,
+    excludeRequestId: current.id,
+  });
+  const allowNegative = Boolean(current.allow_negative);
+  const balanceExceeded = balanceValidation.exceeds_balance && !allowNegative;
+
+  const period = String(payload?.period || current.period || `${balanceValidation.year}`).trim();
+  const { rows: updatedRows } = await db.query(
+    `UPDATE vacaciones_solicitudes
+        SET start_date = $2,
+            end_date = $3,
+            return_date = $4,
+            period = $5,
+            days = $6,
+            effective_days = $7,
+            weekends_consumed = $8,
+            balance_exceeded = $9,
+            balance_deficit_days = $10,
+            date_overlap_warning = $11,
+            projected_remaining_days = $12,
+            updated_at = now()
+      WHERE id = $1
+      RETURNING *`,
+    [
+      solicitudId,
+      startDate,
+      endDate,
+      returnDate,
+      period,
+      rawDays,
+      effectiveDays,
+      weekendsConsumedByRequest,
+      balanceExceeded,
+      balanceExceeded ? balanceValidation.deficit_days : null,
+      overlapWarning,
+      balanceValidation.projected_remaining,
+    ]
+  );
+  const updated = updatedRows[0];
+
+  await logAction({
+    user_id: actor.id,
+    module: "vacaciones",
+    action: "reschedule",
+    entity: "vacaciones_solicitudes",
+    entity_id: updated.id,
+    details: {
+      previous_dates: {
+        start_date: current.start_date,
+        end_date: current.end_date,
+        return_date: current.return_date,
+        days: current.days,
+        effective_days: current.effective_days,
+        weekends_consumed: current.weekends_consumed,
+      },
+      next_dates: {
+        start_date: updated.start_date,
+        end_date: updated.end_date,
+        return_date: updated.return_date,
+        days: updated.days,
+        effective_days: updated.effective_days,
+        weekends_consumed: updated.weekends_consumed,
+      },
+      overlap_warning: overlapWarning,
+      balance_validation: balanceValidation,
+    },
+  });
+
+  await notifyOriginalApprover({
+    solicitud: updated,
+    actor,
+    actionType: "rescheduled",
+    payload: {
+      previous_dates: {
+        start_date: current.start_date,
+        end_date: current.end_date,
+      },
+      next_dates: {
+        start_date: updated.start_date,
+        end_date: updated.end_date,
+      },
+    },
+  });
+
+  const warnings = [overlapWarning, balanceExceeded
+    ? `Advertencia de saldo: déficit proyectado de ${balanceValidation.deficit_days} día(s).`
+    : null].filter(Boolean);
+
+  return {
+    ...updated,
+    balance_validation: balanceValidation,
+    remaining_before: balanceValidation.remaining,
+    warnings: warnings.length > 0 ? warnings : undefined,
+  };
+}
+
+async function reviewVacationCancellation(id, decision, reason, user) {
+  const normalizedDecision = String(decision || "").trim().toLowerCase();
+  if (!["approve", "reject"].includes(normalizedDecision)) {
+    const err = new Error("Decisión inválida, usa approve o reject");
+    err.status = 400;
+    throw err;
+  }
+  if (normalizedDecision === "reject") {
+    const err = new Error("Este flujo opera con cancelación directa; no hay revisión pendiente.");
+    err.status = 409;
+    throw err;
+  }
+
+  return cancelVacationRequest(id, user?.id, {
+    actor: user,
+    reason: reason || null,
+  });
+}
+
+async function summary(user, includeAll = false) {
+  await ensureTable();
+  const role = (user.role || "").toLowerCase();
+  const canSeeAll = includeAll || HR_ROLES.includes(role) || MGMT_ROLES.includes(role);
+
+  if (!canSeeAll) {
+    const year = new Date().getFullYear();
+    const taken = await computeTakenDays(user.id, year);
+    const hireDateValue = await getHireDate(user.id);
+    const allowanceInfo = computeVacationAllowance(hireDateValue, new Date());
+    const historicalBalance = await getHistoricVacationBalance({
+      userId: user.id,
+      userEmail: user.email,
+      year,
+    });
+  const { rows: summaryRows } = await db.query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('aprobado','approved') THEN COALESCE(effective_days, days) ELSE 0 END),0) AS approved,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('pendiente','pending') THEN COALESCE(effective_days, days) ELSE 0 END),0) AS pending,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('rechazado','rejected') THEN COALESCE(effective_days, days) ELSE 0 END),0) AS rejected,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('cancelado','cancelled') THEN COALESCE(effective_days, days) ELSE 0 END),0) AS cancelled,
+         COALESCE(SUM(COALESCE(effective_days, days)),0) AS requested
+       FROM vacaciones_solicitudes
+      WHERE requester_id=$1 AND EXTRACT(YEAR FROM start_date)=$2`,
+      [user.id, year]
+    );
+    const { rows: legacySummaryRows } = await db.query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('aprobado','approved') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS approved,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('pendiente','pending','pending_final','partially_approved') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS pending,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('rechazado','rejected') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS rejected,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('cancelado','cancelled') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS cancelled,
+         COALESCE(SUM(COALESCE(duracion_dias, 0)),0) AS requested
+       FROM permisos_vacaciones
+      WHERE user_id = $1
+        AND LOWER(COALESCE(tipo_solicitud, '')) = 'vacaciones'
+        AND EXTRACT(YEAR FROM fecha_inicio) = $2`,
+      [user.id, year]
+    );
+    const summaryRow = summaryRows[0] || {};
+    const legacySummaryRow = legacySummaryRows[0] || {};
+    const approved = Number(summaryRow.approved || 0) + Number(legacySummaryRow.approved || 0);
+    const pending = Number(summaryRow.pending || 0) + Number(legacySummaryRow.pending || 0);
+    const rejected = Number(summaryRow.rejected || 0) + Number(legacySummaryRow.rejected || 0);
+    const cancelled = Number(summaryRow.cancelled || 0) + Number(legacySummaryRow.cancelled || 0);
+    const requested = Number(summaryRow.requested || 0) + Number(legacySummaryRow.requested || 0);
+    const specialOpeningProfile = getSpecialVacationOpeningProfile(user.email, new Date());
+    let totalAllowance = allowanceInfo.allowance + historicalBalance;
+    let remaining = totalAllowance - taken - pending;
+    let carryOver = historicalBalance;
+    if (specialOpeningProfile) {
+      const usageSinceOpening = await computeVacationUsageSinceDate({
+        userId: user.id,
+        userEmail: user.email,
+        startDate: specialOpeningProfile.effectiveDate,
+      });
+      totalAllowance = roundToTwo(
+        Number(specialOpeningProfile.openingRemainingDays || 0) +
+        computeSpecialVacationAccrualFromOpening(
+          hireDateValue,
+          specialOpeningProfile.effectiveDate,
+          new Date()
+        )
+      );
+      carryOver = roundToTwo(totalAllowance - allowanceInfo.allowance);
+      remaining = totalAllowance - usageSinceOpening.approved - usageSinceOpening.pending;
+    }
+    let deficitDays = 0;
+    let deficitHours = 0;
+    if (remaining < 0) {
+      deficitDays = roundToTwo(Math.abs(remaining));
+      deficitHours = roundToTwo(deficitDays * HOURS_PER_VACATION_DAY);
+    }
+
+    return {
+      year,
+      allowance: totalAllowance,
+      allowance_base: allowanceInfo.allowance,
+      carry_over: carryOver,
+      tenure_years: allowanceInfo.tenureYears,
+      eligible: allowanceInfo.eligible,
+      eligible_from: allowanceInfo.eligibleFrom,
+      accrued_this_year: allowanceInfo.accruedThisYear,
+      missing_hire_date: allowanceInfo.missingHireDate,
+      taken,
+      approved,
+      pending,
+      rejected,
+      cancelled,
+      requested,
+      charged_from_permisos: 0,
+      remaining,
+      recovery_date: null,
+      deficit_days: deficitDays,
+      deficit_hours: deficitHours,
+    };
+  }
+
+  const { rows } = await db.query(
+    `SELECT u.id as user_id, u.fullname, u.email, d.name as department_name,
+            cp.profile->'laboral'->>'fecha_ingreso' as fecha_ingreso,
+            cp.profile->'laboral'->>'sueldo' as salary,
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('aprobado','approved') THEN COALESCE(v.effective_days, v.days) ELSE 0 END),0)
+              + COALESCE(MAX(legacy.approved), 0) as approved,
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('pendiente','pending') THEN COALESCE(v.effective_days, v.days) ELSE 0 END),0)
+              + COALESCE(MAX(legacy.pending), 0) as pending,
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('rechazado','rejected') THEN COALESCE(v.effective_days, v.days) ELSE 0 END),0)
+              + COALESCE(MAX(legacy.rejected), 0) as rejected,
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('cancelado','cancelled') THEN COALESCE(v.effective_days, v.days) ELSE 0 END),0)
+              + COALESCE(MAX(legacy.cancelled), 0) as cancelled,
+            COALESCE(SUM(COALESCE(v.effective_days, v.days)),0) + COALESCE(MAX(legacy.requested), 0) as requested
+       FROM users u
+       LEFT JOIN vacaciones_solicitudes v ON v.requester_id = u.id
+       LEFT JOIN (
+          SELECT user_id,
+                 COALESCE(SUM(CASE WHEN LOWER(status) IN ('aprobado','approved') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS approved,
+                 COALESCE(SUM(CASE WHEN LOWER(status) IN ('pendiente','pending','pending_final','partially_approved') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS pending,
+                 COALESCE(SUM(CASE WHEN LOWER(status) IN ('rechazado','rejected') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS rejected,
+                 COALESCE(SUM(CASE WHEN LOWER(status) IN ('cancelado','cancelled') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS cancelled,
+                 COALESCE(SUM(COALESCE(duracion_dias, 0)),0) AS requested
+            FROM permisos_vacaciones
+           WHERE LOWER(COALESCE(tipo_solicitud, '')) = 'vacaciones'
+           GROUP BY user_id
+       ) legacy ON legacy.user_id = u.id
+       LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
+       LEFT JOIN departments d ON d.id = u.department_id
+      WHERE (COALESCE(cp.profile->'extra'->>'applicant_source','') <> 'google_forms'
+        AND COALESCE((cp.profile->'extra' ? 'preguntas_adicionales'), false) = false)
+      GROUP BY u.id, u.fullname, u.email, d.name
+      ORDER BY u.fullname`);
+
+  return Promise.all(rows.map(async (r) => {
+    const allowanceInfo = computeVacationAllowance(r.fecha_ingreso, new Date());
+    const historicalBalance = await getHistoricVacationBalance({
+      userId: r.user_id,
+      userEmail: r.email,
+      year: new Date().getFullYear(),
+    });
+    const specialOpeningProfile = getSpecialVacationOpeningProfile(r.email, new Date());
+    let totalAllowance = allowanceInfo.allowance + historicalBalance;
+    const approved = Number(r.approved || 0);
+    const taken = approved;
+    const pending = Number(r.pending || 0);
+    let remaining = totalAllowance - taken - pending;
+    let carryOver = historicalBalance;
+    if (specialOpeningProfile) {
+      const usageSinceOpening = await computeVacationUsageSinceDate({
+        userId: r.user_id,
+        userEmail: r.email,
+        startDate: specialOpeningProfile.effectiveDate,
+      });
+      totalAllowance = roundToTwo(
+        Number(specialOpeningProfile.openingRemainingDays || 0) +
+        computeSpecialVacationAccrualFromOpening(
+          r.fecha_ingreso,
+          specialOpeningProfile.effectiveDate,
+          new Date()
+        )
+      );
+      carryOver = roundToTwo(totalAllowance - allowanceInfo.allowance);
+      remaining = totalAllowance - usageSinceOpening.approved - usageSinceOpening.pending;
+    }
+
+    let deficitDays = 0;
+    let deficitHours = 0;
+
+    if (remaining < 0) {
+      deficitDays = roundToTwo(Math.abs(remaining));
+      deficitHours = roundToTwo(deficitDays * HOURS_PER_VACATION_DAY);
+    }
+
+    return {
+      ...r,
+      ...allowanceInfo,
+      allowance: totalAllowance,
+      allowance_base: allowanceInfo.allowance,
+      carry_over: carryOver,
+      charged_from_permisos: 0,
+      approved,
+      taken,
+      pending,
+      rejected: Number(r.rejected || 0),
+      cancelled: Number(r.cancelled || 0),
+      requested: Number(r.requested || 0),
+      missing_hire_date: allowanceInfo.missingHireDate,
+      remaining,
+      recovery_date: null,
+      deficit_days: deficitDays,
+      deficit_hours: deficitHours,
+    };
+  }));
+}
+
+async function getVacationSummary(userId) {
+  const user = await loadUser(userId);
+  if (!user) throw new Error("Usuario no encontrado");
+
+  const hireDateValue = await getHireDate(userId);
+  const now = new Date();
+  const balanceValidation = await computeVacationBalanceValidation({
+    userId,
+    userEmail: user.email,
+    startDate: now.toISOString().split("T")[0],
+    requestedDays: 0,
+    hireDateValue,
+  });
+
+  return balanceValidation;
+}
+
+module.exports = {
+  ensureTable,
+  createVacationRequest,
+  listVacationRequests,
+  updateVacationStatus,
+  cancelVacationRequest,
+  reviewVacationCancellation,
+  updateVacationDates,
+  getVacationSummary,
+  getHireDate,
+  computeOffboardingLiquidation,
+  computeVacationBalanceValidation,
+  computeVacationDaysWithWeekendRule,
+  computeWeekendsConsumedThisYear,
+  checkVacationDateOverlap,
+  resolveApproverRole,
+  summary,
+};
+
+async function createVacationMirrorFromPermiso(row) {
+  const effectiveDays = resolveMirrorEffectiveDays(row);
+  const startDate = normalizeDateOnly(row?.fecha_inicio || row?.fecha_inicio_hora);
+  const endDate = normalizeDateOnly(row?.fecha_fin || row?.fecha_fin_hora || startDate);
+  if (!row?.user_id || !startDate || !endDate || !(effectiveDays > 0)) return null;
+
+  const returnDate = normalizeDateOnly(row?.fecha_regreso) || addDaysToDateOnly(endDate, 1) || endDate;
+  const sourceReason = row?.charged_to_vacation_reason || "permiso_charge";
+  const periodYear = Number(String(startDate).slice(0, 4));
+  const projectedRemaining = Number(row?.projected_remaining_days);
+  const balanceExceeded = Number.isFinite(projectedRemaining) && projectedRemaining < 0;
+  const approvedAt = row?.charged_to_vacation_at || row?.aprobacion_final_at || row?.updated_at || row?.created_at || new Date().toISOString();
+  const approverRole = row?.approver_role || "talento_humano";
+  const approverId = row?.approver_user_id || null;
+  const roundedCalendarDays = Math.max(1, Math.ceil(effectiveDays));
+
+  const existing = await db.query(
+    `SELECT id
+       FROM vacaciones_solicitudes
+      WHERE source_module = 'permisos_vacaciones'
+        AND source_request_id = $1
+      LIMIT 1`,
+    [row.id]
+  );
+  if (existing.rows[0]?.id) return existing.rows[0];
+
+  const { rows } = await db.query(
+    `INSERT INTO vacaciones_solicitudes (
+      requester_id, approver_id, approver_role, department_id, start_date, end_date, return_date, period, days, status,
+      advance_request, advance_eligible_from, allow_negative, projected_remaining_days, recovery_date, monetary_debt,
+      effective_days, weekends_consumed, balance_exceeded, balance_deficit_days, date_overlap_warning,
+      source_module, source_request_id, source_reason, approved_at
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,'aprobado',
+      false,NULL,true,$10,NULL,NULL,
+      $11,0,$12,$13,$14,
+      'permisos_vacaciones',$15,$16,$17
+    )
+    RETURNING id`,
+    [
+      row.user_id,
+      approverId,
+      approverRole,
+      row.department_id || null,
+      startDate,
+      endDate,
+      returnDate,
+      String(periodYear),
+      roundedCalendarDays,
+      Number.isFinite(projectedRemaining) ? projectedRemaining : null,
+      effectiveDays,
+      balanceExceeded,
+      balanceExceeded ? roundToTwo(Math.abs(projectedRemaining)) : null,
+      `Generada automaticamente desde permiso #${row.id}.`,
+      row.id,
+      sourceReason,
+      approvedAt,
+    ]
+  );
+
+  return rows[0] || null;
+}
+
+function resolveMirrorEffectiveDays(row = {}) {
+  const explicitDays = Number(row?.charged_vacation_days || 0);
+  if (Number.isFinite(explicitDays) && explicitDays > 0) return roundToTwo(explicitDays);
+  const explicitHours = Number(row?.charged_vacation_hours || row?.duracion_horas || 0);
+  if (Number.isFinite(explicitHours) && explicitHours > 0) {
+    return roundToTwo(explicitHours / HOURS_PER_VACATION_DAY);
+  }
+  const requestDays = Number(row?.duracion_dias || 0);
+  if (Number.isFinite(requestDays) && requestDays > 0) return roundToTwo(requestDays);
+  return 0;
+}

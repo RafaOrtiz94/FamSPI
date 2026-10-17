@@ -1333,6 +1333,16 @@ async function createFileFromPurchase({ purchaseType, purchaseRequestId, process
     );
     await insertDefaultSections(id, client);
     await client.query("COMMIT");
+    // Embudo CRM: con el expediente de consumibles la oportunidad termina su recorrido (ganada).
+    try {
+      await require("../crm-fam/crmPurchaseSync.service").syncConsumableFileCreated({
+        privatePurchaseId: context.private_purchase_request_id,
+        equipmentPurchaseId: context.equipment_purchase_request_id,
+        businessCaseId: context.business_case_id,
+      }, user);
+    } catch (crmSyncError) {
+      logger.warn({ error: crmSyncError.message, fileId: id }, "No se pudo sincronizar el expediente de consumibles con CRM");
+    }
     return getFileDetail(id);
   } catch (error) {
     await client.query("ROLLBACK");

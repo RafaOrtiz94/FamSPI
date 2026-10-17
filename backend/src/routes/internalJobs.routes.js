@@ -11,6 +11,7 @@ const { runOnce: runBusinessCasePreflowExpiry } = require('../jobs/businessCaseP
 const { runOnce: runBusinessCaseWorkflowSla } = require('../jobs/businessCaseWorkflowSlaScheduler');
 const { runOnce: runBusinessCaseDeterminationsGateExpiry } = require('../jobs/businessCaseDeterminationsGateExpiryScheduler');
 const { runOnce: runBusinessCaseSheetQueue } = require('../jobs/businessCaseSheetGenerationQueueScheduler');
+const { runOnce: runBusinessCaseConsumableSimulations } = require('../jobs/businessCaseConsumableSimulationScheduler');
 const { runOnce: runBusinessCaseNotificationQueue } = require('../jobs/businessCaseNotificationQueueScheduler');
 const { runOnce: runDatabaseBackupToDrive } = require('../jobs/databaseBackupToDrive');
 const { runOnce: runPermisosPendingExpiry } = require('../jobs/permisosPendingExpiryScheduler');
@@ -186,6 +187,24 @@ router.post('/business-case/workflow-sla/reminders', async (_req, res) => {
         res.status(500).json({
             error: 'Fallo el procesamiento de recordatorios SLA BC',
             details: error.message,
+        });
+    }
+});
+
+// Simulacion automatica de consumibles para Business Case con estadisticas nuevas o cambiadas.
+router.post('/business-case/consumable-simulations', async (_req, res) => {
+    try {
+        const result = await runBusinessCaseConsumableSimulations();
+        res.json({
+            success: true,
+            message: 'Simulaciones automaticas de consumibles procesadas',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error en job de simulacion de consumibles:', error);
+        res.status(500).json({
+            error: 'Fallo la simulacion automatica de consumibles',
+            details: error.message
         });
     }
 });

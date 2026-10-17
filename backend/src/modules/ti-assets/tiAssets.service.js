@@ -2,7 +2,6 @@ const db = require("../../config/db");
 const crypto = require("crypto");
 const logger = require("../../config/logger");
 const notificationManager = require("../notifications/notificationManager");
-const { getHolidaysForYear } = require("../security/security.holidays.ec");
 const {
   ensureFolder,
   uploadBase64File,
@@ -660,11 +659,82 @@ function isWeekendUTC(date) {
   return day === 0 || day === 6;
 }
 
+function easterSundayUTC(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function observedSingleHolidayUTC(date, { keepMidweekDate = false } = {}) {
+  const weekday = date.getUTCDay();
+  if (weekday === 6) return addDaysUTC(date, -1);
+  if (weekday === 0) return addDaysUTC(date, 1);
+  if (keepMidweekDate) return date;
+  if (weekday === 2) return addDaysUTC(date, -1);
+  if (weekday === 3) return addDaysUTC(date, 2);
+  if (weekday === 4) return addDaysUTC(date, 1);
+  return date;
+}
+
+function observedNovemberHolidaysUTC(year) {
+  const november2 = new Date(Date.UTC(year, 10, 2));
+  const weekday = november2.getUTCDay();
+  if (weekday === 1 || weekday === 4) return [november2, addDaysUTC(november2, 1)];
+  if (weekday === 2) return [addDaysUTC(november2, -1), november2];
+  if (weekday === 3) return [addDaysUTC(november2, 1), addDaysUTC(november2, 2)];
+  if (weekday === 5) return [addDaysUTC(november2, -1), november2];
+  if (weekday === 6) return [addDaysUTC(november2, -1), addDaysUTC(november2, 2)];
+  return [addDaysUTC(november2, 1), addDaysUTC(november2, 2)];
+}
+
+const EXTRA_MAINTENANCE_HOLIDAYS = {
+  2026: ["2026-11-20"],
+};
+
+function getMaintenanceHolidaysForYear(year) {
+  const safeYear = Number(year);
+  if (!Number.isInteger(safeYear)) return [];
+  const easter = easterSundayUTC(safeYear);
+  const dates = [
+    observedSingleHolidayUTC(new Date(Date.UTC(safeYear, 0, 1)), { keepMidweekDate: true }),
+    addDaysUTC(easter, -48),
+    addDaysUTC(easter, -47),
+    addDaysUTC(easter, -2),
+    observedSingleHolidayUTC(new Date(Date.UTC(safeYear, 4, 1))),
+    observedSingleHolidayUTC(new Date(Date.UTC(safeYear, 4, 24))),
+    observedSingleHolidayUTC(new Date(Date.UTC(safeYear, 7, 10))),
+    observedSingleHolidayUTC(new Date(Date.UTC(safeYear, 9, 9))),
+    ...observedNovemberHolidaysUTC(safeYear),
+    observedSingleHolidayUTC(new Date(Date.UTC(safeYear, 11, 25)), { keepMidweekDate: true }),
+  ];
+  const isoDates = dates.map(toISODateUTC);
+  const configuredExtras = String(process.env.TI_MAINTENANCE_EXTRA_HOLIDAYS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number(value.slice(0, 4)) === safeYear);
+  return [...new Set([
+    ...isoDates,
+    ...(EXTRA_MAINTENANCE_HOLIDAYS[safeYear] || []),
+    ...configuredExtras,
+  ])].sort();
+}
+
 function isHolidayECUTC(date) {
   const year = date.getUTCFullYear();
   const iso = toISODateUTC(date);
-  const holidays = getHolidaysForYear(year);
-  return Array.isArray(holidays) && holidays.includes(iso);
+  return getMaintenanceHolidaysForYear(year).includes(iso);
 }
 
 function nextBusinessDayUTC(date) {
@@ -673,6 +743,30 @@ function nextBusinessDayUTC(date) {
     cursor = addDaysUTC(cursor, 1);
   }
   return cursor;
+}
+
+function resolveMaintenanceBusinessDate(date) {
+  const original = parseAnyDate(date);
+  if (!original) return null;
+  if (!isWeekendUTC(original) && !isHolidayECUTC(original)) return original;
+
+  const originalMonth = original.getUTCMonth();
+  let cursor = new Date(original.getTime());
+  do {
+    cursor = addDaysUTC(cursor, 1);
+  } while (cursor.getUTCMonth() === originalMonth && (isWeekendUTC(cursor) || isHolidayECUTC(cursor)));
+  if (cursor.getUTCMonth() === originalMonth) return cursor;
+
+  cursor = addDaysUTC(original, -1);
+  while (cursor.getUTCMonth() === originalMonth && (isWeekendUTC(cursor) || isHolidayECUTC(cursor))) {
+    cursor = addDaysUTC(cursor, -1);
+  }
+  return cursor.getUTCMonth() === originalMonth ? cursor : null;
+}
+
+function resolveMaintenanceDueDate(plannedDate) {
+  const planned = parseAnyDate(plannedDate);
+  return planned ? nextBusinessDayUTC(addDaysUTC(planned, 15)) : null;
 }
 
 function addBusinessDaysUTC(date, days) {
@@ -1808,7 +1902,7 @@ async function generateAnnualMaintenance({ year, userId, dryRun = false }) {
   }
   const endYear = startYear + 4;
   const assetsQ = await db.query(
-    `SELECT id, name, maintenance_frequency_months, purchase_date
+    `SELECT id, name, maintenance_frequency_months, purchase_date, created_at
        FROM public.ti_assets
       WHERE active = true
         AND status NOT IN ('retired', 'damaged')
@@ -1817,30 +1911,35 @@ async function generateAnnualMaintenance({ year, userId, dryRun = false }) {
   const assets = assetsQ.rows || [];
   const created = [];
   const skipped = [];
+  let fallbackCreatedAtCount = 0;
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
     for (const asset of assets) {
       const every = Math.max(1, Number(asset.maintenance_frequency_months || 12));
-      const purchase = parseISODateUTC(asset.purchase_date);
-      if (!purchase) {
-        skipped.push({ asset_id: asset.id, reason: "missing_purchase_date" });
+      const baseDate = resolveMaintenanceBaseDate(asset);
+      if (!baseDate.date) {
+        skipped.push({ asset_id: asset.id, reason: "missing_maintenance_base_date" });
         continue;
       }
-      // El primer mantenimiento se agenda luego de cumplir la frecuencia desde compra.
-      let cursor = addMonthsClampedUTC(purchase, every);
+      if (baseDate.source === "created_at") fallbackCreatedAtCount += 1;
+      // Para activos historicos sin fecha de compra, created_at mantiene una
+      // fecha trazable y evita dejarlos permanentemente fuera del cronograma.
+      let cursor = addMonthsClampedUTC(baseDate.date, every);
       while (cursor.getUTCFullYear() < startYear) {
         cursor = addMonthsClampedUTC(cursor, every);
       }
       while (cursor.getUTCFullYear() <= endYear) {
-        const planned = toISODateUTC(cursor);
-        const maxDueDate = toISODateUTC(addDaysUTC(cursor, 15));
+        const businessDate = resolveMaintenanceBusinessDate(cursor);
+        const planned = toISODateUTC(businessDate);
+        const maxDueDate = toISODateUTC(resolveMaintenanceDueDate(businessDate));
         const exists = await client.query(
           `SELECT id FROM public.ti_asset_maintenance_schedule WHERE asset_id = $1 AND planned_date = $2::date LIMIT 1`,
           [asset.id, planned],
         );
         if (exists.rows.length) {
           skipped.push({ asset_id: asset.id, planned_date: planned, reason: "already_exists" });
+          cursor = addMonthsClampedUTC(cursor, every);
           continue;
         }
         if (dryRun) {
@@ -1880,6 +1979,7 @@ async function generateAnnualMaintenance({ year, userId, dryRun = false }) {
       assets: assets.length,
       created_count: created.length,
       skipped_count: skipped.length,
+      fallback_created_at_count: fallbackCreatedAtCount,
       created,
       skipped,
     };
@@ -1907,6 +2007,59 @@ function parseAnyDate(value) {
   return isNaN(d.getTime()) ? null : d;
 }
 
+function resolveMaintenanceBaseDate(asset = {}) {
+  const purchaseDate = parseAnyDate(asset.purchase_date);
+  if (purchaseDate) return { date: purchaseDate, source: "purchase_date" };
+
+  const createdAt = parseAnyDate(asset.created_at);
+  if (createdAt) return { date: createdAt, source: "created_at" };
+
+  return { date: null, source: null };
+}
+
+function buildFutureMaintenanceCandidates(
+  assets = [],
+  { currentYear = new Date().getUTCFullYear(), horizonYears = 15 } = {},
+) {
+  const candidates = [];
+  const candidateKeys = new Set();
+  let noDateCount = 0;
+  let fallbackCreatedAtCount = 0;
+
+  for (const asset of assets) {
+    const every = Math.max(1, Number(asset.maintenance_frequency_months || 12));
+    const baseDate = resolveMaintenanceBaseDate(asset);
+    if (!baseDate.date) {
+      noDateCount++;
+      continue;
+    }
+    if (baseDate.source === "created_at") fallbackCreatedAtCount++;
+
+    let cursor = addMonthsClampedUTC(baseDate.date, every);
+    while (cursor.getUTCFullYear() < currentYear) {
+      cursor = addMonthsClampedUTC(cursor, every);
+    }
+
+    while (cursor.getUTCFullYear() <= currentYear + horizonYears) {
+      const businessDate = resolveMaintenanceBusinessDate(cursor);
+      const plannedDate = toISODateUTC(businessDate);
+      const key = `${asset.id}:${plannedDate}`;
+      if (!candidateKeys.has(key)) {
+        candidateKeys.add(key);
+        candidates.push({
+          asset_id: Number(asset.id),
+          year: businessDate.getUTCFullYear(),
+          planned_date: plannedDate,
+          max_due_date: toISODateUTC(resolveMaintenanceDueDate(businessDate)),
+        });
+      }
+      cursor = addMonthsClampedUTC(cursor, every);
+    }
+  }
+
+  return { candidates, noDateCount, fallbackCreatedAtCount };
+}
+
 /**
  * Generate or refresh maintenance schedules for all active assets
  * across all future years. Idempotent — skips records that already exist.
@@ -1927,64 +2080,49 @@ async function generateFutureMaintenance({ userId } = {}) {
   );
   const assets = assetsQ.rows || [];
 
-  let totalCreated = 0;
-  let totalSkipped = 0;
-  let noDateCount = 0;
+  const {
+    candidates,
+    noDateCount,
+    fallbackCreatedAtCount,
+  } = buildFutureMaintenanceCandidates(assets, {
+    currentYear,
+    horizonYears: HORIZON_YEARS,
+  });
 
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
 
-    for (const asset of assets) {
-      const every = Math.max(1, Number(asset.maintenance_frequency_months || 12));
-
-      // Regla: el cronograma se calcula desde purchase_date + frecuencia.
-      const purchaseDate = parseAnyDate(asset.purchase_date);
-      if (!purchaseDate) {
-        noDateCount++;
-        continue;
-      }
-
-      // Primer mantenimiento cuando cumple la frecuencia desde la compra.
-      let cursor = addMonthsClampedUTC(purchaseDate, every);
-      while (cursor.getUTCFullYear() < currentYear) {
-        cursor = addMonthsClampedUTC(cursor, every);
-      }
-
-      // Generate from current year up to the horizon
-      while (cursor.getUTCFullYear() <= currentYear + HORIZON_YEARS) {
-        const planned = toISODateUTC(cursor);
-        const maxDueDate = toISODateUTC(addDaysUTC(cursor, 15));
-        const yr = cursor.getUTCFullYear();
-
-        const exists = await client.query(
-          `SELECT id FROM public.ti_asset_maintenance_schedule
-            WHERE asset_id = $1 AND planned_date = $2::date LIMIT 1`,
-          [asset.id, planned],
-        );
-
-        if (!exists.rows.length) {
-          await client.query(
-            `INSERT INTO public.ti_asset_maintenance_schedule
-               (asset_id, year, planned_date, max_due_date, status, created_by, updated_by, created_at, updated_at)
-             VALUES ($1,$2,$3::date,$4::date,'pending',$5,$5,now(),now())`,
-            [asset.id, yr, planned, maxDueDate, userId || null],
-          );
-          totalCreated++;
-        } else {
-          totalSkipped++;
-        }
-
-        cursor = addMonthsClampedUTC(cursor, every);
-      }
+    let totalCreated = 0;
+    if (candidates.length) {
+      const inserted = await client.query(
+        `WITH candidates AS (
+           SELECT *
+             FROM jsonb_to_recordset($1::jsonb) AS c(
+               asset_id bigint,
+               year integer,
+               planned_date date,
+               max_due_date date
+             )
+         )
+         INSERT INTO public.ti_asset_maintenance_schedule
+           (asset_id, year, planned_date, max_due_date, status, created_by, updated_by, created_at, updated_at)
+         SELECT asset_id, year, planned_date, max_due_date, 'pending', $2, $2, now(), now()
+           FROM candidates
+         ON CONFLICT (asset_id, planned_date) DO NOTHING
+         RETURNING id`,
+        [JSON.stringify(candidates), userId || null],
+      );
+      totalCreated = inserted.rowCount || inserted.rows?.length || 0;
     }
 
     await client.query("COMMIT");
     return {
       assets: assets.length,
       created_count: totalCreated,
-      skipped_existing: totalSkipped,
+      skipped_existing: candidates.length - totalCreated,
       skipped_no_date: noDateCount,
+      fallback_created_at_count: fallbackCreatedAtCount,
       horizon_years: HORIZON_YEARS,
     };
   } catch (error) {
@@ -2060,6 +2198,11 @@ async function setMaintenanceCoordinationDate({ maintenanceId, coordinatedWithdr
     err.status = 400;
     throw err;
   }
+  if (toISODateUTC(resolveMaintenanceBusinessDate(parsed)) !== toISODateUTC(parsed)) {
+    const err = new Error("La fecha de coordinacion debe ser un dia habil y no feriado");
+    err.status = 400;
+    throw err;
+  }
   const safeDate = toISODateUTC(parsed);
 
   const { rows } = await db.query(
@@ -2100,7 +2243,13 @@ async function createMaintenance({ assetId, plannedDate, notes = null, userId })
     err.status = 400;
     throw err;
   }
-  const maxDueDate = toISODateUTC(addDaysUTC(planned, 15));
+  if (toISODateUTC(resolveMaintenanceBusinessDate(planned)) !== toISODateUTC(planned)) {
+    const err = new Error("planned_date debe ser un dia habil y no feriado");
+    err.status = 400;
+    throw err;
+  }
+  const safePlannedDate = toISODateUTC(planned);
+  const maxDueDate = toISODateUTC(resolveMaintenanceDueDate(planned));
 
   const { rows: assetRows } = await db.query(
     `SELECT id, name FROM public.ti_assets WHERE id = $1 AND active = true LIMIT 1`,
@@ -2123,12 +2272,12 @@ async function createMaintenance({ assetId, plannedDate, notes = null, userId })
        updated_by = EXCLUDED.updated_by,
        updated_at = now()
      RETURNING *`,
-    [id, date, maxDueDate, notes, userId || null],
+    [id, safePlannedDate, maxDueDate, notes, userId || null],
   );
   try {
     await notifyMaintenanceWindow({
       assetName: assetRows[0].name || `Activo ${id}`,
-      plannedDate: toISODateUTC(planned),
+      plannedDate: safePlannedDate,
       maxDueDate,
     });
   } catch (_err) {
@@ -4269,4 +4418,9 @@ module.exports = {
   liberateAsset,
   getLiberationPhotos,
   getLiberationPhotoFile,
+  getMaintenanceHolidaysForYear,
+  resolveMaintenanceBusinessDate,
+  resolveMaintenanceDueDate,
+  resolveMaintenanceBaseDate,
+  buildFutureMaintenanceCandidates,
 };

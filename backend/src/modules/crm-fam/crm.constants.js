@@ -30,7 +30,14 @@ const ALL_CRM_ROLES = [...new Set([...CRM_ROLES, ...MANAGER_ROLES, ...ADMIN_ROLE
 // forecast, blue-sheet-kpis, reportes de gerencia.
 const MANAGER_OR_ADMIN_ROLES = [...new Set([...MANAGER_ROLES, ...ADMIN_ROLES])];
 
+// Fases del embudo en las que la venta ya esta cerrada con el cliente aunque la oportunidad siga
+// abierta: contrato, entrega del equipo y control de consumibles. Cuentan como "vendido".
+const SOLD_STAGE_NAMES = ['Contratos', 'Entrega e instalación', 'Control de consumibles'];
+const SOLD_STAGES_SQL = `(${SOLD_STAGE_NAMES.map((name) => `'${name}'`).join(', ')})`;
+
 module.exports = {
+  SOLD_STAGE_NAMES,
+  SOLD_STAGES_SQL,
   CRM_ROLES,
   MANAGER_ROLES,
   ADMIN_ROLES,

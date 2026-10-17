@@ -53,7 +53,8 @@ const SectionContent = ({
  // investments/determinations como "las 3 con reglas propias", pero aqui
  // faltaba, reproduciendo el mismo banner falso.
  const isDispatchWorkspace = selectedSection === "dispatch_workspace";
- const hasOwnPermissionModel = isInvestments || isInvestmentValues || isOfferWorkspace || isPricingLab || isDeterminations || isDispatchWorkspace;
+ const isGeneral = selectedSection === "general";
+ const hasOwnPermissionModel = isInvestments || isInvestmentValues || isOfferWorkspace || isPricingLab || isDeterminations || isDispatchWorkspace || (isGeneral && permissions.canEditGeneral === true);
  // Each section passes its own id so save is always attributed correctly
  const makeForwardSave = (sectionId) => (options = {}) => {
   onSectionSave?.({ ...options, section: sectionId });

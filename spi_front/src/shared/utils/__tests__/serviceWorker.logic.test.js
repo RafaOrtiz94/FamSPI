@@ -169,6 +169,14 @@ describe("public/service-worker.js - reglas de seguridad", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  test("no cachea archivos de /static/ sin hash (desarrollo local: bundle.js cambia en cada guardado)", () => {
+    const { fetchHandler } = loadServiceWorker();
+    ["/static/js/bundle.js", "/static/js/src_modules_comercial_Determinations.chunk.js"].forEach((pathname) => {
+      const request = { method: "GET", mode: "no-cors", url: `https://fam-spi-front.web.app${pathname}` };
+      expect(dispatchFetch(fetchHandler(), request)).toBeNull();
+    });
+  });
+
   test("nunca intercepta llamadas a la API (otro origen)", () => {
     const { fetchHandler } = loadServiceWorker();
     const request = {

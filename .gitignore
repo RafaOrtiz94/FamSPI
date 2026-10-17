@@ -53,3 +53,5 @@ backend/backups/
 # Pruebas E2E y verificacion en navegador (artefactos locales)
 spi_front/e2e/.results/
 .playwright-mcp/
+.codex-deploy-investments-20261013-1758/production-source-2.zip
+.codex-deploy-investments-20261013-1758/production-source.zip

@@ -140,6 +140,19 @@ async function syncInvestmentValuesBackfill(req, res) {
   }
 }
 
+// Backfill de Datos Generales a las hojas BC ya generadas. dry_run (default) solo lista.
+async function syncGeneralDataBackfill(req, res) {
+  try {
+    const data = await sheetGenerationService.syncGeneralDataForAllBusinessCases({
+      dryRun: req.body?.dry_run !== false,
+      businessCaseIds: req.body?.business_case_ids || null,
+    });
+    return res.json({ ok: true, data });
+  } catch (error) {
+    return sendError(res, error, "No se pudo sincronizar datos generales a Sheets");
+  }
+}
+
 async function getSheetGenerationMetrics(_req, res) {
   try {
     const response = await sheetGenerationService.getQueueMetrics();
@@ -202,6 +215,7 @@ module.exports = {
   getLatestSheetGenerationJobStatus,
   getSheetGenerationMetrics,
   syncInvestmentValuesBackfill,
+  syncGeneralDataBackfill,
   downloadFallbackExcel,
   getDocumentVersionHistory,
 };

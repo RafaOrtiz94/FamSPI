@@ -2,8 +2,9 @@ const db = require("../../config/db");
 const calculators = require("./crm.calculators");
 const notificationsService = require("../notifications/notifications.service");
 const { ensureFolderPath, uploadFileToDrive } = require("../../utils/drive");
-const { MANAGER_OR_ADMIN_ROLES } = require("./crm.constants");
+const { MANAGER_OR_ADMIN_ROLES, SOLD_STAGES_SQL } = require("./crm.constants");
 const { ensureLinkColumns } = require("./crmPurchaseSync.service");
+const fieldFlags = require("./crmBlueSheetFieldFlags");
 
 const notImplemented = (name) => Promise.reject(Object.assign(new Error(`${name}: Not implemented`), { status: 501 }));
 
@@ -678,16 +679,64 @@ const softDeleteAccountPlan = async (accountId, planId, user) => {
 
 // Estadisticas de ventas por cuenta y plan -- para proyecciones comerciales.
 //
-// "Vendido" = oportunidad ganada (status 'won') O que ya esta en la fase
-// "Contratos" del embudo (aun status 'open': cambiar de etapa no cierra la
-// oportunidad). Monto: won_amount, o el estimado si no se registro.
+// "Vendido" = oportunidad ganada (status 'won') O que ya esta en "Contratos" o en
+// una fase posterior del embudo (entrega, consumibles), aun con status 'open':
+// cambiar de etapa no cierra la oportunidad. Monto: won_amount, o el estimado si no se registro.
 // Si el plan tiene periodo, solo cuenta lo cerrado dentro de el (fecha de
 // cierre real, o la estimada mientras siga abierta); sin periodo, todo el historico.
 //
 // El pipeline necesario sale del historial del VENDEDOR del plan (todas sus
 // oportunidades), no del de esta cuenta: ver calculateRequiredPipeline.
-const SOLD_CONDITION = `(o.status = 'won' OR (o.status = 'open' AND st.name = 'Contratos'))`;
+const SOLD_CONDITION = `(o.status = 'won' OR (o.status = 'open' AND st.name IN ${SOLD_STAGES_SQL}))`;
 const SOLD_AMOUNT = `COALESCE(o.won_amount, o.estimated_amount, 0)`;
+
+// Planes de cuenta activos para el embudo: un plan vive años, asi que no pasa por las fases; se
+// muestra como una franja fija con su avance (vendido vs. meta) y el pipeline abierto de la cuenta.
+// Manager ve todos; el resto, los planes donde es vendedor o propietario de la cuenta.
+const listActivePlansBoard = async (user) => {
+  const params = [];
+  let scope = '';
+  if (!isManager(user)) {
+    params.push(user.id);
+    scope = `AND (p.seller_user_id = $1 OR a.owner_user_id = $1)`;
+  }
+  const IN_PERIOD = `(p.period_start IS NULL OR COALESCE(o.actual_close_date, o.estimated_close_date) >= p.period_start)
+                 AND (p.period_end IS NULL OR COALESCE(o.actual_close_date, o.estimated_close_date) <= p.period_end)`;
+  const { rows } = await db.query(
+    `SELECT p.id, p.account_id, p.name, p.period_start, p.period_end, p.target_amount, p.seller_user_id, p.created_at,
+            u.fullname AS seller_name, a.account_name, a.classification AS account_classification,
+            COALESCE(s.sold_amount, 0)::numeric AS sold_amount, COALESCE(s.sold_count, 0)::int AS sold_count,
+            COALESCE(s.open_amount, 0)::numeric AS open_amount, COALESCE(s.open_count, 0)::int AS open_count
+       FROM crm.crm_account_plans p
+       JOIN crm.crm_accounts a ON a.id = p.account_id AND a.deleted_at IS NULL
+       LEFT JOIN public.users u ON u.id = p.seller_user_id
+       LEFT JOIN LATERAL (
+         SELECT SUM(${SOLD_AMOUNT}) FILTER (WHERE ${SOLD_CONDITION} AND ${IN_PERIOD}) AS sold_amount,
+                COUNT(*) FILTER (WHERE ${SOLD_CONDITION} AND ${IN_PERIOD}) AS sold_count,
+                SUM(COALESCE(o.estimated_amount, 0)) FILTER (WHERE o.status = 'open' AND NOT ${SOLD_CONDITION}) AS open_amount,
+                COUNT(*) FILTER (WHERE o.status = 'open' AND NOT ${SOLD_CONDITION}) AS open_count
+           FROM crm.crm_opportunities o
+           LEFT JOIN crm.crm_pipeline_stages st ON st.id = o.stage_id
+          WHERE o.account_id = p.account_id AND o.deleted_at IS NULL
+       ) s ON true
+      WHERE p.deleted_at IS NULL AND p.status = 'active' ${scope}
+      ORDER BY p.period_end ASC NULLS LAST, a.account_name ASC
+      LIMIT 200`,
+    params
+  );
+  return rows.map((r) => {
+    const target = Number(r.target_amount || 0);
+    const sold = Number(r.sold_amount || 0);
+    return {
+      ...r,
+      target_amount: target,
+      sold_amount: sold,
+      open_amount: Number(r.open_amount || 0),
+      remaining_amount: Math.max(target - sold, 0),
+      progress_pct: target > 0 ? Math.min(100, Math.round((sold / target) * 100)) : null,
+    };
+  });
+};
 
 const getAccountSalesStats = async (id, user, planId) => {
   const account = await getAccountById(id, user); // throws 404/403
@@ -1734,6 +1783,7 @@ const listOpportunities = async ({ status, stage_id, owner_user_id, account_id, 
 
   const { rows } = await db.query(`
     SELECT o.*, a.account_name, a.classification as account_classification,
+      pl.id as account_plan_id, pl.name as account_plan_name, lr.reason_name as lost_reason_name,
       s.name as stage_name, s.order_index as stage_order, s.probability_default,
       u.fullname as owner_name,
       bs.status as blue_sheet_status, bs.health_score as blue_sheet_health_score,
@@ -1743,6 +1793,14 @@ const listOpportunities = async ({ status, stage_id, owner_user_id, account_id, 
     LEFT JOIN crm.crm_pipeline_stages s ON s.id = o.stage_id
     LEFT JOIN public.users u ON u.id = o.owner_user_id
     LEFT JOIN crm.crm_blue_sheets bs ON bs.opportunity_id = o.id
+    LEFT JOIN crm.crm_lost_reasons lr ON lr.id = o.lost_reason_id
+    LEFT JOIN LATERAL (
+      -- Plan de cuenta activo al que aporta la oportunidad (prefiere el del mismo vendedor).
+      SELECT p.id, p.name FROM crm.crm_account_plans p
+       WHERE p.account_id = o.account_id AND p.deleted_at IS NULL AND p.status = 'active'
+       ORDER BY (p.seller_user_id = o.owner_user_id) DESC NULLS LAST, p.period_start DESC NULLS LAST, p.created_at DESC
+       LIMIT 1
+    ) pl ON true
     WHERE ${where}
     ORDER BY o.estimated_close_date ASC NULLS LAST, o.created_at DESC
     LIMIT $${limitIdx} OFFSET $${offsetIdx}
@@ -2031,6 +2089,9 @@ async function _updateBsFields(id, allowed, data, user) {
     `UPDATE crm.crm_blue_sheets SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,
     params
   );
+  // Red flags automaticas segun lo que se acaba de guardar (urgencia critica, presupuesto desconocido...).
+  // No bloquea el guardado del Blue Sheet si falla.
+  await fieldFlags.syncAutoFieldFlags(rows[0], user.id).catch(() => null);
   return rows[0];
 }
 
@@ -2678,7 +2739,7 @@ const ELEMENT_RED_FLAG_DEFAULT_SEVERITY = {
 const listElementRedFlags = async (blueSheetId, user) => {
   await _bsAccess(blueSheetId, user);
   const { rows } = await db.query(
-    `SELECT id, related_entity_type, related_entity_id, severity, status
+    `SELECT id, related_entity_type, related_entity_id, severity, status, flag_category, flag_title, is_auto_generated
        FROM crm.crm_red_flags
       WHERE blue_sheet_id=$1 AND deleted_at IS NULL AND related_entity_id IS NOT NULL`,
     [blueSheetId],
@@ -2690,7 +2751,13 @@ const listElementRedFlags = async (blueSheetId, user) => {
 // (deleted_at=now()), si no existe la crea con los defaults del tipo. El
 // frontend solo necesita mandar el tipo/id del elemento y una etiqueta
 // legible -- la severidad/categoria las resuelve el backend.
-const toggleElementRedFlag = async ({ blue_sheet_id, related_entity_type, related_entity_id, label } = {}, user) => {
+const toggleElementRedFlag = async ({ blue_sheet_id, related_entity_type, related_entity_id, label, field, text } = {}, user) => {
+  // Campos del Blue Sheet (urgencia, presupuesto, textos): ver crmBlueSheetFieldFlags.js.
+  if (related_entity_type === fieldFlags.FIELD_TYPE) {
+    const bs = await _getBsWithAccess(blue_sheet_id, user);
+    if (!EDITABLE_STATES.includes(bs.status)) throw mkErr(`Blue Sheet en estado '${bs.status}' no es editable`, 409);
+    return fieldFlags.toggleFieldFlag({ blueSheetId: blue_sheet_id, field, text, bs }, user.id);
+  }
   if (!ELEMENT_RED_FLAG_TYPES.has(related_entity_type)) throw mkErr('Tipo de elemento invalido', 400);
   if (!related_entity_id) throw mkErr('related_entity_id es requerido', 400);
   await _bsAccess(blue_sheet_id, user);
@@ -3425,7 +3492,7 @@ module.exports = {
   // Accounts
   listAccounts, getAccountById, createAccount, updateAccount, softDeleteAccount, getAccountTimeline,
   getAccountSalesStats, mergeAccounts, getAccountDuplicateCandidates,
-  listAccountPlans, createAccountPlan, updateAccountPlan, softDeleteAccountPlan,
+  listAccountPlans, listActivePlansBoard, createAccountPlan, updateAccountPlan, softDeleteAccountPlan,
   // Contacts
   listContacts, getContactById, createContact, updateContact, softDeleteContact,
   // Email campaigns

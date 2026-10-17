@@ -19,6 +19,7 @@ const SECTION_FIELDS = {
  "provinceCity",
  "processCode",
  "contractObject",
+ "contractObjectType",
  "smartObjective",
  "referentialBudget",
  "maxTradeInPercent",
@@ -32,7 +33,7 @@ const SECTION_ORDER = ["general"];
 // (businessCase.routes.js) -- unico camino para reabrir "general" una vez
 // que comercial guardo y quedo bloqueada automaticamente.
 const GENERAL_REOPEN_ROLES = new Set(["acp_comercial", "backoffice", "backoffice_comercial", "jefe_comercial"]);
-const PRIVATE_CONTRACT_OBJECT_OPTIONS = [
+const CONTRACT_OBJECT_TYPE_OPTIONS = [
  { value: "TODO COMPRADO", label: "TODO COMPRADO" },
  { value: "DETERMINACION", label: "DETERMINACION" },
  { value: "DETERMINACION EFECTIVA", label: "DETERMINACION EFECTIVA" },
@@ -130,7 +131,7 @@ const isPublicPurchaseType = (value) => {
 };
 
 const isKnownPrivateContractObject = (value) =>
- PRIVATE_CONTRACT_OBJECT_OPTIONS.some((option) => option.value === String(value || "").trim());
+ CONTRACT_OBJECT_TYPE_OPTIONS.some((option) => option.value === String(value || "").trim());
 
 const AccordionSection = ({
  id,
@@ -222,17 +223,6 @@ const watchClient = watch("client");
 const watchLocationId = watch("locationId");
 const watchClientType = watch("clientType");
 const watchProvinceCity = watch("provinceCity");
-const watchContractObject = watch("contractObject");
-const privateContractObjectOptions = useMemo(() => {
- const currentValue = String(watchContractObject || "").trim();
- if (!currentValue || isKnownPrivateContractObject(currentValue)) {
- return PRIVATE_CONTRACT_OBJECT_OPTIONS;
- }
- return [
-  ...PRIVATE_CONTRACT_OBJECT_OPTIONS,
-  { value: currentValue, label: `Valor actual: ${currentValue}` },
- ];
-}, [watchContractObject]);
  const selectedClientLabel = selectedClient ? normalizeText(getClientLabel(selectedClient)) : "";
  const [openSections, setOpenSections] = useState(() =>
  SECTION_ORDER.reduce((acc, id) => {
@@ -298,6 +288,19 @@ const privateContractObjectOptions = useMemo(() => {
  fallbackBusinessCase?.contractObject ||
  fallbackBusinessCase?.contract_object ||
  "",
+ contractObjectType:
+ businessCase?.contract_object_type ||
+ fallbackBusinessCase?.contract_object_type ||
+ metadata.contract_object_type ||
+ metadataGeneral.contract_object_type ||
+ (isKnownPrivateContractObject(
+  businessCase?.contractObject ||
+  businessCase?.contract_object ||
+  fallbackBusinessCase?.contractObject ||
+  fallbackBusinessCase?.contract_object,
+ )
+  ? (businessCase?.contractObject || businessCase?.contract_object || fallbackBusinessCase?.contractObject || fallbackBusinessCase?.contract_object)
+  : ""),
  smartObjective:
  businessCase?.smart_objective ||
  fallbackBusinessCase?.smart_objective ||
@@ -665,6 +668,7 @@ const privateContractObjectOptions = useMemo(() => {
  const normalizedSmartObjective = String(formData.smartObjective || "").trim();
  const finalContractingEntity = startedAsPublic ? String(formData.contractingEntity || "").trim() : null;
  const finalProcessCode = startedAsPublic ? String(formData.processCode || "").trim() || null : null;
+ const contractObjectType = String(formData.contractObjectType || "").trim() || null;
  const normalizedReferentialBudget =
  formData.referentialBudget === "" || formData.referentialBudget === null || formData.referentialBudget === undefined
  ? null
@@ -690,6 +694,7 @@ const privateContractObjectOptions = useMemo(() => {
  installation_province: selectedLocationValue?.province || null,
  installation_lat: selectedLocationValue?.lat ?? null,
  installation_lng: selectedLocationValue?.lng ?? null,
+ contract_object_type: contractObjectType,
  general_data: {
  notes: formData.notes,
  smart_objective: normalizedSmartObjective,
@@ -706,6 +711,7 @@ const privateContractObjectOptions = useMemo(() => {
  installation_province: selectedLocationValue?.province || null,
  installation_lat: selectedLocationValue?.lat ?? null,
  installation_lng: selectedLocationValue?.lng ?? null,
+ contract_object_type: contractObjectType,
  },
  };
 
@@ -714,7 +720,7 @@ const privateContractObjectOptions = useMemo(() => {
 
  try {
  // Update business case metadata
- await api.put(`/business-case/${bcId}`, {
+ const response = await api.put(`/business-case/${bcId}`, {
  client_id,
  client_name,
  process_code: finalProcessCode,
@@ -722,7 +728,15 @@ const privateContractObjectOptions = useMemo(() => {
  modern_bc_metadata: metadata,
  });
 
+ // El servidor pasa los datos generales a la hoja ya generada; si no pudo, se avisa sin perder el guardado.
+ const sheetSync = response?.data?.sheet_sync;
+ if (sheetSync && sheetSync.synced === false && sheetSync.reason !== "no_sheet") {
+ showToast(`Datos guardados, pero no se pudo sincronizar con la hoja: ${sheetSync.error || "error desconocido"}`, "error");
+ } else if (sheetSync?.synced) {
+ showToast("Datos del cliente guardados y sincronizados con la hoja", "success");
+ } else {
  showToast("Datos del cliente guardados correctamente", "success");
+ }
  setIsEditing(false);
  onSave();
 
@@ -748,7 +762,8 @@ const privateContractObjectOptions = useMemo(() => {
  "jefe_tecnico",
  "jefe_operaciones",
  ].includes(role);
- return hasRoleAccess && permissions?.canEdit !== false && ownership?.canUserEdit !== false;
+ const hasGeneralPermission = permissions?.canEditGeneral === true || permissions?.canEdit !== false;
+ return hasRoleAccess && hasGeneralPermission && ownership?.canUserEdit !== false;
  };
 
  // Reabrir "general" tras el auto-bloqueo al guardar comercial (ver
@@ -1041,24 +1056,38 @@ const privateContractObjectOptions = useMemo(() => {
  <div className="flex items-center justify-between">
  <span className="text-sm font-bold text-gray-700">Objeto de contratación</span>
  </div>
- <select
+ <textarea
  className={naInputClass("contractObject")}
  disabled={!isEditing}
+ rows={3}
+ placeholder="Describe libremente el objeto de contratación"
  {...register("contractObject", {
   validate: (value) => {
    if (String(value || "").trim()) return true;
    return "El objeto de contratación es obligatorio";
   },
  })}
+ />
+ {errors.contractObject && <p className="ml-1 text-xs font-medium text-rose-500">{errors.contractObject.message}</p>}
+ </label>
+ <label className="flex flex-col gap-1.5">
+ <span className="text-sm font-bold text-gray-700">Modalidad</span>
+ <select
+ className={naInputClass("contractObjectType")}
+ disabled={!isEditing}
+ {...register("contractObjectType", {
+  validate: (value) => Boolean(String(value || "").trim()) || "Selecciona la modalidad",
+ })}
  >
  <option value="">Selecciona una opción</option>
- {privateContractObjectOptions.map((option) => (
+ {CONTRACT_OBJECT_TYPE_OPTIONS.map((option) => (
   <option key={option.value} value={option.value}>
    {option.label}
   </option>
  ))}
  </select>
- {errors.contractObject && <p className="ml-1 text-xs font-medium text-rose-500">{errors.contractObject.message}</p>}
+ <p className="text-xs text-gray-500">La modalidad define el montaje de la oferta; no modifica el texto del objeto.</p>
+ {errors.contractObjectType && <p className="ml-1 text-xs font-medium text-rose-500">{errors.contractObjectType.message}</p>}
  </label>
  <label className="flex flex-col gap-1.5">
  <div className="flex items-center justify-between">

@@ -13,7 +13,7 @@ import { listAllTiAssetReservations } from "../../../../../core/api/bcInvestment
 // sincronizacion con la hoja. Ya NO definen quien registra precios.
 const OPERATIONAL_ROLES = new Set(["jefe_operaciones", "jefe_de_operaciones", "jefe_ti"]);
 const FINANCIAL_ROLES = new Set(["jefe_financiero", "jefe_ti"]);
-// Solo jefe_financiero registra precios (operativo, financiero y depreciacion);
+// Solo jefe_financiero registra el precio unitario de la inversion y la depreciacion;
 // el resto de roles los ve en solo lectura. El backend aplica la misma regla.
 const PRICE_EDITOR_ROLES = new Set(["jefe_financiero"]);
 // Ven el historico de otros BCs: roles de valores (investmentValuesRoles del
@@ -304,9 +304,9 @@ const InvestmentValuesUnifiedSection = ({
   // precios los registran unicamente los roles de valores.
   const sectionEditable = permissions.canEdit !== false;
   const isPriceEditor = PRICE_EDITOR_ROLES.has(role) && sectionEditable;
-  const canEditOperational = isPriceEditor && operationalOwnership?.canUserEdit !== false;
+  // El precio operativo se elimino (2026-10): solo existe el precio unitario de la inversion.
   const canEditFinancial = isPriceEditor && financialOwnership?.canUserEdit !== false;
-  const canEditAny = canEditOperational || canEditFinancial;
+  const canEditAny = canEditFinancial;
   // Acciones que no son precios (cerrar sin inversiones, sincronizar hoja): roles de valores, como antes.
   const canManageValues = sectionEditable && (
     (OPERATIONAL_ROLES.has(role) && operationalOwnership?.canUserEdit !== false) ||
@@ -317,8 +317,7 @@ const InvestmentValuesUnifiedSection = ({
     if (!bcId) return;
     try {
       if (!silent) setLoading(true);
-      const [operationalRes, financialRes, assigneesRes, tiReservations] = await Promise.all([
-        api.get(`/business-case/${bcId}/investments/values`, { params: { class: "operativa" } }),
+      const [financialRes, assigneesRes, tiReservations] = await Promise.all([
         api.get(`/business-case/${bcId}/investments/values`, { params: { class: "financiera" } }),
         canManageQuotations
           ? api.get(`/business-case/${bcId}/investments/values/assignees`)
@@ -331,17 +330,15 @@ const InvestmentValuesUnifiedSection = ({
         countsByCatalogId[key] = (countsByCatalogId[key] || 0) + 1;
       });
       setTiAssetCountsByCatalogId(countsByCatalogId);
-      const operationalPayload = operationalRes?.data?.data || {};
       const financialPayload = financialRes?.data?.data || {};
       // Recargar (asignar responsable, subir cotizacion, etc.) no debe pisar
       // precios editados y aun sin guardar: se conservan los campos sucios.
       const localById = new Map(itemsRef.current.map((row) => [Number(row.catalog_id), row]));
       const dirty = dirtyRef.current;
-      const merged = mergeInvestmentRows(operationalPayload.items || [], financialPayload.items || []).map((row) => {
+      const merged = mergeInvestmentRows([], financialPayload.items || []).map((row) => {
         const local = localById.get(Number(row.catalog_id));
         if (!local) return row;
         const next = { ...row };
-        if (dirty[`${row.catalog_id}:operativa`]) next.operational_unit_price = local.operational_unit_price;
         if (dirty[`${row.catalog_id}:financiera`]) {
           next.financial_unit_price = local.financial_unit_price;
           next.depreciation_percentage = local.depreciation_percentage;
@@ -350,11 +347,8 @@ const InvestmentValuesUnifiedSection = ({
         return next;
       });
       setItems(merged);
-      setPricingContext(financialPayload.pricing_context || operationalPayload.pricing_context || null);
-      setSyncStatus({
-        operational: operationalPayload.sync_status || null,
-        financial: financialPayload.sync_status || null,
-      });
+      setPricingContext(financialPayload.pricing_context || null);
+      setSyncStatus({ financial: financialPayload.sync_status || null });
       setAssignees(Array.isArray(assigneesRes?.data?.data) ? assigneesRes.data.data : []);
       setAssigneeDrafts(Object.fromEntries(merged.map((item) => {
         const key = String(item.catalog_id);
@@ -413,9 +407,6 @@ const InvestmentValuesUnifiedSection = ({
 
   const handleSave = async () => {
     if (!canEditAny || !bcId) return;
-    const operationalValues = items
-      .filter((row) => dirtyMap[`${row.catalog_id}:operativa`] && canEditOperational)
-      .map((row) => ({ catalog_id: row.catalog_id, unit_price: row.operational_unit_price ?? null }));
     const financialValues = items
       .filter((row) => dirtyMap[`${row.catalog_id}:financiera`] && canEditFinancial)
       .map((row) => ({
@@ -425,24 +416,16 @@ const InvestmentValuesUnifiedSection = ({
         reused_from_business_case_id: row.reused_from_business_case_id ?? null,
       }));
 
-    if (!operationalValues.length && !financialValues.length) return;
+    if (!financialValues.length) return;
 
-    const savedKeys = [
-      ...operationalValues.map((v) => `${v.catalog_id}:operativa`),
-      ...financialValues.map((v) => `${v.catalog_id}:financiera`),
-    ];
+    const savedKeys = financialValues.map((v) => `${v.catalog_id}:financiera`);
     const revSnapshot = Object.fromEntries(savedKeys.map((k) => [k, revRef.current[k]]));
 
     try {
       setSaving(true);
-      const requests = [];
-      if (operationalValues.length) {
-        requests.push(api.post(`/business-case/${bcId}/investments/values`, { class: "operativa", values: operationalValues }));
-      }
-      if (financialValues.length) {
-        requests.push(api.post(`/business-case/${bcId}/investments/values`, { class: "financiera", values: financialValues }));
-      }
-      const responses = await Promise.all(requests);
+      const responses = [
+        await api.post(`/business-case/${bcId}/investments/values`, { class: "financiera", values: financialValues }),
+      ];
       const syncs = responses.map((res) => res?.data?.data?.sheet_sync).filter(Boolean);
       const failed = syncs.find((sync) => sync.synced === false && sync.reason !== "no_sheet");
       if (failed) {
@@ -559,24 +542,26 @@ const InvestmentValuesUnifiedSection = ({
     firstPendingRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [openedFromLink, loading, pendingReviewCount]);
   const financialSyncPending = Boolean(syncStatus?.financial?.pending);
-  const operationalSyncPending = Boolean(syncStatus?.operational?.pending);
-  const closedWithoutInvestments = Boolean(
+  const extraordinaryReopen = Boolean(
+    operationalOwnership?.metadata?.extraordinary_reopen?.active ||
+    financialOwnership?.metadata?.extraordinary_reopen?.active,
+  );
+  const closedWithoutInvestments = !extraordinaryReopen && Boolean(
     operationalOwnership?.metadata?.completion_basis === "no_additional_investments_selected" ||
     financialOwnership?.metadata?.completion_basis === "no_additional_investments_selected",
   );
   const canCloseWithoutItems = Boolean(canManageQuotations && canManageValues && !items.length && !closedWithoutInvestments);
   const totals = useMemo(() => items.reduce((acc, row) => {
     const qty = Number(row.quantity || 1);
-    const op = Number(row.operational_unit_price || 0);
     const depreciation = calculateFinancialDepreciation(
       row.financial_unit_price,
       row.depreciation_percentage,
       pricingContext?.projected_deadline_months,
     );
-    acc.operational += op * qty;
-    acc.financial += depreciation.projected * qty;
+    // Lo mismo que escribe la hoja: Precio = valor residual unitario, Total = cantidad x precio.
+    acc.sheetTotal += depreciation.net * qty;
     return acc;
-  }, { operational: 0, financial: 0 }), [items, pricingContext?.projected_deadline_months]);
+  }, { sheetTotal: 0 }), [items, pricingContext?.projected_deadline_months]);
 
   const handleCloseWithoutItems = async () => {
     if (!bcId || !canCloseWithoutItems) return;
@@ -609,12 +594,11 @@ const InvestmentValuesUnifiedSection = ({
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-gray-900">Precios financieros y operativos</h2>
+          <h2 className="text-2xl font-bold tracking-tight text-gray-900">Precios de inversiones</h2>
           <p className="text-sm text-gray-500">
-            Jefe Financiero registra los precios y la depreciacion. Los cambios se guardan y se sincronizan con la hoja automaticamente.
+            Jefe Financiero registra el precio unitario y la depreciacion de cada inversion. Los cambios se guardan y se sincronizan con la hoja automaticamente.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            <SectionEditorBadge ownership={operationalOwnership} />
             <SectionEditorBadge ownership={financialOwnership} />
           </div>
         </div>
@@ -624,11 +608,8 @@ const InvestmentValuesUnifiedSection = ({
               {dirtyCount} cambios
             </span>
           )}
-          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-            Operativo: ${money(totals.operational)}
-          </span>
-          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-            Financiero: ${money(totals.financial)}
+          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700" title="Suma de valor residual unitario x cantidad, igual al total de la hoja">
+            Valor total (hoja): ${money(totals.sheetTotal)}
           </span>
           {saving ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
@@ -677,23 +658,14 @@ const InvestmentValuesUnifiedSection = ({
         <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <FiAlertCircle size={16} className="shrink-0" />
           <span>
-            Hay precios financieros pendientes por completar antes de que la sincronizacion quede completa.
+            Hay inversiones sin precio unitario. Completalas para que la sincronizacion quede lista.
           </span>
         </div>
       ) : (
         <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
           <FiCheckCircle size={16} className="shrink-0" />
           <span>
-            Sincronizacion financiera lista. Los valores operativos pendientes son opcionales segun aplique.
-          </span>
-        </div>
-      )}
-
-      {!financialSyncPending && operationalSyncPending && (
-        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-          <FiAlertCircle size={16} className="shrink-0" />
-          <span>
-            Existen valores operativos sin registrar, pero no bloquean la sincronizacion financiera de este proceso.
+            Sincronizacion lista: todas las inversiones tienen precio unitario.
           </span>
         </div>
       )}
@@ -705,7 +677,7 @@ const InvestmentValuesUnifiedSection = ({
           </p>
           <p className="mt-2">
             {closedWithoutInvestments
-              ? "Inversiones adicionales, precios operativos y precios financieros ya quedaron completados sin items."
+              ? "Inversiones adicionales y precios de inversiones ya quedaron completados sin items."
               : "Si el BC no requiere inversiones adicionales, cierra esta etapa para habilitar la continuidad del flujo."}
           </p>
           {canCloseWithoutItems && (
@@ -729,7 +701,7 @@ const InvestmentValuesUnifiedSection = ({
             {pendingReviewCount === 1
               ? "1 inversion fue agregada o cambio de cantidad."
               : `${pendingReviewCount} inversiones fueron agregadas o cambiaron de cantidad.`}
-            {" "}Aparecen primero y resaltadas hasta que se guarde su precio financiero.
+            {" "}Aparecen primero y resaltadas hasta que se guarde su precio unitario.
           </span>
         </div>
       )}
@@ -758,7 +730,9 @@ const InvestmentValuesUnifiedSection = ({
                 item.depreciation_percentage,
                 pricingContext?.projected_deadline_months,
               );
-              // Pendiente = falta precio financiero (obligatorio) o hay revision de precio abierta.
+              // Pendiente = falta el precio unitario (obligatorio) o hay revision de precio abierta.
+              // La depreciacion solo se detalla cuando el item tiene porcentaje.
+              const hasDepreciation = Number(item.depreciation_percentage) > 0;
               const isPending = pendingReview || !(Number(item.financial_unit_price) > 0);
               const isOpen = expandedMap[item.catalog_id] ?? isPending;
               return (
@@ -781,10 +755,10 @@ const InvestmentValuesUnifiedSection = ({
                     <span className="hidden shrink-0 text-xs text-gray-500 sm:inline">Cant. {item.quantity ?? "-"}</span>
                     {!isOpen && (
                       <span className="hidden shrink-0 text-xs text-gray-500 md:inline">
-                        Financiero ${money(item.financial_unit_price)} · Operativo ${money(Number(item.operational_unit_price || 0) * qty)}
+                        Unitario ${money(item.financial_unit_price)} · Total ${money(depreciation.net * qty)}
                       </span>
                     )}
-                    {dirtyMap[`${item.catalog_id}:operativa`] || dirtyMap[`${item.catalog_id}:financiera`] ? (
+                    {dirtyMap[`${item.catalog_id}:financiera`] ? (
                       <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
                         <FiClock size={11} /> Sin guardar
                       </span>
@@ -892,21 +866,9 @@ const InvestmentValuesUnifiedSection = ({
                     />
                   )}
 
-                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <label className="flex flex-col gap-1">
-                      <span className="text-xs font-semibold text-gray-500">Precio operativo ($)</span>
-                      <input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={item.operational_unit_price ?? ""}
-                        onChange={(event) => updateField(item.catalog_id, "operational_unit_price", event.target.value === "" ? null : Number(event.target.value), "operativa")}
-                        disabled={!canEditOperational || saving}
-                        className="rounded-xl border border-gray-200 px-3 py-2 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="text-xs font-semibold text-gray-500">Precio financiero base ($)</span>
+                      <span className="text-xs font-semibold text-gray-500">Precio unitario de la inversion ($)</span>
                       <input
                         type="number"
                         min={0}
@@ -934,27 +896,30 @@ const InvestmentValuesUnifiedSection = ({
                       </div>
                     </label>
                     <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-sm">
-                      <div className="text-xs font-semibold text-gray-500">Depreciacion del proceso</div>
-                      <div className="mt-1 font-semibold text-gray-900">${money(depreciation.projected * qty)}</div>
-                      {qty > 1 && (
-                        <div className="mt-1 text-[11px] font-medium text-gray-500">
-                          ${money(depreciation.projected)} x {qty}
-                        </div>
-                      )}
+                      <div className="text-xs font-semibold text-gray-500">Valor residual unitario</div>
+                      <div className="mt-1 font-semibold text-gray-900">${money(depreciation.net)}</div>
+                      <div className="mt-1 text-[11px] font-medium text-gray-500">
+                        {hasDepreciation ? "Precio unitario menos depreciacion proyectada" : "Sin depreciacion: igual al precio unitario"}
+                      </div>
                     </div>
-                    <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-sm">
-                      <div className="text-xs font-semibold text-gray-500">Subtotal operativo</div>
-                      <div className="mt-1 font-semibold text-gray-900">${money(Number(item.operational_unit_price || 0) * qty)}</div>
+                    <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-sm">
+                      <div className="text-xs font-semibold text-blue-700">Valor total (hoja)</div>
+                      <div className="mt-1 font-semibold text-gray-900">${money(depreciation.net * qty)}</div>
+                      <div className="mt-1 text-[11px] font-medium text-gray-500">
+                        ${money(depreciation.net)} x {qty}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-3 text-xs text-emerald-800 sm:grid-cols-2 xl:grid-cols-5">
-                    <span>Depreciacion anual: <strong>${money(depreciation.annual)}</strong></span>
-                    <span>Depreciacion mensual: <strong>${money(depreciation.monthly)}</strong></span>
-                    <span>Depreciacion proyectada: <strong>${money(depreciation.projected)}</strong></span>
-                    <span>Proyeccion: <strong>{pricingContext?.projected_deadline_months || 0} meses</strong></span>
-                    <span>Valor residual unitario: <strong>${money(depreciation.net)}</strong></span>
-                  </div>
+                  {hasDepreciation && (
+                    <div className="grid grid-cols-1 gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-3 text-xs text-emerald-800 sm:grid-cols-2 xl:grid-cols-5">
+                      <span>Depreciacion del proceso: <strong>${money(depreciation.projected * qty)}</strong>{qty > 1 ? ` (${money(depreciation.projected)} x ${qty})` : ""}</span>
+                      <span>Depreciacion anual: <strong>${money(depreciation.annual)}</strong></span>
+                      <span>Depreciacion mensual: <strong>${money(depreciation.monthly)}</strong></span>
+                      <span>Depreciacion proyectada: <strong>${money(depreciation.projected)}</strong></span>
+                      <span>Proyeccion: <strong>{pricingContext?.projected_deadline_months || 0} meses</strong></span>
+                    </div>
+                  )}
 
                   {coveredByTiInventory && (
                     <p className="rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700">

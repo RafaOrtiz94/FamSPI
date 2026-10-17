@@ -26,6 +26,7 @@ const { startBusinessCasePreflowExpiryJob } = require("./jobs/businessCasePreflo
 const { startBusinessCaseWorkflowSlaJob } = require("./jobs/businessCaseWorkflowSlaScheduler");
 const { startBusinessCaseDeterminationsGateExpiryJob } = require("./jobs/businessCaseDeterminationsGateExpiryScheduler");
 const { startBusinessCaseSheetGenerationQueueJob } = require("./jobs/businessCaseSheetGenerationQueueScheduler");
+const { startBusinessCaseConsumableSimulationJob } = require("./jobs/businessCaseConsumableSimulationScheduler");
 const { start: startBcNotificationQueueJob } = require("./jobs/businessCaseNotificationQueueScheduler");
 const { startDatabaseBackupJob } = require("./jobs/databaseBackupToDrive");
 const { startPermisosPendingExpiryJob } = require("./jobs/permisosPendingExpiryScheduler");
@@ -75,6 +76,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
       { name: "bc_workflow_sla", fn: startBusinessCaseWorkflowSlaJob },
       { name: "bc_determinations_gate_expiry", fn: startBusinessCaseDeterminationsGateExpiryJob },
       { name: "bc_sheet_generation_queue", fn: startBusinessCaseSheetGenerationQueueJob },
+      { name: "bc_consumable_simulations", fn: startBusinessCaseConsumableSimulationJob },
       { name: "bc_notification_queue", fn: startBcNotificationQueueJob },
       { name: "permisos_pending_expiry", fn: startPermisosPendingExpiryJob },
       { name: "pasante_account_expiry", fn: startPasanteAccountExpiryJob },

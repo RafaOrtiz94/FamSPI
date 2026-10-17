@@ -114,7 +114,8 @@ function parseStability(block) {
   // Elecsys CalSet/PreciControl: la alicuota puesta en el analizador se usa una
   // vez; el frasco sigue vigente a 2-8 °C segun open_days.
   if (/use only once/i.test(b) && !r.single_use) r.onboard_aliquot_single_use = true;
-  if ((m = b.match(/(\d+(?:\.\d+)?)\s*(weeks?|days?|months?)\s*\(?when frozen once/i))) r.frozen_once_days = toDays(m[1], m[2]);
+  // Congelado una sola vez: "N months (when frozen once)" o, en Elecsys, "-20 °C (± 5 °C) N months (freeze only once)".
+  if ((m = b.match(/(\d+(?:\.\d+)?)\s*(weeks?|days?|months?)\s*\(?(?:when frozen once|freeze only once)/i))) r.frozen_once_days = toDays(m[1], m[2]);
   return r;
 }
 
@@ -277,7 +278,29 @@ function toSpecRow({ code, itemType, name, doc, extraction, retrievedAt }) {
   };
 }
 
+// Volumen de muestra por prueba que declara el documento del reactivo (µL). pdftotext pierde la
+// "µ" y normalizeDocumentText la deja como "°". Con varias aplicaciones se toma la mayor: es el
+// volumen que gasta tambien cada medicion de calibrador o control. null si el documento no lo trae.
+function parseSampleVolumeUl(text) {
+  const source = String(text || "");
+  const values = [];
+  const patterns = [
+    /\bSample\s+(\d+(?:\.\d+)?)\s?[°µμu]L/g,
+    /\b(\d+(?:\.\d+)?)\s?[°µμu]L of (?:the )?sample\b/gi,
+  ];
+  patterns.forEach((pattern) => {
+    let match = pattern.exec(source);
+    while (match) {
+      const value = Number(match[1]);
+      if (value >= 1 && value <= 200) values.push(value);
+      match = pattern.exec(source);
+    }
+  });
+  return values.length ? Math.max(...values) : null;
+}
+
 module.exports = {
+  parseSampleVolumeUl,
   normalizeDocumentText,
   normalizeCode,
   packFor,

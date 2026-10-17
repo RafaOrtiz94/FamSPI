@@ -14,9 +14,12 @@ import { isManager } from "../ui/roles";
 import { blueSheetStatus, health as healthOf, opportunityStatus } from "../ui/status";
 import { useLoad } from "../ui/useLoad";
 import { useUrlState } from "../ui/useUrlState";
+import { ExecutiveBoard, SalesGoals } from "./reports/ExecutiveReports";
 
 const BASE = "/dashboard/crm-fam";
 const TABS = [
+  { value: "executive", label: "Dirección" },
+  { value: "goals", label: "Metas" },
   { value: "forecast", label: "Pronóstico" },
   { value: "lost", label: "Motivos de pérdida" },
   { value: "redflags", label: "Red flags" },
@@ -301,8 +304,8 @@ function WinLossReport({ url, setUrl }) {
 
 export default function CrmReportsPage() {
   const { user } = useAuth();
-  const [url, setUrl] = useUrlState({ tab: "forecast", period: "quarter", from: "", to: "", severity: "", flag: "" });
-  const tab = TABS.some((t) => t.value === url.tab) ? url.tab : "forecast";
+  const [url, setUrl] = useUrlState({ tab: "executive", period: "quarter", from: "", to: "", severity: "", flag: "", month: "" });
+  const tab = TABS.some((t) => t.value === url.tab) ? url.tab : "executive";
 
   if (!isManager(user)) {
     return (
@@ -320,6 +323,8 @@ export default function CrmReportsPage() {
       <PageHeader title="Reportes">
         <Tabs label="Reportes" tabs={TABS} value={tab} onChange={(v) => setUrl({ tab: v })} />
       </PageHeader>
+      {tab === "executive" && <ExecutiveBoard url={url} setUrl={setUrl} />}
+      {tab === "goals" && <SalesGoals url={url} setUrl={setUrl} />}
       {tab === "forecast" && <ForecastReport url={url} setUrl={setUrl} />}
       {tab === "lost" && <LostReasonsReport url={url} setUrl={setUrl} />}
       {tab === "redflags" && <RedFlagsReport url={url} setUrl={setUrl} />}

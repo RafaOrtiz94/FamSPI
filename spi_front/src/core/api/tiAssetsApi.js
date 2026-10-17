@@ -143,12 +143,12 @@ export const setTiMaintenanceCoordinationDate = async (id, payload = {}) => {
 };
 
 export const generateTiMaintenanceFuture = async () => {
- const { data } = await api.post("/ti-assets/maintenance/generate");
+ const { data } = await api.post("/ti-assets/maintenance/generate", undefined, { timeout: 120000 });
  return data?.data || null;
 };
 
 export const refreshTiMaintenanceSchedule = async () => {
- const { data } = await api.post("/ti-assets/maintenance/refresh");
+ const { data } = await api.post("/ti-assets/maintenance/refresh", undefined, { timeout: 120000 });
  return data?.data || null;
 };
 

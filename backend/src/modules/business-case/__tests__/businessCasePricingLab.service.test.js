@@ -13,9 +13,14 @@ jest.mock("../businessCaseSheetSyncLocal.service", () => ({
   pullAnnualQuantitiesFromGoogleSheet: jest.fn(),
   pullMaximumQuantitiesFromGoogleSheet: jest.fn(),
 }));
+jest.mock("../consumableRules.service", () => ({ buildRulesPreview: jest.fn() }));
+jest.mock("../businessCasePredictiveLab.service", () => ({ buildPredictivePreview: jest.fn() }));
 
+const db = require("../../../config/db");
 const registry = require("../matrixCalculationPackages.registry");
 const sheetReader = require("../businessCaseSheetSyncLocal.service");
+const consumableRulesService = require("../consumableRules.service");
+const predictiveLabService = require("../businessCasePredictiveLab.service");
 const pricingLab = require("../businessCasePricingLab.service");
 
 const {
@@ -203,5 +208,46 @@ describe("businessCasePricingLab.service", () => {
     expect(result.sheetRead).toMatchObject({ ok: true, readOnly: true });
     expect(result.consumptions[0]).toMatchObject({ annual_qty: 250, planned_qty: 6 });
     expect(originalConsumptions[0]).toMatchObject({ annual_qty: 100, planned_qty: 2 });
+  });
+
+  test("adjunta ruleEngine como tercera fuente sin reemplazar calculo ni historico", async () => {
+    db.query.mockReset();
+    db.query
+      .mockResolvedValueOnce({ rows: [{
+        id: 9,
+        client_name: "Cliente",
+        contract_object: "Comodato por determinacion",
+        modern_bc_metadata: {},
+      }] })
+      .mockResolvedValueOnce({ rows: [{
+        equipment_id: 77,
+        quantity: 1,
+        is_primary: true,
+        equipment_name: "Equipo sin paquete",
+        equipment_code: "EQ-77",
+        category: "coagulation",
+      }] })
+      .mockResolvedValueOnce({ rows: [{ projected_deadline_months: 12 }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    const historical = { mode: "shadow_read_only", items: [] };
+    const ruleEngine = { mode: "shadow_read_only", publishable: false, items: [] };
+    predictiveLabService.buildPredictivePreview.mockResolvedValue(new Map([[77, historical]]));
+    consumableRulesService.buildRulesPreview.mockResolvedValue(new Map([[77, ruleEngine]]));
+
+    const result = await pricingLab.buildPreview(9);
+
+    expect(result.equipment[0]).toMatchObject({
+      status: "unsupported",
+      calculation: null,
+      predictiveModel: historical,
+      ruleEngine,
+    });
+    expect(consumableRulesService.buildRulesPreview).toHaveBeenCalledWith(expect.objectContaining({
+      businessCaseId: 9,
+      data: expect.objectContaining({ requirements: { projected_deadline_months: 12 } }),
+    }));
+    expect(result.offerWriteEnabled).toBe(false);
   });
 });

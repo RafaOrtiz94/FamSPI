@@ -172,6 +172,37 @@ router.post(
   auditSection("pricing_lab", "write"),
   pricingLabCtrl.preview,
 );
+// Casos validados del motor de reglas: miden su exactitud y alimentan el ajuste aprendido.
+// No tocan la oferta ni el consumo del Business Case.
+router.put(
+  "/:id/pricing-lab/rule-validations",
+  verifyToken,
+  requirePricingLabTi,
+  auditSection("pricing_lab", "write"),
+  pricingLabCtrl.saveRuleValidation,
+);
+// Simulacion de escenarios (minimo 5000) con el perfil del cliente; compara con clientes parecidos.
+router.get(
+  "/:id/pricing-lab/simulations",
+  verifyToken,
+  requirePricingLabTi,
+  auditSection("pricing_lab", "read"),
+  pricingLabCtrl.getSimulation,
+);
+router.post(
+  "/:id/pricing-lab/simulations",
+  verifyToken,
+  requirePricingLabTi,
+  auditSection("pricing_lab", "write"),
+  pricingLabCtrl.runSimulation,
+);
+router.delete(
+  "/:id/pricing-lab/rule-validations",
+  verifyToken,
+  requirePricingLabTi,
+  auditSection("pricing_lab", "write"),
+  pricingLabCtrl.deleteRuleValidation,
+);
 
 // Vista de solo-lectura para jefe_calidad y lorena.loaiza@fam-project.com --
 // requireRole ya mira extra_roles (ver middlewares/roles.js), asi que
@@ -205,6 +236,34 @@ router.delete("/:id", verifyToken, requireRole(["gerencia", "admin"]), ctrl.remo
 router.post("/:id/equipment", verifyToken, requireRole(businessCaseRoles), ctrl.selectEquipment);
 router.get("/:id/determinations", verifyToken, requireRole(businessCaseRoles), ctrl.getDeterminations);
 router.get("/:id/determinations/stat-document", verifyToken, requireRole(businessCaseRoles), ctrl.getDeterminationsGateInfo);
+// Prediccion del motor (calibradores, controles, materiales): todos la ven; Jefe de Servicio la valida.
+router.get("/:id/determinations/predictions", verifyToken, requireRole(businessCaseRoles), pricingLabCtrl.getDeterminationPredictions);
+router.put(
+  "/:id/determinations/predictions",
+  verifyToken,
+  requireRole(["jefe_servicio", "jefe_ti", "jefe_de_ti"]),
+  auditSection("determinations", "write"),
+  pricingLabCtrl.validateDeterminationPredictions,
+);
+// Entregas reales del proceso anterior del cliente (verdad del motor): todos las ven; Jefe de Servicio y TI las cargan.
+router.get("/:id/determinations/delivery-history", verifyToken, requireRole(businessCaseRoles), pricingLabCtrl.getDeliveryHistory);
+router.post(
+  "/:id/determinations/delivery-history",
+  verifyToken,
+  requireRole(["jefe_servicio", "jefe_ti", "jefe_de_ti"]),
+  upload.single("file"),
+  auditSection("determinations", "write"),
+  pricingLabCtrl.uploadDeliveryHistory,
+);
+// Estadisticas del laboratorio para el motor: todos las ven; Jefe de Servicio las llena.
+router.get("/:id/determinations/lab-statistics", verifyToken, requireRole(businessCaseRoles), pricingLabCtrl.getLabStatistics);
+router.put(
+  "/:id/determinations/lab-statistics",
+  verifyToken,
+  requireRole(["jefe_servicio", "jefe_ti", "jefe_de_ti"]),
+  auditSection("determinations", "write"),
+  pricingLabCtrl.saveLabStatistics,
+);
 router.post("/:id/determinations/lock-subsection", verifyToken, requireRole(businessCaseRoles), ctrl.lockDeterminationsSubsection);
 router.post("/:id/determinations/lock-all-technical-subsections", verifyToken, requireRole(businessCaseRoles), ctrl.lockAllDeterminationsTechnicalSubsections);
 router.post("/:id/determinations/request-unlock-subsection", verifyToken, requireRole(businessCaseRoles), ctrl.requestDeterminationsSubsectionUnlock);
@@ -286,6 +345,7 @@ router.get("/:id/sheets/jobs/latest", verifyToken, requireRole(businessCaseRoles
 router.get("/:id/sheets/jobs/:jobId", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.getSheetGenerationJobStatus);
 router.get("/sheets/metrics", verifyToken, requireRole(adminRoles), sheetGenerationCtrl.getSheetGenerationMetrics);
 router.post("/sheets/sync-investments", verifyToken, requireRole(adminRoles), sheetGenerationCtrl.syncInvestmentValuesBackfill);
+router.post("/sheets/sync-general-data", verifyToken, requireRole(adminRoles), sheetGenerationCtrl.syncGeneralDataBackfill);
 router.post("/sheets/clear-template-cache", verifyToken, requireRole(adminRoles), ctrl.clearSheetTemplateCache);
 
 // UI Guidance routes (Workspace)
@@ -373,6 +433,12 @@ router.post(
   verifyToken,
   requireRole([...new Set([...investmentRoles, ...investmentValuesRoles])]),
   ctrl.closeInvestmentsWithoutAdditionalItems,
+);
+router.post(
+  "/:id/investments/reopen-extraordinary",
+  verifyToken,
+  requireRole([...new Set([...investmentRoles, ...investmentValuesRoles, "gerencia", "gerencia_general"])]),
+  ctrl.reopenExtraordinaryInvestments,
 );
 // Vincular activos TI concretos (por serie) a una linea de inversion -- solo jefe_ti
 // reserva/libera; cualquiera con acceso a inversiones puede ver que esta reservado.

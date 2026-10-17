@@ -15,7 +15,8 @@
     "clients:backfill:odoo": "node scripts/backfill_odoo_clients.js",
     "clients:backfill:odoo:db": "node scripts/backfill_odoo_clients_from_db.js",
     "attendance:geo:sanitize": "node src/scripts/attendance_maintenance.js --action=geo-sanitize",
-    "attendance:purge:range": "node src/scripts/attendance_maintenance.js --action=purge-range"
+    "attendance:purge:range": "node src/scripts/attendance_maintenance.js --action=purge-range",
+    "consumables:verify": "node scripts/consumable-prediction/verifyCases.js"
   },
   "keywords": [
     "express",
